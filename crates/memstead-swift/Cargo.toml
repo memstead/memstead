@@ -20,10 +20,10 @@ path = "src/bin/uniffi-bindgen.rs"
 
 [dependencies]
 memstead-base.workspace = true
-# Vault-lifecycle orchestrators (`create_vault` / `delete_vault`) live here;
-# the in-process binding mirrors the `memstead_vault_*` MCP contract onto
+# Mem-lifecycle orchestrators (`create_mem` / `delete_mem`) live here;
+# the in-process binding mirrors the `memstead_mem_*` MCP contract onto
 # UniFFI so the macOS app manages the roster through the engine, never via
-# raw vault-repo writes.
+# raw mem-repo writes.
 memstead-engine.workspace = true
 memstead-git-branch.workspace = true
 memstead-schema.workspace = true
@@ -36,8 +36,8 @@ uniffi = { version = "0.31", features = ["build"] }
 
 [dev-dependencies]
 tempfile.workspace = true
-# Pull in `memstead-git-branch::test_support::init_vault_repo_stub` so integration
-# tests can satisfy the `vault-repo/.git/` fail-fast under the
+# Pull in `memstead-git-branch::test_support::init_mem_repo_stub` so integration
+# tests can satisfy the `mem-repo/.git/` fail-fast under the
 # `GitObject` default (Phase 2 Session 6).
 memstead-git-branch = { workspace = true, features = ["test-support"] }
 
@@ -48,6 +48,6 @@ memstead-git-branch = { workspace = true, features = ["test-support"] }
 git-object-storage = ["memstead-git-branch/git-object-storage"]
 # Phase 2 Session 6: gates `Engine::new_for_test` so the in-process
 # tests (and any external harness opting in) can construct an engine
-# rooted at a `TempDir` whose `vault-repo/.git/` has been stubbed,
+# rooted at a `TempDir` whose `mem-repo/.git/` has been stubbed,
 # satisfying the new fail-fast under the `GitObject` default.
 test-support = ["memstead-git-branch/test-support"]

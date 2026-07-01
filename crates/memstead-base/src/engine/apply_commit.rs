@@ -34,11 +34,11 @@
 //!
 //! HEAD cursor + subscriber notification: after a successful apply
 //! the engine's cached `last_known_head` for the affected mount
-//! advances to the envelope SHA, and one [`VaultChangedEvent`] fires
-//! to every subscriber. Same shape every other vault-advance event
+//! advances to the envelope SHA, and one [`MemChangedEvent`] fires
+//! to every subscriber. Same shape every other mem-advance event
 //! flows through.
 
-use crate::engine::{Engine, EngineError, VaultChangedEvent};
+use crate::engine::{Engine, EngineError, MemChangedEvent};
 use crate::entity::id::file_path_to_id;
 use crate::entity::loader::parse_entries;
 use crate::entity::source::SourceEntry;
@@ -49,8 +49,8 @@ impl Engine {
     /// Replay an externally-produced commit envelope into the
     /// in-memory store.
     ///
-    /// Refuses with [`EngineError::UnknownVault`] when the envelope
-    /// names a vault the engine has no mount for. Parse failures on
+    /// Refuses with [`EngineError::UnknownMem`] when the envelope
+    /// names a mem the engine has no mount for. Parse failures on
     /// any change variant surface as [`EngineError::Parse`] and abort
     /// the apply before any store mutation lands — the post-state is
     /// either coherent at the envelope SHA or unchanged. (The store
@@ -60,7 +60,7 @@ impl Engine {
     /// equivalent guarantee.)
     ///
     /// Empty `changes` is a valid envelope: the head cursor advances
-    /// and a `VaultChangedEvent` fires, but no store mutation
+    /// and a `MemChangedEvent` fires, but no store mutation
     /// happens. Lets replay drivers signal "we saw a commit, here is
     /// its SHA, no entity-level changes" — useful for empty commits
     /// (e.g. tag-only or merge commits without tree changes).
@@ -68,20 +68,20 @@ impl Engine {
         &mut self,
         envelope: &CommitEnvelope,
     ) -> Result<(), EngineError> {
-        let vault = envelope.vault.as_str();
+        let mem = envelope.mem.as_str();
 
-        // 1. Resolve mount + schema. Unknown vault refuses before any
-        //    parse work — same idempotent shape as `reload_one_vault`.
+        // 1. Resolve mount + schema. Unknown mem refuses before any
+        //    parse work — same idempotent shape as `reload_one_mem`.
         let mount_idx = self
             .mounts
             .iter()
-            .position(|m| m.mount.vault == vault)
-            .ok_or_else(|| EngineError::UnknownVault(vault.to_string()))?;
+            .position(|m| m.mount.mem == mem)
+            .ok_or_else(|| EngineError::UnknownMem(mem.to_string()))?;
         let schema = self
             .schemas
-            .get(vault)
+            .get(mem)
             .cloned()
-            .ok_or_else(|| EngineError::UnknownVault(vault.to_string()))?;
+            .ok_or_else(|| EngineError::UnknownMem(mem.to_string()))?;
 
         // 2. Walk the changes. Stage parse outputs so a parse failure
         //    on a late change rolls back the entire apply (the store
@@ -114,17 +114,17 @@ impl Engine {
         }
 
         // 3. Parse the staged adds/modifies/rename-targets against the
-        //    vault schema. Parse errors abort before the store sees a
+        //    mem schema. Parse errors abort before the store sees a
         //    mutation. `parse_entries` collects per-file errors into
         //    `LoadResult::errors`; on `apply_external_commit` semantics
         //    we treat any parse failure as a hard refuse — the client
         //    cannot half-apply a commit.
-        let load_result = parse_entries(to_upsert, Vec::new(), vault, schema.as_ref());
+        let load_result = parse_entries(to_upsert, Vec::new(), mem, schema.as_ref());
         if let Some((path, msg)) = load_result.errors.into_iter().next() {
             return Err(EngineError::ParseAfterWrite(format!(
-                "apply_external_commit: failed to parse '{}' in vault '{}': {}",
+                "apply_external_commit: failed to parse '{}' in mem '{}': {}",
                 path.display(),
-                vault,
+                mem,
                 msg
             )));
         }
@@ -133,7 +133,7 @@ impl Engine {
         //    (from, to) pair where `to == from + suffix-rename`
         //    doesn't wipe the just-inserted new entity.
         for path in &to_remove {
-            let id = file_path_to_id(path, vault);
+            let id = file_path_to_id(path, mem);
             self.store.remove(&id);
         }
         // Attach file_path on each parsed entity to mirror the
@@ -167,17 +167,17 @@ impl Engine {
         #[cfg(not(target_arch = "wasm32"))]
         self.invalidate_search_indexes();
 
-        // 6. Emit one `VaultChangedEvent` so subscribers see the
+        // 6. Emit one `MemChangedEvent` so subscribers see the
         //    transition. Same shape `record_self_write` and
         //    `branch_reset` use.
         if previous != envelope.sha {
-            let event = VaultChangedEvent {
-                vault: vault.to_string(),
+            let event = MemChangedEvent {
+                mem: mem.to_string(),
                 head: envelope.sha.clone(),
                 previous,
                 n_commits: 1,
             };
-            self.emit_vault_changed(&event);
+            self.emit_mem_changed(&event);
         }
         Ok(())
     }
@@ -186,26 +186,26 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::VaultBackend;
+    use crate::backend::MemBackend;
     use crate::engine::test_helpers::*;
     use crate::entity::EntityId;
-    use crate::storage::FilesystemVaultWriter;
+    use crate::storage::FilesystemMemWriter;
     use std::collections::BTreeMap;
     use std::sync::{Arc, Mutex};
     use tempfile::TempDir;
 
-    fn empty_folder_engine(tmp: &TempDir, vault: &str) -> Engine {
-        let vault_dir = tmp.path().to_path_buf();
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+    fn empty_folder_engine(tmp: &TempDir, mem: &str) -> Engine {
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
         Engine::from_mounts(vec![(
-            folder_mount(vault, vault_dir),
-            Box::new(writer) as Box<dyn VaultBackend>,
+            folder_mount(mem, mem_dir),
+            Box::new(writer) as Box<dyn MemBackend>,
         )])
         .unwrap()
     }
 
     fn envelope(
-        vault: &str,
+        mem: &str,
         sha: &str,
         parent: &str,
         changes: Vec<EntityChange>,
@@ -213,7 +213,7 @@ mod tests {
         CommitEnvelope {
             sha: sha.to_string(),
             parent: parent.to_string(),
-            vault: vault.to_string(),
+            mem: mem.to_string(),
             timestamp: "2026-05-19T10:00:00Z".to_string(),
             trailers: BTreeMap::new(),
             changes,
@@ -227,12 +227,12 @@ mod tests {
     }
 
     #[test]
-    fn apply_external_commit_unknown_vault_refuses() {
+    fn apply_external_commit_unknown_mem_refuses() {
         let tmp = TempDir::new().unwrap();
         let mut engine = empty_folder_engine(&tmp, "specs");
         let env = envelope("missing", "deadbeef", "", vec![]);
         let err = engine.apply_external_commit(&env).unwrap_err();
-        assert_eq!(err.code(), "UNKNOWN_VAULT");
+        assert_eq!(err.code(), "UNKNOWN_MEM");
     }
 
     #[test]
@@ -361,7 +361,7 @@ mod tests {
     fn apply_external_commit_mixed_changes_apply_atomically() {
         let tmp = TempDir::new().unwrap();
         let mut engine = empty_folder_engine(&tmp, "specs");
-        // Seed the vault with two entities.
+        // Seed the mem with two entities.
         engine
             .apply_external_commit(&envelope(
                 "specs",
@@ -440,13 +440,13 @@ mod tests {
     }
 
     #[test]
-    fn apply_external_commit_emits_vault_changed_event_to_subscribers() {
+    fn apply_external_commit_emits_mem_changed_event_to_subscribers() {
         let tmp = TempDir::new().unwrap();
         let mut engine = empty_folder_engine(&tmp, "specs");
-        let observed = Arc::new(Mutex::new(Vec::<VaultChangedEvent>::new()));
+        let observed = Arc::new(Mutex::new(Vec::<MemChangedEvent>::new()));
         let observed_clone = observed.clone();
         let _handle = engine
-            .subscribe_vault_changes(
+            .subscribe_mem_changes(
                 "specs",
                 Arc::new(move |event| {
                     observed_clone.lock().unwrap().push(event.clone());
@@ -465,9 +465,9 @@ mod tests {
             ))
             .unwrap();
         let events = observed.lock().unwrap();
-        assert_eq!(events.len(), 1, "expected one VaultChangedEvent");
+        assert_eq!(events.len(), 1, "expected one MemChangedEvent");
         assert_eq!(events[0].head, "sha-new");
-        assert_eq!(events[0].vault, "specs");
+        assert_eq!(events[0].mem, "specs");
         assert_eq!(events[0].n_commits, 1);
     }
 
@@ -475,10 +475,10 @@ mod tests {
     fn apply_external_commit_empty_changes_still_advances_head() {
         let tmp = TempDir::new().unwrap();
         let mut engine = empty_folder_engine(&tmp, "specs");
-        let observed = Arc::new(Mutex::new(Vec::<VaultChangedEvent>::new()));
+        let observed = Arc::new(Mutex::new(Vec::<MemChangedEvent>::new()));
         let observed_clone = observed.clone();
         let _handle = engine
-            .subscribe_vault_changes(
+            .subscribe_mem_changes(
                 "specs",
                 Arc::new(move |event| {
                     observed_clone.lock().unwrap().push(event.clone());

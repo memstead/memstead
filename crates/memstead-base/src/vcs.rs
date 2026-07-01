@@ -86,7 +86,7 @@ pub struct CommitContext<'a> {
     /// callers must not feed unbounded input to this field.
     pub note: Option<String>,
     /// Correlation id linking every commit produced by a single
-    /// logical operation (notably multi-vault `memstead_rename`). When
+    /// logical operation (notably multi-mem `memstead_rename`). When
     /// `Some`, [`format_commit_message`] emits a `Logical-Op: <id>`
     /// trailer alongside `Tool:` / `Actor:` / `Client:`. The git-
     /// branch backend's `parse_commit_message` recovers the value
@@ -226,7 +226,7 @@ pub fn format_commit_message(prose: &str, ctx: &CommitContext<'_>) -> String {
     }
     // `Logical-Op:` is the wire-stable trailer key. Recognised by
     // `parse_commit_message` and threaded back into
-    // `Provenance::logical_operation_id` so the multi-vault rename
+    // `Provenance::logical_operation_id` so the multi-mem rename
     // correlation survives a commit-log round-trip through the
     // git-branch backend.
     if let Some(id) = ctx.logical_operation_id {

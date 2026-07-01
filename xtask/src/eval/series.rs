@@ -1,4 +1,4 @@
-//! The chart-ready data series: delta-as-a-function-of-vault-state, plus its
+//! The chart-ready data series: delta-as-a-function-of-mem-state, plus its
 //! per-task breakdown, serialized to JSON for a downstream chart renderer.
 
 use std::path::Path;
@@ -8,7 +8,7 @@ use serde::Serialize;
 
 use super::grade::{TaskResult, mean, stddev};
 
-/// One task's contribution at a single vault state.
+/// One task's contribution at a single mem state.
 #[derive(Clone, Debug, Serialize)]
 pub struct TaskDelta {
     pub task_id: String,
@@ -32,10 +32,10 @@ impl From<&TaskResult> for TaskDelta {
     }
 }
 
-/// The aggregate at one vault state — one point on the compounding chart.
+/// The aggregate at one mem state — one point on the compounding chart.
 #[derive(Clone, Debug, Serialize)]
 pub struct SeriesPoint {
-    /// Identifies the vault state: a git ref, a commit date, or "empty".
+    /// Identifies the mem state: a git ref, a commit date, or "empty".
     pub state_label: String,
     /// Trials per arm at this state (the N behind the variance).
     pub n_trials: usize,
@@ -56,7 +56,7 @@ pub struct SeriesPoint {
 }
 
 impl SeriesPoint {
-    /// Aggregate the per-task results at one vault state into a single point.
+    /// Aggregate the per-task results at one mem state into a single point.
     pub fn aggregate(state_label: String, n_trials: usize, results: &[TaskResult]) -> Self {
         let on_means: Vec<f64> = results.iter().map(|r| r.on_mean).collect();
         let off_means: Vec<f64> = results.iter().map(|r| r.off_mean).collect();
@@ -83,10 +83,10 @@ impl SeriesPoint {
     }
 }
 
-/// The full series for one subject vault — what a chart renderer consumes.
+/// The full series for one subject mem — what a chart renderer consumes.
 #[derive(Clone, Debug, Serialize)]
 pub struct DataSeries {
-    pub subject_vault: String,
+    pub subject_mem: String,
     pub points: Vec<SeriesPoint>,
     /// Tasks the contamination guard (A arm) excluded from the comparison as
     /// guessable, surfaced in the output so an excluded task is reported rather
@@ -146,14 +146,14 @@ mod tests {
     #[test]
     fn series_round_trips_to_json() {
         let series = DataSeries {
-            subject_vault: "engine".into(),
+            subject_mem: "engine".into(),
             points: vec![SeriesPoint::aggregate("empty".into(), 1, &[result("a", 0.5, 0.5)])],
             excluded_contaminated: vec![],
             coverage: vec![],
         };
         let json = series.to_json().unwrap();
         let back: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert_eq!(back["subject_vault"], "engine");
+        assert_eq!(back["subject_mem"], "engine");
         assert_eq!(back["points"][0]["state_label"], "empty");
         assert!((back["points"][0]["delta"].as_f64().unwrap()).abs() < 1e-9);
     }
@@ -163,14 +163,14 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("series.json");
         let series = DataSeries {
-            subject_vault: "engine".into(),
+            subject_mem: "engine".into(),
             points: vec![SeriesPoint::aggregate("v1".into(), 3, &[result("a", 0.9, 0.4)])],
             excluded_contaminated: vec![],
             coverage: vec![],
         };
         series.write(&path).unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
-        assert!(text.contains("\"subject_vault\": \"engine\""), "{text}");
+        assert!(text.contains("\"subject_mem\": \"engine\""), "{text}");
         assert!(text.contains("\"delta\""));
     }
 }

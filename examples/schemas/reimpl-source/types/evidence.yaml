@@ -14,7 +14,7 @@ when_to_use: |
   "I think the system does X" observation — smaller evidences combine.
 boundaries:
   - Not a behavioral claim — use `capability` for that. Evidence backs claims; it does not make them.
-  - Not a design intent — design belongs in the Target vault.
+  - Not a design intent — design belongs in the Target mem.
   - Not a personal opinion without source — opinions are not evidence unless captured as an attributed interview quote.
 system_message: |
   Evidence is small and sourced. Each entity captures one observation,

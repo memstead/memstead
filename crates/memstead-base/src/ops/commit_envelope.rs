@@ -3,7 +3,7 @@
 //! Engine-owned value types in the `memstead-base::ops` family
 //! (sibling to [`Diff`](crate::ops::Diff),
 //! [`ChangeEnvelope`](crate::ops::ChangeEnvelope),
-//! [`VaultChangedEvent`](crate::engine::VaultChangedEvent)).
+//! [`MemChangedEvent`](crate::engine::MemChangedEvent)).
 //!
 //! Mirrors the browser-sync JSON shapes one-to-one: the commit
 //! envelope and the SSE event.
@@ -29,11 +29,11 @@ use serde::{Deserialize, Serialize};
 /// {
 ///   "sha": "c4f2a8...",
 ///   "parent": "a3f9b1...",
-///   "vault": "engine",
+///   "mem": "engine",
 ///   "timestamp": "2026-05-18T14:23:01Z",
 ///   "trailers": { "Tool": "memstead_update", "Actor": "agent" },
 ///   "changes": [
-///     { "op": "modified", "path": "engine--vault.md", "content": "..." }
+///     { "op": "modified", "path": "engine--mem.md", "content": "..." }
 ///   ]
 /// }
 /// ```
@@ -45,8 +45,8 @@ pub struct CommitEnvelope {
     /// branch (no parent).
     #[serde(skip_serializing_if = "String::is_empty", default)]
     pub parent: String,
-    /// Vault name this commit landed on.
-    pub vault: String,
+    /// Mem name this commit landed on.
+    pub mem: String,
     /// Commit timestamp in RFC 3339 / ISO 8601 form (UTC, second
     /// granularity).
     pub timestamp: String,
@@ -67,7 +67,7 @@ pub struct CommitEnvelope {
 pub enum EntityChange {
     /// Entity newly created in this commit.
     Added {
-        /// Vault-relative path on the new side (`.md` suffix
+        /// Mem-relative path on the new side (`.md` suffix
         /// included).
         path: String,
         /// Full markdown body on the new side.
@@ -101,7 +101,7 @@ mod tests {
         let env = CommitEnvelope {
             sha: "c4f2a8".to_string(),
             parent: "a3f9b1".to_string(),
-            vault: "engine".to_string(),
+            mem: "engine".to_string(),
             timestamp: "2026-05-18T14:23:01Z".to_string(),
             trailers: {
                 let mut m = BTreeMap::new();
@@ -111,7 +111,7 @@ mod tests {
             },
             changes: vec![
                 EntityChange::Modified {
-                    path: "engine--vault.md".to_string(),
+                    path: "engine--mem.md".to_string(),
                     content: "body".to_string(),
                 },
                 EntityChange::Deleted {
@@ -122,11 +122,11 @@ mod tests {
         let json = serde_json::to_value(&env).unwrap();
         assert_eq!(json["sha"], "c4f2a8");
         assert_eq!(json["parent"], "a3f9b1");
-        assert_eq!(json["vault"], "engine");
+        assert_eq!(json["mem"], "engine");
         assert_eq!(json["timestamp"], "2026-05-18T14:23:01Z");
         assert_eq!(json["trailers"]["Tool"], "memstead_update");
         assert_eq!(json["changes"][0]["op"], "modified");
-        assert_eq!(json["changes"][0]["path"], "engine--vault.md");
+        assert_eq!(json["changes"][0]["path"], "engine--mem.md");
         assert_eq!(json["changes"][1]["op"], "deleted");
     }
 

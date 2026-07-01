@@ -1,6 +1,6 @@
 //! `Engine::branch_reset` implementation for git-branch mounts.
 //!
-//! The single engine-level history-rewrite op. Sets a vault's branch
+//! The single engine-level history-rewrite op. Sets a mem's branch
 //! pointer to `target_sha` and refuses if any commit that would be
 //! discarded by the reset is already pushed to a remote-tracking ref.
 //! Replay workflows that operate over un-pushed commit segments
@@ -22,7 +22,7 @@
 //! sibling writer that advances the branch between our snapshot and
 //! the commit phase trips the precondition and surfaces as a
 //! `RefTransaction` error — the operator-recoverable case the
-//! `vault_repo_config::commit_refs` machinery already documents.
+//! `mem_repo_config::commit_refs` machinery already documents.
 
 use std::collections::HashSet;
 use std::path::Path;
@@ -147,7 +147,7 @@ pub fn branch_reset_in_gitdir(
     // emptiness if they want to skip downstream side effects.
     if current == target {
         return Ok(BranchResetOutcome {
-            vault: branch.to_string(),
+            mem: branch.to_string(),
             branch_ref,
             previous_sha: current.to_string(),
             new_sha: target.to_string(),
@@ -194,7 +194,7 @@ pub fn branch_reset_in_gitdir(
         .map_err(|e| BackendError::Other(format!("edit_references: {e}")))?;
 
     Ok(BranchResetOutcome {
-        vault: branch.to_string(),
+        mem: branch.to_string(),
         branch_ref,
         previous_sha: current.to_string(),
         new_sha: target.to_string(),
@@ -205,14 +205,14 @@ pub fn branch_reset_in_gitdir(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::VaultWriter;
-    use crate::storage::git_tree::GitTreeVaultWriter;
+    use crate::storage::MemWriter;
+    use crate::storage::git_tree::GitTreeMemWriter;
     use crate::vcs::CommitContext;
     use std::path::PathBuf;
     use tempfile::TempDir;
 
     fn init_gitdir(tmp: &TempDir) -> PathBuf {
-        let gitdir = tmp.path().join("vault-repo").join(".git");
+        let gitdir = tmp.path().join("mem-repo").join(".git");
         std::fs::create_dir_all(&gitdir).unwrap();
         gix::init_bare(&gitdir).unwrap();
         gitdir
@@ -226,7 +226,7 @@ mod tests {
 
     fn commit(gitdir: &PathBuf, branch: &str, file: &str, content: &str, subject: &str) -> String {
         let writer =
-            GitTreeVaultWriter::new(gitdir.clone(), format!("refs/heads/{branch}"));
+            GitTreeMemWriter::new(gitdir.clone(), format!("refs/heads/{branch}"));
         writer.write_entity(Path::new(file), content.as_bytes()).unwrap();
         writer.commit(subject, &CommitContext::internal()).unwrap()
     }
@@ -316,7 +316,7 @@ mod tests {
         let _sha_c = commit(&gitdir, "specs", "c.md", &body("C"), "C");
 
         let mount = memstead_base::Mount {
-            vault: "specs".to_string(),
+            mem: "specs".to_string(),
             schema: Some(memstead_schema::SchemaRef::new(
                 "default",
                 semver::Version::new(1, 0, 0),
@@ -340,11 +340,11 @@ mod tests {
             .unwrap_err();
         match err {
             memstead_base::EngineError::PushedCommitsProtected {
-                vault,
+                mem,
                 target_sha,
                 pushed_shas,
             } => {
-                assert_eq!(vault, "specs");
+                assert_eq!(mem, "specs");
                 assert_eq!(target_sha, _sha_a);
                 assert!(pushed_shas.contains(&sha_b));
             }

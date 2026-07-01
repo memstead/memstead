@@ -1,11 +1,11 @@
 # yaml-language-server: $schema=../../../generated/schema-manifest.schema.json
 
 # ─────────────────────────────────────────────────────────────────────────────
-# ingest@0.1.0 — knowledge-graph schema for ingest *process vaults*.
+# ingest@0.1.0 — knowledge-graph schema for ingest *process mems*.
 #
-# A process vault is paired 1:1 with one ingest configuration
+# A process mem is paired 1:1 with one ingest configuration
 # (e.g. `ingest/engine-graph` is paired with the `engine-graph`
-# ingest that writes into the `engine` destination vault). It is
+# ingest that writes into the `engine` destination mem). It is
 # scaffolding that agents use to drive destination quality higher
 # across runs — not a session-handover log, not an agent workbench,
 # not a place to record modeling-process talk.
@@ -28,7 +28,7 @@ name: ingest
 version: 0.1.0
 
 description: |
-  Process-vault schema for ingest configurations. Three types capture
+  Process-mem schema for ingest configurations. Three types capture
   destination-quality debt that survives between agent runs:
   coverage_gap (something absent from the destination),
   verification_target (a destination claim that hasn't been checked
@@ -37,10 +37,10 @@ description: |
   entities it speaks about; entries do not link to each other.
 
 when_to_use: |
-  Use as the schema for `ingest/<ingest-name>` process vaults paired
-  1:1 with an ingest configuration. Each entry in the vault is a
+  Use as the schema for `ingest/<ingest-name>` process mems paired
+  1:1 with an ingest configuration. Each entry in the mem is a
   durable, objective claim about destination-quality debt that the
-  current agent run could not address. The vault is short-lived
+  current agent run could not address. The mem is short-lived
   scaffolding — it dies when the operator runs `--clear` against the
   ingest. Do not use this schema for general note-taking, planning,
   or to reuse across projects.
@@ -63,16 +63,16 @@ system_message: |
   The hard cuts: absent vs. unverified vs. contradictory. If you
   cannot place the debt in exactly one of these three buckets, it
   probably belongs as content in the destination itself (a Constraint
-  on a spec, a clarification in a memo) — not as a process-vault
+  on a spec, a clarification in a memo) — not as a process-mem
   entry.
 
   Re-verification expectation. Each entry is a snapshot. When an
   agent orients itself at the start of a run, it inspects existing
   entries against the *current* destination state and deletes any
   that intervening runs have resolved. Without this, stale entries
-  accumulate and the vault loses signal.
+  accumulate and the mem loses signal.
 
-  Cross-vault wiki-links into the destination are how an entry
+  Cross-mem wiki-links into the destination are how an entry
   identifies what it speaks about; the engine auto-emits REFERENCES
   edges. Entries do not link to each other.
 
@@ -86,7 +86,7 @@ relationships:
   definitions:
     - name: PART_OF
       description: Hierarchical containment — the source is structurally part of the target.
-      when_to_use: Rare in this schema. Process-vault entries are leaf observations; only use PART_OF if a coverage_gap is genuinely a sub-area of another already-recorded gap.
+      when_to_use: Rare in this schema. Process-mem entries are leaf observations; only use PART_OF if a coverage_gap is genuinely a sub-area of another already-recorded gap.
       default_weight: 3.0
       acyclic: true
     - name: REFERENCES
@@ -97,23 +97,23 @@ relationships:
       description: Fallback weight for any relationship not otherwise specified. Required by the engine.
       default_weight: 1.0
 
-# Cross-vault relationship vocabulary. Source-owned: process-vault entries emit
+# Cross-mem relationship vocabulary. Source-owned: process-mem entries emit
 # REFERENCES into their paired destination, which may be a software- or a
-# project-schema vault. REFERENCES is re-declared per target schema because the
-# cross-vault path does not consult the intra-vault definitions above.
-cross_vault_relationships:
+# project-schema mem. REFERENCES is re-declared per target schema because the
+# cross-mem path does not consult the intra-mem definitions above.
+cross_mem_relationships:
   - to_schema: software
     definitions:
       - name: REFERENCES
-        description: Soft reference from a process-vault quality entry into the destination (software) entity it speaks about.
-        when_to_use: Auto-emitted from inline wiki-links into the paired destination vault. Do not author manually.
+        description: Soft reference from a process-mem quality entry into the destination (software) entity it speaks about.
+        when_to_use: Auto-emitted from inline wiki-links into the paired destination mem. Do not author manually.
         default_weight: 0.5
         source_types: [coverage_gap, verification_target, inconsistency]
   - to_schema: project
     definitions:
       - name: REFERENCES
-        description: Soft reference from a process-vault quality entry into the destination (project) entity it speaks about.
-        when_to_use: Auto-emitted from inline wiki-links into the paired project destination vault. Do not author manually.
+        description: Soft reference from a process-mem quality entry into the destination (project) entity it speaks about.
+        when_to_use: Auto-emitted from inline wiki-links into the paired project destination mem. Do not author manually.
         default_weight: 0.5
         source_types: [coverage_gap, verification_target, inconsistency]
 
@@ -127,11 +127,11 @@ community:
 
 default_writing_guidance:
   avoid: |
-    - Modeling-process talk ("I considered X then chose Y", "TODO: think about Z"). Process-vault entries are objective claims about destination state, not running commentary on the agent's reasoning.
-    - Session-state notes ("left off at file X", "next run should look at Y"). The fresh agent on the next run reads `memstead_overview` and the destination directly; bookmarks in the process vault add nothing.
-    - Agent-comfort entries that should be destination Constraints instead. If a fact constrains how something in the destination must be — that fact belongs in the destination entity's Constraints section, not as a process-vault note.
-    - Stale quality-entries left after the destination was fixed. Each run re-verifies existing entries against current destination state and deletes anything that is no longer true. Without this, the vault loses signal.
+    - Modeling-process talk ("I considered X then chose Y", "TODO: think about Z"). Process-mem entries are objective claims about destination state, not running commentary on the agent's reasoning.
+    - Session-state notes ("left off at file X", "next run should look at Y"). The fresh agent on the next run reads `memstead_overview` and the destination directly; bookmarks in the process mem add nothing.
+    - Agent-comfort entries that should be destination Constraints instead. If a fact constrains how something in the destination must be — that fact belongs in the destination entity's Constraints section, not as a process-mem note.
+    - Stale quality-entries left after the destination was fixed. Each run re-verifies existing entries against current destination state and deletes anything that is no longer true. Without this, the mem loses signal.
     - Internal links between quality-entries. They are leaf observations; the only edges they need are REFERENCES into the destination, and those are auto-emitted from wiki-links.
     - Vague "X is incomplete" entries that don't fit one of the three types. If you cannot say which of `coverage_gap` / `verification_target` / `inconsistency` applies, the observation is not yet sharp enough to write down.
   goal: |
-    The process vault exists so that the *destination* graph reaches its quality goal. Every entry is destination-quality debt the current run could not address: something absent that should be there (`coverage_gap`), something present but unverified (`verification_target`), something contradictory (`inconsistency`). The reader is the next run's fresh agent, which will use this vault to decide what to address next — and which will delete entries the destination has since resolved. The success test: a fresh agent, given only the destination graph and this process vault, would prioritize the same next moves as a fully-aware operator.
+    The process mem exists so that the *destination* graph reaches its quality goal. Every entry is destination-quality debt the current run could not address: something absent that should be there (`coverage_gap`), something present but unverified (`verification_target`), something contradictory (`inconsistency`). The reader is the next run's fresh agent, which will use this mem to decide what to address next — and which will delete entries the destination has since resolved. The success test: a fresh agent, given only the destination graph and this process mem, would prioritize the same next moves as a fully-aware operator.

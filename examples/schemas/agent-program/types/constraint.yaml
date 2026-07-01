@@ -86,5 +86,5 @@ health_required_fields: [rule, enforcement]
 staleness_threshold_days: 365
 write_rules:
   - "A blocking constraint at severity=critical aborts the program on violation. A blocking constraint at severity=error escalates to falls_back_to. Advisory constraints log and continue regardless of severity."
-  - "Constraints with scope=global are intended for cross-program reuse. Author once, reference across program vaults; don't duplicate."
+  - "Constraints with scope=global are intended for cross-program reuse. Author once, reference across program mems; don't duplicate."
   - "Detection is the difference between a rule and a wish. If you can't say how a violation is observed, the constraint is not yet authored."

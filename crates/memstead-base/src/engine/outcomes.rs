@@ -11,13 +11,13 @@ use crate::ops::{IncomingRef, ModifiedMetadata, ModifiedSections, WarningHint};
 
 /// Arguments for [`Engine::create_entity`].
 ///
-/// Carries the target vault (routes to the right mount), the entity
+/// Carries the target mem (routes to the right mount), the entity
 /// shape (title, type, sections, metadata), and nothing else. Caller
 /// identity (actor, client, note) goes through the standalone
 /// arguments so the same MCP-tool / CLI-direct shape works.
 #[derive(Debug, Clone)]
 pub struct CreateEntityArgs {
-    pub vault: String,
+    pub mem: String,
     pub title: String,
     pub entity_type: String,
     pub sections: IndexMap<String, String>,
@@ -46,11 +46,11 @@ pub struct CreateEntityOutcome {
     /// the same value so wire callers don't need to derive it from
     /// the id.
     pub title: String,
-    /// Echoed from the request — pro's `CreateResult.vault`. The
-    /// `EntityId.vault()` accessor projects the same value, but
+    /// Echoed from the request — pro's `CreateResult.mem`. The
+    /// `EntityId.mem()` accessor projects the same value, but
     /// surfacing it explicitly mirrors pro's wire shape.
-    pub vault: String,
-    /// Vault-relative path of the freshly-written `.md` file.
+    pub mem: String,
+    /// Mem-relative path of the freshly-written `.md` file.
     pub file_path: String,
     /// SHA-256 of the canonical bytes. Round-trips as
     /// `expected_hash` for the next mutation against this entity.
@@ -62,8 +62,8 @@ pub struct CreateEntityOutcome {
     /// into a follow-up call.
     #[serde(rename = "_hash")]
     pub content_hash: String,
-    /// Per-vault commit identifier returned by the backend's
-    /// [`crate::backend::VaultBackend::commit`]. Wire-equivalent to
+    /// Per-mem commit identifier returned by the backend's
+    /// [`crate::backend::MemBackend::commit`]. Wire-equivalent to
     /// pro's `CreateResult.commit_sha`.
     pub commit_sha: String,
     /// ISO date string from the parsed entity's `created_date`
@@ -151,10 +151,10 @@ pub struct UpdateEntityArgs {
     pub dry_run: bool,
     /// Atomic batched relation declarations applied before the
     /// section/metadata changes land. Each entry is validated like
-    /// any individual `memstead_relate` call (schema-shape, cross-vault
+    /// any individual `memstead_relate` call (schema-shape, cross-mem
     /// policy, target-id grammar), appended to the entity's
     /// `relationships` list, and — for absent Write-target peers —
-    /// auto-stubbed in the target's vault. The strict
+    /// auto-stubbed in the target's mem. The strict
     /// wiki-link/relation validator then runs against the
     /// post-mutation state with the freshly-declared relations
     /// already in place, so a body wiki-link added in the same
@@ -190,8 +190,8 @@ pub struct UpdateEntityOutcome {
     /// Wire key `_hash`.
     #[serde(rename = "_hash")]
     pub content_hash: String,
-    /// Per-vault commit identifier returned by the backend's
-    /// [`crate::backend::VaultBackend::commit`]. Wire-equivalent to
+    /// Per-mem commit identifier returned by the backend's
+    /// [`crate::backend::MemBackend::commit`]. Wire-equivalent to
     /// pro's `UpdateResult.commit_sha`.
     pub commit_sha: String,
     /// ISO date string from the parsed entity's `modified_date`
@@ -260,7 +260,7 @@ pub struct RelationDeclared {
 /// Arguments for [`Engine::delete_entity`].
 ///
 /// No `force` flag — delete is binary. The engine refuses on any
-/// Write-Vault incoming reference (typed `HAS_INCOMING_REFS`); when
+/// Write-Mem incoming reference (typed `HAS_INCOMING_REFS`); when
 /// only ReadOnly-mount referrers remain, the entity is demoted to a
 /// stub in-memory and the delete proceeds, surfaced via a typed
 /// `RESIDUAL_STUB_FOR_READONLY_REFERRERS` warning on the outcome.
@@ -286,8 +286,8 @@ pub struct DeleteEntityOutcome {
     /// pre-delete; both directions sum into one number for callers
     /// that need a single "how much did this delete cascade" signal.
     pub relations_removed: usize,
-    /// Per-vault commit identifier returned by the backend's
-    /// [`crate::backend::VaultBackend::commit`]. Wire-equivalent to
+    /// Per-mem commit identifier returned by the backend's
+    /// [`crate::backend::MemBackend::commit`]. Wire-equivalent to
     /// pro's `DeleteResult.commit_sha`.
     pub commit_sha: String,
     /// Stub entities that became orphaned by this delete (their last
@@ -344,8 +344,8 @@ pub struct RelateEntityOutcome {
     /// refetching. Wire key `_hash`.
     #[serde(rename = "_hash")]
     pub content_hash: String,
-    /// Per-vault commit identifier returned by the backend's
-    /// [`crate::backend::VaultBackend::commit`]. Empty on the no-op
+    /// Per-mem commit identifier returned by the backend's
+    /// [`crate::backend::MemBackend::commit`]. Empty on the no-op
     /// paths ([`RelateAction::NoOpAlreadyPresent`],
     /// [`RelateAction::NoOpAbsent`]) — those branches skip the disk
     /// write so no commit happens. Wire-equivalent to the pro
@@ -392,17 +392,17 @@ pub struct RenameEntityArgs {
 pub struct RenameEntityOutcome {
     pub old_id: EntityId,
     pub new_id: EntityId,
-    /// Vault-relative path of the renamed entity before the rewrite.
+    /// Mem-relative path of the renamed entity before the rewrite.
     /// Wire-equivalent to pro's `RenameResult.old_path`.
     pub old_path: String,
-    /// Vault-relative path of the renamed entity after the rewrite.
+    /// Mem-relative path of the renamed entity after the rewrite.
     /// Wire-equivalent to pro's `RenameResult.new_path`.
     pub new_path: String,
     /// Wire key `_hash`.
     #[serde(rename = "_hash")]
     pub content_hash: String,
-    /// Per-vault commit identifier returned by the backend's
-    /// [`crate::backend::VaultBackend::commit`]. Empty on the
+    /// Per-mem commit identifier returned by the backend's
+    /// [`crate::backend::MemBackend::commit`]. Empty on the
     /// slug-noop short-circuit (no disk write happened).
     /// Wire-equivalent to pro's `RenameResult.commit_sha`.
     pub commit_sha: String,
@@ -430,7 +430,7 @@ mod tests {
         let create = CreateEntityOutcome {
             id: EntityId("v--e".to_string()),
             title: "t".to_string(),
-            vault: "v".to_string(),
+            mem: "v".to_string(),
             file_path: "v/e.md".to_string(),
             content_hash: "h".to_string(),
             commit_sha: "sha".to_string(),
@@ -506,7 +506,7 @@ mod tests {
 
 }
 
-/// Outcome discriminator for [`Engine::set_vault_schema`]. The agent
+/// Outcome discriminator for [`Engine::set_mem_schema`]. The agent
 /// branches on this — never on which response fields are populated
 /// (stable additive shape, no response-shape polymorphism).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
@@ -514,10 +514,10 @@ mod tests {
 pub enum SetSchemaResult {
     /// Requested schema == current pin; no state change.
     Noop,
-    /// Vault was (or became) integral against the target — the pin
+    /// Mem was (or became) integral against the target — the pin
     /// now IS the target and any migration state is cleared.
     Switched,
-    /// Vault was not integral against the target; dual-pin state
+    /// Mem was not integral against the target; dual-pin state
     /// entered, `findings` carries the non-integral entities.
     MigrationStarted,
     /// Re-issued with the same in-flight target while still not
@@ -526,11 +526,11 @@ pub enum SetSchemaResult {
     MigrationPending,
 }
 
-/// Stable response shape of [`Engine::set_vault_schema`] — all five
+/// Stable response shape of [`Engine::set_mem_schema`] — all five
 /// fields are always present, populated per outcome.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct SetSchemaOutcome {
-    pub vault: String,
+    pub mem: String,
     /// The settled pin after this call (`<name>@<version>`).
     pub schema_pin: String,
     /// In-flight target while a migration is in progress, else `None`.

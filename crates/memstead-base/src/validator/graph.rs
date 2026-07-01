@@ -2,11 +2,11 @@
 //!
 //! Builds a `Store` from validated entities using the same stub +
 //! edge rules as the runtime loader (`entity::store_builder`), then
-//! runs Louvain with a fixed seed. Defence-in-depth cross-vault guard
-//! rejects any relationship whose target lives in another vault
+//! runs Louvain with a fixed seed. Defence-in-depth cross-mem guard
+//! rejects any relationship whose target lives in another mem
 //! (structurally impossible inside a single archive because
 //! `parse_markdown` tags every relationship with the archive's single
-//! vault, but the guard stays to catch engine refactors).
+//! mem, but the guard stays to catch engine refactors).
 
 use std::sync::Arc;
 
@@ -29,20 +29,20 @@ pub const VALIDATOR_LOUVAIN_SEED: u32 = 1;
 /// would produce for the same bytes.
 pub const VALIDATOR_RESOLUTION: f64 = 1.0;
 
-/// One relationship whose target lives in a different vault than the
+/// One relationship whose target lives in a different mem than the
 /// one being validated/exported — i.e. an edge that cannot travel
-/// inside a single-vault archive. `install` refuses on these
+/// inside a single-mem archive. `install` refuses on these
 /// (`ARCHIVE_VALIDATION_FAILED`); `export` warns on them
-/// (`DANGLING_CROSS_VAULT_EDGE_IN_EXPORT`) so the operator sees the
+/// (`DANGLING_CROSS_MEM_EDGE_IN_EXPORT`) so the operator sees the
 /// install-time failure before sharing — one predicate, two postures.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
-pub struct DanglingCrossVaultEdge {
+pub struct DanglingCrossMemEdge {
     /// Archive-relative path of the entity carrying the edge.
     pub entity_path: String,
-    /// Fully-qualified target id (e.g. `other-vault--thing`).
+    /// Fully-qualified target id (e.g. `other-mem--thing`).
     pub target_id: String,
-    /// The target's vault (the vault that won't travel in this archive).
-    pub target_vault: String,
+    /// The target's mem (the mem that won't travel in this archive).
+    pub target_mem: String,
 }
 
 /// Result of running graph checks — Store + communities, ready for
@@ -51,52 +51,52 @@ pub struct DanglingCrossVaultEdge {
 pub struct GraphCheckResult {
     pub store: Store,
     pub communities: LouvainOutput,
-    /// Relationships whose target lives outside the validated vault.
-    /// Empty for a self-contained archive. In `cross_vault_as_error`
+    /// Relationships whose target lives outside the validated mem.
+    /// Empty for a self-contained archive. In `cross_mem_as_error`
     /// mode `build_and_check` returns `Err` on the first such edge and
     /// this never carries entries; in lenient mode every offending edge
     /// is collected here for the caller to surface as a warning.
-    pub dangling_cross_vault_edges: Vec<DanglingCrossVaultEdge>,
+    pub dangling_cross_mem_edges: Vec<DanglingCrossMemEdge>,
 }
 
 /// Build a `Store` from parse results and run community detection.
 /// Rejects any parse-result relationship whose target lives in a
-/// different vault (defense-in-depth: `parse_markdown` already tags
-/// every relationship with the entity's own vault via
+/// different mem (defense-in-depth: `parse_markdown` already tags
+/// every relationship with the entity's own mem via
 /// `wiki_link_to_id`, so this should never fire on a well-formed
 /// archive — but any refactor that weakens that invariant will be
 /// caught here instead of silently diverging from runtime semantics).
 pub fn build_and_check(
     parse_results: Vec<ParseResult>,
     fallback_schema: &TypeDefinition,
-    vault_name: &str,
-    cross_vault_as_error: bool,
+    mem_name: &str,
+    cross_mem_as_error: bool,
 ) -> Result<GraphCheckResult, ValidationError> {
-    // One predicate (`rel.target.vault() != vault_name`), two postures.
-    // `install` / archive-load pass `cross_vault_as_error: true` and
+    // One predicate (`rel.target.mem() != mem_name`), two postures.
+    // `install` / archive-load pass `cross_mem_as_error: true` and
     // refuse on the first
-    // offending edge — a cross-vault edge can't resolve inside a
-    // single-vault archive. `export` passes `false` and collects every
-    // offending edge so it can warn (`DANGLING_CROSS_VAULT_EDGE_IN_EXPORT`)
+    // offending edge — a cross-mem edge can't resolve inside a
+    // single-mem archive. `export` passes `false` and collects every
+    // offending edge so it can warn (`DANGLING_CROSS_MEM_EDGE_IN_EXPORT`)
     // without blocking the snapshot. Same condition either way, so the
     // two surfaces can't drift.
-    if cross_vault_as_error
+    if cross_mem_as_error
         && let Some(pr) = parse_results
             .iter()
-            .find(|pr| pr.entity.relationships.iter().any(|r| r.target.vault() != vault_name))
+            .find(|pr| pr.entity.relationships.iter().any(|r| r.target.mem() != mem_name))
     {
         let rel = pr
             .entity
             .relationships
             .iter()
-            .find(|r| r.target.vault() != vault_name)
+            .find(|r| r.target.mem() != mem_name)
             .expect("find guaranteed a match");
-        return Err(ValidationError::CrossVaultRelationship {
+        return Err(ValidationError::CrossMemRelationship {
             path: pr.entity.file_path.clone(),
             target: rel.target.as_ref().to_string(),
         });
     }
-    let dangling_cross_vault_edges = dangling_cross_vault_edges_in(&parse_results, vault_name);
+    let dangling_cross_mem_edges = dangling_cross_mem_edges_in(&parse_results, mem_name);
 
     let mut store = Store::new();
     // Validator operates on isolated input; no roster, no drift detection —
@@ -120,27 +120,27 @@ pub fn build_and_check(
     Ok(GraphCheckResult {
         store,
         communities,
-        dangling_cross_vault_edges,
+        dangling_cross_mem_edges,
     })
 }
 
-/// The shared cross-vault predicate: every relationship in
-/// `parse_results` whose target lives in a vault other than
-/// `vault_name`. `build_and_check` (install/load) refuses on the first;
+/// The shared cross-mem predicate: every relationship in
+/// `parse_results` whose target lives in a mem other than
+/// `mem_name`. `build_and_check` (install/load) refuses on the first;
 /// the export side warns on all of them — both go through this one
 /// function so the surfaces can't drift.
-pub fn dangling_cross_vault_edges_in(
+pub fn dangling_cross_mem_edges_in(
     parse_results: &[ParseResult],
-    vault_name: &str,
-) -> Vec<DanglingCrossVaultEdge> {
+    mem_name: &str,
+) -> Vec<DanglingCrossMemEdge> {
     let mut edges = Vec::new();
     for pr in parse_results {
         for rel in &pr.entity.relationships {
-            if rel.target.vault() != vault_name {
-                edges.push(DanglingCrossVaultEdge {
+            if rel.target.mem() != mem_name {
+                edges.push(DanglingCrossMemEdge {
                     entity_path: pr.entity.file_path.clone(),
                     target_id: rel.target.as_ref().to_string(),
-                    target_vault: rel.target.vault().to_string(),
+                    target_mem: rel.target.mem().to_string(),
                 });
             }
         }
@@ -162,7 +162,7 @@ pub fn resolve_fallback_type(config_types: Option<&[String]>) -> Arc<TypeDefinit
 }
 
 /// Walk the store and count entities and all out-edges. Used for
-/// `VaultStats` post-validation.
+/// `MemStats` post-validation.
 pub fn tally(store: &Store) -> (usize, usize) {
     let entity_count = store.len();
     let edge_count: usize = store
@@ -217,8 +217,8 @@ E
         type_by_name("spec").unwrap()
     }
 
-    fn parse(path: &str, vault: &str, content: &str) -> ParseResult {
-        parse_markdown(content, path, &spec_type(), vault).unwrap()
+    fn parse(path: &str, mem: &str, content: &str) -> ParseResult {
+        parse_markdown(content, path, &spec_type(), mem).unwrap()
     }
 
     #[test]
@@ -260,31 +260,31 @@ E
     }
 
     #[test]
-    fn rejects_cross_vault_relationship() {
-        // Craft a parse result with a handcrafted cross-vault
+    fn rejects_cross_mem_relationship() {
+        // Craft a parse result with a handcrafted cross-mem
         // relationship. `parse_markdown` won't produce this (it always
-        // tags rels with the entity's vault), so build it by hand.
-        let cross_vault_pr = || {
+        // tags rels with the entity's mem), so build it by hand.
+        let cross_mem_pr = || {
             let mut pr = parse("alpha.md", "v", MINIMAL_SPEC);
             pr.entity.relationships.push(crate::entity::Relationship {
                 rel_type: "DEPENDS_ON".to_string(),
-                target: crate::entity::EntityId("other-vault--thing".to_string()),
+                target: crate::entity::EntityId("other-mem--thing".to_string()),
                 description: None,
             });
             pr
         };
-        let err = build_and_check(vec![cross_vault_pr()], &spec_type(), "v", true)
+        let err = build_and_check(vec![cross_mem_pr()], &spec_type(), "v", true)
             .unwrap_err();
-        assert!(matches!(err, ValidationError::CrossVaultRelationship { .. }));
+        assert!(matches!(err, ValidationError::CrossMemRelationship { .. }));
 
-        // Lenient mode: the same cross-vault edge is collected as data
+        // Lenient mode: the same cross-mem edge is collected as data
         // (no error), so the export side can warn without blocking.
         let result =
-            build_and_check(vec![cross_vault_pr()], &spec_type(), "v", false).unwrap();
-        assert_eq!(result.dangling_cross_vault_edges.len(), 1);
-        let edge = &result.dangling_cross_vault_edges[0];
-        assert_eq!(edge.target_id, "other-vault--thing");
-        assert_eq!(edge.target_vault, "other-vault");
+            build_and_check(vec![cross_mem_pr()], &spec_type(), "v", false).unwrap();
+        assert_eq!(result.dangling_cross_mem_edges.len(), 1);
+        let edge = &result.dangling_cross_mem_edges[0];
+        assert_eq!(edge.target_id, "other-mem--thing");
+        assert_eq!(edge.target_mem, "other-mem");
     }
 
     #[test]

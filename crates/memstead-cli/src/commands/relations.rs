@@ -18,8 +18,8 @@ pub struct Args {
 pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     let id = EntityId::canonical(&args.id);
     let (outgoing, incoming) = match ctx.cli_engine()? {
-        #[cfg(feature = "vault-repo")]
-        CliEngine::VaultRepo(engine) => relations_from_store(&id, &args.id, engine.store())?,
+        #[cfg(feature = "mem-repo")]
+        CliEngine::MemRepo(engine) => relations_from_store(&id, &args.id, engine.store())?,
         CliEngine::Filesystem(engine) => relations_from_store(&id, &args.id, engine.store())?,
     };
     let payload = render::render_relations_json(id.as_ref(), &outgoing, &incoming);

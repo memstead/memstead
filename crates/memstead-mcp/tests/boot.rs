@@ -1,9 +1,9 @@
-#![cfg(feature = "vault-repo")]
+#![cfg(feature = "mem-repo")]
 //! Boot smoke test for the pro MCP binary (`memstead-mcp`).
 //!
 //! Spawns the binary as a subprocess against a tempdir workspace
 //! carrying the post-rebuild markers (`.memstead/workspace.toml`
-//! + `.memstead/state/mounts.json`, plus a stub `vault-repo/.git/`).
+//! + `.memstead/state/mounts.json`, plus a stub `mem-repo/.git/`).
 //! Sends one `initialize` JSON-RPC request over stdin, reads the
 //! reply over stdout, asserts the envelope is well-formed.
 //!
@@ -16,10 +16,10 @@ use std::time::{Duration, Instant};
 
 use tempfile::TempDir;
 
-const WORKSPACE_TOML_BODY: &str = "format = \"memstead-git-branch-1\"\n\n\
+const WORKSPACE_TOML_BODY: &str = "format = \"memstead-git-branch-2\"\n\n\
 [persistence_adapter]\nname = \"file-two-layer\"\n";
 
-const MOUNTS_JSON_BODY: &str = r#"{ "format": "memstead-mounts-1", "mounts": [] }"#;
+const MOUNTS_JSON_BODY: &str = r#"{ "format": "memstead-mounts-3", "mounts": [] }"#;
 
 fn memstead_mcp_bin() -> &'static str {
     env!("CARGO_BIN_EXE_memstead-mcp")
@@ -105,10 +105,10 @@ fn pro_binary_boots_against_new_layout_workspace() {
     let tmp = TempDir::new().unwrap();
     seed_workspace(tmp.path());
 
-    // The pro binary checks `<workspace>/vault-repo/.git` shape on
-    // boot — `init_real_vault_repo` lays down a real bare repo with
+    // The pro binary checks `<workspace>/mem-repo/.git` shape on
+    // boot — `init_real_mem_repo` lays down a real bare repo with
     // `main` + `__MEMSTEAD` refs so the engine accepts it.
-    memstead_git_branch::test_support::init_real_vault_repo(tmp.path(), &[]);
+    memstead_git_branch::test_support::init_real_mem_repo(tmp.path(), &[]);
 
     let mut child = Command::new(memstead_mcp_bin())
         .current_dir(tmp.path())

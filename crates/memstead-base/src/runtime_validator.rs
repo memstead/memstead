@@ -1,8 +1,8 @@
 //! Runtime CRUD validators consumed by the unified [`crate::Engine`]
-//! and `memstead-git-branch`'s vault-repo engine.
+//! and `memstead-git-branch`'s mem-repo engine.
 //!
 //! Distinct concern from [`crate::validator`], which validates sealed
-//! archive bytes at the registry / read-vault ingress boundary. This
+//! archive bytes at the registry / read-mem ingress boundary. This
 //! module sits *inside* both runtime engines and gates per-mutation
 //! payloads (section keys, metadata keys, enum values) against the
 //! pinned schema. The wire-format error codes
@@ -18,7 +18,7 @@ use std::sync::OnceLock;
 
 use indexmap::IndexMap;
 use memstead_schema::{
-    CrossVaultRelationshipEntry, FieldType, RelationshipDef, RelationshipMode, Schema,
+    CrossMemRelationshipEntry, FieldType, RelationshipDef, RelationshipMode, Schema,
     TypeDefinition,
 };
 use regex::Regex;
@@ -81,7 +81,7 @@ pub enum ValidationError {
         entity_type: String,
     },
     /// `READ_ONLY_FIELD`: caller tried to set or unset a read-only
-    /// metadata key (`vault`, `id`, `type`) on update.
+    /// metadata key (`mem`, `id`, `type`) on update.
     #[error("cannot change read-only field '{field}' via update")]
     ReadOnlyField { field: String },
     /// `SECTION_NOT_UPDATABLE`: the section is not in the type's
@@ -536,11 +536,11 @@ impl ValidationError {
 /// either set or unset. Keeping these tied to the schema's identity
 /// fields would silently drift the entity-id contract; the engine
 /// surface treats them as immutable across both flavours.
-pub const READ_ONLY_METADATA_KEYS: &[&str] = &["vault", "id", "type"];
+pub const READ_ONLY_METADATA_KEYS: &[&str] = &["mem", "id", "type"];
 
 /// Reject any attempt to set or unset a read-only metadata key. Both
 /// engine flavours call this from their `update_entity` paths; the
-/// shared list ensures the `vault` / `id` / `type` triple stays
+/// shared list ensures the `mem` / `id` / `type` triple stays
 /// authoritative across both, and the schema's `init_timestamp` /
 /// `auto_timestamp` annotations are honoured on write — the engine
 /// owns those values on create (`init_timestamp`, set once) and on
@@ -830,7 +830,7 @@ pub fn missing_required_fields(
         .metadata_fields
         .iter()
         .filter(|f| {
-            // Engine-managed fields (`type`, `id`, `vault`) are seeded
+            // Engine-managed fields (`type`, `id`, `mem`) are seeded
             // independently of caller input; not the agent's
             // responsibility to supply.
             !READ_ONLY_METADATA_KEYS.iter().any(|k| *k == f.key.as_str())
@@ -885,7 +885,7 @@ pub enum RelationshipCheck {
     OpenWarning(String),
 }
 
-/// Validate a relationship name against a vault schema's vocabulary.
+/// Validate a relationship name against a mem schema's vocabulary.
 /// Strict-mode schemas reject undeclared names with
 /// [`ValidationError::InvalidRelationshipType`]; open-mode schemas
 /// admit unknown names and return a warning string for the engine to
@@ -893,7 +893,7 @@ pub enum RelationshipCheck {
 ///
 /// Both engine flavours call this from their `memstead_relate` paths so
 /// the wire shape (`INVALID_REL_TYPE`, `allowed[]`, `suggestion`) is
-/// stable across vault-repo and filesystem-vault.
+/// stable across mem-repo and filesystem-mem.
 pub fn validate_rel_type(
     rel_type: &str,
     schema: &Schema,
@@ -973,68 +973,68 @@ pub fn validate_rel_shape(
     })
 }
 
-/// Outcome of looking up a rel-type against a cross-vault entry in
-/// the source schema's `cross_vault_relationships:` vocabulary.
+/// Outcome of looking up a rel-type against a cross-mem entry in
+/// the source schema's `cross_mem_relationships:` vocabulary.
 /// `EdgeNotDeclared` carries the recovery payload the engine layer
-/// wraps into [`crate::EngineError::CrossVaultEdgeNotDeclared`]; the
+/// wraps into [`crate::EngineError::CrossMemEdgeNotDeclared`]; the
 /// other variants reuse the existing `ValidationError` shapes so
 /// agents reading the wire shape decode `INVALID_REL_TYPE` /
-/// `INVALID_REL_SHAPE` identically in both intra- and cross-vault
+/// `INVALID_REL_SHAPE` identically in both intra- and cross-mem
 /// flows.
 #[derive(Debug, Clone)]
-pub enum CrossVaultRelCheck {
+pub enum CrossMemRelCheck {
     /// `(rel_type, from_type, to_type)` are admitted by the matched
-    /// cross-vault entry's declared vocabulary and shape. The engine
+    /// cross-mem entry's declared vocabulary and shape. The engine
     /// proceeds with the relate write.
     Ok,
-    /// The source schema declares no cross-vault entry whose
+    /// The source schema declares no cross-mem entry whose
     /// `to_schema:` matches the target schema. Carries the recovery
-    /// payload for `CROSS_VAULT_EDGE_NOT_DECLARED`.
+    /// payload for `CROSS_MEM_EDGE_NOT_DECLARED`.
     EdgeNotDeclared,
-    /// Validation tripped the matched cross-vault entry's own
+    /// Validation tripped the matched cross-mem entry's own
     /// vocabulary / shape — reuses the existing `INVALID_REL_TYPE` /
     /// `INVALID_REL_SHAPE` envelopes (carried as the wrapped
     /// `ValidationError`) so wire-shape decoders stay flat.
     Invalid(ValidationError),
 }
 
-/// Validate a cross-vault edge whose source and target vaults pin
+/// Validate a cross-mem edge whose source and target mems pin
 /// schemas with *different names* against the source schema's
-/// outbound `cross_vault_relationships:` vocabulary.
+/// outbound `cross_mem_relationships:` vocabulary.
 ///
 /// Caller responsibility: only invoke when the source and target
-/// schema *names* differ — same-name vaults (any version pair) fall
-/// through to the intra-vault path ([`validate_rel_type`] +
+/// schema *names* differ — same-name mems (any version pair) fall
+/// through to the intra-mem path ([`validate_rel_type`] +
 /// [`validate_rel_shape`]); same-name is same domain.
 ///
-/// The lookup goes through [`Schema::cross_vault_entry`], which
+/// The lookup goes through [`Schema::cross_mem_entry`], which
 /// matches by target schema name only — eligibility is name-based,
-/// so the target vault's pinned version never participates and a
+/// so the target mem's pinned version never participates and a
 /// version bump on the target side cannot invalidate a declaration.
 ///
-/// On a match, the cross-vault entry's `definitions` list is the sole
-/// vocabulary for this edge: the source schema's intra-vault
+/// On a match, the cross-mem entry's `definitions` list is the sole
+/// vocabulary for this edge: the source schema's intra-mem
 /// `relationships.definitions` is NOT consulted in this regime (per
-/// AC #6 / #9). A rel-type present intra-vault but absent cross-vault
+/// AC #6 / #9). A rel-type present intra-mem but absent cross-mem
 /// surfaces here as `INVALID_REL_TYPE`; a shape violation surfaces
-/// here as `INVALID_REL_SHAPE` with the cross-vault entry's shape
-/// (not the intra-vault entry's, if both exist).
-pub fn validate_cross_vault_edge(
+/// here as `INVALID_REL_SHAPE` with the cross-mem entry's shape
+/// (not the intra-mem entry's, if both exist).
+pub fn validate_cross_mem_edge(
     rel_type: &str,
     from_type: &str,
     to_type: Option<&str>,
     source_schema: &Schema,
     target_schema_ref: &memstead_schema::SchemaRef,
-) -> CrossVaultRelCheck {
-    let Some(entry) = source_schema.cross_vault_entry(&target_schema_ref.name) else {
-        return CrossVaultRelCheck::EdgeNotDeclared;
+) -> CrossMemRelCheck {
+    let Some(entry) = source_schema.cross_mem_entry(&target_schema_ref.name) else {
+        return CrossMemRelCheck::EdgeNotDeclared;
     };
 
     let Some(def) = entry.definitions.iter().find(|d| d.name == rel_type) else {
-        let allowed: Vec<RelationshipHint> = cross_vault_entry_hints(entry);
+        let allowed: Vec<RelationshipHint> = cross_mem_entry_hints(entry);
         let candidate_names: Vec<String> = allowed.iter().map(|h| h.name.clone()).collect();
         let suggestion = nearest_str_match(rel_type, &candidate_names);
-        return CrossVaultRelCheck::Invalid(ValidationError::InvalidRelationshipType {
+        return CrossMemRelCheck::Invalid(ValidationError::InvalidRelationshipType {
             input: rel_type.to_string(),
             allowed,
             suggestion,
@@ -1046,11 +1046,11 @@ pub fn validate_cross_vault_edge(
     let target_ok = def.target_types.is_empty()
         || to_type.is_none_or(|t| def.target_types.iter().any(|d| d == t));
     if source_ok && target_ok {
-        return CrossVaultRelCheck::Ok;
+        return CrossMemRelCheck::Ok;
     }
     let to_for_err = to_type.unwrap_or("<unknown>").to_string();
-    let suggestion = cross_vault_suggest_shape(entry, from_type, to_type);
-    CrossVaultRelCheck::Invalid(ValidationError::InvalidRelationshipShape {
+    let suggestion = cross_mem_suggest_shape(entry, from_type, to_type);
+    CrossMemRelCheck::Invalid(ValidationError::InvalidRelationshipShape {
         rel_type: rel_type.to_string(),
         from_type: from_type.to_string(),
         to_type: to_for_err,
@@ -1060,11 +1060,11 @@ pub fn validate_cross_vault_edge(
     })
 }
 
-/// Sorted vocabulary hints for one cross-vault entry, excluding the
+/// Sorted vocabulary hints for one cross-mem entry, excluding the
 /// `_default` sentinel — same shape as
-/// [`declared_relationship_hints`] but scoped to a single cross-vault
+/// [`declared_relationship_hints`] but scoped to a single cross-mem
 /// declaration.
-fn cross_vault_entry_hints(entry: &CrossVaultRelationshipEntry) -> Vec<RelationshipHint> {
+fn cross_mem_entry_hints(entry: &CrossMemRelationshipEntry) -> Vec<RelationshipHint> {
     let mut out: Vec<RelationshipHint> = entry
         .definitions
         .iter()
@@ -1078,12 +1078,12 @@ fn cross_vault_entry_hints(entry: &CrossVaultRelationshipEntry) -> Vec<Relations
     out
 }
 
-/// First cross-vault `definition` in declaration order whose declared
+/// First cross-mem `definition` in declaration order whose declared
 /// shape would admit `(from_type, to_type)`. Mirrors
-/// [`suggest_shape_admitting`] but scoped to a single cross-vault
+/// [`suggest_shape_admitting`] but scoped to a single cross-mem
 /// entry.
-fn cross_vault_suggest_shape(
-    entry: &CrossVaultRelationshipEntry,
+fn cross_mem_suggest_shape(
+    entry: &CrossMemRelationshipEntry,
     from_type: &str,
     to_type: Option<&str>,
 ) -> Option<RelationshipHint> {
@@ -1091,14 +1091,14 @@ fn cross_vault_suggest_shape(
         .definitions
         .iter()
         .filter(|d| d.name != "_default")
-        .find(|d| cross_vault_def_admits(d, from_type, to_type))
+        .find(|d| cross_mem_def_admits(d, from_type, to_type))
         .map(|d| RelationshipHint {
             name: d.name.clone(),
             when_to_use: d.when_to_use.clone(),
         })
 }
 
-fn cross_vault_def_admits(d: &RelationshipDef, from_type: &str, to_type: Option<&str>) -> bool {
+fn cross_mem_def_admits(d: &RelationshipDef, from_type: &str, to_type: Option<&str>) -> bool {
     let src_ok = d.source_types.is_empty() || d.source_types.iter().any(|t| t == from_type);
     let tgt_ok = d.target_types.is_empty()
         || to_type.is_none_or(|t| d.target_types.iter().any(|x| x == t));
@@ -1316,21 +1316,21 @@ write_rules: []
     }
 
     // ---------------------------------------------------------------
-    // validate_cross_vault_edge — covers the pure-function layer. The
+    // validate_cross_mem_edge — covers the pure-function layer. The
     // engine relate path's routing wraps these outcomes into
-    // `CROSS_VAULT_EDGE_NOT_DECLARED` / `INVALID_REL_TYPE` /
+    // `CROSS_MEM_EDGE_NOT_DECLARED` / `INVALID_REL_TYPE` /
     // `INVALID_REL_SHAPE` envelopes.
     // ---------------------------------------------------------------
 
-    /// Cross-vault-aware source schema: declares one outbound entry
+    /// Cross-mem-aware source schema: declares one outbound entry
     /// to the `other` domain with `ADDRESSES: step → requirement` and
-    /// a shape-free `MENTIONS`. Intra-vault `relationships` carries a
-    /// disjoint `IMPLEMENTS` rel-type so the "intra-vault-only is
-    /// invisible cross-vault" AC is exercisable.
-    fn cross_vault_source_schema() -> std::sync::Arc<Schema> {
+    /// a shape-free `MENTIONS`. Intra-mem `relationships` carries a
+    /// disjoint `IMPLEMENTS` rel-type so the "intra-mem-only is
+    /// invisible cross-mem" AC is exercisable.
+    fn cross_mem_source_schema() -> std::sync::Arc<Schema> {
         let manifest_yaml = r#"name: source-cv
 version: 0.1.0
-description: cross-vault source schema
+description: cross-mem source schema
 when_to_use: tests
 types:
   - step
@@ -1339,12 +1339,12 @@ relationships:
   mode: strict
   definitions:
     - name: IMPLEMENTS
-      description: intra-vault only
+      description: intra-mem only
       default_weight: 1.0
     - name: _default
       description: fallback
       default_weight: 1.0
-cross_vault_relationships:
+cross_mem_relationships:
   - to_schema: other
     definitions:
       - name: ADDRESSES
@@ -1391,7 +1391,7 @@ write_rules: []
                     ("decision".to_string(), make_type("decision")),
                 ],
             )
-            .expect("cross-vault source schema must load"),
+            .expect("cross-mem source schema must load"),
         )
     }
 
@@ -1400,66 +1400,66 @@ write_rules: []
     }
 
     #[test]
-    fn cross_vault_admits_declared_shape() {
-        let src = cross_vault_source_schema();
+    fn cross_mem_admits_declared_shape() {
+        let src = cross_mem_source_schema();
         let target = other_target_ref();
-        match validate_cross_vault_edge("ADDRESSES", "step", Some("requirement"), &src, &target) {
-            CrossVaultRelCheck::Ok => {}
+        match validate_cross_mem_edge("ADDRESSES", "step", Some("requirement"), &src, &target) {
+            CrossMemRelCheck::Ok => {}
             other => panic!("expected Ok, got {other:?}"),
         }
     }
 
     #[test]
-    fn cross_vault_no_matching_entry_returns_edge_not_declared() {
-        let src = cross_vault_source_schema();
+    fn cross_mem_no_matching_entry_returns_edge_not_declared() {
+        let src = cross_mem_source_schema();
         // Target schema not present in source schema's
-        // cross_vault_relationships — source only declares the
+        // cross_mem_relationships — source only declares the
         // `other` domain.
         let target = memstead_schema::SchemaRef::new("docs", semver::Version::new(0, 1, 0));
-        match validate_cross_vault_edge("ADDRESSES", "step", Some("page"), &src, &target) {
-            CrossVaultRelCheck::EdgeNotDeclared => {}
+        match validate_cross_mem_edge("ADDRESSES", "step", Some("page"), &src, &target) {
+            CrossMemRelCheck::EdgeNotDeclared => {}
             other => panic!("expected EdgeNotDeclared, got {other:?}"),
         }
     }
 
     #[test]
-    fn cross_vault_entry_matches_any_target_version() {
+    fn cross_mem_entry_matches_any_target_version() {
         // Eligibility is name-based: the `other` declaration is
-        // satisfied by a target vault pinning *any* version of
+        // satisfied by a target mem pinning *any* version of
         // `other` — a target-side version bump cannot invalidate it.
-        let src = cross_vault_source_schema();
+        let src = cross_mem_source_schema();
         for version in [
             semver::Version::new(1, 0, 0),
             semver::Version::new(1, 1, 0),
             semver::Version::new(2, 5, 0),
         ] {
             let target = memstead_schema::SchemaRef::new("other", version.clone());
-            match validate_cross_vault_edge("ADDRESSES", "step", Some("requirement"), &src, &target)
+            match validate_cross_mem_edge("ADDRESSES", "step", Some("requirement"), &src, &target)
             {
-                CrossVaultRelCheck::Ok => {}
+                CrossMemRelCheck::Ok => {}
                 other => panic!("expected Ok against other@{version}, got {other:?}"),
             }
         }
     }
 
     #[test]
-    fn cross_vault_unknown_rel_type_returns_invalid_rel_type() {
-        let src = cross_vault_source_schema();
+    fn cross_mem_unknown_rel_type_returns_invalid_rel_type() {
+        let src = cross_mem_source_schema();
         let target = other_target_ref();
-        // `IMPLEMENTS` is declared intra-vault only — invisible to
-        // the cross-vault entry and refused with INVALID_REL_TYPE.
-        match validate_cross_vault_edge("IMPLEMENTS", "step", Some("requirement"), &src, &target) {
-            CrossVaultRelCheck::Invalid(ValidationError::InvalidRelationshipType {
+        // `IMPLEMENTS` is declared intra-mem only — invisible to
+        // the cross-mem entry and refused with INVALID_REL_TYPE.
+        match validate_cross_mem_edge("IMPLEMENTS", "step", Some("requirement"), &src, &target) {
+            CrossMemRelCheck::Invalid(ValidationError::InvalidRelationshipType {
                 input,
                 allowed,
                 ..
             }) => {
                 assert_eq!(input, "IMPLEMENTS");
-                // Cross-vault entry's vocabulary surfaces: ADDRESSES + MENTIONS.
+                // Cross-mem entry's vocabulary surfaces: ADDRESSES + MENTIONS.
                 let names: Vec<String> = allowed.into_iter().map(|h| h.name).collect();
                 assert!(names.iter().any(|n| n == "ADDRESSES"));
                 assert!(names.iter().any(|n| n == "MENTIONS"));
-                // Intra-vault-only rel-type must not leak into the cross-vault list.
+                // Intra-mem-only rel-type must not leak into the cross-mem list.
                 assert!(!names.iter().any(|n| n == "IMPLEMENTS"));
             }
             other => panic!("expected Invalid(InvalidRelationshipType), got {other:?}"),
@@ -1467,15 +1467,15 @@ write_rules: []
     }
 
     #[test]
-    fn cross_vault_shape_mismatch_returns_invalid_rel_shape() {
-        let src = cross_vault_source_schema();
+    fn cross_mem_shape_mismatch_returns_invalid_rel_shape() {
+        let src = cross_mem_source_schema();
         let target = other_target_ref();
         // ADDRESSES is shape-pinned to step → requirement. `decision`
         // is a declared source type in source-cv but not admitted by
-        // this cross-vault entry; the shape check refuses with the
-        // cross-vault entry's shape (not intra-vault's).
-        match validate_cross_vault_edge("ADDRESSES", "decision", Some("requirement"), &src, &target) {
-            CrossVaultRelCheck::Invalid(ValidationError::InvalidRelationshipShape {
+        // this cross-mem entry; the shape check refuses with the
+        // cross-mem entry's shape (not intra-mem's).
+        match validate_cross_mem_edge("ADDRESSES", "decision", Some("requirement"), &src, &target) {
+            CrossMemRelCheck::Invalid(ValidationError::InvalidRelationshipShape {
                 rel_type,
                 from_type,
                 allowed_source_types,
@@ -1492,13 +1492,13 @@ write_rules: []
     }
 
     #[test]
-    fn cross_vault_shape_free_rel_type_admits_any_pair() {
-        let src = cross_vault_source_schema();
+    fn cross_mem_shape_free_rel_type_admits_any_pair() {
+        let src = cross_mem_source_schema();
         let target = other_target_ref();
         // MENTIONS has empty source_types/target_types — admits any pair.
         assert!(matches!(
-            validate_cross_vault_edge("MENTIONS", "decision", Some("page"), &src, &target),
-            CrossVaultRelCheck::Ok
+            validate_cross_mem_edge("MENTIONS", "decision", Some("page"), &src, &target),
+            CrossMemRelCheck::Ok
         ));
     }
 

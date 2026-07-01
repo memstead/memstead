@@ -46,7 +46,7 @@ sections:
     catch_all: true
 metadata_fields:
   - key: priority
-    description: How urgent the gap is relative to other coverage_gaps in this vault.
+    description: How urgent the gap is relative to other coverage_gaps in this mem.
     field_type: string
     default_value: mid
     enum_values: [low, mid, high]
@@ -63,4 +63,4 @@ write_rules:
   - "Cite source evidence — path, file, doc section, code symbol. A gap without an evidence pointer cannot be acted on."
   - "Wiki-link the destination neighbor the missing material attaches to. Without REFERENCES into the destination, the gap is unanchored."
   - "Re-verify on every run. If the destination now models this area, delete the entry — it served its purpose."
-  - "Priority is relative within this ingest's process vault, not absolute. Use `high` sparingly for gaps that block other authoring; default to `mid`."
+  - "Priority is relative within this ingest's process mem, not absolute. Use `high` sparingly for gaps that block other authoring; default to `mid`."

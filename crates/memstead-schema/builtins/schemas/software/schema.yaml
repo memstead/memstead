@@ -15,7 +15,7 @@
 #
 # Copy this directory into the workspace-level schemas dir (schemas_dir
 # in .memstead/workspace.toml, conventionally <workspace>/schemas/software/)
-# and pin "schema": "software@0.1.0" in the vault's .memstead/config.json.
+# and pin "schema": "software@0.1.0" in the mem's .memstead/config.json.
 # ─────────────────────────────────────────────────────────────────────────────
 
 name: software
@@ -28,7 +28,7 @@ description: |
   one type has lost the structure the schema offers.
   A schema is a vocabulary, not a census: all nine types are offered
   regardless of how many instances each currently has. A type absent
-  from a vault's type_distribution (e.g. no `actor`, `incident`, or
+  from a mem's type_distribution (e.g. no `actor`, `incident`, or
   `requirement` yet) is available-but-unused, by design — not a gap.
 
 when_to_use: |
@@ -86,7 +86,7 @@ relationships:
     # ── Structural / reference ──────────────────────────────────────────
     - name: PART_OF
       description: Hierarchical containment — the source is structurally part of the target and meaningless without it.
-      when_to_use: Taxonomy. Parent owns the child as a structural part. Pure graph edge — files stay flat at the vault root. Not for logical dependency (use DEPENDS_ON) or soft reference (use REFERENCES).
+      when_to_use: Taxonomy. Parent owns the child as a structural part. Pure graph edge — files stay flat at the mem root. Not for logical dependency (use DEPENDS_ON) or soft reference (use REFERENCES).
       default_weight: 3.0
       acyclic: true
     - name: REFERENCES
@@ -335,13 +335,13 @@ default_writing_guidance:
       graph does not.
     - Entries about modeling process ("decided to model X as a spec",
       "considering whether to split this entity"). Process notes
-      belong in the paired `ingest/<name>` process vault as
+      belong in the paired `ingest/<name>` process mem as
       quality-entries, not in the destination.
-    - Cross-vault wiki-links that are not also relations. Body
-      wiki-links to entities in other vaults must alias an explicit
-      relation in `## Relationships`; the workspace `cross_vault_links`
+    - Cross-mem wiki-links that are not also relations. Body
+      wiki-links to entities in other mems must alias an explicit
+      relation in `## Relationships`; the workspace `cross_mem_links`
       policy gates which directions are allowed. A loose
-      `[[other-vault--X]]` in prose without a backing relation is
+      `[[other-mem--X]]` in prose without a backing relation is
       rejected at write.
     - Numerical entity-count targets ("aim for 15-30 entities"). The
       schema sets type discipline, not headcount. A graph that

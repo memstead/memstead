@@ -10,7 +10,7 @@
 // `memstead.udl` verbatim without textual injection. UDL allows many
 // interfaces but exactly one namespace, which the base file already owns.
 
-// Hermetic test-workspace seeder. Lays down a real `vault-repo/.git`
+// Hermetic test-workspace seeder. Lays down a real `mem-repo/.git`
 // (the git-branch backend) through the engine's own
 // `memstead_git_branch::test_support` helper — the Swift test harness
 // never shells out to `git` or writes refs itself — and roots an `Engine`
@@ -20,8 +20,8 @@
 interface TestSupport {
     constructor();
 
-    // Seed the canonical two-entity fixture (`specs` vault, entity-a USES
-    // entity-b) into a fresh `vault-repo/.git` under `workspace_root`, then
+    // Seed the canonical two-entity fixture (`specs` mem, entity-a USES
+    // entity-b) into a fresh `mem-repo/.git` under `workspace_root`, then
     // return an `Engine` rooted there. Mirrors the Rust-side
     // `setup_test_engine` fixture so a regression shows up on both sides.
     [Throws=MemsteadError]

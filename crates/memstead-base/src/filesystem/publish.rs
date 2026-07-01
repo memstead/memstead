@@ -1,4 +1,4 @@
-//! Filesystem-vault → `.mem` archive assembler.
+//! Filesystem-mem → `.mem` archive assembler.
 //!
 //! Walks a workspace root on disk, reads the workspace config,
 //! projects it to the strict archive shape, embeds the resolved schema
@@ -6,22 +6,22 @@
 //! into a deterministic zip.
 //!
 //! Engine-agnostic: the caller passes a path. Used by both
-//! `memstead publish` and `memstead export --format vault`, neither of which
+//! `memstead publish` and `memstead export --format mem`, neither of which
 //! needs a live engine for the archive build (the workspace config
 //! and the entity walker both read from disk directly).
 //!
 //! ## Archive layout (matches `memstead-base::validator::archive`)
 //!
 //! ```text
-//! .memstead/config.json               # archive shape (PublishedVaultConfig)
+//! .memstead/config.json               # archive shape (PublishedMemConfig)
 //! .memstead/schema/schema.yaml        # schema manifest
 //! .memstead/schema/types/<name>.yaml  # per-type definitions
-//! <vault-relative entity path>.md     # one per entity in the workspace
+//! <mem-relative entity path>.md     # one per entity in the workspace
 //! ```
 //!
 //! ## Determinism
 //!
-//! - Entity `.md` files are emitted in vault-relative path order — the
+//! - Entity `.md` files are emitted in mem-relative path order — the
 //!   same order [`crate::entity::source::EntitySource::Directory`]
 //!   yields them on read.
 //! - Schema files come from
@@ -29,7 +29,7 @@
 //!   `archive_path`.
 //! - The `.memstead/config.json` is serialised pretty-printed for human
 //!   inspection but with deterministic key order via
-//!   [`memstead_schema::PublishedVaultConfig`]'s `Serialize` impl.
+//!   [`memstead_schema::PublishedMemConfig`]'s `Serialize` impl.
 //! - Compression is fixed at `Stored` so repeated assembly of the same
 //!   workspace yields byte-identical archive bytes (modulo zip-level
 //!   timestamps, which the writer leaves at zero by default).
@@ -38,7 +38,7 @@
 //!
 //! - HTTP. The CLI's `commands::publish` posts the bytes; this module
 //!   stops at "build the byte buffer". Same separation as the
-//!   vault-repo `export_vault` → `commands::publish` flow.
+//!   mem-repo `export_mem` → `commands::publish` flow.
 //! - Validate. The bytes go through `validator::archive::extract_entries`
 //!   on the registry side; doing it here too would double the work for
 //!   the same answer. Tests in this module *do* re-validate so future
@@ -190,8 +190,8 @@ mod tests {
         SchemaRef::new(name, semver::Version::parse(version).unwrap())
     }
 
-    /// Create the vault in a folder *named after it* (identity is path-derived
-    /// under the unified layout) and return the vault root.
+    /// Create the mem in a folder *named after it* (identity is path-derived
+    /// under the unified layout) and return the mem root.
     fn write_workspace(tmp: &TempDir, name: &str, with_version: bool) -> PathBuf {
         let root = tmp.path().join(name);
         std::fs::create_dir_all(&root).unwrap();
@@ -200,7 +200,7 @@ mod tests {
         // config in the no-version test path, clear it explicitly.
         let mut cfg = WorkspaceConfig::new(name, versioned("default", "1.0.0"));
         if with_version {
-            cfg.description = Some("test vault".into());
+            cfg.description = Some("test mem".into());
             cfg.add_dep("anthropic/core".parse().unwrap());
         } else {
             cfg.version = None;

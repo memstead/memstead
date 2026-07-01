@@ -3,7 +3,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # agent-program@0.1.0 — knowledge-graph schema for executable agent programs.
 #
-# An agent-program vault holds programs an LLM agent reads as instructions
+# An agent-program mem holds programs an LLM agent reads as instructions
 # and runs over autonomously. The graph IS the program text. The agent IS
 # the runtime. Tools are declared as first-class entities in the catalog.
 # Constraints are declared as first-class entities the agent must obey.
@@ -21,9 +21,9 @@
 # the default vocabulary carries hierarchical containment of nodes
 # inside a program.
 #
-# Pair with a planning vault when the program was deliberated (link
-# planning.decision via cross-vault reference) and with a software or
-# main vault for the things the program operates over.
+# Pair with a planning mem when the program was deliberated (link
+# planning.decision via cross-mem reference) and with a software or
+# main mem for the things the program operates over.
 # ─────────────────────────────────────────────────────────────────────────────
 
 name: agent-program
@@ -39,10 +39,10 @@ description: |
 when_to_use: |
   Use to model agent programs that today live as prompt-based skill
   bodies, hand-coded orchestration scripts, or untracked institutional
-  procedures (SOPs, runbooks, hotline scripts). Author one vault per
-  program, or one vault per program family with PART_OF hierarchy.
-  Cross-link to planning vaults (decisions that motivated the program)
-  and to main vaults (entities the program operates over) via the
+  procedures (SOPs, runbooks, hotline scripts). Author one mem per
+  program, or one mem per program family with PART_OF hierarchy.
+  Cross-link to planning mems (decisions that motivated the program)
+  and to main mems (entities the program operates over) via the
   references field, never via copy.
 
 system_message: |
@@ -94,7 +94,7 @@ relationships:
     # ── Structural / reference (carried over from default) ──────────────
     - name: PART_OF
       description: Hierarchical containment — the source node is structurally part of the target program.
-      when_to_use: node → program. The canonical "this node belongs to that program" edge. Pure graph edge — files stay flat at the vault root.
+      when_to_use: node → program. The canonical "this node belongs to that program" edge. Pure graph edge — files stay flat at the mem root.
       default_weight: 3.0
       acyclic: true
     - name: REFERENCES
@@ -112,12 +112,12 @@ relationships:
       acyclic: true
     - name: MOTIVATED_BY
       description: The target motivated the creation of the source.
-      when_to_use: program → planning.decision (cross-vault) — the program realizes a planning decision.
+      when_to_use: program → planning.decision (cross-mem) — the program realizes a planning decision.
       default_weight: 2.0
       acyclic: true
     - name: IMPLEMENTS
       description: The source program realizes the target specification.
-      when_to_use: program → spec (cross-vault) — the program implements a documented behaviour.
+      when_to_use: program → spec (cross-mem) — the program implements a documented behaviour.
       default_weight: 2.0
       acyclic: true
 

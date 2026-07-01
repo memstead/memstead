@@ -3,7 +3,7 @@
 Thanks for your interest in Memstead. Contributions are welcome — bug reports,
 documentation fixes, and code alike.
 
-Memstead is a schema-agnostic graph engine: each vault keeps a typed model of a
+Memstead is a schema-agnostic graph engine: each mem keeps a typed model of a
 chosen subject as Markdown + git, readable by both humans and LLMs, with MCP as
 the AI-agent access layer. The engine is the open core; a couple of commercial
 layers (a hosted registry, a native app) build on top of it and are not part of
@@ -50,12 +50,12 @@ Run the full suite before opening a PR:
 Or, while iterating on the engine, one flavour at a time:
 
 ```bash
-cargo nextest run --workspace --features vault-repo      # full (git-backed)
+cargo nextest run --workspace --features mem-repo      # full (git-backed)
 cargo nextest run --workspace --no-default-features      # lean (folder-only)
 ```
 
 The engine builds in two flavours from one set of crates — the default
-`vault-repo` build and a lean `--no-default-features` build — and CI runs both.
+`mem-repo` build and a lean `--no-default-features` build — and CI runs both.
 If your change touches a generated reference doc, regenerate it rather than
 editing it by hand (CI fails on drift); the generator is `xtask` — see
 [docs/build.md](docs/build.md).

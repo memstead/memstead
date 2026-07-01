@@ -9,7 +9,7 @@ when_to_use: |
   Use for every external capability the program calls — MCP tools,
   shell commands, internal helpers, sub-agents. Author one tool entity
   per distinct capability; if the same MCP tool is used by many
-  programs, share the entity via cross-vault reference rather than
+  programs, share the entity via cross-mem reference rather than
   duplicating.
 boundaries:
   - Not a node — a tool is what gets called; a node is the call site.
@@ -100,4 +100,4 @@ staleness_threshold_days: 180
 write_rules:
   - "tool_name is the literal string the agent calls — no aliases, no prefixes invented for clarity. If the MCP tool is memstead_create, tool_name is 'memstead_create'."
   - "Destructive tools must list the typed error codes that signal partial failure. A destructive tool with no error_codes section is under-specified."
-  - "Cross-program reuse: if many programs call the same MCP tool, author the tool entity once in a shared catalog vault and reference it across program vaults via the references field. Don't copy."
+  - "Cross-program reuse: if many programs call the same MCP tool, author the tool entity once in a shared catalog mem and reference it across program mems via the references field. Don't copy."

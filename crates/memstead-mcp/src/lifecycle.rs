@@ -1,9 +1,9 @@
-//! Parameter structs for the runtime vault-lifecycle tools —
-//! `memstead_vault_create` and `memstead_vault_delete`.
+//! Parameter structs for the runtime mem-lifecycle tools —
+//! `memstead_mem_create` and `memstead_mem_delete`.
 //!
 //! These are the on-the-wire shapes agents send; the pro MCP handlers
 //! translate them before calling the orchestrators. Pro-only — basis
-//! `FilesystemMcpServer` does not expose vault lifecycle.
+//! `FilesystemMcpServer` does not expose mem lifecycle.
 
 use rmcp::schemars;
 
@@ -16,10 +16,10 @@ use rmcp::schemars;
 #[derive(Debug, Clone, serde::Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct VcsConfigInput {
-    #[schemars(description = "Path to the gitdir relative to the new vault's root.")]
+    #[schemars(description = "Path to the gitdir relative to the new mem's root.")]
     pub gitdir: String,
     #[schemars(
-        description = "Path to the worktree relative to the new vault's root. Defaults to `\".\"` (vault root) when omitted."
+        description = "Path to the worktree relative to the new mem's root. Defaults to `\".\"` (mem root) when omitted."
     )]
     #[serde(default = "default_worktree")]
     pub worktree: String,
@@ -38,7 +38,7 @@ impl From<VcsConfigInput> for memstead_schema::VcsConfig {
     }
 }
 
-/// Wire-shape recovery action for `memstead_vault_create`. The
+/// Wire-shape recovery action for `memstead_mem_create`. The
 /// storage-residue refusal path exposes three explicit
 /// recovery options the caller picks via this enum. The wire
 /// tokens (`reattach` / `force_overwrite` / `hard_cleanup_first`)
@@ -49,7 +49,7 @@ impl From<VcsConfigInput> for memstead_schema::VcsConfig {
 #[serde(rename_all = "snake_case")]
 pub enum RecoveryActionInput {
     /// Adopt the residual entities; skip the seed commit. Default
-    /// when the residue was left by a deliberate `memstead vault
+    /// when the residue was left by a deliberate `memstead mem
     /// unregister`. Explicit `reattach` overrides the default for
     /// crash-residue scenarios where the operator has verified the
     /// content is safe to adopt.
@@ -57,10 +57,10 @@ pub enum RecoveryActionInput {
     /// Destroy the residue, then proceed with the normal create
     /// path. Prior entities are gone. **Not yet implemented** — the
     /// orchestrator currently refuses with `INVALID_INPUT` pointing
-    /// at `memstead vault delete <name>`.
+    /// at `memstead mem delete <name>`.
     ForceOverwrite,
-    /// Refuse with `VAULT_STORAGE_RESIDUE_DETECTED`, instructing the
-    /// caller to run `memstead vault delete <name>` first. Hard barrier
+    /// Refuse with `MEM_STORAGE_RESIDUE_DETECTED`, instructing the
+    /// caller to run `memstead mem delete <name>` first. Hard barrier
     /// against destructive auto-recovery — for operators who want
     /// the cleanup to be a separate, named operation.
     HardCleanupFirst,
@@ -80,11 +80,11 @@ impl From<RecoveryActionInput> for memstead_engine::RecoveryAction {
     }
 }
 
-/// Parameters for `memstead_vault_create`.
+/// Parameters for `memstead_mem_create`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
-pub struct VaultCreateParams {
+pub struct MemCreateParams {
     #[schemars(
-        description = "Unique name for the new vault — the full hierarchical identifier (e.g. `\"sub-vault\"` for flat layouts or `\"team/sub-vault\"` for hierarchical layouts); the value flows through verbatim. Grammar: lowercase ASCII letters, digits, hyphens; segments separated by `/`; no leading, trailing, or double slashes. Must not collide with any currently-registered vault."
+        description = "Unique name for the new mem — the full hierarchical identifier (e.g. `\"sub-mem\"` for flat layouts or `\"team/sub-mem\"` for hierarchical layouts); the value flows through verbatim. Grammar: lowercase ASCII letters, digits, hyphens; segments separated by `/`; no leading, trailing, or double slashes. Must not collide with any currently-registered mem."
     )]
     pub name: String,
     #[schemars(
@@ -92,61 +92,61 @@ pub struct VaultCreateParams {
     )]
     pub location: String,
     #[schemars(
-        description = "Schema pin for the new vault. Format: `name@x.y.z` — e.g. `default@1.0.0`. Resolved against the per-vault schema registry at init time."
+        description = "Schema pin for the new mem. Format: `name@x.y.z` — e.g. `default@1.0.0`. Resolved against the per-mem schema registry at init time."
     )]
     pub schema: String,
     #[schemars(
-        description = "Optional VCS layout override. Shape: `{ \"gitdir\": \".git\", \"worktree\": \".\" }` (default isolated) or `{ \"gitdir\": \"../.git\", \"worktree\": \"..\" }` (shared-gitdir idiom). Paths are relative to the new vault's root. When absent, the engine uses the isolated default."
+        description = "Optional VCS layout override. Shape: `{ \"gitdir\": \".git\", \"worktree\": \".\" }` (default isolated) or `{ \"gitdir\": \"../.git\", \"worktree\": \"..\" }` (shared-gitdir idiom). Paths are relative to the new mem's root. When absent, the engine uses the isolated default."
     )]
     pub vcs: Option<VcsConfigInput>,
     #[schemars(
-        description = "Agent-authored provenance note recorded in the seed commit's body (≤280 chars). One sentence describing why this vault was created."
+        description = "Agent-authored provenance note recorded in the seed commit's body (≤280 chars). One sentence describing why this mem was created."
     )]
     pub note: Option<String>,
     #[schemars(
-        description = "Explicit recovery action when on-disk storage residue is detected at the composed branch path. Three accepted values: `reattach` (adopt the residual entities, skip the seed commit), `force_overwrite` (destroy the residue, currently refuses with `INVALID_INPUT` — implementation pending), `hard_cleanup_first` (refuse with `VAULT_STORAGE_RESIDUE_DETECTED`, instructing the caller to run `memstead_vault_delete` first). When omitted, the engine routes by whether the residue was left by a deliberate `memstead vault unregister`: such residue defaults to `reattach` and emits a `VAULT_REATTACHED_AFTER_UNREGISTER` warning; residue from a crash refuses with `VAULT_STORAGE_RESIDUE_DETECTED`. Bare create against a name with no residue ignores this field."
+        description = "Explicit recovery action when on-disk storage residue is detected at the composed branch path. Three accepted values: `reattach` (adopt the residual entities, skip the seed commit), `force_overwrite` (destroy the residue, currently refuses with `INVALID_INPUT` — implementation pending), `hard_cleanup_first` (refuse with `MEM_STORAGE_RESIDUE_DETECTED`, instructing the caller to run `memstead_mem_delete` first). When omitted, the engine routes by whether the residue was left by a deliberate `memstead mem unregister`: such residue defaults to `reattach` and emits a `MEM_REATTACHED_AFTER_UNREGISTER` warning; residue from a crash refuses with `MEM_STORAGE_RESIDUE_DETECTED`. Bare create against a name with no residue ignores this field."
     )]
     pub recovery: Option<RecoveryActionInput>,
     #[schemars(
-        description = "Inline the full resolved schema body on the response (byte-identical to `memstead_schema(name=<resolved-schema>)`). Default `false` — the response carries only `schema_ref`, `name`, `location`, and `seed_commit_sha`. Set to `true` for first-time-schema callers that want one round-trip instead of two; for the agent's second+ vault on the same schema this opt-in saves ~25 KB of context per call since the schema is workspace-stable and already cached."
+        description = "Inline the full resolved schema body on the response (byte-identical to `memstead_schema(name=<resolved-schema>)`). Default `false` — the response carries only `schema_ref`, `name`, `location`, and `seed_commit_sha`. Set to `true` for first-time-schema callers that want one round-trip instead of two; for the agent's second+ mem on the same schema this opt-in saves ~25 KB of context per call since the schema is workspace-stable and already cached."
     )]
     #[serde(default)]
     pub include_schema: bool,
     #[schemars(
-        description = "Verbosity of the inlined schema body when `include_schema: true`. `\"full\"` (default, absent) inlines the complete schema — byte-identical to `memstead_schema(name=<resolved-schema>)`. `\"lite\"` inlines the cheap cold-start skeleton instead (entity-type names + section keys + field shapes, relationship names + endpoints, the alias pointer; prose dropped) — the recommended pairing for a first-vault create that only needs to orient. Ignored when `include_schema` is false. Any value other than `\"full\"`/`\"lite\"` returns `INVALID_INPUT` naming the bad value."
+        description = "Verbosity of the inlined schema body when `include_schema: true`. `\"full\"` (default, absent) inlines the complete schema — byte-identical to `memstead_schema(name=<resolved-schema>)`. `\"lite\"` inlines the cheap cold-start skeleton instead (entity-type names + section keys + field shapes, relationship names + endpoints, the alias pointer; prose dropped) — the recommended pairing for a first-mem create that only needs to orient. Ignored when `include_schema` is false. Any value other than `\"full\"`/`\"lite\"` returns `INVALID_INPUT` naming the bad value."
     )]
     pub schema_verbosity: Option<String>,
     #[schemars(
-        description = "Optional per-instance writing guidance, written verbatim into the new vault's config `writeGuidance` map in the seed commit. An opaque string-keyed JSON object — e.g. `{ \"phase_context\": \"early design\", \"stack\": \"Rust\" }`. The engine never interprets the keys (schema-strictness D8 — `writeGuidance` is client-owned vocabulary); a client that read the resolved schema package's `vault-template.json` fills the instance keys and passes them here. Omit (or pass `{}`) to seed no guidance."
+        description = "Optional per-instance writing guidance, written verbatim into the new mem's config `writeGuidance` map in the seed commit. An opaque string-keyed JSON object — e.g. `{ \"phase_context\": \"early design\", \"stack\": \"Rust\" }`. The engine never interprets the keys (schema-strictness D8 — `writeGuidance` is client-owned vocabulary); a client that read the resolved schema package's `mem-template.json` fills the instance keys and passes them here. Omit (or pass `{}`) to seed no guidance."
     )]
     #[serde(default)]
     pub write_guidance: std::collections::HashMap<String, serde_json::Value>,
 }
 
-/// Parameters for `memstead_vault_set_schema` — the integrity-driven
+/// Parameters for `memstead_mem_set_schema` — the integrity-driven
 /// schema-migration trigger.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct VaultSetSchemaParams {
-    #[schemars(description = "Name of the writable vault whose schema pin is being set.")]
-    pub vault: String,
+pub struct MemSetSchemaParams {
+    #[schemars(description = "Name of the writable mem whose schema pin is being set.")]
+    pub mem: String,
     #[schemars(
-        description = "Target schema ref, exact `name@x.y.z`. Must resolve against the loaded schema catalogue (vault-pinned, workspace, built-in); unresolvable refs refuse with SCHEMA_NOT_FOUND, malformed refs with INVALID_INPUT."
+        description = "Target schema ref, exact `name@x.y.z`. Must resolve against the loaded schema catalogue (mem-pinned, workspace, built-in); unresolvable refs refuse with SCHEMA_NOT_FOUND, malformed refs with INVALID_INPUT."
     )]
     pub schema: String,
     #[schemars(
-        description = "Optional provenance note (≤280 chars). Reserved: the pin lives in workspace state today (no vault commit is produced), so the note is accepted for wire-compat and recorded once the pin-relocation cut moves the schema pin into vault config."
+        description = "Optional provenance note (≤280 chars). Reserved: the pin lives in workspace state today (no mem commit is produced), so the note is accepted for wire-compat and recorded once the pin-relocation cut moves the schema pin into mem config."
     )]
     pub note: Option<String>,
 }
 
-/// Parameters for `memstead_vault_set_version`. F1.
+/// Parameters for `memstead_mem_set_version`. F1.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
-pub struct VaultSetVersionParams {
-    #[schemars(description = "Name of the vault whose `version` field is being updated.")]
+pub struct MemSetVersionParams {
+    #[schemars(description = "Name of the mem whose `version` field is being updated.")]
     pub name: String,
     #[schemars(
-        description = "New semver version (e.g. `0.2.0`, `1.0.0-beta.1`). Validated as semver; malformed values refuse with `INVALID_INPUT`. The version is consumed by `memstead_export --format vault` to stamp the archive filename and the `.mem` archive's published config — bump before publishing. Initial vault-create seeds `0.1.0` so this surface is the only path that needs to be invoked when an agent or operator is ready to ship."
+        description = "New semver version (e.g. `0.2.0`, `1.0.0-beta.1`). Validated as semver; malformed values refuse with `INVALID_INPUT`. The version is consumed by `memstead_export --format mem` to stamp the archive filename and the `.mem` archive's published config — bump before publishing. Initial mem-create seeds `0.1.0` so this surface is the only path that needs to be invoked when an agent or operator is ready to ship."
     )]
     pub version: String,
     #[schemars(
@@ -155,23 +155,23 @@ pub struct VaultSetVersionParams {
     pub note: Option<String>,
 }
 
-/// Parameters for `memstead_vault_delete`.
+/// Parameters for `memstead_mem_delete`.
 ///
 /// The MCP surface collapses to one verb that always means destructive.
 /// The earlier `delete_files: bool` parameter retired — agents have no legitimate
 /// need to "preserve storage but unregister"; the router-only
 /// unregister-preserve-storage workflow stays reachable via the CLI's
-/// `memstead vault unregister` verb (operator-only). The MCP wrapper
+/// `memstead mem unregister` verb (operator-only). The MCP wrapper
 /// hardcodes `delete_files: true` when invoking the engine, so the
-/// promised refusals (`VAULT_REFERENCED_BY_POLICY`,
-/// `VAULT_HAS_INCOMING_REFS`) and the policy scrub on success always
+/// promised refusals (`MEM_REFERENCED_BY_POLICY`,
+/// `MEM_HAS_INCOMING_REFS`) and the policy scrub on success always
 /// fire.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
-pub struct VaultDeleteParams {
-    #[schemars(description = "Name of the vault to destroy.")]
+pub struct MemDeleteParams {
+    #[schemars(description = "Name of the mem to destroy.")]
     pub name: String,
     #[schemars(
-        description = "Agent-authored provenance note (≤280 chars). Surfaces in the outer-repo Stop-hook aggregation via the engine's trace surface; no per-vault commit is produced by delete."
+        description = "Agent-authored provenance note (≤280 chars). Surfaces in the outer-repo Stop-hook aggregation via the engine's trace surface; no per-mem commit is produced by delete."
     )]
     pub note: Option<String>,
 }
@@ -181,9 +181,9 @@ pub struct VaultDeleteParams {
 // six `memstead_workspace_*` tools wrapping the engine-located
 // `workspace_config_edit` writers. The MCP surface mirrors the CLI
 // verbs (`memstead workspace grant-cross-link`, etc.), so an
-// MCP-driven agent can complete the dynamic vault lifecycle
-// (`vault_create → workspace_grant_cross_link → relate → unrelate
-// → workspace_revoke_cross_link → vault_delete`) without dropping
+// MCP-driven agent can complete the dynamic mem lifecycle
+// (`mem_create → workspace_grant_cross_link → relate → unrelate
+// → workspace_revoke_cross_link → mem_delete`) without dropping
 // to the CLI.
 // ---------------------------------------------------------------------------
 
@@ -191,11 +191,11 @@ pub struct VaultDeleteParams {
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct WorkspaceGrantCrossLinkParams {
     #[schemars(
-        description = "Source vault. The grantee — the vault permitted to author cross-vault edges into `to`."
+        description = "Source mem. The grantee — the mem permitted to author cross-mem edges into `to`."
     )]
     pub from: String,
     #[schemars(
-        description = "Target vault. Pass a named vault (e.g. `\"specs\"`) to append to the named-allowlist shape, or the literal `\"*\"` to set the wildcard shape (any target). Wildcard vs. named is mutually exclusive per `from`-vault — switching between requires revoking the prior shape first; mixing surfaces `CROSS_LINK_CONFLICT`."
+        description = "Target mem. Pass a named mem (e.g. `\"specs\"`) to append to the named-allowlist shape, or the literal `\"*\"` to set the wildcard shape (any target). Wildcard vs. named is mutually exclusive per `from`-mem — switching between requires revoking the prior shape first; mixing surfaces `CROSS_LINK_CONFLICT`."
     )]
     pub to: String,
 }
@@ -204,11 +204,11 @@ pub struct WorkspaceGrantCrossLinkParams {
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct WorkspaceRevokeCrossLinkParams {
     #[schemars(
-        description = "Source vault. The grantee whose existing grant is being revoked."
+        description = "Source mem. The grantee whose existing grant is being revoked."
     )]
     pub from: String,
     #[schemars(
-        description = "Target vault, or `\"*\"` to revoke the wildcard shape. When the underlying list becomes empty, the `from` key is dropped entirely."
+        description = "Target mem, or `\"*\"` to revoke the wildcard shape. When the underlying list becomes empty, the `from` key is dropped entirely."
     )]
     pub to: String,
 }
@@ -217,7 +217,7 @@ pub struct WorkspaceRevokeCrossLinkParams {
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct WorkspaceAllowCreateParams {
     #[schemars(
-        description = "Glob pattern matched against composed vault candidates (`<vault_path>/<name>` for hierarchical, bare `<name>` for flat). First-match-wins; lower index = higher priority."
+        description = "Glob pattern matched against composed mem candidates (`<mem_path>/<name>` for hierarchical, bare `<name>` for flat). First-match-wins; lower index = higher priority."
     )]
     pub pattern: String,
     #[schemars(
@@ -229,7 +229,7 @@ pub struct WorkspaceAllowCreateParams {
     )]
     pub before: Option<String>,
     #[schemars(
-        description = "Default cross-vault link grants for vaults matching this rule. Each entry is a target-vault name (`\"specs\"`) or `\"*\"` (any). Pre-populates `[cross_vault_links]` for matching new vaults so agents don't have to grant a second time."
+        description = "Default cross-mem link grants for mems matching this rule. Each entry is a target-mem name (`\"specs\"`) or `\"*\"` (any). Pre-populates `[cross_mem_links]` for matching new mems so agents don't have to grant a second time."
     )]
     pub default_cross_links: Option<Vec<String>>,
 }
@@ -238,7 +238,7 @@ pub struct WorkspaceAllowCreateParams {
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct WorkspaceRevokeCreateParams {
     #[schemars(
-        description = "Glob pattern of the `[[vault_management.create]]` rule to drop. Matched exactly against the rule's `pattern` field."
+        description = "Glob pattern of the `[[mem_management.create]]` rule to drop. Matched exactly against the rule's `pattern` field."
     )]
     pub pattern: String,
 }
@@ -247,7 +247,7 @@ pub struct WorkspaceRevokeCreateParams {
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct WorkspaceAllowDeleteParams {
     #[schemars(
-        description = "Glob pattern matched against composed vault candidates. Appended to `[[vault_management.delete]]` — the symmetric allowlist for `memstead_vault_delete`. Agent-creatable equals agent-deletable in spirit; mirror the create-side `pattern` to keep parity."
+        description = "Glob pattern matched against composed mem candidates. Appended to `[[mem_management.delete]]` — the symmetric allowlist for `memstead_mem_delete`. Agent-creatable equals agent-deletable in spirit; mirror the create-side `pattern` to keep parity."
     )]
     pub pattern: String,
 }
@@ -256,7 +256,7 @@ pub struct WorkspaceAllowDeleteParams {
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct WorkspaceRevokeDeleteParams {
     #[schemars(
-        description = "Glob pattern of the `[[vault_management.delete]]` rule to drop. Matched exactly against the rule's `pattern` field."
+        description = "Glob pattern of the `[[mem_management.delete]]` rule to drop. Matched exactly against the rule's `pattern` field."
     )]
     pub pattern: String,
 }

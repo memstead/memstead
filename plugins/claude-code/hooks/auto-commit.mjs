@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Stop hook — invokes the shared commit pipeline (`produceOuterCommit`)
 // with the current Claude Code session id. Silent no-op when the plugin
-// isn't configured, `outer_vcs.enabled = false`, or no vault saw any
+// isn't configured, `outer_vcs.enabled = false`, or no mem saw any
 // mutation this turn. The cursor-in-trailer mechanism reads the prior
 // cursor from the outer-repo log, so no per-session state file is
 // required.
@@ -28,7 +28,7 @@ async function main() {
   switch (result.status) {
     case 'committed':
     case 'no-changes':
-    case 'no-vaults':
+    case 'no-mems':
     case 'disabled':
       return;
     case 'probe-failed':

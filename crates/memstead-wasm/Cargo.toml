@@ -45,7 +45,7 @@ wasm-bindgen-test = "0.3"
 
 [build-dependencies]
 # Build-time only: the `build.rs` script generates `fixture.mem` for
-# the wasm-bindgen smoke tests via `Engine::export_vault_to_bytes`.
+# the wasm-bindgen smoke tests via `Engine::export_mem_to_bytes`.
 # Runs on the host (native), so `default-features` doesn't matter here.
 memstead-base = { path = "../memstead-base" }
 memstead-schema.workspace = true

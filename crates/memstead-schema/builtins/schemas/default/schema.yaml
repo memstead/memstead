@@ -37,7 +37,7 @@ relationships:
   definitions:
     - name: PART_OF
       description: Hierarchical containment — the source is structurally part of the target and meaningless without it.
-      when_to_use: Taxonomy. Parent owns the child as a structural part. Pure graph edge — files stay flat at the vault root. Not for logical dependency (use DEPENDS_ON) or soft reference (use REFERENCES).
+      when_to_use: Taxonomy. Parent owns the child as a structural part. Pure graph edge — files stay flat at the mem root. Not for logical dependency (use DEPENDS_ON) or soft reference (use REFERENCES).
       default_weight: 3.0
       acyclic: true
     - name: REFERENCES

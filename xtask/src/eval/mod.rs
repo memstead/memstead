@@ -10,8 +10,8 @@
 //!   substrate?" — the write-side bet.
 //! - **Mount / retrieval** (this module, [`run_task`]/[`run_series`]) — the
 //!   *secondary* mode, retained from the harness's first framing. An arm is
-//!   *whether the subject vault is mounted over MCP*. Answers "does mounting this
-//!   vault make an agent better at retrieving answers about its subject?"
+//!   *whether the subject mem is mounted over MCP*. Answers "does mounting this
+//!   mem make an agent better at retrieving answers about its subject?"
 //!
 //! The mount path below enforces, in code, the properties that make its answer
 //! defensible:
@@ -19,25 +19,25 @@
 //! - **One variable** ([`arm::check_single_variable`]) — the two arms differ only
 //!   in mount state. Same model, same system prompt, same task text. A run whose
 //!   arms diverge in anything else is refused, not silently averaged.
-//! - **Real mount path** ([`arm::validate_mount_evidence`]) — the vault-on arm must
-//!   show `memstead_*` tool use and the vault-off arm must show none, or the trial
+//! - **Real mount path** ([`arm::validate_mount_evidence`]) — the mem-on arm must
+//!   show `memstead_*` tool use and the mem-off arm must show none, or the trial
 //!   is invalid. The proof reflects the product an actual user gets, not a synthetic
 //!   context-stuff.
 //! - **Blind grading** ([`grade::strip_tells`], [`Judge`]) — the judge scores one
 //!   answer against a reference and never receives an arm label, a tool trace, or a
-//!   vault citation. It *cannot* infer the arm; the blinding is structural, not a
+//!   mem citation. It *cannot* infer the arm; the blinding is structural, not a
 //!   convention.
 //! - **Honesty** ([`grade::TaskResult::delta`]) — the delta is `on_mean - off_mean`,
 //!   signed, never floored. A flat or negative result is reported plainly.
 //! - **Variance** — every arm runs `n_trials` times; the series carries the standard
 //!   deviation so a single lucky shot is not mistaken for a result.
 //! - **Compounding axis** ([`run_series`]) — the same task set scored against an
-//!   ordered list of vault states yields delta-as-a-function-of-state, the data
+//!   ordered list of mem states yields delta-as-a-function-of-state, the data
 //!   behind "the line goes up as the graph grows."
 //!
 //! The agent and the judge are traits ([`Runner`], [`Judge`]). The real
-//! [`Runner`] shells to `claude -p --mcp-config` (vault-on) or without it
-//! (vault-off); the real [`Judge`] calls an LLM against a reference. Tests drive
+//! [`Runner`] shells to `claude -p --mcp-config` (mem-on) or without it
+//! (mem-off); the real [`Judge`] calls an LLM against a reference. Tests drive
 //! the whole loop with deterministic stubs so the wiring, the guards, and the
 //! aggregation are verified without a network call.
 
@@ -63,17 +63,17 @@ pub use series::{DataSeries, SeriesPoint};
 /// Which arm of the experiment — the single variable under test.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Condition {
-    /// The subject vault is mounted over the real MCP surface.
-    VaultOn,
-    /// No vault is mounted; the agent has every other tool but `memstead_*`.
-    VaultOff,
+    /// The subject mem is mounted over the real MCP surface.
+    MemOn,
+    /// No mem is mounted; the agent has every other tool but `memstead_*`.
+    MemOff,
 }
 
 impl Condition {
     pub fn label(self) -> &'static str {
         match self {
-            Condition::VaultOn => "vault-on",
-            Condition::VaultOff => "vault-off",
+            Condition::MemOn => "mem-on",
+            Condition::MemOff => "mem-off",
         }
     }
 }
@@ -96,7 +96,7 @@ pub struct TaskSpec {
 /// An agent's answer for one arm.
 ///
 /// `tool_calls` records the tools the agent invoked. It serves two jobs: proving
-/// the vault-on arm really exercised the MCP mount ([`arm::validate_mount_evidence`])
+/// the mem-on arm really exercised the MCP mount ([`arm::validate_mount_evidence`])
 /// and being discarded — never shown to the judge — so a tool trace cannot leak
 /// which arm produced the answer.
 #[derive(Clone, Debug)]
@@ -105,14 +105,14 @@ pub struct AgentAnswer {
     pub tool_calls: Vec<String>,
 }
 
-/// A historical (or current) mount of the subject vault. The compounding axis
+/// A historical (or current) mount of the subject mem. The compounding axis
 /// scores the task set against an ordered list of these.
 ///
-/// `mcp_config` points at the MCP config that mounts *this* state of the vault
+/// `mcp_config` points at the MCP config that mounts *this* state of the mem
 /// (e.g. a worktree checked out at an older commit). `None` models an
-/// empty/absent vault — the instrument must show ~zero delta there.
+/// empty/absent mem — the instrument must show ~zero delta there.
 #[derive(Clone, Debug)]
-pub struct VaultState {
+pub struct MemState {
     pub label: String,
     pub mcp_config: Option<std::path::PathBuf>,
 }
@@ -134,7 +134,7 @@ pub trait Judge {
 /// Run one task through both arms, `n_trials` times each, and aggregate.
 ///
 /// Refuses up front if the two arms differ in anything but mount state. Every
-/// trial validates the mount evidence (vault-on used `memstead_*`, vault-off did
+/// trial validates the mount evidence (mem-on used `memstead_*`, mem-off did
 /// not) and strips tells before the judge sees an answer.
 pub fn run_task<R: Runner, J: Judge>(
     runner: &R,
@@ -149,9 +149,9 @@ pub fn run_task<R: Runner, J: Judge>(
     let mut off_scores = Vec::with_capacity(n_trials);
     for _ in 0..n_trials {
         let on = runner.run(on_arm)?;
-        validate_mount_evidence(Condition::VaultOn, &on)?;
+        validate_mount_evidence(Condition::MemOn, &on)?;
         let off = runner.run(off_arm)?;
-        validate_mount_evidence(Condition::VaultOff, &off)?;
+        validate_mount_evidence(Condition::MemOff, &off)?;
         on_scores.push(judge.score(&task.reference, &strip_tells(&on.text))?);
         off_scores.push(judge.score(&task.reference, &strip_tells(&off.text))?);
     }
@@ -161,17 +161,17 @@ pub fn run_task<R: Runner, J: Judge>(
 /// The compounding axis: score `tasks` against each `state` in order and collect
 /// the deltas into a chart-ready series.
 ///
-/// `mcp_off` is the vault-off MCP config (no `memstead_*`); for vault-on, each
-/// state supplies its own historical mount via [`VaultState::mcp_config`]. A
+/// `mcp_off` is the mem-off MCP config (no `memstead_*`); for mem-on, each
+/// state supplies its own historical mount via [`MemState::mcp_config`]. A
 /// state with no mount (`None`) still runs — the instrument must report ~zero
 /// delta for an empty graph rather than skipping it.
 #[allow(clippy::too_many_arguments)]
 pub fn run_series<R: Runner, J: Judge>(
     runner: &R,
     judge: &J,
-    subject_vault: &str,
+    subject_mem: &str,
     tasks: &[TaskSpec],
-    states: &[VaultState],
+    states: &[MemState],
     model: &str,
     system_prompt: &str,
     n_trials: usize,
@@ -187,7 +187,7 @@ pub fn run_series<R: Runner, J: Judge>(
         points.push(SeriesPoint::aggregate(state.label.clone(), n_trials, &task_results));
     }
     Ok(DataSeries {
-        subject_vault: subject_vault.to_string(),
+        subject_mem: subject_mem.to_string(),
         points,
         // The mount/retrieval mode does not screen for contamination or coverage.
         excluded_contaminated: Vec::new(),
@@ -200,26 +200,26 @@ mod tests {
     use super::*;
 
     /// A deterministic stub that answers a task differently depending on whether
-    /// the vault is mounted and how rich the named state is. It lets the tests
+    /// the mem is mounted and how rich the named state is. It lets the tests
     /// drive the full loop — guards, blinding, aggregation, series — without a
     /// network call.
     struct StubRunner {
-        /// Quality the vault-on arm reaches for the current state, 0.0..=1.0.
-        /// The vault-off arm always reaches `off_quality`.
+        /// Quality the mem-on arm reaches for the current state, 0.0..=1.0.
+        /// The mem-off arm always reaches `off_quality`.
         on_quality: f64,
         off_quality: f64,
     }
 
     impl Runner for StubRunner {
         fn run(&self, arm: &ArmConfig) -> Result<AgentAnswer> {
-            // Vault-on must carry mount evidence; vault-off must not — exactly the
+            // Mem-on must carry mount evidence; mem-off must not — exactly the
             // shape the real runner produces and the validator enforces.
             match arm.condition {
-                Condition::VaultOn => Ok(AgentAnswer {
-                    text: format!("ANSWER q={:.3} via the mounted vault", self.on_quality),
+                Condition::MemOn => Ok(AgentAnswer {
+                    text: format!("ANSWER q={:.3} via the mounted mem", self.on_quality),
                     tool_calls: vec!["mcp__memstead__memstead_search".into()],
                 }),
-                Condition::VaultOff => Ok(AgentAnswer {
+                Condition::MemOff => Ok(AgentAnswer {
                     text: format!("ANSWER q={:.3}", self.off_quality),
                     tool_calls: vec![],
                 }),
@@ -252,7 +252,7 @@ mod tests {
     }
 
     #[test]
-    fn run_task_reports_positive_delta_when_vault_helps() {
+    fn run_task_reports_positive_delta_when_mem_helps() {
         let runner = StubRunner { on_quality: 0.9, off_quality: 0.4 };
         let t = task("t1");
         let (on, off) = build_arms(&t, "claude-x", "sys", Some("/tmp/on.json".into()));
@@ -263,7 +263,7 @@ mod tests {
 
     #[test]
     fn run_task_reports_negative_delta_plainly() {
-        // Honesty: when vault-off beats vault-on, the delta is negative — no floor.
+        // Honesty: when mem-off beats mem-on, the delta is negative — no floor.
         let runner = StubRunner { on_quality: 0.2, off_quality: 0.7 };
         let t = task("t1");
         let (on, off) = build_arms(&t, "claude-x", "sys", Some("/tmp/on.json".into()));
@@ -273,8 +273,8 @@ mod tests {
     }
 
     #[test]
-    fn unrelated_vault_yields_near_zero_delta() {
-        // Honesty: a vault that does not help the task produces on == off → ~0.
+    fn unrelated_mem_yields_near_zero_delta() {
+        // Honesty: a mem that does not help the task produces on == off → ~0.
         let runner = StubRunner { on_quality: 0.5, off_quality: 0.5 };
         let t = task("t1");
         let (on, off) = build_arms(&t, "claude-x", "sys", Some("/tmp/on.json".into()));
@@ -290,29 +290,29 @@ mod tests {
         impl Runner for StatefulRunner {
             fn run(&self, arm: &ArmConfig) -> Result<AgentAnswer> {
                 let q = match (arm.condition, arm.mcp_config.as_ref()) {
-                    (Condition::VaultOff, _) => 0.4,
-                    (Condition::VaultOn, None) => 0.4, // empty/absent state: no lift
-                    (Condition::VaultOn, Some(p)) => {
+                    (Condition::MemOff, _) => 0.4,
+                    (Condition::MemOn, None) => 0.4, // empty/absent state: no lift
+                    (Condition::MemOn, Some(p)) => {
                         // richer state label → higher quality
                         if p.to_string_lossy().contains("rich") { 0.9 } else { 0.6 }
                     }
                 };
                 let tool_calls = match arm.condition {
-                    Condition::VaultOn if arm.mcp_config.is_some() => {
+                    Condition::MemOn if arm.mcp_config.is_some() => {
                         vec!["mcp__memstead__memstead_search".to_string()]
                     }
-                    // An empty/absent vault-on state still mounts the (empty) surface.
-                    Condition::VaultOn => vec!["mcp__memstead__memstead_overview".to_string()],
-                    Condition::VaultOff => vec![],
+                    // An empty/absent mem-on state still mounts the (empty) surface.
+                    Condition::MemOn => vec!["mcp__memstead__memstead_overview".to_string()],
+                    Condition::MemOff => vec![],
                 };
                 Ok(AgentAnswer { text: format!("q={q:.3}"), tool_calls })
             }
         }
         let tasks = vec![task("a"), task("b")];
         let states = vec![
-            VaultState { label: "empty".into(), mcp_config: None },
-            VaultState { label: "v1".into(), mcp_config: Some("/tmp/v1.json".into()) },
-            VaultState { label: "v2-rich".into(), mcp_config: Some("/tmp/rich.json".into()) },
+            MemState { label: "empty".into(), mcp_config: None },
+            MemState { label: "v1".into(), mcp_config: Some("/tmp/v1.json".into()) },
+            MemState { label: "v2-rich".into(), mcp_config: Some("/tmp/rich.json".into()) },
         ];
         let series = run_series(
             &StatefulRunner,

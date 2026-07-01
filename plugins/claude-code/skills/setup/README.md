@@ -4,13 +4,13 @@ What this skill must achieve. Use this as the reference when tuning SKILL.md.
 
 ## Core purpose
 
-First-time onboarding for a filesystem-vault Memstead workspace. The user just installed `memstead` and `memstead-mcp` (basis flavour); they need a one-shot path from "empty folder" to "MCP server registered, ready to use".
+First-time onboarding for a filesystem-mem Memstead workspace. The user just installed `memstead` and `memstead-mcp` (basis flavour); they need a one-shot path from "empty folder" to "MCP server registered, ready to use".
 
 ## Acceptance shape
 
 The setup flow:
 
-- Running it in an empty directory: prompts for vault name and schema, runs `memstead init`, resolves `memstead-mcp` to its absolute path at setup time (e.g. via `command -v memstead-mcp`) and writes that absolute path into `.mcp.json` so the spawned MCP server does not depend on the parent shell's `PATH`, and tells the user to restart Claude Code.
+- Running it in an empty directory: prompts for mem name and schema, runs `memstead init`, resolves `memstead-mcp` to its absolute path at setup time (e.g. via `command -v memstead-mcp`) and writes that absolute path into `.mcp.json` so the spawned MCP server does not depend on the parent shell's `PATH`, and tells the user to restart Claude Code.
 - After restart, the `memstead` MCP server is registered, the user issues `/start` (or asks the agent freely) and the agent successfully calls `memstead_search`.
 
 ## Principles
@@ -23,5 +23,5 @@ The setup flow:
 ## Out of scope
 
 - Resolving custom schemas via `memstead link` (that's its own command — the user runs it after `setup` if they want a non-default schema).
-- Bootstrapping vault-repo workspaces (`memstead vault-repo init` is a separate, pro-only path).
+- Bootstrapping mem-repo workspaces (`memstead mem-repo init` is a separate, pro-only path).
 - Verifying the MCP server is wired correctly post-setup (only runs at next session start).

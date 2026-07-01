@@ -1,7 +1,7 @@
 //! Workspace-root utilities. Today's only consumer is the `memstead_health`
-//! `OUTER_REPO_NOT_IGNORING_VAULT_REPO` warning surfaced by the MCP layer:
+//! `OUTER_REPO_NOT_IGNORING_MEM_REPO` warning surfaced by the MCP layer:
 //! when the workspace is embedded inside another git repository, the
-//! vault-repo-git directory must be excluded by the outer repo's
+//! mem-repo-git directory must be excluded by the outer repo's
 //! `.gitignore` to avoid the gitlink trap.
 //!
 //! Pure path-walking — no IO beyond `metadata` / `read_to_string` for
@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 /// is not embedded inside another git repository).
 ///
 /// `workspace_root` itself is intentionally skipped: the embedded
-/// `vault-repo/.git/` lives *inside* the workspace and is not the
+/// `mem-repo/.git/` lives *inside* the workspace and is not the
 /// "outer" repo this helper looks for. We start the walk one level
 /// up so the workspace's own gitdir can never shadow a real outer
 /// repo.
@@ -38,25 +38,25 @@ pub fn find_enclosing_git_repo(workspace_root: &Path) -> Option<PathBuf> {
 }
 
 /// Returns `true` when the outer repo at `outer_repo_root` contains a
-/// `.gitignore` line that ignores `vault-repo/` (with or without a
+/// `.gitignore` line that ignores `mem-repo/` (with or without a
 /// leading workspace-relative prefix). The match is whitespace- and
-/// trailing-slash-insensitive: `vault-repo`, `vault-repo/`, `memstead/vault-repo`,
-/// and `memstead/vault-repo/` all count as "ignored." A negation
-/// (`!vault-repo/`) cancels the match.
+/// trailing-slash-insensitive: `mem-repo`, `mem-repo/`, `memstead/mem-repo`,
+/// and `memstead/mem-repo/` all count as "ignored." A negation
+/// (`!mem-repo/`) cancels the match.
 ///
 /// This is a *best-effort heuristic* against a hand-edited file, not a
 /// full `.gitignore` parser. False negatives are acceptable (the
 /// warning surfaces; the user inspects); false positives would silence
 /// a real misconfiguration, which is why the matcher errs on the side
 /// of literal substring matches and skips comment lines.
-pub fn outer_repo_ignores_vault_repo(outer_repo_root: &Path, workspace_root: &Path) -> bool {
+pub fn outer_repo_ignores_mem_repo(outer_repo_root: &Path, workspace_root: &Path) -> bool {
     let gitignore = outer_repo_root.join(".gitignore");
     let Ok(contents) = std::fs::read_to_string(&gitignore) else {
         return false;
     };
 
     // Workspace-relative prefix the outer-repo author would use to
-    // address the vault-repo directory: "<rel>/vault-repo" where <rel>
+    // address the mem-repo directory: "<rel>/mem-repo" where <rel>
     // is the workspace's path relative to the outer repo root.
     let rel_prefix: Option<String> = workspace_root
         .strip_prefix(outer_repo_root)
@@ -74,22 +74,22 @@ pub fn outer_repo_ignores_vault_repo(outer_repo_root: &Path, workspace_root: &Pa
             None => (false, line),
         };
         let body = body.trim_end_matches('/').trim();
-        if line_matches_vault_repo(body, rel_prefix.as_deref()) {
+        if line_matches_mem_repo(body, rel_prefix.as_deref()) {
             matched = !negated;
         }
     }
     matched
 }
 
-fn line_matches_vault_repo(body: &str, rel_prefix: Option<&str>) -> bool {
+fn line_matches_mem_repo(body: &str, rel_prefix: Option<&str>) -> bool {
     let body = body.trim_start_matches('/');
-    if body == "vault-repo" {
+    if body == "mem-repo" {
         return true;
     }
     if let Some(rel) = rel_prefix {
         let rel = rel.trim_start_matches('/').trim_end_matches('/');
         if !rel.is_empty() {
-            let combined = format!("{rel}/vault-repo");
+            let combined = format!("{rel}/mem-repo");
             if body == combined {
                 return true;
             }
@@ -145,8 +145,8 @@ mod tests {
 
     #[test]
     fn skips_workspace_self_git_dir() {
-        // Workspace's own `.git/` (the vault-repo-git embedded gitdir
-        // sits at `workspace/vault-repo/.git`, but a stray `.git` at the
+        // Workspace's own `.git/` (the mem-repo-git embedded gitdir
+        // sits at `workspace/mem-repo/.git`, but a stray `.git` at the
         // workspace root itself would be the legacy disk gitdir). The
         // walker starts at parent, so neither shadows a real outer
         // repo. As in `returns_none_when_no_outer_git`, we tolerate
@@ -186,13 +186,13 @@ mod tests {
     }
 
     #[test]
-    fn ignore_check_matches_bare_vault_repo() {
+    fn ignore_check_matches_bare_mem_repo() {
         let tmp = TempDir::new().unwrap();
         let outer = tmp.path().join("outer");
         let workspace = outer.join("memstead");
         fs::create_dir_all(&workspace).unwrap();
-        fs::write(outer.join(".gitignore"), "vault-repo/\n").unwrap();
-        assert!(outer_repo_ignores_vault_repo(&outer, &workspace));
+        fs::write(outer.join(".gitignore"), "mem-repo/\n").unwrap();
+        assert!(outer_repo_ignores_mem_repo(&outer, &workspace));
     }
 
     #[test]
@@ -201,8 +201,8 @@ mod tests {
         let outer = tmp.path().join("outer");
         let workspace = outer.join("memstead");
         fs::create_dir_all(&workspace).unwrap();
-        fs::write(outer.join(".gitignore"), "memstead/vault-repo/\n").unwrap();
-        assert!(outer_repo_ignores_vault_repo(&outer, &workspace));
+        fs::write(outer.join(".gitignore"), "memstead/mem-repo/\n").unwrap();
+        assert!(outer_repo_ignores_mem_repo(&outer, &workspace));
     }
 
     #[test]
@@ -212,7 +212,7 @@ mod tests {
         let workspace = outer.join("memstead");
         fs::create_dir_all(&workspace).unwrap();
         fs::write(outer.join(".gitignore"), "node_modules/\ntarget/\n").unwrap();
-        assert!(!outer_repo_ignores_vault_repo(&outer, &workspace));
+        assert!(!outer_repo_ignores_mem_repo(&outer, &workspace));
     }
 
     #[test]
@@ -221,7 +221,7 @@ mod tests {
         let outer = tmp.path().join("outer");
         let workspace = outer.join("memstead");
         fs::create_dir_all(&workspace).unwrap();
-        assert!(!outer_repo_ignores_vault_repo(&outer, &workspace));
+        assert!(!outer_repo_ignores_mem_repo(&outer, &workspace));
     }
 
     #[test]
@@ -230,8 +230,8 @@ mod tests {
         let outer = tmp.path().join("outer");
         let workspace = outer.join("memstead");
         fs::create_dir_all(&workspace).unwrap();
-        fs::write(outer.join(".gitignore"), "vault-repo/\n!vault-repo/\n").unwrap();
-        assert!(!outer_repo_ignores_vault_repo(&outer, &workspace));
+        fs::write(outer.join(".gitignore"), "mem-repo/\n!mem-repo/\n").unwrap();
+        assert!(!outer_repo_ignores_mem_repo(&outer, &workspace));
     }
 
     #[test]
@@ -240,7 +240,7 @@ mod tests {
         let outer = tmp.path().join("outer");
         let workspace = outer.join("memstead");
         fs::create_dir_all(&workspace).unwrap();
-        fs::write(outer.join(".gitignore"), "# vault-repo/\n").unwrap();
-        assert!(!outer_repo_ignores_vault_repo(&outer, &workspace));
+        fs::write(outer.join(".gitignore"), "# mem-repo/\n").unwrap();
+        assert!(!outer_repo_ignores_mem_repo(&outer, &workspace));
     }
 }

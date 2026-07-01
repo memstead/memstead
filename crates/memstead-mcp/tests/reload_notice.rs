@@ -1,12 +1,12 @@
-#![cfg(feature = "vault-repo")]
+#![cfg(feature = "mem-repo")]
 //! Engine-level reload-before-operation test on a real git-branch
-//! vault. Two `Engine` instances share one vault-repo gitdir (the
-//! coherence plan's framing scenario: two sessions on one vault). A
+//! mem. Two `Engine` instances share one mem-repo gitdir (the
+//! coherence plan's framing scenario: two sessions on one mem). A
 //! sibling commit must be reloaded by the second engine *before* its
-//! own write, and the reload must surface a structured `vault_changed`
+//! own write, and the reload must surface a structured `mem_changed`
 //! notice describing what moved.
 //!
-//! This is the engine substrate the MCP `vault_changed` response field
+//! This is the engine substrate the MCP `mem_changed` response field
 //! rides on; the MCP wire harness drives a single process, so the
 //! two-instance scenario is exercised here at the engine boundary.
 
@@ -14,11 +14,11 @@ use indexmap::IndexMap;
 use memstead_base::ops::NoticeChanges;
 use memstead_base::vcs::{Actor, ClientId};
 use memstead_base::{CreateEntityArgs, EngineError, EntityId, UpdateEntityArgs};
-use memstead_git_branch::test_support::init_real_vault_repo;
+use memstead_git_branch::test_support::init_real_mem_repo;
 use memstead_git_branch::workspace_store::engine_from_workspace_root;
 use tempfile::TempDir;
 
-fn create_args(vault: &str, title: &str) -> CreateEntityArgs {
+fn create_args(mem: &str, title: &str) -> CreateEntityArgs {
     // The builtin `default` schema's `spec` type requires the
     // `identity` + `purpose` sections — seed both so the create is a
     // valid request.
@@ -26,7 +26,7 @@ fn create_args(vault: &str, title: &str) -> CreateEntityArgs {
     sections.insert("identity".to_string(), "identity body".to_string());
     sections.insert("purpose".to_string(), "purpose body".to_string());
     CreateEntityArgs {
-        vault: vault.to_string(),
+        mem: mem.to_string(),
         title: title.to_string(),
         entity_type: "spec".to_string(),
         sections,
@@ -62,22 +62,22 @@ fn update_purpose_args(id: EntityId, expected_hash: String, body: &str) -> Updat
 }
 
 #[test]
-fn second_engine_reloads_and_surfaces_vault_changed_on_create() {
+fn second_engine_reloads_and_surfaces_mem_changed_on_create() {
     let tmp = TempDir::new().unwrap();
-    init_real_vault_repo(tmp.path(), &[("specs", "default@1.0.0")]);
+    init_real_mem_repo(tmp.path(), &[("specs", "default@1.0.0")]);
 
     // Both engines boot from the same workspace, cached at the same
     // (empty-tree) head before any write.
     let mut a = engine_from_workspace_root(tmp.path()).expect("engine A boots");
     let mut b = engine_from_workspace_root(tmp.path()).expect("engine B boots");
 
-    // A creates E_a, advancing the shared vault ref.
+    // A creates E_a, advancing the shared mem ref.
     a.create_entity(create_args("specs", "Entity A"), Actor::Cli, Some(&client()), None)
         .expect("A create succeeds");
 
     // B, still cached at the pre-A head, creates a distinct entity. The
     // reload-before-operation check must pull A's commit in first (so
-    // B's graph holds E_a) and stash a `vault_changed` notice.
+    // B's graph holds E_a) and stash a `mem_changed` notice.
     b.create_entity(create_args("specs", "Entity B"), Actor::Cli, Some(&client()), None)
         .expect("B create succeeds (distinct id, no collision)");
 
@@ -86,14 +86,14 @@ fn second_engine_reloads_and_surfaces_vault_changed_on_create() {
         "B reloaded to A's head before its write — E_a is present in B's graph",
     );
 
-    let notices = b.take_vault_changed_notices();
+    let notices = b.take_mem_changed_notices();
     assert_eq!(
         notices.len(),
         1,
         "B's create reloaded exactly once and stashed one notice",
     );
     let n = &notices[0];
-    assert_eq!(n.vault, "specs");
+    assert_eq!(n.mem, "specs");
     match &n.changes {
         NoticeChanges::Detailed { entries } => {
             assert!(
@@ -115,7 +115,7 @@ fn second_engine_reloads_and_surfaces_vault_changed_on_create() {
     // follow-up quiescent reload attaches no notice.
     b.reload_if_stale(Some("specs"));
     assert!(
-        b.take_vault_changed_notices().is_empty(),
+        b.take_mem_changed_notices().is_empty(),
         "quiescent op after the reload attaches no notice",
     );
 }
@@ -126,13 +126,13 @@ fn single_engine_no_sibling_attaches_no_notice() {
     // the ref only moves by the engine's own commits, so no operation
     // reloads and no notice is ever stashed.
     let tmp = TempDir::new().unwrap();
-    init_real_vault_repo(tmp.path(), &[("specs", "default@1.0.0")]);
+    init_real_mem_repo(tmp.path(), &[("specs", "default@1.0.0")]);
     let mut a = engine_from_workspace_root(tmp.path()).expect("engine boots");
 
     a.create_entity(create_args("specs", "Entity One"), Actor::Cli, Some(&client()), None)
         .expect("create one");
     assert!(
-        a.take_vault_changed_notices().is_empty(),
+        a.take_mem_changed_notices().is_empty(),
         "first op has nothing to reload past",
     );
 
@@ -142,19 +142,19 @@ fn single_engine_no_sibling_attaches_no_notice() {
     a.create_entity(create_args("specs", "Entity Two"), Actor::Cli, Some(&client()), None)
         .expect("create two");
     assert!(
-        a.take_vault_changed_notices().is_empty(),
+        a.take_mem_changed_notices().is_empty(),
         "no sibling moved the ref — no notice on the engine's own follow-on write",
     );
 }
 
 #[test]
-fn read_after_sibling_modify_returns_fresh_content_with_vault_changed() {
+fn read_after_sibling_modify_returns_fresh_content_with_mem_changed() {
     // "Positive (read drift)": an engine cached at H0 issues a read
     // after a sibling modified X. The read path's reload refreshes X to
     // the sibling's content (not stale) and stashes the notice the MCP
     // read handler attaches to its response.
     let tmp = TempDir::new().unwrap();
-    init_real_vault_repo(tmp.path(), &[("specs", "default@1.0.0")]);
+    init_real_mem_repo(tmp.path(), &[("specs", "default@1.0.0")]);
 
     let mut a = engine_from_workspace_root(tmp.path()).expect("engine A boots");
     a.create_entity(create_args("specs", "Shared X"), Actor::Cli, Some(&client()), None)
@@ -181,7 +181,7 @@ fn read_after_sibling_modify_returns_fresh_content_with_vault_changed() {
         "B's read sees A's fresh content, not the stale boot snapshot",
     );
 
-    let notices = b.take_vault_changed_notices();
+    let notices = b.take_mem_changed_notices();
     assert_eq!(notices.len(), 1, "the read-triggered reload stashed one notice");
     match &notices[0].changes {
         NoticeChanges::Detailed { entries } => assert!(
@@ -195,9 +195,9 @@ fn read_after_sibling_modify_returns_fresh_content_with_vault_changed() {
 }
 
 #[test]
-fn write_collision_surfaces_hash_mismatch_with_vault_changed() {
+fn write_collision_surfaces_hash_mismatch_with_mem_changed() {
     let tmp = TempDir::new().unwrap();
-    init_real_vault_repo(tmp.path(), &[("specs", "default@1.0.0")]);
+    init_real_mem_repo(tmp.path(), &[("specs", "default@1.0.0")]);
 
     // A creates the shared entity X first; B boots afterwards so B's
     // graph already holds X (cached at X's create head).
@@ -236,7 +236,7 @@ fn write_collision_surfaces_hash_mismatch_with_vault_changed() {
     );
 
     // The notice still rides the (refused) operation.
-    let notices = b.take_vault_changed_notices();
+    let notices = b.take_mem_changed_notices();
     assert_eq!(notices.len(), 1, "the reload stashed one notice");
     match &notices[0].changes {
         NoticeChanges::Detailed { entries } => assert!(
@@ -250,9 +250,9 @@ fn write_collision_surfaces_hash_mismatch_with_vault_changed() {
 }
 
 #[test]
-fn unrelated_concurrent_write_proceeds_with_vault_changed() {
+fn unrelated_concurrent_write_proceeds_with_mem_changed() {
     let tmp = TempDir::new().unwrap();
-    init_real_vault_repo(tmp.path(), &[("specs", "default@1.0.0")]);
+    init_real_mem_repo(tmp.path(), &[("specs", "default@1.0.0")]);
 
     let mut a = engine_from_workspace_root(tmp.path()).expect("engine A boots");
     a.create_entity(create_args("specs", "Entity X"), Actor::Cli, Some(&client()), None)
@@ -286,7 +286,7 @@ fn unrelated_concurrent_write_proceeds_with_vault_changed() {
     )
     .expect("disjoint update commits");
 
-    let notices = b.take_vault_changed_notices();
+    let notices = b.take_mem_changed_notices();
     assert_eq!(notices.len(), 1);
     match &notices[0].changes {
         NoticeChanges::Detailed { entries } => {

@@ -1,17 +1,17 @@
 //! Memstead CLI library — the command modules, utility modules, and
 //! the shared `CliError` behind the `memstead` binary (`src/main.rs`).
 //!
-//! One crate, two build configs. The default build (`vault-repo`
+//! One crate, two build configs. The default build (`mem-repo`
 //! feature on) is the full `memstead`: every subcommand, including the
-//! multi-vault / vault-repo lifecycle (vault, workspace, install,
+//! multi-mem / mem-repo lifecycle (mem, workspace, install,
 //! batch-update, recover). `--no-default-features` drops the git-branch
-//! backend and the vault-repo-only subcommands, yielding the lean
+//! backend and the mem-repo-only subcommands, yielding the lean
 //! engine-agnostic surface (a CI / wasm-adjacent config, not shipped).
 
 pub mod auth;
 pub mod cli;
 pub mod commands;
-#[cfg(feature = "vault-repo")]
+#[cfg(feature = "mem-repo")]
 pub mod outer_gitignore;
 pub mod output;
 pub mod registry;
@@ -43,7 +43,7 @@ pub const CHUNK_OUT_OF_RANGE_CODE: &str = "CHUNK_OUT_OF_RANGE";
 
 /// `memstead init` refusal: ancestor walk found an existing
 /// `.memstead/workspace.toml` above the target. Without this guard a
-/// standalone init would silently nest a fresh filesystem-vault
+/// standalone init would silently nest a fresh filesystem-mem
 /// workspace inside an existing one, with neither workspace aware of
 /// the other.
 pub const WORKSPACE_ALREADY_EXISTS_ABOVE_CODE: &str = "WORKSPACE_ALREADY_EXISTS_ABOVE";
@@ -161,7 +161,7 @@ impl CliError {
                         serde_json::json!({
                             "from_id": r.from_id,
                             "rel_types": r.rel_types,
-                            "vault": r.vault,
+                            "mem": r.mem,
                             "capability": "write",
                         })
                     })
@@ -174,21 +174,21 @@ impl CliError {
                     })),
                 )
             }
-            VaultHasIncomingRefs { vault, referrers } => {
+            MemHasIncomingRefs { mem, referrers } => {
                 let referrers_json: Vec<_> = referrers
                     .iter()
                     .map(|r| {
                         serde_json::json!({
                             "from_id": r.from_id,
                             "rel_types": r.rel_types,
-                            "vault": r.vault,
+                            "mem": r.mem,
                         })
                     })
                     .collect();
                 (
                     ExitKind::Validation,
                     Some(serde_json::json!({
-                        "vault": vault,
+                        "mem": mem,
                         "referrers": referrers_json,
                     })),
                 )
@@ -229,7 +229,7 @@ impl CliError {
                     "reason": reason,
                 })),
             ),
-            InvalidWikiLinkVault { raw, section, reason } => (
+            InvalidWikiLinkMem { raw, section, reason } => (
                 ExitKind::Validation,
                 Some(serde_json::json!({
                     "raw": raw,
@@ -237,18 +237,18 @@ impl CliError {
                     "reason": reason,
                 })),
             ),
-            CrossVaultLinkNotAllowed { from_vault, to_vault } => (
+            CrossMemLinkNotAllowed { from_mem, to_mem } => (
                 ExitKind::Validation,
                 Some(serde_json::json!({
-                    "from_vault": from_vault,
-                    "to_vault": to_vault,
+                    "from_mem": from_mem,
+                    "to_mem": to_mem,
                 })),
             ),
-            CrossVaultTargetNotFound { target_id, target_vault } => (
+            CrossMemTargetNotFound { target_id, target_mem } => (
                 ExitKind::Validation,
                 Some(serde_json::json!({
                     "target_id": target_id,
-                    "target_vault": target_vault,
+                    "target_mem": target_mem,
                 })),
             ),
             RenameNoOp { id, new_title } => (
@@ -275,12 +275,12 @@ impl CliError {
                 })),
             ),
             Validation(v) => (ExitKind::Validation, Some(v.details())),
-            VaultConfigIncomplete { vault, missing_fields } => (
+            MemConfigIncomplete { mem, missing_fields } => (
                 ExitKind::Validation,
                 Some(serde_json::json!({
-                    "vault": vault,
+                    "mem": mem,
                     "missing_fields": missing_fields,
-                    "set_via": format!("memstead vault set-version {vault} <version>"),
+                    "set_via": format!("memstead mem set-version {mem} <version>"),
                 })),
             ),
             InvalidTitle(slug_err) => {
@@ -369,7 +369,7 @@ impl CliError {
                     "guidance": guidance,
                 })),
             ),
-            CrossVaultEdgeNotDeclared {
+            CrossMemEdgeNotDeclared {
                 source_schema,
                 target_schema,
                 rel_type,
@@ -494,13 +494,13 @@ impl CliError {
                     "truncated": truncated,
                 })),
             ),
-            RenameBlockedByCrossVaultPolicy { from_vault, blocked_referrers } => {
+            RenameBlockedByCrossMemPolicy { from_mem, blocked_referrers } => {
                 let entries: Vec<_> = blocked_referrers
                     .iter()
                     .map(|r| {
                         serde_json::json!({
-                            "from_vault": r.from_vault,
-                            "to_vault": r.to_vault,
+                            "from_mem": r.from_mem,
+                            "to_mem": r.to_mem,
                             "count": r.count,
                         })
                     })
@@ -508,29 +508,29 @@ impl CliError {
                 (
                     ExitKind::Validation,
                     Some(serde_json::json!({
-                        "from_vault": from_vault,
+                        "from_mem": from_mem,
                         "blocked_referrers": entries,
                     })),
                 )
             }
             RenamePartialFailure {
-                committed_vaults,
-                failed_vault,
+                committed_mems,
+                failed_mem,
                 failure_cause,
             } => (
                 ExitKind::Validation,
                 Some(serde_json::json!({
-                    "committed_vaults": committed_vaults,
-                    "failed_vault": failed_vault,
+                    "committed_mems": committed_mems,
+                    "failed_mem": failed_mem,
                     "failure_cause": failure_cause,
                 })),
             ),
-            UnknownVault(name) => (
-                // A missing/unmatched vault is a not-found condition, the
+            UnknownMem(name) => (
+                // A missing/unmatched mem is a not-found condition, the
                 // same category as `ENTITY_NOT_FOUND` (exit 3) — not a
                 // validation refusal. This central engine-error path covers
-                // `reload --vault nope` and every command that surfaces the
-                // engine's `UnknownVault` rather than constructing the code
+                // `reload --mem nope` and every command that surfaces the
+                // engine's `UnknownMem` rather than constructing the code
                 // itself.
                 ExitKind::NotFound,
                 Some(serde_json::json!({ "name": name })),
@@ -540,13 +540,13 @@ impl CliError {
                 Some(serde_json::json!({ "ref": raw })),
             ),
             PushedCommitsProtected {
-                vault,
+                mem,
                 target_sha,
                 pushed_shas,
             } => (
                 ExitKind::Validation,
                 Some(serde_json::json!({
-                    "vault": vault,
+                    "mem": mem,
                     "target_sha": target_sha,
                     "pushed_shas": pushed_shas,
                 })),
@@ -555,58 +555,58 @@ impl CliError {
                 ExitKind::Validation,
                 Some(serde_json::json!({ "remote": name })),
             ),
-            LocalDivergence { vault, remote_ref } => (
+            LocalDivergence { mem, remote_ref } => (
                 ExitKind::Validation,
                 Some(serde_json::json!({
-                    "vault": vault,
+                    "mem": mem,
                     "remote_ref": remote_ref,
                 })),
             ),
-            NonFastForward { vault, remote } => (
+            NonFastForward { mem, remote } => (
                 ExitKind::Validation,
                 Some(serde_json::json!({
-                    "vault": vault,
+                    "mem": mem,
                     "remote": remote,
                 })),
             ),
             LocalInvalidState {
-                vault,
+                mem,
                 remote,
                 detail,
             } => (
                 ExitKind::Validation,
                 Some(serde_json::json!({
-                    "vault": vault,
+                    "mem": mem,
                     "remote": remote,
                     "detail": detail,
                 })),
             ),
             SchemaViolationInFetch {
-                vault,
+                mem,
                 ref_name,
                 violations,
             } => (
                 ExitKind::Validation,
                 Some(serde_json::json!({
-                    "vault": vault,
+                    "mem": mem,
                     "ref": ref_name,
                     "violations": violations,
                 })),
             ),
-            ReadOnlyMount(vault) => (
+            ReadOnlyMount(mem) => (
                 ExitKind::Validation,
-                Some(serde_json::json!({ "vault": vault })),
+                Some(serde_json::json!({ "mem": mem })),
             ),
-            VaultNameCollision { name, source_origin } => (
+            MemNameCollision { name, source_origin } => (
                 ExitKind::Validation,
                 Some(serde_json::json!({
                     "name": name,
                     "source": source_origin,
                 })),
             ),
-            SchemaNotFound { vault, pin, sources } => (
+            SchemaNotFound { mem, pin, sources } => (
                 ExitKind::Validation,
-                Some(serde_json::json!({ "vault": vault, "pin": pin, "sources": sources })),
+                Some(serde_json::json!({ "mem": mem, "pin": pin, "sources": sources })),
             ),
             InvalidInput(msg) => (
                 ExitKind::Validation,
@@ -629,7 +629,7 @@ impl CliError {
             // CLI surfaces the typed code via `e.code()` (already set
             // at the top of this fn) and the message text describes
             // the underlying cause.
-            DuplicateVault(name) => (
+            DuplicateMem(name) => (
                 ExitKind::Generic,
                 Some(serde_json::json!({ "name": name })),
             ),
@@ -637,7 +637,7 @@ impl CliError {
                 ExitKind::Generic,
                 Some(serde_json::json!({ "detail": detail })),
             ),
-            Vault(detail) => (
+            Mem(detail) => (
                 ExitKind::Generic,
                 Some(serde_json::json!({ "detail": detail })),
             ),
@@ -655,18 +655,18 @@ impl CliError {
             ),
             SearchUnavailable => (ExitKind::Generic, Some(serde_json::json!({}))),
             // Typed refusal
-            // when `memstead export --format markdown --vault-name <V>`
+            // when `memstead export --format markdown --mem-name <V>`
             // targets a backend that doesn't support markdown
             // regeneration. Validation-class exit code matches other
             // backend-incompatibility refusals.
             MarkdownExportUnsupportedBackend {
-                vault,
+                mem,
                 active_backend,
                 supported_backends,
             } => (
                 ExitKind::Validation,
                 Some(serde_json::json!({
-                    "vault": vault,
+                    "mem": mem,
                     "active_backend": active_backend,
                     "supported_backends": supported_backends,
                 })),
@@ -683,10 +683,10 @@ impl CliError {
             ),
             // A bad `--since` cursor surfaces the typed `INVALID_CURSOR` (via
             // `e.code()`) with the untruncated SHA — rather than leaking it
-            // as the `VAULT_ERROR` catch-all.
-            InvalidChangesCursor { vault, since } => (
+            // as the `MEM_ERROR` catch-all.
+            InvalidChangesCursor { mem, since } => (
                 ExitKind::Validation,
-                Some(serde_json::json!({ "vault": vault, "since": since })),
+                Some(serde_json::json!({ "mem": mem, "since": since })),
             ),
         };
         // Route the CLI message through the rich-prose renderer so markdown-

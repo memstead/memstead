@@ -6,12 +6,12 @@
 //! Surface:
 //! - [`wire`] — Serde structs that mirror the JSON wire format
 //!   one-to-one (`CommitEnvelope`, `EntityChange`,
-//!   `VaultChangedEvent`). The durable contract between server
+//!   `MemChangedEvent`). The durable contract between server
 //!   implementations and client code.
 //! - [`builder`] — functions that turn engine state into envelopes:
 //!   per-commit `build_commit_envelope`, range
 //!   `build_commit_envelopes`, snapshot `build_snapshot`. Typed
-//!   refusal codes (`UNKNOWN_VAULT`, `UNKNOWN_COMMIT`,
+//!   refusal codes (`UNKNOWN_MEM`, `UNKNOWN_COMMIT`,
 //!   `DELTA_TOO_LARGE`).
 //! - [`error`] — `BridgeError` typed-refusal envelope.
 //!
@@ -35,4 +35,4 @@ pub use handlers::{
     BridgeState, CommitsQuery, commit_handler, commits_handler, events_handler, head_handler,
     search_handler, snapshot_handler,
 };
-pub use wire::{CommitEnvelope, EntityChange, SearchHit, SearchQuery, SearchResult, VaultChangedEvent};
+pub use wire::{CommitEnvelope, EntityChange, SearchHit, SearchQuery, SearchResult, MemChangedEvent};

@@ -18,15 +18,15 @@ walking nodes and prompting the agent at each step. The graph is
 on the agent. The graph constrains the action space; the agent picks
 words and tool calls within it.
 
-This directory is a **pure example**. It is not wired into any vault,
+This directory is a **pure example**. It is not wired into any mem,
 not registered in `.memstead/workspace.toml`, not published. To adopt it,
-copy the directory into a program vault and pin it.
+copy the directory into a program mem and pin it.
 
 ## How to use
 
-### Per program (or program family), a vault
+### Per program (or program family), a mem
 
-Create a dedicated vault for each agent program (or for a family of
+Create a dedicated mem for each agent program (or for a family of
 related programs):
 
 ```
@@ -34,11 +34,11 @@ related programs):
 ```
 
 1. Install this example package into the workspace's local schema
-   storage, then create the program vault pinned to it:
+   storage, then create the program mem pinned to it:
 
    ```
    memstead schema install examples/schemas/agent-program
-   memstead vault init <workspace>/programs/<program-name> --schema agent-program@0.1.0
+   memstead mem init <workspace>/programs/<program-name> --schema agent-program@0.1.0
    ```
 
    `install` copies the package under `<workspace>/.memstead/schemas/agent-program@0.1.0/`;
@@ -106,9 +106,9 @@ Strict mode. Five program-specific edges plus the relevant defaults:
 | `governed_by` | program → constraint, node → constraint | The rule applies. Program-attached = whole program; node-attached = local. |
 
 Common defaults in use: `PART_OF` (node belongs to program; tools and
-constraints belong to a catalog vault), `MOTIVATED_BY` (program →
-planning.decision in another vault), `IMPLEMENTS` (program → spec in a
-software vault), `SUPERSEDES` (a v2 program replaces a v1).
+constraints belong to a catalog mem), `MOTIVATED_BY` (program →
+planning.decision in another mem), `IMPLEMENTS` (program → spec in a
+software mem), `SUPERSEDES` (a v2 program replaces a v1).
 
 ## Why this graph runs
 

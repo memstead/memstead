@@ -236,8 +236,8 @@ pub struct Connectivity {
 }
 
 /// Compute one entity's raw and typed degree. `incoming_counts` decides
-/// which incoming edges contribute (e.g. source-in-vault scoping for a
-/// vault-filtered health view); every outgoing edge always counts. Typed
+/// which incoming edges contribute (e.g. source-in-mem scoping for a
+/// mem-filtered health view); every outgoing edge always counts. Typed
 /// degree excludes `EdgeSource::BodyLink` (auto-emitted mention) edges.
 pub fn connectivity_for(
     store: &Store,
@@ -306,12 +306,12 @@ mod tests {
     use crate::store::{Edge, EdgeSource};
     use indexmap::IndexMap;
 
-    fn entity(id: &str, vault: &str, stub: bool) -> Entity {
+    fn entity(id: &str, mem: &str, stub: bool) -> Entity {
         Entity {
             id: EntityId(id.to_string()),
             title: id.to_string(),
             entity_type: "spec".to_string(),
-            vault: vault.to_string(),
+            mem: mem.to_string(),
             file_path: String::new(),
             metadata: IndexMap::new(),
             sections: IndexMap::new(),

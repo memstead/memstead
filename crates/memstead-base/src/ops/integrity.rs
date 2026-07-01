@@ -4,7 +4,7 @@
 //! `memstead_create` / `memstead_update` / `memstead_relate`. This module runs the
 //! same checks in a read context over the entities already on disk, so
 //! `memstead_health` can report the *conformance* axis: which entities of a
-//! vault would a write refuse under a given schema, and why.
+//! mem would a write refuse under a given schema, and why.
 //!
 //! One validation truth, two contexts: every finding carries the same
 //! typed code (and the same recovery payload, via
@@ -31,8 +31,8 @@ use crate::engine::EngineError;
 use crate::engine::mutation::unknown_type_error;
 use crate::entity::Entity;
 use crate::runtime_validator::{
-    CrossVaultRelCheck, READ_ONLY_METADATA_KEYS, RelationshipCheck, missing_required_fields,
-    missing_required_sections, parse_metadata_value, validate_cross_vault_edge,
+    CrossMemRelCheck, READ_ONLY_METADATA_KEYS, RelationshipCheck, missing_required_fields,
+    missing_required_sections, parse_metadata_value, validate_cross_mem_edge,
     validate_rel_shape, validate_rel_type, validate_section_keys,
 };
 use crate::store::Store;
@@ -73,46 +73,46 @@ impl IntegrityFinding {
     }
 }
 
-/// Run the conformance axis over every non-stub entity of `vault`,
-/// validating against `schema` (the vault's current pin, or an
+/// Run the conformance axis over every non-stub entity of `mem`,
+/// validating against `schema` (the mem's current pin, or an
 /// arbitrary target schema — the caller chooses the effective schema).
 ///
-/// `vault_schemas` maps vault name → pinned schema for *every* mounted
-/// vault; it is consulted only to route relationship checks the same
-/// way the write path routes them (same schema *name* → intra-vault
+/// `mem_schemas` maps mem name → pinned schema for *every* mounted
+/// mem; it is consulted only to route relationship checks the same
+/// way the write path routes them (same schema *name* → intra-mem
 /// vocabulary of `schema`; different name → `schema`'s
-/// `cross_vault_relationships`). For cross-vault edges this is the
-/// read-time twin of the write-time `validate_cross_vault_edge` —
+/// `cross_mem_relationships`). For cross-mem edges this is the
+/// read-time twin of the write-time `validate_cross_mem_edge` —
 /// including the target-entity type fetch — so target-type drift on
 /// existing edges surfaces here.
 pub fn conformance_findings(
     store: &Store,
-    vault: &str,
+    mem: &str,
     schema: &Schema,
-    vault_schemas: &HashMap<String, Arc<Schema>>,
+    mem_schemas: &HashMap<String, Arc<Schema>>,
 ) -> Vec<IntegrityFinding> {
     let mut entities: Vec<&Entity> = store
         .all_entities()
-        .filter(|e| e.vault == vault && !e.stub)
+        .filter(|e| e.mem == mem && !e.stub)
         .collect();
     entities.sort_by(|a, b| a.id.0.cmp(&b.id.0));
 
     let mut findings = Vec::new();
     for entity in entities {
-        lint_entity(store, entity, schema, vault_schemas, &mut findings);
+        lint_entity(store, entity, schema, mem_schemas, &mut findings);
     }
     findings
 }
 
-/// Run the consistency axis over `vault`, projecting the pre-existing
+/// Run the consistency axis over `mem`, projecting the pre-existing
 /// graph-coherence checks into the integrity-finding shape: dangling
 /// wiki-links (`DANGLING_LINK`, on the linking entity) and stubs with
 /// their referrers (`ORPHAN_STUB`, on the stub). The category
 /// collectors are the same ones the dedicated health includes use —
 /// `integrity` is a projection, not a second implementation.
-pub fn consistency_findings(store: &Store, vault: &str) -> Vec<IntegrityFinding> {
+pub fn consistency_findings(store: &Store, mem: &str) -> Vec<IntegrityFinding> {
     let mut findings = Vec::new();
-    for link in super::health::collect_dangling_links(store, Some(vault)) {
+    for link in super::health::collect_dangling_links(store, Some(mem)) {
         findings.push(IntegrityFinding {
             id: link.from.to_string(),
             axis: IntegrityAxis::Consistency,
@@ -126,7 +126,7 @@ pub fn consistency_findings(store: &Store, vault: &str) -> Vec<IntegrityFinding>
         });
     }
     for (stub_id, referrers) in crate::graph::query::find_stubs(store) {
-        if stub_id.vault() != vault {
+        if stub_id.mem() != mem {
             continue;
         }
         findings.push(IntegrityFinding {
@@ -156,10 +156,10 @@ pub fn entity_conformance_findings(
     store: &Store,
     entity: &Entity,
     schema: &Schema,
-    vault_schemas: &HashMap<String, Arc<Schema>>,
+    mem_schemas: &HashMap<String, Arc<Schema>>,
 ) -> Vec<IntegrityFinding> {
     let mut findings = Vec::new();
-    lint_entity(store, entity, schema, vault_schemas, &mut findings);
+    lint_entity(store, entity, schema, mem_schemas, &mut findings);
     findings
 }
 
@@ -167,7 +167,7 @@ fn lint_entity(
     store: &Store,
     entity: &Entity,
     schema: &Schema,
-    vault_schemas: &HashMap<String, Arc<Schema>>,
+    mem_schemas: &HashMap<String, Arc<Schema>>,
     findings: &mut Vec<IntegrityFinding>,
 ) {
     // Type lookup gates everything else: an unknown type means no
@@ -213,7 +213,7 @@ fn lint_entity(
     }
 
     // Metadata — unknown keys, enum violations, malformed typed values.
-    // Engine-managed keys (`vault`, `id`, `type`) are skipped exactly
+    // Engine-managed keys (`mem`, `id`, `type`) are skipped exactly
     // as the write path treats them (read-only, never caller-supplied).
     let mut supplied: IndexMap<String, String> = IndexMap::new();
     for (key, value) in &entity.metadata {
@@ -250,18 +250,18 @@ fn lint_entity(
 
     // Relationships — routed exactly as the write path routes them:
     // same schema *name* on both ends (any version pair) consults the
-    // intra-vault vocabulary of the effective schema; a different name
-    // consults its `cross_vault_relationships`. An unmounted target
-    // vault falls back to the intra path, mirroring the relate path.
+    // intra-mem vocabulary of the effective schema; a different name
+    // consults its `cross_mem_relationships`. An unmounted target
+    // mem falls back to the intra path, mirroring the relate path.
     let (src_name, src_version) = schema.id();
     for rel in &entity.relationships {
-        let target_vault = rel.target.vault();
-        let target_schema = if target_vault == entity.vault {
+        let target_mem = rel.target.mem();
+        let target_schema = if target_mem == entity.mem {
             None
         } else {
-            vault_schemas.get(target_vault)
+            mem_schemas.get(target_mem)
         };
-        let cross_vault_different = target_schema
+        let cross_mem_different = target_schema
             .map(|t| t.id().0 != src_name)
             .unwrap_or(false);
         let target_type = store
@@ -269,22 +269,22 @@ fn lint_entity(
             .map(|e| e.entity_type.clone())
             .filter(|t| !t.is_empty());
 
-        if cross_vault_different {
-            let target = target_schema.expect("Some when cross_vault_different");
+        if cross_mem_different {
+            let target = target_schema.expect("Some when cross_mem_different");
             let (t_name, t_version) = target.id();
             let target_ref = SchemaRef::new(t_name, t_version.clone());
-            match validate_cross_vault_edge(
+            match validate_cross_mem_edge(
                 &rel.rel_type,
                 &entity.entity_type,
                 target_type.as_deref(),
                 schema,
                 &target_ref,
             ) {
-                CrossVaultRelCheck::Ok => {}
-                CrossVaultRelCheck::EdgeNotDeclared => {
+                CrossMemRelCheck::Ok => {}
+                CrossMemRelCheck::EdgeNotDeclared => {
                     findings.push(IntegrityFinding::conformance(
                         &entity.id,
-                        &EngineError::CrossVaultEdgeNotDeclared {
+                        &EngineError::CrossMemEdgeNotDeclared {
                             source_schema: format!("{src_name}@{src_version}"),
                             target_schema: target_ref.as_display(),
                             rel_type: rel.rel_type.clone(),
@@ -293,7 +293,7 @@ fn lint_entity(
                         },
                     ));
                 }
-                CrossVaultRelCheck::Invalid(v) => {
+                CrossMemRelCheck::Invalid(v) => {
                     findings.push(IntegrityFinding::conformance(
                         &entity.id,
                         &EngineError::Validation(v),
@@ -391,7 +391,7 @@ write_rules: []
 "#;
 
     /// `lint-src@0.1.0`: strict vocabulary with shape-pinned
-    /// `IMPLEMENTS: doc → doc`, a cross-vault declaration to the
+    /// `IMPLEMENTS: doc → doc`, a cross-mem declaration to the
     /// `other` domain (`ADDRESSES: doc → requirement`), and a `doc`
     /// type carrying a required `body` section and a required enum
     /// `status` field with no default.
@@ -414,7 +414,7 @@ relationships:
     - name: _default
       description: fallback
       default_weight: 1.0
-cross_vault_relationships:
+cross_mem_relationships:
   - to_schema: other
     definitions:
       - name: ADDRESSES
@@ -446,7 +446,7 @@ community:
         )
     }
 
-    /// `other@1.0.0`: the cross-vault target domain, declaring a
+    /// `other@1.0.0`: the cross-mem target domain, declaring a
     /// `requirement` and a `task` type.
     fn other_schema() -> Arc<Schema> {
         let manifest = r#"name: other
@@ -486,12 +486,12 @@ community:
         )
     }
 
-    fn entity(vault: &str, slug: &str, entity_type: &str) -> Entity {
+    fn entity(mem: &str, slug: &str, entity_type: &str) -> Entity {
         Entity {
-            id: EntityId::new(vault, slug),
+            id: EntityId::new(mem, slug),
             title: slug.to_string(),
             entity_type: entity_type.to_string(),
-            vault: vault.to_string(),
+            mem: mem.to_string(),
             file_path: format!("{slug}.md"),
             metadata: IndexMap::new(),
             sections: IndexMap::new(),
@@ -503,8 +503,8 @@ community:
         }
     }
 
-    fn conformant_entity(vault: &str, slug: &str) -> Entity {
-        let mut e = entity(vault, slug, "doc");
+    fn conformant_entity(mem: &str, slug: &str) -> Entity {
+        let mut e = entity(mem, slug, "doc");
         e.sections.insert("body".to_string(), "content".to_string());
         e.metadata.insert(
             "status".to_string(),
@@ -527,7 +527,7 @@ community:
     }
 
     #[test]
-    fn clean_vault_produces_no_findings() {
+    fn clean_mem_produces_no_findings() {
         let schema = lint_schema();
         let mut store = Store::new();
         let a = conformant_entity("lv", "alpha");
@@ -646,7 +646,7 @@ community:
     }
 
     #[test]
-    fn cross_vault_edges_lint_like_the_write_path() {
+    fn cross_mem_edges_lint_like_the_write_path() {
         let schema = lint_schema();
         let other = other_schema();
         let mut store = Store::new();
@@ -665,7 +665,7 @@ community:
         // the write-time shape code resurfaces at lint time.
         e.relationships
             .push(Relationship::new("ADDRESSES", task.id.clone()));
-        // Rel-type absent from the cross-vault entry entirely.
+        // Rel-type absent from the cross-mem entry entirely.
         e.relationships
             .push(Relationship::new("IMPLEMENTS", requirement.id.clone()));
         store.upsert(requirement.id.clone(), requirement);
@@ -694,7 +694,7 @@ community:
     }
 
     #[test]
-    fn other_vaults_are_out_of_scope() {
+    fn other_mems_are_out_of_scope() {
         let schema = lint_schema();
         let mut store = Store::new();
         let e = entity("elsewhere", "broken", "doc");

@@ -252,7 +252,7 @@ mod tests {
         // (C-wins task delta + both coverage reports) and confirm the dropped fact
         // is present in the JSON, not hidden.
         let series = crate::eval::series::DataSeries {
-            subject_vault: "engine".into(),
+            subject_mem: "engine".into(),
             points: vec![crate::eval::series::SeriesPoint::aggregate(
                 "schema-forced − free-form".into(),
                 2,

@@ -22,4 +22,4 @@ Agents do not read or write `.md` files directly; they call MCP tools to query t
 
 ## Significance
 
-Exposing the [[vault]] through MCP is what lets a developer point their own agent at Memstead and have it read and build a [[graph]] natively.
+Exposing the [[mem]] through MCP is what lets a developer point their own agent at Memstead and have it read and build a [[graph]] natively.

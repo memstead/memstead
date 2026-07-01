@@ -7,7 +7,7 @@
 //! agents, credential helpers, OAuth), works on every protocol the
 //! installed `git` supports, and keeps the Cargo dep tree unchanged.
 //! Cost: a runtime `git` requirement on the operator's PATH (already
-//! true for any consumer of a vault-repo) and stderr-parsing for
+//! true for any consumer of a mem-repo) and stderr-parsing for
 //! refusal classification.
 //!
 //! Atomicity caveat for AC F: `git fetch` advances remote-tracking
@@ -59,7 +59,7 @@ fn run_git(
 }
 
 /// `memstead_fetch` implementation: invokes `git fetch <remote> [<refspec>...]`
-/// against the vault-repo gitdir and walks the per-ref state before
+/// against the mem-repo gitdir and walks the per-ref state before
 /// and after to surface what moved. Errors map to typed markers:
 /// `UNKNOWN_REMOTE:<remote>` when stderr admits the remote does not
 /// exist; everything else surfaces as a generic backend failure.
@@ -102,17 +102,17 @@ pub fn fetch_in_gitdir(
 pub fn pull_in_gitdir(
     gitdir: &Path,
     remote: &str,
-    vault: &str,
+    mem: &str,
 ) -> Result<PullOutcome, BackendError> {
     let fetched = fetch_in_gitdir(gitdir, remote, &[])?;
 
-    let branch_ref = format!("refs/heads/{vault}");
-    let remote_ref = format!("refs/remotes/{remote}/{vault}");
+    let branch_ref = format!("refs/heads/{mem}");
+    let remote_ref = format!("refs/remotes/{remote}/{mem}");
 
     let remote_sha = resolve_ref(gitdir, &remote_ref).ok_or_else(|| {
         BackendError::Other(format!(
             "remote-tracking ref `{remote_ref}` is absent after fetch; \
-             the remote may not carry vault `{vault}`"
+             the remote may not carry mem `{mem}`"
         ))
     })?;
     let local_sha = resolve_ref(gitdir, &branch_ref);
@@ -125,7 +125,7 @@ pub fn pull_in_gitdir(
     };
     if !can_fast_forward {
         return Err(BackendError::Other(format!(
-            "LOCAL_DIVERGENCE:{vault}:{remote_ref}"
+            "LOCAL_DIVERGENCE:{mem}:{remote_ref}"
         )));
     }
 
@@ -145,7 +145,7 @@ pub fn pull_in_gitdir(
     })?;
 
     Ok(PullOutcome {
-        vault: vault.to_string(),
+        mem: mem.to_string(),
         source_ref: remote_ref,
         branch_ref,
         previous_sha,
@@ -155,16 +155,16 @@ pub fn pull_in_gitdir(
 }
 
 /// `memstead_push` implementation: invokes `git push <remote>
-/// refs/heads/<vault>` against the gitdir. Without `force`, the
+/// refs/heads/<mem>` against the gitdir. Without `force`, the
 /// underlying git refuses non-fast-forward pushes; we map that
-/// stderr shape into `NON_FAST_FORWARD:<vault>:<remote>`.
+/// stderr shape into `NON_FAST_FORWARD:<mem>:<remote>`.
 pub fn push_in_gitdir(
     gitdir: &Path,
     remote: &str,
-    vault: &str,
+    mem: &str,
     force: bool,
 ) -> Result<PushOutcome, BackendError> {
-    let branch_ref = format!("refs/heads/{vault}");
+    let branch_ref = format!("refs/heads/{mem}");
     let local_sha = resolve_ref(gitdir, &branch_ref).ok_or_else(|| {
         BackendError::Other(format!("UNKNOWN_REF: {branch_ref}"))
     })?;
@@ -178,7 +178,7 @@ pub fn push_in_gitdir(
     let args_ref: Vec<&str> = args.iter().map(String::as_str).collect();
 
     let remote_owned = remote.to_string();
-    let vault_owned = vault.to_string();
+    let mem_owned = mem.to_string();
     run_git(gitdir, &args_ref, move |stderr| {
         let lower = stderr.to_lowercase();
         // Git's non-fast-forward refusal text varies across versions
@@ -191,7 +191,7 @@ pub fn push_in_gitdir(
             || lower.contains("[rejected]")
             || lower.contains("updates were rejected")
         {
-            return format!("NON_FAST_FORWARD:{vault_owned}:{remote_owned}");
+            return format!("NON_FAST_FORWARD:{mem_owned}:{remote_owned}");
         }
         if lower.contains("does not appear to be a git repository")
             || lower.contains("could not read from remote repository")
@@ -204,7 +204,7 @@ pub fn push_in_gitdir(
     })?;
 
     Ok(PushOutcome {
-        vault: vault.to_string(),
+        mem: mem.to_string(),
         remote: remote.to_string(),
         branch_ref,
         new_sha: local_sha,
@@ -387,8 +387,8 @@ fn diff_ref_snapshots(
 mod tests {
     use super::*;
     use std::path::PathBuf;
-    use crate::storage::VaultWriter;
-    use crate::storage::git_tree::GitTreeVaultWriter;
+    use crate::storage::MemWriter;
+    use crate::storage::git_tree::GitTreeMemWriter;
     use crate::vcs::CommitContext;
     use tempfile::TempDir;
 
@@ -423,7 +423,7 @@ mod tests {
     }
 
     fn commit(gitdir: &Path, branch: &str, file: &str, content: &str) -> String {
-        let writer = GitTreeVaultWriter::new(
+        let writer = GitTreeMemWriter::new(
             gitdir.to_path_buf(),
             format!("refs/heads/{branch}"),
         );
@@ -567,7 +567,7 @@ mod tests {
         // Land a malformed entity on the upstream and push it. The
         // body has no frontmatter at all — the strict validator's
         // `split_frontmatter_strict` refuses with `MissingFrontmatter`.
-        let writer = GitTreeVaultWriter::new(
+        let writer = GitTreeMemWriter::new(
             local_upstream.clone(),
             "refs/heads/specs".to_string(),
         );
@@ -584,7 +584,7 @@ mod tests {
         add_remote(&downstream_gitdir, "origin", &remote);
 
         let mount = memstead_base::Mount {
-            vault: "specs".to_string(),
+            mem: "specs".to_string(),
             schema: Some(memstead_schema::SchemaRef::new(
                 "default",
                 semver::Version::new(1, 0, 0),
@@ -606,11 +606,11 @@ mod tests {
         let err = engine.pull("specs", "origin").unwrap_err();
         match err {
             memstead_base::EngineError::SchemaViolationInFetch {
-                vault,
+                mem,
                 ref_name,
                 violations,
             } => {
-                assert_eq!(vault, "specs");
+                assert_eq!(mem, "specs");
                 assert!(ref_name.starts_with("refs/remotes/origin/specs"));
                 assert!(!violations.is_empty(), "violations must list the broken entity");
                 assert!(
@@ -628,21 +628,21 @@ mod tests {
 
     #[test]
     fn engine_push_refuses_local_invalid_state() {
-        // Seed an engine with a vault whose local branch carries a
+        // Seed an engine with a mem whose local branch carries a
         // malformed entity, then call push: the engine refuses with
         // LOCAL_INVALID_STATE before contacting the remote.
         let tmp = TempDir::new().unwrap();
         let local = init_local(&tmp, "local");
         let remote = init_bare_remote(&tmp, "remote.git");
         add_remote(&local, "origin", &remote);
-        let writer = GitTreeVaultWriter::new(local.clone(), "refs/heads/specs".to_string());
+        let writer = GitTreeMemWriter::new(local.clone(), "refs/heads/specs".to_string());
         writer
             .write_entity(Path::new("broken.md"), b"# Bad\n\nbody without frontmatter.\n")
             .unwrap();
         writer.commit("seed", &CommitContext::internal()).unwrap();
 
         let mount = memstead_base::Mount {
-            vault: "specs".to_string(),
+            mem: "specs".to_string(),
             schema: Some(memstead_schema::SchemaRef::new(
                 "default",
                 semver::Version::new(1, 0, 0),
@@ -664,11 +664,11 @@ mod tests {
         let err = engine.push("specs", "origin", false).unwrap_err();
         match err {
             memstead_base::EngineError::LocalInvalidState {
-                vault,
+                mem,
                 remote: r,
                 detail,
             } => {
-                assert_eq!(vault, "specs");
+                assert_eq!(mem, "specs");
                 assert_eq!(r, "origin");
                 assert!(detail.contains("broken.md") || detail.contains("violation"), "detail = {detail}");
             }

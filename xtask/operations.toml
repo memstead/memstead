@@ -97,19 +97,19 @@ mcp = "memstead_rename"
 cli = "rename"
 
 [[operation]]
-name = "vault-create"
-mcp = "memstead_vault_create"
-cli = "vault"
+name = "mem-create"
+mcp = "memstead_mem_create"
+cli = "mem"
 
 [[operation]]
-name = "vault-delete"
-mcp = "memstead_vault_delete"
-cli = "vault"
+name = "mem-delete"
+mcp = "memstead_mem_delete"
+cli = "mem"
 
 [[operation]]
-name = "vault-set-version"
-mcp = "memstead_vault_set_version"
-cli = "vault"
+name = "mem-set-version"
+mcp = "memstead_mem_set_version"
+cli = "mem"
 
 [[operation]]
 name = "workspace-allow-create"
@@ -173,12 +173,12 @@ name = "agent-notes"
 uniffi = "agent_notes"
 
 [[operation]]
-name = "vault-head-sha"
-uniffi = "vault_head_sha"
+name = "mem-head-sha"
+uniffi = "mem_head_sha"
 
 # WASM-specific operations. Browser thin-clients hydrate from a `.mem`
 # snapshot, then receive incremental updates as `applyCommit` envelopes
-# produced by the bridge's `/commits` endpoint. `vault-names` is a cheap
+# produced by the bridge's `/commits` endpoint. `mem-names` is a cheap
 # diagnostic accessor on the WASM side; the other surfaces expose
 # equivalent information via overview/health, so no parity entry there.
 
@@ -191,8 +191,8 @@ name = "apply-commit"
 wasm = "applyCommit"
 
 [[operation]]
-name = "vault-names"
-wasm = "vaultNames"
+name = "mem-names"
+wasm = "memNames"
 
 [[operation]]
 name = "set-panic-hook"

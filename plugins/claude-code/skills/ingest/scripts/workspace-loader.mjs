@@ -5,18 +5,18 @@
  *
  * Reads `<workspace_root>/.memstead.toml` for plugin-side keys (`format`).
  * Walks the four-primitive workspace store:
- *   <workspace>/.memstead/mediums/<vault>/<name>.json
- *   <workspace>/.memstead/facets/<vault>/<name>.json
- *   <workspace>/.memstead/projections/<vault>/<name>.json
+ *   <workspace>/.memstead/mediums/<mem>/<name>.json
+ *   <workspace>/.memstead/facets/<mem>/<name>.json
+ *   <workspace>/.memstead/projections/<mem>/<name>.json
  *   <workspace>/.memstead/ingests/<name>.json
  * and translates each Facet (+ its Medium) into the per-source engagement
  * object the rest of the loader and `inject.mjs` consume.
  *
- * Per-vault config (`schema`, `writeGuidance`, `description`), per-vault
+ * Per-mem config (`schema`, `writeGuidance`, `description`), per-mem
  * `snapshot_token`, and per-schema `default_writing_guidance` come from
  * `memstead workspace dump --json` — invoked once per `loadWorkspace` call.
- * The plugin no longer reads `<vault>/.memstead/config.json`, no longer
- * walks vault `**.md` for backoff hashes, and no longer reads schema
+ * The plugin no longer reads `<mem>/.memstead/config.json`, no longer
+ * walks mem `**.md` for backoff hashes, and no longer reads schema
  * YAML from disk. The engine's storage backend is private to it.
  *
  * Exports:
@@ -52,7 +52,7 @@ const SCHEMAS_ROOT = resolve(__dirname, '../../../schemas/memstead-plugin/v0');
  * Extract the plugin-side keys from `.memstead.toml`. Only `format` is read
  * now — the former `scopes_dir`/`projections_dir`/`ingests_dir` keys are
  * retired (pipeline configs live at the fixed `.memstead/` store locations).
- * The `vaults` array was historically read here as a vault registry; that
+ * The `mems` array was historically read here as a mem registry; that
  * role is fulfilled by the engine's workspace dump. Engine-only keys and any
  * other top-level keys are silently ignored.
  */
@@ -159,7 +159,7 @@ export function fetchDumpFromCli(workspaceRoot) {
  * and walk scopes / projections / ingests. Returns a normalised
  * structure where each ingest entry carries its fully resolved
  * projection (with scope-refs inlined) and destination list, and each
- * vault carries the dump's per-vault metadata and snapshot token.
+ * mem carries the dump's per-mem metadata and snapshot token.
  *
  * @param {string} workspaceRoot — directory containing `.memstead.toml`.
  * @param {object} [opts]
@@ -211,14 +211,14 @@ export function loadWorkspace(workspaceRoot, opts = {}) {
   }
 
   // Reduce the dump to plugin-friendly shapes:
-  //   vaults[] — sorted vault names, the canonical "what vaults exist"
-  //              answer (replaces the legacy `vaults = [...]` array)
-  //   vaultMeta — name → { schema, description, writeGuidance, snapshotToken }
+  //   mems[] — sorted mem names, the canonical "what mems exist"
+  //              answer (replaces the legacy `mems = [...]` array)
+  //   memMeta — name → { schema, description, writeGuidance, snapshotToken }
   //   schemas   — schemaName → { default_writing_guidance }
-  const vaultMeta = {};
-  for (const v of (dump.vaults || [])) {
+  const memMeta = {};
+  for (const v of (dump.mems || [])) {
     if (typeof v?.name !== 'string') continue;
-    vaultMeta[v.name] = {
+    memMeta[v.name] = {
       schema: v.schema ?? null,
       description: v.description ?? null,
       writeGuidance: (v.writeGuidance && typeof v.writeGuidance === 'object') ? v.writeGuidance : {},
@@ -230,7 +230,7 @@ export function loadWorkspace(workspaceRoot, opts = {}) {
       syncState: (v.sync_state && typeof v.sync_state === 'object') ? v.sync_state : {},
     };
   }
-  const vaults = Object.keys(vaultMeta).sort();
+  const mems = Object.keys(memMeta).sort();
   const schemas = (dump.schemas && typeof dump.schemas === 'object') ? dump.schemas : {};
 
   const schemasLoaded = loadSchemas();
@@ -242,13 +242,13 @@ export function loadWorkspace(workspaceRoot, opts = {}) {
   // old-shape configs into the store. Absent store directories resolve to
   // empty. The result is the internal shape (`facetViews`/`projections`/
   // `ingests`) the rest of the loader and `inject.mjs` consume.
-  const { facetViews, projections, ingests } = loadFourPrimitiveStore(root, vaultMeta, schemasLoaded);
+  const { facetViews, projections, ingests } = loadFourPrimitiveStore(root, memMeta, schemasLoaded);
 
   return {
     workspaceRoot: root,
     dirs,
-    vaults,
-    vaultMeta,
+    mems,
+    memMeta,
     schemas,
     facetViews,
     projections,
@@ -328,24 +328,24 @@ function assembleIngest(name, raw, projections, dirs) {
   const ref = raw.projection;
   if (typeof ref !== 'string' || !ref.includes('/')) {
     throw new Error(
-      `workspace-loader: ingest "${name}" missing or malformed "projection" field; expected "<vault>/<name>", got ${JSON.stringify(ref)}`
+      `workspace-loader: ingest "${name}" missing or malformed "projection" field; expected "<mem>/<name>", got ${JSON.stringify(ref)}`
     );
   }
   const slash = ref.indexOf('/');
-  const projVault = ref.slice(0, slash);
+  const projMem = ref.slice(0, slash);
   const projName = ref.slice(slash + 1);
-  const vaultProjections = projections[projVault];
-  if (!vaultProjections) {
+  const memProjections = projections[projMem];
+  if (!memProjections) {
     throw new Error(
-      `workspace-loader: ingest "${name}" references projection "${ref}" but no projections directory for vault "${projVault}" was found under "${dirs.projections}/"`
+      `workspace-loader: ingest "${name}" references projection "${ref}" but no projections directory for mem "${projMem}" was found under "${dirs.projections}/"`
     );
   }
-  const projection = vaultProjections[projName];
+  const projection = memProjections[projName];
   if (!projection) {
-    const expected = join(dirs.projections, projVault, `${projName}.json`);
-    const available = Object.keys(vaultProjections);
+    const expected = join(dirs.projections, projMem, `${projName}.json`);
+    const available = Object.keys(memProjections);
     throw new Error(
-      `workspace-loader: ingest "${name}" references projection "${ref}" not found; expected file at "${expected}" (available in "${projVault}": ${available.join(', ') || '(none)'})`
+      `workspace-loader: ingest "${name}" references projection "${ref}" not found; expected file at "${expected}" (available in "${projMem}": ${available.join(', ') || '(none)'})`
     );
   }
   return {
@@ -357,7 +357,7 @@ function assembleIngest(name, raw, projections, dirs) {
       ? raw.deny_paths.filter((s) => typeof s === 'string' && s.length > 0)
       : [],
     projection_ref: ref,
-    projection_vault: projVault,
+    projection_mem: projMem,
     projection_name: projName,
     projection,
     sources: projection.sources,
@@ -374,32 +374,32 @@ function assembleIngest(name, raw, projections, dirs) {
  * internal `{scopes, projections, ingests}` shape the legacy reader produces,
  * so `inject.mjs` and the rest of the loader are unchanged. A legacy scope's
  * `{type, scope:{tree}}` object is reconstructed from each Facet plus the
- * Medium it references (`facet.medium` → that vault's medium → its `type`),
- * and a four-primitive Projection (`source_facets` / `reference_vaults` /
- * `destination_vault`) is translated back into the assembled
- * `{sources:[{role, scope_ref|vault, scope}], destinations:[{vault}]}` form.
+ * Medium it references (`facet.medium` → that mem's medium → its `type`),
+ * and a four-primitive Projection (`source_facets` / `reference_mems` /
+ * `destination_mem`) is translated back into the assembled
+ * `{sources:[{role, scope_ref|mem, scope}], destinations:[{mem}]}` form.
  *
  * Engagement metadata still comes from the skill's `mediums.json` (keyed by
  * medium type) — moving it into per-facet `engagement` records is a separate
  * step; this reader does not yet consume `facet.engagement`.
  */
-function loadFourPrimitiveStore(root, vaultMeta, schemasLoaded) {
+function loadFourPrimitiveStore(root, memMeta, schemasLoaded) {
   const storeDir = join(root, '.memstead');
-  const mediums = readStoreVaultScoped(join(storeDir, 'mediums'), schemasLoaded.medium, 'medium', vaultMeta);
-  const facets = readStoreVaultScoped(join(storeDir, 'facets'), schemasLoaded.facet, 'facet', vaultMeta);
+  const mediums = readStoreMemScoped(join(storeDir, 'mediums'), schemasLoaded.medium, 'medium', memMeta);
+  const facets = readStoreMemScoped(join(storeDir, 'facets'), schemasLoaded.facet, 'facet', memMeta);
 
-  // Build a per-vault facet view keyed by facet name: the medium type it
+  // Build a per-mem facet view keyed by facet name: the medium type it
   // engages (from its referenced medium) plus its allow/deny selection. This
   // is the engagement object each projection source carries.
   const facetViews = {};
-  for (const [vault, facetMap] of Object.entries(facets)) {
-    facetViews[vault] = {};
+  for (const [mem, facetMap] of Object.entries(facets)) {
+    facetViews[mem] = {};
     for (const [name, facet] of Object.entries(facetMap)) {
-      const medium = (mediums[vault] || {})[facet.medium];
+      const medium = (mediums[mem] || {})[facet.medium];
       const mediumType = medium ? medium.type : 'codebase';
-      facetViews[vault][name] = {
+      facetViews[mem][name] = {
         mediumType,
-        // Where the medium's body lives (path/URL/vault id), and its
+        // Where the medium's body lives (path/URL/mem id), and its
         // declared change-detection strategy. Both flow from the Medium
         // so `inject.mjs` can resolve the source-cursor capability
         // without re-reading the medium file. `change_detection` is
@@ -421,27 +421,27 @@ function loadFourPrimitiveStore(root, vaultMeta, schemasLoaded) {
   const projections = {};
   const projectionsDir = join(storeDir, 'projections');
   if (existsSync(projectionsDir)) {
-    for (const vault of listSubdirs(projectionsDir)) {
-      if (!vaultMeta[vault]) { warnStoreUnregistered('projections', vault, vaultMeta); continue; }
-      projections[vault] = {};
-      for (const f of readdirSync(join(projectionsDir, vault)).filter(x => x.endsWith('.json'))) {
+    for (const mem of listSubdirs(projectionsDir)) {
+      if (!memMeta[mem]) { warnStoreUnregistered('projections', mem, memMeta); continue; }
+      projections[mem] = {};
+      for (const f of readdirSync(join(projectionsDir, mem)).filter(x => x.endsWith('.json'))) {
         const name = f.slice(0, -5);
-        const raw = readJson(join(projectionsDir, vault, f));
+        const raw = readJson(join(projectionsDir, mem, f));
         // `projection.schema.json` is a oneOf of the four-primitive and the
         // legacy shape; the four-primitive branch validates `source_facets` /
-        // `reference_vaults` / `destination_vault` here.
-        validateOrThrow(schemasLoaded.projection, raw, `projection .memstead/projections/${vault}/${f}`);
+        // `reference_mems` / `destination_mem` here.
+        validateOrThrow(schemasLoaded.projection, raw, `projection .memstead/projections/${mem}/${f}`);
         const sources = [];
         for (const facetName of (raw.source_facets || [])) {
-          sources.push({ role: 'primary', facet_ref: facetName, facet: (facetViews[vault] || {})[facetName] });
+          sources.push({ role: 'primary', facet_ref: facetName, facet: (facetViews[mem] || {})[facetName] });
         }
-        for (const refVault of (raw.reference_vaults || [])) {
-          sources.push({ role: 'reference', vault: refVault });
+        for (const refMem of (raw.reference_mems || [])) {
+          sources.push({ role: 'reference', mem: refMem });
         }
-        const destinations = (typeof raw.destination_vault === 'string' && raw.destination_vault)
-          ? [{ vault: raw.destination_vault }]
+        const destinations = (typeof raw.destination_mem === 'string' && raw.destination_mem)
+          ? [{ mem: raw.destination_mem }]
           : [];
-        projections[vault][name] = { ...raw, sources, destinations, rules: raw.rules ?? null, _owningVault: vault };
+        projections[mem][name] = { ...raw, sources, destinations, rules: raw.rules ?? null, _owningMem: mem };
       }
     }
   }
@@ -459,7 +459,7 @@ function loadFourPrimitiveStore(root, vaultMeta, schemasLoaded) {
       try {
         ingests.push(assembleIngest(name, raw, projections, dirs));
       } catch (e) {
-        if (/no projections directory for vault/.test(e.message)) {
+        if (/no projections directory for mem/.test(e.message)) {
           console.warn(`${e.message}; skipping ingest "${name}"`);
         } else {
           throw e;
@@ -471,25 +471,25 @@ function loadFourPrimitiveStore(root, vaultMeta, schemasLoaded) {
   return { facetViews, projections, ingests };
 }
 
-function readStoreVaultScoped(dir, schema, kind, vaultMeta) {
+function readStoreMemScoped(dir, schema, kind, memMeta) {
   const out = {};
   if (!existsSync(dir)) return out;
-  for (const vault of listSubdirs(dir)) {
-    if (!vaultMeta[vault]) { warnStoreUnregistered(`${kind}s`, vault, vaultMeta); continue; }
-    out[vault] = {};
-    for (const f of readdirSync(join(dir, vault)).filter(x => x.endsWith('.json'))) {
+  for (const mem of listSubdirs(dir)) {
+    if (!memMeta[mem]) { warnStoreUnregistered(`${kind}s`, mem, memMeta); continue; }
+    out[mem] = {};
+    for (const f of readdirSync(join(dir, mem)).filter(x => x.endsWith('.json'))) {
       const name = f.slice(0, -5);
-      const content = readJson(join(dir, vault, f));
-      validateOrThrow(schema, content, `${kind} .memstead/${kind}s/${vault}/${f}`);
-      out[vault][name] = content;
+      const content = readJson(join(dir, mem, f));
+      validateOrThrow(schema, content, `${kind} .memstead/${kind}s/${mem}/${f}`);
+      out[mem][name] = content;
     }
   }
   return out;
 }
 
-function warnStoreUnregistered(kindPlural, vault, vaultMeta) {
+function warnStoreUnregistered(kindPlural, mem, memMeta) {
   console.warn(
-    `workspace-loader: .memstead/${kindPlural}/${vault} does not match any registered vault ` +
-    `(known: ${Object.keys(vaultMeta).sort().join(', ') || '(none)'}); ignoring`
+    `workspace-loader: .memstead/${kindPlural}/${mem} does not match any registered mem ` +
+    `(known: ${Object.keys(memMeta).sort().join(', ') || '(none)'}); ignoring`
   );
 }

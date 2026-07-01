@@ -1,16 +1,16 @@
-//! `memstead init` — bootstrap a filesystem vault in the current (or named) folder.
+//! `memstead init` — bootstrap a filesystem mem in the current (or named) folder.
 //!
-//! filesystem-vault is the single-vault, history-free, filesystem-backed product
+//! filesystem-mem is the single-mem, history-free, filesystem-backed product
 //! surface. After `memstead init` the folder contains:
 //!
-//! - `.memstead/config.json` — workspace shape (vault name, schema pin,
+//! - `.memstead/config.json` — workspace shape (mem name, schema pin,
 //!   empty deps list). Pinned via [`memstead_base::filesystem::config`].
 //! - `.memstead/cache/` — empty placeholder for any engine-managed cache
 //!   data the workspace acquires later (e.g. resolved schema bytes).
-//! - `.memstead/memstead-io/` — empty placeholder for cross-vault dependency
+//! - `.memstead/memstead-io/` — empty placeholder for cross-mem dependency
 //!   archives populated by `memstead link`.
 //!
-//! No `.gitignore` is written — filesystem-vault does not assume a surrounding
+//! No `.gitignore` is written — filesystem-mem does not assume a surrounding
 //! git repo, and writing one would surprise users who *do* track the
 //! workspace under git themselves.
 //!
@@ -23,7 +23,7 @@ use std::path::{Path, PathBuf};
 
 use clap::Args;
 use memstead_base::filesystem::config::{
-    FILESYSTEM_WORKSPACE_FORMAT, config_path, init_filesystem_vault, validate_vault_name,
+    FILESYSTEM_WORKSPACE_FORMAT, config_path, init_filesystem_mem, validate_mem_name,
 };
 use memstead_schema::SchemaRef;
 use serde_json::json;
@@ -39,12 +39,12 @@ pub struct InitArgs {
     #[arg(value_name = "PATH")]
     pub path: Option<PathBuf>,
 
-    /// Vault name. Slug-shaped: `^[a-z0-9][a-z0-9-]{0,62}[a-z0-9]$`.
+    /// Mem name. Slug-shaped: `^[a-z0-9][a-z0-9-]{0,62}[a-z0-9]$`.
     #[arg(long)]
     pub name: String,
 
     /// Schema pin in exact `<name>@<version>` form (e.g.
-    /// `default@1.0.0`). Bare-name pins are rejected. filesystem-vault v1
+    /// `default@1.0.0`). Bare-name pins are rejected. filesystem-mem v1
     /// resolves against the engine's builtin schema set;
     /// registry-resolved schemas land in a follow-up.
     #[arg(long)]
@@ -64,9 +64,9 @@ pub fn run(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
         details: None,
     })?;
 
-    // The vault name is path-derived and no longer round-trips through
+    // The mem name is path-derived and no longer round-trips through
     // `config.json`, so validate the slug shape here at the boundary.
-    validate_vault_name(&args.name).map_err(|e| CliError {
+    validate_mem_name(&args.name).map_err(|e| CliError {
         code: "INVALID_INPUT",
         message: format!("invalid --name: {e}"),
         kind: ExitKind::Validation,
@@ -100,8 +100,8 @@ pub fn run(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
     }
 
     // Refuse when an ancestor directory already has a
-    // `.memstead/workspace.toml` — never nest a fresh filesystem-vault
-    // workspace inside an existing one (the outer's `vault list` would
+    // `.memstead/workspace.toml` — never nest a fresh filesystem-mem
+    // workspace inside an existing one (the outer's `mem list` would
     // miss the inner, the inner would miss the outer). The walk starts
     // at the target's parent (target itself is what we're initialising)
     // and stops at the filesystem root.
@@ -111,14 +111,14 @@ pub fn run(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
             kind: ExitKind::Validation,
             message: format!(
                 "an existing memstead workspace lives above {} at {}; \
-                 `memstead init` refuses to nest workspaces. If you meant to add a vault \
-                 inside the existing workspace, run `memstead vault init` instead.",
+                 `memstead init` refuses to nest workspaces. If you meant to add a mem \
+                 inside the existing workspace, run `memstead mem init` instead.",
                 target.display(),
                 found_at.display(),
             ),
             details: Some(serde_json::json!({
                 "found_at": found_at.display().to_string(),
-                "hint": "use `memstead vault init` to add a vault inside an existing workspace",
+                "hint": "use `memstead mem init` to add a mem inside an existing workspace",
             })),
         }
         .into());
@@ -127,10 +127,10 @@ pub fn run(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
     // Write the seed structure (config + `.memstead/` subdirs + adapter
     // marker + one-folder-mount roster) through the engine's shared
     // initialiser, so the CLI and the in-process embedders (the macOS app's
-    // bootstrap) produce a byte-identical filesystem vault from one place.
-    init_filesystem_vault(&target, &args.name, &schema_pin).map_err(|e| CliError {
+    // bootstrap) produce a byte-identical filesystem mem from one place.
+    init_filesystem_mem(&target, &args.name, &schema_pin).map_err(|e| CliError {
         code: crate::INTERNAL_CODE,
-        message: format!("initialise filesystem vault: {e}"),
+        message: format!("initialise filesystem mem: {e}"),
         kind: ExitKind::Generic,
         details: None,
     })?;
@@ -147,7 +147,7 @@ pub fn run(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
     }
 
     let lines = vec![
-        format!("# Initialised filesystem vault `{}`", args.name),
+        format!("# Initialised filesystem mem `{}`", args.name),
         String::new(),
         format!("- Workspace root: `{}`", target.display()),
         format!(
@@ -158,8 +158,8 @@ pub fn run(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
         String::new(),
         "Next steps:".to_string(),
         "- Drop `.md` entities into the workspace root.".to_string(),
-        "- `memstead link <scope/name>` to add a cross-vault dependency.".to_string(),
-        "- `memstead publish` to push the vault to the registry.".to_string(),
+        "- `memstead link <scope/name>` to add a cross-mem dependency.".to_string(),
+        "- `memstead publish` to push the mem to the registry.".to_string(),
     ];
     print_markdown(&lines.join("\n"));
     Ok(())
@@ -252,7 +252,7 @@ mod tests {
 
     #[test]
     fn init_creates_config_and_subdirs_in_empty_folder() {
-        // Identity is path-derived: the vault lives in a folder named after it.
+        // Identity is path-derived: the mem lives in a folder named after it.
         let tmp = TempDir::new().unwrap();
         let root = tmp.path().join("demo");
         run_init(&root, "demo", "default@1.0.0").unwrap();
@@ -338,17 +338,17 @@ mod tests {
         std::fs::create_dir_all(tmp.path().join(".memstead")).unwrap();
         std::fs::write(
             tmp.path().join(".memstead").join("workspace.toml"),
-            "format = \"memstead-git-branch-1\"\n",
+            "format = \"memstead-git-branch-2\"\n",
         )
         .unwrap();
 
         // Attempt a nested init under a sibling subdir.
-        let inner = tmp.path().join("inner-vault");
+        let inner = tmp.path().join("inner-mem");
         std::fs::create_dir_all(&inner).unwrap();
         let err = run_init(&inner, "inner", "default@1.0.0").unwrap_err();
         let msg = err.to_string();
         assert!(
-            msg.contains("nest workspaces") || msg.contains("memstead vault init"),
+            msg.contains("nest workspaces") || msg.contains("memstead mem init"),
             "expected nested-workspace refusal hint, got: {msg}"
         );
     }

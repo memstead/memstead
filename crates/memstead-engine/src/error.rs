@@ -9,7 +9,7 @@
 //!
 //! The four lifecycle-only variants live here rather than on
 //! `memstead_base::EngineError`: they are produced by this crate's
-//! vault-management orchestrator (`create_vault` / `delete_vault`),
+//! mem-management orchestrator (`create_mem` / `delete_mem`),
 //! which returns `Result<_, ProEngineError>`, so the basis crate
 //! carries no pro-specific lifecycle types.
 
@@ -26,7 +26,7 @@ use memstead_base::EngineError;
 /// surface can recover the basis `code()` for any wrapped variant.
 ///
 /// The remaining variants are **lifecycle-only**: they fire from the
-/// pro vault management orchestrator (`create_vault` / `delete_vault`)
+/// pro mem management orchestrator (`create_mem` / `delete_mem`)
 /// and have no basis-side fire conditions. They live in this crate
 /// alongside their orchestrator.
 #[derive(Debug, thiserror::Error)]
@@ -37,18 +37,18 @@ pub enum ProEngineError {
     #[error(transparent)]
     Basis(#[from] EngineError),
 
-    /// `create_vault` / `delete_vault` rejected because the vault
+    /// `create_mem` / `delete_mem` rejected because the mem
     /// path is not covered by an allowlist rule. `reason` is one of
     /// `no_allowlist_configured` / `no_match` / `outside_workspace`.
     /// `policy_table` names the refusing allowlist —
-    /// `"vault_management.create"` or `"vault_management.delete"` —
+    /// `"mem_management.create"` or `"mem_management.delete"` —
     /// so an agent recovering from the envelope knows which TOML
     /// table to edit without threading subcommand context through
     /// error handling. The two discriminators are orthogonal: `reason`
     /// names *why* the gate refused; `policy_table` names *which*
     /// gate refused.
-    #[error("vault path not allowed by [[{policy_table}]]: {candidate} ({reason})")]
-    VaultPathNotAllowed {
+    #[error("mem path not allowed by [[{policy_table}]]: {candidate} ({reason})")]
+    MemPathNotAllowed {
         attempted: PathBuf,
         candidate: String,
         patterns: Vec<String>,
@@ -56,78 +56,78 @@ pub enum ProEngineError {
         policy_table: &'static str,
     },
 
-    /// `create_vault` rejected before the allowlist check because the
+    /// `create_mem` rejected before the allowlist check because the
     /// supplied `name` is structurally malformed — empty, whitespace,
     /// invalid characters, or carries the reserved `__` prefix.
     /// `reason` discriminates the four shapes so an agent who typed
     /// the wrong thing gets a recoverable signal instead of an
-    /// allowlist refusal. Split out of the `VaultPathNotAllowed
+    /// allowlist refusal. Split out of the `MemPathNotAllowed
     /// (no_match)` catch-all so the structural failure modes are
     /// visible.
-    #[error("vault name `{name}` is invalid ({reason})")]
-    InvalidVaultName {
+    #[error("mem name `{name}` is invalid ({reason})")]
+    InvalidMemName {
         name: String,
         reason: &'static str,
     },
 
-    /// `delete_vault` rejected because the workspace
-    /// `[cross_vault_links]` policy grants one or more other vaults
-    /// permission to write into this one. `referring_vaults` lists the
-    /// granting vaults sorted alphabetically so the agent can walk
+    /// `delete_mem` rejected because the workspace
+    /// `[cross_mem_links]` policy grants one or more other mems
+    /// permission to write into this one. `referring_mems` lists the
+    /// granting mems sorted alphabetically so the agent can walk
     /// the policy table. The condition is a *policy grant*, not a
     /// materialised graph edge — revoking the grant in
     /// `.memstead/workspace.toml` is the recovery path.
     #[error(
-        "vault {name} cannot be deleted: workspace `[cross_vault_links]` policy grants {referring_vaults:?} write-into permission — revoke that grant and retry"
+        "mem {name} cannot be deleted: workspace `[cross_mem_links]` policy grants {referring_mems:?} write-into permission — revoke that grant and retry"
     )]
-    VaultReferencedByPolicy {
+    MemReferencedByPolicy {
         name: String,
-        referring_vaults: Vec<String>,
+        referring_mems: Vec<String>,
     },
 
-    /// `create_vault` rejected because the matched create-rule does
+    /// `create_mem` rejected because the matched create-rule does
     /// not allow the requested schema. `allowed_schemas` is the
     /// canonicalised allow-list (each entry `name@version`).
     #[error(
         "schema {requested_schema} not allowed by create-rule {matched_pattern:?} for candidate {candidate:?}"
     )]
-    VaultSchemaNotAllowed {
+    MemSchemaNotAllowed {
         candidate: String,
         matched_pattern: String,
         requested_schema: String,
         allowed_schemas: Vec<String>,
     },
 
-    /// `create_vault` rejected because the target `.memstead/config.json`
+    /// `create_mem` rejected because the target `.memstead/config.json`
     /// already exists at the requested location — the engine never
     /// silently overwrites a prior attempt.
     #[error("config already exists at {path}")]
     ConfigAlreadyExists { path: PathBuf },
 
-    /// `create_vault` detected on-disk storage residue for the
+    /// `create_mem` detected on-disk storage residue for the
     /// requested branch path that is not reflected in the in-memory
-    /// vault router — typically left over by a crash or a
+    /// mem router — typically left over by a crash or a
     /// partially-failed delete. The caller must select an
-    /// explicit recovery action via [`VaultCreateParams::recovery`]
+    /// explicit recovery action via [`MemCreateParams::recovery`]
     /// (`Reattach`, `ForceOverwrite`, or `HardCleanupFirst`) and
     /// retry; the special case of `unregistered_at`-tombstoned
-    /// residue (deliberate operator state from `memstead vault
+    /// residue (deliberate operator state from `memstead mem
     /// unregister`) defaults to `Reattach` without this refusal. The
     /// payload carries the composed branch ref, the config-blob path,
     /// and the entity count of the residual data so the caller can
     /// decide between adopting and discarding.
     #[error(
-        "vault storage residue detected at branch `{branch_ref}`: \
+        "mem storage residue detected at branch `{branch_ref}`: \
          {entity_count} entities preserved from a prior session — \
          re-run with `recovery: reattach` to adopt, `recovery: \
          force_overwrite` to destroy, or `recovery: \
-         hard_cleanup_first` to refuse until `memstead vault delete` is run"
+         hard_cleanup_first` to refuse until `memstead mem delete` is run"
     )]
-    VaultStorageResidueDetected {
+    MemStorageResidueDetected {
         /// Composed branch reference (`refs/heads/<branch_leaf>`)
         /// that carries the residue.
         branch_ref: String,
-        /// Tree path of the `__MEMSTEAD:vaults/<branch_leaf>/config.json`
+        /// Tree path of the `__MEMSTEAD:mems/<branch_leaf>/config.json`
         /// blob (or `None` when the branch exists but the config blob
         /// has already been pruned).
         config_blob: Option<String>,
@@ -138,7 +138,7 @@ pub enum ProEngineError {
     },
 }
 
-/// Recovery shape for `create_vault` against pre-existing storage
+/// Recovery shape for `create_mem` against pre-existing storage
 /// residue. A single enum field with three variants structurally
 /// enforces mutual exclusion on the wire (a three-boolean shape would
 /// need a runtime-validation step instead).
@@ -147,7 +147,7 @@ pub enum RecoveryAction {
     /// Adopt the residual entities and register the existing branch
     /// as a fresh writable mount. The seed-commit step is skipped —
     /// the prior session's history is preserved unchanged. Emits a
-    /// `VaultReattachedAfterUnregister` warning when the residue
+    /// `MemReattachedAfterUnregister` warning when the residue
     /// carries an `unregistered_at` tombstone (audit signal).
     Reattach,
     /// Destroy the residual branch + `__MEMSTEAD` config blob (and any
@@ -155,7 +155,7 @@ pub enum RecoveryAction {
     /// the normal create path. The prior entities are gone.
     ForceOverwrite,
     /// Refuse with a typed code instructing the caller to run
-    /// `memstead vault delete <name>` first. Hard barrier against
+    /// `memstead mem delete <name>` first. Hard barrier against
     /// destructive auto-recovery even with an explicit recovery
     /// flag — for operators who want the residue cleanup to be a
     /// separate, named operation.
@@ -180,14 +180,14 @@ impl ProEngineError {
     /// Render rich, fully-inlined recovery prose for the agent-visible
     /// text channel. Closes the asymmetry where structured `details.X`
     /// fields stayed off the agent's text channel. Each lifecycle
-    /// variant with a structured list (`patterns`, `referring_vaults`,
+    /// variant with a structured list (`patterns`, `referring_mems`,
     /// `allowed_schemas`) inlines the full payload; basis wraps
     /// delegate to [`EngineError::prose_render`]; trivial variants
     /// fall back to `Display`.
     pub fn prose_render(&self) -> String {
         match self {
             ProEngineError::Basis(inner) => inner.prose_render(),
-            ProEngineError::VaultPathNotAllowed {
+            ProEngineError::MemPathNotAllowed {
                 attempted,
                 candidate,
                 patterns,
@@ -200,11 +200,11 @@ impl ProEngineError {
                     patterns.iter().map(|p| format!("'{p}'")).collect::<Vec<_>>().join(", ")
                 };
                 format!(
-                    "vault path not allowed by `[[{policy_table}]]`: candidate '{candidate}' (resolved location '{}') did not match any allowlist rule (reason: {reason}). Configured patterns: {patterns_inline}.",
+                    "mem path not allowed by `[[{policy_table}]]`: candidate '{candidate}' (resolved location '{}') did not match any allowlist rule (reason: {reason}). Configured patterns: {patterns_inline}.",
                     attempted.display()
                 )
             }
-            ProEngineError::VaultSchemaNotAllowed {
+            ProEngineError::MemSchemaNotAllowed {
                 candidate,
                 matched_pattern,
                 requested_schema,
@@ -216,23 +216,23 @@ impl ProEngineError {
                     allowed_schemas.join(", ")
                 };
                 format!(
-                    "schema '{requested_schema}' not allowed by create-rule '{matched_pattern}' for candidate '{candidate}' — allowed schemas: {allowed_inline}. Pick a schema from this list or add a new `[[vault_management.create]]` rule covering this candidate."
+                    "schema '{requested_schema}' not allowed by create-rule '{matched_pattern}' for candidate '{candidate}' — allowed schemas: {allowed_inline}. Pick a schema from this list or add a new `[[mem_management.create]]` rule covering this candidate."
                 )
             }
-            ProEngineError::VaultReferencedByPolicy {
+            ProEngineError::MemReferencedByPolicy {
                 name,
-                referring_vaults,
+                referring_mems,
             } => {
-                let inline = if referring_vaults.is_empty() {
+                let inline = if referring_mems.is_empty() {
                     "(none)".to_string()
                 } else {
-                    referring_vaults.join(", ")
+                    referring_mems.join(", ")
                 };
                 format!(
-                    "vault {name} cannot be deleted: workspace `[cross_vault_links]` policy grants the following vaults write-into permission: {inline}. Revoke each grant (`memstead_workspace_revoke_cross_link`) and retry."
+                    "mem {name} cannot be deleted: workspace `[cross_mem_links]` policy grants the following mems write-into permission: {inline}. Revoke each grant (`memstead_workspace_revoke_cross_link`) and retry."
                 )
             }
-            // InvalidVaultName, ConfigAlreadyExists, VaultStorageResidueDetected:
+            // InvalidMemName, ConfigAlreadyExists, MemStorageResidueDetected:
             // `Display` already inlines every field; fall back.
             _ => self.to_string(),
         }
@@ -240,7 +240,7 @@ impl ProEngineError {
 
     /// Variant-specific recovery payload, rendered as a structured
     /// JSON object that surfaces under `error.details` in MCP / CLI
-    /// envelopes. The CLI's vault commands used to discard the engine's
+    /// envelopes. The CLI's mem commands used to discard the engine's
     /// structured details because the lift code didn't have a single
     /// source of truth —
     /// this mirrors `EngineError::details()` so the lift can call
@@ -254,7 +254,7 @@ impl ProEngineError {
     pub fn details(&self) -> serde_json::Value {
         match self {
             ProEngineError::Basis(inner) => inner.details(),
-            ProEngineError::VaultPathNotAllowed {
+            ProEngineError::MemPathNotAllowed {
                 attempted,
                 candidate,
                 patterns,
@@ -267,17 +267,17 @@ impl ProEngineError {
                 "reason": reason,
                 "policy_table": policy_table,
             }),
-            ProEngineError::InvalidVaultName { name, reason } => {
+            ProEngineError::InvalidMemName { name, reason } => {
                 serde_json::json!({ "name": name, "reason": reason })
             }
-            ProEngineError::VaultReferencedByPolicy {
+            ProEngineError::MemReferencedByPolicy {
                 name,
-                referring_vaults,
+                referring_mems,
             } => serde_json::json!({
                 "name": name,
-                "referring_vaults": referring_vaults,
+                "referring_mems": referring_mems,
             }),
-            ProEngineError::VaultSchemaNotAllowed {
+            ProEngineError::MemSchemaNotAllowed {
                 candidate,
                 matched_pattern,
                 requested_schema,
@@ -292,7 +292,7 @@ impl ProEngineError {
                 "path": path.display().to_string(),
                 "reason": "config_already_exists",
             }),
-            ProEngineError::VaultStorageResidueDetected {
+            ProEngineError::MemStorageResidueDetected {
                 branch_ref,
                 config_blob,
                 entity_count,
@@ -315,12 +315,12 @@ impl ProEngineError {
     pub fn code(&self) -> &'static str {
         match self {
             ProEngineError::Basis(e) => e.code(),
-            ProEngineError::VaultPathNotAllowed { .. } => "VAULT_PATH_NOT_ALLOWED",
-            ProEngineError::InvalidVaultName { .. } => "INVALID_VAULT_NAME",
-            ProEngineError::VaultReferencedByPolicy { .. } => "VAULT_REFERENCED_BY_POLICY",
-            ProEngineError::VaultSchemaNotAllowed { .. } => "VAULT_SCHEMA_NOT_ALLOWED",
+            ProEngineError::MemPathNotAllowed { .. } => "MEM_PATH_NOT_ALLOWED",
+            ProEngineError::InvalidMemName { .. } => "INVALID_MEM_NAME",
+            ProEngineError::MemReferencedByPolicy { .. } => "MEM_REFERENCED_BY_POLICY",
+            ProEngineError::MemSchemaNotAllowed { .. } => "MEM_SCHEMA_NOT_ALLOWED",
             ProEngineError::ConfigAlreadyExists { .. } => "CONFIG_ERROR",
-            ProEngineError::VaultStorageResidueDetected { .. } => "VAULT_STORAGE_RESIDUE_DETECTED",
+            ProEngineError::MemStorageResidueDetected { .. } => "MEM_STORAGE_RESIDUE_DETECTED",
         }
     }
 }
@@ -330,36 +330,36 @@ mod tests {
     use super::*;
 
     /// Code strings track the wire vocabulary the pro MCP surface
-    /// publishes. `VAULT_REFERENCED_BY_POLICY` was renamed from the
-    /// pre-04 `VAULT_HAS_REFERENCES` so the typed code matches the
-    /// actual fire condition (a workspace `[cross_vault_links]` grant,
+    /// publishes. `MEM_REFERENCED_BY_POLICY` was renamed from the
+    /// pre-04 `MEM_HAS_REFERENCES` so the typed code matches the
+    /// actual fire condition (a workspace `[cross_mem_links]` grant,
     /// not a materialised graph edge); the other three lifecycle
     /// codes are unchanged from when these variants lived on
     /// `memstead_base::EngineError`.
     #[test]
     fn lifecycle_codes_pin_wire_vocabulary() {
-        let e = ProEngineError::VaultPathNotAllowed {
+        let e = ProEngineError::MemPathNotAllowed {
             attempted: PathBuf::from("/x"),
             candidate: "x".into(),
             patterns: vec![],
             reason: "no_match",
-            policy_table: "vault_management.create",
+            policy_table: "mem_management.create",
         };
-        assert_eq!(e.code(), "VAULT_PATH_NOT_ALLOWED");
+        assert_eq!(e.code(), "MEM_PATH_NOT_ALLOWED");
 
-        let e = ProEngineError::VaultReferencedByPolicy {
+        let e = ProEngineError::MemReferencedByPolicy {
             name: "x".into(),
-            referring_vaults: vec![],
+            referring_mems: vec![],
         };
-        assert_eq!(e.code(), "VAULT_REFERENCED_BY_POLICY");
+        assert_eq!(e.code(), "MEM_REFERENCED_BY_POLICY");
 
-        let e = ProEngineError::VaultSchemaNotAllowed {
+        let e = ProEngineError::MemSchemaNotAllowed {
             candidate: "x".into(),
             matched_pattern: "p".into(),
             requested_schema: "s".into(),
             allowed_schemas: vec![],
         };
-        assert_eq!(e.code(), "VAULT_SCHEMA_NOT_ALLOWED");
+        assert_eq!(e.code(), "MEM_SCHEMA_NOT_ALLOWED");
 
         let e = ProEngineError::ConfigAlreadyExists {
             path: PathBuf::from("/x"),
@@ -372,8 +372,8 @@ mod tests {
     /// path automatically — the pro layer never re-stringifies.
     #[test]
     fn wrapped_basis_error_delegates_code() {
-        let e: ProEngineError = EngineError::UnknownVault("specs".into()).into();
-        assert_eq!(e.code(), "UNKNOWN_VAULT");
+        let e: ProEngineError = EngineError::UnknownMem("specs".into()).into();
+        assert_eq!(e.code(), "UNKNOWN_MEM");
     }
 
     /// The `policy_table` field disambiguates which allowlist refused
@@ -381,38 +381,38 @@ mod tests {
     /// error handling. The structured `details` payload and the
     /// `prose_render` text both surface the table name.
     #[test]
-    fn vault_path_not_allowed_carries_policy_table_in_details_and_prose() {
-        let create_err = ProEngineError::VaultPathNotAllowed {
+    fn mem_path_not_allowed_carries_policy_table_in_details_and_prose() {
+        let create_err = ProEngineError::MemPathNotAllowed {
             attempted: PathBuf::from("/ws/scratch-2"),
             candidate: "scratch-2".into(),
             patterns: vec!["specs".into()],
             reason: "no_match",
-            policy_table: "vault_management.create",
+            policy_table: "mem_management.create",
         };
         let details = create_err.details();
-        assert_eq!(details["policy_table"], "vault_management.create");
+        assert_eq!(details["policy_table"], "mem_management.create");
         assert_eq!(details["reason"], "no_match");
         let prose = create_err.prose_render();
         assert!(
-            prose.contains("vault_management.create"),
+            prose.contains("mem_management.create"),
             "prose must name the refusing allowlist: {prose}"
         );
 
         // Delete-path symmetric — policy_table flips to the delete table.
-        let delete_err = ProEngineError::VaultPathNotAllowed {
+        let delete_err = ProEngineError::MemPathNotAllowed {
             attempted: PathBuf::from("/ws/archive-src"),
             candidate: "archive-src".into(),
             patterns: vec!["specs".into()],
             reason: "no_match",
-            policy_table: "vault_management.delete",
+            policy_table: "mem_management.delete",
         };
         assert_eq!(
             delete_err.details()["policy_table"],
-            "vault_management.delete"
+            "mem_management.delete"
         );
         let prose = delete_err.prose_render();
         assert!(
-            prose.contains("vault_management.delete"),
+            prose.contains("mem_management.delete"),
             "prose must name the refusing allowlist: {prose}"
         );
     }

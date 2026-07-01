@@ -10,10 +10,10 @@ use serde::Serialize;
 
 #[derive(Debug, thiserror::Error)]
 pub enum BridgeError {
-    /// Named vault is not mounted in the engine.
-    #[error("unknown vault: {0}")]
-    UnknownVault(String),
-    /// The provided commit SHA does not resolve in the vault-repo
+    /// Named mem is not mounted in the engine.
+    #[error("unknown mem: {0}")]
+    UnknownMem(String),
+    /// The provided commit SHA does not resolve in the mem-repo
     /// gitdir. Maps to HTTP 404. Force-pushed / GC'd commits surface
     /// here.
     #[error("unknown commit: {0}")]
@@ -44,7 +44,7 @@ impl BridgeError {
     /// pattern-match on them.
     pub fn code(&self) -> &'static str {
         match self {
-            BridgeError::UnknownVault(_) => "UNKNOWN_VAULT",
+            BridgeError::UnknownMem(_) => "UNKNOWN_MEM",
             BridgeError::UnknownCommit(_) => "UNKNOWN_COMMIT",
             BridgeError::DeltaTooLarge { .. } => "DELTA_TOO_LARGE",
             BridgeError::Engine(_) => "ENGINE_ERROR",
@@ -67,8 +67,8 @@ pub struct ErrorEnvelope {
 impl From<&BridgeError> for ErrorEnvelope {
     fn from(e: &BridgeError) -> Self {
         let details = match e {
-            BridgeError::UnknownVault(name) => {
-                Some(serde_json::json!({ "vault": name }))
+            BridgeError::UnknownMem(name) => {
+                Some(serde_json::json!({ "mem": name }))
             }
             BridgeError::UnknownCommit(sha) => {
                 Some(serde_json::json!({ "commit": sha }))

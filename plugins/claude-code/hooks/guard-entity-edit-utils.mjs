@@ -24,27 +24,27 @@ export function isEntityFilename(filename) {
 /**
  * Determine if a file edit should be blocked.
  * @param {string} filePath - The file path from tool_input
- * @param {string} vaultDir - Resolved absolute path to vault directory
- * @param {boolean} vaultDirExists - Whether vaultDir exists on disk
+ * @param {string} memDir - Resolved absolute path to mem directory
+ * @param {boolean} memDirExists - Whether memDir exists on disk
  * @returns {{ action: 'block'|'allow', reason?: string }}
  */
-export function checkEditTarget(filePath, vaultDir, vaultDirExists) {
+export function checkEditTarget(filePath, memDir, memDirExists) {
   if (!filePath) return { action: 'allow' };
 
-  // Fail-closed: if vault dir doesn't exist, block potential entity files
-  if (!vaultDirExists) {
+  // Fail-closed: if mem dir doesn't exist, block potential entity files
+  if (!memDirExists) {
     const absPath = resolve(filePath);
     if (absPath.includes('specs') && isEntityFilename(basename(absPath))) {
       return {
         action: 'block',
-        reason: `Cannot verify vault dir at ${vaultDir} — refusing edit on potential entity file as precaution. File: ${filePath}`,
+        reason: `Cannot verify mem dir at ${memDir} — refusing edit on potential entity file as precaution. File: ${filePath}`,
       };
     }
     return { action: 'allow' };
   }
 
-  const dirName = vaultDir.split('/').pop() || 'specs';
-  const projectRoot = resolve(vaultDir, '..');
+  const dirName = memDir.split('/').pop() || 'specs';
+  const projectRoot = resolve(memDir, '..');
   const relPath = relative(projectRoot, resolve(filePath));
 
   const prefix = dirName + '/';
@@ -59,33 +59,33 @@ export function checkEditTarget(filePath, vaultDir, vaultDirExists) {
 }
 
 /**
- * Find --vault from .mcp.json config object (first vault of first server).
+ * Find --mem from .mcp.json config object (first mem of first server).
  * @param {object} mcpConfig - Parsed .mcp.json content
- * @returns {string} The vault dir path or empty string
+ * @returns {string} The mem dir path or empty string
  */
-export function findVaultDir(mcpConfig) {
-  const roots = findAllVaultDirs(mcpConfig);
+export function findMemDir(mcpConfig) {
+  const roots = findAllMemDirs(mcpConfig);
   return roots[0] || '';
 }
 
 /**
- * Collect all --vault paths from all MCP servers in .mcp.json.
- * Deduplicates paths to avoid checking the same vault twice.
+ * Collect all --mem paths from all MCP servers in .mcp.json.
+ * Deduplicates paths to avoid checking the same mem twice.
  * @param {object} mcpConfig - Parsed .mcp.json content
- * @returns {string[]} All unique vault dir paths
+ * @returns {string[]} All unique mem dir paths
  */
-export function findAllVaultDirs(mcpConfig) {
+export function findAllMemDirs(mcpConfig) {
   const seen = new Set();
   const roots = [];
   const servers = mcpConfig?.mcpServers || {};
   for (const server of Object.values(servers)) {
     const args = server.args || [];
     for (let i = 0; i < args.length; i++) {
-      if (args[i] === '--vault' && args[i + 1]) {
-        const vault = args[i + 1];
-        if (!seen.has(vault)) {
-          seen.add(vault);
-          roots.push(vault);
+      if (args[i] === '--mem' && args[i + 1]) {
+        const mem = args[i + 1];
+        if (!seen.has(mem)) {
+          seen.add(mem);
+          roots.push(mem);
         }
       }
     }

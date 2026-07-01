@@ -1,15 +1,15 @@
 ---
 name: setup
-description: First-time setup for a filesystem-vault Memstead workspace — resolves the memstead-mcp binary path, prompts for vault name + schema, runs `memstead init`, writes `.mcp.json`, and instructs the user to restart Claude Code so the MCP server registers.
+description: First-time setup for a filesystem-mem Memstead workspace — resolves the memstead-mcp binary path, prompts for mem name + schema, runs `memstead init`, writes `.mcp.json`, and instructs the user to restart Claude Code so the MCP server registers.
 disable-model-invocation: true
 allowed-tools: AskUserQuestion, Bash, Read, Write
 ---
 
 # Memstead — First-time setup
 
-Walk a first-time user through bootstrapping a filesystem-vault Memstead workspace in the current directory. End state: a `.memstead/` directory (carrying `workspace.toml`, the per-vault `config.json`, and engine-managed `state/mounts.json`) plus `.mcp.json` are written, and the user has been told to restart Claude Code.
+Walk a first-time user through bootstrapping a filesystem-mem Memstead workspace in the current directory. End state: a `.memstead/` directory (carrying `workspace.toml`, the per-mem `config.json`, and engine-managed `state/mounts.json`) plus `.mcp.json` are written, and the user has been told to restart Claude Code.
 
-This is the basis-product onboarding flow — the binary is `memstead` (CLI) plus `memstead-mcp` (MCP server), both expected on `PATH` via `brew install` / cargo-dist install / a local `cargo build`. There is no vault-repo, no multi-vault, no git history layer — that surface is the pro variant and is not reached from this skill.
+This is the basis-product onboarding flow — the binary is `memstead` (CLI) plus `memstead-mcp` (MCP server), both expected on `PATH` via `brew install` / cargo-dist install / a local `cargo build`. There is no mem-repo, no multi-mem, no git history layer — that surface is the pro variant and is not reached from this skill.
 
 ## Step 1 — Resolve the binaries
 
@@ -45,7 +45,7 @@ Capture both absolute paths — call them `MEMSTEAD_BIN` and `MEMSTEAD_MCP_BIN` 
 
 ## Step 2 — Verify the workspace is empty
 
-`memstead init` errors out on a non-empty target. Before prompting the user for vault details, check the cwd:
+`memstead init` errors out on a non-empty target. Before prompting the user for mem details, check the cwd:
 
 ```bash
 ls -A .
@@ -53,14 +53,14 @@ ls -A .
 
 If the directory contains any files (especially `.memstead/`, `.mcp.json`, or unrelated content), stop and ask the user how to proceed:
 
-- If `.memstead/workspace.toml` exists, the workspace is already initialised — skip to step 4 (write `.mcp.json`). Read the vault `name` and `schema` from `.memstead/config.json` (the per-vault config that `memstead init` writes alongside `workspace.toml`).
+- If `.memstead/workspace.toml` exists, the workspace is already initialised — skip to step 4 (write `.mcp.json`). Read the mem `name` and `schema` from `.memstead/config.json` (the per-mem config that `memstead init` writes alongside `workspace.toml`).
 - If unrelated files are present, surface the list and ask the user to either move to an empty folder or confirm they want to abort. Do not silently overwrite.
 
-## Step 3 — Prompt for vault name and schema
+## Step 3 — Prompt for mem name and schema
 
-Ask the user two questions. Use `AskUserQuestion` for the schema choice (a fixed list); ask for the vault name in plain text in the same response.
+Ask the user two questions. Use `AskUserQuestion` for the schema choice (a fixed list); ask for the mem name in plain text in the same response.
 
-**Vault name.** Slug-shaped (`^[a-z0-9][a-z0-9-]{0,62}[a-z0-9]$`). If the cwd basename matches the slug pattern, suggest it as the default — that's the lowest-friction path.
+**Mem name.** Slug-shaped (`^[a-z0-9][a-z0-9-]{0,62}[a-z0-9]$`). If the cwd basename matches the slug pattern, suggest it as the default — that's the lowest-friction path.
 
 **Schema.** Two options for v1:
 
@@ -74,13 +74,13 @@ Recommend `default@1.0.0` unless the user explicitly wants something else.
 Once both inputs are confirmed:
 
 ```bash
-"$MEMSTEAD_BIN" init --name "<vault-name>" --schema "<schema-pin>"
+"$MEMSTEAD_BIN" init --name "<mem-name>" --schema "<schema-pin>"
 ```
 
 The command exits 0 on success and writes:
 
 - `.memstead/workspace.toml` — the marker `memstead-mcp` walks for when discovering a workspace.
-- `.memstead/config.json` — per-vault config (`{format, name, schema}`).
+- `.memstead/config.json` — per-mem config (`{format, name, schema}`).
 - `.memstead/state/mounts.json` — engine-managed mount records.
 - `.memstead/cache/` (empty).
 - `.memstead/memstead-io/` (empty).
@@ -116,5 +116,5 @@ Do not try to verify the MCP server is reachable from inside this run — the ne
 ## Notes
 
 - **Why `command -v` over `which`.** `command -v` is POSIX, doesn't shell out, and returns absolute paths reliably across `bash`, `zsh`, `dash`, and `sh`. `which` is non-standard and varies by distro.
-- **Why no `args: ["--config", ...]`.** That arg is vault-repo-only; the basis `memstead-mcp` walks for `.memstead/workspace.toml` automatically. Passing it would error on the basis binary (the flag is gated out at the clap layer).
-- **No drift handling needed.** Filesystem-vault has no git layer, so there's no `vault-repo/.git/` to verify, no schema-pin negotiation against `__SYSTEM`, no multi-vault routing. The setup flow is genuinely just: install → init → register.
+- **Why no `args: ["--config", ...]`.** That arg is mem-repo-only; the basis `memstead-mcp` walks for `.memstead/workspace.toml` automatically. Passing it would error on the basis binary (the flag is gated out at the clap layer).
+- **No drift handling needed.** Filesystem-mem has no git layer, so there's no `mem-repo/.git/` to verify, no schema-pin negotiation against `__SYSTEM`, no multi-mem routing. The setup flow is genuinely just: install → init → register.

@@ -15,40 +15,40 @@ use crate::setup::{CliContext, CliEngine};
 
 #[derive(Parser, Debug)]
 pub struct Args {
-    /// Writable vault name to reload. Omit to reload every writable
-    /// vault. Mirrors the MCP `memstead_reload` parameter shape and the
-    /// op's semantics: per-vault form is cheap and skips the
+    /// Writable mem name to reload. Omit to reload every writable
+    /// mem. Mirrors the MCP `memstead_reload` parameter shape and the
+    /// op's semantics: per-mem form is cheap and skips the
     /// workspace-level settings refresh; workspace-wide form
-    /// (omit `--vault`) reloads every vault and also re-reads
+    /// (omit `--mem`) reloads every mem and also re-reads
     /// `.memstead/workspace.toml` to pick up policy edits.
     #[arg(long)]
-    pub vault: Option<String>,
+    pub mem: Option<String>,
 }
 
 pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     let mut engine = match ctx.cli_engine()? {
-        #[cfg(feature = "vault-repo")]
-        CliEngine::VaultRepo(engine) => engine,
+        #[cfg(feature = "mem-repo")]
+        CliEngine::MemRepo(engine) => engine,
         CliEngine::Filesystem(engine) => engine,
     };
-    let reports = match args.vault.as_deref() {
+    let reports = match args.mem.as_deref() {
         Some(name) => engine
-            .reload_one_vault_report(name)
+            .reload_one_mem_report(name)
             .map(|r| vec![r])
             .map_err(CliError::from_engine_op)?,
         None => engine
-            .reload_each_writable_vault_reports()
+            .reload_each_writable_mem_reports()
             .map_err(CliError::from_engine_op)?,
     };
 
     if ctx.json {
         print_json(&serde_json::json!({ "reports": reports }))?;
     } else {
-        let mut lines = vec![format!("# Reloaded {} vault(s)", reports.len()), String::new()];
+        let mut lines = vec![format!("# Reloaded {} mem(s)", reports.len()), String::new()];
         for r in &reports {
             lines.push(format!(
                 "- `{}` — {} entities, head {} → {}{}",
-                r.vault,
+                r.mem,
                 r.entities_loaded,
                 short_sha(&r.head_before),
                 short_sha(&r.head_after),

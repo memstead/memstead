@@ -17,7 +17,7 @@ pub struct Args {
     pub text: Option<String>,
 
     #[arg(long)]
-    pub vault: Option<String>,
+    pub mem: Option<String>,
 
     #[arg(long = "type")]
     pub entity_type: Option<String>,
@@ -143,7 +143,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
 
     let scope = SearchScope {
         query,
-        vault: args.vault,
+        mem: args.mem,
         entity_type: args.entity_type,
         limit: args.limit,
         offset: args.offset,
@@ -159,19 +159,19 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     };
 
     let result = match ctx.cli_engine()? {
-        #[cfg(feature = "vault-repo")]
-        CliEngine::VaultRepo(engine) => {
-            if let Some(name) = scope.vault.as_deref() {
+        #[cfg(feature = "mem-repo")]
+        CliEngine::MemRepo(engine) => {
+            if let Some(name) = scope.mem.as_deref() {
                 if engine.mount(name).is_none() {
-                    return Err(super::list::unknown_vault_error(name, &engine).into());
+                    return Err(super::list::unknown_mem_error(name, &engine).into());
                 }
             }
             engine.search(&scope)?
         }
         CliEngine::Filesystem(engine) => {
-            if let Some(name) = scope.vault.as_deref() {
+            if let Some(name) = scope.mem.as_deref() {
                 if engine.mount(name).is_none() {
-                    return Err(super::list::unknown_vault_error(name, &engine).into());
+                    return Err(super::list::unknown_mem_error(name, &engine).into());
                 }
             }
             engine.search(&scope)?

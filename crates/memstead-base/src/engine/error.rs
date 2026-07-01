@@ -24,21 +24,21 @@ use crate::runtime_validator::{MissingRequiredField, ValidationError};
 pub const INLINE_LIST_CAP: usize = 3;
 
 /// One blocked-direction summary entry for
-/// [`EngineError::RenameBlockedByCrossVaultPolicy`]. Pairs the
-/// referrer's vault with the renaming entity's vault (the edge's
+/// [`EngineError::RenameBlockedByCrossMemPolicy`]. Pairs the
+/// referrer's mem with the renaming entity's mem (the edge's
 /// actual `referrer → renamed` direction post-rewrite) and the count
-/// of distinct referrers in that vault that would emit the blocked
+/// of distinct referrers in that mem that would emit the blocked
 /// rewrite.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BlockedReferrer {
-    /// Referrer's vault — `from_vault` in the propagated edge's
+    /// Referrer's mem — `from_mem` in the propagated edge's
     /// actual direction.
-    pub from_vault: String,
-    /// Renaming entity's vault — `to_vault` in the propagated edge's
+    pub from_mem: String,
+    /// Renaming entity's mem — `to_mem` in the propagated edge's
     /// actual direction. Always the same value across every
     /// `blocked_referrers` entry of a single rename refusal.
-    pub to_vault: String,
-    /// Distinct referrers in `from_vault` that would emit the
+    pub to_mem: String,
+    /// Distinct referrers in `from_mem` that would emit the
     /// blocked rewrite.
     pub count: usize,
 }
@@ -48,8 +48,8 @@ impl fmt::Display for BlockedReferrer {
         write!(
             f,
             "{} → {} ({} referrer{})",
-            self.from_vault,
-            self.to_vault,
+            self.from_mem,
+            self.to_mem,
             self.count,
             if self.count == 1 { "" } else { "s" }
         )
@@ -90,7 +90,7 @@ pub fn format_inline_list_overflow<T: fmt::Display>(items: &[T], field: &str) ->
 /// `details.sources` payload.
 ///
 /// The schema registry consults sources in a fixed order — local
-/// storage (the vault's own storage backend), built-in (compiled into
+/// storage (the mem's own storage backend), built-in (compiled into
 /// the engine binary), remote (memstead.io, reserved) — and records
 /// what each held for the pinned *name* so an agent or operator can
 /// tell *where* a pin failed: missing from local authoring, absent
@@ -187,23 +187,23 @@ impl SchemaSourceDiagnostic {
 #[derive(Debug, thiserror::Error)]
 pub enum EngineError {
     /// `Engine::from_mounts` received two mounts naming the same
-    /// vault. Configuration error: the persistence adapter or
+    /// mem. Configuration error: the persistence adapter or
     /// caller produced a malformed mount list.
-    #[error("duplicate vault in mount list: {0}")]
-    DuplicateVault(String),
-    /// No mount in this engine names the requested vault. Surfaced
+    #[error("duplicate mem in mount list: {0}")]
+    DuplicateMem(String),
+    /// No mount in this engine names the requested mem. Surfaced
     /// before reaching any backend so callers can distinguish
-    /// "wrong vault name" from "backend failure".
-    #[error("unknown vault: {0}")]
-    UnknownVault(String),
+    /// "wrong mem name" from "backend failure".
+    #[error("unknown mem: {0}")]
+    UnknownMem(String),
     /// Mutation rejected because the mount declares
     /// [`MountCapability::ReadOnly`]. Surfaced before reaching the
     /// backend so the typed `Sealed` payload from the archive
     /// backend never triggers — capability gating runs first.
-    #[error("vault {0} is mounted read-only; mutations rejected")]
+    #[error("mem {0} is mounted read-only; mutations rejected")]
     ReadOnlyMount(String),
     /// Entity type is not declared in the pinned schema for this
-    /// vault. Carries the declared types (sorted) and a fuzzy
+    /// mem. Carries the declared types (sorted) and a fuzzy
     /// suggestion so the agent can recover without re-reading the
     /// schema. `schema_ref` is the pinned `<name>@<version>`.
     #[error(
@@ -224,7 +224,7 @@ pub enum EngineError {
     #[error("entity already exists: {id}")]
     AlreadyExists { id: String },
     /// Mutation rejected because the named entity is not in the
-    /// store. Distinct from `UnknownVault`: the vault exists, the
+    /// store. Distinct from `UnknownMem`: the mem exists, the
     /// entity does not.
     #[error("entity not found: {id}")]
     NotFound { id: String },
@@ -245,88 +245,88 @@ pub enum EngineError {
         is_stub: bool,
     },
     /// Refusal to delete or rename an entity because other entities
-    /// in **Write-Vaults** still reference it. There is no force flag
+    /// in **Write-Mems** still reference it. There is no force flag
     /// or escape hatch — the agent removes the offending references
     /// (via `memstead_relate --remove` or `memstead_update`) before retrying.
     /// `referrers` carries the typed referrer info (source id,
-    /// rel-type, source vault) so the response payload describes the
+    /// rel-type, source mem) so the response payload describes the
     /// full surface in one round-trip. ReadOnly-mount referrers are
     /// excluded from this list — they are handled by the residual-
     /// stub demotion path on the destructive mutation.
     #[error(
-        "entity {id} has {n} incoming reference(s) in write vaults ({inline}); remove them first via memstead_relate --remove or memstead_update",
+        "entity {id} has {n} incoming reference(s) in write mems ({inline}); remove them first via memstead_relate --remove or memstead_update",
         n = referrers.len(),
         inline = format_inline_list_overflow(referrers, "referrers"),
     )]
     HasIncomingRefs { id: String, referrers: Vec<ReferrerInfo> },
-    /// Refusal to delete a vault because entities in other Write-Vaults
+    /// Refusal to delete a mem because entities in other Write-Mems
     /// still reference entities inside it. Mirrors entity-level
-    /// [`Self::HasIncomingRefs`] at the vault granularity — the
+    /// [`Self::HasIncomingRefs`] at the mem granularity — the
     /// edge-graph axis (F15 / CLI F8). Revoking a workspace-level grant only closes
     /// the policy axis; this check closes the actual-edge axis so a
-    /// vault delete that would orphan cross-vault edges refuses with
+    /// mem delete that would orphan cross-mem edges refuses with
     /// the typed envelope listing every offending `(from_id, rel_type,
-    /// source_vault)` triple. No force flag — the operator must
+    /// source_mem)` triple. No force flag — the operator must
     /// `memstead_relate --remove` (or `memstead_update` to drop the section)
     /// on each referrer first, then retry. ReadOnly-mount referrers
     /// stay out of this list and route through the residual-stub
     /// demotion path on the destructive mutation, same posture as the
     /// entity-level variant.
     #[error(
-        "vault `{vault}` has {n} incoming reference(s) in write vaults ({inline}); remove them first via memstead_relate --remove or memstead_update",
+        "mem `{mem}` has {n} incoming reference(s) in write mems ({inline}); remove them first via memstead_relate --remove or memstead_update",
         n = referrers.len(),
         inline = format_inline_list_overflow(referrers, "referrers"),
     )]
-    VaultHasIncomingRefs {
-        vault: String,
+    MemHasIncomingRefs {
+        mem: String,
         referrers: Vec<ReferrerInfo>,
     },
-    /// Relate across vaults rejected because the workspace's
-    /// `[cross_vault_links]` policy (or the per-create-rule
-    /// `default_cross_links` synthesis) does not permit `from_vault →
-    /// to_vault`. Agents adjust the policy or pick a same-vault
-    /// target. The hint points at the workspace `[cross_vault_links]`
+    /// Relate across mems rejected because the workspace's
+    /// `[cross_mem_links]` policy (or the per-create-rule
+    /// `default_cross_links` synthesis) does not permit `from_mem →
+    /// to_mem`. Agents adjust the policy or pick a same-mem
+    /// target. The hint points at the workspace `[cross_mem_links]`
     /// section.
     #[error(
-        "cross-vault link from vault `{from_vault}` to vault `{to_vault}` is not allowed by the workspace `[cross_vault_links]` policy"
+        "cross-mem link from mem `{from_mem}` to mem `{to_mem}` is not allowed by the workspace `[cross_mem_links]` policy"
     )]
-    CrossVaultLinkNotAllowed {
-        from_vault: String,
-        to_vault: String,
+    CrossMemLinkNotAllowed {
+        from_mem: String,
+        to_mem: String,
     },
-    /// `memstead_relate` cross-vault to a target whose vault is mounted
+    /// `memstead_relate` cross-mem to a target whose mem is mounted
     /// `MountCapability::ReadOnly` and the target is absent. Auto-stub
-    /// is unavailable across the engine/ReadOnly-vault boundary (the
-    /// engine cannot persist a stub in a vault it has no write access
+    /// is unavailable across the engine/ReadOnly-mem boundary (the
+    /// engine cannot persist a stub in a mem it has no write access
     /// to), so the target must already exist before the relate call.
     #[error(
-        "cross-vault relate target {target_id} is absent in read-only vault `{target_vault}` — auto-stub is unavailable across the read-only boundary; the target must exist before relating"
+        "cross-mem relate target {target_id} is absent in read-only mem `{target_mem}` — auto-stub is unavailable across the read-only boundary; the target must exist before relating"
     )]
-    CrossVaultTargetNotFound {
+    CrossMemTargetNotFound {
         target_id: String,
-        target_vault: String,
+        target_mem: String,
     },
-    /// `memstead_relate` across vaults pinning schemas with different
+    /// `memstead_relate` across mems pinning schemas with different
     /// *names* refused because the source schema's
-    /// `cross_vault_relationships:` section declares no entry for the
+    /// `cross_mem_relationships:` section declares no entry for the
     /// target schema's domain. Each source schema must explicitly
-    /// enumerate outbound cross-vault edges per target domain; the
+    /// enumerate outbound cross-mem edges per target domain; the
     /// absence here means the source schema does not speak the target
     /// domain's vocabulary. Eligibility is name-based — a declaration
     /// covers every version of the named target schema. The agent's
     /// recovery is to declare the rel-type in the source schema's
-    /// `cross_vault_relationships:` section under the target's bare
+    /// `cross_mem_relationships:` section under the target's bare
     /// schema name (`to_schema: <name>`).
     ///
-    /// Orthogonal to the `cross_vault_links` permission policy:
+    /// Orthogonal to the `cross_mem_links` permission policy:
     /// vocabulary and permission fire independently. A policy-admissible
     /// edge that violates vocabulary surfaces here; a vocabulary-admissible
     /// edge that violates policy surfaces as
-    /// [`Self::CrossVaultLinkNotAllowed`].
+    /// [`Self::CrossMemLinkNotAllowed`].
     #[error(
-        "cross-vault edge {rel_type} from `{from_id}` (schema {source_schema}) to `{to_id}` (schema {target_schema}) is not declared in {source_schema}'s `cross_vault_relationships:` section"
+        "cross-mem edge {rel_type} from `{from_id}` (schema {source_schema}) to `{to_id}` (schema {target_schema}) is not declared in {source_schema}'s `cross_mem_relationships:` section"
     )]
-    CrossVaultEdgeNotDeclared {
+    CrossMemEdgeNotDeclared {
         source_schema: String,
         target_schema: String,
         rel_type: String,
@@ -359,26 +359,26 @@ pub enum EngineError {
         "no mutation content for {id} — payload carries an id but every mutation map is empty (recognised keys: sections, append_sections, patch_sections, metadata, metadata_unset, declare_relations, relations_unset)"
     )]
     EmptyUpdate { id: String },
-    /// `memstead_rename` cannot proceed because one or more cross-vault
+    /// `memstead_rename` cannot proceed because one or more cross-mem
     /// referrers would emit a propagated rewrite whose direction the
-    /// workspace's `cross_vault_links` policy does not permit. The
+    /// workspace's `cross_mem_links` policy does not permit. The
     /// engine refuses the rename up-front (before any write); the
     /// agent's recovery is either to grant the missing direction in
-    /// `[cross_vault_links]` or to drop the offending edges first.
+    /// `[cross_mem_links]` or to drop the offending edges first.
     ///
     /// Each `blocked_referrers` entry names a single blocked direction
-    /// (`from_vault → to_vault`) — the referrer's vault and the
-    /// renaming entity's vault, respectively — together with the
-    /// count of distinct referrers in that vault that would emit the
+    /// (`from_mem → to_mem`) — the referrer's mem and the
+    /// renaming entity's mem, respectively — together with the
+    /// count of distinct referrers in that mem that would emit the
     /// blocked rewrite. The direction is the edge's actual direction
     /// post-rewrite (`referrer → renamed`), which is what the policy
     /// gates.
     #[error(
-        "rename blocked: cross-vault rewrite from referrer vault(s) into `{from_vault}` is not permitted by `[cross_vault_links]` — blocked: {} — grant the missing direction or rewrite the blocked referrers manually",
+        "rename blocked: cross-mem rewrite from referrer mem(s) into `{from_mem}` is not permitted by `[cross_mem_links]` — blocked: {} — grant the missing direction or rewrite the blocked referrers manually",
         format_blocked_referrers(blocked_referrers),
     )]
-    RenameBlockedByCrossVaultPolicy {
-        from_vault: String,
+    RenameBlockedByCrossMemPolicy {
+        from_mem: String,
         blocked_referrers: Vec<BlockedReferrer>,
     },
     /// `memstead_create` / `memstead_update` / `memstead_batch_update` refused
@@ -406,7 +406,7 @@ pub enum EngineError {
     },
     /// `memstead_relate --remove` refused because the source entity's
     /// section bodies still contain `[[<target>]]` (or
-    /// `[[<vault>:<target>]]`) wiki-links pointing at the relation's
+    /// `[[<mem>:<target>]]`) wiki-links pointing at the relation's
     /// target. Removing the explicit relation while body links
     /// survive would violate the strict wiki-link/relation invariant
     /// (inline links require a backing relation). The agent's
@@ -424,23 +424,23 @@ pub enum EngineError {
         rel_type: String,
         body_links: Vec<String>,
     },
-    /// A multi-vault `memstead_rename` partially landed: at least one
-    /// vault committed successfully, then a subsequent per-vault
+    /// A multi-mem `memstead_rename` partially landed: at least one
+    /// mem committed successfully, then a subsequent per-mem
     /// commit aborted (typically because a sibling writer advanced
-    /// the failed vault's head between the rename's snapshot and the
+    /// the failed mem's head between the rename's snapshot and the
     /// commit attempt — the parent-ref pin tripped via
-    /// `BackendError::ParentMismatch`). The committed vaults' state
-    /// has already landed and is durable; the failed vault's writes
+    /// `BackendError::ParentMismatch`). The committed mems' state
+    /// has already landed and is durable; the failed mem's writes
     /// did not land. The agent's recovery options: retry the rename
     /// (reload the workspace first so the engine re-derives the right
     /// referrer set), or accept the partial state and reconcile
     /// manually via subsequent mutations.
     #[error(
-        "rename partial-failure: vault `{failed_vault}` aborted with cause {failure_cause:?} after {committed_vaults:?} already committed — reload and retry, or reconcile manually"
+        "rename partial-failure: mem `{failed_mem}` aborted with cause {failure_cause:?} after {committed_mems:?} already committed — reload and retry, or reconcile manually"
     )]
     RenamePartialFailure {
-        committed_vaults: Vec<String>,
-        failed_vault: String,
+        committed_mems: Vec<String>,
+        failed_mem: String,
         failure_cause: String,
     },
     /// `memstead_relate` source is a stub — stubs have no `entity_type`
@@ -467,7 +467,7 @@ pub enum EngineError {
     /// An `EntityId` reaching a write path (notably `memstead_relate to=`)
     /// does not match the wiki-link grammar
     /// (`^[a-z0-9-]+(/[a-z0-9-]+)*$` for the slug; `^[a-z0-9-]+$` for
-    /// the vault). The gate prevents an auto-stub being created at a
+    /// the mem). The gate prevents an auto-stub being created at a
     /// malformed id — once present, that stub would fail any
     /// downstream wiki-link parse that referenced it.
     #[error("entity id '{id}' is malformed: {reason}")]
@@ -476,7 +476,7 @@ pub enum EngineError {
     /// slug-form grammar gate. The invariant is that every wiki-link target reaching
     /// `entity.relationships` carries a grammar-valid `EntityId` — the
     /// alias-synthesis pass would otherwise emit a relation pointing
-    /// at a literal id (e.g. `vault--Knowledge Graph`) that no
+    /// at a literal id (e.g. `mem--Knowledge Graph`) that no
     /// downstream wiki-link parse could ever resolve. `raw` is the
     /// input between brackets (after alias / `.md` strip); `suggested`
     /// is the `title_to_slug`-derived slug-form the agent lifts
@@ -495,17 +495,17 @@ pub enum EngineError {
         link_source: String,
         reason: String,
     },
-    /// A body wiki-link's Tier-2 vault prefix `[[vault:slug]]` failed
-    /// the vault-name grammar (`^[a-z0-9-]+(/[a-z0-9-]+)*$`). Distinct
+    /// A body wiki-link's Tier-2 mem prefix `[[mem:slug]]` failed
+    /// the mem-name grammar (`^[a-z0-9-]+(/[a-z0-9-]+)*$`). Distinct
     /// from `InvalidWikiLinkTarget` because the recovery is different
-    /// — vault names are fixed identifiers in the workspace, not
+    /// — mem names are fixed identifiers in the workspace, not
     /// free-form text the agent can mechanically slugify; the agent
-    /// correlates the bad prefix against the workspace's known vaults
+    /// correlates the bad prefix against the workspace's known mems
     /// rather than reaching for `title_to_slug`.
     #[error(
-        "body wiki-link vault prefix '{raw}' in section '{section}' is not a valid vault name: {reason}"
+        "body wiki-link mem prefix '{raw}' in section '{section}' is not a valid mem name: {reason}"
     )]
-    InvalidWikiLinkVault {
+    InvalidWikiLinkMem {
         raw: String,
         section: String,
         reason: String,
@@ -662,16 +662,16 @@ pub enum EngineError {
     /// payload (e.g. `Sealed`, `HashMismatch`, `Io`).
     #[error(transparent)]
     Backend(#[from] BackendError),
-    /// A vault's schema pin did not resolve. `sources` carries the
+    /// A mem's schema pin did not resolve. `sources` carries the
     /// fixed-order resolution diagnostics (local storage / built-in /
     /// remote) so the caller can tell *where* the pin failed and spot a
     /// right-name/wrong-version partial match; it surfaces under
     /// `details.sources`. Empty `sources` marks an internal lookup miss
-    /// (an already-resolved schema absent from the engine's per-vault
+    /// (an already-resolved schema absent from the engine's per-mem
     /// map), not a genuine source-resolution failure.
-    #[error("vault {vault}: schema pin {pin:?} did not resolve in any schema source")]
+    #[error("mem {mem}: schema pin {pin:?} did not resolve in any schema source")]
     SchemaNotFound {
-        vault: String,
+        mem: String,
         pin: String,
         sources: Vec<SchemaSourceDiagnostic>,
     },
@@ -682,19 +682,19 @@ pub enum EngineError {
     /// switch lifts cleanly.
     #[error("built-in schema catalogue failed to load: {0}")]
     SchemaResolverInit(String),
-    /// Generic vault-level error message — used by accessors that
-    /// surface "vault exists, but the requested resource is not
+    /// Generic mem-level error message — used by accessors that
+    /// surface "mem exists, but the requested resource is not
     /// available for this backend" (e.g. `gitdir_for` against a
     /// folder mount, `worktree_for` against a git-branch mount).
-    #[error("vault error: {0}")]
-    Vault(String),
-    /// `register_writable_vault` rejected because `name` is already
+    #[error("mem error: {0}")]
+    Mem(String),
+    /// `register_writable_mem` rejected because `name` is already
     /// registered (writable OR read-only). `source_origin` is the
     /// human-readable description of the colliding registration,
-    /// rendered via [`VaultOrigin::render_source`] for writable
+    /// rendered via [`MemOrigin::render_source`] for writable
     /// entries or a stand-in for read-only ones.
-    #[error("vault name collision: {name} is already registered ({source_origin})")]
-    VaultNameCollision {
+    #[error("mem name collision: {name} is already registered ({source_origin})")]
+    MemNameCollision {
         name: String,
         source_origin: String,
     },
@@ -704,7 +704,7 @@ pub enum EngineError {
     #[error("invalid input: {0}")]
     InvalidInput(String),
     /// `memstead_fetch` / `memstead_pull` / `memstead_push` named a remote that is
-    /// not configured on the workspace's vault-repo. Typed code
+    /// not configured on the workspace's mem-repo. Typed code
     /// `UNKNOWN_REMOTE`. Recovery: configure the remote via `git
     /// remote add` or pick a remote `git remote -v` already lists.
     #[error("unknown remote: {0}")]
@@ -716,27 +716,27 @@ pub enum EngineError {
     /// run a replay workflow to rewrite them onto the new remote tip.
     /// Typed code `LOCAL_DIVERGENCE`.
     #[error(
-        "vault `{vault}`'s local branch has diverged from `{remote_ref}` — pull cannot fast-forward without losing local commits; rebase / replay first or run memstead branch-reset"
+        "mem `{mem}`'s local branch has diverged from `{remote_ref}` — pull cannot fast-forward without losing local commits; rebase / replay first or run memstead branch-reset"
     )]
-    LocalDivergence { vault: String, remote_ref: String },
+    LocalDivergence { mem: String, remote_ref: String },
     /// `memstead_push` refused because the push would not be a fast-forward
     /// against the remote and the caller did not pass `force: true`.
     /// Typed code `NON_FAST_FORWARD`. Recovery: re-fetch + replay, or
     /// re-issue with `force: true` (warning: rewrites the remote's
     /// view of the branch — other peers will see the rewrite).
     #[error(
-        "push to remote `{remote}` for vault `{vault}` is not a fast-forward; rebase / replay locally or pass `force: true` to overwrite the remote"
+        "push to remote `{remote}` for mem `{mem}` is not a fast-forward; rebase / replay locally or pass `force: true` to overwrite the remote"
     )]
-    NonFastForward { vault: String, remote: String },
+    NonFastForward { mem: String, remote: String },
     /// `memstead_push` refused because the local state failed pre-push
     /// schema validation. The remote was not contacted. Recovery: fix
     /// the schema violations (use `memstead_health` to find them) and
     /// retry. Typed code `LOCAL_INVALID_STATE`.
     #[error(
-        "vault `{vault}` failed pre-push schema validation; remote `{remote}` was not contacted: {detail}"
+        "mem `{mem}` failed pre-push schema validation; remote `{remote}` was not contacted: {detail}"
     )]
     LocalInvalidState {
-        vault: String,
+        mem: String,
         remote: String,
         detail: String,
     },
@@ -749,11 +749,11 @@ pub enum EngineError {
     /// remediation surface without re-walking the tree. Typed code
     /// `SCHEMA_VIOLATION_IN_FETCH`.
     #[error(
-        "vault `{vault}` would fail schema validation at `{ref_name}` — {n} violation(s); fix the remote or replay locally first",
+        "mem `{mem}` would fail schema validation at `{ref_name}` — {n} violation(s); fix the remote or replay locally first",
         n = violations.len(),
     )]
     SchemaViolationInFetch {
-        vault: String,
+        mem: String,
         ref_name: String,
         violations: Vec<String>,
     },
@@ -770,12 +770,12 @@ pub enum EngineError {
         pushed_shas.join(", "),
     )]
     PushedCommitsProtected {
-        vault: String,
+        mem: String,
         target_sha: String,
         pushed_shas: Vec<String>,
     },
     /// `memstead_diff` (or any future ref-comparing op) received a ref
-    /// that does not resolve against the workspace's vault-repo.
+    /// that does not resolve against the workspace's mem-repo.
     /// Carries the ref string verbatim so the caller can fix the
     /// input. Typed code `UNKNOWN_REF`.
     #[error("unknown ref: {0}")]
@@ -795,28 +795,28 @@ pub enum EngineError {
         allowed_max: f32,
     },
     /// `memstead_changes_since` / `memstead changes --since` was given a `since`
-    /// commit cursor the vault's git repository can't resolve — a
+    /// commit cursor the mem's git repository can't resolve — a
     /// malformed prefix or a well-formed-but-absent 40-hex. Surfaces the
     /// `INVALID_CURSOR` code (the documented contract for this op, which
-    /// the CLI previously leaked as the `VAULT_ERROR` catch-all) so a
+    /// the CLI previously leaked as the `MEM_ERROR` catch-all) so a
     /// sync loop branches cleanly: `INVALID_CURSOR` → re-seed from the
-    /// empty-tree sentinel; `VAULT_ERROR` → genuine backend fault.
+    /// empty-tree sentinel; `MEM_ERROR` → genuine backend fault.
     /// `details.since` carries the offending cursor untruncated.
-    #[error("commit cursor '{since}' is not a known commit in vault '{vault}' — pass a commit_sha from a prior mutation, or the empty-tree sentinel to re-seed")]
-    InvalidChangesCursor { vault: String, since: String },
-    /// Vault config is missing a required field that the engine
-    /// itself would normally populate (today: `version` at vault
+    #[error("commit cursor '{since}' is not a known commit in mem '{mem}' — pass a commit_sha from a prior mutation, or the empty-tree sentinel to re-seed")]
+    InvalidChangesCursor { mem: String, since: String },
+    /// Mem config is missing a required field that the engine
+    /// itself would normally populate (today: `version` at mem
     /// init). Surfaced on the export path — pre-fix this collapsed
     /// to `INTERNAL` with a misleading `.memstead/config.json` reference
-    /// that doesn't match the vault-repo backend's blob layout.
-    /// Recovery: run `memstead vault set-version <vault> <version>` to
+    /// that doesn't match the mem-repo backend's blob layout.
+    /// Recovery: run `memstead mem set-version <mem> <version>` to
     /// populate the field, then retry the export. F1.
     #[error(
-        "vault `{vault}` config is missing required field(s) {missing_fields:?} — \
-         set via `memstead vault set-version {vault} <version>` (e.g. 0.1.0)"
+        "mem `{mem}` config is missing required field(s) {missing_fields:?} — \
+         set via `memstead mem set-version {mem} <version>` (e.g. 0.1.0)"
     )]
-    VaultConfigIncomplete {
-        vault: String,
+    MemConfigIncomplete {
+        mem: String,
         missing_fields: Vec<String>,
     },
     /// `memstead_relate` (or a `declare_relations` entry) targeted a
@@ -884,31 +884,31 @@ pub enum EngineError {
          route search queries to the bridge's memstead_search endpoint"
     )]
     SearchUnavailable,
-    /// `memstead export --format markdown --vault-name <V>` was called
-    /// against a vault whose active backend doesn't support markdown
+    /// `memstead export --format markdown --mem-name <V>` was called
+    /// against a mem whose active backend doesn't support markdown
     /// regeneration in place (today: every backend other than
     /// `folder`). Pre-fix this collapsed to a silent
     /// `ExportResult { written: 0, unchanged: 0 }` masquerading as
-    /// success. Recovery: use `--format vault` to produce a portable
+    /// success. Recovery: use `--format mem` to produce a portable
     /// `.mem` archive, which every backend supports.
     #[error(
-        "vault `{vault}` is on backend `{active_backend}`; `memstead export --format markdown` \
-         is supported only on backends [{}] — use `--format vault` to produce a portable \
+        "mem `{mem}` is on backend `{active_backend}`; `memstead export --format markdown` \
+         is supported only on backends [{}] — use `--format mem` to produce a portable \
          `.mem` archive instead",
         supported_backends.join(", ")
     )]
     MarkdownExportUnsupportedBackend {
-        vault: String,
+        mem: String,
         active_backend: String,
         supported_backends: Vec<String>,
     },
 }
 
-/// Typed payload for a single Write-Vault referrer in
+/// Typed payload for a single Write-Mem referrer in
 /// [`EngineError::HasIncomingRefs`]. Captures the (from_id, rel_types,
-/// vault) triple the surface envelope projects so consumers can reason
+/// mem) triple the surface envelope projects so consumers can reason
 /// about the offending edges without a follow-up `memstead_entity` call.
-/// The vault is always a Write-Vault — ReadOnly referrers are
+/// The mem is always a Write-Mem — ReadOnly referrers are
 /// partitioned out before this struct is constructed and surfaced via
 /// the residual-stub warning channel instead.
 ///
@@ -923,7 +923,7 @@ pub enum EngineError {
 pub struct ReferrerInfo {
     pub from_id: String,
     pub rel_types: Vec<String>,
-    pub vault: String,
+    pub mem: String,
 }
 
 /// Inline rendering on the text mirror. Single rel-type renders as
@@ -977,8 +977,8 @@ impl EngineError {
     /// per-surface mapping.
     pub fn code(&self) -> &'static str {
         match self {
-            EngineError::DuplicateVault(_) => "DUPLICATE_VAULT",
-            EngineError::UnknownVault(_) => "UNKNOWN_VAULT",
+            EngineError::DuplicateMem(_) => "DUPLICATE_MEM",
+            EngineError::UnknownMem(_) => "UNKNOWN_MEM",
             EngineError::UnknownRef(_) => "UNKNOWN_REF",
             EngineError::UnknownRemote(_) => "UNKNOWN_REMOTE",
             EngineError::LocalDivergence { .. } => "LOCAL_DIVERGENCE",
@@ -993,15 +993,15 @@ impl EngineError {
             EngineError::NotFound { .. } => "ENTITY_NOT_FOUND",
             EngineError::HashMismatch { .. } => "HASH_MISMATCH",
             EngineError::HasIncomingRefs { .. } => "HAS_INCOMING_REFS",
-            EngineError::VaultHasIncomingRefs { .. } => "VAULT_HAS_INCOMING_REFS",
-            EngineError::CrossVaultLinkNotAllowed { .. } => "CROSS_VAULT_LINK_NOT_ALLOWED",
-            EngineError::CrossVaultTargetNotFound { .. } => "CROSS_VAULT_TARGET_NOT_FOUND",
-            EngineError::CrossVaultEdgeNotDeclared { .. } => "CROSS_VAULT_EDGE_NOT_DECLARED",
+            EngineError::MemHasIncomingRefs { .. } => "MEM_HAS_INCOMING_REFS",
+            EngineError::CrossMemLinkNotAllowed { .. } => "CROSS_MEM_LINK_NOT_ALLOWED",
+            EngineError::CrossMemTargetNotFound { .. } => "CROSS_MEM_TARGET_NOT_FOUND",
+            EngineError::CrossMemEdgeNotDeclared { .. } => "CROSS_MEM_EDGE_NOT_DECLARED",
             EngineError::RepairNotNeeded { .. } => "REPAIR_NOT_NEEDED",
             EngineError::RenameNoOp { .. } => "RENAME_NO_OP",
             EngineError::EmptyUpdate { .. } => "EMPTY_UPDATE",
-            EngineError::RenameBlockedByCrossVaultPolicy { .. } => {
-                "RENAME_BLOCKED_BY_CROSS_VAULT_POLICY"
+            EngineError::RenameBlockedByCrossMemPolicy { .. } => {
+                "RENAME_BLOCKED_BY_CROSS_MEM_POLICY"
             }
             EngineError::RenamePartialFailure { .. } => "RENAME_PARTIAL_FAILURE",
             EngineError::RelationHasBodyLinks { .. } => "RELATION_HAS_BODY_LINKS",
@@ -1011,7 +1011,7 @@ impl EngineError {
             EngineError::StubNotRenamable { .. } => "STUB_NOT_RENAMABLE",
             EngineError::InvalidEntityId { .. } => "INVALID_ENTITY_ID",
             EngineError::InvalidWikiLinkTarget { .. } => "INVALID_WIKI_LINK_TARGET",
-            EngineError::InvalidWikiLinkVault { .. } => "INVALID_VAULT_NAME",
+            EngineError::InvalidWikiLinkMem { .. } => "INVALID_MEM_NAME",
             EngineError::ConflictingSectionModes { .. } => "CONFLICTING_SECTION_MODES",
             EngineError::RelationshipCycle { .. } => "RELATIONSHIP_CYCLE",
             EngineError::SetAndUnsetConflict { .. } => "SET_AND_UNSET_CONFLICT",
@@ -1022,15 +1022,15 @@ impl EngineError {
             EngineError::Validation(v) => v.code(),
             EngineError::ParseAfterWrite(_) => "PARSE_ERROR",
             EngineError::Parse(_) => "PARSE_ERROR",
-            EngineError::Backend(_) => "VAULT_ERROR",
+            EngineError::Backend(_) => "MEM_ERROR",
             EngineError::SchemaNotFound { .. } => "SCHEMA_NOT_FOUND",
             EngineError::SchemaResolverInit(_) => "SCHEMA_RESOLVER_INIT_FAILED",
-            EngineError::Vault(_) => "VAULT_ERROR",
-            EngineError::VaultNameCollision { .. } => "VAULT_NAME_COLLISION",
+            EngineError::Mem(_) => "MEM_ERROR",
+            EngineError::MemNameCollision { .. } => "MEM_NAME_COLLISION",
             EngineError::InvalidInput(_) => "INVALID_INPUT",
             EngineError::RenameSimilarityOutOfRange { .. } => "INVALID_INPUT",
             EngineError::InvalidChangesCursor { .. } => "INVALID_CURSOR",
-            EngineError::VaultConfigIncomplete { .. } => "VAULT_CONFIG_INCOMPLETE",
+            EngineError::MemConfigIncomplete { .. } => "MEM_CONFIG_INCOMPLETE",
             EngineError::MissingRequiredDescription { .. } => "MISSING_REQUIRED_DESCRIPTION",
             EngineError::DescriptionNotPermitted { .. } => "DESCRIPTION_NOT_PERMITTED",
             EngineError::RelationManualAuthoringForbidden { .. } => {
@@ -1093,24 +1093,24 @@ impl EngineError {
                         serde_json::json!({
                             "from_id": r.from_id,
                             "rel_types": r.rel_types,
-                            "vault": r.vault,
+                            "mem": r.mem,
                         })
                     })
                     .collect();
                 serde_json::json!({ "id": id, "referrers": referrers_json })
             }
-            EngineError::VaultHasIncomingRefs { vault, referrers } => {
+            EngineError::MemHasIncomingRefs { mem, referrers } => {
                 let referrers_json: Vec<_> = referrers
                     .iter()
                     .map(|r| {
                         serde_json::json!({
                             "from_id": r.from_id,
                             "rel_types": r.rel_types,
-                            "vault": r.vault,
+                            "mem": r.mem,
                         })
                     })
                     .collect();
-                serde_json::json!({ "vault": vault, "referrers": referrers_json })
+                serde_json::json!({ "mem": mem, "referrers": referrers_json })
             }
             EngineError::WikiLinkWithoutRelation { from_id, missing } => serde_json::json!({
                 "from_id": from_id,
@@ -1140,7 +1140,7 @@ impl EngineError {
                 // that wrote `[[Idempotency]]` finds `idempotency` under
                 // the same field it already knows. `suggested` is the
                 // general hint and is sometimes a colon-form
-                // (`vault:slug`) for the ambiguous-grammar case — only
+                // (`mem:slug`) for the ambiguous-grammar case — only
                 // promote it to `proposed_slug` when it's a bare slug.
                 let proposed_slug = suggested
                     .as_ref()
@@ -1154,7 +1154,7 @@ impl EngineError {
                     "reason": reason,
                 })
             }
-            EngineError::InvalidWikiLinkVault { raw, section, reason } => {
+            EngineError::InvalidWikiLinkMem { raw, section, reason } => {
                 serde_json::json!({ "raw": raw, "section": section, "reason": reason })
             }
             EngineError::ConflictingSectionModes { section, modes } => {
@@ -1247,8 +1247,8 @@ impl EngineError {
                     "path_truncated": path_truncated,
                 })
             }
-            EngineError::CrossVaultLinkNotAllowed { from_vault, to_vault } => {
-                serde_json::json!({ "from_vault": from_vault, "to_vault": to_vault })
+            EngineError::CrossMemLinkNotAllowed { from_mem, to_mem } => {
+                serde_json::json!({ "from_mem": from_mem, "to_mem": to_mem })
             }
             EngineError::EmptyUpdate { id } => {
                 serde_json::json!({
@@ -1259,27 +1259,27 @@ impl EngineError {
                     ],
                 })
             }
-            EngineError::RenameBlockedByCrossVaultPolicy {
-                from_vault,
+            EngineError::RenameBlockedByCrossMemPolicy {
+                from_mem,
                 blocked_referrers,
             } => {
                 let entries: Vec<_> = blocked_referrers
                     .iter()
                     .map(|r| {
                         serde_json::json!({
-                            "from_vault": r.from_vault,
-                            "to_vault": r.to_vault,
+                            "from_mem": r.from_mem,
+                            "to_mem": r.to_mem,
                             "count": r.count,
                         })
                     })
                     .collect();
                 serde_json::json!({
-                    "from_vault": from_vault,
+                    "from_mem": from_mem,
                     "blocked_referrers": entries,
                 })
             }
-            EngineError::CrossVaultTargetNotFound { target_id, target_vault } => {
-                serde_json::json!({ "target_id": target_id, "target_vault": target_vault })
+            EngineError::CrossMemTargetNotFound { target_id, target_mem } => {
+                serde_json::json!({ "target_id": target_id, "target_mem": target_mem })
             }
             EngineError::Validation(v) => v.details(),
             EngineError::MissingRequiredDescription { rel_type, from_id, to_id } => {
@@ -1308,20 +1308,20 @@ impl EngineError {
                 "guidance": guidance,
             }),
             EngineError::MarkdownExportUnsupportedBackend {
-                vault,
+                mem,
                 active_backend,
                 supported_backends,
             } => serde_json::json!({
-                "vault": vault,
+                "mem": mem,
                 "active_backend": active_backend,
                 "supported_backends": supported_backends,
             }),
-            EngineError::InvalidChangesCursor { vault, since } => serde_json::json!({
-                "vault": vault,
+            EngineError::InvalidChangesCursor { mem, since } => serde_json::json!({
+                "mem": mem,
                 "since": since,
             }),
-            EngineError::SchemaNotFound { vault, pin, sources } => serde_json::json!({
-                "vault": vault,
+            EngineError::SchemaNotFound { mem, pin, sources } => serde_json::json!({
+                "mem": mem,
                 "pin": pin,
                 "sources": sources,
             }),
@@ -1355,14 +1355,14 @@ impl EngineError {
             EngineError::HasIncomingRefs { id, referrers } => {
                 let inline = render_referrers_inline(referrers);
                 format!(
-                    "entity {id} has {n} incoming reference(s) in write vaults ({inline}); remove them first via memstead_relate --remove or memstead_update",
+                    "entity {id} has {n} incoming reference(s) in write mems ({inline}); remove them first via memstead_relate --remove or memstead_update",
                     n = referrers.len(),
                 )
             }
-            EngineError::VaultHasIncomingRefs { vault, referrers } => {
+            EngineError::MemHasIncomingRefs { mem, referrers } => {
                 let inline = render_referrers_inline(referrers);
                 format!(
-                    "vault `{vault}` has {n} incoming reference(s) in write vaults ({inline}); remove them first via memstead_relate --remove or memstead_update",
+                    "mem `{mem}` has {n} incoming reference(s) in write mems ({inline}); remove them first via memstead_relate --remove or memstead_update",
                     n = referrers.len(),
                 )
             }
@@ -1498,8 +1498,8 @@ impl EngineError {
             EngineError::Validation(v) => v.prose_render(),
             // Variants whose `Display` already inlines every recovery
             // field — title invariants, hash mismatch (already explains
-            // the stub case), unknown vault / type (already prints
-            // declared list verbatim), cross-vault gates, stubs,
+            // the stub case), unknown mem / type (already prints
+            // declared list verbatim), cross-mem gates, stubs,
             // patch errors, etc. — fall back to `Display`. Logs and
             // tracing consumers see the same string.
             _ => self.to_string(),
@@ -1510,7 +1510,7 @@ impl EngineError {
 /// Inline-render every [`ReferrerInfo`] without the truncation suffix
 /// `format_inline_list_overflow` applies. Used by
 /// [`EngineError::prose_render`]'s `HasIncomingRefs` /
-/// `VaultHasIncomingRefs` arms — the agent text channel inlines the
+/// `MemHasIncomingRefs` arms — the agent text channel inlines the
 /// full list so recovery doesn't depend on the structured channel.
 fn render_referrers_inline(referrers: &[ReferrerInfo]) -> String {
     referrers
@@ -1569,15 +1569,15 @@ fn _hash_mismatch_msg(id: &str, current: &str, is_stub: bool) -> String {
 /// The boot path layers three error sources: layout detection,
 /// workspace-store load failures, per-mount backend instantiation
 /// (folder + archive vs git-branch), and engine construction
-/// (duplicate-vault checks). `#[from]` lifts the lower-layer types so
+/// (duplicate-mem checks). `#[from]` lifts the lower-layer types so
 /// callers branch on a single error envelope.
 #[derive(Debug, thiserror::Error)]
 pub enum BootError {
     /// `detect_layout` returned [`crate::Layout::Empty`] — workspace
     /// root has no recognised layout marker. Operator runs
-    /// `memstead vault-repo init` rather than booting against an empty
+    /// `memstead mem-repo init` rather than booting against an empty
     /// directory.
-    #[error("workspace at {0} is not initialised — run `memstead vault-repo init` first")]
+    #[error("workspace at {0} is not initialised — run `memstead mem-repo init` first")]
     NotInitialised(PathBuf),
     /// Underlying [`crate::WorkspaceStoreAdapter`] load failed
     /// (missing config file, parse error, format-mismatch).
@@ -1588,7 +1588,7 @@ pub enum BootError {
     /// only knows folder + archive.
     #[error(transparent)]
     Instantiate(#[from] crate::workspace_store::InstantiateError),
-    /// Engine construction failed (duplicate vault names, etc.).
+    /// Engine construction failed (duplicate mem names, etc.).
     #[error(transparent)]
     Engine(#[from] EngineError),
 }
@@ -1626,13 +1626,13 @@ mod plan05_subsystem_tests {
         let requested: semver::Version = "99.0.0".parse().unwrap();
         let sources = SchemaSourceDiagnostic::for_failed_pin("default", &requested, &[]);
         let err = EngineError::SchemaNotFound {
-            vault: "specs".to_string(),
+            mem: "specs".to_string(),
             pin: "default@99.0.0".to_string(),
             sources,
         };
         assert_eq!(err.code(), "SCHEMA_NOT_FOUND");
         let d = err.details();
-        assert_eq!(d["vault"], "specs");
+        assert_eq!(d["mem"], "specs");
         assert_eq!(d["pin"], "default@99.0.0");
         let src = d["sources"].as_array().expect("sources is an array");
         let labels: Vec<&str> = src.iter().map(|s| s["source"].as_str().unwrap()).collect();
@@ -1660,7 +1660,7 @@ mod plan05_subsystem_tests {
     }
 
     /// The ambiguous-grammar case suggests a
-    /// colon-form (`vault:slug`), which is NOT a bare slug — it must not
+    /// colon-form (`mem:slug`), which is NOT a bare slug — it must not
     /// be promoted to `proposed_slug`.
     #[test]
     fn invalid_wiki_link_colon_form_suggestion_is_not_a_proposed_slug() {
@@ -1682,12 +1682,12 @@ mod plan05_subsystem_tests {
     fn invalid_changes_cursor_code_and_details() {
         let sha = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
         let err = EngineError::InvalidChangesCursor {
-            vault: "specs".to_string(),
+            mem: "specs".to_string(),
             since: sha.to_string(),
         };
         assert_eq!(err.code(), "INVALID_CURSOR");
         let d = err.details();
-        assert_eq!(d["vault"], "specs");
+        assert_eq!(d["mem"], "specs");
         assert_eq!(d["since"], sha, "the offending SHA must ride untruncated in details");
     }
 }
@@ -1734,7 +1734,7 @@ mod inline_list_tests {
             .map(|i| ReferrerInfo {
                 from_id: format!("specs--ref{i}"),
                 rel_types: vec!["USES".to_string()],
-                vault: "specs".to_string(),
+                mem: "specs".to_string(),
             })
             .collect();
         let err = EngineError::HasIncomingRefs {
@@ -1821,7 +1821,7 @@ mod inline_list_tests {
             .map(|i| ReferrerInfo {
                 from_id: format!("specs--r{i}"),
                 rel_types: vec!["DEPENDS_ON".to_string()],
-                vault: "specs".to_string(),
+                mem: "specs".to_string(),
             })
             .collect();
         let err = EngineError::HasIncomingRefs {

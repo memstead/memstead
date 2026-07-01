@@ -853,34 +853,34 @@ fn required_outgoing_unknown_cardinality_rejected_at_load() {
 }
 
 // ---------------------------------------------------------------------------
-// cross_vault_relationships section
+// cross_mem_relationships section
 // ---------------------------------------------------------------------------
 
 #[test]
-fn cross_vault_relationships_omitted_loads_cleanly() {
+fn cross_mem_relationships_omitted_loads_cleanly() {
     let schema = load(&minimal_manifest(), &[("sample", &minimal_type())]).unwrap();
-    assert!(schema.manifest.cross_vault_relationships.is_empty());
+    assert!(schema.manifest.cross_mem_relationships.is_empty());
 }
 
 #[test]
-fn cross_vault_relationships_empty_array_loads_cleanly() {
+fn cross_mem_relationships_empty_array_loads_cleanly() {
     let m = minimal_manifest().replace(
         "community:",
-        "cross_vault_relationships: []\ncommunity:",
+        "cross_mem_relationships: []\ncommunity:",
     );
     let schema = load(&m, &[("sample", &minimal_type())]).expect("empty list loads");
-    assert!(schema.manifest.cross_vault_relationships.is_empty());
+    assert!(schema.manifest.cross_mem_relationships.is_empty());
 }
 
 #[test]
-fn cross_vault_relationships_section_loads_well_formed_entries() {
+fn cross_mem_relationships_section_loads_well_formed_entries() {
     let m = minimal_manifest().replace(
         "community:",
-        "cross_vault_relationships:\n  - to_schema: other\n    definitions:\n      - name: ADDRESSES\n        description: outbound\n        default_weight: 1.0\n        source_types: [sample]\n        target_types: [foreign_type]\ncommunity:",
+        "cross_mem_relationships:\n  - to_schema: other\n    definitions:\n      - name: ADDRESSES\n        description: outbound\n        default_weight: 1.0\n        source_types: [sample]\n        target_types: [foreign_type]\ncommunity:",
     );
     let schema = load(&m, &[("sample", &minimal_type())]).unwrap();
-    assert_eq!(schema.manifest.cross_vault_relationships.len(), 1);
-    let entry = &schema.manifest.cross_vault_relationships[0];
+    assert_eq!(schema.manifest.cross_mem_relationships.len(), 1);
+    let entry = &schema.manifest.cross_mem_relationships[0];
     assert_eq!(entry.to_schema, "other");
     assert_eq!(entry.definitions.len(), 1);
     assert_eq!(entry.definitions[0].name, "ADDRESSES");
@@ -891,25 +891,25 @@ fn cross_vault_relationships_section_loads_well_formed_entries() {
 }
 
 #[test]
-fn cross_vault_relationships_to_schema_versioned_rejected() {
+fn cross_mem_relationships_to_schema_versioned_rejected() {
     // `to_schema` is the domain identity — a bare schema name. A
     // version suffix refuses at load so a version component can never
     // re-enter the eligibility path.
     let m = minimal_manifest().replace(
         "community:",
-        "cross_vault_relationships:\n  - to_schema: \"other@1.0.0\"\n    definitions: []\ncommunity:",
+        "cross_mem_relationships:\n  - to_schema: \"other@1.0.0\"\n    definitions: []\ncommunity:",
     );
     let err = load(&m, &[("sample", &minimal_type())]).unwrap_err();
     match err {
-        SchemaLoadError::InvalidCrossVaultToSchema { value, .. } => {
+        SchemaLoadError::InvalidCrossMemToSchema { value, .. } => {
             assert_eq!(value, "other@1.0.0");
         }
-        other => panic!("expected InvalidCrossVaultToSchema, got {other:?}"),
+        other => panic!("expected InvalidCrossMemToSchema, got {other:?}"),
     }
     // The message directs the author to the bare-name form.
     let m2 = minimal_manifest().replace(
         "community:",
-        "cross_vault_relationships:\n  - to_schema: \"other@1.0.0\"\n    definitions: []\ncommunity:",
+        "cross_mem_relationships:\n  - to_schema: \"other@1.0.0\"\n    definitions: []\ncommunity:",
     );
     let msg = load(&m2, &[("sample", &minimal_type())])
         .unwrap_err()
@@ -921,59 +921,59 @@ fn cross_vault_relationships_to_schema_versioned_rejected() {
 }
 
 #[test]
-fn cross_vault_relationships_to_schema_range_rejected() {
+fn cross_mem_relationships_to_schema_range_rejected() {
     // Range syntax is refused like any versioned form.
     let m = minimal_manifest().replace(
         "community:",
-        "cross_vault_relationships:\n  - to_schema: other@^1.0.0\n    definitions: []\ncommunity:",
+        "cross_mem_relationships:\n  - to_schema: other@^1.0.0\n    definitions: []\ncommunity:",
     );
     let err = load(&m, &[("sample", &minimal_type())]).unwrap_err();
     assert!(matches!(
         err,
-        SchemaLoadError::InvalidCrossVaultToSchema { .. }
+        SchemaLoadError::InvalidCrossMemToSchema { .. }
     ));
 }
 
 #[test]
-fn cross_vault_relationships_to_schema_must_be_valid_schema_name() {
+fn cross_mem_relationships_to_schema_must_be_valid_schema_name() {
     // Bare-name values follow the same shape grammar as schema names.
     let m = minimal_manifest().replace(
         "community:",
-        "cross_vault_relationships:\n  - to_schema: Other_Schema\n    definitions: []\ncommunity:",
+        "cross_mem_relationships:\n  - to_schema: Other_Schema\n    definitions: []\ncommunity:",
     );
     let err = load(&m, &[("sample", &minimal_type())]).unwrap_err();
     assert!(matches!(
         err,
-        SchemaLoadError::InvalidCrossVaultToSchema { .. }
+        SchemaLoadError::InvalidCrossMemToSchema { .. }
     ));
 }
 
 #[test]
-fn cross_vault_relationships_duplicate_to_schema_rejected() {
+fn cross_mem_relationships_duplicate_to_schema_rejected() {
     let m = minimal_manifest().replace(
         "community:",
-        "cross_vault_relationships:\n  - to_schema: other\n    definitions: []\n  - to_schema: other\n    definitions: []\ncommunity:",
+        "cross_mem_relationships:\n  - to_schema: other\n    definitions: []\n  - to_schema: other\n    definitions: []\ncommunity:",
     );
     let err = load(&m, &[("sample", &minimal_type())]).unwrap_err();
     match err {
-        SchemaLoadError::DuplicateCrossVaultToSchema { to_schema } => {
+        SchemaLoadError::DuplicateCrossMemToSchema { to_schema } => {
             assert_eq!(to_schema, "other");
         }
-        other => panic!("expected DuplicateCrossVaultToSchema, got {other:?}"),
+        other => panic!("expected DuplicateCrossMemToSchema, got {other:?}"),
     }
 }
 
 #[test]
-fn cross_vault_relationships_source_types_must_belong_to_source() {
+fn cross_mem_relationships_source_types_must_belong_to_source() {
     // `source_types` belong to the source schema's namespace — unknown
     // names raise at load.
     let m = minimal_manifest().replace(
         "community:",
-        "cross_vault_relationships:\n  - to_schema: other\n    definitions:\n      - name: ADDRESSES\n        description: outbound\n        default_weight: 1.0\n        source_types: [not_declared]\n        target_types: [foreign]\ncommunity:",
+        "cross_mem_relationships:\n  - to_schema: other\n    definitions:\n      - name: ADDRESSES\n        description: outbound\n        default_weight: 1.0\n        source_types: [not_declared]\n        target_types: [foreign]\ncommunity:",
     );
     let err = load(&m, &[("sample", &minimal_type())]).unwrap_err();
     match err {
-        SchemaLoadError::UndeclaredCrossVaultSourceType {
+        SchemaLoadError::UndeclaredCrossMemSourceType {
             to_schema,
             relationship,
             reference,
@@ -984,23 +984,23 @@ fn cross_vault_relationships_source_types_must_belong_to_source() {
             assert_eq!(reference, "not_declared");
             assert!(declared.contains(&"sample".to_string()));
         }
-        other => panic!("expected UndeclaredCrossVaultSourceType, got {other:?}"),
+        other => panic!("expected UndeclaredCrossMemSourceType, got {other:?}"),
     }
 }
 
 #[test]
-fn cross_vault_relationships_target_types_are_opaque() {
+fn cross_mem_relationships_target_types_are_opaque() {
     // `target_types` may name strings the source schema has never heard
     // of — they belong to the target schema's namespace and are not
     // checked at source-schema load time.
     let m = minimal_manifest().replace(
         "community:",
-        "cross_vault_relationships:\n  - to_schema: other\n    definitions:\n      - name: ADDRESSES\n        description: outbound\n        default_weight: 1.0\n        source_types: [sample]\n        target_types: [completely_unknown_foreign_name]\ncommunity:",
+        "cross_mem_relationships:\n  - to_schema: other\n    definitions:\n      - name: ADDRESSES\n        description: outbound\n        default_weight: 1.0\n        source_types: [sample]\n        target_types: [completely_unknown_foreign_name]\ncommunity:",
     );
     let schema = load(&m, &[("sample", &minimal_type())])
         .expect("target_types are opaque — opaque strings load cleanly");
     assert_eq!(
-        schema.manifest.cross_vault_relationships[0].definitions[0].target_types,
+        schema.manifest.cross_mem_relationships[0].definitions[0].target_types,
         vec!["completely_unknown_foreign_name".to_string()]
     );
 }

@@ -21,9 +21,9 @@
 </head>
 <body>
 <h1>@memstead/client demo</h1>
-<p>Hydrates a vault snapshot, subscribes to the SSE stream, applies
+<p>Hydrates a mem snapshot, subscribes to the SSE stream, applies
 incoming commit envelopes, and routes searches to the bridge —
-all through a single <code>VaultSyncClient</code> instance.</p>
+all through a single <code>MemSyncClient</code> instance.</p>
 
 <div class="state" id="status">disconnected</div>
 
@@ -42,15 +42,15 @@ all through a single <code>VaultSyncClient</code> instance.</p>
 (<code>cd ../memstead-wasm && wasm-pack build --target web --release</code>),
 build this package (<code>npm run build</code>), then serve the repo
 root via <code>python3 -m http.server</code> and open this page.
-Configure <code>BASE_URL</code> and <code>VAULT</code> below to point
+Configure <code>BASE_URL</code> and <code>MEM</code> below to point
 at your running <code>memstead-bridge</code> embedder.</small>
 
 <script type="module">
 import init, { Engine, setPanicHook } from "../../pkg/memstead_wasm.js";
-import { VaultSyncClient } from "../dist/index.js";
+import { MemSyncClient } from "../dist/index.js";
 
 const BASE_URL = "http://localhost:8000/api";
-const VAULT = "specs";
+const MEM = "specs";
 
 const statusEl = document.getElementById("status");
 const headEl = document.getElementById("head");
@@ -63,9 +63,9 @@ async function main() {
   await init();
   setPanicHook?.();
 
-  const client = new VaultSyncClient({
+  const client = new MemSyncClient({
     baseUrl: BASE_URL,
-    vault: VAULT,
+    mem: MEM,
     engineFactory: (bytes) => Engine.fromSnapshot(bytes),
     onUpdate: () => {
       const h = client.health();

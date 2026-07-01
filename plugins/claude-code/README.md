@@ -4,13 +4,13 @@ Work with a Memstead knowledge graph directly from Claude Code. The plugin gives
 Claude a set of MCP tools (all prefixed `memstead_`) for reading and mutating the
 graph, plus a handful of slash commands that drive the common workflows.
 
-A Memstead vault is a typed graph of interconnected Markdown entities, stored as
+A Memstead mem is a typed graph of interconnected Markdown entities, stored as
 Markdown + git. This plugin is how a Claude Code session reads and grows one.
 
 ## Start here: `/setup`
 
 Run **`/setup`** once per workspace. It resolves the `memstead-mcp` binary,
-prompts for a vault name and schema, runs `memstead init`, writes `.mcp.json`,
+prompts for a mem name and schema, runs `memstead init`, writes `.mcp.json`,
 and tells you to restart Claude Code so the MCP server registers. After the
 restart, the `memstead_*` tools and the slash commands below are available.
 
@@ -26,7 +26,7 @@ to call them directly.)
 
 | Command | Use it when… |
 |---|---|
-| **`/setup`** | First-time setup of a vault in this workspace (see above). |
+| **`/setup`** | First-time setup of a mem in this workspace (see above). |
 | **`/graph`** `<task>` | You want to work with the graph — create, query, update, or connect entities. The general-purpose entry point for graph work. |
 | **`/interview`** | You want to capture what a domain expert knows — a guided, one-question-at-a-time conversation that turns answers into structured entities. |
 | **`/ingest`** | You want to build the graph in bulk from a body of source material — a knowledge-graph builder that runs one pass at a time. |
@@ -45,5 +45,5 @@ or "link these two things," it uses `memstead_create` / `memstead_update` /
 
 - The repo [README](../../README.md) — what Memstead is and the quickstart.
 - [VISION.md](../../VISION.md) and [GLOSSARY.md](../../GLOSSARY.md) — the design
-  rationale and precise term definitions (vault, schema, workspace, …).
+  rationale and precise term definitions (mem, schema, workspace, …).
 - [examples/](../../examples/) — worked schemas you can learn from.

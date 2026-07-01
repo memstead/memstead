@@ -4,12 +4,12 @@
 # Steps:
 #   1. cargo build --workspace   — sanity-check that everything compiles
 #   2. cargo install --path crates/memstead-cli --locked   — `memstead` available on PATH
-#   3. cargo install --path crates/memstead-mcp --locked   — `memstead-mcp` available next to `memstead` (the CLI's sibling-of-current-exe resolution looks here for vault-lifecycle subprocess spawns)
+#   3. cargo install --path crates/memstead-mcp --locked   — `memstead-mcp` available next to `memstead` (the CLI's sibling-of-current-exe resolution looks here for mem-lifecycle subprocess spawns)
 #   4. cargo build --release -p memstead-mcp   — in-tree release binary for Claude Code's MCP server (`.mcp.json` points at this path, keeping per-checkout isolation distinct from the ~/.cargo/bin/ install)
 #
 # Layout: one crate per surface. `memstead-cli` produces the `memstead`
 # binary and `memstead-mcp` produces the `memstead-mcp` binary; both are
-# the full multi-vault, git-backed build by default (the `vault-repo`
+# the full multi-mem, git-backed build by default (the `mem-repo`
 # feature is on by default). `--no-default-features` yields the lean
 # folder-only build — a CI / dependency-hygiene config, not installed
 # here.

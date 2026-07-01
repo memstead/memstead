@@ -1,4 +1,4 @@
-#![cfg(feature = "vault-repo")]
+#![cfg(feature = "mem-repo")]
 //! Regression test: recoverable CLI errors never leak `code: "INTERNAL"`.
 //!
 //! The structural fix (non-optional `CliError.code` and explicit `code`
@@ -45,7 +45,7 @@ fn update_missing_entity_returns_typed_code() {
     let tmp = TempDir::new().unwrap();
     let workspace = tmp.path().join("ws");
     memstead()
-        .args(["vault-repo", "init", workspace.to_str().unwrap(), "--no-gitignore"])
+        .args(["mem-repo", "init", workspace.to_str().unwrap(), "--no-gitignore"])
         .assert()
         .success();
 
@@ -74,7 +74,7 @@ fn update_missing_hash_flag_returns_typed_code() {
     let tmp = TempDir::new().unwrap();
     let workspace = tmp.path().join("ws");
     memstead()
-        .args(["vault-repo", "init", workspace.to_str().unwrap(), "--no-gitignore"])
+        .args(["mem-repo", "init", workspace.to_str().unwrap(), "--no-gitignore"])
         .assert()
         .success();
 
@@ -106,7 +106,7 @@ fn overview_chunk_past_end_returns_typed_code() {
     let tmp = TempDir::new().unwrap();
     let workspace = tmp.path().join("ws");
     memstead()
-        .args(["vault-repo", "init", workspace.to_str().unwrap(), "--no-gitignore"])
+        .args(["mem-repo", "init", workspace.to_str().unwrap(), "--no-gitignore"])
         .assert()
         .success();
 
@@ -162,7 +162,7 @@ fn type_unknown_returns_typed_code() {
     let tmp = TempDir::new().unwrap();
     let workspace = tmp.path().join("ws");
     memstead()
-        .args(["vault-repo", "init", workspace.to_str().unwrap(), "--no-gitignore"])
+        .args(["mem-repo", "init", workspace.to_str().unwrap(), "--no-gitignore"])
         .assert()
         .success();
 

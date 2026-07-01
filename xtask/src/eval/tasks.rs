@@ -1,4 +1,4 @@
-//! Loading the run inputs: the task set (a JSON file) and the vault states (CLI
+//! Loading the run inputs: the task set (a JSON file) and the mem states (CLI
 //! `--state label=path` flags).
 //!
 //! The task file is source-agnostic by design — a hand-authored question and a
@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
-use super::{TaskSpec, VaultState};
+use super::{TaskSpec, MemState};
 
 #[derive(Debug, Deserialize)]
 struct TaskFileEntry {
@@ -38,14 +38,14 @@ pub fn load_tasks(path: &Path) -> Result<Vec<TaskSpec>> {
         .collect())
 }
 
-/// Parse a `--state label=path` argument into a [`VaultState`].
+/// Parse a `--state label=path` argument into a [`MemState`].
 ///
 /// `label=` with an empty path yields a state with no mount (`mcp_config: None`)
-/// — the degenerate "no vault" baseline. A non-empty path is the MCP config that
-/// mounts that state of the vault; an *empty graph* state is expressed as a path
-/// to an MCP config whose vault happens to be empty, so its vault-on arm still
+/// — the degenerate "no mem" baseline. A non-empty path is the MCP config that
+/// mounts that state of the mem; an *empty graph* state is expressed as a path
+/// to an MCP config whose mem happens to be empty, so its mem-on arm still
 /// mounts and the mount-evidence check still holds.
-pub fn parse_state_arg(arg: &str) -> Result<VaultState> {
+pub fn parse_state_arg(arg: &str) -> Result<MemState> {
     let (label, path) = arg
         .split_once('=')
         .with_context(|| format!("--state must be `label=path`, got {arg:?}"))?;
@@ -57,7 +57,7 @@ pub fn parse_state_arg(arg: &str) -> Result<VaultState> {
     } else {
         Some(PathBuf::from(path))
     };
-    Ok(VaultState {
+    Ok(MemState {
         label: label.to_string(),
         mcp_config,
     })

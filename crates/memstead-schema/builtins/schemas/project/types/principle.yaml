@@ -7,7 +7,7 @@ description: |
   operations, not code (e.g. "Engine and apps stay separate",
   "Speed of moving inside the Karpathy window beats polish"). Both
   schemas may carry a `principle` type — they live in different
-  vaults under different schemas, so there is no name collision.
+  mems under different schemas, so there is no name collision.
 when_to_use: |
   Use to record a project-level rule that holds across many choices
   and shapes how future choices are made. The defining test: would
@@ -19,7 +19,7 @@ when_to_use: |
 boundaries:
   - Not a `bet` — bets are choices; principles are rules that constrain choices.
   - Not a `vision` — visions are destinations; principles are rules that govern how the project moves toward the destination.
-  - Not a code-side principle — code-side rules ("the macOS app does not open an in-process MCP client") live in the paired code vault.
+  - Not a code-side principle — code-side rules ("the macOS app does not open an in-process MCP client") live in the paired code mem.
 system_message: |
   A principle records a project-level rule. Statement names the rule
   imperatively. Scope names where the rule applies — the surfaces,

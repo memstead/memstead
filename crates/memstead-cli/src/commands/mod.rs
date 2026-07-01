@@ -162,42 +162,42 @@ pub fn render_type_guidance_block(
     out
 }
 
-/// Merge a `vault_changed` notice array into a `--json` CLI response
+/// Merge a `mem_changed` notice array into a `--json` CLI response
 /// body. No-op when no reload happened during the operation or the
 /// body is not a JSON object. Mirrors the MCP server's
-/// `attach_vault_changed` so the two surfaces emit the same key.
+/// `attach_mem_changed` so the two surfaces emit the same key.
 /// (Always compiled; on basis the engine never stashes a notice, so
 /// `notices` is empty and this no-ops.)
-pub fn merge_vault_changed_json(
+pub fn merge_mem_changed_json(
     body: &mut serde_json::Value,
-    notices: &[memstead_base::ops::VaultChangedNotice],
+    notices: &[memstead_base::ops::MemChangedNotice],
 ) {
     if notices.is_empty() {
         return;
     }
     if let Some(obj) = body.as_object_mut() {
         obj.insert(
-            "vault_changed".to_string(),
+            "mem_changed".to_string(),
             serde_json::to_value(notices).unwrap_or(serde_json::Value::Null),
         );
     }
 }
 
-/// Render a human-readable `vault_changed` block for markdown CLI
+/// Render a human-readable `mem_changed` block for markdown CLI
 /// output. Empty when no reload happened. Names `memstead changes-since`
 /// (never `memstead diff`) for the follow-up, matching the cross-surface
 /// recovery contract. (Always compiled; on basis `notices` is always
 /// empty, so this returns the empty string.)
-pub fn render_vault_changed_block(notices: &[memstead_base::ops::VaultChangedNotice]) -> String {
+pub fn render_mem_changed_block(notices: &[memstead_base::ops::MemChangedNotice]) -> String {
     use memstead_base::ops::NoticeChanges;
     if notices.is_empty() {
         return String::new();
     }
-    let mut out = String::from("\n\n## Vault changed under you");
+    let mut out = String::from("\n\n## Mem changed under you");
     for n in notices {
         out.push_str(&format!(
             "\n\n- `{}` advanced `{}` → `{}`",
-            n.vault, n.from_head, n.to_head
+            n.mem, n.from_head, n.to_head
         ));
         match &n.changes {
             NoticeChanges::Detailed { entries } => {
@@ -245,22 +245,22 @@ pub mod stats;
 pub mod unpublish;
 pub mod update;
 
-// Multi-vault / vault-repo subcommands — compiled into the full
+// Multi-mem / mem-repo subcommands — compiled into the full
 // `memstead` binary (default features); absent from the lean
 // `--no-default-features` build, which has no git-branch backend.
-#[cfg(feature = "vault-repo")]
+#[cfg(feature = "mem-repo")]
 pub mod batch_update;
-#[cfg(feature = "vault-repo")]
+#[cfg(feature = "mem-repo")]
 pub mod branch_reset;
-#[cfg(feature = "vault-repo")]
+#[cfg(feature = "mem-repo")]
 pub mod install;
-#[cfg(feature = "vault-repo")]
+#[cfg(feature = "mem-repo")]
 pub mod recover;
-#[cfg(feature = "vault-repo")]
+#[cfg(feature = "mem-repo")]
 pub mod transport;
-#[cfg(feature = "vault-repo")]
-pub mod vault;
-#[cfg(feature = "vault-repo")]
-pub mod vault_repo;
-#[cfg(feature = "vault-repo")]
+#[cfg(feature = "mem-repo")]
+pub mod mem;
+#[cfg(feature = "mem-repo")]
+pub mod mem_repo;
+#[cfg(feature = "mem-repo")]
 pub mod workspace;

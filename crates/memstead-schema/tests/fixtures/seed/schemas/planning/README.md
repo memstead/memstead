@@ -1,6 +1,6 @@
-# `planning` — schema for planning-phase vaults
+# `planning` — schema for planning-phase mems
 
-Workspace-level schema for every vault that pins `"schema": "planning"` — typically the short-lived vaults under `exec_vaults/` that capture one planning phase each. Seven types capture the deliberation between stating a goal and having a plan executed:
+Workspace-level schema for every mem that pins `"schema": "planning"` — typically the short-lived mems under `exec_mems/` that capture one planning phase each. Seven types capture the deliberation between stating a goal and having a plan executed:
 
 | Phase of thought | Type |
 |---|---|
@@ -12,26 +12,26 @@ Workspace-level schema for every vault that pins `"schema": "planning"` — typi
 | What is still unclear | `open_question` |
 | Everything else (observation, constraint, session log, idea) | `note` |
 
-The graph grows as planning unfolds — it is written during conversation, not bulk-extracted from sources. After execution completes, a lens projection lifts the durable artifacts (accepted decisions, validated risks, surviving open questions) into each project vault listed in `belongs_to`; the planning vault is archived as historical record.
+The graph grows as planning unfolds — it is written during conversation, not bulk-extracted from sources. After execution completes, a lens projection lifts the durable artifacts (accepted decisions, validated risks, surviving open questions) into each project mem listed in `belongs_to`; the planning mem is archived as historical record.
 
 ## Location
 
-This schema lives at the workspace level and is shared by every planning vault that pins it. The workspace's `.memstead/workspace.toml` declares `schemas_dir = "schemas"`, and every `schemas/<name>/` directory is discovered at load time. No per-vault copying is required — a planning vault's `.memstead/config.json` just references the schema by name.
+This schema lives at the workspace level and is shared by every planning mem that pins it. The workspace's `.memstead/workspace.toml` declares `schemas_dir = "schemas"`, and every `schemas/<name>/` directory is discovered at load time. No per-mem copying is required — a planning mem's `.memstead/config.json` just references the schema by name.
 
-Local usage is **unversioned**: a vault simply writes `"schema": "planning"` and the engine resolves against this directory. The `version:` field in `schema.yaml` is metadata preserved for publish/archive workflows; it is not a pin.
+Local usage is **unversioned**: a mem simply writes `"schema": "planning"` and the engine resolves against this directory. The `version:` field in `schema.yaml` is metadata preserved for publish/archive workflows; it is not a pin.
 
-## Lifecycle and vault placement
+## Lifecycle and mem placement
 
-Per-phase vaults live under `exec_vaults/<plan-name>/` (controlled by `allowed_create_paths` in `.memstead/workspace.toml`). Each planning vault declares `belongs_to: [<project-vault>, …]` — the project vaults it intends to lens into — and carries a lens projection at `projections/<plan-name>/lens.json` that writes into each destination vault.
+Per-phase mems live under `exec_mems/<plan-name>/` (controlled by `allowed_create_paths` in `.memstead/workspace.toml`). Each planning mem declares `belongs_to: [<project-mem>, …]` — the project mems it intends to lens into — and carries a lens projection at `projections/<plan-name>/lens.json` that writes into each destination mem.
 
 ```
 brief / directive                    ┐
-existing project-graph state         │ read via cross-vault refs
+existing project-graph state         │ read via cross-mem refs
                                      │
        ↓                             ┘
 ┌────────────────────────────────────────┐
-│ exec_vaults/<plan-name>/               │
-│   planning vault                       │ ← grows during conversation
+│ exec_mems/<plan-name>/               │
+│   planning mem                       │ ← grows during conversation
 │   goal → options → decision            │ ← grows during execution sessions
 │          ↓                             │
 │          step ┬→ step ┬→ …             │
@@ -44,7 +44,7 @@ existing project-graph state         │ read via cross-vault refs
                 │   surviving open questions
                 ↓
 ┌────────────────────────────────────────┐
-│ project_vaults/<each in belongs_to>    │
+│ project_mems/<each in belongs_to>    │
 │   software-schema graphs absorb shares │
 └────────────────────────────────────────┘
                 │
@@ -53,7 +53,7 @@ existing project-graph state         │ read via cross-vault refs
   archive/<plan-name>/        (convention; not wired into the engine today)
 ```
 
-The planning vault is the **child**; project vaults are its **parents**. Cross-vault wiki-links flow from planning → project (child → parents declared in `belongs_to`) but not the reverse.
+The planning mem is the **child**; project mems are its **parents**. Cross-mem wiki-links flow from planning → project (child → parents declared in `belongs_to`) but not the reverse.
 
 ## Types
 
@@ -61,7 +61,7 @@ The planning vault is the **child**; project vaults are its **parents**. Cross-v
 
 | Type | Purpose |
 |---|---|
-| `goal` | What the planning phase is set to achieve. Usually 1-3 per vault. Carries `success_criteria` that make 'done' checkable. |
+| `goal` | What the planning phase is set to achieve. Usually 1-3 per mem. Carries `success_criteria` that make 'done' checkable. |
 
 ### Deliberation — weighing the path
 
@@ -103,7 +103,7 @@ Common default-schema edges in use: `PART_OF` (goal hierarchy), `MOTIVATED_BY` (
 
 ## Evolving the schema
 
-Because local use is unversioned, shape changes are in-place edits. Active planning vaults see changes on the next engine reload — coordinate rollouts carefully.
+Because local use is unversioned, shape changes are in-place edits. Active planning mems see changes on the next engine reload — coordinate rollouts carefully.
 
 For publishable or portable schema variants, author a copy under `recipes/planning/schema/` where the `version` field matters.
 

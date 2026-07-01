@@ -13,7 +13,7 @@ when_to_use: |
   this matter at the project level — would it appear in a status
   report or a public-facing announcement? If yes, `milestone`. If
   it is internal task-level work, it belongs in the planning schema
-  as `step` or in a paired code vault.
+  as `step` or in a paired code mem.
 boundaries:
   - Not a planning `step` — steps are executor task-level; milestones are operator commitment-level.
   - Not a `bet` — bets are wagers; milestones are committed deliverables that realize a bet.

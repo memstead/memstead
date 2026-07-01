@@ -13,8 +13,8 @@ only to substrate quality.
 ## Run a real B-vs-C comparison end-to-end (single command)
 
 Needs a live `claude` CLI on `$PATH` and the two pro binaries built
-(`cargo build --features vault-repo -p memstead-mcp` and `cargo build -p memstead`).
-The harness **self-provisions** the empty destination vault for the schema-forced
+(`cargo build --features mem-repo -p memstead-mcp` and `cargo build -p memstead`).
+The harness **self-provisions** the empty destination mem for the schema-forced
 arm — no manual setup. Run from the repo root:
 
 ```sh
@@ -24,7 +24,7 @@ cargo run -p xtask -- eval \
   --tasks   "$ROOT/engine/xtask/eval-example/tasks.json" \
   --facts   "$ROOT/engine/xtask/eval-example/facts.json" \
   --capture-corpus "$ROOT/engine/xtask/eval-example/corpus.md" \
-  --capture-workspace /tmp/eval-capture-vault \
+  --capture-workspace /tmp/eval-capture-mem \
   --cli-binary  "$ROOT/engine/target/debug/memstead" \
   --mcp-binary  "$ROOT/engine/target/debug/memstead-mcp" \
   --model claude-sonnet-4-6 \
@@ -34,7 +34,7 @@ cargo run -p xtask -- eval \
 ```
 
 This captures both substrates from the corpus (free-reason-then-write; the
-schema-forced arm writes typed entities into the provisioned vault via MCP, the
+schema-forced arm writes typed entities into the provisioned mem via MCP, the
 free-form arm writes notes), screens the tasks against the no-substrate arm, answers
 each task from each substrate placed wholly in context (retrieval held out), grades
 blind, measures coverage, and writes a chart-ready series to `--output`. The signed
@@ -44,7 +44,7 @@ Two notes the example bakes in deliberately:
 
 - **`--mcp-binary` must resolve to a real file** — the harness canonicalises it to an
   absolute path before embedding it in the generated mcp-config (which runs
-  `cd <vault> && exec <mcp-binary>`), so a relative path from the repo root works.
+  `cd <mem> && exec <mcp-binary>`), so a relative path from the repo root works.
 - **`--contamination-threshold 0` disables the no-substrate screen** for this demo.
   This toy corpus is small enough that the bare model sometimes fabricates a
   judge-passing answer, so at the default threshold (`0.5`) the guard may flag a task

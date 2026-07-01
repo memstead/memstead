@@ -1,13 +1,13 @@
 //! Git-history replay for the compounding axis.
 //!
-//! The git-branch backend stores each vault as a branch in `vault-repo`; the
-//! vault's content at any past point is just that branch at an older commit. To
+//! The git-branch backend stores each mem as a branch in `mem-repo`; the
+//! mem's content at any past point is just that branch at an older commit. To
 //! score the task set against a historical state we **copy** the live workspace,
-//! move the vault branch ref in the *copy* to the chosen commit, and mount the
+//! move the mem branch ref in the *copy* to the chosen commit, and mount the
 //! copy read-only over MCP.
 //!
-//! The live `vault-repo` is never mutated — only read as the copy source — so
-//! this honours the engine-owns-vault-repo rule: every ref edit lands on a
+//! The live `mem-repo` is never mutated — only read as the copy source — so
+//! this honours the engine-owns-mem-repo rule: every ref edit lands on a
 //! throwaway copy the agent only ever reads.
 
 use std::path::Path;
@@ -15,7 +15,7 @@ use std::process::Command;
 
 use anyhow::{Context, Result, bail};
 
-use super::VaultState;
+use super::MemState;
 
 /// The mcp-config JSON that mounts the workspace at `graph_dir` as a server named
 /// `memstead` (so `--allowedTools mcp__memstead__*` matches).
@@ -28,7 +28,7 @@ pub fn mcp_config_json(graph_dir: &Path, mcp_binary: &Path) -> String {
 }
 
 /// Pick `count` commits evenly across `commits` (oldest→newest), always including
-/// the first and last so the series spans the full growth of the vault.
+/// the first and last so the series spans the full growth of the mem.
 pub fn pick_commits(commits: &[String], count: usize) -> Vec<String> {
     if commits.is_empty() || count == 0 {
         return Vec::new();
@@ -46,13 +46,13 @@ pub fn pick_commits(commits: &[String], count: usize) -> Vec<String> {
 }
 
 /// List commits on `branch` in oldest→newest order.
-pub fn branch_commits(vault_repo: &Path, branch: &str) -> Result<Vec<String>> {
+pub fn branch_commits(mem_repo: &Path, branch: &str) -> Result<Vec<String>> {
     let out = Command::new("git")
         .arg("-C")
-        .arg(vault_repo)
+        .arg(mem_repo)
         .args(["rev-list", "--reverse", branch])
         .output()
-        .with_context(|| format!("git rev-list {branch} in {}", vault_repo.display()))?;
+        .with_context(|| format!("git rev-list {branch} in {}", mem_repo.display()))?;
     if !out.status.success() {
         bail!(
             "git rev-list {branch} failed: {}",
@@ -67,17 +67,17 @@ pub fn branch_commits(vault_repo: &Path, branch: &str) -> Result<Vec<String>> {
 }
 
 /// Prepare one historical state: copy the live workspace to `dest_root/<label>`,
-/// move `vault_branch` to `commit` in the copy, clear the cached mount/index
+/// move `mem_branch` to `commit` in the copy, clear the cached mount/index
 /// state so the engine re-reads the moved ref, and write the mcp-config. Returns
-/// a [`VaultState`] pointing at the written config.
+/// a [`MemState`] pointing at the written config.
 pub fn prepare_state(
     live_graph: &Path,
     dest_root: &Path,
     label: &str,
-    vault_branch: &str,
+    mem_branch: &str,
     commit: &str,
     mcp_binary: &Path,
-) -> Result<VaultState> {
+) -> Result<MemState> {
     let dest = dest_root.join(label);
     if dest.exists() {
         std::fs::remove_dir_all(&dest)
@@ -92,43 +92,43 @@ pub fn prepare_state(
     if !cp.success() {
         bail!("copying {} → {} failed", live_graph.display(), dest.display());
     }
-    let vault_repo = dest.join("vault-repo");
+    let mem_repo = dest.join("mem-repo");
     let mv = Command::new("git")
         .arg("-C")
-        .arg(&vault_repo)
-        .args(["branch", "-f", vault_branch, commit])
+        .arg(&mem_repo)
+        .args(["branch", "-f", mem_branch, commit])
         .status()
-        .context("moving vault branch ref")?;
+        .context("moving mem branch ref")?;
     if !mv.success() {
-        bail!("git branch -f {vault_branch} {commit} failed in {}", vault_repo.display());
+        bail!("git branch -f {mem_branch} {commit} failed in {}", mem_repo.display());
     }
     // Leave `.memstead/state/mounts.json` in place — it is the mount list, and
-    // deleting it unmounts every vault. The mount points at the branch *ref*
+    // deleting it unmounts every mem. The mount points at the branch *ref*
     // (`refs/heads/<branch>`), so moving the ref is enough: the engine detects
-    // the changed HEAD and reloads the vault's content from the new commit.
+    // the changed HEAD and reloads the mem's content from the new commit.
 
     let cfg_path = dest_root.join(format!("{label}.mcp.json"));
     std::fs::write(&cfg_path, mcp_config_json(&dest, mcp_binary))
         .with_context(|| format!("writing mcp-config {}", cfg_path.display()))?;
-    Ok(VaultState {
+    Ok(MemState {
         label: label.to_string(),
         mcp_config: Some(cfg_path),
     })
 }
 
-/// Prepare `count` states spanning `vault_branch`'s history (oldest→newest). The
+/// Prepare `count` states spanning `mem_branch`'s history (oldest→newest). The
 /// oldest is the near-empty state the compounding axis must read as ~0 delta; the
 /// newest is the current graph.
 pub fn prepare_history(
     live_graph: &Path,
     dest_root: &Path,
-    vault_branch: &str,
+    mem_branch: &str,
     count: usize,
     mcp_binary: &Path,
-) -> Result<Vec<VaultState>> {
-    let commits = branch_commits(&live_graph.join("vault-repo"), vault_branch)?;
+) -> Result<Vec<MemState>> {
+    let commits = branch_commits(&live_graph.join("mem-repo"), mem_branch)?;
     if commits.is_empty() {
-        bail!("no commits on {vault_branch}");
+        bail!("no commits on {mem_branch}");
     }
     let picked = pick_commits(&commits, count);
     std::fs::create_dir_all(dest_root)
@@ -138,7 +138,7 @@ pub fn prepare_history(
         .enumerate()
         .map(|(i, c)| {
             let label = format!("s{:02}-{}", i, &c[..8.min(c.len())]);
-            prepare_state(live_graph, dest_root, &label, vault_branch, c, mcp_binary)
+            prepare_state(live_graph, dest_root, &label, mem_branch, c, mcp_binary)
         })
         .collect()
 }

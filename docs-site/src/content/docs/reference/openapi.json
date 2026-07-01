@@ -121,7 +121,7 @@
             "minimum": 0,
             "type": "integer"
           },
-          "vaults": {
+          "mems": {
             "items": {
               "$ref": "#/components/schemas/IndexEntry"
             },
@@ -129,7 +129,7 @@
           }
         },
         "required": [
-          "vaults",
+          "mems",
           "count"
         ],
         "type": "object"
@@ -264,7 +264,7 @@
                 }
               }
             },
-            "description": "Ranked vault index"
+            "description": "Ranked mem index"
           },
           "500": {
             "description": "internal error: database read failed"
@@ -293,7 +293,7 @@
                 }
               }
             },
-            "description": "Vault accepted and stored"
+            "description": "Mem accepted and stored"
           },
           "400": {
             "description": "Validation refused the archive, or the request body was empty"
@@ -308,7 +308,7 @@
             "description": "Validator timed out"
           },
           "410": {
-            "description": "Vault tombstoned (admin take-down), or archive content blocked by the deny-list"
+            "description": "Mem tombstoned (admin take-down), or archive content blocked by the deny-list"
           },
           "413": {
             "description": "Request body exceeded the 2 MB cap"
@@ -325,7 +325,7 @@
         ]
       }
     },
-    "/api/vault/{scope}/{name_ext}": {
+    "/api/mem/{scope}/{name_ext}": {
       "delete": {
         "operationId": "delete_unpublish",
         "parameters": [
@@ -339,7 +339,7 @@
             }
           },
           {
-            "description": "Bare vault name (the DELETE handler treats the segment as `<name>` even though the GET handler treats it as `<name>.<ext>`).",
+            "description": "Bare mem name (the DELETE handler treats the segment as `<name>` even though the GET handler treats it as `<name>.<ext>`).",
             "in": "path",
             "name": "name_ext",
             "required": true,
@@ -369,7 +369,7 @@
                 }
               }
             },
-            "description": "Vault removed. Ordinary unpublish hard-deletes the row + 3 artifacts so the `<scope>/<name>` is immediately re-publishable; an admin takedown deny-lists the bytes, tombstones the rows, and burns the name so neither the bytes nor the name can be re-published"
+            "description": "Mem removed. Ordinary unpublish hard-deletes the row + 3 artifacts so the `<scope>/<name>` is immediately re-publishable; an admin takedown deny-lists the bytes, tombstones the rows, and burns the name so neither the bytes nor the name can be re-published"
           },
           "401": {
             "description": "Bearer token missing or rejected by GitHub"
@@ -418,7 +418,7 @@
             "description": "Unknown scope/name, no current version, malformed `name_ext`, or artifact file missing on disk"
           },
           "410": {
-            "description": "Vault was unpublished (tombstoned)"
+            "description": "Mem was unpublished (tombstoned)"
           },
           "500": {
             "description": "Database read or filesystem read failed"
@@ -429,7 +429,7 @@
         ]
       }
     },
-    "/api/vault/{scope}/{name}/{version_ext}": {
+    "/api/mem/{scope}/{name}/{version_ext}": {
       "get": {
         "operationId": "get_artifact_versioned",
         "parameters": [
@@ -443,7 +443,7 @@
             }
           },
           {
-            "description": "Vault name.",
+            "description": "Mem name.",
             "in": "path",
             "name": "name",
             "required": true,
@@ -512,7 +512,7 @@
     },
     "/v/{scope}/{name}": {
       "get": {
-        "operationId": "get_vault_page",
+        "operationId": "get_mem_page",
         "parameters": [
           {
             "description": "Publisher scope — `github:<handle>`, `<domain>:<handle>`, or a bare `<handle>` (no `@` prefix).",
@@ -524,7 +524,7 @@
             }
           },
           {
-            "description": "Vault name.",
+            "description": "Mem name.",
             "in": "path",
             "name": "name",
             "required": true,
@@ -538,20 +538,20 @@
             "content": {
               "text/html": {}
             },
-            "description": "Vault detail page (HTML)"
+            "description": "Mem detail page (HTML)"
           },
           "404": {
             "content": {
               "text/html": {}
             },
-            "description": "Vault not found, or tombstoned — both render the same branded 404 HTML page"
+            "description": "Mem not found, or tombstoned — both render the same branded 404 HTML page"
           },
           "500": {
             "description": "Database read or filesystem read failed"
           }
         },
         "tags": [
-          "handlers::vault_page"
+          "handlers::mem_page"
         ]
       }
     }

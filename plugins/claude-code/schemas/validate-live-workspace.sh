@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Validate plugin-format files in the live workspace against the
 # memstead-plugin/v0 schemas. Walks the four-primitive layout under
-# `.memstead/`: `mediums/<vault>/*.json`, `facets/<vault>/*.json`,
-# `projections/<vault>/*.json`, and `ingests/*.json`.
+# `.memstead/`: `mediums/<mem>/*.json`, `facets/<mem>/*.json`,
+# `projections/<mem>/*.json`, and `ingests/*.json`.
 #
 # Also validates each schema document against the JSON Schema 2020-12
 # metaschema (sanity check on the schema files themselves) and the

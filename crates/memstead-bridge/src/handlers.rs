@@ -1,7 +1,7 @@
 //! axum handler helpers for the bridge HTTP surface.
 //!
 //! Embedders mount these four handlers under a path prefix of their
-//! choice (`/api/vaults/:name/...` is the canonical layout from the
+//! choice (`/api/mems/:name/...` is the canonical layout from the
 //! plan body) behind their own auth middleware. The handlers know
 //! nothing about auth, sessions, or tenancy — those are the
 //! embedder's concern.
@@ -11,10 +11,10 @@
 //! - `GET <prefix>/head` — `text/plain` HEAD SHA.
 //! - `GET <prefix>/commits?since=<sha>&until=<sha>` — JSON array of
 //!   `CommitEnvelope`s.
-//! - `GET <prefix>/events` — SSE stream emitting `vault_changed`
+//! - `GET <prefix>/events` — SSE stream emitting `mem_changed`
 //!   events.
 //!
-//! Refusal status mapping: `UNKNOWN_VAULT` → 404, `UNKNOWN_COMMIT` →
+//! Refusal status mapping: `UNKNOWN_MEM` → 404, `UNKNOWN_COMMIT` →
 //! 404, `DELTA_TOO_LARGE` → 409, everything else → 500. Each refusal
 //! also serialises an `ErrorEnvelope` JSON body.
 
@@ -36,7 +36,7 @@ use crate::builder::{
     BuildConfig, build_commit_envelope, build_commit_envelopes, build_snapshot, run_search,
 };
 use crate::error::{BridgeError, ErrorEnvelope};
-use crate::wire::{CommitEnvelope, SearchQuery, VaultChangedEvent};
+use crate::wire::{CommitEnvelope, SearchQuery, MemChangedEvent};
 
 /// State the embedder constructs and threads through axum. The
 /// engine is shared behind a `tokio::sync::Mutex` so the
@@ -46,17 +46,17 @@ use crate::wire::{CommitEnvelope, SearchQuery, VaultChangedEvent};
 pub struct BridgeState {
     pub engine: Arc<Mutex<memstead_base::Engine>>,
     pub config: BuildConfig,
-    /// Optional allowlist of vaults the bridge will surface. `None`
-    /// means "expose every vault the engine knows about". Useful for
+    /// Optional allowlist of mems the bridge will surface. `None`
+    /// means "expose every mem the engine knows about". Useful for
     /// embedders that mount the bridge under a multi-tenant routing
     /// layer and want a defence-in-depth filter on top of their own
-    /// path-based vault disambiguation.
+    /// path-based mem disambiguation.
     pub allowlist: Option<Vec<String>>,
 }
 
 impl BridgeState {
     /// Construct a state with no allowlist (every engine-mounted
-    /// vault is exposed).
+    /// mem is exposed).
     pub fn new(engine: Arc<Mutex<memstead_base::Engine>>) -> Self {
         Self {
             engine,
@@ -72,15 +72,15 @@ impl BridgeState {
         self
     }
 
-    /// Builder-style override for the optional vault allowlist.
-    pub fn with_allowlist(mut self, vaults: Vec<String>) -> Self {
-        self.allowlist = Some(vaults);
+    /// Builder-style override for the optional mem allowlist.
+    pub fn with_allowlist(mut self, mems: Vec<String>) -> Self {
+        self.allowlist = Some(mems);
         self
     }
 
-    fn vault_allowed(&self, vault: &str) -> bool {
+    fn mem_allowed(&self, mem: &str) -> bool {
         match &self.allowlist {
-            Some(list) => list.iter().any(|n| n == vault),
+            Some(list) => list.iter().any(|n| n == mem),
             None => true,
         }
     }
@@ -90,7 +90,7 @@ impl BridgeState {
 /// status + JSON envelope body. Wire-stable.
 fn error_response(err: BridgeError) -> Response {
     let status = match &err {
-        BridgeError::UnknownVault(_) | BridgeError::UnknownCommit(_) => StatusCode::NOT_FOUND,
+        BridgeError::UnknownMem(_) | BridgeError::UnknownCommit(_) => StatusCode::NOT_FOUND,
         BridgeError::DeltaTooLarge { .. } => StatusCode::CONFLICT,
         BridgeError::InvalidSearchQuery { .. } => StatusCode::BAD_REQUEST,
         BridgeError::Engine(_) | BridgeError::Git(_) => StatusCode::INTERNAL_SERVER_ERROR,
@@ -99,17 +99,17 @@ fn error_response(err: BridgeError) -> Response {
     (status, Json(envelope)).into_response()
 }
 
-/// `GET <prefix>/snapshot` — returns the vault's archive bytes
+/// `GET <prefix>/snapshot` — returns the mem's archive bytes
 /// (`application/zip`).
 pub async fn snapshot_handler(
     State(state): State<BridgeState>,
-    Path(vault): Path<String>,
+    Path(mem): Path<String>,
 ) -> Response {
-    if !state.vault_allowed(&vault) {
-        return error_response(BridgeError::UnknownVault(vault));
+    if !state.mem_allowed(&mem) {
+        return error_response(BridgeError::UnknownMem(mem));
     }
     let engine = state.engine.lock().await;
-    match build_snapshot(&engine, &vault) {
+    match build_snapshot(&engine, &mem) {
         Ok(snap) => {
             let mut response = (
                 StatusCode::OK,
@@ -131,22 +131,22 @@ pub async fn snapshot_handler(
     }
 }
 
-/// `GET <prefix>/head` — returns the vault's HEAD SHA as
+/// `GET <prefix>/head` — returns the mem's HEAD SHA as
 /// `text/plain` (no trailing newline). Empty response when the
 /// branch does not exist locally.
 pub async fn head_handler(
     State(state): State<BridgeState>,
-    Path(vault): Path<String>,
+    Path(mem): Path<String>,
 ) -> Response {
-    if !state.vault_allowed(&vault) {
-        return error_response(BridgeError::UnknownVault(vault));
+    if !state.mem_allowed(&mem) {
+        return error_response(BridgeError::UnknownMem(mem));
     }
     let engine = state.engine.lock().await;
-    match build_snapshot(&engine, &vault) {
+    match build_snapshot(&engine, &mem) {
         // Reuse the snapshot path's HEAD resolution; the snapshot
         // bytes go to waste here but we keep one canonical lookup
         // path. If profiling shows the wasted export becomes a
-        // bottleneck, split off a dedicated `head_for_vault` builder.
+        // bottleneck, split off a dedicated `head_for_mem` builder.
         Ok(snap) => (
             StatusCode::OK,
             [(header::CONTENT_TYPE, "text/plain")],
@@ -165,7 +165,7 @@ pub struct CommitsQuery {
     #[serde(default)]
     pub since: String,
     /// Upper bound of the range (inclusive). Empty / missing →
-    /// vault branch tip.
+    /// mem branch tip.
     #[serde(default)]
     pub until: Option<String>,
 }
@@ -174,11 +174,11 @@ pub struct CommitsQuery {
 /// commit envelopes.
 pub async fn commits_handler(
     State(state): State<BridgeState>,
-    Path(vault): Path<String>,
+    Path(mem): Path<String>,
     Query(q): Query<CommitsQuery>,
 ) -> Response {
-    if !state.vault_allowed(&vault) {
-        return error_response(BridgeError::UnknownVault(vault));
+    if !state.mem_allowed(&mem) {
+        return error_response(BridgeError::UnknownMem(mem));
     }
     let engine = state.engine.lock().await;
     let since = if q.since.is_empty() {
@@ -187,31 +187,31 @@ pub async fn commits_handler(
         q.since.as_str()
     };
     let until = q.until.as_deref();
-    match build_commit_envelopes(&engine, &vault, since, until, &state.config) {
+    match build_commit_envelopes(&engine, &mem, since, until, &state.config) {
         Ok(envs) => Json::<Vec<CommitEnvelope>>(envs).into_response(),
         Err(e) => error_response(e),
     }
 }
 
-/// `GET <prefix>/events` — SSE stream pushing `vault_changed` events
-/// every time the named vault's HEAD advances. Each SSE response
+/// `GET <prefix>/events` — SSE stream pushing `mem_changed` events
+/// every time the named mem's HEAD advances. Each SSE response
 /// owns a fresh subscription to the engine's broadcast channel; the
 /// subscription drops automatically when the client disconnects (axum
 /// drops the future, which drops the `SubscriptionHandle` we capture
 /// inside the stream).
 pub async fn events_handler(
     State(state): State<BridgeState>,
-    Path(vault): Path<String>,
+    Path(mem): Path<String>,
 ) -> Response {
-    if !state.vault_allowed(&vault) {
-        return error_response(BridgeError::UnknownVault(vault));
+    if !state.mem_allowed(&mem) {
+        return error_response(BridgeError::UnknownMem(mem));
     }
     let (handle, rx) = {
         let engine = state.engine.lock().await;
-        match engine.subscribe_vault_changes_broadcast(&vault) {
+        match engine.subscribe_mem_changes_broadcast(&mem) {
             Ok(pair) => pair,
-            Err(memstead_base::EngineError::UnknownVault(name)) => {
-                return error_response(BridgeError::UnknownVault(name));
+            Err(memstead_base::EngineError::UnknownMem(name)) => {
+                return error_response(BridgeError::UnknownMem(name));
             }
             Err(other) => return error_response(BridgeError::Engine(other.to_string())),
         }
@@ -221,13 +221,13 @@ pub async fn events_handler(
         .into_response()
 }
 
-/// Map a tokio broadcast `Receiver<memstead_base::VaultChangedEvent>`
+/// Map a tokio broadcast `Receiver<memstead_base::MemChangedEvent>`
 /// into the SSE event stream the handler returns. `handle` is moved
 /// in so the engine subscription stays alive for the lifetime of the
 /// stream — dropping the stream drops the handle, which unsubscribes
 /// from the engine.
 fn events_stream(
-    rx: tokio::sync::broadcast::Receiver<memstead_base::engine::VaultChangedEvent>,
+    rx: tokio::sync::broadcast::Receiver<memstead_base::engine::MemChangedEvent>,
     handle: memstead_base::engine::SubscriptionHandle,
 ) -> impl Stream<Item = Result<Event, Infallible>> + Send + 'static {
     let stream = tokio_stream::wrappers::BroadcastStream::new(rx);
@@ -238,7 +238,7 @@ fn events_stream(
     let kept = Arc::new(handle);
     stream.map(
         move |item: Result<
-            memstead_base::engine::VaultChangedEvent,
+            memstead_base::engine::MemChangedEvent,
             tokio_stream::wrappers::errors::BroadcastStreamRecvError,
         >| {
             // Keep the handle reference inside the closure so it shares
@@ -249,9 +249,9 @@ fn events_stream(
             let _alive = kept.clone();
             let event = match item {
                 Ok(core_event) => {
-                    let wire: VaultChangedEvent = core_event.into();
+                    let wire: MemChangedEvent = core_event.into();
                     let data = serde_json::to_string(&wire).unwrap_or_else(|_| "{}".to_string());
-                    Event::default().event("vault_changed").data(data)
+                    Event::default().event("mem_changed").data(data)
                 }
                 // Lagged subscribers get a structured note rather than
                 // silent gaps. The client re-syncs via `/commits` from
@@ -276,13 +276,13 @@ fn events_stream(
 /// over the range API.
 pub async fn commit_handler(
     State(state): State<BridgeState>,
-    Path((vault, sha)): Path<(String, String)>,
+    Path((mem, sha)): Path<(String, String)>,
 ) -> Response {
-    if !state.vault_allowed(&vault) {
-        return error_response(BridgeError::UnknownVault(vault));
+    if !state.mem_allowed(&mem) {
+        return error_response(BridgeError::UnknownMem(mem));
     }
     let engine = state.engine.lock().await;
-    match build_commit_envelope(&engine, &vault, &sha) {
+    match build_commit_envelope(&engine, &mem, &sha) {
         Ok(env) => Json(env).into_response(),
         Err(e) => error_response(e),
     }
@@ -295,7 +295,7 @@ pub async fn commit_handler(
 /// only spans the actual `Engine::search` call (held inside
 /// `run_search`). Refusal status mapping inherits from
 /// [`error_response`]: `INVALID_SEARCH_QUERY` → 400,
-/// `UNKNOWN_VAULT` → 404, `ENGINE_ERROR` → 500.
+/// `UNKNOWN_MEM` → 404, `ENGINE_ERROR` → 500.
 ///
 /// The canonical consumer is the WASM engine (`memstead-wasm`)
 /// — its `engine.search(...)` always throws
@@ -303,14 +303,14 @@ pub async fn commit_handler(
 /// here.
 pub async fn search_handler(
     State(state): State<BridgeState>,
-    Path(vault): Path<String>,
+    Path(mem): Path<String>,
     Query(q): Query<SearchQuery>,
 ) -> Response {
-    if !state.vault_allowed(&vault) {
-        return error_response(BridgeError::UnknownVault(vault));
+    if !state.mem_allowed(&mem) {
+        return error_response(BridgeError::UnknownMem(mem));
     }
     let engine = state.engine.lock().await;
-    match run_search(&engine, &vault, q, &state.config) {
+    match run_search(&engine, &mem, q, &state.config) {
         Ok(result) => Json(result).into_response(),
         Err(e) => error_response(e),
     }

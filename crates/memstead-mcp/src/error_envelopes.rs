@@ -1,6 +1,6 @@
 //! Shared MCP error-envelope translators.
 //!
-//! Both the vault-repo (`server.rs`) and filesystem-vault
+//! Both the mem-repo (`server.rs`) and filesystem-mem
 //! (`filesystem_server.rs`) handlers map engine errors onto the
 //! `{code, message, details}` wire envelope agents branch on. The
 //! per-`ValidationError` translation is bit-identical across the two

@@ -1,15 +1,15 @@
-//! `memstead-serve` — a generic read-only HTTP/MCP server over a sealed vault.
+//! `memstead-serve` — a generic read-only HTTP/MCP server over a sealed mem.
 //!
-//! Mounts one vault read-only and serves the read-only HTTP surface. With no
+//! Mounts one mem read-only and serves the read-only HTTP surface. With no
 //! archive configured it serves the embedded curated "what is Memstead"
-//! content vault, so the read tier works zero-setup. Every deployment specific
+//! content mem, so the read tier works zero-setup. Every deployment specific
 //! is an input from the environment:
 //!
 //! - `MEMSTEAD_SERVE_ARCHIVE` — path to a sealed `.mem` archive. When unset,
-//!   the binary serves the embedded curated content vault.
+//!   the binary serves the embedded curated content mem.
 //! - `MEMSTEAD_SERVE_AUTHORITY` — published authority identity, e.g. the host
 //!   this is served under (default: `memstead`)
-//! - `MEMSTEAD_SERVE_VAULT` — vault name (default: `flagship` for an archive,
+//! - `MEMSTEAD_SERVE_MEM` — mem name (default: `flagship` for an archive,
 //!   `memstead` for the embedded content)
 //! - `MEMSTEAD_SERVE_SCHEMA` — schema pin `name@x.y.z` (default: `default@1.0.0`)
 //! - `MEMSTEAD_SERVE_BIND` — listen address (default: `0.0.0.0:8080`)
@@ -23,7 +23,7 @@ use std::path::PathBuf;
 
 use memstead_base::MountStorage;
 use memstead_serve::{
-    AppState, EMBEDDED_CONTENT_VAULT, ReadOnlyMcpServer, build_app, materialize_embedded_content,
+    AppState, EMBEDDED_CONTENT_MEM, ReadOnlyMcpServer, build_app, materialize_embedded_content,
     mount_read_only,
 };
 
@@ -44,30 +44,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .parse()
         .map_err(|e| format!("invalid MEMSTEAD_SERVE_SCHEMA {schema_pin:?}: {e}"))?;
 
-    // Vault source: an explicit sealed archive, else the embedded curated
-    // content vault so the read tier serves real content with no setup.
-    let (vault, storage) = if let Ok(archive) = std::env::var("MEMSTEAD_SERVE_ARCHIVE") {
-        let vault = std::env::var("MEMSTEAD_SERVE_VAULT").unwrap_or_else(|_| "flagship".to_string());
-        (vault, MountStorage::Archive { path: PathBuf::from(archive) })
+    // Mem source: an explicit sealed archive, else the embedded curated
+    // content mem so the read tier serves real content with no setup.
+    let (mem, storage) = if let Ok(archive) = std::env::var("MEMSTEAD_SERVE_ARCHIVE") {
+        let mem = std::env::var("MEMSTEAD_SERVE_MEM").unwrap_or_else(|_| "flagship".to_string());
+        (mem, MountStorage::Archive { path: PathBuf::from(archive) })
     } else {
         let dir = materialize_embedded_content()?;
         eprintln!(
             "memstead-serve: no MEMSTEAD_SERVE_ARCHIVE set; serving the embedded curated \
-content vault from {}",
+content mem from {}",
             dir.display()
         );
-        let vault =
-            std::env::var("MEMSTEAD_SERVE_VAULT").unwrap_or_else(|_| EMBEDDED_CONTENT_VAULT.to_string());
-        (vault, MountStorage::Folder { path: dir })
+        let mem =
+            std::env::var("MEMSTEAD_SERVE_MEM").unwrap_or_else(|_| EMBEDDED_CONTENT_MEM.to_string());
+        (mem, MountStorage::Folder { path: dir })
     };
     // `/api` and `/mcp` each get their own read-only engine over the same
     // sealed archive — the mount is immutable, so two readers need no
     // coordination, and it sidesteps the std-vs-tokio mutex split between the
     // two surfaces.
-    let api_engine = mount_read_only(vault.clone(), schema.clone(), storage.clone())?;
-    let mcp_engine = mount_read_only(vault, schema, storage)?;
+    let api_engine = mount_read_only(mem.clone(), schema.clone(), storage.clone())?;
+    let mcp_engine = mount_read_only(mem, schema, storage)?;
     // This binary serves the authority's own curated content (the embedded
-    // "what is Memstead" vault, or a deliberately-configured archive), so it
+    // "what is Memstead" mem, or a deliberately-configured archive), so it
     // vouches for it as first-party. An operator pointing it at arbitrary
     // content can suppress that with `MEMSTEAD_SERVE_ORIGIN=third-party`.
     let content_origin = match std::env::var("MEMSTEAD_SERVE_ORIGIN").ok().as_deref() {

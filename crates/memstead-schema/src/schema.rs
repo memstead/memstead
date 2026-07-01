@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::manifest::{
-    Cardinality, CrossVaultRelationshipEntry, RelationshipDef, RelationshipMode, SchemaManifest,
+    Cardinality, CrossMemRelationshipEntry, RelationshipDef, RelationshipMode, SchemaManifest,
 };
 use crate::types::TypeDefinition;
 
@@ -145,19 +145,19 @@ impl Schema {
         self.manifest.alias_target_rel_type.as_deref()
     }
 
-    /// Look up the cross-vault entry whose `to_schema` matches the
+    /// Look up the cross-mem entry whose `to_schema` matches the
     /// target schema's *name*. Returns `None` when this schema declares
     /// no outbound entry for that domain.
     ///
     /// Eligibility is name-based: a schema names a domain, and a
-    /// version is one iteration of describing it. The target vault's
+    /// version is one iteration of describing it. The target mem's
     /// pinned version never participates in the match, so a version
     /// bump on the target side cannot invalidate the declaration. The
     /// loader guarantees `to_schema` is a validated bare schema name,
     /// so plain string equality is exact here.
-    pub fn cross_vault_entry(&self, target_name: &str) -> Option<&CrossVaultRelationshipEntry> {
+    pub fn cross_mem_entry(&self, target_name: &str) -> Option<&CrossMemRelationshipEntry> {
         self.manifest
-            .cross_vault_relationships
+            .cross_mem_relationships
             .iter()
             .find(|entry| entry.to_schema == target_name)
     }

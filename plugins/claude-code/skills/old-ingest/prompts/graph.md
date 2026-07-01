@@ -3,7 +3,7 @@
 - before creating anything, search the graph for existing coverage — not just exact duplicates but entities that already capture the same concepts under a different name. update the existing entity instead of creating a new one
 - when reading the graph, look for repeated content across entities. if the same knowledge lives in multiple places, consolidate it into the right entity and remove it from the others — without losing information
 - wire relationships as you go — entities without connections are orphans that nobody will find
-- no cross-vault wiki-links or relationships — note cross-vault dependencies in Constraints as plain text
+- no cross-mem wiki-links or relationships — note cross-mem dependencies in Constraints as plain text
 - the graph is a network, not a list. every entity should be reachable from related entities
 
 ## Entity Lifecycle

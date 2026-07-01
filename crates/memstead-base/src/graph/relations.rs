@@ -6,13 +6,13 @@ use crate::entity::EntityId;
 use crate::store::Store;
 
 /// Get all ancestors of an entity via PART_OF chain (with cycle detection).
-/// Returns ancestors from immediate parent to root, same-vault only.
+/// Returns ancestors from immediate parent to root, same-mem only.
 pub fn ancestors(store: &Store, id: &EntityId, hierarchy_rel: &str) -> Vec<EntityId> {
     let node = match store.get(id) {
         Some(n) => n,
         None => return Vec::new(),
     };
-    let vault = &node.vault;
+    let mem = &node.mem;
 
     let mut result = Vec::new();
     let mut visited = HashSet::new();
@@ -38,12 +38,12 @@ pub fn ancestors(store: &Store, id: &EntityId, hierarchy_rel: &str) -> Vec<Entit
             break;
         }
 
-        // Cross-vault boundary
+        // Cross-mem boundary
         let parent_node = match store.get(&parent_id) {
             Some(n) => n,
             None => break,
         };
-        if parent_node.vault != *vault {
+        if parent_node.mem != *mem {
             break;
         }
 
@@ -56,13 +56,13 @@ pub fn ancestors(store: &Store, id: &EntityId, hierarchy_rel: &str) -> Vec<Entit
 }
 
 /// Get all descendants of an entity via PART_OF hierarchy (BFS).
-/// Uses incoming PART_OF edges to find children. Same-vault only.
+/// Uses incoming PART_OF edges to find children. Same-mem only.
 pub fn descendants(store: &Store, id: &EntityId, hierarchy_rel: &str) -> Vec<EntityId> {
     let node = match store.get(id) {
         Some(n) => n,
         None => return Vec::new(),
     };
-    let vault = &node.vault;
+    let mem = &node.mem;
 
     let mut result = Vec::new();
     let mut visited = HashSet::new();
@@ -89,7 +89,7 @@ pub fn descendants(store: &Store, id: &EntityId, hierarchy_rel: &str) -> Vec<Ent
                 Some(n) => n,
                 None => continue,
             };
-            if child_node.vault != *vault {
+            if child_node.mem != *mem {
                 continue;
             }
             visited.insert(edge.from.clone());
@@ -122,12 +122,12 @@ mod tests {
     use crate::store::{Edge, EdgeSource};
     use indexmap::IndexMap;
 
-    fn entity(id: &str, vault: &str) -> Entity {
+    fn entity(id: &str, mem: &str) -> Entity {
         Entity {
             id: EntityId(id.to_string()),
             title: id.to_string(),
             entity_type: "spec".to_string(),
-            vault: vault.to_string(),
+            mem: mem.to_string(),
             file_path: String::new(),
             metadata: IndexMap::new(),
             sections: IndexMap::new(),
@@ -198,7 +198,7 @@ mod tests {
     }
 
     #[test]
-    fn ancestors_stops_at_vault_boundary() {
+    fn ancestors_stops_at_mem_boundary() {
         let mut store = Store::new();
         store.upsert(EntityId("s--child".into()), entity("s--child", "s"));
         store.upsert(
@@ -208,7 +208,7 @@ mod tests {
         add_part_of(&mut store, "s--child", "other--parent");
 
         let ancs = ancestors(&store, &EntityId("s--child".into()), "PART_OF");
-        assert!(ancs.is_empty()); // parent is in different vault
+        assert!(ancs.is_empty()); // parent is in different mem
     }
 
     #[test]
@@ -227,7 +227,7 @@ mod tests {
     }
 
     #[test]
-    fn descendants_stops_at_vault_boundary() {
+    fn descendants_stops_at_mem_boundary() {
         let mut store = Store::new();
         store.upsert(EntityId("s--root".into()), entity("s--root", "s"));
         store.upsert(

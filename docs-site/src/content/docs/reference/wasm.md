@@ -52,10 +52,10 @@ pub fn apply_commit(&mut self, envelope: JsValue) -> Result<(), JsValue>
 ```
 
 Apply an externally-produced commit envelope to the in-memory
-store. Parsed against the vault's pinned schema; on any parse
+store. Parsed against the mem's pinned schema; on any parse
 failure the entire envelope is refused and the store stays at
-its prior SHA. Emits the same `VaultChangedEvent` every other
-vault-advance flows through.
+its prior SHA. Emits the same `MemChangedEvent` every other
+mem-advance flows through.
 
 The `envelope` parameter accepts the JSON shape the bridge's
 `/commits` endpoint produces — `serde-wasm-bindgen` decodes
@@ -71,7 +71,7 @@ can branch on the same code MCP would surface.
 pub fn get_entity(&self, id: &str) -> Result<JsValue, JsValue>
 ```
 
-Read one entity by id (`<vault>--<slug>` shape). Returns
+Read one entity by id (`<mem>--<slug>` shape). Returns
 `undefined` when the id is not in the store — same shape the
 MCP `memstead_entity` tool surfaces for a miss.
 
@@ -82,7 +82,7 @@ pub fn health(&self) -> Result<JsValue, JsValue>
 ```
 
 Health summary for the engine — entity counts, edge counts,
-per-vault breakdown. Mirrors the shape `memstead_health` returns
+per-mem breakdown. Mirrors the shape `memstead_health` returns
 in MCP.
 
 ### `Engine.search`
@@ -102,15 +102,15 @@ it, catch the typed code, and route. Same discipline the
 native engine uses today on `wasm32` targets at the Rust API
 surface.
 
-### `Engine.vaultNames`
+### `Engine.memNames`
 
-*Underlying Rust function: `vault_names`*
+*Underlying Rust function: `mem_names`*
 
 ```rust
-pub fn vault_names(&self) -> Result<JsValue, JsValue>
+pub fn mem_names(&self) -> Result<JsValue, JsValue>
 ```
 
-Vault names this engine is mounted against. Cheap accessor —
+Mem names this engine is mounted against. Cheap accessor —
 useful for diagnostic UIs and for routing follow-up reads
-without re-deriving the vault list from health output.
+without re-deriving the mem list from health output.
 

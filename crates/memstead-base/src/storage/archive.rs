@@ -1,9 +1,9 @@
-//! Archive [`VaultBackend`] — a sealed `.mem` zip vault, read-only.
+//! Archive [`MemBackend`] — a sealed `.mem` zip mem, read-only.
 //!
-//! The third sibling of folder and git-branch backends. Vault content
+//! The third sibling of folder and git-branch backends. Mem content
 //! lives compressed inside a zip; the engine reads markdown entries
 //! through this backend without unzipping to disk. Write methods
-//! return [`BackendError::Sealed`] — archive-mounted vaults are
+//! return [`BackendError::Sealed`] — archive-mounted mems are
 //! distribution artifacts, not edit targets.
 //!
 //! ## Reading
@@ -51,7 +51,7 @@ enum ArchiveSource {
     Bytes(Vec<u8>),
 }
 
-/// Archive-backed [`crate::backend::VaultBackend`]. Holds either the
+/// Archive-backed [`crate::backend::MemBackend`]. Holds either the
 /// on-disk path to the sealed zip or an in-memory byte buffer; opens
 /// the archive lazily on each read call.
 pub struct ArchiveBackend {
@@ -124,7 +124,7 @@ impl ArchiveBackend {
 trait ReadSeek: std::io::Read + Seek {}
 impl<T: std::io::Read + Seek + ?Sized> ReadSeek for T {}
 
-impl crate::backend::VaultBackend for ArchiveBackend {
+impl crate::backend::MemBackend for ArchiveBackend {
     fn list_entities(&self) -> Result<Vec<PathBuf>, BackendError> {
         let mut out = Vec::new();
         self.with_archive_reader(|reader| {
@@ -182,8 +182,8 @@ impl crate::backend::VaultBackend for ArchiveBackend {
         Ok(Vec::new())
     }
 
-    fn read_vault_config(&self) -> Result<Option<Vec<u8>>, BackendError> {
-        // Archives bundle the per-vault config inside the zip at
+    fn read_mem_config(&self) -> Result<Option<Vec<u8>>, BackendError> {
+        // Archives bundle the per-mem config inside the zip at
         // `.memstead/config.json`. Return the raw bytes on hit,
         // Ok(None) on miss.
         // Path-backed archives that are absent return Ok(None) to
@@ -219,7 +219,7 @@ impl crate::backend::VaultBackend for ArchiveBackend {
     fn read_archive_provenance(&self) -> Result<Option<Vec<u8>>, BackendError> {
         // The optional provenance payload lives at
         // `.memstead/provenance.json` inside the zip. Same shape as
-        // `read_vault_config`: raw bytes on hit, Ok(None) on miss (a
+        // `read_mem_config`: raw bytes on hit, Ok(None) on miss (a
         // pre-provenance archive simply omits the member).
         if let ArchiveSource::Path(p) = &self.source
             && !p.is_file()
@@ -265,7 +265,7 @@ where
         let raw_name = entry.name().to_string();
         if entry.is_symlink() {
             return Err(BackendError::Other(format!(
-                "entry '{raw_name}': symlinks are not allowed in sealed vault archives"
+                "entry '{raw_name}': symlinks are not allowed in sealed mem archives"
             )));
         }
         let safe_path = match entry.enclosed_name() {
@@ -303,7 +303,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::VaultBackend;
+    use crate::backend::MemBackend;
     use std::io::Write as _;
     use tempfile::TempDir;
     use zip::write::SimpleFileOptions;
@@ -365,7 +365,7 @@ mod tests {
         );
         let backend = ArchiveBackend::new(archive);
         assert_eq!(
-            backend.read_vault_config().unwrap(),
+            backend.read_mem_config().unwrap(),
             None,
             "a `.other/config.json` archive must not serve config"
         );

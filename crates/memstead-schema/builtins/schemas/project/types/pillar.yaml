@@ -3,26 +3,26 @@
 name: pillar
 description: |
   A top-level subsystem of the project — the project-level
-  representative of an external code vault (or other deliverable
+  representative of an external code mem (or other deliverable
   worth tracking at project scale). Carries kind (engine, app,
   plugin, service, website, research) and current velocity (hot,
   warm, cold).
 when_to_use: |
   Use to model a subsystem whose existence and posture matter at the
-  project level. Typically one pillar per code-side vault, but a
+  project level. Typically one pillar per code-side mem, but a
   pillar may also track a non-code deliverable (a research arm, a
   community surface). The defining test: would the operator naturally
   list this as one of the project's "main pieces" in a top-level
-  summary? If yes, `pillar`. If no, it lives inside the code vault
+  summary? If yes, `pillar`. If no, it lives inside the code mem
   alone and does not need a project-level entity.
 boundaries:
-  - Not a code component — fine-grained code structure lives in the paired code vault under software@0.1.0.
+  - Not a code component — fine-grained code structure lives in the paired code mem under software@0.1.0.
   - Not a milestone — pillars are durable subsystems; milestones are committed checkpoints against them.
   - Not a bet — pillars are what exists; bets are choices about what to do with them.
 system_message: |
   A pillar is the project-level handle for one subsystem. Required
   to wiki-link a primary external entity in the corresponding code
-  vault — this is the bridge between project view and code view.
+  mem — this is the bridge between project view and code view.
   The auto-emitted REFERENCES edge anchors the pillar in the code
   graph; agents traversing from project posture into code truth
   follow this edge. Velocity is for queries like "which pillars are
@@ -33,7 +33,7 @@ sections:
     required: true
     search_weight: 30.0
     write_rules:
-      - "One paragraph naming what this pillar covers — its boundary against the project's other pillars. Standalone-readable. Wiki-link to the primary external entity in the paired code vault (e.g. `[[engine:engine-workspace]]`); the auto-emitted REFERENCES is the bridge into the code view."
+      - "One paragraph naming what this pillar covers — its boundary against the project's other pillars. Standalone-readable. Wiki-link to the primary external entity in the paired code mem (e.g. `[[engine:engine-workspace]]`); the auto-emitted REFERENCES is the bridge into the code view."
   - key: current_shape
     heading: Current Shape
     required: true
@@ -82,6 +82,6 @@ updatable_fields: [title, scope, current_shape, open_front, notes, kind, velocit
 health_required_fields: [scope, current_shape]
 staleness_threshold_days: 90
 write_rules:
-  - "Wiki-link the paired code-vault entity in Scope. A pillar that REFERENCES no code-vault entity is a name without realization — the engine warns."
+  - "Wiki-link the paired code-mem entity in Scope. A pillar that REFERENCES no code-mem entity is a name without realization — the engine warns."
   - "Sub-pillars connect via PART_OF. Keep the hierarchy shallow; a pillar tree more than two levels deep is probably too fine-grained for the project view."
   - "Velocity is observed, not aspirational. A pillar marked `hot` because the operator wishes it were hot is wrong; mark it the velocity it actually has."

@@ -1,8 +1,8 @@
-//! Workspace-shape `.memstead/config.json` for filesystem vaults.
+//! Workspace-shape `.memstead/config.json` for filesystem mems.
 //!
 //! Distinct from the archive-shape config in
 //! [`super::super::validator::config`]: the workspace shape adds a
-//! `deps` list (cross-vault dependencies on registry-published vaults)
+//! `deps` list (cross-mem dependencies on registry-published mems)
 //! and pins `format` to a different version namespace so a workspace
 //! file accidentally fed to the archive validator (or vice versa)
 //! surfaces as a typed mismatch rather than a generic serde error.
@@ -19,13 +19,13 @@
 //!
 //! - `format`: workspace-config format integer. Bumped on breaking
 //!   shape changes; current = [`FILESYSTEM_WORKSPACE_FORMAT`].
-//! - `name`: vault slug — **path-derived**, not persisted. Identity of
+//! - `name`: mem slug — **path-derived**, not persisted. Identity of
 //!   record is the mounts roster (`state/mounts.json`); on read an absent
 //!   `name` is filled from the workspace-root basename. The schema
 //!   validator tombstones a stray `name` in `config.json`.
-//! - `schema`: vault schema pin in exact `<name>@<version>` form
+//! - `schema`: mem schema pin in exact `<name>@<version>` form
 //!   (e.g. `"default@1.0.0"`) — bare-name pins are rejected at parse.
-//! - `deps`: cross-vault dependencies, each in `scope/name` form. The
+//! - `deps`: cross-mem dependencies, each in `scope/name` form. The
 //!   list ordering is preserved on round-trip; duplicates are
 //!   rejected at parse time.
 //! - `version`, `description`, `authors`: optional fields used by
@@ -36,7 +36,7 @@
 //! ## Publish projection
 //!
 //! [`Self::to_published`] converts the workspace shape to a strict
-//! [`PublishedVaultConfig`] for `memstead publish`, dropping `deps` and
+//! [`PublishedMemConfig`] for `memstead publish`, dropping `deps` and
 //! enforcing the archive's stricter requirements (versioned schema,
 //! present `version` field). Errors surface via
 //! [`PublishConversionError`] from `memstead-schema`.
@@ -45,7 +45,7 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use memstead_schema::{
-    PUBLISHED_VAULT_FORMAT, PublishConversionError, PublishedVaultConfig, SchemaRef,
+    PUBLISHED_MEM_FORMAT, PublishConversionError, PublishedMemConfig, SchemaRef,
 };
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -54,12 +54,12 @@ use serde::{Deserialize, Serialize};
 /// on breaking shape changes; current consumers (`memstead init`,
 /// `memstead link`, `memstead publish`, the filesystem engine) all check this
 /// before parsing the rest. Distinct from
-/// [`memstead_schema::PUBLISHED_VAULT_FORMAT`] so a misfiled archive
+/// [`memstead_schema::PUBLISHED_MEM_FORMAT`] so a misfiled archive
 /// config inside a workspace surfaces as
 /// [`WorkspaceConfigError::UnsupportedFormat`].
 pub const FILESYSTEM_WORKSPACE_FORMAT: u32 = 1;
 
-/// Cross-vault dependency entry. Mirrors the Tier 3 wiki-link
+/// Cross-mem dependency entry. Mirrors the Tier 3 wiki-link
 /// addressing scheme `[[scope/name:slug]]` and the `memstead link
 /// <scope>/<name>` CLI shorthand.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -114,15 +114,15 @@ impl<'de> Deserialize<'de> for DepRef {
     }
 }
 
-/// Workspace-shape `.memstead/config.json` for a filesystem vault. Distinct
-/// from [`PublishedVaultConfig`] (the archive shape).
+/// Workspace-shape `.memstead/config.json` for a filesystem mem. Distinct
+/// from [`PublishedMemConfig`] (the archive shape).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct WorkspaceConfig {
     /// Format integer. Always [`FILESYSTEM_WORKSPACE_FORMAT`] on
     /// successful load.
     pub format: u32,
-    /// Vault slug — path-derived under the unified layout. The vault's identity
+    /// Mem slug — path-derived under the unified layout. The mem's identity
     /// of record lives in the mounts roster (`state/mounts.json`); the engine no
     /// longer writes `name` into `config.json` (the schema validator tombstones a
     /// stray `name`), so it is omitted on serialize and, when absent on read,
@@ -132,7 +132,7 @@ pub struct WorkspaceConfig {
     /// Schema pin. Exact `<name>@<version>` only — bare-name pins are
     /// rejected at parse.
     pub schema: SchemaRef,
-    /// Vault version, used by `memstead publish`. Optional in the
+    /// Mem version, used by `memstead publish`. Optional in the
     /// workspace shape; required when publishing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<semver::Version>,
@@ -142,7 +142,7 @@ pub struct WorkspaceConfig {
     /// Optional author list.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub authors: Option<Vec<String>>,
-    /// Cross-vault dependencies. Order preserved; duplicates rejected
+    /// Cross-mem dependencies. Order preserved; duplicates rejected
     /// at parse time.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub deps: Vec<DepRef>,
@@ -152,8 +152,8 @@ impl WorkspaceConfig {
     /// Build a fresh workspace config with `format` set to
     /// [`FILESYSTEM_WORKSPACE_FORMAT`], the engine default `version`
     /// (`0.1.0`), and an empty deps list. Convenience for `memstead init`.
-    /// F1: every vault carries a populated `version` from creation
-    /// onward — operators bump via `memstead vault set-version` before
+    /// F1: every mem carries a populated `version` from creation
+    /// onward — operators bump via `memstead mem set-version` before
     /// publishing.
     pub fn new(name: impl Into<String>, schema: SchemaRef) -> Self {
         Self {
@@ -183,13 +183,13 @@ impl WorkspaceConfig {
     /// by sealed `.mem` archives. Drops `deps` and applies the same
     /// requirements as [`memstead_schema::published_config_from`]
     /// (versioned schema, present `version`).
-    pub fn to_published(&self) -> Result<PublishedVaultConfig, PublishConversionError> {
+    pub fn to_published(&self) -> Result<PublishedMemConfig, PublishConversionError> {
         let version = self
             .version
             .clone()
             .ok_or(PublishConversionError::MissingVersion)?;
-        Ok(PublishedVaultConfig {
-            format: PUBLISHED_VAULT_FORMAT,
+        Ok(PublishedMemConfig {
+            format: PUBLISHED_MEM_FORMAT,
             name: self.name.clone(),
             version,
             description: self.description.clone(),
@@ -237,18 +237,18 @@ fn check_slug(value: &str, label: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Validate a vault name against the slug shape. Since the name is now
+/// Validate a mem name against the slug shape. Since the name is now
 /// path-derived (no longer persisted in `config.json`), callers that accept a
-/// vault name as input — e.g. `memstead init --name` — validate it here at the
+/// mem name as input — e.g. `memstead init --name` — validate it here at the
 /// boundary instead of relying on a config round-trip to reject a bad value.
-pub fn validate_vault_name(name: &str) -> Result<(), String> {
+pub fn validate_mem_name(name: &str) -> Result<(), String> {
     check_slug(name, "name")
 }
 
 /// Conventional path of the workspace config inside a workspace root.
 pub fn config_path(workspace_root: &Path) -> PathBuf {
     workspace_root
-        .join(crate::vault::VAULT_META_DIR)
+        .join(crate::mem::MEM_META_DIR)
         .join("config.json")
 }
 
@@ -320,7 +320,7 @@ pub fn read_workspace_config(workspace_root: &Path) -> Result<WorkspaceConfig, W
         config.name = workspace_root
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| "vault".to_string());
+            .unwrap_or_else(|| "mem".to_string());
     }
     Ok(config)
 }
@@ -363,20 +363,20 @@ pub fn write_workspace_config(
     Ok(())
 }
 
-/// Initialise a brand-new filesystem (folder-backed) vault at `root` — the
-/// engine-owned counterpart of `memstead init` for a single collapsed vault.
+/// Initialise a brand-new filesystem (folder-backed) mem at `root` — the
+/// engine-owned counterpart of `memstead init` for a single collapsed mem.
 /// Writes the canonical `.memstead/config.json`, the `cache/` + `memstead-io/`
 /// subdirs, the `workspace.toml` adapter marker, and the `state/mounts.json`
 /// one-folder-mount roster, so the result roots directly through
-/// [`crate::Engine::from_workspace_root`]. The vault root *is* the workspace
-/// root (collapsed single-vault form).
+/// [`crate::Engine::from_workspace_root`]. The mem root *is* the workspace
+/// root (collapsed single-mem form).
 ///
 /// This is the engine entry external embedders (the macOS app's bootstrap)
 /// route through instead of hand-writing `.memstead/config.json` from their
 /// own code — the engine owns the seed structure. Creates `root` (and the
 /// `.memstead/` tree) if absent; the caller is responsible for refusing a
 /// non-empty target if that matters.
-pub fn init_filesystem_vault(
+pub fn init_filesystem_mem(
     root: &Path,
     name: &str,
     schema: &SchemaRef,
@@ -393,16 +393,16 @@ pub fn init_filesystem_vault(
     std::fs::create_dir_all(memstead_dir.join("cache"))?;
     std::fs::create_dir_all(memstead_dir.join("memstead-io"))?;
     // Two-layer file adapter marker — `from_workspace_root` recognises a
-    // workspace by `.memstead/workspace.toml`. The filesystem vault collapses
-    // workspace = vault root: one folder mount carries every entity.
+    // workspace by `.memstead/workspace.toml`. The filesystem mem collapses
+    // workspace = mem root: one folder mount carries every entity.
     std::fs::write(
         memstead_dir.join("workspace.toml"),
-        "format = \"memstead-git-branch-1\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+        "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
     )?;
 
     let workspace = Workspace {
         mounts: vec![Mount {
-            vault: name.to_string(),
+            mem: name.to_string(),
             schema: Some(schema.clone()),
             storage: MountStorage::Folder {
                 path: root.to_path_buf(),
@@ -442,28 +442,28 @@ mod tests {
     }
 
     #[test]
-    fn init_filesystem_vault_produces_a_rootable_workspace() {
+    fn init_filesystem_mem_produces_a_rootable_workspace() {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path().join("notes");
-        init_filesystem_vault(&root, "notes", &versioned("default", "1.0.0")).unwrap();
+        init_filesystem_mem(&root, "notes", &versioned("default", "1.0.0")).unwrap();
 
         // Seed structure landed: config + adapter marker + mounts roster.
         assert!(config_path(&root).is_file());
         assert!(root.join(".memstead").join("workspace.toml").is_file());
         assert!(root.join(".memstead").join("state").join("mounts.json").is_file());
 
-        // And it roots directly through the engine, listing the one vault.
+        // And it roots directly through the engine, listing the one mem.
         let engine = crate::Engine::from_workspace_root(&root).unwrap();
         assert!(
-            engine.vault_router().writable_vaults().iter().any(|v| v == "notes"),
-            "init'd vault must be writable in the rooted engine"
+            engine.mem_router().writable_mems().iter().any(|v| v == "notes"),
+            "init'd mem must be writable in the rooted engine"
         );
     }
 
     fn ok_config_value() -> serde_json::Value {
         serde_json::json!({
             "format": FILESYSTEM_WORKSPACE_FORMAT,
-            "name": "demo-vault",
+            "name": "demo-mem",
             "schema": "default@1.0.0",
         })
     }
@@ -476,7 +476,7 @@ mod tests {
     fn parses_minimal_config() {
         let cfg = parse(ok_config_value()).unwrap();
         assert_eq!(cfg.format, FILESYSTEM_WORKSPACE_FORMAT);
-        assert_eq!(cfg.name, "demo-vault");
+        assert_eq!(cfg.name, "demo-mem");
         assert_eq!(cfg.schema.as_display(), "default@1.0.0");
         assert!(cfg.deps.is_empty());
         assert!(cfg.version.is_none());
@@ -486,7 +486,7 @@ mod tests {
     fn parses_full_config() {
         let v = serde_json::json!({
             "format": FILESYSTEM_WORKSPACE_FORMAT,
-            "name": "demo-vault",
+            "name": "demo-mem",
             "schema": "default@1.0.0",
             "version": "0.1.0",
             "description": "demo",
@@ -532,7 +532,7 @@ mod tests {
         // namespaces overlap on the filename but not on the format
         // integer.
         let mut v = ok_config_value();
-        v["format"] = serde_json::json!(PUBLISHED_VAULT_FORMAT);
+        v["format"] = serde_json::json!(PUBLISHED_MEM_FORMAT);
         let err = parse(v).unwrap_err();
         assert!(matches!(err, WorkspaceConfigError::UnsupportedFormat { .. }));
     }
@@ -619,9 +619,9 @@ mod tests {
     #[test]
     fn engine_written_config_omits_name_and_read_derives_basename() {
         let tmp = TempDir::new().unwrap();
-        let root = tmp.path().join("my-vault");
+        let root = tmp.path().join("my-mem");
         std::fs::create_dir_all(&root).unwrap();
-        let cfg = WorkspaceConfig::new("my-vault", versioned("default", "1.0.0"));
+        let cfg = WorkspaceConfig::new("my-mem", versioned("default", "1.0.0"));
         write_workspace_config(&root, &cfg).unwrap();
 
         // The persisted config carries no `name` (the schema validator
@@ -635,7 +635,7 @@ mod tests {
 
         // Read fills the identity from the basename.
         let read = read_workspace_config(&root).unwrap();
-        assert_eq!(read.name, "my-vault");
+        assert_eq!(read.name, "my-mem");
     }
 
     #[test]
@@ -650,7 +650,7 @@ mod tests {
         std::fs::write(config_path(tmp.path()), v.to_string()).unwrap();
         let read = read_workspace_config(tmp.path()).unwrap();
         // A present legacy name is read as-is (basename fallback only kicks in
-        // when absent), so old vaults keep working.
+        // when absent), so old mems keep working.
         assert_eq!(read.name, "legacy-name");
     }
 
@@ -671,11 +671,11 @@ mod tests {
         cfg.add_dep("anthropic/core".parse().unwrap());
 
         let published = cfg.to_published().unwrap();
-        assert_eq!(published.format, PUBLISHED_VAULT_FORMAT);
+        assert_eq!(published.format, PUBLISHED_MEM_FORMAT);
         assert_eq!(published.name, "demo");
         assert_eq!(published.version.to_string(), "0.1.0");
         assert_eq!(published.schema.name, "default");
-        // PublishedVaultConfig has no `deps` field — the projection
+        // PublishedMemConfig has no `deps` field — the projection
         // simply drops them. Verify it still serialises clean.
         let serialised = serde_json::to_value(&published).unwrap();
         assert!(serialised.get("deps").is_none());
@@ -683,7 +683,7 @@ mod tests {
 
     #[test]
     fn to_published_requires_version() {
-        // F1: vault-init populates `version` with `0.1.0` by default
+        // F1: mem-init populates `version` with `0.1.0` by default
         // so `to_published` no longer trips on a freshly-created
         // config. Simulate the pre-gate / externally-imported config
         // by clearing `version` explicitly.

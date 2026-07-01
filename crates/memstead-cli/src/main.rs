@@ -4,9 +4,9 @@
 //! (same text MCP returns); `--json` emits structured content matching
 //! the MCP `structured_content` payload.
 //!
-//! One crate, two build configs. The default (`vault-repo`) build is
-//! the full `memstead`: every subcommand, including the multi-vault /
-//! vault-repo lifecycle (`vault`, `vault-repo`, `workspace`, `install`,
+//! One crate, two build configs. The default (`mem-repo`) build is
+//! the full `memstead`: every subcommand, including the multi-mem /
+//! mem-repo lifecycle (`mem`, `mem-repo`, `workspace`, `install`,
 //! `batch-update`, `recover`). `--no-default-features` drops the
 //! git-branch backend and those subcommands — a CI / wasm-adjacent
 //! config, not shipped.
@@ -56,7 +56,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         Command::Health(args) => commands::health::run(&ctx, args),
         Command::Export(args) => commands::export::run(&ctx, args),
         Command::Init(args) => commands::init::run(&ctx, args),
-        #[cfg(feature = "vault-repo")]
+        #[cfg(feature = "mem-repo")]
         Command::Install(args) => commands::install::run(&ctx, args),
         Command::Link(args) => commands::link::run(&ctx, args),
         Command::Publish(args) => commands::publish::run(&ctx, args),
@@ -77,33 +77,33 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         Command::Relate(args) => commands::relate::run(&ctx, args),
         Command::Delete(args) => commands::delete::run(&ctx, args),
         Command::Rename(args) => commands::rename::run(&ctx, args),
-        #[cfg(feature = "vault-repo")]
+        #[cfg(feature = "mem-repo")]
         Command::BatchUpdate(args) => commands::batch_update::run(&ctx, args),
-        #[cfg(feature = "vault-repo")]
+        #[cfg(feature = "mem-repo")]
         Command::Recover(args) => commands::recover::run(&ctx, args),
         Command::Changes(args) => commands::changes::run(&ctx, args),
         Command::Reload(args) => commands::reload::run(&ctx, args),
-        #[cfg(feature = "vault-repo")]
-        Command::Vault { action } => match action {
-            commands::vault::VaultAction::Init(args) => commands::vault::run(&ctx, args),
-            commands::vault::VaultAction::Unregister(args) => {
-                commands::vault::run_unregister(&ctx, args)
+        #[cfg(feature = "mem-repo")]
+        Command::Mem { action } => match action {
+            commands::mem::MemAction::Init(args) => commands::mem::run(&ctx, args),
+            commands::mem::MemAction::Unregister(args) => {
+                commands::mem::run_unregister(&ctx, args)
             }
-            commands::vault::VaultAction::Delete(args) => commands::vault::run_delete(&ctx, args),
-            commands::vault::VaultAction::SetVersion(args) => {
-                commands::vault::run_set_version(&ctx, args)
+            commands::mem::MemAction::Delete(args) => commands::mem::run_delete(&ctx, args),
+            commands::mem::MemAction::SetVersion(args) => {
+                commands::mem::run_set_version(&ctx, args)
             }
-            commands::vault::VaultAction::SetSchema(args) => {
-                commands::vault::run_set_schema(&ctx, args)
+            commands::mem::MemAction::SetSchema(args) => {
+                commands::mem::run_set_schema(&ctx, args)
             }
-            commands::vault::VaultAction::SetSyncState(args) => {
-                commands::vault::run_set_sync_state(&ctx, args)
+            commands::mem::MemAction::SetSyncState(args) => {
+                commands::mem::run_set_sync_state(&ctx, args)
             }
-            commands::vault::VaultAction::List(args) => commands::vault::run_list(&ctx, args),
+            commands::mem::MemAction::List(args) => commands::mem::run_list(&ctx, args),
         },
-        #[cfg(feature = "vault-repo")]
-        Command::VaultRepo { action } => commands::vault_repo::run(&ctx, action),
-        #[cfg(feature = "vault-repo")]
+        #[cfg(feature = "mem-repo")]
+        Command::MemRepo { action } => commands::mem_repo::run(&ctx, action),
+        #[cfg(feature = "mem-repo")]
         Command::Workspace { action } => commands::workspace::run(&ctx, action),
         Command::Schema(args) => commands::schema::run(&ctx, args),
         Command::Pipeline(args) => commands::pipeline::run(&ctx, args),

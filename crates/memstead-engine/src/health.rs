@@ -4,7 +4,7 @@
 //! Lifted from `memstead-mcp/src/server.rs::memstead_health_unified` so the
 //! health read-envelope is produced by one transport-neutral builder with no
 //! rmcp type in the path — the MCP wrapper handles drift collection, the
-//! schema anchor, the `vault_changed` notice channel, and `CallToolResult`
+//! schema anchor, the `mem_changed` notice channel, and `CallToolResult`
 //! wrapping; none of that lives here.
 //!
 //! The composer returns the complete health payload as a `serde_json::Value`
@@ -21,7 +21,7 @@ use std::collections::HashMap;
 /// `HealthParams`.
 #[derive(Debug)]
 pub struct HealthArgs<'a> {
-    pub vault: Option<&'a str>,
+    pub mem: Option<&'a str>,
     pub include: &'a [String],
     pub limit: Option<usize>,
     pub target_schema: Option<&'a str>,
@@ -39,17 +39,17 @@ pub struct HealthConfig {
 }
 
 /// Typed input failures the composer surfaces. The MCP wrapper maps each
-/// variant to its existing envelope (`UNKNOWN_VAULT`, `INVALID_INPUT`) and
+/// variant to its existing envelope (`UNKNOWN_MEM`, `INVALID_INPUT`) and
 /// the engine fault to its typed translator, so the wire `code` stays put.
 #[derive(Debug, thiserror::Error)]
 pub enum ComposeHealthError {
-    /// `args.vault` names a vault that isn't writable in this workspace. The
+    /// `args.mem` names a mem that isn't writable in this workspace. The
     /// composer surfaces the sorted writable roster so the wrapper can echo
-    /// it in the `UNKNOWN_VAULT` envelope.
-    #[error("unknown vault: \"{name}\"")]
-    UnknownVault {
+    /// it in the `UNKNOWN_MEM` envelope.
+    #[error("unknown mem: \"{name}\"")]
+    UnknownMem {
         name: String,
-        writable_vaults: Vec<String>,
+        writable_mems: Vec<String>,
     },
     /// `args.target_schema` did not parse as a `name@x.y.z` ref. `reason` is
     /// the parser's message, surfaced verbatim in the `INVALID_INPUT`
@@ -100,51 +100,51 @@ pub fn compose_health(
         }
     }
 
-    // Vault filter validation — only writable vaults accepted.
-    let vault_filter: Option<String> = match args.vault {
-        Some(v) if engine.vault_router().is_writable(v) => Some(v.to_string()),
+    // Mem filter validation — only writable mems accepted.
+    let mem_filter: Option<String> = match args.mem {
+        Some(v) if engine.mem_router().is_writable(v) => Some(v.to_string()),
         Some(v) => {
             let mut names: Vec<String> = engine
-                .vault_router()
-                .writable_vaults()
+                .mem_router()
+                .writable_mems()
                 .iter()
                 .cloned()
                 .collect();
             names.sort();
-            return Err(ComposeHealthError::UnknownVault {
+            return Err(ComposeHealthError::UnknownMem {
                 name: v.to_string(),
-                writable_vaults: names,
+                writable_mems: names,
             });
         }
         None => None,
     };
-    let vf = vault_filter.as_deref();
+    let vf = mem_filter.as_deref();
 
-    // Symmetric with the data filter below: vault-attributable warnings
+    // Symmetric with the data filter below: mem-attributable warnings
     // (SUSPICIOUS_NESTED_PREFIX, DUPLICATE_SECTION_HEADING, etc.) drop out when
-    // their source vault isn't the scoped one. Workspace- and request-scoped
+    // their source mem isn't the scoped one. Workspace- and request-scoped
     // warnings (OUTER_REPO_…, UNKNOWN_INCLUDE_KEY, LIMIT_CLAMPED) report `None`
-    // from `source_vault()` and stay visible — agents should see them
-    // regardless of which vault they're scoping to.
+    // from `source_mem()` and stay visible — agents should see them
+    // regardless of which mem they're scoping to.
     if let Some(v) = vf {
-        warnings.retain(|w| w.source_vault().is_none_or(|wv| wv == v));
+        warnings.retain(|w| w.source_mem().is_none_or(|wv| wv == v));
     }
 
-    let in_vault = |e: &memstead_base::Entity| -> bool {
+    let in_mem = |e: &memstead_base::Entity| -> bool {
         match vf {
-            Some(v) => e.vault == v,
+            Some(v) => e.mem == v,
             None => true,
         }
     };
     let real_count = engine
         .store()
         .all_entities()
-        .filter(|e| !e.stub && in_vault(e))
+        .filter(|e| !e.stub && in_mem(e))
         .count();
     let stub_count = engine
         .store()
         .all_entities()
-        .filter(|e| e.stub && in_vault(e))
+        .filter(|e| e.stub && in_mem(e))
         .count();
     let total_count = real_count + stub_count;
 
@@ -155,7 +155,7 @@ pub fn compose_health(
             Some(v) => engine
                 .store()
                 .get(id)
-                .map(|e| e.vault == v)
+                .map(|e| e.mem == v)
                 .unwrap_or(false),
             None => true,
         })
@@ -167,34 +167,34 @@ pub fn compose_health(
             Some(v) => engine
                 .store()
                 .get(id)
-                .map(|e| e.vault == v)
+                .map(|e| e.mem == v)
                 .unwrap_or(false),
             None => true,
         })
         .collect();
 
-    // Under a `vault` filter, scope the community count to clusters with ≥1
-    // member in that vault (filtering the global partition, not re-running
+    // Under a `mem` filter, scope the community count to clusters with ≥1
+    // member in that mem (filtering the global partition, not re-running
     // detection) so it can't contradict the scoped `total_entities` — e.g. an
-    // empty vault reports 0 entities and 0 communities. Mirrors
+    // empty mem reports 0 entities and 0 communities. Mirrors
     // `memstead_overview` via the shared helper.
     let community_count = match vf {
         Some(v) => {
-            memstead_base::graph::community::clusters_in_vault(engine.store(), engine.communities(), v)
+            memstead_base::graph::community::clusters_in_mem(engine.store(), engine.communities(), v)
                 .len()
         }
         None => engine.communities().count,
     };
 
-    // Edge counts: under a vault filter, count only source-in-vault edges
+    // Edge counts: under a mem filter, count only source-in-mem edges
     // (asymmetric — matches the legacy contract).
     let (edge_count, edge_types) = {
         if let Some(v) = vf {
             let mut counts: HashMap<String, usize> = HashMap::new();
             let mut total: usize = 0;
             for id in engine.store().all_ids() {
-                let source_vault = engine.store().get(id).map(|e| e.vault.clone());
-                if let Some(source) = source_vault.as_deref()
+                let source_mem = engine.store().get(id).map(|e| e.mem.clone());
+                if let Some(source) = source_mem.as_deref()
                     && source != v
                 {
                     continue;
@@ -224,7 +224,7 @@ pub fn compose_health(
 
     let type_distribution: Vec<serde_json::Value> = {
         let mut counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
-        for e in engine.store().all_entities().filter(|e| !e.stub && in_vault(e)) {
+        for e in engine.store().all_entities().filter(|e| !e.stub && in_mem(e)) {
             *counts.entry(&e.entity_type).or_default() += 1;
         }
         let mut pairs: Vec<_> = counts.into_iter().collect();
@@ -235,28 +235,28 @@ pub fn compose_health(
             .collect()
     };
 
-    let writable_vaults: Vec<String> = {
+    let writable_mems: Vec<String> = {
         let mut names: Vec<String> = engine
-            .vault_router()
-            .writable_vaults()
+            .mem_router()
+            .writable_mems()
             .iter()
             .cloned()
             .collect();
         names.sort();
         names
     };
-    // The stable default an omitted-`vault` mutation lands in — the first
-    // writable mount in declaration order, not `writable_vaults[0]` of this
-    // alphabetically-sorted roster. Surfaced so an omitted-`vault` write is
+    // The stable default an omitted-`mem` mutation lands in — the first
+    // writable mount in declaration order, not `writable_mems[0]` of this
+    // alphabetically-sorted roster. Surfaced so an omitted-`mem` write is
     // predictable.
-    let default_writable_vault: Option<String> =
-        engine.default_writable_vault().map(|s| s.to_string());
-    let read_vaults: Vec<String> = {
+    let default_writable_mem: Option<String> =
+        engine.default_writable_mem().map(|s| s.to_string());
+    let read_mems: Vec<String> = {
         let writable_set: std::collections::HashSet<&String> =
-            engine.vault_router().writable_vaults().iter().collect();
+            engine.mem_router().writable_mems().iter().collect();
         let mut names: Vec<String> = engine
-            .vault_router()
-            .visible_vaults()
+            .mem_router()
+            .visible_mems()
             .iter()
             .filter(|n| !writable_set.contains(*n))
             .cloned()
@@ -265,29 +265,29 @@ pub fn compose_health(
         names
     };
 
-    // Per-vault schema pins. Source from `engine.mount(name).schema` which
+    // Per-mem schema pins. Source from `engine.mount(name).schema` which
     // carries the pinned `SchemaRef`; render via `as_display()` to get the
     // same `name@version` form pro emits.
     //
-    // Every *visible* vault appears — writable and read-only alike — each
+    // Every *visible* mem appears — writable and read-only alike — each
     // carrying an explicit `writable` attribute. A read-only mount's pinned
     // schema is real; surfacing it here (rather than filtering to writable
-    // vaults) is what keeps health from reporting "no schema" while the
-    // discovery manifest names one. Writable vaults render first (sorted),
+    // mems) is what keeps health from reporting "no schema" while the
+    // discovery manifest names one. Writable mems render first (sorted),
     // then read-only ones (sorted), so a normal writable workspace — which
-    // has no read vaults — keeps its existing entry order, gaining only the
+    // has no read mems — keeps its existing entry order, gaining only the
     // `writable: true` attribute.
-    let vault_schemas: Vec<serde_json::Value> = {
+    let mem_schemas: Vec<serde_json::Value> = {
         let mut entries: Vec<serde_json::Value> = Vec::new();
-        let writable_set: std::collections::HashSet<&String> = writable_vaults.iter().collect();
-        for name in writable_vaults.iter().chain(read_vaults.iter()) {
+        let writable_set: std::collections::HashSet<&String> = writable_mems.iter().collect();
+        for name in writable_mems.iter().chain(read_mems.iter()) {
             if let Some(v) = vf
                 && name != v
             {
                 continue;
             }
             if let Some(m) = engine.mount(name) {
-                // The vault's *settled* pin — `Mount.schema` (now an optional
+                // The mem's *settled* pin — `Mount.schema` (now an optional
                 // assertion). During a dual-pin migration this stays the
                 // settled pin; the in-flight target is the separate
                 // `migration_target` surface below.
@@ -297,12 +297,12 @@ pub fn compose_health(
                     .map(|s| s.as_display())
                     .unwrap_or_default();
                 let mut entry = serde_json::json!({
-                    "vault": name,
+                    "mem": name,
                     "schema": schema_ref,
                     "writable": writable_set.contains(name),
                 });
                 // Dual-pin confirmation surface: present only while a
-                // migration is in flight, so settled vaults' entries stay
+                // migration is in flight, so settled mems' entries stay
                 // byte-identical to before.
                 if let Some(target) = &m.migration_target {
                     entry["migration_target"] = serde_json::json!(target.as_display());
@@ -313,39 +313,39 @@ pub fn compose_health(
         entries
     };
 
-    // #49: segment the orphan / community headlines by the owning vault's
+    // #49: segment the orphan / community headlines by the owning mem's
     // schema. A blended total mixes schemas with opposite norms — ingest
-    // vaults, where each finding is an isolated entity (orphan by design),
-    // versus code/spec vaults, where an orphan is real debt — so a bare
+    // mems, where each finding is an isolated entity (orphan by design),
+    // versus code/spec mems, where an orphan is real debt — so a bare
     // "54 orphans" reads as 54 units of debt when most are by-design
     // isolates. The raw `total_orphans` / `total_communities` are retained
-    // in `summary`, and a `vault`-scoped call still exposes per-vault counts
+    // in `summary`, and a `mem`-scoped call still exposes per-mem counts
     // (the refusal AC); these maps only attribute the totals by schema.
-    // `orphan_ids` is already vault-scoped above; scope the community
-    // attribution to the same vault set.
+    // `orphan_ids` is already mem-scoped above; scope the community
+    // attribution to the same mem set.
     let orphans_by_schema = engine.orphans_by_schema(&orphan_ids);
-    let scope_vaults: Vec<String> = match vf {
+    let scope_mems: Vec<String> = match vf {
         Some(v) => vec![v.to_string()],
-        None => writable_vaults
+        None => writable_mems
             .iter()
-            .chain(read_vaults.iter())
+            .chain(read_mems.iter())
             .cloned()
             .collect(),
     };
-    let communities_by_schema = engine.communities_by_schema(&scope_vaults);
+    let communities_by_schema = engine.communities_by_schema(&scope_mems);
 
     let mut result = serde_json::json!({
-        "vault": vault_filter,
+        "mem": mem_filter,
         "summary": {
             "total_entities": real_count,
             "total_orphans": orphan_ids.len(),
             "total_stubs": stub_pairs.len(),
             "total_stale": health.stale_entities.iter().filter(|e| match vf {
-                Some(v) => engine.store().get(&e.id).map(|ent| ent.vault == v).unwrap_or(false),
+                Some(v) => engine.store().get(&e.id).map(|ent| ent.mem == v).unwrap_or(false),
                 None => true,
             }).count(),
             "total_missing_fields": health.missing_fields.iter().filter(|h| match vf {
-                Some(v) => engine.store().get(&h.id).map(|ent| ent.vault == v).unwrap_or(false),
+                Some(v) => engine.store().get(&h.id).map(|ent| ent.mem == v).unwrap_or(false),
                 None => true,
             }).count(),
             "total_communities": community_count,
@@ -358,10 +358,10 @@ pub fn compose_health(
         "total_edges": edge_count,
         "edge_types": edge_types,
         "type_distribution": type_distribution,
-        "writable_vaults": writable_vaults,
-        "default_writable_vault": default_writable_vault,
-        "read_vaults": read_vaults,
-        "vault_schemas": vault_schemas,
+        "writable_mems": writable_mems,
+        "default_writable_mem": default_writable_mem,
+        "read_mems": read_mems,
+        "mem_schemas": mem_schemas,
     });
     let obj = result.as_object_mut().unwrap();
     if !warnings.is_empty() {
@@ -416,17 +416,17 @@ pub fn compose_health(
             })
         };
         let connected: Vec<serde_json::Value> = if let Some(v) = vf {
-            // Source-in-vault scoping, to match this response's `edge_types`
-            // / `total_edges`. The node is in-vault, so all of its outgoing
-            // edges are source-in-vault and counted; an incoming edge counts
-            // only when its source is also in-vault, so a cross-vault edge
+            // Source-in-mem scoping, to match this response's `edge_types`
+            // / `total_edges`. The node is in-mem, so all of its outgoing
+            // edges are source-in-mem and counted; an incoming edge counts
+            // only when its source is also in-mem, so a cross-mem edge
             // the aggregate excluded does not inflate the node's degree here.
             let mut entries: Vec<Connectivity> = engine
                 .store()
                 .all_entities()
-                .filter(|e| !e.stub && e.vault == v)
+                .filter(|e| !e.stub && e.mem == v)
                 .map(|e| {
-                    connectivity_for(engine.store(), &e.id, |in_edge| in_edge.from.vault() == v)
+                    connectivity_for(engine.store(), &e.id, |in_edge| in_edge.from.mem() == v)
                 })
                 .collect();
             entries.sort_by(cmp_by_dependency);
@@ -445,7 +445,7 @@ pub fn compose_health(
                 Some(v) => engine
                     .store()
                     .get(&h.id)
-                    .map(|e| e.vault == v)
+                    .map(|e| e.mem == v)
                     .unwrap_or(false),
                 None => true,
             })
@@ -464,7 +464,7 @@ pub fn compose_health(
                 Some(v) => engine
                     .store()
                     .get(&e.id)
-                    .map(|ent| ent.vault == v)
+                    .map(|ent| ent.mem == v)
                     .unwrap_or(false),
                 None => true,
             })
@@ -512,8 +512,8 @@ pub fn compose_health(
     }
     // Conformance axis (`conformance`), or both axes (`integrity`). Findings
     // ride one flat `findings` list in the pinned `{ id, axis, code, detail }`
-    // shape; ids are vault-qualified so the flat list stays unambiguous when
-    // unscoped. Vaults scan in sorted order and each vault's findings are
+    // shape; ids are mem-qualified so the flat list stays unambiguous when
+    // unscoped. Mems scan in sorted order and each mem's findings are
     // deterministic, so the whole list is.
     let wants_conformance = include
         .iter()
@@ -532,16 +532,16 @@ pub fn compose_health(
                 }
             },
         };
-        let scan_vaults: Vec<String> = match vf {
+        let scan_mems: Vec<String> = match vf {
             Some(v) => vec![v.to_string()],
             None => {
-                let mut all = writable_vaults.clone();
+                let mut all = writable_mems.clone();
                 all.sort();
                 all
             }
         };
         let mut findings = Vec::new();
-        for v in &scan_vaults {
+        for v in &scan_mems {
             findings.extend(engine.conformance_findings(v, target.as_ref())?);
             if wants_consistency {
                 findings.extend(engine.consistency_findings(v)?);
@@ -550,41 +550,41 @@ pub fn compose_health(
         obj.insert("findings".into(), serde_json::to_value(&findings).unwrap());
     }
 
-    // Workspace policy surface — opt-in `include_config: true`. Per-vault
+    // Workspace policy surface — opt-in `include_config: true`. Per-mem
     // `vcs: { gitdir?, worktree?, head? }` uses `gitdir_for` / `worktree_for`
-    // / `vault_head_sha`. Each sub-field is conditionally present — folder
-    // mounts have a worktree but no per-vault gitdir; freshly-created vaults
+    // / `mem_head_sha`. Each sub-field is conditionally present — folder
+    // mounts have a worktree but no per-mem gitdir; freshly-created mems
     // have no head yet — and the `vcs` object emits whenever at least one of
     // them is available. `write_guidance` + `extra` come from
-    // `vault_config_for`. `mutations` + `plugin` are passed in via
+    // `mem_config_for`. `mutations` + `plugin` are passed in via
     // [`HealthConfig`] (server state the engine does not own).
     if args.include_config {
-        // Per-vault storage backend → durability marker, derived from the
+        // Per-mem storage backend → durability marker, derived from the
         // mount's `MountStorage` kind. Lives alongside `vcs` so an agent
-        // reading per-vault config learns whether a `commit_sha` this vault
+        // reading per-mem config learns whether a `commit_sha` this mem
         // returns is durable-on-disk or volatile-in-RAM.
-        let backend_by_vault: std::collections::HashMap<&str, (&'static str, bool)> = engine
+        let backend_by_mem: std::collections::HashMap<&str, (&'static str, bool)> = engine
             .mounts()
             .iter()
             .map(|m| {
                 (
-                    m.vault.as_str(),
+                    m.mem.as_str(),
                     (m.storage.backend_id(), m.storage.is_durable()),
                 )
             })
             .collect();
-        let vaults_detail: Vec<serde_json::Value> = writable_vaults
+        let mems_detail: Vec<serde_json::Value> = writable_mems
             .iter()
             .map(|name| {
                 let origin = engine
-                    .vault_router()
-                    .origin_for_vault(name)
+                    .mem_router()
+                    .origin_for_mem(name)
                     .map(|o| o.kind())
                     .unwrap_or("explicit");
                 let mut entry = serde_json::Map::new();
                 entry.insert("name".into(), serde_json::json!(name));
                 entry.insert("origin".into(), serde_json::json!(origin));
-                if let Some((storage, durable)) = backend_by_vault.get(name.as_str()).copied() {
+                if let Some((storage, durable)) = backend_by_mem.get(name.as_str()).copied() {
                     entry.insert("storage".into(), serde_json::json!(storage));
                     entry.insert("durable".into(), serde_json::json!(durable));
                 }
@@ -595,13 +595,13 @@ pub fn compose_health(
                 if let Ok(worktree) = engine.worktree_for(name) {
                     vcs_obj.insert("worktree".into(), serde_json::json!(worktree));
                 }
-                if let Some(sha) = engine.vault_head_sha(name).ok().flatten() {
+                if let Some(sha) = engine.mem_head_sha(name).ok().flatten() {
                     vcs_obj.insert("head".into(), serde_json::json!(sha));
                 }
                 if !vcs_obj.is_empty() {
                     entry.insert("vcs".into(), serde_json::Value::Object(vcs_obj));
                 }
-                if let Some(cfg) = engine.vault_config_for(name) {
+                if let Some(cfg) = engine.mem_config_for(name) {
                     let guidance = serde_json::Map::from_iter(
                         cfg.write_guidance.iter().map(|(k, v)| (k.clone(), v.clone())),
                     );
@@ -614,7 +614,7 @@ pub fn compose_health(
                 serde_json::Value::Object(entry)
             })
             .collect();
-        obj.insert("vaults".into(), serde_json::json!(vaults_detail));
+        obj.insert("mems".into(), serde_json::json!(mems_detail));
 
         obj.insert("mutations".into(), config.mutations.clone());
         obj.insert("plugin".into(), config.plugin.clone());
@@ -634,8 +634,8 @@ pub fn render_health_markdown(v: &serde_json::Value) -> String {
     use std::fmt::Write as _;
     let mut s = String::new();
     let _ = writeln!(s, "# Graph health");
-    if let Some(vault) = v.get("vault").and_then(|x| x.as_str()) {
-        let _ = writeln!(s, "\nVault filter: `{vault}`");
+    if let Some(mem) = v.get("mem").and_then(|x| x.as_str()) {
+        let _ = writeln!(s, "\nMem filter: `{mem}`");
     }
 
     if let Some(sum) = v.get("summary").and_then(|x| x.as_object()) {
@@ -701,7 +701,7 @@ pub fn render_health_markdown(v: &serde_json::Value) -> String {
 
 /// Render a `{ key: count }` map as an indented sub-list under `title`,
 /// skipping an empty/missing map. The empty-string schema key (an unpinned
-/// vault) renders as `(unpinned)`.
+/// mem) renders as `(unpinned)`.
 fn render_count_map(s: &mut String, val: Option<&serde_json::Value>, title: &str) {
     use std::fmt::Write as _;
     let Some(map) = val.and_then(|x| x.as_object()) else {

@@ -1,5 +1,5 @@
 # Basis-build CI smoke. Builds the basis flavour of `memstead` and
-# `memstead-mcp` (no `vault-repo` feature, no `gix`, no `memstead-git-branch`)
+# `memstead-mcp` (no `mem-repo` feature, no `gix`, no `memstead-git-branch`)
 # and exercises three end-to-end probes against the binaries:
 #
 #   * `basis_smoke`        — happy-path round-trip (create → search →

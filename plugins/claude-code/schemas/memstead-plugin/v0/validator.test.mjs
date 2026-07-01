@@ -247,7 +247,7 @@ describe("validator — real plugin schemas", () => {
     const schema = loadJson("memstead-toml.schema.json");
     const bad = {
       format: "memstead-plugin/v999",
-      vaults: ["some/vault"],
+      mems: ["some/mem"],
     };
     const r = validate(schema, bad);
     assert.equal(r.valid, false);

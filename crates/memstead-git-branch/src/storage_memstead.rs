@@ -1,13 +1,13 @@
-//! Unified `__MEMSTEAD` ref — schemas + per-vault configs in one tree.
+//! Unified `__MEMSTEAD` ref — schemas + per-mem configs in one tree.
 //!
 //! The post-rebuild target collapses today's two registry-class refs
-//! (`__SCHEMAS` for YAMLs, `__SYSTEM` for per-vault configs) onto a
+//! (`__SCHEMAS` for YAMLs, `__SYSTEM` for per-mem configs) onto a
 //! single `__MEMSTEAD` ref with the layout:
 //!
 //! - `__MEMSTEAD:schemas/<name>@<version>/schema.yaml`
 //! - `__MEMSTEAD:schemas/<name>@<version>/types/<type>.yaml`
-//! - `__MEMSTEAD:vaults/<vault>/config.json` (and any other per-vault
-//!   blobs that today live under `__SYSTEM:<vault>/`)
+//! - `__MEMSTEAD:mems/<mem>/config.json` (and any other per-mem
+//!   blobs that today live under `__SYSTEM:<mem>/`)
 //!
 //! The `repo.json` blob from `__SYSTEM:` does NOT migrate — its
 //! `canonical_name` field projects into the mount record in
@@ -23,16 +23,16 @@
 //!   workspace whose `__MEMSTEAD` tree already matches the projection
 //!   produces no new commit.
 //! - [`load_schemas_from_memstead_ref`] — additive reader for the new
-//!   layout. Returns the same [`crate::vault_repo_schemas::LoadOutcome`]
+//!   layout. Returns the same [`crate::mem_repo_schemas::LoadOutcome`]
 //!   shape so a future cutover session can drop in the new function
 //!   without touching call sites.
-//! - [`read_vault_config_from_memstead_ref`] — additive reader for the
-//!   per-vault config under the new layout. Returns the same
-//!   [`memstead_schema::VaultConfig`] shape the legacy `read_config_at_gitdir`
+//! - [`read_mem_config_from_memstead_ref`] — additive reader for the
+//!   per-mem config under the new layout. Returns the same
+//!   [`memstead_schema::MemConfig`] shape the legacy `read_config_at_gitdir`
 //!   produces.
 //!
-//! Existing readers (`vault_repo_schemas::load_schemas_from_ref`,
-//! `vault_repo_config::read_config_at_gitdir`) are NOT touched by this
+//! Existing readers (`mem_repo_schemas::load_schemas_from_ref`,
+//! `mem_repo_config::read_config_at_gitdir`) are NOT touched by this
 //! module. The cutover (replace legacy reads with `__MEMSTEAD` reads + drop
 //! the old refs) is deliberately a separate session — landing the
 //! migration helpers first lets operators upgrade their workspaces
@@ -41,12 +41,12 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use memstead_schema::{Schema, VaultConfig, loader::SchemaLoadError};
+use memstead_schema::{Schema, MemConfig, loader::SchemaLoadError};
 
-use crate::vault_repo_config::{
-    RefSpec, VaultRepoWriteError, commit_refs_at_gitdir, resolve_full_path_at_gitdir,
+use crate::mem_repo_config::{
+    RefSpec, MemRepoWriteError, commit_refs_at_gitdir, resolve_full_path_at_gitdir,
 };
-use crate::vault_repo_schemas::{LoadOutcome, VaultRepoSchemasError};
+use crate::mem_repo_schemas::{LoadOutcome, MemRepoSchemasError};
 use crate::vcs::{CommitContext, author_identity, format_commit_message};
 
 const COMMITTER_NAME: &str = "engine";
@@ -56,7 +56,7 @@ const COMMITTER_EMAIL: &str = "noreply@memstead.io";
 /// `__MEMSTEAD` ref.
 #[derive(Debug, thiserror::Error)]
 pub enum MemsteadRefError {
-    #[error("could not open vault-repo gitdir: {0}")]
+    #[error("could not open mem-repo gitdir: {0}")]
     GixOpen(String),
     #[error("git tree read error: {0}")]
     GitTree(String),
@@ -86,9 +86,9 @@ pub struct MemsteadMigrationOutcome {
     pub already_current: bool,
     /// Number of schema entries projected from `__SCHEMAS`.
     pub schemas_migrated: usize,
-    /// Number of per-vault entries projected from `__SYSTEM` (one
+    /// Number of per-mem entries projected from `__SYSTEM` (one
     /// per top-level entry under `__SYSTEM` minus `repo.json`).
-    pub vaults_migrated: usize,
+    pub mems_migrated: usize,
 }
 
 /// Read `refs/heads/__SCHEMAS` and `refs/heads/__SYSTEM` from
@@ -170,10 +170,10 @@ pub fn migrate_to_memstead_ref(gitdir: &Path) -> Result<MemsteadMigrationOutcome
     }
 
     // 2. Read __SYSTEM — copy every top-level entry except
-    //    `repo.json` into `vaults/<entry-name>/...`. Hierarchical
-    //    structures (`<seg>/<seg>/<vault>/config.json`) are
+    //    `repo.json` into `mems/<entry-name>/...`. Hierarchical
+    //    structures (`<seg>/<seg>/<mem>/config.json`) are
     //    preserved by copying the subtree's object id verbatim.
-    let mut vault_entries: Vec<(String, gix::ObjectId, gix::object::tree::EntryKind)> = Vec::new();
+    let mut mem_entries: Vec<(String, gix::ObjectId, gix::object::tree::EntryKind)> = Vec::new();
     if let Some(reference) =
         repo.try_find_reference("refs/heads/__SYSTEM")
             .map_err(|e| MemsteadRefError::GitTree(e.to_string()))?
@@ -200,7 +200,7 @@ pub fn migrate_to_memstead_ref(gitdir: &Path) -> Result<MemsteadMigrationOutcome
                 // not into __MEMSTEAD.
                 continue;
             }
-            vault_entries.push((name, entry.oid().to_owned(), entry.mode().kind()));
+            mem_entries.push((name, entry.oid().to_owned(), entry.mode().kind()));
         }
     }
 
@@ -219,9 +219,9 @@ pub fn migrate_to_memstead_ref(gitdir: &Path) -> Result<MemsteadMigrationOutcome
             )
             .map_err(|e| MemsteadRefError::GitTree(e.to_string()))?;
     }
-    for (name, oid, kind) in &vault_entries {
+    for (name, oid, kind) in &mem_entries {
         editor
-            .upsert(format!("vaults/{name}").as_str(), *kind, *oid)
+            .upsert(format!("mems/{name}").as_str(), *kind, *oid)
             .map_err(|e| MemsteadRefError::GitTree(e.to_string()))?;
     }
     let new_tree_id = editor
@@ -247,7 +247,7 @@ pub fn migrate_to_memstead_ref(gitdir: &Path) -> Result<MemsteadMigrationOutcome
             commit_sha: tip_id.to_hex().to_string(),
             already_current: true,
             schemas_migrated: schema_entries.len(),
-            vaults_migrated: vault_entries.len(),
+            mems_migrated: mem_entries.len(),
         });
     }
 
@@ -281,7 +281,7 @@ pub fn migrate_to_memstead_ref(gitdir: &Path) -> Result<MemsteadMigrationOutcome
         commit_sha: commit_id.to_hex().to_string(),
         already_current: false,
         schemas_migrated: schema_entries.len(),
-        vaults_migrated: vault_entries.len(),
+        mems_migrated: mem_entries.len(),
     })
 }
 
@@ -299,13 +299,13 @@ pub struct SchemaWriteOutcome {
 /// `schemas/<name>@<version>/`, committing on top of the current ref tip
 /// (or an empty tree when the ref is absent). `files` are
 /// `(relative-path, bytes)` pairs — e.g. `("schema.yaml", …)`,
-/// `("types/decision.yaml", …)`, `("vault-template.json", …)`. Existing
-/// `schemas/` and `vaults/` entries on the ref are preserved (the new
+/// `("types/decision.yaml", …)`, `("mem-template.json", …)`. Existing
+/// `schemas/` and `mems/` entries on the ref are preserved (the new
 /// package is upserted into the current tree). Idempotent: re-writing
 /// identical bytes yields the same tree and produces no commit.
 ///
 /// This is the git-branch backend's authoring write path — the engine
-/// owns vault-repo state, so this lib function is invoked through the
+/// owns mem-repo state, so this lib function is invoked through the
 /// engine, never by an external consumer directly. Mirrors the
 /// committer identity and idempotency check of [`migrate_to_memstead_ref`].
 pub fn write_schema_to_memstead_ref(
@@ -327,7 +327,7 @@ pub fn write_schema_to_memstead_ref(
             Some((id.detach(), tree_id))
         });
 
-    // Edit from the current tree so existing schemas/vaults survive; an
+    // Edit from the current tree so existing schemas/mems survive; an
     // empty tree when the ref does not exist yet.
     let base_tree = match existing_tip {
         Some((_, tree_id)) => repo
@@ -426,17 +426,17 @@ fn extract_manifest_version(yaml: &str) -> Option<String> {
 
 /// Read schemas from the unified `__MEMSTEAD:schemas/` tree.
 ///
-/// Mirrors [`crate::vault_repo_schemas::load_schemas_from_ref`]'s
+/// Mirrors [`crate::mem_repo_schemas::load_schemas_from_ref`]'s
 /// `LoadOutcome` shape so a future cutover session can drop in the
 /// new function without touching call sites. The shape is the same;
 /// the read source is `refs/heads/__MEMSTEAD` instead of
 /// `refs/heads/__SCHEMAS`.
 pub fn load_schemas_from_memstead_ref(
     workspace_root: &Path,
-) -> Result<LoadOutcome, VaultRepoSchemasError> {
-    let gitdir = workspace_root.join("vault-repo").join(".git");
+) -> Result<LoadOutcome, MemRepoSchemasError> {
+    let gitdir = workspace_root.join("mem-repo").join(".git");
     if !gitdir.is_dir() {
-        return Ok(LoadOutcome::NoVaultRepo);
+        return Ok(LoadOutcome::NoMemRepo);
     }
     load_schemas_from_memstead_ref_at_gitdir(&gitdir)
 }
@@ -444,43 +444,43 @@ pub fn load_schemas_from_memstead_ref(
 /// Gitdir-rooted variant of [`load_schemas_from_memstead_ref`].
 pub fn load_schemas_from_memstead_ref_at_gitdir(
     gitdir: &Path,
-) -> Result<LoadOutcome, VaultRepoSchemasError> {
+) -> Result<LoadOutcome, MemRepoSchemasError> {
     let repo =
-        gix::open(gitdir).map_err(|e| VaultRepoSchemasError::GixOpen(e.to_string()))?;    let memstead_ref = match repo
+        gix::open(gitdir).map_err(|e| MemRepoSchemasError::GixOpen(e.to_string()))?;    let memstead_ref = match repo
         .try_find_reference("refs/heads/__MEMSTEAD")
-        .map_err(|e| VaultRepoSchemasError::GitTree(e.to_string()))?
+        .map_err(|e| MemRepoSchemasError::GitTree(e.to_string()))?
     {
         Some(r) => r,
-        None => return Ok(LoadOutcome::NoVaultRepo),
+        None => return Ok(LoadOutcome::NoMemRepo),
     };
     let id = memstead_ref
         .into_fully_peeled_id()
-        .map_err(|e| VaultRepoSchemasError::GitTree(e.to_string()))?;
+        .map_err(|e| MemRepoSchemasError::GitTree(e.to_string()))?;
     let commit = id
         .object()
-        .map_err(|e| VaultRepoSchemasError::GitTree(e.to_string()))?
+        .map_err(|e| MemRepoSchemasError::GitTree(e.to_string()))?
         .try_into_commit()
-        .map_err(|e| VaultRepoSchemasError::GitTree(e.to_string()))?;
+        .map_err(|e| MemRepoSchemasError::GitTree(e.to_string()))?;
     let tree = commit
         .tree()
-        .map_err(|e| VaultRepoSchemasError::GitTree(e.to_string()))?;
+        .map_err(|e| MemRepoSchemasError::GitTree(e.to_string()))?;
 
     let schemas_entry = match tree
         .lookup_entry_by_path("schemas")
-        .map_err(|e| VaultRepoSchemasError::GitTree(e.to_string()))?
+        .map_err(|e| MemRepoSchemasError::GitTree(e.to_string()))?
     {
         Some(e) if e.mode().is_tree() => e,
         _ => return Ok(LoadOutcome::NoSchemas),
     };
     let schemas_tree = schemas_entry
         .object()
-        .map_err(|e| VaultRepoSchemasError::GitTree(e.to_string()))?
+        .map_err(|e| MemRepoSchemasError::GitTree(e.to_string()))?
         .try_into_tree()
-        .map_err(|e| VaultRepoSchemasError::GitTree(e.to_string()))?;
+        .map_err(|e| MemRepoSchemasError::GitTree(e.to_string()))?;
 
     let mut entries: Vec<(String, gix::ObjectId, gix::object::tree::EntryKind)> = Vec::new();
     for entry_res in schemas_tree.iter() {
-        let entry = entry_res.map_err(|e| VaultRepoSchemasError::GitTree(e.to_string()))?;
+        let entry = entry_res.map_err(|e| MemRepoSchemasError::GitTree(e.to_string()))?;
         let name = match std::str::from_utf8(entry.filename()) {
             Ok(s) => s.to_string(),
             Err(_) => continue,
@@ -496,28 +496,28 @@ pub fn load_schemas_from_memstead_ref_at_gitdir(
         }
         let schema_obj = repo
             .find_object(oid)
-            .map_err(|e| VaultRepoSchemasError::GitTree(e.to_string()))?;
+            .map_err(|e| MemRepoSchemasError::GitTree(e.to_string()))?;
         let schema_tree = schema_obj
             .try_into_tree()
-            .map_err(|e| VaultRepoSchemasError::GitTree(e.to_string()))?;
+            .map_err(|e| MemRepoSchemasError::GitTree(e.to_string()))?;
 
         let manifest_yaml =
             read_blob_string_for_schemas(&repo, &schema_tree, "schema.yaml", &versioned_name)?;
         let mut types_yamls: Vec<(String, String)> = Vec::new();
         if let Some(types_entry) = schema_tree
             .lookup_entry_by_path("types")
-            .map_err(|e| VaultRepoSchemasError::GitTree(e.to_string()))?
+            .map_err(|e| MemRepoSchemasError::GitTree(e.to_string()))?
         {
             if types_entry.mode().is_tree() {
                 let types_obj = types_entry
                     .object()
-                    .map_err(|e| VaultRepoSchemasError::GitTree(e.to_string()))?;
+                    .map_err(|e| MemRepoSchemasError::GitTree(e.to_string()))?;
                 let types_tree = types_obj
                     .try_into_tree()
-                    .map_err(|e| VaultRepoSchemasError::GitTree(e.to_string()))?;
+                    .map_err(|e| MemRepoSchemasError::GitTree(e.to_string()))?;
                 for entry_res in types_tree.iter() {
                     let entry = entry_res
-                        .map_err(|e| VaultRepoSchemasError::GitTree(e.to_string()))?;
+                        .map_err(|e| MemRepoSchemasError::GitTree(e.to_string()))?;
                     if !entry.mode().is_blob() {
                         continue;
                     }
@@ -531,10 +531,10 @@ pub fn load_schemas_from_memstead_ref_at_gitdir(
                     };
                     let blob = repo
                         .find_object(entry.oid().to_owned())
-                        .map_err(|e| VaultRepoSchemasError::GitTree(e.to_string()))?;
+                        .map_err(|e| MemRepoSchemasError::GitTree(e.to_string()))?;
                     let bytes = blob.data.clone();
                     let contents = String::from_utf8(bytes).map_err(|e| {
-                        VaultRepoSchemasError::NotUtf8(
+                        MemRepoSchemasError::NotUtf8(
                             format!("{versioned_name}/types/{filename}"),
                             e.to_string(),
                         )
@@ -546,7 +546,7 @@ pub fn load_schemas_from_memstead_ref_at_gitdir(
         }
 
         let schema = memstead_schema::loader::load_schema_from_memory(&manifest_yaml, &types_yamls)
-            .map_err(|source| VaultRepoSchemasError::Schema {
+            .map_err(|source| MemRepoSchemasError::Schema {
                 name: versioned_name.clone(),
                 source,
             })?;
@@ -565,45 +565,45 @@ fn read_blob_string_for_schemas(
     schema_tree: &gix::Tree<'_>,
     filename: &str,
     schema_name: &str,
-) -> Result<String, VaultRepoSchemasError> {
+) -> Result<String, MemRepoSchemasError> {
     let entry = schema_tree
         .lookup_entry_by_path(filename)
-        .map_err(|e| VaultRepoSchemasError::GitTree(e.to_string()))?
-        .ok_or_else(|| VaultRepoSchemasError::GitTree(format!(
+        .map_err(|e| MemRepoSchemasError::GitTree(e.to_string()))?
+        .ok_or_else(|| MemRepoSchemasError::GitTree(format!(
             "schema '{schema_name}': missing {filename} in __MEMSTEAD"
         )))?;
     let object = entry
         .object()
-        .map_err(|e| VaultRepoSchemasError::GitTree(e.to_string()))?;
+        .map_err(|e| MemRepoSchemasError::GitTree(e.to_string()))?;
     let bytes = object.data.clone();
     String::from_utf8(bytes)
-        .map_err(|e| VaultRepoSchemasError::NotUtf8(format!("{schema_name}/{filename}"), e.to_string()))
+        .map_err(|e| MemRepoSchemasError::NotUtf8(format!("{schema_name}/{filename}"), e.to_string()))
 }
 
-/// Read a per-vault config from `__MEMSTEAD:vaults/<vault>/config.json`.
+/// Read a per-mem config from `__MEMSTEAD:mems/<mem>/config.json`.
 ///
-/// Mirrors [`crate::vault_repo_config::read_config_at_gitdir`]'s
+/// Mirrors [`crate::mem_repo_config::read_config_at_gitdir`]'s
 /// return shape so callers can swap signatures without touching the
-/// consumer code. Hierarchical vault paths
-/// (`vaults/<seg>/<seg>/<vault>/config.json`) resolve via the same
+/// consumer code. Hierarchical mem paths
+/// (`mems/<seg>/<seg>/<mem>/config.json`) resolve via the same
 /// `resolve_full_path_at_gitdir` walker the legacy reader uses — but
-/// rooted under `vaults/` rather than the legacy `__SYSTEM:` tree.
+/// rooted under `mems/` rather than the legacy `__SYSTEM:` tree.
 /// When the leaf has no matching content branch yet (the
-/// `vault_management::create_vault` flow before the per-vault commit
+/// `mem_management::create_mem` flow before the per-mem commit
 /// lands), the resolver returns `None` and the read falls back to the
-/// flat `vaults/<leaf>/config.json` layout — same fallback the write
+/// flat `mems/<leaf>/config.json` layout — same fallback the write
 /// side uses, so reads observe the just-written blob in either layout.
-pub fn read_vault_config_from_memstead_ref(
+pub fn read_mem_config_from_memstead_ref(
     gitdir: &Path,
-    vault_name: &str,
-) -> Result<VaultConfig, MemsteadRefError> {
+    mem_name: &str,
+) -> Result<MemConfig, MemsteadRefError> {
     // Resolve the leaf to its full hierarchical tree path. Mirrors
     // commit_config_to_memstead_at_gitdir on the write side — the write
     // and read paths use identical resolution so a hierarchical-leaf
     // read of just-written content lands at the same tree position.
-    let full_tree_path = match resolve_full_path_at_gitdir(gitdir, vault_name) {
+    let full_tree_path = match resolve_full_path_at_gitdir(gitdir, mem_name) {
         Ok(Some(p)) => p,
-        Ok(None) => vault_name.to_string(),
+        Ok(None) => mem_name.to_string(),
         Err(e) => {
             return Err(MemsteadRefError::GitTree(e.to_string()));
         }
@@ -630,7 +630,7 @@ pub fn read_vault_config_from_memstead_ref(
         .tree()
         .map_err(|e| MemsteadRefError::GitTree(e.to_string()))?;
 
-    let path = format!("vaults/{full_tree_path}/config.json");
+    let path = format!("mems/{full_tree_path}/config.json");
     let entry = tree
         .lookup_entry_by_path(&path)
         .map_err(|e| MemsteadRefError::GitTree(e.to_string()))?
@@ -650,27 +650,27 @@ pub fn read_vault_config_from_memstead_ref(
         path: path.clone(),
         message: format!("invalid json: {e}"),
     })?;
-    memstead_schema::parse_vault_config(&value).map_err(|e| MemsteadRefError::Config {
+    memstead_schema::parse_mem_config(&value).map_err(|e| MemsteadRefError::Config {
         path,
         message: e.to_string(),
     })
 }
 
-/// Commit `vaults/<vault_name>/config.json` to
-/// `vault-repo-git:refs/heads/__MEMSTEAD`.
+/// Commit `mems/<mem_name>/config.json` to
+/// `mem-repo-git:refs/heads/__MEMSTEAD`.
 ///
-/// Mirrors [`crate::vault_repo_config::commit_config_at_gitdir`]'s
+/// Mirrors [`crate::mem_repo_config::commit_config_at_gitdir`]'s
 /// shape (read-modify-write against the snapshot, atomic ref
 /// advance via [`commit_refs_at_gitdir`]) but targets the unified
-/// `__MEMSTEAD` ref under `vaults/<full_tree_path>/config.json` rather
+/// `__MEMSTEAD` ref under `mems/<full_tree_path>/config.json` rather
 /// than the legacy `__SYSTEM:<full_tree_path>/config.json`.
 ///
 /// Hierarchical paths are resolved with the same
 /// `resolve_full_path_at_gitdir` walker the legacy helper uses; for
-/// callers writing the very first config blob before any per-vault
-/// branch exists (the unified `vault_management::create_vault`
+/// callers writing the very first config blob before any per-mem
+/// branch exists (the unified `mem_management::create_mem`
 /// flow), the resolver returns `None` and the function falls back
-/// to the flat `<vault_name>/config.json` shape.
+/// to the flat `<mem_name>/config.json` shape.
 ///
 /// When `__MEMSTEAD` does not yet exist (workspace was never migrated),
 /// the function creates the ref atomically with a `MustNotExist`
@@ -678,26 +678,26 @@ pub fn read_vault_config_from_memstead_ref(
 /// might be performing the migration concurrently.
 pub fn commit_config_to_memstead_at_gitdir(
     gitdir: &Path,
-    vault_name: &str,
+    mem_name: &str,
     config_bytes: &[u8],
     ctx: &CommitContext<'_>,
     message: &str,
-) -> Result<(), VaultRepoWriteError> {
-    let full_tree_path = match resolve_full_path_at_gitdir(gitdir, vault_name) {
+) -> Result<(), MemRepoWriteError> {
+    let full_tree_path = match resolve_full_path_at_gitdir(gitdir, mem_name) {
         Ok(Some(p)) => p,
-        Ok(None) => vault_name.to_string(),
-        Err(crate::vault_repo_config::VaultRepoConfigError::GitdirNotFound(p)) => {
-            return Err(VaultRepoWriteError::GixOpen {
+        Ok(None) => mem_name.to_string(),
+        Err(crate::mem_repo_config::MemRepoConfigError::GitdirNotFound(p)) => {
+            return Err(MemRepoWriteError::GixOpen {
                 path: p,
-                message: "vault-repo gitdir not found".to_string(),
+                message: "mem-repo gitdir not found".to_string(),
             });
         }
         Err(e) => {
-            return Err(VaultRepoWriteError::GitTree(e.to_string()));
+            return Err(MemRepoWriteError::GitTree(e.to_string()));
         }
     };
 
-    let repo = gix::open(gitdir).map_err(|e| VaultRepoWriteError::GixOpen {
+    let repo = gix::open(gitdir).map_err(|e| MemRepoWriteError::GixOpen {
         path: gitdir.display().to_string(),
         message: e.to_string(),
     })?;
@@ -705,47 +705,47 @@ pub fn commit_config_to_memstead_at_gitdir(
     // ref-edit batch can use the matching precondition.
     let existing_tip: Option<gix::ObjectId> = repo
         .try_find_reference("refs/heads/__MEMSTEAD")
-        .map_err(|e| VaultRepoWriteError::GitTree(e.to_string()))?
+        .map_err(|e| MemRepoWriteError::GitTree(e.to_string()))?
         .map(|r| {
             r.into_fully_peeled_id()
                 .map(|id| id.detach())
-                .map_err(|e| VaultRepoWriteError::GitTree(format!("peel __MEMSTEAD: {e}")))
+                .map_err(|e| MemRepoWriteError::GitTree(format!("peel __MEMSTEAD: {e}")))
         })
         .transpose()?;
 
     // Base tree: existing __MEMSTEAD tree, or the empty tree when the ref
-    // does not yet exist. Either way, upsert the per-vault config blob
+    // does not yet exist. Either way, upsert the per-mem config blob
     // and write the resulting tree.
     let mut editor = match existing_tip {
         Some(tip) => {
             let commit = repo
                 .find_object(tip)
-                .map_err(|e| VaultRepoWriteError::GitTree(format!("read __MEMSTEAD commit: {e}")))?
+                .map_err(|e| MemRepoWriteError::GitTree(format!("read __MEMSTEAD commit: {e}")))?
                 .into_commit();
             let tree = commit
                 .tree()
-                .map_err(|e| VaultRepoWriteError::GitTree(format!("peel __MEMSTEAD tree: {e}")))?;
+                .map_err(|e| MemRepoWriteError::GitTree(format!("peel __MEMSTEAD tree: {e}")))?;
             tree.edit().map_err(|e| {
-                VaultRepoWriteError::GitTree(format!("editor init for __MEMSTEAD: {e}"))
+                MemRepoWriteError::GitTree(format!("editor init for __MEMSTEAD: {e}"))
             })?
         }
         None => repo.empty_tree().edit().map_err(|e| {
-            VaultRepoWriteError::GitTree(format!("editor init (empty) for __MEMSTEAD: {e}"))
+            MemRepoWriteError::GitTree(format!("editor init (empty) for __MEMSTEAD: {e}"))
         })?,
     };
     let blob_id = repo
         .write_blob(config_bytes)
-        .map_err(|e| VaultRepoWriteError::GitTree(format!("write config blob: {e}")))?
+        .map_err(|e| MemRepoWriteError::GitTree(format!("write config blob: {e}")))?
         .detach();
-    let tree_path = format!("vaults/{full_tree_path}/config.json");
+    let tree_path = format!("mems/{full_tree_path}/config.json");
     editor
         .upsert(tree_path.as_str(), gix::objs::tree::EntryKind::Blob, blob_id)
         .map_err(|e| {
-            VaultRepoWriteError::GitTree(format!("tree upsert {tree_path}: {e}"))
+            MemRepoWriteError::GitTree(format!("tree upsert {tree_path}: {e}"))
         })?;
     let new_tree_id = editor
         .write()
-        .map_err(|e| VaultRepoWriteError::GitTree(format!("tree write for __MEMSTEAD: {e}")))?
+        .map_err(|e| MemRepoWriteError::GitTree(format!("tree write for __MEMSTEAD: {e}")))?
         .detach();
 
     let time = gix::date::Time::now_local_or_utc();
@@ -781,7 +781,7 @@ pub fn commit_config_to_memstead_at_gitdir(
     let new_commit_id = repo
         .write_object(&commit)
         .map_err(|e| {
-            VaultRepoWriteError::GitTree(format!("write {tree_path} commit: {e}"))
+            MemRepoWriteError::GitTree(format!("write {tree_path} commit: {e}"))
         })?
         .detach();
 
@@ -804,19 +804,19 @@ pub fn commit_config_to_memstead_at_gitdir(
     Ok(())
 }
 
-/// Drop every git-branch artifact the engine wrote for one vault:
-/// the per-vault content branch (`refs/heads/<branch_leaf>`) and the
-/// `__MEMSTEAD:vaults/<branch_leaf>/config.json` blob (collapsing any
-/// empty `vaults/…` ancestor directories along the way). Symmetric
+/// Drop every git-branch artifact the engine wrote for one mem:
+/// the per-mem content branch (`refs/heads/<branch_leaf>`) and the
+/// `__MEMSTEAD:mems/<branch_leaf>/config.json` blob (collapsing any
+/// empty `mems/…` ancestor directories along the way). Symmetric
 /// counterpart to [`commit_config_to_memstead_at_gitdir`] +
-/// [`crate::storage::git_tree::GitTreeVaultWriter::commit`]'s seed
-/// commit pair — `memstead_vault_create` writes those two, this helper
-/// undoes them when `memstead_vault_delete delete_files=true`.
+/// [`crate::storage::git_tree::GitTreeMemWriter::commit`]'s seed
+/// commit pair — `memstead_mem_create` writes those two, this helper
+/// undoes them when `memstead_mem_delete delete_files=true`.
 ///
 /// `branch_leaf` is the hierarchical branch name (e.g.
 /// `planning/plan-q4-revamp` or the bare leaf for flat layouts).
 /// The function does NOT walk the repo to resolve it — the caller
-/// (the git-branch backend's [`memstead_base::backend::VaultBackend::delete_artifacts`]
+/// (the git-branch backend's [`memstead_base::backend::MemBackend::delete_artifacts`]
 /// impl) has it directly in `self.ref_name` minus the `refs/heads/`
 /// prefix.
 ///
@@ -824,33 +824,33 @@ pub fn commit_config_to_memstead_at_gitdir(
 /// - Branch ref delete uses `PreviousValue::Any` so a missing branch
 ///   (sibling engine pruned it, manual surgery) is not an error.
 /// - `__MEMSTEAD` rewrite is skipped entirely when the ref doesn't exist;
-///   when it exists but doesn't carry the per-vault entry, the
+///   when it exists but doesn't carry the per-mem entry, the
 ///   helper still writes a no-op commit only if the tree changed
 ///   (the editor's `remove` on a missing path is a no-op there).
 ///
 /// Both edits land in a single `edit_references` transaction — either
 /// the branch + `__MEMSTEAD` advance both succeed, or the whole call is
 /// rejected and no state changed.
-pub fn delete_vault_artifacts_at_gitdir(
+pub fn delete_mem_artifacts_at_gitdir(
     gitdir: &Path,
     branch_leaf: &str,
     ctx: &CommitContext<'_>,
-) -> Result<(), VaultRepoWriteError> {
+) -> Result<(), MemRepoWriteError> {
     use gix::refs::transaction::{Change, LogChange, PreviousValue, RefEdit, RefLog};
     use gix::refs::{FullName, Target};
 
-    let repo = gix::open(gitdir).map_err(|e| VaultRepoWriteError::GixOpen {
+    let repo = gix::open(gitdir).map_err(|e| MemRepoWriteError::GixOpen {
         path: gitdir.display().to_string(),
         message: e.to_string(),
     })?;
-    // ---- Step 1: drop the per-vault entry from __MEMSTEAD (if present) ----
+    // ---- Step 1: drop the per-mem entry from __MEMSTEAD (if present) ----
     let existing_memstead_tip: Option<gix::ObjectId> = repo
         .try_find_reference("refs/heads/__MEMSTEAD")
-        .map_err(|e| VaultRepoWriteError::GitTree(e.to_string()))?
+        .map_err(|e| MemRepoWriteError::GitTree(e.to_string()))?
         .map(|r| {
             r.into_fully_peeled_id()
                 .map(|id| id.detach())
-                .map_err(|e| VaultRepoWriteError::GitTree(format!("peel __MEMSTEAD: {e}")))
+                .map_err(|e| MemRepoWriteError::GitTree(format!("peel __MEMSTEAD: {e}")))
         })
         .transpose()?;
 
@@ -858,36 +858,36 @@ pub fn delete_vault_artifacts_at_gitdir(
     if let Some(tip) = existing_memstead_tip {
         let commit = repo
             .find_object(tip)
-            .map_err(|e| VaultRepoWriteError::GitTree(format!("read __MEMSTEAD commit: {e}")))?
+            .map_err(|e| MemRepoWriteError::GitTree(format!("read __MEMSTEAD commit: {e}")))?
             .into_commit();
         let tree = commit
             .tree()
-            .map_err(|e| VaultRepoWriteError::GitTree(format!("peel __MEMSTEAD tree: {e}")))?;
+            .map_err(|e| MemRepoWriteError::GitTree(format!("peel __MEMSTEAD tree: {e}")))?;
 
         // Check whether the entry actually exists — skip the commit
         // entirely when it doesn't (e.g. a parallel run already
         // pruned it). Saves an empty no-op commit.
-        let tree_path = format!("vaults/{branch_leaf}/config.json");
+        let tree_path = format!("mems/{branch_leaf}/config.json");
         let entry_present = tree
             .lookup_entry_by_path(&tree_path)
             .map_err(|e| {
-                VaultRepoWriteError::GitTree(format!("lookup {tree_path}: {e}"))
+                MemRepoWriteError::GitTree(format!("lookup {tree_path}: {e}"))
             })?
             .is_some();
 
         if entry_present {
             let mut editor = tree.edit().map_err(|e| {
-                VaultRepoWriteError::GitTree(format!("editor init for __MEMSTEAD: {e}"))
+                MemRepoWriteError::GitTree(format!("editor init for __MEMSTEAD: {e}"))
             })?;
             editor.remove(tree_path.as_str()).map_err(|e| {
-                VaultRepoWriteError::GitTree(format!("tree remove {tree_path}: {e}"))
+                MemRepoWriteError::GitTree(format!("tree remove {tree_path}: {e}"))
             })?;
             // gix's tree writer prunes empty subtrees on write, so
-            // removing `vaults/<path>/<name>/config.json` collapses
+            // removing `mems/<path>/<name>/config.json` collapses
             // the now-empty `<path>/<name>/` and any `<path>/`
             // ancestors automatically. No manual walk needed.
             let new_tree_id = editor.write().map_err(|e| {
-                VaultRepoWriteError::GitTree(format!("tree write for __MEMSTEAD: {e}"))
+                MemRepoWriteError::GitTree(format!("tree write for __MEMSTEAD: {e}"))
             })?.detach();
 
             let time = gix::date::Time::now_local_or_utc();
@@ -905,7 +905,7 @@ pub fn delete_vault_artifacts_at_gitdir(
                 None => committer_sig.clone(),
             };
             let full_message = format_commit_message(
-                &format!("memstead: prune __MEMSTEAD:vaults/{branch_leaf}/config.json"),
+                &format!("memstead: prune __MEMSTEAD:mems/{branch_leaf}/config.json"),
                 ctx,
             );
             let commit_obj = gix::objs::Commit {
@@ -920,7 +920,7 @@ pub fn delete_vault_artifacts_at_gitdir(
             let new_commit_id = repo
                 .write_object(&commit_obj)
                 .map_err(|e| {
-                    VaultRepoWriteError::GitTree(format!("write __MEMSTEAD prune commit: {e}"))
+                    MemRepoWriteError::GitTree(format!("write __MEMSTEAD prune commit: {e}"))
                 })?
                 .detach();
             new_memstead_commit = Some(new_commit_id);
@@ -932,7 +932,7 @@ pub fn delete_vault_artifacts_at_gitdir(
 
     let branch_ref = format!("refs/heads/{branch_leaf}");
     let branch_full: FullName = branch_ref.as_str().try_into().map_err(|e| {
-        VaultRepoWriteError::RefTransaction(format!(
+        MemRepoWriteError::RefTransaction(format!(
             "invalid branch ref {branch_ref:?}: {e}"
         ))
     })?;
@@ -949,7 +949,7 @@ pub fn delete_vault_artifacts_at_gitdir(
 
     if let (Some(prior_tip), Some(new_commit)) = (existing_memstead_tip, new_memstead_commit) {
         let memstead_full: FullName = "refs/heads/__MEMSTEAD".try_into().map_err(|e| {
-            VaultRepoWriteError::RefTransaction(format!("invalid __MEMSTEAD ref: {e}"))
+            MemRepoWriteError::RefTransaction(format!("invalid __MEMSTEAD ref: {e}"))
         })?;
         edits.push(RefEdit {
             change: Change::Update {
@@ -957,7 +957,7 @@ pub fn delete_vault_artifacts_at_gitdir(
                     mode: RefLog::AndReference,
                     force_create_reflog: false,
                     message: format!(
-                        "memstead: prune __MEMSTEAD:vaults/{branch_leaf}/config.json"
+                        "memstead: prune __MEMSTEAD:mems/{branch_leaf}/config.json"
                     )
                     .as_str()
                     .into(),
@@ -971,7 +971,7 @@ pub fn delete_vault_artifacts_at_gitdir(
     }
 
     repo.edit_references(edits)
-        .map_err(|e| VaultRepoWriteError::RefTransaction(e.to_string()))?;
+        .map_err(|e| MemRepoWriteError::RefTransaction(e.to_string()))?;
 
     Ok(())
 }
@@ -983,7 +983,7 @@ mod tests {
     use tempfile::TempDir;
 
     fn fresh_repo_dir(tmp: &Path) -> PathBuf {
-        let git_dir = tmp.join("vault-repo.git");
+        let git_dir = tmp.join("mem-repo.git");
         gix::init_bare(&git_dir).unwrap();
         std::fs::canonicalize(&git_dir).unwrap()
     }
@@ -1041,10 +1041,10 @@ mod tests {
         .unwrap();
     }
 
-    /// Build a minimal __SYSTEM commit. `vaults` is `(vault_name,
+    /// Build a minimal __SYSTEM commit. `mems` is `(mem_name,
     /// config_json)` pairs; `repo_json` is the repo.json blob (or
     /// empty to skip).
-    fn seed_system(gitdir: &Path, repo_json: &str, vaults: &[(&str, &str)]) {
+    fn seed_system(gitdir: &Path, repo_json: &str, mems: &[(&str, &str)]) {
         let repo = gix::open(gitdir).unwrap();
         let actor = actor_for_test();
         let mut buf = gix::date::parse::TimeBuf::default();
@@ -1060,11 +1060,11 @@ mod tests {
                 )
                 .unwrap();
         }
-        for (vault, config) in vaults {
+        for (mem, config) in mems {
             let blob = repo.write_blob(config.as_bytes()).unwrap().detach();
             editor
                 .upsert(
-                    format!("{vault}/config.json"),
+                    format!("{mem}/config.json"),
                     gix::object::tree::EntryKind::Blob,
                     blob,
                 )
@@ -1146,7 +1146,7 @@ mod tests {
 
         let outcome = migrate_to_memstead_ref(&gitdir).unwrap();
         assert_eq!(outcome.schemas_migrated, 2);
-        assert_eq!(outcome.vaults_migrated, 2);
+        assert_eq!(outcome.mems_migrated, 2);
         assert!(!outcome.already_current);
 
         let entries = list_memstead_entries(&gitdir);
@@ -1154,9 +1154,9 @@ mod tests {
         assert!(entries.contains(&"schemas/default@1.0.0/schema.yaml".to_string()));
         assert!(entries.contains(&"schemas/default@1.0.0/types/spec.yaml".to_string()));
         assert!(entries.contains(&"schemas/custom@0.5.0/schema.yaml".to_string()));
-        // Vault configs live under vaults/.
-        assert!(entries.contains(&"vaults/alpha/config.json".to_string()));
-        assert!(entries.contains(&"vaults/beta/config.json".to_string()));
+        // Mem configs live under mems/.
+        assert!(entries.contains(&"mems/alpha/config.json".to_string()));
+        assert!(entries.contains(&"mems/beta/config.json".to_string()));
         // repo.json explicitly NOT migrated.
         assert!(
             !entries.iter().any(|p| p.contains("repo.json")),
@@ -1173,7 +1173,7 @@ mod tests {
         let tiny = vec![
             ("schema.yaml".to_string(), b"name: tiny\nversion: 0.1.0\n".to_vec()),
             ("types/doc.yaml".to_string(), b"name: doc\n".to_vec()),
-            ("vault-template.json".to_string(), b"{}\n".to_vec()),
+            ("mem-template.json".to_string(), b"{}\n".to_vec()),
         ];
         let out = write_schema_to_memstead_ref(&gitdir, "tiny", "0.1.0", &tiny).unwrap();
         assert!(!out.already_current);
@@ -1181,7 +1181,7 @@ mod tests {
         for p in [
             "schemas/tiny@0.1.0/schema.yaml",
             "schemas/tiny@0.1.0/types/doc.yaml",
-            "schemas/tiny@0.1.0/vault-template.json",
+            "schemas/tiny@0.1.0/mem-template.json",
         ] {
             assert!(entries.iter().any(|e| e == p), "missing {p}: {entries:?}");
         }
@@ -1251,7 +1251,7 @@ mod tests {
         // do with that case).
         let outcome = migrate_to_memstead_ref(&gitdir).unwrap();
         assert_eq!(outcome.schemas_migrated, 0);
-        assert_eq!(outcome.vaults_migrated, 0);
+        assert_eq!(outcome.mems_migrated, 0);
         let entries = list_memstead_entries(&gitdir);
         assert!(entries.is_empty());
     }
@@ -1295,7 +1295,7 @@ mod tests {
     }
 
     #[test]
-    fn read_vault_config_from_memstead_round_trips_after_migration() {
+    fn read_mem_config_from_memstead_round_trips_after_migration() {
         let tmp = TempDir::new().unwrap();
         let gitdir = fresh_repo_dir(tmp.path());
         seed_schemas(&gitdir, &[("default", "1.0.0", &[])]);
@@ -1306,13 +1306,13 @@ mod tests {
         );
         let _ = migrate_to_memstead_ref(&gitdir).unwrap();
 
-        let config = read_vault_config_from_memstead_ref(&gitdir, "alpha").unwrap();
+        let config = read_mem_config_from_memstead_ref(&gitdir, "alpha").unwrap();
         assert!(config.schema.is_some());
         assert_eq!(config.schema.unwrap().to_string(), "default@1.0.0");
     }
 
     #[test]
-    fn read_vault_config_from_memstead_returns_typed_error_for_missing_vault() {
+    fn read_mem_config_from_memstead_returns_typed_error_for_missing_mem() {
         let tmp = TempDir::new().unwrap();
         let gitdir = fresh_repo_dir(tmp.path());
         seed_schemas(&gitdir, &[("default", "1.0.0", &[])]);
@@ -1322,11 +1322,11 @@ mod tests {
             &[("alpha", r#"{"format": 1, "schema": "default@1.0.0"}"#)],
         );
         let _ = migrate_to_memstead_ref(&gitdir).unwrap();
-        match read_vault_config_from_memstead_ref(&gitdir, "nonexistent") {
+        match read_mem_config_from_memstead_ref(&gitdir, "nonexistent") {
             Err(MemsteadRefError::Config { path, .. }) => {
                 assert!(path.contains("nonexistent"));
             }
-            other => panic!("expected Config error for missing vault, got {other:?}"),
+            other => panic!("expected Config error for missing mem, got {other:?}"),
         }
     }
 
@@ -1348,9 +1348,9 @@ mod tests {
         .unwrap();
 
         let entries = list_memstead_entries(&gitdir);
-        assert_eq!(entries, vec!["vaults/alpha/config.json".to_string()]);
+        assert_eq!(entries, vec!["mems/alpha/config.json".to_string()]);
 
-        let config = read_vault_config_from_memstead_ref(&gitdir, "alpha").unwrap();
+        let config = read_mem_config_from_memstead_ref(&gitdir, "alpha").unwrap();
         assert_eq!(
             config.schema.unwrap().to_string(),
             "default@1.0.0"
@@ -1380,7 +1380,7 @@ mod tests {
         )
         .unwrap();
 
-        let config = read_vault_config_from_memstead_ref(&gitdir, "alpha").unwrap();
+        let config = read_mem_config_from_memstead_ref(&gitdir, "alpha").unwrap();
         assert_eq!(
             config.schema.unwrap().to_string(),
             "default@2.0.0"
@@ -1388,7 +1388,7 @@ mod tests {
     }
 
     #[test]
-    fn commit_config_to_memstead_preserves_sibling_vault_entries() {
+    fn commit_config_to_memstead_preserves_sibling_mem_entries() {
         let tmp = TempDir::new().unwrap();
         let gitdir = fresh_repo_dir(tmp.path());
         let ctx = CommitContext::internal();
@@ -1414,8 +1414,8 @@ mod tests {
         assert_eq!(
             entries,
             vec![
-                "vaults/alpha/config.json".to_string(),
-                "vaults/beta/config.json".to_string(),
+                "mems/alpha/config.json".to_string(),
+                "mems/beta/config.json".to_string(),
             ]
         );
     }

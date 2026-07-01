@@ -4,7 +4,7 @@
 //! - [`build_commit_envelope`] — one envelope for one commit SHA.
 //! - [`build_commit_envelopes`] — range `(since, until]` with
 //!   delta-size refusal.
-//! - [`build_snapshot`] — wraps `Engine::export_vault_to_bytes`
+//! - [`build_snapshot`] — wraps `Engine::export_mem_to_bytes`
 //!   into a `[SnapshotOutput]` carrying both archive bytes and the
 //!   resolved HEAD SHA, ready for an HTTP response.
 //!
@@ -64,11 +64,11 @@ impl Default for BuildConfig {
 /// send and the HEAD SHA the snapshot is anchored at.
 #[derive(Debug, Clone)]
 pub struct SnapshotOutput {
-    /// Vault name (echoes the caller's argument).
-    pub vault: String,
+    /// Mem name (echoes the caller's argument).
+    pub mem: String,
     /// Archive bytes — `application/zip` content for an HTTP body.
     pub bytes: Vec<u8>,
-    /// HEAD SHA of the vault's branch at the time the snapshot was
+    /// HEAD SHA of the mem's branch at the time the snapshot was
     /// built. Clients persist this as their last-known-HEAD cursor
     /// for follow-up `/commits?since=<sha>` requests.
     pub head: String,
@@ -78,36 +78,36 @@ pub struct SnapshotOutput {
 /// gix, walks the parent-vs-commit tree diff, and pulls full markdown
 /// content per touched `.md` blob from the commit's tree.
 ///
-/// `vault` is the vault label baked into the response and the path
-/// filter for the tree diff — only changes under the vault's path
+/// `mem` is the mem label baked into the response and the path
+/// filter for the tree diff — only changes under the mem's path
 /// surface (`.md` files outside any `.memstead/` engine-internal
 /// subtree).
 pub fn build_commit_envelope(
     engine: &memstead_base::Engine,
-    vault: &str,
+    mem: &str,
     sha: &str,
 ) -> Result<CommitEnvelope, BridgeError> {
-    let gitdir = resolve_vault_gitdir(engine, vault)?;
+    let gitdir = resolve_mem_gitdir(engine, mem)?;
     let repo = gix::open(&gitdir).map_err(|e| BridgeError::Git(format!("gix open: {e}")))?;
-    build_envelope_from_repo(&repo, vault, sha)
+    build_envelope_from_repo(&repo, mem, sha)
 }
 
 /// Build the sequence of envelopes for `(since, until]`. `since` may
 /// be the empty-tree SHA (`4b825dc6...`) for a from-the-start walk;
-/// `until` defaults to the vault branch tip when empty.
+/// `until` defaults to the mem branch tip when empty.
 pub fn build_commit_envelopes(
     engine: &memstead_base::Engine,
-    vault: &str,
+    mem: &str,
     since: &str,
     until: Option<&str>,
     config: &BuildConfig,
 ) -> Result<Vec<CommitEnvelope>, BridgeError> {
-    let gitdir = resolve_vault_gitdir(engine, vault)?;
+    let gitdir = resolve_mem_gitdir(engine, mem)?;
     let repo = gix::open(&gitdir).map_err(|e| BridgeError::Git(format!("gix open: {e}")))?;
 
     let until_sha = match until {
         Some(s) if !s.is_empty() => s.to_string(),
-        _ => format!("refs/heads/{vault}"),
+        _ => format!("refs/heads/{mem}"),
     };
     let head_id = repo
         .rev_parse_single(until_sha.as_str())
@@ -161,39 +161,39 @@ pub fn build_commit_envelopes(
     ids.reverse();
     let mut out = Vec::with_capacity(ids.len());
     for id in ids {
-        out.push(build_envelope_from_repo(&repo, vault, &id.to_string())?);
+        out.push(build_envelope_from_repo(&repo, mem, &id.to_string())?);
     }
     Ok(out)
 }
 
-/// Snapshot wrapper around `Engine::export_vault_to_bytes`.
+/// Snapshot wrapper around `Engine::export_mem_to_bytes`.
 /// Returns archive bytes + the HEAD SHA the snapshot was anchored at
 /// so clients can persist the SHA as their next polling cursor.
 pub fn build_snapshot(
     engine: &memstead_base::Engine,
-    vault: &str,
+    mem: &str,
 ) -> Result<SnapshotOutput, BridgeError> {
     // Resolve HEAD before exporting so the cursor in the response
     // matches the snapshot's content. The snapshot itself does not
     // walk git history; the SHA gives clients a concrete anchor for
     // their follow-up `/commits?since=<sha>` poll.
-    let gitdir = resolve_vault_gitdir(engine, vault).ok();
+    let gitdir = resolve_mem_gitdir(engine, mem).ok();
     let head = match &gitdir {
-        Some(g) => head_sha_for_vault(g, vault).unwrap_or_default(),
+        Some(g) => head_sha_for_mem(g, mem).unwrap_or_default(),
         None => String::new(),
     };
-    let bytes = engine.export_vault_to_bytes(vault).map_err(|e| match e {
-        memstead_base::EngineError::UnknownVault(name) => BridgeError::UnknownVault(name),
+    let bytes = engine.export_mem_to_bytes(mem).map_err(|e| match e {
+        memstead_base::EngineError::UnknownMem(name) => BridgeError::UnknownMem(name),
         other => BridgeError::Engine(other.to_string()),
     })?;
     Ok(SnapshotOutput {
-        vault: vault.to_string(),
+        mem: mem.to_string(),
         bytes,
         head,
     })
 }
 
-/// Run a search against `vault` and return the wire envelope.
+/// Run a search against `mem` and return the wire envelope.
 ///
 /// Framework-agnostic — `search_handler` in
 /// [`crate::handlers`] is the axum-wired wrapper, but other
@@ -206,7 +206,7 @@ pub fn build_snapshot(
 ///   [`BridgeError::InvalidSearchQuery`] / 400.
 /// - `limit` outside `[1, config.search_max_limit]` → same code /
 ///   400.
-/// - `vault` not mounted in `engine` → [`BridgeError::UnknownVault`]
+/// - `mem` not mounted in `engine` → [`BridgeError::UnknownMem`]
 ///   / 404.
 /// - Underlying `Engine::search` failure → [`BridgeError::Engine`] /
 ///   500.
@@ -216,7 +216,7 @@ pub fn build_snapshot(
 /// entities matching more terms higher automatically.
 pub fn run_search(
     engine: &memstead_base::Engine,
-    vault: &str,
+    mem: &str,
     query: SearchQuery,
     config: &BuildConfig,
 ) -> Result<SearchResult, BridgeError> {
@@ -252,10 +252,10 @@ pub fn run_search(
         None => config.search_default_limit,
     };
 
-    // 3. Verify the vault is mounted. Folder, git-branch, archive —
+    // 3. Verify the mem is mounted. Folder, git-branch, archive —
     //    every backend `Engine::search` accepts is fine here.
-    if !engine.vault_names().iter().any(|n| *n == vault) {
-        return Err(BridgeError::UnknownVault(vault.to_string()));
+    if !engine.mem_names().iter().any(|n| *n == mem) {
+        return Err(BridgeError::UnknownMem(mem.to_string()));
     }
 
     // 4. Build the engine-side `SearchScope`. Whitespace-split into
@@ -272,7 +272,7 @@ pub fn run_search(
     };
     let scope = memstead_base::ops::SearchScope {
         query: Some(inner_query),
-        vault: Some(vault.to_string()),
+        mem: Some(mem.to_string()),
         entity_type: query.entity_type.clone(),
         limit: Some(limit),
         offset: query.offset,
@@ -297,7 +297,7 @@ pub fn run_search(
     let truncated = result.total > result.returned + result.offset;
     let hits: Vec<SearchHit> = result.hits.iter().map(SearchHit::from_engine).collect();
     Ok(SearchResult {
-        vault: vault.to_string(),
+        mem: mem.to_string(),
         query: query.q,
         hits,
         total_matched: result.total,
@@ -310,7 +310,7 @@ pub fn run_search(
 /// SHA. Reusable across the single-commit and range entry points.
 fn build_envelope_from_repo(
     repo: &gix::Repository,
-    vault: &str,
+    mem: &str,
     sha: &str,
 ) -> Result<CommitEnvelope, BridgeError> {
     let id = repo
@@ -385,18 +385,18 @@ fn build_envelope_from_repo(
             |change| -> Result<std::ops::ControlFlow<()>, std::convert::Infallible> {
                 match change {
                     Change::Addition { location, .. } => {
-                        if let Some(path) = vault_entity_path(location.as_ref()) {
+                        if let Some(path) = mem_entity_path(location.as_ref()) {
                             let content = read_blob(&tree, &path).unwrap_or_default();
                             changes.push(EntityChange::Added { path, content });
                         }
                     }
                     Change::Deletion { location, .. } => {
-                        if let Some(path) = vault_entity_path(location.as_ref()) {
+                        if let Some(path) = mem_entity_path(location.as_ref()) {
                             changes.push(EntityChange::Deleted { path });
                         }
                     }
                     Change::Modification { location, .. } => {
-                        if let Some(path) = vault_entity_path(location.as_ref()) {
+                        if let Some(path) = mem_entity_path(location.as_ref()) {
                             let content = read_blob(&tree, &path).unwrap_or_default();
                             changes.push(EntityChange::Modified { path, content });
                         }
@@ -406,8 +406,8 @@ fn build_envelope_from_repo(
                         location,
                         ..
                     } => {
-                        let from = vault_entity_path(source_location.as_ref());
-                        let to = vault_entity_path(location.as_ref());
+                        let from = mem_entity_path(source_location.as_ref());
+                        let to = mem_entity_path(location.as_ref());
                         if let (Some(from), Some(to)) = (from, to) {
                             let content = read_blob(&tree, &to).unwrap_or_default();
                             changes.push(EntityChange::Renamed { from, to, content });
@@ -424,18 +424,18 @@ fn build_envelope_from_repo(
     Ok(CommitEnvelope {
         sha: resolved_sha,
         parent: parent_sha,
-        vault: vault.to_string(),
+        mem: mem.to_string(),
         timestamp,
         trailers,
         changes,
     })
 }
 
-/// Filter a tree-diff path down to a vault entity. Skips the engine-
+/// Filter a tree-diff path down to a mem entity. Skips the engine-
 /// internal `.memstead/` subtree and non-`.md` entries; returns the
 /// POSIX relative path so consumers can echo it as the wire-format
 /// `path` value.
-fn vault_entity_path(raw: &gix::bstr::BStr) -> Option<String> {
+fn mem_entity_path(raw: &gix::bstr::BStr) -> Option<String> {
     let s = std::str::from_utf8(raw.as_ref()).ok()?;
     if s.is_empty() || !s.ends_with(".md") {
         return None;
@@ -480,7 +480,7 @@ fn format_iso_8601(time: gix::date::Time) -> String {
 
 /// Tiny `Unix epoch seconds → "YYYY-MM-DDTHH:MM:SSZ"` formatter so
 /// we don't need a `time` / `chrono` dependency. Handles 1970-2099 —
-/// far enough for any reasonable vault history; commits outside that
+/// far enough for any reasonable mem history; commits outside that
 /// range fall back to a `?` placeholder.
 fn format_unix_seconds_utc(secs: i64) -> String {
     if secs < 0 || secs > 4_102_444_800 {
@@ -557,30 +557,30 @@ fn parse_trailer_line(line: &str) -> Option<(String, String)> {
     Some((key.to_string(), value.to_string()))
 }
 
-/// Look up the gitdir for `vault`. Returns the path the git-branch
-/// mount declares; folder / archive vaults refuse via
-/// [`BridgeError::UnknownVault`] because the bridge wire format only
-/// applies to git-backed vaults.
-fn resolve_vault_gitdir(
+/// Look up the gitdir for `mem`. Returns the path the git-branch
+/// mount declares; folder / archive mems refuse via
+/// [`BridgeError::UnknownMem`] because the bridge wire format only
+/// applies to git-backed mems.
+fn resolve_mem_gitdir(
     engine: &memstead_base::Engine,
-    vault: &str,
+    mem: &str,
 ) -> Result<std::path::PathBuf, BridgeError> {
-    let names: Vec<&str> = engine.vault_names().into_iter().collect();
-    if !names.iter().any(|n| *n == vault) {
-        return Err(BridgeError::UnknownVault(vault.to_string()));
+    let names: Vec<&str> = engine.mem_names().into_iter().collect();
+    if !names.iter().any(|n| *n == mem) {
+        return Err(BridgeError::UnknownMem(mem.to_string()));
     }
     engine
-        .gitdir_for(vault)
-        .map_err(|_| BridgeError::UnknownVault(vault.to_string()))
+        .gitdir_for(mem)
+        .map_err(|_| BridgeError::UnknownMem(mem.to_string()))
 }
 
-/// Resolve `refs/heads/<vault>` to its SHA. Returns `None` when the
-/// branch does not exist (fresh vault) — callers treat that as
+/// Resolve `refs/heads/<mem>` to its SHA. Returns `None` when the
+/// branch does not exist (fresh mem) — callers treat that as
 /// "empty HEAD" rather than an error.
-fn head_sha_for_vault(gitdir: &Path, vault: &str) -> Option<String> {
+fn head_sha_for_mem(gitdir: &Path, mem: &str) -> Option<String> {
     let repo = gix::open(gitdir).ok()?;
     let id = repo
-        .rev_parse_single(format!("refs/heads/{vault}").as_str())
+        .rev_parse_single(format!("refs/heads/{mem}").as_str())
         .ok()?;
     Some(id.detach().to_string())
 }
@@ -588,8 +588,8 @@ fn head_sha_for_vault(gitdir: &Path, vault: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use memstead_base::storage::VaultWriter;
-    use memstead_git_branch::storage::git_tree::GitTreeVaultWriter;
+    use memstead_base::storage::MemWriter;
+    use memstead_git_branch::storage::git_tree::GitTreeMemWriter;
     use memstead_base::vcs::CommitContext;
     use std::path::PathBuf;
     use tempfile::TempDir;
@@ -611,9 +611,9 @@ mod tests {
             ".delete_entity(",
             ".relate_entity(",
             ".rename_entity(",
-            ".reload_one_vault(",
-            ".reload_each_writable_vault(",
-            ".reload_each_writable_vault_reports(",
+            ".reload_one_mem(",
+            ".reload_each_writable_mem(",
+            ".reload_each_writable_mem_reports(",
             ".apply_commit(",
         ];
         let src_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
@@ -635,7 +635,7 @@ mod tests {
     }
 
     fn init_gitdir(tmp: &TempDir) -> PathBuf {
-        let gitdir = tmp.path().join("vault-repo").join(".git");
+        let gitdir = tmp.path().join("mem-repo").join(".git");
         std::fs::create_dir_all(&gitdir).unwrap();
         gix::init_bare(&gitdir).unwrap();
         gitdir
@@ -648,7 +648,7 @@ mod tests {
     }
 
     fn commit(gitdir: &Path, branch: &str, file: &str, content: &str, subject: &str) -> String {
-        let writer = GitTreeVaultWriter::new(
+        let writer = GitTreeMemWriter::new(
             gitdir.to_path_buf(),
             format!("refs/heads/{branch}"),
         );
@@ -658,9 +658,9 @@ mod tests {
         writer.commit(subject, &CommitContext::internal()).unwrap()
     }
 
-    fn engine_with_vault(gitdir: &Path) -> memstead_base::Engine {
+    fn engine_with_mem(gitdir: &Path) -> memstead_base::Engine {
         let mount = memstead_base::Mount {
-            vault: "specs".to_string(),
+            mem: "specs".to_string(),
             schema: Some(memstead_schema::SchemaRef::new(
                 "default",
                 semver::Version::new(1, 0, 0),
@@ -708,14 +708,14 @@ mod tests {
     }
 
     #[test]
-    fn build_envelope_unknown_vault_returns_typed_error() {
+    fn build_envelope_unknown_mem_returns_typed_error() {
         let tmp = TempDir::new().unwrap();
         let gitdir = init_gitdir(&tmp);
-        let engine = engine_with_vault(&gitdir);
+        let engine = engine_with_mem(&gitdir);
         let err = build_commit_envelope(&engine, "missing", "deadbeef").unwrap_err();
         match err {
-            BridgeError::UnknownVault(v) => assert_eq!(v, "missing"),
-            other => panic!("expected UnknownVault, got {other:?}"),
+            BridgeError::UnknownMem(v) => assert_eq!(v, "missing"),
+            other => panic!("expected UnknownMem, got {other:?}"),
         }
     }
 
@@ -724,7 +724,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let gitdir = init_gitdir(&tmp);
         commit(&gitdir, "specs", "alpha.md", &body("Alpha"), "seed");
-        let engine = engine_with_vault(&gitdir);
+        let engine = engine_with_mem(&gitdir);
         let err = build_commit_envelope(&engine, "specs", "0000000000000000000000000000000000000000")
             .unwrap_err();
         match err {
@@ -740,11 +740,11 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let gitdir = init_gitdir(&tmp);
         let sha = commit(&gitdir, "specs", "alpha.md", &body("Alpha"), "seed");
-        let engine = engine_with_vault(&gitdir);
+        let engine = engine_with_mem(&gitdir);
         let env = build_commit_envelope(&engine, "specs", &sha).unwrap();
         assert_eq!(env.sha, sha);
         assert_eq!(env.parent, "");
-        assert_eq!(env.vault, "specs");
+        assert_eq!(env.mem, "specs");
         assert_eq!(env.changes.len(), 1);
         match &env.changes[0] {
             EntityChange::Added { path, content } => {
@@ -761,7 +761,7 @@ mod tests {
         let gitdir = init_gitdir(&tmp);
         commit(&gitdir, "specs", "alpha.md", &body("Alpha-v0"), "seed");
         let sha2 = commit(&gitdir, "specs", "alpha.md", &body("Alpha-v1"), "rev");
-        let engine = engine_with_vault(&gitdir);
+        let engine = engine_with_mem(&gitdir);
         let env = build_commit_envelope(&engine, "specs", &sha2).unwrap();
         assert_eq!(env.changes.len(), 1);
         match &env.changes[0] {
@@ -781,7 +781,7 @@ mod tests {
         let sha1 = commit(&gitdir, "specs", "a.md", &body("A"), "first");
         let sha2 = commit(&gitdir, "specs", "b.md", &body("B"), "second");
         let sha3 = commit(&gitdir, "specs", "c.md", &body("C"), "third");
-        let engine = engine_with_vault(&gitdir);
+        let engine = engine_with_mem(&gitdir);
         let envs = build_commit_envelopes(
             &engine,
             "specs",
@@ -808,7 +808,7 @@ mod tests {
                 &format!("c{i}"),
             );
         }
-        let engine = engine_with_vault(&gitdir);
+        let engine = engine_with_mem(&gitdir);
         let config = BuildConfig {
             delta_limit: 2,
             ..BuildConfig::default()
@@ -834,16 +834,16 @@ mod tests {
     fn build_snapshot_returns_bytes_and_head_sha() {
         let tmp = TempDir::new().unwrap();
         let gitdir = init_gitdir(&tmp);
-        // The snapshot path needs a vault config blob — write one
-        // through the same writer the engine uses for the vault
+        // The snapshot path needs a mem config blob — write one
+        // through the same writer the engine uses for the mem
         // backend so the export path finds it.
-        let writer = GitTreeVaultWriter::new(
+        let writer = GitTreeMemWriter::new(
             gitdir.clone(),
             "refs/heads/__MEMSTEAD".to_string(),
         );
         writer
             .write_entity(
-                Path::new("vaults/specs/config.json"),
+                Path::new("mems/specs/config.json"),
                 br#"{"schema":"default@1.0.0","version":"1.0.0"}"#,
             )
             .unwrap();
@@ -852,9 +852,9 @@ mod tests {
             .unwrap();
 
         let sha = commit(&gitdir, "specs", "alpha.md", &body("Alpha"), "seed");
-        let engine = engine_with_vault(&gitdir);
+        let engine = engine_with_mem(&gitdir);
         let snap = build_snapshot(&engine, "specs").unwrap();
-        assert_eq!(snap.vault, "specs");
+        assert_eq!(snap.mem, "specs");
         assert!(!snap.bytes.is_empty(), "snapshot must produce non-empty archive bytes");
         assert_eq!(snap.head, sha);
     }

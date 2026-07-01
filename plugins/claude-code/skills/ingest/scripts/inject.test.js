@@ -11,12 +11,12 @@
  *      - No numerical entity targets, no behavioral exhortations.
  *
  *   2. Auto-create branch — first run of a discovery/refinement ingest
- *      whose paired `ingest/<name>` vault is absent issues a single
- *      `memstead vault init <name> --org-path ingest --schema ingest@0.1.0`
+ *      whose paired `ingest/<name>` mem is absent issues a single
+ *      `memstead mem init <name> --org-path ingest --schema ingest@0.1.0`
  *      via the operator-mode CLI before emitting the prompt.
  *
- *   3. `--clear <name>` branch — invokes `memstead vault delete <name>`
- *      via the operator-mode CLI; a non-existent vault is reported as
+ *   3. `--clear <name>` branch — invokes `memstead mem delete <name>`
+ *      via the operator-mode CLI; a non-existent mem is reported as
  *      already-absent (exit 0).
  *
  * The tests run `inject.mjs` as a subprocess against a tempdir
@@ -65,16 +65,16 @@ function cleanup(root) {
 
 /**
  * Drop a workspace-dump fixture next to `.memstead.toml`. The fake-memstead
- * stand-in cats it on `memstead workspace dump`. `vaults` is a list of
+ * stand-in cats it on `memstead workspace dump`. `mems` is a list of
  * `{name, schema?, writeGuidance?, snapshot_token?}`; `schemas` is
  * `{name → {avoid?, goal?}}` — each value is wrapped under
  * `default_writing_guidance` to match the engine's dump shape.
  */
-function writeFakeDump(root, { vaults, schemas = {} }) {
+function writeFakeDump(root, { mems, schemas = {} }) {
   const dump = {
     format: 'workspace-dump/v0',
     workspace_root: root,
-    vaults: vaults.map((v, i) => ({
+    mems: mems.map((v, i) => ({
       name: v.name,
       schema: v.schema ?? null,
       description: v.description ?? null,
@@ -115,12 +115,12 @@ function readInvocations(root) {
 
 /**
  * One discovery ingest, one refinement ingest, one one-shot ingest.
- * Each writes into its own destination vault; refinement and discovery
- * pair with auto-creatable `ingest/<name>` process vaults, one-shot
+ * Each writes into its own destination mem; refinement and discovery
+ * pair with auto-creatable `ingest/<name>` process mems, one-shot
  * does not. The destination schemas carry distinctive `default_writing_guidance`
  * fixtures so the tests can match against schema-rendered output.
  */
-function buildWorkspace({ withProcessVault = false } = {}) {
+function buildWorkspace({ withProcessMem = false } = {}) {
   const toml = `format = "memstead-plugin/v0"\n`;
 
   // Source files referenced by the codebase facet so refinement's
@@ -131,7 +131,7 @@ function buildWorkspace({ withProcessVault = false } = {}) {
   };
 
   // Four-primitive workspace store: a codebase Medium, a Facet selecting it,
-  // a Projection mapping the facet to the destination vault, and three ingests.
+  // a Projection mapping the facet to the destination mem, and three ingests.
   const files = {
     '.memstead.toml': toml,
     '.memstead/mediums/engine-dest/src.json': {
@@ -146,7 +146,7 @@ function buildWorkspace({ withProcessVault = false } = {}) {
     },
     '.memstead/projections/engine-dest/graph.json': {
       source_facets: ['src'],
-      destination_vault: 'engine-dest',
+      destination_mem: 'engine-dest',
     },
     '.memstead/ingests/discovery-run.json': {
       projection: 'engine-dest/graph',
@@ -182,18 +182,18 @@ function buildWorkspace({ withProcessVault = false } = {}) {
     },
   };
 
-  const baseVaults = [
+  const baseMems = [
     { name: 'engine-dest', schema: 'sample@0.1.0' },
   ];
-  const vaults = withProcessVault
+  const mems = withProcessMem
     ? [
-        ...baseVaults,
+        ...baseMems,
         { name: 'discovery-run', schema: 'ingest@0.1.0' },
         { name: 'refinement-run', schema: 'ingest@0.1.0' },
       ]
-    : baseVaults;
+    : baseMems;
 
-  writeFakeDump(root, { vaults, schemas });
+  writeFakeDump(root, { mems, schemas });
   return root;
 }
 
@@ -203,7 +203,7 @@ function buildWorkspace({ withProcessVault = false } = {}) {
 
 describe('inject.mjs — render structure (discovery mode)', () => {
   let root;
-  beforeEach(() => { root = buildWorkspace({ withProcessVault: true }); });
+  beforeEach(() => { root = buildWorkspace({ withProcessMem: true }); });
   afterEach(() => cleanup(root));
 
   it('opens with a Situation block', () => {
@@ -234,12 +234,12 @@ describe('inject.mjs — render structure (discovery mode)', () => {
     assert.doesNotMatch(r.stdout, /spot-checking is not reading/i);
   });
 
-  it('Operative-data section names sources, destination, and the paired process vault', () => {
+  it('Operative-data section names sources, destination, and the paired process mem', () => {
     const r = runInject(root, ['discovery-run']);
     assert.match(r.stdout, /^## Operative data$/m);
     assert.match(r.stdout, /^### Sources$/m);
     assert.match(r.stdout, /^### Destination$/m);
-    assert.match(r.stdout, /^### Paired process vault$/m);
+    assert.match(r.stdout, /^### Paired process mem$/m);
     assert.match(r.stdout, /\*\*ingest\/discovery-run\*\*/);
     assert.match(r.stdout, /ingest@0\.1\.0/);
   });
@@ -249,54 +249,54 @@ describe('inject.mjs — render structure (discovery mode)', () => {
 //  AUTO-CREATE BRANCH
 // ═══════════════════════════════════════════════════════════════════════════
 
-describe('inject.mjs — process-vault auto-create', () => {
+describe('inject.mjs — process-mem auto-create', () => {
   let root;
   afterEach(() => cleanup(root));
 
-  it('issues `memstead vault init <name> --org-path ingest --schema ingest@0.1.0` for a discovery ingest whose vault is absent', () => {
-    root = buildWorkspace({ withProcessVault: false });
+  it('issues `memstead mem init <name> --org-path ingest --schema ingest@0.1.0` for a discovery ingest whose mem is absent', () => {
+    root = buildWorkspace({ withProcessMem: false });
     const r = runInject(root, ['discovery-run']);
     assert.equal(r.status, 0, `stderr:\n${r.stderr}`);
     const calls = readInvocations(root);
-    const inits = calls.filter(c => c.argv[0] === 'vault' && c.argv[1] === 'init');
-    assert.equal(inits.length, 1, `expected exactly one vault init call, got ${inits.length}: ${JSON.stringify(inits)}`);
+    const inits = calls.filter(c => c.argv[0] === 'mem' && c.argv[1] === 'init');
+    assert.equal(inits.length, 1, `expected exactly one mem init call, got ${inits.length}: ${JSON.stringify(inits)}`);
     const argv = inits[0].argv;
     assert.deepEqual(
       argv.slice(0, 7),
-      ['vault', 'init', 'discovery-run', '--org-path', 'ingest', '--schema', 'ingest@0.1.0'],
+      ['mem', 'init', 'discovery-run', '--org-path', 'ingest', '--schema', 'ingest@0.1.0'],
     );
   });
 
-  it('does not create a process vault for one-shot ingests', () => {
-    root = buildWorkspace({ withProcessVault: false });
+  it('does not create a process mem for one-shot ingests', () => {
+    root = buildWorkspace({ withProcessMem: false });
     const r = runInject(root, ['one-shot-run']);
     assert.equal(r.status, 0, `stderr:\n${r.stderr}`);
     const calls = readInvocations(root);
-    const inits = calls.filter(c => c.argv[0] === 'vault' && c.argv[1] === 'init');
-    assert.equal(inits.length, 0, `expected no vault init calls, got: ${JSON.stringify(inits)}`);
-    // And the prompt must not advertise a paired process vault.
-    assert.doesNotMatch(r.stdout, /^### Paired process vault$/m);
+    const inits = calls.filter(c => c.argv[0] === 'mem' && c.argv[1] === 'init');
+    assert.equal(inits.length, 0, `expected no mem init calls, got: ${JSON.stringify(inits)}`);
+    // And the prompt must not advertise a paired process mem.
+    assert.doesNotMatch(r.stdout, /^### Paired process mem$/m);
   });
 
-  it('skips creation when the process vault is already present', () => {
-    root = buildWorkspace({ withProcessVault: true });
+  it('skips creation when the process mem is already present', () => {
+    root = buildWorkspace({ withProcessMem: true });
     const r = runInject(root, ['discovery-run']);
     assert.equal(r.status, 0, `stderr:\n${r.stderr}`);
     const calls = readInvocations(root);
-    const inits = calls.filter(c => c.argv[0] === 'vault' && c.argv[1] === 'init');
-    assert.equal(inits.length, 0, 'should not re-create an existing process vault');
+    const inits = calls.filter(c => c.argv[0] === 'mem' && c.argv[1] === 'init');
+    assert.equal(inits.length, 0, 'should not re-create an existing process mem');
   });
 
   it('continues with a notice when auto-create fails', () => {
-    root = buildWorkspace({ withProcessVault: false });
-    writeFileSync(join(root, '.fake-vault-init-mode'), 'fail');
+    root = buildWorkspace({ withProcessMem: false });
+    writeFileSync(join(root, '.fake-mem-init-mode'), 'fail');
     const r = runInject(root, ['discovery-run']);
     assert.equal(r.status, 0, `stderr:\n${r.stderr}`);
     // Prompt still emits, situation block carries a notice referencing
     // the operator-recovery command.
     assert.match(r.stdout, /^## Situation$/m);
     assert.match(r.stdout, /could not be auto-created/);
-    assert.match(r.stdout, /memstead vault init discovery-run --org-path ingest --schema ingest@0\.1\.0/);
+    assert.match(r.stdout, /memstead mem init discovery-run --org-path ingest --schema ingest@0\.1\.0/);
   });
 });
 
@@ -308,33 +308,33 @@ describe('inject.mjs — --clear', () => {
   let root;
   afterEach(() => cleanup(root));
 
-  it('deletes the named process vault via the operator-mode CLI', () => {
-    root = buildWorkspace({ withProcessVault: true });
+  it('deletes the named process mem via the operator-mode CLI', () => {
+    root = buildWorkspace({ withProcessMem: true });
     const r = runInject(root, ['--clear', 'discovery-run']);
     assert.equal(r.status, 0, `stderr:\n${r.stderr}`);
     assert.match(r.stdout, /ingest\/discovery-run — deleted\./);
     const calls = readInvocations(root);
-    const deletes = calls.filter(c => c.argv[0] === 'vault' && c.argv[1] === 'delete');
+    const deletes = calls.filter(c => c.argv[0] === 'mem' && c.argv[1] === 'delete');
     assert.equal(deletes.length, 1);
-    assert.deepEqual(deletes[0].argv.slice(0, 3), ['vault', 'delete', 'discovery-run']);
+    assert.deepEqual(deletes[0].argv.slice(0, 3), ['mem', 'delete', 'discovery-run']);
   });
 
-  it('reports already-absent (exit 0) when the vault does not exist', () => {
-    root = buildWorkspace({ withProcessVault: false });
-    writeFileSync(join(root, '.fake-vault-delete-mode'), 'absent');
+  it('reports already-absent (exit 0) when the mem does not exist', () => {
+    root = buildWorkspace({ withProcessMem: false });
+    writeFileSync(join(root, '.fake-mem-delete-mode'), 'absent');
     const r = runInject(root, ['--clear', 'never-existed']);
     assert.equal(r.status, 0);
     assert.match(r.stdout, /ingest\/never-existed — already absent\./);
   });
 
   it('treats `--clear` without a name as a usage error (exit 0 with usage line)', () => {
-    root = buildWorkspace({ withProcessVault: false });
+    root = buildWorkspace({ withProcessMem: false });
     const r = runInject(root, ['--clear']);
     assert.equal(r.status, 0);
     assert.match(r.stdout, /Usage:/);
-    // No vault delete CLI invocation issued.
+    // No mem delete CLI invocation issued.
     const calls = readInvocations(root);
-    const deletes = calls.filter(c => c.argv[0] === 'vault' && c.argv[1] === 'delete');
+    const deletes = calls.filter(c => c.argv[0] === 'mem' && c.argv[1] === 'delete');
     assert.equal(deletes.length, 0);
   });
 });
@@ -348,7 +348,7 @@ describe('inject.mjs — unsupported preparation', () => {
   afterEach(() => cleanup(root));
 
   it('reports an ingest unsupported (not silently skipped) when its facet declares a preparation step', () => {
-    root = buildWorkspace({ withProcessVault: true });
+    root = buildWorkspace({ withProcessMem: true });
     // Add a preparation step to the source facet — no implementation exists.
     writeFileSync(
       join(root, '.memstead/facets/engine-dest/src.json'),

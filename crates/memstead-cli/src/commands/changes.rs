@@ -1,4 +1,4 @@
-//! `memstead changes` — diff a vault's HEAD against a caller-provided SHA.
+//! `memstead changes` — diff a mem's HEAD against a caller-provided SHA.
 //!
 //! Mirrors the MCP `memstead_changes_since` tool so the same commit-SHA
 //! response field can drive both interactive (CLI) and agent (MCP)
@@ -12,9 +12,9 @@ use crate::setup::{CliContext, CliEngine};
 
 #[derive(Parser, Debug)]
 pub struct Args {
-    /// Writable vault name. Defaults to the first loaded vault.
+    /// Writable mem name. Defaults to the first loaded mem.
     #[arg(long)]
-    pub vault: Option<String>,
+    pub mem: Option<String>,
 
     /// Commit SHA to diff against. Pass a prior mutation's `commit_sha`,
     /// or the git canonical empty-tree hash
@@ -35,7 +35,7 @@ pub struct Args {
 
     /// Fold per-commit agent-notes (subject, note, actor, tool, client)
     /// and the workspace-level `__MEMSTEAD` ref tip (unified schemas +
-    /// per-vault configs) into the response. Default off — entity-
+    /// per-mem configs) into the response. Default off — entity-
     /// delta only. Outer-repo auto-commit consumers turn this on so
     /// they get notes + the registry-ref sha in one round-trip without
     /// re-walking the gitdir.
@@ -45,35 +45,35 @@ pub struct Args {
 
 pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     match ctx.cli_engine()? {
-        #[cfg(feature = "vault-repo")]
-        CliEngine::VaultRepo(engine) => run_vault_repo(ctx, engine, args),
+        #[cfg(feature = "mem-repo")]
+        CliEngine::MemRepo(engine) => run_mem_repo(ctx, engine, args),
         CliEngine::Filesystem(engine) => run_filesystem(ctx, engine, args),
     }
 }
 
-#[cfg(feature = "vault-repo")]
-fn run_vault_repo(
+#[cfg(feature = "mem-repo")]
+fn run_mem_repo(
     ctx: &CliContext,
     engine: memstead_base::Engine,
     args: Args,
 ) -> anyhow::Result<()> {
-    let vault = match args.vault {
+    let mem = match args.mem {
         Some(v) => v,
         None => engine
-            .vault_configs_named()
-            .find(|(name, _)| engine.vault_router().is_writable(name))
+            .mem_configs_named()
+            .find(|(name, _)| engine.mem_router().is_writable(name))
             .map(|(name, _)| name.to_string())
             .ok_or_else(|| {
                 CliError::new(
                     ExitKind::Generic,
-                    "NO_WRITABLE_VAULT",
-                    "no writable vault loaded — pass --vault <name>",
+                    "NO_WRITABLE_MEM",
+                    "no writable mem loaded — pass --mem <name>",
                 )
             })?,
     };
 
     let mut report = engine
-        .changes_since(&vault, &args.since, args.rename_similarity)
+        .changes_since(&mem, &args.since, args.rename_similarity)
         .map_err(CliError::from_engine_op)?;
 
     // The engine unconditionally populates `notes` and `memstead_ref`
@@ -96,7 +96,7 @@ fn run_vault_repo(
     let mut lines: Vec<String> = Vec::new();
     lines.push(format!(
         "# Changes in `{}` since `{}`",
-        report.vault, report.since
+        report.mem, report.since
     ));
     lines.push(String::new());
     lines.push(format!("- HEAD: `{}`", report.head));
@@ -197,12 +197,12 @@ fn run_vault_repo(
     Ok(())
 }
 
-/// Filesystem-vault `memstead changes` reads `.memstead/changes.jsonl` and
+/// Filesystem-mem `memstead changes` reads `.memstead/changes.jsonl` and
 /// returns entries with `ts > since`. The cursor is a timestamp
 /// string (RFC 3339), not a commit-SHA — same divergence as the
 /// MCP `memstead_changes_since` tool's filesystem path. `--rename-similarity`
 /// and `--include-notes` are accepted for shape parity but ignored:
-/// filesystem-vault has no rename detection (mutations are explicit
+/// filesystem-mem has no rename detection (mutations are explicit
 /// in the changelog) and no agent-notes layer (notes ride on each
 /// changelog entry).
 fn run_filesystem(
@@ -210,19 +210,19 @@ fn run_filesystem(
     engine: memstead_base::Engine,
     args: Args,
 ) -> anyhow::Result<()> {
-    let workspace_vault = engine
-        .vault_names()
+    let workspace_mem = engine
+        .mem_names()
         .into_iter()
         .next()
         .map(String::from)
         .unwrap_or_default();
-    if let Some(name) = args.vault.as_deref() {
-        if name != workspace_vault {
+    if let Some(name) = args.mem.as_deref() {
+        if name != workspace_mem {
             return Err(CliError::new(
                 ExitKind::NotFound,
-                "UNKNOWN_VAULT",
+                "UNKNOWN_MEM",
                 format!(
-                    "filesystem-vault is single-vault: workspace vault is `{workspace_vault}`, --vault `{name}` does not match"
+                    "filesystem-mem is single-mem: workspace mem is `{workspace_mem}`, --mem `{name}` does not match"
                 ),
             )
             .into());
@@ -240,11 +240,11 @@ fn run_filesystem(
         CliError::new(
             ExitKind::NotFound,
             "WORKSPACE_NOT_INITIALISED",
-            "no filesystem-vault workspace found from cwd",
+            "no filesystem-mem workspace found from cwd",
         )
     })?;
     let log_path = workspace_root
-        .join(memstead_base::VAULT_META_DIR)
+        .join(memstead_base::MEM_META_DIR)
         .join("changes.jsonl");
     let raw = match std::fs::read_to_string(&log_path) {
         Ok(s) => s,
@@ -283,7 +283,7 @@ fn run_filesystem(
 
     if ctx.json {
         print_json(&serde_json::json!({
-            "vault": workspace_vault,
+            "mem": workspace_mem,
             "since": since,
             "entries": entries,
         }))?;
@@ -293,7 +293,7 @@ fn run_filesystem(
     let mut lines: Vec<String> = Vec::new();
     lines.push(format!(
         "# Changes in `{}` since `{}`",
-        workspace_vault,
+        workspace_mem,
         since
     ));
     lines.push(String::new());

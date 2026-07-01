@@ -9,7 +9,7 @@ tags: memstead, core
 
 ## Definition
 
-A modal flavour is the conceptual genre a [[vault]] inhabits — knowledge, planning, inquiry, spec, or hybrid — determined by the [[schema]] the vault pins.
+A modal flavour is the conceptual genre a [[mem]] inhabits — knowledge, planning, inquiry, spec, or hybrid — determined by the [[schema]] the mem pins.
 
 ## Explanation
 
@@ -18,8 +18,8 @@ The flavour is a read-back of the schema choice rather than an independent setti
 ## Boundaries
 
 - A modal flavour is not a separate axis from the [[schema]]: every schema implies a flavour by the types it declares.
-- A modal flavour is the user-facing name; the technical vocabulary uses [[vault]] plus its [[schema]].
+- A modal flavour is the user-facing name; the technical vocabulary uses [[mem]] plus its [[schema]].
 
 ## Significance
 
-The flavour is the concrete word a person uses for what their [[vault]] is — "a knowledge graph", "a spec graph" — and it follows entirely from one schema choice.
+The flavour is the concrete word a person uses for what their [[mem]] is — "a knowledge graph", "a spec graph" — and it follows entirely from one schema choice.

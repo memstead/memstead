@@ -1,9 +1,9 @@
-//! Type definitions, schema loading, and vault-config validation for Memstead.
+//! Type definitions, schema loading, and mem-config validation for Memstead.
 //!
 //! Schemas are first-class packages — named, versioned bundles of type
 //! definitions + relationship vocabulary + LLM-facing documentation. The
 //! engine holds a `SchemaRegistry` mapping `(name, version)` to `Arc<Schema>`.
-//! Each vault pins exactly one schema via `VaultConfig.schema: SchemaRef`.
+//! Each mem pins exactly one schema via `MemConfig.schema: SchemaRef`.
 
 pub mod archive_provenance;
 pub mod base_metadata;
@@ -28,14 +28,14 @@ pub use config::{
     ARCHIVE_CONFIG_PATH, ARCHIVE_EXTENSION, ARCHIVE_META_DIR, ARCHIVE_PROVENANCE_PATH,
     ARCHIVE_SCHEMA_PREFIX,
     CommunityOverride, ConfigCheckResult, ConfigError,
-    PUBLISHED_VAULT_FORMAT, PublishConfig, PublishConversionError, PublishedVaultConfig,
-    ReadVaultSource, ReadVaultSpec, RoleConfig, SchemaRef, VAULT_META_DIR, VaultConfig,
-    VcsConfig, check_config, load_and_validate, load_config, parse_vault_config,
+    PUBLISHED_MEM_FORMAT, PublishConfig, PublishConversionError, PublishedMemConfig,
+    ReadMemSource, ReadMemSpec, RoleConfig, SchemaRef, MEM_META_DIR, MemConfig,
+    VcsConfig, check_config, load_and_validate, load_config, parse_mem_config,
     published_config_from,
 };
 pub use loader::{SchemaLoadError, load_schema_from_dir, load_schema_from_memory};
 pub use manifest::{
-    Cardinality, CommunityConfig, CrossVaultRelationshipEntry, DefaultWritingGuidance,
+    Cardinality, CommunityConfig, CrossMemRelationshipEntry, DefaultWritingGuidance,
     ManualAuthoring, PerEdgeDescription, RelationshipDef, RelationshipMode,
     RelationshipVocabulary, SchemaManifest,
 };
@@ -164,10 +164,10 @@ impl SchemaRegistry {
     /// 1. `<workspace_schemas_dir>/<schema>/` — workspace-level shared schemas
     /// 2. Embedded builtins (`default@1.0.0`, ...)
     /// 3. `<workspace_root>/.memstead.cache/schemas/<schema>-<version>/` —
-    ///    extracted from read-vault archives (workspace-wide cache)
+    ///    extracted from read-mem archives (workspace-wide cache)
     ///
-    /// Different versions of the same schema coexist; a vault picks by exact
-    /// pin via `VaultConfig.schema`.
+    /// Different versions of the same schema coexist; a mem picks by exact
+    /// pin via `MemConfig.schema`.
     ///
     /// Hidden directories (name starts with `.`) are skipped at every scan
     /// level so VCS metadata and OS dotdirs cannot be mistaken for a schema
@@ -282,7 +282,7 @@ impl SchemaRegistry {
     /// Merge another registry into this one. `name@version` keys already
     /// present are left untouched — the caller controls precedence by the
     /// order it merges. Used by the engine to build one aggregate registry
-    /// across writable vaults without copying arcs twice.
+    /// across writable mems without copying arcs twice.
     pub fn merge_from(&mut self, other: &SchemaRegistry) {
         for (key, schema) in &other.schemas {
             self.schemas.entry(key.clone()).or_insert_with(|| schema.clone());
@@ -292,7 +292,7 @@ impl SchemaRegistry {
     /// Insert a schema, replacing any existing entry at the same
     /// `(name, version)` key. Used by storage backends that source
     /// workspace-level schemas from outside the disk-walker (e.g. the
-    /// `gix`-tree-backed loader in `memstead-git-branch::vault_repo_schemas`) to
+    /// `gix`-tree-backed loader in `memstead-git-branch::mem_repo_schemas`) to
     /// overlay workspace schemas on top of the cache + builtins layers
     /// loaded by [`Self::load_for_workspace`] with `workspace_schemas_dir
     /// = None`.
@@ -302,7 +302,7 @@ impl SchemaRegistry {
     /// canonical use case — a workspace's `software@1.0.0` schema
     /// overlay legitimately replaces the `default@1.0.0` builtin's
     /// slot only when the names happen to collide, which is the
-    /// vault-repo overlay pattern. Callers MUST NOT use this
+    /// mem-repo overlay pattern. Callers MUST NOT use this
     /// method to silently shadow an unrelated builtin name unless
     /// they own the workspace-overlay precedence story; the only
     /// in-tree caller is `memstead-git-branch::lib::build_workspace_schema_registry`.
@@ -392,7 +392,7 @@ impl Default for SchemaRegistry {
 ///
 /// Kept as a convenience because ~100 engine call sites use short names to
 /// resolve type definitions. Production consumers should prefer
-/// `vault.schema.get_type(name)` for user-defined schemas; this helper
+/// `mem.schema.get_type(name)` for user-defined schemas; this helper
 /// exists for test fixtures, CLI one-offs, and callers that legitimately
 /// target the built-in `default` schema.
 pub fn type_by_name(name: &str) -> Option<Arc<TypeDefinition>> {
@@ -595,26 +595,26 @@ write_rules: []
         }
 
         #[test]
-        fn per_vault_schema_override_no_longer_resolves() {
-            // Pre-cutover, a per-vault `<vault>/.memstead/schemas/<name>/`
+        fn per_mem_schema_override_no_longer_resolves() {
+            // Pre-cutover, a per-mem `<mem>/.memstead/schemas/<name>/`
             // shadowed builtins and the workspace layer. That level is
             // gone — the builtin survives even
-            // with a per-vault directory present on disk.
+            // with a per-mem directory present on disk.
             let tmp = TempDir::new().unwrap();
-            let vault_override = tmp.path().join("vault/.memstead/schemas/default");
-            write_schema(&vault_override, "default", "1.0.0");
+            let mem_override = tmp.path().join("mem/.memstead/schemas/default");
+            write_schema(&mem_override, "default", "1.0.0");
 
             let reg =
                 SchemaRegistry::load_for_workspace(Some(tmp.path()), None).unwrap();
             let schema = reg
                 .get("default", &semver::Version::new(1, 0, 0))
                 .expect("builtin default still registered");
-            // Builtin ships 10 types; the per-vault override would have
+            // Builtin ships 10 types; the per-mem override would have
             // been a 1-type schema if the level still existed.
             assert_eq!(
                 schema.types.len(),
                 10,
-                "per-vault override must no longer shadow the builtin"
+                "per-mem override must no longer shadow the builtin"
             );
         }
 
@@ -659,7 +659,7 @@ write_rules: []
         #[test]
         fn workspace_cache_path_is_workspace_wide() {
             // The cache lives at `<workspace_root>/.memstead.cache/schemas/`
-            // — never under any vault directory.
+            // — never under any mem directory.
             let tmp = TempDir::new().unwrap();
             let cache_dir = tmp.path().join(".memstead.cache/schemas/recipe-1.0.0");
             write_schema(&cache_dir, "recipe", "1.0.0");

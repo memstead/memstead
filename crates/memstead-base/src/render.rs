@@ -306,7 +306,7 @@ pub fn render_search_markdown(result: &SearchResult, offset: usize) -> String {
 fn render_facets_block(facets: &Facets) -> Option<String> {
     let blocks: Vec<(&str, String)> = [
         ("by_type", &facets.by_type),
-        ("by_vault", &facets.by_vault),
+        ("by_mem", &facets.by_mem),
         ("by_level", &facets.by_level),
         ("by_status", &facets.by_status),
         ("by_confidence", &facets.by_confidence),
@@ -660,7 +660,7 @@ pub struct ListResultEnvelope<'a> {
 }
 
 /// Build the structured `memstead_entity` envelope. Identity fields
-/// (`_hash`, `id`, `vault`, `type`, `_stub_kind`) come from the parsed
+/// (`_hash`, `id`, `mem`, `type`, `_stub_kind`) come from the parsed
 /// `Entity` and live at the top level. Every schema-declared frontmatter
 /// key surfaces under a nested `metadata: {...}` map — its single home.
 /// Read a metadata
@@ -668,15 +668,15 @@ pub struct ListResultEnvelope<'a> {
 /// without per-type branching. The prior shape additionally hoisted
 /// `level`/`stability`/`created_date`/`last_modified` to the top level,
 /// serialising those fields twice; that hoist is gone. The read-only
-/// identity triple (`vault`/`id`/`type`) is excluded from the nested map
+/// identity triple (`mem`/`id`/`type`) is excluded from the nested map
 /// — it appears only top-level — and underscore-prefixed internal keys
-/// (`_hash`, `_tokens*`, `_vault_schema`, `_stub_*`) live in dedicated
+/// (`_hash`, `_tokens*`, `_mem_schema`, `_stub_*`) live in dedicated
 /// top-level slots and never appear inside the nested map. `sections` and
 /// `relationships` round-trip the engine's internal IndexMap / Vec
 /// shapes verbatim. `_tokens` is computed from the rendered body
 /// (filter and opt-in inserts applied) so agents can pre-size before
-/// a follow-up `token_budget`-bounded read. `_vault_schema` rides
-/// when the workspace pinned a schema for the vault.
+/// a follow-up `token_budget`-bounded read. `_mem_schema` rides
+/// when the workspace pinned a schema for the mem.
 ///
 /// Per-section filtering applies — when `sections_filter` is
 /// `Some`, the structured `sections` map carries only the requested
@@ -710,8 +710,8 @@ pub fn build_entity_envelope(
         serde_json::Value::String(entity.id.to_string()),
     );
     envelope.insert(
-        "vault".to_string(),
-        serde_json::Value::String(entity.vault.clone()),
+        "mem".to_string(),
+        serde_json::Value::String(entity.mem.clone()),
     );
     envelope.insert(
         "type".to_string(),
@@ -726,11 +726,11 @@ pub fn build_entity_envelope(
     // type-specific fields a top-level hoist never covered).
     //
     // Identity keys stay top-level and are excluded here so they too
-    // appear exactly once: `_hash`, `id`, `vault`, `type` are the
+    // appear exactly once: `_hash`, `id`, `mem`, `type` are the
     // entity's structural identity (inserted above), not free-form
-    // metadata. `vault`/`id`/`type` is the engine's read-only key triple
+    // metadata. `mem`/`id`/`type` is the engine's read-only key triple
     // (`READ_ONLY_METADATA_KEYS`); `_`-prefixed internal keys live in
-    // dedicated top-level slots (`_tokens*`, `_vault_schema`, `_stub_*`).
+    // dedicated top-level slots (`_tokens*`, `_mem_schema`, `_stub_*`).
     // Stub entities surface an empty `metadata: {}` so consumers don't
     // branch on its presence.
     let mut metadata = serde_json::Map::new();
@@ -765,7 +765,7 @@ pub fn build_entity_envelope(
     }
     if let Some(s) = schema_anchor {
         envelope.insert(
-            "_vault_schema".to_string(),
+            "_mem_schema".to_string(),
             serde_json::Value::String(s.to_string()),
         );
     }
@@ -904,10 +904,10 @@ fn hit_summary_line(hit: &SearchHit) -> String {
 /// structured-content envelope.
 ///
 /// Prefers the engine-precomputed [`SearchHit::summary`] (resolved against the
-/// hit's own vault schema at search time). Falls back to the global
+/// hit's own mem schema at search time). Falls back to the global
 /// `type_by_name` lookup only for hits built outside the search op (FFI/bridge
 /// and test fixtures) — that fallback sees only the `default` schema, which is
-/// why the engine resolves the pair where the per-vault schema is in hand.
+/// why the engine resolves the pair where the per-mem schema is in hand.
 fn hit_summary_pair(hit: &SearchHit) -> (String, String) {
     if let Some(summary) = &hit.summary {
         return (summary.heading.clone(), summary.value.clone());
@@ -932,7 +932,7 @@ fn summary_pair(
 /// type declares no sections, and an honest `"—"` value when the lead section
 /// is absent/empty in this hit. The single source of truth shared by the
 /// render-time fallback ([`summary_pair`]) and the search op, which calls it
-/// with each hit's correctly-resolved per-vault schema.
+/// with each hit's correctly-resolved per-mem schema.
 pub(crate) fn lead_section_pair<'a>(
     schema: &TypeDefinition,
     get_section: impl Fn(&str) -> Option<&'a str>,
@@ -1008,8 +1008,8 @@ pub fn render_type_catalog_markdown() -> String {
 
 /// Render the type catalog for an arbitrary loaded [`Schema`].
 /// Same shape as [`render_type_catalog_markdown`]; iterates the
-/// schema's own types in name order so multi-vault workspaces can
-/// describe the schema pinned by the writable vault, not the engine's
+/// schema's own types in name order so multi-mem workspaces can
+/// describe the schema pinned by the writable mem, not the engine's
 /// hard-coded built-in.
 pub fn render_type_catalog_markdown_for(schema: &Schema) -> String {
     let mut types: Vec<Arc<TypeDefinition>> = schema.types.values().cloned().collect();
@@ -1194,7 +1194,7 @@ impl SchemaVerbosity {
     }
 }
 
-/// Trust origin of a schema (or the vault that pins it), decided at
+/// Trust origin of a schema (or the mem that pins it), decided at
 /// adopt/write time and reported — never re-derived — on the read path.
 ///
 /// `FirstParty` is an engine built-in or a schema authored/explicitly
@@ -1206,14 +1206,14 @@ impl SchemaVerbosity {
 /// `ThirdParty` is a schema that arrived from outside this workspace
 /// (registry-installed or adopted from a foreign folder/clone) and has
 /// not been explicitly trusted. Memstead's value proposition pulls a
-/// vault's schema directly into a consuming agent's context, where the
+/// mem's schema directly into a consuming agent's context, where the
 /// schema's free-text fields are framed *as instructions* ("System
 /// context", "Writing guidance"). A third-party schema is therefore
 /// served structural-only: [`build_schema_payload`] forces the
 /// [`SchemaVerbosity::Lite`] skeleton regardless of the requested
 /// verbosity, omitting every prose-instruction field. This is lossless
 /// for the legitimate use case — the omitted fields only guide writing,
-/// and a write never targets a foreign vault.
+/// and a write never targets a foreign mem.
 ///
 /// The class is unforgeable by a publisher: it is decided by *how* the
 /// schema entered the workspace, not by any content the schema carries.
@@ -1250,8 +1250,8 @@ impl OriginClass {
 
 /// Build the transport-neutral, rmcp-free JSON payload for a schema read
 /// (`memstead_schema`). Shared by the MCP server, the HTTP surface, and
-/// the filesystem-vault MCP flavour so every surface emits identical
-/// schema-read bytes from one source. `used_by` lists the writable vaults
+/// the filesystem-mem MCP flavour so every surface emits identical
+/// schema-read bytes from one source. `used_by` lists the writable mems
 /// whose pinned schema resolves to this one; `verbosity` toggles the full
 /// payload versus the lightweight skeleton (see [`SchemaVerbosity`]).
 ///
@@ -1271,11 +1271,11 @@ pub fn build_schema_payload(
 ) -> serde_json::Value {
     let manifest = &schema.manifest;
     // De-frame third-party schemas: their prose-instruction fields only
-    // guide authoring (which never targets a foreign vault), so omitting
+    // guide authoring (which never targets a foreign mem), so omitting
     // them is lossless — and serving them would place a stranger's
     // free-text in the consuming agent's instruction context. The Lite
     // skeleton keeps every structural flag an agent needs to understand
-    // and query the vault. The override is one-directional: a `full`
+    // and query the mem. The override is one-directional: a `full`
     // request cannot re-admit the prose for a third-party schema.
     let verbosity = if origin.is_third_party() {
         SchemaVerbosity::Lite
@@ -1333,14 +1333,14 @@ pub fn build_schema_payload(
         })
         .collect();
 
-    // Outbound cross-vault vocabulary, one entry per target schema.
+    // Outbound cross-mem vocabulary, one entry per target schema.
     // Same shape as the YAML — `{ to_schema, definitions: [...] }` —
     // so consumers can decode the section symmetrically with the
-    // intra-vault `relationships` array. `_default` filtering mirrors
-    // the intra-vault block; the rest of the per-definition shape is
+    // intra-mem `relationships` array. `_default` filtering mirrors
+    // the intra-mem block; the rest of the per-definition shape is
     // identical so a single decoder handles both.
-    let cross_vault_relationships: Vec<serde_json::Value> = manifest
-        .cross_vault_relationships
+    let cross_mem_relationships: Vec<serde_json::Value> = manifest
+        .cross_mem_relationships
         .iter()
         .map(|entry| {
             let definitions: Vec<serde_json::Value> = entry
@@ -1503,7 +1503,7 @@ pub fn build_schema_payload(
     }
 
     // Surface `default_writing_guidance` at the top level so plugin-side
-    // resolvers can concatenate the schema-generic prose with per-vault
+    // resolvers can concatenate the schema-generic prose with per-mem
     // additions without parsing schema YAML themselves. FULL mode only —
     // it is guidance prose. Field-by-field omission — a schema with
     // neither `avoid` nor `goal` declared emits no key at all (both
@@ -1529,13 +1529,13 @@ pub fn build_schema_payload(
             "relationships".into(),
             serde_json::Value::Array(relationships),
         );
-        // Only surface the cross-vault block when the schema declares
+        // Only surface the cross-mem block when the schema declares
         // outbound entries — keeps the response minimal for schemas
-        // that don't speak cross-vault vocabulary.
-        if !cross_vault_relationships.is_empty() {
+        // that don't speak cross-mem vocabulary.
+        if !cross_mem_relationships.is_empty() {
             obj.insert(
-                "cross_vault_relationships".into(),
-                serde_json::Value::Array(cross_vault_relationships),
+                "cross_mem_relationships".into(),
+                serde_json::Value::Array(cross_mem_relationships),
             );
         }
         obj.insert("types".into(), serde_json::Value::Array(types_full));
@@ -1567,11 +1567,11 @@ pub fn build_schema_payload(
             serde_json::Value::Array(relationships_summary),
         );
 
-        // Lite cross-vault form mirrors the intra-vault lite shape:
+        // Lite cross-mem form mirrors the intra-mem lite shape:
         // name + endpoint pinning, prose dropped. Same emit-when-non-empty
         // rule as full mode.
-        if !cross_vault_relationships.is_empty() {
-            let cross_summary: Vec<serde_json::Value> = cross_vault_relationships
+        if !cross_mem_relationships.is_empty() {
+            let cross_summary: Vec<serde_json::Value> = cross_mem_relationships
                 .iter()
                 .map(|e| {
                     let definitions: Vec<serde_json::Value> = e["definitions"]
@@ -1595,7 +1595,7 @@ pub fn build_schema_payload(
                 })
                 .collect();
             obj.insert(
-                "cross_vault_relationships_summary".into(),
+                "cross_mem_relationships_summary".into(),
                 serde_json::Value::Array(cross_summary),
             );
         }
@@ -1728,7 +1728,7 @@ mod tests {
         SearchHit {
             id: EntityId(id.to_string()),
             title: title.to_string(),
-            vault: id.split("--").next().unwrap_or("").to_string(),
+            mem: id.split("--").next().unwrap_or("").to_string(),
             entity_type: entity_type.to_string(),
             stub: false,
             score: 1.0,
@@ -1778,7 +1778,7 @@ mod tests {
             id: EntityId("specs--test-entity".to_string()),
             title: "Test Entity".to_string(),
             entity_type: "spec".to_string(),
-            vault: "specs".to_string(),
+            mem: "specs".to_string(),
             file_path: "test-entity.md".to_string(),
             metadata: IndexMap::new(),
             sections: IndexMap::from([
@@ -1815,7 +1815,7 @@ mod tests {
             id: EntityId("ingest--example".to_string()),
             title: "Example".to_string(),
             entity_type: "inconsistency".to_string(),
-            vault: "ingest".to_string(),
+            mem: "ingest".to_string(),
             file_path: "example.md".to_string(),
             metadata: IndexMap::new(),
             sections,
@@ -1855,7 +1855,7 @@ mod tests {
             id: EntityId("custom--example".to_string()),
             title: "Example".to_string(),
             entity_type: "not-a-builtin-type".to_string(),
-            vault: "custom".to_string(),
+            mem: "custom".to_string(),
             file_path: "example.md".to_string(),
             metadata: IndexMap::new(),
             sections,
@@ -1890,7 +1890,7 @@ mod tests {
             id: EntityId("specs--order-test".to_string()),
             title: "Order Test".to_string(),
             entity_type: "spec".to_string(),
-            vault: "specs".to_string(),
+            mem: "specs".to_string(),
             file_path: "order-test.md".to_string(),
             metadata: IndexMap::new(),
             sections,
@@ -2299,7 +2299,7 @@ mod tests {
         assert_eq!(hit0["id"], "memos--d1");
         assert_eq!(hit0["title"], "Memo One");
         assert_eq!(hit0["entity_type"], "memo");
-        assert_eq!(hit0["vault"], "memos");
+        assert_eq!(hit0["mem"], "memos");
         assert_eq!(hit0["stub"], false);
         assert_eq!(hit0["tokens"], 10);
         assert!(hit0["sections"].is_object());
@@ -2387,7 +2387,7 @@ mod tests {
                 ("memo".to_string(), 3),
                 ("decision".to_string(), 2),
             ]),
-            by_vault: HashMap::from([
+            by_mem: HashMap::from([
                 ("specs".to_string(), 10),
                 ("memos".to_string(), 2),
             ]),
@@ -2530,8 +2530,8 @@ mod tests {
             "by_type bucket wrong; got:\n{out}"
         );
         assert!(
-            out.contains("- **by_vault:** specs=10, memos=2"),
-            "by_vault bucket wrong; got:\n{out}"
+            out.contains("- **by_mem:** specs=10, memos=2"),
+            "by_mem bucket wrong; got:\n{out}"
         );
         assert!(
             out.contains("- **by_level:** high=4"),
@@ -2604,7 +2604,7 @@ mod tests {
         for marker in [
             "## Facets",
             "- **by_type:**",
-            "- **by_vault:**",
+            "- **by_mem:**",
             "- **by_level:**",
             "- **by_status:**",
             "- **by_confidence:**",
@@ -2690,7 +2690,7 @@ mod tests {
     /// Every schema-declared frontmatter key surfaces under the nested
     /// `metadata` map — its single home. The four
     /// formerly-hoisted scalars are not at the top level; the
-    /// read-only identity triple (vault/id/type) and underscore-prefixed
+    /// read-only identity triple (mem/id/type) and underscore-prefixed
     /// internal keys are excluded from the nested map.
     #[test]
     fn build_entity_envelope_nested_metadata_carries_every_schema_field() {
@@ -2751,14 +2751,14 @@ mod tests {
         assert_eq!(metadata["deprecation_status"], "none");
 
         // Internal underscore-prefixed keys and the read-only identity
-        // triple (vault/id/type) do NOT appear inside the nested map.
+        // triple (mem/id/type) do NOT appear inside the nested map.
         for k in metadata.keys() {
             assert!(
                 !k.starts_with('_'),
                 "metadata map must not carry underscore-prefixed key `{k}`"
             );
             assert!(
-                !["vault", "id", "type"].contains(&k.as_str()),
+                !["mem", "id", "type"].contains(&k.as_str()),
                 "metadata map must not carry identity key `{k}` (it lives top-level)"
             );
         }
@@ -2894,7 +2894,7 @@ mod tests {
     /// `default_writing_guidance`, rel `description` / `when_to_use`)
     /// reach a consuming agent — even though `full` was asked for. The
     /// structural skeleton (type/section/field/rel shape) survives so the
-    /// vault stays understandable and queryable. This is the refusal
+    /// mem stays understandable and queryable. This is the refusal
     /// complement: a `full` request cannot re-admit the prose.
     #[test]
     fn third_party_origin_forces_structural_only_even_under_full() {

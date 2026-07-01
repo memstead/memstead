@@ -1,11 +1,11 @@
-// Pure helpers + the drift-detection pipeline for vault-drift-notify.mjs.
+// Pure helpers + the drift-detection pipeline for mem-drift-notify.mjs.
 // Pure helpers are testable without process.exit, stdin, filesystem, or
 // git invocations. `runDriftNotify` is the side-effecting pipeline both
 // the hook entry point and the integration tests invoke; it takes an
 // injectable `withEngineFn` so tests can mock the MCP layer.
 //
-// The hook no longer reads `vault-repo/.git/` — HEAD enumeration runs
-// through `memstead_health { include_config: true }` and per-vault entity
+// The hook no longer reads `mem-repo/.git/` — HEAD enumeration runs
+// through `memstead_health { include_config: true }` and per-mem entity
 // deltas through `memstead_changes_since`.
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
@@ -14,7 +14,7 @@ import { resolveEngineCommand, withEngine } from './mcp-client.mjs';
 import {
   ensureCacheDir,
   extractCurrentHeads,
-} from './vault-drift-snapshot-utils.mjs';
+} from './mem-drift-snapshot-utils.mjs';
 
 const MCP_TIMEOUT_MS = 15000;
 
@@ -44,11 +44,11 @@ export function parseRefList(stdout) {
 }
 
 /**
- * True if the branch name corresponds to a writable vault that should be
+ * True if the branch name corresponds to a writable mem that should be
  * tracked for drift. Excludes `main` (operator-facing docs) and any
  * registry-class ref whose name starts with `__` (e.g. `__MEMSTEAD`).
  */
-export function isTrackedVault(name) {
+export function isTrackedMem(name) {
   if (!name) return false;
   if (name === 'main') return false;
   if (name.startsWith('__')) return false;
@@ -56,14 +56,14 @@ export function isTrackedVault(name) {
 }
 
 /**
- * Convert a vault-relative file-path list (output of `git diff-tree -r
+ * Convert a mem-relative file-path list (output of `git diff-tree -r
  * --name-only $old..$new`) into entity ids of the form
- * `<vault>--<slug>`. Drops paths that are not `.md` files. `vault` is
- * the full hierarchical branch name; nested paths inside the vault keep
+ * `<mem>--<slug>`. Drops paths that are not `.md` files. `mem` is
+ * the full hierarchical branch name; nested paths inside the mem keep
  * their `/` separators after the `--` (mirrors `file_path_to_id` in the
- * engine: `path/to/leaf.md` → `<vault>--path/to/leaf`).
+ * engine: `path/to/leaf.md` → `<mem>--path/to/leaf`).
  */
-export function diffPathsToEntityIds(vault, paths) {
+export function diffPathsToEntityIds(mem, paths) {
   if (!paths || !paths.length) return [];
   const ids = [];
   const seen = new Set();
@@ -73,7 +73,7 @@ export function diffPathsToEntityIds(vault, paths) {
     if (!p.endsWith('.md')) continue;
     const slug = p.slice(0, -'.md'.length);
     if (!slug) continue;
-    const id = `${vault}--${slug}`;
+    const id = `${mem}--${slug}`;
     if (seen.has(id)) continue;
     seen.add(id);
     ids.push(id);
@@ -83,7 +83,7 @@ export function diffPathsToEntityIds(vault, paths) {
 }
 
 /**
- * Parse the on-disk state file. Returns a `{ vault: sha }` map, or
+ * Parse the on-disk state file. Returns a `{ mem: sha }` map, or
  * `null` if the input is missing/corrupt/unrecognised. Callers treat
  * `null` like a first run.
  */
@@ -106,10 +106,10 @@ export function parseState(raw) {
 }
 
 /**
- * Diff `prior` against `currentMap` and return the per-vault drift
- * entries. A vault present in `currentMap` but absent from `prior` is
- * **not** drift — it's a first observation for that vault (record
- * silently). A vault in `prior` but absent from `currentMap` (deleted
+ * Diff `prior` against `currentMap` and return the per-mem drift
+ * entries. A mem present in `currentMap` but absent from `prior` is
+ * **not** drift — it's a first observation for that mem (record
+ * silently). A mem in `prior` but absent from `currentMap` (deleted
  * branch) is dropped silently from the next-write state by the caller;
  * this function does not return an entry for it. Same SHA on both
  * sides is not drift either.
@@ -117,13 +117,13 @@ export function parseState(raw) {
 export function computeDrift(prior, currentMap) {
   if (!prior) return [];
   const out = [];
-  for (const [vault, newSha] of Object.entries(currentMap)) {
-    const oldSha = prior[vault];
+  for (const [mem, newSha] of Object.entries(currentMap)) {
+    const oldSha = prior[mem];
     if (!oldSha) continue;
     if (oldSha === newSha) continue;
-    out.push({ vault, oldSha, newSha });
+    out.push({ mem, oldSha, newSha });
   }
-  out.sort((a, b) => a.vault.localeCompare(b.vault));
+  out.sort((a, b) => a.mem.localeCompare(b.mem));
   return out;
 }
 
@@ -131,7 +131,7 @@ export function computeDrift(prior, currentMap) {
  * Build the system-reminder block for a non-empty drift list. Mirrors
  * the `<system-reminder>...</system-reminder>` envelope the agent
  * already recognises from IDE-selection and file-open notifications.
- * Each entry carries the vault name, old/new SHAs (short), and the
+ * Each entry carries the mem name, old/new SHAs (short), and the
  * sorted entity-id list. Empty drift list returns an empty string —
  * the hook should not emit any output in that case.
  */
@@ -139,18 +139,18 @@ export function formatReminder(driftEntries) {
   if (!driftEntries || !driftEntries.length) return '';
   const lines = [];
   lines.push('<system-reminder>');
-  lines.push('Vault drift detected since the last user prompt. The following');
-  lines.push("vaults advanced under this session's feet — likely from a sibling");
+  lines.push('Mem drift detected since the last user prompt. The following');
+  lines.push("mems advanced under this session's feet — likely from a sibling");
   lines.push('engine instance (parallel terminal, forked subagent, macOS app).');
   lines.push('Re-read affected entities via `memstead_entity` before answering any');
   lines.push('question whose answer depends on their prior content. Cached');
   lines.push('`expected_hash` values for these entities are likely invalid; a');
   lines.push('follow-up `memstead_update` will trip `HASH_MISMATCH` if so.');
   lines.push('');
-  for (const { vault, oldSha, newSha, entityIds } of driftEntries) {
+  for (const { mem, oldSha, newSha, entityIds } of driftEntries) {
     const oldShort = (oldSha || '').slice(0, 12);
     const newShort = (newSha || '').slice(0, 12);
-    lines.push(`Vault \`${vault}\` (${oldShort} → ${newShort}):`);
+    lines.push(`Mem \`${mem}\` (${oldShort} → ${newShort}):`);
     if (!entityIds || !entityIds.length) {
       lines.push('  (no entity-level diff available)');
     } else {
@@ -182,8 +182,8 @@ export function sanitizeSessionId(s) {
 
 /**
  * Build the next-write state map from the current refs list. Already
- * filtered to tracked vaults by the caller; this just collapses to
- * `{ name: sha }`. Vaults present in `prior` but absent here are
+ * filtered to tracked mems by the caller; this just collapses to
+ * `{ name: sha }`. Mems present in `prior` but absent here are
  * implicitly dropped (deleted-branch handling).
  */
 export function nextStateMap(trackedRefs) {
@@ -197,7 +197,7 @@ export function nextStateMap(trackedRefs) {
 
 /**
  * Flatten a `memstead_changes_since` response into the unique sorted entity
- * ids that touched the per-vault diff. `Added` / `Updated` / `Removed`
+ * ids that touched the per-mem diff. `Added` / `Updated` / `Removed`
  * carry a single `id`; `Renamed` carries `from_id` + `to_id` (both end
  * up in the set so the agent re-reads either side that may live in its
  * context). Unknown shapes silently contribute nothing — drift output
@@ -228,8 +228,8 @@ export function entityIdsFromChangesReport(report) {
  * Mocking surface mirrors `runDriftSnapshot` and `produceOuterCommit`:
  *   - `engineCommand` lets a test bypass `resolveEngineCommand`
  *   - `withEngineFn` lets a test inject a fake MCP client. The mock
- *     must answer two tools: `memstead_health` (writable_vaults / vaults
- *     with vcs.head) and `memstead_changes_since` (per-vault delta).
+ *     must answer two tools: `memstead_health` (writable_mems / mems
+ *     with vcs.head) and `memstead_changes_since` (per-mem delta).
  */
 export async function runDriftNotify({
   workspaceRoot,
@@ -268,7 +268,7 @@ export async function runDriftNotify({
   }
 
   // One MCP session — `memstead_health` to enumerate writable HEADs, then
-  // a per-drifted-vault `memstead_changes_since` to get entity ids.
+  // a per-drifted-mem `memstead_changes_since` to get entity ids.
   let envelope;
   try {
     envelope = await withEngineFn(cmdSpec, timeoutMs, async (client) => {
@@ -281,12 +281,12 @@ export async function runDriftNotify({
       for (const entry of drifted) {
         try {
           const report = await client.callTool('memstead_changes_since', {
-            vault: entry.vault,
+            mem: entry.mem,
             since: entry.oldSha,
           });
           entry.entityIds = entityIdsFromChangesReport(report);
         } catch {
-          // Per-vault diff failure: degrade to "no entity-level diff
+          // Per-mem diff failure: degrade to "no entity-level diff
           // available" — formatReminder already handles an empty array.
           entry.entityIds = [];
         }
@@ -297,7 +297,7 @@ export async function runDriftNotify({
     return { status: 'probe-failed', message: err?.message ?? String(err) };
   }
 
-  // Persist the next-state map — drops vaults absent from `currentMap`
+  // Persist the next-state map — drops mems absent from `currentMap`
   // (deleted-branch handling) and adds newly-observed ones.
   try {
     writeFileSync(statePath, JSON.stringify(envelope.currentMap, null, 2) + '\n');

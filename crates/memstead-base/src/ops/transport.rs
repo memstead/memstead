@@ -40,8 +40,8 @@ pub struct UpdatedRef {
 /// branch.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PullOutcome {
-    /// Vault whose branch was advanced.
-    pub vault: String,
+    /// Mem whose branch was advanced.
+    pub mem: String,
     /// Remote-tracking ref the fast-forward consumed (e.g.
     /// `refs/remotes/origin/specs`).
     pub source_ref: String,
@@ -56,12 +56,12 @@ pub struct PullOutcome {
     pub updated_refs: Vec<UpdatedRef>,
 }
 
-/// Outcome of `Engine::push`. The remote's view of the vault's
+/// Outcome of `Engine::push`. The remote's view of the mem's
 /// branch has moved to `new_sha` after the operation.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PushOutcome {
-    /// Vault whose branch was pushed.
-    pub vault: String,
+    /// Mem whose branch was pushed.
+    pub mem: String,
     /// Remote name the push targeted.
     pub remote: String,
     /// Local branch ref that was pushed (e.g. `refs/heads/specs`).

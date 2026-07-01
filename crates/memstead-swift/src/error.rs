@@ -6,7 +6,7 @@
 //! and retry", IoError pops a filesystem warning, HashMismatch asks the
 //! user to refresh, etc.) while still carrying the underlying message
 //! for diagnostics. Agent-actionable validation variants
-//! (`UnknownSection`, `UnknownVault`) get their own Swift cases so the
+//! (`UnknownSection`, `UnknownMem`) get their own Swift cases so the
 //! macOS app can branch on them without string-parsing the message.
 
 use memstead_base::EngineError;
@@ -37,14 +37,14 @@ pub enum MemsteadError {
         declared: Vec<String>,
         suggestion: Option<String>,
     },
-    /// Mirrors `EngineError::UnknownVault` — the app can branch on this to
-    /// re-open the vault picker. `writable_vaults` is empty on the
+    /// Mirrors `EngineError::UnknownMem` — the app can branch on this to
+    /// re-open the mem picker. `writable_mems` is empty on the
     /// unified engine's variant (the legacy variant carried the roster);
     /// the picker can re-query the engine for the live list.
-    #[error("unknown writable vault '{name}'")]
-    UnknownVault {
+    #[error("unknown writable mem '{name}'")]
+    UnknownMem {
         name: String,
-        writable_vaults: Vec<String>,
+        writable_mems: Vec<String>,
     },
 }
 
@@ -52,9 +52,9 @@ impl From<EngineError> for MemsteadError {
     fn from(err: EngineError) -> Self {
         match err {
             // --- Typed agent-actionable variants ---------------------------
-            EngineError::UnknownVault(name) => Self::UnknownVault {
+            EngineError::UnknownMem(name) => Self::UnknownMem {
                 name,
-                writable_vaults: Vec::new(),
+                writable_mems: Vec::new(),
             },
 
             // Validation lift — only UnknownSection carves out a typed
@@ -79,8 +79,8 @@ impl From<EngineError> for MemsteadError {
             EngineError::AlreadyExists { id } => Self::ValidationFailed {
                 message: format!("already exists: {id}"),
             },
-            EngineError::DuplicateVault(name) => Self::ValidationFailed {
-                message: format!("duplicate vault: {name}"),
+            EngineError::DuplicateMem(name) => Self::ValidationFailed {
+                message: format!("duplicate mem: {name}"),
             },
 
             // --- Optimistic locking / structural ---------------------------
@@ -95,23 +95,23 @@ impl From<EngineError> for MemsteadError {
                     "relationship cycle: {rel_type} from {from} to {to} would close a cycle"
                 ),
             },
-            EngineError::CrossVaultLinkNotAllowed {
-                from_vault,
-                to_vault,
+            EngineError::CrossMemLinkNotAllowed {
+                from_mem,
+                to_mem,
             } => Self::ValidationFailed {
                 message: format!(
-                    "cross-vault link from `{from_vault}` to `{to_vault}` is not allowed by the workspace `[cross_vault_links]` policy"
+                    "cross-mem link from `{from_mem}` to `{to_mem}` is not allowed by the workspace `[cross_mem_links]` policy"
                 ),
             },
-            EngineError::CrossVaultTargetNotFound {
+            EngineError::CrossMemTargetNotFound {
                 target_id,
-                target_vault,
+                target_mem,
             } => Self::ValidationFailed {
                 message: format!(
-                    "cross-vault target `{target_id}` is absent in read-only vault `{target_vault}`"
+                    "cross-mem target `{target_id}` is absent in read-only mem `{target_mem}`"
                 ),
             },
-            EngineError::CrossVaultEdgeNotDeclared {
+            EngineError::CrossMemEdgeNotDeclared {
                 source_schema,
                 target_schema,
                 rel_type,
@@ -119,7 +119,7 @@ impl From<EngineError> for MemsteadError {
                 to_id,
             } => Self::ValidationFailed {
                 message: format!(
-                    "cross-vault edge {rel_type} from `{from_id}` (schema {source_schema}) to `{to_id}` (schema {target_schema}) is not declared in {source_schema}'s `cross_vault_relationships:` section"
+                    "cross-mem edge {rel_type} from `{from_id}` (schema {source_schema}) to `{to_id}` (schema {target_schema}) is not declared in {source_schema}'s `cross_mem_relationships:` section"
                 ),
             },
             EngineError::RepairNotNeeded { id, recovery } => Self::ValidationFailed {
@@ -130,28 +130,28 @@ impl From<EngineError> for MemsteadError {
             EngineError::RenameNoOp { id, new_title } => Self::ValidationFailed {
                 message: format!("rename no-op for {id}: {new_title:?} slugifies the same"),
             },
-            EngineError::RenameBlockedByCrossVaultPolicy {
-                from_vault,
+            EngineError::RenameBlockedByCrossMemPolicy {
+                from_mem,
                 blocked_referrers,
             } => Self::ValidationFailed {
                 message: {
                     let pairs: Vec<String> = blocked_referrers
                         .iter()
-                        .map(|r| format!("{} → {} ({})", r.from_vault, r.to_vault, r.count))
+                        .map(|r| format!("{} → {} ({})", r.from_mem, r.to_mem, r.count))
                         .collect();
                     format!(
-                        "rename blocked into `{from_vault}` — policy denies: {}",
+                        "rename blocked into `{from_mem}` — policy denies: {}",
                         pairs.join(", ")
                     )
                 },
             },
             EngineError::RenamePartialFailure {
-                committed_vaults,
-                failed_vault,
+                committed_mems,
+                failed_mem,
                 failure_cause,
             } => Self::ValidationFailed {
                 message: format!(
-                    "rename partial-failure: vault `{failed_vault}` aborted ({failure_cause}) after {committed_vaults:?} already committed"
+                    "rename partial-failure: mem `{failed_mem}` aborted ({failure_cause}) after {committed_mems:?} already committed"
                 ),
             },
             EngineError::RelationHasBodyLinks {
@@ -173,17 +173,17 @@ impl From<EngineError> for MemsteadError {
                 }
             }
             EngineError::ReadOnlyMount(name) => Self::ValidationFailed {
-                message: format!("vault {name} is mounted read-only"),
+                message: format!("mem {name} is mounted read-only"),
             },
             EngineError::HasIncomingRefs { id, referrers } => Self::ValidationFailed {
                 message: format!(
-                    "{id} has {} incoming write-vault references; remove them first via memstead_relate --remove or memstead_update",
+                    "{id} has {} incoming write-mem references; remove them first via memstead_relate --remove or memstead_update",
                     referrers.len()
                 ),
             },
-            EngineError::VaultHasIncomingRefs { vault, referrers } => Self::ValidationFailed {
+            EngineError::MemHasIncomingRefs { mem, referrers } => Self::ValidationFailed {
                 message: format!(
-                    "vault `{vault}` has {} incoming write-vault reference(s); remove them first via memstead_relate --remove or memstead_update",
+                    "mem `{mem}` has {} incoming write-mem reference(s); remove them first via memstead_relate --remove or memstead_update",
                     referrers.len()
                 ),
             },
@@ -197,13 +197,13 @@ impl From<EngineError> for MemsteadError {
             | EngineError::SetAndUnsetConflict { .. }
             | EngineError::PatchSectionEmpty { .. }
             | EngineError::PatchOldNotFound { .. }
-            | EngineError::VaultNameCollision { .. }
+            | EngineError::MemNameCollision { .. }
             | EngineError::StubCannotRelate { .. }
             | EngineError::StubNotUpdatable { .. }
             | EngineError::StubNotRenamable { .. }
             | EngineError::InvalidEntityId { .. }
             | EngineError::InvalidWikiLinkTarget { .. }
-            | EngineError::InvalidWikiLinkVault { .. }
+            | EngineError::InvalidWikiLinkMem { .. }
             | EngineError::InvalidInput(_)
             | EngineError::UnknownRef(_)
             | EngineError::UnknownRemote(_)
@@ -217,7 +217,7 @@ impl From<EngineError> for MemsteadError {
             | EngineError::MissingRequiredDescription { .. }
             | EngineError::DescriptionNotPermitted { .. }
             | EngineError::RelationManualAuthoringForbidden { .. }
-            | EngineError::VaultConfigIncomplete { .. }
+            | EngineError::MemConfigIncomplete { .. }
             | EngineError::MarkdownExportUnsupportedBackend { .. } => Self::ValidationFailed {
                 message: err.to_string(),
             },
@@ -226,8 +226,8 @@ impl From<EngineError> for MemsteadError {
             EngineError::Parse(s) => Self::ValidationFailed {
                 message: format!("parse error: {s}"),
             },
-            EngineError::Vault(s) => Self::ValidationFailed {
-                message: format!("vault error: {s}"),
+            EngineError::Mem(s) => Self::ValidationFailed {
+                message: format!("mem error: {s}"),
             },
             EngineError::ParseAfterWrite(s) => Self::Internal {
                 message: format!("parse after write failed: {s}"),
@@ -235,8 +235,8 @@ impl From<EngineError> for MemsteadError {
             EngineError::Backend(e) => Self::Internal {
                 message: format!("backend error: {e}"),
             },
-            EngineError::SchemaNotFound { vault, pin, .. } => Self::SchemaError {
-                message: format!("vault {vault}: schema pin {pin} not found"),
+            EngineError::SchemaNotFound { mem, pin, .. } => Self::SchemaError {
+                message: format!("mem {mem}: schema pin {pin} not found"),
             },
             EngineError::SchemaResolverInit(e) => Self::SchemaError {
                 message: format!("schema resolver init failed: {e}"),
@@ -285,16 +285,16 @@ impl From<memstead_engine::ProEngineError> for MemsteadError {
         use memstead_engine::ProEngineError as P;
         match err {
             // A basis-side failure surfaced through the pro orchestrator
-            // (`UnknownVault`, `ReadOnlyMount`, `SchemaNotFound`, …)
+            // (`UnknownMem`, `ReadOnlyMount`, `SchemaNotFound`, …)
             // delegates to the canonical `EngineError` mapping so typed
-            // Swift variants (`UnknownVault`) survive the lift.
+            // Swift variants (`UnknownMem`) survive the lift.
             P::Basis(e) => e.into(),
             // Every remaining variant is a caller-actionable lifecycle
             // refusal — workspace-policy gates, a malformed name, an
             // occupied location, or detected storage residue. They carry
             // their recovery story in the message; collapse into
             // `ValidationFailed` so the roster surfaces the typed refusal
-            // rather than leaving a partially-created vault behind.
+            // rather than leaving a partially-created mem behind.
             other => Self::ValidationFailed {
                 message: other.to_string(),
             },
@@ -362,11 +362,11 @@ mod tests {
     }
 
     #[test]
-    fn engine_error_vault_maps_to_validation_failed() {
-        let e: MemsteadError = EngineError::Vault("unknown vault: x".to_string()).into();
+    fn engine_error_mem_maps_to_validation_failed() {
+        let e: MemsteadError = EngineError::Mem("unknown mem: x".to_string()).into();
         match e {
             MemsteadError::ValidationFailed { message } => {
-                assert!(message.contains("vault error"), "got: {message}")
+                assert!(message.contains("mem error"), "got: {message}")
             }
             other => panic!("expected ValidationFailed, got {other:?}"),
         }
@@ -398,19 +398,19 @@ mod tests {
     }
 
     #[test]
-    fn engine_error_unknown_vault_carries_name() {
-        let e: MemsteadError = EngineError::UnknownVault("ghost".to_string()).into();
+    fn engine_error_unknown_mem_carries_name() {
+        let e: MemsteadError = EngineError::UnknownMem("ghost".to_string()).into();
         match e {
-            MemsteadError::UnknownVault {
+            MemsteadError::UnknownMem {
                 name,
-                writable_vaults,
+                writable_mems,
             } => {
                 assert_eq!(name, "ghost");
-                // The unified engine's UnknownVault variant does not carry
+                // The unified engine's UnknownMem variant does not carry
                 // the writable roster; the picker re-queries the engine.
-                assert!(writable_vaults.is_empty());
+                assert!(writable_mems.is_empty());
             }
-            other => panic!("expected UnknownVault, got {other:?}"),
+            other => panic!("expected UnknownMem, got {other:?}"),
         }
     }
 }

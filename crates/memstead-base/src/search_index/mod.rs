@@ -1,10 +1,10 @@
-//! Per-vault tantivy search indexes.
+//! Per-mem tantivy search indexes.
 //!
-//! The engine holds `search_indexes: HashMap<String, VaultIndex>` for
-//! its writable vaults, each with a long-lived `IndexWriter`, lazily
+//! The engine holds `search_indexes: HashMap<String, MemIndex>` for
+//! its writable mems, each with a long-lived `IndexWriter`, lazily
 //! built on first search and rebuilt from the store after any mutation
 //! or reload invalidates the map (whole-map invalidation, not
-//! incremental upkeep). [`execute_on_vault`] serves queries against the
+//! incremental upkeep). [`execute_on_mem`] serves queries against the
 //! built indexes.
 
 pub mod query;
@@ -13,10 +13,10 @@ pub mod snippets;
 pub mod tokenizer;
 pub mod writer;
 
-pub use query::execute_on_vault;
+pub use query::execute_on_mem;
 pub use schema::IndexFields;
 pub use snippets::{compute_matched_terms, compute_score_breakdown};
-pub use writer::VaultIndex;
+pub use writer::MemIndex;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -25,25 +25,25 @@ use memstead_schema::Schema;
 
 use crate::store::Store;
 
-/// Build per-vault indexes for every writable vault. Each vault's index
+/// Build per-mem indexes for every writable mem. Each mem's index
 /// uses its own pinned schema from `writable_schemas`.
 pub fn build_all(
     store: &Store,
     writable_schemas: &HashMap<String, Arc<Schema>>,
-) -> HashMap<String, VaultIndex> {
-    let mut indexes: HashMap<String, VaultIndex> = HashMap::new();
+) -> HashMap<String, MemIndex> {
+    let mut indexes: HashMap<String, MemIndex> = HashMap::new();
 
-    // Write-vaults keep their writers alive for the engine lifetime.
+    // Write-mems keep their writers alive for the engine lifetime.
     for (name, schema) in writable_schemas {
-        match VaultIndex::build_in_ram(name.clone(), Some(schema)) {
+        match MemIndex::build_in_ram(name.clone(), Some(schema)) {
             Ok(idx) => {
                 indexes.insert(name.clone(), idx);
             }
             Err(e) => {
                 tracing::warn!(
-                    vault = name.as_str(),
+                    mem = name.as_str(),
                     error = %e,
-                    "failed to create search index for writable vault; skipping"
+                    "failed to create search index for writable mem; skipping"
                 );
             }
         }
@@ -56,12 +56,12 @@ pub fn build_all(
         if entity.stub {
             continue;
         }
-        let Some(idx) = indexes.get_mut(&entity.vault) else {
+        let Some(idx) = indexes.get_mut(&entity.mem) else {
             continue;
         };
         if let Err(e) = idx.index_entity(entity) {
             tracing::warn!(
-                vault = entity.vault.as_str(),
+                mem = entity.mem.as_str(),
                 id = entity.id.as_ref(),
                 error = %e,
                 "failed to index entity during bulk build"
@@ -72,9 +72,9 @@ pub fn build_all(
     for idx in indexes.values_mut() {
         if let Err(e) = idx.commit() {
             tracing::warn!(
-                vault = idx.vault.as_str(),
+                mem = idx.mem.as_str(),
                 error = %e,
-                "failed to commit vault index after bulk build"
+                "failed to commit mem index after bulk build"
             );
         }
     }

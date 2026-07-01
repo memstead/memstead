@@ -169,7 +169,7 @@ pub(super) fn gc_orphan_stubs_among<'a>(
 pub(super) fn validate_relation_target_grammar(
     target: &EntityId,
 ) -> Result<(), EngineError> {
-    if let Err(reason) = crate::entity::id::validate_vault_name_grammar(target.vault()) {
+    if let Err(reason) = crate::entity::id::validate_mem_name_grammar(target.mem()) {
         return Err(EngineError::InvalidEntityId {
             id: target.to_string(),
             reason,
@@ -231,7 +231,7 @@ pub(super) fn make_stub(id: &EntityId, kind: crate::entity::StubKind) -> Entity 
         id: id.clone(),
         title: id.name().to_string(),
         entity_type: String::new(),
-        vault: id.vault().to_string(),
+        mem: id.mem().to_string(),
         file_path: String::new(),
         metadata: IndexMap::new(),
         sections: IndexMap::new(),
@@ -243,13 +243,13 @@ pub(super) fn make_stub(id: &EntityId, kind: crate::entity::StubKind) -> Entity 
     }
 }
 
-/// Cross-vault add-path policy gate. Same-vault writes bypass; the
-/// `[cross_vault_links]` table only gates writes that cross the
-/// vault boundary. Cross-vault writes consult
-/// [`super::Engine::cross_vault_link_allowed`] in the edge's actual
-/// direction (`source_vault → target_vault`). Disallowed pairings
-/// surface [`EngineError::CrossVaultLinkNotAllowed`] with the
-/// `(from_vault, to_vault)` payload an agent already sees on
+/// Cross-mem add-path policy gate. Same-mem writes bypass; the
+/// `[cross_mem_links]` table only gates writes that cross the
+/// mem boundary. Cross-mem writes consult
+/// [`super::Engine::cross_mem_link_allowed`] in the edge's actual
+/// direction (`source_mem → target_mem`). Disallowed pairings
+/// surface [`EngineError::CrossMemLinkNotAllowed`] with the
+/// `(from_mem, to_mem)` payload an agent already sees on
 /// `memstead_relate`.
 ///
 /// Funnel point for every add-shaped edge write — `memstead_relate`,
@@ -257,18 +257,18 @@ pub(super) fn make_stub(id: &EntityId, kind: crate::entity::StubKind) -> Entity 
 /// any future add-path mutation surface route through one gate so
 /// the policy can't drift between sites. Remove-shaped writes
 /// (cleanup) remain permissive and call this helper not at all.
-pub(super) fn validate_cross_vault_add_policy(
+pub(super) fn validate_cross_mem_add_policy(
     engine: &super::Engine,
-    source_vault: &str,
-    target_vault: &str,
+    source_mem: &str,
+    target_mem: &str,
 ) -> Result<(), EngineError> {
-    if source_vault == target_vault {
+    if source_mem == target_mem {
         return Ok(());
     }
-    if !engine.cross_vault_link_allowed(source_vault, target_vault) {
-        return Err(EngineError::CrossVaultLinkNotAllowed {
-            from_vault: source_vault.to_string(),
-            to_vault: target_vault.to_string(),
+    if !engine.cross_mem_link_allowed(source_mem, target_mem) {
+        return Err(EngineError::CrossMemLinkNotAllowed {
+            from_mem: source_mem.to_string(),
+            to_mem: target_mem.to_string(),
         });
     }
     Ok(())
@@ -276,93 +276,93 @@ pub(super) fn validate_cross_vault_add_policy(
 
 /// Outcome of the engine's edge-validation router for a single
 /// inline / explicit relate. Carries the optional open-mode warning
-/// from the intra-vault flow; the cross-vault flow has no
-/// open-mode (cross-vault entries are declared vocabulary).
+/// from the intra-mem flow; the cross-mem flow has no
+/// open-mode (cross-mem entries are declared vocabulary).
 pub(super) enum EdgeRouteOutcome {
     Ok,
     OpenModeWarning(crate::ops::WarningHint),
 }
 
 /// Run rel-type + shape validation for one edge, routing through
-/// intra-vault vocabulary or the source schema's
-/// `cross_vault_relationships:` section as appropriate.
+/// intra-mem vocabulary or the source schema's
+/// `cross_mem_relationships:` section as appropriate.
 ///
 /// The routing rule:
-/// when `source_vault != target_vault` AND the target vault's
+/// when `source_mem != target_mem` AND the target mem's
 /// pinned schema differs from the source schema by name or by
-/// version, the source schema's `cross_vault_relationships:` entry
+/// version, the source schema's `cross_mem_relationships:` entry
 /// for the target schema is the sole authority for both the
 /// vocabulary check (`INVALID_REL_TYPE`) and the shape check
 /// (`INVALID_REL_SHAPE`). If no matching entry exists, surface
-/// [`EngineError::CrossVaultEdgeNotDeclared`].
+/// [`EngineError::CrossMemEdgeNotDeclared`].
 ///
-/// Otherwise (same-vault, same-schema cross-vault, or target vault
-/// unmounted) the call falls through to the existing intra-vault
-/// validators — the same behaviour the intra-vault path always had.
+/// Otherwise (same-mem, same-schema cross-mem, or target mem
+/// unmounted) the call falls through to the existing intra-mem
+/// validators — the same behaviour the intra-mem path always had.
 ///
 /// `check_shape` mirrors the relate path's add-only shape posture:
 /// pass `false` to skip the shape check (currently only the
 /// `memstead_relate --remove` path). The vocabulary check still fires
-/// in that case, matching the intra-vault behaviour where
+/// in that case, matching the intra-mem behaviour where
 /// `validate_rel_type` runs on both add and remove.
 pub(super) fn route_edge_validation(
     engine: &super::Engine,
     rel_type: &str,
     from_type: &str,
     to_type: Option<&str>,
-    source_vault: &str,
-    target_vault: &str,
+    source_mem: &str,
+    target_mem: &str,
     from_id: &EntityId,
     to_id: &EntityId,
     check_shape: bool,
 ) -> Result<EdgeRouteOutcome, EngineError> {
     use crate::runtime_validator::{
-        CrossVaultRelCheck, RelationshipCheck, validate_cross_vault_edge, validate_rel_shape,
+        CrossMemRelCheck, RelationshipCheck, validate_cross_mem_edge, validate_rel_shape,
         validate_rel_type,
     };
     use memstead_schema::SchemaRef;
 
     let source_schema = engine
         .schemas
-        .get(source_vault)
+        .get(source_mem)
         .expect("schema present for every registered mount");
 
-    let target_schema_arc = if source_vault == target_vault {
+    let target_schema_arc = if source_mem == target_mem {
         None
     } else {
-        engine.schemas.get(target_vault).cloned()
+        engine.schemas.get(target_mem).cloned()
     };
     let target_schema_ref: Option<SchemaRef> = target_schema_arc.as_ref().map(|s| {
         let (name, version) = s.id();
         SchemaRef::new(name, version)
     });
-    let cross_vault_different = match (&target_schema_ref, source_schema.id()) {
+    let cross_mem_different = match (&target_schema_ref, source_schema.id()) {
         (Some(target), (src_name, _)) => target.name != src_name,
         (None, _) => false,
     };
 
-    if cross_vault_different {
+    if cross_mem_different {
         let target_ref = target_schema_ref
             .as_ref()
-            .expect("target_schema_ref is Some when cross_vault_different");
+            .expect("target_schema_ref is Some when cross_mem_different");
         if !check_shape {
-            // Cleanup posture: cross-vault remove stays permissive so
+            // Cleanup posture: cross-mem remove stays permissive so
             // pre-tightening edges remain droppable without first
-            // re-declaring them. Mirrors the intra-vault shape gate's
+            // re-declaring them. Mirrors the intra-mem shape gate's
             // add-only stance.
             return Ok(EdgeRouteOutcome::Ok);
         }
-        match validate_cross_vault_edge(
+        match validate_cross_mem_edge(
             rel_type,
             from_type,
             to_type,
             source_schema.as_ref(),
             target_ref,
         ) {
-            CrossVaultRelCheck::Ok => Ok(EdgeRouteOutcome::Ok),
-            CrossVaultRelCheck::EdgeNotDeclared => {
+            CrossMemRelCheck::Ok => Ok(EdgeRouteOutcome::Ok),
+            CrossMemRelCheck::EdgeNotDeclared => {
                 let (src_name, src_version) = source_schema.id();
-                Err(EngineError::CrossVaultEdgeNotDeclared {
+                Err(EngineError::CrossMemEdgeNotDeclared {
                     source_schema: SchemaRef::new(src_name, src_version).as_display(),
                     target_schema: target_ref.as_display(),
                     rel_type: rel_type.to_string(),
@@ -370,7 +370,7 @@ pub(super) fn route_edge_validation(
                     to_id: to_id.to_string(),
                 })
             }
-            CrossVaultRelCheck::Invalid(v) => Err(EngineError::Validation(v)),
+            CrossMemRelCheck::Invalid(v) => Err(EngineError::Validation(v)),
         }
     } else {
         let warning_hint = match validate_rel_type(rel_type, source_schema.as_ref())? {
@@ -393,8 +393,8 @@ pub(super) fn route_edge_validation(
 }
 
 /// Validate the per-edge description posture declared on the rel-type
-/// in the routing-appropriate definition (intra-vault when source and
-/// target share the schema; cross-vault entry when they don't). Emits
+/// in the routing-appropriate definition (intra-mem when source and
+/// target share the schema; cross-mem entry when they don't). Emits
 /// `MissingRequiredDescription` / `DescriptionNotPermitted` on
 /// violations; `optional` and unknown rel-types are no-ops (the
 /// vocabulary / shape gates already catch undeclared names — posture
@@ -408,8 +408,8 @@ pub(super) fn validate_description_posture(
     engine: &super::Engine,
     rel_type: &str,
     description: Option<&str>,
-    source_vault: &str,
-    target_vault: &str,
+    source_mem: &str,
+    target_mem: &str,
     from_id: &EntityId,
     to_id: &EntityId,
 ) -> Result<(), EngineError> {
@@ -417,32 +417,32 @@ pub(super) fn validate_description_posture(
 
     let source_schema = engine
         .schemas
-        .get(source_vault)
+        .get(source_mem)
         .expect("schema present for every registered mount");
-    let target_schema_arc = if source_vault == target_vault {
+    let target_schema_arc = if source_mem == target_mem {
         None
     } else {
-        engine.schemas.get(target_vault).cloned()
+        engine.schemas.get(target_mem).cloned()
     };
     let target_schema_ref: Option<SchemaRef> = target_schema_arc.as_ref().map(|s| {
         let (name, version) = s.id();
         SchemaRef::new(name, version)
     });
-    let cross_vault_different = match (&target_schema_ref, source_schema.id()) {
+    let cross_mem_different = match (&target_schema_ref, source_schema.id()) {
         (Some(target), (src_name, _)) => target.name != src_name,
         (None, _) => false,
     };
 
-    let posture = if cross_vault_different {
-        // Look up the matching cross-vault entry's definition. If the
+    let posture = if cross_mem_different {
+        // Look up the matching cross-mem entry's definition. If the
         // entry exists but the rel-type isn't enumerated under it, the
         // vocabulary gate (route_edge_validation) will surface
-        // `CROSS_VAULT_EDGE_NOT_DECLARED`; posture is a no-op there.
+        // `CROSS_MEM_EDGE_NOT_DECLARED`; posture is a no-op there.
         let target_ref = target_schema_ref
             .as_ref()
-            .expect("target_schema_ref is Some when cross_vault_different");
+            .expect("target_schema_ref is Some when cross_mem_different");
         source_schema
-            .cross_vault_entry(&target_ref.name)
+            .cross_mem_entry(&target_ref.name)
             .and_then(|entry| entry.definitions.iter().find(|d| d.name == rel_type))
             .map(|d| d.per_edge_description)
     } else {
@@ -481,7 +481,7 @@ pub(super) fn validate_description_posture(
 pub(super) fn validate_manual_authoring_posture(
     engine: &super::Engine,
     rel_type: &str,
-    source_vault: &str,
+    source_mem: &str,
     from_id: &EntityId,
     to_id: &EntityId,
 ) -> Result<(), EngineError> {
@@ -489,7 +489,7 @@ pub(super) fn validate_manual_authoring_posture(
 
     let source_schema = engine
         .schemas
-        .get(source_vault)
+        .get(source_mem)
         .expect("schema present for every registered mount");
     let posture = source_schema.relationship_manual_authoring(rel_type);
     if matches!(posture, ManualAuthoring::Forbidden) {
@@ -517,16 +517,16 @@ pub(super) fn validate_manual_authoring_posture(
 /// 1. Schema has no pointer (`alias_target_rel_type` absent): no-op.
 ///    Caller's validator continues to refuse unbacked links exactly as
 ///    today.
-/// 2. Schema has a pointer, body wiki-link target is in the same vault
-///    OR cross-vault policy admits it: append `Relationship { rel_type:
+/// 2. Schema has a pointer, body wiki-link target is in the same mem
+///    OR cross-mem policy admits it: append `Relationship { rel_type:
 ///    pointer, target, description: None }` to `next.relationships` if
 ///    no relation of `(pointer, target)` is already present. Dedupe is
 ///    `(target, rel_type)` — a USES or DEPENDS_ON edge to the same
 ///    target does not suppress synthesis of the pointer rel-type.
-/// 3. Schema has a pointer but a body wiki-link crosses a vault
+/// 3. Schema has a pointer but a body wiki-link crosses a mem
 ///    boundary the workspace doesn't grant: return
-///    `EngineError::CrossVaultLinkNotAllowed` with the source/target
-///    vault pair. The entire mutation aborts — no partial state.
+///    `EngineError::CrossMemLinkNotAllowed` with the source/target
+///    mem pair. The entire mutation aborts — no partial state.
 ///
 /// GC: when `prev` is `Some`, the pass also drops pointer-rel-type
 /// relations whose target was a body wiki-link in `prev` but no longer
@@ -553,7 +553,7 @@ pub(super) fn synthesise_alias_relations(
 ) -> Result<(Vec<crate::entity::Relationship>, bool), super::EngineError> {
     let schema = engine
         .schemas
-        .get(next.vault.as_str())
+        .get(next.mem.as_str())
         .expect("schema present for every registered mount");
     let Some(pointer) = schema.alias_target_rel_type().map(str::to_string) else {
         return Ok((Vec::new(), false));
@@ -571,7 +571,7 @@ pub(super) fn synthesise_alias_relations(
     //    EntityIds. Section context comes from the iteration key.
     let mut next_targets: std::collections::HashSet<EntityId> = std::collections::HashSet::new();
     for (section_key, body) in next.sections.iter() {
-        let ids = crate::entity::parser::extract_inline_links(body, &next.vault)
+        let ids = crate::entity::parser::extract_inline_links(body, &next.mem)
             .map_err(|errs| map_wiki_link_errors(section_key, errs))?;
         next_targets.extend(ids);
     }
@@ -583,7 +583,7 @@ pub(super) fn synthesise_alias_relations(
 
     // 2. Walk body wiki-links in section iteration order and append
     //    one relation per `(target, pointer)` pair not already
-    //    present. Cross-vault gate fires on the first refusal.
+    //    present. Cross-mem gate fires on the first refusal.
     let existing: std::collections::HashSet<(String, EntityId)> = next
         .relationships
         .iter()
@@ -594,7 +594,7 @@ pub(super) fn synthesise_alias_relations(
         std::collections::HashSet::new();
     let mut self_link_ignored = false;
     for (section_key, body) in next.sections.iter() {
-        let ids = crate::entity::parser::extract_inline_links(body, &next.vault)
+        let ids = crate::entity::parser::extract_inline_links(body, &next.mem)
             .map_err(|errs| map_wiki_link_errors(section_key, errs))?;
         for target in ids {
             // F11: a body wiki-link to the entity's own id is a vacuous
@@ -610,12 +610,12 @@ pub(super) fn synthesise_alias_relations(
             if existing.contains(&key) || already_synthesised.contains(&target) {
                 continue;
             }
-            if target.vault() != next.vault.as_str()
-                && !engine.cross_vault_link_allowed(&next.vault, target.vault())
+            if target.mem() != next.mem.as_str()
+                && !engine.cross_mem_link_allowed(&next.mem, target.mem())
             {
-                return Err(super::EngineError::CrossVaultLinkNotAllowed {
-                    from_vault: next.vault.clone(),
-                    to_vault: target.vault().to_string(),
+                return Err(super::EngineError::CrossMemLinkNotAllowed {
+                    from_mem: next.mem.clone(),
+                    to_mem: target.mem().to_string(),
                 });
             }
             let rel = crate::entity::Relationship::new(pointer.clone(), target.clone());
@@ -655,8 +655,8 @@ pub(super) fn map_wiki_link_errors(
             link_source: "body_link".to_string(),
             reason,
         },
-        WikiLinkError::InvalidVaultName { raw, reason } => {
-            EngineError::InvalidWikiLinkVault {
+        WikiLinkError::InvalidMemName { raw, reason } => {
+            EngineError::InvalidWikiLinkMem {
                 raw,
                 section: section_key.to_string(),
                 reason,
@@ -679,7 +679,7 @@ pub(super) fn collect_body_link_targets(
         .sections
         .iter()
         .flat_map(|(_, body)| {
-            crate::entity::parser::extract_inline_links_lenient(body, &entity.vault)
+            crate::entity::parser::extract_inline_links_lenient(body, &entity.mem)
         })
         .collect()
 }
@@ -702,7 +702,7 @@ pub(super) fn collect_body_link_targets(
 ///
 /// Reuses [`crate::entity::parser::extract_inline_links`] so the
 /// lexical discipline (fenced-code masking, inline-code masking,
-/// alias handling, cross-vault forms) matches every other validator
+/// alias handling, cross-mem forms) matches every other validator
 /// surface in the engine.
 pub(super) fn scan_wikilinks_without_relation(
     next: &Entity,
@@ -714,7 +714,7 @@ pub(super) fn scan_wikilinks_without_relation(
         .collect();
     let mut missing: Vec<(String, EntityId)> = Vec::new();
     for (section_key, body) in next.sections.iter() {
-        let ids = crate::entity::parser::extract_inline_links(body, &next.vault)
+        let ids = crate::entity::parser::extract_inline_links(body, &next.mem)
             .map_err(|errs| map_wiki_link_errors(section_key, errs))?;
         for target in ids {
             // A self-targeting body link is intentionally unbacked: the
@@ -740,14 +740,14 @@ mod tests {
 
     use tempfile::TempDir;
 
-    use crate::backend::VaultBackend;
+    use crate::backend::MemBackend;
     use crate::engine::test_helpers::*;
     use crate::engine::{
         CreateEntityArgs, Engine,
         UpdateEntityArgs,
     };
     
-    use crate::storage::FilesystemVaultWriter;
+    use crate::storage::FilesystemMemWriter;
     use crate::vcs::CommitContext;
 
     use indexmap::IndexMap;
@@ -760,18 +760,18 @@ mod tests {
         // observably mutate the store the same way the explicit
         // forms would.
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().to_path_buf();
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
-            folder_mount("specs", vault_dir),
-            Box::new(writer) as Box<dyn VaultBackend>,
+            folder_mount("specs", mem_dir),
+            Box::new(writer) as Box<dyn MemBackend>,
         )])
         .unwrap();
         let ctx = CommitContext::internal();
 
         // create_entity_with_ctx
         let create_args = CreateEntityArgs {
-            vault: "specs".to_string(),
+            mem: "specs".to_string(),
             title: "Seed".to_string(),
             entity_type: "spec".to_string(),
             sections: IndexMap::from_iter([

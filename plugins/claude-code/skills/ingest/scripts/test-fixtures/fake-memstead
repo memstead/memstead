@@ -2,12 +2,12 @@
 # Test fixture: stand-in for `memstead` — covers the three invocations
 # inject.mjs makes:
 #   $0 workspace dump        — emits <cwd>/.fake-dump.json
-#   $0 vault init <name> ... — appends a JSON line to <cwd>/.fake-invocations.log
-#   $0 vault delete <name> ..— same; respects <cwd>/.fake-vault-delete-mode
+#   $0 mem init <name> ... — appends a JSON line to <cwd>/.fake-invocations.log
+#   $0 mem delete <name> ..— same; respects <cwd>/.fake-mem-delete-mode
 #
 # Behaviour overrides for tests:
-#   <cwd>/.fake-vault-init-mode    "fail" → exit 1, "ok" (default) → exit 0
-#   <cwd>/.fake-vault-delete-mode  "absent" → exit 1 with "unknown writable vault"
+#   <cwd>/.fake-mem-init-mode    "fail" → exit 1, "ok" (default) → exit 0
+#   <cwd>/.fake-mem-delete-mode  "absent" → exit 1 with "unknown writable mem"
 #                                  "fail"   → exit 1 with generic error
 #                                  "ok" (default) → exit 0
 
@@ -37,11 +37,11 @@ case "$1 $2" in
     printf '{"error":"fake-memstead: no .fake-dump.json in cwd","code":1}\n' >&2
     exit 1
     ;;
-  "vault init")
+  "mem init")
     log_invocation "$@"
-    mode=$(test -f .fake-vault-init-mode && cat .fake-vault-init-mode || echo ok)
+    mode=$(test -f .fake-mem-init-mode && cat .fake-mem-init-mode || echo ok)
     if [ "$mode" = "fail" ]; then
-      printf 'fake-memstead: vault init forced to fail\n' >&2
+      printf 'fake-memstead: mem init forced to fail\n' >&2
       exit 1
     fi
     printf '{"name":"%s","ok":true}\n' "$3"
@@ -57,24 +57,24 @@ case "$1 $2" in
     fi
     exit 0
     ;;
-  "vault set-sync-state")
+  "mem set-sync-state")
     # inject.mjs never calls this itself (the ingest agent does, at the
     # end of a pass) — but a stand-in keeps any stray invocation from
     # erroring during tests.
     log_invocation "$@"
-    printf '{"vault":"%s","ok":true}\n' "$3"
+    printf '{"mem":"%s","ok":true}\n' "$3"
     exit 0
     ;;
-  "vault delete")
+  "mem delete")
     log_invocation "$@"
-    mode=$(test -f .fake-vault-delete-mode && cat .fake-vault-delete-mode || echo ok)
+    mode=$(test -f .fake-mem-delete-mode && cat .fake-mem-delete-mode || echo ok)
     case "$mode" in
       absent)
-        printf 'fake-memstead: ERROR: unknown writable vault %s\n' "$3" >&2
+        printf 'fake-memstead: ERROR: unknown writable mem %s\n' "$3" >&2
         exit 1
         ;;
       fail)
-        printf 'fake-memstead: vault delete forced to fail\n' >&2
+        printf 'fake-memstead: mem delete forced to fail\n' >&2
         exit 1
         ;;
       *)

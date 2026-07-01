@@ -3,17 +3,17 @@
 // Fires on Write/Edit tools. Outputs a reminder to review relevant entities.
 //
 // The direct-edit warning always runs (guard behavior).
-// The realization scan is conditional on schema drift support — if the vault's
+// The realization scan is conditional on schema drift support — if the mem's
 // schema has no drift section, realization scanning is skipped silently.
 //
-// Schema is loaded from the vault's .memstead/config.json "schema" field.
+// Schema is loaded from the mem's .memstead/config.json "schema" field.
 
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { basename, resolve, join, relative } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { extractRealizationPaths, fileToId, pathMatches } from './check-realization-utils.mjs';
 import { isEntityFilename } from './guard-entity-edit-utils.mjs';
-import { resolveVaultDirsFromCwd } from './workspace-resolve-utils.mjs';
+import { resolveMemDirsFromCwd } from './workspace-resolve-utils.mjs';
 
 const input = JSON.parse(await readStdin());
 
@@ -21,42 +21,42 @@ const input = JSON.parse(await readStdin());
 const filePath = input.tool_input?.file_path;
 if (!filePath) process.exit(0);
 
-// Resolve folder-backed vault dirs the engine way (walk up for
+// Resolve folder-backed mem dirs the engine way (walk up for
 // .memstead/workspace.toml, read the mount list). Empty on a git-branch
 // workspace — entities are branch blobs, nothing to scan on disk.
 const absFilePath = resolve(filePath);
-for (const vaultDir of resolveVaultDirsFromCwd()) {
-  if (!existsSync(vaultDir)) continue;
+for (const memDir of resolveMemDirsFromCwd()) {
+  if (!existsSync(memDir)) continue;
 
-  // Normalize edited path to relative (from project root = parent of vault dir)
-  const projectRoot = resolve(vaultDir, '..');
+  // Normalize edited path to relative (from project root = parent of mem dir)
+  const projectRoot = resolve(memDir, '..');
   const relPath = relative(projectRoot, absFilePath);
-  const dirName = vaultDir.split('/').pop() || 'specs';
-  const insideVault = relPath.startsWith(dirName + '/') || relPath.startsWith(dirName + '\\');
+  const dirName = memDir.split('/').pop() || 'specs';
+  const insideMem = relPath.startsWith(dirName + '/') || relPath.startsWith(dirName + '\\');
 
   // --- Guard behavior (always active) ---
   // Warn if an entity markdown was edited directly (backup check — the
   // PreToolUse guard should block this first).
-  if (insideVault && isEntityFilename(basename(relPath))) {
+  if (insideMem && isEntityFilename(basename(relPath))) {
     process.stdout.write(
       `WARNING: Entity file \`${relPath}\` was edited directly. Always use Memstead MCP tools (memstead_create, memstead_update) to mutate entities.\n`,
     );
     process.exit(0);
   }
-  // A non-entity file inside the vault dir is this vault's concern but needs
+  // A non-entity file inside the mem dir is this mem's concern but needs
   // no realization scan; stop here.
-  if (insideVault) process.exit(0);
+  if (insideMem) process.exit(0);
 
-  // --- Realization scan (conditional on this vault's schema drift support) ---
-  const SCHEMA = await loadVaultSchema(vaultDir);
+  // --- Realization scan (conditional on this mem's schema drift support) ---
+  const SCHEMA = await loadMemSchema(memDir);
   if (!SCHEMA?.drift) continue;
 
   const matches = [];
-  for (const file of findMarkdownFiles(vaultDir)) {
+  for (const file of findMarkdownFiles(memDir)) {
     const paths = extractRealizationPaths(readFileSync(file, 'utf-8'), SCHEMA);
     for (const p of paths) {
       if (pathMatches(relPath, p)) {
-        const entityId = fileToId(relative(vaultDir, file));
+        const entityId = fileToId(relative(memDir, file));
         if (entityId) matches.push(entityId);
         break;
       }
@@ -73,18 +73,18 @@ for (const vaultDir of resolveVaultDirsFromCwd()) {
 
 // --- Helpers ---
 
-// Load a folder vault's schema module from its `.memstead/config.json`
+// Load a folder mem's schema module from its `.memstead/config.json`
 // "schema" field. Returns null when the config or schema is unavailable
-// (e.g. a git-branch vault whose schema lives on the __SCHEMAS ref, not
+// (e.g. a git-branch mem whose schema lives on the __SCHEMAS ref, not
 // on disk).
-async function loadVaultSchema(vaultDir) {
+async function loadMemSchema(memDir) {
   try {
-    const configPath = join(vaultDir, '.memstead', 'config.json');
+    const configPath = join(memDir, '.memstead', 'config.json');
     if (!existsSync(configPath)) return null;
     const schemaRef = JSON.parse(readFileSync(configPath, 'utf-8')).schema;
     if (!schemaRef) return null;
     const isRelative = schemaRef.startsWith('./') || schemaRef.startsWith('../');
-    const resolved = isRelative ? resolve(vaultDir, schemaRef) : schemaRef;
+    const resolved = isRelative ? resolve(memDir, schemaRef) : schemaRef;
     const mod = resolved.startsWith('/')
       ? await import(pathToFileURL(resolved).href)
       : await import(resolved);

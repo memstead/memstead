@@ -1,4 +1,4 @@
-#![cfg(not(feature = "vault-repo"))]
+#![cfg(not(feature = "mem-repo"))]
 //! Boot smoke test for the lean MCP build (`memstead-mcp --no-default-features`).
 //!
 //! Spawns the binary as a subprocess against a tempdir workspace
@@ -16,10 +16,10 @@ use std::time::{Duration, Instant};
 
 use tempfile::TempDir;
 
-const WORKSPACE_TOML_BODY: &str = "format = \"memstead-git-branch-1\"\n\n\
+const WORKSPACE_TOML_BODY: &str = "format = \"memstead-git-branch-2\"\n\n\
 [persistence_adapter]\nname = \"file-two-layer\"\n";
 
-const MOUNTS_JSON_BODY: &str = r#"{ "format": "memstead-mounts-1", "mounts": [] }"#;
+const MOUNTS_JSON_BODY: &str = r#"{ "format": "memstead-mounts-3", "mounts": [] }"#;
 
 fn memstead_mcp_bin() -> &'static str {
     env!("CARGO_BIN_EXE_memstead-mcp")

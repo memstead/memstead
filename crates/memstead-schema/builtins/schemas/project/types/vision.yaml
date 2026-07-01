@@ -2,13 +2,13 @@
 
 name: vision
 description: |
-  The durable north star of the project. One to three per vault;
+  The durable north star of the project. One to three per mem;
   rarely edited; superseded, not rewritten. Carries the time horizon
   the vision speaks to and a lifecycle status (active, superseded,
   abandoned).
 when_to_use: |
   Use to state the long-arc destination of the project — what
-  "winning" looks like across years, not quarters. A vault typically
+  "winning" looks like across years, not quarters. A mem typically
   carries one principal vision plus zero to two secondary visions
   scoped to a surface (e.g. one for the engine, one for the app). If
   you find yourself authoring a fourth, the project is probably split

@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-description = "Full engine extension for Memstead — multi-vault policy, vault management, cross-vault-link resolution, lifecycle. Depends on memstead-base."
+description = "Full engine extension for Memstead — multi-mem policy, mem management, cross-mem-link resolution, lifecycle. Depends on memstead-base."
 publish = false
 
 [dependencies]

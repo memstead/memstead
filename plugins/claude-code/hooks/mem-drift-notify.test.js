@@ -1,18 +1,18 @@
-// Unit tests against the pure helpers in vault-drift-notify-utils.mjs.
+// Unit tests against the pure helpers in mem-drift-notify-utils.mjs.
 // No git invocations, no tempdirs — those live in the integration test.
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   parseRefList,
-  isTrackedVault,
+  isTrackedMem,
   diffPathsToEntityIds,
   parseState,
   computeDrift,
   formatReminder,
   sanitizeSessionId,
   nextStateMap,
-} from './vault-drift-notify-utils.mjs';
+} from './mem-drift-notify-utils.mjs';
 
 describe('parseRefList', () => {
   it('parses well-formed for-each-ref output', () => {
@@ -46,35 +46,35 @@ describe('parseRefList', () => {
   });
 });
 
-describe('isTrackedVault', () => {
+describe('isTrackedMem', () => {
   it('drops main and registry-class refs', () => {
-    assert.strictEqual(isTrackedVault('main'), false);
-    assert.strictEqual(isTrackedVault('__SYSTEM'), false);
-    assert.strictEqual(isTrackedVault('__SCHEMAS'), false);
+    assert.strictEqual(isTrackedMem('main'), false);
+    assert.strictEqual(isTrackedMem('__SYSTEM'), false);
+    assert.strictEqual(isTrackedMem('__SCHEMAS'), false);
   });
 
-  it('keeps writable vault names including hierarchical', () => {
-    assert.strictEqual(isTrackedVault('memstead/engine'), true);
-    assert.strictEqual(isTrackedVault('ingest/engine-graph'), true);
-    assert.strictEqual(isTrackedVault('exec-foo'), true);
+  it('keeps writable mem names including hierarchical', () => {
+    assert.strictEqual(isTrackedMem('memstead/engine'), true);
+    assert.strictEqual(isTrackedMem('ingest/engine-graph'), true);
+    assert.strictEqual(isTrackedMem('exec-foo'), true);
   });
 
   it('rejects empty/falsy input', () => {
-    assert.strictEqual(isTrackedVault(''), false);
-    assert.strictEqual(isTrackedVault(null), false);
-    assert.strictEqual(isTrackedVault(undefined), false);
+    assert.strictEqual(isTrackedMem(''), false);
+    assert.strictEqual(isTrackedMem(null), false);
+    assert.strictEqual(isTrackedMem(undefined), false);
   });
 });
 
 describe('diffPathsToEntityIds', () => {
-  it('flattens flat-layout paths into <vault>--<slug>', () => {
+  it('flattens flat-layout paths into <mem>--<slug>', () => {
     assert.deepStrictEqual(
       diffPathsToEntityIds('memstead/engine', ['engine.md', 'cap-foo.md']),
       ['memstead/engine--cap-foo', 'memstead/engine--engine'],
     );
   });
 
-  it('preserves hierarchical paths inside the vault after the --', () => {
+  it('preserves hierarchical paths inside the mem after the --', () => {
     assert.deepStrictEqual(
       diffPathsToEntityIds('specs', ['architecture/result.md', 'a.md']),
       ['specs--a', 'specs--architecture/result'],
@@ -134,29 +134,29 @@ describe('parseState', () => {
 });
 
 describe('computeDrift', () => {
-  it('returns entries only for vaults with changed SHAs', () => {
+  it('returns entries only for mems with changed SHAs', () => {
     const drift = computeDrift({ a: 'old', b: 'same' }, { a: 'new', b: 'same', c: 'fresh' });
-    assert.deepStrictEqual(drift, [{ vault: 'a', oldSha: 'old', newSha: 'new' }]);
+    assert.deepStrictEqual(drift, [{ mem: 'a', oldSha: 'old', newSha: 'new' }]);
   });
 
   it('returns [] when prior is null (first-run)', () => {
     assert.deepStrictEqual(computeDrift(null, { a: 'x' }), []);
   });
 
-  it('ignores deleted vaults (in prior, not in current)', () => {
+  it('ignores deleted mems (in prior, not in current)', () => {
     assert.deepStrictEqual(computeDrift({ removed: 'x' }, { kept: 'y' }), []);
   });
 
-  it('ignores vaults newly observed (in current, not in prior)', () => {
+  it('ignores mems newly observed (in current, not in prior)', () => {
     assert.deepStrictEqual(computeDrift({}, { fresh: 'y' }), []);
   });
 
-  it('sorts entries by vault name', () => {
+  it('sorts entries by mem name', () => {
     const drift = computeDrift(
       { 'memstead/engine': '1', 'ingest/x': '2' },
       { 'memstead/engine': '1a', 'ingest/x': '2a' },
     );
-    assert.deepStrictEqual(drift.map((d) => d.vault), ['ingest/x', 'memstead/engine']);
+    assert.deepStrictEqual(drift.map((d) => d.mem), ['ingest/x', 'memstead/engine']);
   });
 });
 
@@ -166,10 +166,10 @@ describe('formatReminder', () => {
     assert.strictEqual(formatReminder(null), '');
   });
 
-  it('emits a single system-reminder block listing each vault and its entity ids', () => {
+  it('emits a single system-reminder block listing each mem and its entity ids', () => {
     const out = formatReminder([
       {
-        vault: 'memstead/engine',
+        mem: 'memstead/engine',
         oldSha: 'aaaaaaaaaaaaaaaa',
         newSha: 'bbbbbbbbbbbbbbbb',
         entityIds: ['memstead/engine--engine', 'memstead/engine--foo'],
@@ -177,7 +177,7 @@ describe('formatReminder', () => {
     ]);
     assert.match(out, /^<system-reminder>/);
     assert.match(out, /<\/system-reminder>$/);
-    assert.match(out, /Vault `memstead\/engine` \(aaaaaaaaaaaa → bbbbbbbbbbbb\):/);
+    assert.match(out, /Mem `memstead\/engine` \(aaaaaaaaaaaa → bbbbbbbbbbbb\):/);
     assert.match(out, /- memstead\/engine--engine/);
     assert.match(out, /- memstead\/engine--foo/);
     assert.match(out, /memstead_entity/);
@@ -185,20 +185,20 @@ describe('formatReminder', () => {
 
   it('handles drift with no entity-level diff (degraded git)', () => {
     const out = formatReminder([
-      { vault: 'v', oldSha: 'a', newSha: 'b', entityIds: [] },
+      { mem: 'v', oldSha: 'a', newSha: 'b', entityIds: [] },
     ]);
     assert.match(out, /\(no entity-level diff available\)/);
   });
 
-  it('lists multiple vaults in one block', () => {
+  it('lists multiple mems in one block', () => {
     const out = formatReminder([
-      { vault: 'a', oldSha: '1', newSha: '2', entityIds: ['a--x'] },
-      { vault: 'b', oldSha: '3', newSha: '4', entityIds: ['b--y'] },
+      { mem: 'a', oldSha: '1', newSha: '2', entityIds: ['a--x'] },
+      { mem: 'b', oldSha: '3', newSha: '4', entityIds: ['b--y'] },
     ]);
     const matches = out.match(/<system-reminder>/g) || [];
     assert.strictEqual(matches.length, 1);
-    assert.match(out, /Vault `a`/);
-    assert.match(out, /Vault `b`/);
+    assert.match(out, /Mem `a`/);
+    assert.match(out, /Mem `b`/);
     assert.match(out, /a--x/);
     assert.match(out, /b--y/);
   });

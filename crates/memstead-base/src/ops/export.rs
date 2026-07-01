@@ -1,16 +1,16 @@
-//! Vault-archive export.
+//! Mem-archive export.
 //!
 //! The folder-shaped export (the gix-free path) lives here so the
-//! unified `Engine::export_vault` can call it without crossing into
+//! unified `Engine::export_mem` can call it without crossing into
 //! `memstead-git-branch`. The git-branch-shaped variant
-//! (`export_vault_from_branch`) stays in `memstead-git-branch::ops::export`
+//! (`export_mem_from_branch`) stays in `memstead-git-branch::ops::export`
 //! because it walks a gitdir.
 //!
 //! Output wire shape is deterministic and matches the git-branch
 //! variant byte-for-byte for equivalent input: `.memstead/config.json`
-//! carries the whitelist-projection of the author's `VaultConfig`,
+//! carries the whitelist-projection of the author's `MemConfig`,
 //! `.memstead/schema/` embeds the pinned schema's source files, and the
-//! vault's `.md` blobs land at their vault-relative paths. Entries are
+//! mem's `.md` blobs land at their mem-relative paths. Entries are
 //! sorted by path and zip-stamped with a fixed mtime so identical
 //! input produces byte-identical archives.
 
@@ -20,20 +20,20 @@ use std::path::{Path, PathBuf};
 
 use memstead_schema::{
     ARCHIVE_CONFIG_PATH, ARCHIVE_PROVENANCE_PATH, ARCHIVE_SCHEMA_PREFIX, ArchiveProvenance,
-    EntityProvenance, PublishConversionError, SchemaSourceError, VaultConfig,
+    EntityProvenance, PublishConversionError, SchemaSourceError, MemConfig,
     collect_schema_source, published_config_from,
 };
 use zip::{CompressionMethod, DateTime, write::SimpleFileOptions};
 
 use crate::entity::EntityId;
-use crate::ops::VaultExportResult;
+use crate::ops::MemExportResult;
 use crate::provenance::Provenance;
 use crate::validator::canonical::canonical_json;
 
 /// Build the per-entity authoring-provenance payload from a backend's
-/// mutation log (`read_provenance`). Keys by each entity's vault-relative
+/// mutation log (`read_provenance`). Keys by each entity's mem-relative
 /// path ([`EntityId::path`]) so the payload survives a remount under a
-/// different vault name. For each entity, keeps the most recent record
+/// different mem name. For each entity, keeps the most recent record
 /// that carries a non-empty note — the entity's *current* rationale.
 ///
 /// No-fabrication: records with no entity (batch) or no note are skipped,
@@ -79,30 +79,30 @@ pub fn build_archive_provenance(records: &[Provenance]) -> Option<ArchiveProvena
     ))
 }
 
-/// Byte-shaped output of [`export_vault_to_bytes`]. Bundles the
+/// Byte-shaped output of [`export_mem_to_bytes`]. Bundles the
 /// produced archive bytes with the same metadata
-/// [`VaultExportResult`] reports for path-based exports.
+/// [`MemExportResult`] reports for path-based exports.
 #[derive(Debug, Clone)]
-pub struct VaultExportBytes {
+pub struct MemExportBytes {
     /// The `.mem` archive bytes — self-contained, ready to validate
     /// via `extract_entries` and hydrate via `Engine::from_archive_bytes`.
     pub bytes: Vec<u8>,
-    /// Vault name (mirrors `VaultExportResult.name`).
+    /// Mem name (mirrors `MemExportResult.name`).
     pub name: String,
-    /// Vault version (mirrors `VaultExportResult.version`).
+    /// Mem version (mirrors `MemExportResult.version`).
     pub version: String,
     /// `.md` entity count in the produced archive.
     pub entity_count: usize,
-    /// Cross-vault edges whose target won't travel inside this archive —
+    /// Cross-mem edges whose target won't travel inside this archive —
     /// `install` will reject each. Mirrors
-    /// `VaultExportResult.dangling_cross_vault_edges`; empty for a
+    /// `MemExportResult.dangling_cross_mem_edges`; empty for a
     /// self-contained export.
-    pub dangling_cross_vault_edges: Vec<crate::validator::DanglingCrossVaultEdge>,
+    pub dangling_cross_mem_edges: Vec<crate::validator::DanglingCrossMemEdge>,
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum VaultExportError {
-    #[error("vault directory not found: {0}")]
+pub enum MemExportError {
+    #[error("mem directory not found: {0}")]
     DirNotFound(String),
     #[error(transparent)]
     Convert(#[from] PublishConversionError),
@@ -118,7 +118,7 @@ pub enum VaultExportError {
     BranchRead(String),
     /// The
     /// produced archive failed strict validation. Reaches this state
-    /// when the vault carries on-disk drift from a pre-fix engine —
+    /// when the mem carries on-disk drift from a pre-fix engine —
     /// entities created when `MISSING_REQUIRED_SECTION` was a
     /// warning, hand-edited markdown, or archive-imports from
     /// non-canonical sources. Export and install share one strict
@@ -129,32 +129,32 @@ pub enum VaultExportError {
     ArchiveValidationFailed(String),
 }
 
-/// Export a vault directory as a portable `.mem` archive.
+/// Export a mem directory as a portable `.mem` archive.
 ///
 /// The archive contains `.memstead/config.json` (a **whitelist projection**
-/// of the author's `VaultConfig` — author-only fields like
-/// `writeGuidance`, `mediums`, `projections`, `readVaults` never enter
-/// the archive), every `.md` file under the vault root, and the pinned
+/// of the author's `MemConfig` — author-only fields like
+/// `writeGuidance`, `mediums`, `projections`, `readMems` never enter
+/// the archive), every `.md` file under the mem root, and the pinned
 /// schema's source YAML under `schema/`.
 ///
 /// Output is deterministic — entries are sorted by path and written
 /// with a fixed modification time — so identical input produces
 /// byte-identical archives, and archives produced here round-trip
 /// through `validate_and_normalize_archive` without rewriting.
-pub fn export_vault(
-    vault_dir: &Path,
-    config: &VaultConfig,
+pub fn export_mem(
+    mem_dir: &Path,
+    config: &MemConfig,
     output_path: &Path,
     workspace_root: Option<&Path>,
     workspace_schemas_dir: Option<&Path>,
-) -> Result<VaultExportResult, VaultExportError> {
-    let basename = vault_dir
+) -> Result<MemExportResult, MemExportError> {
+    let basename = mem_dir
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("");
     let explicit_name = config.name.as_deref().unwrap_or(basename);
-    let out = export_vault_to_bytes(
-        vault_dir,
+    let out = export_mem_to_bytes(
+        mem_dir,
         config,
         workspace_root,
         workspace_schemas_dir,
@@ -170,56 +170,56 @@ pub fn export_vault(
 
     let size_bytes = fs::metadata(output_path)?.len();
 
-    Ok(VaultExportResult {
+    Ok(MemExportResult {
         archive_path: output_path.display().to_string(),
         name: out.name,
         version: out.version,
         entity_count: out.entity_count,
         size_bytes,
-        dangling_cross_vault_edges: out.dangling_cross_vault_edges,
+        dangling_cross_mem_edges: out.dangling_cross_mem_edges,
     })
 }
 
 /// Produce a portable `.mem` archive **as bytes** for a folder-backed
-/// vault. Same wire format as [`export_vault`] — same whitelist
+/// mem. Same wire format as [`export_mem`] — same whitelist
 /// projection, same embedded schema source, same deterministic sort
 /// order and fixed mtime — but the output stays in memory so the
 /// bridge / WASM consumers can return it directly over HTTP.
 ///
-/// `explicit_name` is the vault name the publish whitelist receives.
-/// Callers reaching this through [`crate::Engine::export_vault_to_bytes`]
-/// pass the mount's vault name; callers reaching it directly choose
+/// `explicit_name` is the mem name the publish whitelist receives.
+/// Callers reaching this through [`crate::Engine::export_mem_to_bytes`]
+/// pass the mount's mem name; callers reaching it directly choose
 /// the disk basename or a config-supplied alias.
-pub fn export_vault_to_bytes(
-    vault_dir: &Path,
-    config: &VaultConfig,
+pub fn export_mem_to_bytes(
+    mem_dir: &Path,
+    config: &MemConfig,
     workspace_root: Option<&Path>,
     workspace_schemas_dir: Option<&Path>,
     explicit_name: &str,
-) -> Result<VaultExportBytes, VaultExportError> {
-    if !vault_dir.is_dir() {
-        return Err(VaultExportError::DirNotFound(
-            vault_dir.display().to_string(),
+) -> Result<MemExportBytes, MemExportError> {
+    if !mem_dir.is_dir() {
+        return Err(MemExportError::DirNotFound(
+            mem_dir.display().to_string(),
         ));
     }
 
     let mut md_files = Vec::new();
-    collect_markdown(vault_dir, &mut md_files)?;
+    collect_markdown(mem_dir, &mut md_files)?;
 
     let mut md_entries: Vec<(PathBuf, Vec<u8>)> = Vec::with_capacity(md_files.len());
     for abs in &md_files {
         let rel = abs
-            .strip_prefix(vault_dir)
-            .expect("markdown file must live under vault_dir");
+            .strip_prefix(mem_dir)
+            .expect("markdown file must live under mem_dir");
         md_entries.push((rel.to_path_buf(), fs::read(abs)?));
     }
 
-    // Source the per-entity authoring provenance from the folder vault's
+    // Source the per-entity authoring provenance from the folder mem's
     // own mutation log (`.memstead/changes.jsonl`), read through the folder
-    // backend so the JSONL parsing has one home. A vault with no changelog
+    // backend so the JSONL parsing has one home. A mem with no changelog
     // yields no records → no provenance member (absent, not empty).
-    use crate::backend::VaultBackend;
-    let provenance = crate::storage::FilesystemVaultWriter::new(vault_dir.to_path_buf())
+    use crate::backend::MemBackend;
+    let provenance = crate::storage::FilesystemMemWriter::new(mem_dir.to_path_buf())
         .read_provenance(None)
         .ok()
         .and_then(|records| build_archive_provenance(&records));
@@ -236,27 +236,27 @@ pub fn export_vault_to_bytes(
 
 /// Seal already-collected entity bytes into a portable `.mem` archive —
 /// the storage-agnostic core shared by the folder exporter
-/// ([`export_vault_to_bytes`], which walks a directory) and the
+/// ([`export_mem_to_bytes`], which walks a directory) and the
 /// in-memory exporter (which lists entities from a
-/// [`crate::backend::VaultBackend`] holding them in RAM). Same wire
+/// [`crate::backend::MemBackend`] holding them in RAM). Same wire
 /// format either way: whitelist config projection, embedded schema
 /// source, deterministic path-sorted entries, fixed mtime, and the same
 /// pre-write lenient validation pass.
 ///
-/// `md_entries` are `(vault-relative path, bytes)` pairs; paths are
+/// `md_entries` are `(mem-relative path, bytes)` pairs; paths are
 /// posix-normalised for the archive. Entries need not be pre-sorted — the
 /// archive sort makes the output deterministic regardless of input order.
 pub fn export_entries_to_bytes(
-    config: &VaultConfig,
+    config: &MemConfig,
     workspace_root: Option<&Path>,
     workspace_schemas_dir: Option<&Path>,
     explicit_name: &str,
     md_entries: Vec<(PathBuf, Vec<u8>)>,
     provenance: Option<&ArchiveProvenance>,
-) -> Result<VaultExportBytes, VaultExportError> {
+) -> Result<MemExportBytes, MemExportError> {
     let published = published_config_from(config, explicit_name)?;
     let config_bytes = canonical_json(&published)
-        .map_err(|e| VaultExportError::Canonical(e.to_string()))?
+        .map_err(|e| MemExportError::Canonical(e.to_string()))?
         .into_bytes();
 
     let schema_files =
@@ -309,23 +309,23 @@ pub fn export_entries_to_bytes(
     // attempt. If the produced archive doesn't validate (legacy
     // on-disk drift, hand-edited markdown, archive-imports from
     // non-canonical sources), surface the typed refusal; the
-    // disk-shaped wrapper (`export_vault`) never writes a broken
+    // disk-shaped wrapper (`export_mem`) never writes a broken
     // archive because validation happens here, pre-write.
     //
-    // The *lenient* variant collects cross-vault edges (whose target
-    // won't travel inside this single-vault archive) instead of
+    // The *lenient* variant collects cross-mem edges (whose target
+    // won't travel inside this single-mem archive) instead of
     // refusing on them — export warns and still produces, where install
     // refuses. Every other strict check still refuses, so a
     // genuinely-broken archive never lands.
     let validated = crate::validator::validate_and_normalize_archive_lenient(&buf)
-        .map_err(|e| VaultExportError::ArchiveValidationFailed(e.to_string()))?;
+        .map_err(|e| MemExportError::ArchiveValidationFailed(e.to_string()))?;
 
-    Ok(VaultExportBytes {
+    Ok(MemExportBytes {
         bytes: buf,
         name: published.name.clone(),
         version: published.version.to_string(),
         entity_count,
-        dangling_cross_vault_edges: validated.dangling_cross_vault_edges,
+        dangling_cross_mem_edges: validated.dangling_cross_mem_edges,
     })
 }
 

@@ -1,9 +1,9 @@
-#![cfg(feature = "vault-repo")]
+#![cfg(feature = "mem-repo")]
 //! Integration tests for the workspace-init / no-workspace edges.
 //!
 //! Covers two behaviours of the workspace-config CLI:
 //!
-//! - Round-trip: `memstead vault-repo init <path>` followed by
+//! - Round-trip: `memstead mem-repo init <path>` followed by
 //!   `memstead stats` in the same workspace succeeds. Init writes
 //!   `.memstead/workspace.toml`, so the second invocation no longer
 //!   trips `StoreError::NotInitialised`.
@@ -26,12 +26,12 @@ fn memstead() -> Command {
 
 /// `--json` stdout is machine-only: exactly one JSON document, the
 /// contract `--help` advertises (`memstead … --json | jq -r .<field>`).
-/// `vault-repo init` runs the outer-repo `.gitignore`-ensure step; this
+/// `mem-repo init` runs the outer-repo `.gitignore`-ensure step; this
 /// asserts that step's human provenance lands on stderr, never as a
 /// trailing free-text line contaminating the JSON on stdout. The outer
 /// `.git/` makes the gitignore step fire (otherwise `NoOuter`, no line).
 #[test]
-fn vault_repo_init_json_stdout_is_single_document() {
+fn mem_repo_init_json_stdout_is_single_document() {
     let tmp = TempDir::new().unwrap();
     // Fake enclosing repo so `apply_outer_gitignore` appends rather than
     // returning `NoOuter` — the path that previously leaked onto stdout.
@@ -39,7 +39,7 @@ fn vault_repo_init_json_stdout_is_single_document() {
     let workspace = tmp.path().join("ws");
 
     let output = memstead()
-        .args(["--json", "vault-repo", "init", workspace.to_str().unwrap()])
+        .args(["--json", "mem-repo", "init", workspace.to_str().unwrap()])
         .assert()
         .success()
         .get_output()
@@ -50,8 +50,8 @@ fn vault_repo_init_json_stdout_is_single_document() {
         panic!("--json stdout must be exactly one JSON document: {e}; stdout:\n{stdout}")
     });
     assert!(
-        parsed.get("vault_repo_dir").and_then(|v| v.as_str()).is_some(),
-        "--json envelope must carry `vault_repo_dir`, got: {parsed}",
+        parsed.get("mem_repo_dir").and_then(|v| v.as_str()).is_some(),
+        "--json envelope must carry `mem_repo_dir`, got: {parsed}",
     );
 
     // Provenance is preserved — relocated to stderr, not dropped.
@@ -62,16 +62,16 @@ fn vault_repo_init_json_stdout_is_single_document() {
     );
 }
 
-/// Round-trip: `vault-repo init` produces a workspace `memstead stats`
-/// can boot against. Pro-only — `memstead vault-repo` is gated behind
-/// the `vault-repo` feature.
+/// Round-trip: `mem-repo init` produces a workspace `memstead stats`
+/// can boot against. Pro-only — `memstead mem-repo` is gated behind
+/// the `mem-repo` feature.
 #[test]
-fn vault_repo_init_followed_by_stats_succeeds() {
+fn mem_repo_init_followed_by_stats_succeeds() {
     let tmp = TempDir::new().unwrap();
     let workspace = tmp.path().join("ws");
 
     memstead()
-        .args(["vault-repo", "init", workspace.to_str().unwrap(), "--no-gitignore"])
+        .args(["mem-repo", "init", workspace.to_str().unwrap(), "--no-gitignore"])
         .assert()
         .success();
 
@@ -111,11 +111,11 @@ fn missing_workspace_emits_typed_envelope_json() {
         "envelope must carry the symbolic workspace-not-init code, got: {parsed}",
     );
 
-    // Pro CLI binary: recovery hint is always `memstead vault-repo init`.
+    // Pro CLI binary: recovery hint is always `memstead mem-repo init`.
     // Now lives under `details.hint.recovery_command` — the uniform
     // `{code, message, details}` envelope nests recovery payloads
     // under `details` rather than merging flat at top level.
-    let expected_command = "memstead vault-repo init";
+    let expected_command = "memstead mem-repo init";
     assert_eq!(
         parsed["details"]["hint"]["recovery_command"], expected_command,
         "details.hint.recovery_command must name the bootstrap command for this flavour, got: {parsed}",

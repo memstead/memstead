@@ -1,11 +1,11 @@
-//! Git-tree-backed [`VaultWriter`](super::VaultWriter) — the second
+//! Git-tree-backed [`MemWriter`](super::MemWriter) — the second
 //! storage adapter. Buffers mutations
 //! in memory and applies them to a tree built via
 //! `gix::object::tree::Editor`, then advances the target ref via
 //! [`gix::Repository::commit_as`].
 //!
-//! No working tree is written: the vault's content lives only in the
-//! multi-root `vault-repo-git` object store, one branch per vault. Each
+//! No working tree is written: the mem's content lives only in the
+//! multi-root `mem-repo-git` object store, one branch per mem. Each
 //! commit rebuilds the tree from the buffered op log against the
 //! snapshotted parent tree.
 //!
@@ -20,7 +20,7 @@
 //! refs, which is the exact CAS guard we want. If a concurrent writer
 //! advanced the ref between snapshot and commit, the gix call returns
 //! [`gix::commit::Error::ReferenceEdit`]; we re-resolve the live tip and
-//! surface [`super::VaultWriterError::HashMismatch`] with the new tip's
+//! surface [`super::MemWriterError::HashMismatch`] with the new tip's
 //! hex OID. That maps into
 //! [`crate::EngineError::HashMismatch`] so MCP agents see a stable
 //! `_hash` to retry with.
@@ -35,7 +35,7 @@ use std::sync::Mutex;
 
 use gix::objs::tree::EntryKind;
 
-use super::{CommitId, VaultWriter, VaultWriterError};
+use super::{CommitId, MemWriter, MemWriterError};
 use crate::vcs::{acquire_branch_mutex, author_identity, format_commit_message, CommitContext};
 
 /// Per-path final state for the buffered op log. Move operations
@@ -56,7 +56,7 @@ struct Pending {
     /// passed verbatim to `commit_as`'s `parents` argument; gix uses
     /// it as the CAS guard.
     parent: Option<gix::ObjectId>,
-    /// Per-path final state. Values are stored vault-relative as
+    /// Per-path final state. Values are stored mem-relative as
     /// forward-slash strings — git tree entries are slash-separated
     /// regardless of host OS, and the editor APIs take string keys.
     ops: HashMap<String, PendingState>,
@@ -76,20 +76,20 @@ impl Pending {
     }
 }
 
-/// Git-tree-backed implementation of [`VaultWriter`]. Holds the
+/// Git-tree-backed implementation of [`MemWriter`]. Holds the
 /// gitdir path and target ref name; opens the [`gix::Repository`]
 /// per call (matches the [`crate::vcs::GixVcs`] pattern, since
 /// `gix::Repository` is `Send` but not `Sync` — its object-database
 /// cache uses interior mutability via `RefCell`).
 ///
 /// Mutations buffer in memory until [`Self::commit`].
-pub struct GitTreeVaultWriter {
+pub struct GitTreeMemWriter {
     gitdir: PathBuf,
     ref_name: String,
     pending: Mutex<Pending>,
 }
 
-impl GitTreeVaultWriter {
+impl GitTreeMemWriter {
     /// Build a writer against the repository at `gitdir` targeting
     /// `ref_name`. The ref need not exist yet — the first commit
     /// creates it. `ref_name` is the per-branch mutex key; pass the
@@ -103,9 +103,9 @@ impl GitTreeVaultWriter {
         }
     }
 
-    fn open_repo(&self) -> Result<gix::Repository, VaultWriterError> {
+    fn open_repo(&self) -> Result<gix::Repository, MemWriterError> {
         gix::open(&self.gitdir).map_err(|e| {
-            VaultWriterError::Path(format!(
+            MemWriterError::Path(format!(
                 "git-tree writer: open repo at {}: {e}",
                 self.gitdir.display()
             ))
@@ -115,7 +115,7 @@ impl GitTreeVaultWriter {
     /// Capture the current tip of `ref_name` if no snapshot has been
     /// taken in this session. Idempotent: subsequent mutations reuse
     /// the same snapshot. A missing ref leaves `parent = None`.
-    fn ensure_snapshot(&self, pending: &mut Pending) -> Result<(), VaultWriterError> {
+    fn ensure_snapshot(&self, pending: &mut Pending) -> Result<(), MemWriterError> {
         if pending.parent.is_some() || !pending.ops.is_empty() {
             return Ok(());
         }
@@ -123,7 +123,7 @@ impl GitTreeVaultWriter {
         let mut reference = match repo
             .try_find_reference(&self.ref_name)
             .map_err(|e| {
-                VaultWriterError::Path(format!(
+                MemWriterError::Path(format!(
                     "git-tree writer: resolve ref {}: {e}",
                     self.ref_name
                 ))
@@ -132,7 +132,7 @@ impl GitTreeVaultWriter {
             None => return Ok(()),
         };
         let id = reference.peel_to_id().map_err(|e| {
-            VaultWriterError::Path(format!(
+            MemWriterError::Path(format!(
                 "git-tree writer: peel ref {} to id: {e}",
                 self.ref_name
             ))
@@ -147,10 +147,10 @@ impl GitTreeVaultWriter {
     /// path used between write transactions, so a sibling engine's
     /// commit is visible on the next read rather than frozen at the
     /// snapshot captured by the first read of the session.
-    fn live_tip(&self) -> Result<Option<gix::ObjectId>, VaultWriterError> {
+    fn live_tip(&self) -> Result<Option<gix::ObjectId>, MemWriterError> {
         let repo = self.open_repo()?;
         let mut reference = match repo.try_find_reference(&self.ref_name).map_err(|e| {
-            VaultWriterError::Path(format!(
+            MemWriterError::Path(format!(
                 "git-tree writer: resolve ref {}: {e}",
                 self.ref_name
             ))
@@ -159,7 +159,7 @@ impl GitTreeVaultWriter {
             None => return Ok(None),
         };
         let id = reference.peel_to_id().map_err(|e| {
-            VaultWriterError::Path(format!(
+            MemWriterError::Path(format!(
                 "git-tree writer: peel ref {} to id: {e}",
                 self.ref_name
             ))
@@ -174,19 +174,19 @@ impl GitTreeVaultWriter {
         &self,
         parent: gix::ObjectId,
         path: &str,
-    ) -> Result<Option<Vec<u8>>, VaultWriterError> {
+    ) -> Result<Option<Vec<u8>>, MemWriterError> {
         let repo = self.open_repo()?;
         let commit = repo
             .find_object(parent)
             .map_err(|e| {
-                VaultWriterError::Path(format!("git-tree writer: open parent commit: {e}"))
+                MemWriterError::Path(format!("git-tree writer: open parent commit: {e}"))
             })?
             .into_commit();
         let tree = commit.tree().map_err(|e| {
-            VaultWriterError::Path(format!("git-tree writer: peel commit to tree: {e}"))
+            MemWriterError::Path(format!("git-tree writer: peel commit to tree: {e}"))
         })?;
         let entry = match tree.lookup_entry_by_path(path).map_err(|e| {
-            VaultWriterError::Path(format!(
+            MemWriterError::Path(format!(
                 "git-tree writer: lookup {path} in parent tree: {e}"
             ))
         })? {
@@ -197,20 +197,20 @@ impl GitTreeVaultWriter {
             return Ok(None);
         }
         let object = repo.find_object(entry.id()).map_err(|e| {
-            VaultWriterError::Path(format!("git-tree writer: read blob {path}: {e}"))
+            MemWriterError::Path(format!("git-tree writer: read blob {path}: {e}"))
         })?;
         Ok(Some(object.data.clone()))
     }
 }
 
-/// Normalise a vault-relative path to forward-slash form. Rejects
+/// Normalise a mem-relative path to forward-slash form. Rejects
 /// empty paths and any path that contains `..` segments — git tree
 /// entries cannot escape upward and this guards the caller against
-/// accidentally writing past the vault root via a relative-path bug.
-fn normalise_rel_path(rel_path: &Path) -> Result<String, VaultWriterError> {
+/// accidentally writing past the mem root via a relative-path bug.
+fn normalise_rel_path(rel_path: &Path) -> Result<String, MemWriterError> {
     if rel_path.as_os_str().is_empty() {
-        return Err(VaultWriterError::Path(
-            "vault-relative path is empty".to_string(),
+        return Err(MemWriterError::Path(
+            "mem-relative path is empty".to_string(),
         ));
     }
     let mut parts: Vec<String> = Vec::new();
@@ -220,7 +220,7 @@ fn normalise_rel_path(rel_path: &Path) -> Result<String, VaultWriterError> {
             Component::Normal(s) => match s.to_str() {
                 Some(p) if !p.is_empty() => parts.push(p.to_string()),
                 _ => {
-                    return Err(VaultWriterError::Path(format!(
+                    return Err(MemWriterError::Path(format!(
                         "non-utf-8 or empty path component in {}",
                         rel_path.display()
                     )))
@@ -228,7 +228,7 @@ fn normalise_rel_path(rel_path: &Path) -> Result<String, VaultWriterError> {
             },
             Component::CurDir => continue,
             Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
-                return Err(VaultWriterError::Path(format!(
+                return Err(MemWriterError::Path(format!(
                     "path traversal or absolute component in {}",
                     rel_path.display()
                 )));
@@ -236,39 +236,39 @@ fn normalise_rel_path(rel_path: &Path) -> Result<String, VaultWriterError> {
         }
     }
     if parts.is_empty() {
-        return Err(VaultWriterError::Path(
-            "vault-relative path is empty after normalisation".to_string(),
+        return Err(MemWriterError::Path(
+            "mem-relative path is empty after normalisation".to_string(),
         ));
     }
     Ok(parts.join("/"))
 }
 
-impl VaultWriter for GitTreeVaultWriter {
-    fn write_entity(&self, rel_path: &Path, content: &[u8]) -> Result<(), VaultWriterError> {
+impl MemWriter for GitTreeMemWriter {
+    fn write_entity(&self, rel_path: &Path, content: &[u8]) -> Result<(), MemWriterError> {
         let key = normalise_rel_path(rel_path)?;
         let mut pending = self.pending.lock().map_err(|_| {
-            VaultWriterError::Path("git-tree writer pending state poisoned".to_string())
+            MemWriterError::Path("git-tree writer pending state poisoned".to_string())
         })?;
         self.ensure_snapshot(&mut pending)?;
         pending.ops.insert(key, PendingState::Upsert(content.to_vec()));
         Ok(())
     }
 
-    fn delete_entity(&self, rel_path: &Path) -> Result<(), VaultWriterError> {
+    fn delete_entity(&self, rel_path: &Path) -> Result<(), MemWriterError> {
         let key = normalise_rel_path(rel_path)?;
         let mut pending = self.pending.lock().map_err(|_| {
-            VaultWriterError::Path("git-tree writer pending state poisoned".to_string())
+            MemWriterError::Path("git-tree writer pending state poisoned".to_string())
         })?;
         self.ensure_snapshot(&mut pending)?;
         pending.ops.insert(key, PendingState::Delete);
         Ok(())
     }
 
-    fn move_entity(&self, from: &Path, to: &Path) -> Result<(), VaultWriterError> {
+    fn move_entity(&self, from: &Path, to: &Path) -> Result<(), MemWriterError> {
         let from_key = normalise_rel_path(from)?;
         let to_key = normalise_rel_path(to)?;
         let mut pending = self.pending.lock().map_err(|_| {
-            VaultWriterError::Path("git-tree writer pending state poisoned".to_string())
+            MemWriterError::Path("git-tree writer pending state poisoned".to_string())
         })?;
         self.ensure_snapshot(&mut pending)?;
 
@@ -279,7 +279,7 @@ impl VaultWriter for GitTreeVaultWriter {
             Some(PendingState::Upsert(b)) => b,
             Some(PendingState::Delete) => {
                 pending.ops.insert(from_key, PendingState::Delete);
-                return Err(VaultWriterError::Path(format!(
+                return Err(MemWriterError::Path(format!(
                     "move source {} is already pending deletion",
                     from.display()
                 )));
@@ -293,7 +293,7 @@ impl VaultWriter for GitTreeVaultWriter {
                 match blob {
                     Some(b) => b,
                     None => {
-                        return Err(VaultWriterError::Path(format!(
+                        return Err(MemWriterError::Path(format!(
                             "move source {} does not exist",
                             from.display()
                         )));
@@ -304,7 +304,7 @@ impl VaultWriter for GitTreeVaultWriter {
 
         if matches!(pending.ops.get(&to_key), Some(PendingState::Upsert(_))) {
             // A move refuses when the target already has a pending write.
-            return Err(VaultWriterError::Path(format!(
+            return Err(MemWriterError::Path(format!(
                 "move target {} already has a pending write",
                 to.display()
             )));
@@ -318,13 +318,13 @@ impl VaultWriter for GitTreeVaultWriter {
         &self,
         message: &str,
         ctx: &CommitContext<'_>,
-    ) -> Result<CommitId, VaultWriterError> {
+    ) -> Result<CommitId, MemWriterError> {
         // Serialise commits against the same target ref at process
         // scope. Different refs under the same gitdir proceed in
         // parallel — that is the whole point of the per-branch key.
         let mutex = acquire_branch_mutex(&self.ref_name);
         let _guard = mutex.lock().map_err(|_| {
-            VaultWriterError::Path(format!(
+            MemWriterError::Path(format!(
                 "git-tree writer mutex poisoned for ref {} (gitdir {})",
                 self.ref_name,
                 self.gitdir.display()
@@ -333,7 +333,7 @@ impl VaultWriter for GitTreeVaultWriter {
         let repo = self.open_repo()?;
 
         let mut pending = self.pending.lock().map_err(|_| {
-            VaultWriterError::Path("git-tree writer pending state poisoned".to_string())
+            MemWriterError::Path("git-tree writer pending state poisoned".to_string())
         })?;
 
         // Make sure we have a parent snapshot even if the caller went
@@ -348,20 +348,20 @@ impl VaultWriter for GitTreeVaultWriter {
                 let commit = repo
                     .find_object(parent_id)
                     .map_err(|e| {
-                        VaultWriterError::Path(format!(
+                        MemWriterError::Path(format!(
                             "git-tree writer: open parent {parent_id}: {e}"
                         ))
                     })?
                     .into_commit();
                 let tree = commit.tree().map_err(|e| {
-                    VaultWriterError::Path(format!("git-tree writer: peel parent tree: {e}"))
+                    MemWriterError::Path(format!("git-tree writer: peel parent tree: {e}"))
                 })?;
                 tree.edit().map_err(|e| {
-                    VaultWriterError::Path(format!("git-tree writer: editor init: {e}"))
+                    MemWriterError::Path(format!("git-tree writer: editor init: {e}"))
                 })?
             }
             None => repo.empty_tree().edit().map_err(|e| {
-                VaultWriterError::Path(format!("git-tree writer: empty editor init: {e}"))
+                MemWriterError::Path(format!("git-tree writer: empty editor init: {e}"))
             })?,
         };
 
@@ -373,7 +373,7 @@ impl VaultWriter for GitTreeVaultWriter {
                     let blob_id = repo
                         .write_blob(bytes.as_slice())
                         .map_err(|e| {
-                            VaultWriterError::Path(format!(
+                            MemWriterError::Path(format!(
                                 "git-tree writer: write blob for {path}: {e}"
                             ))
                         })?
@@ -381,14 +381,14 @@ impl VaultWriter for GitTreeVaultWriter {
                     editor
                         .upsert(path.as_str(), EntryKind::Blob, blob_id)
                         .map_err(|e| {
-                            VaultWriterError::Path(format!(
+                            MemWriterError::Path(format!(
                                 "git-tree writer: tree upsert {path}: {e}"
                             ))
                         })?;
                 }
                 PendingState::Delete => {
                     editor.remove(path.as_str()).map_err(|e| {
-                        VaultWriterError::Path(format!(
+                        MemWriterError::Path(format!(
                             "git-tree writer: tree remove {path}: {e}"
                         ))
                     })?;
@@ -398,7 +398,7 @@ impl VaultWriter for GitTreeVaultWriter {
 
         let tree_id = editor
             .write()
-            .map_err(|e| VaultWriterError::Path(format!("git-tree writer: tree write: {e}")))?
+            .map_err(|e| MemWriterError::Path(format!("git-tree writer: tree write: {e}")))?
             .detach();
 
         // Build signatures via the same convention the disk adapter
@@ -443,7 +443,7 @@ impl VaultWriter for GitTreeVaultWriter {
         // failed commit is a coherence bug: `read_entity` prefers pending
         // over the committed tip, so an orphaned op would be served as
         // phantom truth (and pulled into the in-memory store by a later
-        // `reload_one_vault`) until the process restarts.
+        // `reload_one_mem`) until the process restarts.
         pending.clear();
         let commit_id = match commit_result {
             Ok(id) => id,
@@ -454,25 +454,25 @@ impl VaultWriter for GitTreeVaultWriter {
                 let mut reference = repo
                     .try_find_reference(&self.ref_name)
                     .map_err(|e| {
-                        VaultWriterError::Path(format!(
+                        MemWriterError::Path(format!(
                             "git-tree writer: re-resolve ref after CAS: {e}"
                         ))
                     })?
-                    .ok_or_else(|| VaultWriterError::Path(format!(
+                    .ok_or_else(|| MemWriterError::Path(format!(
                         "git-tree writer: ref {} vanished during CAS recovery",
                         self.ref_name
                     )))?;
                 let live_id = reference.peel_to_id().map_err(|e| {
-                    VaultWriterError::Path(format!(
+                    MemWriterError::Path(format!(
                         "git-tree writer: peel live tip after CAS: {e}"
                     ))
                 })?;
-                return Err(VaultWriterError::HashMismatch {
+                return Err(MemWriterError::HashMismatch {
                     current: live_id.to_hex().to_string(),
                 });
             }
             Err(e) => {
-                return Err(VaultWriterError::Path(format!(
+                return Err(MemWriterError::Path(format!(
                     "git-tree writer: commit_as failed: {e}"
                 )));
             }
@@ -492,12 +492,12 @@ impl VaultWriter for GitTreeVaultWriter {
     }
 }
 
-impl memstead_base::backend::VaultBackend for GitTreeVaultWriter {
+impl memstead_base::backend::MemBackend for GitTreeMemWriter {
     fn list_entities(&self) -> Result<Vec<PathBuf>, memstead_base::backend::BackendError> {
-        // Walk the per-vault branch tree, return only `.md` paths
+        // Walk the per-mem branch tree, return only `.md` paths
         // outside the `.memstead/` umbrella (config / schemas / changelog
         // live there and don't surface as entities at this layer).
-        // Branch-missing → empty list (a fresh vault has no commits yet).
+        // Branch-missing → empty list (a fresh mem has no commits yet).
         let blobs = match read_branch_blobs(&self.gitdir, &self.ref_name) {
             Ok(b) => b,
             Err(BranchReadError::BranchMissing { .. }) => return Ok(Vec::new()),
@@ -540,7 +540,7 @@ impl memstead_base::backend::VaultBackend for GitTreeVaultWriter {
         // Mid-transaction (one or more writes already staged): reads
         // must see the same snapshotted parent the buffered ops will be
         // composed onto, for a consistent commit. Between transactions
-        // (no pending ops — boot loads, `reload_one_vault` re-reads, any
+        // (no pending ops — boot loads, `reload_one_mem` re-reads, any
         // read before the first write of an op), read the *live* ref tip
         // so a sibling engine's commit is visible. The previous code
         // pinned the parent on the first read of the session and froze
@@ -573,14 +573,14 @@ impl memstead_base::backend::VaultBackend for GitTreeVaultWriter {
         rel_path: &Path,
         content: &[u8],
     ) -> Result<(), memstead_base::backend::BackendError> {
-        <Self as VaultWriter>::write_entity(self, rel_path, content).map_err(Into::into)
+        <Self as MemWriter>::write_entity(self, rel_path, content).map_err(Into::into)
     }
 
     fn delete_entity(
         &self,
         rel_path: &Path,
     ) -> Result<(), memstead_base::backend::BackendError> {
-        <Self as VaultWriter>::delete_entity(self, rel_path).map_err(Into::into)
+        <Self as MemWriter>::delete_entity(self, rel_path).map_err(Into::into)
     }
 
     fn move_entity(
@@ -588,7 +588,7 @@ impl memstead_base::backend::VaultBackend for GitTreeVaultWriter {
         from: &Path,
         to: &Path,
     ) -> Result<(), memstead_base::backend::BackendError> {
-        <Self as VaultWriter>::move_entity(self, from, to).map_err(Into::into)
+        <Self as MemWriter>::move_entity(self, from, to).map_err(Into::into)
     }
 
     fn discard_pending(&self) -> Result<(), memstead_base::backend::BackendError> {
@@ -611,7 +611,7 @@ impl memstead_base::backend::VaultBackend for GitTreeVaultWriter {
         message: &str,
         ctx: &CommitContext<'_>,
     ) -> Result<CommitId, memstead_base::backend::BackendError> {
-        <Self as VaultWriter>::commit(self, message, ctx).map_err(Into::into)
+        <Self as MemWriter>::commit(self, message, ctx).map_err(Into::into)
     }
 
     fn commit_with_expected_parent(
@@ -622,7 +622,7 @@ impl memstead_base::backend::VaultBackend for GitTreeVaultWriter {
     ) -> Result<CommitId, memstead_base::backend::BackendError> {
         // No pin requested → identical to commit().
         let Some(expected) = expected_parent else {
-            return <Self as VaultWriter>::commit(self, message, ctx).map_err(Into::into);
+            return <Self as MemWriter>::commit(self, message, ctx).map_err(Into::into);
         };
 
         // Acquire the same per-ref mutex `commit` uses so the parent
@@ -673,7 +673,7 @@ impl memstead_base::backend::VaultBackend for GitTreeVaultWriter {
         }
 
         drop(guard);
-        <Self as VaultWriter>::commit(self, message, ctx).map_err(Into::into)
+        <Self as MemWriter>::commit(self, message, ctx).map_err(Into::into)
     }
 
     fn append_provenance(
@@ -726,7 +726,7 @@ impl memstead_base::backend::VaultBackend for GitTreeVaultWriter {
     fn current_head(
         &self,
     ) -> Result<Option<String>, memstead_base::backend::BackendError> {
-        // Open the gitdir and peel the per-vault branch ref to its
+        // Open the gitdir and peel the per-mem branch ref to its
         // commit object id. Missing ref / missing repo / peel failure
         // collapse to `Ok(None)` — the engine treats them as "no
         // drift signal", same as folder/archive. Surfaced log lines
@@ -761,10 +761,10 @@ impl memstead_base::backend::VaultBackend for GitTreeVaultWriter {
             .map(|id| id.detach().to_hex().to_string()))
     }
 
-    fn read_vault_config(
+    fn read_mem_config(
         &self,
     ) -> Result<Option<Vec<u8>>, memstead_base::backend::BackendError> {
-        // Resolve the vault leaf from `self.ref_name`. V1 unified
+        // Resolve the mem leaf from `self.ref_name`. V1 unified
         // mounts are flat (`refs/heads/<leaf>`); hierarchical
         // layouts are not yet supported on the unified path.
         let leaf = self
@@ -772,23 +772,23 @@ impl memstead_base::backend::VaultBackend for GitTreeVaultWriter {
             .strip_prefix("refs/heads/")
             .unwrap_or(&self.ref_name);
 
-        // `__MEMSTEAD:vaults/<leaf>/config.json` is the only read path.
+        // `__MEMSTEAD:mems/<leaf>/config.json` is the only read path.
         // Every workspace the engine touches has `__MEMSTEAD` populated
         // by boot — the legacy registry-class refs are no longer
         // read at runtime.
         Ok(read_blob_from_ref(
             &self.gitdir,
             "refs/heads/__MEMSTEAD",
-            &format!("vaults/{leaf}/config.json"),
+            &format!("mems/{leaf}/config.json"),
         )?)
     }
 
     fn delete_artifacts(
         &self,
     ) -> Result<(), memstead_base::backend::BackendError> {
-        // The branch leaf is the per-vault ref minus the
+        // The branch leaf is the per-mem ref minus the
         // `refs/heads/` prefix — symmetric with the resolution done
-        // by `read_vault_config` / `write_vault_config` above.
+        // by `read_mem_config` / `write_mem_config` above.
         // Hierarchical layouts (e.g. `refs/heads/planning/plan-q4`)
         // strip to `planning/plan-q4`; flat layouts to the bare leaf.
         let branch_leaf = self
@@ -798,12 +798,12 @@ impl memstead_base::backend::VaultBackend for GitTreeVaultWriter {
         let ctx = CommitContext {
             actor: memstead_base::vcs::Actor::Agent,
             client: None,
-            tool: Some("memstead_vault_delete"),
+            tool: Some("memstead_mem_delete"),
             note: None,
             logical_operation_id: None,
             entity_ids: None,
         };
-        crate::storage_memstead::delete_vault_artifacts_at_gitdir(
+        crate::storage_memstead::delete_mem_artifacts_at_gitdir(
             &self.gitdir,
             branch_leaf,
             &ctx,
@@ -811,33 +811,33 @@ impl memstead_base::backend::VaultBackend for GitTreeVaultWriter {
         .map_err(|e| memstead_base::backend::BackendError::Other(e.to_string()))
     }
 
-    fn write_vault_config(
+    fn write_mem_config(
         &self,
         bytes: &[u8],
     ) -> Result<(), memstead_base::backend::BackendError> {
-        self.write_vault_config_with_note(bytes, None)
+        self.write_mem_config_with_note(bytes, None)
     }
 
-    fn write_vault_config_with_note(
+    fn write_mem_config_with_note(
         &self,
         bytes: &[u8],
         note: Option<&str>,
     ) -> Result<(), memstead_base::backend::BackendError> {
-        // Write `__MEMSTEAD:vaults/<vault>/config.json` only. The legacy
-        // `vault_repo_config::read_config` consumer chain reads
+        // Write `__MEMSTEAD:mems/<mem>/config.json` only. The legacy
+        // `mem_repo_config::read_config` consumer chain reads
         // through `__MEMSTEAD`, so a dual-write to any retired ref would
         // be wasted work.
         //
-        // Vault leaf comes from `self.ref_name` (the per-vault
+        // Mem leaf comes from `self.ref_name` (the per-mem
         // branch); for hierarchical mounts (refs/heads/<path>/<leaf>)
         // the helper's `resolve_full_path_at_gitdir` walks the
         // branch list to find the matching full path. For a fresh
-        // vault not yet present in the branch list, the helper
+        // mem not yet present in the branch list, the helper
         // falls back to the flat `<leaf>/config.json` shape —
-        // unified `create_vault` writes the per-vault branch commit
+        // unified `create_mem` writes the per-mem branch commit
         // AFTER this call, so during the very first
-        // write_vault_config the branch isn't yet present.
-        // Hierarchical-path semantics for fresh vaults need a
+        // write_mem_config the branch isn't yet present.
+        // Hierarchical-path semantics for fresh mems need a
         // small lift in a follow-up (pass full path explicitly).
         //
         // `note` rides the commit body so a version bump (or any
@@ -850,7 +850,7 @@ impl memstead_base::backend::VaultBackend for GitTreeVaultWriter {
         let ctx = CommitContext {
             actor: memstead_base::vcs::Actor::Agent,
             client: None,
-            tool: Some("memstead_vault_config_write"),
+            tool: Some("memstead_mem_config_write"),
             note: note.map(str::to_string),
             logical_operation_id: None,
             entity_ids: None,
@@ -860,7 +860,7 @@ impl memstead_base::backend::VaultBackend for GitTreeVaultWriter {
             leaf,
             bytes,
             &ctx,
-            &format!("memstead: commit __MEMSTEAD:vaults/{leaf}/config.json"),
+            &format!("memstead: commit __MEMSTEAD:mems/{leaf}/config.json"),
         )
         .map_err(|e| memstead_base::backend::BackendError::Other(e.to_string()))
     }
@@ -871,8 +871,8 @@ impl memstead_base::backend::VaultBackend for GitTreeVaultWriter {
 /// `Ok(None)` when the ref is missing or the path doesn't exist
 /// in the tree. Errors propagate as `BackendError::Other`.
 ///
-/// Used by `read_vault_config` to read per-vault configs from
-/// `__MEMSTEAD` without needing a full pro `VaultConfig` parser path —
+/// Used by `read_mem_config` to read per-mem configs from
+/// `__MEMSTEAD` without needing a full pro `MemConfig` parser path —
 /// the engine parses bytes uniformly across backends.
 fn read_blob_from_ref(
     gitdir: &Path,
@@ -977,7 +977,7 @@ fn commit_note_to_provenance(
 ///   branch).
 ///
 /// Spawn failure or non-zero exit maps to
-/// [`VaultWriterError::Io`] with the workdir and the captured stderr
+/// [`MemWriterError::Io`] with the workdir and the captured stderr
 /// in the message, plus an actionable hint pointing the caller at
 /// `git -C <workdir> reset --hard HEAD` for manual recovery (the
 /// commit itself already landed successfully — a sync failure leaves
@@ -987,11 +987,11 @@ fn commit_note_to_provenance(
 /// processes write the same ref concurrently, the worktree converges
 /// to whoever's `read-tree` ran last; intermediate readers may see a
 /// mix. Single-process engines today; the open seam is documented in
-/// `vault-repo-write-cutover`'s "Open seams" section.
+/// `mem-repo-write-cutover`'s "Open seams" section.
 fn sync_index_and_worktree(
     repo: &gix::Repository,
     ref_name: &str,
-) -> Result<(), VaultWriterError> {
+) -> Result<(), MemWriterError> {
     let Some(workdir) = repo.workdir() else {
         return Ok(());
     };
@@ -1029,7 +1029,7 @@ fn sync_index_and_worktree(
         })?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(VaultWriterError::Io(std::io::Error::other(format!(
+        return Err(MemWriterError::Io(std::io::Error::other(format!(
             "worktree sync: `git -C {} read-tree --reset -u HEAD` failed (status {}): {}; \
              commit already landed in the object store, recover with \
              `git -C {} reset --hard HEAD` (or remove a stale \
@@ -1053,7 +1053,7 @@ const COMMITTER_NAME: &str = "engine";
 const COMMITTER_EMAIL: &str = "noreply@memstead.io";
 
 /// One blob entry returned by [`read_branch_blobs`] — the
-/// vault-relative forward-slash path and the blob bytes. The list is
+/// mem-relative forward-slash path and the blob bytes. The list is
 /// sorted by `path` so callers (e.g. archive emitters) get
 /// deterministic ordering without a re-sort.
 #[derive(Debug, Clone)]
@@ -1086,11 +1086,11 @@ pub enum BranchReadError {
 /// commit and return their (path, bytes) pairs sorted by path. The
 /// branch tip's commit is peeled to a tree, then the tree is recursed
 /// breadth-first. Subtrees are descended; symlinks and non-blob entries
-/// are skipped (vault content is regular files only).
+/// are skipped (mem content is regular files only).
 ///
 /// `ref_name` is the fully-qualified ref form, e.g.
-/// `refs/heads/<vault>` for vault-content reads or `refs/heads/main`
-/// for schema/config reads against the `vault-repo-git` repo.
+/// `refs/heads/<mem>` for mem-content reads or `refs/heads/main`
+/// for schema/config reads against the `mem-repo-git` repo.
 ///
 /// A missing ref returns [`BranchReadError::BranchMissing`] so callers
 /// can distinguish "branch never created" from "branch exists but is
@@ -1175,7 +1175,7 @@ fn walk_tree(
                     .into_tree();
                 walk_tree(repo, &subtree, &full, out)?;
             }
-            // Symlinks and commits (submodules) — vault content is
+            // Symlinks and commits (submodules) — mem content is
             // regular files only; ignore.
             EntryKind::Link | EntryKind::Commit => {}
         }
@@ -1190,12 +1190,12 @@ mod tests {
     use std::path::Path;
     use tempfile::TempDir;
 
-    /// Build a fresh bare repo at `<tmp>/vault-repo.git` and return the
+    /// Build a fresh bare repo at `<tmp>/mem-repo.git` and return the
     /// canonical gitdir path. Tests open the repo per-call via
     /// `gix::open` so the writer's `gitdir + ref_name` shape is what
     /// gets exercised.
     fn fresh_repo_dir(tmp: &Path) -> PathBuf {
-        let git_dir = tmp.join("vault-repo.git");
+        let git_dir = tmp.join("mem-repo.git");
         gix::init_bare(&git_dir).unwrap();
         std::fs::canonicalize(&git_dir).unwrap()
     }
@@ -1233,7 +1233,7 @@ mod tests {
     fn git_tree_writer_round_trip() {
         let tmp = TempDir::new().unwrap();
         let gitdir = fresh_repo_dir(tmp.path());
-        let writer = GitTreeVaultWriter::new(gitdir.clone(), "refs/heads/test".to_string());
+        let writer = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/test".to_string());
 
         writer
             .write_entity(Path::new("notes/hello.md"), b"# hi\n")
@@ -1249,7 +1249,7 @@ mod tests {
     fn git_tree_writer_delete_removes_path() {
         let tmp = TempDir::new().unwrap();
         let gitdir = fresh_repo_dir(tmp.path());
-        let writer = GitTreeVaultWriter::new(gitdir.clone(), "refs/heads/test".to_string());
+        let writer = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/test".to_string());
 
         writer.write_entity(Path::new("a.md"), b"a").unwrap();
         writer.write_entity(Path::new("b.md"), b"b").unwrap();
@@ -1266,7 +1266,7 @@ mod tests {
     fn git_tree_writer_move_renames_path() {
         let tmp = TempDir::new().unwrap();
         let gitdir = fresh_repo_dir(tmp.path());
-        let writer = GitTreeVaultWriter::new(gitdir.clone(), "refs/heads/test".to_string());
+        let writer = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/test".to_string());
 
         writer.write_entity(Path::new("from.md"), b"payload").unwrap();
         writer.commit("seed", &ctx_for_test()).unwrap();
@@ -1285,7 +1285,7 @@ mod tests {
     fn git_tree_writer_multi_op_commit() {
         let tmp = TempDir::new().unwrap();
         let gitdir = fresh_repo_dir(tmp.path());
-        let writer = GitTreeVaultWriter::new(gitdir.clone(), "refs/heads/test".to_string());
+        let writer = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/test".to_string());
 
         // Seed an entry that will be deleted in the same multi-op
         // commit as two new writes.
@@ -1314,12 +1314,12 @@ mod tests {
         let gitdir = fresh_repo_dir(tmp.path());
 
         // Seed so both writers snapshot the same parent SHA.
-        let seeder = GitTreeVaultWriter::new(gitdir.clone(), "refs/heads/test".to_string());
+        let seeder = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/test".to_string());
         seeder.write_entity(Path::new("seed.md"), b"x").unwrap();
         let seed_sha = seeder.commit("seed", &ctx_for_test()).unwrap();
 
-        let a = GitTreeVaultWriter::new(gitdir.clone(), "refs/heads/test".to_string());
-        let b = GitTreeVaultWriter::new(gitdir.clone(), "refs/heads/test".to_string());
+        let a = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/test".to_string());
+        let b = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/test".to_string());
 
         // Both writers take their snapshot at the same parent.
         a.write_entity(Path::new("a.md"), b"a").unwrap();
@@ -1340,7 +1340,7 @@ mod tests {
             .commit("b loses", &ctx_for_test())
             .expect_err("B's commit must fail with HashMismatch");
         match err {
-            VaultWriterError::HashMismatch { current } => {
+            MemWriterError::HashMismatch { current } => {
                 assert_eq!(current, new_tip);
             }
             other => panic!("expected HashMismatch, got {other:?}"),
@@ -1353,19 +1353,19 @@ mod tests {
         // staged ops. Before the fix, `pending` was left populated on a
         // CAS conflict, and because `read_entity` prefers pending over the
         // committed tip, the loser's never-committed write was served as
-        // phantom truth (and a later `reload_one_vault` pulled it into the
+        // phantom truth (and a later `reload_one_mem` pulled it into the
         // in-memory store) until the process restarted.
         let tmp = TempDir::new().unwrap();
         let gitdir = fresh_repo_dir(tmp.path());
 
         // Seed a shared entity both writers will target, so they snapshot
         // the same parent SHA.
-        let seeder = GitTreeVaultWriter::new(gitdir.clone(), "refs/heads/test".to_string());
+        let seeder = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/test".to_string());
         seeder.write_entity(Path::new("shared.md"), b"v1").unwrap();
         seeder.commit("seed", &ctx_for_test()).unwrap();
 
-        let a = GitTreeVaultWriter::new(gitdir.clone(), "refs/heads/test".to_string());
-        let b = GitTreeVaultWriter::new(gitdir.clone(), "refs/heads/test".to_string());
+        let a = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/test".to_string());
+        let b = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/test".to_string());
 
         // Both snapshot the same parent, then stage conflicting updates to
         // the SAME entity.
@@ -1378,7 +1378,7 @@ mod tests {
             .commit("b loses", &ctx_for_test())
             .expect_err("B must lose the CAS race");
         assert!(
-            matches!(err, VaultWriterError::HashMismatch { .. }),
+            matches!(err, MemWriterError::HashMismatch { .. }),
             "expected HashMismatch, got {err:?}"
         );
 
@@ -1389,7 +1389,7 @@ mod tests {
         );
         // …so a read falls through to the committed tip and returns A's
         // value, NOT B's orphaned "B-phantom" staged write.
-        let read = <GitTreeVaultWriter as memstead_base::backend::VaultBackend>::read_entity(
+        let read = <GitTreeMemWriter as memstead_base::backend::MemBackend>::read_entity(
             &b,
             Path::new("shared.md"),
         )
@@ -1403,15 +1403,15 @@ mod tests {
 
     #[test]
     fn commit_with_expected_parent_succeeds_when_ref_matches_pin() {
-        use memstead_base::backend::VaultBackend;
+        use memstead_base::backend::MemBackend;
 
         let tmp = TempDir::new().unwrap();
         let gitdir = fresh_repo_dir(tmp.path());
 
-        let seeder = GitTreeVaultWriter::new(gitdir.clone(), "refs/heads/test".to_string());
-        <GitTreeVaultWriter as VaultWriter>::write_entity(&seeder, Path::new("seed.md"), b"x")
+        let seeder = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/test".to_string());
+        <GitTreeMemWriter as MemWriter>::write_entity(&seeder, Path::new("seed.md"), b"x")
             .unwrap();
-        let seed_sha = <GitTreeVaultWriter as VaultWriter>::commit(
+        let seed_sha = <GitTreeMemWriter as MemWriter>::commit(
             &seeder,
             "seed",
             &ctx_for_test(),
@@ -1419,16 +1419,16 @@ mod tests {
         .unwrap();
 
         // Engine-style flow: snapshot head, mutate, then commit pinned.
-        let writer = GitTreeVaultWriter::new(gitdir.clone(), "refs/heads/test".to_string());
-        let expected = <GitTreeVaultWriter as VaultBackend>::current_head(&writer)
+        let writer = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/test".to_string());
+        let expected = <GitTreeMemWriter as MemBackend>::current_head(&writer)
             .unwrap()
             .expect("seeded ref has a head");
         assert_eq!(expected, seed_sha);
 
-        <GitTreeVaultWriter as VaultWriter>::write_entity(&writer, Path::new("after.md"), b"after")
+        <GitTreeMemWriter as MemWriter>::write_entity(&writer, Path::new("after.md"), b"after")
             .unwrap();
 
-        let new_tip = <GitTreeVaultWriter as VaultBackend>::commit_with_expected_parent(
+        let new_tip = <GitTreeMemWriter as MemBackend>::commit_with_expected_parent(
             &writer,
             "pinned commit",
             &ctx_for_test(),
@@ -1444,16 +1444,16 @@ mod tests {
 
     #[test]
     fn commit_with_expected_parent_surfaces_parent_mismatch_when_sibling_advances_ref() {
-        use memstead_base::backend::{BackendError, VaultBackend};
+        use memstead_base::backend::{BackendError, MemBackend};
 
         let tmp = TempDir::new().unwrap();
         let gitdir = fresh_repo_dir(tmp.path());
 
         // Seed so both writers start from the same commit.
-        let seeder = GitTreeVaultWriter::new(gitdir.clone(), "refs/heads/test".to_string());
-        <GitTreeVaultWriter as VaultWriter>::write_entity(&seeder, Path::new("seed.md"), b"x")
+        let seeder = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/test".to_string());
+        <GitTreeMemWriter as MemWriter>::write_entity(&seeder, Path::new("seed.md"), b"x")
             .unwrap();
-        let seed_sha = <GitTreeVaultWriter as VaultWriter>::commit(
+        let seed_sha = <GitTreeMemWriter as MemWriter>::commit(
             &seeder,
             "seed",
             &ctx_for_test(),
@@ -1462,8 +1462,8 @@ mod tests {
 
         // Engine A snapshots head — this is the pin it will retain
         // through any number of intermediate writes.
-        let a = GitTreeVaultWriter::new(gitdir.clone(), "refs/heads/test".to_string());
-        let pin = <GitTreeVaultWriter as VaultBackend>::current_head(&a)
+        let a = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/test".to_string());
+        let pin = <GitTreeMemWriter as MemBackend>::current_head(&a)
             .unwrap()
             .expect("seeded ref has a head");
         assert_eq!(pin, seed_sha);
@@ -1471,14 +1471,14 @@ mod tests {
         // A sibling writer (another engine instance, manual git op,
         // out-of-band CLI invocation, …) advances the ref between A's
         // snapshot and A's commit attempt.
-        let sibling = GitTreeVaultWriter::new(gitdir.clone(), "refs/heads/test".to_string());
-        <GitTreeVaultWriter as VaultWriter>::write_entity(
+        let sibling = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/test".to_string());
+        <GitTreeMemWriter as MemWriter>::write_entity(
             &sibling,
             Path::new("drift.md"),
             b"drift",
         )
         .unwrap();
-        let new_tip = <GitTreeVaultWriter as VaultWriter>::commit(
+        let new_tip = <GitTreeMemWriter as MemWriter>::commit(
             &sibling,
             "sibling advance",
             &ctx_for_test(),
@@ -1488,8 +1488,8 @@ mod tests {
 
         // A now tries to land a pinned commit. The pin no longer
         // matches the live tip → typed `ParentMismatch`.
-        <GitTreeVaultWriter as VaultWriter>::write_entity(&a, Path::new("a.md"), b"a").unwrap();
-        let err = <GitTreeVaultWriter as VaultBackend>::commit_with_expected_parent(
+        <GitTreeMemWriter as MemWriter>::write_entity(&a, Path::new("a.md"), b"a").unwrap();
+        let err = <GitTreeMemWriter as MemBackend>::commit_with_expected_parent(
             &a,
             "pinned commit",
             &ctx_for_test(),
@@ -1507,15 +1507,15 @@ mod tests {
 
     #[test]
     fn commit_with_expected_parent_none_pin_is_equivalent_to_commit() {
-        use memstead_base::backend::VaultBackend;
+        use memstead_base::backend::MemBackend;
 
         let tmp = TempDir::new().unwrap();
         let gitdir = fresh_repo_dir(tmp.path());
-        let writer = GitTreeVaultWriter::new(gitdir.clone(), "refs/heads/test".to_string());
+        let writer = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/test".to_string());
 
-        <GitTreeVaultWriter as VaultWriter>::write_entity(&writer, Path::new("hello.md"), b"hi")
+        <GitTreeMemWriter as MemWriter>::write_entity(&writer, Path::new("hello.md"), b"hi")
             .unwrap();
-        let sha = <GitTreeVaultWriter as VaultBackend>::commit_with_expected_parent(
+        let sha = <GitTreeMemWriter as MemBackend>::commit_with_expected_parent(
             &writer,
             "unpinned",
             &ctx_for_test(),
@@ -1539,7 +1539,7 @@ mod tests {
         let payload = b"shared content\n";
 
         let gitdir_a = fresh_repo_dir(tmp_a.path());
-        let writer_a = GitTreeVaultWriter::new(gitdir_a.clone(), "refs/heads/a".to_string());
+        let writer_a = GitTreeMemWriter::new(gitdir_a.clone(), "refs/heads/a".to_string());
         writer_a
             .write_entity(Path::new("file.md"), payload)
             .unwrap();
@@ -1559,7 +1559,7 @@ mod tests {
             .detach();
 
         let gitdir_b = fresh_repo_dir(tmp_b.path());
-        let writer_b = GitTreeVaultWriter::new(gitdir_b.clone(), "refs/heads/b".to_string());
+        let writer_b = GitTreeMemWriter::new(gitdir_b.clone(), "refs/heads/b".to_string());
         writer_b
             .write_entity(Path::new("file.md"), payload)
             .unwrap();
@@ -1587,9 +1587,9 @@ mod tests {
     /// Initialise a non-bare repo at `<workdir>` with `refs/heads/main`
     /// as the symbolic HEAD. Returns `(workdir, gitdir)` — the workdir
     /// is what GitHub Desktop would open; the gitdir is what
-    /// `GitTreeVaultWriter::new` consumes.
+    /// `GitTreeMemWriter::new` consumes.
     fn fresh_non_bare_repo(tmp: &Path) -> (PathBuf, PathBuf) {
-        let workdir = tmp.join("vault-repo-workdir");
+        let workdir = tmp.join("mem-repo-workdir");
         std::fs::create_dir_all(&workdir).unwrap();
         let status = std::process::Command::new("git")
             .arg("-C")
@@ -1618,7 +1618,7 @@ mod tests {
     fn sync_helper_updates_worktree_when_ref_matches_head() {
         let tmp = TempDir::new().unwrap();
         let (workdir, gitdir) = fresh_non_bare_repo(tmp.path());
-        let writer = GitTreeVaultWriter::new(gitdir.clone(), "refs/heads/main".to_string());
+        let writer = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/main".to_string());
 
         writer
             .write_entity(Path::new("configs/alpha.json"), b"{\"name\":\"alpha\"}\n")
@@ -1659,7 +1659,7 @@ mod tests {
         // refs/heads/main. The worktree must NOT receive the feature
         // branch's content.
         let writer =
-            GitTreeVaultWriter::new(gitdir.clone(), "refs/heads/feature".to_string());
+            GitTreeMemWriter::new(gitdir.clone(), "refs/heads/feature".to_string());
         writer
             .write_entity(Path::new("only-on-feature.md"), b"feature-only\n")
             .unwrap();
@@ -1682,7 +1682,7 @@ mod tests {
     fn sync_helper_preserves_untracked_files() {
         let tmp = TempDir::new().unwrap();
         let (workdir, gitdir) = fresh_non_bare_repo(tmp.path());
-        let writer = GitTreeVaultWriter::new(gitdir.clone(), "refs/heads/main".to_string());
+        let writer = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/main".to_string());
 
         // Drop an untracked file in the workdir before any engine
         // commit runs. `git read-tree --reset -u HEAD` only touches
@@ -1711,7 +1711,7 @@ mod tests {
     fn sync_helper_updates_through_delete_and_overwrite() {
         let tmp = TempDir::new().unwrap();
         let (workdir, gitdir) = fresh_non_bare_repo(tmp.path());
-        let writer = GitTreeVaultWriter::new(gitdir.clone(), "refs/heads/main".to_string());
+        let writer = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/main".to_string());
 
         writer.write_entity(Path::new("a.md"), b"first\n").unwrap();
         writer.commit("create a", &ctx_for_test()).unwrap();
@@ -1751,19 +1751,19 @@ mod tests {
         );
     }
 
-    // ----- VaultBackend impl -----------------------------------------
+    // ----- MemBackend impl -----------------------------------------
 
     /// Build a CommitContext that produces an `memstead: <verb> <id>`
     /// subject with a given verb. The agent-notes parser keys off the
     /// subject's verb to recover the mutation kind.
     fn commit_with_verb(
-        writer: &GitTreeVaultWriter,
+        writer: &GitTreeMemWriter,
         verb: &str,
         entity_id: &str,
         ctx: &CommitContext<'_>,
     ) {
         let subject = format!("memstead: {verb} {entity_id}");
-        <GitTreeVaultWriter as VaultWriter>::commit(writer, &subject, ctx).unwrap();
+        <GitTreeMemWriter as MemWriter>::commit(writer, &subject, ctx).unwrap();
     }
 
     fn ctx_with_note<'a>(note: &'a str) -> CommitContext<'a> {
@@ -1782,50 +1782,50 @@ mod tests {
 
     #[test]
     fn backend_list_entities_returns_only_md_outside_memstead_namespace() {
-        use memstead_base::backend::VaultBackend;
+        use memstead_base::backend::MemBackend;
 
         let tmp = TempDir::new().unwrap();
         let gitdir = fresh_repo_dir(tmp.path());
         let writer =
-            GitTreeVaultWriter::new(gitdir.clone(), "refs/heads/test".to_string());
+            GitTreeMemWriter::new(gitdir.clone(), "refs/heads/test".to_string());
 
-        // Seed via VaultWriter (fully-qualified to avoid trait
-        // ambiguity once VaultBackend enters scope below).
-        <GitTreeVaultWriter as VaultWriter>::write_entity(&writer, Path::new("a.md"), b"# a")
+        // Seed via MemWriter (fully-qualified to avoid trait
+        // ambiguity once MemBackend enters scope below).
+        <GitTreeMemWriter as MemWriter>::write_entity(&writer, Path::new("a.md"), b"# a")
             .unwrap();
-        <GitTreeVaultWriter as VaultWriter>::write_entity(
+        <GitTreeMemWriter as MemWriter>::write_entity(
             &writer,
             Path::new("nested/b.md"),
             b"# b",
         )
         .unwrap();
-        <GitTreeVaultWriter as VaultWriter>::write_entity(
+        <GitTreeMemWriter as MemWriter>::write_entity(
             &writer,
             Path::new("notes.json"),
             b"{}",
         )
         .unwrap();
-        <GitTreeVaultWriter as VaultWriter>::write_entity(
+        <GitTreeMemWriter as MemWriter>::write_entity(
             &writer,
             Path::new(".memstead/config.json"),
             b"{}",
         )
         .unwrap();
-        <GitTreeVaultWriter as VaultWriter>::write_entity(
+        <GitTreeMemWriter as MemWriter>::write_entity(
             &writer,
             Path::new(".memstead/notes.md"),
             b"# skip me",
         )
         .unwrap();
-        <GitTreeVaultWriter as VaultWriter>::write_entity(
+        <GitTreeMemWriter as MemWriter>::write_entity(
             &writer,
             Path::new(".other/notes.md"),
             b"# no longer special, walked like any non-meta dir",
         )
         .unwrap();
-        <GitTreeVaultWriter as VaultWriter>::commit(&writer, "seed", &ctx_for_test()).unwrap();
+        <GitTreeMemWriter as MemWriter>::commit(&writer, "seed", &ctx_for_test()).unwrap();
 
-        let backend: &dyn VaultBackend = &writer;
+        let backend: &dyn MemBackend = &writer;
         let mut paths: Vec<String> = backend
             .list_entities()
             .unwrap()
@@ -1846,35 +1846,35 @@ mod tests {
 
     #[test]
     fn backend_list_entities_returns_empty_for_missing_branch() {
-        use memstead_base::backend::VaultBackend;
+        use memstead_base::backend::MemBackend;
 
         let tmp = TempDir::new().unwrap();
         let gitdir = fresh_repo_dir(tmp.path());
-        let writer = GitTreeVaultWriter::new(gitdir, "refs/heads/never".to_string());
-        let backend: &dyn VaultBackend = &writer;
+        let writer = GitTreeMemWriter::new(gitdir, "refs/heads/never".to_string());
+        let backend: &dyn MemBackend = &writer;
         // Branch never created → empty, no error.
         assert!(backend.list_entities().unwrap().is_empty());
     }
 
     #[test]
     fn backend_read_entity_consults_pending_then_branch_tip() {
-        use memstead_base::backend::VaultBackend;
+        use memstead_base::backend::MemBackend;
 
         let tmp = TempDir::new().unwrap();
         let gitdir = fresh_repo_dir(tmp.path());
         let writer =
-            GitTreeVaultWriter::new(gitdir.clone(), "refs/heads/test".to_string());
+            GitTreeMemWriter::new(gitdir.clone(), "refs/heads/test".to_string());
 
         // Seed a committed entry.
-        <GitTreeVaultWriter as VaultWriter>::write_entity(
+        <GitTreeMemWriter as MemWriter>::write_entity(
             &writer,
             Path::new("on_branch.md"),
             b"branch",
         )
         .unwrap();
-        <GitTreeVaultWriter as VaultWriter>::commit(&writer, "seed", &ctx_for_test()).unwrap();
+        <GitTreeMemWriter as MemWriter>::commit(&writer, "seed", &ctx_for_test()).unwrap();
 
-        let backend: &dyn VaultBackend = &writer;
+        let backend: &dyn MemBackend = &writer;
         // Branch path → reads from the branch tip.
         assert_eq!(
             backend.read_entity(Path::new("on_branch.md")).unwrap(),
@@ -1897,21 +1897,21 @@ mod tests {
 
     #[test]
     fn backend_read_provenance_reconstructs_from_commit_log() {
-        use memstead_base::backend::VaultBackend;
+        use memstead_base::backend::MemBackend;
 
         let tmp = TempDir::new().unwrap();
         let gitdir = fresh_repo_dir(tmp.path());
         let writer =
-            GitTreeVaultWriter::new(gitdir.clone(), "refs/heads/test".to_string());
+            GitTreeMemWriter::new(gitdir.clone(), "refs/heads/test".to_string());
 
         // Two commits with memstead: subjects so the verb maps back to a
         // ProvenanceKind. The first carries an agent note, the second
         // does not.
-        <GitTreeVaultWriter as VaultWriter>::write_entity(&writer, Path::new("a.md"), b"a")
+        <GitTreeMemWriter as MemWriter>::write_entity(&writer, Path::new("a.md"), b"a")
             .unwrap();
         commit_with_verb(&writer, "create", "v:a", &ctx_with_note("first draft"));
 
-        <GitTreeVaultWriter as VaultWriter>::write_entity(&writer, Path::new("a.md"), b"a2")
+        <GitTreeMemWriter as MemWriter>::write_entity(&writer, Path::new("a.md"), b"a2")
             .unwrap();
         commit_with_verb(
             &writer,
@@ -1927,7 +1927,7 @@ mod tests {
             },
         );
 
-        let backend: &dyn VaultBackend = &writer;
+        let backend: &dyn MemBackend = &writer;
         // append_provenance is the no-op contract; calling it with a
         // throw-away record must not perturb the read path.
         backend
@@ -1963,29 +1963,29 @@ mod tests {
 
     #[test]
     fn backend_read_provenance_filters_by_cursor_sha() {
-        use memstead_base::backend::VaultBackend;
+        use memstead_base::backend::MemBackend;
 
         let tmp = TempDir::new().unwrap();
         let gitdir = fresh_repo_dir(tmp.path());
         let writer =
-            GitTreeVaultWriter::new(gitdir.clone(), "refs/heads/test".to_string());
+            GitTreeMemWriter::new(gitdir.clone(), "refs/heads/test".to_string());
 
         // Seed three commits; the cursor will be the SHA of the first.
-        <GitTreeVaultWriter as VaultWriter>::write_entity(&writer, Path::new("a.md"), b"a")
+        <GitTreeMemWriter as MemWriter>::write_entity(&writer, Path::new("a.md"), b"a")
             .unwrap();
         let first_sha =
-            <GitTreeVaultWriter as VaultWriter>::commit(&writer, "memstead: create v:a", &ctx_for_test())
+            <GitTreeMemWriter as MemWriter>::commit(&writer, "memstead: create v:a", &ctx_for_test())
                 .unwrap();
-        <GitTreeVaultWriter as VaultWriter>::write_entity(&writer, Path::new("a.md"), b"a2")
+        <GitTreeMemWriter as MemWriter>::write_entity(&writer, Path::new("a.md"), b"a2")
             .unwrap();
-        <GitTreeVaultWriter as VaultWriter>::commit(&writer, "memstead: update v:a", &ctx_for_test())
+        <GitTreeMemWriter as MemWriter>::commit(&writer, "memstead: update v:a", &ctx_for_test())
             .unwrap();
-        <GitTreeVaultWriter as VaultWriter>::write_entity(&writer, Path::new("a.md"), b"a3")
+        <GitTreeMemWriter as MemWriter>::write_entity(&writer, Path::new("a.md"), b"a3")
             .unwrap();
-        <GitTreeVaultWriter as VaultWriter>::commit(&writer, "memstead: update v:a", &ctx_for_test())
+        <GitTreeMemWriter as MemWriter>::commit(&writer, "memstead: update v:a", &ctx_for_test())
             .unwrap();
 
-        let backend: &dyn VaultBackend = &writer;
+        let backend: &dyn MemBackend = &writer;
         // Cursor at the first SHA → returns only the two newer commits.
         let after = backend.read_provenance(Some(&first_sha)).unwrap();
         assert_eq!(after.len(), 2, "expected commits after cursor, got {after:?}");
@@ -1996,33 +1996,33 @@ mod tests {
 
     #[test]
     fn backend_read_provenance_empty_for_missing_branch() {
-        use memstead_base::backend::VaultBackend;
+        use memstead_base::backend::MemBackend;
 
         let tmp = TempDir::new().unwrap();
         let gitdir = fresh_repo_dir(tmp.path());
-        let writer = GitTreeVaultWriter::new(gitdir, "refs/heads/never".to_string());
-        let backend: &dyn VaultBackend = &writer;
+        let writer = GitTreeMemWriter::new(gitdir, "refs/heads/never".to_string());
+        let backend: &dyn MemBackend = &writer;
         // No commits yet → empty record list, no error.
         assert!(backend.read_provenance(None).unwrap().is_empty());
     }
 
     #[test]
     fn backend_unknown_verb_falls_back_to_update_kind() {
-        use memstead_base::backend::VaultBackend;
+        use memstead_base::backend::MemBackend;
 
         let tmp = TempDir::new().unwrap();
         let gitdir = fresh_repo_dir(tmp.path());
         let writer =
-            GitTreeVaultWriter::new(gitdir.clone(), "refs/heads/test".to_string());
+            GitTreeMemWriter::new(gitdir.clone(), "refs/heads/test".to_string());
 
-        <GitTreeVaultWriter as VaultWriter>::write_entity(&writer, Path::new("a.md"), b"a")
+        <GitTreeMemWriter as MemWriter>::write_entity(&writer, Path::new("a.md"), b"a")
             .unwrap();
         // Verb that isn't in the ProvenanceKind enum (e.g. lifecycle
-        // verbs like `vault_create`) — round-trips as Update under the
+        // verbs like `mem_create`) — round-trips as Update under the
         // tolerant-reader convention shared with the folder backend.
-        commit_with_verb(&writer, "vault_create", "v:a", &ctx_for_test());
+        commit_with_verb(&writer, "mem_create", "v:a", &ctx_for_test());
 
-        let backend: &dyn VaultBackend = &writer;
+        let backend: &dyn MemBackend = &writer;
         let records = backend.read_provenance(None).unwrap();
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].kind, memstead_base::ProvenanceKind::Update);
@@ -2035,13 +2035,13 @@ mod tests {
         // without erroring (proves the writer is wired with the
         // right gitdir + ref shape).
         use memstead_base::{
-            Mount, MountCapability, MountLifecycle, MountStorage, VaultBackend,
+            Mount, MountCapability, MountLifecycle, MountStorage, MemBackend,
         };
 
         let tmp = TempDir::new().unwrap();
         let gitdir = fresh_repo_dir(tmp.path());
         let mount = Mount {
-            vault: "engine".to_string(),
+            mem: "engine".to_string(),
             schema: Some("default@1.0.0".parse().unwrap()),
             storage: MountStorage::GitBranch {
                 gitdir,
@@ -2052,7 +2052,7 @@ mod tests {
             cross_linkable: true,
             migration_target: None,
         };
-        let backend: Box<dyn VaultBackend> =
+        let backend: Box<dyn MemBackend> =
             crate::storage::instantiate_pro_backend(&mount).unwrap();
         // Empty branch → empty list, no error.
         assert!(backend.list_entities().unwrap().is_empty());
@@ -2067,14 +2067,14 @@ mod tests {
         // Mounts may carry either shape; the writer must end up keyed
         // on the same per-branch mutex regardless.
         use memstead_base::{
-            Mount, MountCapability, MountLifecycle, MountStorage, VaultBackend,
+            Mount, MountCapability, MountLifecycle, MountStorage, MemBackend,
         };
 
         let tmp = TempDir::new().unwrap();
         let gitdir = fresh_repo_dir(tmp.path());
         for branch in ["engine", "refs/heads/engine"] {
             let mount = Mount {
-                vault: "engine".to_string(),
+                mem: "engine".to_string(),
                 schema: Some("default@1.0.0".parse().unwrap()),
                 storage: MountStorage::GitBranch {
                     gitdir: gitdir.clone(),
@@ -2085,26 +2085,26 @@ mod tests {
                 cross_linkable: true,
             migration_target: None,
         };
-            let backend: Box<dyn VaultBackend> =
+            let backend: Box<dyn MemBackend> =
                 crate::storage::instantiate_pro_backend(&mount).unwrap();
             // Both shapes resolve cleanly (no panic, no error).
             assert!(backend.list_entities().unwrap().is_empty());
         }
     }
 
-    // ---- VaultBackend::current_head ----------------------------------
+    // ---- MemBackend::current_head ----------------------------------
 
     #[test]
     fn current_head_returns_none_for_empty_branch() {
         // A fresh bare repo has no commits and no branches; the
         // writer's `try_find_reference` returns Ok(None) and
         // current_head collapses to Ok(None) — drift detection on
-        // an unborn vault is a clean no-op.
+        // an unborn mem is a clean no-op.
         let tmp = TempDir::new().unwrap();
         let gitdir = fresh_repo_dir(tmp.path());
         let writer =
-            GitTreeVaultWriter::new(gitdir, "refs/heads/specs".to_string());
-        let head = <GitTreeVaultWriter as memstead_base::backend::VaultBackend>::current_head(&writer).unwrap();
+            GitTreeMemWriter::new(gitdir, "refs/heads/specs".to_string());
+        let head = <GitTreeMemWriter as memstead_base::backend::MemBackend>::current_head(&writer).unwrap();
         assert!(head.is_none());
     }
 
@@ -2117,7 +2117,7 @@ mod tests {
         // and peels the ref) so equality proves end-to-end consistency.
         let tmp = TempDir::new().unwrap();
         let gitdir = fresh_repo_dir(tmp.path());
-        let writer = GitTreeVaultWriter::new(
+        let writer = GitTreeMemWriter::new(
             gitdir.clone(),
             "refs/heads/specs".to_string(),
         );
@@ -2127,7 +2127,7 @@ mod tests {
         assert_eq!(sha.len(), 40);
 
         let head =
-            <GitTreeVaultWriter as memstead_base::backend::VaultBackend>::current_head(&writer)
+            <GitTreeMemWriter as memstead_base::backend::MemBackend>::current_head(&writer)
                 .unwrap()
                 .expect("head present after commit");
         assert_eq!(head, sha);
@@ -2141,7 +2141,7 @@ mod tests {
         // cached last_known_head to detect a sibling writer.
         let tmp = TempDir::new().unwrap();
         let gitdir = fresh_repo_dir(tmp.path());
-        let writer = GitTreeVaultWriter::new(
+        let writer = GitTreeMemWriter::new(
             gitdir.clone(),
             "refs/heads/specs".to_string(),
         );
@@ -2149,7 +2149,7 @@ mod tests {
         writer.write_entity(Path::new("a.md"), b"a").unwrap();
         let first = writer.commit("first", &ctx_for_test()).unwrap();
         let head_after_first =
-            <GitTreeVaultWriter as memstead_base::backend::VaultBackend>::current_head(&writer)
+            <GitTreeMemWriter as memstead_base::backend::MemBackend>::current_head(&writer)
                 .unwrap()
                 .unwrap();
         assert_eq!(head_after_first, first);
@@ -2158,7 +2158,7 @@ mod tests {
         let second = writer.commit("second", &ctx_for_test()).unwrap();
         assert_ne!(first, second);
         let head_after_second =
-            <GitTreeVaultWriter as memstead_base::backend::VaultBackend>::current_head(&writer)
+            <GitTreeMemWriter as memstead_base::backend::MemBackend>::current_head(&writer)
                 .unwrap()
                 .unwrap();
         assert_eq!(head_after_second, second);
@@ -2172,11 +2172,11 @@ mod tests {
         // a transient broken mount doesn't poison the read it
         // accompanies.
         let tmp = TempDir::new().unwrap();
-        let writer = GitTreeVaultWriter::new(
+        let writer = GitTreeMemWriter::new(
             tmp.path().join("does-not-exist.git"),
             "refs/heads/specs".to_string(),
         );
-        let head = <GitTreeVaultWriter as memstead_base::backend::VaultBackend>::current_head(&writer).unwrap();
+        let head = <GitTreeMemWriter as memstead_base::backend::MemBackend>::current_head(&writer).unwrap();
         assert!(head.is_none());
     }
 
@@ -2190,13 +2190,13 @@ mod tests {
     fn dispatch_changes(
         gitdir: &Path,
         branch: &str,
-        vault: &str,
+        mem: &str,
         since: &str,
     ) -> Result<memstead_base::ops::BackendChanges, memstead_base::backend::BackendError> {
         (crate::storage::PRO_GIT_BRANCH_OPS.changes_since)(
             gitdir,
             branch,
-            vault,
+            mem,
             since,
             memstead_base::ops::RENAME_SIMILARITY_DEFAULT,
         )
@@ -2229,7 +2229,7 @@ mod tests {
         use memstead_base::ops::ChangeEnvelope;
         let tmp = TempDir::new().unwrap();
         let gitdir = fresh_repo_dir(tmp.path());
-        let writer = GitTreeVaultWriter::new(
+        let writer = GitTreeMemWriter::new(
             gitdir.clone(),
             "refs/heads/specs".to_string(),
         );
@@ -2261,7 +2261,7 @@ mod tests {
                 } => {
                     assert!(
                         id.0.starts_with("specs--"),
-                        "expected vault-prefixed id, got {}",
+                        "expected mem-prefixed id, got {}",
                         id.0
                     );
                     assert!(title.is_none(), "dispatch must not enrich title");
@@ -2280,7 +2280,7 @@ mod tests {
         use memstead_base::ops::ChangeEnvelope;
         let tmp = TempDir::new().unwrap();
         let gitdir = fresh_repo_dir(tmp.path());
-        let writer = GitTreeVaultWriter::new(
+        let writer = GitTreeMemWriter::new(
             gitdir.clone(),
             "refs/heads/specs".to_string(),
         );
@@ -2321,7 +2321,7 @@ mod tests {
         // wrapper used for real backend faults.
         let tmp = TempDir::new().unwrap();
         let gitdir = fresh_repo_dir(tmp.path());
-        let writer = GitTreeVaultWriter::new(
+        let writer = GitTreeMemWriter::new(
             gitdir.clone(),
             "refs/heads/specs".to_string(),
         );

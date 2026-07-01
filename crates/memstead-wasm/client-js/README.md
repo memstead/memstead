@@ -1,8 +1,8 @@
 # @memstead/client
 
-Browser thin-client for Memstead vaults — orchestrates the snapshot +
+Browser thin-client for Memstead mems — orchestrates the snapshot +
 SSE + commit-apply lifecycle on top of `@memstead/wasm` and the
-`memstead-bridge` HTTP+SSE surface as a single `VaultSyncClient` class.
+`memstead-bridge` HTTP+SSE surface as a single `MemSyncClient` class.
 
 ## Install
 
@@ -18,13 +18,13 @@ pnpm add @memstead/client @memstead/wasm
 
 ```ts
 import init, { Engine } from "@memstead/wasm";
-import { VaultSyncClient } from "@memstead/client";
+import { MemSyncClient } from "@memstead/client";
 
 await init();
 
-const client = new VaultSyncClient({
+const client = new MemSyncClient({
   baseUrl: "https://example.com/api",
-  vault: "specs",
+  mem: "specs",
   engineFactory: (bytes) => Engine.fromSnapshot(bytes),
   onUpdate: () => rerender(client),
 });
@@ -40,16 +40,16 @@ client.close();
 
 ## What it does
 
-- **`open()`** hydrates the engine from `GET /vaults/<v>/snapshot`
-  and subscribes to `GET /vaults/<v>/events`.
-- Every incoming `vault_changed` event triggers
-  `GET /vaults/<v>/commits?since=<localHead>&until=<eventHead>` and
+- **`open()`** hydrates the engine from `GET /mems/<v>/snapshot`
+  and subscribes to `GET /mems/<v>/events`.
+- Every incoming `mem_changed` event triggers
+  `GET /mems/<v>/commits?since=<localHead>&until=<eventHead>` and
   applies the returned envelopes to the local WASM engine.
 - On SSE reconnect (transparent EventSource behaviour), the next
   event re-fetches `/head` so the gap can be filled before resuming.
 - `404 UNKNOWN_COMMIT` or `409 DELTA_TOO_LARGE` on `/commits` →
   full snapshot reload + cursor reset (force-push / rebase recovery).
-- **`search()`** routes to `GET /vaults/<v>/search` — the local WASM
+- **`search()`** routes to `GET /mems/<v>/search` — the local WASM
   engine refuses search with `SEARCH_UNAVAILABLE_IN_WASM`.
 - **`getEntity()` / `health()`** route to the local engine — no
   round-trip.
@@ -58,16 +58,16 @@ client.close();
 
 ## Errors
 
-Every refusal surfaces as a `VaultSyncError` with a stable `code`:
+Every refusal surfaces as a `MemSyncError` with a stable `code`:
 
 | code                     | source                                          |
 |--------------------------|-------------------------------------------------|
-| `UNKNOWN_VAULT`          | bridge — vault not in the embedder's allowlist  |
+| `UNKNOWN_MEM`          | bridge — mem not in the embedder's allowlist  |
 | `UNKNOWN_COMMIT`         | bridge — force-push or rebase ate the cursor    |
 | `DELTA_TOO_LARGE`        | bridge — too many commits in the requested range|
 | `INVALID_SEARCH_QUERY`   | bridge — empty `q` or out-of-range `limit`      |
 | `ENGINE_ERROR`           | bridge — internal `memstead-base` failure           |
-| `GIT_ERROR`              | bridge — git operation against the vault-repo failed|
+| `GIT_ERROR`              | bridge — git operation against the mem-repo failed|
 | `CLIENT_CLOSED`          | client — `close()` was called                   |
 | `NOT_OPEN`               | client — read before `open()` resolved          |
 | `NETWORK`                | client — `fetch` rejected                       |

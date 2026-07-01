@@ -12,7 +12,7 @@
 //!
 //! `CommitNote` carries the parsed subject + trailer block from
 //! `crate::vcs::format_commit_message`. The workspace-level pointer
-//! is the SHA of `refs/heads/__MEMSTEAD` (unified schemas + per-vault
+//! is the SHA of `refs/heads/__MEMSTEAD` (unified schemas + per-mem
 //! configs branch), exposed as `memstead_ref: Option<String>` on the
 //! report — `None` when the workspace has not been migrated to the
 //! unified layout yet.
@@ -26,7 +26,7 @@ use serde::Serialize;
 /// Callers branch on `actor` for agent-vs-external classification.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct CommitNote {
-    pub vault: String,
+    pub mem: String,
     pub sha: String,
     pub subject: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -42,7 +42,7 @@ pub struct CommitNote {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub client: Option<String>,
     /// Correlation id linking every commit produced by a single
-    /// logical operation (notably multi-vault `memstead_rename`).
+    /// logical operation (notably multi-mem `memstead_rename`).
     /// Populated from the `Logical-Op:` trailer when present.
     #[serde(skip_serializing_if = "Option::is_none", rename = "logical_op")]
     pub logical_operation_id: Option<String>,
@@ -61,14 +61,14 @@ pub struct CommitNote {
 /// Walked output of `agent_notes_since`. `head` echoes the resolved
 /// branch tip so callers record it as the next polling cursor without
 /// a follow-up `memstead_health` round-trip. `memstead_ref` carries the
-/// workspace-level `__MEMSTEAD` ref tip (unified schemas + per-vault
+/// workspace-level `__MEMSTEAD` ref tip (unified schemas + per-mem
 /// configs) so consumers — today the outer-repo auto-commit cursor
-/// block — anchor it alongside the per-vault head without a second
+/// block — anchor it alongside the per-mem head without a second
 /// round-trip. `None` when the workspace has not been migrated to the
 /// unified layout yet.
 #[derive(Debug, Clone, Serialize)]
 pub struct AgentNotesReport {
-    pub vault: String,
+    pub mem: String,
     pub since: String,
     pub head: String,
     pub notes: Vec<CommitNote>,

@@ -30,7 +30,7 @@ function setupOuterRepo() {
   return root;
 }
 
-function makeVault(outerRoot, name) {
+function makeMem(outerRoot, name) {
   const worktree = join(outerRoot, name);
   mkdirSync(worktree, { recursive: true });
   const gitdir = join(worktree, '.git');
@@ -41,7 +41,7 @@ function makeVault(outerRoot, name) {
   return { name, gitdir, worktree };
 }
 
-function commitInVault(layout, filename, content, subject, trailers = {}) {
+function commitInMem(layout, filename, content, subject, trailers = {}) {
   writeFileSync(join(layout.worktree, filename), content);
   git(['add', filename], { cwd: layout.worktree });
   const lines = [subject, ''];
@@ -57,12 +57,12 @@ function commitInVault(layout, filename, content, subject, trailers = {}) {
 }
 
 function healthFor(outerVcs, layouts, extra = {}) {
-  // Synthesise per-vault `head` from the test fixture's real git
+  // Synthesise per-mem `head` from the test fixture's real git
   // state so the migrated pipeline can read it from the `memstead_health`
   // response (it no longer peels refs itself).
   return {
-    writable_vaults: layouts.map((l) => l.name),
-    vaults: layouts.map((l) => {
+    writable_mems: layouts.map((l) => l.name),
+    mems: layouts.map((l) => {
       const headRes = git(['rev-parse', 'HEAD'], { cwd: l.worktree });
       const head = headRes.status === 0 ? headRes.stdout.trim() : null;
       return {
@@ -78,7 +78,7 @@ function healthFor(outerVcs, layouts, extra = {}) {
 /**
  * Parse a single commit body into the engine's `CommitNote`-shaped
  * record. Test-fixture-only: the integration tests build commits with
- * canonical trailer blocks via `commitInVault`, so this parser exists
+ * canonical trailer blocks via `commitInMem`, so this parser exists
  * to round-trip them back into the synthesised MCP response. Mirrors
  * what the engine's `parse_commit_message` does in Rust.
  */
@@ -122,26 +122,26 @@ function parseTestCommit(sha, body) {
 /**
  * Build a mock `withEngineFn` that synthesises `memstead_health` and
  * `memstead_changes_since(... include_notes: true)` responses by reading
- * the real test vault-repo gitdirs. Test-fixture infrastructure: the
+ * the real test mem-repo gitdirs. Test-fixture infrastructure: the
  * git invocations here are looking up fixture state, not running plugin
- * code — exempt from the no-direct-git (engine-owns-vault-repo) rule.
+ * code — exempt from the no-direct-git (engine-owns-mem-repo) rule.
  *
- * `changesByVault` keys a per-vault descriptor `{ changes, head, notes,
+ * `changesByMem` keys a per-mem descriptor `{ changes, head, notes,
  * memstead_ref }`. Any field can be omitted: `notes` defaults to the
- * commits the test wrote into the vault between `args.since` and the
+ * commits the test wrote into the mem between `args.since` and the
  * recorded head, `memstead_ref` defaults to `undefined` (no ride-along).
  */
-function mcpFactory(health, changesByVault) {
+function mcpFactory(health, changesByMem) {
   return async (_cmd, _timeout, fn) => {
     const client = {
       async callTool(name, args) {
         if (name === 'memstead_health') return health;
         if (name === 'memstead_changes_since') {
-          const v = changesByVault[args.vault] ?? {};
-          // Resolve head: explicit override > test vault-repo HEAD > since
+          const v = changesByMem[args.mem] ?? {};
+          // Resolve head: explicit override > test mem-repo HEAD > since
           let head = v.head;
           if (!head) {
-            const layout = (health.vaults ?? []).find((x) => x.name === args.vault);
+            const layout = (health.mems ?? []).find((x) => x.name === args.mem);
             const worktree = layout?.vcs?.worktree;
             if (worktree) {
               const r = git(['rev-parse', 'HEAD'], { cwd: worktree });
@@ -154,7 +154,7 @@ function mcpFactory(health, changesByVault) {
           // and the caller didn't supply an explicit override.
           let notes = v.notes;
           if (args.include_notes && notes === undefined) {
-            const layout = (health.vaults ?? []).find((x) => x.name === args.vault);
+            const layout = (health.mems ?? []).find((x) => x.name === args.mem);
             const worktree = layout?.vcs?.worktree;
             notes = [];
             if (worktree && head !== args.since) {
@@ -213,8 +213,8 @@ describe('integration: seed commit on first run', () => {
   let layout;
   before(() => {
     outerRoot = setupOuterRepo();
-    layout = makeVault(outerRoot, 'engine');
-    commitInVault(layout, 'foo.md', 'foo', 'memstead: create engine--foo', {
+    layout = makeMem(outerRoot, 'engine');
+    commitInMem(layout, 'foo.md', 'foo', 'memstead: create engine--foo', {
       note: 'added foo',
       tool: 'memstead_create',
       actor: 'Agent',
@@ -229,7 +229,7 @@ describe('integration: seed commit on first run', () => {
     assert.strictEqual(r.kind, 'seed');
 
     const body = git(['log', '--format=%B', '-n', '1', 'HEAD'], { cwd: outerRoot }).stdout;
-    assert.match(body, /^memstead: initialize cursor \(1 vaults\)\n/);
+    assert.match(body, /^memstead: initialize cursor \(1 mems\)\n/);
     assert.match(body, /Memstead-cursor: engine@[0-9a-f]+/);
     assert.doesNotMatch(body, /Agent notes:/);
     assert.doesNotMatch(body, /\nSession:/);
@@ -255,13 +255,13 @@ describe('integration: two mutating turns produce two outer commits', () => {
   let layout;
   before(() => {
     outerRoot = setupOuterRepo();
-    layout = makeVault(outerRoot, 'engine');
+    layout = makeMem(outerRoot, 'engine');
   });
   after(() => rmSync(outerRoot, { recursive: true, force: true }));
 
   it('first turn seeds, second turn bundles only the second turn notes', async () => {
-    // Turn 1 — commits a per-vault change, pipeline fires as seed path
-    const firstHead = commitInVault(layout, 'turn1.md', '1', 'memstead: create engine--turn1', {
+    // Turn 1 — commits a per-mem change, pipeline fires as seed path
+    const firstHead = commitInMem(layout, 'turn1.md', '1', 'memstead: create engine--turn1', {
       note: 'first turn note',
       tool: 'memstead_create',
       actor: 'Agent',
@@ -279,8 +279,8 @@ describe('integration: two mutating turns produce two outer commits', () => {
     assert.strictEqual(r1.status, 'committed');
     assert.strictEqual(r1.kind, 'seed');
 
-    // Turn 2 — another per-vault commit; pipeline produces normal commit
-    const secondHead = commitInVault(layout, 'turn2.md', '2', 'memstead: create engine--turn2', {
+    // Turn 2 — another per-mem commit; pipeline produces normal commit
+    const secondHead = commitInMem(layout, 'turn2.md', '2', 'memstead: create engine--turn2', {
       note: 'second turn note',
       tool: 'memstead_create',
       actor: 'Agent',
@@ -298,7 +298,7 @@ describe('integration: two mutating turns produce two outer commits', () => {
     assert.strictEqual(r2.kind, 'normal');
 
     const body = git(['log', '--format=%B', '-n', '1', 'HEAD'], { cwd: outerRoot }).stdout;
-    assert.match(body, /^memstead: session changes \(1 entities, 1 vaults\)\n/);
+    assert.match(body, /^memstead: session changes \(1 entities, 1 mems\)\n/);
     assert.match(body, /Agent notes:\n- \[engine\] second turn note/);
     assert.doesNotMatch(body, /first turn note/);
     assert.match(body, new RegExp(`Memstead-cursor: engine@${secondHead}`));
@@ -314,13 +314,13 @@ describe('integration: skill-hook parity', () => {
   let layout;
   before(() => {
     outerRoot = setupOuterRepo();
-    layout = makeVault(outerRoot, 'engine');
+    layout = makeMem(outerRoot, 'engine');
   });
   after(() => rmSync(outerRoot, { recursive: true, force: true }));
 
   it('hook body differs from skill body only by the Session trailer', async () => {
-    // Bootstrap: per-vault seed + outer seed commit
-    commitInVault(layout, 'seed.md', 's', 'memstead: create engine--seed', {
+    // Bootstrap: per-mem seed + outer seed commit
+    commitInMem(layout, 'seed.md', 's', 'memstead: create engine--seed', {
       note: 'seed note',
       tool: 'memstead_create',
       actor: 'Agent',
@@ -328,8 +328,8 @@ describe('integration: skill-hook parity', () => {
     });
     await runSeed(outerRoot, [layout]);
 
-    // Hook run — new per-vault commit, hook pipeline
-    const hookHead = commitInVault(layout, 'hook.md', 'h', 'memstead: create engine--hook', {
+    // Hook run — new per-mem commit, hook pipeline
+    const hookHead = commitInMem(layout, 'hook.md', 'h', 'memstead: create engine--hook', {
       note: 'hook commit',
       tool: 'memstead_create',
       actor: 'Agent',
@@ -347,8 +347,8 @@ describe('integration: skill-hook parity', () => {
     assert.strictEqual(rh.status, 'committed');
     const hookBody = git(['log', '--format=%B', '-n', '1', 'HEAD'], { cwd: outerRoot }).stdout;
 
-    // Skill run — new per-vault commit, skill pipeline (sessionId=null)
-    const skillHead = commitInVault(layout, 'skill.md', 's', 'memstead: create engine--skill', {
+    // Skill run — new per-mem commit, skill pipeline (sessionId=null)
+    const skillHead = commitInMem(layout, 'skill.md', 's', 'memstead: create engine--skill', {
       note: 'skill commit',
       tool: 'memstead_create',
       actor: 'Agent',
@@ -381,13 +381,13 @@ describe('integration: external drift attribution', () => {
   let layout;
   before(() => {
     outerRoot = setupOuterRepo();
-    layout = makeVault(outerRoot, 'engine');
+    layout = makeMem(outerRoot, 'engine');
   });
   after(() => rmSync(outerRoot, { recursive: true, force: true }));
 
   it('segregates Agent notes from External edits captured; skips no-Actor', async () => {
     // Bootstrap
-    commitInVault(layout, 'initial.md', 'x', 'memstead: create engine--initial', {
+    commitInMem(layout, 'initial.md', 'x', 'memstead: create engine--initial', {
       note: 'initial',
       tool: 'memstead_create',
       actor: 'Agent',
@@ -396,16 +396,16 @@ describe('integration: external drift attribution', () => {
     await runSeed(outerRoot, [layout]);
 
     // External + agent + orphan (no Actor) — all in the same cursor window
-    const extHead = commitInVault(layout, 'ext.md', 'e', 'memstead: external edits (1 files)', {
+    const extHead = commitInMem(layout, 'ext.md', 'e', 'memstead: external edits (1 files)', {
       tool: 'memstead_external',
       actor: 'External',
     });
-    const orphanHead = commitInVault(layout, 'orphan.md', 'o', 'memstead: create engine--orphan', {
+    const orphanHead = commitInMem(layout, 'orphan.md', 'o', 'memstead: create engine--orphan', {
       note: 'orphan — no actor',
       tool: 'memstead_create',
       // no actor trailer
     });
-    const agentHead = commitInVault(layout, 'agent.md', 'a', 'memstead: create engine--with-agent', {
+    const agentHead = commitInMem(layout, 'agent.md', 'a', 'memstead: create engine--with-agent', {
       note: 'agent updated',
       tool: 'memstead_create',
       actor: 'Agent',
@@ -442,8 +442,8 @@ describe('integration: look-alike commit rejected', () => {
   let layout;
   before(() => {
     outerRoot = setupOuterRepo();
-    layout = makeVault(outerRoot, 'engine');
-    commitInVault(layout, 'a.md', 'a', 'memstead: create engine--a', {
+    layout = makeMem(outerRoot, 'engine');
+    commitInMem(layout, 'a.md', 'a', 'memstead: create engine--a', {
       note: 'real',
       tool: 'memstead_create',
       actor: 'Agent',
@@ -470,8 +470,8 @@ describe('integration: stale cursor fallback', () => {
   let layout;
   before(() => {
     outerRoot = setupOuterRepo();
-    layout = makeVault(outerRoot, 'engine');
-    commitInVault(layout, 'a.md', 'a', 'memstead: create engine--a', {
+    layout = makeMem(outerRoot, 'engine');
+    commitInMem(layout, 'a.md', 'a', 'memstead: create engine--a', {
       note: 'a',
       tool: 'memstead_create',
       actor: 'Agent',
@@ -481,7 +481,7 @@ describe('integration: stale cursor fallback', () => {
   after(() => rmSync(outerRoot, { recursive: true, force: true }));
 
   it('falls back to empty-tree when the prior cursor SHA is unreachable', async () => {
-    // Outer-repo cursor points at a non-existent SHA in the vault gitdir.
+    // Outer-repo cursor points at a non-existent SHA in the mem gitdir.
     // The migrated pipeline catches the engine's OBJECT_NOT_FOUND error
     // from memstead_changes_since and retries with the empty-tree sentinel.
     const unreachable = 'deadbeefcafebabe0000000000000000deadbeef';
@@ -490,7 +490,7 @@ describe('integration: stale cursor fallback', () => {
     git(['commit', '-q', '-F', '-'], {
       cwd: outerRoot,
       input:
-        `memstead: session changes (0 entities, 1 vaults)\n\nVaults: engine\nMemstead-cursor: engine@${unreachable}\n`,
+        `memstead: session changes (0 entities, 1 mems)\n\nMems: engine\nMemstead-cursor: engine@${unreachable}\n`,
     });
 
     const headSha = git(['rev-parse', 'HEAD'], { cwd: layout.worktree }).stdout.trim();
@@ -503,7 +503,7 @@ describe('integration: stale cursor fallback', () => {
           async callTool(name, args) {
             if (
               name === 'memstead_changes_since'
-              && args?.vault === 'engine'
+              && args?.mem === 'engine'
               && args?.since === unreachable
             ) {
               throw new Error(`MCP memstead_changes_since error: ${unreachable}: OBJECT_NOT_FOUND`);

@@ -39,18 +39,18 @@ impl Engine {
     /// Rename an entity by changing its title — the slug, id, and
     /// on-disk file path follow.
     ///
-    /// **Same-vault referrers and self-references are rewritten
+    /// **Same-mem referrers and self-references are rewritten
     /// atomically.** The renaming entity is treated as the first
     /// referrer of itself: every entry in its own `relationships`
     /// list whose target equals the old id is updated to point at
     /// the new id, and every `[[<old-slug>]]` token in its own
     /// section bodies is rewritten to the new slug (respecting
     /// fenced-code and inline-code masking). Every other entity in
-    /// the same vault that pointed at the old id (via an explicit
+    /// the same mem that pointed at the old id (via an explicit
     /// relation or an inline body wiki-link) gets the same two-
-    /// surface rewrite. All rewrites land in one per-vault commit.
-    /// Cross-vault referrers and ReadOnly-mount referrers are not
-    /// yet walked — those land with the multi-vault atomicity
+    /// surface rewrite. All rewrites land in one per-mem commit.
+    /// Cross-mem referrers and ReadOnly-mount referrers are not
+    /// yet walked — those land with the multi-mem atomicity
     /// machinery and the residual-stub demotion path respectively.
     pub fn rename_entity(
         &mut self,
@@ -60,22 +60,22 @@ impl Engine {
         note: Option<&str>,
     ) -> Result<RenameEntityOutcome, EngineError> {
         let id = &args.id;
-        let vault = id.vault().to_string();
+        let mem = id.mem().to_string();
 
         let mount_idx = self
             .mounts
             .iter()
-            .position(|m| m.mount.vault == vault)
-            .ok_or_else(|| EngineError::UnknownVault(vault.clone()))?;
+            .position(|m| m.mount.mem == mem)
+            .ok_or_else(|| EngineError::UnknownMem(mem.clone()))?;
         if self.mounts[mount_idx].mount.capability != MountCapability::Write {
-            return Err(EngineError::ReadOnlyMount(vault));
+            return Err(EngineError::ReadOnlyMount(mem));
         }
 
         // Reload-before-operation: reload if a sibling advanced the
-        // vault ref so the `expected_hash` compare below runs against
+        // mem ref so the `expected_hash` compare below runs against
         // current truth. The drift notice rides the outcome's
         // `warnings` (real-rename path).
-        let mut drift_warnings = self.reload_if_stale(Some(&vault));
+        let mut drift_warnings = self.reload_if_stale(Some(&mem));
 
         let entity = self
             .store
@@ -104,7 +104,7 @@ impl Engine {
         }
 
         let new_slug = validate_and_derive_slug(&args.new_title)?;
-        let new_id = EntityId::new(&vault, &new_slug);
+        let new_id = EntityId::new(&mem, &new_slug);
         crate::entity::id::enforce_id_length(new_id.as_ref())?;
 
         if new_id == *id {
@@ -134,7 +134,7 @@ impl Engine {
 
         let schema = self
             .schemas
-            .get(&vault)
+            .get(&mem)
             .expect("schema present for every registered mount");
         let type_def = schema
             .get_type(&entity.entity_type)
@@ -167,11 +167,11 @@ impl Engine {
         // masking discipline of `extract_inline_links`).
         //
         // The body parser admits both short form `[[slug]]` and
-        // full-id form `[[vault--slug]]` (same vault) as references to
+        // full-id form `[[mem--slug]]` (same mem) as references to
         // the same entity. The bare-slug rewriter only catches the
-        // first; `rewrite_cross_vault_slug` (which already powers the
-        // cross-vault Tier-2 rewrite) covers the second by matching
-        // `<vault>--<slug>` and `<vault>:<slug>` forms. Calling both
+        // first; `rewrite_cross_mem_slug` (which already powers the
+        // cross-mem Tier-2 rewrite) covers the second by matching
+        // `<mem>--<slug>` and `<mem>:<slug>` forms. Calling both
         // here preserves the form the author wrote — short stays short,
         // full-id stays full-id — just retargeted to the new slug.
         let old_slug = id.name().to_string();
@@ -185,9 +185,9 @@ impl Engine {
             if count > 0 {
                 *body = rewritten;
             }
-            let (rewritten, count) = crate::entity::wikilink_rewrite::rewrite_cross_vault_slug(
+            let (rewritten, count) = crate::entity::wikilink_rewrite::rewrite_cross_mem_slug(
                 body,
-                &vault,
+                &mem,
                 &old_slug,
                 &new_slug_owned,
             );
@@ -197,7 +197,7 @@ impl Engine {
         }
 
         // Every entity whose on-disk file the rename rewrites
-        // (the renaming entity itself plus every Write-vault referrer
+        // (the renaming entity itself plus every Write-mem referrer
         // touched by the body/relationships rewrite cascade) gets
         // `auto_timestamp` metadata fields stamped before
         // `generate_markdown` so the new file carries the stamp.
@@ -210,54 +210,54 @@ impl Engine {
 
         // Referrer collection. Walk every incoming edge — explicit
         // relations and `EdgeSource::BodyLink` synthesised mirrors
-        // alike — and bucket each unique referrer by its vault's
-        // capability. Same-vault referrers are guaranteed Write (the
+        // alike — and bucket each unique referrer by its mem's
+        // capability. Same-mem referrers are guaranteed Write (the
         // mount-capability gate at the top of this fn refused the
-        // rename if the renaming vault itself isn't Write). Cross-
-        // vault referrers split into Write (rewriteable, subject to
-        // the `cross_vault_links` policy gate below) and ReadOnly
+        // rename if the renaming mem itself isn't Write). Cross-
+        // mem referrers split into Write (rewriteable, subject to
+        // the `cross_mem_links` policy gate below) and ReadOnly
         // (the engine has no write access; their handling lands with
         // the rename-path residual-stub demotion in the next cut and
         // is filtered out here).
         let mut seen: std::collections::HashSet<EntityId> = std::collections::HashSet::new();
-        let mut same_vault_ids: Vec<EntityId> = Vec::new();
-        let mut cross_vault_ids: Vec<EntityId> = Vec::new();
+        let mut same_mem_ids: Vec<EntityId> = Vec::new();
+        let mut cross_mem_ids: Vec<EntityId> = Vec::new();
         for in_edge in self.store.incoming(id) {
             if in_edge.from == *id || !seen.insert(in_edge.from.clone()) {
                 continue;
             }
-            if in_edge.from.vault() == vault {
-                same_vault_ids.push(in_edge.from.clone());
+            if in_edge.from.mem() == mem {
+                same_mem_ids.push(in_edge.from.clone());
             } else {
-                cross_vault_ids.push(in_edge.from.clone());
+                cross_mem_ids.push(in_edge.from.clone());
             }
         }
 
-        // Cross-vault peers are partitioned by mount capability.
-        // Write peers feed the cross-vault rewrite plan; ReadOnly
+        // Cross-mem peers are partitioned by mount capability.
+        // Write peers feed the cross-mem rewrite plan; ReadOnly
         // peers feed the residual-stub demotion path (the engine
         // can't rewrite their on-disk markdown, so we materialise an
         // in-memory stub at the OLD id that holds the surviving
         // incoming edges from the ReadOnly mount — mirrors the
         // delete-path's same-shaped demotion).
-        let mut cross_vault_write_ids: Vec<EntityId> = Vec::new();
+        let mut cross_mem_write_ids: Vec<EntityId> = Vec::new();
         let mut readonly_referrers: Vec<EntityId> = Vec::new();
-        for from_id in cross_vault_ids {
+        for from_id in cross_mem_ids {
             match self
-                .mount(from_id.vault())
+                .mount(from_id.mem())
                 .map(|m| m.capability)
                 .unwrap_or(MountCapability::Write)
             {
-                MountCapability::Write => cross_vault_write_ids.push(from_id),
+                MountCapability::Write => cross_mem_write_ids.push(from_id),
                 MountCapability::ReadOnly => readonly_referrers.push(from_id),
             }
         }
         readonly_referrers.sort_by(|a, b| a.to_string().cmp(&b.to_string()));
 
         // Pre-flight policy gate. Each propagated referrer rewrite
-        // is an edge of the form `referrer ∈ peer_vault → renamed ∈
-        // vault` — same direction as the original edge. The gate
-        // consults `cross_vault_link_allowed(peer_vault, vault)`,
+        // is an edge of the form `referrer ∈ peer_mem → renamed ∈
+        // mem` — same direction as the original edge. The gate
+        // consults `cross_mem_link_allowed(peer_mem, mem)`,
         // which is the direction the policy gates new edges with
         // (forward-looking add-filter). A blocked peer aborts the
         // rename up-front — no writes have happened yet, so the
@@ -265,44 +265,44 @@ impl Engine {
         // inverse.
         let mut blocked_counts: std::collections::BTreeMap<String, usize> =
             std::collections::BTreeMap::new();
-        for from_id in &cross_vault_write_ids {
-            let peer_vault = from_id.vault().to_string();
-            if !self.cross_vault_link_allowed(&peer_vault, &vault) {
-                *blocked_counts.entry(peer_vault).or_insert(0) += 1;
+        for from_id in &cross_mem_write_ids {
+            let peer_mem = from_id.mem().to_string();
+            if !self.cross_mem_link_allowed(&peer_mem, &mem) {
+                *blocked_counts.entry(peer_mem).or_insert(0) += 1;
             }
         }
         if !blocked_counts.is_empty() {
             let blocked_referrers: Vec<crate::engine::error::BlockedReferrer> = blocked_counts
                 .into_iter()
-                .map(|(peer_vault, count)| crate::engine::error::BlockedReferrer {
-                    from_vault: peer_vault,
-                    to_vault: vault.clone(),
+                .map(|(peer_mem, count)| crate::engine::error::BlockedReferrer {
+                    from_mem: peer_mem,
+                    to_mem: mem.clone(),
                     count,
                 })
                 .collect();
-            return Err(EngineError::RenameBlockedByCrossVaultPolicy {
-                from_vault: vault.clone(),
+            return Err(EngineError::RenameBlockedByCrossMemPolicy {
+                from_mem: mem.clone(),
                 blocked_referrers,
             });
         }
 
-        // Deterministic iteration order so the resulting per-vault
+        // Deterministic iteration order so the resulting per-mem
         // pending-op replay is stable across runs (helpful for test
         // snapshots and human reviewers).
-        same_vault_ids.sort_by(|a, b| a.to_string().cmp(&b.to_string()));
-        cross_vault_write_ids.sort_by(|a, b| a.to_string().cmp(&b.to_string()));
+        same_mem_ids.sort_by(|a, b| a.to_string().cmp(&b.to_string()));
+        cross_mem_write_ids.sort_by(|a, b| a.to_string().cmp(&b.to_string()));
 
-        // ----- Same-vault rewrite plan -----
-        // (rewritten_markdown, file_path, type_def) per same-vault
+        // ----- Same-mem rewrite plan -----
+        // (rewritten_markdown, file_path, type_def) per same-mem
         // referrer — collected before any backend write so a
         // per-referrer schema or rewrite failure aborts the rename
         // before anything lands.
-        let mut same_vault_writes: Vec<(
+        let mut same_mem_writes: Vec<(
             String,
             String,
             std::sync::Arc<memstead_schema::TypeDefinition>,
-        )> = Vec::with_capacity(same_vault_ids.len());
-        for from_id in &same_vault_ids {
+        )> = Vec::with_capacity(same_mem_ids.len());
+        for from_id in &same_mem_ids {
             let Some(referrer) = self.store.get(from_id) else {
                 continue;
             };
@@ -327,13 +327,13 @@ impl Engine {
                 if count > 0 {
                     *body = rewritten;
                 }
-                // A same-vault referrer may also use
-                // full-id form `[[<vault>--<slug>]]` to point at the
-                // renaming entity — covered by the cross-vault helper
+                // A same-mem referrer may also use
+                // full-id form `[[<mem>--<slug>]]` to point at the
+                // renaming entity — covered by the cross-mem helper
                 // which matches the `--` and `:` separator forms.
-                let (rewritten, count) = crate::entity::wikilink_rewrite::rewrite_cross_vault_slug(
+                let (rewritten, count) = crate::entity::wikilink_rewrite::rewrite_cross_mem_slug(
                     body,
-                    &vault,
+                    &mem,
                     &old_slug,
                     &new_slug_owned,
                 );
@@ -352,35 +352,35 @@ impl Engine {
             // timestamp through from the cloned referrer. (Pre-fix this
             // stamped the shared `today` for cross-entity consistency.)
             let ref_markdown = generate_markdown(&next_ref, referrer_type_def.as_ref());
-            same_vault_writes.push((
+            same_mem_writes.push((
                 ref_markdown,
                 next_ref.file_path.clone(),
                 referrer_type_def,
             ));
         }
 
-        // ----- Cross-vault rewrite plan -----
-        // Group cross-vault Write referrers by their vault so each
-        // peer vault's backend gets one commit. Each entry holds the
-        // peer mount index, the peer vault's schema, and the list of
-        // (markdown, file_path, type_def) for that vault's referrers.
-        struct PeerVaultPlan {
+        // ----- Cross-mem rewrite plan -----
+        // Group cross-mem Write referrers by their mem so each
+        // peer mem's backend gets one commit. Each entry holds the
+        // peer mount index, the peer mem's schema, and the list of
+        // (markdown, file_path, type_def) for that mem's referrers.
+        struct PeerMemPlan {
             mount_idx: usize,
-            vault: String,
+            mem: String,
             writes: Vec<(String, String, std::sync::Arc<memstead_schema::TypeDefinition>)>,
         }
-        let mut peer_plans: std::collections::BTreeMap<String, PeerVaultPlan> =
+        let mut peer_plans: std::collections::BTreeMap<String, PeerMemPlan> =
             std::collections::BTreeMap::new();
-        for from_id in &cross_vault_write_ids {
-            let peer_vault = from_id.vault().to_string();
+        for from_id in &cross_mem_write_ids {
+            let peer_mem = from_id.mem().to_string();
             let peer_mount_idx = self
                 .mounts
                 .iter()
-                .position(|m| m.mount.vault == peer_vault)
+                .position(|m| m.mount.mem == peer_mem)
                 .expect("peer mount present for collected referrer id");
             let peer_schema = self
                 .schemas
-                .get(&peer_vault)
+                .get(&peer_mem)
                 .expect("schema present for every registered mount");
 
             let Some(referrer) = self.store.get(from_id) else {
@@ -398,16 +398,16 @@ impl Engine {
                     rel.target = new_id.clone();
                 }
             }
-            // Cross-vault referrers reference the renaming entity
-            // via the cross-vault wiki-link forms (`[[<vault>:<slug>]]`
-            // or the legacy `[[<vault>--<slug>]]`). The bare-slug
-            // form is reserved for same-vault refs and never appears
+            // Cross-mem referrers reference the renaming entity
+            // via the cross-mem wiki-link forms (`[[<mem>:<slug>]]`
+            // or the legacy `[[<mem>--<slug>]]`). The bare-slug
+            // form is reserved for same-mem refs and never appears
             // here.
             for body in next_ref.sections.values_mut() {
                 let (rewritten, count) =
-                    crate::entity::wikilink_rewrite::rewrite_cross_vault_slug(
+                    crate::entity::wikilink_rewrite::rewrite_cross_mem_slug(
                         body,
-                        &vault,
+                        &mem,
                         &old_slug,
                         &new_slug_owned,
                     );
@@ -415,29 +415,29 @@ impl Engine {
                     *body = rewritten;
                 }
             }
-            // A cross-vault Write peer is a referrer too — preserve its
-            // `last_modified` for the same reason as the same-vault case
+            // A cross-mem Write peer is a referrer too — preserve its
+            // `last_modified` for the same reason as the same-mem case
             // above (slug rewrite is a foreign-key change, not a semantic
             // edit). Its content hash still changes; the staleness clock
             // does not reset.
             let ref_markdown = generate_markdown(&next_ref, referrer_type_def.as_ref());
 
             peer_plans
-                .entry(peer_vault.clone())
-                .or_insert_with(|| PeerVaultPlan {
+                .entry(peer_mem.clone())
+                .or_insert_with(|| PeerMemPlan {
                     mount_idx: peer_mount_idx,
-                    vault: peer_vault.clone(),
+                    mem: peer_mem.clone(),
                     writes: Vec::new(),
                 })
                 .writes
                 .push((ref_markdown, next_ref.file_path.clone(), referrer_type_def));
         }
 
-        // ----- Apply: renaming entity's own vault first -----
+        // ----- Apply: renaming entity's own mem first -----
         // Mint a single `logical_operation_id` up front so every
-        // commit produced by this rename — source vault + every peer
-        // vault — carries the same correlation id in its provenance
-        // entry. Single-vault renames also tag with an id (it just
+        // commit produced by this rename — source mem + every peer
+        // mem — carries the same correlation id in its provenance
+        // entry. Single-mem renames also tag with an id (it just
         // maps to one commit); consumers branch on whether the id
         // recurs to identify a multi-commit logical operation.
         let logical_op_id = crate::provenance::mint_logical_operation_id();
@@ -445,7 +445,7 @@ impl Engine {
         let backend = self.mounts[mount_idx].backend.as_ref();
         backend.write_entity(Path::new(&new_file_path), markdown.as_bytes())?;
         backend.delete_entity(Path::new(&old_file_path))?;
-        for (ref_markdown, ref_file_path, _) in &same_vault_writes {
+        for (ref_markdown, ref_file_path, _) in &same_mem_writes {
             backend.write_entity(Path::new(ref_file_path), ref_markdown.as_bytes())?;
         }
         let commit_subject = format!("memstead: rename {} → {new_id}", id);
@@ -473,39 +473,39 @@ impl Engine {
 
         self.record_self_write(mount_idx, &commit_sha);
 
-        // ----- Apply: cross-vault peer vaults (parent-pinned) -----
-        // Snapshot every peer vault's current head before any peer
+        // ----- Apply: cross-mem peer mems (parent-pinned) -----
+        // Snapshot every peer mem's current head before any peer
         // writes begin. The snapshots are pinned through
         // `commit_with_expected_parent`, so a sibling writer that
-        // advances a peer vault's head between snapshot and commit
+        // advances a peer mem's head between snapshot and commit
         // aborts the commit with `BackendError::ParentMismatch`. The
         // engine layer maps this to `RENAME_PARTIAL_FAILURE` (the
-        // source vault has already committed by this point — its
+        // source mem has already committed by this point — its
         // state is durable; only the failed peer's writes are lost).
         // Folder and archive backends inherit the trait's default
         // `commit_with_expected_parent` (which ignores the parent
         // and delegates to `commit`); the git-branch backend
-        // overrides to check the per-vault branch tip.
+        // overrides to check the per-mem branch tip.
         let mut peer_snapshots: std::collections::BTreeMap<String, Option<String>> =
             std::collections::BTreeMap::new();
         for plan in peer_plans.values() {
             let peer_backend = self.mounts[plan.mount_idx].backend.as_ref();
             let snapshot = peer_backend.current_head()?;
-            peer_snapshots.insert(plan.vault.clone(), snapshot);
+            peer_snapshots.insert(plan.mem.clone(), snapshot);
         }
 
-        // Track which vaults have already committed in this logical
+        // Track which mems have already committed in this logical
         // operation. On a peer-commit failure, the engine surfaces
         // the partial-state envelope so the agent can decide whether
         // to retry, reconcile, or accept.
-        let mut committed_vaults: Vec<String> = vec![vault.clone()];
+        let mut committed_mems: Vec<String> = vec![mem.clone()];
         for plan in peer_plans.values() {
             let peer_backend = self.mounts[plan.mount_idx].backend.as_ref();
             for (ref_markdown, ref_file_path, _) in &plan.writes {
                 peer_backend.write_entity(Path::new(ref_file_path), ref_markdown.as_bytes())?;
             }
             let peer_commit_subject =
-                format!("memstead: rename {} → {new_id} (cross-vault rewrite in `{}`)", id, plan.vault);
+                format!("memstead: rename {} → {new_id} (cross-mem rewrite in `{}`)", id, plan.mem);
             let peer_ctx = CommitContext {
                 actor,
                 client: client.cloned(),
@@ -515,7 +515,7 @@ impl Engine {
                 entity_ids: None,
             };
             let expected = peer_snapshots
-                .get(&plan.vault)
+                .get(&plan.mem)
                 .cloned()
                 .unwrap_or(None);
             let peer_commit_result = peer_backend.commit_with_expected_parent(
@@ -527,8 +527,8 @@ impl Engine {
                 Ok(sha) => sha,
                 Err(crate::backend::BackendError::ParentMismatch { .. }) => {
                     return Err(EngineError::RenamePartialFailure {
-                        committed_vaults: std::mem::take(&mut committed_vaults),
-                        failed_vault: plan.vault.clone(),
+                        committed_mems: std::mem::take(&mut committed_mems),
+                        failed_mem: plan.mem.clone(),
                         failure_cause: "drift".to_string(),
                     });
                 }
@@ -546,18 +546,18 @@ impl Engine {
                 .with_logical_operation_id(logical_op_id.clone()),
             )?;
             self.record_self_write(plan.mount_idx, &peer_commit_sha);
-            committed_vaults.push(plan.vault.clone());
+            committed_mems.push(plan.mem.clone());
         }
 
         // ----- Re-parse and push -----
         let parse_result =
-            parse_markdown(&markdown, &new_file_path, type_def.as_ref(), &vault)
+            parse_markdown(&markdown, &new_file_path, type_def.as_ref(), &mem)
                 .map_err(|e| EngineError::ParseAfterWrite(e.to_string()))?;
         let content_hash = parse_result.entity.content_hash.clone();
 
         let mut parse_results = vec![parse_result];
-        for (ref_markdown, ref_file_path, ref_type_def) in &same_vault_writes {
-            let pr = parse_markdown(ref_markdown, ref_file_path, ref_type_def.as_ref(), &vault)
+        for (ref_markdown, ref_file_path, ref_type_def) in &same_mem_writes {
+            let pr = parse_markdown(ref_markdown, ref_file_path, ref_type_def.as_ref(), &mem)
                 .map_err(|e| EngineError::ParseAfterWrite(e.to_string()))?;
             parse_results.push(pr);
         }
@@ -567,14 +567,14 @@ impl Engine {
                     ref_markdown,
                     ref_file_path,
                     ref_type_def.as_ref(),
-                    &plan.vault,
+                    &plan.mem,
                 )
                 .map_err(|e| EngineError::ParseAfterWrite(e.to_string()))?;
                 parse_results.push(pr);
             }
         }
 
-        // Residual-stub demotion for ReadOnly cross-vault referrers.
+        // Residual-stub demotion for ReadOnly cross-mem referrers.
         // The engine can't rewrite ReadOnly-mount markdown, so the
         // wiki-links there still point at the OLD slug after the
         // rename. To keep `incoming(<new_id>)` aligned with what a
@@ -654,22 +654,22 @@ mod tests {
 
     use tempfile::TempDir;
 
-    use crate::backend::VaultBackend;
+    use crate::backend::MemBackend;
     use crate::engine::test_helpers::*;
     use crate::engine::{Engine, EngineError, RenameEntityArgs};
     use crate::ops::WarningHint;
-    use crate::storage::FilesystemVaultWriter;
+    use crate::storage::FilesystemMemWriter;
 
     #[test]
     fn rename_entity_renames_file_and_id_persists_across_restart() {
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().to_path_buf();
+        let mem_dir = tmp.path().to_path_buf();
 
         let (old_id, new_id, new_file) = {
-            let writer = FilesystemVaultWriter::new(vault_dir.clone());
+            let writer = FilesystemMemWriter::new(mem_dir.clone());
             let mut engine = Engine::from_mounts(vec![(
-                folder_mount("specs", vault_dir.clone()),
-                Box::new(writer) as Box<dyn VaultBackend>,
+                folder_mount("specs", mem_dir.clone()),
+                Box::new(writer) as Box<dyn MemBackend>,
             )])
             .unwrap();
             let (actor, client) = cli_actor();
@@ -692,16 +692,16 @@ mod tests {
             assert_eq!(outcome.new_id.to_string(), "specs--new-name");
             assert_eq!(outcome.new_path, "new-name.md");
             // Old file gone, new file present.
-            assert!(!vault_dir.join(&outcome.old_path).exists());
-            assert!(vault_dir.join(&outcome.new_path).exists());
+            assert!(!mem_dir.join(&outcome.old_path).exists());
+            assert!(mem_dir.join(&outcome.new_path).exists());
             (outcome.old_id, outcome.new_id, outcome.new_path)
         };
 
-        // New engine reading the same vault sees only the new id.
-        let writer2 = FilesystemVaultWriter::new(vault_dir.clone());
+        // New engine reading the same mem sees only the new id.
+        let writer2 = FilesystemMemWriter::new(mem_dir.clone());
         let engine2 = Engine::from_mounts(vec![(
-            folder_mount("specs", vault_dir),
-            Box::new(writer2) as Box<dyn VaultBackend>,
+            folder_mount("specs", mem_dir),
+            Box::new(writer2) as Box<dyn MemBackend>,
         )])
         .unwrap();
         assert!(engine2.get_entity(&old_id).is_none());
@@ -775,11 +775,11 @@ mod tests {
         use indexmap::IndexMap;
 
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().to_path_buf();
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
-            folder_mount("specs", vault_dir.clone()),
-            Box::new(writer) as Box<dyn VaultBackend>,
+            folder_mount("specs", mem_dir.clone()),
+            Box::new(writer) as Box<dyn MemBackend>,
         )])
         .unwrap();
         let (actor, client) = cli_actor();
@@ -804,7 +804,7 @@ mod tests {
         let seeded = engine
             .create_entity(
                 crate::engine::CreateEntityArgs {
-                    vault: "specs".to_string(),
+                    mem: "specs".to_string(),
                     title: "Old Name".to_string(),
                     entity_type: "spec".to_string(),
                     sections,
@@ -836,7 +836,7 @@ mod tests {
 
         // File on disk reflects the rewrite — old slug must not
         // appear anywhere in the new file's bytes.
-        let new_bytes = std::fs::read_to_string(vault_dir.join(&outcome.new_path)).unwrap();
+        let new_bytes = std::fs::read_to_string(mem_dir.join(&outcome.new_path)).unwrap();
         assert!(
             new_bytes.contains("[[brand-new-name]]"),
             "expected new slug in body, got:\n{new_bytes}"
@@ -883,23 +883,23 @@ mod tests {
     #[test]
     fn rename_preserves_referrer_last_modified_but_rewrites_link() {
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().to_path_buf();
+        let mem_dir = tmp.path().to_path_buf();
 
         std::fs::write(
-            vault_dir.join("target.md"),
+            mem_dir.join("target.md"),
             "---\ntype: spec\ncreated_date: 2020-01-01\nlast_modified: 2020-01-01\nlevel: M0\n---\n# Target\n\n## Identity\n\nT\n\n## Purpose\n\nP\n",
         )
         .unwrap();
         std::fs::write(
-            vault_dir.join("referrer.md"),
+            mem_dir.join("referrer.md"),
             "---\ntype: spec\ncreated_date: 2020-01-01\nlast_modified: 2020-01-01\nlevel: M0\n---\n# Referrer\n\n## Identity\n\nR\n\n## Purpose\n\nDepends on [[target]] for context.\n\n## Relationships\n\n- **REFERENCES**: [[target]]\n",
         )
         .unwrap();
 
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
-            folder_mount("specs", vault_dir.clone()),
-            Box::new(writer) as Box<dyn VaultBackend>,
+            folder_mount("specs", mem_dir.clone()),
+            Box::new(writer) as Box<dyn MemBackend>,
         )])
         .unwrap();
         let (actor, client) = cli_actor();
@@ -925,7 +925,7 @@ mod tests {
             )
             .expect("rename succeeds");
 
-        let referrer_md = std::fs::read_to_string(vault_dir.join("referrer.md")).unwrap();
+        let referrer_md = std::fs::read_to_string(mem_dir.join("referrer.md")).unwrap();
         // Staleness clock preserved — NOT bumped to today.
         assert!(
             referrer_md.contains("last_modified: 2020-01-01"),
@@ -943,17 +943,17 @@ mod tests {
     }
 
     #[test]
-    fn rename_entity_rewrites_same_vault_referrers_atomically() {
+    fn rename_entity_rewrites_same_mem_referrers_atomically() {
         use crate::engine::{CreateEntityArgs, RelateEntityArgs};
         use crate::entity::EntityId;
         use indexmap::IndexMap;
 
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().to_path_buf();
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
-            folder_mount("specs", vault_dir.clone()),
-            Box::new(writer) as Box<dyn VaultBackend>,
+            folder_mount("specs", mem_dir.clone()),
+            Box::new(writer) as Box<dyn MemBackend>,
         )])
         .unwrap();
         let (actor, client) = cli_actor();
@@ -975,7 +975,7 @@ mod tests {
         let referrer_a = engine
             .create_entity(
                 CreateEntityArgs {
-                    vault: "specs".to_string(),
+                    mem: "specs".to_string(),
                     title: "Referrer Alpha".to_string(),
                     entity_type: "spec".to_string(),
                     sections: sections_a,
@@ -1003,7 +1003,7 @@ mod tests {
         let referrer_b = engine
             .create_entity(
                 CreateEntityArgs {
-                    vault: "specs".to_string(),
+                    mem: "specs".to_string(),
                     title: "Referrer Bravo".to_string(),
                     entity_type: "spec".to_string(),
                     sections: sections_b,
@@ -1026,7 +1026,7 @@ mod tests {
             .create_entity(empty_create_args("specs", "Bystander"), actor, Some(&client), None)
             .unwrap();
         let bystander_bytes_before =
-            std::fs::read_to_string(vault_dir.join(&bystander.file_path)).unwrap();
+            std::fs::read_to_string(mem_dir.join(&bystander.file_path)).unwrap();
 
         let renamed = engine
             .rename_entity(
@@ -1042,9 +1042,9 @@ mod tests {
             .unwrap();
         assert_eq!(renamed.new_id.to_string(), "specs--renamed-spec");
 
-        // Old slug must not survive in any vault file — grep-clean,
-        // scoped to this single-vault workspace.
-        for path in std::fs::read_dir(&vault_dir).unwrap().flatten() {
+        // Old slug must not survive in any mem file — grep-clean,
+        // scoped to this single-mem workspace.
+        for path in std::fs::read_dir(&mem_dir).unwrap().flatten() {
             let p = path.path();
             if p.extension().and_then(|s| s.to_str()) != Some("md") {
                 continue;
@@ -1091,42 +1091,42 @@ mod tests {
 
         // Bystander untouched — exact byte equality on disk.
         let bystander_bytes_after =
-            std::fs::read_to_string(vault_dir.join(&bystander.file_path)).unwrap();
+            std::fs::read_to_string(mem_dir.join(&bystander.file_path)).unwrap();
         assert_eq!(
             bystander_bytes_before, bystander_bytes_after,
             "bystander must not be rewritten"
         );
     }
 
-    /// Two-vault test scaffolding: build an engine with `specs` and
-    /// `memos` Write mounts, and set `cross_vault_links` so each is
+    /// Two-mem test scaffolding: build an engine with `specs` and
+    /// `memos` Write mounts, and set `cross_mem_links` so each is
     /// permitted to link into the other. Returns the engine, both
-    /// vault directories, and the actor/client tuple. The test then
+    /// mem directories, and the actor/client tuple. The test then
     /// seeds whatever entities it needs.
-    fn engine_with_two_vaults_and_bidirectional_policy(
+    fn engine_with_two_mems_and_bidirectional_policy(
         specs_dir: PathBuf,
         memos_dir: PathBuf,
     ) -> Engine {
         use memstead_schema::workspace_config::CrossLinkValue;
-        let writer_specs = FilesystemVaultWriter::new(specs_dir.clone());
-        let writer_memos = FilesystemVaultWriter::new(memos_dir.clone());
+        let writer_specs = FilesystemMemWriter::new(specs_dir.clone());
+        let writer_memos = FilesystemMemWriter::new(memos_dir.clone());
         let mut engine = Engine::from_mounts(vec![
             (
                 folder_mount("specs", specs_dir),
-                Box::new(writer_specs) as Box<dyn VaultBackend>,
+                Box::new(writer_specs) as Box<dyn MemBackend>,
             ),
             (
                 folder_mount("memos", memos_dir),
-                Box::new(writer_memos) as Box<dyn VaultBackend>,
+                Box::new(writer_memos) as Box<dyn MemBackend>,
             ),
         ])
         .unwrap();
         let mut settings = crate::workspace::WorkspaceSettings::default();
-        settings.cross_vault_links.insert(
+        settings.cross_mem_links.insert(
             "memos".to_string(),
             CrossLinkValue::List(vec!["specs".to_string()]),
         );
-        settings.cross_vault_links.insert(
+        settings.cross_mem_links.insert(
             "specs".to_string(),
             CrossLinkValue::List(vec!["memos".to_string()]),
         );
@@ -1135,7 +1135,7 @@ mod tests {
     }
 
     #[test]
-    fn rename_entity_rewrites_cross_vault_write_referrer() {
+    fn rename_entity_rewrites_cross_mem_write_referrer() {
         use crate::engine::{CreateEntityArgs, RelateEntityArgs};
         use crate::entity::EntityId;
         use indexmap::IndexMap;
@@ -1144,7 +1144,7 @@ mod tests {
         let tmp_memos = TempDir::new().unwrap();
         let specs_dir = tmp_specs.path().to_path_buf();
         let memos_dir = tmp_memos.path().to_path_buf();
-        let mut engine = engine_with_two_vaults_and_bidirectional_policy(
+        let mut engine = engine_with_two_mems_and_bidirectional_policy(
             specs_dir.clone(),
             memos_dir.clone(),
         );
@@ -1155,9 +1155,9 @@ mod tests {
             .create_entity(empty_create_args("specs", "Target Spec"), actor, Some(&client), None)
             .unwrap();
 
-        // Cross-vault referrer in `memos` has a body wiki-link in the
-        // `:` form atomically backed by an explicit cross-vault relation.
-        // The legacy `--` form is a same-vault nested-prefix drift
+        // Cross-mem referrer in `memos` has a body wiki-link in the
+        // `:` form atomically backed by an explicit cross-mem relation.
+        // The legacy `--` form is a same-mem nested-prefix drift
         // (resolves to `memos--specs--target-spec`); under the alias
         // model it cannot be backed and the engine surfaces it as
         // `SuspiciousNestedPrefix`, so it stays out of fresh fixtures.
@@ -1171,7 +1171,7 @@ mod tests {
         let referrer = engine
             .create_entity(
                 CreateEntityArgs {
-                    vault: "memos".to_string(),
+                    mem: "memos".to_string(),
                     title: "Cross Note".to_string(),
                     entity_type: "memo".to_string(),
                     sections,
@@ -1203,7 +1203,7 @@ mod tests {
             .unwrap();
         assert_eq!(renamed.new_id.to_string(), "specs--renamed-spec");
 
-        // Cross-vault referrer's on-disk file now carries the new
+        // Cross-mem referrer's on-disk file now carries the new
         // slug in the colon form and no `target-spec` remnants survive.
         let referrer_path = memos_dir.join(&referrer.file_path);
         let referrer_bytes = std::fs::read_to_string(&referrer_path).unwrap();
@@ -1224,7 +1224,7 @@ mod tests {
                 .iter()
                 .any(|r| r.rel_type == "REFERENCES"
                     && r.target == EntityId::new("specs", "renamed-spec")),
-            "expected cross-vault relation to point at renamed-spec, got {:?}",
+            "expected cross-mem relation to point at renamed-spec, got {:?}",
             in_mem.relationships
         );
         assert!(
@@ -1234,21 +1234,21 @@ mod tests {
         );
     }
 
-    /// Wraps a real `VaultBackend` and forwards every method
+    /// Wraps a real `MemBackend` and forwards every method
     /// verbatim, except `commit_with_expected_parent` returns
     /// `BackendError::ParentMismatch` whenever the caller passes a
     /// non-`None` `expected_parent`. Models the "sibling writer
     /// advanced the head between snapshot and our commit" case
     /// without needing a real git-branch repository.
     struct DriftingBackend {
-        inner: Box<dyn VaultBackend>,
+        inner: Box<dyn MemBackend>,
     }
     impl DriftingBackend {
-        fn new(inner: Box<dyn VaultBackend>) -> Self {
+        fn new(inner: Box<dyn MemBackend>) -> Self {
             Self { inner }
         }
     }
-    impl crate::backend::VaultBackend for DriftingBackend {
+    impl crate::backend::MemBackend for DriftingBackend {
         fn list_entities(&self) -> Result<Vec<PathBuf>, crate::backend::BackendError> {
             self.inner.list_entities()
         }
@@ -1320,7 +1320,7 @@ mod tests {
     }
 
     #[test]
-    fn rename_entity_surfaces_partial_failure_when_peer_vault_drifts() {
+    fn rename_entity_surfaces_partial_failure_when_peer_mem_drifts() {
         use crate::engine::{CreateEntityArgs, RelateEntityArgs};
         use indexmap::IndexMap;
         use memstead_schema::workspace_config::CrossLinkValue;
@@ -1331,31 +1331,31 @@ mod tests {
         let memos_dir = tmp_memos.path().to_path_buf();
 
         // specs uses a plain filesystem backend; memos uses one
-        // wrapped in DriftingBackend so its peer-vault commit during
+        // wrapped in DriftingBackend so its peer-mem commit during
         // rename fails with ParentMismatch (the parent-pin tripped
         // by a hypothetical sibling writer).
-        let writer_specs = FilesystemVaultWriter::new(specs_dir.clone());
-        let writer_memos_inner: Box<dyn VaultBackend> =
-            Box::new(FilesystemVaultWriter::new(memos_dir.clone()));
+        let writer_specs = FilesystemMemWriter::new(specs_dir.clone());
+        let writer_memos_inner: Box<dyn MemBackend> =
+            Box::new(FilesystemMemWriter::new(memos_dir.clone()));
         let writer_memos = DriftingBackend::new(writer_memos_inner);
 
         let mut engine = Engine::from_mounts(vec![
             (
                 folder_mount("specs", specs_dir.clone()),
-                Box::new(writer_specs) as Box<dyn VaultBackend>,
+                Box::new(writer_specs) as Box<dyn MemBackend>,
             ),
             (
                 folder_mount("memos", memos_dir.clone()),
-                Box::new(writer_memos) as Box<dyn VaultBackend>,
+                Box::new(writer_memos) as Box<dyn MemBackend>,
             ),
         ])
         .unwrap();
         let mut settings = crate::workspace::WorkspaceSettings::default();
-        settings.cross_vault_links.insert(
+        settings.cross_mem_links.insert(
             "memos".to_string(),
             CrossLinkValue::List(vec!["specs".to_string()]),
         );
-        settings.cross_vault_links.insert(
+        settings.cross_mem_links.insert(
             "specs".to_string(),
             CrossLinkValue::List(vec!["memos".to_string()]),
         );
@@ -1379,7 +1379,7 @@ mod tests {
         let referrer = engine
             .create_entity(
                 CreateEntityArgs {
-                    vault: "memos".to_string(),
+                    mem: "memos".to_string(),
                     title: "Cross Note".to_string(),
                     entity_type: "memo".to_string(),
                     sections,
@@ -1410,29 +1410,29 @@ mod tests {
             .unwrap_err();
         match err {
             EngineError::RenamePartialFailure {
-                committed_vaults,
-                failed_vault,
+                committed_mems,
+                failed_mem,
                 failure_cause,
             } => {
-                // The renaming entity's own vault committed before
-                // the peer-vault commit was attempted, so it must be
+                // The renaming entity's own mem committed before
+                // the peer-mem commit was attempted, so it must be
                 // listed as already-committed.
-                assert_eq!(committed_vaults, vec!["specs".to_string()]);
-                assert_eq!(failed_vault, "memos");
+                assert_eq!(committed_mems, vec!["specs".to_string()]);
+                assert_eq!(failed_mem, "memos");
                 assert_eq!(failure_cause, "drift");
             }
             other => panic!("expected RenamePartialFailure, got {other:?}"),
         }
-        // The renaming entity's own vault has the new file (its
+        // The renaming entity's own mem has the new file (its
         // commit landed) — that's the whole point of the partial-
-        // failure envelope: source vault is durable, peer is not.
+        // failure envelope: source mem is durable, peer is not.
         assert!(specs_dir.join("renamed-spec.md").exists());
         assert!(!specs_dir.join(&target.file_path).exists());
     }
 
     #[test]
-    fn rename_entity_tags_every_per_vault_commit_with_same_logical_operation_id() {
-        use crate::backend::VaultBackend;
+    fn rename_entity_tags_every_per_mem_commit_with_same_logical_operation_id() {
+        use crate::backend::MemBackend;
         use crate::engine::{CreateEntityArgs, RelateEntityArgs};
         use indexmap::IndexMap;
 
@@ -1440,7 +1440,7 @@ mod tests {
         let tmp_memos = TempDir::new().unwrap();
         let specs_dir = tmp_specs.path().to_path_buf();
         let memos_dir = tmp_memos.path().to_path_buf();
-        let mut engine = engine_with_two_vaults_and_bidirectional_policy(
+        let mut engine = engine_with_two_mems_and_bidirectional_policy(
             specs_dir.clone(),
             memos_dir.clone(),
         );
@@ -1458,7 +1458,7 @@ mod tests {
         let referrer = engine
             .create_entity(
                 CreateEntityArgs {
-                    vault: "memos".to_string(),
+                    mem: "memos".to_string(),
                     title: "Cross Note".to_string(),
                     entity_type: "memo".to_string(),
                     sections,
@@ -1488,24 +1488,24 @@ mod tests {
             )
             .unwrap();
 
-        // Read provenance from each vault's backend and find the
-        // rename entries. Both vaults must record a Rename entry, and
+        // Read provenance from each mem's backend and find the
+        // rename entries. Both mems must record a Rename entry, and
         // both entries must share the same logical_operation_id.
-        let specs_backend: Box<dyn VaultBackend> =
-            Box::new(FilesystemVaultWriter::new(specs_dir.clone()));
-        let memos_backend: Box<dyn VaultBackend> =
-            Box::new(FilesystemVaultWriter::new(memos_dir.clone()));
+        let specs_backend: Box<dyn MemBackend> =
+            Box::new(FilesystemMemWriter::new(specs_dir.clone()));
+        let memos_backend: Box<dyn MemBackend> =
+            Box::new(FilesystemMemWriter::new(memos_dir.clone()));
         let specs_provenance = specs_backend.read_provenance(None).unwrap();
         let memos_provenance = memos_backend.read_provenance(None).unwrap();
 
         let specs_rename = specs_provenance
             .iter()
             .find(|p| matches!(p.kind, crate::provenance::ProvenanceKind::Rename))
-            .expect("specs vault must have a rename provenance entry");
+            .expect("specs mem must have a rename provenance entry");
         let memos_rename = memos_provenance
             .iter()
             .find(|p| matches!(p.kind, crate::provenance::ProvenanceKind::Rename))
-            .expect("memos vault must have a rename provenance entry");
+            .expect("memos mem must have a rename provenance entry");
 
         let specs_id = specs_rename
             .logical_operation_id
@@ -1517,7 +1517,7 @@ mod tests {
             .expect("memos rename entry must carry a logical_operation_id");
         assert_eq!(
             specs_id, memos_id,
-            "both per-vault rename commits must share the same logical_operation_id"
+            "both per-mem rename commits must share the same logical_operation_id"
         );
         assert!(
             specs_id.starts_with("logop-"),
@@ -1526,7 +1526,7 @@ mod tests {
     }
 
     #[test]
-    fn rename_entity_refuses_when_cross_vault_referrer_blocked_by_policy() {
+    fn rename_entity_refuses_when_cross_mem_referrer_blocked_by_policy() {
         use crate::engine::{CreateEntityArgs, RelateEntityArgs};
         use indexmap::IndexMap;
         use memstead_schema::workspace_config::CrossLinkValue;
@@ -1536,9 +1536,9 @@ mod tests {
         let specs_dir = tmp_specs.path().to_path_buf();
         let memos_dir = tmp_memos.path().to_path_buf();
 
-        // Start with full policy so the create + cross-vault relate
+        // Start with full policy so the create + cross-mem relate
         // succeed during setup.
-        let mut engine = engine_with_two_vaults_and_bidirectional_policy(
+        let mut engine = engine_with_two_mems_and_bidirectional_policy(
             specs_dir.clone(),
             memos_dir.clone(),
         );
@@ -1556,7 +1556,7 @@ mod tests {
         let referrer = engine
             .create_entity(
                 CreateEntityArgs {
-                    vault: "memos".to_string(),
+                    mem: "memos".to_string(),
                     title: "Cross Note".to_string(),
                     entity_type: "memo".to_string(),
                     sections,
@@ -1579,11 +1579,11 @@ mod tests {
         // preserves that direction, so the rename gate must refuse
         // up-front with the now-blocked direction named.
         let mut settings = crate::workspace::WorkspaceSettings::default();
-        settings.cross_vault_links.insert(
+        settings.cross_mem_links.insert(
             "specs".to_string(),
             CrossLinkValue::List(vec!["memos".to_string()]),
         );
-        // No entry for `memos` → `cross_vault_link_allowed("memos", "specs")` = false.
+        // No entry for `memos` → `cross_mem_link_allowed("memos", "specs")` = false.
         engine.set_settings(settings);
 
         let err = engine
@@ -1599,17 +1599,17 @@ mod tests {
             )
             .unwrap_err();
         match err {
-            EngineError::RenameBlockedByCrossVaultPolicy {
-                from_vault,
+            EngineError::RenameBlockedByCrossMemPolicy {
+                from_mem,
                 blocked_referrers,
             } => {
-                assert_eq!(from_vault, "specs");
+                assert_eq!(from_mem, "specs");
                 assert_eq!(blocked_referrers.len(), 1);
-                assert_eq!(blocked_referrers[0].from_vault, "memos");
-                assert_eq!(blocked_referrers[0].to_vault, "specs");
+                assert_eq!(blocked_referrers[0].from_mem, "memos");
+                assert_eq!(blocked_referrers[0].to_mem, "specs");
                 assert_eq!(blocked_referrers[0].count, 1);
             }
-            other => panic!("expected RenameBlockedByCrossVaultPolicy, got {other:?}"),
+            other => panic!("expected RenameBlockedByCrossMemPolicy, got {other:?}"),
         }
         // Nothing landed: target file is still at the old path, no
         // new file was created.
@@ -1617,9 +1617,9 @@ mod tests {
         assert!(!specs_dir.join("renamed-spec.md").exists());
     }
 
-    /// Rename target has no Write-vault referrers but is referenced
+    /// Rename target has no Write-mem referrers but is referenced
     /// from a ReadOnly archive. The rename rewrites the renaming
-    /// entity's own vault but cannot reach into the archive — the
+    /// entity's own mem but cannot reach into the archive — the
     /// archive's wiki-link still points at the old slug. To keep
     /// `incoming(<new_id>)` aligned with what a fresh boot would
     /// produce and surface the dangling reference, the OLD-id store
@@ -1628,17 +1628,17 @@ mod tests {
     /// warning on the outcome. Mirrors delete-path's same-shaped
     /// demotion.
     #[test]
-    fn rename_entity_demotes_to_stub_when_only_readonly_cross_vault_referrers_remain() {
+    fn rename_entity_demotes_to_stub_when_only_readonly_cross_mem_referrers_remain() {
         use crate::engine::test_helpers::{archive_mount, build_archive};
         use crate::workspace::{Mount, MountCapability, MountLifecycle, MountStorage};
 
         let tmp = TempDir::new().unwrap();
         let writable_dir = tmp.path().join("writable");
         std::fs::create_dir_all(&writable_dir).unwrap();
-        let writer = FilesystemVaultWriter::new(writable_dir.clone());
+        let writer = FilesystemMemWriter::new(writable_dir.clone());
 
-        // Archive entity declares an explicit cross-vault relation
-        // into the writable vault; under the alias model every edge
+        // Archive entity declares an explicit cross-mem relation
+        // into the writable mem; under the alias model every edge
         // originates from `## Relationships`.
         let archive_md = "---\ntype: spec\ncreated_date: 2026-01-15\nlast_modified: 2026-04-12\nlevel: M0\n---\n# Archived Source\n\n## Identity\n\nLinks to [[specs:target]].\n\n## Purpose\n\nFixture for rename residual-stub demotion.\n\n## Relationships\n\n- **REFERENCES**: [[specs:target]]\n";
         let archive_path = build_archive(
@@ -1648,7 +1648,7 @@ mod tests {
         );
 
         let folder_mount = Mount {
-            vault: "specs".to_string(),
+            mem: "specs".to_string(),
             schema: Some(crate::engine::test_helpers::pin("default")),
             storage: MountStorage::Folder {
                 path: writable_dir.clone(),
@@ -1660,10 +1660,10 @@ mod tests {
         };
         let archive_reader = crate::storage::ArchiveBackend::new(archive_path.clone());
         let mut engine = Engine::from_mounts(vec![
-            (folder_mount, Box::new(writer) as Box<dyn VaultBackend>),
+            (folder_mount, Box::new(writer) as Box<dyn MemBackend>),
             (
                 archive_mount("archive", archive_path.clone()),
-                Box::new(archive_reader) as Box<dyn VaultBackend>,
+                Box::new(archive_reader) as Box<dyn MemBackend>,
             ),
         ])
         .unwrap();
@@ -1750,23 +1750,23 @@ mod tests {
         assert_eq!(referrers, vec![archived_source_id]);
     }
 
-    /// A same-vault referrer whose body uses the full-id form
-    /// `[[<vault>--<slug>]]` to point at the renaming entity must have
+    /// A same-mem referrer whose body uses the full-id form
+    /// `[[<mem>--<slug>]]` to point at the renaming entity must have
     /// that token retargeted to the new slug. Pre-fix the rewrite
     /// pass only matched short-form `[[<slug>]]`; full-id tokens
     /// survived and pointed at the dead id. The new code calls
-    /// `rewrite_cross_vault_slug` on the same-vault path alongside
+    /// `rewrite_cross_mem_slug` on the same-mem path alongside
     /// the bare-slug helper, covering both legal slug-form variants.
     #[test]
-    fn rename_entity_rewrites_full_id_form_body_link_on_same_vault_referrer() {
+    fn rename_entity_rewrites_full_id_form_body_link_on_same_mem_referrer() {
         use crate::engine::CreateEntityArgs;
         use indexmap::IndexMap;
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().to_path_buf();
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
-            folder_mount("specs", vault_dir.clone()),
-            Box::new(writer) as Box<dyn VaultBackend>,
+            folder_mount("specs", mem_dir.clone()),
+            Box::new(writer) as Box<dyn MemBackend>,
         )])
         .unwrap();
         let (actor, client) = cli_actor();
@@ -1790,7 +1790,7 @@ mod tests {
         let referrer = engine
             .create_entity(
                 CreateEntityArgs {
-                    vault: "specs".to_string(),
+                    mem: "specs".to_string(),
                     title: "Referrer Full".to_string(),
                     entity_type: "spec".to_string(),
                     sections,
@@ -1821,7 +1821,7 @@ mod tests {
         // The full-id form was retargeted (slug part rewritten, full-id
         // form preserved). The old slug must not survive in the
         // referrer's on-disk file.
-        let referrer_path = vault_dir.join(&referrer.file_path);
+        let referrer_path = mem_dir.join(&referrer.file_path);
         let body = std::fs::read_to_string(&referrer_path).unwrap();
         assert!(
             body.contains("[[specs--renamed-spec]]"),
@@ -1876,18 +1876,18 @@ mod tests {
         let other_dir = tmp_other.path().to_path_buf();
 
         // Pretty-print scaffold: `test` and `other` are the
-        // canonical vault names. Reuse the helper by ignoring the
+        // canonical mem names. Reuse the helper by ignoring the
         // returned dirs and overriding the policy explicitly.
-        let writer_test = FilesystemVaultWriter::new(test_dir.clone());
-        let writer_other = FilesystemVaultWriter::new(other_dir.clone());
+        let writer_test = FilesystemMemWriter::new(test_dir.clone());
+        let writer_other = FilesystemMemWriter::new(other_dir.clone());
         let mut engine = Engine::from_mounts(vec![
             (
                 folder_mount("test", test_dir.clone()),
-                Box::new(writer_test) as Box<dyn VaultBackend>,
+                Box::new(writer_test) as Box<dyn MemBackend>,
             ),
             (
                 folder_mount("other", other_dir.clone()),
-                Box::new(writer_other) as Box<dyn VaultBackend>,
+                Box::new(writer_other) as Box<dyn MemBackend>,
             ),
         ])
         .unwrap();
@@ -1896,7 +1896,7 @@ mod tests {
         // Setup policy: only `test → other` granted. Create the edge
         // `test--src IMPLEMENTS other--target`.
         let mut settings = crate::workspace::WorkspaceSettings::default();
-        settings.cross_vault_links.insert(
+        settings.cross_mem_links.insert(
             "test".to_string(),
             CrossLinkValue::List(vec!["other".to_string()]),
         );
@@ -1911,7 +1911,7 @@ mod tests {
         let src = engine
             .create_entity(
                 CreateEntityArgs {
-                    vault: "test".to_string(),
+                    mem: "test".to_string(),
                     title: "Src".to_string(),
                     entity_type: "spec".to_string(),
                     sections: src_sections,
@@ -1960,24 +1960,24 @@ mod tests {
             )
             .unwrap_err();
         match err {
-            EngineError::RenameBlockedByCrossVaultPolicy {
-                from_vault,
+            EngineError::RenameBlockedByCrossMemPolicy {
+                from_mem,
                 blocked_referrers,
             } => {
-                assert_eq!(from_vault, "other");
+                assert_eq!(from_mem, "other");
                 assert_eq!(
                     blocked_referrers,
                     vec![BlockedReferrer {
-                        from_vault: "test".to_string(),
-                        to_vault: "other".to_string(),
+                        from_mem: "test".to_string(),
+                        to_mem: "other".to_string(),
                         count: 1,
                     }],
                     "blocked_referrers must name the actual edge direction (test → other)",
                 );
             }
-            other => panic!("expected RenameBlockedByCrossVaultPolicy, got {other:?}"),
+            other => panic!("expected RenameBlockedByCrossMemPolicy, got {other:?}"),
         }
-        // No write landed in either vault: target file path
+        // No write landed in either mem: target file path
         // unchanged, the new slug file absent.
         assert!(other_dir.join(&target.file_path).exists());
         assert!(!other_dir.join("renamed.md").exists());
@@ -1997,23 +1997,23 @@ mod tests {
         let test_dir = tmp_test.path().to_path_buf();
         let other_dir = tmp_other.path().to_path_buf();
 
-        let writer_test = FilesystemVaultWriter::new(test_dir.clone());
-        let writer_other = FilesystemVaultWriter::new(other_dir.clone());
+        let writer_test = FilesystemMemWriter::new(test_dir.clone());
+        let writer_other = FilesystemMemWriter::new(other_dir.clone());
         let mut engine = Engine::from_mounts(vec![
             (
                 folder_mount("test", test_dir),
-                Box::new(writer_test) as Box<dyn VaultBackend>,
+                Box::new(writer_test) as Box<dyn MemBackend>,
             ),
             (
                 folder_mount("other", other_dir),
-                Box::new(writer_other) as Box<dyn VaultBackend>,
+                Box::new(writer_other) as Box<dyn MemBackend>,
             ),
         ])
         .unwrap();
         let (actor, client) = cli_actor();
 
         let mut settings = crate::workspace::WorkspaceSettings::default();
-        settings.cross_vault_links.insert(
+        settings.cross_mem_links.insert(
             "test".to_string(),
             CrossLinkValue::List(vec!["other".to_string()]),
         );
@@ -2028,7 +2028,7 @@ mod tests {
         let src = engine
             .create_entity(
                 CreateEntityArgs {
-                    vault: "test".to_string(),
+                    mem: "test".to_string(),
                     title: "Src".to_string(),
                     entity_type: "spec".to_string(),
                     sections: src_sections,
@@ -2058,7 +2058,7 @@ mod tests {
             .unwrap();
 
         // Policy unchanged from setup (`test → other` still granted)
-        // — rename must succeed and rewrite the cross-vault referrer.
+        // — rename must succeed and rewrite the cross-mem referrer.
         let outcome = engine
             .rename_entity(
                 RenameEntityArgs {
@@ -2088,21 +2088,21 @@ mod tests {
     }
 
     /// A rename whose target has no
-    /// cross-vault referrers bypasses the gate entirely. Even with
+    /// cross-mem referrers bypasses the gate entirely. Even with
     /// a fully-empty cross-link policy, the rename succeeds.
     #[test]
-    fn rename_with_no_cross_vault_referrers_succeeds_regardless_of_policy() {
+    fn rename_with_no_cross_mem_referrers_succeeds_regardless_of_policy() {
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().to_path_buf();
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
-            folder_mount("specs", vault_dir),
-            Box::new(writer) as Box<dyn VaultBackend>,
+            folder_mount("specs", mem_dir),
+            Box::new(writer) as Box<dyn MemBackend>,
         )])
         .unwrap();
         let (actor, client) = cli_actor();
-        // Default settings: no cross-vault links at all. The
-        // single-vault rename's referrers (if any) are all same-vault
+        // Default settings: no cross-mem links at all. The
+        // single-mem rename's referrers (if any) are all same-mem
         // and bypass the gate by construction.
         let target = engine
             .create_entity(empty_create_args("specs", "Target"), actor, Some(&client), None)

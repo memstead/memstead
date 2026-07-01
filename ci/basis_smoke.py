@@ -52,7 +52,7 @@ def run(memstead: Path, memstead_mcp: Path) -> int:
                     "entity_type": "spec",
                     "sections": {
                         "identity": "An entity to verify the basis happy path.",
-                        "purpose": "Lets the smoke probe round-trip without the vault-repo path.",
+                        "purpose": "Lets the smoke probe round-trip without the mem-repo path.",
                     },
                 },
             )

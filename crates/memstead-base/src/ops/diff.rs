@@ -2,7 +2,7 @@
 //!
 //! `Diff` is the engine-level response shape for `Engine::diff(ref_a,
 //! ref_b, config)`. Consumers (LLM replay skills, PR-review UIs,
-//! pre-merge previews, snapshot comparisons, cross-vault reflection
+//! pre-merge previews, snapshot comparisons, cross-mem reflection
 //! tools) all consume this one struct rather than re-walking git trees
 //! themselves.
 //!

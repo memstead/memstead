@@ -8,7 +8,7 @@ trying to do.
 
 New to Memstead? Start here.
 
-- **[Quickstart](../README.md#quickstart)** — install, create your first vault,
+- **[Quickstart](../README.md#quickstart)** — install, create your first mem,
   and run a `create → search` loop end to end.
 
 ## 🔧 How-to guides — *accomplishing a task*
@@ -21,8 +21,8 @@ You know what you want; these get you there.
   run `/setup`, then drive the graph with the `memstead_*` MCP tools.
 - **Author a schema** — learn by example from the
   [worked schemas](../examples/README.md) (`agent-program`; the paired
-  `reimpl-source`/`reimpl-target`), then point a vault at yours.
-- **[Publish & install a vault](publish.md)** — share a vault through a
+  `reimpl-source`/`reimpl-target`), then point a mem at yours.
+- **[Publish & install a mem](publish.md)** — share a mem through a
   registry and install one into a workspace.
 
 ## 📖 Reference — *looking something up*
@@ -39,7 +39,7 @@ check fails the build if the committed copy lags).
 The ideas and rationale behind Memstead.
 
 - **[Vision](../VISION.md)** — what Memstead is for and the design rationale.
-- **[Glossary](../GLOSSARY.md)** — precise definitions (vault, schema,
+- **[Glossary](../GLOSSARY.md)** — precise definitions (mem, schema,
   workspace, mount, storage backend, …).
 - **[Prior art](../PRIOR_ART.md)** — how Memstead relates to adjacent tools.
 

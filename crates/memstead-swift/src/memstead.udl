@@ -1,6 +1,6 @@
 // UniFFI interface for the macOS app.
 //
-// Read-only surface: input records (VaultInit, HealthOptions, SearchScope),
+// Read-only surface: input records (MemInit, HealthOptions, SearchScope),
 // response records (Entity, Stats, HealthSummary, List/Search/Relations/
 // Cluster/Path results), the error enum, and the Engine interface with
 // method signatures. Mutation FFI is deferred — kept as a UniFFI
@@ -10,29 +10,29 @@
 namespace memstead {
     string version();
 
-    // Enumerate the workspace's vaults by walking the `vault-repo/.git/`
-    // branch list (excluding `main` and registry refs), one `VaultInit`
-    // per vault. The Swift app calls this before constructing the Engine
+    // Enumerate the workspace's mems by walking the `mem-repo/.git/`
+    // branch list (excluding `main` and registry refs), one `MemInit`
+    // per mem. The Swift app calls this before constructing the Engine
     // to seed its UI; the Engine itself loads its mounts from
     // `.memstead/state/mounts.json` and does not consume this list.
-    sequence<VaultInit> discover_vaults(string project_root);
+    sequence<MemInit> discover_mems(string project_root);
 
     // Construct an engine rooted at an explicit `workspace_root` (a directory
     // containing `.memstead/workspace.toml`). Cwd-independent — unlike the
-    // `Engine(vaults:)` constructor, which falls back to the process cwd.
+    // `Engine(mems:)` constructor, which falls back to the process cwd.
     // Backend-agnostic: folder and git-branch mounts open through this one
     // call with no caller-side branching. Throws a typed, actionable error
     // when the path has no recognised workspace layout.
     [Throws=MemsteadError]
     Engine engine_open(string workspace_root);
 
-    // Initialise a brand-new filesystem (folder-backed) vault at `root` — the
+    // Initialise a brand-new filesystem (folder-backed) mem at `root` — the
     // engine-owned bootstrap the macOS app routes through instead of writing
     // `.memstead/config.json` itself. Writes the seed config + adapter marker +
     // one-folder-mount roster, so the result roots through `engine_open`. The
-    // vault root is the workspace root (collapsed single-vault form).
+    // mem root is the workspace root (collapsed single-mem form).
     [Throws=MemsteadError]
-    void init_filesystem_vault(string root, string name, string schema);
+    void init_filesystem_mem(string root, string name, string schema);
 };
 
 // ---------------------------------------------------------------------------
@@ -41,7 +41,7 @@ namespace memstead {
 // Maps memstead_base::EngineError onto a smaller Swift-facing set. Most
 // validation kinds collapse into `ValidationFailed { message }`; the two
 // cases the macOS app actually branches on (`UnknownSection`,
-// `UnknownVault`) get their own variants carrying the declared lists and
+// `UnknownMem`) get their own variants carrying the declared lists and
 // a suggestion so the UI can render a picker without re-parsing messages.
 // ---------------------------------------------------------------------------
 
@@ -54,14 +54,14 @@ interface MemsteadError {
     IoError(string message);
     Internal(string message);
     UnknownSection(string key, string entity_type, sequence<string> declared, string? suggestion);
-    UnknownVault(string name, sequence<string> writable_vaults);
+    UnknownMem(string name, sequence<string> writable_mems);
 };
 
 // ---------------------------------------------------------------------------
 // Input records — Engine bootstrap + query options.
 // ---------------------------------------------------------------------------
 
-dictionary VaultInit {
+dictionary MemInit {
     string name;
     string dir;
     string schema_name;
@@ -84,7 +84,7 @@ dictionary Query {
 
 dictionary SearchScope {
     Query? query;
-    string? vault;
+    string? mem;
     string? entity_type;
     u32? limit;
     u32? offset;
@@ -132,7 +132,7 @@ dictionary Entity {
     string id;
     string title;
     string entity_type;
-    string vault;
+    string mem;
     string file_path;
     sequence<MetadataEntry> metadata;
     sequence<Section> sections;
@@ -156,9 +156,9 @@ dictionary EdgeTypeCount {
 // `memstead_health`'s default response); carrying it on Stats avoids a second
 // `get_health()` round-trip just to display the entity/stub split.
 //
-// `writable_vaults` + `read_vaults` mirror the same fields on
-// `memstead_health`'s default response so the macOS app can render the vault
-// list from one call (write vaults come from the router; read vaults are
+// `writable_mems` + `read_mems` mirror the same fields on
+// `memstead_health`'s default response so the macOS app can render the mem
+// list from one call (write mems come from the router; read mems are
 // the visible set minus the writable set).
 dictionary Stats {
     u64 entity_count;
@@ -166,10 +166,10 @@ dictionary Stats {
     u64 edge_count;
     sequence<EdgeTypeCount> edge_types;
     u64 community_count;
-    u64 vault_count;
+    u64 mem_count;
     sequence<string> types_in_use;
-    sequence<string> writable_vaults;
-    sequence<string> read_vaults;
+    sequence<string> writable_mems;
+    sequence<string> read_mems;
 };
 
 // ---------------------------------------------------------------------------
@@ -208,7 +208,7 @@ dictionary HealthSummary {
 dictionary SearchHit {
     string id;
     string title;
-    string vault;
+    string mem;
     string entity_type;
     boolean stub;
     f32 score;
@@ -286,10 +286,10 @@ dictionary ReloadResult {
 };
 
 // ---------------------------------------------------------------------------
-// Per-vault commit-delta + agent-notes feed. Mirrors the MCP /
+// Per-mem commit-delta + agent-notes feed. Mirrors the MCP /
 // `memstead-cli` surface (`memstead_changes_since`, `memstead changes` —
-// `--include-notes` for the notes branch, `memstead_health.vaults[].vcs.head`
-// for the per-vault head) so the macOS app has parity with what the
+// `--include-notes` for the notes branch, `memstead_health.mems[].vcs.head`
+// for the per-mem head) so the macOS app has parity with what the
 // Claude Code plugin and operator CLI consume.
 // ---------------------------------------------------------------------------
 
@@ -302,7 +302,7 @@ interface ChangeEnvelope {
 };
 
 dictionary CommitNote {
-    string vault;
+    string mem;
     string sha;
     string subject;
     string? tool_verb;
@@ -315,18 +315,18 @@ dictionary CommitNote {
 };
 
 dictionary ChangesReport {
-    string vault;
+    string mem;
     string since;
     string head;
     sequence<ChangeEnvelope> changes;
 };
 
 dictionary AgentNotesReport {
-    string vault;
+    string mem;
     string since;
     string head;
     sequence<CommitNote> notes;
-    // SHA of `refs/heads/__MEMSTEAD` — unified schemas + per-vault
+    // SHA of `refs/heads/__MEMSTEAD` — unified schemas + per-mem
     // configs branch. `None` when the workspace has not been
     // migrated to the unified layout yet.
     string? memstead_ref;
@@ -351,14 +351,14 @@ dictionary ParseRecoveryReport {
 };
 
 // ---------------------------------------------------------------------------
-// Vault lifecycle — create / delete / set-schema / set-version through the
-// engine. Mirrors the `memstead_vault_*` MCP contract onto the in-process
-// binding so the macOS roster manages vaults without any vault-repo mutation
+// Mem lifecycle — create / delete / set-schema / set-version through the
+// engine. Mirrors the `memstead_mem_*` MCP contract onto the in-process
+// binding so the macOS roster manages mems without any mem-repo mutation
 // (git ops, raw `config.json`/`.md` writes, `.git` introspection) originating
 // in Swift. Export-as-`.mem` is a separate, different-shaped task — not here.
 // ---------------------------------------------------------------------------
 
-dictionary VaultCreateRequest {
+dictionary MemCreateRequest {
     string name;
     string location;
     string schema;
@@ -368,7 +368,7 @@ dictionary VaultCreateRequest {
     boolean operator_mode;
 };
 
-dictionary VaultCreateOutcome {
+dictionary MemCreateOutcome {
     string name;
     string location;
     string schema_ref;
@@ -376,57 +376,57 @@ dictionary VaultCreateOutcome {
     sequence<string> warnings;
 };
 
-dictionary VaultDeleteOutcome {
+dictionary MemDeleteOutcome {
     string name;
     boolean deleted_from_router;
     boolean files_deleted;
     sequence<string> warnings;
 };
 
-dictionary VaultSchemaOutcome {
-    string vault;
+dictionary MemSchemaOutcome {
+    string mem;
     string schema_pin;
     string? migration_target;
     string outcome;
     sequence<string> findings;
 };
 
-dictionary VaultVersionOutcome {
-    string vault;
+dictionary MemVersionOutcome {
+    string mem;
     string? old_version;
     string new_version;
     sequence<string> warnings;
 };
 
-enum VaultBackendKind {
+enum MemBackendKind {
     "GitBranch",
     "Folder",
     "Archive",
     "InMemory",
 };
 
-dictionary VaultRosterEntry {
-    string vault;
-    VaultBackendKind backend;
+dictionary MemRosterEntry {
+    string mem;
+    MemBackendKind backend;
     boolean writable;
     string? schema_pin;
     u64 entity_count;
     boolean drifted;
 };
 
-dictionary DanglingCrossVaultEdge {
+dictionary DanglingCrossMemEdge {
     string entity_path;
     string target_id;
-    string target_vault;
+    string target_mem;
 };
 
-dictionary VaultExportOutcome {
+dictionary MemExportOutcome {
     string archive_path;
     string name;
     string version;
     u64 entity_count;
     u64 size_bytes;
-    sequence<DanglingCrossVaultEdge> dangling_cross_vault_edges;
+    sequence<DanglingCrossMemEdge> dangling_cross_mem_edges;
 };
 
 // ---------------------------------------------------------------------------
@@ -438,7 +438,7 @@ dictionary VaultExportOutcome {
 
 interface Engine {
     [Throws=MemsteadError]
-    constructor(sequence<VaultInit> vaults);
+    constructor(sequence<MemInit> mems);
 
     Stats get_stats();
     HealthSummary get_health(HealthOptions options);
@@ -451,38 +451,38 @@ interface Engine {
 
     sequence<ClusterInfo> get_overview(boolean rebuild);
 
-    // The workspace vault roster — one entry per mounted vault, with the
+    // The workspace mem roster — one entry per mounted mem, with the
     // per-mount facts (backend kind, capability, schema pin, entity count,
     // drift) the home sidebar renders. Every fact comes from the engine,
     // so the roster never reconstructs backend/capability from a Swift-side
-    // read of `mounts.json`. Cannot fail (per-vault drift probes that error
+    // read of `mounts.json`. Cannot fail (per-mem drift probes that error
     // collapse to `false`).
-    sequence<VaultRosterEntry> vault_roster();
+    sequence<MemRosterEntry> mem_roster();
 
     [Throws=MemsteadError]
     ReloadResult reload();
 
-    // Cached branch-tip SHA for a writable vault. `None` for fresh
-    // vaults with no commits yet — consumers substitute the canonical
+    // Cached branch-tip SHA for a writable mem. `None` for fresh
+    // mems with no commits yet — consumers substitute the canonical
     // empty-tree sentinel `4b825dc642cb6eb9a060e54bf8d69288fbee4904`.
     [Throws=MemsteadError]
-    string? vault_head_sha(string vault);
+    string? mem_head_sha(string mem);
 
-    // Two-tree diff between `since` and the vault's current HEAD. See
+    // Two-tree diff between `since` and the mem's current HEAD. See
     // `memstead_changes_since` for semantics. `rename_similarity` mirrors
     // the MCP knob (default 0.6 when `None`).
     [Throws=MemsteadError]
-    ChangesReport changes_since(string vault, string since, f32? rename_similarity);
+    ChangesReport changes_since(string mem, string since, f32? rename_similarity);
 
     // Walk per-commit agent-notes between `since` and HEAD. See the
     // engine's `Engine::agent_notes`. The response also carries the
-    // workspace-level `__MEMSTEAD` ref tip (unified schemas + per-vault
+    // workspace-level `__MEMSTEAD` ref tip (unified schemas + per-mem
     // configs).
     [Throws=MemsteadError]
-    AgentNotesReport agent_notes(string vault, string since);
+    AgentNotesReport agent_notes(string mem, string since);
 
     // Bulk-fix accumulated parse-time relation drift across every
-    // writable vault — the UniFFI counterpart to `memstead recover`.
+    // writable mem — the UniFFI counterpart to `memstead recover`.
     // First disk-mutating UniFFI method; provenance mirrors the CLI's
     // `Actor::Cli`. `note` lands on each per-source re-render commit.
     [Throws=MemsteadError]
@@ -495,33 +495,33 @@ interface Engine {
     // take identifiers. Referential integrity and snapshot refresh live in
     // the engine. See `memstead_base::pipeline_edit`.
     [Throws=MemsteadError]
-    void add_medium(string vault, string name, string medium_json);
+    void add_medium(string mem, string name, string medium_json);
     [Throws=MemsteadError]
-    void update_medium(string vault, string name, string medium_json);
+    void update_medium(string mem, string name, string medium_json);
     [Throws=MemsteadError]
-    void delete_medium(string vault, string name);
+    void delete_medium(string mem, string name);
     [Throws=MemsteadError]
-    void rename_medium(string vault, string old_name, string new_name);
+    void rename_medium(string mem, string old_name, string new_name);
 
     [Throws=MemsteadError]
-    void add_facet(string vault, string name, string facet_json);
+    void add_facet(string mem, string name, string facet_json);
     [Throws=MemsteadError]
-    void update_facet(string vault, string name, string facet_json);
+    void update_facet(string mem, string name, string facet_json);
     [Throws=MemsteadError]
-    void delete_facet(string vault, string name);
+    void delete_facet(string mem, string name);
     [Throws=MemsteadError]
-    void rename_facet(string vault, string old_name, string new_name);
+    void rename_facet(string mem, string old_name, string new_name);
 
     [Throws=MemsteadError]
-    void add_projection(string vault, string name, string projection_json);
+    void add_projection(string mem, string name, string projection_json);
     [Throws=MemsteadError]
-    void update_projection(string vault, string name, string projection_json);
+    void update_projection(string mem, string name, string projection_json);
     [Throws=MemsteadError]
-    void delete_projection(string vault, string name);
+    void delete_projection(string mem, string name);
     [Throws=MemsteadError]
-    void rename_projection(string vault, string old_name, string new_name);
+    void rename_projection(string mem, string old_name, string new_name);
 
-    // Ingests are flat (workspace-level, not vault-scoped) — no vault param.
+    // Ingests are flat (workspace-level, not mem-scoped) — no mem param.
     [Throws=MemsteadError]
     void add_ingest(string name, string ingest_json);
     [Throws=MemsteadError]
@@ -536,25 +536,25 @@ interface Engine {
     // mediums/facets/projections/ingests. Cannot fail.
     string pipeline_configs_json();
 
-    // Vault lifecycle. The macOS roster routes create/delete/set-schema/
-    // set-version here instead of mutating the vault-repo from Swift; the
+    // Mem lifecycle. The macOS roster routes create/delete/set-schema/
+    // set-version here instead of mutating the mem-repo from Swift; the
     // engine owns backend instantiation, allowlist gating, policy scrub,
-    // and the seed/version commits. See `memstead_engine::vault_management`
-    // and `memstead_base::Engine::{set_vault_schema, set_vault_version}`.
+    // and the seed/version commits. See `memstead_engine::mem_management`
+    // and `memstead_base::Engine::{set_mem_schema, set_mem_version}`.
     [Throws=MemsteadError]
-    VaultCreateOutcome create_vault(VaultCreateRequest request);
+    MemCreateOutcome create_mem(MemCreateRequest request);
     [Throws=MemsteadError]
-    VaultDeleteOutcome delete_vault(string name, string? note, boolean operator_mode);
+    MemDeleteOutcome delete_mem(string name, string? note, boolean operator_mode);
     [Throws=MemsteadError]
-    VaultSchemaOutcome set_vault_schema(string vault, string schema);
+    MemSchemaOutcome set_mem_schema(string mem, string schema);
     [Throws=MemsteadError]
-    VaultVersionOutcome set_vault_version(string vault, string version, string? note);
+    MemVersionOutcome set_mem_version(string mem, string version, string? note);
 
-    // Export a vault as a portable `.mem` archive at `output_path`.
+    // Export a mem as a portable `.mem` archive at `output_path`.
     // Backend-symmetric (folder snapshot / git-branch history); archive
     // mounts refuse (sealed), in-memory mounts refuse (unsupported). The
-    // engine owns the export — Swift never walks the vault directory. See
-    // `memstead_base::Engine::export_vault`.
+    // engine owns the export — Swift never walks the mem directory. See
+    // `memstead_base::Engine::export_mem`.
     [Throws=MemsteadError]
-    VaultExportOutcome export_vault(string vault, string output_path);
+    MemExportOutcome export_mem(string mem, string output_path);
 };

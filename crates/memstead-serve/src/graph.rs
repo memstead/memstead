@@ -29,7 +29,7 @@ pub struct GraphNode {
     pub community: usize,
 }
 
-/// A directed edge between two nodes in the same vault. Coordinate-free.
+/// A directed edge between two nodes in the same mem. Coordinate-free.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct GraphEdge {
     pub source: String,
@@ -53,10 +53,10 @@ pub struct GraphSnapshot {
     pub communities: Vec<GraphCommunity>,
 }
 
-/// Compute `vault`'s current graph projection from `engine`. Recomputed
+/// Compute `mem`'s current graph projection from `engine`. Recomputed
 /// from the live store on every call — never incremental — so deleted and
 /// renamed entities never linger across frames.
-pub fn graph_projection(engine: &Engine, vault: &str) -> GraphSnapshot {
+pub fn graph_projection(engine: &Engine, mem: &str) -> GraphSnapshot {
     let store = engine.store();
     let louvain = engine.communities();
 
@@ -72,7 +72,7 @@ pub fn graph_projection(engine: &Engine, vault: &str) -> GraphSnapshot {
     let mut nodes = Vec::new();
     let mut edges = Vec::new();
     for e in store.all_entities() {
-        if e.vault != vault {
+        if e.mem != mem {
             continue;
         }
         let id_str = e.id.to_string();
@@ -90,8 +90,8 @@ pub fn graph_projection(engine: &Engine, vault: &str) -> GraphSnapshot {
         });
         for edge in store.outgoing(&e.id) {
             // Keep edges between nodes that travel in this snapshot — guards
-            // against a dangling target (e.g. a hypothetical cross-vault edge).
-            if store.get(&edge.target).map(|t| t.vault == vault).unwrap_or(false) {
+            // against a dangling target (e.g. a hypothetical cross-mem edge).
+            if store.get(&edge.target).map(|t| t.mem == mem).unwrap_or(false) {
                 edges.push(GraphEdge {
                     source: id_str.clone(),
                     target: edge.target.to_string(),
@@ -125,7 +125,7 @@ pub fn graph_projection(engine: &Engine, vault: &str) -> GraphSnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::session::{CONTENT_VAULT_NAME, mount_session_engine};
+    use crate::session::{CONTENT_MEM_NAME, mount_session_engine};
     use indexmap::IndexMap;
     use memstead_base::vcs::{Actor, ClientId};
     use memstead_base::{CreateEntityArgs, DeleteEntityArgs, MountStorage, RelateEntityArgs};
@@ -144,7 +144,7 @@ mod tests {
         sections.insert("identity".to_string(), identity.to_string());
         sections.insert("purpose".to_string(), purpose.to_string());
         CreateEntityArgs {
-            vault: "sketch".to_string(),
+            mem: "sketch".to_string(),
             title: title.to_string(),
             entity_type: "spec".to_string(),
             sections,
@@ -161,10 +161,10 @@ mod tests {
     #[test]
     fn projection_tracks_create_relate_delete_and_recomputes() {
         let mut engine =
-            mount_session_engine(MountStorage::InMemory, schema(), CONTENT_VAULT_NAME.to_string(), schema()).unwrap();
+            mount_session_engine(MountStorage::InMemory, schema(), CONTENT_MEM_NAME.to_string(), schema()).unwrap();
         let (actor, client) = cli();
 
-        // Empty vault → empty projection.
+        // Empty mem → empty projection.
         let snap = graph_projection(&engine, "sketch");
         assert!(snap.nodes.is_empty() && snap.edges.is_empty());
 
@@ -247,7 +247,7 @@ mod tests {
     #[test]
     fn projection_carries_no_layout_coordinates() {
         let mut engine =
-            mount_session_engine(MountStorage::InMemory, schema(), CONTENT_VAULT_NAME.to_string(), schema()).unwrap();
+            mount_session_engine(MountStorage::InMemory, schema(), CONTENT_MEM_NAME.to_string(), schema()).unwrap();
         let (actor, client) = cli();
         engine
             .create_entity(spec_args("A Node", "i", "p"), actor, Some(&client), None)

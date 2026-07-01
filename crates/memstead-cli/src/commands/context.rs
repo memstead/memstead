@@ -26,8 +26,8 @@ pub struct Args {
 pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     let id = EntityId::canonical(&args.id_or_query);
     let outcome: ContextOutcome = match ctx.cli_engine()? {
-        #[cfg(feature = "vault-repo")]
-        CliEngine::VaultRepo(engine) => resolve_context_vault_repo(&engine, &id, ctx, &args)?,
+        #[cfg(feature = "mem-repo")]
+        CliEngine::MemRepo(engine) => resolve_context_mem_repo(&engine, &id, ctx, &args)?,
         CliEngine::Filesystem(engine) => resolve_context_filesystem(&engine, &id, ctx, &args)?,
     };
 
@@ -90,13 +90,13 @@ enum ContextOutcome {
     },
 }
 
-/// Resolve context for an id-or-query against the vault-repo engine.
+/// Resolve context for an id-or-query against the mem-repo engine.
 /// On a successful unique resolution returns `Ok(Some(_))`. On
 /// not-found / ambiguous results, prints the user-facing notice and
 /// returns `Ok(None)` so the caller exits cleanly without invoking
 /// the markdown render path.
-#[cfg(feature = "vault-repo")]
-fn resolve_context_vault_repo(
+#[cfg(feature = "mem-repo")]
+fn resolve_context_mem_repo(
     engine: &memstead_base::Engine,
     id: &EntityId,
     ctx: &CliContext,
@@ -112,7 +112,7 @@ fn resolve_context_vault_repo(
     Ok(ContextOutcome::Resolved(engine.context(&search.hits[0].id)))
 }
 
-/// Mirror of [`resolve_context_vault_repo`] for the filesystem engine.
+/// Mirror of [`resolve_context_mem_repo`] for the filesystem engine.
 fn resolve_context_filesystem(
     engine: &memstead_base::Engine,
     id: &EntityId,

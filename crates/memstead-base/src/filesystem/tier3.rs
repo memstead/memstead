@@ -1,24 +1,24 @@
 //! Tier 3 wiki-link resolution against cached
 //! `.memstead/memstead-io/<scope>/<name>.mem` archives.
 //!
-//! ## What Tier 3 means in filesystem-vault context
+//! ## What Tier 3 means in filesystem-mem context
 //!
-//! - **Tier 1** `[[slug]]` — same-vault.
-//! - **Tier 2** `[[leaf:slug]]` — cross-vault (vault-repo only —
-//!   multi-vault under one repo).
-//! - **Tier 3** `[[scope/name:slug]]` — registry-published vault. The
-//!   filesystem-vault workspace caches the dep at
+//! - **Tier 1** `[[slug]]` — same-mem.
+//! - **Tier 2** `[[leaf:slug]]` — cross-mem (mem-repo only —
+//!   multi-mem under one repo).
+//! - **Tier 3** `[[scope/name:slug]]` — registry-published mem. The
+//!   filesystem-mem workspace caches the dep at
 //!   `<workspace_root>/.memstead/memstead-io/<scope>/<name>.mem` (populated
 //!   by `memstead link <scope/name>`); this module reads that archive
-//!   and resolves the slug to a cross-vault [`EntityId`] of the
+//!   and resolves the slug to a cross-mem [`EntityId`] of the
 //!   existing shape.
 //!
-//! ## vault-repo invariance
+//! ## mem-repo invariance
 //!
 //! The wiki-link parser at [`crate::entity::id::wiki_link_to_id`]
 //! still falls Tier 3 syntax back to Tier 1 silently — preserving
-//! existing vault-repo behaviour. This module is the
-//! filesystem-vault-only counterpart that surfaces resolution
+//! existing mem-repo behaviour. This module is the
+//! filesystem-mem-only counterpart that surfaces resolution
 //! warnings as a separate validation pass over loaded entities,
 //! consumed via the unified [`crate::Engine`] when a folder mount
 //! is present.
@@ -28,8 +28,8 @@
 //! - Rewrite `parse_result.inline_links` or store edges. The current
 //!   v1 surface returns warnings; the resolved [`crate::EntityId`] is
 //!   available via [`Tier3Ref::resolve`] but the engine's load path
-//!   does not yet swap the same-vault fallback in `inline_links` for
-//!   the resolved cross-vault id. A follow-up plan can take that
+//!   does not yet swap the same-mem fallback in `inline_links` for
+//!   the resolved cross-mem id. A follow-up plan can take that
 //!   final step once the warning-only surface settles.
 
 use std::path::{Path, PathBuf};
@@ -64,9 +64,9 @@ impl Tier3Ref {
             .join(&self.scope)
     }
 
-    /// Resolve to a cross-vault [`EntityId`] by reading the cached
-    /// archive. The vault component of the returned id is the
-    /// archive's vault `name` (matching the archive's
+    /// Resolve to a cross-mem [`EntityId`] by reading the cached
+    /// archive. The mem component of the returned id is the
+    /// archive's mem `name` (matching the archive's
     /// `.memstead/config.json` `name` field — same value as the dep
     /// reference's `name`).
     ///

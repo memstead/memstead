@@ -1,22 +1,22 @@
 # `reimpl-source@0.1.0` — Legacy extraction schema
 
 Paired with [`reimpl-target@0.1.0`](../../reimpl-target/schema/). This schema lives
-in the **Legacy vault** — the read-mostly extraction of what the old
+in the **Legacy mem** — the read-mostly extraction of what the old
 system actually is. It captures two things and nothing else: **evidence**
 (grounded observations about the old system) and **capabilities**
 (behavioral units supported by evidence).
 
-One Legacy vault can feed **multiple** Target vaults. Each Target carries
+One Legacy mem can feed **multiple** Target mems. Each Target carries
 its own divergences; the Legacy stays technology- and target-neutral.
 
 ## Purpose
 
-The Legacy vault is the single source of truth about *what the old system
+The Legacy mem is the single source of truth about *what the old system
 actually does* — extracted from code, tests, data, interviews, and
 observation. It is not a wish list and not a design. Every capability
 must be backed by evidence; unsourced claims have no place here.
 
-After the reimplementation phase ends, the Legacy vault is sealed and
+After the reimplementation phase ends, the Legacy mem is sealed and
 kept as a historical record.
 
 ## Types
@@ -30,10 +30,10 @@ kept as a historical record.
 
 ```
 memstead schema install examples/schemas/reimpl-source
-memstead vault init <legacy-vault> --schema reimpl-source@0.1.0
+memstead mem init <legacy-mem> --schema reimpl-source@0.1.0
 ```
 
-In the Legacy vault's `.memstead/config.json`:
+In the Legacy mem's `.memstead/config.json`:
 
 ```json
 {
@@ -50,8 +50,8 @@ Inherits the default schema's 37 edges plus one source-specific addition:
 |---|---|---|
 | `SUPPORTS` | evidence → capability | Evidence backs a capability claim. Capabilities without SUPPORTS edges are unsupported belief and should be flagged. |
 
-Cross-vault inbound edges from the Target vault (`REALIZES_CAPABILITY`,
-`DIVERGES_FROM`) are declared in the target schema. The Legacy vault
+Cross-mem inbound edges from the Target mem (`REALIZES_CAPABILITY`,
+`DIVERGES_FROM`) are declared in the target schema. The Legacy mem
 neither produces nor restricts them.
 
 ## Evolving the schema

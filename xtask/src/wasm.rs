@@ -460,7 +460,7 @@ impl Engine {
 
     #[test]
     fn snake_to_camel_conversion() {
-        assert_eq!(snake_to_camel("vault_names"), "vaultNames");
+        assert_eq!(snake_to_camel("mem_names"), "memNames");
         assert_eq!(snake_to_camel("apply_commit"), "applyCommit");
         assert_eq!(snake_to_camel("health"), "health");
         assert_eq!(snake_to_camel("from_archive_bytes"), "fromArchiveBytes");

@@ -17,17 +17,17 @@ export interface CommitEnvelope {
   sha: string;
   /** Empty string for the first commit of a branch (no parent). */
   parent?: string;
-  vault: string;
+  mem: string;
   /** RFC 3339 / ISO 8601, UTC, second-precision. */
   timestamp: string;
   trailers?: Record<string, string>;
   changes: EntityChange[];
 }
 
-/** SSE `vault_changed` event payload. Pushed when the named vault's
+/** SSE `mem_changed` event payload. Pushed when the named mem's
  * HEAD advances. */
-export interface VaultChangedEvent {
-  vault: string;
+export interface MemChangedEvent {
+  mem: string;
   head: string;
   previous: string;
   n_commits: number;
@@ -52,7 +52,7 @@ export interface SearchQuery {
 export interface SearchHit {
   id: string;
   title: string;
-  vault: string;
+  mem: string;
   entity_type: string;
   stub: boolean;
   score: number;
@@ -67,7 +67,7 @@ export interface SearchHit {
 
 /** `/search` response envelope. */
 export interface SearchResult {
-  vault: string;
+  mem: string;
   query: string;
   hits: SearchHit[];
   total_matched: number;
@@ -82,7 +82,7 @@ export interface SearchResult {
 export interface Entity {
   id: string;
   title: string;
-  vault: string;
+  mem: string;
   entity_type: string;
   stub: boolean;
   content_hash: string;
@@ -100,7 +100,7 @@ export interface Entity {
 export interface HealthReport {
   total_entities: number;
   total_edges: number;
-  vaults: Record<string, unknown>;
+  mems: Record<string, unknown>;
   // Open-ended — the engine's HealthSummary is a closed Rust struct
   // but new fields land additively and we don't want a `@memstead/client`
   // bump per field. Consumers branch on the keys they care about.
@@ -115,8 +115,8 @@ export interface WasmEngineLike {
   applyCommit(envelope: CommitEnvelope): void;
   getEntity(id: string): Entity | undefined;
   health(): HealthReport;
-  /** Optional — only present on engine builds with `vaultNames`. */
-  vaultNames?(): string[];
+  /** Optional — only present on engine builds with `memNames`. */
+  memNames?(): string[];
 }
 
 /** Factory the client uses to hydrate an engine from snapshot bytes.
@@ -131,14 +131,14 @@ export type WasmEngineFactory = (bytes: Uint8Array) => WasmEngineLike;
  * unknown headers, so anything the embedder adds rides through). */
 export type AuthFn = (headers: Headers) => void | Promise<void>;
 
-/** Constructor options for [`VaultSyncClient`]. */
-export interface VaultSyncClientOptions {
+/** Constructor options for [`MemSyncClient`]. */
+export interface MemSyncClientOptions {
   /** Base URL for the bridge — path prefix the embedder mounted the
    * handlers under. Trailing slashes are tolerated. The final URL
-   * pattern is `${baseUrl}/vaults/${vault}/<endpoint>`. */
+   * pattern is `${baseUrl}/mems/${mem}/<endpoint>`. */
   baseUrl: string;
-  /** Vault name to track. Must match one the bridge mounted. */
-  vault: string;
+  /** Mem name to track. Must match one the bridge mounted. */
+  mem: string;
   /** Factory producing a `WasmEngineLike` from snapshot bytes.
    * Typically `(bytes) => Engine.fromSnapshot(bytes)` from
    * `@memstead/wasm`. */
@@ -150,7 +150,7 @@ export interface VaultSyncClientOptions {
   /** Failure callback. Fired for errors the client recovers from
    * autonomously (force-push refresh, SSE reconnect drift) and for
    * fatal errors that close the client. */
-  onError?: (err: VaultSyncClientError) => void;
+  onError?: (err: MemSyncClientError) => void;
   /** Auth-header injector — runs per outgoing HTTP request. */
   auth?: AuthFn;
   /** Per-request `fetch` options merged into every outgoing call
@@ -168,7 +168,7 @@ export interface VaultSyncClientOptions {
 
 /** Minimal interface the client uses against an `EventSource` — kept
  * narrow so tests can inject an in-process emitter that drives
- * `vault_changed` events synchronously. */
+ * `mem_changed` events synchronously. */
 export interface EventSourceLike {
   readonly readyState: number;
   addEventListener(
@@ -182,7 +182,7 @@ export interface EventSourceLike {
  * UPPER_SNAKE_CASE and pattern-matches against the bridge's error
  * envelope `code` plus client-internal sentinel codes (see
  * `errors.ts`). */
-export interface VaultSyncClientError extends Error {
+export interface MemSyncClientError extends Error {
   readonly code: string;
   readonly status?: number;
   readonly details?: unknown;

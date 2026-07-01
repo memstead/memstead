@@ -2,15 +2,15 @@
 //!
 //! The read-only [`crate::ReadOnlyMcpServer`] serves one sealed archive,
 //! read tools only. This module is the **additive** writable counterpart:
-//! every visitor session gets its own ephemeral in-memory vault (the
+//! every visitor session gets its own ephemeral in-memory mem (the
 //! [`memstead_base::MountStorage::InMemory`] backend) behind its own
 //! remote-MCP endpoint, exposing **only the 10 entity tools** — the five
 //! reads plus the five mutations — and withholding the other 13 of the
-//! full MCP surface (vault lifecycle, workspace policy, admin).
+//! full MCP surface (mem lifecycle, workspace policy, admin).
 //!
 //! ## The allowlist is a security boundary
 //!
-//! A public, anonymous, writable endpoint must never hand vault-lifecycle
+//! A public, anonymous, writable endpoint must never hand mem-lifecycle
 //! or workspace-policy mutation to arbitrary visitors. The exposed surface
 //! is a hardcoded allowlist of exactly the 10 entity tools
 //! ([`SESSION_ENTITY_TOOLS`]); [`SessionMcpServer`] scopes both
@@ -29,7 +29,7 @@
 //! the registry carries no opinion about unguessability. Sessions evict
 //! after a TTL/idle window via [`SessionRegistry::sweep_expired`]; an
 //! evicted or never-created id resolves to a typed [`SessionError`], never
-//! a silently-minted fresh vault — eviction is observable.
+//! a silently-minted fresh mem — eviction is observable.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -49,7 +49,7 @@ use tokio_stream::StreamExt;
 use tokio_stream::wrappers::BroadcastStream;
 use tower::ServiceExt;
 
-use memstead_base::backend::VaultBackend;
+use memstead_base::backend::MemBackend;
 use memstead_base::storage::InMemoryBackend;
 use memstead_base::{Engine, Mount, MountCapability, MountLifecycle, MountStorage};
 use memstead_schema::SchemaRef;
@@ -88,26 +88,26 @@ pub const SESSION_ENTITY_TOOLS: &[&str] = &[
     "memstead_rename",
 ];
 
-/// The writable vault every session engine mounts — the visitor's own
-/// throwaway "sketch" graph. One in-memory vault per session; it is the
+/// The writable mem every session engine mounts — the visitor's own
+/// throwaway "sketch" graph. One in-memory mem per session; it is the
 /// engine's only writable mount, so it is the default target for a create
-/// that omits `vault`.
-pub const SESSION_VAULT_NAME: &str = "sketch";
+/// that omits `mem`.
+pub const SESSION_MEM_NAME: &str = "sketch";
 
-/// The read-only content vault mounted alongside every session's sketch —
+/// The read-only content mem mounted alongside every session's sketch —
 /// the curated "what is Memstead" graph the agent reads to orient itself
 /// (schema, patterns, a rich example) before sketching its own. Reads span
-/// both mounts; writes reach only [`SESSION_VAULT_NAME`].
-pub const CONTENT_VAULT_NAME: &str = "memstead";
+/// both mounts; writes reach only [`SESSION_MEM_NAME`].
+pub const CONTENT_MEM_NAME: &str = "memstead";
 
 /// Default per-session entity budget. A sketch session is a throwaway
-/// scratch graph, not a production vault — a bounded budget caps the work
-/// a single anonymous visitor can pile into one in-memory vault. Deletes
+/// scratch graph, not a production mem — a bounded budget caps the work
+/// a single anonymous visitor can pile into one in-memory mem. Deletes
 /// free room, so the cap bounds live size, not lifetime create count.
 pub const DEFAULT_SESSION_ENTITY_CAP: usize = 200;
 
 /// Default ceiling on concurrently-live sessions one registry will hold.
-/// Each live session is its own in-memory engine (a writable sketch vault
+/// Each live session is its own in-memory engine (a writable sketch mem
 /// plus a read-only content view), so the live-session count — not request
 /// rate — is what bounds memory. Past this ceiling new sessions are refused
 /// (page-first: a 503; connection-born: a typed `RESOURCE_CAP_EXCEEDED` on
@@ -117,10 +117,10 @@ pub const DEFAULT_SESSION_ENTITY_CAP: usize = 200;
 /// (rough budget: a few MB per live session).
 pub const DEFAULT_SESSION_MAX: usize = 2000;
 
-/// Write a seed `VaultConfig` (schema pin + version) into a fresh
-/// in-memory backend *before* boot, so the vault is self-describing when
+/// Write a seed `MemConfig` (schema pin + version) into a fresh
+/// in-memory backend *before* boot, so the mem is self-describing when
 /// `from_mounts` reads it — and so a later `.mem` export projects a valid
-/// published config (export refuses a vault whose config has no version).
+/// published config (export refuses a mem whose config has no version).
 fn in_memory_backend_with_config(
     schema: &SchemaRef,
     what: &str,
@@ -128,39 +128,39 @@ fn in_memory_backend_with_config(
     let backend = InMemoryBackend::new();
     let config_bytes = format!(r#"{{"version":"0.1.0","schema":"{schema}"}}"#).into_bytes();
     backend
-        .write_vault_config(&config_bytes)
-        .map_err(|e| memstead_base::EngineError::Vault(format!("{what} config write: {e}")))?;
+        .write_mem_config(&config_bytes)
+        .map_err(|e| memstead_base::EngineError::Mem(format!("{what} config write: {e}")))?;
     Ok(backend)
 }
 
 /// Build a session's two-mount [`Engine`]: a **writable** in-memory
-/// [`SESSION_VAULT_NAME`] sketch vault (the visitor's own throwaway graph)
-/// alongside a **read-only** [`CONTENT_VAULT_NAME`] content vault (the
+/// [`SESSION_MEM_NAME`] sketch mem (the visitor's own throwaway graph)
+/// alongside a **read-only** [`CONTENT_MEM_NAME`] content mem (the
 /// curated "what is Memstead" graph the agent reads to orient itself).
-/// Reads span both mounts; a write reaches only the sketch vault — the
+/// Reads span both mounts; a write reaches only the sketch mem — the
 /// engine refuses a write to the read-only content mount at the capability
-/// layer, a second guard beneath the tool allowlist. The sketch vault is
+/// layer, a second guard beneath the tool allowlist. The sketch mem is
 /// the engine's sole writable mount, so it is the default target for a
-/// create that omits `vault`.
+/// create that omits `mem`.
 ///
 /// `content_storage` is the curated content source: [`MountStorage::Archive`]
 /// (a sealed `.mem`) in production, [`MountStorage::Folder`] for tests, or
-/// [`MountStorage::InMemory`] for an empty placeholder when no curated vault
+/// [`MountStorage::InMemory`] for an empty placeholder when no curated mem
 /// is wired yet. `content_schema` pins the content mount (matching the
 /// source's own pin for folder/archive sources); `sketch_schema` pins the
-/// visitor's vault — a session-creation parameter, not hardcoded, so a
+/// visitor's mem — a session-creation parameter, not hardcoded, so a
 /// launch schema or a visitor-chosen one both flow through unchanged.
-/// Provisions nothing on disk for the sketch vault; dropping the engine
+/// Provisions nothing on disk for the sketch mem; dropping the engine
 /// reclaims it.
 pub fn mount_session_engine(
     content_storage: MountStorage,
     content_schema: SchemaRef,
-    content_vault_name: String,
+    content_mem_name: String,
     sketch_schema: SchemaRef,
 ) -> Result<Engine, memstead_base::EngineError> {
-    // Writable sketch vault — declared first; its own empty in-memory backend.
+    // Writable sketch mem — declared first; its own empty in-memory backend.
     let sketch_mount = Mount {
-        vault: SESSION_VAULT_NAME.to_string(),
+        mem: SESSION_MEM_NAME.to_string(),
         schema: Some(sketch_schema.clone()),
         storage: MountStorage::InMemory,
         capability: MountCapability::Write,
@@ -170,11 +170,11 @@ pub fn mount_session_engine(
     };
     let sketch_backend = in_memory_backend_with_config(&sketch_schema, "sketch")?;
 
-    // Read-only content vault. Folder/archive sources carry their own
+    // Read-only content mem. Folder/archive sources carry their own
     // config; an in-memory placeholder is made self-describing here so
-    // overview/schema still resolve over it until a curated vault is wired.
+    // overview/schema still resolve over it until a curated mem is wired.
     let content_mount = Mount {
-        vault: content_vault_name,
+        mem: content_mem_name,
         schema: Some(content_schema.clone()),
         storage: content_storage,
         capability: MountCapability::ReadOnly,
@@ -182,16 +182,16 @@ pub fn mount_session_engine(
         cross_linkable: true,
         migration_target: None,
     };
-    let content_backend: Box<dyn VaultBackend> = match &content_mount.storage {
+    let content_backend: Box<dyn MemBackend> = match &content_mount.storage {
         MountStorage::InMemory => {
             Box::new(in_memory_backend_with_config(&content_schema, "content")?)
         }
         _ => memstead_base::workspace_store::instantiate_basis_backend(&content_mount)
-            .map_err(|e| memstead_base::EngineError::Vault(e.to_string()))?,
+            .map_err(|e| memstead_base::EngineError::Mem(e.to_string()))?,
     };
 
     Engine::from_mounts(vec![
-        (sketch_mount, Box::new(sketch_backend) as Box<dyn VaultBackend>),
+        (sketch_mount, Box::new(sketch_backend) as Box<dyn MemBackend>),
         (content_mount, content_backend),
     ])
 }
@@ -220,15 +220,15 @@ pub fn session_instructions() -> String {
     format!(
         "Memstead sketch session: your own empty, writable, ephemeral knowledge \
 graph exposed over MCP. This endpoint lists exactly ten entity tools ({tools}) and \
-refuses every other tool on call with TOOL_NOT_FOUND. Vault-lifecycle tools \
-(memstead_vault_create, memstead_vault_delete, memstead_vault_set_schema, \
-memstead_vault_set_version), the workspace-policy tools (memstead_workspace_*), and \
+refuses every other tool on call with TOOL_NOT_FOUND. Mem-lifecycle tools \
+(memstead_mem_create, memstead_mem_delete, memstead_mem_set_schema, \
+memstead_mem_set_version), the workspace-policy tools (memstead_workspace_*), and \
 admin tools (memstead_reload, memstead_diff, memstead_changes_since) are unavailable \
-here. Cold-start: call memstead_overview for the schema catalogue and vault \
-inventory; read a vault's schema via memstead_schema; then build the graph with \
+here. Cold-start: call memstead_overview for the schema catalogue and mem \
+inventory; read a mem's schema via memstead_schema; then build the graph with \
 memstead_create / memstead_relate / memstead_update / memstead_rename / \
 memstead_delete and read it back with memstead_search / memstead_entity. The session \
-vault is empty and yours alone; it is reclaimed when the session expires.",
+mem is empty and yours alone; it is reclaimed when the session expires.",
         tools = SESSION_ENTITY_TOOLS.join(", "),
     )
 }
@@ -251,7 +251,7 @@ vault is empty and yours alone; it is reclaimed when the session expires.",
 /// connection (a capability probe, a reconnect, an IDE that re-handshakes).
 /// Registering eagerly would publish a resolvable, *empty* `/v/{id}` for every
 /// such handshake — one of which the client might surface to a human as the
-/// link, leaving them staring at a "live but empty" sibling of the vault the
+/// link, leaving them staring at a "live but empty" sibling of the mem the
 /// agent is actually writing. Binding on first real work means only a session
 /// that does something becomes resolvable, and the link is surfaced from that
 /// same session's overview (see [`SessionMcpServer::call_tool`]).
@@ -366,38 +366,38 @@ impl SessionMcpServer {
         SESSION_ENTITY_TOOLS.contains(&name)
     }
 
-    /// Seal this session's **sketch** vault into `.mem` archive bytes — the
-    /// funnel exit. Targets [`SESSION_VAULT_NAME`] explicitly (not the
-    /// engine's first vault), so the export bundles only the visitor's own
-    /// graph and never the read-only content vault. The bytes are
+    /// Seal this session's **sketch** mem into `.mem` archive bytes — the
+    /// funnel exit. Targets [`SESSION_MEM_NAME`] explicitly (not the
+    /// engine's first mem), so the export bundles only the visitor's own
+    /// graph and never the read-only content mem. The bytes are
     /// self-describing (schema embedded) and mount standalone in the real
     /// engine.
     pub fn export_bytes(&self) -> Result<Vec<u8>, memstead_base::EngineError> {
         self.inner
-            .with_engine(|e| e.export_vault_to_bytes(SESSION_VAULT_NAME))
+            .with_engine(|e| e.export_mem_to_bytes(SESSION_MEM_NAME))
     }
 
     /// Count of real (non-stub) entities in this session's writable sketch
-    /// vault. The per-session cap is scoped to the visitor's own graph —
-    /// the read-only content vault's entities never count against it (the
+    /// mem. The per-session cap is scoped to the visitor's own graph —
+    /// the read-only content mem's entities never count against it (the
     /// engine's `stats().entity_count` would sum both mounts).
     fn sketch_entity_count(&self) -> usize {
         self.inner.with_engine(|e| {
             e.store()
                 .all_entities()
-                .filter(|ent| ent.vault == SESSION_VAULT_NAME && !ent.stub)
+                .filter(|ent| ent.mem == SESSION_MEM_NAME && !ent.stub)
                 .count()
         })
     }
 
     /// The current `{nodes, edges, communities}` projection of this
-    /// session's vault — the snapshot a viewer renders, recomputed from the
+    /// session's mem — the snapshot a viewer renders, recomputed from the
     /// live store on every call.
     pub fn graph_snapshot(&self) -> GraphSnapshot {
-        self.inner.with_engine(|e| graph_projection(e, SESSION_VAULT_NAME))
+        self.inner.with_engine(|e| graph_projection(e, SESSION_MEM_NAME))
     }
 
-    /// Subscribe to this session's vault-change events — the trigger that
+    /// Subscribe to this session's mem-change events — the trigger that
     /// drives a fresh projection per agent mutation. Returns the keep-alive
     /// handle (drop unsubscribes) and a broadcast receiver.
     pub fn subscribe_changes(
@@ -405,12 +405,12 @@ impl SessionMcpServer {
     ) -> Result<
         (
             memstead_base::engine::SubscriptionHandle,
-            tokio::sync::broadcast::Receiver<memstead_base::engine::VaultChangedEvent>,
+            tokio::sync::broadcast::Receiver<memstead_base::engine::MemChangedEvent>,
         ),
         memstead_base::EngineError,
     > {
         self.inner
-            .with_engine(|e| e.subscribe_vault_changes_broadcast(SESSION_VAULT_NAME))
+            .with_engine(|e| e.subscribe_mem_changes_broadcast(SESSION_MEM_NAME))
     }
 }
 
@@ -424,7 +424,7 @@ impl ServerHandler for SessionMcpServer {
         info.server_info.name = "memstead-session".to_string();
         info.server_info.title = Some("Memstead (sketch session)".to_string());
         info.server_info.description = Some(
-            "Writable MCP surface over an ephemeral per-session Memstead vault — ten entity tools, \
+            "Writable MCP surface over an ephemeral per-session Memstead mem — ten entity tools, \
 no lifecycle/policy/admin path."
                 .to_string(),
         );
@@ -483,7 +483,7 @@ private, read-only live-view link to hand to a human. The graph builds there as 
         }
         // Per-session resource cap: a `create` at or above the entity
         // budget is refused with a typed code before it can grow the
-        // vault. Deletes are never gated, so a capped session can free
+        // mem. Deletes are never gated, so a capped session can free
         // room and continue. `relate`/`update` auto-stubs don't count
         // (stubs are excluded from the entity count), so only `create`
         // — the real-entity adder — is gated.
@@ -500,7 +500,7 @@ delete entities to free space",
         // (idempotent). Only a session that calls a tool becomes resolvable at
         // `/v/{id}`, so a bare handshake — a capability probe, a reconnect, an
         // IDE that re-initializes — never leaves a "live but empty" sibling
-        // vault behind. The registered clone shares this session's engine
+        // mem behind. The registered clone shares this session's engine
         // `Arc`, so the view renders exactly what the agent writes.
         //
         // If the global session ceiling is hit, registration is refused and we
@@ -543,7 +543,7 @@ pub type SessionService = StreamableHttpService<SessionMcpServer, LocalSessionMa
 
 /// Build the streamable-HTTP MCP service for one session. The handler
 /// factory clones the session server per MCP-protocol session, so every
-/// request within a sketch session hits the same in-memory vault.
+/// request within a sketch session hits the same in-memory mem.
 fn session_service(server: SessionMcpServer) -> SessionService {
     // A public service behind a proxy under its own hostname — rmcp's
     // loopback-only `allowed_hosts` default (a DNS-rebinding guard for
@@ -561,11 +561,11 @@ pub enum SessionError {
     /// No live session under this id — never created, or already evicted.
     /// The two collapse to one refusal on purpose: a resolved id always
     /// means a live session, so eviction is observable (the id stops
-    /// resolving) and never masked by minting a fresh empty vault.
+    /// resolving) and never masked by minting a fresh empty mem.
     UnknownSession(String),
-    /// The session vault engine failed to initialise.
+    /// The session mem engine failed to initialise.
     EngineInit(String),
-    /// The session is live but sealing its vault to `.mem` failed.
+    /// The session is live but sealing its mem to `.mem` failed.
     ExportFailed(String),
     /// The global live-session ceiling is reached — a new session is refused
     /// so the box sheds load instead of exhausting memory. Transient: a retry
@@ -604,7 +604,7 @@ impl std::error::Error for SessionError {}
 
 struct SessionEntry {
     /// The scoped session server — held alongside the service so the
-    /// registry can reach the engine (e.g. to export the vault) without
+    /// registry can reach the engine (e.g. to export the mem) without
     /// going through the MCP transport. Shares the same `Arc`-wrapped
     /// engine as the service's per-request server clones.
     server: SessionMcpServer,
@@ -618,30 +618,30 @@ struct SessionEntry {
 }
 
 /// A boxed, shareable session-id generator. Production injects a CSPRNG
-/// (an unguessable id is the only thing scoping a throwaway vault); tests
+/// (an unguessable id is the only thing scoping a throwaway mem); tests
 /// inject a deterministic counter.
 pub type IdGen = Arc<dyn Fn() -> String + Send + Sync>;
 
 /// In-process registry of live sessions: `session id → engine/service`.
 /// Cheap to clone (shares one `Arc<Mutex<_>>`), so it doubles as axum
-/// shared state. Each session is one writable in-memory vault, dropped on
+/// shared state. Each session is one writable in-memory mem, dropped on
 /// eviction.
 #[derive(Clone)]
 pub struct SessionRegistry {
     inner: Arc<Mutex<HashMap<String, SessionEntry>>>,
     /// The curated read-only content source mounted alongside every
-    /// session's sketch vault (shared across sessions — each session mounts
+    /// session's sketch mem (shared across sessions — each session mounts
     /// its own read-only view of it). `Folder`/`Archive` point at a real
-    /// curated vault; `InMemory` is an empty placeholder until one is wired.
+    /// curated mem; `InMemory` is an empty placeholder until one is wired.
     content_storage: MountStorage,
     /// Schema pinned on the content mount (matches the source's own pin for
     /// folder/archive sources).
     content_schema: SchemaRef,
-    /// Vault name the content mount registers under. Must match the content
-    /// source's own vault name — an archive's ids are `<name>--slug`, so a
+    /// Mem name the content mount registers under. Must match the content
+    /// source's own mem name — an archive's ids are `<name>--slug`, so a
     /// mismatch makes its entities invisible. Configurable so any curated graph
-    /// (not only the default [`CONTENT_VAULT_NAME`]) can back the read tier.
-    content_vault_name: String,
+    /// (not only the default [`CONTENT_MEM_NAME`]) can back the read tier.
+    content_mem_name: String,
     ttl: Duration,
     entity_cap: usize,
     /// Ceiling on concurrently-live sessions. Defaults to unlimited
@@ -653,14 +653,14 @@ pub struct SessionRegistry {
 }
 
 impl SessionRegistry {
-    /// Build a registry whose sessions each mount a writable sketch vault
+    /// Build a registry whose sessions each mount a writable sketch mem
     /// (idle-evicting after `ttl`, holding at most `entity_cap` real
-    /// entities) plus a shared read-only content vault from
+    /// entities) plus a shared read-only content mem from
     /// `content_storage`/`content_schema`. Ids are drawn from `id_gen`.
     pub fn new(
         content_storage: MountStorage,
         content_schema: SchemaRef,
-        content_vault_name: String,
+        content_mem_name: String,
         ttl: Duration,
         entity_cap: usize,
         id_gen: IdGen,
@@ -669,7 +669,7 @@ impl SessionRegistry {
             inner: Arc::new(Mutex::new(HashMap::new())),
             content_storage,
             content_schema,
-            content_vault_name,
+            content_mem_name,
             ttl,
             entity_cap,
             max_sessions: usize::MAX,
@@ -692,7 +692,7 @@ impl SessionRegistry {
     /// Mint a session: build its two-mount engine (writable sketch +
     /// read-only content), wrap it in a scoped session server +
     /// streamable-HTTP service, register it under a fresh id, and return
-    /// the id. `sketch_schema` pins the new writable vault.
+    /// the id. `sketch_schema` pins the new writable mem.
     pub fn create_session(&self, sketch_schema: SchemaRef) -> Result<String, SessionError> {
         // Shed before building the engine when the live-session ceiling is hit,
         // so a spike never pays the engine-mount cost just to be refused.
@@ -702,7 +702,7 @@ impl SessionRegistry {
         let engine = mount_session_engine(
             self.content_storage.clone(),
             self.content_schema.clone(),
-            self.content_vault_name.clone(),
+            self.content_mem_name.clone(),
             sketch_schema,
         )
         .map_err(|e| SessionError::EngineInit(e.to_string()))?;
@@ -756,7 +756,7 @@ impl SessionRegistry {
 
     /// Resolve a session's MCP service, refreshing its idle clock. A missing
     /// id (never created or already evicted) is a typed refusal — never a
-    /// silently-minted fresh vault. A connection-born session (no per-session
+    /// silently-minted fresh mem. A connection-born session (no per-session
     /// service) also refuses: its MCP surface is the shared `/mcp`, not
     /// `/s/{id}/mcp`.
     pub fn service_for(&self, id: &str) -> Result<SessionService, SessionError> {
@@ -787,9 +787,9 @@ impl SessionRegistry {
         }
     }
 
-    /// Seal a session's current vault into `.mem` archive bytes (the
+    /// Seal a session's current mem into `.mem` archive bytes (the
     /// funnel exit). Scoped to the requesting session — it only ever
-    /// bundles that session's vault. An unknown or evicted id is a typed
+    /// bundles that session's mem. An unknown or evicted id is a typed
     /// refusal, never an empty or stale archive. Refreshes the idle clock.
     pub fn export_session(&self, id: &str) -> Result<Vec<u8>, SessionError> {
         self.server_for(id)?
@@ -814,7 +814,7 @@ impl SessionRegistry {
         (
             SessionMcpServer,
             memstead_base::engine::SubscriptionHandle,
-            tokio::sync::broadcast::Receiver<memstead_base::engine::VaultChangedEvent>,
+            tokio::sync::broadcast::Receiver<memstead_base::engine::MemChangedEvent>,
         ),
         SessionError,
     > {
@@ -826,7 +826,7 @@ impl SessionRegistry {
     }
 
     /// Evict every session idle longer than the registry TTL relative to
-    /// `now`, releasing its vault. Returns the number evicted. `now` is a
+    /// `now`, releasing its mem. Returns the number evicted. `now` is a
     /// parameter (not read from the clock) so eviction is deterministically
     /// testable.
     pub fn sweep_expired(&self, now: Instant) -> usize {
@@ -848,13 +848,13 @@ impl SessionRegistry {
 }
 
 // ---------------------------------------------------------------------------
-// HTTP surface — session creation + vault export
+// HTTP surface — session creation + mem export
 // ---------------------------------------------------------------------------
 
 /// Optional `POST /sessions` body.
 #[derive(serde::Deserialize, Default)]
 struct CreateSessionBody {
-    /// `<name>@<version>` schema pin for the session vault. Absent →
+    /// `<name>@<version>` schema pin for the session mem. Absent →
     /// `default@1.0.0`. (The schema-choice policy is plan 04's; this
     /// server just takes the pin.)
     schema: Option<String>,
@@ -883,7 +883,7 @@ async fn create_session_handler(
     }
 }
 
-/// `GET /s/{id}/export` — seal the session's vault and stream the `.mem`
+/// `GET /s/{id}/export` — seal the session's mem and stream the `.mem`
 /// archive as a download. An unknown or evicted id is a typed 404.
 async fn export_handler(State(reg): State<SessionRegistry>, Path(id): Path<String>) -> Response {
     match reg.export_session(&id) {
@@ -919,7 +919,7 @@ async fn graph_handler(State(reg): State<SessionRegistry>, Path(id): Path<String
 
 /// `GET /s/{id}/stream` — Server-Sent Events: a current snapshot on
 /// subscribe (so a late joiner renders immediately), then a fresh snapshot
-/// after each vault mutation. Each frame is recomputed from the live store,
+/// after each mem mutation. Each frame is recomputed from the live store,
 /// so a deleted/renamed entity never lingers. Unknown/evicted id is a typed
 /// 404 (not a live-looking stream that never updates).
 async fn stream_handler(State(reg): State<SessionRegistry>, Path(id): Path<String>) -> Response {
@@ -985,7 +985,7 @@ fn session_error_response(e: &SessionError) -> Response {
 /// wraps and tests drive directly. Mounts session creation
 /// (`POST /sessions`), the per-session remote-MCP endpoint
 /// (`/s/{id}/mcp`), the live graph snapshot + stream
-/// (`GET /s/{id}/graph`, `GET /s/{id}/stream`), and vault export
+/// (`GET /s/{id}/graph`, `GET /s/{id}/stream`), and mem export
 /// (`GET /s/{id}/export`).
 pub fn session_router(registry: SessionRegistry) -> Router {
     Router::new()
@@ -1033,8 +1033,8 @@ pub fn build_session_app(registry: SessionRegistry, per_second: u64, burst: u32)
 /// connection-born flow. Unlike [`session_service`] (one service per
 /// already-minted session), this one service serves every visitor: rmcp calls
 /// the handler factory once per `initialize`, and each call mints a fresh
-/// two-mount engine (the visitor's own sketch vault + the shared read-only
-/// content vault) and a fresh application-generated view id, then attaches a
+/// two-mount engine (the visitor's own sketch mem + the shared read-only
+/// content mem) and a fresh application-generated view id, then attaches a
 /// [`ViewBinding`] carrying the registry. The session is born from the
 /// connection — there is no separate session-creation API.
 ///
@@ -1045,7 +1045,7 @@ pub fn build_session_app(registry: SessionRegistry, per_second: u64, burst: u32)
 /// publish a resolvable, empty `/v/{id}` that a client could surface as the
 /// link — the "live but empty" failure. Binding on first real work, and
 /// surfacing the link from that session's own `memstead_overview` response,
-/// guarantees the link a human receives addresses the vault the agent writes.
+/// guarantees the link a human receives addresses the mem the agent writes.
 ///
 /// The view id is application-generated rather than the rmcp transport session
 /// id: that id is unavailable to the handler at `initialize` time, and it is a
@@ -1063,14 +1063,14 @@ pub fn build_sketch_mcp_service(
         let engine = mount_session_engine(
             registry.content_storage.clone(),
             registry.content_schema.clone(),
-            registry.content_vault_name.clone(),
+            registry.content_mem_name.clone(),
             sketch_schema.clone(),
         )
         .map_err(|e| std::io::Error::other(e.to_string()))?;
         let view_id = (registry.id_gen)();
         // Attach the view binding but DO NOT register here — the server
         // self-registers on its first tool call (see `ensure_view_registered`),
-        // so a bare handshake leaves no resolvable empty vault behind.
+        // so a bare handshake leaves no resolvable empty mem behind.
         let server = SessionMcpServer::from_engine(engine, registry.entity_cap).with_view(
             view_id,
             view_base.clone(),
@@ -1085,7 +1085,7 @@ pub fn build_sketch_mcp_service(
 /// the rate limiter. This is the agent/data plane only — it serves no HTML
 /// page. It mounts the stable remote-MCP endpoint (`/mcp`) and the per-session
 /// view *data* endpoints the agent's view URL points at — the live graph
-/// snapshot + stream (`GET /v/{id}/graph`, `GET /v/{id}/stream`) and vault
+/// snapshot + stream (`GET /v/{id}/graph`, `GET /v/{id}/stream`) and mem
 /// export (`GET /v/{id}/export`). The view handlers are shared with the
 /// page-first `/s/{id}/...` routes — same registry, same id resolution.
 ///
@@ -1174,20 +1174,20 @@ mod tests {
 
     fn registry_with_cap(ttl: Duration, entity_cap: usize) -> SessionRegistry {
         // Default fixture: an empty in-memory content placeholder. Tests that
-        // exercise cross-vault content reads wire a seeded folder source via
+        // exercise cross-mem content reads wire a seeded folder source via
         // `registry_with_content`.
         SessionRegistry::new(
             MountStorage::InMemory,
             default_schema(),
-            CONTENT_VAULT_NAME.to_string(),
+            CONTENT_MEM_NAME.to_string(),
             ttl,
             entity_cap,
             counter_id_gen(),
         )
     }
 
-    /// A registry whose read-only content vault is a seeded folder source —
-    /// for the cross-vault-read and capability-split tests. `content_dir`
+    /// A registry whose read-only content mem is a seeded folder source —
+    /// for the cross-mem-read and capability-split tests. `content_dir`
     /// must outlive the registry (the mount reads it lazily).
     fn registry_with_content(ttl: Duration, content_dir: &std::path::Path) -> SessionRegistry {
         SessionRegistry::new(
@@ -1195,23 +1195,23 @@ mod tests {
                 path: content_dir.to_path_buf(),
             },
             default_schema(),
-            CONTENT_VAULT_NAME.to_string(),
+            CONTENT_MEM_NAME.to_string(),
             ttl,
             DEFAULT_SESSION_ENTITY_CAP,
             counter_id_gen(),
         )
     }
 
-    /// Write a one-entity curated content vault into `dir` (folder backend):
+    /// Write a one-entity curated content mem into `dir` (folder backend):
     /// a single `concept` entity. The content mount's schema comes from its
     /// `Mount.schema` pin, so no on-disk config is needed (mirrors the
     /// read-only serve's folder fixture).
-    fn seed_content_vault(dir: &std::path::Path) {
+    fn seed_content_mem(dir: &std::path::Path) {
         std::fs::write(
             dir.join("what-is-memstead.md"),
             "---\ntype: concept\n---\n# What Is Memstead\n\n## Definition\n\n\
 A schema-agnostic graph engine over markdown + git.\n\n## Explanation\n\n\
-Each vault keeps a typed model of a chosen subject.\n",
+Each mem keeps a typed model of a chosen subject.\n",
         )
         .unwrap();
     }
@@ -1290,10 +1290,10 @@ Each vault keeps a typed model of a chosen subject.\n",
             .map(|t| t.name.to_string())
             .collect();
         for withheld in [
-            "memstead_vault_create",
-            "memstead_vault_delete",
-            "memstead_vault_set_schema",
-            "memstead_vault_set_version",
+            "memstead_mem_create",
+            "memstead_mem_delete",
+            "memstead_mem_set_schema",
+            "memstead_mem_set_version",
             "memstead_workspace_allow_create",
             "memstead_workspace_revoke_create",
             "memstead_workspace_allow_delete",
@@ -1340,8 +1340,8 @@ Each vault keeps a typed model of a chosen subject.\n",
         assert_eq!(union, all, "allowed ∪ withheld must equal the full tool surface");
         // The session server is hosted on the *basis* FilesystemMcpServer,
         // whose universe is the 10 entity tools plus two admin tools
-        // (changes_since, diff). The vault-lifecycle and workspace-policy
-        // tools are vault-repo-only and not present on this host at all —
+        // (changes_since, diff). The mem-lifecycle and workspace-policy
+        // tools are mem-repo-only and not present on this host at all —
         // defense in depth: they cannot be dispatched regardless of the
         // allowlist. So the derived withheld set is exactly those two
         // admin tools, and it is non-empty (filtering is meaningful).
@@ -1356,7 +1356,7 @@ Each vault keeps a typed model of a chosen subject.\n",
         let engine = mount_session_engine(
             MountStorage::InMemory,
             default_schema(),
-            CONTENT_VAULT_NAME.to_string(),
+            CONTENT_MEM_NAME.to_string(),
             default_schema(),
         )
         .unwrap();
@@ -1370,7 +1370,7 @@ Each vault keeps a typed model of a chosen subject.\n",
         for available in SESSION_ENTITY_TOOLS {
             assert!(instr.contains(available), "instructions name available tool {available}");
         }
-        for absent in ["memstead_vault_create", "memstead_workspace_", "memstead_reload"] {
+        for absent in ["memstead_mem_create", "memstead_workspace_", "memstead_reload"] {
             assert!(instr.contains(absent), "instructions name withheld tool class {absent}");
         }
     }
@@ -1380,7 +1380,7 @@ Each vault keeps a typed model of a chosen subject.\n",
         let engine = mount_session_engine(
             MountStorage::InMemory,
             default_schema(),
-            CONTENT_VAULT_NAME.to_string(),
+            CONTENT_MEM_NAME.to_string(),
             default_schema(),
         )
         .unwrap();
@@ -1452,7 +1452,7 @@ Each vault keeps a typed model of a chosen subject.\n",
         for available in SESSION_ENTITY_TOOLS {
             assert!(body.contains(available), "tools/list names {available}: {body}");
         }
-        for absent in ["memstead_vault_create", "memstead_reload", "memstead_workspace_allow_create"] {
+        for absent in ["memstead_mem_create", "memstead_reload", "memstead_workspace_allow_create"] {
             assert!(!body.contains(absent), "tools/list must not name {absent}: {body}");
         }
 
@@ -1481,7 +1481,7 @@ Each vault keeps a typed model of a chosen subject.\n",
     async fn withheld_tool_is_refused_over_transport() {
         let reg = registry(Duration::from_secs(3600));
         let (svc, sid) = handshaken(&reg).await;
-        let call = r#"{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"memstead_vault_create","arguments":{}}}"#;
+        let call = r#"{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"memstead_mem_create","arguments":{}}}"#;
         let (status, _s, body) = mcp_post(&svc, call, Some(&sid)).await;
         assert_eq!(status, StatusCode::OK);
         assert!(
@@ -1490,7 +1490,7 @@ Each vault keeps a typed model of a chosen subject.\n",
         );
     }
 
-    /// Refusal complement: session A and session B are different vaults. A
+    /// Refusal complement: session A and session B are different mems. A
     /// create on A is invisible to a read on B.
     #[tokio::test]
     async fn sessions_are_isolated() {
@@ -1510,38 +1510,38 @@ Each vault keeps a typed model of a chosen subject.\n",
         );
     }
 
-    // ----- two-tier: read curated content, write only the sketch vault -----
+    // ----- two-tier: read curated content, write only the sketch mem -----
 
     /// The two-tier shape over the MCP transport: a session mounts a writable
-    /// `sketch` vault and a read-only `memstead` content vault. A create with
-    /// no `vault` lands in `sketch`; an explicit create against `memstead` is
+    /// `sketch` mem and a read-only `memstead` content mem. A create with
+    /// no `mem` lands in `sketch`; an explicit create against `memstead` is
     /// refused with READ_ONLY_MOUNT (the engine capability layer, beneath the
     /// tool allowlist); and a read spans both mounts — the curated content is
     /// visible alongside the agent's own sketch.
     #[tokio::test]
     async fn session_reads_curated_content_and_writes_only_sketch() {
         let content_dir = tempfile::TempDir::new().unwrap();
-        seed_content_vault(content_dir.path());
+        seed_content_mem(content_dir.path());
         let reg = registry_with_content(Duration::from_secs(3600), content_dir.path());
         let (svc, sid) = handshaken(&reg).await;
 
-        // A create that omits `vault` lands in the writable sketch vault.
+        // A create that omits `mem` lands in the writable sketch mem.
         let create = r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"memstead_create","arguments":{"title":"My Idea","entity_type":"spec","sections":{"identity":"i","purpose":"p"}}}}"#;
         let (status, _s, body) = mcp_post(&svc, create, Some(&sid)).await;
         assert_eq!(status, StatusCode::OK, "create must succeed: {body}");
         assert!(
             body.contains("sketch--my-idea"),
-            "an omitted-vault create lands in the writable sketch vault: {body}"
+            "an omitted-mem create lands in the writable sketch mem: {body}"
         );
 
-        // An explicit create against the read-only content vault is refused —
+        // An explicit create against the read-only content mem is refused —
         // not silently redirected to sketch.
-        let create_ro = r#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"memstead_create","arguments":{"vault":"memstead","title":"Sneaky","entity_type":"spec","sections":{"identity":"i","purpose":"p"}}}}"#;
+        let create_ro = r#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"memstead_create","arguments":{"mem":"memstead","title":"Sneaky","entity_type":"spec","sections":{"identity":"i","purpose":"p"}}}}"#;
         let (status, _s, body) = mcp_post(&svc, create_ro, Some(&sid)).await;
         assert_eq!(status, StatusCode::OK);
         assert!(
             body.contains("READ_ONLY_MOUNT"),
-            "a write to the read-only content vault must refuse with READ_ONLY_MOUNT: {body}"
+            "a write to the read-only content mem must refuse with READ_ONLY_MOUNT: {body}"
         );
 
         // A read spans both mounts: the curated content AND the agent's sketch.
@@ -1550,7 +1550,7 @@ Each vault keeps a typed model of a chosen subject.\n",
         assert_eq!(status, StatusCode::OK, "search must succeed: {body}");
         assert!(
             body.contains("what-is-memstead"),
-            "reads surface the curated content vault: {body}"
+            "reads surface the curated content mem: {body}"
         );
         assert!(
             body.contains("my-idea"),
@@ -1559,12 +1559,12 @@ Each vault keeps a typed model of a chosen subject.\n",
     }
 
     /// The live view scopes to the agent's own sketch graph — the read-only
-    /// content vault's entities never appear in the projection (the viewer
+    /// content mem's entities never appear in the projection (the viewer
     /// renders the visitor's work, not the curated reference graph).
     #[tokio::test]
     async fn live_projection_scopes_to_sketch_excluding_content() {
         let content_dir = tempfile::TempDir::new().unwrap();
-        seed_content_vault(content_dir.path());
+        seed_content_mem(content_dir.path());
         let reg = registry_with_content(Duration::from_secs(3600), content_dir.path());
         let (id, svc, sid) = fresh_session(&reg).await;
         mcp_post(&svc, ALPHA_CREATE, Some(&sid)).await;
@@ -1577,14 +1577,14 @@ Each vault keeps a typed model of a chosen subject.\n",
         );
         assert!(
             !snap.nodes.iter().any(|n| n.id.starts_with("memstead--")),
-            "the read-only content vault is excluded from the live view: {:?}",
+            "the read-only content mem is excluded from the live view: {:?}",
             snap.nodes
         );
     }
 
-    // ----- the curated "what is Memstead" content vault is real & conformant -
+    // ----- the curated "what is Memstead" content mem is real & conformant -
 
-    /// The committed curated content vault mounts cleanly (schema-conformant),
+    /// The committed curated content mem mounts cleanly (schema-conformant),
     /// carries all its concept entities, has no dangling references, and is
     /// queryable — the public "what is Memstead" content the agent reads to
     /// orient itself. This validates the hand-authored `.md` asset against the
@@ -1593,50 +1593,50 @@ Each vault keeps a typed model of a chosen subject.\n",
     /// concepts require engine-authoring through the create path — see the plan
     /// session log; the body wiki-links are visible to a reader regardless.)
     #[test]
-    fn curated_content_vault_loads_conformant_and_queryable() {
+    fn curated_content_mem_loads_conformant_and_queryable() {
         let content_dir =
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("content/memstead");
         assert!(content_dir.is_dir(), "curated content dir exists: {content_dir:?}");
 
-        // Mount it read-only alongside a sketch vault, exactly as a session does.
+        // Mount it read-only alongside a sketch mem, exactly as a session does.
         let engine = mount_session_engine(
             MountStorage::Folder { path: content_dir },
             default_schema(),
-            CONTENT_VAULT_NAME.to_string(),
+            CONTENT_MEM_NAME.to_string(),
             default_schema(),
         )
-        .expect("the curated content vault mounts cleanly (schema-conformant)");
+        .expect("the curated content mem mounts cleanly (schema-conformant)");
 
-        // Every authored concept is present under the content vault.
+        // Every authored concept is present under the content mem.
         let slugs = [
-            "memstead", "vault", "schema", "entity", "wikilink", "workspace", "mount",
+            "memstead", "mem", "schema", "entity", "wikilink", "workspace", "mount",
             "storage-backend", "modal-flavour", "graph", "mcp-layer",
         ];
         for slug in slugs {
-            let id = memstead_base::EntityId::new(CONTENT_VAULT_NAME, slug);
+            let id = memstead_base::EntityId::new(CONTENT_MEM_NAME, slug);
             assert!(
                 engine.get_entity(&id).is_some(),
-                "content entity {slug} loaded into the {CONTENT_VAULT_NAME} vault"
+                "content entity {slug} loaded into the {CONTENT_MEM_NAME} mem"
             );
         }
 
         // No stub (unresolved) entities: every body wiki-link points at a
         // concept that is actually authored, so the agent reads a coherent
-        // vault, not one littered with dangling references.
+        // mem, not one littered with dangling references.
         let stubs = engine.store().all_entities().filter(|e| e.stub).count();
-        assert_eq!(stubs, 0, "no dangling wiki-links / stub entities in the curated vault");
+        assert_eq!(stubs, 0, "no dangling wiki-links / stub entities in the curated mem");
 
         // The content is queryable: a search over the two-mount engine surfaces
         // the curated concepts (this is the "reads return the public content"
         // half of the two-tier experience).
         let scope = memstead_base::ops::SearchScope {
             query: Some(memstead_base::ops::Query {
-                any: vec!["schema".to_string(), "vault".to_string()],
+                any: vec!["schema".to_string(), "mem".to_string()],
                 not: Vec::new(),
                 phrase: None,
                 field: None,
             }),
-            vault: Some(CONTENT_VAULT_NAME.to_string()),
+            mem: Some(CONTENT_MEM_NAME.to_string()),
             entity_type: None,
             limit: None,
             offset: None,
@@ -1650,7 +1650,7 @@ Each vault keeps a typed model of a chosen subject.\n",
             stub: None,
             token_budget: None,
         };
-        let hits = engine.search(&scope).expect("search the content vault");
+        let hits = engine.search(&scope).expect("search the content mem");
         assert!(
             hits.hits.len() >= 2,
             "search returns the curated content: {} hits",
@@ -1706,7 +1706,7 @@ Each vault keeps a typed model of a chosen subject.\n",
     /// `initialize`. The handshake names the live-view channel but bakes no URL
     /// — the link arrives with the first `memstead_overview`, which also binds
     /// the (app-generated, not rmcp) view id; a create then lands in that
-    /// connection's own sketch vault and the view reflects it.
+    /// connection's own sketch mem and the view reflects it.
     #[tokio::test]
     async fn connection_born_mcp_binds_view_to_the_working_session() {
         let reg = registry(Duration::from_secs(3600));
@@ -1727,7 +1727,7 @@ Each vault keeps a typed model of a chosen subject.\n",
         mcp_post(&svc, INITIALIZED, Some(&rmcp_sid)).await;
 
         // Lazy binding: a session that has only handshaked is NOT yet
-        // resolvable — no "live but empty" vault exists until it does work.
+        // resolvable — no "live but empty" mem exists until it does work.
         assert_eq!(
             reg.snapshot("sess-0").err().expect("unbound before first tool call").code(),
             "UNKNOWN_SESSION",
@@ -1746,7 +1746,7 @@ Each vault keeps a typed model of a chosen subject.\n",
             "the freshly-bound session's sketch is empty"
         );
 
-        // A create over the connection lands in this connection's sketch vault;
+        // A create over the connection lands in this connection's sketch mem;
         // the view snapshot reflects it.
         let (cs, _s, cbody) = mcp_post(&svc, ALPHA_CREATE, Some(&rmcp_sid)).await;
         assert_eq!(cs, StatusCode::OK, "create: {cbody}");
@@ -1759,9 +1759,9 @@ Each vault keeps a typed model of a chosen subject.\n",
         );
     }
 
-    /// Regression for the "live · vault empty" incident: the link the agent
+    /// Regression for the "live · mem empty" incident: the link the agent
     /// surfaces must address the session that carries its writes, never a
-    /// sibling vault born from a different `initialize`. A bare "probe"
+    /// sibling mem born from a different `initialize`. A bare "probe"
     /// handshake binds nothing (so its `/v/{id}` refuses instead of rendering a
     /// misleading live-but-empty graph), while the working session's overview
     /// carries the correct, resolvable link.
@@ -1795,19 +1795,19 @@ Each vault keeps a typed model of a chosen subject.\n",
         assert_eq!(
             reg.snapshot("sess-0").err().expect("probe id must refuse").code(),
             "UNKNOWN_SESSION",
-            "a probe handshake leaves no resolvable empty vault behind",
+            "a probe handshake leaves no resolvable empty mem behind",
         );
         // The surfaced link resolves and reflects the agent's writes.
         let snap = reg.snapshot("sess-1").expect("working view resolves");
         assert!(
             snap.nodes.iter().any(|n| n.id == "sketch--alpha-note"),
-            "the surfaced link addresses the vault the agent actually wrote: {:?}",
+            "the surfaced link addresses the mem the agent actually wrote: {:?}",
             snap.nodes
         );
     }
 
     /// Two MCP connections to the one stable `/mcp` service get distinct view
-    /// ids and isolated vaults — a create on one is invisible to the other.
+    /// ids and isolated mems — a create on one is invisible to the other.
     /// Each binds its view on its own first tool call (A creates, B reads).
     #[tokio::test]
     async fn connection_born_sessions_are_isolated() {
@@ -1943,12 +1943,12 @@ Each vault keeps a typed model of a chosen subject.\n",
         assert!(reg.is_empty());
 
         // The evicted id now refuses — it is NOT silently re-served a fresh
-        // empty vault under the same id.
+        // empty mem under the same id.
         let err = reg.service_for(&id).err().expect("evicted id must refuse");
         assert_eq!(err.code(), "UNKNOWN_SESSION");
     }
 
-    // ----- AC5: the session vault is exportable as a standalone .mem -----
+    // ----- AC5: the session mem is exportable as a standalone .mem -----
 
     /// A graph the agent builds over the session endpoint exports to a
     /// `.mem` archive that mounts standalone in the real engine — no
@@ -1989,13 +1989,13 @@ Each vault keeps a typed model of a chosen subject.\n",
         let sid = sid.expect("initialize issues a session id");
         mcp_post(&svc, INITIALIZED, Some(&sid)).await;
 
-        // Pre-write: overview flags the vault ephemeral with no write yet.
+        // Pre-write: overview flags the mem ephemeral with no write yet.
         let overview = r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"memstead_overview","arguments":{}}}"#;
         let (status, _s, body) = mcp_post(&svc, overview, Some(&sid)).await;
         assert_eq!(status, StatusCode::OK, "overview must succeed: {body}");
         assert!(
             body.contains("ephemeral") && body.contains("in-memory"),
-            "sketch overview must flag the vault ephemeral before any write; got: {body}"
+            "sketch overview must flag the mem ephemeral before any write; got: {body}"
         );
 
         // Per-write: the create response echoes durable=false.
@@ -2018,7 +2018,7 @@ Each vault keeps a typed model of a chosen subject.\n",
     }
 
     /// Refusal complement: an export is scoped to the requesting session —
-    /// session B's archive never bundles session A's vault.
+    /// session B's archive never bundles session A's mem.
     #[tokio::test]
     async fn export_is_scoped_to_the_requesting_session() {
         let reg = registry(Duration::from_secs(3600));
@@ -2304,14 +2304,14 @@ Each vault keeps a typed model of a chosen subject.\n",
         let (id, svc, sid) = fresh_session(&reg).await;
 
         let (server, _handle, mut rx) = reg.subscribe_session(&id).unwrap();
-        assert!(server.graph_snapshot().nodes.is_empty(), "snapshot-on-subscribe is the empty vault");
+        assert!(server.graph_snapshot().nodes.is_empty(), "snapshot-on-subscribe is the empty mem");
 
         let (status, _s, _b) = mcp_post(&svc, ALPHA_CREATE, Some(&sid)).await;
         assert_eq!(status, StatusCode::OK);
 
         // The mutation pushes a change event; the recomputed snapshot reflects it.
         let evt = rx.recv().await.expect("a change event follows the create");
-        assert_eq!(evt.vault, "sketch");
+        assert_eq!(evt.mem, "sketch");
         let after = server.graph_snapshot();
         assert!(
             after.nodes.iter().any(|n| n.id == "sketch--alpha-note"),

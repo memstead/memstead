@@ -8,7 +8,7 @@
 #      (schemas_dir in .memstead/workspace.toml, conventionally
 #      <workspace>/schemas/recipe/)
 #   2. Restart the MCP server so the new schema is picked up
-#   3. In any vault's .memstead/config.json, set   "schema": "recipe@0.1.0"
+#   3. In any mem's .memstead/config.json, set   "schema": "recipe@0.1.0"
 #   4. Create entities with entity_type "recipe" or "ingredient"
 #
 # A schema is a package. It bundles every type definition, the full
@@ -17,9 +17,9 @@
 # Each type gets its own file under types/.
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Schema identity — both fields are pinned exactly by consuming vaults.
+# Schema identity — both fields are pinned exactly by consuming mems.
 # Never "latest", never a range. Bump version when any shape or semantics
-# changes; external vaults keep working against the old version.
+# changes; external mems keep working against the old version.
 name: recipe
 version: 0.1.0
 

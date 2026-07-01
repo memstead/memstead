@@ -16,9 +16,9 @@
 //!   throws the `SEARCH_UNAVAILABLE_IN_WASM` envelope.
 //!
 //! `fixture.mem` is generated at build time by the crate's
-//! [`build.rs`](../build.rs): a tiny two-entity folder vault
+//! [`build.rs`](../build.rs): a tiny two-entity folder mem
 //! (`alpha`, `beta`) round-tripped through
-//! `Engine::export_vault_to_bytes`. Embedding the bytes via
+//! `Engine::export_mem_to_bytes`. Embedding the bytes via
 //! `include_bytes!` keeps the test self-contained — no fetch, no
 //! filesystem.
 
@@ -60,7 +60,7 @@ fn apply_commit_then_get_entity_after() {
         r#"({
             sha: "new-sha",
             parent: "",
-            vault: "specs",
+            mem: "specs",
             timestamp: "2026-05-19T10:00:00Z",
             trailers: {},
             changes: [{

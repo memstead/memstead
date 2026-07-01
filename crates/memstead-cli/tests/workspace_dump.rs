@@ -1,9 +1,9 @@
-#![cfg(feature = "vault-repo")]
+#![cfg(feature = "mem-repo")]
 // `memstead workspace dump` ships only in the pro build.
 
 //! Integration tests for `memstead workspace dump`.
 //!
-//! Each test seeds a vault-repo-git workspace under a temp dir, runs
+//! Each test seeds a mem-repo-git workspace under a temp dir, runs
 //! `memstead workspace dump` against it, and asserts on the returned JSON
 //! shape. The shape is the consumer-facing contract — every assertion
 //! here corresponds to a documented field.
@@ -12,18 +12,18 @@ use std::fs;
 use std::path::Path;
 
 use assert_cmd::Command;
-use memstead_git_branch::test_support::init_real_vault_repo_from_disk;
+use memstead_git_branch::test_support::init_real_mem_repo_from_disk;
 use tempfile::TempDir;
 
 fn memstead() -> Command {
     Command::cargo_bin("memstead").expect("memstead binary must be built by cargo")
 }
 
-/// Lay down a minimal vault directory with a `.memstead/config.json`. The
-/// disk shape feeds `init_real_vault_repo_from_disk`, which reshapes it
-/// into `__MEMSTEAD:vaults/<name>/config.json` blobs and per-vault content
+/// Lay down a minimal mem directory with a `.memstead/config.json`. The
+/// disk shape feeds `init_real_mem_repo_from_disk`, which reshapes it
+/// into `__MEMSTEAD:mems/<name>/config.json` blobs and per-mem content
 /// branches.
-fn write_vault_dir(root: &Path, name: &str, schema: &str, description: Option<&str>) {
+fn write_mem_dir(root: &Path, name: &str, schema: &str, description: Option<&str>) {
     let dir = root.join(name);
     let store = dir.join(".memstead");
     fs::create_dir_all(&store).unwrap();
@@ -57,13 +57,13 @@ Smoke-test entity for the dump tests.
     .unwrap();
 }
 
-/// Seed a vault-repo with the named single vault and return the
+/// Seed a mem-repo with the named single mem and return the
 /// workspace root.
 fn seed_workspace_with(name: &str, schema: &str, description: Option<&str>) -> TempDir {
     let tmp = TempDir::new().unwrap();
-    write_vault_dir(tmp.path(), name, schema, description);
+    write_mem_dir(tmp.path(), name, schema, description);
     let dir = tmp.path().join(name);
-    init_real_vault_repo_from_disk(tmp.path(), &[(&dir, name)]);
+    init_real_mem_repo_from_disk(tmp.path(), &[(&dir, name)]);
     tmp
 }
 
@@ -84,7 +84,7 @@ fn dump_format_is_v0() {
 }
 
 #[test]
-fn dump_lists_vault_with_schema_pin() {
+fn dump_lists_mem_with_schema_pin() {
     let ws = seed_workspace_with("engine", "default@1.0.0", Some("rust engine"));
 
     let output = memstead()
@@ -97,14 +97,14 @@ fn dump_lists_vault_with_schema_pin() {
         .clone();
     let parsed: serde_json::Value = serde_json::from_slice(&output).expect("valid JSON");
 
-    let vaults = parsed["vaults"].as_array().expect("vaults is array");
-    assert_eq!(vaults.len(), 1);
-    let v = &vaults[0];
+    let mems = parsed["mems"].as_array().expect("mems is array");
+    assert_eq!(mems.len(), 1);
+    let v = &mems[0];
     assert_eq!(v["name"], "engine");
     assert_eq!(v["schema_ref"], "default@1.0.0");
     assert!(
         v.get("schema").is_none(),
-        "per-vault pin is `schema_ref`, never `schema` (which is reserved for the inlined schema body)"
+        "per-mem pin is `schema_ref`, never `schema` (which is reserved for the inlined schema body)"
     );
     assert_eq!(v["description"], "rust engine");
     assert!(
@@ -143,11 +143,11 @@ fn dump_includes_schema_default_writing_guidance() {
         .clone();
     let parsed: serde_json::Value = serde_json::from_slice(&output).expect("valid JSON");
 
-    // The schemas object is keyed by the same string the vault references.
+    // The schemas object is keyed by the same string the mem references.
     let schemas = parsed["schemas"].as_object().expect("schemas is object");
     assert!(
         schemas.contains_key("default@1.0.0"),
-        "schemas key matches the vault's schema pin: {:?}",
+        "schemas key matches the mem's schema pin: {:?}",
         schemas.keys().collect::<Vec<_>>()
     );
     // `default_writing_guidance` is always present (possibly empty).
@@ -172,7 +172,7 @@ fn dump_snapshot_token_is_stable_across_runs() {
             .stdout
             .clone();
         let parsed: serde_json::Value = serde_json::from_slice(&out).expect("valid JSON");
-        parsed["vaults"][0]["snapshot_token"].as_str().unwrap().to_string()
+        parsed["mems"][0]["snapshot_token"].as_str().unwrap().to_string()
     };
 
     let first = run();
@@ -184,16 +184,16 @@ fn dump_snapshot_token_is_stable_across_runs() {
 }
 
 #[test]
-fn dump_orders_vaults_alphabetically() {
-    // Three vaults seeded out-of-order to verify the dump sorts them.
+fn dump_orders_mems_alphabetically() {
+    // Three mems seeded out-of-order to verify the dump sorts them.
     let tmp = TempDir::new().unwrap();
     for name in ["zeta", "alpha", "mu"] {
-        write_vault_dir(tmp.path(), name, "default@1.0.0", None);
+        write_mem_dir(tmp.path(), name, "default@1.0.0", None);
     }
     let zeta = tmp.path().join("zeta");
     let alpha = tmp.path().join("alpha");
     let mu = tmp.path().join("mu");
-    init_real_vault_repo_from_disk(
+    init_real_mem_repo_from_disk(
         tmp.path(),
         &[(&zeta, "zeta"), (&alpha, "alpha"), (&mu, "mu")],
     );
@@ -207,7 +207,7 @@ fn dump_orders_vaults_alphabetically() {
         .stdout
         .clone();
     let parsed: serde_json::Value = serde_json::from_slice(&output).expect("valid JSON");
-    let names: Vec<&str> = parsed["vaults"]
+    let names: Vec<&str> = parsed["mems"]
         .as_array()
         .unwrap()
         .iter()
@@ -238,7 +238,7 @@ fn dump_accepts_local_json_flag() {
 #[test]
 fn dump_fails_outside_workspace_with_clear_error() {
     let tmp = TempDir::new().unwrap();
-    // No vault-repo, no .memstead/workspace.toml — engine init will fail.
+    // No mem-repo, no .memstead/workspace.toml — engine init will fail.
     let assert = memstead()
         .current_dir(tmp.path())
         .args(["--json", "workspace", "dump"])
@@ -284,9 +284,9 @@ fn dump_workspace_root_is_absolute() {
 
 // --- sync-state round-trip (ingest source-cursor baseline) ---
 
-/// Helper: run `memstead workspace dump` and return the first vault's
+/// Helper: run `memstead workspace dump` and return the first mem's
 /// JSON object.
-fn dump_first_vault(ws: &Path) -> serde_json::Value {
+fn dump_first_mem(ws: &Path) -> serde_json::Value {
     let output = memstead()
         .current_dir(ws)
         .args(["workspace", "dump"])
@@ -296,16 +296,16 @@ fn dump_first_vault(ws: &Path) -> serde_json::Value {
         .stdout
         .clone();
     let parsed: serde_json::Value = serde_json::from_slice(&output).expect("valid JSON");
-    parsed["vaults"][0].clone()
+    parsed["mems"][0].clone()
 }
 
 #[test]
 fn dump_omits_sync_state_when_unset() {
-    // A vault that never had a sync-state token must not gain an empty
+    // A mem that never had a sync-state token must not gain an empty
     // `sync_state` map on the wire — mirrors `write_guidance`'s
     // skip-if-empty contract so existing minimal dumps are unchanged.
     let ws = seed_workspace_with("engine", "default@1.0.0", None);
-    let v = dump_first_vault(ws.path());
+    let v = dump_first_mem(ws.path());
     assert!(
         v.get("sync_state").is_none(),
         "sync_state must be omitted from the wire when empty: {v}"
@@ -314,15 +314,15 @@ fn dump_omits_sync_state_when_unset() {
 
 #[test]
 fn set_sync_state_surfaces_on_dump() {
-    // The full write→persist→read pipe: `vault set-sync-state` commits
-    // the opaque token into the per-vault config, and `workspace dump`
+    // The full write→persist→read pipe: `mem set-sync-state` commits
+    // the opaque token into the per-mem config, and `workspace dump`
     // surfaces it verbatim for the ingest loop to diff against.
     let ws = seed_workspace_with("engine", "default@1.0.0", None);
 
     memstead()
         .current_dir(ws.path())
         .args([
-            "vault",
+            "mem",
             "set-sync-state",
             "engine",
             "engine-graph/source-files",
@@ -331,7 +331,7 @@ fn set_sync_state_surfaces_on_dump() {
         .assert()
         .success();
 
-    let v = dump_first_vault(ws.path());
+    let v = dump_first_mem(ws.path());
     assert_eq!(
         v["sync_state"]["engine-graph/source-files"], "cafef00d",
         "sync_state token round-trips through the dump: {v}"
@@ -349,7 +349,7 @@ fn set_sync_state_empty_token_clears_key() {
         memstead()
             .current_dir(ws.path())
             .args([
-                "vault",
+                "mem",
                 "set-sync-state",
                 "engine",
                 "engine-graph/source-files",
@@ -362,7 +362,7 @@ fn set_sync_state_empty_token_clears_key() {
     set("cafef00d");
     set(""); // clear
 
-    let v = dump_first_vault(ws.path());
+    let v = dump_first_mem(ws.path());
     assert!(
         v.get("sync_state").is_none(),
         "cleared sync_state leaves no key, so the map drops off the wire: {v}"
@@ -371,7 +371,7 @@ fn set_sync_state_empty_token_clears_key() {
 
 #[test]
 fn set_sync_state_is_durable_across_cache_independent_reads() {
-    // Durability proxy: the token lives in engine-held vault config
+    // Durability proxy: the token lives in engine-held mem config
     // (a committed `__MEMSTEAD` blob), not skill cache. A fresh
     // `workspace dump` process — no shared in-memory state with the
     // writer — still sees it. This is the "survives a .memstead.cache
@@ -381,7 +381,7 @@ fn set_sync_state_is_durable_across_cache_independent_reads() {
     memstead()
         .current_dir(ws.path())
         .args([
-            "vault",
+            "mem",
             "set-sync-state",
             "engine",
             "engine-graph/source-files",
@@ -391,8 +391,8 @@ fn set_sync_state_is_durable_across_cache_independent_reads() {
         .success();
 
     // Two independent dump invocations, each its own process.
-    let first = dump_first_vault(ws.path());
-    let second = dump_first_vault(ws.path());
+    let first = dump_first_mem(ws.path());
+    let second = dump_first_mem(ws.path());
     assert_eq!(first["sync_state"], second["sync_state"]);
     assert_eq!(first["sync_state"]["engine-graph/source-files"], "deadbeef");
 }

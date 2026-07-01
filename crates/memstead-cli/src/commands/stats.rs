@@ -33,8 +33,8 @@ struct StatsPayload<'a> {
 
 pub fn run(ctx: &CliContext) -> anyhow::Result<()> {
     let (stats, total, real, schema_counts) = match ctx.cli_engine()? {
-        #[cfg(feature = "vault-repo")]
-        CliEngine::VaultRepo(engine) => {
+        #[cfg(feature = "mem-repo")]
+        CliEngine::MemRepo(engine) => {
             let stats = engine.stats();
             let store: &Store = engine.store();
             (

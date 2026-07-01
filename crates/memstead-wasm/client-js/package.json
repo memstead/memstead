@@ -1,7 +1,7 @@
 {
   "name": "@memstead/client",
   "version": "0.1.0",
-  "description": "Browser client wrapping @memstead/wasm + the memstead-bridge HTTP/SSE surface as a single VaultSyncClient class.",
+  "description": "Browser client wrapping @memstead/wasm + the memstead-bridge HTTP/SSE surface as a single MemSyncClient class.",
   "license": "MIT",
   "type": "module",
   "main": "dist/index.js",

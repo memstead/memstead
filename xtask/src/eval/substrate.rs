@@ -1,5 +1,5 @@
 //! The substrate-quality arm: an arm is *which substrate is in the agent's
-//! context*, not *whether a vault is mounted*.
+//! context*, not *whether a mem is mounted*.
 //!
 //! This is the write-side test. From one source corpus the harness builds two
 //! substrates — a free-form capture (B) and a schema-forced capture (C) of the
@@ -327,7 +327,7 @@ pub fn run_substrate_series<R: SubstrateRunner, J: Judge>(
     }
     let label = format!("{} − {}", schema_forced.label, free_form.label);
     Ok(DataSeries {
-        subject_vault: subject.to_string(),
+        subject_mem: subject.to_string(),
         points: vec![SeriesPoint::aggregate(label, n_trials, &results)],
         // The contamination screen and coverage measure run on the caller side and
         // their reports are attached to the returned series by the caller.
@@ -584,7 +584,7 @@ mod tests {
             3,
         )
         .unwrap();
-        assert_eq!(series.subject_vault, "engine");
+        assert_eq!(series.subject_mem, "engine");
         assert_eq!(series.points.len(), 1);
         let p = &series.points[0];
         assert!((p.delta - 0.3).abs() < 1e-9, "delta = {}", p.delta);

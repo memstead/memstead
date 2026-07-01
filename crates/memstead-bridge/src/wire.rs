@@ -39,11 +39,11 @@ pub use memstead_base::ops::{CommitEnvelope, EntityChange};
 /// stable while keeping the crate-boundary thin.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SearchHit {
-    /// Entity id — `<vault>--<slug>`. Matches the wire form
+    /// Entity id — `<mem>--<slug>`. Matches the wire form
     /// downstream consumers (MCP, CLI) use.
     pub id: String,
     pub title: String,
-    pub vault: String,
+    pub mem: String,
     pub entity_type: String,
     pub stub: bool,
     pub score: f32,
@@ -69,7 +69,7 @@ impl SearchHit {
         Self {
             id: hit.id.0.clone(),
             title: hit.title.clone(),
-            vault: hit.vault.clone(),
+            mem: hit.mem.clone(),
             entity_type: hit.entity_type.clone(),
             stub: hit.stub,
             score: hit.score,
@@ -114,16 +114,16 @@ pub struct SearchQuery {
 }
 
 /// Response body for `GET /search`. The outer shape stays small —
-/// `vault` / `query` echo the request for client-side correlation,
+/// `mem` / `query` echo the request for client-side correlation,
 /// `total_matched` / `truncated` carry pagination state, and
 /// `hits[]` ships each match as a [`SearchHit`]. The hit shape is
 /// the same one [`memstead_base::ops::SearchHit`] uses, so MCP's
 /// `memstead_search` and the bridge's `/search` deliver byte-identical
-/// per-hit JSON for the same vault state.
+/// per-hit JSON for the same mem state.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SearchResult {
-    /// Vault the search ran against — echoed from the request path.
-    pub vault: String,
+    /// Mem the search ran against — echoed from the request path.
+    pub mem: String,
     /// Echo of the original `q` parameter so a client that scoped
     /// the response into a UI element can label it without keeping
     /// its own bookkeeping.
@@ -143,26 +143,26 @@ pub struct SearchResult {
     pub warnings: Vec<String>,
 }
 
-/// SSE-side `vault_changed` event payload. Pushed when a vault's
+/// SSE-side `mem_changed` event payload. Pushed when a mem's
 /// HEAD advances; the client reacts by fetching the corresponding
 /// commit envelope range via `/commits`.
 ///
-/// Mirrors the [`memstead_base::engine::VaultChangedEvent`] core type — the
+/// Mirrors the [`memstead_base::engine::MemChangedEvent`] core type — the
 /// engine's broadcast surface is the natural producer. Re-declared
 /// here so consumers depend only on the bridge crate's wire types
 /// without pulling in the engine.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct VaultChangedEvent {
-    pub vault: String,
+pub struct MemChangedEvent {
+    pub mem: String,
     pub head: String,
     pub previous: String,
     pub n_commits: u32,
 }
 
-impl From<memstead_base::engine::VaultChangedEvent> for VaultChangedEvent {
-    fn from(e: memstead_base::engine::VaultChangedEvent) -> Self {
+impl From<memstead_base::engine::MemChangedEvent> for MemChangedEvent {
+    fn from(e: memstead_base::engine::MemChangedEvent) -> Self {
         Self {
-            vault: e.vault,
+            mem: e.mem,
             head: e.head,
             previous: e.previous,
             n_commits: e.n_commits,
@@ -183,7 +183,7 @@ mod tests {
         let env = CommitEnvelope {
             sha: "c4f2a8".to_string(),
             parent: String::new(),
-            vault: "engine".to_string(),
+            mem: "engine".to_string(),
             timestamp: "2026-05-18T14:23:01Z".to_string(),
             trailers: BTreeMap::new(),
             changes: vec![EntityChange::Renamed {
@@ -220,7 +220,7 @@ mod tests {
         let hit = SearchHit {
             id: "specs--alpha".to_string(),
             title: "Alpha".to_string(),
-            vault: "specs".to_string(),
+            mem: "specs".to_string(),
             entity_type: "spec".to_string(),
             stub: false,
             score: 1.5,
@@ -236,7 +236,7 @@ mod tests {
             expansion: None,
         };
         let result = SearchResult {
-            vault: "specs".to_string(),
+            mem: "specs".to_string(),
             query: "alpha".to_string(),
             hits: vec![hit],
             total_matched: 1,
@@ -244,7 +244,7 @@ mod tests {
             warnings: vec![],
         };
         let json = serde_json::to_value(&result).unwrap();
-        assert_eq!(json["vault"], "specs");
+        assert_eq!(json["mem"], "specs");
         assert_eq!(json["query"], "alpha");
         assert_eq!(json["total_matched"], 1);
         assert_eq!(json["truncated"], false);
@@ -271,7 +271,7 @@ mod tests {
         let engine_hit = memstead_base::ops::SearchHit {
             id: memstead_base::EntityId::new("specs", "alpha"),
             title: "Alpha".to_string(),
-            vault: "specs".to_string(),
+            mem: "specs".to_string(),
             entity_type: "spec".to_string(),
             stub: false,
             score: 1.5,
@@ -297,28 +297,28 @@ mod tests {
     }
 
     #[test]
-    fn vault_changed_event_round_trips_via_serde() {
-        let e = VaultChangedEvent {
-            vault: "specs".to_string(),
+    fn mem_changed_event_round_trips_via_serde() {
+        let e = MemChangedEvent {
+            mem: "specs".to_string(),
             head: "abc".to_string(),
             previous: "def".to_string(),
             n_commits: 2,
         };
         let json = serde_json::to_string(&e).unwrap();
-        let parsed: VaultChangedEvent = serde_json::from_str(&json).unwrap();
+        let parsed: MemChangedEvent = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, e);
     }
 
     #[test]
-    fn vault_changed_event_lifts_from_engine_type() {
-        let core = memstead_base::engine::VaultChangedEvent {
-            vault: "v".to_string(),
+    fn mem_changed_event_lifts_from_engine_type() {
+        let core = memstead_base::engine::MemChangedEvent {
+            mem: "v".to_string(),
             head: "h".to_string(),
             previous: "p".to_string(),
             n_commits: 1,
         };
-        let wire: VaultChangedEvent = core.into();
-        assert_eq!(wire.vault, "v");
+        let wire: MemChangedEvent = core.into();
+        assert_eq!(wire.mem, "v");
         assert_eq!(wire.head, "h");
         assert_eq!(wire.previous, "p");
         assert_eq!(wire.n_commits, 1);

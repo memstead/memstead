@@ -37,17 +37,17 @@ the skill bypasses the `outer_vcs.enabled` gate.
 
 3. Parse the returned `{ status, ... }` JSON and report to the user:
 
-   - `committed` → "Committed `<sha>` across `<N>` vaults."
-   - `no-changes` → "No pending vault changes to commit."
-   - `no-vaults` → "No writable vaults in this workspace."
+   - `committed` → "Committed `<sha>` across `<N>` mems."
+   - `no-changes` → "No pending mem changes to commit."
+   - `no-mems` → "No writable mems in this workspace."
    - `probe-failed` → "Engine probe failed: `<message>`."
    - `commit-failed` → "Commit failed: `<stderr>`."
 
 ## Rules
 
 - Never amend, never force push, never rewrite history.
-- Only the writable-vault worktrees are staged — no code, no config
-  outside vaults.
+- Only the writable-mem worktrees are staged — no code, no config
+  outside mems.
 - The skill does not build its own commit message — the shared pipeline
   owns subject, body, and trailer shape. This keeps the outer-repo log
   uniform across automatic and manual commits.

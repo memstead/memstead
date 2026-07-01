@@ -15,9 +15,9 @@ use serde::Deserialize;
 
 use memstead_base::CreateEntityArgs;
 use memstead_base::vcs::Actor;
-#[cfg(feature = "vault-repo")]
+#[cfg(feature = "mem-repo")]
 use memstead_base::EntityId;
-#[cfg(feature = "vault-repo")]
+#[cfg(feature = "mem-repo")]
 use memstead_base::ops::RelateArg;
 
 use crate::CliError;
@@ -36,9 +36,9 @@ pub struct Args {
     #[arg(long = "type")]
     pub entity_type: Option<String>,
 
-    /// Vault name. Defaults to the first writable vault.
+    /// Mem name. Defaults to the first writable mem.
     #[arg(long)]
-    pub vault: Option<String>,
+    pub mem: Option<String>,
 
     /// Section content: repeatable `--section key=value`. Body
     /// wiki-links must take slug-form (`[[idempotency]]`, not the
@@ -68,7 +68,7 @@ pub struct Args {
     pub dry_run: bool,
 
     /// Agent-authored provenance note (≤280 chars, one sentence
-    /// describing why this mutation happened). Lands in the per-vault
+    /// describing why this mutation happened). Lands in the per-mem
     /// commit body between the mechanical subject line and the
     /// provenance trailers. When `[mutations].require_notes = true` in
     /// workspace config a missing note adds a `NOTE_MISSING` warning
@@ -89,7 +89,7 @@ pub struct Args {
 struct CreatePayload {
     title: String,
     entity_type: String,
-    vault: Option<String>,
+    mem: Option<String>,
     #[serde(default)]
     sections: IndexMap<String, String>,
     #[serde(default)]
@@ -105,7 +105,7 @@ struct CreatePayload {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-#[cfg_attr(not(feature = "vault-repo"), allow(dead_code))]
+#[cfg_attr(not(feature = "mem-repo"), allow(dead_code))]
 struct RelationPayload {
     to: String,
     #[serde(rename = "type")]
@@ -153,7 +153,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         CreatePayload {
             title,
             entity_type,
-            vault: args.vault.clone(),
+            mem: args.mem.clone(),
             sections: parse_kv_list(&args.sections, "--section")?,
             metadata: parse_kv_list(&args.metadata, "--metadata")?,
             relations: parse_relation_list(&args.relations)?,
@@ -166,16 +166,16 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     let note = args.note.clone().or_else(|| payload.note.clone());
 
     match ctx.cli_engine()? {
-        #[cfg(feature = "vault-repo")]
-        CliEngine::VaultRepo(mut engine) => {
-            let vault = match payload.vault {
+        #[cfg(feature = "mem-repo")]
+        CliEngine::MemRepo(mut engine) => {
+            let mem = match payload.mem {
                 Some(v) => v,
-                None => first_writable_vault(&engine)?,
+                None => first_writable_mem(&engine)?,
             };
 
             let create_args = CreateEntityArgs {
                 title: payload.title,
-                vault,
+                mem,
                 entity_type: payload.entity_type,
                 sections: payload.sections,
                 metadata: payload.metadata,
@@ -197,12 +197,12 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                     &crate::setup::cli_ctx_with_note(note.clone()),
                 )
                 .map_err(CliError::from_engine_op)?;
-            let vault_changed = engine.take_vault_changed_notices();
+            let mem_changed = engine.take_mem_changed_notices();
 
             if ctx.json {
                 let mut body =
                     serde_json::to_value(&result).unwrap_or(serde_json::Value::Null);
-                super::merge_vault_changed_json(&mut body, &vault_changed);
+                super::merge_mem_changed_json(&mut body, &mem_changed);
                 print_json(&body)?;
             } else {
                 let warnings = if result.warnings.is_empty() {
@@ -238,39 +238,39 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 } else {
                     format!("Created `{}`", result.id)
                 };
-                let vault_changed_block = super::render_vault_changed_block(&vault_changed);
+                let mem_changed_block = super::render_mem_changed_block(&mem_changed);
                 print_markdown(&format!(
-                    "# {}\n\n- Title: {}\n- Vault: {}\n- File: {}\n- Hash: `{}`{}{}{}",
+                    "# {}\n\n- Title: {}\n- Mem: {}\n- File: {}\n- Hash: `{}`{}{}{}",
                     title_heading,
                     result.title,
-                    result.vault,
+                    result.mem,
                     result.file_path,
                     result.content_hash,
                     warnings,
                     incoming_block,
-                    vault_changed_block,
+                    mem_changed_block,
                 ));
             }
         }
         CliEngine::Filesystem(mut engine) => {
-            // Filesystem-vault `memstead create` accepts `--vault` for shape
-            // parity (matches vault-repo CLI), but the engine is single-
-            // vault; an explicit `--vault` mismatch with the workspace's
-            // pinned vault errors out so the user sees the misconfig
+            // Filesystem-mem `memstead create` accepts `--mem` for shape
+            // parity (matches mem-repo CLI), but the engine is single-
+            // mem; an explicit `--mem` mismatch with the workspace's
+            // pinned mem errors out so the user sees the misconfig
             // rather than a silent no-op.
-            let workspace_vault = engine
-                .vault_names()
+            let workspace_mem = engine
+                .mem_names()
                 .into_iter()
                 .next()
                 .map(String::from)
                 .unwrap_or_default();
-            if let Some(requested) = payload.vault.as_deref() {
-                if requested != workspace_vault {
+            if let Some(requested) = payload.mem.as_deref() {
+                if requested != workspace_mem {
                     return Err(CliError::new(
                         ExitKind::NotFound,
-                        "UNKNOWN_VAULT",
+                        "UNKNOWN_MEM",
                         format!(
-                            "filesystem-vault is single-vault: workspace vault is `{workspace_vault}`, request specified `{requested}`"
+                            "filesystem-mem is single-mem: workspace mem is `{workspace_mem}`, request specified `{requested}`"
                         ),
                     )
                     .into());
@@ -284,7 +284,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 return Err(CliError::new(
                     ExitKind::Validation,
                     "INVALID_INPUT",
-                    "--relation is not yet supported on filesystem-vault `memstead create` — use `memstead relate` after creation",
+                    "--relation is not yet supported on filesystem-mem `memstead create` — use `memstead relate` after creation",
                 )
                 .into());
             }
@@ -292,13 +292,13 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 return Err(CliError::new(
                     ExitKind::Validation,
                     "INVALID_INPUT",
-                    "--dry-run is not yet supported on filesystem-vault `memstead create`",
+                    "--dry-run is not yet supported on filesystem-mem `memstead create`",
                 )
                 .into());
             }
 
             let create_args = CreateEntityArgs {
-                vault: workspace_vault,
+                mem: workspace_mem,
                 title: payload.title.clone(),
                 entity_type: payload.entity_type,
                 sections: payload.sections,
@@ -339,10 +339,10 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                     format!("{warnings_block}{guidance_block}")
                 };
                 print_markdown(&format!(
-                    "# Created `{}`\n\n- Title: {}\n- Vault: {}\n- File: {}\n- Hash: `{}`{}",
+                    "# Created `{}`\n\n- Title: {}\n- Mem: {}\n- File: {}\n- Hash: `{}`{}",
                     outcome.id,
                     payload.title,
-                    outcome.id.vault(),
+                    outcome.id.mem(),
                     outcome.file_path,
                     outcome.content_hash,
                     warnings,
@@ -387,18 +387,18 @@ fn parse_relation_list(items: &[String]) -> anyhow::Result<Vec<RelationPayload>>
     Ok(out)
 }
 
-#[cfg(feature = "vault-repo")]
-fn first_writable_vault(engine: &memstead_base::Engine) -> anyhow::Result<String> {
+#[cfg(feature = "mem-repo")]
+fn first_writable_mem(engine: &memstead_base::Engine) -> anyhow::Result<String> {
     // Resolve through the shared stable-default contract so the CLI and
-    // MCP omitted-`vault` paths always agree: the first writable mount in
-    // declaration order — the seed vault — not an alphabetically-first or
-    // set-order pick that shifts when an unrelated vault is added.
-    match engine.default_writable_vault() {
+    // MCP omitted-`mem` paths always agree: the first writable mount in
+    // declaration order — the seed mem — not an alphabetically-first or
+    // set-order pick that shifts when an unrelated mem is added.
+    match engine.default_writable_mem() {
         Some(name) => Ok(name.to_string()),
         None => Err(CliError::new(
             ExitKind::Generic,
-            "NO_WRITABLE_VAULT",
-            "no writable vault loaded — pass --vault <name>",
+            "NO_WRITABLE_MEM",
+            "no writable mem loaded — pass --mem <name>",
         )
         .into()),
     }

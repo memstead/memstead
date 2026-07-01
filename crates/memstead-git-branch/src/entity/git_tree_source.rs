@@ -1,4 +1,4 @@
-//! Git-tree-backed entity source — reads `.md` blobs out of a vault
+//! Git-tree-backed entity source — reads `.md` blobs out of a mem
 //! ref's tree without a working tree on disk.
 //!
 //! Mirrors `Directory`'s walk semantics from
@@ -12,7 +12,7 @@ use memstead_base::entity::loader::{LoadError, LoadResult, parse_entries};
 use memstead_base::entity::source::{SourceEntry, SourceReadError};
 use memstead_schema::Schema;
 
-/// A vault stored as a git ref's tree — no working tree on disk.
+/// A mem stored as a git ref's tree — no working tree on disk.
 ///
 /// `repo` is opened once per call by the engine — fresh opens are
 /// cheap (no clone, no fetch). `ref_name` is fully-qualified
@@ -117,25 +117,25 @@ fn read_git_tree(
     Ok((out, errors))
 }
 
-/// Load all entities from a vault stored as a branch in a
-/// `vault-repo-git` repository.
+/// Load all entities from a mem stored as a branch in a
+/// `mem-repo-git` repository.
 ///
 /// Reads blobs from the git object database and feeds the result
 /// through [`memstead_base::entity::loader::parse_entries`] so the entity
 /// pipeline matches the directory- and archive-backed loaders byte
 /// for byte.
-pub fn load_vault_from_git_tree(
+pub fn load_mem_from_git_tree(
     repo: gix::Repository,
     ref_name: &str,
-    vault: &str,
-    vault_schema: &Schema,
+    mem: &str,
+    mem_schema: &Schema,
 ) -> Result<LoadResult, LoadError> {
     let source = GitTreeSource {
         repo,
         ref_name: ref_name.to_string(),
     };
     let (entries, read_errors) = source.read_all()?;
-    Ok(parse_entries(entries, read_errors, vault, vault_schema))
+    Ok(parse_entries(entries, read_errors, mem, mem_schema))
 }
 
 #[cfg(test)]
@@ -305,9 +305,9 @@ mod tests {
     }
 
     #[test]
-    fn load_vault_via_git_tree_source_round_trips_a_blob() {
+    fn load_mem_via_git_tree_source_round_trips_a_blob() {
         let tmp = TempDir::new().unwrap();
-        let gitdir = tmp.path().join("vault-repo").join(".git");
+        let gitdir = tmp.path().join("mem-repo").join(".git");
         std::fs::create_dir_all(&gitdir).unwrap();
         gix::init_bare(&gitdir).unwrap();
         let repo = gix::open(&gitdir).unwrap();
@@ -346,7 +346,7 @@ mod tests {
 
         let schema = Schema::builtin_default();
         let result =
-            load_vault_from_git_tree(repo, "refs/heads/specs", "specs", &schema).unwrap();
+            load_mem_from_git_tree(repo, "refs/heads/specs", "specs", &schema).unwrap();
 
         assert_eq!(result.entities.len(), 1);
         assert!(result.errors.is_empty());

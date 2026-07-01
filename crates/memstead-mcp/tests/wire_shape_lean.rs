@@ -1,9 +1,9 @@
-#![cfg(not(feature = "vault-repo"))]
+#![cfg(not(feature = "mem-repo"))]
 //! Wire-shape characterization for the MCP tool surface.
 //!
 //! This suite pins the bytes the server emits in `result.content[]` and
 //! `result.structured_content` for representative tool calls. Both server
-//! implementations live in this crate, gated by `vault-repo`: each
+//! implementations live in this crate, gated by `mem-repo`: each
 //! flavour's pin runs against its own (`FilesystemMcpServer` for the
 //! lean build, `McpServer` for the full build).
 //!
@@ -19,7 +19,7 @@
 //!      reuse the empty-mounts fixture below for pure error paths).
 //!   3. Call `harness.call_tool(...)`, assert on `code`, `message`
 //!      contents, and `structured_content` shape.
-//!   4. If the path is flavor-specific, gate on `vault-repo`.
+//!   4. If the path is flavor-specific, gate on `mem-repo`.
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
@@ -29,10 +29,10 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
-const WORKSPACE_TOML_BODY: &str = "format = \"memstead-git-branch-1\"\n\n\
+const WORKSPACE_TOML_BODY: &str = "format = \"memstead-git-branch-2\"\n\n\
 [persistence_adapter]\nname = \"file-two-layer\"\n";
 
-const MOUNTS_JSON_BODY_EMPTY: &str = r#"{ "format": "memstead-mounts-1", "mounts": [] }"#;
+const MOUNTS_JSON_BODY_EMPTY: &str = r#"{ "format": "memstead-mounts-3", "mounts": [] }"#;
 
 fn memstead_mcp_bin() -> &'static str {
     env!("CARGO_BIN_EXE_memstead-mcp")
@@ -47,21 +47,21 @@ fn seed_empty_workspace(root: &Path) {
     std::fs::write(memstead.join("state").join("mounts.json"), MOUNTS_JSON_BODY_EMPTY).unwrap();
 }
 
-/// Seed a single-vault folder workspace at `root` pinned to the
+/// Seed a single-mem folder workspace at `root` pinned to the
 /// `default@1.0.0` builtin schema. **Basis-only fixture.** The mount is
 /// `Write`/`Eager` and stores entities in `root` itself.
 ///
-/// Pro flavor cannot use this — the pro binary discovers vaults from
-/// `vault-repo/.git/` branches (not from the folder-mount state file)
-/// and would boot with zero writable vaults against a folder-seeded
+/// Pro flavor cannot use this — the pro binary discovers mems from
+/// `mem-repo/.git/` branches (not from the folder-mount state file)
+/// and would boot with zero writable mems against a folder-seeded
 /// workspace. Pro tests use [`seed_pro_workspace`] instead.
-fn seed_folder_workspace(root: &Path, vault_name: &str) {
+fn seed_folder_workspace(root: &Path, mem_name: &str) {
     use memstead_base::WorkspaceStoreAdapter;
     use memstead_base::filesystem::config::{WorkspaceConfig, write_workspace_config};
     use memstead_schema::SchemaRef;
 
     let pin: SchemaRef = "default@1.0.0".parse().unwrap();
-    let cfg = WorkspaceConfig::new(vault_name, pin.clone());
+    let cfg = WorkspaceConfig::new(mem_name, pin.clone());
     write_workspace_config(root, &cfg).unwrap();
 
     let memstead = root.join(".memstead");
@@ -70,7 +70,7 @@ fn seed_folder_workspace(root: &Path, vault_name: &str) {
 
     let workspace = memstead_base::Workspace {
         mounts: vec![memstead_base::Mount {
-            vault: vault_name.to_string(),
+            mem: mem_name.to_string(),
             schema: Some(pin),
             storage: memstead_base::MountStorage::Folder {
                 path: root.to_path_buf(),
@@ -305,7 +305,7 @@ fn basis_memstead_entity_emits_typed_envelope_for_missing_id() {
 // ---------------------------------------------------------------------------
 //
 // Success responses carry markdown content (often dependent on dynamic
-// state like vault counts or schema version names). Pinning every byte
+// state like mem counts or schema version names). Pinning every byte
 // would couple the suite to schema metadata. Instead these pins fix the
 // envelope shape — `isError` absent or false, `content[0].type == text`,
 // `text` carries the expected anchor sections — so a contract-shape
@@ -355,7 +355,7 @@ fn basis_memstead_search_succeeds_on_empty_seeded_workspace() {
 
 
 /// Basis pin: `memstead_overview` on a seeded folder workspace produces
-/// the cold-start markdown with the `## Vaults` and `## Schemas`
+/// the cold-start markdown with the `## Mems` and `## Schemas`
 /// anchors. Empty graph → no community section.
 #[test]
 fn basis_memstead_overview_succeeds_on_empty_seeded_workspace() {
@@ -366,8 +366,8 @@ fn basis_memstead_overview_succeeds_on_empty_seeded_workspace() {
     let result = harness.call_tool("memstead_overview", json!({}));
     let text = assert_success_envelope(&result);
     assert!(
-        text.contains("## Vaults"),
-        "overview missing ## Vaults anchor: {text:?}"
+        text.contains("## Mems"),
+        "overview missing ## Mems anchor: {text:?}"
     );
     assert!(
         text.contains("## Schemas"),
@@ -375,7 +375,7 @@ fn basis_memstead_overview_succeeds_on_empty_seeded_workspace() {
     );
     assert!(
         text.contains("demo"),
-        "overview missing vault name: {text:?}"
+        "overview missing mem name: {text:?}"
     );
 }
 
@@ -414,17 +414,17 @@ fn basis_memstead_schema_unknown_name_emits_entity_not_found() {
 //
 // Success path: the create response carries a JSON body on
 // `structured_content` whose `id` field is the slugified id, plus
-// `title`, `vault`, `content_hash`, `commit_sha`, and `warnings`. The
+// `title`, `mem`, `content_hash`, `commit_sha`, and `warnings`. The
 // pins assert on field PRESENCE + the deterministic `id` slug; the
 // hashes / commit shas are content-derived and pinning them would
 // couple the suite to the markdown render exactly.
 
-fn assert_create_success_shape(result: &Value, expected_id: &str, expected_vault: &str) {
+fn assert_create_success_shape(result: &Value, expected_id: &str, expected_mem: &str) {
     let _text = assert_success_envelope(result);
     let body = result
         .get("structuredContent")
         .expect("structuredContent missing on create success");
-    for field in ["id", "title", "vault", "_hash", "warnings"] {
+    for field in ["id", "title", "mem", "_hash", "warnings"] {
         assert!(
             body.get(field).is_some(),
             "create response missing {field:?}: {body}"
@@ -436,9 +436,9 @@ fn assert_create_success_shape(result: &Value, expected_id: &str, expected_vault
         "create id drifted from slug rule: {body}"
     );
     assert_eq!(
-        body.get("vault").and_then(Value::as_str),
-        Some(expected_vault),
-        "create response vault drifted: {body}"
+        body.get("mem").and_then(Value::as_str),
+        Some(expected_mem),
+        "create response mem drifted: {body}"
     );
 }
 
@@ -510,13 +510,13 @@ fn basis_memstead_create_unknown_type_emits_typed_envelope() {
 
 /// Basis pin: `memstead_health` returns the engine's `HealthSummary`
 /// serialised directly — `{missing_fields, orphan_count, stale_entities,
-/// stub_count}`. There is **no** `writable_vaults` field on the basis
+/// stub_count}`. There is **no** `writable_mems` field on the basis
 /// response shape, even though the pro flavor (and the agent-facing
 /// contract documented in the tool description) does carry one.
 ///
 /// **Drift discovered:** basis `memstead_health` ships a strict subset of
 /// the pro response shape. The pro server returns a richer
-/// `HealthReport` envelope with vault-level detail; basis returns only
+/// `HealthReport` envelope with mem-level detail; basis returns only
 /// the workspace-wide scalars from `compute_health`. The pin records
 /// today's basis truth so the lift cannot regress it.
 #[test]
@@ -536,11 +536,11 @@ fn basis_memstead_health_succeeds_on_seeded_workspace() {
             "basis health response missing {field:?}: {body}"
         );
     }
-    // Today the basis surface does NOT include `writable_vaults`; pro
+    // Today the basis surface does NOT include `writable_mems`; pro
     // does. The pin trips if the field appears (or disappears).
     assert!(
-        body.get("writable_vaults").is_none(),
-        "basis health unexpectedly carries writable_vaults — \
+        body.get("writable_mems").is_none(),
+        "basis health unexpectedly carries writable_mems — \
          if this is intended, update the pin: {body}"
     );
 }
@@ -774,7 +774,7 @@ fn basis_memstead_relate_returns_typed_success_envelope() {
 
 /// Basis pin: rename an entity to a new title. The response carries
 /// `old_id`, `new_id`, plus rotated `content_hash`. The slug rule
-/// (`<vault>--<lower-kebab>`) is engine-internal so the expected new_id
+/// (`<mem>--<lower-kebab>`) is engine-internal so the expected new_id
 /// is computable from the new title.
 #[test]
 fn basis_memstead_rename_returns_typed_success_envelope() {
@@ -865,8 +865,8 @@ fn basis_memstead_rename_same_slug_silent_noop() {
 // `memstead_reload` (pro-only) success pin
 // ---------------------------------------------------------------------------
 //
-// The basis filesystem-vault server doesn't expose memstead_reload —
-// drift-reload is a vault-repo concept (sibling writer commits a new
+// The basis filesystem-mem server doesn't expose memstead_reload —
+// drift-reload is a mem-repo concept (sibling writer commits a new
 // HEAD; engine re-derives memo state). Pinning is pro-only.
 
 
@@ -875,7 +875,7 @@ fn basis_memstead_rename_same_slug_silent_noop() {
 // ---------------------------------------------------------------------------
 //
 // The recovery payload contract: `details.referrers[]` carries
-// `{from_id, rel_type, vault, capability: "write"}` for each Write-Vault
+// `{from_id, rel_type, mem, capability: "write"}` for each Write-Mem
 // referrer so the agent can rewrite the offending references without a
 // follow-up `memstead_entity` call. Both flavors emit this shape today.
 
@@ -930,8 +930,8 @@ fn assert_has_incoming_refs_envelope(
         "referrer.rel_types must carry ≥1 entry: {first}"
     );
     assert!(
-        first.get("vault").and_then(Value::as_str).is_some(),
-        "referrer.vault missing: {first}"
+        first.get("mem").and_then(Value::as_str).is_some(),
+        "referrer.mem missing: {first}"
     );
 }
 
@@ -973,8 +973,8 @@ fn basis_memstead_delete_with_incoming_refs_emits_typed_envelope() {
 /// Basis pin: `memstead_changes_since` reads `.memstead/changes.jsonl` and emits
 /// `{since, count, entries[]}`. Passing `since: ""` returns every
 /// recorded change (basis filters with `ts > since`; empty since
-/// admits all). The basis flavor IGNORES the `vault` param (the
-/// JSONL changelog is workspace-global, not per-vault).
+/// admits all). The basis flavor IGNORES the `mem` param (the
+/// JSONL changelog is workspace-global, not per-mem).
 #[test]
 fn basis_memstead_changes_since_returns_typed_success_envelope() {
     let tmp = TempDir::new().unwrap();
@@ -985,7 +985,7 @@ fn basis_memstead_changes_since_returns_typed_success_envelope() {
 
     let result = harness.call_tool(
         "memstead_changes_since",
-        json!({ "vault": "demo", "since": "" }),
+        json!({ "mem": "demo", "since": "" }),
     );
     let _ = assert_success_envelope(&result);
     let body = result
@@ -1017,7 +1017,7 @@ fn basis_memstead_changes_since_returns_typed_success_envelope() {
 // `memstead_create` before mutating. The auto-stub side rides a
 // `AUTO_STUB_CREATED` warning on the relate response.
 
-/// Basis pin: `memstead_relate` against an absent same-vault target
+/// Basis pin: `memstead_relate` against an absent same-mem target
 /// auto-stubs the target and emits a `AUTO_STUB_CREATED` warning on
 /// the response's `warnings[]`. Try-then-update the stub trips
 /// `STUB_NOT_UPDATABLE`.
@@ -1152,7 +1152,7 @@ fn basis_relate_from_stub_emits_typed_envelope() {
 
 
 // ---------------------------------------------------------------------------
-// Pro-only vault-lifecycle pin — `memstead_vault_create` success
+// Pro-only mem-lifecycle pin — `memstead_mem_create` success
 // ---------------------------------------------------------------------------
 
 

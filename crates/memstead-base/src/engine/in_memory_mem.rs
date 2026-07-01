@@ -15,7 +15,7 @@
 use indexmap::IndexMap;
 
 use super::test_helpers::*;
-use crate::backend::VaultBackend;
+use crate::backend::MemBackend;
 use crate::engine::{
     CreateEntityArgs, DeleteEntityArgs, Engine, EngineError, RelateEntityArgs, RenameEntityArgs,
     UpdateEntityArgs,
@@ -33,9 +33,9 @@ fn spec_sections(identity: &str, purpose: &str) -> IndexMap<String, String> {
     s
 }
 
-fn spec_create(vault: &str, title: &str, sections: IndexMap<String, String>) -> CreateEntityArgs {
+fn spec_create(mem: &str, title: &str, sections: IndexMap<String, String>) -> CreateEntityArgs {
     CreateEntityArgs {
-        vault: vault.to_string(),
+        mem: mem.to_string(),
         title: title.to_string(),
         entity_type: "spec".to_string(),
         sections,
@@ -70,12 +70,12 @@ fn empty_update(id: EntityId, expected_hash: Option<String>) -> UpdateEntityArgs
 fn full_lifecycle_round_trips_in_memory() {
     let mut engine = Engine::from_mounts(vec![(
         in_memory_mount("specs"),
-        Box::new(InMemoryBackend::new()) as Box<dyn VaultBackend>,
+        Box::new(InMemoryBackend::new()) as Box<dyn MemBackend>,
     )])
     .unwrap();
     let (actor, client) = cli_actor();
 
-    // Vault boots empty — nothing was provisioned.
+    // Mem boots empty — nothing was provisioned.
     assert!(engine.get_entity(&EntityId::new("specs", "target-spec")).is_none());
 
     // --- create: target, then a referrer whose body wiki-links it ---
@@ -237,22 +237,22 @@ fn full_lifecycle_round_trips_in_memory() {
     assert!(!relate.commit_sha.is_empty(), "relate must produce a commit id");
 }
 
-/// An in-memory vault exports to a self-describing `.mem` archive that
+/// An in-memory mem exports to a self-describing `.mem` archive that
 /// mounts standalone in a fresh engine — with no filesystem, no network,
 /// and no other inputs — yielding the same entities and relationships the
 /// agent built. This is the funnel-exit guarantee: the visitor can take
 /// the graph home.
 #[test]
-fn in_memory_vault_exports_to_mem_archive_that_mounts_standalone() {
-    // A session-style in-memory vault is self-describing: a config (with
+fn in_memory_mem_exports_to_mem_archive_that_mounts_standalone() {
+    // A session-style in-memory mem is self-describing: a config (with
     // a version, which export requires) is written to the backend before
-    // boot, so `vault_config_for` resolves it and export can project it.
+    // boot, so `mem_config_for` resolves it and export can project it.
     let backend = InMemoryBackend::new();
     backend
-        .write_vault_config(br#"{"version":"0.1.0","schema":"default@1.0.0"}"#)
+        .write_mem_config(br#"{"version":"0.1.0","schema":"default@1.0.0"}"#)
         .expect("in-memory backend accepts a config write");
     let mount = Mount {
-        vault: "playground".to_string(),
+        mem: "playground".to_string(),
         schema: Some(pin("default")),
         storage: MountStorage::InMemory,
         capability: MountCapability::Write,
@@ -261,7 +261,7 @@ fn in_memory_vault_exports_to_mem_archive_that_mounts_standalone() {
         migration_target: None,
     };
     let mut engine =
-        Engine::from_mounts(vec![(mount, Box::new(backend) as Box<dyn VaultBackend>)]).unwrap();
+        Engine::from_mounts(vec![(mount, Box::new(backend) as Box<dyn MemBackend>)]).unwrap();
     let (actor, client) = cli_actor();
 
     // Build a small graph: a target, plus a referrer that both
@@ -302,9 +302,9 @@ fn in_memory_vault_exports_to_mem_archive_that_mounts_standalone() {
         )
         .unwrap();
 
-    // Seal the live vault to `.mem` bytes, then mount those bytes
+    // Seal the live mem to `.mem` bytes, then mount those bytes
     // standalone in a brand-new engine — no shared state with the source.
-    let bytes = engine.export_vault_to_bytes("playground").expect("in-memory export succeeds");
+    let bytes = engine.export_mem_to_bytes("playground").expect("in-memory export succeeds");
     let standalone = Engine::from_archive_bytes(bytes).expect("exported .mem mounts standalone");
 
     // The standalone engine yields the same graph the agent built.

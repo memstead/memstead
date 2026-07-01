@@ -12,7 +12,7 @@
 //!   a selection (allow/deny patterns), an engagement contract, and an
 //!   optional deterministic preparation step.
 //! - [`Projection`] — *obligation*: maps source facets (+ optional reference
-//!   vaults) to a destination vault. The one place agent reasoning lives.
+//!   mems) to a destination mem. The one place agent reasoning lives.
 //! - [`Ingest`] — *schedule*: runs a projection in a mode/trigger/batch.
 //!
 //! These are operator-edited configs. The loader's job is load + validate +
@@ -21,7 +21,7 @@
 use serde::{Deserialize, Serialize};
 
 /// What kind of surface a [`Medium`] references. The string forms match the
-/// `type` field of the legacy `scopes/<vault>/<name>.json` records, so
+/// `type` field of the legacy `scopes/<mem>/<name>.json` records, so
 /// the migration shim maps them without translation. `pdf` (and other
 /// non-text mediums) join this enum with their follow-up plans.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -31,7 +31,7 @@ pub enum MediumType {
     Codebase,
     /// A directory of files (non-code).
     Filesystem,
-    /// Another vault's graph (reachable as the reserved id `graph` for "home").
+    /// Another mem's graph (reachable as the reserved id `graph` for "home").
     Graph,
     /// A git history.
     Git,
@@ -40,7 +40,7 @@ pub enum MediumType {
 }
 
 /// A **Medium** — a passive, named, typed reference to a body of information
-/// the vault acknowledges as part of its territory. Nothing more: no
+/// the mem acknowledges as part of its territory. Nothing more: no
 /// selection, no engagement metadata, no preparation step.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Medium {
@@ -49,7 +49,7 @@ pub struct Medium {
     /// What kind of surface this is.
     #[serde(rename = "type")]
     pub medium_type: MediumType,
-    /// Where the body of information lives — a path, URL, or vault id,
+    /// Where the body of information lives — a path, URL, or mem id,
     /// interpreted per [`Self::medium_type`]. Opaque to this layer.
     pub pointer: String,
 }
@@ -109,7 +109,7 @@ pub struct Facet {
 }
 
 /// A **Projection** — the obligation that connects source facets (and optional
-/// read-only reference vaults) to a single destination vault. The only place
+/// read-only reference mems) to a single destination mem. The only place
 /// agent reasoning lives; it carries no scope, preparation, or medium metadata
 /// of its own (all of that lives in the facets it references).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -120,11 +120,11 @@ pub struct Projection {
     /// Source facets (by name) the projection consumes.
     #[serde(default)]
     pub source_facets: Vec<String>,
-    /// Read-only reference vaults that supply cross-vault context.
+    /// Read-only reference mems that supply cross-mem context.
     #[serde(default)]
-    pub reference_vaults: Vec<String>,
-    /// The vault this projection writes into.
-    pub destination_vault: String,
+    pub reference_mems: Vec<String>,
+    /// The mem this projection writes into.
+    pub destination_mem: String,
 }
 
 /// How an [`Ingest`] run engages its projection.
@@ -233,19 +233,19 @@ mod tests {
         assert_eq!(back, f);
     }
 
-    /// A projection maps source facets + reference vaults to one destination.
+    /// A projection maps source facets + reference mems to one destination.
     #[test]
     fn projection_round_trips() {
         let p = Projection {
             intent: Some("Swift macOS app source.".to_string()),
             source_facets: vec!["source-files".to_string()],
-            reference_vaults: vec!["engine".to_string()],
-            destination_vault: "macos".to_string(),
+            reference_mems: vec!["engine".to_string()],
+            destination_mem: "macos".to_string(),
         };
         let json = serde_json::to_string(&p).unwrap();
         let back: Projection = serde_json::from_str(&json).unwrap();
         assert_eq!(back, p);
-        assert_eq!(back.destination_vault, "macos");
+        assert_eq!(back.destination_mem, "macos");
     }
 
     /// An ingest round-trips; `mode`/`trigger` use the kebab-case wire forms

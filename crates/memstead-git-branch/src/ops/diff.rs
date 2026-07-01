@@ -1,7 +1,7 @@
 //! `Engine::diff(ref_a, ref_b)` implementation for git-branch mounts.
 //!
 //! Walks the two tree objects pointed to by `ref_a` and `ref_b` inside
-//! the workspace's vault-repo gitdir, produces a per-entity diff
+//! the workspace's mem-repo gitdir, produces a per-entity diff
 //! ([`Diff`]) that downstream replay / review / preview / audit
 //! tooling consumes. Same backbone the [`changes_since`](super::changes)
 //! op uses — two-tree diff with rename detection — but expanded into a
@@ -18,8 +18,8 @@
 //!
 //! - **Rename detection**: deferred. The agent-notes-driven rename
 //!   collapse `changes_since` performs requires a `since` cursor in
-//!   the same vault's history. A generic two-ref diff (potentially
-//!   cross-vault) needs a different walk; v1 emits Added/Deleted pairs
+//!   the same mem's history. A generic two-ref diff (potentially
+//!   cross-mem) needs a different walk; v1 emits Added/Deleted pairs
 //!   instead of `Renamed` and leaves rename-chain unfilled.
 //! - **Cross-entity ripple**: `IncomingRipple` lists stay empty in
 //!   the entries. Populating them requires a per-side wiki-link graph
@@ -39,28 +39,28 @@ use memstead_base::ops::{Diff, DiffConfig, EntityDiff, IncomingRipple};
 
 use crate::EMPTY_TREE_SHA;
 
-/// Normalise a caller-supplied ref against the per-vault branch
+/// Normalise a caller-supplied ref against the per-mem branch
 /// convention, shared by `memstead_diff` and `memstead_changes_since`.
 ///
 /// Rewrites a leading `HEAD` *token* — the whole ref (`HEAD`) or the base
 /// of a revspec (`HEAD~5`, `HEAD^`, `HEAD^{tree}`, `HEAD@{1}`) — to
-/// `refs/heads/<vault>`, preserving the suffix, so resolution targets the
-/// selected vault's branch tip rather than the vault-repo gitdir's
+/// `refs/heads/<mem>`, preserving the suffix, so resolution targets the
+/// selected mem's branch tip rather than the mem-repo gitdir's
 /// symbolic HEAD (which points at the dummy default branch). gix already
 /// parses the revspec suffix; this only re-anchors the `HEAD` base. A ref
 /// that merely *starts with* `HEAD` (e.g. `HEADER`, `HEAD-foo`) is left
 /// alone — the character after `HEAD` must be a revspec operator
-/// (`~ ^ : @`) or end-of-string. Targeted at the per-vault entry point
-/// only: vault-less callers (cross-vault diffs naming a peer branch) pass
+/// (`~ ^ : @`) or end-of-string. Targeted at the per-mem entry point
+/// only: mem-less callers (cross-mem diffs naming a peer branch) pass
 /// fully-qualified refs that don't begin with the `HEAD` token.
 ///
 /// The empty-tree sentinel is handled inside `resolve_tree` so callers see
 /// a single dispatch.
-pub(crate) fn normalise_ref_for_vault(vault: &str, raw: &str) -> String {
+pub(crate) fn normalise_ref_for_mem(mem: &str, raw: &str) -> String {
     if let Some(rest) = raw.strip_prefix("HEAD")
         && (rest.is_empty() || rest.starts_with(['~', '^', ':', '@']))
     {
-        return format!("refs/heads/{vault}{rest}");
+        return format!("refs/heads/{mem}{rest}");
     }
     raw.to_string()
 }
@@ -106,11 +106,11 @@ fn sha_for(repo: &gix::Repository, raw: &str) -> Result<String, BackendError> {
     Ok(id.detach().to_string())
 }
 
-/// Translate a tree-diff path to a vault-qualified entity id, returning
+/// Translate a tree-diff path to a mem-qualified entity id, returning
 /// `None` for engine-internal paths (`.memstead/...`) and non-markdown
 /// entries. Mirrors `changes::path_to_entity_id` but is callable from
 /// here without exporting the private helper.
-fn path_to_entity_id(vault: &str, path: &gix::bstr::BStr) -> Option<EntityId> {
+fn path_to_entity_id(mem: &str, path: &gix::bstr::BStr) -> Option<EntityId> {
     let s = std::str::from_utf8(path.as_ref()).ok()?;
     if s.is_empty() || !s.ends_with(".md") {
         return None;
@@ -118,7 +118,7 @@ fn path_to_entity_id(vault: &str, path: &gix::bstr::BStr) -> Option<EntityId> {
     if s.starts_with(".memstead/") {
         return None;
     }
-    Some(file_path_to_id(s, vault))
+    Some(file_path_to_id(s, mem))
 }
 
 /// Read the markdown body for `path` from `tree`. Returns `None` when
@@ -145,7 +145,7 @@ fn peek_meta(raw: &Option<String>) -> (Option<String>, Option<String>) {
 /// known gaps (rename, ripple) that will surface as handover items.
 pub fn diff_two_refs(
     gitdir: &Path,
-    vault: &str,
+    mem: &str,
     ref_a: &str,
     ref_b: &str,
     config: &DiffConfig,
@@ -157,13 +157,13 @@ pub fn diff_two_refs(
         )));
     }
     let repo = gix::open(gitdir).map_err(|e| BackendError::Other(format!("gix open: {e}")))?;
-    // Bare `HEAD` substitutes to `refs/heads/<vault>` so the diff targets
-    // the vault's branch tip (not the gitdir's symbolic HEAD on a
-    // dummy default branch). Per-vault callers always pass a vault
+    // Bare `HEAD` substitutes to `refs/heads/<mem>` so the diff targets
+    // the mem's branch tip (not the gitdir's symbolic HEAD on a
+    // dummy default branch). Per-mem callers always pass a mem
     // selector; the substitution is unconditional on this entry
     // point.
-    let normalised_a = normalise_ref_for_vault(vault, ref_a);
-    let normalised_b = normalise_ref_for_vault(vault, ref_b);
+    let normalised_a = normalise_ref_for_mem(mem, ref_a);
+    let normalised_b = normalise_ref_for_mem(mem, ref_b);
     let tree_a = resolve_tree(&repo, &normalised_a)?;
     let tree_b = resolve_tree(&repo, &normalised_b)?;
     let resolved_a_sha = sha_for(&repo, &normalised_a)?;
@@ -189,7 +189,7 @@ pub fn diff_two_refs(
             |change| -> Result<std::ops::ControlFlow<()>, std::convert::Infallible> {
                 match change {
                     Change::Addition { location, .. } => {
-                        if let Some(id) = path_to_entity_id(vault, location.as_ref()) {
+                        if let Some(id) = path_to_entity_id(mem, location.as_ref()) {
                             // Read the post-state blob unconditionally to
                             // populate `title`/`entity_type` (the docstring's
                             // metadata-only shape); keep the full body as
@@ -207,7 +207,7 @@ pub fn diff_two_refs(
                         }
                     }
                     Change::Deletion { location, .. } => {
-                        if let Some(id) = path_to_entity_id(vault, location.as_ref()) {
+                        if let Some(id) = path_to_entity_id(mem, location.as_ref()) {
                             // The entity still exists on `ref_a`; pull its
                             // metadata from that side so a deleted entry
                             // still carries `title`/`entity_type`.
@@ -224,7 +224,7 @@ pub fn diff_two_refs(
                         }
                     }
                     Change::Modification { location, .. } => {
-                        if let Some(id) = path_to_entity_id(vault, location.as_ref()) {
+                        if let Some(id) = path_to_entity_id(mem, location.as_ref()) {
                             // Post-state (`ref_b`) is the source for the
                             // current metadata, mirroring `memstead_changes_since`.
                             let raw_b = read_md_at_path(&repo, &tree_b, location.as_ref());
@@ -250,8 +250,8 @@ pub fn diff_two_refs(
                         location,
                         ..
                     } => {
-                        let from = path_to_entity_id(vault, source_location.as_ref());
-                        let to = path_to_entity_id(vault, location.as_ref());
+                        let from = path_to_entity_id(mem, source_location.as_ref());
+                        let to = path_to_entity_id(mem, location.as_ref());
                         if let (Some(from_id), Some(to_id)) = (from, to) {
                             // Post-state (the `to` side) carries the surviving
                             // metadata.
@@ -290,7 +290,7 @@ pub fn diff_two_refs(
     // entries into `Renamed`; for any `Renamed` entry where the notes
     // record a multi-step chain, fill `rename_chain` with the
     // intermediates.
-    apply_agent_notes_renames(gitdir, vault, ref_a, ref_b, &mut entries, config);
+    apply_agent_notes_renames(gitdir, mem, ref_a, ref_b, &mut entries, config);
 
     // Schema-strictness pass: entries whose markdown body fails the
     // cheap parse check (missing / malformed frontmatter) get demoted
@@ -309,8 +309,8 @@ pub fn diff_two_refs(
     if config.include_ripple {
         let affected = collect_affected_ids(&entries);
         if !affected.is_empty() {
-            let ripple_a = scan_tree_ripple(&repo, &tree_a, vault, &affected, "ref_a");
-            let ripple_b = scan_tree_ripple(&repo, &tree_b, vault, &affected, "ref_b");
+            let ripple_a = scan_tree_ripple(&repo, &tree_a, mem, &affected, "ref_a");
+            let ripple_b = scan_tree_ripple(&repo, &tree_b, mem, &affected, "ref_b");
             attach_ripple(&mut entries, &ripple_a, &ripple_b);
         }
     }
@@ -334,14 +334,14 @@ pub fn diff_two_refs(
 /// nothing — gix-similarity stays the fallback rename signal.
 fn apply_agent_notes_renames(
     gitdir: &Path,
-    vault: &str,
+    mem: &str,
     ref_a: &str,
     ref_b: &str,
     entries: &mut Vec<EntityDiff>,
     config: &DiffConfig,
 ) {
     let report = match crate::ops::agent_notes::agent_notes_since(
-        vault,
+        mem,
         gitdir,
         ref_a,
         Some(ref_b),
@@ -623,7 +623,7 @@ fn collect_affected_ids(entries: &[EntityDiff]) -> HashSet<EntityId> {
 fn scan_tree_ripple(
     repo: &gix::Repository,
     tree: &gix::Tree<'_>,
-    vault: &str,
+    mem: &str,
     affected: &HashSet<EntityId>,
     side: &str,
 ) -> HashMap<EntityId, Vec<IncomingRipple>> {
@@ -643,7 +643,7 @@ fn scan_tree_ripple(
         if !path.ends_with(".md") || path.starts_with(".memstead/") {
             continue;
         }
-        let referrer_id = file_path_to_id(path, vault);
+        let referrer_id = file_path_to_id(path, mem);
         // Don't list an entity as its own referrer — a wiki-link in
         // the entity's own body pointing at itself is not "ripple".
         let object = match repo.find_object(entry.oid) {
@@ -658,7 +658,7 @@ fn scan_tree_ripple(
             Ok(s) => s,
             Err(_) => continue,
         };
-        for target in extract_inline_links_lenient(content, vault) {
+        for target in extract_inline_links_lenient(content, mem) {
             if target == referrer_id {
                 continue;
             }
@@ -728,14 +728,14 @@ fn primary_id(entry: &EntityDiff) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::VaultWriter;
-    use crate::storage::git_tree::GitTreeVaultWriter;
+    use crate::storage::MemWriter;
+    use crate::storage::git_tree::GitTreeMemWriter;
     use crate::vcs::CommitContext;
     use std::path::PathBuf;
     use tempfile::TempDir;
 
     fn init_gitdir(tmp: &TempDir) -> PathBuf {
-        let gitdir = tmp.path().join("vault-repo").join(".git");
+        let gitdir = tmp.path().join("mem-repo").join(".git");
         std::fs::create_dir_all(&gitdir).unwrap();
         gix::init_bare(&gitdir).unwrap();
         gitdir
@@ -756,11 +756,11 @@ mod tests {
 
     fn write_and_commit(
         gitdir: &PathBuf,
-        vault: &str,
+        mem: &str,
         entries: &[(&str, &str)],
         subject: &str,
     ) -> String {
-        let writer = GitTreeVaultWriter::new(gitdir.clone(), format!("refs/heads/{vault}"));
+        let writer = GitTreeMemWriter::new(gitdir.clone(), format!("refs/heads/{mem}"));
         for (path, content) in entries {
             writer.write_entity(Path::new(path), content.as_bytes()).unwrap();
         }
@@ -792,24 +792,24 @@ mod tests {
 
     #[test]
     fn normalise_rewrites_only_the_head_token() {
-        // #53: the HEAD base of a revspec re-anchors on the vault branch,
+        // #53: the HEAD base of a revspec re-anchors on the mem branch,
         // suffix preserved.
-        assert_eq!(normalise_ref_for_vault("v", "HEAD"), "refs/heads/v");
-        assert_eq!(normalise_ref_for_vault("v", "HEAD~5"), "refs/heads/v~5");
-        assert_eq!(normalise_ref_for_vault("v", "HEAD^"), "refs/heads/v^");
-        assert_eq!(normalise_ref_for_vault("v", "HEAD^{tree}"), "refs/heads/v^{tree}");
-        assert_eq!(normalise_ref_for_vault("v", "HEAD@{1}"), "refs/heads/v@{1}");
+        assert_eq!(normalise_ref_for_mem("v", "HEAD"), "refs/heads/v");
+        assert_eq!(normalise_ref_for_mem("v", "HEAD~5"), "refs/heads/v~5");
+        assert_eq!(normalise_ref_for_mem("v", "HEAD^"), "refs/heads/v^");
+        assert_eq!(normalise_ref_for_mem("v", "HEAD^{tree}"), "refs/heads/v^{tree}");
+        assert_eq!(normalise_ref_for_mem("v", "HEAD@{1}"), "refs/heads/v@{1}");
         // Refusal: a ref that merely starts with "HEAD" is left alone.
-        assert_eq!(normalise_ref_for_vault("v", "HEADER"), "HEADER");
-        assert_eq!(normalise_ref_for_vault("v", "HEAD-foo"), "HEAD-foo");
+        assert_eq!(normalise_ref_for_mem("v", "HEADER"), "HEADER");
+        assert_eq!(normalise_ref_for_mem("v", "HEAD-foo"), "HEAD-foo");
         // Refusal: a plain branch / SHA passes through unchanged.
-        assert_eq!(normalise_ref_for_vault("v", "main"), "main");
-        assert_eq!(normalise_ref_for_vault("v", "deadbeef"), "deadbeef");
+        assert_eq!(normalise_ref_for_mem("v", "main"), "main");
+        assert_eq!(normalise_ref_for_mem("v", "deadbeef"), "deadbeef");
     }
 
     #[test]
-    fn diff_head_revspec_anchors_on_vault_branch() {
-        // #53: `HEAD~1` / `HEAD` resolve against `refs/heads/<vault>`, not
+    fn diff_head_revspec_anchors_on_mem_branch() {
+        // #53: `HEAD~1` / `HEAD` resolve against `refs/heads/<mem>`, not
         // the gitdir's symbolic HEAD (the dummy default branch, which has no
         // commits here — before the fix these revspecs would refuse).
         let tmp = TempDir::new().unwrap();
@@ -828,7 +828,7 @@ mod tests {
         );
 
         let diff = diff_two_refs(&gitdir, "specs", "HEAD~1", "HEAD", &DiffConfig::default())
-            .expect("HEAD revspec must resolve against the vault branch");
+            .expect("HEAD revspec must resolve against the mem branch");
         assert_eq!(diff.entries.len(), 1, "only beta added between c1 and c2");
         assert!(
             matches!(diff.entries[0], EntityDiff::Added { .. }),
@@ -866,7 +866,7 @@ mod tests {
         );
         // Drop alpha in a third commit so it surfaces as a deletion.
         let writer =
-            GitTreeVaultWriter::new(gitdir.clone(), "refs/heads/specs".to_string());
+            GitTreeMemWriter::new(gitdir.clone(), "refs/heads/specs".to_string());
         writer.delete_entity(Path::new("alpha.md")).unwrap();
         writer.commit("drop alpha", &CommitContext::internal()).unwrap();
 
@@ -1017,7 +1017,7 @@ mod tests {
 
         let body = body_with_title("Title");
         let writer =
-            GitTreeVaultWriter::new(gitdir.clone(), "refs/heads/specs".to_string());
+            GitTreeMemWriter::new(gitdir.clone(), "refs/heads/specs".to_string());
         writer.write_entity(Path::new("alpha.md"), body.as_bytes()).unwrap();
         writer.commit("seed", &CommitContext::internal()).unwrap();
         let sha_seed =
@@ -1026,7 +1026,7 @@ mod tests {
         // alpha → beta. Move the file (delete + write) and emit the
         // commit subject the engine uses on its rename pipeline.
         let writer =
-            GitTreeVaultWriter::new(gitdir.clone(), "refs/heads/specs".to_string());
+            GitTreeMemWriter::new(gitdir.clone(), "refs/heads/specs".to_string());
         writer.delete_entity(Path::new("alpha.md")).unwrap();
         writer.write_entity(Path::new("beta.md"), body.as_bytes()).unwrap();
         writer
@@ -1035,7 +1035,7 @@ mod tests {
 
         // beta → gamma. Same shape.
         let writer =
-            GitTreeVaultWriter::new(gitdir.clone(), "refs/heads/specs".to_string());
+            GitTreeMemWriter::new(gitdir.clone(), "refs/heads/specs".to_string());
         writer.delete_entity(Path::new("beta.md")).unwrap();
         writer.write_entity(Path::new("gamma.md"), body.as_bytes()).unwrap();
         writer
@@ -1090,7 +1090,7 @@ mod tests {
 
     #[test]
     fn diff_ripple_lists_incoming_wikilinks_on_each_side() {
-        // Build a vault with three entities: alpha, beta, gamma.
+        // Build a mem with three entities: alpha, beta, gamma.
         // beta links to alpha on ref_a; gamma links to alpha on ref_b.
         // Modify alpha between the two refs. The diff entry for
         // alpha should surface both referrers in its ripple list,
@@ -1120,7 +1120,7 @@ mod tests {
         // Drop beta to break its outbound link on ref_b. Add gamma
         // with a fresh inbound link to alpha.
         let writer =
-            GitTreeVaultWriter::new(gitdir.clone(), "refs/heads/specs".to_string());
+            GitTreeMemWriter::new(gitdir.clone(), "refs/heads/specs".to_string());
         writer.write_entity(Path::new("alpha.md"), alpha_v2.as_bytes()).unwrap();
         writer
             .write_entity(Path::new("gamma.md"), gamma_links_alpha.as_bytes())
@@ -1220,7 +1220,7 @@ mod tests {
         let sha_a = sha_for(&gix::open(&gitdir).unwrap(), "refs/heads/specs").unwrap();
         // Overwrite alpha with a body that has no frontmatter.
         let writer =
-            GitTreeVaultWriter::new(gitdir.clone(), "refs/heads/specs".to_string());
+            GitTreeMemWriter::new(gitdir.clone(), "refs/heads/specs".to_string());
         writer
             .write_entity(Path::new("alpha.md"), b"# Alpha but no frontmatter\n\nbody.\n")
             .unwrap();
@@ -1270,7 +1270,7 @@ mod tests {
         );
 
         let mount = memstead_base::Mount {
-            vault: "specs".to_string(),
+            mem: "specs".to_string(),
             schema: Some(memstead_schema::SchemaRef::new(
                 "default",
                 semver::Version::new(1, 0, 0),
@@ -1314,7 +1314,7 @@ mod tests {
         );
 
         let mount = memstead_base::Mount {
-            vault: "specs".to_string(),
+            mem: "specs".to_string(),
             schema: Some(memstead_schema::SchemaRef::new(
                 "default",
                 semver::Version::new(1, 0, 0),
@@ -1372,7 +1372,7 @@ mod tests {
 
     /// The canonical empty-tree SHA is accepted as
     /// `ref_a` and short-circuits to the empty tree, so a first-sync
-    /// diff lists every entity in the vault as `added`.
+    /// diff lists every entity in the mem as `added`.
     /// `resolved_a_sha` echoes the sentinel verbatim.
     #[test]
     fn diff_accepts_empty_tree_sentinel_for_ref_a() {
@@ -1449,16 +1449,16 @@ mod tests {
         }
     }
 
-    /// Bare `HEAD` substitutes to `refs/heads/<vault>`
-    /// so the diff targets the vault's branch tip, not the gitdir's
+    /// Bare `HEAD` substitutes to `refs/heads/<mem>`
+    /// so the diff targets the mem's branch tip, not the gitdir's
     /// symbolic HEAD on a dummy default branch. Compares behaviour
-    /// against the explicit `refs/heads/<vault>` form — both calls
+    /// against the explicit `refs/heads/<mem>` form — both calls
     /// produce the same `resolved_b_sha` and same entries.
     #[test]
-    fn diff_resolves_bare_head_to_vault_branch_tip() {
+    fn diff_resolves_bare_head_to_mem_branch_tip() {
         let tmp = TempDir::new().unwrap();
         let gitdir = init_gitdir(&tmp);
-        // Seed a commit on the vault branch.
+        // Seed a commit on the mem branch.
         write_and_commit(
             &gitdir,
             "specs",
@@ -1467,7 +1467,7 @@ mod tests {
         );
         let sha_a = sha_for(&gix::open(&gitdir).unwrap(), "refs/heads/specs").unwrap();
 
-        // Advance the vault branch.
+        // Advance the mem branch.
         write_and_commit(
             &gitdir,
             "specs",
@@ -1479,7 +1479,7 @@ mod tests {
         // unrelated default branch with no commits) by default —
         // resolving bare HEAD literally would either refuse or hit
         // the wrong branch. The substitution targets
-        // `refs/heads/<vault>` per the vault selector.
+        // `refs/heads/<mem>` per the mem selector.
         let via_head = diff_two_refs(
             &gitdir,
             "specs",
@@ -1487,7 +1487,7 @@ mod tests {
             "HEAD",
             &DiffConfig::default(),
         )
-        .expect("bare HEAD must resolve via vault substitution");
+        .expect("bare HEAD must resolve via mem substitution");
         let via_explicit = diff_two_refs(
             &gitdir,
             "specs",
@@ -1495,7 +1495,7 @@ mod tests {
             "refs/heads/specs",
             &DiffConfig::default(),
         )
-        .expect("explicit refs/heads/<vault> still works");
+        .expect("explicit refs/heads/<mem> still works");
 
         // Both calls land on the same commit and produce the same
         // entry set — the bare-HEAD substitution is structurally
@@ -1505,7 +1505,7 @@ mod tests {
     }
 
     /// First-sync diff against
-    /// the vault-branch HEAD using only the canonical sentinel and
+    /// the mem-branch HEAD using only the canonical sentinel and
     /// bare `HEAD`. Collapses to one call (no need to look up the
     /// explicit ref names).
     #[test]

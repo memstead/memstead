@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Basis-build smoke: schema-strictness probes.
 
-Pre-strictness-axis-fix the filesystem-vault write path silently
+Pre-strictness-axis-fix the filesystem-mem write path silently
 accepted unknown sections, missing required sections, and out-of-enum
 metadata values (Bug 1 in `dev/smoke-test-2026-05-09.md`). This probe
 locks the wire-format error codes the agent sees on each violation.

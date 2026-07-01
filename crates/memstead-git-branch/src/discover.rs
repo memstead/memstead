@@ -1,18 +1,18 @@
-//! Branch enumeration for the workspace's `vault-repo/.git/`.
+//! Branch enumeration for the workspace's `mem-repo/.git/`.
 //!
-//! Post-rebuild the canonical vault list lives in
+//! Post-rebuild the canonical mem list lives in
 //! `.memstead/state/mounts.json`. This helper is retained for the macOS
-//! UniFFI `discover_vaults` entry point, which the app calls before the
-//! engine is constructed to seed its UI. It reads the per-vault branch
-//! list off the workspace's single `vault-repo/.git/` and filters out
+//! UniFFI `discover_mems` entry point, which the app calls before the
+//! engine is constructed to seed its UI. It reads the per-mem branch
+//! list off the workspace's single `mem-repo/.git/` and filters out
 //! `main` and any `__*` registry-class refs.
 
 use std::collections::HashMap;
 use std::path::Path;
 
-/// Enumerate the workspace's per-vault content branches.
+/// Enumerate the workspace's per-mem content branches.
 ///
-/// Walks `<workspace_root>/vault-repo/.git/refs/heads/`, filters out
+/// Walks `<workspace_root>/mem-repo/.git/refs/heads/`, filters out
 /// `main` and any `__*`-prefixed registry refs (today: `__MEMSTEAD`), and
 /// returns the sorted leaf names. The leaf is the last `/`-separated
 /// segment of each branch shortname so hierarchical layouts surface
@@ -21,13 +21,13 @@ use std::path::Path;
 /// Returns `Some(names)` when the gitdir exists and carries the
 /// `__MEMSTEAD` umbrella ref (the post-rebuild "real workspace" gate).
 /// `Some(empty_vec)` is healthy — a freshly-initialised workspace has
-/// `__MEMSTEAD` but no per-vault branches yet.
+/// `__MEMSTEAD` but no per-mem branches yet.
 ///
 /// Returns `None` when the gitdir is missing, cannot be opened, or
 /// lacks `__MEMSTEAD`. Callers (notably `memstead-swift`) treat `None` as
-/// "this workspace is not vault-repo-backed".
-pub fn enumerate_vault_repo_branches(workspace_root: &Path) -> Option<Vec<String>> {
-    let gitdir = workspace_root.join("vault-repo").join(".git");
+/// "this workspace is not mem-repo-backed".
+pub fn enumerate_mem_repo_branches(workspace_root: &Path) -> Option<Vec<String>> {
+    let gitdir = workspace_root.join("mem-repo").join(".git");
     enumerate_branches_in_gitdir(&gitdir)
 }
 
@@ -42,7 +42,7 @@ fn enumerate_branches_in_gitdir(gitdir: &Path) -> Option<Vec<String>> {
             tracing::warn!(
                 gitdir = %gitdir.display(),
                 error = %e,
-                "could not open vault-repo gitdir"
+                "could not open mem-repo gitdir"
             );
             return None;
         }
@@ -60,7 +60,7 @@ fn enumerate_branches_in_gitdir(gitdir: &Path) -> Option<Vec<String>> {
             tracing::warn!(
                 gitdir = %gitdir.display(),
                 error = %e,
-                "could not access vault-repo references"
+                "could not access mem-repo references"
             );
             return None;
         }
@@ -71,7 +71,7 @@ fn enumerate_branches_in_gitdir(gitdir: &Path) -> Option<Vec<String>> {
             tracing::warn!(
                 gitdir = %gitdir.display(),
                 error = %e,
-                "could not enumerate vault-repo local branches"
+                "could not enumerate mem-repo local branches"
             );
             return None;
         }
@@ -82,7 +82,7 @@ fn enumerate_branches_in_gitdir(gitdir: &Path) -> Option<Vec<String>> {
             Err(e) => {
                 tracing::warn!(
                     error = %e,
-                    "failed to read a vault-repo reference; skipping"
+                    "failed to read a mem-repo reference; skipping"
                 );
                 continue;
             }
@@ -109,7 +109,7 @@ fn enumerate_branches_in_gitdir(gitdir: &Path) -> Option<Vec<String>> {
                 leaf = leaf,
                 existing = prior.as_str(),
                 duplicate = name,
-                "vault-repo has two branches with the same leaf; dropping the second"
+                "mem-repo has two branches with the same leaf; dropping the second"
             );
             continue;
         }
@@ -126,10 +126,10 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
-    fn init_vault_repo_with_branches(root: &Path, branches: &[&str]) {
-        let vault_repo = root.join("vault-repo").join(".git");
-        std::fs::create_dir_all(&vault_repo).unwrap();
-        let repo = gix::init_bare(&vault_repo).unwrap();
+    fn init_mem_repo_with_branches(root: &Path, branches: &[&str]) {
+        let mem_repo = root.join("mem-repo").join(".git");
+        std::fs::create_dir_all(&mem_repo).unwrap();
+        let repo = gix::init_bare(&mem_repo).unwrap();
         let actor = gix::actor::Signature {
             name: "test".into(),
             email: "test@example.com".into(),
@@ -177,36 +177,36 @@ mod tests {
     }
 
     #[test]
-    fn enumerates_per_vault_branches_excluding_main_and_registry_refs() {
+    fn enumerates_per_mem_branches_excluding_main_and_registry_refs() {
         let tmp = TempDir::new().unwrap();
-        init_vault_repo_with_branches(tmp.path(), &["alpha", "beta", "gamma"]);
-        let names = enumerate_vault_repo_branches(tmp.path()).expect("real workspace");
+        init_mem_repo_with_branches(tmp.path(), &["alpha", "beta", "gamma"]);
+        let names = enumerate_mem_repo_branches(tmp.path()).expect("real workspace");
         assert_eq!(names, vec!["alpha", "beta", "gamma"]);
     }
 
     #[test]
-    fn returns_none_when_vault_repo_missing() {
+    fn returns_none_when_mem_repo_missing() {
         let tmp = TempDir::new().unwrap();
-        assert!(enumerate_vault_repo_branches(tmp.path()).is_none());
+        assert!(enumerate_mem_repo_branches(tmp.path()).is_none());
     }
 
     #[test]
     fn returns_none_when_memstead_ref_missing() {
         let tmp = TempDir::new().unwrap();
-        let vault_repo = tmp.path().join("vault-repo").join(".git");
-        std::fs::create_dir_all(&vault_repo).unwrap();
-        gix::init_bare(&vault_repo).unwrap();
-        assert!(enumerate_vault_repo_branches(tmp.path()).is_none());
+        let mem_repo = tmp.path().join("mem-repo").join(".git");
+        std::fs::create_dir_all(&mem_repo).unwrap();
+        gix::init_bare(&mem_repo).unwrap();
+        assert!(enumerate_mem_repo_branches(tmp.path()).is_none());
     }
 
     #[test]
     fn surfaces_hierarchical_layout_as_leaf_names() {
         let tmp = TempDir::new().unwrap();
-        init_vault_repo_with_branches(
+        init_mem_repo_with_branches(
             tmp.path(),
             &["demo/engine", "planning/exec-foo"],
         );
-        let names = enumerate_vault_repo_branches(tmp.path()).expect("real workspace");
+        let names = enumerate_mem_repo_branches(tmp.path()).expect("real workspace");
         assert_eq!(names, vec!["engine", "exec-foo"]);
     }
 }

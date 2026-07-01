@@ -1,9 +1,9 @@
-#![cfg(feature = "vault-repo")]
+#![cfg(feature = "mem-repo")]
 //! Wire-shape characterization for the MCP tool surface.
 //!
 //! This suite pins the bytes the server emits in `result.content[]` and
 //! `result.structured_content` for representative tool calls. Both server
-//! implementations live in this crate, gated by `vault-repo`: each
+//! implementations live in this crate, gated by `mem-repo`: each
 //! flavour's pin runs against its own (`FilesystemMcpServer` for the
 //! lean build, `McpServer` for the full build).
 //!
@@ -19,7 +19,7 @@
 //!      reuse the empty-mounts fixture below for pure error paths).
 //!   3. Call `harness.call_tool(...)`, assert on `code`, `message`
 //!      contents, and `structured_content` shape.
-//!   4. If the path is flavor-specific, gate on `vault-repo`.
+//!   4. If the path is flavor-specific, gate on `mem-repo`.
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
@@ -29,10 +29,10 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
-const WORKSPACE_TOML_BODY: &str = "format = \"memstead-git-branch-1\"\n\n\
+const WORKSPACE_TOML_BODY: &str = "format = \"memstead-git-branch-2\"\n\n\
 [persistence_adapter]\nname = \"file-two-layer\"\n";
 
-const MOUNTS_JSON_BODY_EMPTY: &str = r#"{ "format": "memstead-mounts-1", "mounts": [] }"#;
+const MOUNTS_JSON_BODY_EMPTY: &str = r#"{ "format": "memstead-mounts-3", "mounts": [] }"#;
 
 fn memstead_mcp_bin() -> &'static str {
     env!("CARGO_BIN_EXE_memstead-mcp")
@@ -48,43 +48,43 @@ fn seed_empty_workspace(root: &Path) {
 }
 
 
-/// Seed a pro-flavor workspace at `root` with git-branch backed vaults.
-/// Each `(vault_name, schema_pin)` produces:
+/// Seed a pro-flavor workspace at `root` with git-branch backed mems.
+/// Each `(mem_name, schema_pin)` produces:
 /// - a branch `refs/heads/<name>` and a config blob on `__SYSTEM` (via
-///   `init_real_vault_repo`)
+///   `init_real_mem_repo`)
 /// - a corresponding `MountStorage::GitBranch` entry in `mounts.json`
-///   so the pro boot path's persistence adapter sees the vault as a
+///   so the pro boot path's persistence adapter sees the mem as a
 ///   writable mount.
 ///
 /// Without the mounts.json entries the engine boots with zero mounts
 /// even when git-branch refs exist on disk — boot doesn't auto-discover
-/// vault branches; the materialisation runs out-of-band via
-/// `memstead vault-repo init`. The seed shortcuts that by writing the
+/// mem branches; the materialisation runs out-of-band via
+/// `memstead mem-repo init`. The seed shortcuts that by writing the
 /// state file directly.
-fn seed_pro_workspace(root: &Path, vaults: &[(&str, &str)]) {
-    seed_pro_workspace_with_toml(root, vaults, WORKSPACE_TOML_BODY);
+fn seed_pro_workspace(root: &Path, mems: &[(&str, &str)]) {
+    seed_pro_workspace_with_toml(root, mems, WORKSPACE_TOML_BODY);
 }
 
 /// Variant of [`seed_pro_workspace`] that accepts a custom
-/// `workspace.toml` body. Used by tests that need `[[vault_management.*]]`
+/// `workspace.toml` body. Used by tests that need `[[mem_management.*]]`
 /// rules (those rules live in workspace.toml and are not state-managed).
-fn seed_pro_workspace_with_toml(root: &Path, vaults: &[(&str, &str)], workspace_toml: &str) {
+fn seed_pro_workspace_with_toml(root: &Path, mems: &[(&str, &str)], workspace_toml: &str) {
     use memstead_base::WorkspaceStoreAdapter;
     use memstead_schema::SchemaRef;
 
-    memstead_git_branch::test_support::init_real_vault_repo(root, vaults);
+    memstead_git_branch::test_support::init_real_mem_repo(root, mems);
 
     let memstead = root.join(".memstead");
     std::fs::create_dir_all(memstead.join("state")).unwrap();
     std::fs::write(memstead.join("workspace.toml"), workspace_toml).unwrap();
 
-    let gitdir = root.join("vault-repo").join(".git");
-    let mounts: Vec<memstead_base::Mount> = vaults
+    let gitdir = root.join("mem-repo").join(".git");
+    let mounts: Vec<memstead_base::Mount> = mems
         .iter()
         .map(|(name, schema)| {
             let pin: SchemaRef = schema.parse().unwrap();
             memstead_base::Mount {
-                vault: (*name).to_string(),
+                mem: (*name).to_string(),
                 schema: Some(pin),
                 storage: memstead_base::MountStorage::GitBranch {
                     gitdir: gitdir.clone(),
@@ -308,9 +308,9 @@ fn assert_error_envelope(result: &Value, expected_code: &str, expected_message: 
 fn pro_memstead_entity_emits_typed_envelope_for_missing_id() {
     let tmp = TempDir::new().unwrap();
     seed_empty_workspace(tmp.path());
-    // Pro boot checks `<workspace>/vault-repo/.git` shape on startup —
+    // Pro boot checks `<workspace>/mem-repo/.git` shape on startup —
     // seed a real bare repo with `main` + `__MEMSTEAD` refs.
-    memstead_git_branch::test_support::init_real_vault_repo(tmp.path(), &[]);
+    memstead_git_branch::test_support::init_real_mem_repo(tmp.path(), &[]);
 
     let mut harness = WireHarness::start(tmp.path());
     let result = harness.call_tool(
@@ -332,7 +332,7 @@ fn pro_memstead_entity_emits_typed_envelope_for_missing_id() {
 // ---------------------------------------------------------------------------
 //
 // Success responses carry markdown content (often dependent on dynamic
-// state like vault counts or schema version names). Pinning every byte
+// state like mem counts or schema version names). Pinning every byte
 // would couple the suite to schema metadata. Instead these pins fix the
 // envelope shape — `isError` absent or false, `content[0].type == text`,
 // `text` carries the expected anchor sections — so a contract-shape
@@ -358,8 +358,8 @@ fn assert_success_envelope(result: &Value) -> String {
 }
 
 
-/// Pro pin: same input through the pro server. Pro discovers vaults
-/// via the git-branch refs in `vault-repo/.git/`, so the seed seeds a
+/// Pro pin: same input through the pro server. Pro discovers mems
+/// via the git-branch refs in `mem-repo/.git/`, so the seed seeds a
 /// `demo` branch with the default schema pinned in `__SYSTEM`.
 #[test]
 fn pro_memstead_search_succeeds_on_empty_seeded_workspace() {
@@ -380,9 +380,9 @@ fn pro_memstead_search_succeeds_on_empty_seeded_workspace() {
 
 /// Pro pin: pro flavor's `memstead_overview` against the proper pro seed
 /// (git-branch refs + matching `mounts.json` entries) emits the
-/// canonical anchors AND lists the seeded vault. Adding the pro-only
+/// canonical anchors AND lists the seeded mem. Adding the pro-only
 /// `## Lifecycle Namespaces` anchor (the basis overview omits it
-/// entirely — basis has no vault-creation rules) is part of the pin so
+/// entirely — basis has no mem-creation rules) is part of the pin so
 /// the test trips if pro accidentally drops that section.
 #[test]
 fn pro_memstead_overview_succeeds_on_empty_seeded_workspace() {
@@ -392,7 +392,7 @@ fn pro_memstead_overview_succeeds_on_empty_seeded_workspace() {
     let mut harness = WireHarness::start(tmp.path());
     let result = harness.call_tool("memstead_overview", json!({}));
     let text = assert_success_envelope(&result);
-    for anchor in ["## Vaults", "## Schemas", "## Communities", "## Lifecycle Namespaces"] {
+    for anchor in ["## Mems", "## Schemas", "## Communities", "## Lifecycle Namespaces"] {
         assert!(
             text.contains(anchor),
             "pro overview missing {anchor:?}: {text:?}"
@@ -400,7 +400,7 @@ fn pro_memstead_overview_succeeds_on_empty_seeded_workspace() {
     }
     assert!(
         text.contains("demo"),
-        "pro overview missing vault name: {text:?}"
+        "pro overview missing mem name: {text:?}"
     );
 }
 
@@ -412,7 +412,7 @@ fn pro_memstead_overview_succeeds_on_empty_seeded_workspace() {
 // ---------------------------------------------------------------------------
 
 
-/// Pro pin: same input on a pro-seeded single-vault workspace. Per-flavor
+/// Pro pin: same input on a pro-seeded single-mem workspace. Per-flavor
 /// message bytes are recorded independently; the basis flavor appends
 /// `" — workspace pins default@1.0.0"` to the message, the pro flavor
 /// emits only `"schema not found: \"<name>\""`. Recorded drift, pending
@@ -440,17 +440,17 @@ fn pro_memstead_schema_unknown_name_emits_entity_not_found() {
 //
 // Success path: the create response carries a JSON body on
 // `structured_content` whose `id` field is the slugified id, plus
-// `title`, `vault`, `content_hash`, `commit_sha`, and `warnings`. The
+// `title`, `mem`, `content_hash`, `commit_sha`, and `warnings`. The
 // pins assert on field PRESENCE + the deterministic `id` slug; the
 // hashes / commit shas are content-derived and pinning them would
 // couple the suite to the markdown render exactly.
 
-fn assert_create_success_shape(result: &Value, expected_id: &str, expected_vault: &str) {
+fn assert_create_success_shape(result: &Value, expected_id: &str, expected_mem: &str) {
     let _text = assert_success_envelope(result);
     let body = result
         .get("structuredContent")
         .expect("structuredContent missing on create success");
-    for field in ["id", "title", "vault", "_hash", "warnings"] {
+    for field in ["id", "title", "mem", "_hash", "warnings"] {
         assert!(
             body.get(field).is_some(),
             "create response missing {field:?}: {body}"
@@ -462,14 +462,14 @@ fn assert_create_success_shape(result: &Value, expected_id: &str, expected_vault
         "create id drifted from slug rule: {body}"
     );
     assert_eq!(
-        body.get("vault").and_then(Value::as_str),
-        Some(expected_vault),
-        "create response vault drifted: {body}"
+        body.get("mem").and_then(Value::as_str),
+        Some(expected_mem),
+        "create response mem drifted: {body}"
     );
 }
 
 
-/// Pro pin: same as basis. The slug rule (`<vault>--<lower-kebab>`) is
+/// Pro pin: same as basis. The slug rule (`<mem>--<lower-kebab>`) is
 /// engine-internal so the expected id matches the basis pin.
 #[test]
 fn pro_memstead_create_returns_typed_success_envelope() {
@@ -533,7 +533,7 @@ fn pro_memstead_create_unknown_type_emits_typed_envelope() {
 
 
 /// Pro pin: pro `memstead_health` returns a richer envelope with
-/// `writable_vaults` populated when the engine sees writable mounts.
+/// `writable_mems` populated when the engine sees writable mounts.
 #[test]
 fn pro_memstead_health_succeeds_on_seeded_workspace() {
     let tmp = TempDir::new().unwrap();
@@ -546,14 +546,14 @@ fn pro_memstead_health_succeeds_on_seeded_workspace() {
         .get("structuredContent")
         .expect("structuredContent missing on health success");
     assert!(
-        body.get("writable_vaults").is_some(),
-        "pro health response missing writable_vaults: {body}"
+        body.get("writable_mems").is_some(),
+        "pro health response missing writable_mems: {body}"
     );
 }
 
 /// A bad
 /// `since` cursor on `memstead_changes_since` returns the typed `INVALID_CURSOR`
-/// — not the `VAULT_ERROR` catch-all — with the offending SHA untruncated
+/// — not the `MEM_ERROR` catch-all — with the offending SHA untruncated
 /// in `details.since`, so a sync loop branches cleanly (typed → re-seed).
 #[test]
 fn pro_memstead_changes_since_bad_cursor_returns_invalid_cursor() {
@@ -564,7 +564,7 @@ fn pro_memstead_changes_since_bad_cursor_returns_invalid_cursor() {
     let bad = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
     let result = harness.call_tool(
         "memstead_changes_since",
-        json!({ "vault": "demo", "since": bad }),
+        json!({ "mem": "demo", "since": bad }),
     );
     let is_error = result.get("isError").and_then(Value::as_bool).unwrap_or(false);
     assert!(is_error, "a bad since cursor must error: {result}");
@@ -574,7 +574,7 @@ fn pro_memstead_changes_since_bad_cursor_returns_invalid_cursor() {
     assert_eq!(
         sc.get("code").and_then(Value::as_str),
         Some("INVALID_CURSOR"),
-        "bad since must carry the typed INVALID_CURSOR code, not VAULT_ERROR: {sc}",
+        "bad since must carry the typed INVALID_CURSOR code, not MEM_ERROR: {sc}",
     );
     assert_eq!(
         sc.get("details").and_then(|d| d.get("since")).and_then(Value::as_str),
@@ -584,23 +584,23 @@ fn pro_memstead_changes_since_bad_cursor_returns_invalid_cursor() {
 }
 
 /// The default writable
-/// vault is stable. After the seed vault `demo`, creating a second
-/// writable vault `aaa` (which sorts ahead alphabetically) must NOT
-/// retarget omitted-`vault` writes — a subsequent `memstead_create` with
-/// `vault` omitted still lands in `demo`. The default is discoverable
-/// on `memstead_health.default_writable_vault`, and an explicit `vault`
-/// always wins. Pre-fix the resolver read `writable_vaults().iter().next()`
-/// off an unordered `HashSet`, so the second vault silently retargeted
+/// mem is stable. After the seed mem `demo`, creating a second
+/// writable mem `aaa` (which sorts ahead alphabetically) must NOT
+/// retarget omitted-`mem` writes — a subsequent `memstead_create` with
+/// `mem` omitted still lands in `demo`. The default is discoverable
+/// on `memstead_health.default_writable_mem`, and an explicit `mem`
+/// always wins. Pre-fix the resolver read `writable_mems().iter().next()`
+/// off an unordered `HashSet`, so the second mem silently retargeted
 /// the default.
 #[test]
-fn pro_default_writable_vault_is_stable_after_second_vault() {
+fn pro_default_writable_mem_is_stable_after_second_mem() {
     const TOML: &str = "\
-format = \"memstead-git-branch-1\"\n\
+format = \"memstead-git-branch-2\"\n\
 \n\
 [persistence_adapter]\n\
 name = \"file-two-layer\"\n\
 \n\
-[[vault_management.create]]\n\
+[[mem_management.create]]\n\
 pattern = \"*\"\n\
 schemas = [\"default@1.0.0\"]\n\
 ";
@@ -610,22 +610,22 @@ schemas = [\"default@1.0.0\"]\n\
 
     let sections = json!({ "identity": "the identity", "purpose": "the purpose" });
 
-    // Baseline: an omitted-`vault` create lands in the seed `demo`.
+    // Baseline: an omitted-`mem` create lands in the seed `demo`.
     let c1 = harness.call_tool(
         "memstead_create",
         json!({ "title": "First", "entity_type": "spec", "sections": sections }),
     );
     assert_create_success_shape(&c1, "demo--first", "demo");
 
-    // Bring up a second writable vault whose name sorts ahead of `demo`.
+    // Bring up a second writable mem whose name sorts ahead of `demo`.
     let cv = harness.call_tool(
-        "memstead_vault_create",
-        json!({ "name": "aaa", "location": "vaults/aaa", "schema": "default@1.0.0" }),
+        "memstead_mem_create",
+        json!({ "name": "aaa", "location": "mems/aaa", "schema": "default@1.0.0" }),
     );
     let _ = assert_success_envelope(&cv);
 
-    // The omitted-`vault` create STILL lands in `demo`, not `aaa` —
-    // adding a vault did not move the default.
+    // The omitted-`mem` create STILL lands in `demo`, not `aaa` —
+    // adding a mem did not move the default.
     let c2 = harness.call_tool(
         "memstead_create",
         json!({ "title": "Second", "entity_type": "spec", "sections": sections }),
@@ -638,15 +638,15 @@ schemas = [\"default@1.0.0\"]\n\
         .get("structuredContent")
         .expect("structuredContent missing on health success");
     assert_eq!(
-        hbody.get("default_writable_vault").and_then(Value::as_str),
+        hbody.get("default_writable_mem").and_then(Value::as_str),
         Some("demo"),
         "memstead_health must name the stable default: {hbody}",
     );
 
-    // Explicit `vault` always wins, regardless of the default.
+    // Explicit `mem` always wins, regardless of the default.
     let c3 = harness.call_tool(
         "memstead_create",
-        json!({ "vault": "aaa", "title": "Third", "entity_type": "spec", "sections": sections }),
+        json!({ "mem": "aaa", "title": "Third", "entity_type": "spec", "sections": sections }),
     );
     assert_create_success_shape(&c3, "aaa--third", "aaa");
 }
@@ -817,7 +817,7 @@ fn pro_memstead_delete_succeeds_and_entity_becomes_unreadable() {
 
 /// Pro pin: same flow, but the response field names differ from basis:
 /// pro emits `rel_type` (not `type`), `source: "explicit"` (carries the
-/// edge source), `_vault_schema`, and `commit_sha` — but **omits**
+/// edge source), `_mem_schema`, and `commit_sha` — but **omits**
 /// `action`. The basis surface has `type` and `action` instead. Both
 /// shapes are pinned per-flavor, pending reconciliation of which schema
 /// wins.
@@ -949,8 +949,8 @@ fn pro_memstead_rename_same_slug_emits_typed_warning() {
 // `memstead_reload` (pro-only) success pin
 // ---------------------------------------------------------------------------
 //
-// The basis filesystem-vault server doesn't expose memstead_reload —
-// drift-reload is a vault-repo concept (sibling writer commits a new
+// The basis filesystem-mem server doesn't expose memstead_reload —
+// drift-reload is a mem-repo concept (sibling writer commits a new
 // HEAD; engine re-derives memo state). Pinning is pro-only.
 
 /// Pro pin: `memstead_reload` on a quiescent workspace returns a success
@@ -976,7 +976,7 @@ fn pro_memstead_reload_returns_typed_success_envelope() {
 // ---------------------------------------------------------------------------
 //
 // The recovery payload contract: `details.referrers[]` carries
-// `{from_id, rel_type, vault, capability: "write"}` for each Write-Vault
+// `{from_id, rel_type, mem, capability: "write"}` for each Write-Mem
 // referrer so the agent can rewrite the offending references without a
 // follow-up `memstead_entity` call. Both flavors emit this shape today.
 
@@ -1031,8 +1031,8 @@ fn assert_has_incoming_refs_envelope(
         "referrer.rel_types must carry ≥1 entry: {first}"
     );
     assert!(
-        first.get("vault").and_then(Value::as_str).is_some(),
-        "referrer.vault missing: {first}"
+        first.get("mem").and_then(Value::as_str).is_some(),
+        "referrer.mem missing: {first}"
     );
 }
 
@@ -1088,7 +1088,7 @@ fn pro_memstead_changes_since_returns_typed_success_envelope() {
     let empty_tree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
     let result = harness.call_tool(
         "memstead_changes_since",
-        json!({ "vault": "demo", "since": empty_tree }),
+        json!({ "mem": "demo", "since": empty_tree }),
     );
     let _ = assert_success_envelope(&result);
     let body = result
@@ -1177,7 +1177,7 @@ fn pro_memstead_changes_since_wide_window_uses_authoritative_rename_map() {
     let cursor_capture = harness.call_tool(
         "memstead_changes_since",
         json!({
-            "vault": "demo",
+            "mem": "demo",
             "since": "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
         }),
     );
@@ -1234,7 +1234,7 @@ fn pro_memstead_changes_since_wide_window_uses_authoritative_rename_map() {
     // Step 4: changes_since from the captured cursor.
     let feed = harness.call_tool(
         "memstead_changes_since",
-        json!({ "vault": "demo", "since": head_sha }),
+        json!({ "mem": "demo", "since": head_sha }),
     );
     let _ = assert_success_envelope(&feed);
     let body = feed
@@ -1307,7 +1307,7 @@ fn pro_memstead_changes_since_include_notes_false_strips_notes_and_memstead_ref(
     let empty_tree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
     let result = harness.call_tool(
         "memstead_changes_since",
-        json!({ "vault": "demo", "since": empty_tree, "include_notes": false }),
+        json!({ "mem": "demo", "since": empty_tree, "include_notes": false }),
     );
     let _ = assert_success_envelope(&result);
     let body = result
@@ -1368,7 +1368,7 @@ fn pro_memstead_entity_returns_structured_envelope_alongside_markdown() {
         Some(id.as_str()),
     );
     assert_eq!(
-        body.get("vault").and_then(Value::as_str),
+        body.get("mem").and_then(Value::as_str),
         Some("demo"),
     );
     assert_eq!(
@@ -1527,7 +1527,7 @@ fn pro_memstead_changes_since_include_notes_true_carries_notes_and_rename_note()
     let empty_tree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
     let feed = harness.call_tool(
         "memstead_changes_since",
-        json!({ "vault": "demo", "since": empty_tree, "include_notes": true }),
+        json!({ "mem": "demo", "since": empty_tree, "include_notes": true }),
     );
     let _ = assert_success_envelope(&feed);
     let body = feed
@@ -1683,26 +1683,26 @@ fn pro_relate_from_stub_emits_typed_envelope() {
 }
 
 // ---------------------------------------------------------------------------
-// Pro-only vault-lifecycle pin — `memstead_vault_create` success
+// Pro-only mem-lifecycle pin — `memstead_mem_create` success
 // ---------------------------------------------------------------------------
 
-/// Pro pin: with a permissive `[[vault_management.create]]` rule in
-/// `workspace.toml`, `memstead_vault_create` succeeds and registers a new
-/// vault. Response shape carries the new vault's identity so the agent
+/// Pro pin: with a permissive `[[mem_management.create]]` rule in
+/// `workspace.toml`, `memstead_mem_create` succeeds and registers a new
+/// mem. Response shape carries the new mem's identity so the agent
 /// can chain follow-up mutations.
 #[test]
-fn pro_memstead_vault_create_returns_typed_success_envelope() {
-    // The vault-management matcher tests the candidate against the
-    // pattern. The candidate is the vault NAME (not the location
+fn pro_memstead_mem_create_returns_typed_success_envelope() {
+    // The mem-management matcher tests the candidate against the
+    // pattern. The candidate is the mem NAME (not the location
     // path) so a wildcard pattern admits any name. The location lives
     // on disk at the operator's discretion.
     const WORKSPACE_TOML_WITH_CREATE_RULE: &str = "\
-format = \"memstead-git-branch-1\"\n\
+format = \"memstead-git-branch-2\"\n\
 \n\
 [persistence_adapter]\n\
 name = \"file-two-layer\"\n\
 \n\
-[[vault_management.create]]\n\
+[[mem_management.create]]\n\
 pattern = \"*\"\n\
 schemas = [\"default@1.0.0\"]\n\
 ";
@@ -1716,43 +1716,43 @@ schemas = [\"default@1.0.0\"]\n\
 
     let mut harness = WireHarness::start(tmp.path());
     let result = harness.call_tool(
-        "memstead_vault_create",
+        "memstead_mem_create",
         json!({
             "name": "fresh",
-            "location": "vaults/fresh",
+            "location": "mems/fresh",
             "schema": "default@1.0.0",
         }),
     );
     let _ = assert_success_envelope(&result);
     let body = result
         .get("structuredContent")
-        .expect("structuredContent missing on vault_create success");
+        .expect("structuredContent missing on mem_create success");
     // The exact response field set is engine-derived; the pin
-    // checks the bare minimum: the new vault's name is echoed back so
+    // checks the bare minimum: the new mem's name is echoed back so
     // the agent can chain follow-up mutations against it.
     assert!(
-        body.get("name").is_some() || body.get("vault").is_some(),
-        "vault_create response missing name/vault: {body}"
+        body.get("name").is_some() || body.get("mem").is_some(),
+        "mem_create response missing name/mem: {body}"
     );
 }
 
-/// Pro pin: with permissive `[[vault_management.create]]` and `.delete]]`
-/// rules, `memstead_vault_delete` against an existing vault returns a success
+/// Pro pin: with permissive `[[mem_management.create]]` and `.delete]]`
+/// rules, `memstead_mem_delete` against an existing mem returns a success
 /// envelope. The pin checks the success flag and presence of
 /// `structured_content` — exact response fields are engine-derived.
 #[test]
-fn pro_memstead_vault_delete_returns_typed_success_envelope() {
+fn pro_memstead_mem_delete_returns_typed_success_envelope() {
     const WORKSPACE_TOML_WITH_LIFECYCLE_RULES: &str = "\
-format = \"memstead-git-branch-1\"\n\
+format = \"memstead-git-branch-2\"\n\
 \n\
 [persistence_adapter]\n\
 name = \"file-two-layer\"\n\
 \n\
-[[vault_management.create]]\n\
+[[mem_management.create]]\n\
 pattern = \"*\"\n\
 schemas = [\"default@1.0.0\"]\n\
 \n\
-[[vault_management.delete]]\n\
+[[mem_management.delete]]\n\
 pattern = \"*\"\n\
 ";
 
@@ -1765,13 +1765,13 @@ pattern = \"*\"\n\
 
     let mut harness = WireHarness::start(tmp.path());
 
-    // Create a fresh vault first so we have something to delete that
+    // Create a fresh mem first so we have something to delete that
     // is not the seeded `demo` (which has a real git-branch ref).
     let create = harness.call_tool(
-        "memstead_vault_create",
+        "memstead_mem_create",
         json!({
             "name": "ephemeral",
-            "location": "vaults/ephemeral",
+            "location": "mems/ephemeral",
             "schema": "default@1.0.0",
         }),
     );
@@ -1780,43 +1780,43 @@ pattern = \"*\"\n\
     // Now delete it. The MCP wrapper hardcodes `delete_files: true`,
     // so this is always destructive.
     let del = harness.call_tool(
-        "memstead_vault_delete",
+        "memstead_mem_delete",
         json!({ "name": "ephemeral" }),
     );
     let _ = assert_success_envelope(&del);
     assert!(
         del.get("structuredContent").is_some(),
-        "vault_delete response missing structuredContent: {del}"
+        "mem_delete response missing structuredContent: {del}"
     );
 }
 
 /// MCP parity for the CLI
-/// F7 regression. `memstead_vault_delete` (always destructive) scrubs the
-/// deleted vault's dangling `[cross_vault_links]` grant but PRESERVES
-/// the exact-name `[[vault_management.create]]` /
-/// `[[vault_management.delete]]` allowlist rules — they are
+/// F7 regression. `memstead_mem_delete` (always destructive) scrubs the
+/// deleted mem's dangling `[cross_mem_links]` grant but PRESERVES
+/// the exact-name `[[mem_management.create]]` /
+/// `[[mem_management.delete]]` allowlist rules — they are
 /// forward-looking permissions for the name. So a follow-up
-/// `memstead_vault_create` of the same name succeeds without re-granting.
-/// The cross-link grant points OUT of the deleted vault
-/// (`ephemeral → demo`) so the delete's own `VAULT_REFERENCED_BY_POLICY`
-/// gate (which fires only when another vault grants the target) stays
+/// `memstead_mem_create` of the same name succeeds without re-granting.
+/// The cross-link grant points OUT of the deleted mem
+/// (`ephemeral → demo`) so the delete's own `MEM_REFERENCED_BY_POLICY`
+/// gate (which fires only when another mem grants the target) stays
 /// clear.
 #[test]
-fn pro_vault_delete_preserves_allowlist_rules_so_recreate_succeeds() {
+fn pro_mem_delete_preserves_allowlist_rules_so_recreate_succeeds() {
     const WORKSPACE_TOML: &str = "\
-format = \"memstead-git-branch-1\"\n\
+format = \"memstead-git-branch-2\"\n\
 \n\
 [persistence_adapter]\n\
 name = \"file-two-layer\"\n\
 \n\
-[cross_vault_links]\n\
+[cross_mem_links]\n\
 ephemeral = [\"demo\"]\n\
 \n\
-[[vault_management.create]]\n\
+[[mem_management.create]]\n\
 pattern = \"ephemeral\"\n\
 schemas = [\"default@1.0.0\"]\n\
 \n\
-[[vault_management.delete]]\n\
+[[mem_management.delete]]\n\
 pattern = \"ephemeral\"\n\
 ";
 
@@ -1831,10 +1831,10 @@ pattern = \"ephemeral\"\n\
 
     // Create `ephemeral` — admitted by the exact-name create rule.
     let create = harness.call_tool(
-        "memstead_vault_create",
+        "memstead_mem_create",
         json!({
             "name": "ephemeral",
-            "location": "vaults/ephemeral",
+            "location": "mems/ephemeral",
             "schema": "default@1.0.0",
         }),
     );
@@ -1842,7 +1842,7 @@ pattern = \"ephemeral\"\n\
 
     // Destructive delete — admitted by the exact-name delete rule.
     let del = harness.call_tool(
-        "memstead_vault_delete",
+        "memstead_mem_delete",
         json!({ "name": "ephemeral" }),
     );
     let _ = assert_success_envelope(&del);
@@ -1855,18 +1855,18 @@ pattern = \"ephemeral\"\n\
         2,
         "delete must preserve the create+delete allowlist rules; got:\n{after}",
     );
-    // The deleted vault's own dangling cross-link grant is scrubbed.
+    // The deleted mem's own dangling cross-link grant is scrubbed.
     assert!(
         !after.contains("ephemeral = [\"demo\"]"),
-        "delete must scrub the deleted vault's dangling cross-link grant; got:\n{after}",
+        "delete must scrub the deleted mem's dangling cross-link grant; got:\n{after}",
     );
 
     // Re-create the same name — succeeds with no fresh allow-create.
     let recreate = harness.call_tool(
-        "memstead_vault_create",
+        "memstead_mem_create",
         json!({
             "name": "ephemeral",
-            "location": "vaults/ephemeral",
+            "location": "mems/ephemeral",
             "schema": "default@1.0.0",
         }),
     );
@@ -1874,19 +1874,19 @@ pattern = \"ephemeral\"\n\
 }
 
 /// Item 01 pin: `memstead-mcp --operator-mode` plumbs the bypass through
-/// the MCP boundary. With zero `[[vault_management.create]]` /
-/// `[[vault_management.delete]]` rules, an operator-mode server can
-/// still `memstead_vault_create` and `memstead_vault_delete` a fresh vault;
+/// the MCP boundary. With zero `[[mem_management.create]]` /
+/// `[[mem_management.delete]]` rules, an operator-mode server can
+/// still `memstead_mem_create` and `memstead_mem_delete` a fresh mem;
 /// a server booted without the flag against the same workspace
-/// returns `VAULT_PATH_NOT_ALLOWED` reason=`no_allowlist_configured`.
+/// returns `MEM_PATH_NOT_ALLOWED` reason=`no_allowlist_configured`.
 #[test]
 fn pro_operator_mode_bypasses_empty_allowlist_via_mcp() {
-    // Workspace.toml carries no `[vault_management]` section at all —
+    // Workspace.toml carries no `[mem_management]` section at all —
     // every agent-mode lifecycle call rejects with the
     // `no_allowlist_configured` envelope. Operator-mode admits the
     // call regardless.
     const WORKSPACE_TOML_NO_RULES: &str = "\
-format = \"memstead-git-branch-1\"\n\
+format = \"memstead-git-branch-2\"\n\
 \n\
 [persistence_adapter]\n\
 name = \"file-two-layer\"\n\
@@ -1903,10 +1903,10 @@ name = \"file-two-layer\"\n\
     {
         let mut harness = WireHarness::start(tmp.path());
         let agent_attempt = harness.call_tool(
-            "memstead_vault_create",
+            "memstead_mem_create",
             json!({
                 "name": "fresh",
-                "location": "vaults/fresh",
+                "location": "mems/fresh",
                 "schema": "default@1.0.0",
             }),
         );
@@ -1923,8 +1923,8 @@ name = \"file-two-layer\"\n\
             .expect("structuredContent missing on agent-mode envelope");
         assert_eq!(
             structured.get("code").and_then(Value::as_str),
-            Some("VAULT_PATH_NOT_ALLOWED"),
-            "agent-mode rejection must carry VAULT_PATH_NOT_ALLOWED: {structured}"
+            Some("MEM_PATH_NOT_ALLOWED"),
+            "agent-mode rejection must carry MEM_PATH_NOT_ALLOWED: {structured}"
         );
         assert_eq!(
             structured
@@ -1940,10 +1940,10 @@ name = \"file-two-layer\"\n\
     {
         let mut harness = WireHarness::start_with_args(tmp.path(), &["--operator-mode"]);
         let create = harness.call_tool(
-            "memstead_vault_create",
+            "memstead_mem_create",
             json!({
                 "name": "fresh",
-                "location": "vaults/fresh",
+                "location": "mems/fresh",
                 "schema": "default@1.0.0",
             }),
         );
@@ -1951,7 +1951,7 @@ name = \"file-two-layer\"\n\
 
         // And the matching delete also succeeds — both gates are bypassed.
         let del = harness.call_tool(
-            "memstead_vault_delete",
+            "memstead_mem_delete",
             json!({ "name": "fresh" }),
         );
         let _ = assert_success_envelope(&del);
@@ -1966,7 +1966,7 @@ name = \"file-two-layer\"\n\
 #[test]
 fn pro_memstead_overview_surfaces_operator_mode_bypass() {
     const WORKSPACE_TOML: &str = "\
-format = \"memstead-git-branch-1\"\n\
+format = \"memstead-git-branch-2\"\n\
 \n\
 [persistence_adapter]\n\
 name = \"file-two-layer\"\n\
@@ -2001,13 +2001,13 @@ name = \"file-two-layer\"\n\
             "operator-mode overview must mention the flag: {text}"
         );
         assert!(
-            text.contains("VAULT_REFERENCED_BY_POLICY"),
+            text.contains("MEM_REFERENCED_BY_POLICY"),
             "operator-mode overview must name the bypassed safeguard: {text}"
         );
     }
 }
 
-/// Item 03 pin: `memstead_vault_create` against a vault-repo workspace
+/// Item 03 pin: `memstead_mem_create` against a mem-repo workspace
 /// produces a `mounts.json` whose new git-branch entry carries the
 /// fully-qualified `refs/heads/<leaf>` form for the `branch` field.
 /// Pre-fix the writer already produced the long form; this pin guards
@@ -2016,18 +2016,18 @@ name = \"file-two-layer\"\n\
 /// every fresh-workspace rebuild produce noise-only diffs against the
 /// legacy shape).
 #[test]
-fn pro_memstead_vault_create_writes_refs_heads_branch_in_mounts_json() {
+fn pro_memstead_mem_create_writes_refs_heads_branch_in_mounts_json() {
     const WORKSPACE_TOML_WITH_CREATE_RULE: &str = "\
-format = \"memstead-git-branch-1\"\n\
+format = \"memstead-git-branch-2\"\n\
 \n\
 [persistence_adapter]\n\
 name = \"file-two-layer\"\n\
 \n\
-[[vault_management.create]]\n\
+[[mem_management.create]]\n\
 pattern = \"*\"\n\
 schemas = [\"default@1.0.0\"]\n\
 \n\
-[[vault_management.create]]\n\
+[[mem_management.create]]\n\
 pattern = \"namespace/*\"\n\
 schemas = [\"default@1.0.0\"]\n\
 ";
@@ -2043,10 +2043,10 @@ schemas = [\"default@1.0.0\"]\n\
 
     // Flat-layout create — branch_leaf is the bare name.
     let flat = harness.call_tool(
-        "memstead_vault_create",
+        "memstead_mem_create",
         json!({
             "name": "fresh",
-            "location": "vaults/fresh",
+            "location": "mems/fresh",
             "schema": "default@1.0.0",
         }),
     );
@@ -2055,10 +2055,10 @@ schemas = [\"default@1.0.0\"]\n\
     // Hierarchical paths are first-class. `name = "namespace/scoped"`
     // IS the full identifier — there is no separate `path` wire field.
     let hier = harness.call_tool(
-        "memstead_vault_create",
+        "memstead_mem_create",
         json!({
             "name": "namespace/scoped",
-            "location": "vaults/scoped",
+            "location": "mems/scoped",
             "schema": "default@1.0.0",
         }),
     );
@@ -2066,20 +2066,20 @@ schemas = [\"default@1.0.0\"]\n\
 
     let mounts_json_path = tmp.path().join(".memstead").join("state").join("mounts.json");
     let on_disk = std::fs::read_to_string(&mounts_json_path)
-        .expect("mounts.json must exist after vault_create");
+        .expect("mounts.json must exist after mem_create");
     assert!(
         on_disk.contains("\"branch\": \"refs/heads/fresh\""),
-        "flat-layout vault must persist refs/heads/<name>, got: {on_disk}"
+        "flat-layout mem must persist refs/heads/<name>, got: {on_disk}"
     );
     assert!(
         on_disk.contains("\"branch\": \"refs/heads/namespace/scoped\""),
-        "hierarchical vault must persist refs/heads/<full-name>, got: {on_disk}"
+        "hierarchical mem must persist refs/heads/<full-name>, got: {on_disk}"
     );
-    // `mounts.json` carries the full hierarchical name as the vault
+    // `mounts.json` carries the full hierarchical name as the mem
     // identifier (not the bare leaf).
     assert!(
-        on_disk.contains("\"vault\": \"namespace/scoped\""),
-        "hierarchical vault identity is the full path in mounts.json, got: {on_disk}"
+        on_disk.contains("\"mem\": \"namespace/scoped\""),
+        "hierarchical mem identity is the full path in mounts.json, got: {on_disk}"
     );
 }
 
@@ -2208,27 +2208,27 @@ fn pro_memstead_update_body_wikilink_auto_synthesises_alias_relation() {
 // ---------------------------------------------------------------------------
 // MCP wire tests for the six
 // `memstead_workspace_*` tools wrapping the engine-located
-// `workspace_config_edit` writers. Closes the F7 dynamic-vault-
+// `workspace_config_edit` writers. Closes the F7 dynamic-mem-
 // lifecycle gap from MCP — an agent can now grant, mutate, revoke,
 // and delete without dropping to CLI.
 // ---------------------------------------------------------------------------
 
 const TIER_C_WORKSPACE_TOML: &str = "\
-format = \"memstead-git-branch-1\"\n\
+format = \"memstead-git-branch-2\"\n\
 \n\
 [persistence_adapter]\n\
 name = \"file-two-layer\"\n\
 \n\
-[[vault_management.create]]\n\
+[[mem_management.create]]\n\
 pattern = \"*\"\n\
 schemas = [\"default@1.0.0\"]\n\
 \n\
-[[vault_management.delete]]\n\
+[[mem_management.delete]]\n\
 pattern = \"*\"\n\
 ";
 
 /// `memstead_workspace_grant_cross_link` writes the
-/// `[cross_vault_links]` section. Round-trip: invoke the tool, read
+/// `[cross_mem_links]` section. Round-trip: invoke the tool, read
 /// `.memstead/workspace.toml` back, assert the grant appears.
 #[test]
 fn pro_memstead_workspace_grant_cross_link_round_trip() {
@@ -2248,8 +2248,8 @@ fn pro_memstead_workspace_grant_cross_link_round_trip() {
 
     let body = std::fs::read_to_string(tmp.path().join(".memstead").join("workspace.toml")).unwrap();
     assert!(
-        body.contains("[cross_vault_links]"),
-        "grant must write the cross_vault_links section; got:\n{body}",
+        body.contains("[cross_mem_links]"),
+        "grant must write the cross_mem_links section; got:\n{body}",
     );
     assert!(
         body.contains("source = [\"target\"]"),
@@ -2332,12 +2332,12 @@ fn pro_memstead_workspace_revoke_cross_link_idempotent_when_absent() {
 
 /// `memstead_workspace_allow_create` writes a new rule.
 /// Round-trip: invoke the tool, parse the workspace TOML, assert
-/// the new rule appears in `[[vault_management.create]]`.
+/// the new rule appears in `[[mem_management.create]]`.
 #[test]
 fn pro_memstead_workspace_allow_create_round_trip() {
     // Seed with empty rules — exercise the "append first rule" path.
     const EMPTY_TOML: &str = "\
-format = \"memstead-git-branch-1\"\n\
+format = \"memstead-git-branch-2\"\n\
 \n\
 [persistence_adapter]\n\
 name = \"file-two-layer\"\n\
@@ -2357,7 +2357,7 @@ name = \"file-two-layer\"\n\
 
     let body = std::fs::read_to_string(tmp.path().join(".memstead").join("workspace.toml")).unwrap();
     assert!(
-        body.contains("[[vault_management.create]]"),
+        body.contains("[[mem_management.create]]"),
         "allow_create must write the section header; got:\n{body}",
     );
     assert!(
@@ -2373,7 +2373,7 @@ name = \"file-two-layer\"\n\
 #[test]
 fn pro_allow_create_differing_schemas_refused_stored_unchanged() {
     const EMPTY_TOML: &str = "\
-format = \"memstead-git-branch-1\"\n\
+format = \"memstead-git-branch-2\"\n\
 \n\
 [persistence_adapter]\n\
 name = \"file-two-layer\"\n\
@@ -2429,13 +2429,13 @@ name = \"file-two-layer\"\n\
     let _ = assert_success_envelope(&same);
 }
 
-/// Dynamic vault lifecycle end-to-end via MCP only. Mirrors the
+/// Dynamic mem lifecycle end-to-end via MCP only. Mirrors the
 /// workflow named
-/// in the tool descriptions: create a target vault, grant the
-/// source vault permission to link into it, revoke the grant, then
+/// in the tool descriptions: create a target mem, grant the
+/// source mem permission to link into it, revoke the grant, then
 /// delete the target. No CLI calls.
 #[test]
-fn pro_f7_dynamic_vault_lifecycle_completes_via_mcp_only() {
+fn pro_f7_dynamic_mem_lifecycle_completes_via_mcp_only() {
     let tmp = TempDir::new().unwrap();
     seed_pro_workspace_with_toml(
         tmp.path(),
@@ -2445,12 +2445,12 @@ fn pro_f7_dynamic_vault_lifecycle_completes_via_mcp_only() {
 
     let mut harness = WireHarness::start_with_args(tmp.path(), &["--operator-mode"]);
 
-    // 1. Create the target vault.
+    // 1. Create the target mem.
     let create = harness.call_tool(
-        "memstead_vault_create",
+        "memstead_mem_create",
         json!({
             "name": "target",
-            "location": "vaults/target",
+            "location": "mems/target",
             "schema": "default@1.0.0",
         }),
     );
@@ -2464,7 +2464,7 @@ fn pro_f7_dynamic_vault_lifecycle_completes_via_mcp_only() {
     let _ = assert_success_envelope(&grant);
 
     // 3. Revoke the grant before deleting (otherwise step 4 would
-    //    refuse with VAULT_REFERENCED_BY_POLICY — the safeguard the
+    //    refuse with MEM_REFERENCED_BY_POLICY — the safeguard the
     //    policy-check gates on delete_files=true).
     let revoke = harness.call_tool(
         "memstead_workspace_revoke_cross_link",
@@ -2472,10 +2472,10 @@ fn pro_f7_dynamic_vault_lifecycle_completes_via_mcp_only() {
     );
     let _ = assert_success_envelope(&revoke);
 
-    // 4. Delete the target vault. delete_files=true now succeeds
+    // 4. Delete the target mem. delete_files=true now succeeds
     //    because the cross-link grant was revoked in step 3.
     let delete = harness.call_tool(
-        "memstead_vault_delete",
+        "memstead_mem_delete",
         json!({ "name": "target", "delete_files": true }),
     );
     let _ = assert_success_envelope(&delete);

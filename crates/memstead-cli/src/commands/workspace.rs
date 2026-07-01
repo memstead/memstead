@@ -2,8 +2,8 @@
 //!
 //! Subcommand families:
 //!
-//! - `dump` — emit a JSON document describing every writable vault, the
-//!   schema each is pinned to, and per-vault opaque snapshot tokens.
+//! - `dump` — emit a JSON document describing every writable mem, the
+//!   schema each is pinned to, and per-mem opaque snapshot tokens.
 //!   Storage-agnostic contract consumed by the Claude-Code ingest
 //!   plugin; versioned (`format = "workspace-dump/v0"`).
 //! - `allow-create / revoke-create / allow-delete / revoke-delete /
@@ -25,7 +25,7 @@ use clap::{Args, Subcommand};
 use serde::Serialize;
 use serde_json::{Map, Value};
 
-use memstead_git_branch::vault_repo_config::branch_ref_for_vault_at_gitdir;
+use memstead_git_branch::mem_repo_config::branch_ref_for_mem_at_gitdir;
 
 use crate::CliError;
 use crate::output::{ExitKind, print_json};
@@ -37,20 +37,20 @@ use memstead_engine::workspace_config_edit::{
 /// Subcommands under `memstead workspace`.
 #[derive(Subcommand, Debug)]
 pub enum WorkspaceAction {
-    /// Emit a JSON document describing the workspace's vaults, the
-    /// schema each is pinned to, and per-vault opaque snapshot tokens.
+    /// Emit a JSON document describing the workspace's mems, the
+    /// schema each is pinned to, and per-mem opaque snapshot tokens.
     /// Output is always JSON (the global `--json` is a no-op here).
     Dump(DumpArgs),
 
-    /// Render the active workspace configuration: vault-management
-    /// allowlists, cross-vault permissions, mutation policy, plugin
+    /// Render the active workspace configuration: mem-management
+    /// allowlists, cross-mem permissions, mutation policy, plugin
     /// sections. Markdown by default; `--json` emits a structured
     /// document. Counterpart to the `allow-create / grant-cross-link /
     /// set-mutations` write surface — read what those commands have
     /// composed.
     Show(ShowArgs),
 
-    /// Add a `[[vault_management.create]]` allowlist rule. Pattern
+    /// Add a `[[mem_management.create]]` allowlist rule. Pattern
     /// uses gitignore-style globs (`*` does not cross `/`, `**`
     /// matches zero-or-more segments). Schemas pin which schemas the
     /// agent may bring into existence under this namespace; `--schema *`
@@ -59,26 +59,26 @@ pub enum WorkspaceAction {
     #[command(name = "allow-create")]
     AllowCreate(AllowCreateArgs),
 
-    /// Remove a `[[vault_management.create]]` rule by pattern.
+    /// Remove a `[[mem_management.create]]` rule by pattern.
     #[command(name = "revoke-create")]
     RevokeCreate(PatternArg),
 
-    /// Add a `[[vault_management.delete]]` allowlist rule.
+    /// Add a `[[mem_management.delete]]` allowlist rule.
     #[command(name = "allow-delete")]
     AllowDelete(PatternArg),
 
-    /// Remove a `[[vault_management.delete]]` rule by pattern.
+    /// Remove a `[[mem_management.delete]]` rule by pattern.
     #[command(name = "revoke-delete")]
     RevokeDelete(PatternArg),
 
-    /// Grant a `[cross_vault_links]` permission: `<from>` may write
+    /// Grant a `[cross_mem_links]` permission: `<from>` may write
     /// edges into `<to>`. `<to>` is `*` for the wildcard shape or a
-    /// vault name for the allowlist shape. Mixing the two for one
-    /// `from`-vault is rejected.
+    /// mem name for the allowlist shape. Mixing the two for one
+    /// `from`-mem is rejected.
     #[command(name = "grant-cross-link")]
     GrantCrossLink(CrossLinkArgs),
 
-    /// Revoke a `[cross_vault_links]` permission. Removes the named
+    /// Revoke a `[cross_mem_links]` permission. Removes the named
     /// target from the allowlist; drops the `from`-key entirely when
     /// the allowlist becomes empty. `*` revokes the wildcard shape.
     #[command(name = "revoke-cross-link")]
@@ -105,7 +105,7 @@ pub struct ShowArgs {}
 pub struct AllowCreateArgs {
     /// Glob pattern (gitignore semantics) the rule matches against
     /// the lifecycle candidate `<path>/<name>` (or `<name>` for
-    /// flat-layout vaults).
+    /// flat-layout mems).
     pub pattern: String,
 
     /// Schema pins the rule permits. Repeat or pass as a single
@@ -113,9 +113,9 @@ pub struct AllowCreateArgs {
     #[arg(long, required = true, value_delimiter = ',')]
     pub schema: Vec<String>,
 
-    /// Cross-vault permission conferred on every vault matching this
+    /// Cross-mem permission conferred on every mem matching this
     /// rule. Rule-derived and evaluated lazily at relate time — not
-    /// written into `[cross_vault_links]`; `workspace show` and
+    /// written into `[cross_mem_links]`; `workspace show` and
     /// `memstead_overview` surface it under the rule. Repeat or pass as a
     /// single comma-separated value; `*` for wildcard.
     #[arg(long, value_delimiter = ',')]
@@ -138,9 +138,9 @@ pub struct PatternArg {
 /// Args for `grant-cross-link / revoke-cross-link`.
 #[derive(Args, Debug)]
 pub struct CrossLinkArgs {
-    /// Source vault (the `from` side of the permission).
+    /// Source mem (the `from` side of the permission).
     pub from: String,
-    /// Target vault or `*` for the wildcard shape.
+    /// Target mem or `*` for the wildcard shape.
     pub to: String,
 }
 
@@ -180,7 +180,7 @@ fn require_workspace_root() -> anyhow::Result<PathBuf> {
     })?;
     find_workspace_root(&cwd).ok_or_else(|| {
         workspace_not_initialised_error(
-            "No workspace found. Run from a directory containing `.memstead/workspace.toml` (run `memstead vault-repo init` or `memstead init` to bootstrap).",
+            "No workspace found. Run from a directory containing `.memstead/workspace.toml` (run `memstead mem-repo init` or `memstead init` to bootstrap).",
         )
         .into()
     })
@@ -262,7 +262,7 @@ fn parse_cross_links(targets: &[String]) -> Vec<CrossLinkTarget> {
 /// `{action, detail}` envelope; markdown-default
 /// mode emits a markdown block (heading + bullet list + optional
 /// `## Warnings` block) matching the shape every other CLI mutation
-/// (`vault init`, `relate`, `create`, …) uses.
+/// (`mem init`, `relate`, `create`, …) uses.
 ///
 /// `heading` is the top-level title (e.g. `"Workspace allow-create
 /// rule \`scratch-*\`"`). `bullets` is a list of pre-formatted bullet
@@ -408,16 +408,16 @@ fn revoke_delete(ctx: &CliContext, args: PatternArg) -> anyhow::Result<()> {
 
 fn grant_cross_link(ctx: &CliContext, args: CrossLinkArgs) -> anyhow::Result<()> {
     let root = require_workspace_root()?;
-    // Registered vaults (any mount) drive the grant's target validation
+    // Registered mems (any mount) drive the grant's target validation
     // in the shared engine policy-edit layer — same warnings the MCP
     // surface emits. Building the engine mirrors `workspace dump`.
-    let known_vaults: Vec<String> = {
+    let known_mems: Vec<String> = {
         let engine = crate::setup::pro_engine(ctx)?;
-        engine.vault_names().iter().map(|s| s.to_string()).collect()
+        engine.mem_names().iter().map(|s| s.to_string()).collect()
     };
     let target = CrossLinkTarget::parse(&args.to);
     let warnings =
-        workspace_config_edit::grant_cross_link(&root, &args.from, &target, &known_vaults)
+        workspace_config_edit::grant_cross_link(&root, &args.from, &target, &known_mems)
             .map_err(lift_edit_error)?;
     let heading = format!("Workspace grant-cross-link `{}` → `{}`", args.from, args.to);
     let bullets = vec![
@@ -473,7 +473,7 @@ fn show(ctx: &CliContext, _args: ShowArgs) -> anyhow::Result<()> {
     let json_mode = ctx.json;
     if json_mode {
         let create_rules: Vec<serde_json::Value> = settings
-            .vault_create_rules
+            .mem_create_rules
             .iter()
             .map(|r| {
                 let mut obj = serde_json::Map::new();
@@ -500,12 +500,12 @@ fn show(ctx: &CliContext, _args: ShowArgs) -> anyhow::Result<()> {
             })
             .collect();
         let delete_rules: Vec<serde_json::Value> = settings
-            .vault_delete_rules
+            .mem_delete_rules
             .iter()
             .map(|r| serde_json::json!({ "pattern": r.pattern }))
             .collect();
         let mut cross_links_obj = serde_json::Map::new();
-        for (k, v) in &settings.cross_vault_links {
+        for (k, v) in &settings.cross_mem_links {
             cross_links_obj.insert(k.clone(), cross_link_value_to_json(v));
         }
         let mut mutations_obj = serde_json::Map::new();
@@ -518,11 +518,11 @@ fn show(ctx: &CliContext, _args: ShowArgs) -> anyhow::Result<()> {
         }
         let document = serde_json::json!({
             "workspace_root": root.display().to_string(),
-            "vault_management": {
+            "mem_management": {
                 "create": create_rules,
                 "delete": delete_rules,
             },
-            "cross_vault_links": cross_links_obj,
+            "cross_mem_links": cross_links_obj,
             "mutations": mutations_obj,
             "plugin": plugin_obj,
         });
@@ -535,13 +535,13 @@ fn show(ctx: &CliContext, _args: ShowArgs) -> anyhow::Result<()> {
     lines.push(format!("- Root: `{}`", root.display()));
     lines.push(String::new());
 
-    lines.push("## Vault management".to_string());
+    lines.push("## Mem management".to_string());
     lines.push(String::new());
-    if settings.vault_create_rules.is_empty() {
-        lines.push("- `[[vault_management.create]]`: (none — no agent-driven vault creation allowed)".to_string());
+    if settings.mem_create_rules.is_empty() {
+        lines.push("- `[[mem_management.create]]`: (none — no agent-driven mem creation allowed)".to_string());
     } else {
-        lines.push("- `[[vault_management.create]]`:".to_string());
-        for r in &settings.vault_create_rules {
+        lines.push("- `[[mem_management.create]]`:".to_string());
+        for r in &settings.mem_create_rules {
             let cross = match &r.default_cross_links {
                 None => String::new(),
                 Some(v) => format!(" → cross-links: {}", render_cross_link_value(v)),
@@ -553,22 +553,22 @@ fn show(ctx: &CliContext, _args: ShowArgs) -> anyhow::Result<()> {
             ));
         }
     }
-    if settings.vault_delete_rules.is_empty() {
-        lines.push("- `[[vault_management.delete]]`: (none)".to_string());
+    if settings.mem_delete_rules.is_empty() {
+        lines.push("- `[[mem_management.delete]]`: (none)".to_string());
     } else {
-        lines.push("- `[[vault_management.delete]]`:".to_string());
-        for r in &settings.vault_delete_rules {
+        lines.push("- `[[mem_management.delete]]`:".to_string());
+        for r in &settings.mem_delete_rules {
             lines.push(format!("  - `{}`", r.pattern));
         }
     }
     lines.push(String::new());
 
-    lines.push("## Cross-vault links".to_string());
+    lines.push("## Cross-mem links".to_string());
     lines.push(String::new());
-    if settings.cross_vault_links.is_empty() {
-        lines.push("- `[cross_vault_links]`: (none — default-deny)".to_string());
+    if settings.cross_mem_links.is_empty() {
+        lines.push("- `[cross_mem_links]`: (none — default-deny)".to_string());
     } else {
-        for (from, value) in &settings.cross_vault_links {
+        for (from, value) in &settings.cross_mem_links {
             lines.push(format!("- `{from}` → {}", render_cross_link_value(value)));
         }
     }
@@ -649,46 +649,46 @@ fn set_mutations(ctx: &CliContext, args: SetMutationsArgs) -> anyhow::Result<()>
 const DUMP_FORMAT: &str = "workspace-dump/v0";
 
 #[derive(Serialize)]
-struct DumpVault {
+struct DumpMem {
     name: String,
     /// Mount capability — `"writable"` or `"read_only"`. RO mounts
     /// have no gitdir / snapshot_token; consumers branch on this to
     /// know which conditional fields are populated.
     capability: &'static str,
-    /// Schema pin as it appears in the vault config (`"software"` or
+    /// Schema pin as it appears in the mem config (`"software"` or
     /// `"software@1.0.0"`). `None` is preserved as JSON `null` so
     /// consumers can branch on the unset case without inferring it from
     /// an absent key. Serialized as `schema_ref` for consistency with
-    /// `memstead_vault_create`'s response (where `schema_ref` is the short
+    /// `memstead_mem_create`'s response (where `schema_ref` is the short
     /// name string and `schema` is the inlined schema body).
     #[serde(rename = "schema_ref")]
     schema: Option<String>,
-    /// One-line description from the vault config; `None` when unset.
+    /// One-line description from the mem config; `None` when unset.
     description: Option<String>,
-    /// Opaque pass-through of `VaultConfig.write_guidance` — the same
+    /// Opaque pass-through of `MemConfig.write_guidance` — the same
     /// `HashMap<String, Value>` shape the engine carries on disk and on
     /// the wire.
     ///
     /// Serialized snake_case (`write_guidance`), uniform with every
     /// neighbouring key in the dump envelope — even though the on-disk
-    /// `VaultConfig` carries it camelCase.
+    /// `MemConfig` carries it camelCase.
     write_guidance: Map<String, Value>,
-    /// Opaque token that changes iff the vault content has changed
+    /// Opaque token that changes iff the mem content has changed
     /// since the previous dump. Consumers' only legal operation is
-    /// byte-equality. Today the token is the per-vault content branch's
+    /// byte-equality. Today the token is the per-mem content branch's
     /// fully-peeled HEAD oid for git-branch mounts; `None` for folder
     /// and archive mounts whose backends have no head-of-branch
     /// concept (the archive's bytes are immutable post-install; folder
-    /// vaults aren't change-tracked by the engine).
+    /// mems aren't change-tracked by the engine).
     #[serde(skip_serializing_if = "Option::is_none")]
     snapshot_token: Option<String>,
-    /// Verbatim pass-through of `VaultConfig.sync_state` — the ingest
+    /// Verbatim pass-through of `MemConfig.sync_state` — the ingest
     /// layer's durable "last synced source state" baseline, keyed per
     /// `(ingest, facet)`. Each value is an opaque token the engine
     /// never interprets (git → commit id, graph → snapshot token,
     /// filesystem → a JSON-stringified stat digest). This is the read
     /// pipe the ingest loop diffs against to steer at the changed
-    /// slice; writes route through `memstead vault set-sync-state`.
+    /// slice; writes route through `memstead mem set-sync-state`.
     /// Omitted from the wire when empty, like `write_guidance` —
     /// existing minimal configs don't gain an empty `{}`.
     #[serde(skip_serializing_if = "Map::is_empty")]
@@ -723,16 +723,16 @@ fn dump(_ctx: &CliContext, _args: DumpArgs) -> anyhow::Result<()> {
         )
     })?;
 
-    let mut vaults: Vec<DumpVault> = Vec::new();
+    let mut mems: Vec<DumpMem> = Vec::new();
     let mut schemas: Map<String, Value> = Map::new();
 
-    for (name, config) in engine.vault_configs_named() {
+    for (name, config) in engine.mem_configs_named() {
         // F24: branch on mount capability. Git-branch (writable)
         // mounts emit the gitdir-derived snapshot token; folder and
         // archive (RO) mounts omit the token entirely. Calling
         // `gitdir_for(name)` unconditionally would trip
-        // `EngineError::Vault` for archive mounts, crashing the whole
-        // dump with `VAULT_ERROR` on the first RO mount encountered.
+        // `EngineError::Mem` for archive mounts, crashing the whole
+        // dump with `MEM_ERROR` on the first RO mount encountered.
         let mount = engine.mount(name);
         let capability = match mount.map(|m| m.capability) {
             Some(memstead_base::MountCapability::ReadOnly) => "read_only",
@@ -744,15 +744,15 @@ fn dump(_ctx: &CliContext, _args: DumpArgs) -> anyhow::Result<()> {
                 let gitdir = engine.gitdir_for(name).map_err(|e| {
                     CliError::new(
                         ExitKind::Generic,
-                        "VAULT_ERROR",
-                        format!("workspace dump: gitdir for vault '{name}': {e}"),
+                        "MEM_ERROR",
+                        format!("workspace dump: gitdir for mem '{name}': {e}"),
                     )
                 })?;
                 Some(read_branch_head_oid(&gitdir, name).map_err(|e| {
                     CliError::new(
                         ExitKind::Generic,
-                        "VAULT_ERROR",
-                        format!("workspace dump: snapshot token for vault '{name}': {e}"),
+                        "MEM_ERROR",
+                        format!("workspace dump: snapshot token for mem '{name}': {e}"),
                     )
                 })?)
             }
@@ -782,7 +782,7 @@ fn dump(_ctx: &CliContext, _args: DumpArgs) -> anyhow::Result<()> {
             sync_state.insert(k.clone(), Value::String(v.clone()));
         }
 
-        vaults.push(DumpVault {
+        mems.push(DumpMem {
             name: name.to_string(),
             capability,
             schema: schema_pin.clone(),
@@ -814,7 +814,7 @@ fn dump(_ctx: &CliContext, _args: DumpArgs) -> anyhow::Result<()> {
         }
     }
 
-    vaults.sort_by(|a, b| a.name.cmp(&b.name));
+    mems.sort_by(|a, b| a.name.cmp(&b.name));
 
     let workspace_root = std::env::current_dir().ok().and_then(|cwd| {
         crate::setup::find_workspace_root(&cwd).map(|p| p.display().to_string())
@@ -823,7 +823,7 @@ fn dump(_ctx: &CliContext, _args: DumpArgs) -> anyhow::Result<()> {
     let document = serde_json::json!({
         "format": DUMP_FORMAT,
         "workspace_root": workspace_root,
-        "vaults": vaults,
+        "mems": mems,
         "schemas": schemas,
     });
 
@@ -831,20 +831,20 @@ fn dump(_ctx: &CliContext, _args: DumpArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Read the fully-peeled HEAD oid of the per-vault content branch as a
+/// Read the fully-peeled HEAD oid of the per-mem content branch as a
 /// hex string. This is the dump's snapshot-token primitive — the value
-/// changes iff a new commit lands on the vault's branch, which is iff
-/// the vault content changed.
+/// changes iff a new commit lands on the mem's branch, which is iff
+/// the mem content changed.
 ///
-/// `vault_name` is the leaf; the helper walks `__MEMSTEAD:vaults/` to find
+/// `mem_name` is the leaf; the helper walks `__MEMSTEAD:mems/` to find
 /// the hierarchical branch ref (`refs/heads/<path>/<leaf>`) and reads
 /// the oid from there.
-fn read_branch_head_oid(gitdir: &Path, vault_name: &str) -> Result<String, String> {
+fn read_branch_head_oid(gitdir: &Path, mem_name: &str) -> Result<String, String> {
     if !gitdir.is_dir() {
         return Err(format!("gitdir not found at {}", gitdir.display()));
     }
     let repo = gix::open(gitdir).map_err(|e| format!("gix open: {e}"))?;
-    let branch_ref = branch_ref_for_vault_at_gitdir(gitdir, vault_name);
+    let branch_ref = branch_ref_for_mem_at_gitdir(gitdir, mem_name);
     let reference = repo
         .find_reference(&branch_ref)
         .map_err(|e| format!("find ref {branch_ref}: {e}"))?;

@@ -28,7 +28,7 @@ system_message: |
   observable condition under which the verification can be called
   done. Without all three, the next agent can't act on the entry —
   they would have to do general re-reading, which is not what
-  this vault is for.
+  this mem is for.
 sections:
   - key: claim
     heading: Claim

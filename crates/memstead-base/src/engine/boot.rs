@@ -9,7 +9,7 @@
 //!
 //! Free helpers in this module materialise the workspace schemas
 //! catalogue, walk each mount's backend at load-time, and synthesise
-//! the [`VaultRouterSnapshot`] from the resolved mount list — pieces
+//! the [`MemRouterSnapshot`] from the resolved mount list — pieces
 //! the two entry points share.
 
 use std::cell::OnceCell;
@@ -19,14 +19,14 @@ use std::sync::Arc;
 
 use memstead_schema::Schema;
 
-use crate::backend::VaultBackend;
+use crate::backend::MemBackend;
 use crate::engine_fallback_type;
 use crate::entity::loader::parse_entries;
 use crate::entity::source::{SourceEntry, SourceReadError};
 use crate::entity::store_builder::push_entities_into_store;
 use crate::ops::WarningHint;
 use crate::store::Store;
-use crate::vault::{VaultOrigin, VaultRouterSnapshot};
+use crate::mem::{MemOrigin, MemRouterSnapshot};
 use crate::workspace::{Mount, MountCapability, MountStorage, WorkspaceSettings};
 
 use super::{BootError, Engine, EngineError, MountedBackend};
@@ -34,17 +34,17 @@ use super::{BootError, Engine, EngineError, MountedBackend};
 impl Engine {
     /// Build an engine from `(mount, backend)` pairs. The backend
     /// is the implementor that will serve reads / writes for that
-    /// mount's vault.
+    /// mount's mem.
     ///
-    /// Returns [`EngineError::DuplicateVault`] when two mounts name
-    /// the same vault; that's a configuration error the caller must
+    /// Returns [`EngineError::DuplicateMem`] when two mounts name
+    /// the same mem; that's a configuration error the caller must
     /// fix before the engine can route deterministically. An empty
     /// mount list is allowed (returns an engine that errors
-    /// `UnknownVault` on every read) — useful for tests; production
+    /// `UnknownMem` on every read) — useful for tests; production
     /// callers will reject empty inputs at the persistence-adapter
     /// layer.
     pub fn from_mounts(
-        mounts: Vec<(Mount, Box<dyn VaultBackend>)>,
+        mounts: Vec<(Mount, Box<dyn MemBackend>)>,
     ) -> Result<Self, EngineError> {
         Self::from_mounts_inner(mounts, Vec::new())
     }
@@ -52,7 +52,7 @@ impl Engine {
     /// Construct an engine from mounts plus an optional workspace
     /// schemas directory. Loads every subdirectory of `schemas_dir`
     /// as a workspace-authored schema and combines with the builtin
-    /// catalogue for per-vault schema-pin resolution. Workspace
+    /// catalogue for per-mem schema-pin resolution. Workspace
     /// schemas take precedence on (name, version) collision —
     /// matches pro's behaviour.
     ///
@@ -60,7 +60,7 @@ impl Engine {
     /// Used by `engine_from_workspace_root` to thread the
     /// `[schemas_dir]` workspace-toml entry into schema resolution.
     pub fn from_mounts_with_schemas_dir(
-        mounts: Vec<(Mount, Box<dyn VaultBackend>)>,
+        mounts: Vec<(Mount, Box<dyn MemBackend>)>,
         schemas_dir: Option<&Path>,
     ) -> Result<Self, EngineError> {
         let extra_schemas = load_workspace_schemas(schemas_dir)?;
@@ -76,7 +76,7 @@ impl Engine {
     /// resolvable, which `from_mounts_with_schemas_dir` (folder only)
     /// does not.
     pub fn from_mounts_with_schemas_dir_and_extra(
-        mounts: Vec<(Mount, Box<dyn VaultBackend>)>,
+        mounts: Vec<(Mount, Box<dyn MemBackend>)>,
         schemas_dir: Option<&Path>,
         mut extra: Vec<Arc<memstead_schema::Schema>>,
     ) -> Result<Self, EngineError> {
@@ -86,15 +86,15 @@ impl Engine {
     }
 
     pub(crate) fn from_mounts_inner(
-        mounts: Vec<(Mount, Box<dyn VaultBackend>)>,
+        mounts: Vec<(Mount, Box<dyn MemBackend>)>,
         extra_schemas: Vec<Arc<memstead_schema::Schema>>,
     ) -> Result<Self, EngineError> {
         let mut seen: std::collections::HashSet<String> =
             std::collections::HashSet::with_capacity(mounts.len());
         let mut mounted: Vec<MountedBackend> = Vec::with_capacity(mounts.len());
         for (mount, backend) in mounts {
-            if !seen.insert(mount.vault.clone()) {
-                return Err(EngineError::DuplicateVault(mount.vault));
+            if !seen.insert(mount.mem.clone()) {
+                return Err(EngineError::DuplicateMem(mount.mem));
             }
             // Seed the per-mount drift baseline. A backend that
             // doesn't track HEAD (folder, archive) returns Ok(None)
@@ -102,21 +102,21 @@ impl Engine {
             // probe failure during init falls back to None so a
             // later successful probe can establish the baseline.
             let last_known_head = backend.current_head().ok().flatten();
-            // Load the per-vault `.memstead/config.json` via the
+            // Load the per-mem `.memstead/config.json` via the
             // backend trait. Each backend resolves its own
             // canonical location (folder: `<root>/.memstead/config.json`;
             // archive: inside the zip; git-branch:
-            // `__MEMSTEAD:vaults/<leaf>/config.json`). Read failures
+            // `__MEMSTEAD:mems/<leaf>/config.json`). Read failures
             // or missing files surface as
             // `None` — `memstead_health` accommodates the missing-config
             // case (handler emits empty `writeGuidance` + `extra`).
-            let vault_config = backend
-                .read_vault_config()
+            let mem_config = backend
+                .read_mem_config()
                 .ok()
                 .flatten()
                 .and_then(|bytes| {
                     let value: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
-                    memstead_schema::config::parse_vault_config(&value).ok()
+                    memstead_schema::config::parse_mem_config(&value).ok()
                 });
             // Read the optional authoring-provenance payload the archive
             // carries (`.memstead/provenance.json`). A malformed payload is
@@ -133,7 +133,7 @@ impl Engine {
                 mount,
                 backend,
                 last_known_head,
-                vault_config,
+                mem_config,
                 archive_provenance,
             });
         }
@@ -164,25 +164,25 @@ impl Engine {
             HashMap::with_capacity(mounted.len());
         let fallback = engine_fallback_type();
 
-        // Derive the vault roster + last-segment suffixes ONCE so the
+        // Derive the mem roster + last-segment suffixes ONCE so the
         // per-mount load loop hands the same view to every
         // `LoadCollector`. `known_suffixes` is the input the
         // nested-prefix detector compares against; the full
-        // `vault_names` list feeds the two-pass cross-vault resolver
+        // `mem_names` list feeds the two-pass cross-mem resolver
         // in `push_entities_into_store`.
-        let vault_names: Vec<String> = mounted
+        let mem_names: Vec<String> = mounted
             .iter()
-            .map(|m| m.mount.vault.clone())
+            .map(|m| m.mount.mem.clone())
             .collect();
-        let known_suffixes: Vec<String> = vault_names
+        let known_suffixes: Vec<String> = mem_names
             .iter()
             .map(|n| crate::entity::store_builder::last_segment_suffix(n).to_string())
             .collect();
         let mut load_warnings: Vec<WarningHint> = Vec::new();
 
         for m in &mounted {
-            // Schema-pin authority: the vault's own per-vault config is
-            // the authoritative settled pin, so a copied or cloned vault
+            // Schema-pin authority: the mem's own per-mem config is
+            // the authoritative settled pin, so a copied or cloned mem
             // resolves its schema from its own backend without consulting
             // this workspace's `mounts.json`. `Mount.schema` (the mount
             // record's pin) is the fallback when the config carries no
@@ -190,7 +190,7 @@ impl Engine {
             // disagreement surfaces a `SchemaPinMismatch` warning rather
             // than silently preferring either.
             let config_pin = m
-                .vault_config
+                .mem_config
                 .as_ref()
                 .and_then(|c| c.schema.as_ref());
             let mount_pin = m.mount.schema.as_ref();
@@ -201,7 +201,7 @@ impl Engine {
                 && cfg != mp
             {
                 load_warnings.push(WarningHint::SchemaPinMismatch {
-                    vault: m.mount.vault.clone(),
+                    mem: m.mount.mem.clone(),
                     config_pin: cfg.as_display(),
                     mount_pin: mp.as_display(),
                 });
@@ -209,29 +209,29 @@ impl Engine {
             // Authoritative pin first (the backend config), then the
             // mount assertion as fallback when the config carries none.
             let settled_pin = config_pin.or(mount_pin);
-            // Dual-pin: a vault mid-migration validates against the
+            // Dual-pin: a mem mid-migration validates against the
             // migration target, not the settled pin.
             let effective_pin = m
                 .mount
                 .migration_target
                 .as_ref()
                 .or(settled_pin)
-                .ok_or_else(|| EngineError::VaultConfigIncomplete {
-                    vault: m.mount.vault.clone(),
+                .ok_or_else(|| EngineError::MemConfigIncomplete {
+                    mem: m.mount.mem.clone(),
                     missing_fields: vec!["schema".to_string()],
                 })?;
             let schema = SchemaResolver::new(&builtin_schemas)
                 .resolve(effective_pin)
                 .map_err(|sources| EngineError::SchemaNotFound {
-                    vault: m.mount.vault.clone(),
+                    mem: m.mount.mem.clone(),
                     pin: effective_pin.as_display(),
                     sources,
                 })?;
-            schemas.insert(m.mount.vault.clone(), schema.clone());
+            schemas.insert(m.mount.mem.clone(), schema.clone());
 
             let (entries, read_errors) = collect_source_entries(m.backend.as_ref())?;
             let load_result =
-                parse_entries(entries, read_errors, &m.mount.vault, schema.as_ref());
+                parse_entries(entries, read_errors, &m.mount.mem, schema.as_ref());
             // Wire the LoadCollector so the parser/store-builder
             // pipeline forwards typed drift warnings
             // (`SuspiciousNestedPrefix`, `DuplicateSectionHeading`,
@@ -244,14 +244,14 @@ impl Engine {
                 Some(crate::entity::store_builder::LoadCollector {
                     warnings: &mut load_warnings,
                     known_suffixes: &known_suffixes,
-                    vault_names: &vault_names,
+                    mem_names: &mem_names,
                 }),
             );
             load_errors.extend(load_result.errors);
         }
 
         // Parse-time relation validation runs after every mount's
-        // entities are loaded so cross-vault target types are
+        // entities are loaded so cross-mem target types are
         // resolvable. Hand-edits, external tooling, and the macOS
         // app's editor surface can inject relations that bypass
         // `memstead_relate`; this is the only place those get caught.
@@ -260,7 +260,7 @@ impl Engine {
         let mount_caps: std::collections::HashMap<String, crate::workspace::MountCapability> =
             mounted
                 .iter()
-                .map(|m| (m.mount.vault.clone(), m.mount.capability))
+                .map(|m| (m.mount.mem.clone(), m.mount.capability))
                 .collect();
         crate::entity::store_builder::validate_loaded_relations(
             &mut store,
@@ -270,17 +270,17 @@ impl Engine {
         );
 
         // Stamp `EdgeSource::BodyLink` on edges whose rel-type matches
-        // the source vault's `alias_target_rel_type` pointer. Runs
+        // the source mem's `alias_target_rel_type` pointer. Runs
         // after `validate_loaded_relations` so the surviving relation
         // set is schema-clean before the labeling pass.
         crate::entity::store_builder::remap_alias_target_edge_sources(&mut store, &schemas);
 
-        // Derive the runtime vault router from the mount list.
+        // Derive the runtime mem router from the mount list.
         // Mirrors pro's `Engine::from_init` step that registers every
-        // mount with `VaultRouterSnapshot` so handlers reach a
+        // mount with `MemRouterSnapshot` so handlers reach a
         // consistent writable/visible roster regardless of which
-        // backend serves the vault.
-        let vault_router = build_vault_router_from_mounts(&mounted);
+        // backend serves the mem.
+        let mem_router = build_mem_router_from_mounts(&mounted);
 
         Ok(Self {
             mounts: mounted,
@@ -297,13 +297,13 @@ impl Engine {
             workspace_root: None,
             load_warnings,
             pipeline_configs: crate::pipeline_store::PipelineConfigs::default(),
-            vault_router: Arc::new(vault_router),
+            mem_router: Arc::new(mem_router),
             backend_factory: crate::workspace_store::instantiate_basis_backend,
             git_branch_ops: None,
             event_subscribers: Arc::new(std::sync::Mutex::new(
                 crate::engine::events::SubscriberRegistry::new(),
             )),
-            pending_vault_changed: Vec::new(),
+            pending_mem_changed: Vec::new(),
         })
     }
 
@@ -322,7 +322,7 @@ impl Engine {
     /// - [`Layout::Empty`](crate::Layout) → [`BootError::NotInitialised`]
     /// - any mount declaring [`crate::workspace::MountStorage::GitBranch`]
     ///   → [`BootError::Instantiate`] wrapping
-    ///   [`crate::InstantiateError::GitBranchRequiresVaultRepoFeature`]
+    ///   [`crate::InstantiateError::GitBranchRequiresMemRepoFeature`]
     /// - underlying store / engine failures lift through the
     ///   `#[from]` conversions
     pub fn from_workspace_root(workspace_root: &Path) -> Result<Self, BootError> {
@@ -332,9 +332,9 @@ impl Engine {
         };
 
         let workspace = match detect_layout(workspace_root) {
-            // Standalone collapse: a bare folder vault (`.memstead/config.json`,
+            // Standalone collapse: a bare folder mem (`.memstead/config.json`,
             // no `workspace.toml`) roots as a one-mount workspace rather than
-            // refusing — the lone-vault boot path is the unified one.
+            // refusing — the lone-mem boot path is the unified one.
             Layout::Empty => match crate::workspace_store::standalone_workspace(workspace_root) {
                 Some(ws) => ws,
                 None => {
@@ -345,7 +345,7 @@ impl Engine {
         };
 
         let settings = workspace.settings.clone();
-        let mut mounts: Vec<(Mount, Box<dyn VaultBackend>)> =
+        let mut mounts: Vec<(Mount, Box<dyn MemBackend>)> =
             Vec::with_capacity(workspace.mounts.len());
         for mount in workspace.mounts {
             let backend = instantiate_basis_backend(&mount)?;
@@ -388,16 +388,16 @@ impl Engine {
     }
 }
 
-/// Derive a [`VaultRouterSnapshot`] from the engine's resolved mount
+/// Derive a [`MemRouterSnapshot`] from the engine's resolved mount
 /// list. Mirrors pro's `Engine::from_init` mount-register loop so the
 /// runtime router carries the same writable/visible roster regardless
-/// of which backend serves each vault.
+/// of which backend serves each mem.
 ///
 /// One pass over the mounts:
 /// - Writable mounts ([`MountCapability::Write`]) register via
 ///   `add_writable` with the storage's worktree path. Folder mounts
 ///   surface `MountStorage::Folder.path`; git-branch mounts surface
-///   `None` (the vault content lives only inside the gitdir).
+///   `None` (the mem content lives only inside the gitdir).
 ///   Archive mounts should never be writable; if one slips through,
 ///   it registers with `dir: None`.
 /// - Read-only folder / git-branch mounts also register via
@@ -412,16 +412,16 @@ impl Engine {
 /// mounts we use the path the storage offers as the archive_path
 /// argument — semantically wrong but the router treats
 /// `add_read_only` data as opaque for visibility tracking. The two
-/// callers that care (`archive_path_for_vault`, `dir_for_vault`)
+/// callers that care (`archive_path_for_mem`, `dir_for_mem`)
 /// branch on backend type at the handler level rather than reading
 /// these synthesized paths.
 ///
-/// Origin is `VaultOrigin::ExplicitToml` for every mount built from
+/// Origin is `MemOrigin::ExplicitToml` for every mount built from
 /// `Workspace.mounts` — the file-adapter case. `RuntimeCreated`
-/// origins land when `memstead_vault_create` migrates onto the unified
+/// origins land when `memstead_mem_create` migrates onto the unified
 /// engine and produces fresh runtime registrations.
-fn build_vault_router_from_mounts(mounts: &[MountedBackend]) -> VaultRouterSnapshot {
-    let mut router = VaultRouterSnapshot::new();
+fn build_mem_router_from_mounts(mounts: &[MountedBackend]) -> MemRouterSnapshot {
+    let mut router = MemRouterSnapshot::new();
     for m in mounts {
         match m.mount.capability {
             MountCapability::Write => {
@@ -431,24 +431,24 @@ fn build_vault_router_from_mounts(mounts: &[MountedBackend]) -> VaultRouterSnaps
                     MountStorage::Archive { .. } => None,
                     // In-memory mounts have no on-disk working dir —
                     // they register writable with `dir: None`, the same
-                    // shape vault-repo-backed mounts use.
+                    // shape mem-repo-backed mounts use.
                     MountStorage::InMemory => None,
                 };
                 router.add_writable(
-                    m.mount.vault.clone(),
+                    m.mount.mem.clone(),
                     dir,
-                    VaultOrigin::ExplicitToml,
+                    MemOrigin::ExplicitToml,
                 );
             }
             MountCapability::ReadOnly => match &m.mount.storage {
                 MountStorage::Archive { path } => {
-                    router.add_read_only(m.mount.vault.clone(), path.clone());
+                    router.add_read_only(m.mount.mem.clone(), path.clone());
                 }
                 MountStorage::Folder { path } => {
-                    router.add_read_only(m.mount.vault.clone(), path.clone());
+                    router.add_read_only(m.mount.mem.clone(), path.clone());
                 }
                 MountStorage::GitBranch { gitdir, .. } => {
-                    router.add_read_only(m.mount.vault.clone(), gitdir.clone());
+                    router.add_read_only(m.mount.mem.clone(), gitdir.clone());
                 }
                 // A read-only in-memory mount has no on-disk read
                 // source to register. The engine never produces this
@@ -464,7 +464,7 @@ fn build_vault_router_from_mounts(mounts: &[MountedBackend]) -> VaultRouterSnaps
 
 /// Public re-export of [`resolve_builtin_schema_pin`] for lifecycle
 /// orchestrators in `memstead-engine`. Mirrors pro's
-/// `resolve_vault_schema` against the built-in catalogue;
+/// `resolve_mem_schema` against the built-in catalogue;
 /// workspace-schema-registry resolution lifts later.
 pub fn resolve_builtin_schema_pin_pub(
     pin: &memstead_schema::SchemaRef,
@@ -475,7 +475,7 @@ pub fn resolve_builtin_schema_pin_pub(
 
 /// The engine's schema-pin resolver — the single named entry point a
 /// load path resolves a `name@version` pin through. Consults schema
-/// sources in a fixed order: **local storage** (the vault's own storage
+/// sources in a fixed order: **local storage** (the mem's own storage
 /// backend — folder `.memstead/schemas/` or the git-branch
 /// `__MEMSTEAD:schemas/` ref, layered first into the catalogue so it
 /// wins on `(name, version)` collision), **built-in** (compiled into the
@@ -564,7 +564,7 @@ pub(super) fn resolve_builtin_schema_pin(
 }
 
 pub(super) fn collect_source_entries(
-    backend: &dyn VaultBackend,
+    backend: &dyn MemBackend,
 ) -> Result<(Vec<SourceEntry>, Vec<SourceReadError>), EngineError> {
     let paths = backend.list_entities()?;
     let mut entries: Vec<SourceEntry> = Vec::with_capacity(paths.len());
@@ -602,11 +602,11 @@ mod tests {
     use memstead_schema::SchemaRef;
     use tempfile::TempDir;
 
-    use crate::backend::VaultBackend;
+    use crate::backend::MemBackend;
     use crate::engine::test_helpers::*;
     use crate::engine::{Engine, EngineError};
     use crate::ops::WarningHint;
-    use crate::storage::{ArchiveBackend, FilesystemVaultWriter, VaultWriter};
+    use crate::storage::{ArchiveBackend, FilesystemMemWriter, MemWriter};
     use crate::vcs::CommitContext;
     use crate::workspace::{Mount, MountCapability, MountLifecycle, MountStorage};
 
@@ -629,28 +629,28 @@ mod tests {
     }
 
     #[test]
-    fn empty_mount_list_constructs_and_errors_unknown_vault_on_read() {
+    fn empty_mount_list_constructs_and_errors_unknown_mem_on_read() {
         let engine = Engine::from_mounts(Vec::new()).unwrap();
-        assert!(engine.vault_names().is_empty());
+        assert!(engine.mem_names().is_empty());
         match engine.list_entities("missing") {
-            Err(EngineError::UnknownVault(v)) => assert_eq!(v, "missing"),
-            other => panic!("expected UnknownVault, got {other:?}"),
+            Err(EngineError::UnknownMem(v)) => assert_eq!(v, "missing"),
+            other => panic!("expected UnknownMem, got {other:?}"),
         }
     }
 
     #[test]
-    fn duplicate_vault_names_rejected_at_construction() {
+    fn duplicate_mem_names_rejected_at_construction() {
         let tmp = TempDir::new().unwrap();
-        let writer1: Box<dyn VaultBackend> =
-            Box::new(FilesystemVaultWriter::new(tmp.path().to_path_buf()));
-        let writer2: Box<dyn VaultBackend> =
-            Box::new(FilesystemVaultWriter::new(tmp.path().to_path_buf()));
+        let writer1: Box<dyn MemBackend> =
+            Box::new(FilesystemMemWriter::new(tmp.path().to_path_buf()));
+        let writer2: Box<dyn MemBackend> =
+            Box::new(FilesystemMemWriter::new(tmp.path().to_path_buf()));
         let err = Engine::from_mounts(vec![
             (folder_mount("specs", tmp.path().to_path_buf()), writer1),
             (folder_mount("specs", tmp.path().to_path_buf()), writer2),
         ])
         .unwrap_err();
-        assert!(matches!(err, EngineError::DuplicateVault(v) if v == "specs"));
+        assert!(matches!(err, EngineError::DuplicateMem(v) if v == "specs"));
     }
 
     #[test]
@@ -661,14 +661,14 @@ mod tests {
         // LoadCollector wiring, that warning lands on
         // `engine.load_warnings()`.
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().to_path_buf();
+        let mem_dir = tmp.path().to_path_buf();
         let body = "---\ntype: spec\n---\n# Dup\n\n## Identity\n\nfirst.\n\n## Identity\n\nsecond.\n";
-        std::fs::write(vault_dir.join("dup.md"), body).unwrap();
+        std::fs::write(mem_dir.join("dup.md"), body).unwrap();
 
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
         let engine = Engine::from_mounts(vec![(
-            folder_mount("specs", vault_dir),
-            Box::new(writer) as Box<dyn VaultBackend>,
+            folder_mount("specs", mem_dir),
+            Box::new(writer) as Box<dyn MemBackend>,
         )])
         .unwrap();
 
@@ -682,25 +682,25 @@ mod tests {
     }
 
     /// Parse-time relation validation drops relations whose `rel_type`
-    /// is not declared in the source vault's strict-mode schema and
+    /// is not declared in the source mem's strict-mode schema and
     /// emits `PARSED_RELATION_INVALID { reason: "unknown_rel_type" }`.
     /// The entity itself loads normally; only the bad relation goes
     /// missing from the in-memory store.
     #[test]
     fn from_mounts_drops_unknown_rel_type_from_hand_edit_with_warning() {
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().to_path_buf();
+        let mem_dir = tmp.path().to_path_buf();
         // Hand-authored markdown with a `## Relationships` entry whose
         // type isn't declared in the default schema (strict mode).
         let target = "---\ntype: spec\n---\n# Target\n\n## Identity\n\nThe target.\n";
         let source = "---\ntype: spec\n---\n# Source\n\n## Identity\n\nThe source.\n\n## Relationships\n\n- **MADE_UP_TYPE**: [[specs--target]]\n";
-        std::fs::write(vault_dir.join("target.md"), target).unwrap();
-        std::fs::write(vault_dir.join("source.md"), source).unwrap();
+        std::fs::write(mem_dir.join("target.md"), target).unwrap();
+        std::fs::write(mem_dir.join("source.md"), source).unwrap();
 
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
         let engine = Engine::from_mounts(vec![(
-            folder_mount("specs", vault_dir),
-            Box::new(writer) as Box<dyn VaultBackend>,
+            folder_mount("specs", mem_dir),
+            Box::new(writer) as Box<dyn MemBackend>,
         )])
         .unwrap();
 
@@ -778,19 +778,19 @@ mod tests {
     #[test]
     fn from_mounts_drops_cycle_closing_edge_in_acyclic_subgraph() {
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().to_path_buf();
+        let mem_dir = tmp.path().to_path_buf();
         // Mutual PART_OF — acyclic in the default schema. The
         // wiki-link grammar admits both as well-formed cross-
         // references, so only the cycle pass can catch this.
         let alpha = "---\ntype: spec\n---\n# Alpha\n\n## Identity\n\nfirst.\n\n## Relationships\n\n- **PART_OF**: [[specs--beta]]\n";
         let beta = "---\ntype: spec\n---\n# Beta\n\n## Identity\n\nsecond.\n\n## Relationships\n\n- **PART_OF**: [[specs--alpha]]\n";
-        std::fs::write(vault_dir.join("alpha.md"), alpha).unwrap();
-        std::fs::write(vault_dir.join("beta.md"), beta).unwrap();
+        std::fs::write(mem_dir.join("alpha.md"), alpha).unwrap();
+        std::fs::write(mem_dir.join("beta.md"), beta).unwrap();
 
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
         let engine = Engine::from_mounts(vec![(
-            folder_mount("specs", vault_dir),
-            Box::new(writer) as Box<dyn VaultBackend>,
+            folder_mount("specs", mem_dir),
+            Box::new(writer) as Box<dyn MemBackend>,
         )])
         .unwrap();
 
@@ -908,29 +908,29 @@ community:
 "#;
         write_schema_files_with_default_type(&schemas_dir, "shape-test", manifest, &["doc", "actor"]);
 
-        let vault_dir = tmp.path().join("vault");
-        std::fs::create_dir_all(&vault_dir).unwrap();
+        let mem_dir = tmp.path().join("mem");
+        std::fs::create_dir_all(&mem_dir).unwrap();
         // Source is type `doc`; target is also type `doc`. The
         // declared `OWNS` rel-type expects `actor -> doc`, so the
         // shape check rejects this pair at load.
         let target = "---\ntype: doc\n---\n# Target\n\n## Body\n\nthe target\n";
         let source = "---\ntype: doc\n---\n# Source\n\n## Body\n\nthe source\n\n## Relationships\n\n- **OWNS**: [[specs--target]]\n";
-        std::fs::write(vault_dir.join("target.md"), target).unwrap();
-        std::fs::write(vault_dir.join("source.md"), source).unwrap();
+        std::fs::write(mem_dir.join("target.md"), target).unwrap();
+        std::fs::write(mem_dir.join("source.md"), source).unwrap();
 
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
         let pin = SchemaRef::new("shape-test", semver::Version::new(0, 1, 0));
         let mount = Mount {
-            vault: "specs".to_string(),
+            mem: "specs".to_string(),
             schema: Some(pin),
-            storage: MountStorage::Folder { path: vault_dir },
+            storage: MountStorage::Folder { path: mem_dir },
             capability: MountCapability::Write,
             lifecycle: MountLifecycle::Eager,
             cross_linkable: true,
             migration_target: None,
         };
         let engine = Engine::from_mounts_with_schemas_dir(
-            vec![(mount, Box::new(writer) as Box<dyn VaultBackend>)],
+            vec![(mount, Box::new(writer) as Box<dyn MemBackend>)],
             Some(&schemas_dir),
         )
         .unwrap();
@@ -1052,20 +1052,20 @@ community:
         let body = "---\ntype: spec\n---\n# Hello\n\n## Identity\n\nA test entity.\n";
 
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().to_path_buf();
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
-        <FilesystemVaultWriter as VaultWriter>::write_entity(
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        <FilesystemMemWriter as MemWriter>::write_entity(
             &writer,
             Path::new("hello.md"),
             body.as_bytes(),
         )
         .unwrap();
-        <FilesystemVaultWriter as VaultWriter>::commit(&writer, "seed", &CommitContext::internal())
+        <FilesystemMemWriter as MemWriter>::commit(&writer, "seed", &CommitContext::internal())
             .unwrap();
 
         let engine = Engine::from_mounts(vec![(
-            folder_mount("specs", vault_dir),
-            Box::new(writer) as Box<dyn VaultBackend>,
+            folder_mount("specs", mem_dir),
+            Box::new(writer) as Box<dyn MemBackend>,
         )])
         .unwrap();
 
@@ -1109,16 +1109,16 @@ community:
 
         let tmp = TempDir::new().unwrap();
 
-        let folder_dir = tmp.path().join("folder-vault");
+        let folder_dir = tmp.path().join("folder-mem");
         std::fs::create_dir_all(&folder_dir).unwrap();
-        let folder_writer = FilesystemVaultWriter::new(folder_dir.clone());
-        <FilesystemVaultWriter as VaultWriter>::write_entity(
+        let folder_writer = FilesystemMemWriter::new(folder_dir.clone());
+        <FilesystemMemWriter as MemWriter>::write_entity(
             &folder_writer,
             Path::new("local.md"),
             folder_body.as_bytes(),
         )
         .unwrap();
-        <FilesystemVaultWriter as VaultWriter>::commit(
+        <FilesystemMemWriter as MemWriter>::commit(
             &folder_writer,
             "seed",
             &CommitContext::internal(),
@@ -1134,7 +1134,7 @@ community:
         let engine = Engine::from_mounts(vec![
             (
                 folder_mount("local", folder_dir),
-                Box::new(folder_writer) as Box<dyn VaultBackend>,
+                Box::new(folder_writer) as Box<dyn MemBackend>,
             ),
             (
                 archive_mount("external", archive_path.clone()),
@@ -1143,7 +1143,7 @@ community:
         ])
         .unwrap();
 
-        // Both vaults' entities live in one shared store.
+        // Both mems' entities live in one shared store.
         assert_eq!(engine.store().len(), 2);
         assert!(
             engine
@@ -1166,26 +1166,26 @@ community:
         let bad = "---\nthis is not valid yaml: : :\n---\n# Bad\n";
 
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().to_path_buf();
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
-        <FilesystemVaultWriter as VaultWriter>::write_entity(
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        <FilesystemMemWriter as MemWriter>::write_entity(
             &writer,
             Path::new("good.md"),
             good.as_bytes(),
         )
         .unwrap();
-        <FilesystemVaultWriter as VaultWriter>::write_entity(
+        <FilesystemMemWriter as MemWriter>::write_entity(
             &writer,
             Path::new("bad.md"),
             bad.as_bytes(),
         )
         .unwrap();
-        <FilesystemVaultWriter as VaultWriter>::commit(&writer, "seed", &CommitContext::internal())
+        <FilesystemMemWriter as MemWriter>::commit(&writer, "seed", &CommitContext::internal())
             .unwrap();
 
         let engine = Engine::from_mounts(vec![(
-            folder_mount("specs", vault_dir),
-            Box::new(writer) as Box<dyn VaultBackend>,
+            folder_mount("specs", mem_dir),
+            Box::new(writer) as Box<dyn MemBackend>,
         )])
         .unwrap();
 
@@ -1235,10 +1235,10 @@ community:
     #[test]
     fn from_workspace_root_loads_new_two_layer_layout() {
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().join("vault");
-        std::fs::create_dir_all(&vault_dir).unwrap();
+        let mem_dir = tmp.path().join("mem");
+        std::fs::create_dir_all(&mem_dir).unwrap();
         std::fs::write(
-            vault_dir.join("hello.md"),
+            mem_dir.join("hello.md"),
             "---\ntype: spec\n---\n# Hello\n\n## Identity\n\nA.\n",
         )
         .unwrap();
@@ -1247,7 +1247,7 @@ community:
         std::fs::create_dir_all(&memstead).unwrap();
         std::fs::write(
             memstead.join("workspace.toml"),
-            "format = \"memstead-git-branch-1\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+            "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
         )
         .unwrap();
         // Save the mount via the file adapter so the JSON shape matches
@@ -1258,14 +1258,14 @@ community:
             .save_state(
                 tmp.path(),
                 &crate::workspace::Workspace {
-                    mounts: vec![folder_mount("specs", vault_dir)],
+                    mounts: vec![folder_mount("specs", mem_dir)],
                     settings: crate::workspace::WorkspaceSettings::default(),
                 },
             )
             .unwrap();
 
         let engine = Engine::from_workspace_root(tmp.path()).unwrap();
-        assert_eq!(engine.vault_names(), vec!["specs"]);
+        assert_eq!(engine.mem_names(), vec!["specs"]);
         let entity = engine
             .get_entity(&crate::EntityId::new("specs", "hello"))
             .expect("seeded entity must load through from_workspace_root");
@@ -1282,14 +1282,14 @@ community:
             Facet, Ingest, IngestMode, IngestTrigger, Medium, MediumType, Projection,
         };
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().join("vault");
-        std::fs::create_dir_all(&vault_dir).unwrap();
+        let mem_dir = tmp.path().join("mem");
+        std::fs::create_dir_all(&mem_dir).unwrap();
 
         let memstead = tmp.path().join(".memstead");
         std::fs::create_dir_all(&memstead).unwrap();
         std::fs::write(
             memstead.join("workspace.toml"),
-            "format = \"memstead-git-branch-1\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+            "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
         )
         .unwrap();
         use crate::workspace_store::WorkspaceStoreAdapter;
@@ -1297,7 +1297,7 @@ community:
             .save_state(
                 tmp.path(),
                 &crate::workspace::Workspace {
-                    mounts: vec![folder_mount("specs", vault_dir)],
+                    mounts: vec![folder_mount("specs", mem_dir)],
                     settings: crate::workspace::WorkspaceSettings::default(),
                 },
             )
@@ -1335,8 +1335,8 @@ community:
             &Projection {
                 intent: None,
                 source_facets: vec!["view".to_string()],
-                reference_vaults: Vec::new(),
-                destination_vault: "specs".to_string(),
+                reference_mems: Vec::new(),
+                destination_mem: "specs".to_string(),
             },
         )
         .unwrap();
@@ -1360,7 +1360,7 @@ community:
         assert_eq!(pc.facets.len(), 1, "one facet enumerated");
         assert_eq!(pc.facets[0].config.medium, "src");
         assert_eq!(pc.projections.len(), 1, "one projection enumerated");
-        assert_eq!(pc.projections[0].config.destination_vault, "specs");
+        assert_eq!(pc.projections[0].config.destination_mem, "specs");
         assert_eq!(pc.ingests.len(), 1, "one ingest enumerated");
         assert_eq!(pc.ingests[0].name, "specs-graph");
         assert_eq!(pc.ingests[0].config.mode, IngestMode::Discovery);
@@ -1376,20 +1376,20 @@ community:
         use crate::workspace_store::WorkspaceStoreAdapter;
 
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().join("vault");
-        std::fs::create_dir_all(&vault_dir).unwrap();
+        let mem_dir = tmp.path().join("mem");
+        std::fs::create_dir_all(&mem_dir).unwrap();
         let memstead = tmp.path().join(".memstead");
         std::fs::create_dir_all(&memstead).unwrap();
         std::fs::write(
             memstead.join("workspace.toml"),
-            "format = \"memstead-git-branch-1\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+            "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
         )
         .unwrap();
         crate::FileWorkspaceStore::new()
             .save_state(
                 tmp.path(),
                 &crate::workspace::Workspace {
-                    mounts: vec![folder_mount("specs", vault_dir)],
+                    mounts: vec![folder_mount("specs", mem_dir)],
                     settings: crate::workspace::WorkspaceSettings::default(),
                 },
             )
@@ -1474,7 +1474,7 @@ community:
 
     /// The basis folder authoring path: a schema package authored at the
     /// fixed `<workspace>/.memstead/schemas/<name>@<version>/` location
-    /// is resolved at boot, so a folder vault can pin a non-built-in
+    /// is resolved at boot, so a folder mem can pin a non-built-in
     /// schema. Before this wiring `from_workspace_root` loaded only
     /// built-ins, so the pin would refuse with `SCHEMA_NOT_FOUND`.
     #[test]
@@ -1482,8 +1482,8 @@ community:
         use crate::engine::test_helpers::write_schema_files_with_default_type;
 
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().join("vault");
-        std::fs::create_dir_all(&vault_dir).unwrap();
+        let mem_dir = tmp.path().join("mem");
+        std::fs::create_dir_all(&mem_dir).unwrap();
 
         // Author a schema package at the fixed folder location.
         let authored_dir = tmp.path().join(".memstead").join("schemas");
@@ -1505,18 +1505,18 @@ community:
 "#;
         write_schema_files_with_default_type(&authored_dir, "authored@0.1.0", manifest, &["doc"]);
 
-        // A folder vault pinning the authored (non-built-in) schema.
+        // A folder mem pinning the authored (non-built-in) schema.
         let memstead = tmp.path().join(".memstead");
         std::fs::create_dir_all(&memstead).unwrap();
         std::fs::write(
             memstead.join("workspace.toml"),
-            "format = \"memstead-git-branch-1\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+            "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
         )
         .unwrap();
         let mount = Mount {
-            vault: "specs".to_string(),
+            mem: "specs".to_string(),
             schema: Some(SchemaRef::new("authored", semver::Version::new(0, 1, 0))),
-            storage: MountStorage::Folder { path: vault_dir },
+            storage: MountStorage::Folder { path: mem_dir },
             capability: MountCapability::Write,
             lifecycle: MountLifecycle::Eager,
             cross_linkable: true,
@@ -1537,33 +1537,33 @@ community:
         // location rather than refusing as an unknown built-in.
         let engine = Engine::from_workspace_root(tmp.path())
             .expect("authored schema at .memstead/schemas/ must resolve at boot");
-        assert_eq!(engine.vault_names(), vec!["specs"]);
+        assert_eq!(engine.mem_names(), vec!["specs"]);
     }
 
     #[test]
-    fn from_workspace_root_propagates_vault_management_settings() {
-        // workspace.toml carries [vault_management] rules; the file
+    fn from_workspace_root_propagates_mem_management_settings() {
+        // workspace.toml carries [mem_management] rules; the file
         // adapter parses them into Workspace.settings; from_workspace_root
         // calls Engine::set_settings so the engine surface reflects them.
         // End-to-end check that the carriers, parser, and plumbing connect.
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().join("vault");
-        std::fs::create_dir_all(&vault_dir).unwrap();
+        let mem_dir = tmp.path().join("mem");
+        std::fs::create_dir_all(&mem_dir).unwrap();
 
         let memstead = tmp.path().join(".memstead");
         std::fs::create_dir_all(&memstead).unwrap();
         std::fs::write(
             memstead.join("workspace.toml"),
-            r#"format = "memstead-git-branch-1"
+            r#"format = "memstead-git-branch-2"
 
 [persistence_adapter]
 name = "file-two-layer"
 
-[[vault_management.create]]
+[[mem_management.create]]
 pattern = "exec-*"
 schemas = ["default@1.0.0"]
 
-[[vault_management.delete]]
+[[mem_management.delete]]
 pattern = "exec-*"
 "#,
         )
@@ -1574,7 +1574,7 @@ pattern = "exec-*"
             .save_state(
                 tmp.path(),
                 &crate::workspace::Workspace {
-                    mounts: vec![folder_mount("specs", vault_dir)],
+                    mounts: vec![folder_mount("specs", mem_dir)],
                     settings: crate::workspace::WorkspaceSettings::default(),
                 },
             )
@@ -1582,22 +1582,22 @@ pattern = "exec-*"
 
         let engine = Engine::from_workspace_root(tmp.path()).unwrap();
         let s = engine.settings();
-        assert_eq!(s.vault_create_rules.len(), 1);
-        assert_eq!(s.vault_create_rules[0].pattern, "exec-*");
+        assert_eq!(s.mem_create_rules.len(), 1);
+        assert_eq!(s.mem_create_rules[0].pattern, "exec-*");
         assert_eq!(
-            s.vault_create_rules[0].schemas,
+            s.mem_create_rules[0].schemas,
             vec!["default@1.0.0".to_string()]
         );
-        assert_eq!(s.vault_delete_rules.len(), 1);
-        assert_eq!(s.vault_delete_rules[0].pattern, "exec-*");
+        assert_eq!(s.mem_delete_rules.len(), 1);
+        assert_eq!(s.mem_delete_rules[0].pattern, "exec-*");
     }
 
     #[test]
     fn from_mounts_rejects_unknown_schema_pin_with_typed_error() {
         let tmp = TempDir::new().unwrap();
-        let writer = FilesystemVaultWriter::new(tmp.path().to_path_buf());
+        let writer = FilesystemMemWriter::new(tmp.path().to_path_buf());
         let mount = Mount {
-            vault: "specs".to_string(),
+            mem: "specs".to_string(),
             schema: Some(SchemaRef::new("totally-not-a-schema", semver::Version::new(1, 0, 0))),
             storage: MountStorage::Folder {
                 path: tmp.path().to_path_buf(),
@@ -1609,12 +1609,12 @@ pattern = "exec-*"
         };
         let err = Engine::from_mounts(vec![(
             mount,
-            Box::new(writer) as Box<dyn VaultBackend>,
+            Box::new(writer) as Box<dyn MemBackend>,
         )])
         .unwrap_err();
         match err {
-            EngineError::SchemaNotFound { vault, pin, sources } => {
-                assert_eq!(vault, "specs");
+            EngineError::SchemaNotFound { mem, pin, sources } => {
+                assert_eq!(mem, "specs");
                 assert_eq!(pin, "totally-not-a-schema@1.0.0");
                 // The diagnostics name all three sources in fixed order;
                 // none carries the unknown pin, and remote is reserved.
@@ -1630,27 +1630,27 @@ pattern = "exec-*"
         }
     }
 
-    /// Schema-pin authority: the vault's own per-vault config is the
+    /// Schema-pin authority: the mem's own per-mem config is the
     /// authoritative settled pin. Here the config pins a resolvable
     /// schema (`software@0.1.0`) while the workspace mount expects an
     /// unresolvable one — boot succeeds (proving the config pin won,
     /// not the mount's) and surfaces a `SchemaPinMismatch` warning
     /// naming both pins.
     #[test]
-    fn vault_config_schema_is_authoritative_over_mount_pin() {
+    fn mem_config_schema_is_authoritative_over_mount_pin() {
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().to_path_buf();
-        std::fs::create_dir_all(vault_dir.join(".memstead")).unwrap();
+        let mem_dir = tmp.path().to_path_buf();
+        std::fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
         std::fs::write(
-            vault_dir.join(".memstead").join("config.json"),
+            mem_dir.join(".memstead").join("config.json"),
             r#"{"schema":"software@0.1.0"}"#,
         )
         .unwrap();
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
         let mount = Mount {
-            vault: "specs".to_string(),
+            mem: "specs".to_string(),
             schema: Some(SchemaRef::new("totally-not-a-schema", semver::Version::new(9, 9, 9))),
-            storage: MountStorage::Folder { path: vault_dir },
+            storage: MountStorage::Folder { path: mem_dir },
             capability: MountCapability::Write,
             lifecycle: MountLifecycle::Eager,
             cross_linkable: true,
@@ -1658,7 +1658,7 @@ pattern = "exec-*"
         };
         let engine = Engine::from_mounts(vec![(
             mount,
-            Box::new(writer) as Box<dyn VaultBackend>,
+            Box::new(writer) as Box<dyn MemBackend>,
         )])
         .expect("config pin software@0.1.0 is authoritative — boot must resolve it despite the unresolvable mount pin");
 
@@ -1666,8 +1666,8 @@ pattern = "exec-*"
             .load_warnings()
             .iter()
             .find_map(|w| match w {
-                WarningHint::SchemaPinMismatch { vault, config_pin, mount_pin } => {
-                    Some((vault.clone(), config_pin.clone(), mount_pin.clone()))
+                WarningHint::SchemaPinMismatch { mem, config_pin, mount_pin } => {
+                    Some((mem.clone(), config_pin.clone(), mount_pin.clone()))
                 }
                 _ => None,
             })
@@ -1684,7 +1684,7 @@ pattern = "exec-*"
         std::fs::create_dir_all(&memstead).unwrap();
         std::fs::write(
             memstead.join("workspace.toml"),
-            "format = \"memstead-git-branch-1\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+            "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
         )
         .unwrap();
         // Hand-craft a state/mounts.json carrying a git-branch mount —
@@ -1694,10 +1694,10 @@ pattern = "exec-*"
         std::fs::write(
             state_dir.join("mounts.json"),
             r#"{
-                "format": "memstead-mounts-1",
+                "format": "memstead-mounts-3",
                 "mounts": [
                     {
-                        "vault": "specs",
+                        "mem": "specs",
                         "schema": "default@1.0.0",
                         "storage": { "type": "git-branch", "gitdir": "/tmp/x.git", "branch": "specs" },
                         "capability": "write",
@@ -1711,21 +1711,21 @@ pattern = "exec-*"
         let err = Engine::from_workspace_root(tmp.path()).unwrap_err();
         match err {
             crate::BootError::Instantiate(
-                crate::workspace_store::InstantiateError::GitBranchRequiresVaultRepoFeature {
-                    vault,
+                crate::workspace_store::InstantiateError::GitBranchRequiresMemRepoFeature {
+                    mem,
                 },
             ) => {
-                assert_eq!(vault, "specs");
+                assert_eq!(mem, "specs");
             }
             other => panic!(
-                "expected Instantiate(GitBranchRequiresVaultRepoFeature), got {other:?}"
+                "expected Instantiate(GitBranchRequiresMemRepoFeature), got {other:?}"
             ),
         }
     }
 
     #[test]
-    fn from_workspace_root_roots_standalone_folder_vault() {
-        // Standalone collapse: a bare folder vault — `.memstead/config.json`
+    fn from_workspace_root_roots_standalone_folder_mem() {
+        // Standalone collapse: a bare folder mem — `.memstead/config.json`
         // pinning a schema, no `workspace.toml` — boots as a one-mount
         // workspace instead of refusing with NotInitialised.
         let tmp = TempDir::new().unwrap();
@@ -1736,7 +1736,7 @@ pattern = "exec-*"
             r#"{"schema":"default@1.0.0"}"#,
         )
         .unwrap();
-        // A collapsed single-vault folder keeps its `.md` files at the root.
+        // A collapsed single-mem folder keeps its `.md` files at the root.
         std::fs::write(
             root.join("hello.md"),
             "---\ntype: spec\n---\n# Hello\n\n## Identity\n\nStandalone body.\n",
@@ -1744,18 +1744,18 @@ pattern = "exec-*"
         .unwrap();
 
         let engine = Engine::from_workspace_root(root)
-            .expect("a bare folder vault must root as a one-mount workspace");
-        assert_eq!(engine.stats().vault_count, 1, "exactly one mount");
+            .expect("a bare folder mem must root as a one-mount workspace");
+        assert_eq!(engine.stats().mem_count, 1, "exactly one mount");
         assert!(
             engine.stats().entity_count >= 1,
-            "the standalone vault's entity must load"
+            "the standalone mem's entity must load"
         );
     }
 
     #[test]
     fn from_workspace_root_still_rejects_truly_empty_dir() {
         // Refusal complement: a directory with neither `workspace.toml` nor a
-        // `.memstead/config.json` is not a vault — it still refuses, so the
+        // `.memstead/config.json` is not a mem — it still refuses, so the
         // standalone path never masks a genuinely uninitialised directory.
         let tmp = TempDir::new().unwrap();
         let err = Engine::from_workspace_root(tmp.path()).unwrap_err();
@@ -1765,6 +1765,6 @@ pattern = "exec-*"
         );
     }
 
-    // ---- Engine::reload_one_vault -----------------------------------
+    // ---- Engine::reload_one_mem -----------------------------------
 
 }

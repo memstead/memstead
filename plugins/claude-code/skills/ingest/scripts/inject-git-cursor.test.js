@@ -48,7 +48,7 @@ function writeDump(root, syncState, { name = 'engine-dest' } = {}) {
   const dump = {
     format: 'workspace-dump/v0',
     workspace_root: root,
-    vaults: [{
+    mems: [{
       name,
       schema: 'sample@0.1.0',
       description: null,
@@ -74,7 +74,7 @@ function buildGitWorkspace({ changeDetection = 'git' } = {}) {
       name: 'src', medium: 'src', scope: [{ path: 'sources/engine/**/*.rs', mode: 'allow' }],
     },
     '.memstead/projections/engine-dest/graph.json': {
-      source_facets: ['src'], destination_vault: 'engine-dest',
+      source_facets: ['src'], destination_mem: 'engine-dest',
     },
     '.memstead/ingests/git-run.json': {
       projection: 'engine-dest/graph', mode: 'discovery', trigger: 'manual',
@@ -195,7 +195,7 @@ describe('git cursor — re-seed and auto resolution', () => {
 });
 
 describe('git cursor — additive to destination-snapshot backoff', () => {
-  // Two ingests sharing the destination vault: the source-change trigger
+  // Two ingests sharing the destination mem: the source-change trigger
   // must override an escalated destination-snapshot backoff so the drifted
   // ingest is not slept through. Driven via `--all` (round-robin + backoff).
   function buildTwoIngest() {
@@ -209,7 +209,7 @@ describe('git cursor — additive to destination-snapshot backoff', () => {
         name: 'src', medium: 'src', scope: [{ path: 'sources/engine/**/*.rs', mode: 'allow' }],
       },
       '.memstead/projections/engine-dest/graph.json': {
-        source_facets: ['src'], destination_vault: 'engine-dest',
+        source_facets: ['src'], destination_mem: 'engine-dest',
       },
       '.memstead/ingests/git-run.json': { projection: 'engine-dest/graph', mode: 'discovery', trigger: 'loop' },
       'sources/engine/lib.rs': '// v1',

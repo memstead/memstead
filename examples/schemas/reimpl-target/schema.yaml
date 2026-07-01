@@ -4,10 +4,10 @@
 # reimpl-target@0.1.0 — Target-design schema, paired with reimpl-source.
 #
 # Two types: target-spec (design of a new component) and divergence
-# (authorized deviation from legacy behavior). The Target vault is
+# (authorized deviation from legacy behavior). The Target mem is
 # authored, not extracted — it is where design decisions happen.
 #
-# Cross-vault edges target capabilities in the paired Legacy vault on
+# Cross-mem edges target capabilities in the paired Legacy mem on
 # reimpl-source@0.1.0. The engine validates both endpoints.
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -15,27 +15,27 @@ name: reimpl-target
 version: 0.1.0
 
 description: |
-  Schema for a Target vault in a reimplementation project. Paired with a
-  Legacy vault on reimpl-source@0.1.0. Captures the design of the new
+  Schema for a Target mem in a reimplementation project. Paired with a
+  Legacy mem on reimpl-source@0.1.0. Captures the design of the new
   system as target-spec entities linking back to legacy capabilities, and
   authorized deviations as first-class divergence entities with rationale.
 
 when_to_use: |
-  Use in the Target vault of a reimplementation project, paired with a
-  Legacy vault on reimpl-source@0.1.0. One Legacy vault can feed multiple
-  Target vaults — e.g. two different apps reimplemented from the same
+  Use in the Target mem of a reimplementation project, paired with a
+  Legacy mem on reimpl-source@0.1.0. One Legacy mem can feed multiple
+  Target mems — e.g. two different apps reimplemented from the same
   source — each with its own divergences. After the reimpl completes,
   swap the schema to software@0.1.0 and continue as a regular
-  specification vault.
+  specification mem.
 
 system_message: |
-  You are in a Target vault of a reimplementation project. Two types:
+  You are in a Target mem of a reimplementation project. Two types:
 
     target-spec — design of a new component, realizing legacy capabilities
     divergence  — an authorized deviation from legacy behavior
 
   Every target-spec should link REALIZES_CAPABILITY to the capabilities
-  in the paired Legacy vault it realizes. Unrealized capabilities are
+  in the paired Legacy mem it realizes. Unrealized capabilities are
   surfaced by the coverage query and drive build prioritization.
 
   Deviations from legacy behavior are NEVER silent. Whenever you
@@ -56,8 +56,8 @@ types:
   - divergence
 
 # Inherits the default schema's 37 edges plus four target-specific ones.
-# REALIZES_CAPABILITY and DIVERGES_FROM are cross-vault edges into the
-# paired Legacy vault on reimpl-source@0.1.0.
+# REALIZES_CAPABILITY and DIVERGES_FROM are cross-mem edges into the
+# paired Legacy mem on reimpl-source@0.1.0.
 relationships:
   mode: strict
   definitions:
@@ -204,14 +204,14 @@ relationships:
       default_weight: 2.0
       acyclic: true
 
-    # ── Reimpl-specific additions (cross-vault to reimpl-source) ────────
+    # ── Reimpl-specific additions (cross-mem to reimpl-source) ────────
     - name: REALIZES_CAPABILITY
-      description: A target-spec realizes one or more legacy capabilities. Cross-vault edge into the paired reimpl-source vault.
+      description: A target-spec realizes one or more legacy capabilities. Cross-mem edge into the paired reimpl-source mem.
       when_to_use: target-spec → capability. The primary coverage driver — every realized capability is a capability ticked off the build list. One target-spec may realize many capabilities; one capability may be split across several target-specs.
       default_weight: 3.0
       acyclic: true
     - name: DIVERGES_FROM
-      description: A divergence attaches to the legacy capability it modifies, drops, or replaces. Cross-vault edge into the paired reimpl-source vault.
+      description: A divergence attaches to the legacy capability it modifies, drops, or replaces. Cross-mem edge into the paired reimpl-source mem.
       when_to_use: divergence → capability. Mandatory on every divergence entity. The edge plus the divergence's kind field make "what are we changing?" queryable in one pass.
       default_weight: 3.0
       acyclic: true

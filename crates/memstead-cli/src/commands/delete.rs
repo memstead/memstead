@@ -33,14 +33,14 @@ pub struct Args {
 pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     let id = EntityId::canonical(&args.id);
     match ctx.cli_engine()? {
-        #[cfg(feature = "vault-repo")]
-        CliEngine::VaultRepo(engine) => run_vault_repo(ctx, engine, id, args),
+        #[cfg(feature = "mem-repo")]
+        CliEngine::MemRepo(engine) => run_mem_repo(ctx, engine, id, args),
         CliEngine::Filesystem(engine) => run_filesystem(ctx, engine, id, args),
     }
 }
 
-#[cfg(feature = "vault-repo")]
-fn run_vault_repo(
+#[cfg(feature = "mem-repo")]
+fn run_mem_repo(
     ctx: &CliContext,
     mut engine: memstead_base::Engine,
     id: EntityId,
@@ -95,18 +95,18 @@ fn run_vault_repo(
             &crate::setup::cli_ctx_with_note(args.note.clone()),
         )
         .map_err(CliError::from_engine_op)?;
-    let vault_changed = engine.take_vault_changed_notices();
+    let mem_changed = engine.take_mem_changed_notices();
 
     if ctx.json {
         let mut body = serde_json::to_value(&result).unwrap_or(serde_json::Value::Null);
-        super::merge_vault_changed_json(&mut body, &vault_changed);
+        super::merge_mem_changed_json(&mut body, &mem_changed);
         print_json(&body)?;
     } else {
         print_markdown(&format!(
             "# Deleted `{}`\n\n- Relations removed: {}{}",
             result.id,
             result.relations_removed,
-            super::render_vault_changed_block(&vault_changed),
+            super::render_mem_changed_block(&mem_changed),
         ));
     }
     Ok(())
@@ -142,7 +142,7 @@ fn run_filesystem(
         );
     }
 
-    // Same hash-snapshot posture as the vault-repo path.
+    // Same hash-snapshot posture as the mem-repo path.
     let current_hash = engine
         .get_entity(&id)
         .ok_or_else(|| {
@@ -194,7 +194,7 @@ fn run_filesystem(
 /// Render the dry-run preview, including the would-be verdict. The
 /// referrer classification comes straight from the engine's delete guard
 /// (`classify_delete_referrers`), so the preview's verdict matches what
-/// the real `memstead delete` would do: Write-Vault referrers would refuse
+/// the real `memstead delete` would do: Write-Mem referrers would refuse
 /// with `HAS_INCOMING_REFS`; ReadOnly-only referrers would proceed via
 /// the residual-stub demotion; none would remove cleanly. The agent can
 /// branch on the preview alone without re-encoding the deletion ruleset.
@@ -218,7 +218,7 @@ fn print_dry_run(
                 serde_json::json!({
                     "from_id": r.from_id,
                     "rel_types": r.rel_types,
-                    "vault": r.vault,
+                    "mem": r.mem,
                 })
             })
             .collect();
@@ -228,7 +228,7 @@ fn print_dry_run(
             "title": title,
             "file_path": file_path,
             // Same `referrers` key the failure-path payload uses, holding
-            // the blocking (Write-Vault) sources only — these are what the
+            // the blocking (Write-Mem) sources only — these are what the
             // agent must clear before the real delete can proceed.
             "referrers": blocking_json,
             "readonly_referrers": readonly_json,
@@ -274,7 +274,7 @@ fn print_dry_run(
                     "- `{}` [{}] ({})",
                     r.from_id,
                     r.rel_types.join(", "),
-                    r.vault
+                    r.mem
                 ));
             }
         }

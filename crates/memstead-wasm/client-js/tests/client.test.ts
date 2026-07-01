@@ -1,4 +1,4 @@
-// VaultSyncClient unit tests.
+// MemSyncClient unit tests.
 //
 // Drive the client against mocked `fetch` + `EventSource` so the
 // suite runs under Node without any browser or Rust toolchain.
@@ -7,8 +7,8 @@
 // network + WASM boundaries.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { VaultSyncClient } from "../src/client.ts";
-import { VaultSyncError, BRIDGE_CODES, CLIENT_CODES } from "../src/errors.ts";
+import { MemSyncClient } from "../src/client.ts";
+import { MemSyncError, BRIDGE_CODES, CLIENT_CODES } from "../src/errors.ts";
 import type {
   CommitEnvelope,
   Entity,
@@ -18,7 +18,7 @@ import type {
   WasmEngineLike,
 } from "../src/types.ts";
 
-/** In-process EventSource stand-in. Tests drive `vault_changed` by
+/** In-process EventSource stand-in. Tests drive `mem_changed` by
  * calling `emitMessage`; the SSE reconnect path is simulated via
  * `emitError`. */
 class FakeEventSource implements EventSourceLike {
@@ -68,14 +68,14 @@ class FakeEngine implements WasmEngineLike {
     this.applied.push(envelope);
     for (const change of envelope.changes) {
       if (change.op === "deleted") {
-        this.entities.delete(`${envelope.vault}--${stripMd(change.path)}`);
+        this.entities.delete(`${envelope.mem}--${stripMd(change.path)}`);
       } else if (change.op === "renamed") {
-        this.entities.delete(`${envelope.vault}--${stripMd(change.from)}`);
-        const id = `${envelope.vault}--${stripMd(change.to)}`;
-        this.entities.set(id, makeEntity(id, envelope.vault));
+        this.entities.delete(`${envelope.mem}--${stripMd(change.from)}`);
+        const id = `${envelope.mem}--${stripMd(change.to)}`;
+        this.entities.set(id, makeEntity(id, envelope.mem));
       } else {
-        const id = `${envelope.vault}--${stripMd(change.path)}`;
-        this.entities.set(id, makeEntity(id, envelope.vault));
+        const id = `${envelope.mem}--${stripMd(change.path)}`;
+        this.entities.set(id, makeEntity(id, envelope.mem));
       }
     }
   }
@@ -85,7 +85,7 @@ class FakeEngine implements WasmEngineLike {
   }
 
   health(): HealthReport {
-    return { total_entities: this.entities.size, total_edges: 0, vaults: {} };
+    return { total_entities: this.entities.size, total_edges: 0, mems: {} };
   }
 }
 
@@ -93,11 +93,11 @@ function stripMd(path: string): string {
   return path.replace(/\.md$/, "");
 }
 
-function makeEntity(id: string, vault: string): Entity {
+function makeEntity(id: string, mem: string): Entity {
   return {
     id,
     title: id.split("--").slice(1).join("--"),
-    vault,
+    mem,
     entity_type: "spec",
     stub: false,
     content_hash: "deadbeef",
@@ -163,14 +163,14 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-function newClient(headSha = "sha-initial"): VaultSyncClient {
+function newClient(headSha = "sha-initial"): MemSyncClient {
   recorder.on(
     (url) => url.endsWith("/snapshot"),
     () => snapshotResponse(headSha),
   );
-  return new VaultSyncClient({
+  return new MemSyncClient({
     baseUrl: "https://example.test/api",
-    vault: "specs",
+    mem: "specs",
     engineFactory: () => engine,
     fetch: recorder.fetch,
     eventSourceFactory: (url) => {
@@ -180,22 +180,22 @@ function newClient(headSha = "sha-initial"): VaultSyncClient {
   });
 }
 
-describe("VaultSyncClient.open", () => {
+describe("MemSyncClient.open", () => {
   it("fetches /snapshot, hydrates the engine, and sets the head cursor", async () => {
     const client = newClient("sha-initial");
     await client.open();
     expect(client.head).toBe("sha-initial");
     expect(client.isOpen).toBe(true);
-    expect(recorder.calls[0]?.url).toBe("https://example.test/api/vaults/specs/snapshot");
-    expect(fakeES?.url).toBe("https://example.test/api/vaults/specs/events");
+    expect(recorder.calls[0]?.url).toBe("https://example.test/api/mems/specs/snapshot");
+    expect(fakeES?.url).toBe("https://example.test/api/mems/specs/events");
   });
 
   it("fires onUpdate after snapshot hydration", async () => {
     const onUpdate = vi.fn();
     recorder.on((u) => u.endsWith("/snapshot"), () => snapshotResponse("sha-initial"));
-    const client = new VaultSyncClient({
+    const client = new MemSyncClient({
       baseUrl: "https://example.test/api",
-      vault: "specs",
+      mem: "specs",
       engineFactory: () => engine,
       onUpdate,
       fetch: recorder.fetch,
@@ -208,34 +208,34 @@ describe("VaultSyncClient.open", () => {
     expect(onUpdate).toHaveBeenCalledTimes(1);
   });
 
-  it("throws a typed VaultSyncError when /snapshot refuses with UNKNOWN_VAULT", async () => {
+  it("throws a typed MemSyncError when /snapshot refuses with UNKNOWN_MEM", async () => {
     recorder.on(
       (u) => u.endsWith("/snapshot"),
       () =>
-        jsonResponse({ code: "UNKNOWN_VAULT", message: "unknown vault: specs" }, { status: 404 }),
+        jsonResponse({ code: "UNKNOWN_MEM", message: "unknown mem: specs" }, { status: 404 }),
     );
-    const client = new VaultSyncClient({
+    const client = new MemSyncClient({
       baseUrl: "https://example.test/api",
-      vault: "specs",
+      mem: "specs",
       engineFactory: () => engine,
       fetch: recorder.fetch,
       eventSourceFactory: (url) => new FakeEventSource(url),
     });
     await expect(client.open()).rejects.toMatchObject({
-      code: BRIDGE_CODES.UNKNOWN_VAULT,
+      code: BRIDGE_CODES.UNKNOWN_MEM,
       status: 404,
     });
   });
 });
 
-describe("VaultSyncClient SSE → commit apply", () => {
-  it("applies envelopes from /commits when /events emits vault_changed", async () => {
+describe("MemSyncClient SSE → commit apply", () => {
+  it("applies envelopes from /commits when /events emits mem_changed", async () => {
     const onUpdate = vi.fn();
     const envelopes: CommitEnvelope[] = [
       {
         sha: "sha-next",
         parent: "sha-initial",
-        vault: "specs",
+        mem: "specs",
         timestamp: "2026-05-19T10:00:00Z",
         changes: [{ op: "modified", path: "alpha.md", content: "..." }],
       },
@@ -245,9 +245,9 @@ describe("VaultSyncClient SSE → commit apply", () => {
     );
     recorder.on((u) => u.endsWith("/snapshot"), () => snapshotResponse("sha-initial"));
 
-    const client = new VaultSyncClient({
+    const client = new MemSyncClient({
       baseUrl: "https://example.test/api",
-      vault: "specs",
+      mem: "specs",
       engineFactory: () => engine,
       onUpdate,
       fetch: recorder.fetch,
@@ -260,8 +260,8 @@ describe("VaultSyncClient SSE → commit apply", () => {
     onUpdate.mockClear();
 
     fakeES!.emitMessage(
-      "vault_changed",
-      JSON.stringify({ vault: "specs", head: "sha-next", previous: "sha-initial", n_commits: 1 }),
+      "mem_changed",
+      JSON.stringify({ mem: "specs", head: "sha-next", previous: "sha-initial", n_commits: 1 }),
     );
     // Allow the microtask queue to drain — apply runs async.
     await new Promise((r) => setTimeout(r, 0));
@@ -276,7 +276,7 @@ describe("VaultSyncClient SSE → commit apply", () => {
   it("re-fetches /head after a reconnect signal before applying the next event", async () => {
     recorder.on((u) => u.endsWith("/snapshot"), () => snapshotResponse("sha-initial"));
     // After reconnect we expect /head, then /commits using the value
-    // it returns — even though the next vault_changed payload also
+    // it returns — even though the next mem_changed payload also
     // carries a sha. This pins that EventSource buffer gaps are
     // closed via the authoritative head query.
     recorder.on(
@@ -294,7 +294,7 @@ describe("VaultSyncClient SSE → commit apply", () => {
           {
             sha: "sha-jumped",
             parent: "sha-initial",
-            vault: "specs",
+            mem: "specs",
             timestamp: "2026-05-19T10:00:00Z",
             changes: [{ op: "added", path: "beta.md", content: "..." }],
           } satisfies CommitEnvelope,
@@ -306,19 +306,19 @@ describe("VaultSyncClient SSE → commit apply", () => {
 
     fakeES!.emitError(); // signals reconnect
     fakeES!.emitMessage(
-      "vault_changed",
-      JSON.stringify({ vault: "specs", head: "sha-stale", previous: "x", n_commits: 1 }),
+      "mem_changed",
+      JSON.stringify({ mem: "specs", head: "sha-stale", previous: "x", n_commits: 1 }),
     );
     await new Promise((r) => setTimeout(r, 0));
     await new Promise((r) => setTimeout(r, 0));
 
     expect(client.head).toBe("sha-jumped");
     const urls = recorder.calls.map((c) => c.url);
-    expect(urls).toContain("https://example.test/api/vaults/specs/head");
+    expect(urls).toContain("https://example.test/api/mems/specs/head");
   });
 });
 
-describe("VaultSyncClient force-push recovery", () => {
+describe("MemSyncClient force-push recovery", () => {
   it("reloads the snapshot when /commits refuses with UNKNOWN_COMMIT", async () => {
     let snapshotHead = "sha-initial";
     recorder.on((u) => u.endsWith("/snapshot"), () => snapshotResponse(snapshotHead));
@@ -331,9 +331,9 @@ describe("VaultSyncClient force-push recovery", () => {
 
     const onError = vi.fn();
     const onUpdate = vi.fn();
-    const client = new VaultSyncClient({
+    const client = new MemSyncClient({
       baseUrl: "https://example.test/api",
-      vault: "specs",
+      mem: "specs",
       engineFactory: () => engine,
       onUpdate,
       onError,
@@ -348,8 +348,8 @@ describe("VaultSyncClient force-push recovery", () => {
     snapshotHead = "sha-after-force-push";
 
     fakeES!.emitMessage(
-      "vault_changed",
-      JSON.stringify({ vault: "specs", head: "sha-rebased", previous: "sha-x", n_commits: 0 }),
+      "mem_changed",
+      JSON.stringify({ mem: "specs", head: "sha-rebased", previous: "sha-x", n_commits: 0 }),
     );
     await new Promise((r) => setTimeout(r, 0));
     await new Promise((r) => setTimeout(r, 0));
@@ -374,9 +374,9 @@ describe("VaultSyncClient force-push recovery", () => {
       ),
     );
     const onError = vi.fn();
-    const client = new VaultSyncClient({
+    const client = new MemSyncClient({
       baseUrl: "https://example.test/api",
-      vault: "specs",
+      mem: "specs",
       engineFactory: () => engine,
       onError,
       fetch: recorder.fetch,
@@ -389,8 +389,8 @@ describe("VaultSyncClient force-push recovery", () => {
     snapshotHead = "sha-resynced";
 
     fakeES!.emitMessage(
-      "vault_changed",
-      JSON.stringify({ vault: "specs", head: "sha-far", previous: "sha-i", n_commits: 99 }),
+      "mem_changed",
+      JSON.stringify({ mem: "specs", head: "sha-far", previous: "sha-i", n_commits: 99 }),
     );
     await new Promise((r) => setTimeout(r, 0));
     await new Promise((r) => setTimeout(r, 0));
@@ -403,16 +403,16 @@ describe("VaultSyncClient force-push recovery", () => {
   });
 });
 
-describe("VaultSyncClient.search", () => {
+describe("MemSyncClient.search", () => {
   it("issues a GET /search with URL query params and parses the result", async () => {
     const expected: SearchResult = {
-      vault: "specs",
+      mem: "specs",
       query: "alpha",
       hits: [
         {
           id: "specs--alpha",
           title: "Alpha",
-          vault: "specs",
+          mem: "specs",
           entity_type: "spec",
           stub: false,
           score: 1.2,
@@ -431,10 +431,10 @@ describe("VaultSyncClient.search", () => {
 
     expect(got).toEqual(expected);
     const searchCall = recorder.calls.find((c) => c.url.includes("/search?"));
-    expect(searchCall?.url).toBe("https://example.test/api/vaults/specs/search?q=alpha&limit=10");
+    expect(searchCall?.url).toBe("https://example.test/api/mems/specs/search?q=alpha&limit=10");
   });
 
-  it("translates 400 INVALID_SEARCH_QUERY into a typed VaultSyncError", async () => {
+  it("translates 400 INVALID_SEARCH_QUERY into a typed MemSyncError", async () => {
     recorder.on((u) => u.includes("/search?"), () =>
       jsonResponse(
         {
@@ -448,13 +448,13 @@ describe("VaultSyncClient.search", () => {
     const client = newClient();
     await client.open();
     const err = await client.search({ q: "" }).catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(VaultSyncError);
-    expect((err as VaultSyncError).code).toBe(BRIDGE_CODES.INVALID_SEARCH_QUERY);
-    expect((err as VaultSyncError).status).toBe(400);
+    expect(err).toBeInstanceOf(MemSyncError);
+    expect((err as MemSyncError).code).toBe(BRIDGE_CODES.INVALID_SEARCH_QUERY);
+    expect((err as MemSyncError).status).toBe(400);
   });
 });
 
-describe("VaultSyncClient.close", () => {
+describe("MemSyncClient.close", () => {
   it("closes the SSE subscription and refuses subsequent reads", async () => {
     const client = newClient();
     await client.open();
@@ -471,7 +471,7 @@ describe("VaultSyncClient.close", () => {
   });
 });
 
-describe("VaultSyncClient.getEntity", () => {
+describe("MemSyncClient.getEntity", () => {
   it("returns the entity from the local engine without an HTTP round-trip", async () => {
     const client = newClient();
     await client.open();

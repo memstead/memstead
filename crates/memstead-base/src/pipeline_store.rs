@@ -3,20 +3,20 @@
 //! Reads and writes [`Medium`] / [`Facet`] / [`Projection`] / [`Ingest`] JSON
 //! under the workspace store ([`WORKSPACE_STORE_DIR`]):
 //!
-//! - `<root>/.memstead/mediums/<vault>/<name>.json`
-//! - `<root>/.memstead/facets/<vault>/<name>.json`
-//! - `<root>/.memstead/projections/<vault>/<name>.json`
-//! - `<root>/.memstead/ingests/<name>.json`  — flat; ingests are not per-vault
+//! - `<root>/.memstead/mediums/<mem>/<name>.json`
+//! - `<root>/.memstead/facets/<mem>/<name>.json`
+//! - `<root>/.memstead/projections/<mem>/<name>.json`
+//! - `<root>/.memstead/ingests/<name>.json`  — flat; ingests are not per-mem
 //!
 //! (The plan's acceptance-criteria text lists `projections`/`ingests` under a
 //! `.graph/` path; that is a typo for `.memstead/` — the AC header, Goal, and
 //! Constraints all place every pipeline config in the `.memstead/` workspace
 //! store. All four primitives live under `.memstead/` here.)
 //!
-//! Mediums, facets, and projections are per-vault (a `<vault>` subdirectory
-//! tier preserves the "vault owns its territory" framing); ingests are flat,
+//! Mediums, facets, and projections are per-mem (a `<mem>` subdirectory
+//! tier preserves the "mem owns its territory" framing); ingests are flat,
 //! matching the legacy `ingests/<name>.json` layout. The record's
-//! identity is `(vault, name)` derived from the file path; `name` is the file
+//! identity is `(mem, name)` derived from the file path; `name` is the file
 //! stem.
 //!
 //! The loader's job is load + validate + expose read-only: a malformed config
@@ -40,19 +40,19 @@ pub const PROJECTIONS_DIR: &str = "projections";
 /// See [`MEDIUMS_DIR`].
 pub const INGESTS_DIR: &str = "ingests";
 
-/// A per-vault pipeline record paired with the vault and name (file stem) that
+/// A per-mem pipeline record paired with the mem and name (file stem) that
 /// identify it on disk.
 #[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct VaultPipelineRecord<T> {
-    /// The vault subdirectory this record lives under.
-    pub vault: String,
+pub struct MemPipelineRecord<T> {
+    /// The mem subdirectory this record lives under.
+    pub mem: String,
     /// The record's name — the file stem (e.g. `source-tree`).
     pub name: String,
     /// The parsed config.
     pub config: T,
 }
 
-/// A flat (non-per-vault) pipeline record — used for ingests.
+/// A flat (non-per-mem) pipeline record — used for ingests.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct PipelineRecord<T> {
     /// The record's name — the file stem (e.g. `macos-graph`).
@@ -64,12 +64,12 @@ pub struct PipelineRecord<T> {
 /// Every pipeline config in a workspace store, in the four-primitive shape.
 #[derive(Debug, Default, Clone, PartialEq, Serialize)]
 pub struct PipelineConfigs {
-    /// Per-vault mediums.
-    pub mediums: Vec<VaultPipelineRecord<Medium>>,
-    /// Per-vault facets.
-    pub facets: Vec<VaultPipelineRecord<Facet>>,
-    /// Per-vault projections.
-    pub projections: Vec<VaultPipelineRecord<Projection>>,
+    /// Per-mem mediums.
+    pub mediums: Vec<MemPipelineRecord<Medium>>,
+    /// Per-mem facets.
+    pub facets: Vec<MemPipelineRecord<Facet>>,
+    /// Per-mem projections.
+    pub projections: Vec<MemPipelineRecord<Projection>>,
     /// Flat ingests.
     pub ingests: Vec<PipelineRecord<Ingest>>,
 }
@@ -79,14 +79,14 @@ fn primitive_dir(workspace_root: &Path, primitive: &str) -> PathBuf {
     workspace_root.join(WORKSPACE_STORE_DIR).join(primitive)
 }
 
-/// File path of a per-vault record: `<root>/.memstead/<primitive>/<vault>/<name>.json`.
-fn vault_scoped_path(workspace_root: &Path, primitive: &str, vault: &str, name: &str) -> PathBuf {
+/// File path of a per-mem record: `<root>/.memstead/<primitive>/<mem>/<name>.json`.
+fn mem_scoped_path(workspace_root: &Path, primitive: &str, mem: &str, name: &str) -> PathBuf {
     primitive_dir(workspace_root, primitive)
-        .join(vault)
+        .join(mem)
         .join(format!("{name}.json"))
 }
 
-/// File path of a flat (non-per-vault) record: `<root>/.memstead/<primitive>/<name>.json`.
+/// File path of a flat (non-per-mem) record: `<root>/.memstead/<primitive>/<name>.json`.
 fn flat_path(workspace_root: &Path, primitive: &str, name: &str) -> PathBuf {
     primitive_dir(workspace_root, primitive).join(format!("{name}.json"))
 }
@@ -138,31 +138,31 @@ fn write_json<T: Serialize>(path: &Path, config: &T) -> Result<(), StoreError> {
     })
 }
 
-/// Load every `<primitive>/<vault>/<name>.json` under the store, parsed.
+/// Load every `<primitive>/<mem>/<name>.json` under the store, parsed.
 /// Absent primitive directory → empty (a workspace may declare no pipelines).
 /// A malformed file surfaces a typed parse error naming the path.
-fn load_vault_scoped<T: DeserializeOwned>(
+fn load_mem_scoped<T: DeserializeOwned>(
     workspace_root: &Path,
     primitive: &str,
-) -> Result<Vec<VaultPipelineRecord<T>>, StoreError> {
+) -> Result<Vec<MemPipelineRecord<T>>, StoreError> {
     let dir = primitive_dir(workspace_root, primitive);
-    let mut out: Vec<VaultPipelineRecord<T>> = Vec::new();
-    let vault_dirs = match std::fs::read_dir(&dir) {
+    let mut out: Vec<MemPipelineRecord<T>> = Vec::new();
+    let mem_dirs = match std::fs::read_dir(&dir) {
         Ok(rd) => rd,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(out),
         Err(e) => return Err(StoreError::Io { path: dir, source: e }),
     };
-    for vault_entry in vault_dirs.flatten() {
-        let vault_path = vault_entry.path();
-        if !vault_path.is_dir() {
+    for mem_entry in mem_dirs.flatten() {
+        let mem_path = mem_entry.path();
+        if !mem_path.is_dir() {
             continue;
         }
-        let vault = vault_entry.file_name().to_string_lossy().into_owned();
-        let files = match std::fs::read_dir(&vault_path) {
+        let mem = mem_entry.file_name().to_string_lossy().into_owned();
+        let files = match std::fs::read_dir(&mem_path) {
             Ok(rd) => rd,
             Err(e) => {
                 return Err(StoreError::Io {
-                    path: vault_path,
+                    path: mem_path,
                     source: e,
                 });
             }
@@ -176,15 +176,15 @@ fn load_vault_scoped<T: DeserializeOwned>(
                 continue;
             };
             let config = read_json::<T>(&path)?;
-            out.push(VaultPipelineRecord {
-                vault: vault.clone(),
+            out.push(MemPipelineRecord {
+                mem: mem.clone(),
                 name,
                 config,
             });
         }
     }
     // Deterministic order so callers (and tests) see a stable enumeration.
-    out.sort_by(|a, b| (a.vault.as_str(), a.name.as_str()).cmp(&(b.vault.as_str(), b.name.as_str())));
+    out.sort_by(|a, b| (a.mem.as_str(), a.name.as_str()).cmp(&(b.mem.as_str(), b.name.as_str())));
     Ok(out)
 }
 
@@ -228,35 +228,35 @@ fn read_json<T: DeserializeOwned>(path: &Path) -> Result<T, StoreError> {
     })
 }
 
-/// Write a medium to `<root>/.memstead/mediums/<vault>/<name>.json`.
+/// Write a medium to `<root>/.memstead/mediums/<mem>/<name>.json`.
 pub fn write_medium(
     workspace_root: &Path,
-    vault: &str,
+    mem: &str,
     name: &str,
     medium: &Medium,
 ) -> Result<(), StoreError> {
-    write_json(&vault_scoped_path(workspace_root, MEDIUMS_DIR, vault, name), medium)
+    write_json(&mem_scoped_path(workspace_root, MEDIUMS_DIR, mem, name), medium)
 }
 
-/// Write a facet to `<root>/.memstead/facets/<vault>/<name>.json`.
+/// Write a facet to `<root>/.memstead/facets/<mem>/<name>.json`.
 pub fn write_facet(
     workspace_root: &Path,
-    vault: &str,
+    mem: &str,
     name: &str,
     facet: &Facet,
 ) -> Result<(), StoreError> {
-    write_json(&vault_scoped_path(workspace_root, FACETS_DIR, vault, name), facet)
+    write_json(&mem_scoped_path(workspace_root, FACETS_DIR, mem, name), facet)
 }
 
-/// Write a projection to `<root>/.memstead/projections/<vault>/<name>.json`.
+/// Write a projection to `<root>/.memstead/projections/<mem>/<name>.json`.
 pub fn write_projection(
     workspace_root: &Path,
-    vault: &str,
+    mem: &str,
     name: &str,
     projection: &Projection,
 ) -> Result<(), StoreError> {
     write_json(
-        &vault_scoped_path(workspace_root, PROJECTIONS_DIR, vault, name),
+        &mem_scoped_path(workspace_root, PROJECTIONS_DIR, mem, name),
         projection,
     )
 }
@@ -272,18 +272,18 @@ pub fn write_ingest(
 
 /// Delete a medium file. Missing → [`StoreError::Io`]; callers that want a
 /// friendly "no such medium" pre-check existence via [`load_pipeline_configs`].
-pub fn delete_medium(workspace_root: &Path, vault: &str, name: &str) -> Result<(), StoreError> {
-    remove_file(&vault_scoped_path(workspace_root, MEDIUMS_DIR, vault, name))
+pub fn delete_medium(workspace_root: &Path, mem: &str, name: &str) -> Result<(), StoreError> {
+    remove_file(&mem_scoped_path(workspace_root, MEDIUMS_DIR, mem, name))
 }
 
 /// Delete a facet file. See [`delete_medium`] for missing-file semantics.
-pub fn delete_facet(workspace_root: &Path, vault: &str, name: &str) -> Result<(), StoreError> {
-    remove_file(&vault_scoped_path(workspace_root, FACETS_DIR, vault, name))
+pub fn delete_facet(workspace_root: &Path, mem: &str, name: &str) -> Result<(), StoreError> {
+    remove_file(&mem_scoped_path(workspace_root, FACETS_DIR, mem, name))
 }
 
 /// Delete a projection file. See [`delete_medium`] for missing-file semantics.
-pub fn delete_projection(workspace_root: &Path, vault: &str, name: &str) -> Result<(), StoreError> {
-    remove_file(&vault_scoped_path(workspace_root, PROJECTIONS_DIR, vault, name))
+pub fn delete_projection(workspace_root: &Path, mem: &str, name: &str) -> Result<(), StoreError> {
+    remove_file(&mem_scoped_path(workspace_root, PROJECTIONS_DIR, mem, name))
 }
 
 /// Delete an ingest file (flat). See [`delete_medium`] for missing-file semantics.
@@ -298,19 +298,19 @@ pub fn delete_ingest(workspace_root: &Path, name: &str) -> Result<(), StoreError
 // field stale, so their rename lives in the `pipeline_edit` layer, which
 // rewrites the embedded name and dependent references together.
 
-/// Rename a projection within its vault (`old` → `new`, same `<vault>` tier).
+/// Rename a projection within its mem (`old` → `new`, same `<mem>` tier).
 /// Refuses to clobber an existing target. A projection has no embedded name,
 /// so a file move is its whole rename; rewriting dependent ingest `projection`
 /// references is the calling layer's job.
 pub fn rename_projection(
     workspace_root: &Path,
-    vault: &str,
+    mem: &str,
     old: &str,
     new: &str,
 ) -> Result<(), StoreError> {
     rename_file(
-        &vault_scoped_path(workspace_root, PROJECTIONS_DIR, vault, old),
-        &vault_scoped_path(workspace_root, PROJECTIONS_DIR, vault, new),
+        &mem_scoped_path(workspace_root, PROJECTIONS_DIR, mem, old),
+        &mem_scoped_path(workspace_root, PROJECTIONS_DIR, mem, new),
     )
 }
 
@@ -328,9 +328,9 @@ pub fn rename_ingest(workspace_root: &Path, old: &str, new: &str) -> Result<(), 
 /// resolve to empty; a malformed file surfaces a typed [`StoreError::Parse`].
 pub fn load_pipeline_configs(workspace_root: &Path) -> Result<PipelineConfigs, StoreError> {
     Ok(PipelineConfigs {
-        mediums: load_vault_scoped(workspace_root, MEDIUMS_DIR)?,
-        facets: load_vault_scoped(workspace_root, FACETS_DIR)?,
-        projections: load_vault_scoped(workspace_root, PROJECTIONS_DIR)?,
+        mediums: load_mem_scoped(workspace_root, MEDIUMS_DIR)?,
+        facets: load_mem_scoped(workspace_root, FACETS_DIR)?,
+        projections: load_mem_scoped(workspace_root, PROJECTIONS_DIR)?,
         ingests: load_flat(workspace_root, INGESTS_DIR)?,
     })
 }
@@ -362,8 +362,8 @@ mod tests {
         let projection = Projection {
             intent: Some("Swift macOS app source.".to_string()),
             source_facets: vec!["source-files".to_string()],
-            reference_vaults: vec!["engine".to_string()],
-            destination_vault: "macos".to_string(),
+            reference_mems: vec!["engine".to_string()],
+            destination_mem: "macos".to_string(),
         };
         let ingest = Ingest {
             projection: "macos/graph".to_string(),
@@ -401,7 +401,7 @@ mod tests {
 
         let configs = load_pipeline_configs(root).unwrap();
         assert_eq!(configs.mediums.len(), 1);
-        assert_eq!(configs.mediums[0].vault, "macos");
+        assert_eq!(configs.mediums[0].mem, "macos");
         assert_eq!(configs.mediums[0].name, "source-tree");
         assert_eq!(configs.mediums[0].config, medium);
         assert_eq!(configs.facets[0].config, facet);
@@ -412,7 +412,7 @@ mod tests {
     }
 
     #[test]
-    fn load_enumeration_is_sorted_and_per_vault() {
+    fn load_enumeration_is_sorted_and_per_mem() {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         let (medium, _, _, _) = sample();
@@ -424,7 +424,7 @@ mod tests {
         let keys: Vec<_> = configs
             .mediums
             .iter()
-            .map(|r| (r.vault.as_str(), r.name.as_str()))
+            .map(|r| (r.mem.as_str(), r.name.as_str()))
             .collect();
         assert_eq!(
             keys,

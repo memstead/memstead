@@ -44,7 +44,7 @@ enum PrepareOutcome {
 struct PreparedUpdate {
     mount_idx: usize,
     id: EntityId,
-    vault: String,
+    mem: String,
     type_def: Arc<memstead_schema::TypeDefinition>,
     file_path: String,
     markdown: String,
@@ -90,13 +90,13 @@ impl Engine {
         client: Option<&ClientId>,
         note: Option<&str>,
     ) -> Result<UpdateEntityOutcome, EngineError> {
-        // Reload-before-operation: probe the vault ref and reload if a
+        // Reload-before-operation: probe the mem ref and reload if a
         // sibling advanced it, so the `expected_hash` compare inside
         // `prepare_update` runs against current truth. A stale hash for
         // the targeted entity then trips a real `HASH_MISMATCH`; an
         // unrelated concurrent write leaves this entity's hash intact
         // and the update proceeds. The drift notice rides the outcome.
-        let mut drift_warnings = self.reload_if_stale(Some(args.id.vault()));
+        let mut drift_warnings = self.reload_if_stale(Some(args.id.mem()));
         let mut outcome = match self.prepare_update(args)? {
             PrepareOutcome::Done(outcome) => outcome,
             PrepareOutcome::Prepared(prepared) => {
@@ -184,7 +184,7 @@ impl Engine {
             &prepared.markdown,
             &prepared.file_path,
             prepared.type_def.as_ref(),
-            &prepared.vault,
+            &prepared.mem,
         )
         .map_err(|e| EngineError::ParseAfterWrite(e.to_string()))?;
         let content_hash = parse_result.entity.content_hash.clone();
@@ -216,15 +216,15 @@ impl Engine {
         args: UpdateEntityArgs,
     ) -> Result<PrepareOutcome, EngineError> {
         let id = &args.id;
-        let vault = id.vault().to_string();
+        let mem = id.mem().to_string();
 
         let mount_idx = self
             .mounts
             .iter()
-            .position(|m| m.mount.vault == vault)
-            .ok_or_else(|| EngineError::UnknownVault(vault.clone()))?;
+            .position(|m| m.mount.mem == mem)
+            .ok_or_else(|| EngineError::UnknownMem(mem.clone()))?;
         if self.mounts[mount_idx].mount.capability != MountCapability::Write {
-            return Err(EngineError::ReadOnlyMount(vault));
+            return Err(EngineError::ReadOnlyMount(mem));
         }
 
         let entity = self
@@ -294,7 +294,7 @@ impl Engine {
 
         let schema = self
             .schemas
-            .get(&vault)
+            .get(&mem)
             .expect("schema present for every registered mount")
             .clone();
         let type_def = schema
@@ -440,7 +440,7 @@ impl Engine {
         // wiki-link/relation validator at the end of this fn sees
         // the freshly-declared relations as part of the post-state.
         // Same vocabulary + shape + grammar gates `memstead_relate`
-        // runs; auto-stubs absent Write-vault targets identically
+        // runs; auto-stubs absent Write-mem targets identically
         // to the relate path. Returns the (rel_type, target,
         // target_was_stubbed) triples in `relations_declared` on
         // the outcome so the agent sees what landed.
@@ -448,7 +448,7 @@ impl Engine {
             self,
             &mut next,
             &args.declare_relations,
-            &vault,
+            &mem,
             mount_idx,
             type_def.as_ref(),
             schema.as_ref(),
@@ -582,7 +582,7 @@ impl Engine {
         // `alias_target_rel_type`, append engine-emitted relations of
         // that rel-type for every body wiki-link not already backed,
         // and GC pointer-rel-type relations whose target was a body
-        // wiki-link in the prev state but isn't in next. Cross-vault
+        // wiki-link in the prev state but isn't in next. Cross-mem
         // refusal aborts the update — no partial state.
         //
         // The returned `Vec<Relationship>` is the per-call set of
@@ -782,7 +782,7 @@ impl Engine {
         Ok(PrepareOutcome::Prepared(PreparedUpdate {
             mount_idx,
             id: id.clone(),
-            vault,
+            mem,
             type_def,
             file_path,
             markdown,
@@ -810,9 +810,9 @@ impl Engine {
     ///
     /// The batch validates and prepares every item first (each with
     /// its own optimistic-lock check), then commits the whole set as
-    /// **one** commit per vault. If any item fails — validation error,
+    /// **one** commit per mem. If any item fails — validation error,
     /// `HASH_MISMATCH`, entity-not-found, any per-item refusal —
-    /// **nothing is committed**: the on-disk vault and the in-memory
+    /// **nothing is committed**: the on-disk mem and the in-memory
     /// store are restored to exactly their pre-call state, and the
     /// result is marked `applied: false` with the offending item
     /// carrying a typed `{code, message, details}` error envelope and
@@ -828,11 +828,11 @@ impl Engine {
     /// commit. A batch where every item is a no-op (content unchanged)
     /// likewise applies with an empty `commit_sha`.
     ///
-    /// Atomicity is per-vault: for the common single-vault batch a
+    /// Atomicity is per-mem: for the common single-mem batch a
     /// commit-time backend failure rolls the whole batch back. A batch
-    /// spanning multiple vaults commits each vault in turn; if a later
-    /// vault's commit fails, already-committed vaults stay committed
-    /// (true cross-vault two-phase commit is out of scope) — but the
+    /// spanning multiple mems commits each mem in turn; if a later
+    /// mem's commit fails, already-committed mems stay committed
+    /// (true cross-mem two-phase commit is out of scope) — but the
     /// dominant failure mode, a per-item validation/hash refusal, is
     /// always fully atomic because no commit happens until every item
     /// has passed.
@@ -852,17 +852,17 @@ impl Engine {
             });
         }
 
-        // Reload-before-operation: refresh every vault this batch
+        // Reload-before-operation: refresh every mem this batch
         // touches *before* preparing items, so each item's
         // `expected_hash` check runs against current truth (the batch
         // is the one multi-op-per-process path, so a sibling commit
         // between boot and this call is plausible). Notices stash on
         // the engine for the caller to drain.
-        let mut touched_vaults: Vec<String> =
-            updates.iter().map(|(a, _)| a.id.vault().to_string()).collect();
-        touched_vaults.sort();
-        touched_vaults.dedup();
-        for v in &touched_vaults {
+        let mut touched_mems: Vec<String> =
+            updates.iter().map(|(a, _)| a.id.mem().to_string()).collect();
+        touched_mems.sort();
+        touched_mems.dedup();
+        for v in &touched_mems {
             self.reload_if_stale(Some(v));
         }
 
@@ -936,7 +936,7 @@ impl Engine {
         }
 
         // --- Phase 2: stage every prepared write, then commit once
-        // per vault. ---
+        // per mem. ---
         for p in &prepared {
             if let Err(e) = self.mounts[p.mount_idx]
                 .backend
@@ -979,8 +979,8 @@ impl Engine {
                 Ok(sha) => mount_commits.push((m, sha)),
                 Err(e) => {
                     // A commit failed. Roll back the store and any
-                    // still-pending backends. Vaults already committed
-                    // in this loop stay committed (per-vault atomicity).
+                    // still-pending backends. Mems already committed
+                    // in this loop stay committed (per-mem atomicity).
                     self.store = store_snapshot;
                     self.discard_all_pending();
                     return Err(e.into());
@@ -1014,8 +1014,8 @@ impl Engine {
         self.invalidate_communities();
         self.invalidate_search_indexes();
 
-        // Single-vault batches name their one commit; multi-vault names
-        // the last vault committed (see the method docstring).
+        // Single-mem batches name their one commit; multi-mem names
+        // the last mem committed (see the method docstring).
         let commit_sha = mount_commits
             .last()
             .map(|(_, s)| s.clone())
@@ -1087,8 +1087,8 @@ fn batch_error_envelope(err: &EngineError) -> crate::ops::BatchError {
 ///
 /// Validates each declared relation against the same gates
 /// `memstead_relate` runs (target-id grammar, rel-type vocabulary,
-/// schema shape, cross-vault policy, ReadOnly-target rule). On the
-/// add path with an absent Write-vault target, the target is
+/// schema shape, cross-mem policy, ReadOnly-target rule). On the
+/// add path with an absent Write-mem target, the target is
 /// auto-stubbed via `make_stub` — matching the
 /// `WarningHint::AutoStubCreated` semantics of the relate flow.
 ///
@@ -1099,7 +1099,7 @@ fn apply_declare_relations(
     engine: &mut Engine,
     next: &mut Entity,
     declarations: &[crate::ops::RelateArg],
-    source_vault: &str,
+    source_mem: &str,
     source_mount_idx: usize,
     type_def: &memstead_schema::TypeDefinition,
     schema: &memstead_schema::Schema,
@@ -1115,31 +1115,31 @@ fn apply_declare_relations(
 
         validate_relation_target_grammar(&rel.to)?;
 
-        let target_vault = rel.to.vault().to_string();
-        super::validate_cross_vault_add_policy(
+        let target_mem = rel.to.mem().to_string();
+        super::validate_cross_mem_add_policy(
             engine,
-            source_vault,
-            &target_vault,
+            source_mem,
+            &target_mem,
         )?;
-        if target_vault != source_vault
-            && let Some(mount) = engine.mount(&target_vault)
+        if target_mem != source_mem
+            && let Some(mount) = engine.mount(&target_mem)
             && mount.capability == MountCapability::ReadOnly
             && !engine.store.contains(&rel.to)
         {
-            return Err(EngineError::CrossVaultTargetNotFound {
+            return Err(EngineError::CrossMemTargetNotFound {
                 target_id: rel.to.to_string(),
-                target_vault: target_vault.clone(),
+                target_mem: target_mem.clone(),
             });
         }
 
         // Rel-type + shape validation, routed through the engine's
-        // cross-vault-aware edge validator. Cross-different-schema
+        // cross-mem-aware edge validator. Cross-different-schema
         // edges check vocabulary + shape against the source schema's
-        // `cross_vault_relationships:` entry; same-schema edges fall
-        // through to the intra-vault `relationships.definitions`.
+        // `cross_mem_relationships:` entry; same-schema edges fall
+        // through to the intra-mem `relationships.definitions`.
         // Open-mode admits unknown rel-types silently (no
         // per-declaration warning surfaced here — symmetry with the
-        // pre-cross-vault behaviour).
+        // pre-cross-mem behaviour).
         let target_type = engine
             .store
             .get(&rel.to)
@@ -1151,8 +1151,8 @@ fn apply_declare_relations(
             &canonical,
             next.entity_type.as_str(),
             target_type.as_deref(),
-            source_vault,
-            &target_vault,
+            source_mem,
+            &target_mem,
             &next.id,
             &rel.to,
             /* check_shape = */ true,
@@ -1168,8 +1168,8 @@ fn apply_declare_relations(
             engine,
             &canonical,
             normalised_description.as_deref(),
-            source_vault,
-            &target_vault,
+            source_mem,
+            &target_mem,
             &next.id,
             &rel.to,
         )?;
@@ -1178,7 +1178,7 @@ fn apply_declare_relations(
         super::validate_manual_authoring_posture(
             engine,
             &canonical,
-            source_vault,
+            source_mem,
             &next.id,
             &rel.to,
         )?;
@@ -1199,9 +1199,9 @@ fn apply_declare_relations(
             });
         }
 
-        // Auto-stub absent Write-vault targets. Same mechanic as
-        // `memstead_relate`'s relate path. ReadOnly cross-vault targets
-        // were caught above; same-vault and cross-vault-to-Write
+        // Auto-stub absent Write-mem targets. Same mechanic as
+        // `memstead_relate`'s relate path. ReadOnly cross-mem targets
+        // were caught above; same-mem and cross-mem-to-Write
         // both fall through here.
         let target_was_stubbed = !engine.store.contains(&rel.to);
         if target_was_stubbed && !exists {
@@ -1227,14 +1227,14 @@ mod tests {
     use indexmap::IndexMap;
     use tempfile::TempDir;
 
-    use crate::backend::VaultBackend;
+    use crate::backend::MemBackend;
     use crate::engine::test_helpers::*;
     use crate::engine::{
         CreateEntityArgs, Engine, EngineError, RelateEntityArgs, UpdateEntityArgs,
     };
     use crate::entity::EntityId;
     
-    use crate::storage::{ArchiveBackend, FilesystemVaultWriter};
+    use crate::storage::{ArchiveBackend, FilesystemMemWriter};
     use crate::vcs::Actor;
 
     #[test]
@@ -1242,11 +1242,11 @@ mod tests {
         // No updates → BatchResult with zero counts + empty
         // commit_sha. No engine mutation happens.
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().to_path_buf();
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
-            folder_mount("specs", vault_dir),
-            Box::new(writer) as Box<dyn VaultBackend>,
+            folder_mount("specs", mem_dir),
+            Box::new(writer) as Box<dyn MemBackend>,
         )])
         .unwrap();
 
@@ -1269,17 +1269,17 @@ mod tests {
         // missing item carries the typed ENTITY_NOT_FOUND envelope, and
         // the valid item is marked `not_applied`.
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().to_path_buf();
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
-            folder_mount("specs", vault_dir),
-            Box::new(writer) as Box<dyn VaultBackend>,
+            folder_mount("specs", mem_dir),
+            Box::new(writer) as Box<dyn MemBackend>,
         )])
         .unwrap();
 
         // Seed: create an entity.
         let create_args = CreateEntityArgs {
-            vault: "specs".to_string(),
+            mem: "specs".to_string(),
             title: "Seed".to_string(),
             entity_type: "spec".to_string(),
             sections: IndexMap::from_iter([
@@ -1369,16 +1369,16 @@ mod tests {
         // applies both and produces exactly one commit; the response's
         // commit_sha names it and both entries report "updated".
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().to_path_buf();
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
-            folder_mount("specs", vault_dir),
-            Box::new(writer) as Box<dyn VaultBackend>,
+            folder_mount("specs", mem_dir),
+            Box::new(writer) as Box<dyn MemBackend>,
         )])
         .unwrap();
 
         let mk = |title: &str| CreateEntityArgs {
-            vault: "specs".to_string(),
+            mem: "specs".to_string(),
             title: title.to_string(),
             entity_type: "spec".to_string(),
             sections: IndexMap::from_iter([
@@ -1441,14 +1441,14 @@ mod tests {
         // targets a missing entity and fails. The refusal must leave no
         // trace of the stub.
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().to_path_buf();
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
-            folder_mount("specs", vault_dir.clone()),
-            Box::new(writer) as Box<dyn VaultBackend>,
+            folder_mount("specs", mem_dir.clone()),
+            Box::new(writer) as Box<dyn MemBackend>,
         )])
         .unwrap();
-        engine.set_workspace_root(vault_dir);
+        engine.set_workspace_root(mem_dir);
         let (actor, client) = cli_actor();
 
         let a = engine
@@ -1961,14 +1961,14 @@ mod tests {
         use tempfile::TempDir;
 
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().to_path_buf();
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
-            folder_mount("specs", vault_dir.clone()),
-            Box::new(writer) as Box<dyn VaultBackend>,
+            folder_mount("specs", mem_dir.clone()),
+            Box::new(writer) as Box<dyn MemBackend>,
         )])
         .unwrap();
-        engine.set_workspace_root(vault_dir.clone());
+        engine.set_workspace_root(mem_dir.clone());
         let (actor, client) = cli_actor();
 
         let target = engine
@@ -2039,14 +2039,14 @@ mod tests {
         use tempfile::TempDir;
 
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().to_path_buf();
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
-            folder_mount("specs", vault_dir.clone()),
-            Box::new(writer) as Box<dyn VaultBackend>,
+            folder_mount("specs", mem_dir.clone()),
+            Box::new(writer) as Box<dyn MemBackend>,
         )])
         .unwrap();
-        engine.set_workspace_root(vault_dir.clone());
+        engine.set_workspace_root(mem_dir.clone());
         let (actor, client) = cli_actor();
 
         let target = engine
@@ -2171,14 +2171,14 @@ mod tests {
         use tempfile::TempDir;
 
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().to_path_buf();
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
-            folder_mount("specs", vault_dir.clone()),
-            Box::new(writer) as Box<dyn VaultBackend>,
+            folder_mount("specs", mem_dir.clone()),
+            Box::new(writer) as Box<dyn MemBackend>,
         )])
         .unwrap();
-        engine.set_workspace_root(vault_dir.clone());
+        engine.set_workspace_root(mem_dir.clone());
         let (actor, client) = cli_actor();
         let target = engine
             .create_entity(empty_create_args("specs", "Target"), actor, Some(&client), None)
@@ -2288,11 +2288,11 @@ mod tests {
     #[test]
     fn references_edges_round_trip_across_full_crud_cycle() {
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().to_path_buf();
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
-            folder_mount("specs", vault_dir),
-            Box::new(writer) as Box<dyn VaultBackend>,
+            folder_mount("specs", mem_dir),
+            Box::new(writer) as Box<dyn MemBackend>,
         )])
         .unwrap();
         let (actor, client) = cli_actor();
@@ -2343,7 +2343,7 @@ mod tests {
         let probe = engine
             .create_entity(
                 CreateEntityArgs {
-                    vault: "specs".to_string(),
+                    mem: "specs".to_string(),
                     title: "Probe".to_string(),
                     entity_type: "spec".to_string(),
                     sections,
@@ -2458,10 +2458,10 @@ mod tests {
             "REFERENCES counter must round-trip to baseline"
         );
 
-        // Cross-check: a full reload of the vault produces the same
+        // Cross-check: a full reload of the mem produces the same
         // post-cycle counts. If the in-memory store and the on-disk
         // bytes drift, reload uncovers it.
-        engine.reload_one_vault("specs").unwrap();
+        engine.reload_one_mem("specs").unwrap();
         assert_eq!(
             engine.store().edge_count(),
             baseline_edges,
@@ -2848,11 +2848,11 @@ mod tests {
         // and the call no-ops.
         use crate::ops::RelateArg;
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().to_path_buf();
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
-            folder_mount("specs", vault_dir),
-            Box::new(writer) as Box<dyn VaultBackend>,
+            folder_mount("specs", mem_dir),
+            Box::new(writer) as Box<dyn MemBackend>,
         )])
         .unwrap();
         let (actor, client) = cli_actor();
@@ -3064,14 +3064,14 @@ mod tests {
         use tempfile::TempDir;
 
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().to_path_buf();
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
-            folder_mount("specs", vault_dir.clone()),
-            Box::new(writer) as Box<dyn VaultBackend>,
+            folder_mount("specs", mem_dir.clone()),
+            Box::new(writer) as Box<dyn MemBackend>,
         )])
         .unwrap();
-        engine.set_workspace_root(vault_dir.clone());
+        engine.set_workspace_root(mem_dir.clone());
         let (actor, client) = cli_actor();
 
         let target = engine
@@ -3088,7 +3088,7 @@ mod tests {
         let source = engine
             .create_entity(
                 CreateEntityArgs {
-                    vault: "specs".to_string(),
+                    mem: "specs".to_string(),
                     title: "Source".to_string(),
                     entity_type: "spec".to_string(),
                     sections,
@@ -3159,14 +3159,14 @@ mod tests {
         use tempfile::TempDir;
 
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().to_path_buf();
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
-            folder_mount("specs", vault_dir.clone()),
-            Box::new(writer) as Box<dyn VaultBackend>,
+            folder_mount("specs", mem_dir.clone()),
+            Box::new(writer) as Box<dyn MemBackend>,
         )])
         .unwrap();
-        engine.set_workspace_root(vault_dir.clone());
+        engine.set_workspace_root(mem_dir.clone());
         let (actor, client) = cli_actor();
 
         let ghost = crate::EntityId::new("specs", "ghost");
@@ -3176,7 +3176,7 @@ mod tests {
         let source = engine
             .create_entity(
                 CreateEntityArgs {
-                    vault: "specs".to_string(),
+                    mem: "specs".to_string(),
                     title: "Source".to_string(),
                     entity_type: "spec".to_string(),
                     sections,
@@ -3231,7 +3231,7 @@ mod tests {
         // Reload from disk: the source's on-disk markdown no longer
         // carries the link, so the parser re-emits no stub. The
         // decremented count holds across the reload — the GC was real.
-        engine.reload_each_writable_vault().unwrap();
+        engine.reload_each_writable_mem().unwrap();
         assert!(
             !engine.store().contains(&ghost),
             "stub stays gone after reload-from-disk",
@@ -3254,14 +3254,14 @@ mod tests {
         use tempfile::TempDir;
 
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().to_path_buf();
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
-            folder_mount("specs", vault_dir.clone()),
-            Box::new(writer) as Box<dyn VaultBackend>,
+            folder_mount("specs", mem_dir.clone()),
+            Box::new(writer) as Box<dyn MemBackend>,
         )])
         .unwrap();
-        engine.set_workspace_root(vault_dir.clone());
+        engine.set_workspace_root(mem_dir.clone());
         let (actor, client) = cli_actor();
 
         let ghost = crate::EntityId::new("specs", "ghost");
@@ -3271,7 +3271,7 @@ mod tests {
         let source = engine
             .create_entity(
                 CreateEntityArgs {
-                    vault: "specs".to_string(),
+                    mem: "specs".to_string(),
                     title: "Source".to_string(),
                     entity_type: "spec".to_string(),
                     sections,
@@ -3330,14 +3330,14 @@ mod tests {
         use tempfile::TempDir;
 
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().to_path_buf();
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
-            folder_mount("specs", vault_dir.clone()),
-            Box::new(writer) as Box<dyn VaultBackend>,
+            folder_mount("specs", mem_dir.clone()),
+            Box::new(writer) as Box<dyn MemBackend>,
         )])
         .unwrap();
-        engine.set_workspace_root(vault_dir.clone());
+        engine.set_workspace_root(mem_dir.clone());
         let (actor, client) = cli_actor();
 
         let ghost = crate::EntityId::new("specs", "ghost");
@@ -3346,7 +3346,7 @@ mod tests {
             sections.insert("identity".to_string(), format!("{title} identity"));
             sections.insert("purpose".to_string(), "see [[ghost]]".to_string());
             CreateEntityArgs {
-                vault: "specs".to_string(),
+                mem: "specs".to_string(),
                 title: title.to_string(),
                 entity_type: "spec".to_string(),
                 sections,
@@ -3411,14 +3411,14 @@ mod tests {
         use tempfile::TempDir;
 
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().to_path_buf();
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
-            folder_mount("specs", vault_dir.clone()),
-            Box::new(writer) as Box<dyn VaultBackend>,
+            folder_mount("specs", mem_dir.clone()),
+            Box::new(writer) as Box<dyn MemBackend>,
         )])
         .unwrap();
-        engine.set_workspace_root(vault_dir.clone());
+        engine.set_workspace_root(mem_dir.clone());
         let (actor, client) = cli_actor();
 
         let target = engine
@@ -3488,14 +3488,14 @@ mod tests {
         use tempfile::TempDir;
 
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().to_path_buf();
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
-            folder_mount("specs", vault_dir.clone()),
-            Box::new(writer) as Box<dyn VaultBackend>,
+            folder_mount("specs", mem_dir.clone()),
+            Box::new(writer) as Box<dyn MemBackend>,
         )])
         .unwrap();
-        engine.set_workspace_root(vault_dir.clone());
+        engine.set_workspace_root(mem_dir.clone());
         let (actor, client) = cli_actor();
 
         let target = engine
@@ -3553,14 +3553,14 @@ mod tests {
         use tempfile::TempDir;
 
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().to_path_buf();
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
-            folder_mount("specs", vault_dir.clone()),
-            Box::new(writer) as Box<dyn VaultBackend>,
+            folder_mount("specs", mem_dir.clone()),
+            Box::new(writer) as Box<dyn MemBackend>,
         )])
         .unwrap();
-        engine.set_workspace_root(vault_dir.clone());
+        engine.set_workspace_root(mem_dir.clone());
         let (actor, client) = cli_actor();
 
         let target = engine
@@ -3645,10 +3645,10 @@ mod tests {
         use memstead_schema::SchemaRef;
         use tempfile::TempDir;
 
-        use crate::backend::VaultBackend;
+        use crate::backend::MemBackend;
         use crate::engine::test_helpers::*;
         use crate::engine::{CreateEntityArgs, Engine, EngineError, UpdateEntityArgs};
-        use crate::storage::FilesystemVaultWriter;
+        use crate::storage::FilesystemMemWriter;
         use crate::workspace::{Mount, MountCapability, MountLifecycle, MountStorage};
 
         const TYPE_BODY: &str = r#"description: t
@@ -3698,12 +3698,12 @@ write_rules: []
         }
 
         fn folder_mount_with_pin(
-            vault: &str,
+            mem: &str,
             path: std::path::PathBuf,
             pin: SchemaRef,
         ) -> Mount {
             Mount {
-                vault: vault.to_string(),
+                mem: mem.to_string(),
                 schema: Some(pin),
                 storage: MountStorage::Folder { path },
                 capability: MountCapability::Write,
@@ -3728,13 +3728,13 @@ write_rules: []
                 manifest,
                 &[(type_yaml_name, &make_type_yaml(type_yaml_name))],
             );
-            let vault_dir = tmp.path().join("vault");
-            std::fs::create_dir_all(&vault_dir).unwrap();
-            let writer = FilesystemVaultWriter::new(vault_dir.clone());
+            let mem_dir = tmp.path().join("mem");
+            std::fs::create_dir_all(&mem_dir).unwrap();
+            let writer = FilesystemMemWriter::new(mem_dir.clone());
             let pin = SchemaRef::new(schema_name, schema_version);
-            let mount = folder_mount_with_pin("v", vault_dir, pin);
+            let mount = folder_mount_with_pin("v", mem_dir, pin);
             let mut engine = Engine::from_mounts_with_schemas_dir(
-                vec![(mount, Box::new(writer) as Box<dyn VaultBackend>)],
+                vec![(mount, Box::new(writer) as Box<dyn MemBackend>)],
                 Some(&schemas_dir),
             )
             .expect("engine with custom schema constructs");
@@ -3779,7 +3779,7 @@ community:
             let target = engine
                 .create_entity(
                     CreateEntityArgs {
-                        vault: "v".to_string(),
+                        mem: "v".to_string(),
                         title: "Target".to_string(),
                         entity_type: "doc".to_string(),
                         sections: IndexMap::from_iter([(
@@ -3801,7 +3801,7 @@ community:
             let source = engine
                 .create_entity(
                     CreateEntityArgs {
-                        vault: "v".to_string(),
+                        mem: "v".to_string(),
                         title: "Source".to_string(),
                         entity_type: "doc".to_string(),
                         sections,
@@ -3870,7 +3870,7 @@ community:
             let target = engine
                 .create_entity(
                     CreateEntityArgs {
-                        vault: "v".to_string(),
+                        mem: "v".to_string(),
                         title: "Target".to_string(),
                         entity_type: "doc".to_string(),
                         sections: IndexMap::from_iter([(
@@ -3889,7 +3889,7 @@ community:
             let source = engine
                 .create_entity(
                     CreateEntityArgs {
-                        vault: "v".to_string(),
+                        mem: "v".to_string(),
                         title: "Source".to_string(),
                         entity_type: "doc".to_string(),
                         sections: IndexMap::from_iter([(
@@ -3989,7 +3989,7 @@ community:
             let err = engine
                 .create_entity(
                     CreateEntityArgs {
-                        vault: "v".to_string(),
+                        mem: "v".to_string(),
                         title: "Source".to_string(),
                         entity_type: "doc".to_string(),
                         sections,
@@ -4022,16 +4022,16 @@ community:
         }
 
         /// Tier-2 body wiki-link with a non-conformant
-        /// vault prefix refuses with the distinct `InvalidVaultName`
-        /// (wire code `INVALID_VAULT_NAME`) — vaults are fixed
+        /// mem prefix refuses with the distinct `InvalidMemName`
+        /// (wire code `INVALID_MEM_NAME`) — mems are fixed
         /// identifiers, not free-form text the agent can slugify, so
         /// the recovery path is different from `InvalidWikiLinkTarget`.
         #[test]
-        fn tier_two_bad_vault_prefix_refuses_with_distinct_envelope() {
+        fn tier_two_bad_mem_prefix_refuses_with_distinct_envelope() {
             let manifest = r#"name: aliased
 version: 0.1.0
 description: alias-synthesis fixture
-when_to_use: tests prove strict vault-prefix grammar at mutation entry
+when_to_use: tests prove strict mem-prefix grammar at mutation entry
 types:
   - doc
 relationships:
@@ -4059,12 +4059,12 @@ community:
             let mut sections: IndexMap<String, String> = IndexMap::new();
             sections.insert(
                 "body".to_string(),
-                "see [[Other Vault:foo]]".to_string(),
+                "see [[Other Mem:foo]]".to_string(),
             );
             let err = engine
                 .create_entity(
                     CreateEntityArgs {
-                        vault: "v".to_string(),
+                        mem: "v".to_string(),
                         title: "Source".to_string(),
                         entity_type: "doc".to_string(),
                         sections,
@@ -4078,12 +4078,12 @@ community:
                 )
                 .unwrap_err();
             match err {
-                EngineError::InvalidWikiLinkVault { raw, section, .. } => {
-                    assert_eq!(raw, "Other Vault");
+                EngineError::InvalidWikiLinkMem { raw, section, .. } => {
+                    assert_eq!(raw, "Other Mem");
                     assert_eq!(section, "body");
                 }
                 other => panic!(
-                    "Tier-2 bad vault prefix must refuse with InvalidWikiLinkVault; got {other:?}"
+                    "Tier-2 bad mem prefix must refuse with InvalidWikiLinkMem; got {other:?}"
                 ),
             }
         }
@@ -4092,8 +4092,8 @@ community:
         /// containing the ambiguous `[[<segments>/<segments>--<slug>]]`
         /// form refuses with `InvalidWikiLinkTarget` carrying the
         /// colon-form (`<prefix>:<slug>`) as `suggested`. Pre-fix the
-        /// dash form silently produced a same-vault phantom stub at
-        /// slug `team/sub-vault--target`, losing the agent's intent.
+        /// dash form silently produced a same-mem phantom stub at
+        /// slug `team/sub-mem--target`, losing the agent's intent.
         #[test]
         fn hierarchical_dash_form_body_link_refuses_with_colon_suggestion() {
             let manifest = r#"name: aliased
@@ -4127,12 +4127,12 @@ community:
             let mut sections: IndexMap<String, String> = IndexMap::new();
             sections.insert(
                 "body".to_string(),
-                "see [[team/sub-vault--target]]".to_string(),
+                "see [[team/sub-mem--target]]".to_string(),
             );
             let err = engine
                 .create_entity(
                     CreateEntityArgs {
-                        vault: "v".to_string(),
+                        mem: "v".to_string(),
                         title: "Source".to_string(),
                         entity_type: "doc".to_string(),
                         sections,
@@ -4153,8 +4153,8 @@ community:
                     link_source,
                     ..
                 } => {
-                    assert_eq!(raw, "team/sub-vault--target");
-                    assert_eq!(suggested.as_deref(), Some("team/sub-vault:target"));
+                    assert_eq!(raw, "team/sub-mem--target");
+                    assert_eq!(suggested.as_deref(), Some("team/sub-mem:target"));
                     assert_eq!(section, "body");
                     assert_eq!(link_source, "body_link");
                 }
@@ -4185,17 +4185,17 @@ community:
 
     fn repair_engine() -> (TempDir, Engine) {
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().to_path_buf();
+        let mem_dir = tmp.path().to_path_buf();
         std::fs::write(
-            vault_dir.join("anchor.md"),
+            mem_dir.join("anchor.md"),
             "---\ntype: spec\ncreated_date: 2026-01-15\nlast_modified: 2026-04-12\n---\n# Anchor\n\n## Identity\n\nTarget.\n\n## Purpose\n\nRelation target.\n",
         )
         .unwrap();
-        std::fs::write(vault_dir.join("drifted.md"), DRIFTED_MD).unwrap();
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+        std::fs::write(mem_dir.join("drifted.md"), DRIFTED_MD).unwrap();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
         let engine = Engine::from_mounts(vec![(
-            folder_mount("specs", vault_dir),
-            Box::new(writer) as Box<dyn VaultBackend>,
+            folder_mount("specs", mem_dir),
+            Box::new(writer) as Box<dyn MemBackend>,
         )])
         .unwrap();
         (tmp, engine)

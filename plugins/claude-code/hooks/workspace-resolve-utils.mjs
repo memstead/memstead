@@ -1,24 +1,24 @@
-// Shared workspace / vault-dir resolution for the path-aware hooks
+// Shared workspace / mem-dir resolution for the path-aware hooks
 // (guard-entity-edit, guard-entity-bash, check-realization, inject-context).
 //
 // Engine-true: the engine locates its workspace by walking up from the
 // current directory for `.memstead/workspace.toml`. These hooks mirror
 // that, then read the engine-managed mount list
-// (`.memstead/state/mounts.json`) to find which vaults are
+// (`.memstead/state/mounts.json`) to find which mems are
 // *folder*-backed — the only backend whose entities
 // are working-tree files a direct Write/Edit or shell command could touch.
-// Git-branch vaults hold entities as git blobs on per-vault branches and
-// archive vaults as sealed zip entries; neither has anything on disk for a
+// Git-branch mems hold entities as git blobs on per-mem branches and
+// archive mems as sealed zip entries; neither has anything on disk for a
 // file-path guard to protect, so they contribute no directories.
 //
-// This replaces the previous `--vault`-arg scan, which fell back to a
+// This replaces the previous `--mem`-arg scan, which fell back to a
 // `./specs` directory that no real workspace produces (the engine binaries
-// accept no `--vault` flag and find their workspace by cwd) — leaving the
+// accept no `--mem` flag and find their workspace by cwd) — leaving the
 // guards fail-open on every workspace the plugin bootstraps.
 
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve, join, dirname } from 'node:path';
-import { findAllVaultDirs } from './guard-entity-edit-utils.mjs';
+import { findAllMemDirs } from './guard-entity-edit-utils.mjs';
 
 const STORE_DIR = '.memstead';
 
@@ -54,13 +54,13 @@ export function findWorkspaceRoot(startDir) {
 }
 
 /**
- * Absolute on-disk directories of folder-backed vaults, read from the
+ * Absolute on-disk directories of folder-backed mems, read from the
  * engine-managed mount list. Git-branch and archive mounts are skipped —
  * their entities are not working-tree files.
  * @param {string} workspaceRoot - Absolute workspace root.
- * @returns {string[]} Absolute vault directories (possibly empty).
+ * @returns {string[]} Absolute mem directories (possibly empty).
  */
-export function readFolderVaultDirs(workspaceRoot) {
+export function readFolderMemDirs(workspaceRoot) {
   let mounts;
   try {
     const mountsPath = join(workspaceRoot, STORE_DIR, 'state', 'mounts.json');
@@ -71,7 +71,7 @@ export function readFolderVaultDirs(workspaceRoot) {
   const dirs = [];
   for (const m of Array.isArray(mounts) ? mounts : []) {
     if (m?.storage?.type !== 'folder') continue;
-    const rel = m.storage.path ?? m.storage.dir ?? m.vault;
+    const rel = m.storage.path ?? m.storage.dir ?? m.mem;
     if (!rel) continue;
     dirs.push(resolve(workspaceRoot, rel));
   }
@@ -104,21 +104,21 @@ export function mcpConfigCdTargets(mcpConfig, cwd) {
 }
 
 /**
- * Resolve the vault directories a path-aware hook should guard.
- *   1. Explicit `--vault <path>` args in .mcp.json (legacy / hand-authored
+ * Resolve the mem directories a path-aware hook should guard.
+ *   1. Explicit `--mem <path>` args in .mcp.json (legacy / hand-authored
  *      configs); resolved against cwd.
  *   2. Otherwise locate workspace roots — both `cd <dir>` launch targets in
  *      .mcp.json (workspaces living in a subdirectory) and a walk-up from cwd
  *      (hooks invoked from inside the workspace) — and return the union of
- *      folder-backed vault dirs from each workspace's engine mount list.
+ *      folder-backed mem dirs from each workspace's engine mount list.
  * Returns absolute paths. Empty when no workspace resolves or no workspace has
- * folder-backed vaults (e.g. a git-branch workspace, where there are no
+ * folder-backed mems (e.g. a git-branch workspace, where there are no
  * working-tree entity files to guard).
  * @param {{ cwd?: string, mcpConfig?: object|null }} [opts]
  * @returns {string[]}
  */
-export function resolveVaultDirs({ cwd = process.cwd(), mcpConfig = null } = {}) {
-  const explicit = findAllVaultDirs(mcpConfig);
+export function resolveMemDirs({ cwd = process.cwd(), mcpConfig = null } = {}) {
+  const explicit = findAllMemDirs(mcpConfig);
   if (explicit.length > 0) return explicit.map((p) => resolve(cwd, p));
 
   const roots = new Set();
@@ -130,7 +130,7 @@ export function resolveVaultDirs({ cwd = process.cwd(), mcpConfig = null } = {})
 
   const dirs = [];
   for (const root of roots) {
-    for (const d of readFolderVaultDirs(root)) {
+    for (const d of readFolderMemDirs(root)) {
       if (!dirs.includes(d)) dirs.push(d);
     }
   }
@@ -142,10 +142,10 @@ export function resolveVaultDirs({ cwd = process.cwd(), mcpConfig = null } = {})
  * @param {string} [cwd]
  * @returns {string[]}
  */
-export function resolveVaultDirsFromCwd(cwd = process.cwd()) {
+export function resolveMemDirsFromCwd(cwd = process.cwd()) {
   let mcpConfig = null;
   try {
     mcpConfig = JSON.parse(readFileSync(join(cwd, '.mcp.json'), 'utf-8'));
   } catch { /* no/.malformed .mcp.json — walk-up resolution still applies */ }
-  return resolveVaultDirs({ cwd, mcpConfig });
+  return resolveMemDirs({ cwd, mcpConfig });
 }

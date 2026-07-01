@@ -7,10 +7,10 @@
 //! rebuild both adapters construct (and are read into) this single
 //! [`Provenance`] record so `memstead_changes_since` returns
 //! identically-shaped values regardless of which backend serves the
-//! queried vault.
+//! queried mem.
 //!
 //! This module ships the **shape**; the read/write wiring on each
-//! backend lands as that backend gains a [`crate::backend::VaultBackend`]
+//! backend lands as that backend gains a [`crate::backend::MemBackend`]
 //! implementation. The existing `crate::filesystem::changelog`
 //! `ChangeEntry` / `MutationKind` pair stays as the folder backend's
 //! on-disk encoder until that wiring lands; the two are kept in
@@ -63,12 +63,12 @@ impl ProvenanceKind {
     }
 }
 
-/// One mutation event in a vault's provenance log.
+/// One mutation event in a mem's provenance log.
 ///
 /// Constructed at the engine boundary (one per MCP mutating tool, one
 /// per CLI mutation, one per drift-flush) and handed to the backend
-/// via [`crate::backend::VaultBackend::append_provenance`]. Read back
-/// out via [`crate::backend::VaultBackend::read_provenance`] for
+/// via [`crate::backend::MemBackend::append_provenance`]. Read back
+/// out via [`crate::backend::MemBackend::read_provenance`] for
 /// `memstead_changes_since`.
 ///
 /// The folder backend persists this as a JSONL line under
@@ -80,7 +80,7 @@ impl ProvenanceKind {
 pub struct Provenance {
     pub timestamp: SystemTime,
     pub kind: ProvenanceKind,
-    /// Vault-relative entity id (`vault:slug`), or `None` for batch
+    /// Mem-relative entity id (`mem:slug`), or `None` for batch
     /// mutations that touch multiple entities.
     pub entity: Option<String>,
     pub actor: Actor,
@@ -90,11 +90,11 @@ pub struct Provenance {
     /// want an empty note pass `None`.
     pub note: Option<String>,
     /// Correlation id that ties every commit produced by a single
-    /// logical operation (notably a multi-vault `memstead_rename`) to one
+    /// logical operation (notably a multi-mem `memstead_rename`) to one
     /// another. `Some(id)` on every commit a single logical call
     /// produced; `None` on legacy or single-call mutations that don't
     /// participate in correlation. Consumers that don't know the
-    /// field continue working — it's purely additive. Single-vault
+    /// field continue working — it's purely additive. Single-mem
     /// mutations may carry an id too (a logical-op with one commit),
     /// or `None` — both are valid wire shapes.
     pub logical_operation_id: Option<String>,

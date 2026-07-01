@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-description = "MCP server for Memstead — exposes the typed entity-graph engine over JSON-RPC stdio. Default build produces the full `memstead-mcp` binary (multi-vault, git-backed); `--no-default-features` builds the lean folder + archive surface."
+description = "MCP server for Memstead — exposes the typed entity-graph engine over JSON-RPC stdio. Default build produces the full `memstead-mcp` binary (multi-mem, git-backed); `--no-default-features` builds the lean folder + archive surface."
 
 [[bin]]
 name = "memstead-mcp"
@@ -36,12 +36,12 @@ memstead-git-branch = { workspace = true, features = ["test-support"] }
 tempfile.workspace = true
 
 [features]
-# `vault-repo` is the default: it pulls in the git-branch backend
+# `mem-repo` is the default: it pulls in the git-branch backend
 # (`memstead-git-branch` + the full `memstead-engine` extension) and
-# compiles the multi-vault `McpServer` plus its support modules —
+# compiles the multi-mem `McpServer` plus its support modules —
 # yielding the full `memstead-mcp` binary external integrations invoke.
 # `--no-default-features` drops all of that, producing the lean
 # folder + archive `FilesystemMcpServer`. The lean build is a CI /
 # wasm-adjacent config and dependency-hygiene guard, not a shipped product.
-default = ["vault-repo"]
-vault-repo = ["dep:memstead-engine", "dep:memstead-git-branch", "dep:semver"]
+default = ["mem-repo"]
+mem-repo = ["dep:memstead-engine", "dep:memstead-git-branch", "dep:semver"]

@@ -28,7 +28,7 @@ Present a compact dashboard:
 From `memstead_health`: node count (`total_nodes`), edge count (`total_edges`), stub count (`stub_nodes`), and edge type distribution (`edge_types`) as a small table.
 
 ### 2. Directory
-Group entities from `memstead_search` `hits[]` (structured response) by vault. For each entity show: `id` [level]: identity
+Group entities from `memstead_search` `hits[]` (structured response) by mem. For each entity show: `id` [level]: identity
 
 ### 3. Health
 - **Stubs** (unresolved links): list them, or "None ✓"

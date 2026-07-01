@@ -44,29 +44,29 @@ pub struct Inputs {
 }
 
 /// Subcommands compiled only into the full `memstead` build (the
-/// `vault-repo` feature). `xtask` links `memstead-cli` with that
+/// `mem-repo` feature). `xtask` links `memstead-cli` with that
 /// feature on, so `Cli::command()` yields the full set; the lean
 /// surface is that set minus these. Kept in sync with the
-/// `#[cfg(feature = "vault-repo")]` variants in
+/// `#[cfg(feature = "mem-repo")]` variants in
 /// `memstead-cli/src/cli.rs`.
-const CLI_VAULT_REPO_ONLY: &[&str] = &[
+const CLI_MEM_REPO_ONLY: &[&str] = &[
     "install",
     "batch-update",
     "recover",
-    "vault",
-    "vault-repo",
+    "mem",
+    "mem-repo",
     "workspace",
 ];
 
 pub fn collect_inputs(udl_source: &str, wasm_methods: Vec<String>) -> Inputs {
     let (mcp_basis, mcp_pro) = mcp::tool_names();
-    // One CLI crate now. `xtask` links it with `vault-repo` on, so
+    // One CLI crate now. `xtask` links it with `mem-repo` on, so
     // `Cli::command()` is the full surface; the lean surface drops the
-    // vault-repo-only subcommands.
+    // mem-repo-only subcommands.
     let cli_pro = subcommand_names(&memstead_cli::cli::Cli::command());
     let cli_basis: Vec<String> = cli_pro
         .iter()
-        .filter(|n| !CLI_VAULT_REPO_ONLY.contains(&n.as_str()))
+        .filter(|n| !CLI_MEM_REPO_ONLY.contains(&n.as_str()))
         .cloned()
         .collect();
     let uniffi_methods = udl::engine_methods(udl_source)

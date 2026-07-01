@@ -1,7 +1,7 @@
 //! HTTP client for the Memstead registry (memstead.io).
 //!
 //! Thin wrapper around `reqwest::blocking` that knows the two routes
-//! the CLI consumes (`POST /api/publish`, `GET /api/vault/...`) plus
+//! the CLI consumes (`POST /api/publish`, `GET /api/mem/...`) plus
 //! the typed error envelope (`ApiError`) the registry emits.
 
 use std::io::Read;
@@ -163,7 +163,7 @@ pub fn publish(
     }
 }
 
-/// Outcome of a successful `DELETE /api/vault/<scope>/<name>`.
+/// Outcome of a successful `DELETE /api/mem/<scope>/<name>`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct UnpublishResponse {
     #[allow(dead_code)]
@@ -172,7 +172,7 @@ pub struct UnpublishResponse {
     pub name: String,
 }
 
-/// DELETE a vault from the registry. Same auth + error envelope as
+/// DELETE a mem from the registry. Same auth + error envelope as
 /// publish, so reuse `PublishError` for the failure shape.
 pub fn unpublish(
     client: &reqwest::blocking::Client,
@@ -182,7 +182,7 @@ pub fn unpublish(
     token: &str,
 ) -> Result<UnpublishResponse, PublishError> {
     let url = format!(
-        "{base}/api/vault/{scope}/{name}",
+        "{base}/api/mem/{scope}/{name}",
         scope = url_segment(scope),
         name = url_segment(name),
     );
@@ -208,7 +208,7 @@ pub fn unpublish(
     }
 }
 
-/// Admin-only takedown of a published vault: same `DELETE` route as
+/// Admin-only takedown of a published mem: same `DELETE` route as
 /// `unpublish`, but with the `x-memstead-takedown` header carrying the
 /// statement-of-reasons notice reference. The server selects the
 /// takedown path (deny-list the bytes, tombstone, burn the name)
@@ -222,7 +222,7 @@ pub fn admin_takedown(
     token: &str,
 ) -> Result<UnpublishResponse, PublishError> {
     let url = format!(
-        "{base}/api/vault/{scope}/{name}",
+        "{base}/api/mem/{scope}/{name}",
         scope = url_segment(scope),
         name = url_segment(name),
     );
@@ -290,7 +290,7 @@ pub fn admin_denylist(
 
 /// GET a sealed `.mem` archive from the registry, streaming into
 /// `dest_path`. Returns the number of bytes written.
-pub fn download_vault(
+pub fn download_mem(
     client: &reqwest::blocking::Client,
     base: &str,
     scope: &str,
@@ -298,7 +298,7 @@ pub fn download_vault(
     dest_path: &Path,
 ) -> Result<u64, DownloadError> {
     let url = format!(
-        "{base}/api/vault/{scope}/{name}.mem",
+        "{base}/api/mem/{scope}/{name}.mem",
         scope = url_segment(scope),
         name = url_segment(name),
     );

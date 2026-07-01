@@ -13,22 +13,22 @@ four-pillar framing of a software-project graph:
 
 The graph's value comes from type diversity. A graph dominated by any
 one type — especially `spec` — has lost the structure the schema offers.
-See [`vault-template.json`](./vault-template.json) in this package for the
-per-vault scaffolding — the instance write-guidance keys to fill.
+See [`mem-template.json`](./mem-template.json) in this package for the
+per-mem scaffolding — the instance write-guidance keys to fill.
 
 This schema ships **built into the engine** — every install resolves
 `software@0.1.0` with no copy step. Pin it directly when you create a
-code vault (below); fork it only when you want to customize the
+code mem (below); fork it only when you want to customize the
 vocabulary.
 
 ## How to use
 
-1. Create the code vault pinned to the built-in schema, filling the
-   instance write-guidance keys the package's `vault-template.json`
+1. Create the code mem pinned to the built-in schema, filling the
+   instance write-guidance keys the package's `mem-template.json`
    lists (here, `stack`):
 
    ```
-   memstead vault init <your-vault> --schema software@0.1.0 \
+   memstead mem init <your-mem> --schema software@0.1.0 \
        --write-guidance '{"stack": "<one paragraph naming the runtime stack, datastores, deployment target>"}'
    ```
 
@@ -39,7 +39,7 @@ vocabulary.
 2. Create entities via MCP:
 
    ```
-   memstead_create vault=<your-vault> entity_type=decision title="…" sections={…}
+   memstead_create mem=<your-mem> entity_type=decision title="…" sections={…}
    ```
 
 ## Types
@@ -98,14 +98,14 @@ Common default-schema edges in this schema: `PART_OF`, `DEPENDS_ON`,
 
 ## Evolving the schema
 
-Bump `version` in `schema.yaml` on any shape change. Vaults pin exact
-versions (`software@0.1.0`), so an existing vault keeps working against
+Bump `version` in `schema.yaml` on any shape change. Mems pin exact
+versions (`software@0.1.0`), so an existing mem keeps working against
 the old version until its config is updated. Ship new versions
 alongside old ones rather than editing in place.
 
 ## Reference
 
-- Per-vault scaffolding (instance write guidance): [`vault-template.json`](./vault-template.json)
+- Per-mem scaffolding (instance write guidance): [`mem-template.json`](./mem-template.json)
 - Authoring guide: [dev/authoring-schemas.md](../../../dev/authoring-schemas.md)
 - Built-in schema this one draws from: [engine/crates/memstead-schema/builtins/schemas/default/](../../../engine/crates/memstead-schema/builtins/schemas/default/)
 - Fully commented example of a minimal schema: [engine/crates/memstead-schema/examples/minimal/](../../../engine/crates/memstead-schema/examples/minimal/)

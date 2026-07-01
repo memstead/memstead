@@ -1,10 +1,10 @@
-//! Markdown and vault-archive export.
+//! Markdown and mem-archive export.
 //!
 //! `export_markdown` regenerates entity files from the store, only writing
 //! files that actually changed (incremental). Compares generated markdown
 //! against the current file on disk byte-for-byte.
 //!
-//! `export_vault` zips a vault directory into a portable `.mem` archive
+//! `export_mem` zips a mem directory into a portable `.mem` archive
 //! with deterministic output (sorted entries, fixed mtime).
 
 use std::fs;
@@ -14,14 +14,14 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use memstead_schema::{
-    ARCHIVE_CONFIG_PATH, ARCHIVE_SCHEMA_PREFIX, TypeDefinition, VaultConfig,
+    ARCHIVE_CONFIG_PATH, ARCHIVE_SCHEMA_PREFIX, TypeDefinition, MemConfig,
     collect_schema_source, published_config_from, type_by_name,
 };
 #[cfg(feature = "git-object-storage")]
-use memstead_base::ops::VaultExportBytes;
+use memstead_base::ops::MemExportBytes;
 use zip::{CompressionMethod, DateTime, write::SimpleFileOptions};
 
-use super::{ExportResult, VaultExportResult};
+use super::{ExportResult, MemExportResult};
 use crate::entity::generator::generate_markdown;
 use crate::entity::writer::write_entity;
 use crate::store::Store;
@@ -34,7 +34,7 @@ use crate::storage::git_tree::{BranchReadError, read_branch_blobs};
 pub fn export_markdown(
     store: &Store,
     default_schema: &TypeDefinition,
-    vault_dir: &Path,
+    mem_dir: &Path,
     schema_filter: Option<&str>,
 ) -> ExportResult {
     let mut written = 0;
@@ -58,14 +58,14 @@ pub fn export_markdown(
         let generated = generate_markdown(entity, schema);
 
         // Compare with file on disk
-        let full_path = vault_dir.join(&entity.file_path);
+        let full_path = mem_dir.join(&entity.file_path);
         let needs_write = match std::fs::read_to_string(&full_path) {
             Ok(existing) => existing != generated,
             Err(_) => true, // File doesn't exist — write it
         };
 
         if needs_write {
-            let _ = write_entity(entity, vault_dir, schema);
+            let _ = write_entity(entity, mem_dir, schema);
             written += 1;
         } else {
             unchanged += 1;
@@ -84,7 +84,7 @@ pub fn export_entity(
     store: &Store,
     id: &crate::entity::EntityId,
     default_schema: &TypeDefinition,
-    vault_dir: &Path,
+    mem_dir: &Path,
 ) -> Result<ExportResult, String> {
     let entity = store
         .get(id)
@@ -98,14 +98,14 @@ pub fn export_entity(
     let schema: &TypeDefinition = resolved.as_deref().unwrap_or(default_schema);
     let generated = generate_markdown(entity, schema);
 
-    let full_path = vault_dir.join(&entity.file_path);
+    let full_path = mem_dir.join(&entity.file_path);
     let needs_write = match std::fs::read_to_string(&full_path) {
         Ok(existing) => existing != generated,
         Err(_) => true,
     };
 
     if needs_write {
-        write_entity(entity, vault_dir, schema).map_err(|e| e.to_string())?;
+        write_entity(entity, mem_dir, schema).map_err(|e| e.to_string())?;
         Ok(ExportResult {
             written: 1,
             unchanged: 0,
@@ -121,51 +121,51 @@ pub fn export_entity(
 }
 
 // ---------------------------------------------------------------------------
-// Vault (.mem) archive export
+// Mem (.mem) archive export
 // ---------------------------------------------------------------------------
 
-// Stage 1.7-2: VaultExportError and the folder-shaped `export_vault`
+// Stage 1.7-2: MemExportError and the folder-shaped `export_mem`
 // live in `memstead-base::ops::export`. Re-export here so downstream
 // callers that imported via the workspace path keep working. The
-// gix-bound `export_vault_from_branch` (below) stays here.
-pub use memstead_base::ops::export::{VaultExportError, export_vault};
+// gix-bound `export_mem_from_branch` (below) stays here.
+pub use memstead_base::ops::export::{MemExportError, export_mem};
 
 #[cfg(feature = "git-object-storage")]
-fn branch_read_into_vault_export(e: BranchReadError) -> VaultExportError {
-    VaultExportError::BranchRead(e.to_string())
+fn branch_read_into_mem_export(e: BranchReadError) -> MemExportError {
+    MemExportError::BranchRead(e.to_string())
 }
 
-/// Export a vault as a portable `.mem` archive by walking the
-/// `vault-repo-git` branch tree directly — the git-object storage path's
-/// counterpart to [`export_vault`]. No working tree is consulted; all
-/// `.md` content comes from the per-vault branch tip, sorted by path
+/// Export a mem as a portable `.mem` archive by walking the
+/// `mem-repo-git` branch tree directly — the git-object storage path's
+/// counterpart to [`export_mem`]. No working tree is consulted; all
+/// `.md` content comes from the per-mem branch tip, sorted by path
 /// for deterministic archive bytes.
 ///
-/// Wire format matches [`export_vault`]:
+/// Wire format matches [`export_mem`]:
 /// `.memstead/config.json` carries the whitelist projection,
 /// `.memstead/schema/` embeds the pinned schema's source files, and the rest of the
-/// archive carries vault-relative `.md` blobs.
+/// archive carries mem-relative `.md` blobs.
 ///
-/// `vault_repo_gitdir` is the multi-root repo (`<workspace>/vault-repo/.git/`).
-/// The function reads vault content from `refs/heads/<vault_name>` and
+/// `mem_repo_gitdir` is the multi-root repo (`<workspace>/mem-repo/.git/`).
+/// The function reads mem content from `refs/heads/<mem_name>` and
 /// (for now) resolves the schema via [`collect_schema_source`] using
 /// `workspace_root` + `workspace_schemas_dir` — the same chain used by
 /// the disk path. Reading schemas from `refs/heads/__MEMSTEAD:schemas/<name>/`
 /// is a follow-up; the current chain still satisfies the wire-format
 /// contract because schemas are workspace-tracked alongside the cache.
 #[cfg(feature = "git-object-storage")]
-pub fn export_vault_from_branch(
-    vault_repo_gitdir: &Path,
-    vault_name: &str,
-    config: &VaultConfig,
+pub fn export_mem_from_branch(
+    mem_repo_gitdir: &Path,
+    mem_name: &str,
+    config: &MemConfig,
     output_path: &Path,
     workspace_root: Option<&Path>,
     workspace_schemas_dir: Option<&Path>,
     provenance_bytes: Option<&[u8]>,
-) -> Result<VaultExportResult, VaultExportError> {
-    let out = export_vault_from_branch_to_bytes(
-        vault_repo_gitdir,
-        vault_name,
+) -> Result<MemExportResult, MemExportError> {
+    let out = export_mem_from_branch_to_bytes(
+        mem_repo_gitdir,
+        mem_name,
         config,
         workspace_root,
         workspace_schemas_dir,
@@ -180,47 +180,47 @@ pub fn export_vault_from_branch(
     fs::write(output_path, &out.bytes)?;
 
     let size_bytes = fs::metadata(output_path)?.len();
-    Ok(VaultExportResult {
+    Ok(MemExportResult {
         archive_path: output_path.display().to_string(),
         name: out.name,
         version: out.version,
         entity_count: out.entity_count,
         size_bytes,
-        dangling_cross_vault_edges: out.dangling_cross_vault_edges,
+        dangling_cross_mem_edges: out.dangling_cross_mem_edges,
     })
 }
 
-/// Byte-shaped counterpart to [`export_vault_from_branch`]. Same wire
+/// Byte-shaped counterpart to [`export_mem_from_branch`]. Same wire
 /// format, same determinism contract, no on-disk artifact — the bytes
-/// are the output. The engine's `export_vault_to_bytes` dispatches to
+/// are the output. The engine's `export_mem_to_bytes` dispatches to
 /// this for git-branch mounts via the [`memstead_base::GitBranchOps`]
 /// bundle so byte-snapshot consumers (the bridge, future WASM
 /// replicas) treat folder and git-branch backends symmetrically.
 #[cfg(feature = "git-object-storage")]
-pub fn export_vault_from_branch_to_bytes(
-    vault_repo_gitdir: &Path,
-    vault_name: &str,
-    config: &VaultConfig,
+pub fn export_mem_from_branch_to_bytes(
+    mem_repo_gitdir: &Path,
+    mem_name: &str,
+    config: &MemConfig,
     workspace_root: Option<&Path>,
     workspace_schemas_dir: Option<&Path>,
     provenance_bytes: Option<&[u8]>,
-) -> Result<VaultExportBytes, VaultExportError> {
-    let published = published_config_from(config, vault_name)?;
+) -> Result<MemExportBytes, MemExportError> {
+    let published = published_config_from(config, mem_name)?;
     let config_bytes = canonical_json(&published)
-        .map_err(|e| VaultExportError::Canonical(e.to_string()))?
+        .map_err(|e| MemExportError::Canonical(e.to_string()))?
         .into_bytes();
 
     let schema_files =
         collect_schema_source(workspace_root, workspace_schemas_dir, &published.schema)?;
 
     let ref_name = match workspace_root {
-        Some(root) => crate::vault_repo_config::branch_ref_for_vault(root, vault_name),
-        None => format!("refs/heads/{vault_name}"),
+        Some(root) => crate::mem_repo_config::branch_ref_for_mem(root, mem_name),
+        None => format!("refs/heads/{mem_name}"),
     };
-    let blobs = match read_branch_blobs(vault_repo_gitdir, &ref_name) {
+    let blobs = match read_branch_blobs(mem_repo_gitdir, &ref_name) {
         Ok(b) => b,
         Err(BranchReadError::BranchMissing { .. }) => Vec::new(),
-        Err(e) => return Err(branch_read_into_vault_export(e)),
+        Err(e) => return Err(branch_read_into_mem_export(e)),
     };
     let md_entries: Vec<(String, Vec<u8>)> = blobs
         .into_iter()
@@ -233,7 +233,7 @@ pub fn export_vault_from_branch_to_bytes(
         Vec::with_capacity(2 + schema_files.len() + md_entries.len());
     all_entries.push((ARCHIVE_CONFIG_PATH.to_string(), config_bytes));
     // Embed the engine-sourced authoring-provenance payload (commit-trailer
-    // rationale, keyed by vault-relative path). The engine walks the log;
+    // rationale, keyed by mem-relative path). The engine walks the log;
     // this assembler only places the member.
     if let Some(prov) = provenance_bytes {
         all_entries.push((
@@ -266,23 +266,23 @@ pub fn export_vault_from_branch_to_bytes(
         zip.finish()?;
     }
 
-    // Surface every cross-vault
-    // edge whose target won't travel inside this single-vault archive —
+    // Surface every cross-mem
+    // edge whose target won't travel inside this single-mem archive —
     // exactly what `install` will refuse on. Detected via the shared
-    // predicate so export and install agree. Cross-vault-only (tolerant
+    // predicate so export and install agree. Cross-mem-only (tolerant
     // parse): the git-branch export keeps its lenient-on-drift posture;
-    // this adds the missing cross-vault signal so the failure no longer
+    // this adds the missing cross-mem signal so the failure no longer
     // surfaces silently at install time on the share boundary.
-    let dangling_cross_vault_edges =
-        memstead_base::validator::collect_dangling_cross_vault_edges_from_bytes(&buf)
-            .map_err(|e| VaultExportError::ArchiveValidationFailed(e.to_string()))?;
+    let dangling_cross_mem_edges =
+        memstead_base::validator::collect_dangling_cross_mem_edges_from_bytes(&buf)
+            .map_err(|e| MemExportError::ArchiveValidationFailed(e.to_string()))?;
 
-    Ok(VaultExportBytes {
+    Ok(MemExportBytes {
         bytes: buf,
         name: published.name.clone(),
         version: published.version.to_string(),
         entity_count,
-        dangling_cross_vault_edges,
+        dangling_cross_mem_edges,
     })
 }
 
@@ -321,7 +321,7 @@ mod tests {
             id: EntityId::new("specs", name),
             title: name.into(),
             entity_type: "spec".into(),
-            vault: "specs".into(),
+            mem: "specs".into(),
             file_path: format!("{name}.md"),
             metadata,
             sections,
@@ -355,7 +355,7 @@ mod tests {
             id: EntityId::new("memos", name),
             title: name.into(),
             entity_type: "memo".into(),
-            vault: "memos".into(),
+            mem: "memos".into(),
             file_path: format!("{name}.md"),
             metadata,
             sections,
@@ -392,7 +392,7 @@ mod tests {
             id: EntityId::new("assertions", name),
             title: name.into(),
             entity_type: "assertion".into(),
-            vault: "assertions".into(),
+            mem: "assertions".into(),
             file_path: format!("{name}.md"),
             metadata,
             sections,
@@ -467,9 +467,9 @@ mod tests {
         assert_eq!(r2.unchanged, 1);
     }
 
-    // ---- vault archive export ---------------------------------------------
+    // ---- mem archive export ---------------------------------------------
 
-    fn write_vault_fixture(dir: &Path) {
+    fn write_mem_fixture(dir: &Path) {
         std::fs::create_dir_all(dir.join(".memstead")).unwrap();
         // Author-side config with every flavor of author-only field the
         // whitelist projection has to strip. If the export pipeline ever
@@ -477,7 +477,7 @@ mod tests {
         // below catches it.
         std::fs::write(
             dir.join(".memstead/config.json"),
-            r#"{"version":"1.2.0","description":"AWS patterns","schema":"default@1.0.0","writeGuidance":{"context":"secret"},"mediums":{},"projections":{},"readVaults":{}}"#,
+            r#"{"version":"1.2.0","description":"AWS patterns","schema":"default@1.0.0","writeGuidance":{"context":"secret"},"mediums":{},"projections":{},"readMems":{}}"#,
         ).unwrap();
         std::fs::write(
             dir.join("api-gateway.md"),
@@ -493,18 +493,18 @@ mod tests {
     }
 
     #[test]
-    fn export_vault_writes_whitelisted_config_and_markdown() {
+    fn export_mem_writes_whitelisted_config_and_markdown() {
         let tmp = TempDir::new().unwrap();
-        let vault = tmp.path().join("aws-patterns");
-        write_vault_fixture(&vault);
+        let mem = tmp.path().join("aws-patterns");
+        write_mem_fixture(&mem);
 
-        let config = memstead_schema::load_and_validate(&vault).unwrap();
+        let config = memstead_schema::load_and_validate(&mem).unwrap();
         let out = tmp.path().join("aws-patterns.mem");
 
-        // `vault` acts as the source root for schema resolution. It has no
+        // `mem` acts as the source root for schema resolution. It has no
         // `.memstead/schemas/` dir of its own, so the default pin falls through
         // to the embedded builtin.
-        let result = export_vault(&vault, &config, &out, None, None).unwrap();
+        let result = export_mem(&mem, &config, &out, None, None).unwrap();
         assert_eq!(result.name, "aws-patterns");
         assert_eq!(result.version, "1.2.0");
         assert_eq!(result.entity_count, 2);
@@ -548,7 +548,7 @@ mod tests {
             .read_to_end(&mut config_bytes)
             .unwrap();
         let written: serde_json::Value = serde_json::from_slice(&config_bytes).unwrap();
-        assert_eq!(written["format"], memstead_schema::PUBLISHED_VAULT_FORMAT);
+        assert_eq!(written["format"], memstead_schema::PUBLISHED_MEM_FORMAT);
         assert_eq!(written["name"], "aws-patterns");
         assert_eq!(written["version"], "1.2.0");
         assert_eq!(written["description"], "AWS patterns");
@@ -563,7 +563,7 @@ mod tests {
             "projections",
             "rules",
             "publish",
-            "readVaults",
+            "readMems",
             "vcs",
             "language",
             "community",
@@ -577,45 +577,45 @@ mod tests {
     }
 
     #[test]
-    fn export_vault_is_deterministic() {
+    fn export_mem_is_deterministic() {
         let tmp = TempDir::new().unwrap();
-        let vault = tmp.path().join("aws-patterns");
-        write_vault_fixture(&vault);
+        let mem = tmp.path().join("aws-patterns");
+        write_mem_fixture(&mem);
 
-        let config = memstead_schema::load_and_validate(&vault).unwrap();
+        let config = memstead_schema::load_and_validate(&mem).unwrap();
         let out1 = tmp.path().join("a.mem");
         let out2 = tmp.path().join("b.mem");
 
-        export_vault(&vault, &config, &out1, None, None).unwrap();
+        export_mem(&mem, &config, &out1, None, None).unwrap();
         std::thread::sleep(std::time::Duration::from_millis(10));
-        export_vault(&vault, &config, &out2, None, None).unwrap();
+        export_mem(&mem, &config, &out2, None, None).unwrap();
 
         let a = std::fs::read(&out1).unwrap();
         let b = std::fs::read(&out2).unwrap();
-        assert_eq!(a, b, "vault archive exports must be byte-stable");
+        assert_eq!(a, b, "mem archive exports must be byte-stable");
     }
 
     #[test]
-    fn export_vault_errors_when_version_missing() {
+    fn export_mem_errors_when_version_missing() {
         let tmp = TempDir::new().unwrap();
-        let vault = tmp.path().join("no-version");
-        std::fs::create_dir_all(vault.join(".memstead")).unwrap();
+        let mem = tmp.path().join("no-version");
+        std::fs::create_dir_all(mem.join(".memstead")).unwrap();
         std::fs::write(
-            vault.join(".memstead/config.json"),
+            mem.join(".memstead/config.json"),
             r#"{"schema":"default@1.0.0","mediums":{},"projections":{}}"#,
         )
         .unwrap();
         std::fs::write(
-            vault.join("a.md"),
+            mem.join("a.md"),
             "---\ntype: spec\ncreated_date: 2026-01-15\nlast_modified: 2026-04-12\nlevel: M0\n---\n# A\n\n## Identity\n\nA.\n",
         ).unwrap();
 
-        let config = memstead_schema::load_and_validate(&vault).unwrap();
+        let config = memstead_schema::load_and_validate(&mem).unwrap();
         let out = tmp.path().join("out.mem");
-        let err = export_vault(&vault, &config, &out, None, None).unwrap_err();
+        let err = export_mem(&mem, &config, &out, None, None).unwrap_err();
         assert!(matches!(
             err,
-            VaultExportError::Convert(memstead_schema::PublishConversionError::MissingVersion)
+            MemExportError::Convert(memstead_schema::PublishConversionError::MissingVersion)
         ));
         // The whitelist projection fails before any archive bytes are
         // written, so the output path must stay untouched.
@@ -637,45 +637,45 @@ mod tests {
         assert_eq!(result.written, 1); // Only spec entity
     }
 
-    // ---- vault archive export from git-object branch ----------------------
+    // ---- mem archive export from git-object branch ----------------------
 
     #[cfg(feature = "git-object-storage")]
     mod git_object_export {
         use super::*;
-        use crate::storage::git_tree::GitTreeVaultWriter;
-        use crate::storage::VaultWriter;
+        use crate::storage::git_tree::GitTreeMemWriter;
+        use crate::storage::MemWriter;
         use crate::vcs::CommitContext;
 
-        /// Build a fresh `vault-repo-git`-style bare repo and a side-by-side
-        /// vault config dir so [`export_vault_from_branch`] has both inputs
+        /// Build a fresh `mem-repo-git`-style bare repo and a side-by-side
+        /// mem config dir so [`export_mem_from_branch`] has both inputs
         /// it needs: the gitdir + ref to walk, plus a disk-resident
-        /// `<vault>/.memstead/config.json` for the metadata projection.
-        fn seed_vault_branch(
+        /// `<mem>/.memstead/config.json` for the metadata projection.
+        fn seed_mem_branch(
             workspace: &Path,
-            vault_name: &str,
+            mem_name: &str,
             entries: &[(&str, &str)],
         ) -> (PathBuf, PathBuf) {
-            let gitdir = workspace.join("vault-repo").join(".git");
+            let gitdir = workspace.join("mem-repo").join(".git");
             std::fs::create_dir_all(&gitdir).unwrap();
             gix::init_bare(&gitdir).unwrap();
 
-            // Per-vault on-disk config dir mirrors the cutover layout —
+            // Per-mem on-disk config dir mirrors the cutover layout —
             // schemas resolve through workspace paths regardless of the
-            // adapter, and the engine still loads VaultConfig from disk.
-            let vault_dir = workspace.join(vault_name);
-            std::fs::create_dir_all(vault_dir.join(".memstead")).unwrap();
+            // adapter, and the engine still loads MemConfig from disk.
+            let mem_dir = workspace.join(mem_name);
+            std::fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
             std::fs::write(
-                vault_dir.join(".memstead/config.json"),
+                mem_dir.join(".memstead/config.json"),
                 r#"{"version":"1.0.0","description":"fixture","schema":"default@1.0.0"}"#,
             )
             .unwrap();
 
-            // Commit each entry to `refs/heads/<vault_name>` via the
+            // Commit each entry to `refs/heads/<mem_name>` via the
             // production write path so the test exercises the same tree
             // shape `memstead-cli`'s mutations would produce.
-            let writer = GitTreeVaultWriter::new(
+            let writer = GitTreeMemWriter::new(
                 gitdir.clone(),
-                format!("refs/heads/{vault_name}"),
+                format!("refs/heads/{mem_name}"),
             );
             for (rel, content) in entries {
                 writer
@@ -685,13 +685,13 @@ mod tests {
             writer
                 .commit("seed", &CommitContext::internal())
                 .unwrap();
-            (gitdir, vault_dir)
+            (gitdir, mem_dir)
         }
 
         #[test]
         fn publish_from_branch_produces_correct_tarball() {
             let tmp = TempDir::new().unwrap();
-            let (gitdir, vault_dir) = seed_vault_branch(
+            let (gitdir, mem_dir) = seed_mem_branch(
                 tmp.path(),
                 "fixture",
                 &[
@@ -706,9 +706,9 @@ mod tests {
                 ],
             );
 
-            let config = memstead_schema::load_and_validate(&vault_dir).unwrap();
+            let config = memstead_schema::load_and_validate(&mem_dir).unwrap();
             let out = tmp.path().join("fixture.mem");
-            let result = export_vault_from_branch(
+            let result = export_mem_from_branch(
                 &gitdir,
                 "fixture",
                 &config,
@@ -756,7 +756,7 @@ mod tests {
             // the plan's identifier; assertion targets the wire-format
             // rule.
             let tmp = TempDir::new().unwrap();
-            let (gitdir, vault_dir) = seed_vault_branch(
+            let (gitdir, mem_dir) = seed_mem_branch(
                 tmp.path(),
                 "fixture",
                 &[(
@@ -765,9 +765,9 @@ mod tests {
                 )],
             );
 
-            let config = memstead_schema::load_and_validate(&vault_dir).unwrap();
+            let config = memstead_schema::load_and_validate(&mem_dir).unwrap();
             let out = tmp.path().join("fixture.mem");
-            export_vault_from_branch(&gitdir, "fixture", &config, &out, None, None, None).unwrap();
+            export_mem_from_branch(&gitdir, "fixture", &config, &out, None, None, None).unwrap();
 
             let file = std::fs::File::open(&out).unwrap();
             let mut archive = zip::ZipArchive::new(file).unwrap();
@@ -794,7 +794,7 @@ mod tests {
             // primitive and the path variant is now a thin write
             // wrapper. Guards against future drift between the two.
             let tmp = TempDir::new().unwrap();
-            let (gitdir, vault_dir) = seed_vault_branch(
+            let (gitdir, mem_dir) = seed_mem_branch(
                 tmp.path(),
                 "fixture",
                 &[(
@@ -802,11 +802,11 @@ mod tests {
                     "---\ntype: spec\ncreated_date: 2026-01-01\nlast_modified: 2026-01-01\nlevel: M0\n---\n# A\n\n## Identity\n\nA.\n",
                 )],
             );
-            let config = memstead_schema::load_and_validate(&vault_dir).unwrap();
+            let config = memstead_schema::load_and_validate(&mem_dir).unwrap();
             let out = tmp.path().join("fixture.mem");
-            export_vault_from_branch(&gitdir, "fixture", &config, &out, None, None, None).unwrap();
+            export_mem_from_branch(&gitdir, "fixture", &config, &out, None, None, None).unwrap();
             let path_bytes = std::fs::read(&out).unwrap();
-            let byte_bytes = export_vault_from_branch_to_bytes(
+            let byte_bytes = export_mem_from_branch_to_bytes(
                 &gitdir, "fixture", &config, None, None, None,
             )
             .unwrap()
@@ -817,11 +817,11 @@ mod tests {
         #[test]
         fn byte_export_validates_and_hydrates_via_engine() {
             // The bridge consumer's contract: bytes out of
-            // `export_vault_to_bytes` validate against `extract_entries`
+            // `export_mem_to_bytes` validate against `extract_entries`
             // standalone and hydrate into a new engine with the same
-            // read surface for the exported vault.
+            // read surface for the exported mem.
             let tmp = TempDir::new().unwrap();
-            let (gitdir, vault_dir) = seed_vault_branch(
+            let (gitdir, mem_dir) = seed_mem_branch(
                 tmp.path(),
                 "fixture",
                 &[(
@@ -829,8 +829,8 @@ mod tests {
                     "---\ntype: spec\ncreated_date: 2026-01-01\nlast_modified: 2026-01-01\nlevel: M0\n---\n# Alpha\n\n## Identity\n\nA round-trip seed.\n",
                 )],
             );
-            let config = memstead_schema::load_and_validate(&vault_dir).unwrap();
-            let bytes = export_vault_from_branch_to_bytes(
+            let config = memstead_schema::load_and_validate(&mem_dir).unwrap();
+            let bytes = export_mem_from_branch_to_bytes(
                 &gitdir, "fixture", &config, None, None, None,
             )
             .unwrap()
@@ -855,7 +855,7 @@ mod tests {
         #[test]
         fn publish_re_runs_yield_byte_identical_tarballs() {
             let tmp = TempDir::new().unwrap();
-            let (gitdir, vault_dir) = seed_vault_branch(
+            let (gitdir, mem_dir) = seed_mem_branch(
                 tmp.path(),
                 "fixture",
                 &[(
@@ -864,13 +864,13 @@ mod tests {
                 )],
             );
 
-            let config = memstead_schema::load_and_validate(&vault_dir).unwrap();
+            let config = memstead_schema::load_and_validate(&mem_dir).unwrap();
             let out1 = tmp.path().join("a.mem");
             let out2 = tmp.path().join("b.mem");
-            export_vault_from_branch(&gitdir, "fixture", &config, &out1, None, None, None).unwrap();
+            export_mem_from_branch(&gitdir, "fixture", &config, &out1, None, None, None).unwrap();
             // Sleep a few ms to defeat any wallclock-based determinism leak.
             std::thread::sleep(std::time::Duration::from_millis(10));
-            export_vault_from_branch(&gitdir, "fixture", &config, &out2, None, None, None).unwrap();
+            export_mem_from_branch(&gitdir, "fixture", &config, &out2, None, None, None).unwrap();
             let a = std::fs::read(&out1).unwrap();
             let b = std::fs::read(&out2).unwrap();
             assert_eq!(

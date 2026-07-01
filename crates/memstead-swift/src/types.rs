@@ -14,7 +14,7 @@
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone)]
-pub struct VaultInit {
+pub struct MemInit {
     pub name: String,
     pub dir: String,
     pub schema_name: String,
@@ -39,7 +39,7 @@ pub struct Query {
 #[derive(Debug, Clone)]
 pub struct SearchScope {
     pub query: Option<Query>,
-    pub vault: Option<String>,
+    pub mem: Option<String>,
     pub entity_type: Option<String>,
     pub limit: Option<u32>,
     pub offset: Option<u32>,
@@ -89,7 +89,7 @@ pub struct Entity {
     pub id: String,
     pub title: String,
     pub entity_type: String,
-    pub vault: String,
+    pub mem: String,
     pub file_path: String,
     pub metadata: Vec<MetadataEntry>,
     pub sections: Vec<Section>,
@@ -115,10 +115,10 @@ pub struct Stats {
     pub edge_count: u64,
     pub edge_types: Vec<EdgeTypeCount>,
     pub community_count: u64,
-    pub vault_count: u64,
+    pub mem_count: u64,
     pub types_in_use: Vec<String>,
-    pub writable_vaults: Vec<String>,
-    pub read_vaults: Vec<String>,
+    pub writable_mems: Vec<String>,
+    pub read_mems: Vec<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -162,7 +162,7 @@ pub struct HealthSummary {
 pub struct SearchHit {
     pub id: String,
     pub title: String,
-    pub vault: String,
+    pub mem: String,
     pub entity_type: String,
     pub stub: bool,
     pub score: f32,
@@ -246,7 +246,7 @@ pub struct ReloadResult {
 }
 
 // ---------------------------------------------------------------------------
-// Per-vault commit-delta + agent-notes feed (UniFFI catch-up to MCP/CLI).
+// Per-mem commit-delta + agent-notes feed (UniFFI catch-up to MCP/CLI).
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone)]
@@ -276,7 +276,7 @@ pub enum ChangeEnvelope {
 
 #[derive(Debug, Clone)]
 pub struct CommitNote {
-    pub vault: String,
+    pub mem: String,
     pub sha: String,
     pub subject: String,
     pub tool_verb: Option<String>,
@@ -290,7 +290,7 @@ pub struct CommitNote {
 
 #[derive(Debug, Clone)]
 pub struct ChangesReport {
-    pub vault: String,
+    pub mem: String,
     pub since: String,
     pub head: String,
     pub changes: Vec<ChangeEnvelope>,
@@ -298,7 +298,7 @@ pub struct ChangesReport {
 
 #[derive(Debug, Clone)]
 pub struct AgentNotesReport {
-    pub vault: String,
+    pub mem: String,
     pub since: String,
     pub head: String,
     pub notes: Vec<CommitNote>,
@@ -332,46 +332,46 @@ pub struct ParseRecoveryReport {
 }
 
 // ---------------------------------------------------------------------------
-// Vault lifecycle (create / delete / set-schema / set-version). Mirrors the
-// `memstead_vault_*` MCP contract onto the in-process binding so the macOS
-// roster manages vaults through the engine — no vault-repo mutation (git
+// Mem lifecycle (create / delete / set-schema / set-version). Mirrors the
+// `memstead_mem_*` MCP contract onto the in-process binding so the macOS
+// roster manages mems through the engine — no mem-repo mutation (git
 // ops, raw `config.json` / `.md` writes, `.git` introspection) originates in
 // Swift. Export-as-`.mem` is a separate, different-shaped task and is not
 // bound here.
 // ---------------------------------------------------------------------------
 
-/// Input for [`crate::Engine::create_vault`]. Mirrors `VaultCreateParams`
+/// Input for [`crate::Engine::create_mem`]. Mirrors `MemCreateParams`
 /// minus the agent-only knobs the desktop operator never sets
 /// (`recovery`, `include_schema`, `write_guidance`); those keep their
 /// engine defaults. The optional VCS override is split into two scalar
 /// fields rather than a nested record so the UniFFI shape stays flat;
 /// set both or neither.
 #[derive(Debug, Clone)]
-pub struct VaultCreateRequest {
-    /// Full hierarchical identifier (`"sub-vault"` or `"team/sub-vault"`).
+pub struct MemCreateRequest {
+    /// Full hierarchical identifier (`"sub-mem"` or `"team/sub-mem"`).
     pub name: String,
     /// Absolute path, or relative to the workspace root.
     pub location: String,
     /// Schema pin, `name@x.y.z` (e.g. `default@1.0.0`).
     pub schema: String,
     /// Gitdir of an optional VCS layout override, relative to the new
-    /// vault's root. `None` uses the engine's isolated default. When set,
+    /// mem's root. `None` uses the engine's isolated default. When set,
     /// pair with `vcs_worktree`.
     pub vcs_gitdir: Option<String>,
     /// Worktree of the optional VCS layout override. Ignored unless
-    /// `vcs_gitdir` is also set; defaults to `"."` (vault root).
+    /// `vcs_gitdir` is also set; defaults to `"."` (mem root).
     pub vcs_worktree: Option<String>,
     /// Provenance note recorded in the seed commit (≤280 chars).
     pub note: Option<String>,
-    /// When `true`, skip the `[[vault_management.create]]` allowlist gate
+    /// When `true`, skip the `[[mem_management.create]]` allowlist gate
     /// (operator intent). `false` runs the gate so workspace policy
     /// refusals surface as typed errors.
     pub operator_mode: bool,
 }
 
-/// Outcome of [`crate::Engine::create_vault`].
+/// Outcome of [`crate::Engine::create_mem`].
 #[derive(Debug, Clone)]
-pub struct VaultCreateOutcome {
+pub struct MemCreateOutcome {
     pub name: String,
     pub location: String,
     /// Canonical settled schema pin (`name@x.y.z`).
@@ -379,14 +379,14 @@ pub struct VaultCreateOutcome {
     /// Seed-commit cursor for `changes_since` polling; empty on the
     /// reattach branch (paired with a warning).
     pub seed_commit_sha: String,
-    /// Non-fatal findings (e.g. `VAULT_REATTACHED_AFTER_UNREGISTER`),
+    /// Non-fatal findings (e.g. `MEM_REATTACHED_AFTER_UNREGISTER`),
     /// rendered to display strings.
     pub warnings: Vec<String>,
 }
 
-/// Outcome of [`crate::Engine::delete_vault`].
+/// Outcome of [`crate::Engine::delete_mem`].
 #[derive(Debug, Clone)]
-pub struct VaultDeleteOutcome {
+pub struct MemDeleteOutcome {
     pub name: String,
     pub deleted_from_router: bool,
     pub files_deleted: bool,
@@ -394,12 +394,12 @@ pub struct VaultDeleteOutcome {
     pub warnings: Vec<String>,
 }
 
-/// Outcome of [`crate::Engine::set_vault_schema`]. Flattens the engine's
+/// Outcome of [`crate::Engine::set_mem_schema`]. Flattens the engine's
 /// `SetSchemaOutcome`; `findings` carries the ids of entities not yet
 /// integral against the target while a migration is in progress.
 #[derive(Debug, Clone)]
-pub struct VaultSchemaOutcome {
-    pub vault: String,
+pub struct MemSchemaOutcome {
+    pub mem: String,
     /// Settled pin after this call (`name@x.y.z`).
     pub schema_pin: String,
     /// In-flight migration target while a migration is in progress.
@@ -411,10 +411,10 @@ pub struct VaultSchemaOutcome {
     pub findings: Vec<String>,
 }
 
-/// Outcome of [`crate::Engine::set_vault_version`].
+/// Outcome of [`crate::Engine::set_mem_version`].
 #[derive(Debug, Clone)]
-pub struct VaultVersionOutcome {
-    pub vault: String,
+pub struct MemVersionOutcome {
+    pub mem: String,
     /// Previous version, or `None` when the config carried none.
     pub old_version: Option<String>,
     pub new_version: String,
@@ -423,66 +423,66 @@ pub struct VaultVersionOutcome {
     pub warnings: Vec<String>,
 }
 
-/// A cross-vault edge in an exported slice whose target won't travel
-/// inside the single-vault archive — `install` rejects the archive for
-/// each. Mirrors `memstead_base::validator::DanglingCrossVaultEdge`.
+/// A cross-mem edge in an exported slice whose target won't travel
+/// inside the single-mem archive — `install` rejects the archive for
+/// each. Mirrors `memstead_base::validator::DanglingCrossMemEdge`.
 #[derive(Debug, Clone)]
-pub struct DanglingCrossVaultEdge {
+pub struct DanglingCrossMemEdge {
     /// Archive-relative path of the entity carrying the edge.
     pub entity_path: String,
-    /// Fully-qualified target id (e.g. `other-vault--thing`).
+    /// Fully-qualified target id (e.g. `other-mem--thing`).
     pub target_id: String,
-    /// The target's vault (the vault that won't travel in this archive).
-    pub target_vault: String,
+    /// The target's mem (the mem that won't travel in this archive).
+    pub target_mem: String,
 }
 
-/// Backend kind of a mounted vault. Mirrors the four `MountStorage`
+/// Backend kind of a mounted mem. Mirrors the four `MountStorage`
 /// variants the engine distinguishes; the roster renders each distinctly
 /// and gates which mutating affordances it offers (archive = sealed,
 /// in-memory = ephemeral).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum VaultBackendKind {
+pub enum MemBackendKind {
     GitBranch,
     Folder,
     Archive,
     InMemory,
 }
 
-/// One row of the workspace vault roster — the per-mount facts the home
+/// One row of the workspace mem roster — the per-mount facts the home
 /// sidebar renders, sourced entirely from the engine so no Swift-side
 /// reconstruction can disagree with engine truth. `backend` and
 /// `writable` come straight from the mount; `schema_pin` is the mount's
-/// settled pin; `entity_count` is the live non-stub count for the vault;
+/// settled pin; `entity_count` is the live non-stub count for the mem;
 /// `drifted` is the engine's read-only drift probe (git-branch only).
 #[derive(Debug, Clone)]
-pub struct VaultRosterEntry {
-    pub vault: String,
-    pub backend: VaultBackendKind,
+pub struct MemRosterEntry {
+    pub mem: String,
+    pub backend: MemBackendKind,
     /// `true` when the engine reports the mount writable; archive mounts
     /// (and any read-only mount) report `false`.
     pub writable: bool,
     /// Settled schema pin (`name@x.y.z`), or `None` when the mount
     /// asserts none.
     pub schema_pin: Option<String>,
-    /// Live non-stub entity count for this vault.
+    /// Live non-stub entity count for this mem.
     pub entity_count: u64,
-    /// A sibling writer has advanced the vault-repo past the engine's
+    /// A sibling writer has advanced the mem-repo past the engine's
     /// cached head. Always `false` for non-git-branch backends; clears
     /// after the app re-reads through the engine (`reload`).
     pub drifted: bool,
 }
 
-/// Outcome of [`crate::Engine::export_vault`]. Mirrors
-/// `memstead_base::ops::VaultExportResult`; the archive is written to the
+/// Outcome of [`crate::Engine::export_mem`]. Mirrors
+/// `memstead_base::ops::MemExportResult`; the archive is written to the
 /// requested `output_path` and the metadata describes what landed.
 #[derive(Debug, Clone)]
-pub struct VaultExportOutcome {
+pub struct MemExportOutcome {
     /// Filesystem path the `.mem` archive was written to.
     pub archive_path: String,
     pub name: String,
     pub version: String,
     pub entity_count: u64,
     pub size_bytes: u64,
-    /// Dangling cross-vault edges; empty for a self-contained export.
-    pub dangling_cross_vault_edges: Vec<DanglingCrossVaultEdge>,
+    /// Dangling cross-mem edges; empty for a self-contained export.
+    pub dangling_cross_mem_edges: Vec<DanglingCrossMemEdge>,
 }

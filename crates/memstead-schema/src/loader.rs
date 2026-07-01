@@ -140,35 +140,35 @@ pub enum SchemaLoadError {
         reserved_keys: Vec<String>,
     },
 
-    /// A `cross_vault_relationships:` entry's `to_schema:` field is
-    /// not a bare schema name. Cross-vault eligibility is name-based —
+    /// A `cross_mem_relationships:` entry's `to_schema:` field is
+    /// not a bare schema name. Cross-mem eligibility is name-based —
     /// versioned (`software@1.0.0`) and range (`software@^1.0`) forms
     /// are refused so a version component can never silently re-enter
     /// the eligibility path.
     #[error(
-        "cross_vault_relationships[].to_schema '{value}' {reason} — expected a bare schema name (e.g. 'software', not 'software@1.0.0')"
+        "cross_mem_relationships[].to_schema '{value}' {reason} — expected a bare schema name (e.g. 'software', not 'software@1.0.0')"
     )]
-    InvalidCrossVaultToSchema { value: String, reason: String },
+    InvalidCrossMemToSchema { value: String, reason: String },
 
-    /// Two `cross_vault_relationships:` entries declare the same
+    /// Two `cross_mem_relationships:` entries declare the same
     /// `to_schema:`. A schema declares each target-schema at most once
     /// — the second entry would otherwise silently shadow or split
     /// the vocabulary.
-    #[error("cross_vault_relationships declares duplicate to_schema '{to_schema}'")]
-    DuplicateCrossVaultToSchema { to_schema: String },
+    #[error("cross_mem_relationships declares duplicate to_schema '{to_schema}'")]
+    DuplicateCrossMemToSchema { to_schema: String },
 
-    /// A `cross_vault_relationships[].definitions[*].source_types` entry
+    /// A `cross_mem_relationships[].definitions[*].source_types` entry
     /// references a type name not declared in the source schema's
     /// `types` list. Source types belong to the source schema's
     /// namespace; unknown names raise this error at load time.
     /// (Target types are accepted as opaque strings — they belong to
     /// the target schema's namespace, which is not in scope here.)
     #[error(
-        "cross_vault_relationships[to_schema='{to_schema}'].definitions[name='{relationship}'].source_types references unknown type '{reference}'. Declared types: [{}]. {}",
+        "cross_mem_relationships[to_schema='{to_schema}'].definitions[name='{relationship}'].source_types references unknown type '{reference}'. Declared types: [{}]. {}",
         declared.join(", "),
         format_suggestion(reference, declared)
     )]
-    UndeclaredCrossVaultSourceType {
+    UndeclaredCrossMemSourceType {
         to_schema: String,
         relationship: String,
         reference: String,
@@ -386,39 +386,39 @@ fn load_with_context(
         }
     }
 
-    // Cross-vault relationships: validate `to_schema` is a bare schema
-    // name (cross-vault eligibility is name-based — a version suffix or
+    // Cross-mem relationships: validate `to_schema` is a bare schema
+    // name (cross-mem eligibility is name-based — a version suffix or
     // range refuses), refuse duplicate target schemas, and cross-check
     // `source_types` against the source schema's types. `target_types`
     // are accepted as opaque strings — they belong to the target
     // schema's namespace, which is out of scope at source-schema load
     // time. The target schema may not even be present in the workspace
-    // when the source schema loads (and cross-vault declarations
+    // when the source schema loads (and cross-mem declarations
     // targeting absent schemas are legitimate for portable library
     // schemas).
     let mut seen_to_schemas: HashSet<String> = HashSet::new();
-    for entry in &manifest.cross_vault_relationships {
+    for entry in &manifest.cross_mem_relationships {
         if entry.to_schema.contains('@') {
-            return Err(SchemaLoadError::InvalidCrossVaultToSchema {
+            return Err(SchemaLoadError::InvalidCrossMemToSchema {
                 value: entry.to_schema.clone(),
                 reason: "must not carry a version or range".into(),
             });
         }
         if let Err(reason) = name_shape(&entry.to_schema) {
-            return Err(SchemaLoadError::InvalidCrossVaultToSchema {
+            return Err(SchemaLoadError::InvalidCrossMemToSchema {
                 value: entry.to_schema.clone(),
                 reason: reason.into(),
             });
         }
         if !seen_to_schemas.insert(entry.to_schema.clone()) {
-            return Err(SchemaLoadError::DuplicateCrossVaultToSchema {
+            return Err(SchemaLoadError::DuplicateCrossMemToSchema {
                 to_schema: entry.to_schema.clone(),
             });
         }
         for def in &entry.definitions {
             for t in &def.source_types {
                 if !manifest.types.iter().any(|d| d == t) {
-                    return Err(SchemaLoadError::UndeclaredCrossVaultSourceType {
+                    return Err(SchemaLoadError::UndeclaredCrossMemSourceType {
                         to_schema: entry.to_schema.clone(),
                         relationship: def.name.clone(),
                         reference: t.clone(),
@@ -536,7 +536,7 @@ fn validate_name(name: &str) -> Result<(), SchemaLoadError> {
 }
 
 /// Shared shape rule for schema names — the manifest's own `name:` and
-/// every `cross_vault_relationships[].to_schema` follow the same
+/// every `cross_mem_relationships[].to_schema` follow the same
 /// grammar; the two callers wrap violations in their field-specific
 /// error variants.
 fn name_shape(name: &str) -> Result<(), &'static str> {

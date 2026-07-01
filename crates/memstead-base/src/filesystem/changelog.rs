@@ -1,6 +1,6 @@
-//! JSONL changelog at `.memstead/changes.jsonl` for filesystem vaults.
+//! JSONL changelog at `.memstead/changes.jsonl` for filesystem mems.
 //!
-//! filesystem vaults have no commit history, so the agent's `note` parameter and
+//! filesystem mems have no commit history, so the agent's `note` parameter and
 //! the per-mutation provenance trail (timestamp, mutation type, entity
 //! id, actor) lands here instead. Append-only; one line per mutation;
 //! the file is created lazily on first append.
@@ -10,7 +10,7 @@
 //! Each line is a JSON object terminated by `\n`:
 //!
 //! ```json
-//! {"ts":"2026-05-08T15:42:13.001Z","kind":"create","entity":"vault:slug","actor":"agent","note":"first draft"}
+//! {"ts":"2026-05-08T15:42:13.001Z","kind":"create","entity":"mem:slug","actor":"agent","note":"first draft"}
 //! ```
 //!
 //! - `ts` — RFC 3339 timestamp with millisecond precision, always UTC
@@ -18,7 +18,7 @@
 //! - `kind` — mutation kind: `create`, `update`, `delete`, `relate`,
 //!   `rename`, or `batch`. Future kinds extend the set; readers should
 //!   tolerate unknown values.
-//! - `entity` — vault-relative entity id (`vault:slug` form), or
+//! - `entity` — mem-relative entity id (`mem:slug` form), or
 //!   `null` for batch mutations that span multiple entities.
 //! - `actor` — caller category from
 //!   [`memstead_base::vcs::Actor::as_trailer`]: `agent`, `cli`, `external`,
@@ -35,7 +35,7 @@
 //! ≤ `PIPE_BUF` (4 KiB on Linux/macOS) appear atomically; the line
 //! shape stays well under that. Concurrent writers from a single
 //! process are serialised by the file's append-mode kernel lock.
-//! Cross-process concurrency is out of scope (filesystem vaults are single-writer
+//! Cross-process concurrency is out of scope (filesystem mems are single-writer
 //! per the plan).
 
 use std::io::Write as _;
@@ -49,7 +49,7 @@ use crate::vcs::{Actor, ClientId};
 /// Conventional path of the changelog inside a workspace root.
 pub fn changelog_path(workspace_root: &Path) -> PathBuf {
     workspace_root
-        .join(crate::vault::VAULT_META_DIR)
+        .join(crate::mem::MEM_META_DIR)
         .join("changes.jsonl")
 }
 
@@ -81,7 +81,7 @@ impl MutationKind {
 
 /// Two enums name the same six mutation classes — one is the legacy
 /// folder-backend on-disk encoder, the other is the backend-neutral
-/// shape consumed by [`crate::backend::VaultBackend`]. Bridge here so
+/// shape consumed by [`crate::backend::MemBackend`]. Bridge here so
 /// callers crossing between the two surfaces don't drift.
 impl From<ProvenanceKind> for MutationKind {
     fn from(k: ProvenanceKind) -> Self {
@@ -113,7 +113,7 @@ impl From<MutationKind> for ProvenanceKind {
 /// engine (criterion 1's wiring) and passed to [`append_change`].
 pub struct ChangeEntry<'a> {
     pub kind: MutationKind,
-    /// Vault-relative entity id, or `None` for batch mutations.
+    /// Mem-relative entity id, or `None` for batch mutations.
     pub entity: Option<&'a str>,
     pub actor: Actor,
     /// Optional caller identity (e.g. `claude-code@2.1.0`).
@@ -122,7 +122,7 @@ pub struct ChangeEntry<'a> {
     /// are treated as absent.
     pub note: Option<&'a str>,
     /// Correlation id linking every commit produced by a single
-    /// logical operation (notably multi-vault `memstead_rename`). `None`
+    /// logical operation (notably multi-mem `memstead_rename`). `None`
     /// for single-call mutations that don't participate in
     /// correlation. Round-trips through the JSONL wire shape; reader
     /// reconstructs the same value on `read_provenance`.
@@ -221,7 +221,7 @@ pub fn append_change_at(
 /// not pull in `chrono` and the underlying `std::time::SystemTime` is
 /// epoch-based.
 ///
-/// Public so the folder-backend [`crate::backend::VaultBackend`] impl
+/// Public so the folder-backend [`crate::backend::MemBackend`] impl
 /// can reuse the same encoder when it constructs cursor strings.
 pub fn format_rfc3339_utc(now: std::time::SystemTime) -> String {
     let dur = now
@@ -236,7 +236,7 @@ pub fn format_rfc3339_utc(now: std::time::SystemTime) -> String {
 /// Inverse of [`format_rfc3339_utc`]. Returns `None` when `s` is not
 /// the exact 24-character `YYYY-MM-DDTHH:MM:SS.mmmZ` shape this
 /// crate emits — round-trip precision is the contract; lenient
-/// parsing is not. Used by the folder-backend `VaultBackend::read_provenance`
+/// parsing is not. Used by the folder-backend `MemBackend::read_provenance`
 /// impl when reconstructing [`crate::provenance::Provenance`] records
 /// from on-disk JSONL lines.
 pub fn parse_rfc3339_utc(s: &str) -> Option<std::time::SystemTime> {

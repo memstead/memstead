@@ -1,8 +1,8 @@
 # Memstead — Vision
 
-Memstead is a schema-agnostic graph engine. A vault keeps a typed model of a chosen subject — its facts, plans, decisions, open questions, or any mix the schema allows. Knowledge graphs are one well-known modal slice; Memstead generalises across all of them.
+Memstead is a schema-agnostic graph engine. A mem keeps a typed model of a chosen subject — its facts, plans, decisions, open questions, or any mix the schema allows. Knowledge graphs are one well-known modal slice; Memstead generalises across all of them.
 
-AI agents are the primary consumers and structured markdown is the storage layer. Every entity is a typed file in git; every mutation goes through the engine's MCP tool surface; every schema and every vault travels as a portable, versioned package.
+AI agents are the primary consumers and structured markdown is the storage layer. Every entity is a typed file in git; every mutation goes through the engine's MCP tool surface; every schema and every mem travels as a portable, versioned package.
 
 This document describes why the engine exists, what it bets on, and where it is going.
 
@@ -47,11 +47,11 @@ The engine stays generic. Specific products go to market separately.
 
 ### Markdown + git as the foundation
 
-Human-readable, git-diffable, no migration tooling, no vendor lock-in, no database to run. Knowledge lives in files the user owns. Workspaces are directories; vaults are typed sub-directories; everything is a regular file behind the API.
+Human-readable, git-diffable, no migration tooling, no vendor lock-in, no database to run. Knowledge lives in files the user owns. Workspaces are directories; mems are typed sub-directories; everything is a regular file behind the API.
 
 ### Three dimensions: state, structure, narrative
 
-Information in a vault lives along three orthogonal dimensions, each with its own storage shape, mutation semantics, and read pattern.
+Information in a mem lives along three orthogonal dimensions, each with its own storage shape, mutation semantics, and read pattern.
 
 **State** — entity content. The current, timeless facts about each thing: a decision's choice and consequences, a spec's purpose, a contract's wire shape. Read via `memstead_entity`; mutated via section-level operations.
 
@@ -65,37 +65,37 @@ The engine's MCP surface and schema rules align with this separation. State is w
 
 ### Commit provenance for history reconstruction
 
-Every vault mutation lands as a native git commit with structured provenance. Author, actor, tool, and client are recorded as message trailers; external disk edits get their own provenance category. A future agent reading `git log` inside a vault can filter reliably — *"the last five edits on this entity all came from the ingest skill"*, *"these bytes appeared outside any agent path on this date"* — without parsing free prose. No PII enters the vault.
+Every mem mutation lands as a native git commit with structured provenance. Author, actor, tool, and client are recorded as message trailers; external disk edits get their own provenance category. A future agent reading `git log` inside a mem can filter reliably — *"the last five edits on this entity all came from the ingest skill"*, *"these bytes appeared outside any agent path on this date"* — without parsing free prose. No PII enters the mem.
 
 ### Schema-agnostic engine, schemas as packages
 
-The engine has no hardcoded entity types. Schemas — a `schema.yaml` manifest plus `types/*.yaml` definitions — are first-class, semver-versioned packages. A vault pins its schema by name; a workspace can share schemas across many vaults; published vault archives embed the pinned schema so they remain self-describing on import. New schemas — for product requirements, customer research, legal compliance, anything — are author-only work, never engine work.
+The engine has no hardcoded entity types. Schemas — a `schema.yaml` manifest plus `types/*.yaml` definitions — are first-class, semver-versioned packages. A mem pins its schema by name; a workspace can share schemas across many mems; published mem archives embed the pinned schema so they remain self-describing on import. New schemas — for product requirements, customer research, legal compliance, anything — are author-only work, never engine work.
 
 This is the foundation for a schema marketplace on memstead.io: domain-specific schemas published, browsed, and installed the way packages are.
 
 ### LLM-first engine, human-first app
 
-The engine, the schema system, the relationship vocabulary, and the MCP interface are designed for LLM agents as the primary author and consumer. The macOS app and human-facing projections (specs to documentation, vault summaries to overviews) are designed for humans. Two layers, two consumer profiles, one shared substrate.
+The engine, the schema system, the relationship vocabulary, and the MCP interface are designed for LLM agents as the primary author and consumer. The macOS app and human-facing projections (specs to documentation, mem summaries to overviews) are designed for humans. Two layers, two consumer profiles, one shared substrate.
 
 ### Two modes of truth
 
-- **Code-bound vaults:** code is the source of truth, specs are an abstraction layer that helps LLMs reason about the codebase. Drift detection and reconcile workflows keep the spec layer current.
-- **Knowledge-only vaults:** the spec *is* the source of truth. There is no other hard reality. Direct authoring; freshness is measured against authorial commitment, not external code.
+- **Code-bound mems:** code is the source of truth, specs are an abstraction layer that helps LLMs reason about the codebase. Drift detection and reconcile workflows keep the spec layer current.
+- **Knowledge-only mems:** the spec *is* the source of truth. There is no other hard reality. Direct authoring; freshness is measured against authorial commitment, not external code.
 
 The engine handles both with the same primitives — what changes is which features carry weight.
 
-### Vault scaling: many small, federated
+### Mem scaling: many small, federated
 
-A vault is sized for one coherent subject — typically 1,000–5,000 entities. Beyond ~10,000, the subject discipline usually breaks: the "subject" has become two or three subjects in one bucket. The architectural answer at higher scale is not a bigger vault but **more vaults connected by cross-vault edges**.
+A mem is sized for one coherent subject — typically 1,000–5,000 entities. Beyond ~10,000, the subject discipline usually breaks: the "subject" has become two or three subjects in one bucket. The architectural answer at higher scale is not a bigger mem but **more mems connected by cross-mem edges**.
 
 Two tiers fall out of this:
 
-- **Working Vault** — folder or git-branch backed, 1k–5k entities, full read/write, agents traverse the whole graph, communities, mutations through MCP. This is what the engine ships today.
-- **Indexed Vault** *(planned, not built)* — read-only at million-entity scale. Agents don't traverse; they query an index. The index is a **derived projection over finished vaults, never a parallel source of truth**: markdown+git stays authoritative, the index is rebuilt from it, and drift is one-directional — rebuild forward, never sync back. It answers questions; it never originates state. Because it is derived, its backing engine (an embedded graph store, Neo4j, a search index) is an interchangeable implementation detail — no lock-in, since truth never lives there. Cross-vault edges from working vaults point into it; full-graph operations (community-detect, full-traverse) are not offered. The use case is "the FDA's structured drug database" or "every paper in PubMed" — knowledge an agent needs to query, not navigate.
+- **Working Mem** — folder or git-branch backed, 1k–5k entities, full read/write, agents traverse the whole graph, communities, mutations through MCP. This is what the engine ships today.
+- **Indexed Mem** *(planned, not built)* — read-only at million-entity scale. Agents don't traverse; they query an index. The index is a **derived projection over finished mems, never a parallel source of truth**: markdown+git stays authoritative, the index is rebuilt from it, and drift is one-directional — rebuild forward, never sync back. It answers questions; it never originates state. Because it is derived, its backing engine (an embedded graph store, Neo4j, a search index) is an interchangeable implementation detail — no lock-in, since truth never lives there. Cross-mem edges from working mems point into it; full-graph operations (community-detect, full-traverse) are not offered. The use case is "the FDA's structured drug database" or "every paper in PubMed" — knowledge an agent needs to query, not navigate.
 
-The federation pattern follows: a workspace mounts dozens of small working vaults plus a handful of indexed vaults; the memstead.io registry indexes published vaults across authorities. The engine's `VaultBackend` trait makes new backend kinds (indexed-archive, remote-fetch, etc.) additive — no engine surgery to add a new tier.
+The federation pattern follows: a workspace mounts dozens of small working mems plus a handful of indexed mems; the memstead.io registry indexes published mems across authorities. The engine's `MemBackend` trait makes new backend kinds (indexed-archive, remote-fetch, etc.) additive — no engine surgery to add a new tier.
 
-This is what "engine is generic, apps come later" means at scale: the same engine drives a personal planning vault (50 entities) and a federated research-knowledge graph (5M entities across 500 vaults). What changes is which backends each mount uses, not the engine's shape.
+This is what "engine is generic, apps come later" means at scale: the same engine drives a personal planning mem (50 entities) and a federated research-knowledge graph (5M entities across 500 mems). What changes is which backends each mount uses, not the engine's shape.
 
 ### What Memstead refuses to become
 
@@ -103,13 +103,13 @@ Three architectural lines are drawn explicitly. Convergence on neighbouring syst
 
 - **No probabilistic reasoning layer.** Confidence and belief modeling are well-trodden territory in academic knowledge graphs. Adding them shifts Memstead from "structured truth with explicit revision" toward "fuzzy inference engine." The optional `confidence` metadata field stays a tag, never a probabilistic substrate.
 - **No swap-out of markdown as primary storage.** Treating markdown + git as one storage option among several — with RDF or property-graph export driving interop — dilutes the bet. Other systems can learn to read markdown; markdown does not need to read like other systems.
-- **No separate database backend as a source of truth.** Git's performance limits will eventually surface. The answer is to push git further (sharding, partial-load, lazy reading) rather than introduce a parallel *authoritative* store. The line: a store that is **written to and kept coherent with the files** is the hybrid that rots — refused. A **derived index, read-only and rebuilt from the files** (see the Indexed Vault tier) is not — it holds no truth git doesn't already hold, so it can be discarded and regenerated at will. Two authoritative stores in one workspace are two systems to keep coherent; an index is downstream of one.
+- **No separate database backend as a source of truth.** Git's performance limits will eventually surface. The answer is to push git further (sharding, partial-load, lazy reading) rather than introduce a parallel *authoritative* store. The line: a store that is **written to and kept coherent with the files** is the hybrid that rots — refused. A **derived index, read-only and rebuilt from the files** (see the Indexed Mem tier) is not — it holds no truth git doesn't already hold, so it can be discarded and regenerated at will. Two authoritative stores in one workspace are two systems to keep coherent; an index is downstream of one.
 
 Each line is a decision against a pull that would otherwise feel reasonable. Naming them explicitly is what keeps the architecture coherent over time.
 
 ### Form over universal fit
 
-The engine has a deliberate form: typed entities in markdown, agent-navigated, git-versioned, vault-scale in the thousands. Some domains fit this form well — codebase architecture, decision records, planning graphs, worldbuilding, PKM. Others fit badly: domains that need probabilistic reasoning, real-time collaboration, web-scale corpora, OLAP-style aggregation, or formal inference over graph topology.
+The engine has a deliberate form: typed entities in markdown, agent-navigated, git-versioned, mem-scale in the thousands. Some domains fit this form well — codebase architecture, decision records, planning graphs, worldbuilding, PKM. Others fit badly: domains that need probabilistic reasoning, real-time collaboration, web-scale corpora, OLAP-style aggregation, or formal inference over graph topology.
 
 Refused domains are not gaps. Every accommodation that loosens the form to fit a new domain dilutes the guarantees the form gives to the domains it already serves. The honest answer to "could the engine serve X?" is sometimes "no, and that is the design."
 
@@ -140,7 +140,7 @@ The whole engine — Rust crates, the MCP server, the `.mem` format/protocol and
 
 - The **macOS app** — a human control-and-oversight surface over the engine, a *free showcase* at launch rather than a monetised flagship.
 - A **private/enterprise registry** — companies managing their own mems on a hosted or self-hosted server (the npm-Enterprise model, sellable because the registry server stays private).
-- **Team features** — collaboration, shared vaults with edit safeguards, organisation-level authority.
+- **Team features** — collaboration, shared mems with edit safeguards, organisation-level authority.
 
 Open-source serves three purposes:
 
@@ -152,23 +152,23 @@ Open-source serves three purposes:
 
 Today, website knowledge is trapped in unstructured HTML. A university has hundreds of pages about research projects, curricula, and faculty expertise — but no AI agent can navigate it systematically. A company documents its APIs, processes, and architecture across wikis and docs — all opaque to AI.
 
-Memstead's authority model opens a path: any domain registers as an authority on memstead.io and publishes structured knowledge graphs under its own scope. The natural extension is that domains *host their own vaults* while memstead.io serves as a federated index — the same relationship GitHub repos have with npm, or websites with search engines.
+Memstead's authority model opens a path: any domain registers as an authority on memstead.io and publishes structured knowledge graphs under its own scope. The natural extension is that domains *host their own mems* while memstead.io serves as a federated index — the same relationship GitHub repos have with npm, or websites with search engines.
 
 ```
 https://mit.edu/.well-known/memstead-authority.json     "we are a memstead authority"
-https://mit.edu/vaults/ml-curriculum.mem             self-hosted vault
+https://mit.edu/mems/ml-curriculum.mem             self-hosted mem
 https://memstead.io/v/mit.edu:cs-dept/ml-curriculum   index entry, links to mit.edu
 ```
 
 `.well-known/memstead-authority.json` becomes a discoverability signal: *this domain has structured, machine-readable knowledge — here is the entry point.* AI agents discovering a domain check for that file and immediately access a navigable knowledge graph instead of scraping HTML.
 
-**Example — a university.** A projection runs against the university website periodically. It extracts structural, timeless knowledge — departments, research areas, degree programmes, faculty expertise, institutional relationships — not events, news, or deadlines. Current information stays on the website; the vault is a durable understanding of what the university *is*.
+**Example — a university.** A projection runs against the university website periodically. It extracts structural, timeless knowledge — departments, research areas, degree programmes, faculty expertise, institutional relationships — not events, news, or deadlines. Current information stays on the website; the mem is a durable understanding of what the university *is*.
 
-The projected graph is published as one or more `.mem` files on the university's own server. The authority file lists them. memstead.io indexes them but holds no copy — downloads go directly to `mit.edu`. When vaults are added or removed, the registry updates.
+The projected graph is published as one or more `.mem` files on the university's own server. The authority file lists them. memstead.io indexes them but holds no copy — downloads go directly to `mit.edu`. When mems are added or removed, the registry updates.
 
 An AI agent researching *"machine-learning programmes in Europe"* hits memstead.io, finds `mit.edu:cs-dept/ml-curriculum`, downloads from `mit.edu`, and has a structured knowledge graph to reason against — no scraping, no hallucination, no token waste on HTML boilerplate.
 
-This turns Memstead from "a registry for sharing knowledge graphs" into "an open standard for how websites make their knowledge accessible to AI." The engine stays the same; the surface area grows from "developers sharing vaults" to "any organisation publishing structured knowledge."
+This turns Memstead from "a registry for sharing knowledge graphs" into "an open standard for how websites make their knowledge accessible to AI." The engine stays the same; the surface area grows from "developers sharing mems" to "any organisation publishing structured knowledge."
 
 ## Known risks
 
@@ -179,6 +179,6 @@ This turns Memstead from "a registry for sharing knowledge graphs" into "an open
 
 ## Where to look next
 
-- Architectural details on cross-vault composition, the projection DAG, and the registry layer: [dev/concepts/composition-layering.md](dev/concepts/composition-layering.md).
+- Architectural details on cross-mem composition, the projection DAG, and the registry layer: [dev/concepts/composition-layering.md](dev/concepts/composition-layering.md).
 - Working rules for contributors and AI agents in this repository: [CLAUDE.md](CLAUDE.md).
 - Engine and registry source: [engine/](engine/).

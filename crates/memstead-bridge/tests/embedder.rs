@@ -1,7 +1,7 @@
 //! Embedder integration test for the bridge HTTP surface.
 //!
 //! A mini axum router mounts the four canonical handlers under a
-//! `/api/vaults/:name/...` path prefix behind a trivial mock-auth
+//! `/api/mems/:name/...` path prefix behind a trivial mock-auth
 //! layer. The test drives each endpoint via `tower::ServiceExt::oneshot`
 //! against an in-memory `Router` and asserts the wire-format / HTTP
 //! contract.
@@ -20,19 +20,19 @@ use axum::http::{Request, StatusCode, header};
 use axum::routing::get;
 use bytes::Bytes;
 use http_body_util::BodyExt;
-use memstead_base::storage::VaultWriter;
+use memstead_base::storage::MemWriter;
 use memstead_base::vcs::CommitContext;
 use memstead_bridge::{
     BridgeState, BuildConfig, CommitEnvelope, commits_handler, events_handler, head_handler,
     search_handler, snapshot_handler, SearchResult,
 };
-use memstead_git_branch::storage::git_tree::GitTreeVaultWriter;
+use memstead_git_branch::storage::git_tree::GitTreeMemWriter;
 use tempfile::TempDir;
 use tokio::sync::Mutex;
 use tower::ServiceExt;
 
 fn init_gitdir(tmp: &TempDir) -> PathBuf {
-    let gitdir = tmp.path().join("vault-repo").join(".git");
+    let gitdir = tmp.path().join("mem-repo").join(".git");
     std::fs::create_dir_all(&gitdir).unwrap();
     gix::init_bare(&gitdir).unwrap();
     gitdir
@@ -45,7 +45,7 @@ fn body(title: &str) -> String {
 }
 
 fn commit(gitdir: &Path, branch: &str, file: &str, content: &str, subject: &str) -> String {
-    let writer = GitTreeVaultWriter::new(
+    let writer = GitTreeMemWriter::new(
         gitdir.to_path_buf(),
         format!("refs/heads/{branch}"),
     );
@@ -59,7 +59,7 @@ fn commit(gitdir: &Path, branch: &str, file: &str, content: &str, subject: &str)
 
 fn engine_with_specs(gitdir: &Path) -> memstead_base::Engine {
     let mount = memstead_base::Mount {
-        vault: "specs".to_string(),
+        mem: "specs".to_string(),
         schema: Some(memstead_schema::SchemaRef::new("default", semver::Version::new(1, 0, 0))),
         storage: memstead_base::MountStorage::GitBranch {
             gitdir: gitdir.to_path_buf(),
@@ -77,17 +77,17 @@ fn engine_with_specs(gitdir: &Path) -> memstead_base::Engine {
     engine
 }
 
-/// Seed an `__MEMSTEAD` ref-branch entry so `Engine::export_vault_to_bytes`
-/// can resolve a `VaultConfig` for the vault. Without this the snapshot
-/// path refuses with `VAULT_CONFIG_INCOMPLETE`.
-fn seed_vault_config(gitdir: &Path) {
-    let writer = GitTreeVaultWriter::new(
+/// Seed an `__MEMSTEAD` ref-branch entry so `Engine::export_mem_to_bytes`
+/// can resolve a `MemConfig` for the mem. Without this the snapshot
+/// path refuses with `MEM_CONFIG_INCOMPLETE`.
+fn seed_mem_config(gitdir: &Path) {
+    let writer = GitTreeMemWriter::new(
         gitdir.to_path_buf(),
         "refs/heads/__MEMSTEAD".to_string(),
     );
     writer
         .write_entity(
-            Path::new("vaults/specs/config.json"),
+            Path::new("mems/specs/config.json"),
             br#"{"schema":"default@1.0.0","version":"1.0.0"}"#,
         )
         .unwrap();
@@ -119,11 +119,11 @@ use axum::response::IntoResponse;
 
 fn build_router(state: BridgeState) -> Router {
     Router::new()
-        .route("/api/vaults/:name/snapshot", get(snapshot_handler))
-        .route("/api/vaults/:name/head", get(head_handler))
-        .route("/api/vaults/:name/commits", get(commits_handler))
-        .route("/api/vaults/:name/events", get(events_handler))
-        .route("/api/vaults/:name/search", get(search_handler))
+        .route("/api/mems/:name/snapshot", get(snapshot_handler))
+        .route("/api/mems/:name/head", get(head_handler))
+        .route("/api/mems/:name/commits", get(commits_handler))
+        .route("/api/mems/:name/events", get(events_handler))
+        .route("/api/mems/:name/search", get(search_handler))
         .layer(axum::middleware::from_fn(mock_auth))
         .with_state(state)
 }
@@ -144,7 +144,7 @@ async fn read_body(response: axum::response::Response) -> Bytes {
 async fn auth_middleware_blocks_unauthenticated_requests() {
     let tmp = TempDir::new().unwrap();
     let gitdir = init_gitdir(&tmp);
-    seed_vault_config(&gitdir);
+    seed_mem_config(&gitdir);
     commit(&gitdir, "specs", "alpha.md", &body("Alpha"), "seed");
     let engine = Arc::new(Mutex::new(engine_with_specs(&gitdir)));
     let state = BridgeState::new(engine);
@@ -153,7 +153,7 @@ async fn auth_middleware_blocks_unauthenticated_requests() {
     let response = app
         .oneshot(
             Request::builder()
-                .uri("/api/vaults/specs/head")
+                .uri("/api/mems/specs/head")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -166,14 +166,14 @@ async fn auth_middleware_blocks_unauthenticated_requests() {
 async fn head_endpoint_returns_current_sha() {
     let tmp = TempDir::new().unwrap();
     let gitdir = init_gitdir(&tmp);
-    seed_vault_config(&gitdir);
+    seed_mem_config(&gitdir);
     let sha = commit(&gitdir, "specs", "alpha.md", &body("Alpha"), "seed");
     let engine = Arc::new(Mutex::new(engine_with_specs(&gitdir)));
     let state = BridgeState::new(engine);
     let app = build_router(state);
 
     let response = app
-        .oneshot(auth_request("/api/vaults/specs/head"))
+        .oneshot(auth_request("/api/mems/specs/head"))
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
@@ -185,14 +185,14 @@ async fn head_endpoint_returns_current_sha() {
 async fn snapshot_endpoint_returns_archive_bytes_and_head_header() {
     let tmp = TempDir::new().unwrap();
     let gitdir = init_gitdir(&tmp);
-    seed_vault_config(&gitdir);
+    seed_mem_config(&gitdir);
     let sha = commit(&gitdir, "specs", "alpha.md", &body("Alpha"), "seed");
     let engine = Arc::new(Mutex::new(engine_with_specs(&gitdir)));
     let state = BridgeState::new(engine);
     let app = build_router(state);
 
     let response = app
-        .oneshot(auth_request("/api/vaults/specs/snapshot"))
+        .oneshot(auth_request("/api/mems/specs/snapshot"))
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
@@ -212,7 +212,7 @@ async fn snapshot_endpoint_returns_archive_bytes_and_head_header() {
     let bytes = read_body(response).await;
     assert!(!bytes.is_empty(), "snapshot body must carry archive bytes");
     // Snapshot hydrates: the bytes feed Engine::from_archive_bytes
-    // and produce an engine with the same vault entity visible.
+    // and produce an engine with the same mem entity visible.
     let hydrated = memstead_base::Engine::from_archive_bytes(bytes.to_vec()).unwrap();
     let alpha = hydrated
         .get_entity(&memstead_base::EntityId::new("specs", "alpha"))
@@ -224,7 +224,7 @@ async fn snapshot_endpoint_returns_archive_bytes_and_head_header() {
 async fn commits_endpoint_returns_chronological_envelopes() {
     let tmp = TempDir::new().unwrap();
     let gitdir = init_gitdir(&tmp);
-    seed_vault_config(&gitdir);
+    seed_mem_config(&gitdir);
     let sha_a = commit(&gitdir, "specs", "alpha.md", &body("Alpha"), "first");
     let sha_b = commit(&gitdir, "specs", "beta.md", &body("Beta"), "second");
     let engine = Arc::new(Mutex::new(engine_with_specs(&gitdir)));
@@ -233,7 +233,7 @@ async fn commits_endpoint_returns_chronological_envelopes() {
 
     let response = app
         .oneshot(auth_request(&format!(
-            "/api/vaults/specs/commits?until={sha_b}"
+            "/api/mems/specs/commits?until={sha_b}"
         )))
         .await
         .unwrap();
@@ -249,7 +249,7 @@ async fn commits_endpoint_returns_chronological_envelopes() {
 async fn commits_endpoint_returns_404_for_unknown_since() {
     let tmp = TempDir::new().unwrap();
     let gitdir = init_gitdir(&tmp);
-    seed_vault_config(&gitdir);
+    seed_mem_config(&gitdir);
     commit(&gitdir, "specs", "alpha.md", &body("Alpha"), "seed");
     let engine = Arc::new(Mutex::new(engine_with_specs(&gitdir)));
     let state = BridgeState::new(engine);
@@ -257,7 +257,7 @@ async fn commits_endpoint_returns_404_for_unknown_since() {
 
     let response = app
         .oneshot(auth_request(
-            "/api/vaults/specs/commits?since=0000000000000000000000000000000000000000",
+            "/api/mems/specs/commits?since=0000000000000000000000000000000000000000",
         ))
         .await
         .unwrap();
@@ -271,7 +271,7 @@ async fn commits_endpoint_returns_404_for_unknown_since() {
 async fn commits_endpoint_returns_409_for_delta_too_large() {
     let tmp = TempDir::new().unwrap();
     let gitdir = init_gitdir(&tmp);
-    seed_vault_config(&gitdir);
+    seed_mem_config(&gitdir);
     let mut last = String::new();
     for i in 0..5 {
         last = commit(
@@ -291,7 +291,7 @@ async fn commits_endpoint_returns_409_for_delta_too_large() {
 
     let response = app
         .oneshot(auth_request(&format!(
-            "/api/vaults/specs/commits?until={last}"
+            "/api/mems/specs/commits?until={last}"
         )))
         .await
         .unwrap();
@@ -303,27 +303,27 @@ async fn commits_endpoint_returns_409_for_delta_too_large() {
 }
 
 #[tokio::test]
-async fn allowlist_blocks_unlisted_vaults_with_404() {
+async fn allowlist_blocks_unlisted_mems_with_404() {
     let tmp = TempDir::new().unwrap();
     let gitdir = init_gitdir(&tmp);
-    seed_vault_config(&gitdir);
+    seed_mem_config(&gitdir);
     commit(&gitdir, "specs", "alpha.md", &body("Alpha"), "seed");
     let engine = Arc::new(Mutex::new(engine_with_specs(&gitdir)));
     let state = BridgeState::new(engine).with_allowlist(vec!["other".to_string()]);
     let app = build_router(state);
 
     let response = app
-        .oneshot(auth_request("/api/vaults/specs/head"))
+        .oneshot(auth_request("/api/mems/specs/head"))
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
     let body = read_body(response).await;
     let envelope: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(envelope["code"], "UNKNOWN_VAULT");
+    assert_eq!(envelope["code"], "UNKNOWN_MEM");
 }
 
 #[tokio::test]
-async fn events_endpoint_emits_vault_changed_within_window() {
+async fn events_endpoint_emits_mem_changed_within_window() {
     // Subscribe to the SSE stream, perform an engine mutation, assert
     // the resulting SSE frame arrives within 2 seconds. The mutation
     // here is a `create_entity` through the same engine the SSE handler
@@ -331,7 +331,7 @@ async fn events_endpoint_emits_vault_changed_within_window() {
     // the bridge listens on.
     let tmp = TempDir::new().unwrap();
     let gitdir = init_gitdir(&tmp);
-    seed_vault_config(&gitdir);
+    seed_mem_config(&gitdir);
     commit(&gitdir, "specs", "seed.md", &body("Seed"), "init");
 
     let engine = Arc::new(Mutex::new(engine_with_specs(&gitdir)));
@@ -341,7 +341,7 @@ async fn events_endpoint_emits_vault_changed_within_window() {
     // Drive the request through `oneshot` so we hold the response
     // body — a tokio mpsc-shaped Body that we'll read for SSE frames.
     let response = app
-        .oneshot(auth_request("/api/vaults/specs/events"))
+        .oneshot(auth_request("/api/mems/specs/events"))
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
@@ -376,10 +376,10 @@ async fn events_endpoint_emits_vault_changed_within_window() {
         );
         let mut sections = indexmap::IndexMap::new();
         sections.insert("identity".to_string(), "Live entity for SSE test.".to_string());
-        sections.insert("purpose".to_string(), "Trigger a vault_changed event.".to_string());
+        sections.insert("purpose".to_string(), "Trigger a mem_changed event.".to_string());
         e.create_entity(
             memstead_base::CreateEntityArgs {
-                vault: "specs".to_string(),
+                mem: "specs".to_string(),
                 title: "Live".to_string(),
                 entity_type: "spec".to_string(),
                 sections,
@@ -396,7 +396,7 @@ async fn events_endpoint_emits_vault_changed_within_window() {
 
     // Read frames for up to 2 seconds. axum SSE encodes events as
     // `event: <name>\ndata: <payload>\n\n` so we just look for
-    // "vault_changed" in the concatenated bytes.
+    // "mem_changed" in the concatenated bytes.
     let mut accumulated = Vec::new();
     let deadline = std::time::Instant::now() + Duration::from_secs(2);
     while std::time::Instant::now() < deadline {
@@ -408,15 +408,15 @@ async fn events_endpoint_emits_vault_changed_within_window() {
             Err(_) => break,
         };
         accumulated.extend_from_slice(&chunk);
-        if String::from_utf8_lossy(&accumulated).contains("event: vault_changed") {
+        if String::from_utf8_lossy(&accumulated).contains("event: mem_changed") {
             break;
         }
     }
     mutator.await.unwrap();
     let body_str = String::from_utf8_lossy(&accumulated);
     assert!(
-        body_str.contains("event: vault_changed"),
-        "expected SSE vault_changed event within window; got: {body_str}",
+        body_str.contains("event: mem_changed"),
+        "expected SSE mem_changed event within window; got: {body_str}",
     );
 }
 
@@ -424,13 +424,13 @@ async fn events_endpoint_emits_vault_changed_within_window() {
 // /search endpoint
 // ---------------------------------------------------------------------------
 
-/// Seed a git-branch-backed `specs` vault containing two entities
+/// Seed a git-branch-backed `specs` mem containing two entities
 /// (`alpha.md`, `beta.md`) ready to be queried via the search
 /// endpoint. Returns the running engine. Each entity has a
 /// distinctive body word so a precise query can isolate either one.
 fn engine_with_searchable_entities(tmp: &TempDir) -> memstead_base::Engine {
     let gitdir = init_gitdir(tmp);
-    seed_vault_config(&gitdir);
+    seed_mem_config(&gitdir);
     let alpha_body = "---\ntype: spec\ncreated_date: 2026-01-01\nlast_modified: 2026-01-01\nlevel: M0\n---\n# Alpha\n\n## Identity\n\nAlpha distinctive marker phrase.\n";
     let beta_body = "---\ntype: spec\ncreated_date: 2026-01-01\nlast_modified: 2026-01-01\nlevel: M0\n---\n# Beta\n\n## Identity\n\nBeta carries the singular keyword unobtainium for tests.\n";
     commit(&gitdir, "specs", "alpha.md", alpha_body, "alpha seed");
@@ -446,7 +446,7 @@ async fn search_endpoint_returns_hits_in_wire_shape() {
     let app = build_router(state);
 
     let response = app
-        .oneshot(auth_request("/api/vaults/specs/search?q=unobtainium"))
+        .oneshot(auth_request("/api/mems/specs/search?q=unobtainium"))
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
@@ -459,7 +459,7 @@ async fn search_endpoint_returns_hits_in_wire_shape() {
     );
     let body = read_body(response).await;
     let parsed: SearchResult = serde_json::from_slice(&body).unwrap();
-    assert_eq!(parsed.vault, "specs");
+    assert_eq!(parsed.mem, "specs");
     assert_eq!(parsed.query, "unobtainium");
     assert!(
         parsed.hits.iter().any(|h| h.id == "specs--beta"),
@@ -470,23 +470,23 @@ async fn search_endpoint_returns_hits_in_wire_shape() {
 }
 
 #[tokio::test]
-async fn search_endpoint_404s_for_unallowed_vault() {
+async fn search_endpoint_404s_for_unallowed_mem() {
     let tmp = TempDir::new().unwrap();
     let engine = Arc::new(Mutex::new(engine_with_searchable_entities(&tmp)));
-    // The vault `specs` is mounted but the allowlist only permits
+    // The mem `specs` is mounted but the allowlist only permits
     // `something-else` — the search handler must refuse before
     // touching the engine.
     let state = BridgeState::new(engine).with_allowlist(vec!["something-else".to_string()]);
     let app = build_router(state);
 
     let response = app
-        .oneshot(auth_request("/api/vaults/specs/search?q=alpha"))
+        .oneshot(auth_request("/api/mems/specs/search?q=alpha"))
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
     let body = read_body(response).await;
     let envelope: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(envelope["code"], "UNKNOWN_VAULT");
+    assert_eq!(envelope["code"], "UNKNOWN_MEM");
 }
 
 #[tokio::test]
@@ -497,7 +497,7 @@ async fn search_endpoint_refuses_empty_query_with_400() {
     let app = build_router(state);
 
     let response = app
-        .oneshot(auth_request("/api/vaults/specs/search?q="))
+        .oneshot(auth_request("/api/mems/specs/search?q="))
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
@@ -518,7 +518,7 @@ async fn search_endpoint_refuses_oversized_limit_with_400() {
     let app = build_router(state);
 
     let response = app
-        .oneshot(auth_request("/api/vaults/specs/search?q=alpha&limit=100"))
+        .oneshot(auth_request("/api/mems/specs/search?q=alpha&limit=100"))
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
@@ -537,7 +537,7 @@ async fn search_endpoint_blocks_unauthenticated_requests() {
     let response = app
         .oneshot(
             Request::builder()
-                .uri("/api/vaults/specs/search?q=alpha")
+                .uri("/api/mems/specs/search?q=alpha")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -553,7 +553,7 @@ async fn search_endpoint_blocks_unauthenticated_requests() {
 #[tokio::test]
 async fn search_endpoint_hit_shape_matches_engine_search_hit_shape() {
     // The bridge's per-hit JSON matches the engine's own `SearchHit`
-    // JSON for the same vault state. We resolve a hit via the bridge,
+    // JSON for the same mem state. We resolve a hit via the bridge,
     // then run the same query directly through
     // `Engine::search` and assert the JSON shape (sorted field
     // names) on the first hit is equal.
@@ -563,7 +563,7 @@ async fn search_endpoint_hit_shape_matches_engine_search_hit_shape() {
     let app = build_router(state);
 
     let response = app
-        .oneshot(auth_request("/api/vaults/specs/search?q=unobtainium"))
+        .oneshot(auth_request("/api/mems/specs/search?q=unobtainium"))
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
@@ -582,7 +582,7 @@ async fn search_endpoint_hit_shape_matches_engine_search_hit_shape() {
             phrase: None,
             field: None,
         }),
-        vault: Some("specs".to_string()),
+        mem: Some("specs".to_string()),
         entity_type: None,
         limit: Some(20),
         offset: None,
@@ -604,7 +604,7 @@ async fn search_endpoint_hit_shape_matches_engine_search_hit_shape() {
     // MCP-shape conformance contract: a future field rename on the
     // engine side that forgets to mirror through to the bridge
     // surfaces here, not in production traffic.
-    for key in &["id", "title", "vault", "entity_type", "stub", "tokens"] {
+    for key in &["id", "title", "mem", "entity_type", "stub", "tokens"] {
         assert_eq!(
             bridge_hit[key], engine_hit_json[key],
             "field `{key}` must match between bridge and engine SearchHit JSON",

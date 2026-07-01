@@ -2,8 +2,8 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   resolveOuterVcsConfig,
-  extractVaultLayouts,
-  classifyVaultNotes,
+  extractMemLayouts,
+  classifyMemNotes,
   memsteadRefToArray,
   parseCursorTrailers,
   formatCursorTrailers,
@@ -52,31 +52,31 @@ describe('resolveOuterVcsConfig', () => {
   });
 });
 
-describe('extractVaultLayouts', () => {
-  it('returns writable vaults with vcs subobject only', () => {
+describe('extractMemLayouts', () => {
+  it('returns writable mems with vcs subobject only', () => {
     const response = {
-      writable_vaults: ['a', 'b', 'c'],
-      vaults: [
+      writable_mems: ['a', 'b', 'c'],
+      mems: [
         { name: 'a', vcs: { gitdir: '/tmp/a/.git', worktree: '/tmp/a' } },
         { name: 'b' }, // no vcs
         { name: 'c', vcs: { gitdir: '/tmp/c/.git', worktree: '/tmp/c' } },
         { name: 'ro', vcs: { gitdir: '/tmp/ro/.git', worktree: '/tmp/ro' } }, // read-only
       ],
     };
-    const layouts = extractVaultLayouts(response);
+    const layouts = extractMemLayouts(response);
     assert.deepStrictEqual(
       layouts.map((v) => v.name),
       ['a', 'c'],
     );
   });
 
-  it('returns empty list when vaults field is missing', () => {
-    assert.deepStrictEqual(extractVaultLayouts({}), []);
-    assert.deepStrictEqual(extractVaultLayouts({ vaults: null }), []);
+  it('returns empty list when mems field is missing', () => {
+    assert.deepStrictEqual(extractMemLayouts({}), []);
+    assert.deepStrictEqual(extractMemLayouts({ mems: null }), []);
   });
 });
 
-describe('classifyVaultNotes', () => {
+describe('classifyMemNotes', () => {
   it('bins agent/external actors into separate buckets', () => {
     const notes = [
       {
@@ -102,23 +102,23 @@ describe('classifyVaultNotes', () => {
         timestamp: 0,
       },
     ];
-    const { agentNotes, externalNotes } = classifyVaultNotes({
-      vaultName: 'engine',
+    const { agentNotes, externalNotes } = classifyMemNotes({
+      memName: 'engine',
       notes,
       logger: { error: () => {} },
     });
     assert.strictEqual(agentNotes.length, 1);
     assert.strictEqual(agentNotes[0].note, 'added foo invariant');
-    assert.strictEqual(agentNotes[0].vault, 'engine');
+    assert.strictEqual(agentNotes[0].mem, 'engine');
     assert.strictEqual(externalNotes.length, 1);
-    assert.strictEqual(externalNotes[0].vault, 'engine');
+    assert.strictEqual(externalNotes[0].mem, 'engine');
     assert.strictEqual(externalNotes[0].summary, 'external edits (2 files)');
   });
 
   it('skips notes with no recognized actor (stderr warning)', () => {
     const errors = [];
-    const { agentNotes, externalNotes } = classifyVaultNotes({
-      vaultName: 'engine',
+    const { agentNotes, externalNotes } = classifyMemNotes({
+      memName: 'engine',
       notes: [
         {
           sha: 'sha-orphan',
@@ -135,8 +135,8 @@ describe('classifyVaultNotes', () => {
   });
 
   it('returns empty buckets for empty input', () => {
-    const r = classifyVaultNotes({
-      vaultName: 'engine',
+    const r = classifyMemNotes({
+      memName: 'engine',
       notes: [],
       logger: { error: () => {} },
     });
@@ -144,7 +144,7 @@ describe('classifyVaultNotes', () => {
   });
 
   it('tolerates non-array notes input', () => {
-    const r = classifyVaultNotes({ vaultName: 'engine', notes: undefined });
+    const r = classifyMemNotes({ memName: 'engine', notes: undefined });
     assert.deepStrictEqual(r, { agentNotes: [], externalNotes: [] });
   });
 });
@@ -170,11 +170,11 @@ describe('memsteadRefToArray', () => {
 describe('parseCursorTrailers', () => {
   it('extracts one cursor per line into a Map', () => {
     const body = [
-      'memstead: session changes (1 entities, 1 vaults)',
+      'memstead: session changes (1 entities, 1 mems)',
       '',
       'body',
       '',
-      'Vaults: engine',
+      'Mems: engine',
       'Memstead-cursor: engine@a1b2c3d4',
       'Memstead-cursor: plugin@e5f6a7b8',
     ].join('\n');
@@ -185,7 +185,7 @@ describe('parseCursorTrailers', () => {
   });
 
   it('returns empty map when no trailers', () => {
-    const body = 'memstead: session changes (1 entities, 1 vaults)\n\nbody\n\nVaults: engine';
+    const body = 'memstead: session changes (1 entities, 1 mems)\n\nbody\n\nMems: engine';
     assert.strictEqual(parseCursorTrailers(body).size, 0);
   });
 
@@ -219,7 +219,7 @@ describe('formatCursorTrailers', () => {
     );
   });
 
-  it('fills empty-tree for vaults without a head', () => {
+  it('fills empty-tree for mems without a head', () => {
     const layouts = [
       { name: 'engine', gitdir: '/a/.git', worktree: '/a' },
       { name: 'fresh', gitdir: '/b/.git', worktree: '/b' },
@@ -229,7 +229,7 @@ describe('formatCursorTrailers', () => {
     assert.match(out, new RegExp(`Memstead-cursor: fresh@${GIT_EMPTY_TREE_SHA}$`));
   });
 
-  it('appends the registry-ref trailer after the per-vault block', () => {
+  it('appends the registry-ref trailer after the per-mem block', () => {
     const layouts = [{ name: 'engine', gitdir: '/a/.git', worktree: '/a' }];
     const heads = new Map([['engine', 'aaaaaaa']]);
     const refs = [{ name: '__MEMSTEAD', sha: 'sys1234' }];
@@ -262,10 +262,10 @@ describe('buildOuterCommitMessage', () => {
       buildOuterCommitMessage({
         agentNotes: [],
         externalNotes: [],
-        vaultsTouched: [],
+        memsTouched: [],
         sessionId: 'sess-1',
         layouts: defaultLayouts,
-        perVaultHeads: defaultHeads,
+        perMemHeads: defaultHeads,
       }),
       null,
     );
@@ -274,18 +274,18 @@ describe('buildOuterCommitMessage', () => {
   it('renders Agent notes subsection and Memstead-cursor trailer', () => {
     const msg = buildOuterCommitMessage({
       agentNotes: [
-        { vault: 'engine', note: 'added foo invariant', toolVerb: 'create', entityId: 'engine--foo' },
-        { vault: 'engine', note: 'clarified bar purpose', toolVerb: 'update', entityId: 'engine--bar' },
+        { mem: 'engine', note: 'added foo invariant', toolVerb: 'create', entityId: 'engine--foo' },
+        { mem: 'engine', note: 'clarified bar purpose', toolVerb: 'update', entityId: 'engine--bar' },
       ],
       externalNotes: [],
-      vaultsTouched: ['engine'],
+      memsTouched: ['engine'],
       sessionId: 'sess-42',
       layouts: defaultLayouts,
-      perVaultHeads: defaultHeads,
+      perMemHeads: defaultHeads,
     });
-    assert.match(msg, /^memstead: session changes \(2 entities, 1 vaults\)\n/);
+    assert.match(msg, /^memstead: session changes \(2 entities, 1 mems\)\n/);
     assert.match(msg, /Agent notes:\n- \[engine\] added foo invariant/);
-    assert.match(msg, /\nVaults: engine\n/);
+    assert.match(msg, /\nMems: engine\n/);
     assert.match(msg, /\nSession: sess-42\n/);
     assert.match(msg, /\nMemstead-cursor: engine@deadbeef$/);
   });
@@ -293,13 +293,13 @@ describe('buildOuterCommitMessage', () => {
   it('omits Session trailer when sessionId is null (skill path)', () => {
     const msg = buildOuterCommitMessage({
       agentNotes: [
-        { vault: 'engine', note: 'manual commit', toolVerb: 'update', entityId: 'engine--foo' },
+        { mem: 'engine', note: 'manual commit', toolVerb: 'update', entityId: 'engine--foo' },
       ],
       externalNotes: [],
-      vaultsTouched: ['engine'],
+      memsTouched: ['engine'],
       sessionId: null,
       layouts: defaultLayouts,
-      perVaultHeads: defaultHeads,
+      perMemHeads: defaultHeads,
     });
     assert.doesNotMatch(msg, /\nSession:/);
     assert.match(msg, /\nMemstead-cursor: engine@deadbeef$/);
@@ -308,15 +308,15 @@ describe('buildOuterCommitMessage', () => {
   it('renders External edits captured section alongside Agent notes', () => {
     const msg = buildOuterCommitMessage({
       agentNotes: [
-        { vault: 'engine', note: 'updated doc', toolVerb: 'update', entityId: 'engine--foo' },
+        { mem: 'engine', note: 'updated doc', toolVerb: 'update', entityId: 'engine--foo' },
       ],
       externalNotes: [
-        { vault: 'engine', summary: 'external edits (2 files)' },
+        { mem: 'engine', summary: 'external edits (2 files)' },
       ],
-      vaultsTouched: ['engine'],
+      memsTouched: ['engine'],
       sessionId: 'sess-1',
       layouts: defaultLayouts,
-      perVaultHeads: defaultHeads,
+      perMemHeads: defaultHeads,
     });
     assert.match(msg, /Agent notes:\n- \[engine\] updated doc\n/);
     assert.match(msg, /External edits captured:\n- \[engine\] external edits \(2 files\)\n/);
@@ -326,12 +326,12 @@ describe('buildOuterCommitMessage', () => {
     const msg = buildOuterCommitMessage({
       agentNotes: [],
       externalNotes: [
-        { vault: 'engine', summary: 'external edits (3 files)' },
+        { mem: 'engine', summary: 'external edits (3 files)' },
       ],
-      vaultsTouched: ['engine'],
+      memsTouched: ['engine'],
       sessionId: 'sess-1',
       layouts: defaultLayouts,
-      perVaultHeads: defaultHeads,
+      perMemHeads: defaultHeads,
     });
     assert.doesNotMatch(msg, /Agent notes:/);
     assert.match(msg, /External edits captured:\n- \[engine\] external edits \(3 files\)/);
@@ -340,27 +340,27 @@ describe('buildOuterCommitMessage', () => {
   it('falls back to mechanical subject for un-noted agent commits', () => {
     const msg = buildOuterCommitMessage({
       agentNotes: [
-        { vault: 'plugin', note: '', toolVerb: 'update', entityId: 'plugin--baz' },
+        { mem: 'plugin', note: '', toolVerb: 'update', entityId: 'plugin--baz' },
       ],
       externalNotes: [],
-      vaultsTouched: ['plugin'],
+      memsTouched: ['plugin'],
       sessionId: 'sess-1',
       layouts: [{ name: 'plugin', gitdir: '/b/.git', worktree: '/b' }],
-      perVaultHeads: new Map([['plugin', 'ffffeee']]),
+      perMemHeads: new Map([['plugin', 'ffffeee']]),
     });
     assert.match(msg, /- \[plugin\] update plugin--baz/);
   });
 
-  it('emits registry-ref trailers after the per-vault cursors', () => {
+  it('emits registry-ref trailers after the per-mem cursors', () => {
     const msg = buildOuterCommitMessage({
       agentNotes: [
-        { vault: 'engine', note: 'updated doc', toolVerb: 'update', entityId: 'engine--foo' },
+        { mem: 'engine', note: 'updated doc', toolVerb: 'update', entityId: 'engine--foo' },
       ],
       externalNotes: [],
-      vaultsTouched: ['engine'],
+      memsTouched: ['engine'],
       sessionId: 'sess-7',
       layouts: defaultLayouts,
-      perVaultHeads: defaultHeads,
+      perMemHeads: defaultHeads,
       registryRefs: [{ name: '__MEMSTEAD', sha: 'sys42' }],
     });
     assert.match(msg, /\nMemstead-cursor: engine@deadbeef\n/);
@@ -369,7 +369,7 @@ describe('buildOuterCommitMessage', () => {
 });
 
 describe('buildSeedCommitMessage', () => {
-  it('lists vaults with their heads and emits cursor trailers', () => {
+  it('lists mems with their heads and emits cursor trailers', () => {
     const layouts = [
       { name: 'engine', gitdir: '/a/.git', worktree: '/a' },
       { name: 'fresh', gitdir: '/b/.git', worktree: '/b' },
@@ -379,7 +379,7 @@ describe('buildSeedCommitMessage', () => {
       ['fresh', GIT_EMPTY_TREE_SHA],
     ]);
     const msg = buildSeedCommitMessage(layouts, heads);
-    assert.match(msg, /^memstead: initialize cursor \(2 vaults\)\n/);
+    assert.match(msg, /^memstead: initialize cursor \(2 mems\)\n/);
     assert.match(msg, /- engine @ aaa111\n/);
     assert.match(msg, new RegExp(`- fresh @ ${GIT_EMPTY_TREE_SHA} \\(no commits yet\\)\n`));
     assert.match(msg, /\nMemstead-cursor: engine@aaa111\n/);
@@ -423,19 +423,19 @@ describe('readPriorCursor', () => {
       status: 0,
       stdout: [
         'sha_newer',
-        'memstead: session changes (1 entities, 1 vaults)',
+        'memstead: session changes (1 entities, 1 mems)',
         '',
         'Agent notes:',
         '- [engine] something',
         '',
-        'Vaults: engine',
+        'Mems: engine',
         'Session: sess-1',
         'Memstead-cursor: engine@feedface',
         '--EOC--',
         'sha_older',
-        'memstead: initialize cursor (1 vaults)',
+        'memstead: initialize cursor (1 mems)',
         '',
-        'Seeded cursors at current per-vault HEAD for:',
+        'Seeded cursors at current per-mem HEAD for:',
         '- engine @ abc000',
         '',
         'Memstead-cursor: engine@abc000',
@@ -460,9 +460,9 @@ describe('readPriorCursor', () => {
         'no trailers here',
         '--EOC--',
         'sha_real',
-        'memstead: session changes (1 entities, 1 vaults)',
+        'memstead: session changes (1 entities, 1 mems)',
         '',
-        'Vaults: engine',
+        'Mems: engine',
         'Memstead-cursor: engine@deadbee',
         '--EOC--',
         '',
@@ -479,7 +479,7 @@ describe('readPriorCursor', () => {
       status: 0,
       stdout: [
         'sha_seed',
-        'memstead: initialize cursor (1 vaults)',
+        'memstead: initialize cursor (1 mems)',
         '',
         'Memstead-cursor: engine@aaa000',
         '--EOC--',
@@ -522,13 +522,13 @@ describe('produceOuterCommit', () => {
     vcs: { gitdir: '/tmp/engine/.git', worktree: '/tmp/engine' },
   };
 
-  function fakeClientFactory(health, changesByVault = {}) {
+  function fakeClientFactory(health, changesByMem = {}) {
     return async (_cmd, _timeout, fn) => {
       const client = {
         async callTool(name, args) {
           if (name === 'memstead_health') return health;
           if (name === 'memstead_changes_since') {
-            const r = changesByVault[args.vault] ?? { changes: [], head: GIT_EMPTY_TREE_SHA };
+            const r = changesByMem[args.mem] ?? { changes: [], head: GIT_EMPTY_TREE_SHA };
             return r;
           }
           return null;
@@ -540,8 +540,8 @@ describe('produceOuterCommit', () => {
 
   it('returns disabled when outer_vcs.enabled is false and skipEnabledCheck=false', async () => {
     const health = {
-      writable_vaults: ['engine'],
-      vaults: [baseLayout],
+      writable_mems: ['engine'],
+      mems: [baseLayout],
       plugin: { claude_code: { outer_vcs: { enabled: false } } },
     };
     const r = await produceOuterCommit({
@@ -558,8 +558,8 @@ describe('produceOuterCommit', () => {
 
   it('skill path (skipEnabledCheck=true) ignores enabled=false', async () => {
     const health = {
-      writable_vaults: ['engine'],
-      vaults: [baseLayout],
+      writable_mems: ['engine'],
+      mems: [baseLayout],
       plugin: { claude_code: { outer_vcs: { enabled: false } } },
     };
     let probed = false;
@@ -581,10 +581,10 @@ describe('produceOuterCommit', () => {
     assert.ok(probed);
   });
 
-  it('returns no-vaults when writable_vaults is empty', async () => {
+  it('returns no-mems when writable_mems is empty', async () => {
     const health = {
-      writable_vaults: [],
-      vaults: [],
+      writable_mems: [],
+      mems: [],
       plugin: { claude_code: { outer_vcs: { enabled: true } } },
     };
     const r = await produceOuterCommit({
@@ -596,7 +596,7 @@ describe('produceOuterCommit', () => {
       git: () => ({ status: 0, stdout: '', stderr: '' }),
       logger: { error: () => {} },
     });
-    assert.strictEqual(r.status, 'no-vaults');
+    assert.strictEqual(r.status, 'no-mems');
   });
 
   it('returns probe-failed when memstead_health throws', async () => {
@@ -615,12 +615,12 @@ describe('produceOuterCommit', () => {
     assert.match(r.message, /engine crashed/);
   });
 
-  it('logs bootstrap-log-line when a writable vault is new to the cursor', async () => {
-    // Prior cursor references `engine`; writable vaults also include
+  it('logs bootstrap-log-line when a writable mem is new to the cursor', async () => {
+    // Prior cursor references `engine`; writable mems also include
     // `plugin` which is new to the cursor. Expect a stderr log line.
     const health = {
-      writable_vaults: ['engine', 'plugin'],
-      vaults: [
+      writable_mems: ['engine', 'plugin'],
+      mems: [
         { name: 'engine', vcs: { gitdir: '/tmp/engine/.git', worktree: '/tmp/engine' } },
         { name: 'plugin', vcs: { gitdir: '/tmp/plugin/.git', worktree: '/tmp/plugin' } },
       ],
@@ -635,9 +635,9 @@ describe('produceOuterCommit', () => {
           status: 0,
           stdout: [
             'sha_prior',
-            'memstead: session changes (1 entities, 1 vaults)',
+            'memstead: session changes (1 entities, 1 mems)',
             '',
-            'Vaults: engine',
+            'Mems: engine',
             'Memstead-cursor: engine@deadbee',
             '--EOC--',
             '',
@@ -663,15 +663,15 @@ describe('produceOuterCommit', () => {
     });
     // Either no-changes (no mutations) or commit-failed (no real git)
     // — what we care about is the stderr signal.
-    assert.ok(errors.some((e) => /vault 'plugin' is new to the cursor/.test(e)));
+    assert.ok(errors.some((e) => /mem 'plugin' is new to the cursor/.test(e)));
     assert.ok(logCall > 0);
     assert.notStrictEqual(r.status, 'disabled');
   });
 
-  it('returns no-changes when no vault had changes', async () => {
+  it('returns no-changes when no mem had changes', async () => {
     const health = {
-      writable_vaults: ['engine'],
-      vaults: [baseLayout],
+      writable_mems: ['engine'],
+      mems: [baseLayout],
       plugin: { claude_code: { outer_vcs: { enabled: true } } },
     };
     const gitFake = (args) => {
@@ -680,9 +680,9 @@ describe('produceOuterCommit', () => {
           status: 0,
           stdout: [
             'sha_prior',
-            'memstead: session changes (1 entities, 1 vaults)',
+            'memstead: session changes (1 entities, 1 mems)',
             '',
-            'Vaults: engine',
+            'Mems: engine',
             'Memstead-cursor: engine@deadbee',
             '--EOC--',
             '',

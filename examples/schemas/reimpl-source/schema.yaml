@@ -4,30 +4,30 @@
 # reimpl-source@0.1.0 — Legacy-extraction schema, paired with reimpl-target.
 #
 # Two types: evidence (atomic sourced observation) and capability
-# (behavioral unit backed by evidence). The Legacy vault is extracted from
+# (behavioral unit backed by evidence). The Legacy mem is extracted from
 # the old system and remains technology- and target-neutral. One Legacy
-# vault can feed many Target vaults.
+# mem can feed many Target mems.
 # ─────────────────────────────────────────────────────────────────────────────
 
 name: reimpl-source
 version: 0.1.0
 
 description: |
-  Schema for the Legacy vault in a reimplementation project. Captures
+  Schema for the Legacy mem in a reimplementation project. Captures
   what the old system actually does — as behavioral capabilities backed
   by concrete evidence from code, tests, data, interviews, and
-  observation. The vault is extracted, not authored; every claim traces
+  observation. The mem is extracted, not authored; every claim traces
   to a sourced artifact.
 
 when_to_use: |
-  Use in the Legacy vault of a reimplementation project, paired with a
-  Target vault on reimpl-target@0.1.0. Not for ongoing software
+  Use in the Legacy mem of a reimplementation project, paired with a
+  Target mem on reimpl-target@0.1.0. Not for ongoing software
   documentation — use software@0.1.0 for living specs. Not for pure
   knowledge capture — use the default schema. Reimpl-source is
   specifically for the extraction phase of replacing an old system.
 
 system_message: |
-  You are in the Legacy vault of a reimplementation project. Two types:
+  You are in the Legacy mem of a reimplementation project. Two types:
 
     evidence    — a single sourced observation from the old system
     capability  — a behavioral unit the old system exhibits
@@ -38,7 +38,7 @@ system_message: |
 
   Extract, do not design. Describe what the old system actually does, not
   what it should do or what the new system will do. Design decisions
-  belong in the Target vault.
+  belong in the Target mem.
 
   Capabilities are behavioral and testable. A capability must be
   expressible as an acceptance criterion: given these inputs and this
@@ -54,7 +54,7 @@ types:
 
 # The default schema's 37 edges are inherited; SUPPORTS is the one
 # source-specific addition. Edges targeting entities in a paired Target
-# vault (cross-vault inbound) are declared in the target schema, not
+# mem (cross-mem inbound) are declared in the target schema, not
 # here — a schema only needs to describe relationships originating from
 # its own entities.
 relationships:

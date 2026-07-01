@@ -9,18 +9,18 @@ use crate::setup::{CliContext, CliEngine};
 
 // Lean build: renders the simple in-process cluster overview and defers
 // rich heavy-content to the MCP tool.
-#[cfg(not(feature = "vault-repo"))]
+#[cfg(not(feature = "mem-repo"))]
 use memstead_base::{chunking::floor_chunk_budget, render};
-#[cfg(not(feature = "vault-repo"))]
+#[cfg(not(feature = "mem-repo"))]
 const DEFAULT_TOKEN_BUDGET: usize = 25_000;
 
 // Full build: routes through the shared engine composer so the CLI
 // renders the same rich content the MCP `memstead_overview` tool emits.
-#[cfg(feature = "vault-repo")]
+#[cfg(feature = "mem-repo")]
 use memstead_engine::overview::{
     ComposeOverviewError, DEFAULT_OVERVIEW_BUDGET, OverviewArgs, Surface, compose_overview,
 };
-#[cfg(feature = "vault-repo")]
+#[cfg(feature = "mem-repo")]
 const DEFAULT_CHUNK_BUDGET: usize = 25_000;
 
 /// All clusters with summaries and member lists.
@@ -30,7 +30,7 @@ const DEFAULT_CHUNK_BUDGET: usize = 25_000;
 /// emits, differing only in inline command-name hints
 /// (`memstead type <ref>` vs `memstead_schema(name=<ref>)`). The lean
 /// build renders the simpler cluster summary in-process and surfaces a
-/// warning when rich `--include` / `--vault` / `--token-budget` flags
+/// warning when rich `--include` / `--mem` / `--token-budget` flags
 /// are supplied (that content needs the git-backed engine composer).
 #[derive(Parser, Debug)]
 pub struct Args {
@@ -42,12 +42,12 @@ pub struct Args {
     #[arg(long)]
     pub chunk: Option<usize>,
 
-    /// Scope schemas + vault inventory to a single writable vault.
+    /// Scope schemas + mem inventory to a single writable mem.
     #[arg(long)]
-    pub vault: Option<String>,
+    pub mem: Option<String>,
 
     /// Opt heavy content into the response: `community_members`,
-    /// `community_bridges`, `vault_distribution`, `dangling_links`.
+    /// `community_bridges`, `mem_distribution`, `dangling_links`.
     /// Keys listed here are always included even past `token_budget`;
     /// keys omitted may surface in the `Hints` section instead.
     /// Repeatable (`--include K --include K`) AND comma-string
@@ -58,8 +58,8 @@ pub struct Args {
     pub include: Vec<String>,
 
     /// Token budget for heavy content only (`community_members`,
-    /// `community_bridges`, `vault_distribution`, `dangling_links`).
-    /// Hard-required content (vault roster, schema refs, community
+    /// `community_bridges`, `mem_distribution`, `dangling_links`).
+    /// Hard-required content (mem roster, schema refs, community
     /// titles, workspace policy) always ships in addition — total
     /// response size will exceed this budget. Default 8000 (matches
     /// the MCP tool). Budgets below ~10 tokens are safe but
@@ -70,18 +70,18 @@ pub struct Args {
     pub token_budget: Option<usize>,
 }
 
-#[cfg(feature = "vault-repo")]
+#[cfg(feature = "mem-repo")]
 pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
-    // The full build always activates the vault-repo feature, so both
+    // The full build always activates the mem-repo feature, so both
     // engine arms are present.
     let mut engine = match ctx.cli_engine()? {
-        CliEngine::VaultRepo(e) => e,
+        CliEngine::MemRepo(e) => e,
         CliEngine::Filesystem(e) => e,
     };
 
     let composer_args = OverviewArgs {
         include: &args.include,
-        vault: args.vault.as_deref(),
+        mem: args.mem.as_deref(),
         rebuild: args.rebuild && args.chunk.unwrap_or(1) <= 1,
         token_budget: args.token_budget.unwrap_or(DEFAULT_OVERVIEW_BUDGET),
         // CLI surface never sees `--operator-mode` — the flag is an
@@ -103,17 +103,17 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             }
             .into());
         }
-        Err(ComposeOverviewError::UnknownVault { name, writable_vaults }) => {
+        Err(ComposeOverviewError::UnknownMem { name, writable_mems }) => {
             return Err(CliError {
-                code: "UNKNOWN_VAULT",
+                code: "UNKNOWN_MEM",
                 kind: ExitKind::NotFound,
                 message: format!(
-                    "unknown vault: \"{name}\". Writable vaults: [{}]",
-                    writable_vaults.join(", ")
+                    "unknown mem: \"{name}\". Writable mems: [{}]",
+                    writable_mems.join(", ")
                 ),
                 details: Some(json!({
                     "name": name,
-                    "writable_vaults": writable_vaults,
+                    "writable_mems": writable_mems,
                 })),
             }
             .into());
@@ -181,7 +181,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
 /// into the chunk's frontmatter. Defaults to 1 — `apply_chunking`
 /// guarantees the marker, but a malformed head degrades to the
 /// single-chunk reading rather than failing the command.
-#[cfg(feature = "vault-repo")]
+#[cfg(feature = "mem-repo")]
 fn parse_total_chunks(chunked: &str) -> usize {
     chunked
         .lines()
@@ -190,7 +190,7 @@ fn parse_total_chunks(chunked: &str) -> usize {
         .unwrap_or(1)
 }
 
-#[cfg(not(feature = "vault-repo"))]
+#[cfg(not(feature = "mem-repo"))]
 pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     // `--include` parses uniformly with `memstead health --include` — both repeatable and
     // comma-string shapes accept. Validate keys against the engine's
@@ -198,7 +198,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     // `UNKNOWN_INCLUDE_KEY` warnings (same pattern the MCP tool ships).
     // Rich-content rendering on the lean build is deferred — it always
     // lists per-cluster members (the `community_members` content) but
-    // `community_bridges`, `vault_distribution`, `dangling_links` need
+    // `community_bridges`, `mem_distribution`, `dangling_links` need
     // the shared engine composer, which is absent without the
     // git-branch backend.
     let mut include_warnings: Vec<(String, &'static [&'static str])> = Vec::new();
@@ -238,11 +238,11 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     // `memstead overview` and the MCP `memstead_overview` tool).
     let pro_only_warning = (!args.include.is_empty()
         || args.token_budget.is_some()
-        || args.vault.is_some())
+        || args.mem.is_some())
         .then(|| {
             (
                 "OVERVIEW_RICH_CONTENT_PRO_ONLY",
-                "the lean build renders the simple cluster overview only — rich content (`--vault` scoping, `--include community_bridges` / `vault_distribution` / `dangling_links`, non-default `--token-budget`) requires the full `memstead` build or the `memstead_overview` MCP tool".to_string(),
+                "the lean build renders the simple cluster overview only — rich content (`--mem` scoping, `--include community_bridges` / `mem_distribution` / `dangling_links`, non-default `--token-budget`) requires the full `memstead` build or the `memstead_overview` MCP tool".to_string(),
             )
         });
 
@@ -301,23 +301,23 @@ mod tests {
             "--include",
             "community_members",
             "--include",
-            "vault_distribution",
+            "mem_distribution",
         ])
         .expect("repeated form parses");
         assert_eq!(
             repeated.include,
-            vec!["community_members", "vault_distribution"],
+            vec!["community_members", "mem_distribution"],
         );
 
         let comma = Args::try_parse_from([
             "overview",
             "--include",
-            "community_members,vault_distribution",
+            "community_members,mem_distribution",
         ])
         .expect("comma form parses");
         assert_eq!(
             comma.include,
-            vec!["community_members", "vault_distribution"],
+            vec!["community_members", "mem_distribution"],
         );
     }
 
@@ -327,9 +327,9 @@ mod tests {
     /// allowlist; the lean build against `memstead-base`'s constant.
     #[test]
     fn help_lists_every_overview_include_key() {
-        #[cfg(feature = "vault-repo")]
+        #[cfg(feature = "mem-repo")]
         let keys: &[&str] = memstead_engine::overview::ALLOWED_OVERVIEW_INCLUDE_KEYS;
-        #[cfg(not(feature = "vault-repo"))]
+        #[cfg(not(feature = "mem-repo"))]
         let keys: &[&str] = memstead_base::ops::OVERVIEW_INCLUDE_KEYS;
 
         let cmd = Args::command();

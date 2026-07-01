@@ -1,9 +1,9 @@
 //! Cross-process file-watcher convenience for the change-event
 //! surface.
 //!
-//! [`watch_vault_repo`] starts a `notify`-backed file-system watcher
+//! [`watch_mem_repo`] starts a `notify`-backed file-system watcher
 //! against `<gitdir>/refs/heads/` and surfaces a
-//! [`std::sync::mpsc::Receiver`] of [`VaultChangedEvent`]s. Consumers
+//! [`std::sync::mpsc::Receiver`] of [`MemChangedEvent`]s. Consumers
 //! that do not share the writer's [`crate::Engine`] instance (the
 //! bridge HEAD-watcher, the macOS live-update path, audit-log workers,
 //! webhook notifiers) consume events through this surface; the wire
@@ -12,17 +12,17 @@
 //!
 //! Gated behind the `file-watcher` Cargo feature — `notify` is a
 //! non-trivial dependency and consumers that only need the in-process
-//! [`crate::Engine::subscribe_vault_changes`] path should not pay for
+//! [`crate::Engine::subscribe_mem_changes`] path should not pay for
 //! it. Without the feature enabled the module disappears entirely.
 //!
 //! ## Design
 //!
-//! * `watch_vault_repo` spawns a background thread running the
-//!   notify-event loop and returns a [`VaultRepoWatcher`] handle that
+//! * `watch_mem_repo` spawns a background thread running the
+//!   notify-event loop and returns a [`MemRepoWatcher`] handle that
 //!   owns the `notify::PollWatcher` (chosen over `RecommendedWatcher`
 //!   for cross-platform determinism — see the rationale at the
-//!   `PollWatcher::new` call site). A per-vault
-//!   `HashMap<vault_name, last_seen_sha>` (a shared `Arc<Mutex<…>>`
+//!   `PollWatcher::new` call site). A per-mem
+//!   `HashMap<mem_name, last_seen_sha>` (a shared `Arc<Mutex<…>>`
 //!   seeded before the thread starts) lets each emitted event's
 //!   `previous` field reflect the actual transition.
 //! * On startup the thread scans the existing `refs/heads/` tree and
@@ -30,16 +30,16 @@
 //!   consumers see changes from this point forward, never replay.
 //! * Per file-system event the thread re-reads the touched ref file
 //!   (or the directory holding it for hierarchical layouts) and emits
-//!   a `VaultChangedEvent` if the SHA changed. Notify can deliver
+//!   a `MemChangedEvent` if the SHA changed. Notify can deliver
 //!   bursts; the SHA-comparison gate deduplicates them.
-//! * The returned [`VaultRepoWatcher`] handle owns the notify watcher;
+//! * The returned [`MemRepoWatcher`] handle owns the notify watcher;
 //!   dropping it cancels the watch and the background thread joins on
 //!   its event channel disconnecting.
 //!
 //! ## Limitations
 //!
 //! * Reads loose refs only (the typical case for an actively-written
-//!   vault-repo). Packed refs (`<gitdir>/packed-refs`) are not parsed
+//!   mem-repo). Packed refs (`<gitdir>/packed-refs`) are not parsed
 //!   in v1 — production deployments that compact refs need a
 //!   follow-up. Loose refs created after compaction still surface
 //!   normally.
@@ -57,7 +57,7 @@ use notify::{
     Config, Event, PollWatcher, RecursiveMode, Watcher,
 };
 
-use super::events::VaultChangedEvent;
+use super::events::MemChangedEvent;
 
 /// Poll interval for the underlying `notify` watcher. Chosen so the
 /// observed change-event latency stays in the 10–50 ms band the AC
@@ -67,10 +67,10 @@ use super::events::VaultChangedEvent;
 /// middle ground for the v1 cross-process surface.
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
 
-/// Errors surfaced by [`watch_vault_repo`].
+/// Errors surfaced by [`watch_mem_repo`].
 #[derive(Debug, thiserror::Error)]
 pub enum FileWatcherError {
-    /// `<gitdir>/refs/heads` does not exist. The vault-repo has not
+    /// `<gitdir>/refs/heads` does not exist. The mem-repo has not
     /// been initialised, or the path was wrong.
     #[error("refs/heads directory not found under gitdir: {0}")]
     RefsHeadsMissing(PathBuf),
@@ -84,7 +84,7 @@ pub enum FileWatcherError {
     Io(#[from] std::io::Error),
 }
 
-/// RAII handle returned by [`watch_vault_repo`]. Dropping the handle
+/// RAII handle returned by [`watch_mem_repo`]. Dropping the handle
 /// stops the watcher (the underlying notify watcher is dropped,
 /// cancelling the OS-level subscription, and the background thread
 /// exits when its event channel disconnects).
@@ -92,7 +92,7 @@ pub enum FileWatcherError {
 /// The handle is `Send` but not `Sync` — the consumer threads receive
 /// events through the `mpsc::Receiver` returned alongside the handle,
 /// not by sharing the handle itself.
-pub struct VaultRepoWatcher {
+pub struct MemRepoWatcher {
     _watcher: PollWatcher,
     // The background-thread join handle is kept so panics inside the
     // event loop surface eventually (on drop the thread's panic
@@ -101,42 +101,42 @@ pub struct VaultRepoWatcher {
     _thread: Option<thread::JoinHandle<()>>,
 }
 
-impl std::fmt::Debug for VaultRepoWatcher {
+impl std::fmt::Debug for MemRepoWatcher {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("VaultRepoWatcher").finish()
+        f.debug_struct("MemRepoWatcher").finish()
     }
 }
 
 /// Start a file-system watcher on `<gitdir>/refs/heads/` and surface a
-/// receiver of [`VaultChangedEvent`]s. See the module docs for the
+/// receiver of [`MemChangedEvent`]s. See the module docs for the
 /// design and the limitations (loose-refs only, no synthetic replay).
 ///
-/// `gitdir` is the bare-repo directory typically named `vault-repo`
+/// `gitdir` is the bare-repo directory typically named `mem-repo`
 /// inside a Memstead workspace. Pass the path that contains the
 /// `refs/heads/` tree directly — the function does not auto-discover
 /// from a workspace root.
-pub fn watch_vault_repo(
+pub fn watch_mem_repo(
     gitdir: &Path,
-) -> Result<(VaultRepoWatcher, Receiver<VaultChangedEvent>), FileWatcherError> {
+) -> Result<(MemRepoWatcher, Receiver<MemChangedEvent>), FileWatcherError> {
     let refs_heads = gitdir.join("refs").join("heads");
     if !refs_heads.is_dir() {
         return Err(FileWatcherError::RefsHeadsMissing(refs_heads));
     }
 
-    // Seed the per-vault SHA map from the current state of
-    // `refs/heads/` so the first emit per vault carries a correct
+    // Seed the per-mem SHA map from the current state of
+    // `refs/heads/` so the first emit per mem carries a correct
     // `previous` value (instead of always empty).
     let state: Arc<Mutex<HashMap<String, String>>> =
         Arc::new(Mutex::new(scan_initial_state(&refs_heads)?));
 
-    let (event_tx, event_rx) = channel::<VaultChangedEvent>();
+    let (event_tx, event_rx) = channel::<MemChangedEvent>();
     let (notify_tx, notify_rx) = channel::<notify::Result<Event>>();
 
     // Use `PollWatcher` rather than `RecommendedWatcher` for v1: it is
     // deterministic across platforms (no FSEvents/inotify backend
     // quirks under tempdir / sandbox / network volumes), the poll cost
     // is negligible for the small `refs/heads/` tree of a typical
-    // vault-repo, and the 10–50 ms latency band the AC targets is
+    // mem-repo, and the 10–50 ms latency band the AC targets is
     // achievable with a 50 ms interval. Production deployments that
     // ever need lower latency can switch to `RecommendedWatcher`
     // behind a config knob — left out of v1 to keep the surface small.
@@ -160,7 +160,7 @@ pub fn watch_vault_repo(
     let state_for_thread = state.clone();
     let event_tx_for_thread = event_tx;
     let join = thread::Builder::new()
-        .name("memstead-vault-repo-watcher".to_string())
+        .name("memstead-mem-repo-watcher".to_string())
         .spawn(move || {
             run_event_loop(
                 &refs_heads_for_thread,
@@ -172,7 +172,7 @@ pub fn watch_vault_repo(
         .expect("spawning file-watcher thread must succeed");
 
     Ok((
-        VaultRepoWatcher {
+        MemRepoWatcher {
             _watcher: watcher,
             _thread: Some(join),
         },
@@ -181,8 +181,8 @@ pub fn watch_vault_repo(
 }
 
 /// Walk the initial `refs/heads/` tree and read each loose ref's
-/// 40-char SHA. The map this returns seeds the per-vault state so the
-/// first event emitted for any vault carries the right `previous`
+/// 40-char SHA. The map this returns seeds the per-mem state so the
+/// first event emitted for any mem carries the right `previous`
 /// value (rather than always an empty string).
 fn scan_initial_state(refs_heads: &Path) -> Result<HashMap<String, String>, std::io::Error> {
     let mut out = HashMap::new();
@@ -202,7 +202,7 @@ fn scan_dir(
         if file_type.is_dir() {
             scan_dir(base, &path, out)?;
         } else if file_type.is_file()
-            && let Some(name) = vault_name_for_ref_path(base, &path)
+            && let Some(name) = mem_name_for_ref_path(base, &path)
             && let Some(sha) = read_ref_sha(&path)
         {
             out.insert(name, sha);
@@ -211,12 +211,12 @@ fn scan_dir(
     Ok(())
 }
 
-/// Derive the vault name from a `refs/heads/<...>` path. Returns
+/// Derive the mem name from a `refs/heads/<...>` path. Returns
 /// `None` when the path is outside `base` (defensive — should not
 /// happen in practice). Hierarchical layouts (`refs/heads/path/leaf`)
-/// produce `path/leaf` as the vault name; flat layouts (the typical
+/// produce `path/leaf` as the mem name; flat layouts (the typical
 /// case) produce the file basename.
-fn vault_name_for_ref_path(base: &Path, ref_path: &Path) -> Option<String> {
+fn mem_name_for_ref_path(base: &Path, ref_path: &Path) -> Option<String> {
     let rel = ref_path.strip_prefix(base).ok()?;
     Some(
         rel.components()
@@ -231,7 +231,7 @@ fn vault_name_for_ref_path(base: &Path, ref_path: &Path) -> Option<String> {
 /// `ref: refs/heads/main`, empty files mid-write, content longer than
 /// 41 bytes). Loose refs in a healthy git repo are always either a
 /// raw SHA or a `ref:` line — symbolic refs in `refs/heads/` are not
-/// emitted as vault changes.
+/// emitted as mem changes.
 fn read_ref_sha(ref_path: &Path) -> Option<String> {
     let raw = std::fs::read_to_string(ref_path).ok()?;
     let trimmed = raw.trim();
@@ -243,12 +243,12 @@ fn read_ref_sha(ref_path: &Path) -> Option<String> {
 
 /// Background-thread event loop. Reads notify events off `notify_rx`,
 /// re-reads the touched ref files to determine the new SHA, and emits
-/// a [`VaultChangedEvent`] to `event_tx` whenever a SHA changes.
+/// a [`MemChangedEvent`] to `event_tx` whenever a SHA changes.
 fn run_event_loop(
     refs_heads: &Path,
     state: Arc<Mutex<HashMap<String, String>>>,
     notify_rx: Receiver<notify::Result<Event>>,
-    event_tx: Sender<VaultChangedEvent>,
+    event_tx: Sender<MemChangedEvent>,
 ) {
     while let Ok(item) = notify_rx.recv() {
         let Ok(event) = item else { continue };
@@ -262,7 +262,7 @@ fn run_event_loop(
             if !path.is_file() {
                 continue;
             }
-            let Some(vault) = vault_name_for_ref_path(refs_heads, &path) else {
+            let Some(mem) = mem_name_for_ref_path(refs_heads, &path) else {
                 continue;
             };
             let Some(new_sha) = read_ref_sha(&path) else {
@@ -270,15 +270,15 @@ fn run_event_loop(
             };
             let previous = {
                 let mut map = state.lock().unwrap();
-                let prev = map.get(&vault).cloned().unwrap_or_default();
+                let prev = map.get(&mem).cloned().unwrap_or_default();
                 if prev == new_sha {
                     continue;
                 }
-                map.insert(vault.clone(), new_sha.clone());
+                map.insert(mem.clone(), new_sha.clone());
                 prev
             };
-            let emission = VaultChangedEvent {
-                vault,
+            let emission = MemChangedEvent {
+                mem,
                 head: new_sha,
                 previous,
                 n_commits: 1,
@@ -297,20 +297,20 @@ mod tests {
     use std::time::{Duration, Instant};
     use tempfile::TempDir;
 
-    /// Wait up to `timeout` for an event whose vault matches
-    /// `expected_vault`. Drains and forwards any unrelated event the
+    /// Wait up to `timeout` for an event whose mem matches
+    /// `expected_mem`. Drains and forwards any unrelated event the
     /// watcher may emit during the wait (notify can fire for unrelated
     /// fs noise inside the gitdir tree).
     fn recv_event_for(
-        rx: &Receiver<VaultChangedEvent>,
-        expected_vault: &str,
+        rx: &Receiver<MemChangedEvent>,
+        expected_mem: &str,
         timeout: Duration,
-    ) -> Option<VaultChangedEvent> {
+    ) -> Option<MemChangedEvent> {
         let deadline = Instant::now() + timeout;
         loop {
             let remaining = deadline.checked_duration_since(Instant::now())?;
             match rx.recv_timeout(remaining) {
-                Ok(ev) if ev.vault == expected_vault => return Some(ev),
+                Ok(ev) if ev.mem == expected_mem => return Some(ev),
                 Ok(_) => continue,
                 Err(_) => return None,
             }
@@ -318,13 +318,13 @@ mod tests {
     }
 
     fn make_refs_heads(tmp: &TempDir) -> PathBuf {
-        let gitdir = tmp.path().join("vault-repo.git");
+        let gitdir = tmp.path().join("mem-repo.git");
         std::fs::create_dir_all(gitdir.join("refs").join("heads")).unwrap();
         gitdir
     }
 
-    fn write_ref(refs_heads: &Path, vault: &str, sha: &str) {
-        let p = refs_heads.join(vault);
+    fn write_ref(refs_heads: &Path, mem: &str, sha: &str) {
+        let p = refs_heads.join(mem);
         if let Some(parent) = p.parent() {
             std::fs::create_dir_all(parent).unwrap();
         }
@@ -336,7 +336,7 @@ mod tests {
     #[test]
     fn refs_heads_missing_returns_typed_error() {
         let tmp = TempDir::new().unwrap();
-        let err = watch_vault_repo(&tmp.path().join("nope")).unwrap_err();
+        let err = watch_mem_repo(&tmp.path().join("nope")).unwrap_err();
         match err {
             FileWatcherError::RefsHeadsMissing(_) => {}
             other => panic!("expected RefsHeadsMissing, got {other:?}"),
@@ -344,7 +344,7 @@ mod tests {
     }
 
     #[test]
-    fn modifying_ref_file_emits_vault_changed_event() {
+    fn modifying_ref_file_emits_mem_changed_event() {
         let tmp = TempDir::new().unwrap();
         let gitdir = make_refs_heads(&tmp);
         let refs_heads = gitdir.join("refs").join("heads");
@@ -352,7 +352,7 @@ mod tests {
         let initial = "1234567890abcdef1234567890abcdef12345678";
         write_ref(&refs_heads, "specs", initial);
 
-        let (_watcher, rx) = watch_vault_repo(&gitdir).unwrap();
+        let (_watcher, rx) = watch_mem_repo(&gitdir).unwrap();
 
         // Update the ref to a new SHA — the watcher should fire.
         let updated = "fedcba9876543210fedcba9876543210fedcba98";
@@ -360,7 +360,7 @@ mod tests {
 
         let event = recv_event_for(&rx, "specs", Duration::from_secs(2))
             .expect("event must arrive within 2s");
-        assert_eq!(event.vault, "specs");
+        assert_eq!(event.mem, "specs");
         assert_eq!(event.head, updated);
         assert_eq!(event.previous, initial);
         assert_eq!(event.n_commits, 1);
@@ -372,12 +372,12 @@ mod tests {
         let gitdir = make_refs_heads(&tmp);
         let refs_heads = gitdir.join("refs").join("heads");
 
-        let (_watcher, rx) = watch_vault_repo(&gitdir).unwrap();
+        let (_watcher, rx) = watch_mem_repo(&gitdir).unwrap();
 
         let sha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-        write_ref(&refs_heads, "newvault", sha);
+        write_ref(&refs_heads, "newmem", sha);
 
-        let event = recv_event_for(&rx, "newvault", Duration::from_secs(2))
+        let event = recv_event_for(&rx, "newmem", Duration::from_secs(2))
             .expect("event must arrive within 2s");
         assert_eq!(event.head, sha);
         assert_eq!(event.previous, "");
@@ -390,7 +390,7 @@ mod tests {
         let refs_heads = gitdir.join("refs").join("heads");
 
         write_ref(&refs_heads, "specs", "1111111111111111111111111111111111111111");
-        let (_watcher, rx) = watch_vault_repo(&gitdir).unwrap();
+        let (_watcher, rx) = watch_mem_repo(&gitdir).unwrap();
 
         // Re-write the same SHA — notify will fire, but the SHA gate
         // in the event loop suppresses the duplicate emission.
@@ -404,19 +404,19 @@ mod tests {
     }
 
     #[test]
-    fn hierarchical_branch_paths_produce_compound_vault_names() {
+    fn hierarchical_branch_paths_produce_compound_mem_names() {
         let tmp = TempDir::new().unwrap();
         let gitdir = make_refs_heads(&tmp);
         let refs_heads = gitdir.join("refs").join("heads");
 
-        let (_watcher, rx) = watch_vault_repo(&gitdir).unwrap();
+        let (_watcher, rx) = watch_mem_repo(&gitdir).unwrap();
 
         let sha = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
         write_ref(&refs_heads, "team/specs", sha);
 
         let event = recv_event_for(&rx, "team/specs", Duration::from_secs(2))
             .expect("hierarchical event must arrive");
-        assert_eq!(event.vault, "team/specs");
+        assert_eq!(event.mem, "team/specs");
         assert_eq!(event.head, sha);
     }
 
@@ -426,7 +426,7 @@ mod tests {
         let gitdir = make_refs_heads(&tmp);
         let refs_heads = gitdir.join("refs").join("heads");
 
-        let (watcher, rx) = watch_vault_repo(&gitdir).unwrap();
+        let (watcher, rx) = watch_mem_repo(&gitdir).unwrap();
         drop(watcher);
 
         // After the watcher drops, new ref writes should not surface.

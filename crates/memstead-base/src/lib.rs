@@ -3,14 +3,14 @@
 //! Hosts the parts of the engine that do not assume a git-backed
 //! storage: token-budget chunking, workspace-root utilities, the
 //! entity types and markdown pipeline (parse / generate / write), the
-//! in-memory store, graph queries and community detection, the vault
+//! in-memory store, graph queries and community detection, the mem
 //! router, the operation request/response types (including the
 //! gix-free read paths in `ops::health` / `ops::search`), the search
 //! index, validators, and rendering.
 //!
 //! Consumers that need only graph operations against directory or
 //! archive storage depend on this crate alone — its dependency closure
-//! does not include `gix`. Code that needs git-backed vaults depends on
+//! does not include `gix`. Code that needs git-backed mems depends on
 //! `memstead-git-branch`, which builds on `memstead-base`.
 
 pub mod backend;
@@ -34,8 +34,8 @@ pub mod search_index;
 pub mod storage;
 pub mod store;
 pub mod validator;
-pub mod vault;
-pub mod vault_management;
+pub mod mem;
+pub mod mem_management;
 pub mod vcs;
 pub mod workspace;
 pub mod workspace_root;
@@ -45,7 +45,7 @@ use std::sync::Arc;
 
 use memstead_schema::{TypeDefinition, type_by_name};
 
-pub use backend::{BackendError, VaultBackend};
+pub use backend::{BackendError, MemBackend};
 pub use engine::{
     BackendFactory, BootError, CreateEntityArgs, CreateEntityOutcome, DeleteEntityArgs,
     DeleteEntityOutcome, DeleteReferrers, Engine, EngineError, FromArchiveBytesError,
@@ -65,7 +65,7 @@ pub use ops::{
     HealthSummary, ListResult, ModifiedMetadata, ModifiedSections, Query,
     RENAME_SIMILARITY_DEFAULT, RENAME_SIMILARITY_MAX, RENAME_SIMILARITY_MIN, RelateArg,
     RelateResult, ReloadReport, ReloadResult, RenameResult, SearchHit, SearchResult, SearchScope,
-    SetVaultVersionOutcome, UpdateArgs, UpdateResult, VaultExportResult, WarningHint,
+    SetMemVersionOutcome, UpdateArgs, UpdateResult, MemExportResult, WarningHint,
 };
 pub use pipeline::{
     Facet, Ingest, IngestMode, IngestTrigger, Medium, MediumType, PatternEntry, PatternMode,
@@ -74,12 +74,12 @@ pub use pipeline::{
 pub use pipeline_edit::PipelineEditError;
 pub use pipeline_migrate::{migrate_legacy_pipeline, read_legacy_pipeline_configs};
 pub use pipeline_store::{
-    PipelineConfigs, PipelineRecord, VaultPipelineRecord, load_pipeline_configs,
+    PipelineConfigs, PipelineRecord, MemPipelineRecord, load_pipeline_configs,
 };
 pub use provenance::{Provenance, ProvenanceKind};
 pub use store::{Edge, EdgeSource, InEdge, Store};
-pub use vault::{VAULT_META_DIR, VaultOrigin, VaultRouterSnapshot};
-pub use vault_management::{
+pub use mem::{MEM_META_DIR, MemOrigin, MemRouterSnapshot};
+pub use mem_management::{
     CreateRuleSet, DeleteRuleSet, MatcherSet, MatcherSetError,
 };
 pub use workspace::{

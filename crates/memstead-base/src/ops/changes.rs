@@ -166,7 +166,7 @@ impl ChangeEnvelope {
 /// ([`crate::Engine::changes_since`], landing in a follow-up session)
 /// adds rename-similarity clamping warnings, optional agent-notes
 /// piggyback (git-branch only), and the operator-facing
-/// `vault: String` field on top.
+/// `mem: String` field on top.
 ///
 /// `head` echoes the resolved cursor of the current state — agents
 /// remember it as the next polling cursor so the next call passes it
@@ -191,7 +191,7 @@ pub struct BackendChanges {
     /// renderer-side filter rather than a separate engine-side trigger.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<crate::ops::agent_notes::CommitNote>,
-    /// Workspace-level `__MEMSTEAD` ref tip (unified schemas + per-vault
+    /// Workspace-level `__MEMSTEAD` ref tip (unified schemas + per-mem
     /// configs). `None` for backends without commit history; `None`
     /// also on git-branch backends where the `__MEMSTEAD` ref does not
     /// (yet) exist — pre-migration workspaces are legitimate.
@@ -214,8 +214,8 @@ impl BackendChanges {
     }
 }
 
-/// Synthesise per-entity events for a folder-backed vault by reading
-/// `<vault_root>/.memstead/changes.jsonl` and bucketing events by entity.
+/// Synthesise per-entity events for a folder-backed mem by reading
+/// `<mem_root>/.memstead/changes.jsonl` and bucketing events by entity.
 ///
 /// Net-effect rules per entity:
 /// - Last event = Delete                  → `Removed`
@@ -232,11 +232,11 @@ impl BackendChanges {
 /// Envelopes are id-only (`title` / `entity_type` are `None`); the
 /// engine wrapper enriches from its in-memory store.
 pub fn folder_changes_since(
-    vault_root: &Path,
-    vault: &str,
+    mem_root: &Path,
+    mem: &str,
     since: &str,
 ) -> Result<BackendChanges, BackendError> {
-    let log_path = crate::filesystem::changelog::changelog_path(vault_root);
+    let log_path = crate::filesystem::changelog::changelog_path(mem_root);
     let raw = match std::fs::read_to_string(&log_path) {
         Ok(s) => s,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -306,7 +306,7 @@ pub fn folder_changes_since(
     let mut changes: Vec<ChangeEnvelope> = Vec::with_capacity(by_entity.len());
     for (entity_str, agg) in by_entity {
         let id = match entity_str.split_once("--") {
-            Some((v, slug)) if v == vault => EntityId::new(v, slug),
+            Some((v, slug)) if v == mem => EntityId::new(v, slug),
             _ => continue,
         };
         let envelope = match (agg.first_kind, agg.last_kind) {
@@ -341,7 +341,7 @@ pub fn folder_changes_since(
 /// Engine-wrapper-level "what changed" shape returned by
 /// [`crate::Engine::changes_since`].
 ///
-/// Adds the operator-facing `vault: String` and `warnings:
+/// Adds the operator-facing `mem: String` and `warnings:
 /// Vec<WarningHint>` that the engine layer owns (rename-similarity
 /// clamping, etc.) on top of [`BackendChanges`]. Envelope `title` /
 /// `entity_type` fields are enriched from the engine's in-memory
@@ -357,7 +357,7 @@ pub fn folder_changes_since(
 /// `memstead_git_branch::ops::agent_notes::agent_notes_since` directly.
 #[derive(Debug, Clone, Serialize)]
 pub struct ChangesReport {
-    pub vault: String,
+    pub mem: String,
     pub since: String,
     pub head: String,
     pub changes: Vec<ChangeEnvelope>,
@@ -368,14 +368,14 @@ pub struct ChangesReport {
     /// backend has no commit history.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<Vec<crate::ops::agent_notes::CommitNote>>,
-    /// Workspace-level `__MEMSTEAD` ref tip (unified schemas + per-vault
+    /// Workspace-level `__MEMSTEAD` ref tip (unified schemas + per-mem
     /// configs). `None` when `include_notes` is false or the
     /// workspace has not been migrated to the unified layout yet.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub memstead_ref: Option<String>,
 }
 
-// ---- vault_changed notice (reload-before-op awareness contract) ----
+// ---- mem_changed notice (reload-before-op awareness contract) ----
 
 /// Max changed-entity count rendered with full per-entity detail
 /// (id + change-kind + title + type) before the notice degrades to
@@ -403,7 +403,7 @@ pub struct NoticeByChange {
     pub renamed: usize,
 }
 
-/// The size-graceful body of a [`VaultChangedNotice`]. Internally
+/// The size-graceful body of a [`MemChangedNotice`]. Internally
 /// tagged on `mode` so a caller decodes one stable shape and branches
 /// on the discriminator — no request-shape-dependent polymorphism.
 ///
@@ -435,26 +435,26 @@ pub enum NoticeChanges {
     },
 }
 
-/// Non-blocking "the vault moved under you" notice, attached to a
+/// Non-blocking "the mem moved under you" notice, attached to a
 /// response only when a reload happened during the operation. The
 /// operation's own result/error rides alongside — this is purely the
 /// objective "what else changed" delta, scaled by size, for the agent
 /// to judge relevance against (the engine does not filter to a
 /// per-agent interest model).
 ///
-/// Built by [`VaultChangedNotice::from_delta`] from the
+/// Built by [`MemChangedNotice::from_delta`] from the
 /// `from_head → to_head` [`ChangeEnvelope`] list a reload produced.
 /// Entries are ordered lexically by id so two notices over the same
 /// delta are byte-identical.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct VaultChangedNotice {
-    pub vault: String,
+pub struct MemChangedNotice {
+    pub mem: String,
     pub from_head: String,
     pub to_head: String,
     pub changes: NoticeChanges,
 }
 
-impl VaultChangedNotice {
+impl MemChangedNotice {
     /// Build a notice from the per-entity delta between `from_head`
     /// and `to_head`, degrading by size:
     /// `detailed` (≤ [`NOTICE_DETAILED_MAX`]) → `ids`
@@ -462,7 +462,7 @@ impl VaultChangedNotice {
     /// by primary id (the `to_id` for a rename) so the output is
     /// deterministic regardless of input order.
     pub fn from_delta(
-        vault: String,
+        mem: String,
         from_head: String,
         to_head: String,
         mut changes: Vec<ChangeEnvelope>,
@@ -497,7 +497,7 @@ impl VaultChangedNotice {
             }
         };
         Self {
-            vault,
+            mem,
             from_head,
             to_head,
             changes: body,
@@ -506,7 +506,7 @@ impl VaultChangedNotice {
 
     /// Total changed-entity count this notice describes, across every
     /// degradation tier. The MCP layer uses it to populate the
-    /// `entities_loaded` field of a `VaultReloaded` warning synthesised
+    /// `entities_loaded` field of a `MemReloaded` warning synthesised
     /// for an error response — a mutation reloads *inside* the engine
     /// and surfaces only the stashed notice, not a `WarningHint`, so the
     /// error-text warning line is reconstructed from the notice itself.
@@ -543,7 +543,7 @@ mod tests {
         // fields skip-serialize-when-none. Consumers that don't
         // request notes see no notes/memstead_ref keys on the wire.
         let r = ChangesReport {
-            vault: "specs".to_string(),
+            mem: "specs".to_string(),
             since: "abc".to_string(),
             head: "def".to_string(),
             changes: Vec::new(),
@@ -566,9 +566,9 @@ mod tests {
     fn changes_report_emits_notes_and_memstead_ref_when_some() {
         // When include_notes populates the fields, wire shape carries
         // both keys nested at the report root. `memstead_ref` is the SHA
-        // of `refs/heads/__MEMSTEAD` (unified schemas + per-vault configs).
+        // of `refs/heads/__MEMSTEAD` (unified schemas + per-mem configs).
         let r = ChangesReport {
-            vault: "specs".to_string(),
+            mem: "specs".to_string(),
             since: "abc".to_string(),
             head: "def".to_string(),
             changes: Vec::new(),
@@ -627,7 +627,7 @@ mod tests {
         assert!(json.contains(r#""to_id":"specs--new""#));
     }
 
-    // ---- VaultChangedNotice degradation + determinism --------------
+    // ---- MemChangedNotice degradation + determinism --------------
 
     /// `n` added envelopes with predictable ids (`e-0000` …) so tests
     /// can assert ordering and inline-id presence.
@@ -658,7 +658,7 @@ mod tests {
                 entity_type: Some("spec".to_string()),
             },
         ];
-        let notice = VaultChangedNotice::from_delta(
+        let notice = MemChangedNotice::from_delta(
             "specs".to_string(),
             "H0".to_string(),
             "H1".to_string(),
@@ -699,7 +699,7 @@ mod tests {
             entity_type: Some("spec".to_string()),
         };
         let changes_since_json = serde_json::to_value(&env).unwrap();
-        let notice = VaultChangedNotice::from_delta(
+        let notice = MemChangedNotice::from_delta(
             "specs".to_string(),
             "H0".to_string(),
             "H1".to_string(),
@@ -724,7 +724,7 @@ mod tests {
             title: Some("New".to_string()),
             entity_type: Some("spec".to_string()),
         }];
-        let notice = VaultChangedNotice::from_delta(
+        let notice = MemChangedNotice::from_delta(
             "specs".to_string(),
             "H0".to_string(),
             "H1".to_string(),
@@ -753,7 +753,7 @@ mod tests {
             title: Some("Z".to_string()),
             entity_type: Some("spec".to_string()),
         });
-        let notice = VaultChangedNotice::from_delta(
+        let notice = MemChangedNotice::from_delta(
             "specs".to_string(),
             "H0".to_string(),
             "H1".to_string(),
@@ -771,7 +771,7 @@ mod tests {
     fn notice_medium_delta_degrades_to_ids_with_every_id_inline() {
         // 60 > NOTICE_DETAILED_MAX (50) but ≤ NOTICE_IDS_MAX (500):
         // mode drops to "ids" yet every changed id is still listed.
-        let notice = VaultChangedNotice::from_delta(
+        let notice = MemChangedNotice::from_delta(
             "specs".to_string(),
             "H0".to_string(),
             "H1".to_string(),
@@ -797,7 +797,7 @@ mod tests {
         // (mode "ids") while still listing every id — i.e. the id list
         // is budgeted on a distinctly higher threshold than the detail.
         let just_over_detail = NOTICE_DETAILED_MAX + 1;
-        let notice = VaultChangedNotice::from_delta(
+        let notice = MemChangedNotice::from_delta(
             "specs".to_string(),
             "H0".to_string(),
             "H1".to_string(),
@@ -817,7 +817,7 @@ mod tests {
         // every event; counts buckets by type; self_inform names
         // changes_since with the from_head cursor; no ids inline.
         let n = NOTICE_IDS_MAX + 1;
-        let notice = VaultChangedNotice::from_delta(
+        let notice = MemChangedNotice::from_delta(
             "specs".to_string(),
             "H0".to_string(),
             "H1".to_string(),
@@ -847,13 +847,13 @@ mod tests {
         let forward = added_envelopes(20);
         let mut reversed = forward.clone();
         reversed.reverse();
-        let a = VaultChangedNotice::from_delta(
+        let a = MemChangedNotice::from_delta(
             "specs".to_string(),
             "H0".to_string(),
             "H1".to_string(),
             forward,
         );
-        let b = VaultChangedNotice::from_delta(
+        let b = MemChangedNotice::from_delta(
             "specs".to_string(),
             "H0".to_string(),
             "H1".to_string(),

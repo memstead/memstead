@@ -2,8 +2,8 @@
 //! the xtask doc generator can call `Cli::command()` against the same
 //! tree the binary exposes — no duplicated declarations, no drift.
 //!
-//! One crate, two build configs: the default (`vault-repo`) build
-//! exposes the full command set including the multi-vault / vault-repo
+//! One crate, two build configs: the default (`mem-repo`) build
+//! exposes the full command set including the multi-mem / mem-repo
 //! lifecycle subcommands; `--no-default-features` drops those, leaving
 //! the engine-agnostic surface.
 
@@ -20,14 +20,14 @@ Exit codes:
   0  success
   1  generic failure (catch-all for non-classified errors)
   2  usage error (clap argument-parse failure — unknown flag, bad value)
-  3  not found (entity / vault / resource missing)
+  3  not found (entity / mem / resource missing)
   4  hash mismatch (optimistic-locking failure on a mutation)
   5  validation / schema / policy refusal
 
   For programmatic branching, prefer `--json` over the exit code:
     memstead <subcommand> ... --json | jq -r .code
   The JSON envelope's `code` field carries the typed token
-  (e.g. INVALID_TITLE, HAS_INCOMING_REFS, CROSS_VAULT_LINK_NOT_ALLOWED)
+  (e.g. INVALID_TITLE, HAS_INCOMING_REFS, CROSS_MEM_LINK_NOT_ALLOWED)
   with structured recovery details under `.details`.";
 
 /// Query and mutate Memstead knowledge graphs from the shell.
@@ -77,19 +77,19 @@ pub enum Command {
     /// Health summary (orphans, stubs, stale entities, missing fields).
     Health(commands::health::Args),
 
-    /// Export the write vault as markdown (in place) or as a portable `.mem` archive.
+    /// Export the write mem as markdown (in place) or as a portable `.mem` archive.
     Export(commands::export::Args),
 
-    /// Initialise a filesystem vault in the current (or named) folder.
+    /// Initialise a filesystem mem in the current (or named) folder.
     /// Strict: errors out when the target is not empty.
     Init(commands::init::InitArgs),
 
-    /// Install a sealed `.mem` vault — either a local file, or `<scope>/<name>`
+    /// Install a sealed `.mem` mem — either a local file, or `<scope>/<name>`
     /// from the memstead.io registry.
-    #[cfg(feature = "vault-repo")]
+    #[cfg(feature = "mem-repo")]
     Install(commands::install::Args),
 
-    /// Link a filesystem vault to a registry-published dependency.
+    /// Link a filesystem mem to a registry-published dependency.
     /// `memstead link <scope/name>` fetches the archive into
     /// `.memstead/memstead-io/` and records the dep in `.memstead/config.json`.
     Link(commands::link::LinkArgs),
@@ -111,7 +111,7 @@ pub enum Command {
         action: commands::domain::DomainAction,
     },
 
-    /// Admin-only registry moderation: take a vault down or deny-list
+    /// Admin-only registry moderation: take a mem down or deny-list
     /// bytes. Gated server-side by the `MEMSTEAD_ADMINS` allowlist; every
     /// action is recorded in the registry's append-only audit log.
     Admin {
@@ -153,49 +153,49 @@ pub enum Command {
     /// the whole batch is refused and NOTHING is committed — fix the
     /// named entry and resubmit. On success the batch lands as one
     /// commit. Mirrors `memstead update` per entry.
-    #[cfg(feature = "vault-repo")]
+    #[cfg(feature = "mem-repo")]
     #[command(name = "batch-update")]
     BatchUpdate(commands::batch_update::Args),
 
-    /// Apply parse-time-drift recovery across writable vaults. Walks
+    /// Apply parse-time-drift recovery across writable mems. Walks
     /// `PARSED_RELATION_INVALID` warnings, re-renders affected
     /// source entities to drop the stale rows, and reports per-entry
     /// outcomes. Read-only-origin drops surface as skipped.
-    #[cfg(feature = "vault-repo")]
+    #[cfg(feature = "mem-repo")]
     Recover(commands::recover::Args),
 
-    /// Diff a vault's HEAD against a commit SHA. Pass `--since` = a
+    /// Diff a mem's HEAD against a commit SHA. Pass `--since` = a
     /// prior `commit_sha` from a mutation, or the canonical empty-tree
     /// hash `4b825dc642cb6eb9a060e54bf8d69288fbee4904` for a first sync.
     Changes(commands::changes::Args),
 
-    /// Reload one writable vault's slice of the in-memory store from
-    /// its on-disk branch tip — or every writable vault when
-    /// `--vault` is omitted. CLI parity with the MCP `memstead_reload`
+    /// Reload one writable mem's slice of the in-memory store from
+    /// its on-disk branch tip — or every writable mem when
+    /// `--mem` is omitted. CLI parity with the MCP `memstead_reload`
     /// tool.
     Reload(commands::reload::Args),
 
-    /// Vault lifecycle commands.
-    #[cfg(feature = "vault-repo")]
-    Vault {
+    /// Mem lifecycle commands.
+    #[cfg(feature = "mem-repo")]
+    Mem {
         #[command(subcommand)]
-        action: commands::vault::VaultAction,
+        action: commands::mem::MemAction,
     },
 
-    /// Vault-repo-git lifecycle commands.
-    #[cfg(feature = "vault-repo")]
-    #[command(name = "vault-repo")]
-    VaultRepo {
+    /// Mem-repo-git lifecycle commands.
+    #[cfg(feature = "mem-repo")]
+    #[command(name = "mem-repo")]
+    MemRepo {
         #[command(subcommand)]
-        action: commands::vault_repo::VaultRepoAction,
+        action: commands::mem_repo::MemRepoAction,
     },
 
     /// Introspect and configure workspace policy — `dump` reads the
     /// effective config; `allow-create`/`revoke-create`/`allow-delete`/
     /// `revoke-delete`/`grant-cross-link`/`revoke-cross-link`/`set-mutations`
-    /// write the vault-lifecycle allowlist, cross-vault link grants, and
+    /// write the mem-lifecycle allowlist, cross-mem link grants, and
     /// mutation policy.
-    #[cfg(feature = "vault-repo")]
+    #[cfg(feature = "mem-repo")]
     Workspace {
         #[command(subcommand)]
         action: commands::workspace::WorkspaceAction,

@@ -1,19 +1,19 @@
 //! `memstead-serve-full` — the single-origin public surface in one process.
 //!
 //! Serves the embedded human site + the read-only HTML read pages (`/agent`,
-//! `/overview`, `/entity/<id>`, `/entities`, `/schema`, over a sealed vault)
+//! `/overview`, `/entity/<id>`, `/entities`, `/schema`, over a sealed mem)
 //! AND the writable connection-born sketch `/mcp` (each MCP connection mints its
-//! own ephemeral sketch vault beside a shared read-only content vault), plus the
+//! own ephemeral sketch mem beside a shared read-only content mem), plus the
 //! per-session view-data routes (`/v/{id}/graph|stream|export`). One binary, one
 //! host: the website and the writable MCP share an origin, so a deployment needs
 //! no edge to splice two backends together.
 //!
 //! It reads BOTH env families:
-//! - `MEMSTEAD_SERVE_*` — the read side: `AUTHORITY`, `SCHEMA`, `ARCHIVE`/`VAULT`
+//! - `MEMSTEAD_SERVE_*` — the read side: `AUTHORITY`, `SCHEMA`, `ARCHIVE`/`MEM`
 //!   for the read engine; the embedded site is chosen at build time
 //!   (`MEMSTEAD_SERVE_SITE_DIST`); `BIND` (honours `PORT`) is the listen address.
 //! - `MEMSTEAD_SESSION_*` — the sketch side: `SCHEMA` (the writable sketch
-//!   vault), `CONTENT_DIR`/`CONTENT_ARCHIVE` + `CONTENT_SCHEMA` + `CONTENT_VAULT`
+//!   mem), `CONTENT_DIR`/`CONTENT_ARCHIVE` + `CONTENT_SCHEMA` + `CONTENT_MEM`
 //!   (the read-only content the agent orients against), `TTL_SECS`,
 //!   `ENTITY_CAP`, `MAX` (live-session ceiling — shed, don't OOM, on a spike),
 //!   `VIEW_BASE`, `RATE_PER_SEC`/`RATE_BURST` (rate limit keyed on the forwarded
@@ -26,10 +26,10 @@ use std::time::{Duration, Instant};
 
 use memstead_base::MountStorage;
 use memstead_serve::session::{
-    CONTENT_VAULT_NAME, DEFAULT_SESSION_ENTITY_CAP, DEFAULT_SESSION_MAX, IdGen, SessionRegistry,
+    CONTENT_MEM_NAME, DEFAULT_SESSION_ENTITY_CAP, DEFAULT_SESSION_MAX, IdGen, SessionRegistry,
 };
 use memstead_serve::{
-    AppState, EMBEDDED_CONTENT_VAULT, build_unified_app, materialize_embedded_content,
+    AppState, EMBEDDED_CONTENT_MEM, build_unified_app, materialize_embedded_content,
     mount_read_only,
 };
 use uuid::Uuid;
@@ -40,7 +40,7 @@ fn env_u64(key: &str, default: u64) -> u64 {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // ---- read side: the website + the HTML read pages over a sealed vault ----
+    // ---- read side: the website + the HTML read pages over a sealed mem ----
     let authority =
         std::env::var("MEMSTEAD_SERVE_AUTHORITY").unwrap_or_else(|_| "memstead".to_string());
     let schema_pin =
@@ -53,17 +53,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let schema: memstead_schema::SchemaRef = schema_pin
         .parse()
         .map_err(|e| format!("invalid MEMSTEAD_SERVE_SCHEMA {schema_pin:?}: {e}"))?;
-    let (vault, storage) = if let Ok(archive) = std::env::var("MEMSTEAD_SERVE_ARCHIVE") {
-        let vault =
-            std::env::var("MEMSTEAD_SERVE_VAULT").unwrap_or_else(|_| "flagship".to_string());
-        (vault, MountStorage::Archive { path: PathBuf::from(archive) })
+    let (mem, storage) = if let Ok(archive) = std::env::var("MEMSTEAD_SERVE_ARCHIVE") {
+        let mem =
+            std::env::var("MEMSTEAD_SERVE_MEM").unwrap_or_else(|_| "flagship".to_string());
+        (mem, MountStorage::Archive { path: PathBuf::from(archive) })
     } else {
         let dir = materialize_embedded_content()?;
-        let vault = std::env::var("MEMSTEAD_SERVE_VAULT")
-            .unwrap_or_else(|_| EMBEDDED_CONTENT_VAULT.to_string());
-        (vault, MountStorage::Folder { path: dir })
+        let mem = std::env::var("MEMSTEAD_SERVE_MEM")
+            .unwrap_or_else(|_| EMBEDDED_CONTENT_MEM.to_string());
+        (mem, MountStorage::Folder { path: dir })
     };
-    let api_engine = mount_read_only(vault, schema, storage)?;
+    let api_engine = mount_read_only(mem, schema, storage)?;
     // Serves the authority's own curated read tier → first-party by default;
     // `MEMSTEAD_SERVE_ORIGIN=third-party` opts out for generic deployments.
     let content_origin = match std::env::var("MEMSTEAD_SERVE_ORIGIN").ok().as_deref() {
@@ -102,8 +102,8 @@ mounting an empty placeholder"
     let content_schema: memstead_schema::SchemaRef = content_pin
         .parse()
         .map_err(|e| format!("invalid MEMSTEAD_SESSION_CONTENT_SCHEMA {content_pin:?}: {e}"))?;
-    let content_vault_name = std::env::var("MEMSTEAD_SESSION_CONTENT_VAULT")
-        .unwrap_or_else(|_| CONTENT_VAULT_NAME.to_string());
+    let content_mem_name = std::env::var("MEMSTEAD_SESSION_CONTENT_MEM")
+        .unwrap_or_else(|_| CONTENT_MEM_NAME.to_string());
     let ttl = Duration::from_secs(env_u64("MEMSTEAD_SESSION_TTL_SECS", 1800));
     let cap = env_u64("MEMSTEAD_SESSION_ENTITY_CAP", DEFAULT_SESSION_ENTITY_CAP as u64) as usize;
     // Global live-session ceiling: bounds memory under a traffic spike (each
@@ -111,10 +111,10 @@ mounting an empty placeholder"
     let max_sessions = env_u64("MEMSTEAD_SESSION_MAX", DEFAULT_SESSION_MAX as u64) as usize;
     let id_gen: IdGen = Arc::new(|| format!("s_{}", Uuid::new_v4().simple()));
     let registry =
-        SessionRegistry::new(content_storage, content_schema, content_vault_name, ttl, cap, id_gen)
+        SessionRegistry::new(content_storage, content_schema, content_mem_name, ttl, cap, id_gen)
             .with_max_sessions(max_sessions);
 
-    // Drive idle eviction so abandoned sessions release their vaults.
+    // Drive idle eviction so abandoned sessions release their mems.
     {
         let registry = registry.clone();
         let sweep_every = (ttl / 4).max(Duration::from_secs(30));

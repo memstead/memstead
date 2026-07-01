@@ -1,7 +1,7 @@
 //! Tantivy tokenizer configuration — language-agnostic, no stemming.
 //!
 //! Pipeline: `SimpleTokenizer → LowerCaser → AsciiFoldingFilter`. One
-//! tokenizer name for every text field. A single per-vault stemmer
+//! tokenizer name for every text field. A single per-mem stemmer
 //! misbehaves on bilingual content, so agents handle morphology by
 //! enumerating variants in `Query.any` instead.
 
@@ -9,7 +9,7 @@ use tantivy::tokenizer::{
     AsciiFoldingFilter, LowerCaser, SimpleTokenizer, TextAnalyzer, TokenizerManager,
 };
 
-/// Tokenizer name registered on every per-vault index. Referenced from the
+/// Tokenizer name registered on every per-mem index. Referenced from the
 /// TEXT field options so callers don't have to track the string.
 pub const MEMSTEAD_TOKENIZER: &str = "memstead_default";
 

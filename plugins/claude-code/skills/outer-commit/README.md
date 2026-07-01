@@ -13,14 +13,14 @@ What this skill must achieve. Use this as the reference when tuning SKILL.md.
 
 ## Safety
 
-- only commit the writable-vault worktrees — never code, never config
+- only commit the writable-mem worktrees — never code, never config
 - never amend, never force push, never rewrite history
 
 ## Commit message format
 
 Same as the Stop hook. Subject `memstead: session changes (N entities, M
-vaults)`; body carries `Agent notes:` and `External edits captured:`
-subsections; trailer block includes `Vaults:` and one `Memstead-cursor:`
-entry per writable vault. The `Session:` trailer is present on hook
+mems)`; body carries `Agent notes:` and `External edits captured:`
+subsections; trailer block includes `Mems:` and one `Memstead-cursor:`
+entry per writable mem. The `Session:` trailer is present on hook
 commits and omitted on skill commits — that is the only difference
 between the two paths.

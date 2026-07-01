@@ -5,7 +5,7 @@
 //! - Required sections present and non-empty
 //! - Staleness: days since last_modified > schema threshold
 //! - Undeclared relationships — existing entities whose
-//!   `relationships:` include a name that is not in the per-vault
+//!   `relationships:` include a name that is not in the per-mem
 //!   schema's vocabulary surface as soft warnings rather than hard
 //!   load-time failures. Agents can fix either the entity or the
 //!   schema; undeclared *types* on load are decision-3 hard errors
@@ -44,14 +44,14 @@ pub const HEALTH_INCLUDE_KEYS: &[&str] = &[
 
 /// Compute health reports for all entities in the store.
 ///
-/// `vault_schemas` maps vault name → `Arc<Schema>`. Entities whose vault
+/// `mem_schemas` maps mem name → `Arc<Schema>`. Entities whose mem
 /// is missing from this map fall back to the builtin `default` schema
 /// relationship vocabulary (keeps legacy fixtures green; real production
-/// paths always register a vault schema).
+/// paths always register a mem schema).
 pub fn compute_health(
     store: &Store,
     default_schema: &TypeDefinition,
-    vault_schemas: &HashMap<String, Arc<Schema>>,
+    mem_schemas: &HashMap<String, Arc<Schema>>,
 ) -> HealthSummary {
     let mut missing_fields = Vec::new();
     let mut stale_entities = Vec::new();
@@ -64,15 +64,15 @@ pub fn compute_health(
         }
 
         // Resolve the entity's `TypeDefinition` against the entity's
-        // own vault's schema first. `type_by_name` only knows the
-        // builtin `default` schema; falling through to it on a vault
+        // own mem's schema first. `type_by_name` only knows the
+        // builtin `default` schema; falling through to it on a mem
         // pinned to a non-default schema (e.g. `planning@0.1.0`) would
         // silently use `default_schema` (effectively `spec`) for every
         // entity and report `spec`'s `health_required_fields` —
         // `[identity, purpose]` — even on entities of types like
         // `goal` / `option` / `decision`.
-        let resolved = vault_schemas
-            .get(entity.vault.as_str())
+        let resolved = mem_schemas
+            .get(entity.mem.as_str())
             .and_then(|s| s.types.get(entity.entity_type.as_str()).cloned())
             .or_else(|| type_by_name(&entity.entity_type));
         let schema: &TypeDefinition = resolved.as_deref().unwrap_or(default_schema);
@@ -111,12 +111,12 @@ pub fn compute_health(
         }
 
         // Undeclared-relationship warning. Scan the entity's
-        // relationship list against the vault's schema vocabulary; every
+        // relationship list against the mem's schema vocabulary; every
         // unknown name becomes a soft HealthIssue (same severity as a
         // missing section) so agents running a health sweep after a
         // schema version bump see drift without a crashed load.
         //
-        // Shape-violation scan: when the vault's schema declares
+        // Shape-violation scan: when the mem's schema declares
         // `source_types` / `target_types` on a relationship and an
         // existing edge violates the shape, surface as a soft
         // HealthIssue. The relate-add path enforces shape going
@@ -125,16 +125,16 @@ pub fn compute_health(
         // memstead_create, which does not yet shape-check). The
         // remove-path on `memstead_relate` skips shape validation so the
         // cleanup is always reachable.
-        if let Some(vault_schema) = vault_schemas.get(entity.vault.as_str()) {
+        if let Some(mem_schema) = mem_schemas.get(entity.mem.as_str()) {
             let mut seen_unknown = std::collections::HashSet::new();
             for rel in &entity.relationships {
-                if !vault_schema.relationship_known(&rel.rel_type) {
+                if !mem_schema.relationship_known(&rel.rel_type) {
                     if seen_unknown.insert(rel.rel_type.clone()) {
-                        let suggestion = vault_schema
+                        let suggestion = mem_schema
                             .suggest_relationship(&rel.rel_type)
                             .map(|s| format!(" Did you mean '{s}'?"))
                             .unwrap_or_default();
-                        let (schema_name, schema_version) = vault_schema.id();
+                        let (schema_name, schema_version) = mem_schema.id();
                         issues.push(HealthIssue {
                             field: "relationships".to_string(),
                             message: format!(
@@ -162,7 +162,7 @@ pub fn compute_health(
                     &rel.rel_type,
                     entity.entity_type.as_str(),
                     target_type.as_deref(),
-                    vault_schema.as_ref(),
+                    mem_schema.as_ref(),
                 ) {
                     let allowed_src = if allowed_source_types.is_empty() {
                         "<any>".to_string()
@@ -260,7 +260,7 @@ pub fn compute_health(
 /// on the primary surface — case drift is surfaced separately via
 /// [`TagDistribution`] siblings folded by the caller if desired.
 ///
-/// `vault_filter` narrows both aggregation passes to entities in that vault;
+/// `mem_filter` narrows both aggregation passes to entities in that mem;
 /// `limit` caps the returned `tag_distribution` array after sorting by count
 /// descending (tie-break by tag ascending for deterministic output).
 ///
@@ -269,7 +269,7 @@ pub fn compute_health(
 /// collisions exist.
 pub fn collect_tag_distribution(
     store: &Store,
-    vault_filter: Option<&str>,
+    mem_filter: Option<&str>,
     limit: usize,
 ) -> (Vec<TagDistribution>, Vec<FoldedTag>, UntaggedStats) {
     // tag → (count, per_type_count)
@@ -283,8 +283,8 @@ pub fn collect_tag_distribution(
         if entity.stub {
             continue;
         }
-        if let Some(v) = vault_filter
-            && entity.vault != v
+        if let Some(v) = mem_filter
+            && entity.mem != v
         {
             continue;
         }
@@ -370,18 +370,18 @@ pub fn collect_tag_distribution(
 ///
 /// The scan also covers the `## Relationships` table: a typed-relation
 /// target whose entity vanished (out-of-band file edit, historical
-/// cross-vault corruption from the pre-F15 vault-delete path, etc.)
+/// cross-mem corruption from the pre-F15 mem-delete path, etc.)
 /// would otherwise stay invisible to the diagnostic surface.
 /// Relationship-section danglers ship the same envelope shape with
 /// `section: None` — the Option marks the source axis without requiring
 /// a magic-string sentinel.
 ///
-/// `vault_filter` narrows *scanning* to entities in that vault; resolution
-/// stays global so cross-vault links whose target is a real entity
+/// `mem_filter` narrows *scanning* to entities in that mem; resolution
+/// stays global so cross-mem links whose target is a real entity
 /// elsewhere are not flagged as missing.
 pub fn collect_dangling_links(
     store: &Store,
-    vault_filter: Option<&str>,
+    mem_filter: Option<&str>,
 ) -> Vec<DanglingLink> {
     use crate::entity::parser::extract_inline_links_lenient;
     use std::collections::HashSet;
@@ -391,8 +391,8 @@ pub fn collect_dangling_links(
         if entity.stub {
             continue;
         }
-        if let Some(v) = vault_filter
-            && entity.vault != v
+        if let Some(v) = mem_filter
+            && entity.mem != v
         {
             continue;
         }
@@ -402,7 +402,7 @@ pub fn collect_dangling_links(
             .map(|r| r.target.clone())
             .collect();
         for (section_key, section_body) in &entity.sections {
-            for target_id in extract_inline_links_lenient(section_body, &entity.vault) {
+            for target_id in extract_inline_links_lenient(section_body, &entity.mem) {
                 let target_missing = store
                     .get(&target_id)
                     .map(|e| e.stub)
@@ -429,8 +429,8 @@ pub fn collect_dangling_links(
         // by design), not corruption. Only a target that's *fully
         // absent* from the store — neither stub nor real — flags as
         // dangling. In practice this only fires for out-of-band file
-        // edits or historical cross-vault-delete corruption that
-        // dropped the stub along with the deleted vault.
+        // edits or historical cross-mem-delete corruption that
+        // dropped the stub along with the deleted mem.
         //
         // Dedup against the body-scan output so a target that
         // surfaces from both axes doesn't double-emit.
@@ -458,32 +458,32 @@ pub fn collect_dangling_links(
 /// Collect every non-stub entity whose type declares `required_outgoing`
 /// blocks that the entity's current outgoing edges leave unsatisfied.
 /// Results are deterministic — sorted
-/// by `(vault, id)` — so the agent can diff successive sweeps without
+/// by `(mem, id)` — so the agent can diff successive sweeps without
 /// the underlying HashMap iteration order leaking through.
 ///
-/// `vault_filter` narrows scanning to entities in that vault when set;
-/// `vault_schemas` resolves the entity's type definition against the
-/// vault's pinned schema. Entities whose vault has no schema in the
+/// `mem_filter` narrows scanning to entities in that mem when set;
+/// `mem_schemas` resolves the entity's type definition against the
+/// mem's pinned schema. Entities whose mem has no schema in the
 /// map are skipped (no schema → no `required_outgoing` to evaluate).
 pub fn collect_missing_required_outgoing(
     store: &Store,
-    vault_filter: Option<&str>,
-    vault_schemas: &HashMap<String, Arc<memstead_schema::Schema>>,
+    mem_filter: Option<&str>,
+    mem_schemas: &HashMap<String, Arc<memstead_schema::Schema>>,
 ) -> Vec<MissingRequiredOutgoingReport> {
     let mut out = Vec::new();
     for entity in store.all_entities() {
         if entity.stub {
             continue;
         }
-        if let Some(v) = vault_filter
-            && entity.vault != v
+        if let Some(v) = mem_filter
+            && entity.mem != v
         {
             continue;
         }
-        let Some(vault_schema) = vault_schemas.get(entity.vault.as_str()) else {
+        let Some(mem_schema) = mem_schemas.get(entity.mem.as_str()) else {
             continue;
         };
-        let Some(td) = vault_schema.types.get(entity.entity_type.as_str()) else {
+        let Some(td) = mem_schema.types.get(entity.entity_type.as_str()) else {
             continue;
         };
         if td.required_outgoing.is_empty() {
@@ -517,26 +517,26 @@ pub fn collect_missing_required_outgoing(
             id: entity.id.clone(),
             title: entity.title.clone(),
             entity_type: entity.entity_type.clone(),
-            vault: entity.vault.clone(),
+            mem: entity.mem.clone(),
             missing: unsatisfied,
         });
     }
-    out.sort_by(|a, b| a.vault.cmp(&b.vault).then_with(|| a.id.0.cmp(&b.id.0)));
+    out.sort_by(|a, b| a.mem.cmp(&b.mem).then_with(|| a.id.0.cmp(&b.id.0)));
     out
 }
 
 /// One entity's unsatisfied `required_outgoing` blocks, surfaced from
 /// the health-time scan. Wire shape mirrors the per-write
 /// `MISSING_REQUIRED_OUTGOING` warning's `details` payload but adds
-/// the `vault` name (the warning's `entity_id` already encodes it via
-/// the vault prefix, but health is multi-vault by default and an
+/// the `mem` name (the warning's `entity_id` already encodes it via
+/// the mem prefix, but health is multi-mem by default and an
 /// explicit field is cheaper for downstream filters).
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct MissingRequiredOutgoingReport {
     pub id: crate::entity::EntityId,
     pub title: String,
     pub entity_type: String,
-    pub vault: String,
+    pub mem: String,
     pub missing: Vec<MissingOutgoingBlock>,
 }
 
@@ -657,7 +657,7 @@ mod tests {
             id: EntityId::new("specs", name),
             title: name.into(),
             entity_type: "spec".into(),
-            vault: "specs".into(),
+            mem: "specs".into(),
             file_path: format!("{name}.md"),
             metadata,
             sections,
@@ -696,7 +696,7 @@ mod tests {
             id: EntityId::new("concepts", name),
             title: name.into(),
             entity_type: "concept".into(),
-            vault: "concepts".into(),
+            mem: "concepts".into(),
             file_path: format!("{name}.md"),
             metadata,
             sections,
@@ -804,11 +804,11 @@ mod tests {
         store.upsert(bad.id.clone(), bad);
         store.upsert(victim.id.clone(), victim);
 
-        let mut vault_schemas = HashMap::new();
-        vault_schemas.insert("specs".to_string(), software);
+        let mut mem_schemas = HashMap::new();
+        mem_schemas.insert("specs".to_string(), software);
 
         let schema = &type_by_name("spec").unwrap();
-        let summary = compute_health(&store, schema, &vault_schemas);
+        let summary = compute_health(&store, schema, &mem_schemas);
         let report = summary
             .missing_fields
             .iter()
@@ -875,11 +875,11 @@ mod tests {
         store.upsert(owner.id.clone(), owner);
         store.upsert(owned.id.clone(), owned);
 
-        let mut vault_schemas = HashMap::new();
-        vault_schemas.insert("specs".to_string(), software);
+        let mut mem_schemas = HashMap::new();
+        mem_schemas.insert("specs".to_string(), software);
 
         let schema = &type_by_name("spec").unwrap();
-        let summary = compute_health(&store, schema, &vault_schemas);
+        let summary = compute_health(&store, schema, &mem_schemas);
         let shape_issue = summary
             .missing_fields
             .iter()
@@ -910,11 +910,11 @@ mod tests {
         });
         store.upsert(entity.id.clone(), entity);
 
-        let mut vault_schemas = HashMap::new();
-        vault_schemas.insert("specs".to_string(), Schema::builtin_default());
+        let mut mem_schemas = HashMap::new();
+        mem_schemas.insert("specs".to_string(), Schema::builtin_default());
 
         let schema = &type_by_name("spec").unwrap();
-        let summary = compute_health(&store, schema, &vault_schemas);
+        let summary = compute_health(&store, schema, &mem_schemas);
         let report = summary
             .missing_fields
             .iter()
@@ -942,7 +942,7 @@ mod tests {
     // -------------------------------------------------------------------
 
     /// Build an entity with an arbitrary section body so the test can seed
-    /// inline wiki-links at will. Vault defaults to `specs`.
+    /// inline wiki-links at will. Mem defaults to `specs`.
     fn make_entity_with_body(name: &str, section_key: &str, body: &str) -> Entity {
         let mut entity = make_entity(name, true);
         entity
@@ -1032,7 +1032,7 @@ mod tests {
     }
 
     /// F12: a `## Relationships` row pointing at a fully-absent target
-    /// (out-of-band file edit, vault-delete corruption) must surface.
+    /// (out-of-band file edit, mem-delete corruption) must surface.
     /// The scan covers both axes; relationship-table danglers ship
     /// `section: None` to mark the source axis.
     #[test]
@@ -1127,7 +1127,7 @@ mod tests {
     }
 
     #[test]
-    fn dangling_links_scope_to_vault_filter() {
+    fn dangling_links_scope_to_mem_filter() {
         use crate::entity::store_builder::make_stub;
 
         let mut store = Store::new();
@@ -1145,7 +1145,7 @@ mod tests {
         // web--x with body [[gone]] → dangling in web (different stub).
         let mut x = make_entity("x", true);
         x.id = EntityId::new("web", "x");
-        x.vault = "web".into();
+        x.mem = "web".into();
         x.file_path = "x.md".into();
         x.sections
             .insert("purpose".into(), "Refers to [[gone]] in prose.".into());
@@ -1158,11 +1158,11 @@ mod tests {
 
         let specs_only = super::collect_dangling_links(&store, Some("specs"));
         assert_eq!(specs_only.len(), 1);
-        assert_eq!(specs_only[0].from.vault(), "specs");
+        assert_eq!(specs_only[0].from.mem(), "specs");
 
         let web_only = super::collect_dangling_links(&store, Some("web"));
         assert_eq!(web_only.len(), 1);
-        assert_eq!(web_only[0].from.vault(), "web");
+        assert_eq!(web_only[0].from.mem(), "web");
     }
 
     #[test]
@@ -1185,10 +1185,10 @@ mod tests {
     // collect_tag_distribution — #18
     // ---------------------------------------------------------------------
 
-    fn make_entity_with_tags(name: &str, vault: &str, entity_type: &str, tags: &str) -> Entity {
+    fn make_entity_with_tags(name: &str, mem: &str, entity_type: &str, tags: &str) -> Entity {
         let mut e = make_entity(name, true);
-        e.id = EntityId::new(vault, name);
-        e.vault = vault.into();
+        e.id = EntityId::new(mem, name);
+        e.mem = mem.into();
         e.entity_type = entity_type.into();
         e.metadata
             .insert("tags".into(), MetadataValue::String(tags.into()));
@@ -1257,7 +1257,7 @@ mod tests {
     }
 
     #[test]
-    fn tag_distribution_respects_vault_filter() {
+    fn tag_distribution_respects_mem_filter() {
         let mut store = Store::new();
         let a = make_entity_with_tags("a", "specs", "spec", "decision");
         let b = make_entity_with_tags("b", "memos", "memo", "observation");
@@ -1269,7 +1269,7 @@ mod tests {
         let (dist, _folded, untagged) = collect_tag_distribution(&store, Some("memos"), 10);
         assert_eq!(dist.len(), 1);
         assert_eq!(dist[0].tag, "observation");
-        assert_eq!(untagged.total, 0, "untagged scoped to filter vault");
+        assert_eq!(untagged.total, 0, "untagged scoped to filter mem");
     }
 
     #[test]
@@ -1351,7 +1351,7 @@ community:
         )
     }
 
-    fn make_typed_entity(vault: &str, slug: &str, entity_type: &str) -> crate::entity::Entity {
+    fn make_typed_entity(mem: &str, slug: &str, entity_type: &str) -> crate::entity::Entity {
         use crate::entity::MetadataValue;
         let mut metadata = IndexMap::new();
         metadata.insert(
@@ -1361,10 +1361,10 @@ community:
         let mut sections = IndexMap::new();
         sections.insert("body".into(), "Body.".into());
         crate::entity::Entity {
-            id: EntityId::new(vault, slug),
+            id: EntityId::new(mem, slug),
             title: slug.to_string(),
             entity_type: entity_type.into(),
-            vault: vault.into(),
+            mem: mem.into(),
             file_path: format!("{slug}.md"),
             metadata,
             sections,
@@ -1401,11 +1401,11 @@ community:
             store.upsert(e.id.clone(), e);
         }
 
-        let mut vault_schemas = HashMap::new();
-        vault_schemas.insert("plan".to_string(), schema);
+        let mut mem_schemas = HashMap::new();
+        mem_schemas.insert("plan".to_string(), schema);
 
         let reports =
-            collect_missing_required_outgoing(&store, None, &vault_schemas);
+            collect_missing_required_outgoing(&store, None, &mem_schemas);
         assert_eq!(
             reports.len(),
             1,
@@ -1414,7 +1414,7 @@ community:
         let r = &reports[0];
         assert_eq!(r.id, violator.id);
         assert_eq!(r.entity_type, "decision");
-        assert_eq!(r.vault, "plan");
+        assert_eq!(r.mem, "plan");
         assert_eq!(r.missing.len(), 2);
         let names: Vec<&str> = r
             .missing
@@ -1433,9 +1433,9 @@ community:
     }
 
     #[test]
-    fn missing_required_outgoing_respects_vault_filter() {
-        // Plan: "a write to vault A doesn't surface vault B's violations
-        // in memstead_health vault=A; vault-scoped aggregation is correct."
+    fn missing_required_outgoing_respects_mem_filter() {
+        // Plan: "a write to mem A doesn't surface mem B's violations
+        // in memstead_health mem=A; mem-scoped aggregation is correct."
         let schema = required_outgoing_fixture_schema();
         let mut store = Store::new();
         let v_a = make_typed_entity("alpha", "stalled", "decision");
@@ -1443,23 +1443,23 @@ community:
         store.upsert(v_a.id.clone(), v_a);
         store.upsert(v_b.id.clone(), v_b.clone());
 
-        let mut vault_schemas = HashMap::new();
-        vault_schemas.insert("alpha".to_string(), schema.clone());
-        vault_schemas.insert("beta".to_string(), schema);
+        let mut mem_schemas = HashMap::new();
+        mem_schemas.insert("alpha".to_string(), schema.clone());
+        mem_schemas.insert("beta".to_string(), schema);
 
         let alpha_only =
-            collect_missing_required_outgoing(&store, Some("alpha"), &vault_schemas);
+            collect_missing_required_outgoing(&store, Some("alpha"), &mem_schemas);
         assert_eq!(alpha_only.len(), 1);
-        assert_eq!(alpha_only[0].vault, "alpha");
+        assert_eq!(alpha_only[0].mem, "alpha");
 
         let both =
-            collect_missing_required_outgoing(&store, None, &vault_schemas);
+            collect_missing_required_outgoing(&store, None, &mem_schemas);
         assert_eq!(both.len(), 2);
     }
 
     #[test]
-    fn missing_required_outgoing_skips_stubs_and_unschemaed_vaults() {
-        // Stubs have no entity_type; unschemaed vaults can't be evaluated
+    fn missing_required_outgoing_skips_stubs_and_unschemaed_mems() {
+        // Stubs have no entity_type; unschemaed mems can't be evaluated
         // — both must be silently skipped.
         let schema = required_outgoing_fixture_schema();
         let mut store = Store::new();
@@ -1470,13 +1470,13 @@ community:
         store.upsert(stub.id.clone(), stub);
         store.upsert(other.id.clone(), other);
 
-        let mut vault_schemas = HashMap::new();
-        vault_schemas.insert("plan".to_string(), schema);
+        let mut mem_schemas = HashMap::new();
+        mem_schemas.insert("plan".to_string(), schema);
 
-        let reports = collect_missing_required_outgoing(&store, None, &vault_schemas);
+        let reports = collect_missing_required_outgoing(&store, None, &mem_schemas);
         assert!(
             reports.is_empty(),
-            "stub (no schema lookup) and unschemaed vault must be skipped; got {reports:?}",
+            "stub (no schema lookup) and unschemaed mem must be skipped; got {reports:?}",
         );
     }
 }

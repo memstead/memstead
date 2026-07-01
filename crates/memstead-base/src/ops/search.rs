@@ -18,19 +18,19 @@ use crate::entity::EntityId;
 use crate::entity::generator::generate_markdown;
 use crate::graph::query;
 use crate::search_index::{
-    VaultIndex, compute_matched_terms, compute_score_breakdown, query as search_query,
+    MemIndex, compute_matched_terms, compute_score_breakdown, query as search_query,
 };
 use crate::store::Store;
 
-/// Hard ceiling on how many hits to pull back from tantivy per vault. The
+/// Hard ceiling on how many hits to pull back from tantivy per mem. The
 /// in-memory post-filter trims this down; the ceiling exists so misconfigured
 /// callers (e.g. an unbounded offset) can't degrade into a full-corpus scan
-/// per vault. 10k matches the "typical vault" perf budget.
-const MAX_HITS_PER_VAULT: usize = 10_000;
+/// per mem. 10k matches the "typical mem" perf budget.
+const MAX_HITS_PER_MEM: usize = 10_000;
 
-/// Resolve a hit's lead-section summary against its *own* vault schema —
+/// Resolve a hit's lead-section summary against its *own* mem schema —
 /// the renderer can't do this correctly (its `type_by_name` only sees the
-/// `default` schema), so the search op computes it here where the per-vault
+/// `default` schema), so the search op computes it here where the per-mem
 /// `schema` is in hand and stores it on the hit. Delegates to the shared
 /// [`crate::render::lead_section_pair`] so the lead-section rule has one home.
 fn hit_summary<'a>(
@@ -71,36 +71,36 @@ fn hit_response_tokens(hit: &SearchHit) -> usize {
 
 /// Search entities with text matching and filtering.
 ///
-/// Evaluates `scope.query` against the per-vault tantivy indexes when any
+/// Evaluates `scope.query` against the per-mem tantivy indexes when any
 /// text predicate is set; otherwise degrades to a metadata-only scan of the
 /// store (the `list` semantics path).
 pub fn search(
     store: &Store,
     scope: &SearchScope,
     default_schema: &TypeDefinition,
-    search_indexes: &HashMap<String, VaultIndex>,
-    vault_schemas: &HashMap<String, Arc<Schema>>,
+    search_indexes: &HashMap<String, MemIndex>,
+    mem_schemas: &HashMap<String, Arc<Schema>>,
 ) -> SearchResult {
     let mut warnings: Vec<WarningHint> = Vec::new();
     let scoped_type = scope.entity_type.as_deref();
-    let scope_vault = scope.vault.as_deref();
+    let scope_mem = scope.mem.as_deref();
     let filter_type = scoped_type
-        .and_then(|t| resolve_type(t, scope_vault, vault_schemas));
+        .and_then(|t| resolve_type(t, scope_mem, mem_schemas));
     let filter_schema: &TypeDefinition = filter_type.as_deref().unwrap_or(default_schema);
     collect_equality_filter_warnings(
         &scope.filters,
         filter_schema,
         scoped_type,
-        scope_vault,
-        vault_schemas,
+        scope_mem,
+        mem_schemas,
         &mut warnings,
     );
     collect_range_filter_warnings(
         &scope.range_filters,
         filter_schema,
         scoped_type,
-        scope_vault,
-        vault_schemas,
+        scope_mem,
+        mem_schemas,
         &mut warnings,
     );
     collect_stub_type_exclusion_warning(scope, &mut warnings);
@@ -110,29 +110,29 @@ pub fn search(
     let effective_query: Option<&Query> = scope.query.as_ref().filter(|q| !q.is_empty());
     let query_has_text = effective_query.is_some();
 
-    // Execute the tantivy query across the selected vaults — at most one
-    // when `scope.vault` is Some, otherwise every indexed vault. Keep the
-    // highest score per entity (a cross-vault dedup is irrelevant today but
+    // Execute the tantivy query across the selected mems — at most one
+    // when `scope.mem` is Some, otherwise every indexed mem. Keep the
+    // highest score per entity (a cross-mem dedup is irrelevant today but
     // cheap insurance).
     let mut scored_ids: HashMap<EntityId, f32> = HashMap::new();
     if query_has_text {
         let query = effective_query.unwrap();
-        let target_vaults = resolve_target_vaults(search_indexes, scope.vault.as_deref());
-        if let Some(name) = scope.vault.as_ref()
-            && target_vaults.is_empty()
+        let target_mems = resolve_target_mems(search_indexes, scope.mem.as_deref());
+        if let Some(name) = scope.mem.as_ref()
+            && target_mems.is_empty()
         {
-            warnings.push(WarningHint::SearchVaultIndexUnavailable {
-                vault: name.clone(),
+            warnings.push(WarningHint::SearchMemIndexUnavailable {
+                mem: name.clone(),
                 reason: "missing_index",
                 error: None,
             });
         }
-        for vault_name in &target_vaults {
-            let Some(idx) = search_indexes.get(vault_name.as_str()) else {
+        for mem_name in &target_mems {
+            let Some(idx) = search_indexes.get(mem_name.as_str()) else {
                 continue;
             };
-            let schema = vault_schemas.get(vault_name.as_str());
-            match search_query::execute_on_vault(idx, schema, query, MAX_HITS_PER_VAULT) {
+            let schema = mem_schemas.get(mem_name.as_str());
+            match search_query::execute_on_mem(idx, schema, query, MAX_HITS_PER_MEM) {
                 Ok(hits) => {
                     for (id, score) in hits {
                         let slot = scored_ids.entry(id).or_insert(f32::MIN);
@@ -143,12 +143,12 @@ pub fn search(
                 }
                 Err(e) => {
                     tracing::warn!(
-                        vault = vault_name.as_str(),
+                        mem = mem_name.as_str(),
                         error = %e,
-                        "tantivy query failed; vault contributes no hits"
+                        "tantivy query failed; mem contributes no hits"
                     );
-                    warnings.push(WarningHint::SearchVaultIndexUnavailable {
-                        vault: vault_name.to_string(),
+                    warnings.push(WarningHint::SearchMemIndexUnavailable {
+                        mem: mem_name.to_string(),
                         reason: "query_failed",
                         error: Some(e.to_string()),
                     });
@@ -181,8 +181,8 @@ pub fn search(
             _ => {}
         }
 
-        if let Some(ref vault) = scope.vault
-            && entity.vault != *vault
+        if let Some(ref mem) = scope.mem
+            && entity.mem != *mem
         {
             continue;
         }
@@ -197,15 +197,15 @@ pub fn search(
             continue;
         }
 
-        let resolved = resolve_type(&entity.entity_type, Some(entity.vault.as_str()), vault_schemas);
+        let resolved = resolve_type(&entity.entity_type, Some(entity.mem.as_str()), mem_schemas);
         let schema: &TypeDefinition = resolved.as_deref().unwrap_or(default_schema);
 
         if !apply_equality_filters(
             entity,
             &scope.filters,
             schema,
-            scope.vault.as_deref(),
-            vault_schemas,
+            scope.mem.as_deref(),
+            mem_schemas,
         ) {
             continue;
         }
@@ -213,8 +213,8 @@ pub fn search(
             entity,
             &scope.range_filters,
             schema,
-            scope.vault.as_deref(),
-            vault_schemas,
+            scope.mem.as_deref(),
+            mem_schemas,
         ) {
             continue;
         }
@@ -266,7 +266,7 @@ pub fn search(
         hits.push(SearchHit {
             id: entity.id.clone(),
             title: entity.title.clone(),
-            vault: entity.vault.clone(),
+            mem: entity.mem.clone(),
             entity_type: entity.entity_type.clone(),
             stub: entity.stub,
             score,
@@ -309,7 +309,7 @@ pub fn search(
 
     // Graph expansion. After the primary hit set is computed,
     // optionally pull in neighbours reachable via the requested edge types.
-    // Non-query filters (vault, entity_type, filters, range_filters) also
+    // Non-query filters (mem, entity_type, filters, range_filters) also
     // apply to expanded candidates — a violating neighbour is dropped. The
     // `related_to`, `edge_type`, and text predicates deliberately do NOT
     // apply: expansion is a graph-proximity surface on top of
@@ -317,7 +317,7 @@ pub fn search(
     if let Some(ref edge_types) = scope.expand_via
         && !edge_types.is_empty()
     {
-        expand_hits(&mut hits, store, edge_types, scope, default_schema, vault_schemas);
+        expand_hits(&mut hits, store, edge_types, scope, default_schema, mem_schemas);
     }
 
     // Sort: a `related_to` neighbourhood ranks by proximity — nearer hops
@@ -416,30 +416,30 @@ pub fn list(
     store: &Store,
     scope: &SearchScope,
     default_schema: &TypeDefinition,
-    vault_schemas: &HashMap<String, Arc<Schema>>,
+    mem_schemas: &HashMap<String, Arc<Schema>>,
 ) -> ListResult {
     let mut hits: Vec<SearchHit> = Vec::new();
     let mut total_tokens = 0;
     let mut warnings: Vec<WarningHint> = Vec::new();
     let scoped_type = scope.entity_type.as_deref();
-    let scope_vault = scope.vault.as_deref();
+    let scope_mem = scope.mem.as_deref();
     let filter_type = scoped_type
-        .and_then(|t| resolve_type(t, scope_vault, vault_schemas));
+        .and_then(|t| resolve_type(t, scope_mem, mem_schemas));
     let filter_schema: &TypeDefinition = filter_type.as_deref().unwrap_or(default_schema);
     collect_equality_filter_warnings(
         &scope.filters,
         filter_schema,
         scoped_type,
-        scope_vault,
-        vault_schemas,
+        scope_mem,
+        mem_schemas,
         &mut warnings,
     );
     collect_range_filter_warnings(
         &scope.range_filters,
         filter_schema,
         scoped_type,
-        scope_vault,
-        vault_schemas,
+        scope_mem,
+        mem_schemas,
         &mut warnings,
     );
     collect_stub_type_exclusion_warning(scope, &mut warnings);
@@ -451,8 +451,8 @@ pub fn list(
             _ => {}
         }
 
-        if let Some(ref vault) = scope.vault
-            && entity.vault != *vault
+        if let Some(ref mem) = scope.mem
+            && entity.mem != *mem
         {
             continue;
         }
@@ -463,15 +463,15 @@ pub fn list(
             continue;
         }
 
-        let resolved = resolve_type(&entity.entity_type, Some(entity.vault.as_str()), vault_schemas);
+        let resolved = resolve_type(&entity.entity_type, Some(entity.mem.as_str()), mem_schemas);
         let schema: &TypeDefinition = resolved.as_deref().unwrap_or(default_schema);
 
         if !apply_equality_filters(
             entity,
             &scope.filters,
             schema,
-            scope.vault.as_deref(),
-            vault_schemas,
+            scope.mem.as_deref(),
+            mem_schemas,
         ) {
             continue;
         }
@@ -479,8 +479,8 @@ pub fn list(
             entity,
             &scope.range_filters,
             schema,
-            scope.vault.as_deref(),
-            vault_schemas,
+            scope.mem.as_deref(),
+            mem_schemas,
         ) {
             continue;
         }
@@ -518,7 +518,7 @@ pub fn list(
         hits.push(SearchHit {
             id: entity.id.clone(),
             title: entity.title.clone(),
-            vault: entity.vault.clone(),
+            mem: entity.mem.clone(),
             entity_type: entity.entity_type.clone(),
             stub: entity.stub,
             score: 0.0,
@@ -567,7 +567,7 @@ pub fn list(
 /// is a Tier 2 concern.
 fn compute_facets(hits: &[SearchHit], store: &Store) -> Facets {
     let mut by_type: HashMap<String, usize> = HashMap::new();
-    let mut by_vault: HashMap<String, usize> = HashMap::new();
+    let mut by_mem: HashMap<String, usize> = HashMap::new();
     let mut by_level: HashMap<String, usize> = HashMap::new();
     let mut by_status: HashMap<String, usize> = HashMap::new();
     let mut by_confidence: HashMap<String, usize> = HashMap::new();
@@ -583,7 +583,7 @@ fn compute_facets(hits: &[SearchHit], store: &Store) -> Facets {
         if !hit.entity_type.is_empty() {
             *by_type.entry(hit.entity_type.clone()).or_insert(0) += 1;
         }
-        *by_vault.entry(hit.vault.clone()).or_insert(0) += 1;
+        *by_mem.entry(hit.mem.clone()).or_insert(0) += 1;
 
         if let Some(entity) = store.get(&hit.id) {
             if let Some(v) = entity.metadata.get("level") {
@@ -628,7 +628,7 @@ fn compute_facets(hits: &[SearchHit], store: &Store) -> Facets {
 
     Facets {
         by_type,
-        by_vault,
+        by_mem,
         by_level,
         by_status,
         by_confidence,
@@ -644,7 +644,7 @@ fn compute_facets(hits: &[SearchHit], store: &Store) -> Facets {
 /// Append expanded hits to the primary set. For each primary seed, walk
 /// `edge_types` bidirectionally up to `expand_depth` hops (default 1) and
 /// add neighbours with `expansion: Some(ExpansionInfo)`. Score decays by
-/// `0.5^depth`. Non-query filters (`vault`, `entity_type`, `filters`,
+/// `0.5^depth`. Non-query filters (`mem`, `entity_type`, `filters`,
 /// `range_filters`) are enforced on every candidate; violating neighbours
 /// are dropped. Duplicates across multiple seeds are resolved by keeping
 /// the highest-score candidate.
@@ -657,7 +657,7 @@ fn expand_hits(
     edge_types: &[String],
     scope: &SearchScope,
     default_schema: &TypeDefinition,
-    vault_schemas: &HashMap<String, Arc<Schema>>,
+    mem_schemas: &HashMap<String, Arc<Schema>>,
 ) {
     let depth_limit = scope.expand_depth.unwrap_or(1);
     if depth_limit == 0 {
@@ -700,8 +700,8 @@ fn expand_hits(
             Some(false) if entity.stub => continue,
             _ => {}
         }
-        if let Some(ref vault) = scope.vault
-            && entity.vault != *vault
+        if let Some(ref mem) = scope.mem
+            && entity.mem != *mem
         {
             continue;
         }
@@ -711,15 +711,15 @@ fn expand_hits(
             continue;
         }
 
-        let resolved = resolve_type(&entity.entity_type, Some(entity.vault.as_str()), vault_schemas);
+        let resolved = resolve_type(&entity.entity_type, Some(entity.mem.as_str()), mem_schemas);
         let schema: &TypeDefinition = resolved.as_deref().unwrap_or(default_schema);
 
         if !apply_equality_filters(
             entity,
             &scope.filters,
             schema,
-            scope.vault.as_deref(),
-            vault_schemas,
+            scope.mem.as_deref(),
+            mem_schemas,
         ) {
             continue;
         }
@@ -727,8 +727,8 @@ fn expand_hits(
             entity,
             &scope.range_filters,
             schema,
-            scope.vault.as_deref(),
-            vault_schemas,
+            scope.mem.as_deref(),
+            mem_schemas,
         ) {
             continue;
         }
@@ -751,7 +751,7 @@ fn expand_hits(
         hits.push(SearchHit {
             id: id.clone(),
             title: entity.title.clone(),
-            vault: entity.vault.clone(),
+            mem: entity.mem.clone(),
             entity_type: entity.entity_type.clone(),
             stub: entity.stub,
             score,
@@ -784,10 +784,10 @@ fn first_positive_term(query: Option<&Query>) -> Option<String> {
     q.phrase.clone()
 }
 
-/// Pick which vaults to query. `None` = every indexed vault; `Some(name)`
-/// narrows to that vault (or empty when the name isn't indexed).
-fn resolve_target_vaults<'a>(
-    search_indexes: &'a HashMap<String, VaultIndex>,
+/// Pick which mems to query. `None` = every indexed mem; `Some(name)`
+/// narrows to that mem (or empty when the name isn't indexed).
+fn resolve_target_mems<'a>(
+    search_indexes: &'a HashMap<String, MemIndex>,
     requested: Option<&str>,
 ) -> Vec<&'a String> {
     match requested {
@@ -877,8 +877,8 @@ fn apply_equality_filters(
     entity: &crate::entity::Entity,
     filters: &HashMap<String, String>,
     schema: &TypeDefinition,
-    scope_vault: Option<&str>,
-    vault_schemas: &HashMap<String, Arc<Schema>>,
+    scope_mem: Option<&str>,
+    mem_schemas: &HashMap<String, Arc<Schema>>,
 ) -> bool {
     // Two distinct branches decide whether an entity survives a filter
     // key it can't equality-match — and they are NOT the same outcome:
@@ -903,7 +903,7 @@ fn apply_equality_filters(
     // typo doesn't collapse the result set.
     for (key, filter_value) in filters {
         let Some(field_def) = schema.metadata_field(key) else {
-            if classify_filter_field(key, scope_vault, vault_schemas, false)
+            if classify_filter_field(key, scope_mem, mem_schemas, false)
                 == FieldFilterability::Filterable
             {
                 return false;
@@ -948,7 +948,7 @@ fn apply_equality_filters(
 /// warning-matches-result contract.
 #[derive(PartialEq, Eq, Clone, Copy)]
 enum FieldFilterability {
-    /// No reachable schema (within `scope_vault` if set) declares the key.
+    /// No reachable schema (within `scope_mem` if set) declares the key.
     Unknown,
     /// Declared on ≥1 type, but no declaring type marks it filterable in
     /// the requested mode → the filter is ignored, result = unfiltered.
@@ -959,8 +959,8 @@ enum FieldFilterability {
 }
 
 /// Classify `key`'s filterability across the reachable schemas, ignoring
-/// any single reference type. `scope_vault = Some(v)` narrows to that
-/// vault's pinned schema (mirrors [`find_filter_declaring_types`] so the
+/// any single reference type. `scope_mem = Some(v)` narrows to that
+/// mem's pinned schema (mirrors [`find_filter_declaring_types`] so the
 /// application and warning paths see the same reachable set); `None` scans
 /// every schema. `range = true` counts only `Filterable::Range`; `false`
 /// (equality) counts `Equality | Range`.
@@ -972,8 +972,8 @@ enum FieldFilterability {
 /// entity's type is preserved via the `Filterable` verdict.
 fn classify_filter_field(
     key: &str,
-    scope_vault: Option<&str>,
-    vault_schemas: &HashMap<String, Arc<Schema>>,
+    scope_mem: Option<&str>,
+    mem_schemas: &HashMap<String, Arc<Schema>>,
     range: bool,
 ) -> FieldFilterability {
     let counts = |f: Filterable| {
@@ -995,14 +995,14 @@ fn classify_filter_field(
             }
         }
     };
-    match scope_vault {
+    match scope_mem {
         Some(v) => {
-            if let Some(s) = vault_schemas.get(v) {
+            if let Some(s) = mem_schemas.get(v) {
                 scan(s);
             }
         }
         None => {
-            for s in vault_schemas.values() {
+            for s in mem_schemas.values() {
                 scan(s);
             }
         }
@@ -1020,8 +1020,8 @@ fn apply_range_filters(
     entity: &crate::entity::Entity,
     filters: &HashMap<String, String>,
     schema: &TypeDefinition,
-    scope_vault: Option<&str>,
-    vault_schemas: &HashMap<String, Arc<Schema>>,
+    scope_mem: Option<&str>,
+    mem_schemas: &HashMap<String, Arc<Schema>>,
 ) -> bool {
     // Same two-branch posture as `apply_equality_filters`:
     // - Field absent from this type but range-filterable on another
@@ -1041,7 +1041,7 @@ fn apply_range_filters(
             continue;
         };
         let Some(field_def) = schema.metadata_field(field_name) else {
-            if classify_filter_field(field_name, scope_vault, vault_schemas, true)
+            if classify_filter_field(field_name, scope_mem, mem_schemas, true)
                 == FieldFilterability::Filterable
             {
                 return false;
@@ -1110,8 +1110,8 @@ fn collect_equality_filter_warnings(
     filters: &HashMap<String, String>,
     schema: &TypeDefinition,
     scoped_type: Option<&str>,
-    scope_vault: Option<&str>,
-    vault_schemas: &HashMap<String, Arc<Schema>>,
+    scope_mem: Option<&str>,
+    mem_schemas: &HashMap<String, Arc<Schema>>,
     warnings: &mut Vec<WarningHint>,
 ) {
     for (key, value) in filters {
@@ -1125,12 +1125,12 @@ fn collect_equality_filter_warnings(
                 // `FIELD_NOT_FILTERABLE`, not an "applied-with-narrowing"
                 // code — the fallback type's accident of declaration does
                 // not decide the outcome.
-                match classify_filter_field(key, scope_vault, vault_schemas, false) {
+                match classify_filter_field(key, scope_mem, mem_schemas, false) {
                     FieldFilterability::DeclaredNotFilterable => {
                         warnings.push(WarningHint::FieldNotFilterable { field: key.clone() });
                     }
                     _ => {
-                        let others = find_filter_declaring_types(key, scope_vault, vault_schemas);
+                        let others = find_filter_declaring_types(key, scope_mem, mem_schemas);
                         warnings.push(WarningHint::UnknownFilterKey {
                             key: key.clone(),
                             scoped_type: scoped_type.map(|s| s.to_string()),
@@ -1183,8 +1183,8 @@ fn collect_range_filter_warnings(
     filters: &HashMap<String, String>,
     schema: &TypeDefinition,
     scoped_type: Option<&str>,
-    scope_vault: Option<&str>,
-    vault_schemas: &HashMap<String, Arc<Schema>>,
+    scope_mem: Option<&str>,
+    mem_schemas: &HashMap<String, Arc<Schema>>,
     warnings: &mut Vec<WarningHint>,
 ) {
     for key in filters.keys() {
@@ -1199,7 +1199,7 @@ fn collect_range_filter_warnings(
                 // non-range-filterable is ignored (result = unfiltered) and
                 // reports `FIELD_NOT_RANGE_FILTERABLE`, not an
                 // applied-with-narrowing code.
-                match classify_filter_field(field_name, scope_vault, vault_schemas, true) {
+                match classify_filter_field(field_name, scope_mem, mem_schemas, true) {
                     FieldFilterability::DeclaredNotFilterable => {
                         warnings.push(WarningHint::FieldNotRangeFilterable {
                             field: field_name.to_string(),
@@ -1207,7 +1207,7 @@ fn collect_range_filter_warnings(
                     }
                     _ => {
                         let others =
-                            find_filter_declaring_types(field_name, scope_vault, vault_schemas);
+                            find_filter_declaring_types(field_name, scope_mem, mem_schemas);
                         warnings.push(WarningHint::UnknownRangeFilterField {
                             field: field_name.to_string(),
                             key: key.clone(),
@@ -1227,24 +1227,24 @@ fn collect_range_filter_warnings(
     }
 }
 
-/// Resolve `entity_type` to a TypeDefinition by consulting the per-vault
-/// schema map first (narrowed to `preferred_vault`'s schema if provided
+/// Resolve `entity_type` to a TypeDefinition by consulting the per-mem
+/// schema map first (narrowed to `preferred_mem`'s schema if provided
 /// and the type is declared there), then any reachable schema in the
 /// map, then the builtin default. Used by both filter dispatch (where
-/// the entity's vault drives resolution) and warning collection (where
-/// the scope's vault narrows the reachable set).
+/// the entity's mem drives resolution) and warning collection (where
+/// the scope's mem narrows the reachable set).
 fn resolve_type(
     entity_type: &str,
-    preferred_vault: Option<&str>,
-    vault_schemas: &HashMap<String, Arc<Schema>>,
+    preferred_mem: Option<&str>,
+    mem_schemas: &HashMap<String, Arc<Schema>>,
 ) -> Option<Arc<TypeDefinition>> {
-    if let Some(v) = preferred_vault
-        && let Some(s) = vault_schemas.get(v)
+    if let Some(v) = preferred_mem
+        && let Some(s) = mem_schemas.get(v)
         && let Some(t) = s.get_type(entity_type)
     {
         return Some(t);
     }
-    for s in vault_schemas.values() {
+    for s in mem_schemas.values() {
         if let Some(t) = s.get_type(entity_type) {
             return Some(t);
         }
@@ -1253,9 +1253,9 @@ fn resolve_type(
 }
 
 /// Locate every reachable type that declares `key` as a metadata
-/// field, regardless of its `filterable` kind. `scope_vault = Some(v)`
-/// narrows the search to that vault's pinned schema; `None` scans every
-/// schema in `vault_schemas`. Empty return ⇒ no reachable schema
+/// field, regardless of its `filterable` kind. `scope_mem = Some(v)`
+/// narrows the search to that mem's pinned schema; `None` scans every
+/// schema in `mem_schemas`. Empty return ⇒ no reachable schema
 /// declares the filter at all — caller distinguishes the
 /// "filter-on-other-type(s)" message from the "no-declaration-anywhere"
 /// message based on the list length.
@@ -1266,8 +1266,8 @@ fn resolve_type(
 /// declaring type so the agent picks the right `--type` scope.
 fn find_filter_declaring_types(
     key: &str,
-    scope_vault: Option<&str>,
-    vault_schemas: &HashMap<String, Arc<Schema>>,
+    scope_mem: Option<&str>,
+    mem_schemas: &HashMap<String, Arc<Schema>>,
 ) -> Vec<String> {
     let mut found: Vec<String> = Vec::new();
     let mut scan = |schema: &Schema| {
@@ -1277,14 +1277,14 @@ fn find_filter_declaring_types(
             }
         }
     };
-    match scope_vault {
+    match scope_mem {
         Some(v) => {
-            if let Some(s) = vault_schemas.get(v) {
+            if let Some(s) = mem_schemas.get(v) {
                 scan(s);
             }
         }
         None => {
-            for s in vault_schemas.values() {
+            for s in mem_schemas.values() {
                 scan(s);
             }
         }
@@ -1318,12 +1318,12 @@ fn compare_numeric(
 mod tests {
     use super::*;
     use crate::entity::{Entity, EntityId, MetadataValue};
-    use crate::search_index::VaultIndex;
+    use crate::search_index::MemIndex;
     use crate::store::Store;
     use indexmap::IndexMap;
     use memstead_schema::{Schema, type_by_name};
 
-    fn make_entity(name: &str, vault: &str) -> Entity {
+    fn make_entity(name: &str, mem: &str) -> Entity {
         let mut metadata = IndexMap::new();
         metadata.insert("level".into(), MetadataValue::String("M0".into()));
         metadata.insert("type".into(), MetadataValue::String("spec".into()));
@@ -1334,10 +1334,10 @@ mod tests {
         sections.insert("purpose".into(), format!("Purpose of {name}."));
 
         Entity {
-            id: EntityId::new(vault, name),
+            id: EntityId::new(mem, name),
             title: name.to_string(),
             entity_type: "spec".into(),
-            vault: vault.into(),
+            mem: mem.into(),
             file_path: format!("{name}.md"),
             metadata,
             sections,
@@ -1349,27 +1349,27 @@ mod tests {
         }
     }
 
-    /// Build per-vault tantivy indexes from a store's contents. Used by the
+    /// Build per-mem tantivy indexes from a store's contents. Used by the
     /// unit tests since the search path now goes through tantivy.
     fn build_test_indexes(
         store: &Store,
-    ) -> (HashMap<String, VaultIndex>, HashMap<String, Arc<Schema>>) {
+    ) -> (HashMap<String, MemIndex>, HashMap<String, Arc<Schema>>) {
         let schema = Schema::builtin_default();
         let mut indexes = HashMap::new();
         let mut schemas = HashMap::new();
-        let vaults: HashSet<String> = store
+        let mems: HashSet<String> = store
             .all_entities()
             .filter(|e| !e.stub)
-            .map(|e| e.vault.clone())
+            .map(|e| e.mem.clone())
             .collect();
-        for vault in vaults {
-            let mut idx = VaultIndex::build_in_ram(vault.clone(), Some(&schema)).unwrap();
-            for e in store.all_entities().filter(|e| e.vault == vault) {
+        for mem in mems {
+            let mut idx = MemIndex::build_in_ram(mem.clone(), Some(&schema)).unwrap();
+            for e in store.all_entities().filter(|e| e.mem == mem) {
                 idx.index_entity(e).unwrap();
             }
             idx.commit().unwrap();
-            indexes.insert(vault.clone(), idx);
-            schemas.insert(vault, schema.clone());
+            indexes.insert(mem.clone(), idx);
+            schemas.insert(mem, schema.clone());
         }
         (indexes, schemas)
     }
@@ -1424,19 +1424,19 @@ mod tests {
     }
 
     #[test]
-    fn search_with_vault_filter() {
+    fn search_with_mem_filter() {
         let mut store = Store::new();
         store.upsert(EntityId::new("specs", "a"), make_entity("a", "specs"));
         store.upsert(EntityId::new("memos", "b"), make_entity("b", "memos"));
 
         let scope = SearchScope {
-            vault: Some("specs".into()),
+            mem: Some("specs".into()),
             ..Default::default()
         };
 
         let result = run_search(&store, &scope);
         assert_eq!(result.total, 1);
-        assert_eq!(result.hits[0].vault, "specs");
+        assert_eq!(result.hits[0].mem, "specs");
     }
 
     #[test]
@@ -2274,7 +2274,7 @@ mod tests {
     }
 
     #[test]
-    fn query_spans_all_vaults_when_vault_none() {
+    fn query_spans_all_mems_when_mem_none() {
         let mut store = Store::new();
         let mut a = make_entity("a", "specs");
         a.sections.insert("identity".into(), "foo".into());
@@ -2295,7 +2295,7 @@ mod tests {
     }
 
     #[test]
-    fn query_targets_single_vault_when_named() {
+    fn query_targets_single_mem_when_named() {
         let mut store = Store::new();
         let mut a = make_entity("a", "specs");
         a.sections.insert("identity".into(), "foo".into());
@@ -2309,12 +2309,12 @@ mod tests {
                 any: vec!["foo".into()],
                 ..Default::default()
             }),
-            vault: Some("memos".into()),
+            mem: Some("memos".into()),
             ..Default::default()
         };
         let result = run_search(&store, &scope);
         assert_eq!(result.total, 1);
-        assert_eq!(result.hits[0].vault, "memos");
+        assert_eq!(result.hits[0].mem, "memos");
     }
 
     // ---- matched_terms + score_breakdown + heading_path ----
@@ -2700,12 +2700,12 @@ mod tests {
             by_type_sum, 12,
             "by_type must cover the full unpaginated set, not just the page"
         );
-        let by_vault_sum: usize = facets.by_vault.values().sum();
-        assert_eq!(by_vault_sum, 12);
+        let by_mem_sum: usize = facets.by_mem.values().sum();
+        assert_eq!(by_mem_sum, 12);
     }
 
     #[test]
-    fn facets_by_type_and_vault_exact() {
+    fn facets_by_type_and_mem_exact() {
         let mut store = Store::new();
         // 3 specs in 'specs', 2 memos in 'memos'.
         for i in 0..3 {
@@ -2733,8 +2733,8 @@ mod tests {
         let facets = result.facets.as_ref().unwrap();
         assert_eq!(facets.by_type.get("spec").copied(), Some(3));
         assert_eq!(facets.by_type.get("memo").copied(), Some(2));
-        assert_eq!(facets.by_vault.get("specs").copied(), Some(3));
-        assert_eq!(facets.by_vault.get("memos").copied(), Some(2));
+        assert_eq!(facets.by_mem.get("specs").copied(), Some(3));
+        assert_eq!(facets.by_mem.get("memos").copied(), Some(2));
         // Without graph expansion every hit is primary; no `expanded`
         // dim is populated.
         assert_eq!(facets.by_expansion.get("primary").copied(), Some(5));
@@ -2761,7 +2761,7 @@ mod tests {
             .as_ref()
             .expect("facets is Some(Facets::default()) even when hit set is empty");
         assert!(facets.by_type.is_empty());
-        assert!(facets.by_vault.is_empty());
+        assert!(facets.by_mem.is_empty());
         assert!(facets.by_level.is_empty());
         assert!(facets.by_subsection.is_empty());
         assert!(facets.by_expansion.is_empty());
@@ -3290,8 +3290,8 @@ mod tests {
         assert_eq!(rf.expansion.as_ref().unwrap().via_edge, "REFERENCES");
     }
 
-    fn make_stub_entity(name: &str, vault: &str) -> Entity {
-        let mut e = make_entity(name, vault);
+    fn make_stub_entity(name: &str, mem: &str) -> Entity {
+        let mut e = make_entity(name, mem);
         e.stub = true;
         e
     }
@@ -3405,13 +3405,13 @@ mod tests {
         );
     }
 
-    /// A hit's summary is resolved against its *own* vault schema at
+    /// A hit's summary is resolved against its *own* mem schema at
     /// search time,
     /// not the global `default` schema. A `software`-schema `requirement`
     /// projects its `Statement` anchor — pre-fix `type_by_name` missed it
     /// (requirement isn't a `default`-schema type) and rendered `—`.
     #[test]
-    fn search_summary_uses_per_vault_schema_anchor_section() {
+    fn search_summary_uses_per_mem_schema_anchor_section() {
         use memstead_schema::SchemaRegistry;
 
         let software = SchemaRegistry::builtin()
@@ -3431,7 +3431,7 @@ mod tests {
             id: EntityId::new("reqs", "encrypt-tokens"),
             title: "Encrypt tokens".into(),
             entity_type: "requirement".into(),
-            vault: "reqs".into(),
+            mem: "reqs".into(),
             file_path: "encrypt-tokens.md".into(),
             metadata,
             sections,
@@ -3444,9 +3444,9 @@ mod tests {
         let mut store = Store::new();
         store.upsert(entity.id.clone(), entity);
 
-        // Index + per-vault schema map keyed to the *software* schema, so the
+        // Index + per-mem schema map keyed to the *software* schema, so the
         // search op resolves `requirement` against it (not the default schema).
-        let mut idx = VaultIndex::build_in_ram("reqs".into(), Some(&software)).unwrap();
+        let mut idx = MemIndex::build_in_ram("reqs".into(), Some(&software)).unwrap();
         for e in store.all_entities() {
             idx.index_entity(e).unwrap();
         }
@@ -3537,7 +3537,7 @@ staleness_threshold_days: 90\nwrite_rules: []\n";
         let schema = csv_tag_schema();
         let type_def = schema.get_type("thing").expect("thing type present");
         let type_def = type_def.as_ref();
-        let vault_schemas: HashMap<String, Arc<Schema>> = HashMap::new();
+        let mem_schemas: HashMap<String, Arc<Schema>> = HashMap::new();
         let filters: HashMap<String, String> = filters
             .iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -3548,7 +3548,7 @@ staleness_threshold_days: 90\nwrite_rules: []\n";
             type_def,
             None,
             None,
-            &vault_schemas,
+            &mem_schemas,
             &mut warnings,
         );
         warnings.iter().map(|w| w.code()).collect()

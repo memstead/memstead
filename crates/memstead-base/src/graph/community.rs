@@ -538,7 +538,7 @@ fn run_louvain(index: &mut LouvainIndex, rng: &mut dyn FnMut() -> f64) {
 ///
 /// `edge_weight_fn` maps relationship types to weights.
 /// Nodes where `store.get(id).stub == true` are excluded.
-/// `visible_fn` filters entities by vault visibility.
+/// `visible_fn` filters entities by mem visibility.
 pub fn detect_communities<F>(
     store: &Store,
     resolution: f64,
@@ -670,15 +670,15 @@ where
 ///
 /// Pair keys are lexicographically normalised (`from_cluster <= to_cluster`)
 /// so each unordered cluster pair appears at most once. Intra-cluster edges
-/// are skipped. If `vault_filter` is set, only edges whose **source** entity
-/// lives in that vault contribute — matches `memstead_health`'s asymmetric filter.
+/// are skipped. If `mem_filter` is set, only edges whose **source** entity
+/// lives in that mem contribute — matches `memstead_health`'s asymmetric filter.
 /// Edges where either endpoint lacks a cluster assignment in `louvain` are
 /// skipped. `sample_edges` is capped at [`BRIDGE_SAMPLE_CAP`] and sorted by
 /// `(rel_type, from, to)` for determinism; `edge_types` is sorted ASCII.
 pub fn aggregate_bridges(
     store: &Store,
     louvain: &LouvainOutput,
-    vault_filter: Option<&str>,
+    mem_filter: Option<&str>,
 ) -> Vec<CommunityBridge> {
     // Accumulator per unordered cluster pair: (edge_count, edge_types, samples).
     struct Acc {
@@ -696,8 +696,8 @@ pub fn aggregate_bridges(
             Some(e) => e,
             None => continue,
         };
-        if let Some(vf) = vault_filter
-            && entity.vault != vf
+        if let Some(vf) = mem_filter
+            && entity.mem != vf
         {
             continue;
         }
@@ -760,29 +760,29 @@ pub fn aggregate_bridges(
 }
 
 /// Cluster ids from `louvain` that have at least one member living in
-/// `vault`.
+/// `mem`.
 ///
 /// This is the membership rule that scopes `memstead_overview` /
-/// `memstead_health` community output under a `vault` filter: it filters the
+/// `memstead_health` community output under a `mem` filter: it filters the
 /// already-computed global partition rather than re-running detection on
-/// a subgraph (per-vault Louvain ≠ the global partition restricted to a
-/// vault, and would renumber clusters). Surviving cluster ids keep their
+/// a subgraph (per-mem Louvain ≠ the global partition restricted to a
+/// mem, and would renumber clusters). Surviving cluster ids keep their
 /// global-pass values, and surviving clusters keep their full membership
-/// (including out-of-vault members) — only *which* clusters are reported
+/// (including out-of-mem members) — only *which* clusters are reported
 /// is scoped, not their contents. Stub entities are ignored, matching the
 /// scoped entity-count definition.
 ///
 /// Returned as a sorted set so callers iterate deterministically.
-pub fn clusters_in_vault(
+pub fn clusters_in_mem(
     store: &Store,
     louvain: &LouvainOutput,
-    vault: &str,
+    mem: &str,
 ) -> BTreeSet<String> {
     // Entity-id strings (the `.0` form used as cluster members) for the
-    // non-stub entities that live in `vault`.
-    let in_vault: HashSet<&str> = store
+    // non-stub entities that live in `mem`.
+    let in_mem: HashSet<&str> = store
         .all_entities()
-        .filter(|e| !e.stub && e.vault == vault)
+        .filter(|e| !e.stub && e.mem == mem)
         .map(|e| e.id.0.as_str())
         .collect();
     louvain
@@ -791,7 +791,7 @@ pub fn clusters_in_vault(
         .filter(|(_, info)| {
             info.entities
                 .iter()
-                .any(|member| in_vault.contains(member.as_str()))
+                .any(|member| in_mem.contains(member.as_str()))
         })
         .map(|(cid, _)| cid.clone())
         .collect()
@@ -819,12 +819,12 @@ mod tests {
     use crate::entity::Entity;
     use crate::store::{Edge, EdgeSource};
 
-    fn entity(id: &str, vault: &str) -> Entity {
+    fn entity(id: &str, mem: &str) -> Entity {
         Entity {
             id: EntityId(id.to_string()),
             title: id.to_string(),
             entity_type: "spec".to_string(),
-            vault: vault.to_string(),
+            mem: mem.to_string(),
             file_path: String::new(),
             metadata: indexmap::IndexMap::new(),
             sections: indexmap::IndexMap::new(),

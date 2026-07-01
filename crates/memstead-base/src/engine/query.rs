@@ -1,13 +1,13 @@
 //! Engine read paths — accessors and queries.
 //!
 //! Read-only methods on `Engine`: store / schema / mount accessors,
-//! per-vault path helpers (`gitdir_for` / `worktree_for`), aggregated
+//! per-mem path helpers (`gitdir_for` / `worktree_for`), aggregated
 //! views (`communities`, `orphans`, `stubs`, `most_connected`,
-//! `missing_required_outgoing`), per-vault summaries (`health`,
+//! `missing_required_outgoing`), per-mem summaries (`health`,
 //! `stats`, `context`), search (`list`, `search`,
 //! `search_indexes`), and the bytes-level read wrappers
 //! (`list_entities`, `read_entity`, `read_provenance`). Capability and
-//! cross-vault link gating live here too — they're consulted by
+//! cross-mem link gating live here too — they're consulted by
 //! handlers before any mutation reaches the backend.
 
 use std::cell::OnceCell;
@@ -25,9 +25,9 @@ use crate::ops::{
 };
 use crate::provenance::Provenance;
 #[cfg(not(target_arch = "wasm32"))]
-use crate::search_index::{VaultIndex, build_all};
+use crate::search_index::{MemIndex, build_all};
 use crate::store::Store;
-use crate::vault::VaultRouterSnapshot;
+use crate::mem::MemRouterSnapshot;
 use crate::workspace::{MountCapability, MountStorage, WorkspaceSettings};
 
 use super::{BackendFactory, Engine, EngineError, MountedBackend};
@@ -41,7 +41,7 @@ impl Engine {
         &self.store
     }
 
-    /// Per-vault schema, keyed by mount's vault name. Each entry is the
+    /// Per-mem schema, keyed by mount's mem name. Each entry is the
     /// schema resolved from that mount's pin at boot, so the map holds
     /// genuinely heterogeneous schemas in a multi-schema workspace.
     pub fn schemas(&self) -> &HashMap<String, Arc<Schema>> {
@@ -50,11 +50,11 @@ impl Engine {
 
     /// Workspace-authored schemas loaded from
     /// `WorkspaceSettings.schemas_dir` at construction. Distinct from
-    /// [`Self::schemas`] (per-vault, only schemas pinned by a mount):
+    /// [`Self::schemas`] (per-mem, only schemas pinned by a mount):
     /// this slice carries every workspace-loaded schema regardless of
-    /// whether a vault pins it. Used by `memstead_overview` to enumerate
-    /// schemas referenced by `vault_create_rules.schemas[]` but not
-    /// pinned by any vault — agents see what could be pinned without
+    /// whether a mem pins it. Used by `memstead_overview` to enumerate
+    /// schemas referenced by `mem_create_rules.schemas[]` but not
+    /// pinned by any mem — agents see what could be pinned without
     /// looking up the workspace.toml directly.
     pub fn workspace_schemas(&self) -> &[Arc<Schema>] {
         &self.workspace_schemas
@@ -62,9 +62,9 @@ impl Engine {
 
     /// Embedded built-in schemas loaded once at boot. Handlers
     /// resolving a schema pin by `<name>@<version>` (MCP's `memstead_schema`,
-    /// `memstead_overview` rendering) walk vault-pinned, workspace, and
+    /// `memstead_overview` rendering) walk mem-pinned, workspace, and
     /// built-in catalogues in order — built-ins are the catch-all when
-    /// no vault or workspace dir pins the schema. Workspace schemas
+    /// no mem or workspace dir pins the schema. Workspace schemas
     /// shadow built-ins on `(name, version)` collision; resolve from
     /// `workspace_schemas()` first.
     pub fn builtin_schemas(&self) -> &[Arc<Schema>] {
@@ -78,14 +78,14 @@ impl Engine {
     /// **or** pinned by a writable mount in this workspace. Built-ins are
     /// compiled into the binary — unforgeable. A non-built-in schema earns
     /// first-party status only once the operator *adopts* it by writably
-    /// mounting a vault that pins it: writing into a vault is the act that
+    /// mounting a mem that pins it: writing into a mem is the act that
     /// legitimately needs a schema's authoring prose (`system_message`,
     /// `write_rules`, …), and the mount's writable posture is set by the
     /// consumer's own config — a publisher cannot forge it.
     ///
     /// Everything else is [`OriginClass::ThirdParty`]: a schema present in
     /// the catalogue but pinned only by read-only mounts (a registry-
-    /// installed read-vault or an adopted foreign folder/clone), or one the
+    /// installed read-mem or an adopted foreign folder/clone), or one the
     /// engine cannot vouch for at all. Its prose is served structural-only
     /// so a stranger's free-text never reaches a consuming agent as
     /// instructions. This classifies by the mount graph — never by scanning
@@ -93,9 +93,9 @@ impl Engine {
     /// is the safe default for any ambiguous origin.
     ///
     /// Note a read-only mount pinning a *built-in* schema (e.g. a registry
-    /// vault on `default@1.0.0`) resolves to the consumer's own clean copy
+    /// mem on `default@1.0.0`) resolves to the consumer's own clean copy
     /// and stays first-party — the de-framing targets only foreign,
-    /// non-built-in schemas that no writable vault has adopted.
+    /// non-built-in schemas that no writable mem has adopted.
     pub fn schema_origin(&self, schema: &Arc<Schema>) -> crate::render::OriginClass {
         use crate::render::OriginClass;
         let (name, version) = schema.id();
@@ -112,7 +112,7 @@ impl Engine {
         let canon = format!("{name}@{version}");
         let pinned_by_writable = self.mounts().iter().any(|m| {
             m.schema.as_ref().map(|s| s.to_string()).as_deref() == Some(canon.as_str())
-                && self.vault_router().is_writable(&m.vault)
+                && self.mem_router().is_writable(&m.mem)
         });
         if pinned_by_writable {
             OriginClass::FirstParty
@@ -121,12 +121,12 @@ impl Engine {
         }
     }
 
-    /// Classify a vault's *data* trust origin — the authority every read
+    /// Classify a mem's *data* trust origin — the authority every read
     /// surface consults before serving an entity's content (bodies,
     /// snippets, titles). A writable mount is [`OriginClass::FirstParty`]:
     /// its content is authored in this workspace. Anything else — a
-    /// read-only mount (a registry-installed read-vault or an adopted
-    /// foreign folder/clone) or an unknown vault — is
+    /// read-only mount (a registry-installed read-mem or an adopted
+    /// foreign folder/clone) or an unknown mem — is
     /// [`OriginClass::ThirdParty`], so the consuming agent/host treats the
     /// content as quoted, untrusted data.
     ///
@@ -136,8 +136,8 @@ impl Engine {
     /// first-party. Distinct from [`Self::schema_origin`], which governs a
     /// schema's instruction-prose: the data channel and the
     /// instruction channel are separate vectors with separate authorities.
-    pub fn vault_origin_class(&self, vault: &str) -> crate::render::OriginClass {
-        if self.vault_router().is_writable(vault) {
+    pub fn mem_origin_class(&self, mem: &str) -> crate::render::OriginClass {
+        if self.mem_router().is_writable(mem) {
             crate::render::OriginClass::FirstParty
         } else {
             crate::render::OriginClass::ThirdParty
@@ -151,8 +151,8 @@ impl Engine {
         &self.load_errors
     }
 
-    /// Workspace-level operator policy (vault create/delete rules,
-    /// cross-vault links). Defaults to empty; populated via
+    /// Workspace-level operator policy (mem create/delete rules,
+    /// cross-mem links). Defaults to empty; populated via
     /// [`Engine::set_settings`] after construction. Surfaced for MCP
     /// handlers (`memstead_health { include_config: true }`,
     /// `memstead_overview`'s lifecycle-namespaces section) and other
@@ -175,7 +175,7 @@ impl Engine {
     /// counterpart of the `add_*_json` edit entry points. Serialization-
     /// boundary callers (UniFFI, where serde does not live) get the
     /// four-primitive store in one call and deserialize on their side.
-    /// Shape: `{ "mediums": [{ vault, name, config }], "facets": [...],
+    /// Shape: `{ "mediums": [{ mem, name, config }], "facets": [...],
     /// "projections": [...], "ingests": [{ name, config }] }`. Serializing
     /// these plain records cannot fail; an empty store still yields the
     /// fallback empty object.
@@ -205,8 +205,8 @@ impl Engine {
     /// left the policy decorative on the CLI). `tool` becomes the
     /// warning's `details.tool` — callers pass the engine-level verb
     /// (`create_entity`, `update_entity`, `relate_entity`,
-    /// `delete_entity`, `rename_entity`, `create_vault`,
-    /// `delete_vault`), matching the commit `Tool:` provenance trailer.
+    /// `delete_entity`, `rename_entity`, `create_mem`,
+    /// `delete_mem`), matching the commit `Tool:` provenance trailer.
     /// The mutation still commits — the policy nudges, it never blocks.
     pub fn note_missing_warning(&self, tool: &str, note: Option<&str>) -> Option<WarningHint> {
         if !self.settings.mutations.require_notes.unwrap_or(false) {
@@ -223,7 +223,7 @@ impl Engine {
 
     /// Backend factory currently installed on this engine. Returned by
     /// value because [`BackendFactory`] is a function pointer (`Copy`).
-    /// Used by [`crate::vault_management::create_vault`] to materialise
+    /// Used by [`crate::mem_management::create_mem`] to materialise
     /// the backend for a freshly-registered mount; consumers that need
     /// to instantiate a backend ad-hoc can call this directly.
     pub fn backend_factory(&self) -> BackendFactory {
@@ -231,9 +231,9 @@ impl Engine {
     }
 
     /// Git-branch ops bundle currently installed on this engine.
-    /// `None` on basis-flavor engines that don't see vault-repo
+    /// `None` on basis-flavor engines that don't see mem-repo
     /// mounts. Returned by value because [`super::GitBranchOps`] is
-    /// `Copy`. `create_vault` reaches for
+    /// `Copy`. `create_mem` reaches for
     /// the bundle to drive `prune_residue` against an unmounted
     /// gitdir when the `ForceOverwrite` recovery action is selected.
     pub fn git_branch_ops(&self) -> Option<super::GitBranchOps> {
@@ -248,42 +248,42 @@ impl Engine {
         self.store.get(id)
     }
 
-    /// Vault names the engine knows about, in declaration order.
+    /// Mem names the engine knows about, in declaration order.
     /// Cheap; useful for callers that need to enumerate before
-    /// dispatching by vault.
-    pub fn vault_names(&self) -> Vec<&str> {
-        self.mounts.iter().map(|m| m.mount.vault.as_str()).collect()
+    /// dispatching by mem.
+    pub fn mem_names(&self) -> Vec<&str> {
+        self.mounts.iter().map(|m| m.mount.mem.as_str()).collect()
     }
 
-    /// Public-shape mount record for `vault`, or `None` for an unknown
-    /// vault.
+    /// Public-shape mount record for `mem`, or `None` for an unknown
+    /// mem.
     ///
     /// Surfaces the operator-facing
-    /// [`crate::workspace::Mount`] (vault name, schema pin, storage
+    /// [`crate::workspace::Mount`] (mem name, schema pin, storage
     /// reference, capability, lifecycle, cross_linkable) so MCP / CLI
     /// handlers can branch on backend-specific shapes via
     /// [`crate::workspace::MountStorage`] when they need accessors
     /// that don't make sense on every backend (e.g. gitdir / branch
     /// for `memstead_health { include_config: true }`'s git-class
     /// payload). Backends that want the equivalent of pro's
-    /// `engine.gitdir_for(vault)` match
-    /// `engine.mount(vault).map(|m| &m.storage)` against
+    /// `engine.gitdir_for(mem)` match
+    /// `engine.mount(mem).map(|m| &m.storage)` against
     /// `MountStorage::GitBranch { gitdir, branch }` and walk
     /// directly — keeps the engine surface backend-neutral.
     ///
-    /// Counterpart to [`Self::vault_names`] which lists every mount.
-    pub fn mount(&self, vault: &str) -> Option<&crate::workspace::Mount> {
+    /// Counterpart to [`Self::mem_names`] which lists every mount.
+    pub fn mount(&self, mem: &str) -> Option<&crate::workspace::Mount> {
         self.mounts
             .iter()
-            .find(|m| m.mount.vault == vault)
+            .find(|m| m.mount.mem == mem)
             .map(|m| &m.mount)
     }
 
-    /// Orphan count attributed to each vault's pinned schema, over the
-    /// given `orphan_ids` (the caller pre-filters them by any vault scope).
-    /// Lets a health surface show that ingest-vault isolates (orphans by
-    /// design) and code-vault debt land in different schema buckets rather
-    /// than one blended, misleading total. Vaults with no settled pin
+    /// Orphan count attributed to each mem's pinned schema, over the
+    /// given `orphan_ids` (the caller pre-filters them by any mem scope).
+    /// Lets a health surface show that ingest-mem isolates (orphans by
+    /// design) and code-mem debt land in different schema buckets rather
+    /// than one blended, misleading total. Mems with no settled pin
     /// bucket under the empty string.
     pub fn orphans_by_schema(
         &self,
@@ -294,7 +294,7 @@ impl Engine {
             let schema = self
                 .store()
                 .get(id)
-                .and_then(|e| self.mount(&e.vault))
+                .and_then(|e| self.mount(&e.mem))
                 .and_then(|m| m.schema.as_ref().map(|s| s.as_display()))
                 .unwrap_or_default();
             *by_schema.entry(schema).or_insert(0) += 1;
@@ -302,24 +302,24 @@ impl Engine {
         by_schema
     }
 
-    /// Community count attributed to each schema across `vaults`: a cluster
-    /// counts toward every schema whose vaults it touches, so these figures
+    /// Community count attributed to each schema across `mems`: a cluster
+    /// counts toward every schema whose mems it touches, so these figures
     /// can sum above the global community count — the same "touches"
-    /// semantic as the vault-scoped count. Per-schema dedup keeps a cluster
-    /// touching two vaults of one schema from being counted twice.
+    /// semantic as the mem-scoped count. Per-schema dedup keeps a cluster
+    /// touching two mems of one schema from being counted twice.
     pub fn communities_by_schema(
         &self,
-        vaults: &[String],
+        mems: &[String],
     ) -> std::collections::BTreeMap<String, usize> {
         let louvain = self.communities();
         let mut buckets: std::collections::BTreeMap<String, std::collections::BTreeSet<String>> =
             std::collections::BTreeMap::new();
-        for name in vaults {
+        for name in mems {
             let schema = self
                 .mount(name)
                 .and_then(|m| m.schema.as_ref().map(|s| s.as_display()))
                 .unwrap_or_default();
-            let clusters = crate::graph::community::clusters_in_vault(self.store(), louvain, name);
+            let clusters = crate::graph::community::clusters_in_mem(self.store(), louvain, name);
             buckets.entry(schema).or_default().extend(clusters);
         }
         buckets
@@ -329,60 +329,60 @@ impl Engine {
     }
 
     /// All mounts the engine knows about, in declaration order.
-    /// Counterpart to [`Self::vault_names`] when the caller needs
+    /// Counterpart to [`Self::mem_names`] when the caller needs
     /// the full mount shape (e.g. to enumerate by storage variant).
     pub fn mounts(&self) -> Vec<&crate::workspace::Mount> {
         self.mounts.iter().map(|m| &m.mount).collect()
     }
 
-    /// Names of vaults whose mount declares
+    /// Names of mems whose mount declares
     /// [`crate::workspace::MountCapability::Write`], in declaration
     /// order. Convenience over `mounts().iter().filter(...).map(...)`
     /// for handlers that gate by writable status (`memstead_health`,
-    /// `memstead_overview`'s vault roster, the lifecycle tools'
+    /// `memstead_overview`'s mem roster, the lifecycle tools'
     /// candidate list). Read-only mounts (archive backends) are
     /// excluded.
-    pub fn writable_vault_names(&self) -> Vec<&str> {
+    pub fn writable_mem_names(&self) -> Vec<&str> {
         self.mounts
             .iter()
             .filter(|m| m.mount.capability == MountCapability::Write)
-            .map(|m| m.mount.vault.as_str())
+            .map(|m| m.mount.mem.as_str())
             .collect()
     }
 
-    /// The default writable vault — the target a mutation lands in when
-    /// it omits `vault`. `None` when no writable vault is mounted.
+    /// The default writable mem — the target a mutation lands in when
+    /// it omits `mem`. `None` when no writable mem is mounted.
     ///
     /// Defined as the **first writable mount in declaration order**, i.e.
-    /// the seed / earliest-created writable vault. This is a *stable*
-    /// designation, not a function of the current name set: new vaults
-    /// register via `register_writable_vault`, which pushes onto the end
+    /// the seed / earliest-created writable mem. This is a *stable*
+    /// designation, not a function of the current name set: new mems
+    /// register via `register_writable_mem`, which pushes onto the end
     /// of the mount list (and `mounts.json` preserves that order across
-    /// reboots), so creating an additional vault never moves the default
+    /// reboots), so creating an additional mem never moves the default
     /// — even one whose name sorts ahead alphabetically. Deleting the
-    /// current default promotes the next-earliest writable vault; that is
-    /// the only thing that shifts it. Both the MCP `resolve_vault` and the
-    /// CLI's omitted-`--vault` path resolve through here so the two
+    /// current default promotes the next-earliest writable mem; that is
+    /// the only thing that shifts it. Both the MCP `resolve_mem` and the
+    /// CLI's omitted-`--mem` path resolve through here so the two
     /// surfaces always agree (the
-    /// pre-fix MCP path read `writable_vaults().iter().next()` off an
+    /// pre-fix MCP path read `writable_mems().iter().next()` off an
     /// unordered `HashSet`, which silently retargeted writes when a second
-    /// vault appeared).
-    pub fn default_writable_vault(&self) -> Option<&str> {
+    /// mem appeared).
+    pub fn default_writable_mem(&self) -> Option<&str> {
         self.mounts
             .iter()
             .find(|m| m.mount.capability == MountCapability::Write)
-            .map(|m| m.mount.vault.as_str())
+            .map(|m| m.mount.mem.as_str())
     }
 
     /// On-disk folder path for a folder-backed mount, or `None` for
-    /// any other backend (git-branch, archive) or unknown vault.
-    /// Convenience over `engine.mount(vault).map(|m| &m.storage)`
+    /// any other backend (git-branch, archive) or unknown mem.
+    /// Convenience over `engine.mount(mem).map(|m| &m.storage)`
     /// + matching on `MountStorage::Folder { path }`. Used by
-    /// handlers that need a filesystem path for a folder vault
+    /// handlers that need a filesystem path for a folder mem
     /// (e.g. `memstead_health { include_config: true }`'s
-    /// `vaults[].vcs.worktree` field for folder mounts).
-    pub fn folder_path_for_vault(&self, vault: &str) -> Option<&Path> {
-        match self.mount(vault).map(|m| &m.storage) {
+    /// `mems[].vcs.worktree` field for folder mounts).
+    pub fn folder_path_for_mem(&self, mem: &str) -> Option<&Path> {
+        match self.mount(mem).map(|m| &m.storage) {
             Some(crate::workspace::MountStorage::Folder { path }) => {
                 Some(path.as_path())
             }
@@ -390,91 +390,91 @@ impl Engine {
         }
     }
 
-    /// Runtime snapshot of writable / visible vaults. Handlers that
-    /// need the writable roster (`memstead_health`'s `writable_vaults` /
-    /// `read_vaults`), per-vault origin tag (`include_config:
-    /// true`'s `vaults[].origin`), or visibility check
-    /// (`memstead_overview`'s vault list, the lifecycle tools' collision
+    /// Runtime snapshot of writable / visible mems. Handlers that
+    /// need the writable roster (`memstead_health`'s `writable_mems` /
+    /// `read_mems`), per-mem origin tag (`include_config:
+    /// true`'s `mems[].origin`), or visibility check
+    /// (`memstead_overview`'s mem list, the lifecycle tools' collision
     /// guard) consume the router here. Returned by reference — the
     /// `Arc` is held on the engine; callers that need a clonable
     /// handle can `Arc::clone` the engine's field directly when that
     /// surface arrives.
-    pub fn vault_router(&self) -> &VaultRouterSnapshot {
-        &self.vault_router
+    pub fn mem_router(&self) -> &MemRouterSnapshot {
+        &self.mem_router
     }
 
-    /// Resolve the gitdir for a writable vault. Used by `memstead_health
-    /// { include_config: true }` to surface per-vault `vcs.gitdir`
+    /// Resolve the gitdir for a writable mem. Used by `memstead_health
+    /// { include_config: true }` to surface per-mem `vcs.gitdir`
     /// so outer-repo auto-commit hooks can `git -C <gitdir>` per
-    /// vault without hardcoding the layout.
+    /// mem without hardcoding the layout.
     ///
-    /// - `EngineError::UnknownVault` when the name does not resolve.
-    /// - `EngineError::Vault` when the mount's storage is not
+    /// - `EngineError::UnknownMem` when the name does not resolve.
+    /// - `EngineError::Mem` when the mount's storage is not
     ///   git-branch-backed (folder, archive — they have no gitdir).
-    pub fn gitdir_for(&self, vault_name: &str) -> Result<PathBuf, EngineError> {
+    pub fn gitdir_for(&self, mem_name: &str) -> Result<PathBuf, EngineError> {
         let m = self
-            .mount(vault_name)
-            .ok_or_else(|| EngineError::UnknownVault(vault_name.to_string()))?;
+            .mount(mem_name)
+            .ok_or_else(|| EngineError::UnknownMem(mem_name.to_string()))?;
         match &m.storage {
             MountStorage::GitBranch { gitdir, .. } => Ok(gitdir.clone()),
             MountStorage::Folder { .. }
             | MountStorage::Archive { .. }
-            | MountStorage::InMemory => Err(EngineError::Vault(format!(
-                "vault '{vault_name}' has no resolved gitdir"
+            | MountStorage::InMemory => Err(EngineError::Mem(format!(
+                "mem '{mem_name}' has no resolved gitdir"
             ))),
         }
     }
 
-    /// Resolve the worktree for a writable vault. Used by
-    /// `memstead_health { include_config: true }` to surface per-vault
+    /// Resolve the worktree for a writable mem. Used by
+    /// `memstead_health { include_config: true }` to surface per-mem
     /// `vcs.worktree`.
     ///
-    /// - `EngineError::UnknownVault` when the name does not resolve.
-    /// - `EngineError::Vault` when the mount's backend has no
+    /// - `EngineError::UnknownMem` when the name does not resolve.
+    /// - `EngineError::Mem` when the mount's backend has no
     ///   worktree concept (git-branch with no working tree, archive).
     ///
     /// Folder mounts surface their on-disk path. Git-branch mounts
     /// follow the `dir: Some(...)` composition pattern: when the
-    /// workspace root contains a folder named after the vault with a
+    /// workspace root contains a folder named after the mem with a
     /// `.memstead/config.json` marker, that folder is the worktree
-    /// (disk-shape composition). Otherwise — pure vault-repo-backed
+    /// (disk-shape composition). Otherwise — pure mem-repo-backed
     /// — return Err.
-    pub fn worktree_for(&self, vault_name: &str) -> Result<PathBuf, EngineError> {
+    pub fn worktree_for(&self, mem_name: &str) -> Result<PathBuf, EngineError> {
         let m = self
-            .mount(vault_name)
-            .ok_or_else(|| EngineError::UnknownVault(vault_name.to_string()))?;
+            .mount(mem_name)
+            .ok_or_else(|| EngineError::UnknownMem(mem_name.to_string()))?;
         match &m.storage {
             MountStorage::Folder { path } => Ok(path.clone()),
             MountStorage::GitBranch { .. } => {
                 if let Some(root) = self.workspace_root.as_deref() {
-                    let candidate = root.join(vault_name);
+                    let candidate = root.join(mem_name);
                     if candidate
-                        .join(crate::vault::VAULT_META_DIR)
+                        .join(crate::mem::MEM_META_DIR)
                         .join("config.json")
                         .is_file()
                     {
                         return Ok(candidate.canonicalize().unwrap_or(candidate));
                     }
                 }
-                Err(EngineError::Vault(format!(
-                    "vault '{vault_name}' has no working tree (vault-repo-backed)"
+                Err(EngineError::Mem(format!(
+                    "mem '{mem_name}' has no working tree (mem-repo-backed)"
                 )))
             }
-            MountStorage::Archive { .. } => Err(EngineError::Vault(format!(
-                "vault '{vault_name}' is archive-backed and has no worktree"
+            MountStorage::Archive { .. } => Err(EngineError::Mem(format!(
+                "mem '{mem_name}' is archive-backed and has no worktree"
             ))),
-            MountStorage::InMemory => Err(EngineError::Vault(format!(
-                "vault '{vault_name}' is in-memory and has no worktree"
+            MountStorage::InMemory => Err(EngineError::Mem(format!(
+                "mem '{mem_name}' is in-memory and has no worktree"
             ))),
         }
     }
 
-    /// Per-vault `.memstead/config.json` payload, when available. Used
+    /// Per-mem `.memstead/config.json` payload, when available. Used
     /// by `memstead_health { include_config: true }` to surface the
     /// opaque `write_guidance` map and the catch-all `extra` fields
-    /// per vault.
+    /// per mem.
     ///
-    /// Folder-backed mounts return `Some(&VaultConfig)` when
+    /// Folder-backed mounts return `Some(&MemConfig)` when
     /// `<path>/.memstead/config.json` parsed cleanly at construction.
     /// Git-branch and archive backends return `None` until the
     /// read-from-storage-backend path lifts (the V1 unified engine
@@ -482,66 +482,66 @@ impl Engine {
     /// inside the gitdir / archive for the other backends and
     /// needs a backend-level read primitive).
     ///
-    /// Unknown vault names return `None` (no error variant — the
+    /// Unknown mem names return `None` (no error variant — the
     /// accessor is intentionally lenient because memstead_health emits
     /// an empty detail block per missing config rather than
     /// aborting the call).
-    pub fn vault_config_for(
+    pub fn mem_config_for(
         &self,
-        vault: &str,
-    ) -> Option<&memstead_schema::config::VaultConfig> {
+        mem: &str,
+    ) -> Option<&memstead_schema::config::MemConfig> {
         self.mounts
             .iter()
-            .find(|m| m.mount.vault == vault)
-            .and_then(|m| m.vault_config.as_ref())
+            .find(|m| m.mount.mem == mem)
+            .and_then(|m| m.mem_config.as_ref())
     }
 
-    /// The authoring-provenance payload an installed vault carries, read
+    /// The authoring-provenance payload an installed mem carries, read
     /// from the archive's `.memstead/provenance.json` at construction.
-    /// `None` when the vault carries none (a pre-provenance archive, a
-    /// runtime-created vault, or a backend that does not surface one) —
-    /// the read path reports provenance as absent. Unknown vault names
+    /// `None` when the mem carries none (a pre-provenance archive, a
+    /// runtime-created mem, or a backend that does not surface one) —
+    /// the read path reports provenance as absent. Unknown mem names
     /// return `None`.
     pub fn archive_provenance_for(
         &self,
-        vault: &str,
+        mem: &str,
     ) -> Option<&memstead_schema::ArchiveProvenance> {
         self.mounts
             .iter()
-            .find(|m| m.mount.vault == vault)
+            .find(|m| m.mount.mem == mem)
             .and_then(|m| m.archive_provenance.as_ref())
     }
 
-    /// Iterate `(vault_name, &VaultConfig)` for every mount whose
-    /// vault-config payload loaded at construction. Used by callers
+    /// Iterate `(mem_name, &MemConfig)` for every mount whose
+    /// mem-config payload loaded at construction. Used by callers
     /// that walk every writable mount's config (`memstead health`'s
-    /// per-vault dump, the workspace-dump CLI). The yielded `&str` is
-    /// the authoritative vault leaf from the mount record.
+    /// per-mem dump, the workspace-dump CLI). The yielded `&str` is
+    /// the authoritative mem leaf from the mount record.
     ///
     /// Folder-backed mounts yield when their `.memstead/config.json`
     /// parsed cleanly. Git-branch and archive backends are silent in
     /// V1 (the same deferred-read-from-storage gap that
-    /// [`Self::vault_config_for`] documents).
-    pub fn vault_configs_named(
+    /// [`Self::mem_config_for`] documents).
+    pub fn mem_configs_named(
         &self,
-    ) -> impl Iterator<Item = (&str, &memstead_schema::config::VaultConfig)> {
+    ) -> impl Iterator<Item = (&str, &memstead_schema::config::MemConfig)> {
         self.mounts
             .iter()
-            .filter_map(|m| m.vault_config.as_ref().map(|c| (m.mount.vault.as_str(), c)))
+            .filter_map(|m| m.mem_config.as_ref().map(|c| (m.mount.mem.as_str(), c)))
     }
 
-    /// Resolved `Arc<Schema>` for a writable vault by name. `None`
+    /// Resolved `Arc<Schema>` for a writable mem by name. `None`
     /// when the name is not a registered mount.
     ///
-    /// Cheap — `Arc::clone` over the per-vault schema map. Resolved
+    /// Cheap — `Arc::clone` over the per-mem schema map. Resolved
     /// schemas are stored in `HashMap<String, Arc<Schema>>` so the
     /// lookup is a single hash hit + clone.
-    pub fn schema_for(&self, vault: &str) -> Option<std::sync::Arc<memstead_schema::Schema>> {
-        self.schemas.get(vault).cloned()
+    pub fn schema_for(&self, mem: &str) -> Option<std::sync::Arc<memstead_schema::Schema>> {
+        self.schemas.get(mem).cloned()
     }
 
     /// Cached current branch-tip cursor (typically a 40-char hex
-    /// SHA for git-branch backends; `None` for fresh vaults or
+    /// SHA for git-branch backends; `None` for fresh mems or
     /// backends that don't track a head — folder / archive).
     ///
     /// The value is the per-mount `last_known_head`, seeded at
@@ -549,20 +549,20 @@ impl Engine {
     /// [`Self::reload_if_stale`] / mutation paths after a
     /// successful commit.
     ///
-    /// - `EngineError::UnknownVault` when the name does not resolve.
-    pub fn vault_head_sha(
+    /// - `EngineError::UnknownMem` when the name does not resolve.
+    pub fn mem_head_sha(
         &self,
-        vault_name: &str,
+        mem_name: &str,
     ) -> Result<Option<String>, EngineError> {
         let m = self
             .mounts
             .iter()
-            .find(|m| m.mount.vault == vault_name)
-            .ok_or_else(|| EngineError::UnknownVault(vault_name.to_string()))?;
+            .find(|m| m.mount.mem == mem_name)
+            .ok_or_else(|| EngineError::UnknownMem(mem_name.to_string()))?;
         Ok(m.last_known_head.clone())
     }
 
-    /// Whether a sibling writer has advanced this vault's backend past
+    /// Whether a sibling writer has advanced this mem's backend past
     /// the engine's cached `last_known_head` — a read-only drift probe
     /// that does **not** reload (unlike [`Self::reload_if_stale`]). One
     /// `backend.current_head()` read compared against the cached cursor;
@@ -575,13 +575,13 @@ impl Engine {
     /// surfacing the error — drift is advisory, and the next real
     /// operation's reload path is the authoritative sync.
     ///
-    /// - `EngineError::UnknownVault` when the name does not resolve.
-    pub fn vault_drifted(&self, vault_name: &str) -> Result<bool, EngineError> {
+    /// - `EngineError::UnknownMem` when the name does not resolve.
+    pub fn mem_drifted(&self, mem_name: &str) -> Result<bool, EngineError> {
         let m = self
             .mounts
             .iter()
-            .find(|m| m.mount.vault == vault_name)
-            .ok_or_else(|| EngineError::UnknownVault(vault_name.to_string()))?;
+            .find(|m| m.mount.mem == mem_name)
+            .ok_or_else(|| EngineError::UnknownMem(mem_name.to_string()))?;
         let live = m.backend.current_head().ok().flatten();
         Ok(live != m.last_known_head)
     }
@@ -594,7 +594,7 @@ impl Engine {
         self.workspace_root.as_deref()
     }
 
-    /// Typed warnings surfaced during vault load — drift findings
+    /// Typed warnings surfaced during mem load — drift findings
     /// the loader pipeline collects per entity. Empty for V1; the
     /// accessor surfaces them so handlers can merge into health
     /// summaries uniformly.
@@ -605,15 +605,15 @@ impl Engine {
     // ---------------------------------------------------------------
     // Read-side delegates onto the kernel ops/graph functions.
     //
-    // The vault-router engine exposed each of these directly so the
+    // The mem-router engine exposed each of these directly so the
     // MCP layer could call them without reaching into the store. The
     // unified engine mirrors that surface so the MCP migration is a
     // straight rename rather than a re-architecture.
     //
-    // Multi-vault cache strategy: per-vault community detection and
-    // per-vault search indexes are unnecessary at this layer — the
+    // Multi-mem cache strategy: per-mem community detection and
+    // per-mem search indexes are unnecessary at this layer — the
     // engine-wide store already carries every mount's edges; Louvain
-    // and tantivy run once across the union. `vault_schemas` for
+    // and tantivy run once across the union. `mem_schemas` for
     // health/search is the engine's existing `schemas` field as-is.
     // ---------------------------------------------------------------
 
@@ -625,15 +625,15 @@ impl Engine {
     ///
     /// One detection run per engine. The partition is workspace-global,
     /// so it needs a single source for the Louvain parameters; that
-    /// source is the schema of the lexicographically-first vault name —
+    /// source is the schema of the lexicographically-first mem name —
     /// a stable key, so the partition is deterministic across processes
     /// even when mounts pin heterogeneous schemas. For a single-schema
-    /// workspace every vault's schema is identical, so the choice of
+    /// workspace every mem's schema is identical, so the choice of
     /// key is immaterial there.
     pub fn communities(&self) -> &LouvainOutput {
         self.community_memo.get_or_init(|| {
             // Select the parameter schema by a stable key (smallest
-            // vault name) rather than unordered-map iteration, so the
+            // mem name) rather than unordered-map iteration, so the
             // partition does not vary between processes. Fall back to
             // the builtin default for the empty-mounts case (caller
             // still gets a valid empty Louvain result against an empty
@@ -682,33 +682,33 @@ impl Engine {
     }
 
     /// Entities whose type's `required_outgoing` blocks are not yet
-    /// satisfied. `vault_filter = None` scans every vault; `Some(v)`
-    /// scans only that vault.
+    /// satisfied. `mem_filter = None` scans every mem; `Some(v)`
+    /// scans only that mem.
     pub fn missing_required_outgoing(
         &self,
-        vault_filter: Option<&str>,
+        mem_filter: Option<&str>,
     ) -> Vec<crate::ops::health::MissingRequiredOutgoingReport> {
         crate::ops::health::collect_missing_required_outgoing(
             &self.store,
-            vault_filter,
+            mem_filter,
             &self.schemas,
         )
     }
 
-    /// Conformance-axis integrity findings for one vault — which
+    /// Conformance-axis integrity findings for one mem — which
     /// entities a write would refuse under the effective schema, and
-    /// why. `target_schema = None` lints against the vault's current
+    /// why. `target_schema = None` lints against the mem's current
     /// pin; `Some(ref)` lints against that schema instead (resolved
-    /// among vault-pinned, workspace, and built-in schemas).
+    /// among mem-pinned, workspace, and built-in schemas).
     pub fn conformance_findings(
         &self,
-        vault: &str,
+        mem: &str,
         target_schema: Option<&memstead_schema::SchemaRef>,
     ) -> Result<Vec<crate::ops::integrity::IntegrityFinding>, EngineError> {
         let pinned = self
             .schemas
-            .get(vault)
-            .ok_or_else(|| EngineError::UnknownVault(vault.to_string()))?;
+            .get(mem)
+            .ok_or_else(|| EngineError::UnknownMem(mem.to_string()))?;
         let effective: Arc<Schema> = match target_schema {
             None => pinned.clone(),
             Some(target) => self.resolve_schema_by_ref(target).ok_or_else(|| {
@@ -719,7 +719,7 @@ impl Engine {
                     .cloned()
                     .collect();
                 EngineError::SchemaNotFound {
-                    vault: vault.to_string(),
+                    mem: mem.to_string(),
                     pin: target.as_display(),
                     sources: crate::engine::error::SchemaSourceDiagnostic::for_failed_pin(
                         &target.name,
@@ -731,14 +731,14 @@ impl Engine {
         };
         Ok(crate::ops::integrity::conformance_findings(
             &self.store,
-            vault,
+            mem,
             &effective,
             &self.schemas,
         ))
     }
 
     /// Resolve an exact `name@version` ref against every schema this
-    /// engine can see: vault-pinned, workspace-authored, built-in.
+    /// engine can see: mem-pinned, workspace-authored, built-in.
     /// `None` when no loaded schema matches.
     pub(crate) fn resolve_schema_by_ref(
         &self,
@@ -755,37 +755,37 @@ impl Engine {
             .cloned()
     }
 
-    /// The vault's `Mount.schema` expectation assertion, when set.
-    /// `None` for unknown vaults *and* for vaults whose mount carries no
+    /// The mem's `Mount.schema` expectation assertion, when set.
+    /// `None` for unknown mems *and* for mems whose mount carries no
     /// assertion (the authoritative pin then lives in the backend
     /// config; the resolved active schema, not this, is the effective pin).
-    pub fn schema_pin(&self, vault: &str) -> Option<memstead_schema::SchemaRef> {
+    pub fn schema_pin(&self, mem: &str) -> Option<memstead_schema::SchemaRef> {
         self.mounts
             .iter()
-            .find(|m| m.mount.vault == vault)
+            .find(|m| m.mount.mem == mem)
             .and_then(|m| m.mount.schema.clone())
     }
 
-    /// The vault's in-flight migration target, when dual-pin state is
-    /// active. `None` for settled or unknown vaults.
-    pub fn migration_target(&self, vault: &str) -> Option<memstead_schema::SchemaRef> {
+    /// The mem's in-flight migration target, when dual-pin state is
+    /// active. `None` for settled or unknown mems.
+    pub fn migration_target(&self, mem: &str) -> Option<memstead_schema::SchemaRef> {
         self.mounts
             .iter()
-            .find(|m| m.mount.vault == vault)
+            .find(|m| m.mount.mem == mem)
             .and_then(|m| m.mount.migration_target.clone())
     }
 
-    /// Consistency-axis integrity findings for one vault — the
+    /// Consistency-axis integrity findings for one mem — the
     /// pre-existing graph-coherence categories (dangling links, stubs)
     /// projected into the `{ id, axis, code, detail }` finding shape.
     pub fn consistency_findings(
         &self,
-        vault: &str,
+        mem: &str,
     ) -> Result<Vec<crate::ops::integrity::IntegrityFinding>, EngineError> {
-        if !self.schemas.contains_key(vault) {
-            return Err(EngineError::UnknownVault(vault.to_string()));
+        if !self.schemas.contains_key(mem) {
+            return Err(EngineError::UnknownMem(mem.to_string()));
         }
-        Ok(crate::ops::integrity::consistency_findings(&self.store, vault))
+        Ok(crate::ops::integrity::consistency_findings(&self.store, mem))
     }
 
     /// Engine-wide health summary across every mount.
@@ -807,16 +807,16 @@ impl Engine {
             merged.append(&mut summary.warnings);
             summary.warnings = merged;
         }
-        // Surface OUTER_REPO_NOT_IGNORING_VAULT_REPO when the
+        // Surface OUTER_REPO_NOT_IGNORING_MEM_REPO when the
         // workspace is embedded inside a git repository whose
-        // .gitignore does not list `vault-repo/`. Skipped when
+        // .gitignore does not list `mem-repo/`. Skipped when
         // workspace_root is unset (engine built ad-hoc from a mount
         // list).
         if let Some(root) = self.workspace_root.as_deref()
             && let Some(outer) = crate::workspace_root::find_enclosing_git_repo(root)
-            && !crate::workspace_root::outer_repo_ignores_vault_repo(&outer, root)
+            && !crate::workspace_root::outer_repo_ignores_mem_repo(&outer, root)
         {
-            summary.warnings.push(WarningHint::OuterRepoNotIgnoringVaultRepo {
+            summary.warnings.push(WarningHint::OuterRepoNotIgnoringMemRepo {
                 outer_repo_root: outer.display().to_string(),
                 workspace_root: root.display().to_string(),
             });
@@ -847,7 +847,7 @@ impl Engine {
             edge_count: self.store.edge_count(),
             edge_types,
             community_count: self.communities().count,
-            vault_count: self.mounts.len(),
+            mem_count: self.mounts.len(),
             types_in_use,
         }
     }
@@ -890,18 +890,18 @@ impl Engine {
         })
     }
 
-    /// Lazily-built per-vault search index map. The map carries one
-    /// entry per writable vault. Build cost scales with entity count;
+    /// Lazily-built per-mem search index map. The map carries one
+    /// entry per writable mem. Build cost scales with entity count;
     /// expect hundreds-of-ms for thousand-entity workspaces. Not
     /// available on `wasm32` targets — search lives behind the bridge
     /// (see [`Self::search`] for the typed refuse).
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn search_indexes(&self) -> &HashMap<String, VaultIndex> {
+    pub fn search_indexes(&self) -> &HashMap<String, MemIndex> {
         self.search_indexes_memo
             .get_or_init(|| build_all(&self.store, &self.schemas))
     }
 
-    /// Drop the cached per-vault search index map. No-op on `wasm32`
+    /// Drop the cached per-mem search index map. No-op on `wasm32`
     /// where no index exists; the method stays present so mutation
     /// hooks can call it unconditionally.
     pub fn invalidate_search_indexes(&mut self) {
@@ -942,52 +942,52 @@ impl Engine {
         }
     }
 
-    /// All vault-relative entity paths under `vault`. Delegates to
+    /// All mem-relative entity paths under `mem`. Delegates to
     /// the backend's `list_entities`. Order is backend-defined.
-    pub fn list_entities(&self, vault: &str) -> Result<Vec<PathBuf>, EngineError> {
-        let m = self.find_mount(vault)?;
+    pub fn list_entities(&self, mem: &str) -> Result<Vec<PathBuf>, EngineError> {
+        let m = self.find_mount(mem)?;
         m.backend.list_entities().map_err(EngineError::Backend)
     }
 
     /// Raw bytes for a single entity (`Ok(None)` if absent).
     pub fn read_entity(
         &self,
-        vault: &str,
+        mem: &str,
         rel_path: &Path,
     ) -> Result<Option<Vec<u8>>, EngineError> {
-        let m = self.find_mount(vault)?;
+        let m = self.find_mount(mem)?;
         m.backend.read_entity(rel_path).map_err(EngineError::Backend)
     }
 
-    /// Provenance entries for `vault` since `cursor`. Cursor shape is
+    /// Provenance entries for `mem` since `cursor`. Cursor shape is
     /// backend-specific (RFC-3339 timestamp for folder, commit SHA for
     /// git-branch); `None` means "from the beginning".
     pub fn read_provenance(
         &self,
-        vault: &str,
+        mem: &str,
         cursor: Option<&str>,
     ) -> Result<Vec<Provenance>, EngineError> {
-        let m = self.find_mount(vault)?;
+        let m = self.find_mount(mem)?;
         m.backend
             .read_provenance(cursor)
             .map_err(EngineError::Backend)
     }
 
-    /// Capability declared on the mount for `vault`. Surfaced for
+    /// Capability declared on the mount for `mem`. Surfaced for
     /// callers that need to gate before dispatching a write — the
     /// engine itself does not yet enforce capability (mutation paths
     /// land in a later session).
     pub fn capability(
         &self,
-        vault: &str,
+        mem: &str,
     ) -> Result<crate::workspace::MountCapability, EngineError> {
-        let m = self.find_mount(vault)?;
+        let m = self.find_mount(mem)?;
         Ok(m.mount.capability)
     }
 
-    /// Returns `true` when `from`'s source vault is mounted with
+    /// Returns `true` when `from`'s source mem is mounted with
     /// [`crate::workspace::MountCapability::ReadOnly`]. Returns
-    /// `false` for Write-Vaults and for vaults whose mount is absent
+    /// `false` for Write-Mems and for mems whose mount is absent
     /// from the router (no mount → no ReadOnly assertion can be
     /// made; the absence is treated as not-ReadOnly so consumers
     /// don't trip on transient lookup misses).
@@ -1000,33 +1000,33 @@ impl Engine {
     /// The information is fully derivable from the current mount
     /// roster, so no new state needs to live on the edge itself.
     pub fn edge_is_from_readonly(&self, from: &EntityId) -> bool {
-        match self.capability(from.vault()) {
+        match self.capability(from.mem()) {
             Ok(crate::workspace::MountCapability::ReadOnly) => true,
             Ok(crate::workspace::MountCapability::Write) | Err(_) => false,
         }
     }
 
-    /// Whether a cross-vault edge from `from_vault` to `to_vault` is
+    /// Whether a cross-mem edge from `from_mem` to `to_mem` is
     /// permitted under the current [`crate::WorkspaceSettings`]
-    /// cross-vault link policy.
+    /// cross-mem link policy.
     ///
-    /// Resolution rules (matches pro's `vault_router` semantics):
-    /// 1. Same-vault edge (`from_vault == to_vault`) → always
-    ///    allowed; the policy gates *cross*-vault edges only.
-    /// 2. Explicit `cross_vault_links[from_vault]`:
+    /// Resolution rules (matches pro's `mem_router` semantics):
+    /// 1. Same-mem edge (`from_mem == to_mem`) → always
+    ///    allowed; the policy gates *cross*-mem edges only.
+    /// 2. Explicit `cross_mem_links[from_mem]`:
     ///    - `"*"` (wildcard) → allowed regardless of target.
-    ///    - `["a", ...]` (allowlist) → allowed iff `to_vault` is in
+    ///    - `["a", ...]` (allowlist) → allowed iff `to_mem` is in
     ///      the list.
     /// 3. Per-create-rule `default_cross_links` synthesis — if
-    ///    rule (1) didn't grant permission and `from_vault` matches
-    ///    a `[[vault_management.create]]` rule whose
+    ///    rule (1) didn't grant permission and `from_mem` matches
+    ///    a `[[mem_management.create]]` rule whose
     ///    `default_cross_links` is set, the synthesised value
     ///    contributes:
     ///    - `"*"` → allowed regardless of target.
-    ///    - `["a", ...]` → allowed iff `to_vault` is in the list.
+    ///    - `["a", ...]` → allowed iff `to_mem` is in the list.
     /// 4. Otherwise → denied (default-deny posture).
     ///
-    /// The synthesis layer compiles a [`crate::vault_management::CreateRuleSet`]
+    /// The synthesis layer compiles a [`crate::mem_management::CreateRuleSet`]
     /// lazily on first call and caches it; [`Self::set_settings`]
     /// invalidates the cache. Compilation failure (malformed glob
     /// in a rule) logs a warning and the synthesis layer is silently
@@ -1034,27 +1034,27 @@ impl Engine {
     /// policy alone, so a half-broken config doesn't lock out edges
     /// the operator did intend to allow. Operators who want hard
     /// validation pre-compile via
-    /// [`crate::vault_management::CreateRuleSet::new`] before
+    /// [`crate::mem_management::CreateRuleSet::new`] before
     /// calling [`Self::set_settings`].
     ///
-    /// The MCP `memstead_relate` handler's cross-vault gate consumes
+    /// The MCP `memstead_relate` handler's cross-mem gate consumes
     /// this method directly.
-    pub fn cross_vault_link_allowed(
+    pub fn cross_mem_link_allowed(
         &self,
-        from_vault: &str,
-        to_vault: &str,
+        from_mem: &str,
+        to_mem: &str,
     ) -> bool {
         use memstead_schema::workspace_config::CrossLinkValue;
-        if from_vault == to_vault {
+        if from_mem == to_mem {
             return true;
         }
 
-        // Step 1: explicit cross_vault_links policy.
-        if let Some(value) = self.settings.cross_vault_links.get(from_vault) {
+        // Step 1: explicit cross_mem_links policy.
+        if let Some(value) = self.settings.cross_mem_links.get(from_mem) {
             match value {
                 CrossLinkValue::Wildcard => return true,
                 CrossLinkValue::List(targets) => {
-                    if targets.iter().any(|t| t == to_vault) {
+                    if targets.iter().any(|t| t == to_mem) {
                         return true;
                     }
                     // Fall through to synthesis check — a List that
@@ -1066,29 +1066,29 @@ impl Engine {
 
         // Step 2: per-create-rule default_cross_links synthesis.
         let rule_set = self.create_rule_set_memo.get_or_init(|| {
-            crate::vault_management::CreateRuleSet::new(
-                self.settings.vault_create_rules.clone(),
+            crate::mem_management::CreateRuleSet::new(
+                self.settings.mem_create_rules.clone(),
             )
             .unwrap_or_else(|err| {
                 tracing::warn!(
                     error = %err,
-                    "cross_vault_link_allowed: failed to compile vault_create_rules — synthesis disabled (resolver falls back to explicit-policy-only)"
+                    "cross_mem_link_allowed: failed to compile mem_create_rules — synthesis disabled (resolver falls back to explicit-policy-only)"
                 );
-                crate::vault_management::CreateRuleSet::default()
+                crate::mem_management::CreateRuleSet::default()
             })
         });
 
-        // Compose the same `<vault_path>/<name>` candidate the create-rule
+        // Compose the same `<mem_path>/<name>` candidate the create-rule
         // composer matched against. The rule globs are keyed on the composed
         // lifecycle path (e.g. `memstead/project`, compiled with
         // `literal_separator`), not the bare leaf name — matching
-        // `from_vault` alone silently misses, so synthesis denied a link
+        // `from_mem` alone silently misses, so synthesis denied a link
         // that `memstead_overview` rendered as rule-granted (the
-        // leaf-vs-composed-path divergence). Flat-layout vaults (no
+        // leaf-vs-composed-path divergence). Flat-layout mems (no
         // hierarchical path) keep the bare leaf, matching their bare rule.
-        let candidate = match self.mount(from_vault).and_then(|m| m.vault_path()) {
-            Some(path) => format!("{path}/{from_vault}"),
-            None => from_vault.to_string(),
+        let candidate = match self.mount(from_mem).and_then(|m| m.mem_path()) {
+            Some(path) => format!("{path}/{from_mem}"),
+            None => from_mem.to_string(),
         };
         if let Some(matched) = rule_set.first_match(std::path::Path::new(&candidate))
             && let Some(synth) = matched.default_cross_links.as_ref()
@@ -1096,7 +1096,7 @@ impl Engine {
             return match synth {
                 CrossLinkValue::Wildcard => true,
                 CrossLinkValue::List(targets) => {
-                    targets.iter().any(|t| t == to_vault)
+                    targets.iter().any(|t| t == to_mem)
                 }
             };
         }
@@ -1104,11 +1104,11 @@ impl Engine {
         false
     }
 
-    pub(super) fn find_mount(&self, vault: &str) -> Result<&MountedBackend, EngineError> {
+    pub(super) fn find_mount(&self, mem: &str) -> Result<&MountedBackend, EngineError> {
         self.mounts
             .iter()
-            .find(|m| m.mount.vault == vault)
-            .ok_or_else(|| EngineError::UnknownVault(vault.to_string()))
+            .find(|m| m.mount.mem == mem)
+            .ok_or_else(|| EngineError::UnknownMem(mem.to_string()))
     }
 }
 
@@ -1119,13 +1119,13 @@ mod tests {
 
     use tempfile::TempDir;
 
-    use crate::backend::{BackendError, VaultBackend};
+    use crate::backend::{BackendError, MemBackend};
     use crate::engine::test_helpers::*;
     use crate::engine::{Engine, EngineError, RelateEntityArgs};
     use crate::entity::EntityId;
     use crate::ops::{Direction, SearchScope, WarningHint};
     use crate::provenance::Provenance;
-    use crate::storage::{ArchiveBackend, FilesystemVaultWriter, VaultWriter};
+    use crate::storage::{ArchiveBackend, FilesystemMemWriter, MemWriter};
     
     use crate::vcs::CommitContext;
     use crate::workspace::{
@@ -1146,7 +1146,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let engine = Engine::from_mounts(vec![(
             folder_mount("specs", tmp.path().to_path_buf()),
-            Box::new(FilesystemVaultWriter::new(tmp.path().to_path_buf())) as Box<dyn VaultBackend>,
+            Box::new(FilesystemMemWriter::new(tmp.path().to_path_buf())) as Box<dyn MemBackend>,
         )])
         .unwrap();
 
@@ -1173,57 +1173,57 @@ mod tests {
         );
     }
 
-    /// `vault_origin_class` classifies a writable mount first-party (its
+    /// `mem_origin_class` classifies a writable mount first-party (its
     /// content is authored in this workspace) and a read-only mount
-    /// third-party (registry-installed read-vault or adopted foreign
-    /// folder/clone — quoted, untrusted data). An unknown vault is
+    /// third-party (registry-installed read-mem or adopted foreign
+    /// folder/clone — quoted, untrusted data). An unknown mem is
     /// third-party (the safe default).
     #[test]
-    fn vault_origin_class_writable_first_party_readonly_third_party() {
+    fn mem_origin_class_writable_first_party_readonly_third_party() {
         use crate::render::OriginClass;
 
         let tmp = TempDir::new().unwrap();
-        // Writable folder vault.
+        // Writable folder mem.
         let writable_dir = tmp.path().join("writable");
         std::fs::create_dir_all(&writable_dir).unwrap();
-        let writer = FilesystemVaultWriter::new(writable_dir.clone());
+        let writer = FilesystemMemWriter::new(writable_dir.clone());
 
-        // Read-only archive vault.
+        // Read-only archive mem.
         let body = "---\ntype: spec\n---\n# Ext\n\n## Identity\n\nFrom an archive.\n";
         let archive_path = build_archive(tmp.path(), "ext", &[("ext.md", body.as_bytes())]);
 
         let engine = Engine::from_mounts(vec![
             (
                 folder_mount("local", writable_dir),
-                Box::new(writer) as Box<dyn VaultBackend>,
+                Box::new(writer) as Box<dyn MemBackend>,
             ),
             (
                 archive_mount("external", archive_path.clone()),
-                Box::new(ArchiveBackend::new(archive_path)) as Box<dyn VaultBackend>,
+                Box::new(ArchiveBackend::new(archive_path)) as Box<dyn MemBackend>,
             ),
         ])
         .unwrap();
 
         assert_eq!(
-            engine.vault_origin_class("local"),
+            engine.mem_origin_class("local"),
             OriginClass::FirstParty,
             "a writable mount is first-party"
         );
         assert_eq!(
-            engine.vault_origin_class("external"),
+            engine.mem_origin_class("external"),
             OriginClass::ThirdParty,
             "a read-only mount is third-party"
         );
         assert_eq!(
-            engine.vault_origin_class("no-such-vault"),
+            engine.mem_origin_class("no-such-mem"),
             OriginClass::ThirdParty,
-            "an unknown vault is third-party (safe default)"
+            "an unknown mem is third-party (safe default)"
         );
     }
 
     /// The adopt-gate: a non-built-in schema is first-party only once a
     /// writable mount pins it (the operator authors against it here).
-    /// Pinned only by a read-only mount — a registry read-vault or an
+    /// Pinned only by a read-only mount — a registry read-mem or an
     /// adopted foreign folder/clone — it stays third-party, so
     /// `memstead_schema` serves it structural-only.
     #[test]
@@ -1255,19 +1255,19 @@ community:
             let schemas_dir = tmp.path().join("schemas");
             std::fs::create_dir_all(&schemas_dir).unwrap();
             write_schema_files_with_default_type(&schemas_dir, "trust-test", manifest, &["doc"]);
-            let vault_dir = tmp.path().join("vault");
-            std::fs::create_dir_all(&vault_dir).unwrap();
+            let mem_dir = tmp.path().join("mem");
+            std::fs::create_dir_all(&mem_dir).unwrap();
             let mount = Mount {
-                vault: "v".to_string(),
+                mem: "v".to_string(),
                 schema: Some(pin.clone()),
-                storage: MountStorage::Folder { path: vault_dir.clone() },
+                storage: MountStorage::Folder { path: mem_dir.clone() },
                 capability: cap,
                 lifecycle: MountLifecycle::Eager,
                 cross_linkable: true,
                 migration_target: None,
             };
             let backend =
-                Box::new(FilesystemVaultWriter::new(vault_dir)) as Box<dyn VaultBackend>;
+                Box::new(FilesystemMemWriter::new(mem_dir)) as Box<dyn MemBackend>;
             // Keep `tmp` alive for the engine's lifetime by leaking it —
             // the test process is short-lived and the folder must outlast
             // the closure.
@@ -1295,7 +1295,7 @@ community:
         );
     }
 
-    /// Consumer read path: an installed (archive-backed) vault that ships
+    /// Consumer read path: an installed (archive-backed) mem that ships
     /// a `.memstead/provenance.json` payload surfaces per-entity authoring
     /// provenance through `archive_provenance_for`. A noted entity carries
     /// its rationale; an entity authored without a note is absent from the
@@ -1323,7 +1323,7 @@ community:
         );
         let engine = Engine::from_mounts(vec![(
             archive_mount("seed", archive.clone()),
-            Box::new(ArchiveBackend::new(archive)) as Box<dyn VaultBackend>,
+            Box::new(ArchiveBackend::new(archive)) as Box<dyn MemBackend>,
         )])
         .unwrap();
 
@@ -1357,7 +1357,7 @@ community:
         );
         let engine = Engine::from_mounts(vec![(
             archive_mount("seed", archive.clone()),
-            Box::new(ArchiveBackend::new(archive)) as Box<dyn VaultBackend>,
+            Box::new(ArchiveBackend::new(archive)) as Box<dyn MemBackend>,
         )])
         .unwrap();
         assert!(
@@ -1369,19 +1369,19 @@ community:
     #[test]
     fn folder_mount_routes_reads_to_filesystem_backend() {
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().to_path_buf();
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
-        // VaultWriter and VaultBackend share method names; the
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        // MemWriter and MemBackend share method names; the
         // module-top `use` brings both into scope. Seed via fully-
-        // qualified VaultWriter calls so dot-syntax stays unambiguous.
-        <FilesystemVaultWriter as VaultWriter>::write_entity(&writer, Path::new("a.md"), b"alpha")
+        // qualified MemWriter calls so dot-syntax stays unambiguous.
+        <FilesystemMemWriter as MemWriter>::write_entity(&writer, Path::new("a.md"), b"alpha")
             .unwrap();
-        <FilesystemVaultWriter as VaultWriter>::commit(&writer, "seed", &CommitContext::internal())
+        <FilesystemMemWriter as MemWriter>::commit(&writer, "seed", &CommitContext::internal())
             .unwrap();
 
         let engine = Engine::from_mounts(vec![(
-            folder_mount("specs", vault_dir),
-            Box::new(writer) as Box<dyn VaultBackend>,
+            folder_mount("specs", mem_dir),
+            Box::new(writer) as Box<dyn MemBackend>,
         )])
         .unwrap();
 
@@ -1404,24 +1404,24 @@ community:
     fn heterogeneous_mounts_route_to_correct_backend() {
         let tmp = TempDir::new().unwrap();
 
-        // Folder vault.
-        let folder_dir = tmp.path().join("folder-vault");
+        // Folder mem.
+        let folder_dir = tmp.path().join("folder-mem");
         std::fs::create_dir_all(&folder_dir).unwrap();
-        let folder_writer = FilesystemVaultWriter::new(folder_dir.clone());
-        <FilesystemVaultWriter as VaultWriter>::write_entity(
+        let folder_writer = FilesystemMemWriter::new(folder_dir.clone());
+        <FilesystemMemWriter as MemWriter>::write_entity(
             &folder_writer,
             Path::new("local.md"),
             b"local",
         )
         .unwrap();
-        <FilesystemVaultWriter as VaultWriter>::commit(
+        <FilesystemMemWriter as MemWriter>::commit(
             &folder_writer,
             "seed",
             &CommitContext::internal(),
         )
         .unwrap();
 
-        // Archive vault.
+        // Archive mem.
         let archive_path = build_archive(
             tmp.path(),
             "external",
@@ -1431,7 +1431,7 @@ community:
         let engine = Engine::from_mounts(vec![
             (
                 folder_mount("local", folder_dir),
-                Box::new(folder_writer) as Box<dyn VaultBackend>,
+                Box::new(folder_writer) as Box<dyn MemBackend>,
             ),
             (
                 archive_mount("external", archive_path.clone()),
@@ -1440,8 +1440,8 @@ community:
         ])
         .unwrap();
 
-        // Routes correctly by vault name.
-        assert_eq!(engine.vault_names(), vec!["local", "external"]);
+        // Routes correctly by mem name.
+        assert_eq!(engine.mem_names(), vec!["local", "external"]);
         assert_eq!(
             engine.read_entity("local", Path::new("local.md")).unwrap(),
             Some(b"local".to_vec())
@@ -1456,7 +1456,7 @@ community:
                 .unwrap(),
             Some(b"nested".to_vec())
         );
-        // Cross-routing: reading a path from the wrong vault → None
+        // Cross-routing: reading a path from the wrong mem → None
         // (the backend doesn't have it), not an error.
         assert_eq!(
             engine.read_entity("local", Path::new("ext.md")).unwrap(),
@@ -1472,33 +1472,33 @@ community:
     fn edge_is_from_readonly_classifies_every_edge_by_source_mount_capability() {
         // `engine.edge_is_from_readonly` is the derived-on-demand
         // alternative to adding a per-edge marker: construct a mixed
-        // workspace (one Write-Vault + one ReadOnly archive with
-        // cross-vault wiki-links) and walk every edge in the store,
+        // workspace (one Write-Mem + one ReadOnly archive with
+        // cross-mem wiki-links) and walk every edge in the store,
         // asserting each edge's source-mount capability.
         let tmp = TempDir::new().unwrap();
 
-        // Write folder vault `local` with a spec-shaped entity that
-        // declares an explicit cross-vault relation into the archive
+        // Write folder mem `local` with a spec-shaped entity that
+        // declares an explicit cross-mem relation into the archive
         // (under the alias model edges originate from `## Relationships`).
-        let folder_dir = tmp.path().join("local-vault");
+        let folder_dir = tmp.path().join("local-mem");
         std::fs::create_dir_all(&folder_dir).unwrap();
-        let folder_writer = FilesystemVaultWriter::new(folder_dir.clone());
+        let folder_writer = FilesystemMemWriter::new(folder_dir.clone());
         let local_md = b"---\ntype: spec\n---\n# Note\n\n## Identity\n\nsee [[external:archived]] for prior context.\n\n## Relationships\n\n- **REFERENCES**: [[external:archived]]\n";
-        <FilesystemVaultWriter as VaultWriter>::write_entity(
+        <FilesystemMemWriter as MemWriter>::write_entity(
             &folder_writer,
             Path::new("note.md"),
             local_md,
         )
         .unwrap();
-        <FilesystemVaultWriter as VaultWriter>::commit(
+        <FilesystemMemWriter as MemWriter>::commit(
             &folder_writer,
             "seed",
             &CommitContext::internal(),
         )
         .unwrap();
 
-        // ReadOnly archive vault `external` with a spec-shaped entity
-        // declaring an explicit cross-vault relation back to the local
+        // ReadOnly archive mem `external` with a spec-shaped entity
+        // declaring an explicit cross-mem relation back to the local
         // note.
         let archive_md = b"---\ntype: spec\n---\n# Archived\n\n## Identity\n\nrefers back to [[local:note]] for the current revision.\n\n## Relationships\n\n- **REFERENCES**: [[local:note]]\n";
         let archive_path = build_archive(tmp.path(), "external", &[("archived.md", archive_md)]);
@@ -1506,7 +1506,7 @@ community:
         let engine = Engine::from_mounts(vec![
             (
                 folder_mount("local", folder_dir),
-                Box::new(folder_writer) as Box<dyn VaultBackend>,
+                Box::new(folder_writer) as Box<dyn MemBackend>,
             ),
             (
                 archive_mount("external", archive_path.clone()),
@@ -1515,7 +1515,7 @@ community:
         ])
         .unwrap();
 
-        // Sanity: both entities are real, both vaults are mounted.
+        // Sanity: both entities are real, both mems are mounted.
         let local_id = EntityId::new("local", "note");
         let archived_id = EntityId::new("external", "archived");
         assert!(engine.get_entity(&local_id).is_some());
@@ -1532,27 +1532,27 @@ community:
         // Walk every edge in the store. For each (from, edge) pair,
         // `edge_is_from_readonly(from)` must return true iff the
         // source mount's capability is ReadOnly. The fixture's two
-        // wiki-links produce one edge from each vault — both halves
+        // wiki-links produce one edge from each mem — both halves
         // exercise both branches of the helper.
         let mut seen_write_edge = false;
         let mut seen_readonly_edge = false;
         for from in engine.store().all_ids().cloned().collect::<Vec<_>>() {
             for _edge in engine.store().outgoing(&from) {
                 let is_ro = engine.edge_is_from_readonly(&from);
-                match engine.capability(from.vault()).unwrap() {
+                match engine.capability(from.mem()).unwrap() {
                     MountCapability::Write => {
                         assert!(
                             !is_ro,
-                            "edge from write vault {} reported as ReadOnly",
-                            from.vault()
+                            "edge from write mem {} reported as ReadOnly",
+                            from.mem()
                         );
                         seen_write_edge = true;
                     }
                     MountCapability::ReadOnly => {
                         assert!(
                             is_ro,
-                            "edge from readonly vault {} reported as Write",
-                            from.vault()
+                            "edge from readonly mem {} reported as Write",
+                            from.mem()
                         );
                         seen_readonly_edge = true;
                     }
@@ -1561,16 +1561,16 @@ community:
         }
         assert!(
             seen_write_edge,
-            "fixture must produce at least one edge from a write vault"
+            "fixture must produce at least one edge from a write mem"
         );
         assert!(
             seen_readonly_edge,
-            "fixture must produce at least one edge from a readonly vault"
+            "fixture must produce at least one edge from a readonly mem"
         );
 
-        // Helper also reports `false` for vaults absent from the
+        // Helper also reports `false` for mems absent from the
         // router — no mount → no ReadOnly assertion can be made.
-        let phantom = EntityId::new("missing-vault", "phantom");
+        let phantom = EntityId::new("missing-mem", "phantom");
         assert!(
             !engine.edge_is_from_readonly(&phantom),
             "absent mount must not be reported as ReadOnly"
@@ -1580,54 +1580,54 @@ community:
     // ---- Engine::changes_since wrapper ------------------------------
 
     #[test]
-    fn cross_vault_link_allowed_same_vault_always_true() {
-        // Self-edges (from == to) bypass the cross-vault policy
-        // entirely — the policy gates *cross*-vault edges only.
+    fn cross_mem_link_allowed_same_mem_always_true() {
+        // Self-edges (from == to) bypass the cross-mem policy
+        // entirely — the policy gates *cross*-mem edges only.
         let tmp = TempDir::new().unwrap();
         let engine = build_demo_engine(&tmp);
-        assert!(engine.cross_vault_link_allowed("specs", "specs"));
-        // Even when the vault doesn't exist (not enrolled in
-        // settings.cross_vault_links), same-vault returns true —
-        // the engine doesn't validate vault existence here, just the
+        assert!(engine.cross_mem_link_allowed("specs", "specs"));
+        // Even when the mem doesn't exist (not enrolled in
+        // settings.cross_mem_links), same-mem returns true —
+        // the engine doesn't validate mem existence here, just the
         // policy.
-        assert!(engine.cross_vault_link_allowed("anywhere", "anywhere"));
+        assert!(engine.cross_mem_link_allowed("anywhere", "anywhere"));
     }
 
     #[test]
-    fn cross_vault_link_allowed_absent_denies_by_default() {
-        // No entry in cross_vault_links for `from_vault` → denied.
+    fn cross_mem_link_allowed_absent_denies_by_default() {
+        // No entry in cross_mem_links for `from_mem` → denied.
         // Default-deny is the V1 posture; operators opt in.
         let tmp = TempDir::new().unwrap();
         let engine = build_demo_engine(&tmp);
-        assert!(!engine.cross_vault_link_allowed("specs", "engine"));
-        assert!(!engine.cross_vault_link_allowed("missing", "anywhere"));
+        assert!(!engine.cross_mem_link_allowed("specs", "engine"));
+        assert!(!engine.cross_mem_link_allowed("missing", "anywhere"));
     }
 
     #[test]
-    fn cross_vault_link_allowed_wildcard_admits_any_target() {
+    fn cross_mem_link_allowed_wildcard_admits_any_target() {
         use memstead_schema::workspace_config::CrossLinkValue;
         let tmp = TempDir::new().unwrap();
         let mut engine = build_demo_engine(&tmp);
         let mut settings = crate::workspace::WorkspaceSettings::default();
         settings
-            .cross_vault_links
+            .cross_mem_links
             .insert("specs".to_string(), CrossLinkValue::Wildcard);
         engine.set_settings(settings);
-        assert!(engine.cross_vault_link_allowed("specs", "engine"));
-        assert!(engine.cross_vault_link_allowed("specs", "macos"));
-        assert!(engine.cross_vault_link_allowed("specs", "any-other"));
+        assert!(engine.cross_mem_link_allowed("specs", "engine"));
+        assert!(engine.cross_mem_link_allowed("specs", "macos"));
+        assert!(engine.cross_mem_link_allowed("specs", "any-other"));
         // Reverse direction is independent — no policy entry for
         // engine→specs means denied.
-        assert!(!engine.cross_vault_link_allowed("engine", "specs"));
+        assert!(!engine.cross_mem_link_allowed("engine", "specs"));
     }
 
     #[test]
-    fn cross_vault_link_allowed_allowlist_enforces_membership() {
+    fn cross_mem_link_allowed_allowlist_enforces_membership() {
         use memstead_schema::workspace_config::CrossLinkValue;
         let tmp = TempDir::new().unwrap();
         let mut engine = build_demo_engine(&tmp);
         let mut settings = crate::workspace::WorkspaceSettings::default();
-        settings.cross_vault_links.insert(
+        settings.cross_mem_links.insert(
             "specs".to_string(),
             CrossLinkValue::List(vec![
                 "engine".to_string(),
@@ -1635,22 +1635,22 @@ community:
             ]),
         );
         engine.set_settings(settings);
-        assert!(engine.cross_vault_link_allowed("specs", "engine"));
-        assert!(engine.cross_vault_link_allowed("specs", "macos"));
-        assert!(!engine.cross_vault_link_allowed("specs", "external"));
+        assert!(engine.cross_mem_link_allowed("specs", "engine"));
+        assert!(engine.cross_mem_link_allowed("specs", "macos"));
+        assert!(!engine.cross_mem_link_allowed("specs", "external"));
     }
 
     #[test]
-    fn cross_vault_link_allowed_synthesises_from_matching_create_rule_wildcard() {
-        // No explicit cross_vault_links entry, but a create rule
-        // matches `from_vault` and carries default_cross_links = "*".
+    fn cross_mem_link_allowed_synthesises_from_matching_create_rule_wildcard() {
+        // No explicit cross_mem_links entry, but a create rule
+        // matches `from_mem` and carries default_cross_links = "*".
         // Synthesis grants permission to any target.
         use memstead_schema::workspace_config::CrossLinkValue;
         let tmp = TempDir::new().unwrap();
         let mut engine = build_demo_engine(&tmp);
         let mut settings = crate::workspace::WorkspaceSettings::default();
         settings
-            .vault_create_rules
+            .mem_create_rules
             .push(crate::workspace::CreateRuleSetting {
                 pattern: "exec-*".to_string(),
                 schemas: vec!["default".to_string()],
@@ -1659,32 +1659,32 @@ community:
         engine.set_settings(settings);
         // No explicit policy; synthesis grants permission for any
         // target because the rule's value is Wildcard.
-        assert!(engine.cross_vault_link_allowed("exec-foo", "specs"));
-        assert!(engine.cross_vault_link_allowed("exec-foo", "engine"));
-        // Vault that doesn't match any rule → still denied.
-        assert!(!engine.cross_vault_link_allowed("orphan", "specs"));
+        assert!(engine.cross_mem_link_allowed("exec-foo", "specs"));
+        assert!(engine.cross_mem_link_allowed("exec-foo", "engine"));
+        // Mem that doesn't match any rule → still denied.
+        assert!(!engine.cross_mem_link_allowed("orphan", "specs"));
     }
 
-    /// #42: synthesis matches a hierarchical vault by composing the same
-    /// `<vault_path>/<name>` candidate the create-rule glob is keyed on,
-    /// not the bare leaf. Before the fix, `from_vault = "project"` could
+    /// #42: synthesis matches a hierarchical mem by composing the same
+    /// `<mem_path>/<name>` candidate the create-rule glob is keyed on,
+    /// not the bare leaf. Before the fix, `from_mem = "project"` could
     /// never match a `memstead/*` rule (the leaf-vs-composed-path
     /// divergence), so enforcement denied a link `memstead_overview`
     /// rendered as rule-granted.
     #[test]
-    fn cross_vault_link_allowed_synthesises_for_hierarchical_vault() {
+    fn cross_mem_link_allowed_synthesises_for_hierarchical_mem() {
         use memstead_schema::workspace_config::CrossLinkValue;
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().to_path_buf();
-        // Mount `project` with a hierarchical branch so its `vault_path()`
+        let mem_dir = tmp.path().to_path_buf();
+        // Mount `project` with a hierarchical branch so its `mem_path()`
         // is "memstead" and the composed candidate is "memstead/project".
         // The Folder backend handles loading; only the Mount's storage
-        // feeds `vault_path()`.
+        // feeds `mem_path()`.
         let mount = Mount {
-            vault: "project".into(),
+            mem: "project".into(),
             schema: Some(pin("default")),
             storage: MountStorage::GitBranch {
-                gitdir: vault_dir.join(".git"),
+                gitdir: mem_dir.join(".git"),
                 branch: "memstead/project".into(),
             },
             capability: MountCapability::Write,
@@ -1692,12 +1692,12 @@ community:
             cross_linkable: true,
             migration_target: None,
         };
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
         let mut engine =
-            Engine::from_mounts(vec![(mount, Box::new(writer) as Box<dyn VaultBackend>)]).unwrap();
+            Engine::from_mounts(vec![(mount, Box::new(writer) as Box<dyn MemBackend>)]).unwrap();
         let mut settings = crate::workspace::WorkspaceSettings::default();
         settings
-            .vault_create_rules
+            .mem_create_rules
             .push(crate::workspace::CreateRuleSetting {
                 pattern: "memstead/*".to_string(),
                 schemas: vec!["default".to_string()],
@@ -1705,17 +1705,17 @@ community:
             });
         engine.set_settings(settings);
         assert!(
-            engine.cross_vault_link_allowed("project", "engine"),
+            engine.cross_mem_link_allowed("project", "engine"),
             "synthesis must match via the composed `memstead/project` candidate"
         );
         assert!(
-            !engine.cross_vault_link_allowed("project", "macos"),
+            !engine.cross_mem_link_allowed("project", "macos"),
             "a target outside the rule's default_cross_links is still denied"
         );
     }
 
     #[test]
-    fn cross_vault_link_allowed_synthesises_from_matching_create_rule_list() {
+    fn cross_mem_link_allowed_synthesises_from_matching_create_rule_list() {
         // Create rule's default_cross_links is a list — synthesis
         // grants permission to listed targets only.
         use memstead_schema::workspace_config::CrossLinkValue;
@@ -1723,7 +1723,7 @@ community:
         let mut engine = build_demo_engine(&tmp);
         let mut settings = crate::workspace::WorkspaceSettings::default();
         settings
-            .vault_create_rules
+            .mem_create_rules
             .push(crate::workspace::CreateRuleSetting {
                 pattern: "exec-*".to_string(),
                 schemas: vec!["default".to_string()],
@@ -1732,42 +1732,42 @@ community:
                 ])),
             });
         engine.set_settings(settings);
-        assert!(engine.cross_vault_link_allowed("exec-foo", "specs"));
+        assert!(engine.cross_mem_link_allowed("exec-foo", "specs"));
         // Target not in the synthesised list → denied.
-        assert!(!engine.cross_vault_link_allowed("exec-foo", "engine"));
+        assert!(!engine.cross_mem_link_allowed("exec-foo", "engine"));
     }
 
     #[test]
-    fn cross_vault_link_allowed_explicit_policy_wins_over_synthesis() {
-        // Explicit cross_vault_links wildcard fires first; the
+    fn cross_mem_link_allowed_explicit_policy_wins_over_synthesis() {
+        // Explicit cross_mem_links wildcard fires first; the
         // synthesis layer is never consulted (and would deny).
         use memstead_schema::workspace_config::CrossLinkValue;
         let tmp = TempDir::new().unwrap();
         let mut engine = build_demo_engine(&tmp);
         let mut settings = crate::workspace::WorkspaceSettings::default();
         settings
-            .cross_vault_links
+            .cross_mem_links
             .insert("exec-foo".to_string(), CrossLinkValue::Wildcard);
         // The synthesis layer would deny `exec-foo → engine` (no
         // matching rule), but explicit policy returns true first.
         engine.set_settings(settings);
-        assert!(engine.cross_vault_link_allowed("exec-foo", "engine"));
+        assert!(engine.cross_mem_link_allowed("exec-foo", "engine"));
     }
 
     #[test]
-    fn cross_vault_link_allowed_synthesis_unions_into_explicit_list() {
+    fn cross_mem_link_allowed_synthesis_unions_into_explicit_list() {
         // Explicit list = ["specs"]; create rule synthesises = ["macos"].
         // Effective allowed targets: union ({specs, macos}).
         use memstead_schema::workspace_config::CrossLinkValue;
         let tmp = TempDir::new().unwrap();
         let mut engine = build_demo_engine(&tmp);
         let mut settings = crate::workspace::WorkspaceSettings::default();
-        settings.cross_vault_links.insert(
+        settings.cross_mem_links.insert(
             "exec-foo".to_string(),
             CrossLinkValue::List(vec!["specs".to_string()]),
         );
         settings
-            .vault_create_rules
+            .mem_create_rules
             .push(crate::workspace::CreateRuleSetting {
                 pattern: "exec-*".to_string(),
                 schemas: vec!["default".to_string()],
@@ -1777,15 +1777,15 @@ community:
             });
         engine.set_settings(settings);
         // Explicit allowlist contains specs → allowed.
-        assert!(engine.cross_vault_link_allowed("exec-foo", "specs"));
+        assert!(engine.cross_mem_link_allowed("exec-foo", "specs"));
         // Synthesis layer adds macos → allowed.
-        assert!(engine.cross_vault_link_allowed("exec-foo", "macos"));
+        assert!(engine.cross_mem_link_allowed("exec-foo", "macos"));
         // Neither layer allows engine → denied.
-        assert!(!engine.cross_vault_link_allowed("exec-foo", "engine"));
+        assert!(!engine.cross_mem_link_allowed("exec-foo", "engine"));
     }
 
     #[test]
-    fn cross_vault_link_allowed_set_settings_invalidates_compiled_rule_cache() {
+    fn cross_mem_link_allowed_set_settings_invalidates_compiled_rule_cache() {
         // After set_settings, a fresh policy must be reflected on the
         // next call — the lazy memo can't return stale rules.
         use memstead_schema::workspace_config::CrossLinkValue;
@@ -1794,7 +1794,7 @@ community:
 
         // First settings: a rule allows exec-* → specs via synthesis.
         let mut s1 = crate::workspace::WorkspaceSettings::default();
-        s1.vault_create_rules
+        s1.mem_create_rules
             .push(crate::workspace::CreateRuleSetting {
                 pattern: "exec-*".to_string(),
                 schemas: vec!["default".to_string()],
@@ -1803,33 +1803,33 @@ community:
                 ])),
             });
         engine.set_settings(s1);
-        assert!(engine.cross_vault_link_allowed("exec-foo", "specs"));
+        assert!(engine.cross_mem_link_allowed("exec-foo", "specs"));
 
         // Replace settings: the rule no longer carries
         // default_cross_links. Cache must invalidate so the next
         // call sees the new policy.
         let mut s2 = crate::workspace::WorkspaceSettings::default();
-        s2.vault_create_rules
+        s2.mem_create_rules
             .push(crate::workspace::CreateRuleSetting {
                 pattern: "exec-*".to_string(),
                 schemas: vec!["default".to_string()],
                 default_cross_links: None,
             });
         engine.set_settings(s2);
-        assert!(!engine.cross_vault_link_allowed("exec-foo", "specs"));
+        assert!(!engine.cross_mem_link_allowed("exec-foo", "specs"));
     }
 
     #[test]
-    fn cross_vault_link_allowed_malformed_glob_falls_back_to_explicit_policy() {
+    fn cross_mem_link_allowed_malformed_glob_falls_back_to_explicit_policy() {
         // Malformed pattern in a create rule causes CreateRuleSet
         // compilation to fail; the resolver logs and disables
-        // synthesis, but explicit cross_vault_links still works.
+        // synthesis, but explicit cross_mem_links still works.
         use memstead_schema::workspace_config::CrossLinkValue;
         let tmp = TempDir::new().unwrap();
         let mut engine = build_demo_engine(&tmp);
         let mut settings = crate::workspace::WorkspaceSettings::default();
         settings
-            .vault_create_rules
+            .mem_create_rules
             .push(crate::workspace::CreateRuleSetting {
                 pattern: "[unclosed".to_string(),
                 schemas: vec!["default".to_string()],
@@ -1837,19 +1837,19 @@ community:
             });
         // Explicit policy still works.
         settings
-            .cross_vault_links
+            .cross_mem_links
             .insert("specs".to_string(), CrossLinkValue::Wildcard);
         engine.set_settings(settings);
         // Explicit policy: specs → engine allowed.
-        assert!(engine.cross_vault_link_allowed("specs", "engine"));
+        assert!(engine.cross_mem_link_allowed("specs", "engine"));
         // Synthesis disabled (compilation failed); rule's would-be
         // wildcard doesn't apply.
-        assert!(!engine.cross_vault_link_allowed("orphan", "anything"));
+        assert!(!engine.cross_mem_link_allowed("orphan", "anything"));
     }
 
     #[test]
-    fn cross_vault_link_allowed_empty_list_denies_all_cross_vault_targets() {
-        // [cross_vault_links] specs = [] is the explicit
+    fn cross_mem_link_allowed_empty_list_denies_all_cross_mem_targets() {
+        // [cross_mem_links] specs = [] is the explicit
         // "intentionally locked down" shape — same effect as
         // default-deny but operator-acknowledged.
         use memstead_schema::workspace_config::CrossLinkValue;
@@ -1857,27 +1857,27 @@ community:
         let mut engine = build_demo_engine(&tmp);
         let mut settings = crate::workspace::WorkspaceSettings::default();
         settings
-            .cross_vault_links
+            .cross_mem_links
             .insert("specs".to_string(), CrossLinkValue::List(Vec::new()));
         engine.set_settings(settings);
-        // Same-vault still passes — policy only gates cross-vault.
-        assert!(engine.cross_vault_link_allowed("specs", "specs"));
-        // Cross-vault denied to every target.
-        assert!(!engine.cross_vault_link_allowed("specs", "engine"));
-        assert!(!engine.cross_vault_link_allowed("specs", "anything"));
+        // Same-mem still passes — policy only gates cross-mem.
+        assert!(engine.cross_mem_link_allowed("specs", "specs"));
+        // Cross-mem denied to every target.
+        assert!(!engine.cross_mem_link_allowed("specs", "engine"));
+        assert!(!engine.cross_mem_link_allowed("specs", "anything"));
     }
 
     #[test]
     fn from_mounts_load_warnings_merge_into_health_summary() {
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().to_path_buf();
+        let mem_dir = tmp.path().to_path_buf();
         let body = "---\ntype: spec\n---\n# Dup2\n\n## Identity\n\na.\n\n## Identity\n\nb.\n";
-        std::fs::write(vault_dir.join("dup2.md"), body).unwrap();
+        std::fs::write(mem_dir.join("dup2.md"), body).unwrap();
 
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
         let engine = Engine::from_mounts(vec![(
-            folder_mount("specs", vault_dir),
-            Box::new(writer) as Box<dyn VaultBackend>,
+            folder_mount("specs", mem_dir),
+            Box::new(writer) as Box<dyn MemBackend>,
         )])
         .unwrap();
 
@@ -1895,11 +1895,11 @@ community:
     #[test]
     fn workspace_root_accessor_is_none_for_engine_built_from_mounts() {
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().to_path_buf();
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
         let engine = Engine::from_mounts(vec![(
-            folder_mount("specs", vault_dir),
-            Box::new(writer) as Box<dyn VaultBackend>,
+            folder_mount("specs", mem_dir),
+            Box::new(writer) as Box<dyn MemBackend>,
         )])
         .unwrap();
         assert!(
@@ -1912,34 +1912,34 @@ community:
     #[test]
     fn health_omits_outer_repo_warning_when_workspace_root_unset() {
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().to_path_buf();
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
         let engine = Engine::from_mounts(vec![(
-            folder_mount("specs", vault_dir),
-            Box::new(writer) as Box<dyn VaultBackend>,
+            folder_mount("specs", mem_dir),
+            Box::new(writer) as Box<dyn MemBackend>,
         )])
         .unwrap();
         let health = engine.health();
         assert!(
             !health.warnings.iter().any(|w| matches!(
                 w,
-                WarningHint::OuterRepoNotIgnoringVaultRepo { .. }
+                WarningHint::OuterRepoNotIgnoringMemRepo { .. }
             )),
             "outer-repo check must skip when workspace_root is None",
         );
     }
 
     #[test]
-    fn writable_vault_names_filters_by_capability() {
+    fn writable_mem_names_filters_by_capability() {
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().to_path_buf();
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
         let archive_path = build_archive(tmp.path(), "ext", &[("a.md", b"a")]);
 
         let engine = Engine::from_mounts(vec![
             (
-                folder_mount("writable", vault_dir),
-                Box::new(writer) as Box<dyn VaultBackend>,
+                folder_mount("writable", mem_dir),
+                Box::new(writer) as Box<dyn MemBackend>,
             ),
             (
                 archive_mount("sealed", archive_path.clone()),
@@ -1950,18 +1950,18 @@ community:
 
         // Only the writable mount surfaces; the archive (read-only)
         // is filtered out.
-        let names = engine.writable_vault_names();
+        let names = engine.writable_mem_names();
         assert_eq!(names, vec!["writable"]);
     }
 
-    /// The default writable vault is
+    /// The default writable mem is
     /// the FIRST writable mount in declaration order — the stable seed,
     /// not the alphabetically-first name. `test` is declared first;
     /// `other` sorts ahead alphabetically but is declared second, so it
     /// is NOT the default. This is the invariant that stops a second
-    /// vault from silently retargeting omitted-`vault` writes.
+    /// mem from silently retargeting omitted-`mem` writes.
     #[test]
-    fn default_writable_vault_is_declaration_first_not_alphabetical() {
+    fn default_writable_mem_is_declaration_first_not_alphabetical() {
         let tmp = TempDir::new().unwrap();
         let test_dir = tmp.path().join("test");
         let other_dir = tmp.path().join("other");
@@ -1971,19 +1971,19 @@ community:
         let engine = Engine::from_mounts(vec![
             (
                 folder_mount("test", test_dir.clone()),
-                Box::new(FilesystemVaultWriter::new(test_dir)) as Box<dyn VaultBackend>,
+                Box::new(FilesystemMemWriter::new(test_dir)) as Box<dyn MemBackend>,
             ),
             (
                 folder_mount("other", other_dir.clone()),
-                Box::new(FilesystemVaultWriter::new(other_dir)) as Box<dyn VaultBackend>,
+                Box::new(FilesystemMemWriter::new(other_dir)) as Box<dyn MemBackend>,
             ),
         ])
         .unwrap();
 
         assert_eq!(
-            engine.default_writable_vault(),
+            engine.default_writable_mem(),
             Some("test"),
-            "default must be the declaration-first writable vault, not the alphabetically-first",
+            "default must be the declaration-first writable mem, not the alphabetically-first",
         );
     }
 
@@ -1992,7 +1992,7 @@ community:
     /// becomes the default. Together with the test above this pins the
     /// basis as mount order, not name sort.
     #[test]
-    fn default_writable_vault_follows_declaration_order() {
+    fn default_writable_mem_follows_declaration_order() {
         let tmp = TempDir::new().unwrap();
         let other_dir = tmp.path().join("other");
         let test_dir = tmp.path().join("test");
@@ -2002,43 +2002,43 @@ community:
         let engine = Engine::from_mounts(vec![
             (
                 folder_mount("other", other_dir.clone()),
-                Box::new(FilesystemVaultWriter::new(other_dir)) as Box<dyn VaultBackend>,
+                Box::new(FilesystemMemWriter::new(other_dir)) as Box<dyn MemBackend>,
             ),
             (
                 folder_mount("test", test_dir.clone()),
-                Box::new(FilesystemVaultWriter::new(test_dir)) as Box<dyn VaultBackend>,
+                Box::new(FilesystemMemWriter::new(test_dir)) as Box<dyn MemBackend>,
             ),
         ])
         .unwrap();
 
-        assert_eq!(engine.default_writable_vault(), Some("other"));
+        assert_eq!(engine.default_writable_mem(), Some("other"));
     }
 
-    /// A read-only-only workspace has no default writable vault.
+    /// A read-only-only workspace has no default writable mem.
     #[test]
-    fn default_writable_vault_none_without_writable_mount() {
+    fn default_writable_mem_none_without_writable_mount() {
         let tmp = TempDir::new().unwrap();
         let archive_path = build_archive(tmp.path(), "ext", &[("a.md", b"a")]);
         let engine = Engine::from_mounts(vec![(
             archive_mount("sealed", archive_path.clone()),
-            Box::new(ArchiveBackend::new(archive_path)) as Box<dyn VaultBackend>,
+            Box::new(ArchiveBackend::new(archive_path)) as Box<dyn MemBackend>,
         )])
         .unwrap();
-        assert_eq!(engine.default_writable_vault(), None);
+        assert_eq!(engine.default_writable_mem(), None);
     }
 
     #[test]
-    fn folder_path_for_vault_returns_path_for_folder_mounts_only() {
+    fn folder_path_for_mem_returns_path_for_folder_mounts_only() {
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().join("specs");
-        std::fs::create_dir_all(&vault_dir).unwrap();
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().join("specs");
+        std::fs::create_dir_all(&mem_dir).unwrap();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
         let archive_path = build_archive(tmp.path(), "ext", &[("a.md", b"a")]);
 
         let engine = Engine::from_mounts(vec![
             (
-                folder_mount("specs", vault_dir.clone()),
-                Box::new(writer) as Box<dyn VaultBackend>,
+                folder_mount("specs", mem_dir.clone()),
+                Box::new(writer) as Box<dyn MemBackend>,
             ),
             (
                 archive_mount("sealed", archive_path.clone()),
@@ -2049,13 +2049,13 @@ community:
 
         // Folder mount returns its path.
         assert_eq!(
-            engine.folder_path_for_vault("specs"),
-            Some(vault_dir.as_path()),
+            engine.folder_path_for_mem("specs"),
+            Some(mem_dir.as_path()),
         );
         // Archive mount returns None — caller branches on storage type.
-        assert_eq!(engine.folder_path_for_vault("sealed"), None);
-        // Unknown vault returns None — same as Engine::mount.
-        assert_eq!(engine.folder_path_for_vault("missing"), None);
+        assert_eq!(engine.folder_path_for_mem("sealed"), None);
+        // Unknown mem returns None — same as Engine::mount.
+        assert_eq!(engine.folder_path_for_mem("missing"), None);
     }
 
     #[test]
@@ -2064,17 +2064,17 @@ community:
         // Engine::mounts surface the operator-facing Mount records.
         // Handlers branch on MountStorage variants through this
         // accessor (replacing pro's gitdir_for / worktree_for /
-        // vault_head_sha / vault_config_for direct-engine
+        // mem_head_sha / mem_config_for direct-engine
         // accessors).
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().to_path_buf();
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
         let archive_path = build_archive(tmp.path(), "ext", &[("a.md", b"a")]);
 
         let engine = Engine::from_mounts(vec![
             (
-                folder_mount("writable", vault_dir.clone()),
-                Box::new(writer) as Box<dyn VaultBackend>,
+                folder_mount("writable", mem_dir.clone()),
+                Box::new(writer) as Box<dyn MemBackend>,
             ),
             (
                 archive_mount("sealed", archive_path.clone()),
@@ -2083,44 +2083,44 @@ community:
         ])
         .unwrap();
 
-        // Known vaults: each returns a Mount whose storage variant
+        // Known mems: each returns a Mount whose storage variant
         // matches what the caller passed at construction.
-        let folder = engine.mount("writable").expect("known vault");
+        let folder = engine.mount("writable").expect("known mem");
         assert!(matches!(folder.storage, MountStorage::Folder { .. }));
         assert_eq!(folder.capability, MountCapability::Write);
 
-        let archive = engine.mount("sealed").expect("known vault");
+        let archive = engine.mount("sealed").expect("known mem");
         match &archive.storage {
             MountStorage::Archive { path } => assert_eq!(path, &archive_path),
             other => panic!("expected Archive storage, got {other:?}"),
         }
         assert_eq!(archive.capability, MountCapability::ReadOnly);
 
-        // Unknown vault — None, no panic, no error.
+        // Unknown mem — None, no panic, no error.
         assert!(engine.mount("missing").is_none());
 
         // Engine::mounts enumerates every mount in declaration order.
         let mounts = engine.mounts();
         assert_eq!(mounts.len(), 2);
-        assert_eq!(mounts[0].vault, "writable");
-        assert_eq!(mounts[1].vault, "sealed");
+        assert_eq!(mounts[0].mem, "writable");
+        assert_eq!(mounts[1].mem, "sealed");
     }
 
     #[test]
-    fn vault_router_writable_set_matches_writable_mount_capability() {
+    fn mem_router_writable_set_matches_writable_mount_capability() {
         // Build an engine with one writable folder mount and one
         // read-only archive mount; the router's writable set must
         // equal the writable mount's name only.
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().join("specs");
-        std::fs::create_dir_all(&vault_dir).unwrap();
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().join("specs");
+        std::fs::create_dir_all(&mem_dir).unwrap();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
         let archive_path = build_archive(tmp.path(), "ext", &[("a.md", b"a")]);
 
         let engine = Engine::from_mounts(vec![
             (
-                folder_mount("specs", vault_dir.clone()),
-                Box::new(writer) as Box<dyn VaultBackend>,
+                folder_mount("specs", mem_dir.clone()),
+                Box::new(writer) as Box<dyn MemBackend>,
             ),
             (
                 archive_mount("ext", archive_path.clone()),
@@ -2129,80 +2129,80 @@ community:
         ])
         .unwrap();
 
-        let router = engine.vault_router();
+        let router = engine.mem_router();
         assert!(router.is_writable("specs"));
         assert!(!router.is_writable("ext"));
         assert!(router.is_visible("specs"));
         assert!(router.is_visible("ext"));
         let writable: std::collections::HashSet<&String> =
-            router.writable_vaults().iter().collect();
+            router.writable_mems().iter().collect();
         assert_eq!(writable.len(), 1);
         assert!(writable.contains(&"specs".to_string()));
     }
 
     #[test]
-    fn vault_router_origin_is_explicit_toml_for_workspace_mounts() {
+    fn mem_router_origin_is_explicit_toml_for_workspace_mounts() {
         // Every mount built via `from_mounts` lands as
-        // `VaultOrigin::ExplicitToml` — the file-adapter origin.
-        // `RuntimeCreated` is reserved for `memstead_vault_create`
+        // `MemOrigin::ExplicitToml` — the file-adapter origin.
+        // `RuntimeCreated` is reserved for `memstead_mem_create`
         // runtime registrations once that handler migrates onto
         // the unified engine.
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().join("specs");
-        std::fs::create_dir_all(&vault_dir).unwrap();
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().join("specs");
+        std::fs::create_dir_all(&mem_dir).unwrap();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
 
         let engine = Engine::from_mounts(vec![(
-            folder_mount("specs", vault_dir),
-            Box::new(writer) as Box<dyn VaultBackend>,
+            folder_mount("specs", mem_dir),
+            Box::new(writer) as Box<dyn MemBackend>,
         )])
         .unwrap();
 
         let origin = engine
-            .vault_router()
-            .origin_for_vault("specs")
-            .expect("known vault");
+            .mem_router()
+            .origin_for_mem("specs")
+            .expect("known mem");
         assert_eq!(origin.kind(), "explicit");
     }
 
     #[test]
-    fn vault_router_dir_for_writable_folder_mount_matches_storage_path() {
+    fn mem_router_dir_for_writable_folder_mount_matches_storage_path() {
         // Folder-backed writable mounts surface the storage path
-        // via `dir_for_vault`. Handlers consuming the router for
-        // per-vault path resolution rely on this.
+        // via `dir_for_mem`. Handlers consuming the router for
+        // per-mem path resolution rely on this.
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().join("specs");
-        std::fs::create_dir_all(&vault_dir).unwrap();
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().join("specs");
+        std::fs::create_dir_all(&mem_dir).unwrap();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
 
         let engine = Engine::from_mounts(vec![(
-            folder_mount("specs", vault_dir.clone()),
-            Box::new(writer) as Box<dyn VaultBackend>,
+            folder_mount("specs", mem_dir.clone()),
+            Box::new(writer) as Box<dyn MemBackend>,
         )])
         .unwrap();
 
         assert_eq!(
-            engine.vault_router().dir_for_vault("specs"),
-            Some(vault_dir.as_path()),
+            engine.mem_router().dir_for_mem("specs"),
+            Some(mem_dir.as_path()),
         );
-        assert_eq!(engine.vault_router().dir_for_vault("unknown"), None);
+        assert_eq!(engine.mem_router().dir_for_mem("unknown"), None);
     }
 
     #[test]
-    fn vault_router_archive_path_for_read_only_archive_mount() {
+    fn mem_router_archive_path_for_read_only_archive_mount() {
         // Read-only archive mounts register via `add_read_only` so
-        // `archive_path_for_vault` resolves the archive's on-disk
+        // `archive_path_for_mem` resolves the archive's on-disk
         // location.
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().join("specs");
-        std::fs::create_dir_all(&vault_dir).unwrap();
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().join("specs");
+        std::fs::create_dir_all(&mem_dir).unwrap();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
         let archive_path = build_archive(tmp.path(), "ext", &[("a.md", b"a")]);
 
         let engine = Engine::from_mounts(vec![
             (
-                folder_mount("specs", vault_dir),
-                Box::new(writer) as Box<dyn VaultBackend>,
+                folder_mount("specs", mem_dir),
+                Box::new(writer) as Box<dyn MemBackend>,
             ),
             (
                 archive_mount("ext", archive_path.clone()),
@@ -2211,48 +2211,48 @@ community:
         ])
         .unwrap();
 
-        let router = engine.vault_router();
+        let router = engine.mem_router();
         assert_eq!(
-            router.archive_path_for_vault("ext"),
+            router.archive_path_for_mem("ext"),
             Some(archive_path.as_path()),
         );
         // Writable folder mount has no archive path.
-        assert_eq!(router.archive_path_for_vault("specs"), None);
+        assert_eq!(router.archive_path_for_mem("specs"), None);
     }
 
     #[test]
-    fn read_vault_config_via_backend_trait_folder_reads_bytes() {
-        // Direct trait call against FilesystemVaultWriter. Verifies
+    fn read_mem_config_via_backend_trait_folder_reads_bytes() {
+        // Direct trait call against FilesystemMemWriter. Verifies
         // the backend-side primitive returns the raw bytes the
         // engine then parses.
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().to_path_buf();
-        std::fs::create_dir_all(vault_dir.join(".memstead")).unwrap();
+        let mem_dir = tmp.path().to_path_buf();
+        std::fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
         let body = br#"{
             "format": 1,
             "schema": "default@1.0.0",
             "writeGuidance": { "tone": "neutral" }
         }"#;
-        std::fs::write(vault_dir.join(".memstead").join("config.json"), body).unwrap();
+        std::fs::write(mem_dir.join(".memstead").join("config.json"), body).unwrap();
 
-        let writer = FilesystemVaultWriter::new(vault_dir);
-        let result = VaultBackend::read_vault_config(&writer).unwrap();
+        let writer = FilesystemMemWriter::new(mem_dir);
+        let result = MemBackend::read_mem_config(&writer).unwrap();
         let bytes = result.expect("config bytes must surface");
         let parsed: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(parsed["schema"], "default@1.0.0");
     }
 
     #[test]
-    fn read_vault_config_via_backend_trait_folder_missing_returns_none() {
+    fn read_mem_config_via_backend_trait_folder_missing_returns_none() {
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().to_path_buf();
-        let writer = FilesystemVaultWriter::new(vault_dir);
-        let result = VaultBackend::read_vault_config(&writer).unwrap();
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir);
+        let result = MemBackend::read_mem_config(&writer).unwrap();
         assert!(result.is_none());
     }
 
     #[test]
-    fn read_vault_config_via_backend_trait_archive_reads_bytes() {
+    fn read_mem_config_via_backend_trait_archive_reads_bytes() {
         // Build an archive containing .memstead/config.json and verify
         // the ArchiveBackend impl returns its bytes.
         let tmp = TempDir::new().unwrap();
@@ -2274,36 +2274,36 @@ community:
         }
 
         let backend = ArchiveBackend::new(archive_path);
-        let result = VaultBackend::read_vault_config(&backend).unwrap();
+        let result = MemBackend::read_mem_config(&backend).unwrap();
         let bytes = result.expect("config bytes must surface");
         let parsed: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(parsed["writeGuidance"]["tone"], "archive");
     }
 
     #[test]
-    fn vault_config_for_returns_none_when_no_config_file_present() {
+    fn mem_config_for_returns_none_when_no_config_file_present() {
         // Folder backend without a `.memstead/config.json` file. The
         // accessor must lenient — return None, not error.
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().to_path_buf();
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
         let engine = Engine::from_mounts(vec![(
-            folder_mount("specs", vault_dir),
-            Box::new(writer) as Box<dyn VaultBackend>,
+            folder_mount("specs", mem_dir),
+            Box::new(writer) as Box<dyn MemBackend>,
         )])
         .unwrap();
-        assert!(engine.vault_config_for("specs").is_none());
+        assert!(engine.mem_config_for("specs").is_none());
     }
 
     #[test]
-    fn vault_config_for_returns_some_when_config_file_present() {
-        // Drop a valid `.memstead/config.json` into the vault dir,
+    fn mem_config_for_returns_some_when_config_file_present() {
+        // Drop a valid `.memstead/config.json` into the mem dir,
         // build the engine, and assert the accessor surfaces a
-        // VaultConfig with the right shape (write_guidance entries
+        // MemConfig with the right shape (write_guidance entries
         // round-trip).
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().to_path_buf();
-        std::fs::create_dir_all(vault_dir.join(".memstead")).unwrap();
+        let mem_dir = tmp.path().to_path_buf();
+        std::fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
         let config_body = r#"{
             "format": 1,
             "schema": "default@1.0.0",
@@ -2312,18 +2312,18 @@ community:
                 "voice": "active"
             }
         }"#;
-        std::fs::write(vault_dir.join(".memstead").join("config.json"), config_body).unwrap();
+        std::fs::write(mem_dir.join(".memstead").join("config.json"), config_body).unwrap();
 
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
         let engine = Engine::from_mounts(vec![(
-            folder_mount("specs", vault_dir),
-            Box::new(writer) as Box<dyn VaultBackend>,
+            folder_mount("specs", mem_dir),
+            Box::new(writer) as Box<dyn MemBackend>,
         )])
         .unwrap();
 
         let cfg = engine
-            .vault_config_for("specs")
-            .expect("vault_config should load");
+            .mem_config_for("specs")
+            .expect("mem_config should load");
         assert_eq!(cfg.write_guidance.len(), 2);
         assert_eq!(
             cfg.write_guidance.get("tone").and_then(|v| v.as_str()),
@@ -2336,35 +2336,35 @@ community:
     }
 
     #[test]
-    fn vault_config_for_unknown_vault_returns_none() {
+    fn mem_config_for_unknown_mem_returns_none() {
         // Lenient accessor — unknown names get None, not Err.
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().to_path_buf();
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
         let engine = Engine::from_mounts(vec![(
-            folder_mount("specs", vault_dir),
-            Box::new(writer) as Box<dyn VaultBackend>,
+            folder_mount("specs", mem_dir),
+            Box::new(writer) as Box<dyn MemBackend>,
         )])
         .unwrap();
-        assert!(engine.vault_config_for("missing").is_none());
+        assert!(engine.mem_config_for("missing").is_none());
     }
 
     #[test]
-    fn vault_config_for_archive_mount_returns_none() {
-        // Archive backends carry vault_config = None in V1 (the
+    fn mem_config_for_archive_mount_returns_none() {
+        // Archive backends carry mem_config = None in V1 (the
         // read-from-storage path is deferred to a follow-up).
         let tmp = TempDir::new().unwrap();
         let archive_path = build_archive(tmp.path(), "ext", &[("a.md", b"a")]);
         let engine = Engine::from_mounts(vec![(
             archive_mount("ext", archive_path.clone()),
-            Box::new(ArchiveBackend::new(archive_path)) as Box<dyn VaultBackend>,
+            Box::new(ArchiveBackend::new(archive_path)) as Box<dyn MemBackend>,
         )])
         .unwrap();
-        assert!(engine.vault_config_for("ext").is_none());
+        assert!(engine.mem_config_for("ext").is_none());
     }
 
     #[test]
-    fn vault_configs_named_iterates_only_mounts_with_config() {
+    fn mem_configs_named_iterates_only_mounts_with_config() {
         // Two folder mounts; one has a config file, one doesn't.
         // The iterator yields exactly the configured one — verifies
         // the filter_map shape and that the name comes from the
@@ -2384,33 +2384,33 @@ community:
         let engine = Engine::from_mounts(vec![
             (
                 folder_mount("specs", with_config.clone()),
-                Box::new(FilesystemVaultWriter::new(with_config)) as Box<dyn VaultBackend>,
+                Box::new(FilesystemMemWriter::new(with_config)) as Box<dyn MemBackend>,
             ),
             (
                 folder_mount("memos", without_config.clone()),
-                Box::new(FilesystemVaultWriter::new(without_config)) as Box<dyn VaultBackend>,
+                Box::new(FilesystemMemWriter::new(without_config)) as Box<dyn MemBackend>,
             ),
         ])
         .unwrap();
 
         let yielded: Vec<(&str, usize)> = engine
-            .vault_configs_named()
+            .mem_configs_named()
             .map(|(name, cfg)| (name, cfg.write_guidance.len()))
             .collect();
         assert_eq!(yielded, vec![("specs", 1)]);
     }
 
     #[test]
-    fn schema_for_returns_some_for_known_vault_and_none_for_unknown() {
+    fn schema_for_returns_some_for_known_mem_and_none_for_unknown() {
         // Every mount registers a schema (resolved from its pin at
-        // boot). Lookup by vault name surfaces the same Arc that
+        // boot). Lookup by mem name surfaces the same Arc that
         // mutations resolve internally; unknown names return None.
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().to_path_buf();
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
         let engine = Engine::from_mounts(vec![(
-            folder_mount("specs", vault_dir),
-            Box::new(writer) as Box<dyn VaultBackend>,
+            folder_mount("specs", mem_dir),
+            Box::new(writer) as Box<dyn MemBackend>,
         )])
         .unwrap();
         assert!(engine.schema_for("specs").is_some());
@@ -2418,64 +2418,64 @@ community:
     }
 
     #[test]
-    fn gitdir_for_unknown_vault_returns_unknown_vault() {
+    fn gitdir_for_unknown_mem_returns_unknown_mem() {
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().to_path_buf();
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
         let engine = Engine::from_mounts(vec![(
-            folder_mount("specs", vault_dir),
-            Box::new(writer) as Box<dyn VaultBackend>,
+            folder_mount("specs", mem_dir),
+            Box::new(writer) as Box<dyn MemBackend>,
         )])
         .unwrap();
         let err = engine.gitdir_for("missing").unwrap_err();
-        assert!(matches!(err, EngineError::UnknownVault(v) if v == "missing"));
+        assert!(matches!(err, EngineError::UnknownMem(v) if v == "missing"));
     }
 
     #[test]
     fn gitdir_for_folder_mount_returns_no_gitdir_error() {
         // Folder mounts do not have a gitdir — pro's contract surfaces
-        // a vault-level error, not UnknownVault. Mirror that here.
+        // a mem-level error, not UnknownMem. Mirror that here.
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().to_path_buf();
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
         let engine = Engine::from_mounts(vec![(
-            folder_mount("specs", vault_dir),
-            Box::new(writer) as Box<dyn VaultBackend>,
+            folder_mount("specs", mem_dir),
+            Box::new(writer) as Box<dyn MemBackend>,
         )])
         .unwrap();
         let err = engine.gitdir_for("specs").unwrap_err();
         match err {
-            EngineError::Vault(msg) => assert!(msg.contains("no resolved gitdir")),
-            other => panic!("expected EngineError::Vault, got {other:?}"),
+            EngineError::Mem(msg) => assert!(msg.contains("no resolved gitdir")),
+            other => panic!("expected EngineError::Mem, got {other:?}"),
         }
     }
 
     #[test]
     fn worktree_for_folder_mount_returns_storage_path() {
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().to_path_buf();
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
         let engine = Engine::from_mounts(vec![(
-            folder_mount("specs", vault_dir.clone()),
-            Box::new(writer) as Box<dyn VaultBackend>,
+            folder_mount("specs", mem_dir.clone()),
+            Box::new(writer) as Box<dyn MemBackend>,
         )])
         .unwrap();
         let worktree = engine.worktree_for("specs").unwrap();
-        assert_eq!(worktree, vault_dir);
+        assert_eq!(worktree, mem_dir);
     }
 
     #[test]
-    fn worktree_for_unknown_vault_returns_unknown_vault() {
+    fn worktree_for_unknown_mem_returns_unknown_mem() {
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().to_path_buf();
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
         let engine = Engine::from_mounts(vec![(
-            folder_mount("specs", vault_dir),
-            Box::new(writer) as Box<dyn VaultBackend>,
+            folder_mount("specs", mem_dir),
+            Box::new(writer) as Box<dyn MemBackend>,
         )])
         .unwrap();
         let err = engine.worktree_for("missing").unwrap_err();
-        assert!(matches!(err, EngineError::UnknownVault(v) if v == "missing"));
+        assert!(matches!(err, EngineError::UnknownMem(v) if v == "missing"));
     }
 
     #[test]
@@ -2484,57 +2484,57 @@ community:
         let archive_path = build_archive(tmp.path(), "ext", &[("a.md", b"a")]);
         let engine = Engine::from_mounts(vec![(
             archive_mount("ext", archive_path.clone()),
-            Box::new(ArchiveBackend::new(archive_path)) as Box<dyn VaultBackend>,
+            Box::new(ArchiveBackend::new(archive_path)) as Box<dyn MemBackend>,
         )])
         .unwrap();
         let err = engine.worktree_for("ext").unwrap_err();
         match err {
-            EngineError::Vault(msg) => assert!(msg.contains("archive-backed")),
-            other => panic!("expected EngineError::Vault, got {other:?}"),
+            EngineError::Mem(msg) => assert!(msg.contains("archive-backed")),
+            other => panic!("expected EngineError::Mem, got {other:?}"),
         }
     }
 
     #[test]
-    fn vault_head_sha_for_folder_mount_is_none() {
+    fn mem_head_sha_for_folder_mount_is_none() {
         // Folder backend doesn't track a head; current_head() returns
-        // Ok(None) at construction; vault_head_sha returns Ok(None).
+        // Ok(None) at construction; mem_head_sha returns Ok(None).
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().to_path_buf();
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
         let engine = Engine::from_mounts(vec![(
-            folder_mount("specs", vault_dir),
-            Box::new(writer) as Box<dyn VaultBackend>,
+            folder_mount("specs", mem_dir),
+            Box::new(writer) as Box<dyn MemBackend>,
         )])
         .unwrap();
-        let head = engine.vault_head_sha("specs").unwrap();
+        let head = engine.mem_head_sha("specs").unwrap();
         assert_eq!(head, None);
     }
 
     #[test]
-    fn vault_head_sha_unknown_vault_returns_unknown_vault() {
+    fn mem_head_sha_unknown_mem_returns_unknown_mem() {
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().to_path_buf();
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
         let engine = Engine::from_mounts(vec![(
-            folder_mount("specs", vault_dir),
-            Box::new(writer) as Box<dyn VaultBackend>,
+            folder_mount("specs", mem_dir),
+            Box::new(writer) as Box<dyn MemBackend>,
         )])
         .unwrap();
-        let err = engine.vault_head_sha("missing").unwrap_err();
-        assert!(matches!(err, EngineError::UnknownVault(v) if v == "missing"));
+        let err = engine.mem_head_sha("missing").unwrap_err();
+        assert!(matches!(err, EngineError::UnknownMem(v) if v == "missing"));
     }
 
     #[test]
     fn capability_surfaces_per_mount() {
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().to_path_buf();
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
         let archive_path = build_archive(tmp.path(), "ext", &[("a.md", b"a")]);
 
         let engine = Engine::from_mounts(vec![
             (
-                folder_mount("writable", vault_dir),
-                Box::new(writer) as Box<dyn VaultBackend>,
+                folder_mount("writable", mem_dir),
+                Box::new(writer) as Box<dyn MemBackend>,
             ),
             (
                 archive_mount("read-only", archive_path.clone()),
@@ -2550,19 +2550,19 @@ community:
         );
         assert!(matches!(
             engine.capability("missing"),
-            Err(EngineError::UnknownVault(_))
+            Err(EngineError::UnknownMem(_))
         ));
     }
 
     #[test]
     fn read_provenance_routes_through_backend() {
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().to_path_buf();
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
 
         // Append a provenance record via the backend trait directly,
         // then read it back through the engine.
-        let backend_handle: &dyn VaultBackend = &writer;
+        let backend_handle: &dyn MemBackend = &writer;
         backend_handle
             .append_provenance(&Provenance::new(
                 std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000),
@@ -2575,8 +2575,8 @@ community:
             .unwrap();
 
         let engine = Engine::from_mounts(vec![(
-            folder_mount("specs", vault_dir),
-            Box::new(writer) as Box<dyn VaultBackend>,
+            folder_mount("specs", mem_dir),
+            Box::new(writer) as Box<dyn MemBackend>,
         )])
         .unwrap();
 
@@ -2591,14 +2591,14 @@ community:
     fn archive_mount_returns_sealed_indirectly_through_backend_layer() {
         // The engine doesn't yet expose mutation methods, but an
         // archive backend held on a Mount with ReadOnly capability is
-        // still a `&dyn VaultBackend` whose write methods return
+        // still a `&dyn MemBackend` whose write methods return
         // Sealed. This test locks the trait routing — when the engine
         // gains write methods in a later session, capability gating +
         // backend Sealed errors must agree.
         let tmp = TempDir::new().unwrap();
         let archive_path = build_archive(tmp.path(), "ext", &[("a.md", b"a")]);
         let backend = ArchiveBackend::new(archive_path);
-        match VaultBackend::write_entity(&backend, Path::new("x.md"), b"x") {
+        match MemBackend::write_entity(&backend, Path::new("x.md"), b"x") {
             Err(BackendError::Sealed) => {}
             other => panic!("expected Sealed, got {other:?}"),
         }
@@ -2614,11 +2614,11 @@ community:
     // graph-query path and the cache-invalidation hooks.
 
     fn build_demo_engine(tmp: &TempDir) -> Engine {
-        let vault_dir = tmp.path().to_path_buf();
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
-            folder_mount("specs", vault_dir),
-            Box::new(writer) as Box<dyn VaultBackend>,
+            folder_mount("specs", mem_dir),
+            Box::new(writer) as Box<dyn MemBackend>,
         )])
         .unwrap();
         let (actor, client) = cli_actor();
@@ -2671,7 +2671,7 @@ community:
         let stats = engine.stats();
         assert_eq!(stats.entity_count, 3);
         assert_eq!(stats.edge_count, 1);
-        assert_eq!(stats.vault_count, 1);
+        assert_eq!(stats.mem_count, 1);
         assert_eq!(stats.types_in_use, vec!["spec".to_string()]);
         assert_eq!(stats.edge_types.get("USES"), Some(&1));
     }
@@ -2686,11 +2686,11 @@ community:
     }
 
     /// #49: the orphan/community headlines can be attributed per pinned
-    /// schema. Single-vault here, so one bucket — but it proves the
-    /// attribution keys by `schema_of(vault)` and that the per-schema
+    /// schema. Single-mem here, so one bucket — but it proves the
+    /// attribution keys by `schema_of(mem)` and that the per-schema
     /// counts sum to the raw total (which a health surface keeps verbatim).
     #[test]
-    fn schema_breakdowns_attribute_to_vault_pin() {
+    fn schema_breakdowns_attribute_to_mem_pin() {
         let tmp = TempDir::new().unwrap();
         let engine = build_demo_engine(&tmp);
 
@@ -2701,15 +2701,15 @@ community:
             orphans.len(),
             "per-schema orphan counts must sum to the raw total"
         );
-        assert_eq!(orphans_by_schema.len(), 1, "one vault ⇒ one schema bucket");
+        assert_eq!(orphans_by_schema.len(), 1, "one mem ⇒ one schema bucket");
         let (schema, count) = orphans_by_schema.iter().next().unwrap();
-        assert!(!schema.is_empty(), "specs vault is pinned: {schema:?}");
+        assert!(!schema.is_empty(), "specs mem is pinned: {schema:?}");
         assert_eq!(*count, 1);
 
-        // communities_by_schema buckets the demo vault's clusters under the
+        // communities_by_schema buckets the demo mem's clusters under the
         // same pin; with one schema, its values sum to the global count.
-        let vaults: Vec<String> = engine.mounts().iter().map(|m| m.vault.clone()).collect();
-        let communities_by_schema = engine.communities_by_schema(&vaults);
+        let mems: Vec<String> = engine.mounts().iter().map(|m| m.mem.clone()).collect();
+        let communities_by_schema = engine.communities_by_schema(&mems);
         assert_eq!(communities_by_schema.len(), 1);
         assert_eq!(
             communities_by_schema.values().sum::<usize>(),
@@ -2720,11 +2720,11 @@ community:
     #[test]
     fn stubs_lists_unresolved_link_targets() {
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().to_path_buf();
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
-            folder_mount("specs", vault_dir),
-            Box::new(writer) as Box<dyn VaultBackend>,
+            folder_mount("specs", mem_dir),
+            Box::new(writer) as Box<dyn MemBackend>,
         )])
         .unwrap();
         let (actor, client) = cli_actor();
@@ -2850,20 +2850,20 @@ community:
     }
 
     #[test]
-    fn list_applies_schema_declared_filter_on_non_default_schema_vault() {
-        // A vault pinned to `planning` (non-default schema). The
+    fn list_applies_schema_declared_filter_on_non_default_schema_mem() {
+        // A mem pinned to `planning` (non-default schema). The
         // `decision` type declares `status` with `filterable: equality`.
         // Pre-fix, filter dispatch consulted only the built-in default
         // schema via `type_by_name`, missed `status`, silently bypassed
         // the filter, and emitted the misleading "unknown filter key"
         // warning. Post-fix, the filter is honored and no warning fires.
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().to_path_buf();
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
         let mount = Mount {
-            vault: "planning".to_string(),
+            mem: "planning".to_string(),
             schema: Some(memstead_schema::SchemaRef::new("planning", semver::Version::new(0, 1, 0))),
-            storage: MountStorage::Folder { path: vault_dir },
+            storage: MountStorage::Folder { path: mem_dir },
             capability: MountCapability::Write,
             lifecycle: MountLifecycle::Eager,
             cross_linkable: true,
@@ -2871,7 +2871,7 @@ community:
         };
         let mut engine = Engine::from_mounts(vec![(
             mount,
-            Box::new(writer) as Box<dyn VaultBackend>,
+            Box::new(writer) as Box<dyn MemBackend>,
         )])
         .unwrap();
         let (actor, client) = cli_actor();
@@ -2889,7 +2889,7 @@ community:
             metadata.insert("deciders".to_string(), "alice".to_string());
             metadata.insert("decided_on".to_string(), "2026-05-19".to_string());
             let args = crate::engine::CreateEntityArgs {
-                vault: "planning".to_string(),
+                mem: "planning".to_string(),
                 title: title.to_string(),
                 entity_type: "decision".to_string(),
                 sections: indexmap::IndexMap::from_iter([
@@ -2925,7 +2925,7 @@ community:
         assert_eq!(result.hits[0].title, "Skip Postgres");
         assert!(
             result.warnings.is_empty(),
-            "no warning should fire when the filter is declared by the vault's pinned schema: {:?}",
+            "no warning should fire when the filter is declared by the mem's pinned schema: {:?}",
             result.warnings
         );
     }

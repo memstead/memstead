@@ -13,7 +13,7 @@ when_to_use: |
   scope grows beyond a few dozen nodes.
 boundaries:
   - Not a node — a program contains nodes; nodes do the work.
-  - Not a goal — goals belong in a planning vault; the program names
+  - Not a goal — goals belong in a planning mem; the program names
     its purpose and exit_criteria inline.
   - Not a tool — tools are catalog entries the program declares as
     available; the program is the consumer, not the capability.

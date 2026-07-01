@@ -1,19 +1,19 @@
-#![cfg(feature = "vault-repo")]
-// `memstead vault init` is part of the vault-repo subcommand surface; the
+#![cfg(feature = "mem-repo")]
+// `memstead mem init` is part of the mem-repo subcommand surface; the
 // basis build does not ship it.
 
-//! Integration test for `memstead vault init`.
+//! Integration test for `memstead mem init`.
 //!
 //! The CLI calls the engine in-process via
-//! `memstead_engine::vault_management::create_vault`. An earlier design
+//! `memstead_engine::mem_management::create_mem`. An earlier design
 //! spawned `memstead-mcp` as a subprocess and the test mocked that
 //! subprocess via a stub shell script — confirming the JSON-RPC plumbing
 //! rather than the actual engine wiring.
 //!
-//! The test seeds a real `vault-repo/.git/` bare repo via
-//! `memstead_git_branch::test_support::init_real_vault_repo` and exercises
+//! The test seeds a real `mem-repo/.git/` bare repo via
+//! `memstead_git_branch::test_support::init_real_mem_repo` and exercises
 //! the full create path, asserting the on-disk post-state: the new
-//! vault's content branch is present in the gitdir, and the `.memstead`
+//! mem's content branch is present in the gitdir, and the `.memstead`
 //! mount manifest reflects the registration.
 
 #![cfg(unix)]
@@ -22,7 +22,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use assert_cmd::Command;
-use memstead_git_branch::test_support::init_real_vault_repo;
+use memstead_git_branch::test_support::init_real_mem_repo;
 use tempfile::TempDir;
 
 /// Build an `memstead` command primed with `MEMSTEAD_OPERATOR_MODE=1`.
@@ -38,8 +38,8 @@ fn memstead() -> Command {
 }
 
 /// Lay down a workspace that the unified engine can boot against:
-/// `.memstead/workspace.toml` plus a real bare `vault-repo/.git/` seeded
-/// via `init_real_vault_repo`. Returns the workspace root path.
+/// `.memstead/workspace.toml` plus a real bare `mem-repo/.git/` seeded
+/// via `init_real_mem_repo`. Returns the workspace root path.
 fn seed_workspace(tmp: &Path) -> PathBuf {
     let workspace = tmp.join("ws");
     fs::create_dir_all(&workspace).unwrap();
@@ -47,77 +47,77 @@ fn seed_workspace(tmp: &Path) -> PathBuf {
     fs::create_dir_all(&memstead_dir).unwrap();
     fs::write(
         memstead_dir.join("workspace.toml"),
-        "format = \"memstead-git-branch-1\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+        "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
     )
     .unwrap();
     // Real bare repo with `main` + `__MEMSTEAD` refs — the engine's boot
     // path probes for these.
-    init_real_vault_repo(&workspace, &[]);
+    init_real_mem_repo(&workspace, &[]);
     workspace
 }
 
 /// Inspect the workspace's `mounts.json` (post-rebuild persistence
 /// adapter shape: `.memstead/state/mounts.json`) and assert the named
-/// vault is registered.
-fn assert_vault_in_mounts(workspace: &Path, vault_name: &str) {
+/// mem is registered.
+fn assert_mem_in_mounts(workspace: &Path, mem_name: &str) {
     let mounts_path = workspace.join(".memstead").join("state").join("mounts.json");
     let raw = fs::read_to_string(&mounts_path).unwrap_or_else(|e| {
         panic!(
-            "mounts.json must exist at {} after vault init: {e}",
+            "mounts.json must exist at {} after mem init: {e}",
             mounts_path.display(),
         )
     });
     assert!(
-        raw.contains(&format!("\"{vault_name}\"")),
-        "mounts.json must list `{vault_name}` post-init; got:\n{raw}",
+        raw.contains(&format!("\"{mem_name}\"")),
+        "mounts.json must list `{mem_name}` post-init; got:\n{raw}",
     );
 }
 
-/// `memstead vault init <name>` against a real vault-repo workspace
-/// registers the vault via the in-process engine call and prints a
+/// `memstead mem init <name>` against a real mem-repo workspace
+/// registers the mem via the in-process engine call and prints a
 /// markdown success block (no longer the stub's pre-rendered text
 /// channel).
 #[test]
-fn memstead_vault_init_creates_vault_via_in_process_engine() {
+fn memstead_mem_init_creates_mem_via_in_process_engine() {
     let tmp = TempDir::new().unwrap();
     let workspace = seed_workspace(tmp.path());
 
     let mut cmd = memstead();
     cmd.current_dir(&workspace)
-        .args(["vault", "init", "test-vault", "--no-gitignore"]);
+        .args(["mem", "init", "test-mem", "--no-gitignore"]);
     let output = cmd.assert().success();
     let stdout = String::from_utf8(output.get_output().stdout.clone()).unwrap();
     assert!(
-        stdout.contains("test-vault"),
-        "stdout must name the new vault; got:\n{stdout}",
+        stdout.contains("test-mem"),
+        "stdout must name the new mem; got:\n{stdout}",
     );
     assert!(
-        stdout.contains("Vault `test-vault` created") || stdout.contains("Vault test-vault"),
-        "stdout must render a vault-created success block; got:\n{stdout}",
+        stdout.contains("Mem `test-mem` created") || stdout.contains("Mem test-mem"),
+        "stdout must render a mem-created success block; got:\n{stdout}",
     );
-    assert_vault_in_mounts(&workspace, "test-vault");
+    assert_mem_in_mounts(&workspace, "test-mem");
 }
 
-/// Hierarchical paths are first-class. `memstead vault init team/sub-vault`
-/// registers the vault under the FULL path — `mounts.json` carries
-/// `"vault": "team/sub-vault"`, not the leaf. The legacy `--org-path` flag
-/// is retired; the slashed path is the canonical hierarchical-vault input
+/// Hierarchical paths are first-class. `memstead mem init team/sub-mem`
+/// registers the mem under the FULL path — `mounts.json` carries
+/// `"mem": "team/sub-mem"`, not the leaf. The legacy `--org-path` flag
+/// is retired; the slashed path is the canonical hierarchical-mem input
 /// shape.
 #[test]
-fn memstead_vault_init_hierarchical_name_lands_full_path() {
+fn memstead_mem_init_hierarchical_name_lands_full_path() {
     let tmp = TempDir::new().unwrap();
     let workspace = seed_workspace(tmp.path());
 
     let mut cmd = memstead();
     cmd.current_dir(&workspace)
-        .args(["vault", "init", "demo/engine", "--no-gitignore"]);
+        .args(["mem", "init", "demo/engine", "--no-gitignore"]);
     cmd.assert().success();
 
     let mounts_path = workspace.join(".memstead").join("state").join("mounts.json");
     let raw = fs::read_to_string(&mounts_path).unwrap();
     assert!(
         raw.contains("\"demo/engine\""),
-        "mounts.json must carry the full hierarchical name as the vault \
+        "mounts.json must carry the full hierarchical name as the mem \
          identifier (not the bare leaf); got:\n{raw}",
     );
     assert!(
@@ -131,13 +131,13 @@ fn memstead_vault_init_hierarchical_name_lands_full_path() {
 /// scripts that still pass it fail loudly rather than silently dropping
 /// the path).
 #[test]
-fn memstead_vault_init_rejects_legacy_org_path_flag() {
+fn memstead_mem_init_rejects_legacy_org_path_flag() {
     let tmp = TempDir::new().unwrap();
     let workspace = seed_workspace(tmp.path());
 
     let mut cmd = memstead();
     cmd.current_dir(&workspace).args([
-        "vault",
+        "mem",
         "init",
         "engine",
         "--org-path",
@@ -153,20 +153,20 @@ fn memstead_vault_init_rejects_legacy_org_path_flag() {
     );
 }
 
-/// `memstead vault init <name> --json` emits a structured envelope
+/// `memstead mem init <name> --json` emits a structured envelope
 /// (matching what an agent reading `--json` expects) rather than the
 /// earlier MCP subprocess's text-channel markdown.
 #[test]
-fn memstead_vault_init_json_mode_emits_structured_envelope() {
+fn memstead_mem_init_json_mode_emits_structured_envelope() {
     let tmp = TempDir::new().unwrap();
     let workspace = seed_workspace(tmp.path());
 
     let mut cmd = memstead();
     cmd.current_dir(&workspace).args([
         "--json",
-        "vault",
+        "mem",
         "init",
-        "json-vault",
+        "json-mem",
         "--no-gitignore",
     ]);
     let output = cmd.assert().success();
@@ -176,7 +176,7 @@ fn memstead_vault_init_json_mode_emits_structured_envelope() {
     });
     assert_eq!(
         parsed.get("name").and_then(|v| v.as_str()),
-        Some("json-vault"),
+        Some("json-mem"),
         "--json envelope must carry `name`",
     );
     assert!(
@@ -200,7 +200,7 @@ fn memstead_vault_init_json_mode_emits_structured_envelope() {
 /// step entirely — so it never exercised the leak. Here an outer `.git/`
 /// (the workspace's grandparent dir) makes the step fire.
 #[test]
-fn memstead_vault_init_json_stdout_is_single_document_with_gitignore_step() {
+fn memstead_mem_init_json_stdout_is_single_document_with_gitignore_step() {
     let tmp = TempDir::new().unwrap();
     // `seed_workspace` lays the workspace at `<tmp>/ws`; the gitignore
     // walk starts at its parent (`<tmp>`), so an outer `.git/` here makes
@@ -210,7 +210,7 @@ fn memstead_vault_init_json_stdout_is_single_document_with_gitignore_step() {
 
     let mut cmd = memstead();
     cmd.current_dir(&workspace)
-        .args(["--json", "vault", "init", "json-gi-vault"]);
+        .args(["--json", "mem", "init", "json-gi-mem"]);
     let output = cmd.assert().success().get_output().clone();
 
     let stdout = String::from_utf8(output.stdout.clone()).unwrap();
@@ -219,7 +219,7 @@ fn memstead_vault_init_json_stdout_is_single_document_with_gitignore_step() {
     });
     assert_eq!(
         parsed.get("name").and_then(|v| v.as_str()),
-        Some("json-gi-vault"),
+        Some("json-gi-mem"),
         "--json envelope must carry `name`, got: {parsed}",
     );
 
@@ -233,109 +233,109 @@ fn memstead_vault_init_json_stdout_is_single_document_with_gitignore_step() {
 
 // ---------------------------------------------------------------------------
 // Verb-split lifecycle tests. The CLI
-// gains `memstead vault unregister` (router-only, storage preserved) and
-// repoints `memstead vault delete` to the storage-destruction shape (the
+// gains `memstead mem unregister` (router-only, storage preserved) and
+// repoints `memstead mem delete` to the storage-destruction shape (the
 // `--delete-files` flag is gone). The four-case matrix below pins
-// the per-verb post-state plus the `VAULT_REFERENCED_BY_POLICY`
-// gating: unregister is admitted regardless of cross-vault grants
+// the per-verb post-state plus the `MEM_REFERENCED_BY_POLICY`
+// gating: unregister is admitted regardless of cross-mem grants
 // (the storage they rely on survives), delete refuses when grants
 // point at the target.
 // ---------------------------------------------------------------------------
 
-/// Stamp a `cross_vault_links` block onto an already-seeded
+/// Stamp a `cross_mem_links` block onto an already-seeded
 /// workspace's `.memstead/workspace.toml`. The block grants `<from>`
-/// permission to author cross-vault links into `<to>`, exercising
-/// the engine-side `VAULT_REFERENCED_BY_POLICY` check.
+/// permission to author cross-mem links into `<to>`, exercising
+/// the engine-side `MEM_REFERENCED_BY_POLICY` check.
 fn append_cross_link_grant(workspace: &Path, from: &str, to: &str) {
     let toml_path = workspace.join(".memstead").join("workspace.toml");
     let mut body = fs::read_to_string(&toml_path).unwrap();
     body.push_str(&format!(
-        "\n[cross_vault_links]\n{from} = [\"{to}\"]\n",
+        "\n[cross_mem_links]\n{from} = [\"{to}\"]\n",
     ));
     fs::write(&toml_path, body).unwrap();
 }
 
-/// Assert the `__MEMSTEAD` ref carries a `vaults/<name>/config.json` blob
-/// (residue check). The bare `vault-repo/.git/refs/heads/<name>`
+/// Assert the `__MEMSTEAD` ref carries a `mems/<name>/config.json` blob
+/// (residue check). The bare `mem-repo/.git/refs/heads/<name>`
 /// branch existence is the other half of the storage-preservation
 /// signal but the config blob is the simpler one to introspect from
 /// the test (gix-free).
-fn assert_branch_present(workspace: &Path, vault_name: &str) {
+fn assert_branch_present(workspace: &Path, mem_name: &str) {
     let branch_ref = workspace
-        .join("vault-repo")
+        .join("mem-repo")
         .join(".git")
         .join("refs")
         .join("heads")
-        .join(vault_name);
+        .join(mem_name);
     let packed_refs = workspace
-        .join("vault-repo")
+        .join("mem-repo")
         .join(".git")
         .join("packed-refs");
     let loose_present = branch_ref.exists();
     let packed_present = packed_refs
         .exists()
         .then(|| fs::read_to_string(&packed_refs).unwrap_or_default())
-        .map(|s| s.contains(&format!("refs/heads/{vault_name}")))
+        .map(|s| s.contains(&format!("refs/heads/{mem_name}")))
         .unwrap_or(false);
     assert!(
         loose_present || packed_present,
-        "branch ref `refs/heads/{vault_name}` must be present after unregister; \
+        "branch ref `refs/heads/{mem_name}` must be present after unregister; \
          loose={loose_present} packed={packed_present}",
     );
 }
 
-fn assert_branch_absent(workspace: &Path, vault_name: &str) {
+fn assert_branch_absent(workspace: &Path, mem_name: &str) {
     let branch_ref = workspace
-        .join("vault-repo")
+        .join("mem-repo")
         .join(".git")
         .join("refs")
         .join("heads")
-        .join(vault_name);
+        .join(mem_name);
     let packed_refs = workspace
-        .join("vault-repo")
+        .join("mem-repo")
         .join(".git")
         .join("packed-refs");
     let loose_present = branch_ref.exists();
     let packed_present = packed_refs
         .exists()
         .then(|| fs::read_to_string(&packed_refs).unwrap_or_default())
-        .map(|s| s.contains(&format!("refs/heads/{vault_name}")))
+        .map(|s| s.contains(&format!("refs/heads/{mem_name}")))
         .unwrap_or(false);
     assert!(
         !loose_present && !packed_present,
-        "branch ref `refs/heads/{vault_name}` must be pruned after delete; \
+        "branch ref `refs/heads/{mem_name}` must be pruned after delete; \
          loose={loose_present} packed={packed_present}",
     );
 }
 
-fn assert_vault_not_in_mounts(workspace: &Path, vault_name: &str) {
+fn assert_mem_not_in_mounts(workspace: &Path, mem_name: &str) {
     let mounts_path = workspace.join(".memstead").join("state").join("mounts.json");
     let raw = fs::read_to_string(&mounts_path).unwrap();
     assert!(
-        !raw.contains(&format!("\"{vault_name}\"")),
-        "mounts.json must no longer list `{vault_name}`; got:\n{raw}",
+        !raw.contains(&format!("\"{mem_name}\"")),
+        "mounts.json must no longer list `{mem_name}`; got:\n{raw}",
     );
 }
 
-/// `memstead vault unregister <name>` against a grant-free
-/// vault unregisters from the router and **preserves storage**.
+/// `memstead mem unregister <name>` against a grant-free
+/// mem unregisters from the router and **preserves storage**.
 /// Storage preservation is the verb's defining signal versus
 /// `delete`.
 #[test]
-fn memstead_vault_unregister_preserves_storage() {
+fn memstead_mem_unregister_preserves_storage() {
     let tmp = TempDir::new().unwrap();
     let workspace = seed_workspace(tmp.path());
 
     memstead()
         .current_dir(&workspace)
-        .args(["vault", "init", "archive-target", "--no-gitignore"])
+        .args(["mem", "init", "archive-target", "--no-gitignore"])
         .assert()
         .success();
-    assert_vault_in_mounts(&workspace, "archive-target");
+    assert_mem_in_mounts(&workspace, "archive-target");
 
     let output = memstead()
         .current_dir(&workspace)
-        .args(["vault", "unregister", "archive-target"])
+        .args(["mem", "unregister", "archive-target"])
         .assert()
         .success();
     let stdout = String::from_utf8(output.get_output().stdout.clone()).unwrap();
@@ -344,30 +344,30 @@ fn memstead_vault_unregister_preserves_storage() {
         "stdout must render the unregister verb in its heading; got:\n{stdout}",
     );
 
-    assert_vault_not_in_mounts(&workspace, "archive-target");
+    assert_mem_not_in_mounts(&workspace, "archive-target");
     // Storage survives: the content branch is still on disk for an
     // archive workflow / future re-init.
     assert_branch_present(&workspace, "archive-target");
 }
 
-/// `memstead vault delete <name>` against a grant-free vault
+/// `memstead mem delete <name>` against a grant-free mem
 /// unregisters AND prunes the content branch. The previous
 /// `--delete-files` flag is gone — `delete` is the verb that
 /// destroys.
 #[test]
-fn memstead_vault_delete_prunes_storage() {
+fn memstead_mem_delete_prunes_storage() {
     let tmp = TempDir::new().unwrap();
     let workspace = seed_workspace(tmp.path());
 
     memstead()
         .current_dir(&workspace)
-        .args(["vault", "init", "scratch", "--no-gitignore"])
+        .args(["mem", "init", "scratch", "--no-gitignore"])
         .assert()
         .success();
 
     let output = memstead()
         .current_dir(&workspace)
-        .args(["vault", "delete", "scratch"])
+        .args(["mem", "delete", "scratch"])
         .assert()
         .success();
     let stdout = String::from_utf8(output.get_output().stdout.clone()).unwrap();
@@ -376,102 +376,102 @@ fn memstead_vault_delete_prunes_storage() {
         "stdout must render the delete verb in its heading; got:\n{stdout}",
     );
 
-    assert_vault_not_in_mounts(&workspace, "scratch");
+    assert_mem_not_in_mounts(&workspace, "scratch");
     // Storage is gone — the branch ref is pruned.
     assert_branch_absent(&workspace, "scratch");
 }
 
-/// `memstead vault unregister <name>` succeeds even when
-/// another vault has a `cross_vault_links` grant pointing at the
+/// `memstead mem unregister <name>` succeeds even when
+/// another mem has a `cross_mem_links` grant pointing at the
 /// target. Storage survives so the grant remains valid against it;
 /// the policy check is gated on `delete_files: true` and does NOT
 /// fire for router-only unregister.
 #[test]
-fn memstead_vault_unregister_is_admitted_under_cross_link_grant() {
+fn memstead_mem_unregister_is_admitted_under_cross_link_grant() {
     let tmp = TempDir::new().unwrap();
     let workspace = seed_workspace(tmp.path());
 
     memstead()
         .current_dir(&workspace)
-        .args(["vault", "init", "target", "--no-gitignore"])
+        .args(["mem", "init", "target", "--no-gitignore"])
         .assert()
         .success();
     memstead()
         .current_dir(&workspace)
-        .args(["vault", "init", "referrer", "--no-gitignore"])
+        .args(["mem", "init", "referrer", "--no-gitignore"])
         .assert()
         .success();
     append_cross_link_grant(&workspace, "referrer", "target");
 
     memstead()
         .current_dir(&workspace)
-        .args(["vault", "unregister", "target"])
+        .args(["mem", "unregister", "target"])
         .assert()
         .success();
-    assert_vault_not_in_mounts(&workspace, "target");
+    assert_mem_not_in_mounts(&workspace, "target");
     assert_branch_present(&workspace, "target");
 }
 
-/// `memstead vault delete <name>` against a vault with cross-
-/// vault grants pointing at it refuses with
-/// `VAULT_REFERENCED_BY_POLICY`. The operator must revoke the grant
+/// `memstead mem delete <name>` against a mem with cross-
+/// mem grants pointing at it refuses with
+/// `MEM_REFERENCED_BY_POLICY`. The operator must revoke the grant
 /// first; this hard stop fires regardless of operator-mode (the CLI
 /// is operator-mode by construction, so the test pins that the
 /// safeguard survives the operator-mode bypass).
 #[test]
-fn memstead_vault_delete_refuses_under_cross_link_grant() {
+fn memstead_mem_delete_refuses_under_cross_link_grant() {
     let tmp = TempDir::new().unwrap();
     let workspace = seed_workspace(tmp.path());
 
     memstead()
         .current_dir(&workspace)
-        .args(["vault", "init", "target", "--no-gitignore"])
+        .args(["mem", "init", "target", "--no-gitignore"])
         .assert()
         .success();
     memstead()
         .current_dir(&workspace)
-        .args(["vault", "init", "referrer", "--no-gitignore"])
+        .args(["mem", "init", "referrer", "--no-gitignore"])
         .assert()
         .success();
     append_cross_link_grant(&workspace, "referrer", "target");
 
     let assertion = memstead()
         .current_dir(&workspace)
-        .args(["vault", "delete", "target"])
+        .args(["mem", "delete", "target"])
         .assert()
         .failure();
     let stderr = String::from_utf8(assertion.get_output().stderr.clone()).unwrap();
     assert!(
-        stderr.contains("VAULT_REFERENCED_BY_POLICY"),
-        "policy refusal must carry VAULT_REFERENCED_BY_POLICY; got stderr:\n{stderr}",
+        stderr.contains("MEM_REFERENCED_BY_POLICY"),
+        "policy refusal must carry MEM_REFERENCED_BY_POLICY; got stderr:\n{stderr}",
     );
     assert!(
         stderr.contains("referrer"),
-        "policy refusal must name the referring vault; got stderr:\n{stderr}",
+        "policy refusal must name the referring mem; got stderr:\n{stderr}",
     );
     // The target survives the refused delete.
-    assert_vault_in_mounts(&workspace, "target");
+    assert_mem_in_mounts(&workspace, "target");
     assert_branch_present(&workspace, "target");
 }
 
-/// The previous `memstead vault delete --delete-files` flag is
+/// The previous `memstead mem delete --delete-files` flag is
 /// gone. Invoking it must surface a clap parse error (not silently
 /// accept the flag and proceed). The presence of `unrecognized` or
 /// `unexpected` in stderr is the canonical clap message.
 #[test]
-fn memstead_vault_delete_rejects_legacy_delete_files_flag() {
+fn memstead_mem_delete_rejects_legacy_delete_files_flag() {
     let tmp = TempDir::new().unwrap();
     let workspace = seed_workspace(tmp.path());
 
     memstead()
         .current_dir(&workspace)
-        .args(["vault", "init", "scratch", "--no-gitignore"])
+        .args(["mem", "init", "scratch", "--no-gitignore"])
         .assert()
         .success();
 
     let assertion = memstead()
         .current_dir(&workspace)
-        .args(["vault", "delete", "scratch", "--delete-files"])
+        .args(["mem", "delete", "scratch", "--delete-files"])
         .assert()
         .failure();
     let stderr = String::from_utf8(assertion.get_output().stderr.clone()).unwrap();
@@ -484,13 +484,13 @@ fn memstead_vault_delete_rejects_legacy_delete_files_flag() {
 
 // ---------------------------------------------------------------------------
 // Storage residue
-// detection at `vault init`, plus tombstone-aware reattach when the residue
-// originates from a deliberate `vault unregister`. These tests
-// exercise the CLI end-to-end against a real bare vault-repo so
+// detection at `mem init`, plus tombstone-aware reattach when the residue
+// originates from a deliberate `mem unregister`. These tests
+// exercise the CLI end-to-end against a real bare mem-repo so
 // the wire shape (engine call → CLI render) is pinned.
 // ---------------------------------------------------------------------------
 
-/// `memstead vault unregister` followed by `memstead vault init
+/// `memstead mem unregister` followed by `memstead mem init
 /// <same-name>` in a fresh CLI process reattaches the preserved
 /// storage. The reattach path emits no new seed commit — pinned via
 /// the `--json` envelope's empty `seed_commit_sha`. Guards against
@@ -499,14 +499,14 @@ fn memstead_vault_delete_rejects_legacy_delete_files_flag() {
 /// `unregistered_at` tombstone on the config blob; the re-init
 /// reads it and routes to the `Reattach` recovery action).
 #[test]
-fn memstead_vault_init_reattaches_after_unregister() {
+fn memstead_mem_init_reattaches_after_unregister() {
     let tmp = TempDir::new().unwrap();
     let workspace = seed_workspace(tmp.path());
 
     // Initial create.
     let initial = memstead()
         .current_dir(&workspace)
-        .args(["--json", "vault", "init", "preserved", "--no-gitignore"])
+        .args(["--json", "mem", "init", "preserved", "--no-gitignore"])
         .assert()
         .success();
     let initial_stdout =
@@ -526,10 +526,10 @@ fn memstead_vault_init_reattaches_after_unregister() {
     // written.
     memstead()
         .current_dir(&workspace)
-        .args(["vault", "unregister", "preserved"])
+        .args(["mem", "unregister", "preserved"])
         .assert()
         .success();
-    assert_vault_not_in_mounts(&workspace, "preserved");
+    assert_mem_not_in_mounts(&workspace, "preserved");
     assert_branch_present(&workspace, "preserved");
 
     // Re-init in a fresh CLI process. Engine boots from the
@@ -541,7 +541,7 @@ fn memstead_vault_init_reattaches_after_unregister() {
     // history is preserved.
     let reattach = memstead()
         .current_dir(&workspace)
-        .args(["--json", "vault", "init", "preserved", "--no-gitignore"])
+        .args(["--json", "mem", "init", "preserved", "--no-gitignore"])
         .assert()
         .success();
     let reattach_stdout =
@@ -556,7 +556,7 @@ fn memstead_vault_init_reattaches_after_unregister() {
         "reattach must skip the seed commit — empty `seed_commit_sha` is the \
          contract signal that the existing branch was adopted; got {reattach_seed:?}",
     );
-    // The reattach branch surfaces a `VAULT_REATTACHED_AFTER_UNREGISTER`
+    // The reattach branch surfaces a `MEM_REATTACHED_AFTER_UNREGISTER`
     // warning through the response envelope's `warnings` array. An
     // agent that didn't internalise the seed-SHA-as-signal convention
     // now has a typed-code path to detect the reattach.
@@ -565,17 +565,17 @@ fn memstead_vault_init_reattaches_after_unregister() {
         .expect("reattach response carries a `warnings` array");
     let reattach_warning = warnings
         .iter()
-        .find(|w| w.get("code").and_then(|c| c.as_str()) == Some("VAULT_REATTACHED_AFTER_UNREGISTER"))
-        .expect("VAULT_REATTACHED_AFTER_UNREGISTER must appear in the warnings array");
+        .find(|w| w.get("code").and_then(|c| c.as_str()) == Some("MEM_REATTACHED_AFTER_UNREGISTER"))
+        .expect("MEM_REATTACHED_AFTER_UNREGISTER must appear in the warnings array");
     assert!(
         reattach_warning
             .get("message")
             .and_then(|m| m.as_str())
             .is_some_and(|s| !s.is_empty()),
-        "VAULT_REATTACHED_AFTER_UNREGISTER must carry a human-readable message"
+        "MEM_REATTACHED_AFTER_UNREGISTER must carry a human-readable message"
     );
-    // Mount manifest carries the vault again.
-    assert_vault_in_mounts(&workspace, "preserved");
+    // Mount manifest carries the mem again.
+    assert_mem_in_mounts(&workspace, "preserved");
 }
 
 /// clap mutex group enforces that at most one recovery
@@ -584,14 +584,14 @@ fn memstead_vault_init_reattaches_after_unregister() {
 /// even reached. The error mentions the conflicting flag so the
 /// operator knows which to drop.
 #[test]
-fn memstead_vault_init_rejects_multiple_recovery_flags() {
+fn memstead_mem_init_rejects_multiple_recovery_flags() {
     let tmp = TempDir::new().unwrap();
     let workspace = seed_workspace(tmp.path());
 
     let assertion = memstead()
         .current_dir(&workspace)
         .args([
-            "vault",
+            "mem",
             "init",
             "scratch",
             "--no-gitignore",
@@ -618,34 +618,34 @@ fn memstead_vault_init_rejects_multiple_recovery_flags() {
 /// residue still creates cleanly (the flag is a no-op when there's
 /// nothing to reattach to).
 #[test]
-fn memstead_vault_init_accepts_explicit_reattach_flag() {
+fn memstead_mem_init_accepts_explicit_reattach_flag() {
     let tmp = TempDir::new().unwrap();
     let workspace = seed_workspace(tmp.path());
 
     memstead()
         .current_dir(&workspace)
-        .args(["vault", "init", "fresh", "--no-gitignore", "--reattach"])
+        .args(["mem", "init", "fresh", "--no-gitignore", "--reattach"])
         .assert()
         .success();
-    assert_vault_in_mounts(&workspace, "fresh");
+    assert_mem_in_mounts(&workspace, "fresh");
     assert_branch_present(&workspace, "fresh");
 }
 
 /// `--force-overwrite` against residue prunes the existing
 /// branch + `__MEMSTEAD` config blob and proceeds with a fresh create.
 /// The post-state signal is a NEW `seed_commit_sha` distinct from
-/// the pre-overwrite vault's seed (proves the branch was recreated,
+/// the pre-overwrite mem's seed (proves the branch was recreated,
 /// not adopted). The prior session's entities are gone by design —
 /// `force-overwrite` is the explicit destructive recovery path.
 #[test]
-fn memstead_vault_init_force_overwrite_prunes_and_recreates() {
+fn memstead_mem_init_force_overwrite_prunes_and_recreates() {
     let tmp = TempDir::new().unwrap();
     let workspace = seed_workspace(tmp.path());
 
     // Initial create — capture the seed sha.
     let initial = memstead()
         .current_dir(&workspace)
-        .args(["--json", "vault", "init", "scratch", "--no-gitignore"])
+        .args(["--json", "mem", "init", "scratch", "--no-gitignore"])
         .assert()
         .success();
     let initial_envelope: serde_json::Value = serde_json::from_str(
@@ -661,7 +661,7 @@ fn memstead_vault_init_force_overwrite_prunes_and_recreates() {
     // Unregister leaves residue (and a tombstone).
     memstead()
         .current_dir(&workspace)
-        .args(["vault", "unregister", "scratch"])
+        .args(["mem", "unregister", "scratch"])
         .assert()
         .success();
     assert_branch_present(&workspace, "scratch");
@@ -669,7 +669,7 @@ fn memstead_vault_init_force_overwrite_prunes_and_recreates() {
     // Re-init with --force-overwrite — prunes the existing branch
     // and produces a fresh seed commit. The contract signal is a
     // non-empty `seed_commit_sha` (the reattach path returns empty);
-    // assert that, plus the mount manifest shows the vault again.
+    // assert that, plus the mount manifest shows the mem again.
     //
     // Note: the new seed SHA can be byte-identical to the prior one
     // — both seed commits have the same content (empty tree), the
@@ -684,7 +684,7 @@ fn memstead_vault_init_force_overwrite_prunes_and_recreates() {
         .current_dir(&workspace)
         .args([
             "--json",
-            "vault",
+            "mem",
             "init",
             "scratch",
             "--no-gitignore",
@@ -710,33 +710,33 @@ fn memstead_vault_init_force_overwrite_prunes_and_recreates() {
     // capture pattern that the deterministic-commit comment above
     // explains.
     let _ = initial_seed;
-    assert_vault_in_mounts(&workspace, "scratch");
+    assert_mem_in_mounts(&workspace, "scratch");
 }
 
 /// `--hard-cleanup-first` against residue refuses with the
-/// `VAULT_STORAGE_RESIDUE_DETECTED` code, instructing the operator
-/// to run `memstead vault delete` first. Hard barrier against
+/// `MEM_STORAGE_RESIDUE_DETECTED` code, instructing the operator
+/// to run `memstead mem delete` first. Hard barrier against
 /// auto-recovery even when an explicit flag is passed.
 #[test]
-fn memstead_vault_init_hard_cleanup_first_refuses_against_residue() {
+fn memstead_mem_init_hard_cleanup_first_refuses_against_residue() {
     let tmp = TempDir::new().unwrap();
     let workspace = seed_workspace(tmp.path());
 
     memstead()
         .current_dir(&workspace)
-        .args(["vault", "init", "scratch", "--no-gitignore"])
+        .args(["mem", "init", "scratch", "--no-gitignore"])
         .assert()
         .success();
     memstead()
         .current_dir(&workspace)
-        .args(["vault", "unregister", "scratch"])
+        .args(["mem", "unregister", "scratch"])
         .assert()
         .success();
 
     let assertion = memstead()
         .current_dir(&workspace)
         .args([
-            "vault",
+            "mem",
             "init",
             "scratch",
             "--no-gitignore",
@@ -746,8 +746,8 @@ fn memstead_vault_init_hard_cleanup_first_refuses_against_residue() {
         .failure();
     let stderr = String::from_utf8(assertion.get_output().stderr.clone()).unwrap();
     assert!(
-        stderr.contains("VAULT_STORAGE_RESIDUE_DETECTED"),
-        "hard-cleanup-first must surface VAULT_STORAGE_RESIDUE_DETECTED; \
+        stderr.contains("MEM_STORAGE_RESIDUE_DETECTED"),
+        "hard-cleanup-first must surface MEM_STORAGE_RESIDUE_DETECTED; \
          got stderr:\n{stderr}",
     );
     // The residue survives — the refusal is exactly that.
@@ -761,21 +761,21 @@ fn memstead_vault_init_hard_cleanup_first_refuses_against_residue() {
 /// pins the isolation so a future refactor can't drift back to a
 /// leaf-only match.
 #[test]
-fn memstead_vault_init_residue_isolation_is_path_aware() {
+fn memstead_mem_init_residue_isolation_is_path_aware() {
     let tmp = TempDir::new().unwrap();
     let workspace = seed_workspace(tmp.path());
 
     // Hierarchical paths are first-class. The slashed-path argument flows
-    // verbatim through to the engine as the vault name; `--org-path` is
+    // verbatim through to the engine as the mem name; `--org-path` is
     // retired. Seed residue at `team-a/shared`.
     memstead()
         .current_dir(&workspace)
-        .args(["vault", "init", "team-a/shared", "--no-gitignore"])
+        .args(["mem", "init", "team-a/shared", "--no-gitignore"])
         .assert()
         .success();
     memstead()
         .current_dir(&workspace)
-        .args(["vault", "unregister", "team-a/shared"])
+        .args(["mem", "unregister", "team-a/shared"])
         .assert()
         .success();
     assert_branch_present(&workspace, "team-a/shared");
@@ -785,7 +785,7 @@ fn memstead_vault_init_residue_isolation_is_path_aware() {
     // a refusal or a reattach here.
     let output = memstead()
         .current_dir(&workspace)
-        .args(["--json", "vault", "init", "team-b/shared", "--no-gitignore"])
+        .args(["--json", "mem", "init", "team-b/shared", "--no-gitignore"])
         .assert()
         .success();
     let envelope: serde_json::Value = serde_json::from_str(
@@ -821,7 +821,7 @@ fn memstead_no_env() -> Command {
     cmd
 }
 
-/// Seed a workspace with `[[vault_management.create]]` rules for
+/// Seed a workspace with `[[mem_management.create]]` rules for
 /// `test` and `other` only — the canonical allowlist-gate fixture.
 fn seed_workspace_with_create_allowlist(tmp: &Path) -> PathBuf {
     let workspace = seed_workspace(tmp);
@@ -831,10 +831,10 @@ fn seed_workspace_with_create_allowlist(tmp: &Path) -> PathBuf {
         &toml_path,
         format!(
             "{existing}\n\
-             [[vault_management.create]]\n\
+             [[mem_management.create]]\n\
              pattern = \"test\"\n\
              schemas = [\"default@1.0.0\"]\n\n\
-             [[vault_management.create]]\n\
+             [[mem_management.create]]\n\
              pattern = \"other\"\n\
              schemas = [\"default@1.0.0\"]\n",
         ),
@@ -843,16 +843,16 @@ fn seed_workspace_with_create_allowlist(tmp: &Path) -> PathBuf {
     workspace
 }
 
-/// F6 — `memstead vault init forbidden` against an allow-create list of
-/// `[test, other]` refuses with `VAULT_PATH_NOT_ALLOWED`.
+/// F6 — `memstead mem init forbidden` against an allow-create list of
+/// `[test, other]` refuses with `MEM_PATH_NOT_ALLOWED`.
 #[test]
-fn vault_init_refuses_outside_allowlist_by_default() {
+fn mem_init_refuses_outside_allowlist_by_default() {
     let tmp = TempDir::new().unwrap();
     let workspace = seed_workspace_with_create_allowlist(tmp.path());
 
     let output = memstead_no_env()
         .current_dir(&workspace)
-        .args(["--json", "vault", "init", "forbidden", "--no-gitignore"])
+        .args(["--json", "mem", "init", "forbidden", "--no-gitignore"])
         .assert()
         .failure()
         .get_output()
@@ -863,36 +863,36 @@ fn vault_init_refuses_outside_allowlist_by_default() {
     let env: serde_json::Value =
         serde_json::from_str(body.trim()).expect("--json envelope parses");
     assert_eq!(
-        env["code"], "VAULT_PATH_NOT_ALLOWED",
+        env["code"], "MEM_PATH_NOT_ALLOWED",
         "expected typed refusal, got: {env}",
     );
 }
 
-/// Positive admission path — `memstead vault init test` against the same
+/// Positive admission path — `memstead mem init test` against the same
 /// allowlist succeeds. The pivot doesn't regress allowed names.
 #[test]
-fn vault_init_admits_allowlisted_name_by_default() {
+fn mem_init_admits_allowlisted_name_by_default() {
     let tmp = TempDir::new().unwrap();
     let workspace = seed_workspace_with_create_allowlist(tmp.path());
 
     memstead_no_env()
         .current_dir(&workspace)
-        .args(["vault", "init", "test", "--no-gitignore"])
+        .args(["mem", "init", "test", "--no-gitignore"])
         .assert()
         .success();
-    assert_vault_in_mounts(&workspace, "test");
+    assert_mem_in_mounts(&workspace, "test");
 }
 
 /// `--operator-mode` flag overrides the allowlist — explicit opt-in.
 #[test]
-fn vault_init_operator_mode_flag_bypasses_allowlist() {
+fn mem_init_operator_mode_flag_bypasses_allowlist() {
     let tmp = TempDir::new().unwrap();
     let workspace = seed_workspace_with_create_allowlist(tmp.path());
 
     memstead_no_env()
         .current_dir(&workspace)
         .args([
-            "vault",
+            "mem",
             "init",
             "forbidden",
             "--no-gitignore",
@@ -900,37 +900,37 @@ fn vault_init_operator_mode_flag_bypasses_allowlist() {
         ])
         .assert()
         .success();
-    assert_vault_in_mounts(&workspace, "forbidden");
+    assert_mem_in_mounts(&workspace, "forbidden");
 }
 
 /// `MEMSTEAD_OPERATOR_MODE=1` env var overrides the allowlist — script
 /// convenience opt-in.
 #[test]
-fn vault_init_operator_mode_env_var_bypasses_allowlist() {
+fn mem_init_operator_mode_env_var_bypasses_allowlist() {
     let tmp = TempDir::new().unwrap();
     let workspace = seed_workspace_with_create_allowlist(tmp.path());
 
     let mut cmd = memstead_no_env();
     cmd.env("MEMSTEAD_OPERATOR_MODE", "1")
         .current_dir(&workspace)
-        .args(["vault", "init", "forbidden", "--no-gitignore"]);
+        .args(["mem", "init", "forbidden", "--no-gitignore"]);
     cmd.assert().success();
-    assert_vault_in_mounts(&workspace, "forbidden");
+    assert_mem_in_mounts(&workspace, "forbidden");
 }
 
 /// CLI F7 regression. A
-/// destructive `memstead vault delete` must NOT revoke the workspace's
-/// `[[vault_management.create]]` / `[[vault_management.delete]]`
+/// destructive `memstead mem delete` must NOT revoke the workspace's
+/// `[[mem_management.create]]` / `[[mem_management.delete]]`
 /// allowlist rules for the deleted name — they are forward-looking
 /// permissions for the name, not references to the instance. So
-/// re-creating a vault of the same name afterward succeeds without
-/// re-running `allow-create`. The dangling `[cross_vault_links]` grant
-/// FROM the deleted vault is still scrubbed (it named the gone
+/// re-creating a mem of the same name afterward succeeds without
+/// re-running `allow-create`. The dangling `[cross_mem_links]` grant
+/// FROM the deleted mem is still scrubbed (it named the gone
 /// instance). The grant direction is `other → keep` so the deletion's
-/// own `VAULT_REFERENCED_BY_POLICY` gate (which fires only when *another*
-/// vault grants the target) stays clear.
+/// own `MEM_REFERENCED_BY_POLICY` gate (which fires only when *another*
+/// mem grants the target) stays clear.
 #[test]
-fn vault_delete_preserves_allowlist_rules_so_recreate_succeeds() {
+fn mem_delete_preserves_allowlist_rules_so_recreate_succeeds() {
     let tmp = TempDir::new().unwrap();
     let workspace = seed_workspace(tmp.path());
     let toml_path = workspace.join(".memstead").join("workspace.toml");
@@ -939,12 +939,12 @@ fn vault_delete_preserves_allowlist_rules_so_recreate_succeeds() {
         &toml_path,
         format!(
             "{existing}\n\
-             [cross_vault_links]\n\
+             [cross_mem_links]\n\
              other = [\"keep\"]\n\n\
-             [[vault_management.create]]\n\
+             [[mem_management.create]]\n\
              pattern = \"other\"\n\
              schemas = [\"default@1.0.0\"]\n\n\
-             [[vault_management.delete]]\n\
+             [[mem_management.delete]]\n\
              pattern = \"other\"\n",
         ),
     )
@@ -953,17 +953,17 @@ fn vault_delete_preserves_allowlist_rules_so_recreate_succeeds() {
     // Create `other` (admitted by the create allowlist).
     memstead_no_env()
         .current_dir(&workspace)
-        .args(["vault", "init", "other", "--no-gitignore"])
+        .args(["mem", "init", "other", "--no-gitignore"])
         .assert()
         .success();
-    assert_vault_in_mounts(&workspace, "other");
+    assert_mem_in_mounts(&workspace, "other");
 
     // Destructive delete — honours the delete allowlist (no operator
-    // mode), so the surviving `[[vault_management.delete]]` rule is what
+    // mode), so the surviving `[[mem_management.delete]]` rule is what
     // admits it.
     memstead_no_env()
         .current_dir(&workspace)
-        .args(["vault", "delete", "other"])
+        .args(["mem", "delete", "other"])
         .assert()
         .success();
 
@@ -974,18 +974,18 @@ fn vault_delete_preserves_allowlist_rules_so_recreate_succeeds() {
         2,
         "delete must preserve the create+delete allowlist rules for `other`; got:\n{after}",
     );
-    // The deleted vault's own dangling cross-link grant is scrubbed.
+    // The deleted mem's own dangling cross-link grant is scrubbed.
     assert!(
         !after.contains("other = [\"keep\"]"),
-        "delete must scrub the deleted vault's dangling cross-link grant; got:\n{after}",
+        "delete must scrub the deleted mem's dangling cross-link grant; got:\n{after}",
     );
 
     // Re-create the same name — succeeds with no fresh `allow-create`,
     // because the create rule survived. This is the exact F7 reproduction.
     memstead_no_env()
         .current_dir(&workspace)
-        .args(["vault", "init", "other", "--no-gitignore"])
+        .args(["mem", "init", "other", "--no-gitignore"])
         .assert()
         .success();
-    assert_vault_in_mounts(&workspace, "other");
+    assert_mem_in_mounts(&workspace, "other");
 }

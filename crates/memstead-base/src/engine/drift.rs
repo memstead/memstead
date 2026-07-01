@@ -1,9 +1,9 @@
-//! Drift detection and per-vault change synthesis.
+//! Drift detection and per-mem change synthesis.
 //!
 //! `reload_if_stale` probes each candidate mount's `current_head()`
-//! cursor on every operation (no throttle), reloads vaults whose
+//! cursor on every operation (no throttle), reloads mems whose
 //! on-disk state has advanced past the engine's cached head, and
-//! surfaces `VaultReloaded` warnings for handlers that need to
+//! surfaces `MemReloaded` warnings for handlers that need to
 //! re-derive conclusions from a now-reloaded snapshot. `changes_since`
 //! produces
 //! the per-entity diff between a stored cursor and the backend's
@@ -21,9 +21,9 @@ use super::{Engine, EngineError};
 impl Engine {
 
     /// Reload-before-operation: before any read or write executes,
-    /// check the vault ref; if it advanced past the engine's cached
-    /// `last_known_head`, reload the affected vault(s) and return one
-    /// [`WarningHint::VaultReloaded`] per reload so the caller can
+    /// check the mem ref; if it advanced past the engine's cached
+    /// `last_known_head`, reload the affected mem(s) and return one
+    /// [`WarningHint::MemReloaded`] per reload so the caller can
     /// surface the drift to the agent (the response *itself* already
     /// carries fresh content — the warning explains why state
     /// shifted).
@@ -36,17 +36,17 @@ impl Engine {
     /// correctness floor: no operation acts on a projection that is
     /// behind git truth.
     ///
-    /// `vault = Some(name)` scopes the probe to one mount; `None`
-    /// scans every mount. Read handlers that target a known vault
-    /// (`memstead_entity` derives the vault from the id;
+    /// `mem = Some(name)` scopes the probe to one mount; `None`
+    /// scans every mount. Read handlers that target a known mem
+    /// (`memstead_entity` derives the mem from the id;
     /// `memstead_changes_since` takes it as a param) and every mutation
-    /// (which knows its target vault) pass a name; tools that scan
-    /// multi-vault (`memstead_search` without a vault filter,
+    /// (which knows its target mem) pass a name; tools that scan
+    /// multi-mem (`memstead_search` without a mem filter,
     /// `memstead_overview`, `memstead_health`) pass `None`.
     ///
     /// Behaviour matrix per mount:
     /// - cached `Some(old)` + on-disk `Some(new)`, `old != new` →
-    ///   reload the vault, emit `VaultReloaded`, refresh the cached
+    ///   reload the mem, emit `MemReloaded`, refresh the cached
     ///   head to `new`.
     /// - cached `None` + on-disk `Some(new)` → silently capture the
     ///   first observed head as the baseline (no warning — there's
@@ -54,25 +54,25 @@ impl Engine {
     /// - cached / on-disk match, on-disk `None` (folder, archive,
     ///   refdb hiccup), or `current_head` errors → no-op.
     ///
-    /// Reload errors are warn-logged and the affected vault is
+    /// Reload errors are warn-logged and the affected mem is
     /// skipped — the caller's response is still served from the (now
     /// stale) in-memory snapshot rather than failing the entire
     /// request. The next operation retries.
     ///
-    /// Cache invalidation rides on `reload_one_vault` — community
-    /// and search-index memos drop when any vault reloads.
+    /// Cache invalidation rides on `reload_one_mem` — community
+    /// and search-index memos drop when any mem reloads.
     pub fn reload_if_stale(
         &mut self,
-        vault: Option<&str>,
+        mem: Option<&str>,
     ) -> Vec<crate::ops::WarningHint> {
-        // Phase 1 — pick candidate vault names that match the filter.
+        // Phase 1 — pick candidate mem names that match the filter.
         // Cloned so the immutable borrow doesn't survive into the
         // mutation phase.
         let candidates: Vec<String> = self
             .mounts
             .iter()
-            .filter(|m| vault.is_none_or(|v| m.mount.vault == v))
-            .map(|m| m.mount.vault.clone())
+            .filter(|m| mem.is_none_or(|v| m.mount.mem == v))
+            .map(|m| m.mount.mem.clone())
             .collect();
 
         if candidates.is_empty() {
@@ -86,7 +86,7 @@ impl Engine {
         let probes: Vec<(String, Option<String>, Option<String>)> = candidates
             .iter()
             .filter_map(|name| {
-                let m = self.mounts.iter().find(|m| &m.mount.vault == name)?;
+                let m = self.mounts.iter().find(|m| &m.mount.mem == name)?;
                 let new_head = m.backend.current_head().ok().flatten();
                 let cached = m.last_known_head.clone();
                 Some((name.clone(), cached, new_head))
@@ -94,23 +94,23 @@ impl Engine {
             .collect();
 
         // Phase 3 — act on each probe. The drift case is the only
-        // one that calls `reload_one_vault`; every other arm just
+        // one that calls `reload_one_mem`; every other arm just
         // (for first-observation) captures the baseline head silently.
         let mut warnings = Vec::new();
         for (name, cached, new_head) in probes {
             match (cached, new_head.clone()) {
                 (Some(old), Some(new)) if old != new => {
-                    match self.reload_one_vault(&name) {
+                    match self.reload_one_mem(&name) {
                         Ok(report) => {
-                            warnings.push(crate::ops::WarningHint::VaultReloaded {
-                                vault: name.clone(),
+                            warnings.push(crate::ops::WarningHint::MemReloaded {
+                                mem: name.clone(),
                                 old_head: old.clone(),
                                 new_head: new.clone(),
                                 entities_loaded: report.added.len()
                                     + report.changed.len(),
                             });
                             if let Some(state) =
-                                self.mounts.iter_mut().find(|m| m.mount.vault == name)
+                                self.mounts.iter_mut().find(|m| m.mount.mem == name)
                             {
                                 state.last_known_head = Some(new.clone());
                             }
@@ -120,14 +120,14 @@ impl Engine {
                             // committed yet, so the `old → new` delta
                             // describes only the sibling's change. Stashed
                             // for the response layer to drain.
-                            let notice = self.vault_changed_notice(&name, &old, &new);
-                            self.pending_vault_changed.push(notice);
+                            let notice = self.mem_changed_notice(&name, &old, &new);
+                            self.pending_mem_changed.push(notice);
                         }
                         Err(e) => {
                             tracing::warn!(
-                                vault = %name,
+                                mem = %name,
                                 error = %e,
-                                "drift-detected reload_one_vault failed; serving \
+                                "drift-detected reload_one_mem failed; serving \
                                  stale snapshot — will retry on the next operation"
                             );
                         }
@@ -135,7 +135,7 @@ impl Engine {
                 }
                 _ => {
                     if let Some(state) =
-                        self.mounts.iter_mut().find(|m| m.mount.vault == name)
+                        self.mounts.iter_mut().find(|m| m.mount.mem == name)
                         && state.last_known_head.is_none()
                     {
                         state.last_known_head = new_head;
@@ -149,11 +149,11 @@ impl Engine {
 
     /// Mark `mount_idx`'s on-disk head as advanced by *this* engine's
     /// own write so the next `reload_if_stale` doesn't surface
-    /// `VAULT_RELOADED` for the commit we just produced. Mutation
+    /// `MEM_RELOADED` for the commit we just produced. Mutation
     /// paths call this immediately after `backend.commit` returns —
     /// the cached `last_known_head` jumps straight to the new SHA
     /// without going through a reload. Because every mutation runs
-    /// `reload_if_stale` for its target vault *before* committing,
+    /// `reload_if_stale` for its target mem *before* committing,
     /// the cached `last_known_head` is current at commit time, so
     /// this advance is over a verified parent — it can never jump
     /// the cache past an unobserved sibling commit. Cross-session and
@@ -169,14 +169,14 @@ impl Engine {
         if commit_sha.is_empty() {
             return;
         }
-        // Capture the pre-write head + vault name so the
-        // `VaultChangedEvent` we emit reflects the transition the
+        // Capture the pre-write head + mem name so the
+        // `MemChangedEvent` we emit reflects the transition the
         // current commit produced. We do this before mutating
         // `last_known_head` because that field is the previous SHA
         // from the event's point of view.
-        let (vault, previous) = match self.mounts.get(mount_idx) {
+        let (mem, previous) = match self.mounts.get(mount_idx) {
             Some(state) => (
-                state.mount.vault.clone(),
+                state.mount.mem.clone(),
                 state.last_known_head.clone().unwrap_or_default(),
             ),
             None => return,
@@ -195,61 +195,61 @@ impl Engine {
         if previous == commit_sha {
             return;
         }
-        let event = crate::engine::events::VaultChangedEvent {
-            vault,
+        let event = crate::engine::events::MemChangedEvent {
+            mem,
             head: commit_sha.to_string(),
             previous,
             n_commits: 1,
         };
-        self.emit_vault_changed(&event);
+        self.emit_mem_changed(&event);
     }
 
     /// Drain the reload-before-operation notices accumulated since the
     /// last drain. The response layer calls this after an operation
-    /// completes to attach the structured `vault_changed` notice. Every
+    /// completes to attach the structured `mem_changed` notice. Every
     /// handler that can trigger a reload (directly via
     /// [`Self::reload_if_stale`] or indirectly through a mutation) must
     /// drain, or an undrained notice leaks into the next operation's
     /// response.
-    pub fn take_vault_changed_notices(&mut self) -> Vec<crate::ops::VaultChangedNotice> {
-        std::mem::take(&mut self.pending_vault_changed)
+    pub fn take_mem_changed_notices(&mut self) -> Vec<crate::ops::MemChangedNotice> {
+        std::mem::take(&mut self.pending_mem_changed)
     }
 
-    /// Build a [`crate::ops::VaultChangedNotice`] describing the
-    /// per-entity delta a reload applied to `vault` (from `from_head`
+    /// Build a [`crate::ops::MemChangedNotice`] describing the
+    /// per-entity delta a reload applied to `mem` (from `from_head`
     /// to `to_head`). Derived from [`Self::changes_since`] so it
     /// carries rename detection on git-branch mounts; on any backend
     /// error (e.g. an unresolvable cursor) it falls back to an empty
-    /// delta — the heads alone still tell the agent the vault moved.
+    /// delta — the heads alone still tell the agent the mem moved.
     ///
     /// Callers pair this with [`Self::reload_if_stale`]: a returned
-    /// [`crate::ops::WarningHint::VaultReloaded`] carries the
+    /// [`crate::ops::WarningHint::MemReloaded`] carries the
     /// `old_head` / `new_head` to pass here. The delta matches the
     /// transition the reload applied (`changes_since` walks the same
     /// `from_head → current` range).
-    pub fn vault_changed_notice(
+    pub fn mem_changed_notice(
         &self,
-        vault: &str,
+        mem: &str,
         from_head: &str,
         to_head: &str,
-    ) -> crate::ops::VaultChangedNotice {
+    ) -> crate::ops::MemChangedNotice {
         let changes = self
-            .changes_since(vault, from_head, None)
+            .changes_since(mem, from_head, None)
             .map(|r| r.changes)
             .unwrap_or_default();
-        crate::ops::VaultChangedNotice::from_delta(
-            vault.to_string(),
+        crate::ops::MemChangedNotice::from_delta(
+            mem.to_string(),
             from_head.to_string(),
             to_head.to_string(),
             changes,
         )
     }
 
-    /// Per-entity events for `vault` between `since` and the backend's
+    /// Per-entity events for `mem` between `since` and the backend's
     /// current state.
     ///
-    /// 1. Resolves the mount (returns [`EngineError::UnknownVault`]
-    ///    on unknown vault).
+    /// 1. Resolves the mount (returns [`EngineError::UnknownMem`]
+    ///    on unknown mem).
     /// 2. Validates `rename_similarity` against
     ///    `[RENAME_SIMILARITY_MIN, RENAME_SIMILARITY_MAX]`. Out-of-range
     ///    values refuse with [`EngineError::InvalidInput`] carrying
@@ -267,16 +267,16 @@ impl Engine {
     ///    in-memory store (best-effort — `Removed` envelopes always
     ///    leave both `None`; missing-from-store entities also leave
     ///    them `None`).
-    /// 5. Returns [`crate::ops::ChangesReport`] with `vault`,
+    /// 5. Returns [`crate::ops::ChangesReport`] with `mem`,
     ///    `since` (echoed), `head` (backend-resolved current
     ///    cursor), enriched `changes`, and any clamping warnings.
     pub fn changes_since(
         &self,
-        vault: &str,
+        mem: &str,
         since: &str,
         rename_similarity: Option<f32>,
     ) -> Result<crate::ops::ChangesReport, EngineError> {
-        let m = self.find_mount(vault)?;
+        let m = self.find_mount(mem)?;
 
         // Reject out-of-range `rename_similarity` early so CLI and MCP
         // share one refusal surface.
@@ -297,11 +297,11 @@ impl Engine {
 
         let backend_changes = match &m.mount.storage {
             MountStorage::Folder { path } => {
-                crate::ops::folder_changes_since(path, vault, since)
+                crate::ops::folder_changes_since(path, mem, since)
                     .map_err(EngineError::Backend)?
             }
             MountStorage::GitBranch { gitdir, branch } => match self.git_branch_ops.as_ref() {
-                Some(hook) => match (hook.changes_since)(gitdir, branch, vault, since, clamped) {
+                Some(hook) => match (hook.changes_since)(gitdir, branch, mem, since, clamped) {
                     Ok(c) => c,
                     // Lift the backend's typed bad-`since` marker to a typed
                     // engine error carrying the untruncated SHA, parallel
@@ -314,7 +314,7 @@ impl Engine {
                             .unwrap_or_default()
                             .to_string();
                         return Err(EngineError::InvalidChangesCursor {
-                            vault: vault.to_string(),
+                            mem: mem.to_string(),
                             since,
                         });
                     }
@@ -393,7 +393,7 @@ impl Engine {
             Some(backend_changes.notes)
         };
         Ok(crate::ops::ChangesReport {
-            vault: vault.to_string(),
+            mem: mem.to_string(),
             since: backend_changes.since,
             head: backend_changes.head,
             changes: enriched,
@@ -403,14 +403,14 @@ impl Engine {
         })
     }
 
-    /// Fetch updates from `remote` into the workspace's vault-repo.
+    /// Fetch updates from `remote` into the workspace's mem-repo.
     /// Advances remote-tracking refs only; the local branch pointer
     /// is not moved.
     ///
     /// `refspecs` is forwarded verbatim to `git fetch`. An empty list
     /// uses the remote's configured defaults.
     ///
-    /// Refusal codes: `UNKNOWN_VAULT`, `UNKNOWN_REMOTE`,
+    /// Refusal codes: `UNKNOWN_MEM`, `UNKNOWN_REMOTE`,
     /// `INVALID_INPUT` (folder / archive mounts).
     ///
     /// V1 atomicity: schema-validation quarantine for
@@ -420,17 +420,17 @@ impl Engine {
     /// reload pipeline.
     pub fn fetch(
         &self,
-        vault: &str,
+        mem: &str,
         remote: &str,
         refspecs: &[String],
     ) -> Result<crate::ops::FetchOutcome, EngineError> {
-        let m = self.find_mount(vault)?;
+        let m = self.find_mount(mem)?;
         match &m.mount.storage {
             MountStorage::Folder { .. }
             | MountStorage::Archive { .. }
             | MountStorage::InMemory => {
                 Err(EngineError::InvalidInput(format!(
-                    "vault '{vault}' is not git-backed — `memstead_fetch` requires a git-branch mount",
+                    "mem '{mem}' is not git-backed — `memstead_fetch` requires a git-branch mount",
                 )))
             }
             MountStorage::GitBranch { gitdir, .. } => match self.git_branch_ops.as_ref() {
@@ -450,7 +450,7 @@ impl Engine {
         }
     }
 
-    /// Pull updates from `remote` into the named vault's branch.
+    /// Pull updates from `remote` into the named mem's branch.
     /// Fetches into the remote-tracking ref, runs a pre-merge schema
     /// validation pass against the prospective state, then
     /// fast-forwards the local branch. Refuses with
@@ -462,14 +462,14 @@ impl Engine {
     /// state).
     pub fn pull(
         &mut self,
-        vault: &str,
+        mem: &str,
         remote: &str,
     ) -> Result<crate::ops::PullOutcome, EngineError> {
         let mount_idx = self
             .mounts
             .iter()
-            .position(|m| m.mount.vault == vault)
-            .ok_or_else(|| EngineError::UnknownVault(vault.to_string()))?;
+            .position(|m| m.mount.mem == mem)
+            .ok_or_else(|| EngineError::UnknownMem(mem.to_string()))?;
 
         // Run the fetch step alone first so we can validate the
         // prospective state against the schema before letting the
@@ -480,7 +480,7 @@ impl Engine {
             | MountStorage::Archive { .. }
             | MountStorage::InMemory => {
                 return Err(EngineError::InvalidInput(format!(
-                    "vault '{vault}' is not git-backed — `memstead_pull` requires a git-branch mount",
+                    "mem '{mem}' is not git-backed — `memstead_pull` requires a git-branch mount",
                 )));
             }
             MountStorage::GitBranch { gitdir, .. } => gitdir.clone(),
@@ -501,16 +501,16 @@ impl Engine {
 
         // Pre-merge schema validation. The remote-tracking ref now
         // points at the fetched tip; we walk it, parse every `.md`
-        // blob against the vault's pinned schema, and refuse the
+        // blob against the mem's pinned schema, and refuse the
         // pull if any parse fails. The local branch pointer is still
         // unchanged at this point — the refusal is fully atomic.
-        let remote_ref = format!("refs/remotes/{remote}/{vault}");
-        self.validate_ref_against_schema(&hook, &gitdir, vault, &remote_ref)?;
+        let remote_ref = format!("refs/remotes/{remote}/{mem}");
+        self.validate_ref_against_schema(&hook, &gitdir, mem, &remote_ref)?;
 
         // Run the underlying pull (re-runs the fetch via git CLI, but
         // that's a no-op cache-wise and keeps the fast-forward logic
         // co-located with the rest of the transport implementation).
-        let outcome = (hook.pull)(&gitdir, remote, vault).map_err(|e| match e {
+        let outcome = (hook.pull)(&gitdir, remote, mem).map_err(|e| match e {
             BackendError::Other(msg) if msg.starts_with("UNKNOWN_REMOTE:") => {
                 EngineError::UnknownRemote(
                     msg.trim_start_matches("UNKNOWN_REMOTE:").trim().to_string(),
@@ -519,9 +519,9 @@ impl Engine {
             BackendError::Other(msg) if msg.starts_with("LOCAL_DIVERGENCE:") => {
                 let payload = msg.trim_start_matches("LOCAL_DIVERGENCE:");
                 let mut parts = payload.splitn(2, ':');
-                let v = parts.next().unwrap_or(vault).to_string();
+                let v = parts.next().unwrap_or(mem).to_string();
                 let remote_ref = parts.next().unwrap_or("refs/remotes/?/?").to_string();
-                EngineError::LocalDivergence { vault: v, remote_ref }
+                EngineError::LocalDivergence { mem: v, remote_ref }
             }
             other => EngineError::Backend(other),
         })?;
@@ -531,18 +531,18 @@ impl Engine {
             if let Some(state) = self.mounts.get_mut(mount_idx) {
                 state.last_known_head = Some(outcome.new_sha.clone());
             }
-            let event = crate::engine::events::VaultChangedEvent {
-                vault: vault.to_string(),
+            let event = crate::engine::events::MemChangedEvent {
+                mem: mem.to_string(),
                 head: outcome.new_sha.clone(),
                 previous: outcome.previous_sha.clone(),
                 n_commits: 1,
             };
-            self.emit_vault_changed(&event);
+            self.emit_mem_changed(&event);
         }
         Ok(outcome)
     }
 
-    /// Push the named vault's branch to `remote`. Runs a pre-push
+    /// Push the named mem's branch to `remote`. Runs a pre-push
     /// schema validation pass against the local branch tree; refuses
     /// with `LOCAL_INVALID_STATE` when the local state fails schema
     /// validation (the remote is not contacted in that case). Refuses
@@ -551,17 +551,17 @@ impl Engine {
     /// `--force-with-lease` push instead.
     pub fn push(
         &self,
-        vault: &str,
+        mem: &str,
         remote: &str,
         force: bool,
     ) -> Result<crate::ops::PushOutcome, EngineError> {
-        let m = self.find_mount(vault)?;
+        let m = self.find_mount(mem)?;
         let gitdir = match &m.mount.storage {
             MountStorage::Folder { .. }
             | MountStorage::Archive { .. }
             | MountStorage::InMemory => {
                 return Err(EngineError::InvalidInput(format!(
-                    "vault '{vault}' is not git-backed — `memstead_push` requires a git-branch mount",
+                    "mem '{mem}' is not git-backed — `memstead_push` requires a git-branch mount",
                 )));
             }
             MountStorage::GitBranch { gitdir, .. } => gitdir.clone(),
@@ -573,15 +573,15 @@ impl Engine {
         })?;
 
         // Pre-push schema validation: walk the local branch tree, run
-        // the vault's pinned schema over every `.md` blob. Any parse
+        // the mem's pinned schema over every `.md` blob. Any parse
         // failure refuses the push with `LOCAL_INVALID_STATE` — the
         // remote is not contacted.
-        let local_ref = format!("refs/heads/{vault}");
+        let local_ref = format!("refs/heads/{mem}");
         if let Err(EngineError::SchemaViolationInFetch { violations, .. }) =
-            self.validate_ref_against_schema(&hook, &gitdir, vault, &local_ref)
+            self.validate_ref_against_schema(&hook, &gitdir, mem, &local_ref)
         {
             return Err(EngineError::LocalInvalidState {
-                vault: vault.to_string(),
+                mem: mem.to_string(),
                 remote: remote.to_string(),
                 detail: format!(
                     "{} violation(s) in local branch: {}",
@@ -591,7 +591,7 @@ impl Engine {
             });
         }
 
-        (hook.push)(&gitdir, remote, vault, force).map_err(|e| match e {
+        (hook.push)(&gitdir, remote, mem, force).map_err(|e| match e {
             BackendError::Other(msg) if msg.starts_with("UNKNOWN_REMOTE:") => {
                 EngineError::UnknownRemote(
                     msg.trim_start_matches("UNKNOWN_REMOTE:").trim().to_string(),
@@ -600,9 +600,9 @@ impl Engine {
             BackendError::Other(msg) if msg.starts_with("NON_FAST_FORWARD:") => {
                 let payload = msg.trim_start_matches("NON_FAST_FORWARD:");
                 let mut parts = payload.splitn(2, ':');
-                let v = parts.next().unwrap_or(vault).to_string();
+                let v = parts.next().unwrap_or(mem).to_string();
                 let r = parts.next().unwrap_or(remote).to_string();
-                EngineError::NonFastForward { vault: v, remote: r }
+                EngineError::NonFastForward { mem: v, remote: r }
             }
             BackendError::Other(msg) if msg.starts_with("UNKNOWN_REF:") => {
                 EngineError::UnknownRef(
@@ -614,7 +614,7 @@ impl Engine {
     }
 
     /// Pre-merge schema validation pass: walks every `.md` blob at
-    /// `ref_name` and runs `parse_entries` with the vault's pinned
+    /// `ref_name` and runs `parse_entries` with the mem's pinned
     /// schema. Returns `Ok(())` when the tree is schema-clean;
     /// returns `EngineError::SchemaViolationInFetch` with the list of
     /// per-entity violation messages otherwise. The validation is
@@ -630,17 +630,17 @@ impl Engine {
         &self,
         hook: &crate::engine::GitBranchOps,
         gitdir: &std::path::Path,
-        vault: &str,
+        mem: &str,
         ref_name: &str,
     ) -> Result<(), EngineError> {
         let schema = self
             .schemas
-            .get(vault)
+            .get(mem)
             .ok_or_else(|| EngineError::SchemaNotFound {
-                vault: vault.to_string(),
+                mem: mem.to_string(),
                 pin: "<missing engine-side resolution>".to_string(),
                 // Internal invariant breach (an already-resolved schema
-                // absent from the per-vault map), not a source-resolution
+                // absent from the per-mem map), not a source-resolution
                 // failure — no per-source diagnostics apply.
                 sources: Vec::new(),
             })?
@@ -671,7 +671,7 @@ impl Engine {
         let load_result = crate::entity::loader::parse_entries(
             source_entries.clone(),
             Vec::new(),
-            vault,
+            mem,
             schema.as_ref(),
         );
         let mut violations: Vec<String> = load_result
@@ -680,7 +680,7 @@ impl Engine {
             .map(|(path, msg)| format!("{}: {msg}", path.display()))
             .collect();
 
-        // Strict per-entity validator: enforces "looks like a vault
+        // Strict per-entity validator: enforces "looks like a mem
         // entity" invariants (frontmatter shape, title presence,
         // required sections, unknown sections, relationship syntax,
         // wiki-link shape) that the permissive loader doesn't refuse.
@@ -721,14 +721,14 @@ impl Engine {
             Ok(())
         } else {
             Err(EngineError::SchemaViolationInFetch {
-                vault: vault.to_string(),
+                mem: mem.to_string(),
                 ref_name: ref_name.to_string(),
                 violations,
             })
         }
     }
 
-    /// Reset a vault's branch pointer to `target_sha`. The only
+    /// Reset a mem's branch pointer to `target_sha`. The only
     /// engine surface that moves a branch pointer over existing
     /// commits — every other mutation appends. Refuses if any commit
     /// that would be discarded by the reset is already reachable from
@@ -736,20 +736,20 @@ impl Engine {
     ///
     /// `target_sha` accepts anything `gix::rev_parse_single` admits:
     /// a SHA, an abbreviated SHA, a branch name, a tag. The branch
-    /// itself (`refs/heads/<vault>`) must exist.
+    /// itself (`refs/heads/<mem>`) must exist.
     ///
     /// Refusal codes:
-    /// - [`EngineError::UnknownVault`] (`UNKNOWN_VAULT`)
+    /// - [`EngineError::UnknownMem`] (`UNKNOWN_MEM`)
     /// - [`EngineError::UnknownRef`] (`UNKNOWN_REF`) — branch or
     ///   target ref does not resolve.
     /// - [`EngineError::PushedCommitsProtected`]
     ///   (`PUSHED_COMMITS_PROTECTED`) — at least one discarded commit
     ///   is pushed. The error carries the offending SHAs verbatim.
-    /// - [`EngineError::InvalidInput`] (`INVALID_INPUT`) — vault is
+    /// - [`EngineError::InvalidInput`] (`INVALID_INPUT`) — mem is
     ///   folder / archive-backed (history rewriting only makes sense
     ///   for git-branch mounts).
     ///
-    /// Emits a [`crate::engine::events::VaultChangedEvent`] on
+    /// Emits a [`crate::engine::events::MemChangedEvent`] on
     /// success when the SHA actually changed; the reset's effect is
     /// observable through the same change-event surface every commit
     /// flows through. Engine's cached `last_known_head` for the
@@ -757,21 +757,21 @@ impl Engine {
     /// probe doesn't flag the reset as a sibling-writer surprise.
     pub fn branch_reset(
         &mut self,
-        vault: &str,
+        mem: &str,
         target_sha: &str,
     ) -> Result<crate::ops::BranchResetOutcome, EngineError> {
         let mount_idx = self
             .mounts
             .iter()
-            .position(|m| m.mount.vault == vault)
-            .ok_or_else(|| EngineError::UnknownVault(vault.to_string()))?;
+            .position(|m| m.mount.mem == mem)
+            .ok_or_else(|| EngineError::UnknownMem(mem.to_string()))?;
 
         let outcome = match &self.mounts[mount_idx].mount.storage {
             MountStorage::Folder { .. }
             | MountStorage::Archive { .. }
             | MountStorage::InMemory => {
                 return Err(EngineError::InvalidInput(format!(
-                    "vault '{vault}' is not git-backed — `memstead_branch_reset` requires a git-branch mount",
+                    "mem '{mem}' is not git-backed — `memstead_branch_reset` requires a git-branch mount",
                 )));
             }
             MountStorage::GitBranch { gitdir, branch } => match self.git_branch_ops.as_ref() {
@@ -791,7 +791,7 @@ impl Engine {
                             .filter(|s| !s.is_empty())
                             .collect();
                         EngineError::PushedCommitsProtected {
-                            vault: vault.to_string(),
+                            mem: mem.to_string(),
                             target_sha: target_sha.to_string(),
                             pushed_shas,
                         }
@@ -808,19 +808,19 @@ impl Engine {
         };
 
         // Rewind the engine's cached HEAD so subsequent drift probes
-        // don't surface VAULT_RELOADED for the reset we just made.
+        // don't surface MEM_RELOADED for the reset we just made.
         // Then emit a change event so subscribers see the transition
         // (skipping the no-op case where previous == new).
         if outcome.previous_sha != outcome.new_sha {
             if let Some(state) = self.mounts.get_mut(mount_idx) {
                 state.last_known_head = Some(outcome.new_sha.clone());
             }
-            let event = crate::engine::events::VaultChangedEvent {
-                vault: vault.to_string(),
+            let event = crate::engine::events::MemChangedEvent {
+                mem: mem.to_string(),
                 head: outcome.new_sha.clone(),
                 previous: outcome.previous_sha.clone(),
                 // n_commits stays at 1 for reset events. The wire
-                // shape is the same `VaultChangedEvent` consumers
+                // shape is the same `MemChangedEvent` consumers
                 // already key on; semantics: "the head moved by this
                 // operation". Replay-aware consumers branch on the
                 // commit-vs-reset distinction by inspecting the
@@ -828,42 +828,42 @@ impl Engine {
                 // commit, not a freshly minted one).
                 n_commits: 1,
             };
-            self.emit_vault_changed(&event);
+            self.emit_mem_changed(&event);
         }
         Ok(outcome)
     }
 
     /// Two-ref structural diff. Produces a per-entity [`crate::ops::Diff`]
     /// comparing the trees at `ref_a` and `ref_b` for the named
-    /// vault's storage. Folder and archive backends carry no git
+    /// mem's storage. Folder and archive backends carry no git
     /// refs and refuse via [`EngineError::InvalidInput`]; the
     /// git-branch backend routes through [`GitBranchOps::diff`] when
     /// the pro flavour is loaded.
     ///
-    /// `vault` selects the storage context (the gitdir, for
+    /// `mem` selects the storage context (the gitdir, for
     /// git-branch mounts). `ref_a` / `ref_b` are arbitrary refs the
     /// underlying git layer accepts — branch names, commit SHAs, tag
-    /// names — so cross-vault diffs work via fully-qualified refs
-    /// (`refs/heads/<other-vault>`) without a separate API.
+    /// names — so cross-mem diffs work via fully-qualified refs
+    /// (`refs/heads/<other-mem>`) without a separate API.
     ///
     /// Refusal codes:
-    /// - [`EngineError::UnknownVault`] (`UNKNOWN_VAULT`) — no mount
-    ///   for `vault`.
+    /// - [`EngineError::UnknownMem`] (`UNKNOWN_MEM`) — no mount
+    ///   for `mem`.
     /// - [`EngineError::UnknownRef`] (`UNKNOWN_REF`) — either ref
     ///   does not resolve. Surfaces verbatim from the git layer's
     ///   `rev_parse` refusal.
     /// - [`EngineError::RenameSimilarityOutOfRange`] (`INVALID_INPUT`)
     ///   — `config.rename_similarity` outside `[0.1, 1.0]`.
-    /// - [`EngineError::InvalidInput`] (`INVALID_INPUT`) — vault is
+    /// - [`EngineError::InvalidInput`] (`INVALID_INPUT`) — mem is
     ///   folder or archive-backed (no refs to diff).
     pub fn diff(
         &self,
-        vault: &str,
+        mem: &str,
         ref_a: &str,
         ref_b: &str,
         config: Option<crate::ops::DiffConfig>,
     ) -> Result<crate::ops::Diff, EngineError> {
-        let m = self.find_mount(vault)?;
+        let m = self.find_mount(mem)?;
         let config = config.unwrap_or_default();
 
         if config.rename_similarity < crate::ops::RENAME_SIMILARITY_MIN
@@ -881,11 +881,11 @@ impl Engine {
             | MountStorage::Archive { .. }
             | MountStorage::InMemory => {
                 Err(EngineError::InvalidInput(format!(
-                    "vault '{vault}' is not git-backed — `memstead_diff` requires a git-branch mount",
+                    "mem '{mem}' is not git-backed — `memstead_diff` requires a git-branch mount",
                 )))
             }
             MountStorage::GitBranch { gitdir, .. } => match self.git_branch_ops.as_ref() {
-                Some(hook) => (hook.diff)(gitdir, vault, ref_a, ref_b, &config)
+                Some(hook) => (hook.diff)(gitdir, mem, ref_a, ref_b, &config)
                     .map_err(|e| match e {
                         // Map the standard backend-side "ref not found" shape into the
                         // typed engine-level refusal. The git-branch dispatcher uses
@@ -914,7 +914,7 @@ mod tests {
     
     use tempfile::TempDir;
 
-    use crate::backend::{BackendError, VaultBackend};
+    use crate::backend::{BackendError, MemBackend};
     use crate::engine::test_helpers::*;
     use crate::engine::{DeleteEntityArgs, Engine, EngineError};
     use crate::entity::EntityId;
@@ -925,11 +925,11 @@ mod tests {
     use crate::workspace::{Mount, MountCapability, MountLifecycle, MountStorage};
 
     #[test]
-    fn engine_diff_unknown_vault_returns_typed_error() {
+    fn engine_diff_unknown_mem_returns_typed_error() {
         let tmp = TempDir::new().unwrap();
         let engine = build_demo_engine(&tmp);
         let err = engine.diff("nope", "a", "b", None).unwrap_err();
-        assert!(matches!(err, EngineError::UnknownVault(v) if v == "nope"));
+        assert!(matches!(err, EngineError::UnknownMem(v) if v == "nope"));
     }
 
     #[test]
@@ -969,13 +969,13 @@ mod tests {
         let mount = archive_mount("ext", archive_path.clone());
         let engine = Engine::from_mounts(vec![(
             mount,
-            Box::new(ArchiveBackend::new(archive_path)) as Box<dyn VaultBackend>,
+            Box::new(ArchiveBackend::new(archive_path)) as Box<dyn MemBackend>,
         )])
         .unwrap();
         let report = engine
             .changes_since("ext", "abc", None)
-            .expect("known vault");
-        assert_eq!(report.vault, "ext");
+            .expect("known mem");
+        assert_eq!(report.mem, "ext");
         assert_eq!(report.since, "abc");
         assert_eq!(report.head, "abc");
         assert!(report.changes.is_empty());
@@ -983,11 +983,11 @@ mod tests {
     }
 
     #[test]
-    fn engine_changes_since_unknown_vault_returns_typed_error() {
+    fn engine_changes_since_unknown_mem_returns_typed_error() {
         let tmp = TempDir::new().unwrap();
         let engine = build_demo_engine(&tmp);
         let err = engine.changes_since("does-not-exist", "abc", None).unwrap_err();
-        assert!(matches!(err, EngineError::UnknownVault(_)));
+        assert!(matches!(err, EngineError::UnknownMem(_)));
     }
 
     #[test]
@@ -1036,7 +1036,7 @@ mod tests {
         // 0.5 is comfortably inside the valid range; no warning.
         let report = engine
             .changes_since("specs", "abc", Some(0.5))
-            .expect("known vault");
+            .expect("known mem");
         assert!(report.warnings.is_empty());
     }
 
@@ -1048,7 +1048,7 @@ mod tests {
         let engine = build_demo_engine(&tmp);
         let report = engine
             .changes_since("specs", "abc", None)
-            .expect("known vault");
+            .expect("known mem");
         assert!(report.warnings.is_empty());
     }
 
@@ -1063,7 +1063,7 @@ mod tests {
         let engine = build_demo_engine(&tmp);
         let report = engine
             .changes_since("specs", crate::ops::EMPTY_TREE_SHA, None)
-            .expect("known vault");
+            .expect("known mem");
 
         // Three Create events → three Added envelopes, each enriched.
         assert_eq!(report.changes.len(), 3);
@@ -1125,11 +1125,11 @@ mod tests {
         }
     }
 
-    // ---- Engine::cross_vault_link_allowed ---------------------------
+    // ---- Engine::cross_mem_link_allowed ---------------------------
 
     #[test]
     fn reload_if_stale_returns_empty_for_folder_only_engine() {
-        // The folder backend inherits VaultBackend::current_head's
+        // The folder backend inherits MemBackend::current_head's
         // default (Ok(None)). Drift detection sees no signal and
         // returns no warnings.
         let tmp = TempDir::new().unwrap();
@@ -1141,8 +1141,8 @@ mod tests {
     }
 
     #[test]
-    fn reload_if_stale_short_circuits_for_unknown_vault_filter() {
-        // Filtering by an unknown vault produces zero candidates;
+    fn reload_if_stale_short_circuits_for_unknown_mem_filter() {
+        // Filtering by an unknown mem produces zero candidates;
         // the method returns an empty Vec without panicking.
         let tmp = TempDir::new().unwrap();
         let mut engine = build_demo_engine(&tmp);
@@ -1150,7 +1150,7 @@ mod tests {
         assert!(warnings.is_empty());
     }
 
-    /// Test fixture: a `VaultBackend` whose `current_head` and
+    /// Test fixture: a `MemBackend` whose `current_head` and
     /// (read-side) entity surface are externally mutable so a test
     /// can simulate a sibling writer advancing the head between
     /// drift-check probes. Write methods are no-ops; the engine's
@@ -1173,7 +1173,7 @@ mod tests {
         }
     }
 
-    impl VaultBackend for ManualHeadBackend {
+    impl MemBackend for ManualHeadBackend {
         fn list_entities(&self) -> Result<Vec<PathBuf>, BackendError> {
             Ok(self
                 .entities
@@ -1223,12 +1223,12 @@ mod tests {
     }
 
     #[test]
-    fn reload_if_stale_emits_vault_reloaded_when_head_advances() {
+    fn reload_if_stale_emits_mem_reloaded_when_head_advances() {
         // Use an Arc<ManualHeadBackend> so the test retains a handle
         // for mutation after the engine has taken ownership of a
-        // Box<dyn VaultBackend> wrapper around it.
+        // Box<dyn MemBackend> wrapper around it.
         struct ArcBackend(std::sync::Arc<ManualHeadBackend>);
-        impl VaultBackend for ArcBackend {
+        impl MemBackend for ArcBackend {
             fn list_entities(&self) -> Result<Vec<PathBuf>, BackendError> {
                 self.0.list_entities()
             }
@@ -1268,7 +1268,7 @@ mod tests {
         let shared = std::sync::Arc::new(ManualHeadBackend::new(Some("aaa")));
         let backend = Box::new(ArcBackend(shared.clone()));
         let mount = Mount {
-            vault: "specs".to_string(),
+            mem: "specs".to_string(),
             schema: Some(pin("default")),
             storage: MountStorage::Folder {
                 path: PathBuf::from("/dev/null"),
@@ -1290,17 +1290,17 @@ mod tests {
         let warnings = engine.reload_if_stale(Some("specs"));
         assert_eq!(warnings.len(), 1);
         match &warnings[0] {
-            crate::ops::WarningHint::VaultReloaded {
-                vault,
+            crate::ops::WarningHint::MemReloaded {
+                mem,
                 old_head,
                 new_head,
                 ..
             } => {
-                assert_eq!(vault, "specs");
+                assert_eq!(mem, "specs");
                 assert_eq!(old_head, "aaa");
                 assert_eq!(new_head, "bbb");
             }
-            other => panic!("expected VaultReloaded, got {other:?}"),
+            other => panic!("expected MemReloaded, got {other:?}"),
         }
 
         // Drift cleared — the engine's cached head now matches the
@@ -1310,13 +1310,13 @@ mod tests {
     }
 
     #[test]
-    fn vault_drifted_tracks_sibling_advance_until_reload() {
+    fn mem_drifted_tracks_sibling_advance_until_reload() {
         // The read-only drift probe used by the macOS roster: it reports
         // `true` once a sibling writer advances the backend past the
         // engine's cached head, *without* itself reloading, and clears
         // after the engine re-reads.
         struct ArcBackend(std::sync::Arc<ManualHeadBackend>);
-        impl VaultBackend for ArcBackend {
+        impl MemBackend for ArcBackend {
             fn list_entities(&self) -> Result<Vec<PathBuf>, BackendError> {
                 self.0.list_entities()
             }
@@ -1356,7 +1356,7 @@ mod tests {
         let shared = std::sync::Arc::new(ManualHeadBackend::new(Some("aaa")));
         let backend = Box::new(ArcBackend(shared.clone()));
         let mount = Mount {
-            vault: "specs".to_string(),
+            mem: "specs".to_string(),
             schema: Some(pin("default")),
             storage: MountStorage::Folder {
                 path: PathBuf::from("/dev/null"),
@@ -1369,27 +1369,27 @@ mod tests {
         let mut engine = Engine::from_mounts(vec![(mount, backend)]).unwrap();
 
         // Fresh boot: cached == live, no drift.
-        assert!(!engine.vault_drifted("specs").unwrap());
+        assert!(!engine.mem_drifted("specs").unwrap());
 
         // Sibling writer advances the head — drift is visible WITHOUT a reload.
         shared.set_head(Some("bbb"));
-        assert!(engine.vault_drifted("specs").unwrap());
+        assert!(engine.mem_drifted("specs").unwrap());
         // Probing did not reload — still drifted on a second read.
-        assert!(engine.vault_drifted("specs").unwrap());
+        assert!(engine.mem_drifted("specs").unwrap());
 
         // Re-reading through the engine clears it.
         let _ = engine.reload_if_stale(Some("specs"));
-        assert!(!engine.vault_drifted("specs").unwrap());
+        assert!(!engine.mem_drifted("specs").unwrap());
 
-        // Unknown vault errors rather than reporting a bogus `false`.
+        // Unknown mem errors rather than reporting a bogus `false`.
         assert!(matches!(
-            engine.vault_drifted("nope"),
-            Err(EngineError::UnknownVault(_))
+            engine.mem_drifted("nope"),
+            Err(EngineError::UnknownMem(_))
         ));
     }
 
     #[test]
-    fn reload_one_vault_report_head_before_is_prior_cursor_and_advances() {
+    fn reload_one_mem_report_head_before_is_prior_cursor_and_advances() {
         // Regression for the reload→changes_since recipe. `head_before`
         // must report the engine's PRIOR cursor (the SHA it last knew),
         // not the post-drift on-disk tip — otherwise
@@ -1398,7 +1398,7 @@ mod tests {
         // must also advance the cursor to the new tip so the next
         // staleness probe is a no-op rather than a spurious reload.
         struct ArcBackend(std::sync::Arc<ManualHeadBackend>);
-        impl VaultBackend for ArcBackend {
+        impl MemBackend for ArcBackend {
             fn list_entities(&self) -> Result<Vec<PathBuf>, BackendError> {
                 self.0.list_entities()
             }
@@ -1438,7 +1438,7 @@ mod tests {
         let shared = std::sync::Arc::new(ManualHeadBackend::new(Some("aaa")));
         let backend = Box::new(ArcBackend(shared.clone()));
         let mount = Mount {
-            vault: "specs".to_string(),
+            mem: "specs".to_string(),
             schema: Some(pin("default")),
             storage: MountStorage::Folder {
                 path: PathBuf::from("/dev/null"),
@@ -1453,13 +1453,13 @@ mod tests {
         // Sibling writer advances the head past the engine's cursor.
         shared.set_head(Some("bbb"));
 
-        let report = engine.reload_one_vault_report("specs").unwrap();
+        let report = engine.reload_one_mem_report("specs").unwrap();
         // head_before is the prior cursor "aaa", not the drifted tip.
         assert_eq!(report.head_before, "aaa");
         assert_eq!(report.head_after, "bbb");
 
         // Cursor advanced to "bbb": a follow-up staleness probe is a
-        // no-op, not a spurious VAULT_RELOADED.
+        // no-op, not a spurious MEM_RELOADED.
         let warnings = engine.reload_if_stale(Some("specs"));
         assert!(
             warnings.is_empty(),
@@ -1474,7 +1474,7 @@ mod tests {
         // window — the ref check is the correctness floor.
         let shared = std::sync::Arc::new(ManualHeadBackend::new(Some("aaa")));
         struct ArcBackend(std::sync::Arc<ManualHeadBackend>);
-        impl VaultBackend for ArcBackend {
+        impl MemBackend for ArcBackend {
             fn list_entities(&self) -> Result<Vec<PathBuf>, BackendError> {
                 self.0.list_entities()
             }
@@ -1513,7 +1513,7 @@ mod tests {
 
         let backend = Box::new(ArcBackend(shared.clone()));
         let mount = Mount {
-            vault: "specs".to_string(),
+            mem: "specs".to_string(),
             schema: Some(pin("default")),
             storage: MountStorage::Folder {
                 path: PathBuf::from("/dev/null"),

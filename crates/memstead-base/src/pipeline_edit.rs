@@ -8,7 +8,7 @@
 //! wrapper methods that call these — not here — so these functions stay pure
 //! disk ops that unit-test with a bare `TempDir`.
 //!
-//! Identity is the file stem `(vault, name)`. Mediums and facets additionally
+//! Identity is the file stem `(mem, name)`. Mediums and facets additionally
 //! carry an embedded `name` field kept equal to the stem (facets reference
 //! mediums by name, projections reference facets by name); rename here updates
 //! the file location, the embedded field, and every dependent reference
@@ -28,7 +28,7 @@ use crate::workspace_store::StoreError;
 
 /// Failure modes of a pipeline edit. Distinct from the entity-centric
 /// [`crate::engine::EngineError`] — these describe four-primitive store edits.
-/// `key` is the display identity: `"<vault>/<name>"`.
+/// `key` is the display identity: `"<mem>/<name>"`.
 #[derive(Debug, thiserror::Error)]
 pub enum PipelineEditError {
     /// The engine was not booted from a workspace root, so there is no
@@ -36,7 +36,7 @@ pub enum PipelineEditError {
     /// list in a test or in-memory consumer).
     #[error("engine has no workspace root — pipeline edits require a workspace-backed engine")]
     NoWorkspaceRoot,
-    /// A create targeted a `(vault, name)` that already holds a record.
+    /// A create targeted a `(mem, name)` that already holds a record.
     #[error("{primitive} '{key}' already exists")]
     AlreadyExists { primitive: &'static str, key: String },
     /// An update / delete / rename targeted a record that does not exist.
@@ -49,7 +49,7 @@ pub enum PipelineEditError {
         key: String,
         referrers: Vec<String>,
     },
-    /// A rename target `(vault, new)` already holds a record.
+    /// A rename target `(mem, new)` already holds a record.
     #[error("rename target {primitive} '{key}' already exists")]
     RenameTargetExists { primitive: &'static str, key: String },
     /// A JSON-string edit entry point received a payload that did not
@@ -64,43 +64,43 @@ pub enum PipelineEditError {
     Store(#[from] StoreError),
 }
 
-fn key(vault: &str, name: &str) -> String {
-    format!("{vault}/{name}")
+fn key(mem: &str, name: &str) -> String {
+    format!("{mem}/{name}")
 }
 
-fn medium_exists(c: &PipelineConfigs, vault: &str, name: &str) -> bool {
-    c.mediums.iter().any(|r| r.vault == vault && r.name == name)
+fn medium_exists(c: &PipelineConfigs, mem: &str, name: &str) -> bool {
+    c.mediums.iter().any(|r| r.mem == mem && r.name == name)
 }
 
-fn facet_exists(c: &PipelineConfigs, vault: &str, name: &str) -> bool {
-    c.facets.iter().any(|r| r.vault == vault && r.name == name)
+fn facet_exists(c: &PipelineConfigs, mem: &str, name: &str) -> bool {
+    c.facets.iter().any(|r| r.mem == mem && r.name == name)
 }
 
-fn projection_exists(c: &PipelineConfigs, vault: &str, name: &str) -> bool {
-    c.projections.iter().any(|r| r.vault == vault && r.name == name)
+fn projection_exists(c: &PipelineConfigs, mem: &str, name: &str) -> bool {
+    c.projections.iter().any(|r| r.mem == mem && r.name == name)
 }
 
-/// Facet names (same vault) whose `medium` points at `name`.
-fn facets_referencing_medium(c: &PipelineConfigs, vault: &str, name: &str) -> Vec<String> {
+/// Facet names (same mem) whose `medium` points at `name`.
+fn facets_referencing_medium(c: &PipelineConfigs, mem: &str, name: &str) -> Vec<String> {
     c.facets
         .iter()
-        .filter(|r| r.vault == vault && r.config.medium == name)
+        .filter(|r| r.mem == mem && r.config.medium == name)
         .map(|r| r.name.clone())
         .collect()
 }
 
-/// Projection names (same vault) whose `source_facets` contain `name`.
-fn projections_referencing_facet(c: &PipelineConfigs, vault: &str, name: &str) -> Vec<String> {
+/// Projection names (same mem) whose `source_facets` contain `name`.
+fn projections_referencing_facet(c: &PipelineConfigs, mem: &str, name: &str) -> Vec<String> {
     c.projections
         .iter()
-        .filter(|r| r.vault == vault && r.config.source_facets.iter().any(|f| f == name))
+        .filter(|r| r.mem == mem && r.config.source_facets.iter().any(|f| f == name))
         .map(|r| r.name.clone())
         .collect()
 }
 
-/// Ingest names whose `projection` points at `<vault>/<name>`.
-fn ingests_referencing_projection(c: &PipelineConfigs, vault: &str, name: &str) -> Vec<String> {
-    let target = key(vault, name);
+/// Ingest names whose `projection` points at `<mem>/<name>`.
+fn ingests_referencing_projection(c: &PipelineConfigs, mem: &str, name: &str) -> Vec<String> {
+    let target = key(mem, name);
     c.ingests
         .iter()
         .filter(|r| r.config.projection == target)
@@ -110,68 +110,68 @@ fn ingests_referencing_projection(c: &PipelineConfigs, vault: &str, name: &str) 
 
 // --- Medium ----------------------------------------------------------------
 
-/// Create a medium. Refuses if `(vault, name)` already holds one.
+/// Create a medium. Refuses if `(mem, name)` already holds one.
 pub fn add_medium(
     root: &Path,
-    vault: &str,
+    mem: &str,
     name: &str,
     medium: &Medium,
 ) -> Result<(), PipelineEditError> {
     let configs = pipeline_store::load_pipeline_configs(root)?;
-    if medium_exists(&configs, vault, name) {
+    if medium_exists(&configs, mem, name) {
         return Err(PipelineEditError::AlreadyExists {
             primitive: "medium",
-            key: key(vault, name),
+            key: key(mem, name),
         });
     }
-    pipeline_store::write_medium(root, vault, name, medium)?;
+    pipeline_store::write_medium(root, mem, name, medium)?;
     Ok(())
 }
 
-/// Overwrite an existing medium. Refuses if `(vault, name)` does not exist.
+/// Overwrite an existing medium. Refuses if `(mem, name)` does not exist.
 pub fn update_medium(
     root: &Path,
-    vault: &str,
+    mem: &str,
     name: &str,
     medium: &Medium,
 ) -> Result<(), PipelineEditError> {
     let configs = pipeline_store::load_pipeline_configs(root)?;
-    if !medium_exists(&configs, vault, name) {
+    if !medium_exists(&configs, mem, name) {
         return Err(PipelineEditError::NotFound {
             primitive: "medium",
-            key: key(vault, name),
+            key: key(mem, name),
         });
     }
-    pipeline_store::write_medium(root, vault, name, medium)?;
+    pipeline_store::write_medium(root, mem, name, medium)?;
     Ok(())
 }
 
-/// Delete a medium. Refuses if any facet in the same vault still references it.
-pub fn delete_medium(root: &Path, vault: &str, name: &str) -> Result<(), PipelineEditError> {
+/// Delete a medium. Refuses if any facet in the same mem still references it.
+pub fn delete_medium(root: &Path, mem: &str, name: &str) -> Result<(), PipelineEditError> {
     let configs = pipeline_store::load_pipeline_configs(root)?;
-    if !medium_exists(&configs, vault, name) {
+    if !medium_exists(&configs, mem, name) {
         return Err(PipelineEditError::NotFound {
             primitive: "medium",
-            key: key(vault, name),
+            key: key(mem, name),
         });
     }
-    let referrers = facets_referencing_medium(&configs, vault, name);
+    let referrers = facets_referencing_medium(&configs, mem, name);
     if !referrers.is_empty() {
         return Err(PipelineEditError::Referenced {
             primitive: "medium",
-            key: key(vault, name),
+            key: key(mem, name),
             referrers,
         });
     }
-    pipeline_store::delete_medium(root, vault, name)?;
+    pipeline_store::delete_medium(root, mem, name)?;
     Ok(())
 }
 
-/// Rename a medium within its vault, updating its embedded `name` and every
+/// Rename a medium within its mem, updating its embedded `name` and every
 /// dependent facet's `medium` reference. No-op when `old == new`.
 pub fn rename_medium(
     root: &Path,
-    vault: &str,
+    mem: &str,
     old: &str,
     new: &str,
 ) -> Result<(), PipelineEditError> {
@@ -182,97 +182,97 @@ pub fn rename_medium(
     let existing = configs
         .mediums
         .iter()
-        .find(|r| r.vault == vault && r.name == old)
+        .find(|r| r.mem == mem && r.name == old)
         .ok_or_else(|| PipelineEditError::NotFound {
             primitive: "medium",
-            key: key(vault, old),
+            key: key(mem, old),
         })?;
-    if medium_exists(&configs, vault, new) {
+    if medium_exists(&configs, mem, new) {
         return Err(PipelineEditError::RenameTargetExists {
             primitive: "medium",
-            key: key(vault, new),
+            key: key(mem, new),
         });
     }
     let mut renamed = existing.config.clone();
     renamed.name = new.to_string();
     // Write the new stem first, then repoint referrers, then drop the old —
     // no point in the sequence leaves a facet pointing at a missing medium.
-    pipeline_store::write_medium(root, vault, new, &renamed)?;
-    for facet in facets_referencing_medium(&configs, vault, old) {
-        if let Some(rec) = configs.facets.iter().find(|r| r.vault == vault && r.name == facet) {
+    pipeline_store::write_medium(root, mem, new, &renamed)?;
+    for facet in facets_referencing_medium(&configs, mem, old) {
+        if let Some(rec) = configs.facets.iter().find(|r| r.mem == mem && r.name == facet) {
             let mut updated = rec.config.clone();
             updated.medium = new.to_string();
-            pipeline_store::write_facet(root, vault, &facet, &updated)?;
+            pipeline_store::write_facet(root, mem, &facet, &updated)?;
         }
     }
-    pipeline_store::delete_medium(root, vault, old)?;
+    pipeline_store::delete_medium(root, mem, old)?;
     Ok(())
 }
 
 // --- Facet -----------------------------------------------------------------
 
-/// Create a facet. Refuses if `(vault, name)` already holds one.
+/// Create a facet. Refuses if `(mem, name)` already holds one.
 pub fn add_facet(
     root: &Path,
-    vault: &str,
+    mem: &str,
     name: &str,
     facet: &Facet,
 ) -> Result<(), PipelineEditError> {
     let configs = pipeline_store::load_pipeline_configs(root)?;
-    if facet_exists(&configs, vault, name) {
+    if facet_exists(&configs, mem, name) {
         return Err(PipelineEditError::AlreadyExists {
             primitive: "facet",
-            key: key(vault, name),
+            key: key(mem, name),
         });
     }
-    pipeline_store::write_facet(root, vault, name, facet)?;
+    pipeline_store::write_facet(root, mem, name, facet)?;
     Ok(())
 }
 
-/// Overwrite an existing facet. Refuses if `(vault, name)` does not exist.
+/// Overwrite an existing facet. Refuses if `(mem, name)` does not exist.
 pub fn update_facet(
     root: &Path,
-    vault: &str,
+    mem: &str,
     name: &str,
     facet: &Facet,
 ) -> Result<(), PipelineEditError> {
     let configs = pipeline_store::load_pipeline_configs(root)?;
-    if !facet_exists(&configs, vault, name) {
+    if !facet_exists(&configs, mem, name) {
         return Err(PipelineEditError::NotFound {
             primitive: "facet",
-            key: key(vault, name),
+            key: key(mem, name),
         });
     }
-    pipeline_store::write_facet(root, vault, name, facet)?;
+    pipeline_store::write_facet(root, mem, name, facet)?;
     Ok(())
 }
 
-/// Delete a facet. Refuses if any projection in the same vault references it.
-pub fn delete_facet(root: &Path, vault: &str, name: &str) -> Result<(), PipelineEditError> {
+/// Delete a facet. Refuses if any projection in the same mem references it.
+pub fn delete_facet(root: &Path, mem: &str, name: &str) -> Result<(), PipelineEditError> {
     let configs = pipeline_store::load_pipeline_configs(root)?;
-    if !facet_exists(&configs, vault, name) {
+    if !facet_exists(&configs, mem, name) {
         return Err(PipelineEditError::NotFound {
             primitive: "facet",
-            key: key(vault, name),
+            key: key(mem, name),
         });
     }
-    let referrers = projections_referencing_facet(&configs, vault, name);
+    let referrers = projections_referencing_facet(&configs, mem, name);
     if !referrers.is_empty() {
         return Err(PipelineEditError::Referenced {
             primitive: "facet",
-            key: key(vault, name),
+            key: key(mem, name),
             referrers,
         });
     }
-    pipeline_store::delete_facet(root, vault, name)?;
+    pipeline_store::delete_facet(root, mem, name)?;
     Ok(())
 }
 
-/// Rename a facet within its vault, updating its embedded `name` and every
+/// Rename a facet within its mem, updating its embedded `name` and every
 /// dependent projection's `source_facets` entry. No-op when `old == new`.
 pub fn rename_facet(
     root: &Path,
-    vault: &str,
+    mem: &str,
     old: &str,
     new: &str,
 ) -> Result<(), PipelineEditError> {
@@ -283,100 +283,100 @@ pub fn rename_facet(
     let existing = configs
         .facets
         .iter()
-        .find(|r| r.vault == vault && r.name == old)
+        .find(|r| r.mem == mem && r.name == old)
         .ok_or_else(|| PipelineEditError::NotFound {
             primitive: "facet",
-            key: key(vault, old),
+            key: key(mem, old),
         })?;
-    if facet_exists(&configs, vault, new) {
+    if facet_exists(&configs, mem, new) {
         return Err(PipelineEditError::RenameTargetExists {
             primitive: "facet",
-            key: key(vault, new),
+            key: key(mem, new),
         });
     }
     let mut renamed = existing.config.clone();
     renamed.name = new.to_string();
-    pipeline_store::write_facet(root, vault, new, &renamed)?;
-    for proj in projections_referencing_facet(&configs, vault, old) {
-        if let Some(rec) = configs.projections.iter().find(|r| r.vault == vault && r.name == proj) {
+    pipeline_store::write_facet(root, mem, new, &renamed)?;
+    for proj in projections_referencing_facet(&configs, mem, old) {
+        if let Some(rec) = configs.projections.iter().find(|r| r.mem == mem && r.name == proj) {
             let mut updated = rec.config.clone();
             for f in updated.source_facets.iter_mut() {
                 if f == old {
                     *f = new.to_string();
                 }
             }
-            pipeline_store::write_projection(root, vault, &proj, &updated)?;
+            pipeline_store::write_projection(root, mem, &proj, &updated)?;
         }
     }
-    pipeline_store::delete_facet(root, vault, old)?;
+    pipeline_store::delete_facet(root, mem, old)?;
     Ok(())
 }
 
 // --- Projection ------------------------------------------------------------
 
-/// Create a projection. Refuses if `(vault, name)` already holds one.
+/// Create a projection. Refuses if `(mem, name)` already holds one.
 pub fn add_projection(
     root: &Path,
-    vault: &str,
+    mem: &str,
     name: &str,
     projection: &Projection,
 ) -> Result<(), PipelineEditError> {
     let configs = pipeline_store::load_pipeline_configs(root)?;
-    if projection_exists(&configs, vault, name) {
+    if projection_exists(&configs, mem, name) {
         return Err(PipelineEditError::AlreadyExists {
             primitive: "projection",
-            key: key(vault, name),
+            key: key(mem, name),
         });
     }
-    pipeline_store::write_projection(root, vault, name, projection)?;
+    pipeline_store::write_projection(root, mem, name, projection)?;
     Ok(())
 }
 
-/// Overwrite an existing projection. Refuses if `(vault, name)` does not exist.
+/// Overwrite an existing projection. Refuses if `(mem, name)` does not exist.
 pub fn update_projection(
     root: &Path,
-    vault: &str,
+    mem: &str,
     name: &str,
     projection: &Projection,
 ) -> Result<(), PipelineEditError> {
     let configs = pipeline_store::load_pipeline_configs(root)?;
-    if !projection_exists(&configs, vault, name) {
+    if !projection_exists(&configs, mem, name) {
         return Err(PipelineEditError::NotFound {
             primitive: "projection",
-            key: key(vault, name),
+            key: key(mem, name),
         });
     }
-    pipeline_store::write_projection(root, vault, name, projection)?;
+    pipeline_store::write_projection(root, mem, name, projection)?;
     Ok(())
 }
 
 /// Delete a projection. Refuses if any ingest still runs it.
-pub fn delete_projection(root: &Path, vault: &str, name: &str) -> Result<(), PipelineEditError> {
+pub fn delete_projection(root: &Path, mem: &str, name: &str) -> Result<(), PipelineEditError> {
     let configs = pipeline_store::load_pipeline_configs(root)?;
-    if !projection_exists(&configs, vault, name) {
+    if !projection_exists(&configs, mem, name) {
         return Err(PipelineEditError::NotFound {
             primitive: "projection",
-            key: key(vault, name),
+            key: key(mem, name),
         });
     }
-    let referrers = ingests_referencing_projection(&configs, vault, name);
+    let referrers = ingests_referencing_projection(&configs, mem, name);
     if !referrers.is_empty() {
         return Err(PipelineEditError::Referenced {
             primitive: "projection",
-            key: key(vault, name),
+            key: key(mem, name),
             referrers,
         });
     }
-    pipeline_store::delete_projection(root, vault, name)?;
+    pipeline_store::delete_projection(root, mem, name)?;
     Ok(())
 }
 
-/// Rename a projection within its vault (a projection has no embedded name, so
+/// Rename a projection within its mem (a projection has no embedded name, so
 /// the file moves), repointing every ingest whose `projection` was
-/// `<vault>/<old>`. No-op when `old == new`.
+/// `<mem>/<old>`. No-op when `old == new`.
 pub fn rename_projection(
     root: &Path,
-    vault: &str,
+    mem: &str,
     old: &str,
     new: &str,
 ) -> Result<(), PipelineEditError> {
@@ -384,21 +384,21 @@ pub fn rename_projection(
         return Ok(());
     }
     let configs = pipeline_store::load_pipeline_configs(root)?;
-    if !projection_exists(&configs, vault, old) {
+    if !projection_exists(&configs, mem, old) {
         return Err(PipelineEditError::NotFound {
             primitive: "projection",
-            key: key(vault, old),
+            key: key(mem, old),
         });
     }
-    if projection_exists(&configs, vault, new) {
+    if projection_exists(&configs, mem, new) {
         return Err(PipelineEditError::RenameTargetExists {
             primitive: "projection",
-            key: key(vault, new),
+            key: key(mem, new),
         });
     }
-    pipeline_store::rename_projection(root, vault, old, new)?;
-    let new_ref = key(vault, new);
-    for ingest in ingests_referencing_projection(&configs, vault, old) {
+    pipeline_store::rename_projection(root, mem, old, new)?;
+    let new_ref = key(mem, new);
+    for ingest in ingests_referencing_projection(&configs, mem, old) {
         if let Some(rec) = configs.ingests.iter().find(|r| r.name == ingest) {
             let mut updated = rec.config.clone();
             updated.projection = new_ref.clone();
@@ -410,10 +410,10 @@ pub fn rename_projection(
 
 // --- Ingest ----------------------------------------------------------------
 //
-// Ingests are *flat* (workspace-level, not vault-scoped) and are the leaf of
+// Ingests are *flat* (workspace-level, not mem-scoped) and are the leaf of
 // the pipeline — nothing references an ingest — so add/update/delete only
 // check the ingest's own existence; there is no referrer gate on delete. An
-// ingest's `projection` field points at a `<vault>/<name>` projection key
+// ingest's `projection` field points at a `<mem>/<name>` projection key
 // (delete_projection enforces the inverse integrity).
 
 fn ingest_exists(c: &PipelineConfigs, name: &str) -> bool {
@@ -505,129 +505,129 @@ impl Engine {
     /// Create a medium and refresh the in-memory snapshot. See [`add_medium`].
     pub fn add_medium(
         &mut self,
-        vault: &str,
+        mem: &str,
         name: &str,
         medium: &Medium,
     ) -> Result<(), PipelineEditError> {
         let root = self.pipeline_edit_root()?;
-        add_medium(&root, vault, name, medium)?;
+        add_medium(&root, mem, name, medium)?;
         self.refresh_pipeline_configs(&root)
     }
 
     /// Overwrite a medium and refresh the snapshot. See [`update_medium`].
     pub fn update_medium(
         &mut self,
-        vault: &str,
+        mem: &str,
         name: &str,
         medium: &Medium,
     ) -> Result<(), PipelineEditError> {
         let root = self.pipeline_edit_root()?;
-        update_medium(&root, vault, name, medium)?;
+        update_medium(&root, mem, name, medium)?;
         self.refresh_pipeline_configs(&root)
     }
 
     /// Delete a medium and refresh the snapshot. See [`delete_medium`].
-    pub fn delete_medium(&mut self, vault: &str, name: &str) -> Result<(), PipelineEditError> {
+    pub fn delete_medium(&mut self, mem: &str, name: &str) -> Result<(), PipelineEditError> {
         let root = self.pipeline_edit_root()?;
-        delete_medium(&root, vault, name)?;
+        delete_medium(&root, mem, name)?;
         self.refresh_pipeline_configs(&root)
     }
 
     /// Rename a medium and refresh the snapshot. See [`rename_medium`].
     pub fn rename_medium(
         &mut self,
-        vault: &str,
+        mem: &str,
         old: &str,
         new: &str,
     ) -> Result<(), PipelineEditError> {
         let root = self.pipeline_edit_root()?;
-        rename_medium(&root, vault, old, new)?;
+        rename_medium(&root, mem, old, new)?;
         self.refresh_pipeline_configs(&root)
     }
 
     /// Create a facet and refresh the snapshot. See [`add_facet`].
     pub fn add_facet(
         &mut self,
-        vault: &str,
+        mem: &str,
         name: &str,
         facet: &Facet,
     ) -> Result<(), PipelineEditError> {
         let root = self.pipeline_edit_root()?;
-        add_facet(&root, vault, name, facet)?;
+        add_facet(&root, mem, name, facet)?;
         self.refresh_pipeline_configs(&root)
     }
 
     /// Overwrite a facet and refresh the snapshot. See [`update_facet`].
     pub fn update_facet(
         &mut self,
-        vault: &str,
+        mem: &str,
         name: &str,
         facet: &Facet,
     ) -> Result<(), PipelineEditError> {
         let root = self.pipeline_edit_root()?;
-        update_facet(&root, vault, name, facet)?;
+        update_facet(&root, mem, name, facet)?;
         self.refresh_pipeline_configs(&root)
     }
 
     /// Delete a facet and refresh the snapshot. See [`delete_facet`].
-    pub fn delete_facet(&mut self, vault: &str, name: &str) -> Result<(), PipelineEditError> {
+    pub fn delete_facet(&mut self, mem: &str, name: &str) -> Result<(), PipelineEditError> {
         let root = self.pipeline_edit_root()?;
-        delete_facet(&root, vault, name)?;
+        delete_facet(&root, mem, name)?;
         self.refresh_pipeline_configs(&root)
     }
 
     /// Rename a facet and refresh the snapshot. See [`rename_facet`].
     pub fn rename_facet(
         &mut self,
-        vault: &str,
+        mem: &str,
         old: &str,
         new: &str,
     ) -> Result<(), PipelineEditError> {
         let root = self.pipeline_edit_root()?;
-        rename_facet(&root, vault, old, new)?;
+        rename_facet(&root, mem, old, new)?;
         self.refresh_pipeline_configs(&root)
     }
 
     /// Create a projection and refresh the snapshot. See [`add_projection`].
     pub fn add_projection(
         &mut self,
-        vault: &str,
+        mem: &str,
         name: &str,
         projection: &Projection,
     ) -> Result<(), PipelineEditError> {
         let root = self.pipeline_edit_root()?;
-        add_projection(&root, vault, name, projection)?;
+        add_projection(&root, mem, name, projection)?;
         self.refresh_pipeline_configs(&root)
     }
 
     /// Overwrite a projection and refresh the snapshot. See [`update_projection`].
     pub fn update_projection(
         &mut self,
-        vault: &str,
+        mem: &str,
         name: &str,
         projection: &Projection,
     ) -> Result<(), PipelineEditError> {
         let root = self.pipeline_edit_root()?;
-        update_projection(&root, vault, name, projection)?;
+        update_projection(&root, mem, name, projection)?;
         self.refresh_pipeline_configs(&root)
     }
 
     /// Delete a projection and refresh the snapshot. See [`delete_projection`].
-    pub fn delete_projection(&mut self, vault: &str, name: &str) -> Result<(), PipelineEditError> {
+    pub fn delete_projection(&mut self, mem: &str, name: &str) -> Result<(), PipelineEditError> {
         let root = self.pipeline_edit_root()?;
-        delete_projection(&root, vault, name)?;
+        delete_projection(&root, mem, name)?;
         self.refresh_pipeline_configs(&root)
     }
 
     /// Rename a projection and refresh the snapshot. See [`rename_projection`].
     pub fn rename_projection(
         &mut self,
-        vault: &str,
+        mem: &str,
         old: &str,
         new: &str,
     ) -> Result<(), PipelineEditError> {
         let root = self.pipeline_edit_root()?;
-        rename_projection(&root, vault, old, new)?;
+        rename_projection(&root, mem, old, new)?;
         self.refresh_pipeline_configs(&root)
     }
 
@@ -670,61 +670,61 @@ impl Engine {
     /// [`Self::add_medium`] from a JSON-encoded [`Medium`].
     pub fn add_medium_json(
         &mut self,
-        vault: &str,
+        mem: &str,
         name: &str,
         medium_json: &str,
     ) -> Result<(), PipelineEditError> {
-        self.add_medium(vault, name, &parse_json(medium_json, "medium")?)
+        self.add_medium(mem, name, &parse_json(medium_json, "medium")?)
     }
 
     /// [`Self::update_medium`] from a JSON-encoded [`Medium`].
     pub fn update_medium_json(
         &mut self,
-        vault: &str,
+        mem: &str,
         name: &str,
         medium_json: &str,
     ) -> Result<(), PipelineEditError> {
-        self.update_medium(vault, name, &parse_json(medium_json, "medium")?)
+        self.update_medium(mem, name, &parse_json(medium_json, "medium")?)
     }
 
     /// [`Self::add_facet`] from a JSON-encoded [`Facet`].
     pub fn add_facet_json(
         &mut self,
-        vault: &str,
+        mem: &str,
         name: &str,
         facet_json: &str,
     ) -> Result<(), PipelineEditError> {
-        self.add_facet(vault, name, &parse_json(facet_json, "facet")?)
+        self.add_facet(mem, name, &parse_json(facet_json, "facet")?)
     }
 
     /// [`Self::update_facet`] from a JSON-encoded [`Facet`].
     pub fn update_facet_json(
         &mut self,
-        vault: &str,
+        mem: &str,
         name: &str,
         facet_json: &str,
     ) -> Result<(), PipelineEditError> {
-        self.update_facet(vault, name, &parse_json(facet_json, "facet")?)
+        self.update_facet(mem, name, &parse_json(facet_json, "facet")?)
     }
 
     /// [`Self::add_projection`] from a JSON-encoded [`Projection`].
     pub fn add_projection_json(
         &mut self,
-        vault: &str,
+        mem: &str,
         name: &str,
         projection_json: &str,
     ) -> Result<(), PipelineEditError> {
-        self.add_projection(vault, name, &parse_json(projection_json, "projection")?)
+        self.add_projection(mem, name, &parse_json(projection_json, "projection")?)
     }
 
     /// [`Self::update_projection`] from a JSON-encoded [`Projection`].
     pub fn update_projection_json(
         &mut self,
-        vault: &str,
+        mem: &str,
         name: &str,
         projection_json: &str,
     ) -> Result<(), PipelineEditError> {
-        self.update_projection(vault, name, &parse_json(projection_json, "projection")?)
+        self.update_projection(mem, name, &parse_json(projection_json, "projection")?)
     }
 
     /// [`Self::add_ingest`] from a JSON-encoded [`Ingest`].
@@ -783,8 +783,8 @@ mod tests {
         Projection {
             intent: Some("test".to_string()),
             source_facets: facets.iter().map(|s| s.to_string()).collect(),
-            reference_vaults: vec![],
-            destination_vault: "v".to_string(),
+            reference_mems: vec![],
+            destination_mem: "v".to_string(),
         }
     }
 

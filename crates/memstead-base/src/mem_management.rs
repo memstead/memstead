@@ -1,27 +1,27 @@
 //! Compiled lifecycle-policy rule sets — first-match-wins glob lookup
-//! over the `[[vault_management.create]]` /
-//! `[[vault_management.delete]]` arrays surfaced in `workspace.toml`.
+//! over the `[[mem_management.create]]` /
+//! `[[mem_management.delete]]` arrays surfaced in `workspace.toml`.
 //!
 //! The data carriers ([`crate::workspace::CreateRuleSetting`],
 //! [`crate::workspace::DeleteRuleSetting`]) live with the workspace
 //! types in [`crate::workspace`]; this module owns the *compiled*
 //! matcher view that handlers call to decide whether a candidate
-//! vault path matches an operator-allowed rule.
+//! mem path matches an operator-allowed rule.
 //!
 //! Each rule's pattern is a gitignore-style glob: `*` does not cross
 //! `/`; `**` matches zero-or-more path segments. Matching is
 //! case-sensitive, no normalization. The matcher targets the composed
-//! candidate `<path>/<name>` (the vault's full hierarchical branch
-//! path on the vault-repo) so rules can scope to a directory under
+//! candidate `<path>/<name>` (the mem's full hierarchical branch
+//! path on the mem-repo) so rules can scope to a directory under
 //! the registry tree without separate path-glob plumbing. Flat-layout
-//! vaults pass their leaf name as the candidate.
+//! mems pass their leaf name as the candidate.
 //!
-//! **Boundary note.** The lifecycle orchestrators (`create_vault`,
-//! `delete_vault`, their params/responses, the shared `NOTE_MAX_LEN`
-//! cap, the `validate_vault_path` helper) live in
-//! [`memstead_engine::vault_management`]. The matcher primitives stay
+//! **Boundary note.** The lifecycle orchestrators (`create_mem`,
+//! `delete_mem`, their params/responses, the shared `NOTE_MAX_LEN`
+//! cap, the `validate_mem_path` helper) live in
+//! [`memstead_engine::mem_management`]. The matcher primitives stay
 //! here because the basis engine's
-//! [`crate::Engine::cross_vault_link_allowed`] synthesises a
+//! [`crate::Engine::cross_mem_link_allowed`] synthesises a
 //! [`CreateRuleSet`] on multi-folder workspaces — they are a basis
 //! policy primitive shared by both flavors.
 
@@ -54,7 +54,7 @@ pub enum MatcherSetError {
 /// `memstead_health` and error envelopes). The `set` is the compiled form
 /// used for `matches`. Empty-input construction is valid and produces
 /// a matcher that rejects every candidate — the natural default when
-/// `[vault_management]` is absent.
+/// `[mem_management]` is absent.
 #[derive(Debug, Clone)]
 pub struct MatcherSet {
     patterns: Vec<String>,
@@ -97,7 +97,7 @@ impl MatcherSet {
     }
 
     /// Original glob strings in input order. Consumed by health
-    /// surfaces and `VAULT_PATH_NOT_ALLOWED` envelopes.
+    /// surfaces and `MEM_PATH_NOT_ALLOWED` envelopes.
     pub fn patterns(&self) -> &[String] {
         &self.patterns
     }
@@ -117,7 +117,7 @@ impl Default for MatcherSet {
     }
 }
 
-/// Compiled `[[vault_management.create]]` rule set. Each rule is a
+/// Compiled `[[mem_management.create]]` rule set. Each rule is a
 /// pre-built `globset::Glob` plus the raw [`CreateRuleSetting`]. The
 /// underlying `GlobSet` carries the same globs in declaration order
 /// so [`Self::first_match`] resolves to the first-listed rule whose
@@ -128,7 +128,7 @@ pub struct CreateRuleSet {
     set: GlobSet,
 }
 
-/// Compiled `[[vault_management.delete]]` rule set. Same first-match
+/// Compiled `[[mem_management.delete]]` rule set. Same first-match
 /// semantics as [`CreateRuleSet`], minus the schema dimension.
 #[derive(Debug, Clone)]
 pub struct DeleteRuleSet {

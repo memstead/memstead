@@ -41,7 +41,7 @@ impl Engine {
     /// abort the call and propagate via `Err`.
     ///
     /// Idempotency: after the per-source re-renders land, the method
-    /// runs `reload_each_writable_vault` so subsequent calls to
+    /// runs `reload_each_writable_mem` so subsequent calls to
     /// `health` / `load_warnings` reflect the post-recovery state.
     /// Re-running on an already-clean workspace returns an empty
     /// `entries` list with no commits.
@@ -156,12 +156,12 @@ impl Engine {
             });
         }
 
-        // Reload writable vaults so `load_warnings` reflects the
+        // Reload writable mems so `load_warnings` reflects the
         // post-recovery state — drops that re-rendered cleanly drop
         // out; drops that failed (or read-only ones that were always
         // out of scope) survive.
         if !entries.is_empty() {
-            self.reload_each_writable_vault()?;
+            self.reload_each_writable_mem()?;
         }
 
         Ok(ParseRecoveryReport {
@@ -224,14 +224,14 @@ impl Engine {
 mod tests {
     use tempfile::TempDir;
 
-    use crate::backend::VaultBackend;
+    use crate::backend::MemBackend;
     use crate::engine::Engine;
     use crate::engine::test_helpers::{
         archive_mount, build_archive, cli_actor, folder_mount,
         write_schema_files_with_default_type,
     };
     use crate::ops::{ParseRecoveryEntry, WarningHint};
-    use crate::storage::{ArchiveBackend, FilesystemVaultWriter};
+    use crate::storage::{ArchiveBackend, FilesystemMemWriter};
     use crate::workspace::{Mount, MountCapability, MountLifecycle, MountStorage};
 
     use memstead_schema::SchemaRef;
@@ -243,16 +243,16 @@ mod tests {
     #[test]
     fn apply_parse_recovery_clears_writable_drops_in_one_call() {
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().to_path_buf();
+        let mem_dir = tmp.path().to_path_buf();
         let target = "---\ntype: spec\n---\n# Target\n\n## Identity\n\nTarget body.\n";
         let source = "---\ntype: spec\n---\n# Source\n\n## Identity\n\nSource body.\n\n## Relationships\n\n- **MADE_UP_TYPE_A**: [[specs--target]]\n- **MADE_UP_TYPE_B**: [[specs--target]]\n";
-        std::fs::write(vault_dir.join("target.md"), target).unwrap();
-        std::fs::write(vault_dir.join("source.md"), source).unwrap();
+        std::fs::write(mem_dir.join("target.md"), target).unwrap();
+        std::fs::write(mem_dir.join("source.md"), source).unwrap();
 
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
-            folder_mount("specs", vault_dir.clone()),
-            Box::new(writer) as Box<dyn VaultBackend>,
+            folder_mount("specs", mem_dir.clone()),
+            Box::new(writer) as Box<dyn MemBackend>,
         )])
         .unwrap();
 
@@ -286,7 +286,7 @@ mod tests {
             .collect();
         assert!(post.is_empty(), "drops must be cleared, got {post:?}");
 
-        let cleaned = std::fs::read_to_string(vault_dir.join("source.md")).unwrap();
+        let cleaned = std::fs::read_to_string(mem_dir.join("source.md")).unwrap();
         assert!(!cleaned.contains("MADE_UP_TYPE_A"), "cleaned source: {cleaned}");
         assert!(!cleaned.contains("MADE_UP_TYPE_B"), "cleaned source: {cleaned}");
     }
@@ -341,16 +341,16 @@ mod tests {
     #[test]
     fn apply_parse_recovery_is_idempotent_after_clean_state() {
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().to_path_buf();
+        let mem_dir = tmp.path().to_path_buf();
         let target = "---\ntype: spec\n---\n# Target\n\n## Identity\n\nTarget.\n";
         let source = "---\ntype: spec\n---\n# Source\n\n## Identity\n\nSource.\n\n## Relationships\n\n- **MADE_UP_TYPE**: [[specs--target]]\n";
-        std::fs::write(vault_dir.join("target.md"), target).unwrap();
-        std::fs::write(vault_dir.join("source.md"), source).unwrap();
+        std::fs::write(mem_dir.join("target.md"), target).unwrap();
+        std::fs::write(mem_dir.join("source.md"), source).unwrap();
 
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
-            folder_mount("specs", vault_dir),
-            Box::new(writer) as Box<dyn VaultBackend>,
+            folder_mount("specs", mem_dir),
+            Box::new(writer) as Box<dyn MemBackend>,
         )])
         .unwrap();
 
@@ -392,11 +392,11 @@ mod tests {
             ],
         );
 
-        let writer = FilesystemVaultWriter::new(writable_dir.clone());
+        let writer = FilesystemMemWriter::new(writable_dir.clone());
         let mut engine = Engine::from_mounts(vec![
             (
                 folder_mount("specs", writable_dir),
-                Box::new(writer) as Box<dyn VaultBackend>,
+                Box::new(writer) as Box<dyn MemBackend>,
             ),
             (
                 archive_mount("external", archive_path.clone()),
@@ -461,26 +461,26 @@ community:
 "#;
         write_schema_files_with_default_type(&schemas_dir, "link-test", manifest, &["doc"]);
 
-        let vault_dir = tmp.path().join("vault");
-        std::fs::create_dir_all(&vault_dir).unwrap();
+        let mem_dir = tmp.path().join("mem");
+        std::fs::create_dir_all(&mem_dir).unwrap();
         let target = "---\ntype: doc\n---\n# Target\n\n## Body\n\nbody\n";
         let source = "---\ntype: doc\n---\n# Source\n\n## Body\n\nrefer to [[specs--target]] here\n\n## Relationships\n\n- **BADTYPE**: [[specs--target]]\n";
-        std::fs::write(vault_dir.join("target.md"), target).unwrap();
-        std::fs::write(vault_dir.join("source.md"), source).unwrap();
+        std::fs::write(mem_dir.join("target.md"), target).unwrap();
+        std::fs::write(mem_dir.join("source.md"), source).unwrap();
 
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
         let pin = SchemaRef::new("link-test", semver::Version::new(0, 1, 0));
         let mount = Mount {
-            vault: "specs".to_string(),
+            mem: "specs".to_string(),
             schema: Some(pin),
-            storage: MountStorage::Folder { path: vault_dir.clone() },
+            storage: MountStorage::Folder { path: mem_dir.clone() },
             capability: MountCapability::Write,
             lifecycle: MountLifecycle::Eager,
             cross_linkable: true,
             migration_target: None,
         };
         let mut engine = Engine::from_mounts_with_schemas_dir(
-            vec![(mount, Box::new(writer) as Box<dyn VaultBackend>)],
+            vec![(mount, Box::new(writer) as Box<dyn MemBackend>)],
             Some(&schemas_dir),
         )
         .unwrap();
@@ -499,7 +499,7 @@ community:
             "expected the strict validator's typed code, got {:?}",
             entry.reason,
         );
-        let unchanged = std::fs::read_to_string(vault_dir.join("source.md")).unwrap();
+        let unchanged = std::fs::read_to_string(mem_dir.join("source.md")).unwrap();
         assert!(unchanged.contains("BADTYPE"), "source must be unchanged on failure");
 
         let post: Vec<_> = engine

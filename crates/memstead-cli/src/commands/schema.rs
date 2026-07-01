@@ -9,10 +9,10 @@
 //! `_default` weight, …) carry the engine's typed diagnostic.
 //!
 //! `memstead schema install <name|path>` copies a schema package into
-//! the current workspace's local schema storage so a vault can pin it.
+//! the current workspace's local schema storage so a mem can pin it.
 //! It resolves the source — a built-in name (`planning`, `planning@0.1.0`)
 //! or a path to a package directory — validates it, and writes the
-//! package (including any `vault-template.json`) under the folder
+//! package (including any `mem-template.json`) under the folder
 //! backend's fixed `<workspace>/.memstead/schemas/<name>@<version>/`
 //! location. Installing a built-in forks it into local storage, which
 //! shadows the built-in per the resolution order — the customization
@@ -23,7 +23,7 @@
 //! `validate` is flavour-agnostic and touches no workspace; `install`
 //! needs the workspace root (the install destination) but no engine
 //! instance — it writes folder-backend schema storage directly, which
-//! is the documented folder authoring mechanism (not vault-repo state).
+//! is the documented folder authoring mechanism (not mem-repo state).
 
 use std::path::{Path, PathBuf};
 
@@ -53,7 +53,7 @@ pub enum SchemaCommand {
     Validate(ValidateArgs),
 
     /// Install a schema package into the current folder workspace's
-    /// `.memstead/schemas/<name>@<version>/` so a vault can pin it.
+    /// `.memstead/schemas/<name>@<version>/` so a mem can pin it.
     /// `<source>` is a built-in name (`planning`, `planning@0.1.0`) or a
     /// path to a package directory. Validates before copying; idempotent.
     Install(InstallArgs),
@@ -151,15 +151,15 @@ fn install(ctx: &CliContext, args: InstallArgs) -> anyhow::Result<()> {
             }
             Ok(())
         }
-        WorkspaceShape::VaultRepo => install_to_git_branch(ctx, &schema_ref, &files),
+        WorkspaceShape::MemRepo => install_to_git_branch(ctx, &schema_ref, &files),
     }
 }
 
 /// Install onto the git-branch backend — write the package onto the
 /// workspace's `__MEMSTEAD:schemas/` ref through the engine (which owns
-/// vault-repo state). Only present in the `vault-repo`-featured build;
+/// mem-repo state). Only present in the `mem-repo`-featured build;
 /// the basis binary refuses (it has no git-branch engine).
-#[cfg(feature = "vault-repo")]
+#[cfg(feature = "mem-repo")]
 fn install_to_git_branch(
     ctx: &CliContext,
     schema_ref: &SchemaRef,
@@ -167,12 +167,12 @@ fn install_to_git_branch(
 ) -> anyhow::Result<()> {
     use crate::setup::CliEngine;
     let engine = match ctx.cli_engine()? {
-        CliEngine::VaultRepo(e) => e,
+        CliEngine::MemRepo(e) => e,
         CliEngine::Filesystem(_) => {
             return Err(CliError::new(
                 ExitKind::Generic,
                 "INTERNAL",
-                "workspace resolved as vault-repo but engine came back filesystem".to_string(),
+                "workspace resolved as mem-repo but engine came back filesystem".to_string(),
             )
             .into());
         }
@@ -207,7 +207,7 @@ fn install_to_git_branch(
     Ok(())
 }
 
-#[cfg(not(feature = "vault-repo"))]
+#[cfg(not(feature = "mem-repo"))]
 fn install_to_git_branch(
     _ctx: &CliContext,
     _schema_ref: &SchemaRef,
@@ -215,9 +215,9 @@ fn install_to_git_branch(
 ) -> anyhow::Result<()> {
     Err(CliError::new(
         ExitKind::Generic,
-        "VAULT_REPO_NOT_SUPPORTED",
+        "MEM_REPO_NOT_SUPPORTED",
         "this binary was built without git-branch support — use the `memstead` binary to \
-         install a schema into a vault-repo workspace."
+         install a schema into a mem-repo workspace."
             .to_string(),
     )
     .into())
@@ -250,11 +250,11 @@ fn resolve_source(source: &str) -> anyhow::Result<(SchemaRef, Vec<memstead_schem
                 format!("could not collect source for {}: {e}", schema_ref.as_display()),
             )
         })?;
-        // Built-in packages may ship a `vault-template.json`; install it
+        // Built-in packages may ship a `mem-template.json`; install it
         // alongside the schema so the scaffolding travels with the fork.
-        if let Some(tpl) = memstead_schema::builtins::builtin_vault_template(&schema_ref.name) {
+        if let Some(tpl) = memstead_schema::builtins::builtin_mem_template(&schema_ref.name) {
             files.push(memstead_schema::SchemaSourceFile {
-                archive_path: "vault-template.json".to_string(),
+                archive_path: "mem-template.json".to_string(),
                 bytes: serde_json::to_vec_pretty(&tpl).unwrap_or_default(),
             });
         }
@@ -309,7 +309,7 @@ fn resolve_builtin_ref(source: &str) -> anyhow::Result<SchemaRef> {
 }
 
 /// Collect the package files from an on-disk directory: `schema.yaml`,
-/// `types/*.yaml`, and the optional `vault-template.json` / `README.md`.
+/// `types/*.yaml`, and the optional `mem-template.json` / `README.md`.
 fn collect_dir_package(dir: &Path) -> anyhow::Result<Vec<memstead_schema::SchemaSourceFile>> {
     use memstead_schema::SchemaSourceFile;
     let mut out = vec![SchemaSourceFile {
@@ -332,7 +332,7 @@ fn collect_dir_package(dir: &Path) -> anyhow::Result<Vec<memstead_schema::Schema
             }
         }
     }
-    for opt in ["vault-template.json", "README.md"] {
+    for opt in ["mem-template.json", "README.md"] {
         let p = dir.join(opt);
         if p.is_file() {
             out.push(SchemaSourceFile {
@@ -376,7 +376,7 @@ fn write_package(pkg_dir: &Path, files: &[memstead_schema::SchemaSourceFile]) ->
 
 /// The installed-location `# yaml-language-server:` directive for a
 /// package member, or `None` for non-YAML members (README,
-/// vault-template.json). Paths are relative to the member's location
+/// mem-template.json). Paths are relative to the member's location
 /// under `.memstead/schemas/<name>@<version>/` and resolve to the
 /// workspace's `.memstead/meta-schemas/` published by engine boot.
 fn directive_for(archive_path: &str) -> Option<&'static str> {
@@ -462,7 +462,7 @@ mod tests {
     }
 
     /// Installing a built-in by name collects its schema files *and*
-    /// its `vault-template.json`.
+    /// its `mem-template.json`.
     #[test]
     fn resolve_source_for_builtin_includes_schema_and_template() {
         let (schema_ref, files) = resolve_source("planning").expect("planning source collects");
@@ -470,8 +470,8 @@ mod tests {
         let paths: Vec<&str> = files.iter().map(|f| f.archive_path.as_str()).collect();
         assert!(paths.contains(&"schema.yaml"), "got {paths:?}");
         assert!(
-            paths.contains(&"vault-template.json"),
-            "built-in install must carry the vault-template.json, got {paths:?}",
+            paths.contains(&"mem-template.json"),
+            "built-in install must carry the mem-template.json, got {paths:?}",
         );
     }
 
@@ -483,7 +483,7 @@ mod tests {
         std::fs::create_dir_all(src.path().join("types")).unwrap();
         std::fs::write(src.path().join("schema.yaml"), b"name: x\n").unwrap();
         std::fs::write(src.path().join("types/doc.yaml"), b"name: doc\n").unwrap();
-        std::fs::write(src.path().join("vault-template.json"), b"{}\n").unwrap();
+        std::fs::write(src.path().join("mem-template.json"), b"{}\n").unwrap();
 
         let files = collect_dir_package(src.path()).unwrap();
         let dest = tempfile::tempdir().unwrap();
@@ -491,7 +491,7 @@ mod tests {
         write_package(&pkg, &files).unwrap();
 
         // YAML members gain the installed-location directive; bodies and
-        // non-YAML members (vault-template.json) are preserved.
+        // non-YAML members (mem-template.json) are preserved.
         let schema = std::fs::read_to_string(pkg.join("schema.yaml")).unwrap();
         assert_eq!(
             schema,
@@ -502,7 +502,7 @@ mod tests {
             doc,
             "# yaml-language-server: $schema=../../../meta-schemas/type-definition.schema.json\nname: doc\n",
         );
-        assert_eq!(std::fs::read(pkg.join("vault-template.json")).unwrap(), b"{}\n");
+        assert_eq!(std::fs::read(pkg.join("mem-template.json")).unwrap(), b"{}\n");
         // Idempotent: a second write reproduces identical files.
         write_package(&pkg, &files).unwrap();
         assert_eq!(std::fs::read_to_string(pkg.join("schema.yaml")).unwrap(), schema);

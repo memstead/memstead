@@ -4,9 +4,9 @@
 //! Operates on the same masked-text model: fenced code blocks and
 //! inline code spans are excluded from rewriting (matches inside them
 //! remain bit-identical). Used by `Engine::rename_entity`'s
-//! referrer-walk: [`rewrite_bare_slug`] rewrites same-vault
-//! self-references and referrers, [`rewrite_cross_vault_slug`] rewrites
-//! cross-vault referrers.
+//! referrer-walk: [`rewrite_bare_slug`] rewrites same-mem
+//! self-references and referrers, [`rewrite_cross_mem_slug`] rewrites
+//! cross-mem referrers.
 
 use regex::Regex;
 
@@ -26,16 +26,16 @@ fn mask_for_link_scan(text: &str) -> String {
         .into_owned()
 }
 
-/// Rewrite every same-vault `[[<old_slug>]]` (with or without a
+/// Rewrite every same-mem `[[<old_slug>]]` (with or without a
 /// `|label` suffix) in `text` to `[[<new_slug>]]`, preserving the
 /// label and surrounding bytes verbatim. Wiki-links inside fenced
 /// code blocks or inline code spans are not touched.
 ///
-/// Cross-vault forms (`[[<vault>:<slug>]]`, `[[<vault>--<slug>]]`)
+/// Cross-mem forms (`[[<mem>:<slug>]]`, `[[<mem>--<slug>]]`)
 /// are deliberately out of scope here — the renaming entity's own
 /// body uses the bare-slug form for self-references, while external
-/// referrer rewriting (which has its own vault prefix shape) is
-/// handled by [`rewrite_cross_vault_slug`].
+/// referrer rewriting (which has its own mem prefix shape) is
+/// handled by [`rewrite_cross_mem_slug`].
 ///
 /// Returns the rewritten text and a count of how many matches were
 /// rewritten (so callers can short-circuit when nothing changed).
@@ -76,25 +76,25 @@ pub(crate) fn rewrite_bare_slug(text: &str, old_slug: &str, new_slug: &str) -> (
     (out, rewritten)
 }
 
-/// Rewrite every cross-vault wiki-link in `text` whose vault half
-/// matches `old_vault` and slug half matches `old_slug`, changing the
+/// Rewrite every cross-mem wiki-link in `text` whose mem half
+/// matches `old_mem` and slug half matches `old_slug`, changing the
 /// slug to `new_slug` and leaving the separator (`:` or `--`) and any
-/// `|label` suffix intact. Both legal cross-vault forms are handled:
+/// `|label` suffix intact. Both legal cross-mem forms are handled:
 ///
-/// - `[[<old_vault>:<old_slug>]]` → `[[<old_vault>:<new_slug>]]`
-/// - `[[<old_vault>--<old_slug>]]` → `[[<old_vault>--<new_slug>]]`
+/// - `[[<old_mem>:<old_slug>]]` → `[[<old_mem>:<new_slug>]]`
+/// - `[[<old_mem>--<old_slug>]]` → `[[<old_mem>--<new_slug>]]`
 ///
 /// Matches inside fenced code blocks and inline code spans are not
 /// rewritten (same discipline as [`rewrite_bare_slug`]). Slug halves
 /// that don't equal `old_slug` are left alone — this function only
-/// rewrites the renamed entity's cross-vault references, not every
-/// reference from `old_vault`.
+/// rewrites the renamed entity's cross-mem references, not every
+/// reference from `old_mem`.
 ///
 /// Returns the rewritten text plus a count of how many matches were
 /// changed.
-pub(crate) fn rewrite_cross_vault_slug(
+pub(crate) fn rewrite_cross_mem_slug(
     text: &str,
-    old_vault: &str,
+    old_mem: &str,
     old_slug: &str,
     new_slug: &str,
 ) -> (String, usize) {
@@ -115,9 +115,9 @@ pub(crate) fn rewrite_cross_vault_slug(
 
         out.push_str(&text[last_end..whole.start()]);
 
-        let rewritten_inner = match split_cross_vault_target(target) {
-            Some((vault, sep, slug)) if vault == old_vault && slug == old_slug => {
-                Some(format!("{old_vault}{sep}{new_slug}"))
+        let rewritten_inner = match split_cross_mem_target(target) {
+            Some((mem, sep, slug)) if mem == old_mem && slug == old_slug => {
+                Some(format!("{old_mem}{sep}{new_slug}"))
             }
             _ => None,
         };
@@ -140,31 +140,31 @@ pub(crate) fn rewrite_cross_vault_slug(
     (out, rewritten)
 }
 
-/// Decompose a cross-vault wiki-link target half into
-/// `(vault, separator, slug)`. Returns `None` for bare-slug forms.
+/// Decompose a cross-mem wiki-link target half into
+/// `(mem, separator, slug)`. Returns `None` for bare-slug forms.
 ///
 /// Recognised separators (in order): `:` (preferred Tier-2 form),
-/// `--` (the EntityId's own format, ambiguous with same-vault slugs
+/// `--` (the EntityId's own format, ambiguous with same-mem slugs
 /// containing dashes — disambiguation is the caller's concern). The
 /// `:` form wins when both could match because the parser canonicalises
-/// new cross-vault wiki-links to `:`.
-fn split_cross_vault_target(target: &str) -> Option<(&str, &'static str, &str)> {
+/// new cross-mem wiki-links to `:`.
+fn split_cross_mem_target(target: &str) -> Option<(&str, &'static str, &str)> {
     if target.contains("::") {
         // `::` is reserved syntax in the parser — don't split.
         return None;
     }
     if let Some(idx) = target.find(':') {
-        let (vault, rest) = target.split_at(idx);
+        let (mem, rest) = target.split_at(idx);
         let slug = &rest[1..];
-        if !vault.is_empty() && !slug.is_empty() && !vault.contains('/') {
-            return Some((vault, ":", slug));
+        if !mem.is_empty() && !slug.is_empty() && !mem.contains('/') {
+            return Some((mem, ":", slug));
         }
     }
     if let Some(idx) = target.find("--") {
-        let (vault, rest) = target.split_at(idx);
+        let (mem, rest) = target.split_at(idx);
         let slug = &rest[2..];
-        if !vault.is_empty() && !slug.is_empty() && !vault.contains('/') {
-            return Some((vault, "--", slug));
+        if !mem.is_empty() && !slug.is_empty() && !mem.contains('/') {
+            return Some((mem, "--", slug));
         }
     }
     None
@@ -222,7 +222,7 @@ mod tests {
     }
 
     #[test]
-    fn cross_vault_form_is_not_rewritten_by_bare_slug_pass() {
+    fn cross_mem_form_is_not_rewritten_by_bare_slug_pass() {
         let (out, n) =
             rewrite_bare_slug("[[specs:old-slug]] and [[old-slug]]", "old-slug", "new-slug");
         assert_eq!(out, "[[specs:old-slug]] and [[new-slug]]");
@@ -237,24 +237,24 @@ mod tests {
     }
 
     #[test]
-    fn cross_vault_rewrites_colon_form() {
+    fn cross_mem_rewrites_colon_form() {
         let (out, n) =
-            rewrite_cross_vault_slug("see [[specs:old-name]] now", "specs", "old-name", "new-name");
+            rewrite_cross_mem_slug("see [[specs:old-name]] now", "specs", "old-name", "new-name");
         assert_eq!(out, "see [[specs:new-name]] now");
         assert_eq!(n, 1);
     }
 
     #[test]
-    fn cross_vault_rewrites_double_hyphen_form() {
+    fn cross_mem_rewrites_double_hyphen_form() {
         let (out, n) =
-            rewrite_cross_vault_slug("see [[specs--old-name]]", "specs", "old-name", "new-name");
+            rewrite_cross_mem_slug("see [[specs--old-name]]", "specs", "old-name", "new-name");
         assert_eq!(out, "see [[specs--new-name]]");
         assert_eq!(n, 1);
     }
 
     #[test]
-    fn cross_vault_preserves_label() {
-        let (out, n) = rewrite_cross_vault_slug(
+    fn cross_mem_preserves_label() {
+        let (out, n) = rewrite_cross_mem_slug(
             "[[specs:old-name|the spec]]",
             "specs",
             "old-name",
@@ -265,8 +265,8 @@ mod tests {
     }
 
     #[test]
-    fn cross_vault_skips_other_vaults_and_other_slugs() {
-        let (out, n) = rewrite_cross_vault_slug(
+    fn cross_mem_skips_other_mems_and_other_slugs() {
+        let (out, n) = rewrite_cross_mem_slug(
             "[[memos:old-name]] [[specs:other]] [[specs:old-name]]",
             "specs",
             "old-name",
@@ -280,17 +280,17 @@ mod tests {
     }
 
     #[test]
-    fn cross_vault_skips_bare_slug() {
+    fn cross_mem_skips_bare_slug() {
         let (out, n) =
-            rewrite_cross_vault_slug("[[old-name]] [[specs:old-name]]", "specs", "old-name", "new-name");
+            rewrite_cross_mem_slug("[[old-name]] [[specs:old-name]]", "specs", "old-name", "new-name");
         assert_eq!(out, "[[old-name]] [[specs:new-name]]");
         assert_eq!(n, 1);
     }
 
     #[test]
-    fn cross_vault_skips_inside_code_block() {
+    fn cross_mem_skips_inside_code_block() {
         let input = "[[specs:old-name]]\n```\n[[specs:old-name]]\n```\n[[specs:old-name]]";
-        let (out, n) = rewrite_cross_vault_slug(input, "specs", "old-name", "new-name");
+        let (out, n) = rewrite_cross_mem_slug(input, "specs", "old-name", "new-name");
         assert!(out.contains("```\n[[specs:old-name]]\n```"));
         assert_eq!(n, 2);
     }

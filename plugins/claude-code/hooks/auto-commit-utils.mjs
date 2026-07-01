@@ -6,12 +6,12 @@
 // filesystem. The `produceOuterCommit` function at the bottom is the
 // single side-effecting pipeline both the hook and the skill invoke.
 //
-// Per-vault data — the workspace `__MEMSTEAD` ref tip, agent-notes per
-// commit, current per-vault HEADs — comes from `memstead_changes_since(...,
+// Per-mem data — the workspace `__MEMSTEAD` ref tip, agent-notes per
+// commit, current per-mem HEADs — comes from `memstead_changes_since(...,
 // include_notes: true)` (which folds `notes[]` and `memstead_ref` into the
-// response) and `memstead_health { include_config: true }` (per-vault
+// response) and `memstead_health { include_config: true }` (per-mem
 // `vcs.head`).
-// The plugin no longer reads `vault-repo/.git/` directly. Outer-repo
+// The plugin no longer reads `mem-repo/.git/` directly. Outer-repo
 // `git add` / `git commit` / `git log` against the user's project repo
 // (the workspace root) stay — that's the user's git, not Memstead-managed.
 
@@ -30,8 +30,8 @@ const COMMIT_BLOCK_MARKER = '--EOC--';
 
 /**
  * The canonical git empty-tree hash. Used as the sentinel cursor value
- * for "this vault has no commits yet" and as a fallback when a recorded
- * cursor is no longer reachable in its vault gitdir.
+ * for "this mem has no commits yet" and as a fallback when a recorded
+ * cursor is no longer reachable in its mem gitdir.
  */
 export const GIT_EMPTY_TREE_SHA = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
 
@@ -67,21 +67,21 @@ export function resolveOuterVcsConfig(healthResponse) {
 
 /**
  * Given an `memstead_health { include_config: true }` response, return the
- * `[{ name, gitdir, worktree, head }]` list for every writable vault
+ * `[{ name, gitdir, worktree, head }]` list for every writable mem
  * that advertises a `vcs` subobject. `head` is the cached branch-tip
- * SHA; `null` for fresh vaults with no commits yet (consumers
- * substitute the empty-tree sentinel). Read-only vaults and vaults
+ * SHA; `null` for fresh mems with no commits yet (consumers
+ * substitute the empty-tree sentinel). Read-only mems and mems
  * whose gitdir couldn't be resolved are silently dropped — the hook
  * ships the outer-repo commit with the coverage it could actually
  * reach.
  */
-export function extractVaultLayouts(healthResponse) {
-  const vaults = Array.isArray(healthResponse?.vaults) ? healthResponse.vaults : [];
+export function extractMemLayouts(healthResponse) {
+  const mems = Array.isArray(healthResponse?.mems) ? healthResponse.mems : [];
   const writable = new Set(
-    Array.isArray(healthResponse?.writable_vaults) ? healthResponse.writable_vaults : [],
+    Array.isArray(healthResponse?.writable_mems) ? healthResponse.writable_mems : [],
   );
   const out = [];
-  for (const v of vaults) {
+  for (const v of mems) {
     if (!v || typeof v !== 'object') continue;
     if (typeof v.name !== 'string') continue;
     if (!writable.has(v.name)) continue;
@@ -95,7 +95,7 @@ export function extractVaultLayouts(healthResponse) {
 
 /**
  * Translate the engine's `memstead_ref` string (SHA of the unified
- * `__MEMSTEAD` ref — schemas + per-vault configs) into the `[{name, sha}]`
+ * `__MEMSTEAD` ref — schemas + per-mem configs) into the `[{name, sha}]`
  * shape the cursor-trailer formatter expects. Returns a single-element
  * array (one registry-class cursor) when the SHA is present, empty
  * otherwise — pre-migration workspaces leave the field absent.
@@ -117,7 +117,7 @@ export function memsteadRefToArray(memsteadRef) {
  * stderr warning; the cursor still advances past them on the caller's
  * side.
  */
-export function classifyVaultNotes({ vaultName, notes, logger = console }) {
+export function classifyMemNotes({ memName, notes, logger = console }) {
   const agentNotes = [];
   const externalNotes = [];
   if (!Array.isArray(notes)) return { agentNotes, externalNotes };
@@ -126,7 +126,7 @@ export function classifyVaultNotes({ vaultName, notes, logger = console }) {
     const actor = typeof n.actor === 'string' ? n.actor.toLowerCase() : null;
     if (actor === 'agent') {
       agentNotes.push({
-        vault: vaultName,
+        mem: memName,
         note: typeof n.note === 'string' ? n.note : '',
         toolVerb: typeof n.tool_verb === 'string' ? n.tool_verb : '',
         entityId: typeof n.entity_id === 'string' ? n.entity_id : '',
@@ -134,13 +134,13 @@ export function classifyVaultNotes({ vaultName, notes, logger = console }) {
     } else if (actor === 'external') {
       const subject = typeof n.subject === 'string' ? n.subject : '';
       externalNotes.push({
-        vault: vaultName,
+        mem: memName,
         // Strips the `memstead:` prefix.
         summary: subject.replace(/^memstead:\s+/, ''),
       });
     } else {
       logger.error?.(
-        `auto-commit: skipping commit in '${vaultName}' with no recognized Actor trailer: ${n.subject ?? '(no subject)'}`,
+        `auto-commit: skipping commit in '${memName}' with no recognized Actor trailer: ${n.subject ?? '(no subject)'}`,
       );
     }
   }
@@ -148,21 +148,21 @@ export function classifyVaultNotes({ vaultName, notes, logger = console }) {
 }
 
 /**
- * Build one `Memstead-cursor:` trailer line per writable vault, in the
- * order the layouts are provided. `perVaultHeads` is a Map keyed by vault
- * name whose values are SHAs (or the empty-tree SHA for vaults with no
+ * Build one `Memstead-cursor:` trailer line per writable mem, in the
+ * order the layouts are provided. `perMemHeads` is a Map keyed by mem
+ * name whose values are SHAs (or the empty-tree SHA for mems with no
  * commits yet).
  *
  * `registryRefs` (default `[]`) appends `Memstead-cursor: __MEMSTEAD@<sha>`
- * lines after the per-vault block — registry-state pointers so
+ * lines after the per-mem block — registry-state pointers so
  * outer-repo replays don't lose track of workspace-level
- * configs/schemas. Order: vaults first, registry refs last, in the
+ * configs/schemas. Order: mems first, registry refs last, in the
  * order the caller provided them.
  */
-export function formatCursorTrailers(layouts, perVaultHeads, registryRefs = []) {
+export function formatCursorTrailers(layouts, perMemHeads, registryRefs = []) {
   const lines = [];
   for (const layout of layouts) {
-    const sha = perVaultHeads.get(layout.name) ?? GIT_EMPTY_TREE_SHA;
+    const sha = perMemHeads.get(layout.name) ?? GIT_EMPTY_TREE_SHA;
     lines.push(`Memstead-cursor: ${layout.name}@${sha}`);
   }
   for (const ref of registryRefs) {
@@ -174,7 +174,7 @@ export function formatCursorTrailers(layouts, perVaultHeads, registryRefs = []) 
 
 /**
  * Parse the `Memstead-cursor:` trailers out of a commit body into a Map
- * of `vaultName -> sha`. Trailers not matching the `<name>@<sha>` shape
+ * of `memName -> sha`. Trailers not matching the `<name>@<sha>` shape
  * are skipped. Returns an empty map when no trailers are present.
  */
 export function parseCursorTrailers(body) {
@@ -189,21 +189,21 @@ export function parseCursorTrailers(body) {
 }
 
 /**
- * Aggregate per-vault agent + external notes into a single outer-repo
+ * Aggregate per-mem agent + external notes into a single outer-repo
  * commit message. Output shape:
  *
- *   memstead: session changes (<N entities>, <M vaults>)
+ *   memstead: session changes (<N entities>, <M mems>)
  *
  *   Agent notes:
- *   - [<vault>] <note or fallback>
+ *   - [<mem>] <note or fallback>
  *
  *   External edits captured:
- *   - [<vault>] <summary>
+ *   - [<mem>] <summary>
  *
- *   Vaults: vault-a, vault-b
+ *   Mems: mem-a, mem-b
  *   Session: <sessionId>   (omitted when sessionId is null)
- *   Memstead-cursor: vault-a@<sha>
- *   Memstead-cursor: vault-b@<sha>
+ *   Memstead-cursor: mem-a@<sha>
+ *   Memstead-cursor: mem-b@<sha>
  *
  * Either subsection is omitted when empty. Returns `null` when both
  * lists are empty (caller skips the commit).
@@ -211,26 +211,26 @@ export function parseCursorTrailers(body) {
 export function buildOuterCommitMessage({
   agentNotes,
   externalNotes,
-  vaultsTouched,
+  memsTouched,
   sessionId,
   layouts,
-  perVaultHeads,
+  perMemHeads,
   registryRefs = [],
 }) {
   if (agentNotes.length === 0 && externalNotes.length === 0) return null;
 
   const entityIds = new Set();
   for (const n of agentNotes) entityIds.add(n.entityId);
-  for (const n of externalNotes) entityIds.add(`${n.vault}--external`);
+  for (const n of externalNotes) entityIds.add(`${n.mem}--external`);
 
-  const subject = `memstead: session changes (${entityIds.size} entities, ${vaultsTouched.length} vaults)`;
+  const subject = `memstead: session changes (${entityIds.size} entities, ${memsTouched.length} mems)`;
 
   const bodyParts = [];
   if (agentNotes.length > 0) {
     bodyParts.push('Agent notes:');
     for (const n of agentNotes) {
       const firstLine = n.note ? n.note.split(/\r?\n/)[0] : `${n.toolVerb} ${n.entityId}`;
-      bodyParts.push(`- [${n.vault}] ${firstLine}`);
+      bodyParts.push(`- [${n.mem}] ${firstLine}`);
       if (n.note) {
         const rest = n.note.split(/\r?\n/).slice(1);
         for (const line of rest) bodyParts.push(`  ${line}`);
@@ -241,31 +241,31 @@ export function buildOuterCommitMessage({
     if (bodyParts.length > 0) bodyParts.push('');
     bodyParts.push('External edits captured:');
     for (const n of externalNotes) {
-      bodyParts.push(`- [${n.vault}] ${n.summary}`);
+      bodyParts.push(`- [${n.mem}] ${n.summary}`);
     }
   }
 
   const trailers = [];
   trailers.push('');
-  trailers.push(`Vaults: ${vaultsTouched.join(', ')}`);
+  trailers.push(`Mems: ${memsTouched.join(', ')}`);
   if (sessionId) trailers.push(`Session: ${sessionId}`);
-  trailers.push(formatCursorTrailers(layouts, perVaultHeads, registryRefs));
+  trailers.push(formatCursorTrailers(layouts, perMemHeads, registryRefs));
 
   return [subject, '', ...bodyParts, ...trailers].join('\n');
 }
 
 /**
  * Build the seed-commit message for first-run bootstrap. Subject is
- * `memstead: initialize cursor (N vaults)`; body lists each writable
- * vault and its current HEAD; `Memstead-cursor:` trailers point at those
- * HEADs (or the empty-tree SHA for vaults with no commits yet). No
+ * `memstead: initialize cursor (N mems)`; body lists each writable
+ * mem and its current HEAD; `Memstead-cursor:` trailers point at those
+ * HEADs (or the empty-tree SHA for mems with no commits yet). No
  * `Session:` trailer — seeds have no associated agent session.
  */
-export function buildSeedCommitMessage(layouts, perVaultHeads, registryRefs = []) {
-  const subject = `memstead: initialize cursor (${layouts.length} vaults)`;
-  const bodyLines = ['Seeded cursors at current per-vault HEAD for:'];
+export function buildSeedCommitMessage(layouts, perMemHeads, registryRefs = []) {
+  const subject = `memstead: initialize cursor (${layouts.length} mems)`;
+  const bodyLines = ['Seeded cursors at current per-mem HEAD for:'];
   for (const l of layouts) {
-    const sha = perVaultHeads.get(l.name) ?? GIT_EMPTY_TREE_SHA;
+    const sha = perMemHeads.get(l.name) ?? GIT_EMPTY_TREE_SHA;
     const note = sha === GIT_EMPTY_TREE_SHA ? ' (no commits yet)' : '';
     bodyLines.push(`- ${l.name} @ ${sha}${note}`);
   }
@@ -273,13 +273,13 @@ export function buildSeedCommitMessage(layouts, perVaultHeads, registryRefs = []
     if (!ref || typeof ref.name !== 'string' || typeof ref.sha !== 'string') continue;
     bodyLines.push(`- ${ref.name} @ ${ref.sha}`);
   }
-  const trailers = ['', formatCursorTrailers(layouts, perVaultHeads, registryRefs)];
+  const trailers = ['', formatCursorTrailers(layouts, perMemHeads, registryRefs)];
   return [subject, '', ...bodyLines, ...trailers].join('\n');
 }
 
 // ---------------------------------------------------------------------
 // Outer-repo git I/O (operates against the user's project repo at
-// `workspaceRoot` — explicitly NOT vault-repo). The carve-out from the
+// `workspaceRoot` — explicitly NOT mem-repo). The carve-out from the
 // no-direct-git rule lives here.
 // ---------------------------------------------------------------------
 
@@ -371,7 +371,7 @@ function runGit(args, { cwd } = {}) {
 
 /**
  * Inspect an error thrown by an MCP `memstead_changes_since` call and
- * decide whether the per-vault cursor should fall back to the
+ * decide whether the per-mem cursor should fall back to the
  * empty-tree sentinel. The engine maps unreachable `since` refs to
  * `OBJECT_NOT_FOUND` (the dominant case) or `VCS_ERROR` (gix-level
  * failures). Anything else is rethrown — those are real probe
@@ -395,9 +395,9 @@ function isUnreachableSinceError(err) {
  * Returns `{ status, ... }` where `status` is one of:
  *
  *   - 'disabled'       — hook path only: outer_vcs.enabled is not true
- *   - 'no-vaults'      — no writable vaults in this workspace
- *   - 'no-changes'     — nothing pending to commit across all vaults
- *   - 'committed'      — commit landed ({ sha, vaultsTouched })
+ *   - 'no-mems'      — no writable mems in this workspace
+ *   - 'no-changes'     — nothing pending to commit across all mems
+ *   - 'committed'      — commit landed ({ sha, memsTouched })
  *   - 'commit-failed'  — git commit returned non-zero ({ stderr })
  *   - 'probe-failed'   — memstead_health or MCP boot errored ({ message })
  *
@@ -440,9 +440,9 @@ export async function produceOuterCommit({
     }
   }
 
-  const layouts = extractVaultLayouts(healthResponse);
+  const layouts = extractMemLayouts(healthResponse);
   if (layouts.length === 0) {
-    return { status: 'no-vaults' };
+    return { status: 'no-mems' };
   }
 
   // 1. Read the prior cursor from the outer repo log.
@@ -457,7 +457,7 @@ export async function produceOuterCommit({
     try {
       registryRefs = await withEngineFn(cmdSpec, timeoutMs, async (client) => {
         const report = await client.callTool('memstead_changes_since', {
-          vault: layouts[0].name,
+          mem: layouts[0].name,
           since: GIT_EMPTY_TREE_SHA,
           include_notes: true,
         });
@@ -480,41 +480,41 @@ export async function produceOuterCommit({
     });
   }
 
-  // 2. For each writable vault, fetch the entity-delta + agent-notes
+  // 2. For each writable mem, fetch the entity-delta + agent-notes
   //    + workspace-level `__MEMSTEAD` ref in one `memstead_changes_since(
-  //    include_notes: true)` call. Vaults with no changes still get a
+  //    include_notes: true)` call. Mems with no changes still get a
   //    cursor trailer (their HEAD re-stated). Cursor unreachability
   //    falls back to the empty-tree sentinel — the engine reports
   //    `OBJECT_NOT_FOUND` when the prior cursor is no longer in the
-  //    vault's history.
-  let perVault;
+  //    mem's history.
+  let perMem;
   let registryRefs = [];
   try {
-    perVault = await withEngineFn(cmdSpec, timeoutMs, async (client) => {
+    perMem = await withEngineFn(cmdSpec, timeoutMs, async (client) => {
       const acc = [];
       for (const layout of layouts) {
         const priorSha = prior.cursors.get(layout.name);
         const isNewToCursor = priorSha === undefined;
         if (isNewToCursor) {
           logger.error?.(
-            `auto-commit: vault '${layout.name}' is new to the cursor, bundling commits since vault inception`,
+            `auto-commit: mem '${layout.name}' is new to the cursor, bundling commits since mem inception`,
           );
         }
         const initialSince = priorSha ?? GIT_EMPTY_TREE_SHA;
         let report;
         try {
           report = await client.callTool('memstead_changes_since', {
-            vault: layout.name,
+            mem: layout.name,
             since: initialSince,
             include_notes: true,
           });
         } catch (err) {
           if (initialSince !== GIT_EMPTY_TREE_SHA && isUnreachableSinceError(err)) {
             logger.error?.(
-              `auto-commit: vault '${layout.name}' cursor ${initialSince} unreachable — falling back to empty-tree`,
+              `auto-commit: mem '${layout.name}' cursor ${initialSince} unreachable — falling back to empty-tree`,
             );
             report = await client.callTool('memstead_changes_since', {
-              vault: layout.name,
+              mem: layout.name,
               since: GIT_EMPTY_TREE_SHA,
               include_notes: true,
             });
@@ -528,7 +528,7 @@ export async function produceOuterCommit({
             : GIT_EMPTY_TREE_SHA;
         const notes = Array.isArray(report?.notes) ? report.notes : [];
         acc.push({ layout, head, notes });
-        // Workspace-level `__MEMSTEAD` ref is identical across vaults —
+        // Workspace-level `__MEMSTEAD` ref is identical across mems —
         // capture from the first response that carries it.
         if (registryRefs.length === 0 && report?.memstead_ref) {
           registryRefs = memsteadRefToArray(report.memstead_ref);
@@ -540,44 +540,44 @@ export async function produceOuterCommit({
     return { status: 'probe-failed', message: err?.message ?? String(err) };
   }
 
-  // 3. Classify per-vault notes into agent-authored and external-
+  // 3. Classify per-mem notes into agent-authored and external-
   //    captured bullets. Agent-authored bullets become the body of the
   //    outer commit; external bullets are preserved in their own
-  //    section. Vaults whose notes window is empty contribute nothing.
+  //    section. Mems whose notes window is empty contribute nothing.
   const agentNotes = [];
   const externalNotes = [];
-  const vaultsTouched = [];
+  const memsTouched = [];
   const worktreesToStage = [];
-  for (const v of perVault) {
+  for (const v of perMem) {
     if (v.notes.length === 0) continue;
-    const { agentNotes: an, externalNotes: en } = classifyVaultNotes({
-      vaultName: v.layout.name,
+    const { agentNotes: an, externalNotes: en } = classifyMemNotes({
+      memName: v.layout.name,
       notes: v.notes,
       logger,
     });
     if (an.length === 0 && en.length === 0) continue;
     agentNotes.push(...an);
     externalNotes.push(...en);
-    vaultsTouched.push(v.layout.name);
+    memsTouched.push(v.layout.name);
     worktreesToStage.push(v.layout.worktree);
   }
 
-  if (vaultsTouched.length === 0) {
+  if (memsTouched.length === 0) {
     return { status: 'no-changes' };
   }
 
-  // 4. Build the per-vault head map for the trailer block — every
-  //    writable vault gets a cursor entry, not just the ones touched.
-  const perVaultHeads = new Map();
-  for (const v of perVault) perVaultHeads.set(v.layout.name, v.head);
+  // 4. Build the per-mem head map for the trailer block — every
+  //    writable mem gets a cursor entry, not just the ones touched.
+  const perMemHeads = new Map();
+  for (const v of perMem) perMemHeads.set(v.layout.name, v.head);
 
   const commitMessage = buildOuterCommitMessage({
     agentNotes,
     externalNotes,
-    vaultsTouched,
+    memsTouched,
     sessionId,
     layouts,
-    perVaultHeads,
+    perMemHeads,
     registryRefs,
   });
   if (!commitMessage) {
@@ -585,7 +585,7 @@ export async function produceOuterCommit({
   }
 
   // 5. Stage and commit in the outer repo (operates in the user's
-  //    project repo at `workspaceRoot`, not vault-repo).
+  //    project repo at `workspaceRoot`, not mem-repo).
   const addArgs = ['add', '--'];
   for (const w of worktreesToStage) addArgs.push(w);
   const addResult = git(addArgs, { cwd: workspaceRoot });
@@ -623,7 +623,7 @@ export async function produceOuterCommit({
   return {
     status: 'committed',
     sha,
-    vaultsTouched,
+    memsTouched,
     kind: 'normal',
   };
 }
@@ -631,13 +631,13 @@ export async function produceOuterCommit({
 /**
  * Write the first-run seed commit. Distinct subject (`memstead: initialize
  * cursor`) signals "this is where cursor bookkeeping started." Any
- * pending writable-vault files are staged alongside; `--allow-empty` is
+ * pending writable-mem files are staged alongside; `--allow-empty` is
  * passed so a fresh workspace with no pending files still lands the
  * seed as an empty-diff commit (carrying only trailers).
  *
- * Per-vault HEADs come from `layouts[i].head` (sourced from
- * `memstead_health.vaults[].vcs.head` — see `extractVaultLayouts`); fresh
- * vaults with no commits yet show as `null` and fall back to the
+ * Per-mem HEADs come from `layouts[i].head` (sourced from
+ * `memstead_health.mems[].vcs.head` — see `extractMemLayouts`); fresh
+ * mems with no commits yet show as `null` and fall back to the
  * empty-tree sentinel.
  */
 export function writeSeedCommit({
@@ -648,9 +648,9 @@ export function writeSeedCommit({
   logger = console,
   git = runGit,
 }) {
-  const perVaultHeads = new Map();
+  const perMemHeads = new Map();
   for (const layout of layouts) {
-    perVaultHeads.set(
+    perMemHeads.set(
       layout.name,
       typeof layout.head === 'string' && layout.head.length > 0
         ? layout.head
@@ -659,9 +659,9 @@ export function writeSeedCommit({
   }
 
   const refs = Array.isArray(registryRefs) ? registryRefs : [];
-  const message = buildSeedCommitMessage(layouts, perVaultHeads, refs);
+  const message = buildSeedCommitMessage(layouts, perMemHeads, refs);
 
-  // Stage any pending vault files. Missing worktrees (rare; vault root
+  // Stage any pending mem files. Missing worktrees (rare; mem root
   // outside the outer repo) produce add errors — proceed with what we
   // can stage.
   for (const layout of layouts) {
@@ -697,7 +697,7 @@ export function writeSeedCommit({
   return {
     status: 'committed',
     sha,
-    vaultsTouched: layouts.map((l) => l.name),
+    memsTouched: layouts.map((l) => l.name),
     kind: 'seed',
   };
 }

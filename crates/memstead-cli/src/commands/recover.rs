@@ -22,7 +22,7 @@ use crate::output::{print_json, print_markdown};
 use crate::setup::CliContext;
 
 /// Apply parse-time-drift recovery actions across every writable
-/// vault. Read-only-origin warnings remain (out of scope) and are
+/// mem. Read-only-origin warnings remain (out of scope) and are
 /// reported as skipped.
 #[derive(Parser, Debug)]
 pub struct Args {

@@ -1,5 +1,5 @@
 //! Translate a [`crate::ops::Query`] into a tantivy boolean query and execute
-//! it against a single vault's index. Explanation extraction and per-term
+//! it against a single mem's index. Explanation extraction and per-term
 //! snippet metadata are layered on top in [`super::snippets`].
 //!
 //! Semantics (mirrors the flat `Query` contract):
@@ -14,7 +14,7 @@
 //!   baseline so tantivy matches the "everything except …" intent.
 //!
 //! Scoring:
-//! - Per-field boosts derive from the vault schema's `title_weight` and
+//! - Per-field boosts derive from the mem schema's `title_weight` and
 //!   `search_weight` — maxed across types whose section key collides.
 //! - Sections whose max `search_weight` across types is `0.0` are skipped
 //!   for `field: None` queries (they remain reachable via explicit `field`).
@@ -32,25 +32,25 @@ use tantivy::{TantivyDocument, Term, collector::TopDocs};
 use crate::entity::EntityId;
 use crate::ops::Query;
 
-use super::writer::VaultIndex;
+use super::writer::MemIndex;
 
-/// Execute a flat query against one vault's index. Returns `(EntityId, bm25-score)`
+/// Execute a flat query against one mem's index. Returns `(EntityId, bm25-score)`
 /// pairs for every document that matches, sorted by tantivy-native score.
 ///
 /// `top_n` bounds how many hits to pull back; callers that need pagination
 /// totals over the full result set must request a generous ceiling. With an
 /// in-RAM index of ~10k entities, collecting all is microseconds.
-pub fn execute_on_vault(
-    vault_idx: &VaultIndex,
-    vault_schema: Option<&Arc<Schema>>,
+pub fn execute_on_mem(
+    mem_idx: &MemIndex,
+    mem_schema: Option<&Arc<Schema>>,
     query: &Query,
     top_n: usize,
 ) -> tantivy::Result<Vec<(EntityId, f32)>> {
     if query.is_empty() {
         return Ok(Vec::new());
     }
-    let tantivy_query = build_tantivy_query(vault_idx, vault_schema, query)?;
-    let reader = vault_idx.index.reader()?;
+    let tantivy_query = build_tantivy_query(mem_idx, mem_schema, query)?;
+    let reader = mem_idx.index.reader()?;
     let searcher = reader.searcher();
     let top_docs = searcher.search(
         tantivy_query.as_ref(),
@@ -60,7 +60,7 @@ pub fn execute_on_vault(
     let mut out = Vec::with_capacity(top_docs.len());
     for (score, addr) in top_docs {
         let doc: TantivyDocument = searcher.doc(addr)?;
-        if let Some(v) = doc.get_first(vault_idx.fields.id)
+        if let Some(v) = doc.get_first(mem_idx.fields.id)
             && let Some(s) = v.as_str()
         {
             out.push((EntityId(s.to_string()), score));
@@ -72,11 +72,11 @@ pub fn execute_on_vault(
 /// Translate a [`Query`] into the tantivy tree we execute. Public so
 /// the explanation/snippet extraction layer can inspect the shape.
 pub fn build_tantivy_query(
-    vault_idx: &VaultIndex,
-    vault_schema: Option<&Arc<Schema>>,
+    mem_idx: &MemIndex,
+    mem_schema: Option<&Arc<Schema>>,
     query: &Query,
 ) -> tantivy::Result<Box<dyn TantivyQuery>> {
-    let target_fields = resolve_target_fields(vault_idx, vault_schema, query.field.as_deref());
+    let target_fields = resolve_target_fields(mem_idx, mem_schema, query.field.as_deref());
 
     // No indexable target field (e.g. `field: "unknown"`) — the query can't
     // match anything. Return an EmptyQuery rather than building a BooleanQuery
@@ -92,7 +92,7 @@ pub fn build_tantivy_query(
     if !query.any.is_empty() {
         let mut any_clauses: Vec<(Occur, Box<dyn TantivyQuery>)> = Vec::new();
         for term_str in &query.any {
-            if let Some(q) = build_term_across_fields(vault_idx, &target_fields, term_str)? {
+            if let Some(q) = build_term_across_fields(mem_idx, &target_fields, term_str)? {
                 any_clauses.push((Occur::Should, q));
             }
         }
@@ -105,7 +105,7 @@ pub fn build_tantivy_query(
     // is itself a field-disjunction so a match in any targeted field drops
     // the doc.
     for term_str in &query.not {
-        if let Some(q) = build_term_across_fields(vault_idx, &target_fields, term_str)? {
+        if let Some(q) = build_term_across_fields(mem_idx, &target_fields, term_str)? {
             top_clauses.push((Occur::MustNot, q));
         }
     }
@@ -116,7 +116,7 @@ pub fn build_tantivy_query(
     if let Some(phrase) = &query.phrase {
         let mut phrase_clauses: Vec<(Occur, Box<dyn TantivyQuery>)> = Vec::new();
         for (field, boost) in &target_fields {
-            if let Some(pq) = build_phrase_query_for_field(vault_idx, *field, phrase, *boost)? {
+            if let Some(pq) = build_phrase_query_for_field(mem_idx, *field, phrase, *boost)? {
                 phrase_clauses.push((Occur::Should, pq));
             }
         }
@@ -150,13 +150,13 @@ pub fn build_tantivy_query(
 /// within each field — agents rarely pass multi-word terms into `any`
 /// because they split morphology into separate variants.
 fn build_term_across_fields(
-    vault_idx: &VaultIndex,
+    mem_idx: &MemIndex,
     target_fields: &[(Field, f32)],
     term_str: &str,
 ) -> tantivy::Result<Option<Box<dyn TantivyQuery>>> {
     let mut clauses: Vec<(Occur, Box<dyn TantivyQuery>)> = Vec::new();
     for (field, boost) in target_fields {
-        if let Some(q) = build_field_term_query(vault_idx, *field, term_str, *boost)? {
+        if let Some(q) = build_field_term_query(mem_idx, *field, term_str, *boost)? {
             clauses.push((Occur::Should, q));
         }
     }
@@ -176,12 +176,12 @@ fn build_term_across_fields(
 /// multi-token terms (rare — e.g. "client side agent" accidentally pasted
 /// into `any`). Zero tokens after normalization ⇒ `None`.
 fn build_field_term_query(
-    vault_idx: &VaultIndex,
+    mem_idx: &MemIndex,
     field: Field,
     term_str: &str,
     boost: f32,
 ) -> tantivy::Result<Option<Box<dyn TantivyQuery>>> {
-    let tokens = tokenize(vault_idx, field, term_str)?;
+    let tokens = tokenize(mem_idx, field, term_str)?;
     if tokens.is_empty() {
         return Ok(None);
     }
@@ -204,12 +204,12 @@ fn build_field_term_query(
 /// single token degenerates to a `TermQuery` (PhraseQuery::new panics with
 /// fewer than two terms).
 fn build_phrase_query_for_field(
-    vault_idx: &VaultIndex,
+    mem_idx: &MemIndex,
     field: Field,
     phrase: &str,
     boost: f32,
 ) -> tantivy::Result<Option<Box<dyn TantivyQuery>>> {
-    let tokens = tokenize(vault_idx, field, phrase)?;
+    let tokens = tokenize(mem_idx, field, phrase)?;
     if tokens.is_empty() {
         return Ok(None);
     }
@@ -239,8 +239,8 @@ fn apply_boost(query: Box<dyn TantivyQuery>, boost: f32) -> Box<dyn TantivyQuery
 /// Tokenise a free-form string against one field's analyzer so query terms
 /// follow the exact pipeline used at index time. Returns lowercased + ASCII-
 /// folded tokens in document order.
-fn tokenize(vault_idx: &VaultIndex, field: Field, text: &str) -> tantivy::Result<Vec<String>> {
-    let mut analyzer = vault_idx.index.tokenizer_for_field(field)?;
+fn tokenize(mem_idx: &MemIndex, field: Field, text: &str) -> tantivy::Result<Vec<String>> {
+    let mut analyzer = mem_idx.index.tokenizer_for_field(field)?;
     let mut stream = analyzer.token_stream(text);
     let mut tokens = Vec::new();
     while stream.advance() {
@@ -255,23 +255,23 @@ fn tokenize(vault_idx: &VaultIndex, field: Field, text: &str) -> tantivy::Result
 /// title plus every section whose max `search_weight` across types is
 /// greater than zero.
 fn resolve_target_fields(
-    vault_idx: &VaultIndex,
-    vault_schema: Option<&Arc<Schema>>,
+    mem_idx: &MemIndex,
+    mem_schema: Option<&Arc<Schema>>,
     query_field: Option<&str>,
 ) -> Vec<(Field, f32)> {
     match query_field {
-        Some("title") => vec![(vault_idx.fields.title, title_weight(vault_schema).max(1.0))],
-        Some(key) => vault_idx
+        Some("title") => vec![(mem_idx.fields.title, title_weight(mem_schema).max(1.0))],
+        Some(key) => mem_idx
             .fields
             .sections
             .get(key)
-            .map(|&f| vec![(f, section_weight(key, vault_schema).max(1.0))])
+            .map(|&f| vec![(f, section_weight(key, mem_schema).max(1.0))])
             .unwrap_or_default(),
         None => {
-            let mut out = Vec::with_capacity(vault_idx.fields.sections.len() + 1);
-            out.push((vault_idx.fields.title, title_weight(vault_schema).max(1.0)));
-            for (key, &f) in &vault_idx.fields.sections {
-                let w = section_weight(key, vault_schema);
+            let mut out = Vec::with_capacity(mem_idx.fields.sections.len() + 1);
+            out.push((mem_idx.fields.title, title_weight(mem_schema).max(1.0)));
+            for (key, &f) in &mem_idx.fields.sections {
+                let w = section_weight(key, mem_schema);
                 if w > 0.0 {
                     out.push((f, w));
                 }
@@ -312,15 +312,15 @@ mod tests {
     use indexmap::IndexMap;
     use std::collections::HashMap;
 
-    fn make_entity(name: &str, vault: &str, identity: &str) -> Entity {
+    fn make_entity(name: &str, mem: &str, identity: &str) -> Entity {
         let mut sections = IndexMap::new();
         sections.insert("identity".into(), identity.to_string());
         sections.insert("purpose".into(), format!("Purpose of {name}."));
         Entity {
-            id: EntityId::new(vault, name),
+            id: EntityId::new(mem, name),
             title: name.to_string(),
             entity_type: "spec".into(),
-            vault: vault.into(),
+            mem: mem.into(),
             file_path: format!("{name}.md"),
             metadata: IndexMap::new(),
             sections,
@@ -332,9 +332,9 @@ mod tests {
         }
     }
 
-    fn build_idx(entities: &[Entity]) -> (VaultIndex, Arc<Schema>) {
+    fn build_idx(entities: &[Entity]) -> (MemIndex, Arc<Schema>) {
         let schema = Schema::builtin_default();
-        let mut idx = VaultIndex::build_in_ram("specs".into(), Some(&schema)).unwrap();
+        let mut idx = MemIndex::build_in_ram("specs".into(), Some(&schema)).unwrap();
         for e in entities {
             idx.index_entity(e).unwrap();
         }
@@ -353,7 +353,7 @@ mod tests {
             any: vec!["graph".into()],
             ..Default::default()
         };
-        let hits = execute_on_vault(&idx, Some(&schema), &q, 100).unwrap();
+        let hits = execute_on_mem(&idx, Some(&schema), &q, 100).unwrap();
         assert_eq!(hits.len(), 1, "only alpha mentions `graph`: {hits:?}");
         assert_eq!(hits[0].0.name(), "alpha");
     }
@@ -370,7 +370,7 @@ mod tests {
             not: vec!["mock".into()],
             ..Default::default()
         };
-        let hits = execute_on_vault(&idx, Some(&schema), &q, 100).unwrap();
+        let hits = execute_on_mem(&idx, Some(&schema), &q, 100).unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].0.name(), "alpha");
     }
@@ -386,7 +386,7 @@ mod tests {
             phrase: Some("graph database".into()),
             ..Default::default()
         };
-        let hits = execute_on_vault(&idx, Some(&schema), &q, 100).unwrap();
+        let hits = execute_on_mem(&idx, Some(&schema), &q, 100).unwrap();
         assert_eq!(hits.len(), 1, "only alpha has adjacent words: {hits:?}");
         assert_eq!(hits[0].0.name(), "alpha");
     }
@@ -404,7 +404,7 @@ mod tests {
             field: Some("identity".into()),
             ..Default::default()
         };
-        let hits = execute_on_vault(&idx, Some(&schema), &q, 100).unwrap();
+        let hits = execute_on_mem(&idx, Some(&schema), &q, 100).unwrap();
         assert_eq!(hits.len(), 1, "only identity-field matches count");
         assert_eq!(hits[0].0.name(), "alpha");
     }
@@ -417,7 +417,7 @@ mod tests {
             any: vec!["hauser".into()],
             ..Default::default()
         };
-        let hits = execute_on_vault(&idx, Some(&schema), &q, 100).unwrap();
+        let hits = execute_on_mem(&idx, Some(&schema), &q, 100).unwrap();
         assert_eq!(hits.len(), 1, "ASCII fold must match `Häuser`");
     }
 
@@ -425,7 +425,7 @@ mod tests {
     fn empty_query_returns_no_hits() {
         let entities = vec![make_entity("alpha", "specs", "whatever")];
         let (idx, schema) = build_idx(&entities);
-        let hits = execute_on_vault(&idx, Some(&schema), &Query::default(), 100).unwrap();
+        let hits = execute_on_mem(&idx, Some(&schema), &Query::default(), 100).unwrap();
         assert!(hits.is_empty(), "empty query ⇒ no hits");
     }
 
@@ -440,7 +440,7 @@ mod tests {
             not: vec!["mock".into()],
             ..Default::default()
         };
-        let hits = execute_on_vault(&idx, Some(&schema), &q, 100).unwrap();
+        let hits = execute_on_mem(&idx, Some(&schema), &q, 100).unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].0.name(), "beta");
     }
@@ -454,7 +454,7 @@ mod tests {
             field: Some("this_field_does_not_exist".into()),
             ..Default::default()
         };
-        let hits = execute_on_vault(&idx, Some(&schema), &q, 100).unwrap();
+        let hits = execute_on_mem(&idx, Some(&schema), &q, 100).unwrap();
         assert!(hits.is_empty());
     }
 }

@@ -7,20 +7,20 @@
 
 import { resolve } from 'node:path';
 import { checkBashCommand } from './guard-entity-bash-utils.mjs';
-import { resolveVaultDirsFromCwd } from './workspace-resolve-utils.mjs';
+import { resolveMemDirsFromCwd } from './workspace-resolve-utils.mjs';
 
 const input = JSON.parse(await readStdin());
 
 const command = input.tool_input?.command;
 if (!command) process.exit(0);
 
-// Resolve folder-backed vault dirs the engine way (see workspace-resolve-utils).
+// Resolve folder-backed mem dirs the engine way (see workspace-resolve-utils).
 // Empty on a git-branch workspace — there are no working-tree entity files a
 // shell command could target there.
-const vaultDirs = resolveVaultDirsFromCwd();
+const memDirs = resolveMemDirsFromCwd();
 
-// Check against every vault directory name — block if any vault is targeted
-for (const root of vaultDirs) {
+// Check against every mem directory name — block if any mem is targeted
+for (const root of memDirs) {
   const resolved = resolve(root);
   const dirName = resolved.split('/').pop() || 'specs';
   const result = checkBashCommand(command, dirName);

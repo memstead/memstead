@@ -1,6 +1,6 @@
-# `ingest` — schema for ingest process vaults
+# `ingest` — schema for ingest process mems
 
-Workspace-level schema for every `ingest/<ingest-name>` vault paired 1:1 with one ingest configuration. Three types capture destination-quality debt that survives between agent runs:
+Workspace-level schema for every `ingest/<ingest-name>` mem paired 1:1 with one ingest configuration. Three types capture destination-quality debt that survives between agent runs:
 
 | Shape of debt | Type |
 |---|---|
@@ -8,19 +8,19 @@ Workspace-level schema for every `ingest/<ingest-name>` vault paired 1:1 with on
 | A *present* destination claim that hasn't been verified | `verification_target` |
 | Two destination claims contradict, or a destination claim contradicts the source | `inconsistency` |
 
-The vault is scaffolding, not a session log. Each entry is an objective claim about destination state — the kind of debt the next run can either resolve directly or use to choose what to address. When the destination is fixed, the entry is deleted in the same run.
+The mem is scaffolding, not a session log. Each entry is an objective claim about destination state — the kind of debt the next run can either resolve directly or use to choose what to address. When the destination is fixed, the entry is deleted in the same run.
 
 ## Location
 
-The schema lives on `__MEMSTEAD:schemas/ingest@0.1.0/` of the workspace's `vault-repo` (loaded via `memstead-core::vault_repo_schemas::load_schemas_from_ref`). Process vaults pin it via `"schema": "ingest@0.1.0"` (or the unversioned `"ingest"`) in their `.memstead/config.json`.
+The schema lives on `__MEMSTEAD:schemas/ingest@0.1.0/` of the workspace's `mem-repo` (loaded via `memstead-core::mem_repo_schemas::load_schemas_from_ref`). Process mems pin it via `"schema": "ingest@0.1.0"` (or the unversioned `"ingest"`) in their `.memstead/config.json`.
 
 ## Lifecycle
 
-A process vault is created automatically by the ingest skill on first run of `/memstead:ingest <ingest-name>` (operator-mode CLI invocation, `memstead vault create ingest/<ingest-name> --schema ingest@0.1.0`). Subsequent runs reuse it. The operator deletes a process vault explicitly via `/memstead:ingest --clear <ingest-name>` (per-ingest, idempotent on already-deleted vaults). One-shot/lens ingests are by-design ephemeral and do not get a process vault.
+A process mem is created automatically by the ingest skill on first run of `/memstead:ingest <ingest-name>` (operator-mode CLI invocation, `memstead mem create ingest/<ingest-name> --schema ingest@0.1.0`). Subsequent runs reuse it. The operator deletes a process mem explicitly via `/memstead:ingest --clear <ingest-name>` (per-ingest, idempotent on already-deleted mems). One-shot/lens ingests are by-design ephemeral and do not get a process mem.
 
 ## Re-verification expectation
 
-Each run *re-verifies* the existing entries against the current destination state and deletes any that intervening runs have resolved. Without this, stale entries accumulate and the vault loses signal. The schema's `default_writing_guidance.goal` and each type's `write_rules` carry this expectation.
+Each run *re-verifies* the existing entries against the current destination state and deletes any that intervening runs have resolved. Without this, stale entries accumulate and the mem loses signal. The schema's `default_writing_guidance.goal` and each type's `write_rules` carry this expectation.
 
 ## Relationship vocabulary
 
@@ -32,12 +32,12 @@ Strict mode, three definitions:
 
 No internal edges between quality entries. They reach the destination via auto-emitted `REFERENCES`; they do not link to each other.
 
-## Cross-vault links
+## Cross-mem links
 
-Each `ingest/<ingest-name>` vault declares an outbound cross-vault permission to its paired destination in the workspace `[cross_vault_links]` section of `.memstead/workspace.toml`. Wiki-links inside `area`, `claim`, `claim_a`, `claim_b` etc. that point at destination entities produce auto-emitted cross-vault `REFERENCES` edges.
+Each `ingest/<ingest-name>` mem declares an outbound cross-mem permission to its paired destination in the workspace `[cross_mem_links]` section of `.memstead/workspace.toml`. Wiki-links inside `area`, `claim`, `claim_a`, `claim_b` etc. that point at destination entities produce auto-emitted cross-mem `REFERENCES` edges.
 
 ## What this schema is *not*
 
 - Not a session-handover log. Bookmarks ("left off at file X") add nothing — the next run reads `memstead_overview` and the destination directly.
-- Not a planning vault. For deliberation in flight, use `planning@0.1.0`.
+- Not a planning mem. For deliberation in flight, use `planning@0.1.0`.
 - Not a workbench. If a fact constrains how a destination entity must be, that fact belongs in the destination entity's Constraints section, not as an entry here.

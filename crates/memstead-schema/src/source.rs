@@ -1,4 +1,4 @@
-//! Schema source-file collection for publishing vault archives.
+//! Schema source-file collection for publishing mem archives.
 //!
 //! A published `.mem` archive is portable only if the schema it pins
 //! travels inside it — otherwise opening the archive on a foreign
@@ -44,7 +44,7 @@ pub enum SchemaSourceError {
     )]
     NotFound {
         schema_ref: String,
-        /// Every filesystem location (vault-local, workspace-level,
+        /// Every filesystem location (mem-local, workspace-level,
         /// cache) consulted before falling through to the embedded
         /// builtins. Listed in resolution order so the error message
         /// matches the precedence the resolver walked.
@@ -88,7 +88,7 @@ pub enum SchemaSourceError {
 }
 
 /// Resolve the schema pinned by `schema_ref` to a sorted set of source
-/// files ready to embed under `.memstead/schema/` in a vault archive.
+/// files ready to embed under `.memstead/schema/` in a mem archive.
 ///
 /// The returned vector is sorted by `archive_path` so archive bytes are
 /// deterministic — callers don't need to re-sort.

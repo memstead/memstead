@@ -12,13 +12,13 @@
  *   refinement            — scout/writer cycle with batched source review.
  *   one-shot              — runs once per trigger; lens routing + report.
  *
- * Discovery- and refinement-mode ingests get a paired *process vault*
+ * Discovery- and refinement-mode ingests get a paired *process mem*
  * pinned to `ingest@0.1.0` — auto-created on first run, cleared by
  * `/memstead:ingest --clear <ingest-name>`. One-shot ingests skip the
- * process vault by design.
+ * process mem by design.
  *
  * The skill's prompt is a *situation brief*, not a procedure. It carries
- * what the schema cannot (loop semantics, mode, paired vault) and routes
+ * what the schema cannot (loop semantics, mode, paired mem) and routes
  * the agent to the schema for goal + avoid; tool-use mechanics come
  * from the MCP tool descriptions Claude Code already injects.
  *
@@ -115,8 +115,8 @@ const allMode = args.includes('--all') || (!clearMode && positional.length === 0
 const nameArg = positional.join(' ').trim();
 
 const STATE_PREFIX = 'ingest';
-const PROCESS_VAULT_PATH = 'ingest';
-const PROCESS_VAULT_SCHEMA = 'ingest@0.1.0';
+const PROCESS_MEM_PATH = 'ingest';
+const PROCESS_MEM_SCHEMA = 'ingest@0.1.0';
 const MAX_SKIP_LEVEL = 10;
 
 // Dry-run mode. Reads happen normally; cache writes, prompt capture
@@ -239,56 +239,56 @@ function runMemstead(argList) {
   };
 }
 
-// ── Process-vault lifecycle ─────────────────────────────────────────────────
+// ── Process-mem lifecycle ─────────────────────────────────────────────────
 
 /**
- * Has the paired process vault been registered in the engine?
- * Process-vault names use the leaf form (`<ingest-name>`) under the
- * `ingest/` org-path; `vaultMeta` keys are leaf names by convention.
+ * Has the paired process mem been registered in the engine?
+ * Process-mem names use the leaf form (`<ingest-name>`) under the
+ * `ingest/` org-path; `memMeta` keys are leaf names by convention.
  */
-function processVaultExists(ingestName, vaultMeta) {
-  return !!vaultMeta?.[ingestName];
+function processMemExists(ingestName, memMeta) {
+  return !!memMeta?.[ingestName];
 }
 
 /**
- * Auto-create the paired process vault via the operator-mode CLI.
+ * Auto-create the paired process mem via the operator-mode CLI.
  * Synchronous, silent on success, surfaces a `notice` on failure so
  * the prompt can still produce useful work.
  *
  * Returns `{ ok: true }` on success or `{ ok: false, notice: string }`
  * on failure (binary missing, lifecycle gate denied, gitdir dirty …).
  */
-function autoCreateProcessVault(ingestName) {
+function autoCreateProcessMem(ingestName) {
   if (DRY_RUN) {
-    dbg(`[dry-run] would create process vault ingest/${ingestName}`);
-    return { ok: false, notice: '(dry-run — process vault create skipped)' };
+    dbg(`[dry-run] would create process mem ingest/${ingestName}`);
+    return { ok: false, notice: '(dry-run — process mem create skipped)' };
   }
   const argList = [
-    'vault', 'init', ingestName,
-    '--org-path', PROCESS_VAULT_PATH,
-    '--schema', PROCESS_VAULT_SCHEMA,
+    'mem', 'init', ingestName,
+    '--org-path', PROCESS_MEM_PATH,
+    '--schema', PROCESS_MEM_SCHEMA,
     '--note', `auto-created by /memstead:ingest for ingest "${ingestName}"`,
   ];
   const r = runMemstead(argList);
   if (r.error) {
-    return { ok: false, notice: `process vault auto-create failed: ${r.error.message}` };
+    return { ok: false, notice: `process mem auto-create failed: ${r.error.message}` };
   }
   if (r.status !== 0) {
     const tail = r.stderr.split('\n').filter(Boolean).slice(-2).join(' / ').trim();
-    return { ok: false, notice: `process vault auto-create exited ${r.status}: ${tail || '(no detail)'}` };
+    return { ok: false, notice: `process mem auto-create exited ${r.status}: ${tail || '(no detail)'}` };
   }
-  dbg(`created process vault ingest/${ingestName}`);
+  dbg(`created process mem ingest/${ingestName}`);
   return { ok: true };
 }
 
 /**
- * Delete the paired process vault. Used by `--clear <ingest-name>`.
- * Idempotent on already-deleted vaults — a "unknown writable vault"
+ * Delete the paired process mem. Used by `--clear <ingest-name>`.
+ * Idempotent on already-deleted mems — a "unknown writable mem"
  * error from the CLI is treated as success.
  */
-function deleteProcessVault(ingestName) {
+function deleteProcessMem(ingestName) {
   const argList = [
-    'vault', 'delete', ingestName,
+    'mem', 'delete', ingestName,
     '--note', `cleared by /memstead:ingest --clear`,
   ];
   const r = runMemstead(argList);
@@ -297,7 +297,7 @@ function deleteProcessVault(ingestName) {
   }
   if (r.status !== 0) {
     const stderr = r.stderr || '';
-    if (/unknown writable vault/i.test(stderr)) {
+    if (/unknown writable mem/i.test(stderr)) {
       return { ok: true, alreadyAbsent: true };
     }
     const tail = stderr.split('\n').filter(Boolean).slice(-2).join(' / ').trim();
@@ -310,14 +310,14 @@ function deleteProcessVault(ingestName) {
 //
 // Per-ingest only. `--clear` without a name is a usage error. `--clear`
 // against a non-existent ingest config is treated by the engine as
-// "unknown writable vault" — we report it as already-absent and exit 0.
+// "unknown writable mem" — we report it as already-absent and exit 0.
 
 if (clearMode) {
   if (!nameArg) {
     process.stdout.write(`> **[${STATE_PREFIX} | clear] Usage: /memstead:ingest --clear <ingest-name>** (per-ingest; no global form).\n`);
     process.exit(0);
   }
-  const result = deleteProcessVault(nameArg);
+  const result = deleteProcessMem(nameArg);
   if (result.alreadyAbsent) {
     process.stdout.write(`[${STATE_PREFIX} | clear] ingest/${nameArg} — already absent.\n`);
   } else if (result.ok) {
@@ -365,7 +365,7 @@ const MEDIUMS = JSON.parse(readFileSync(new URL('../mediums.json', import.meta.u
 
 function sourceMediumType(src) {
   if (src?.facet?.mediumType) return src.facet.mediumType;
-  if (src?.vault) return 'graph';
+  if (src?.mem) return 'graph';
   return 'codebase';
 }
 
@@ -431,7 +431,7 @@ function enumerateSourceFiles(ingest) {
 // degrades to a one-tick full scan.
 //
 // The cursor *advances* only when the agent records the new baseline via
-// `memstead vault set-sync-state` after a complete pass (see the emitted
+// `memstead mem set-sync-state` after a complete pass (see the emitted
 // instruction). inject.mjs never advances it — so an interrupted pass
 // leaves the baseline put and the slice is re-presented next run.
 
@@ -439,7 +439,7 @@ const CURSOR_DIR_NAME = 'source-cursor';
 const SLICE_CAP = 25; // per-class cap in the rendered preface
 
 // Resolve a facet's change-detection strategy. A graph-typed source
-// always uses the `graph` strategy (its signal is the source vault's
+// always uses the `graph` strategy (its signal is the source mem's
 // snapshot token, which the engine provides). Otherwise the declared
 // `change_detection` wins; `auto` (the default) probes for a git work
 // tree over the medium pointer: present → `git`, absent → `mtime`.
@@ -576,26 +576,26 @@ function computeGitSlice(ingest, src, baselineToken) {
 
 // ── graph change-detection ──────────────────────────────────────────────────
 //
-// A graph-typed source is another vault. Its reliable change signal is the
+// A graph-typed source is another mem. Its reliable change signal is the
 // engine's own surfaces — no new engine work: the baseline is the source
-// vault's `snapshot_token` (already on the dump), and the changed set is
-// `memstead changes --vault <src> --since <baseline>` (the same entity
+// mem's `snapshot_token` (already on the dump), and the changed set is
+// `memstead changes --mem <src> --since <baseline>` (the same entity
 // delta the MCP `memstead_changes_since` tool returns). The slice is
 // entity ids, not file paths.
 
 // Compute the graph changed slice for one source facet whose medium type
-// is `graph` (the medium pointer is the source vault id). Same return
+// is `graph` (the medium pointer is the source mem id). Same return
 // contract as `computeGitSlice`.
-function computeGraphSlice(src, baselineToken, vaultMeta) {
-  const srcVault = src.facet?.mediumPointer || src.vault || '';
-  if (!srcVault) return null;
-  const current = vaultMeta?.[srcVault]?.snapshotToken;
+function computeGraphSlice(src, baselineToken, memMeta) {
+  const srcMem = src.facet?.mediumPointer || src.mem || '';
+  if (!srcMem) return null;
+  const current = memMeta?.[srcMem]?.snapshotToken;
   if (!isGitToken(current)) return null; // source has no snapshot signal
 
   if (!isGitToken(baselineToken)) return { reseed: true, token: current };
   if (baselineToken === current) return { changed: false, token: current };
 
-  const r = runMemstead(['changes', '--vault', srcVault, '--since', baselineToken, '--json', '--quiet']);
+  const r = runMemstead(['changes', '--mem', srcMem, '--since', baselineToken, '--json', '--quiet']);
   if (!r || r.status !== 0) return null; // engine unavailable / unknown baseline: degrade
   let parsed;
   try { parsed = JSON.parse(r.stdout); } catch { return null; }
@@ -656,11 +656,11 @@ function writeCursorMemo(ingestName, facetRef, aggregate, statMap) {
 }
 
 // Compute the source-change cursor for an ingest against its destination
-// vault's engine-held baseline. Returns the union changed slice across
+// mem's engine-held baseline. Returns the union changed slice across
 // mtime facets, the per-facet new tokens (for the cursor-write
 // instruction), and any facets that had no baseline (re-seed).
-function computeSourceCursor(ingest, destVault, vaultMeta) {
-  const baselineMap = (destVault && vaultMeta?.[destVault]?.syncState) || {};
+function computeSourceCursor(ingest, destMem, memMeta) {
+  const baselineMap = (destMem && memMeta?.[destMem]?.syncState) || {};
   const union = { added: [], modified: [], deleted: [] };
   const writeCommands = []; // {key, token} — advance after a complete pass
   const reseed = [];        // {key, token} — first sync, no prior baseline
@@ -674,16 +674,16 @@ function computeSourceCursor(ingest, destVault, vaultMeta) {
 
   for (const src of (ingest.sources || [])) {
     const strategy = resolveChangeDetection(src);
-    const facetRef = src.facet_ref || src.vault || 'source';
+    const facetRef = src.facet_ref || src.mem || 'source';
     const key = `${ingest.name}/${facetRef}`;
 
     if (strategy === 'git' || strategy === 'graph') {
       // git diffs the stored commit id against HEAD; graph diffs the
-      // source vault's snapshot token via `memstead changes`. Both reuse
+      // source mem's snapshot token via `memstead changes`. Both reuse
       // an existing history store, so neither needs the skill-cache memo.
       const g = strategy === 'git'
         ? computeGitSlice(ingest, src, baselineMap[key])
-        : computeGraphSlice(src, baselineMap[key], vaultMeta);
+        : computeGraphSlice(src, baselineMap[key], memMeta);
       if (!g) continue;            // no reliable signal — degrade to today
       if (g.reseed) { reseed.push({ key, token: g.token }); continue; }
       if (!g.changed) continue;    // baseline === current source state
@@ -731,7 +731,7 @@ function computeSourceCursor(ingest, destVault, vaultMeta) {
   union.modified = dedupeSort(union.modified);
   union.deleted = dedupeSort(union.deleted);
   const anyChanges = union.added.length || union.modified.length || union.deleted.length;
-  return { union, writeCommands, reseed, anyChanges, degraded, destVault };
+  return { union, writeCommands, reseed, anyChanges, degraded, destMem };
 }
 
 // Cheap, side-effect-free "did the source move since the baseline?"
@@ -740,10 +740,10 @@ function computeSourceCursor(ingest, destVault, vaultMeta) {
 // baseline without computing the full slice or touching the cache, so it
 // can run per-candidate in the round-robin loop. A first sync (no usable
 // baseline) is NOT "changed" — it does not defeat backoff on its own.
-function sourceChangedSince(ingest, destVault, vaultMeta) {
-  const baselineMap = (destVault && vaultMeta?.[destVault]?.syncState) || {};
+function sourceChangedSince(ingest, destMem, memMeta) {
+  const baselineMap = (destMem && memMeta?.[destMem]?.syncState) || {};
   for (const src of (ingest.sources || [])) {
-    const facetRef = src.facet_ref || src.vault || 'source';
+    const facetRef = src.facet_ref || src.mem || 'source';
     const key = `${ingest.name}/${facetRef}`;
     const baseline = baselineMap[key];
     if (baseline === undefined) continue; // no baseline ⇒ not "changed"
@@ -757,8 +757,8 @@ function sourceChangedSince(ingest, destVault, vaultMeta) {
       if (head && head !== baseline) return true;
     } else if (strategy === 'graph') {
       if (!isGitToken(baseline)) continue;
-      const srcVault = src.facet?.mediumPointer || src.vault || '';
-      const current = vaultMeta?.[srcVault]?.snapshotToken;
+      const srcMem = src.facet?.mediumPointer || src.mem || '';
+      const current = memMeta?.[srcMem]?.snapshotToken;
       if (isGitToken(current) && current !== baseline) return true;
     } else if (strategy === 'mtime') {
       const baseDigest = parseDigestToken(baseline);
@@ -776,7 +776,7 @@ function sourceChangedSince(ingest, destVault, vaultMeta) {
 // *what changed*, never *how far along*.
 function changedSliceBlock(cursor) {
   if (!cursor) return '';
-  const { union, writeCommands, reseed, anyChanges, degraded, destVault } = cursor;
+  const { union, writeCommands, reseed, anyChanges, degraded, destMem } = cursor;
   if (!anyChanges && !reseed.length) return '';
 
   const lines = [];
@@ -815,7 +815,7 @@ function changedSliceBlock(cursor) {
   // Cursor-write instruction. The agent records the new baseline as the
   // FINAL step, so an interrupted pass leaves the baseline unchanged and
   // the slice is re-presented next run. Routed through the engine CLI —
-  // never a raw vault-repo write.
+  // never a raw mem-repo write.
   const allCommands = [...writeCommands, ...reseed];
   if (allCommands.length) {
     lines.push('### Recording the new baseline (do this LAST)\n');
@@ -824,7 +824,7 @@ function changedSliceBlock(cursor) {
     );
     lines.push('```sh');
     for (const c of allCommands) {
-      lines.push(`memstead vault set-sync-state ${destVault} ${shellQuote(c.key)} ${shellQuote(c.token)}`);
+      lines.push(`memstead mem set-sync-state ${destMem} ${shellQuote(c.key)} ${shellQuote(c.token)}`);
     }
     lines.push('```');
     lines.push(
@@ -914,9 +914,9 @@ function nextBatch(ingestName, ingest) {
 
 // ── Backoff ─────────────────────────────────────────────────────────────────
 
-function vaultSnapshotToken(vaultName, vaultMeta) {
-  if (!vaultName) return '';
-  const meta = vaultMeta?.[vaultName];
+function memSnapshotToken(memName, memMeta) {
+  if (!memName) return '';
+  const meta = memMeta?.[memName];
   if (!meta || typeof meta.snapshotToken !== 'string') return '';
   return meta.snapshotToken;
 }
@@ -938,7 +938,7 @@ function hasRemainingBatches(ingestName) {
   return state.cursor < state.file_order.length;
 }
 
-function shouldSkip(ingest, vaultName, vaultMeta) {
+function shouldSkip(ingest, memName, memMeta) {
   if (ingest.mode === 'one-shot') return false;
   if (ingest.mode === 'refinement' && hasRemainingBatches(ingest.name)) return false;
 
@@ -948,7 +948,7 @@ function shouldSkip(ingest, vaultName, vaultMeta) {
   // through. Never a hard failure: any error falls through to the
   // destination-snapshot backoff below.
   try {
-    if (sourceChangedSince(ingest, vaultName, vaultMeta)) {
+    if (sourceChangedSince(ingest, memName, memMeta)) {
       dbg(`${ingest.name}: source changed since last sync — not skipping`);
       return false;
     }
@@ -958,7 +958,7 @@ function shouldSkip(ingest, vaultName, vaultMeta) {
 
   const backoff = loadBackoff();
   const entry = backoff[ingest.name] || { skip_remaining: 0, skip_level: 0, snapshot: '' };
-  const current = vaultSnapshotToken(vaultName, vaultMeta);
+  const current = memSnapshotToken(memName, memMeta);
 
   if (entry.snapshot && current !== entry.snapshot) {
     entry.skip_remaining = 0;
@@ -988,18 +988,18 @@ function shouldSkip(ingest, vaultName, vaultMeta) {
   return false;
 }
 
-// ── Per-vault writing-guidance resolution (engine dump) ─────────────────────
+// ── Per-mem writing-guidance resolution (engine dump) ─────────────────────
 
-function primaryVaultName(ingest) {
-  const first = ingest.destinations?.[0]?.vault;
+function primaryMemName(ingest) {
+  const first = ingest.destinations?.[0]?.mem;
   if (typeof first === 'string') return first;
-  if (typeof ingest.projection_vault === 'string') return ingest.projection_vault;
+  if (typeof ingest.projection_mem === 'string') return ingest.projection_mem;
   return null;
 }
 
-function getGuidance(vaultName, vaultMeta, schemas) {
-  if (!vaultName) return null;
-  const meta = vaultMeta?.[vaultName];
+function getGuidance(memName, memMeta, schemas) {
+  if (!memName) return null;
+  const meta = memMeta?.[memName];
   if (!meta) return null;
   const config = { writeGuidance: meta.writeGuidance || {} };
   let schemaPayload = null;
@@ -1024,25 +1024,25 @@ function getGuidance(vaultName, vaultMeta, schemas) {
 /**
  * The opening situation block — what the agent cannot derive from
  * tool descriptions or schema bodies alone. Loop semantics, mode,
- * paired vault availability, context-budget signal. Capability
+ * paired mem availability, context-budget signal. Capability
  * framing — no procedure, no targets, no exhortations.
  */
-function situationBlock(ingest, mode, processVault) {
+function situationBlock(ingest, mode, processMem) {
   const lines = [];
   lines.push('## Situation');
   lines.push('');
   lines.push(`You are running one iteration of \`${ingest.name}\` (${mode} mode) inside a loop. Each iteration is a fresh agent with no memory of prior runs; the destination graph persists between runs and is your continuity. Backoff is mechanical — when nothing has changed since the last run, the loop skips this ingest silently. Reporting "no changes" is therefore a valid outcome.`);
   lines.push('');
-  lines.push(`Mutating the destination is this run's mandate: within the destination vault(s) and paired process vault named under Operative data, create, update, relate, and delete entities without asking. Project-level instructions that make entity creation/deletion ask-first govern interactive dev sessions, not ingest iterations — parking creatable work as a coverage_gap because of that rule defeats the loop. Vaults outside the declared destinations remain off-limits.`);
+  lines.push(`Mutating the destination is this run's mandate: within the destination mem(s) and paired process mem named under Operative data, create, update, relate, and delete entities without asking. Project-level instructions that make entity creation/deletion ask-first govern interactive dev sessions, not ingest iterations — parking creatable work as a coverage_gap because of that rule defeats the loop. Mems outside the declared destinations remain off-limits.`);
   lines.push('');
   lines.push('Context budget is finite. The `PreCompact` hook fires near the limit and asks you to stop and report. Multiple cycles inside one run are fine when context allows; depth on a coherent area beats breadth across unrelated ones.');
   lines.push('');
-  if (processVault.present) {
-    lines.push(`A paired process vault \`${processVault.vaultLabel}\` (schema \`${PROCESS_VAULT_SCHEMA}\`) carries destination-quality debt prior runs could not address. Its entries are objective claims about destination state — read them on orientation, write to it when this run also cannot fix some debt, delete entries the destination has since resolved. Call \`memstead_schema(name=${PROCESS_VAULT_SCHEMA})\` once for the type vocabulary and write rules.`);
-  } else if (processVault.notice) {
-    lines.push(`Note: paired process vault \`${processVault.vaultLabel}\` could not be auto-created — ${processVault.notice}. The run continues without it; the operator can retry with \`memstead vault init ${ingest.name} --org-path ingest --schema ${PROCESS_VAULT_SCHEMA}\`.`);
-  } else if (processVault.skipped) {
-    lines.push(`No process vault is paired with this ingest (mode=${mode}; one-shot ingests are by-design ephemeral).`);
+  if (processMem.present) {
+    lines.push(`A paired process mem \`${processMem.memLabel}\` (schema \`${PROCESS_MEM_SCHEMA}\`) carries destination-quality debt prior runs could not address. Its entries are objective claims about destination state — read them on orientation, write to it when this run also cannot fix some debt, delete entries the destination has since resolved. Call \`memstead_schema(name=${PROCESS_MEM_SCHEMA})\` once for the type vocabulary and write rules.`);
+  } else if (processMem.notice) {
+    lines.push(`Note: paired process mem \`${processMem.memLabel}\` could not be auto-created — ${processMem.notice}. The run continues without it; the operator can retry with \`memstead mem init ${ingest.name} --org-path ingest --schema ${PROCESS_MEM_SCHEMA}\`.`);
+  } else if (processMem.skipped) {
+    lines.push(`No process mem is paired with this ingest (mode=${mode}; one-shot ingests are by-design ephemeral).`);
   }
   lines.push('');
   return lines.join('\n') + '\n';
@@ -1068,7 +1068,7 @@ function intentBlock(ingest) {
  * Render the destination's `default_writing_guidance.goal` and `avoid`
  * blocks directly from the resolved schema-side merge — schema authoring
  * is the single source of truth. `resolveWritingGuidance` has already
- * concatenated any per-vault `goal_additions` / `avoid_additions`.
+ * concatenated any per-mem `goal_additions` / `avoid_additions`.
  */
 function goalAndAvoidBlock(wg) {
   if (!wg) return '';
@@ -1097,9 +1097,9 @@ function goalAndAvoidBlock(wg) {
 
 /**
  * Operative data — what is concretely available to this run. Sources,
- * destination, paired process vault, cross-vault references.
+ * destination, paired process mem, cross-mem references.
  */
-function operativeDataBlock(ingest, processVault, vaultMeta) {
+function operativeDataBlock(ingest, processMem, memMeta) {
   const lines = [];
   lines.push('## Operative data');
   lines.push('');
@@ -1108,12 +1108,12 @@ function operativeDataBlock(ingest, processVault, vaultMeta) {
   if (Array.isArray(ingest.sources) && ingest.sources.length) {
     lines.push('### Sources');
     lines.push('');
-    const referenceVaults = [];
+    const referenceMems = [];
     for (const s of ingest.sources) {
       const label = sourceMediumType(s);
       const roleBit = s.role ? ` (${s.role})` : '';
-      const vaultBit = s.vault ? ` — vault: ${s.vault}` : '';
-      lines.push(`- **${label}**${roleBit}${vaultBit}`);
+      const memBit = s.mem ? ` — mem: ${s.mem}` : '';
+      lines.push(`- **${label}**${roleBit}${memBit}`);
       const tree = s.facet?.scope?.tree;
       if (tree) {
         const allows = tree.filter(r => r.mode === 'allow').map(r => r.path);
@@ -1123,16 +1123,16 @@ function operativeDataBlock(ingest, processVault, vaultMeta) {
       }
       const domains = s.facet?.scope?.domains;
       if (domains) lines.push(`  - Domains: ${domains.join(', ')}`);
-      if (s.role === 'reference' && typeof s.vault === 'string' && s.vault) {
-        referenceVaults.push(s.vault);
+      if (s.role === 'reference' && typeof s.mem === 'string' && s.mem) {
+        referenceMems.push(s.mem);
       }
     }
     lines.push('');
-    if (referenceVaults.length) {
-      lines.push(`Sources tagged \`(reference)\` are read-only context for cross-vault edges — search them, never write into them. Only \`(primary)\` sources are ingested into the destination.`);
+    if (referenceMems.length) {
+      lines.push(`Sources tagged \`(reference)\` are read-only context for cross-mem edges — search them, never write into them. Only \`(primary)\` sources are ingested into the destination.`);
       lines.push('');
-      const vaultList = referenceVaults.map(v => `\`memstead_search vault=${v}\``).join(', ');
-      lines.push(`**Cross-vault references:** consult ${vaultList} before authoring cross-vault edges. The target entity must exist — a wiki-link or relationship to a missing target either auto-stubs (silent) or fails authorization (\`CROSS_VAULT_RELATION\`).`);
+      const memList = referenceMems.map(v => `\`memstead_search mem=${v}\``).join(', ');
+      lines.push(`**Cross-mem references:** consult ${memList} before authoring cross-mem edges. The target entity must exist — a wiki-link or relationship to a missing target either auto-stubs (silent) or fails authorization (\`CROSS_MEM_RELATION\`).`);
       lines.push('');
     }
   }
@@ -1142,19 +1142,19 @@ function operativeDataBlock(ingest, processVault, vaultMeta) {
     lines.push('### Destination');
     lines.push('');
     for (const d of ingest.destinations) {
-      const meta = vaultMeta?.[d.vault];
+      const meta = memMeta?.[d.mem];
       const schemaBit = meta?.schema ? ` — schema: \`${meta.schema}\`` : '';
       const roleBit = d.role ? ` — ${d.role}` : '';
-      lines.push(`- **${d.vault}**${schemaBit}${roleBit}`);
+      lines.push(`- **${d.mem}**${schemaBit}${roleBit}`);
     }
     lines.push('');
   }
 
-  // Paired process vault
-  if (processVault.present) {
-    lines.push('### Paired process vault');
+  // Paired process mem
+  if (processMem.present) {
+    lines.push('### Paired process mem');
     lines.push('');
-    lines.push(`- **${processVault.vaultLabel}** — schema: \`${PROCESS_VAULT_SCHEMA}\`. Inspect via \`memstead_overview\` / \`memstead_search vault=${processVault.leafName}\`.`);
+    lines.push(`- **${processMem.memLabel}** — schema: \`${PROCESS_MEM_SCHEMA}\`. Inspect via \`memstead_overview\` / \`memstead_search mem=${processMem.leafName}\`.`);
     lines.push('');
   }
 
@@ -1189,7 +1189,7 @@ function refinementScoutBlock(ingest, batch) {
   lines.push('FINDINGS_EOF');
   lines.push('```');
   lines.push('');
-  lines.push('If nothing meaningful turns up: write `No findings.` to the file. The next iteration\'s writer phase reads what you put there and acts. Quality debt that is real but out-of-scope for this batch — record it as `coverage_gap` / `verification_target` / `inconsistency` in the paired process vault if available, and note that you did so in the findings file.');
+  lines.push('If nothing meaningful turns up: write `No findings.` to the file. The next iteration\'s writer phase reads what you put there and acts. Quality debt that is real but out-of-scope for this batch — record it as `coverage_gap` / `verification_target` / `inconsistency` in the paired process mem if available, and note that you did so in the findings file.');
   return lines.join('\n') + '\n';
 }
 
@@ -1213,7 +1213,7 @@ function refinementWriterBlock(ingest, findings) {
  * idempotency contract, end-of-run report shape, optional archive.
  * Same shape as the pre-rebuild script, less prose.
  */
-function oneShotLensBlock(ingest, vaultMeta) {
+function oneShotLensBlock(ingest, memMeta) {
   const lines = [];
   lines.push('## Mode: one-shot — lens routing');
   lines.push('');
@@ -1223,12 +1223,12 @@ function oneShotLensBlock(ingest, vaultMeta) {
   // Destination set
   lines.push('### Destination set');
   lines.push('');
-  lines.push('| Vault | Schema | Purpose |');
+  lines.push('| Mem | Schema | Purpose |');
   lines.push('|-------|--------|---------|');
   for (const d of (ingest.destinations || [])) {
-    const meta = vaultMeta?.[d.vault] || {};
+    const meta = memMeta?.[d.mem] || {};
     const cell = s => String(s || '').replaceAll('|', '\\|').replaceAll('\n', ' ');
-    lines.push(`| ${cell(d.vault)} | ${cell(meta.schema || '(none)')} | ${cell(d.role || meta.description || '(no purpose declared)')} |`);
+    lines.push(`| ${cell(d.mem)} | ${cell(meta.schema || '(none)')} | ${cell(d.role || meta.description || '(no purpose declared)')} |`);
   }
   lines.push('');
 
@@ -1259,7 +1259,7 @@ function oneShotLensBlock(ingest, vaultMeta) {
   lines.push('```');
   lines.push(`### Report: ${ingest.name}`);
   lines.push('');
-  lines.push('Destination: <vault>');
+  lines.push('Destination: <mem>');
   lines.push('  created: <count>');
   lines.push('  updated: <count>');
   lines.push('  skipped: <count>');
@@ -1278,7 +1278,7 @@ function oneShotLensBlock(ingest, vaultMeta) {
   if (archive) {
     lines.push('### Archive after run');
     lines.push('');
-    lines.push('After the report has been emitted, archive the source planning vault — `post_actions.archive_source` is set on this ingest.');
+    lines.push('After the report has been emitted, archive the source planning mem — `post_actions.archive_source` is set on this ingest.');
     lines.push('');
   }
 
@@ -1321,8 +1321,8 @@ try {
     ingest = null;
     for (let i = 0; i < names.length; i++) {
       const candidate = eligible[(startIdx + i) % names.length];
-      const vaultName = primaryVaultName(candidate);
-      if (!shouldSkip(candidate, vaultName, ws.vaultMeta)) {
+      const memName = primaryMemName(candidate);
+      if (!shouldSkip(candidate, memName, ws.memMeta)) {
         ingest = candidate;
         break;
       }
@@ -1362,17 +1362,17 @@ try {
   // forked agent's first tool call sees the right policy.
   writeActiveDenyPaths(ingest);
 
-  const vaultName = primaryVaultName(ingest);
-  const wg = getGuidance(vaultName, ws.vaultMeta, ws.schemas);
+  const memName = primaryMemName(ingest);
+  const wg = getGuidance(memName, ws.memMeta, ws.schemas);
   const mode = ingest.mode || 'discovery';
-  dbg(`ingest=${ingest.name} mode=${mode} vault=${vaultName || '(none)'}`);
+  dbg(`ingest=${ingest.name} mode=${mode} mem=${memName || '(none)'}`);
 
   // Source-change cursor: the changed slice (if any) the agent should
   // steer at first, plus the engine-routed instruction to advance the
   // baseline after a complete pass. Empty preface ⇒ today's behaviour.
   let cursorPreface = '';
   try {
-    const cursor = computeSourceCursor(ingest, vaultName, ws.vaultMeta);
+    const cursor = computeSourceCursor(ingest, memName, ws.memMeta);
     cursorPreface = changedSliceBlock(cursor);
     if (cursorPreface) dbg(`source-cursor: ${cursor.anyChanges ? 'changed-slice' : 'reseed'} for ${ingest.name}`);
   } catch (e) {
@@ -1381,24 +1381,24 @@ try {
     dbg(`source-cursor skipped for ${ingest.name}: ${e.message}`);
   }
 
-  // ── Process vault: auto-create unless one-shot ─────────────────────────
+  // ── Process mem: auto-create unless one-shot ─────────────────────────
 
-  const processVault = {
+  const processMem = {
     present: false,
     skipped: mode === 'one-shot',
     notice: null,
     leafName: ingest.name,
-    vaultLabel: `${PROCESS_VAULT_PATH}/${ingest.name}`,
+    memLabel: `${PROCESS_MEM_PATH}/${ingest.name}`,
   };
-  if (!processVault.skipped) {
-    if (processVaultExists(ingest.name, ws.vaultMeta)) {
-      processVault.present = true;
+  if (!processMem.skipped) {
+    if (processMemExists(ingest.name, ws.memMeta)) {
+      processMem.present = true;
     } else {
-      const r = autoCreateProcessVault(ingest.name);
+      const r = autoCreateProcessMem(ingest.name);
       if (r.ok) {
-        processVault.present = true;
+        processMem.present = true;
       } else {
-        processVault.notice = r.notice;
+        processMem.notice = r.notice;
       }
     }
   }
@@ -1409,10 +1409,10 @@ try {
     ensureCacheDir(REF_DIR_NAME);
     const findings = readPendingFindings(ingest.name);
     const parts = [];
-    parts.push(situationBlock(ingest, mode, processVault));
+    parts.push(situationBlock(ingest, mode, processMem));
     parts.push(intentBlock(ingest));
     parts.push(goalAndAvoidBlock(wg));
-    parts.push(operativeDataBlock(ingest, processVault, ws.vaultMeta));
+    parts.push(operativeDataBlock(ingest, processMem, ws.memMeta));
     if (cursorPreface) parts.push(cursorPreface);
     if (findings) {
       if (!DRY_RUN) {
@@ -1439,15 +1439,15 @@ try {
     // round. To re-run a one-shot ingest, the operator removes the
     // matching entry from `.memstead.cache/ingest/ingest-one-shot-runs.json`
     // (or the whole file). No `--clear` shortcut for this — `--clear`
-    // is the per-ingest process-vault deletion gate; conflating it with
+    // is the per-ingest process-mem deletion gate; conflating it with
     // cache-file fiddling would muddy a small, sharp tool.
     markOneShotRan(ingest.name);
     const parts = [
-      situationBlock(ingest, mode, processVault),
+      situationBlock(ingest, mode, processMem),
       intentBlock(ingest),
       goalAndAvoidBlock(wg),
-      operativeDataBlock(ingest, processVault, ws.vaultMeta),
-      oneShotLensBlock(ingest, ws.vaultMeta),
+      operativeDataBlock(ingest, processMem, ws.memMeta),
+      oneShotLensBlock(ingest, ws.memMeta),
     ];
     process.stdout.write(parts.filter(Boolean).join(''));
     process.exit(0);
@@ -1456,10 +1456,10 @@ try {
   // ── Discovery (default) ────────────────────────────────────────────────
 
   const parts = [
-    situationBlock(ingest, mode, processVault),
+    situationBlock(ingest, mode, processMem),
     intentBlock(ingest),
     goalAndAvoidBlock(wg),
-    operativeDataBlock(ingest, processVault, ws.vaultMeta),
+    operativeDataBlock(ingest, processMem, ws.memMeta),
     cursorPreface,
   ];
   process.stdout.write(parts.filter(Boolean).join(''));

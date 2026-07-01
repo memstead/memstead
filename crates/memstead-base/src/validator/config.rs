@@ -5,7 +5,7 @@
 //! Schema resolution against the engine's registry happens at load, not
 //! here — this module only enforces shape and format integer.
 
-use memstead_schema::{PUBLISHED_VAULT_FORMAT, PublishedVaultConfig};
+use memstead_schema::{PUBLISHED_MEM_FORMAT, PublishedMemConfig};
 use regex::Regex;
 use std::sync::OnceLock;
 
@@ -13,7 +13,7 @@ use super::ValidationError;
 
 /// The only shape the archive's `.memstead/config.json` is allowed to
 /// take. Author-only fields (writeGuidance, mediums, projections,
-/// rules, publish, readVaults, vcs, language, community,
+/// rules, publish, readMems, vcs, language, community,
 /// defaultSchema) are stripped at export. Their presence here means
 /// the archive was built before the whitelist export landed, or by
 /// hand — surface that specifically so the user knows to re-export
@@ -24,17 +24,17 @@ const LEGACY_AUTHOR_FIELDS: &[&str] = &[
     "projections",
     "rules",
     "publish",
-    "readVaults",
+    "readMems",
     "vcs",
     "language",
     "community",
     "defaultSchema",
 ];
 
-/// Parse strict config bytes into a `PublishedVaultConfig`. Runs every
+/// Parse strict config bytes into a `PublishedMemConfig`. Runs every
 /// check in this module (shape, legacy detection, format, name,
 /// version, schema resolution).
-pub fn parse_config_bytes(bytes: &[u8]) -> Result<PublishedVaultConfig, ValidationError> {
+pub fn parse_config_bytes(bytes: &[u8]) -> Result<PublishedMemConfig, ValidationError> {
     let value: serde_json::Value = serde_json::from_slice(bytes).map_err(|e| {
         ValidationError::InvalidConfig {
             reason: format!("malformed JSON: {e}"),
@@ -45,7 +45,7 @@ pub fn parse_config_bytes(bytes: &[u8]) -> Result<PublishedVaultConfig, Validati
         for &field in LEGACY_AUTHOR_FIELDS {
             if obj.contains_key(field) {
                 return Err(ValidationError::InvalidConfig {
-                    reason: "legacy vault format — re-export via `memstead export`".to_string(),
+                    reason: "legacy mem format — re-export via `memstead export`".to_string(),
                 });
             }
         }
@@ -55,7 +55,7 @@ pub fn parse_config_bytes(bytes: &[u8]) -> Result<PublishedVaultConfig, Validati
         });
     }
 
-    let config: PublishedVaultConfig =
+    let config: PublishedMemConfig =
         serde_json::from_value(value).map_err(|e| ValidationError::InvalidConfig {
             reason: e.to_string(),
         })?;
@@ -67,8 +67,8 @@ pub fn parse_config_bytes(bytes: &[u8]) -> Result<PublishedVaultConfig, Validati
     Ok(config)
 }
 
-fn check_format(config: &PublishedVaultConfig) -> Result<(), ValidationError> {
-    if config.format == PUBLISHED_VAULT_FORMAT {
+fn check_format(config: &PublishedMemConfig) -> Result<(), ValidationError> {
+    if config.format == PUBLISHED_MEM_FORMAT {
         return Ok(());
     }
     // `format: 2` archives (top-level `schema/` tree, pre-relocation)
@@ -76,13 +76,13 @@ fn check_format(config: &PublishedVaultConfig) -> Result<(), ValidationError> {
     // mismatch falls through to the generic `UnsupportedFormat`.
     if config.format == 2 {
         return Err(ValidationError::InvalidConfig {
-            reason: "legacy vault format (format: 2) — re-export via `memstead export`"
+            reason: "legacy mem format (format: 2) — re-export via `memstead export`"
                 .to_string(),
         });
     }
     Err(ValidationError::UnsupportedFormat {
         got: config.format,
-        expected: PUBLISHED_VAULT_FORMAT,
+        expected: PUBLISHED_MEM_FORMAT,
     })
 }
 
@@ -127,22 +127,22 @@ mod tests {
 
     fn ok_config() -> serde_json::Value {
         serde_json::json!({
-            "format": PUBLISHED_VAULT_FORMAT,
-            "name": "example-vault",
+            "format": PUBLISHED_MEM_FORMAT,
+            "name": "example-mem",
             "version": "0.1.0",
             "schema": "default@1.0.0",
         })
     }
 
-    fn parse(value: serde_json::Value) -> Result<PublishedVaultConfig, ValidationError> {
+    fn parse(value: serde_json::Value) -> Result<PublishedMemConfig, ValidationError> {
         parse_config_bytes(value.to_string().as_bytes())
     }
 
     #[test]
     fn accepts_minimal_valid_config() {
         let config = parse(ok_config()).unwrap();
-        assert_eq!(config.format, PUBLISHED_VAULT_FORMAT);
-        assert_eq!(config.name, "example-vault");
+        assert_eq!(config.format, PUBLISHED_MEM_FORMAT);
+        assert_eq!(config.name, "example-mem");
         assert_eq!(config.version.to_string(), "0.1.0");
     }
 
@@ -165,7 +165,7 @@ mod tests {
         let err = parse(v).unwrap_err();
         match err {
             ValidationError::InvalidConfig { reason } => {
-                assert!(reason.contains("legacy vault format"), "reason={reason}");
+                assert!(reason.contains("legacy mem format"), "reason={reason}");
             }
             other => panic!("expected InvalidConfig, got {other:?}"),
         }
@@ -188,7 +188,7 @@ mod tests {
     }
 
     /// Forge refusal: a publisher cannot smuggle a first-party trust claim
-    /// into a vault archive. Trust origin is decided by the consuming
+    /// into a mem archive. Trust origin is decided by the consuming
     /// engine (built-in catalogue + writable-mount adoption), never read
     /// from publisher-supplied config, so an archive config that carries an
     /// `origin` (or any first-party-claim) key is an unknown field and the

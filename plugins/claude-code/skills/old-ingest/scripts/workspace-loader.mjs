@@ -5,15 +5,15 @@
  *
  * Reads `<workspace_root>/.memstead.toml` for plugin-side keys (`format`,
  * `scopes_dir`, `projections_dir`, `ingests_dir`). Walks:
- *   <workspace>/<scopes_dir>/<vault>/<name>.json
- *   <workspace>/<projections_dir>/<vault>/<name>.json
+ *   <workspace>/<scopes_dir>/<mem>/<name>.json
+ *   <workspace>/<projections_dir>/<mem>/<name>.json
  *   <workspace>/<ingests_dir>/<name>.json
  *
- * Per-vault config (`schema`, `writeGuidance`, `description`), per-vault
+ * Per-mem config (`schema`, `writeGuidance`, `description`), per-mem
  * `snapshot_token`, and per-schema `default_writing_guidance` come from
  * `memstead workspace dump --json` — invoked once per `loadWorkspace` call.
- * The plugin no longer reads `<vault>/.memstead/config.json`, no longer
- * walks vault `**.md` for backoff hashes, and no longer reads schema
+ * The plugin no longer reads `<mem>/.memstead/config.json`, no longer
+ * walks mem `**.md` for backoff hashes, and no longer reads schema
  * YAML from disk. The engine's storage backend is private to it.
  *
  * Exports:
@@ -47,11 +47,11 @@ const SCHEMAS_ROOT = resolve(__dirname, '../../../schemas/memstead-plugin/v0');
 
 /**
  * Extract the plugin-side keys from `.memstead.toml`: `format`,
- * `scopes_dir`, `projections_dir`, `ingests_dir`. The `vaults` array
- * was historically read here as a vault registry; that role is now
+ * `scopes_dir`, `projections_dir`, `ingests_dir`. The `mems` array
+ * was historically read here as a mem registry; that role is now
  * fulfilled by the engine's workspace dump, so this function intentionally
- * does not return it. Engine-only keys (`schemas_dir`, `[vault_management]`,
- * `[[vault_repos]]`, etc.) are silently ignored.
+ * does not return it. Engine-only keys (`schemas_dir`, `[mem_management]`,
+ * `[[mem_repos]]`, etc.) are silently ignored.
  */
 export function loadMemsteadToml(tomlPath) {
   const src = readFileSync(tomlPath, 'utf-8');
@@ -165,7 +165,7 @@ export function fetchDumpFromCli(workspaceRoot) {
  * and walk scopes / projections / ingests. Returns a normalised
  * structure where each ingest entry carries its fully resolved
  * projection (with scope-refs inlined) and destination list, and each
- * vault carries the dump's per-vault metadata and snapshot token.
+ * mem carries the dump's per-mem metadata and snapshot token.
  *
  * @param {string} workspaceRoot — directory containing `.memstead.toml`.
  * @param {object} [opts]
@@ -213,94 +213,94 @@ export function loadWorkspace(workspaceRoot, opts = {}) {
   }
 
   // Reduce the dump to plugin-friendly shapes:
-  //   vaults[] — sorted vault names, the canonical "what vaults exist"
-  //              answer (replaces the legacy `vaults = [...]` array)
-  //   vaultMeta — name → { schema, description, writeGuidance, snapshotToken }
+  //   mems[] — sorted mem names, the canonical "what mems exist"
+  //              answer (replaces the legacy `mems = [...]` array)
+  //   memMeta — name → { schema, description, writeGuidance, snapshotToken }
   //   schemas   — schemaName → { default_writing_guidance }
-  const vaultMeta = {};
-  for (const v of (dump.vaults || [])) {
+  const memMeta = {};
+  for (const v of (dump.mems || [])) {
     if (typeof v?.name !== 'string') continue;
-    vaultMeta[v.name] = {
+    memMeta[v.name] = {
       schema: v.schema ?? null,
       description: v.description ?? null,
       writeGuidance: (v.writeGuidance && typeof v.writeGuidance === 'object') ? v.writeGuidance : {},
       snapshotToken: typeof v.snapshot_token === 'string' ? v.snapshot_token : null,
     };
   }
-  const vaults = Object.keys(vaultMeta).sort();
+  const mems = Object.keys(memMeta).sort();
   const schemas = (dump.schemas && typeof dump.schemas === 'object') ? dump.schemas : {};
 
   const schemasLoaded = loadSchemas();
 
-  // Walk scopes: <root>/<scopesDir>/<vault>/<name>.json
+  // Walk scopes: <root>/<scopesDir>/<mem>/<name>.json
   //
   // Pre-engine-dump the loader hard-failed when a `scopes/<dir>/`
-  // didn't match any registered vault — `vaults = [...]` in
+  // didn't match any registered mem — `mems = [...]` in
   // `.memstead.toml` was an authored allowlist that included planning
-  // vaults before they existed. The engine dump is now the source of
-  // truth and only knows about vaults that actually have a vault-repo
-  // branch, so a `scopes/<planning-vault>/` directory whose vault has
+  // mems before they existed. The engine dump is now the source of
+  // truth and only knows about mems that actually have a mem-repo
+  // branch, so a `scopes/<planning-mem>/` directory whose mem has
   // already been archived (or hasn't been created yet) is a transient
   // state, not an error. Warn-and-continue so unrelated ingests still
   // load; per-ingest fail-fast at run time covers the typo path.
   const scopes = {};
   const scopesDirAbs = join(root, dirs.scopes);
   if (existsSync(scopesDirAbs)) {
-    for (const vaultDir of listSubdirs(scopesDirAbs)) {
-      if (!vaultMeta[vaultDir]) {
+    for (const memDir of listSubdirs(scopesDirAbs)) {
+      if (!memMeta[memDir]) {
         console.warn(
-          `workspace-loader: scopes directory "${dirs.scopes}/${vaultDir}" does not match any registered vault (known: ${vaults.join(', ') || '(none)'}); ignoring — likely a planning vault that has not been created yet or has been archived`
+          `workspace-loader: scopes directory "${dirs.scopes}/${memDir}" does not match any registered mem (known: ${mems.join(', ') || '(none)'}); ignoring — likely a planning mem that has not been created yet or has been archived`
         );
         continue;
       }
-      scopes[vaultDir] = {};
-      const scopeFiles = readdirSync(join(scopesDirAbs, vaultDir)).filter(f => f.endsWith('.json'));
+      scopes[memDir] = {};
+      const scopeFiles = readdirSync(join(scopesDirAbs, memDir)).filter(f => f.endsWith('.json'));
       for (const f of scopeFiles) {
         const name = f.slice(0, -5);
-        const fileAbs = join(scopesDirAbs, vaultDir, f);
+        const fileAbs = join(scopesDirAbs, memDir, f);
         const content = readJson(fileAbs);
-        validateOrThrow(schemasLoaded.scope, content, `scope ${dirs.scopes}/${vaultDir}/${f}`);
-        scopes[vaultDir][name] = content;
+        validateOrThrow(schemasLoaded.scope, content, `scope ${dirs.scopes}/${memDir}/${f}`);
+        scopes[memDir][name] = content;
       }
     }
   }
 
-  // Walk projections: <root>/<projectionsDir>/<vault>/<name>.json
+  // Walk projections: <root>/<projectionsDir>/<mem>/<name>.json
   //
   // Same softening as scopes/ above. A projection authored against an
-  // unregistered vault stays loadable so unrelated ingests can still
+  // unregistered mem stays loadable so unrelated ingests can still
   // run; the eventual error fires when an ingest actually targets the
-  // missing vault.
+  // missing mem.
   const projections = {};
   const projectionsDirAbs = join(root, dirs.projections);
   if (existsSync(projectionsDirAbs)) {
-    for (const vaultDir of listSubdirs(projectionsDirAbs)) {
-      if (!vaultMeta[vaultDir]) {
+    for (const memDir of listSubdirs(projectionsDirAbs)) {
+      if (!memMeta[memDir]) {
         console.warn(
-          `workspace-loader: projections directory "${dirs.projections}/${vaultDir}" does not match any registered vault (known: ${vaults.join(', ') || '(none)'}); ignoring — likely a planning vault that has not been created yet or has been archived`
+          `workspace-loader: projections directory "${dirs.projections}/${memDir}" does not match any registered mem (known: ${mems.join(', ') || '(none)'}); ignoring — likely a planning mem that has not been created yet or has been archived`
         );
         continue;
       }
-      projections[vaultDir] = {};
-      const projFiles = readdirSync(join(projectionsDirAbs, vaultDir)).filter(f => f.endsWith('.json'));
+      projections[memDir] = {};
+      const projFiles = readdirSync(join(projectionsDirAbs, memDir)).filter(f => f.endsWith('.json'));
       for (const f of projFiles) {
         const name = f.slice(0, -5);
-        const raw = readJson(join(projectionsDirAbs, vaultDir, f));
-        validateOrThrow(schemasLoaded.projection, raw, `projection ${dirs.projections}/${vaultDir}/${f}`);
-        projections[vaultDir][name] = resolveProjection(raw, vaultDir, scopes, vaultMeta, dirs);
+        const raw = readJson(join(projectionsDirAbs, memDir, f));
+        validateOrThrow(schemasLoaded.projection, raw, `projection ${dirs.projections}/${memDir}/${f}`);
+        projections[memDir][name] = resolveProjection(raw, memDir, scopes, memMeta, dirs);
       }
     }
   }
 
   // Walk ingests: <root>/<ingestsDir>/<name>.json
   //
-  // An ingest whose projection has been dropped (its owning vault is
+  // An ingest whose projection has been dropped (its owning mem is
   // unregistered) is skipped with a warning rather than failing the
   // whole load — same rationale as the scopes/projections softening
   // above. Other ingests in the same workspace still run. The
   // structurally-broken cases (malformed JSON, missing `projection`
   // field) still hard-fail because they reflect authoring errors, not
-  // transient vault state.
+  // transient mem state.
   const ingests = [];
   const ingestsDirAbs = join(root, dirs.ingests);
   if (existsSync(ingestsDirAbs)) {
@@ -312,10 +312,10 @@ export function loadWorkspace(workspaceRoot, opts = {}) {
         ingests.push(assembleIngest(name, raw, projections, dirs));
       } catch (e) {
         // Distinguish authoring errors (malformed shape) from missing
-        // projection-vault errors (transient). The "no projections
-        // directory for vault" branch is the transient one — warn and
+        // projection-mem errors (transient). The "no projections
+        // directory for mem" branch is the transient one — warn and
         // skip. Everything else propagates.
-        if (/no projections directory for vault/.test(e.message)) {
+        if (/no projections directory for mem/.test(e.message)) {
           // `e.message` already carries the `workspace-loader:` prefix
           // from assembleIngest — emit it as-is to avoid a doubled prefix.
           console.warn(`${e.message}; skipping ingest "${name}"`);
@@ -330,8 +330,8 @@ export function loadWorkspace(workspaceRoot, opts = {}) {
   return {
     workspaceRoot: root,
     dirs,
-    vaults,
-    vaultMeta,
+    mems,
+    memMeta,
     schemas,
     scopes,
     projections,
@@ -397,49 +397,49 @@ function readJson(path) {
   }
 }
 
-function resolveProjection(raw, owningVault, scopes, vaultMeta, dirs) {
-  const sources = Array.isArray(raw.sources) ? raw.sources.map(s => resolveSource(s, owningVault, scopes, vaultMeta, dirs)) : [];
-  const destinations = Array.isArray(raw.destinations) ? raw.destinations.map(d => resolveDestination(d, vaultMeta)) : [];
-  return { ...raw, sources, destinations, _owningVault: owningVault };
+function resolveProjection(raw, owningMem, scopes, memMeta, dirs) {
+  const sources = Array.isArray(raw.sources) ? raw.sources.map(s => resolveSource(s, owningMem, scopes, memMeta, dirs)) : [];
+  const destinations = Array.isArray(raw.destinations) ? raw.destinations.map(d => resolveDestination(d, memMeta)) : [];
+  return { ...raw, sources, destinations, _owningMem: owningMem };
 }
 
-function resolveSource(src, owningVault, scopes, vaultMeta, dirs) {
+function resolveSource(src, owningMem, scopes, memMeta, dirs) {
   if (!src || typeof src !== 'object') return src;
   const out = { ...src };
 
   if (typeof src.scope_ref === 'string') {
-    const vaultScopes = scopes[owningVault] || {};
-    const scope = vaultScopes[src.scope_ref];
+    const memScopes = scopes[owningMem] || {};
+    const scope = memScopes[src.scope_ref];
     if (!scope) {
-      const expectedPath = join(dirs.scopes, owningVault, `${src.scope_ref}.json`);
-      const available = Object.keys(vaultScopes);
+      const expectedPath = join(dirs.scopes, owningMem, `${src.scope_ref}.json`);
+      const available = Object.keys(memScopes);
       throw new Error(
-        `workspace-loader: scope_ref "${src.scope_ref}" in projection for vault "${owningVault}" not found; expected file at "${expectedPath}" (available in "${owningVault}": ${available.join(', ') || '(none)'})`
+        `workspace-loader: scope_ref "${src.scope_ref}" in projection for mem "${owningMem}" not found; expected file at "${expectedPath}" (available in "${owningMem}": ${available.join(', ') || '(none)'})`
       );
     }
     out.scope = scope;
   }
 
-  // Soft validation: an unregistered vault in a projection source is
-  // fine at load time — planning vaults may legitimately not exist
+  // Soft validation: an unregistered mem in a projection source is
+  // fine at load time — planning mems may legitimately not exist
   // yet. Per-ingest fail-fast at run time covers the typo path.
-  if (typeof src.vault === 'string' && !vaultMeta[src.vault]) {
+  if (typeof src.mem === 'string' && !memMeta[src.mem]) {
     console.warn(
-      `workspace-loader: projection source references vault "${src.vault}" which is not a registered vault (known: ${Object.keys(vaultMeta).sort().join(', ') || '(none)'})`
+      `workspace-loader: projection source references mem "${src.mem}" which is not a registered mem (known: ${Object.keys(memMeta).sort().join(', ') || '(none)'})`
     );
   }
 
   return out;
 }
 
-function resolveDestination(dst, vaultMeta) {
+function resolveDestination(dst, memMeta) {
   if (!dst || typeof dst !== 'object') return dst;
   // Same softening as resolveSource — destination resolution is a
   // load-time concern; the actual write fails at agent runtime via
-  // MCP if the vault isn't there.
-  if (typeof dst.vault === 'string' && !vaultMeta[dst.vault]) {
+  // MCP if the mem isn't there.
+  if (typeof dst.mem === 'string' && !memMeta[dst.mem]) {
     console.warn(
-      `workspace-loader: projection destination references vault "${dst.vault}" which is not a registered vault (known: ${Object.keys(vaultMeta).sort().join(', ') || '(none)'})`
+      `workspace-loader: projection destination references mem "${dst.mem}" which is not a registered mem (known: ${Object.keys(memMeta).sort().join(', ') || '(none)'})`
     );
   }
   return { ...dst };
@@ -452,24 +452,24 @@ function assembleIngest(name, raw, projections, dirs) {
   const ref = raw.projection;
   if (typeof ref !== 'string' || !ref.includes('/')) {
     throw new Error(
-      `workspace-loader: ingest "${name}" missing or malformed "projection" field; expected "<vault>/<name>", got ${JSON.stringify(ref)}`
+      `workspace-loader: ingest "${name}" missing or malformed "projection" field; expected "<mem>/<name>", got ${JSON.stringify(ref)}`
     );
   }
   const slash = ref.indexOf('/');
-  const projVault = ref.slice(0, slash);
+  const projMem = ref.slice(0, slash);
   const projName = ref.slice(slash + 1);
-  const vaultProjections = projections[projVault];
-  if (!vaultProjections) {
+  const memProjections = projections[projMem];
+  if (!memProjections) {
     throw new Error(
-      `workspace-loader: ingest "${name}" references projection "${ref}" but no projections directory for vault "${projVault}" was found under "${dirs.projections}/"`
+      `workspace-loader: ingest "${name}" references projection "${ref}" but no projections directory for mem "${projMem}" was found under "${dirs.projections}/"`
     );
   }
-  const projection = vaultProjections[projName];
+  const projection = memProjections[projName];
   if (!projection) {
-    const expected = join(dirs.projections, projVault, `${projName}.json`);
-    const available = Object.keys(vaultProjections);
+    const expected = join(dirs.projections, projMem, `${projName}.json`);
+    const available = Object.keys(memProjections);
     throw new Error(
-      `workspace-loader: ingest "${name}" references projection "${ref}" not found; expected file at "${expected}" (available in "${projVault}": ${available.join(', ') || '(none)'})`
+      `workspace-loader: ingest "${name}" references projection "${ref}" not found; expected file at "${expected}" (available in "${projMem}": ${available.join(', ') || '(none)'})`
     );
   }
   return {
@@ -478,7 +478,7 @@ function assembleIngest(name, raw, projections, dirs) {
     trigger: typeof raw.trigger === 'string' ? raw.trigger : null,
     batch_size: typeof raw.batch_size === 'number' ? raw.batch_size : null,
     projection_ref: ref,
-    projection_vault: projVault,
+    projection_mem: projMem,
     projection_name: projName,
     projection,
     sources: projection.sources,

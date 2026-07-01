@@ -8,20 +8,20 @@
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { checkEditTarget } from './guard-entity-edit-utils.mjs';
-import { resolveVaultDirsFromCwd } from './workspace-resolve-utils.mjs';
+import { resolveMemDirsFromCwd } from './workspace-resolve-utils.mjs';
 
 const input = JSON.parse(await readStdin());
 
 const filePath = input.tool_input?.file_path;
 if (!filePath) process.exit(0);
 
-// Resolve folder-backed vault dirs the engine way: explicit --vault args,
+// Resolve folder-backed mem dirs the engine way: explicit --mem args,
 // else walk up for .memstead/workspace.toml and read the mount list. Empty on a
 // git-branch workspace (entities are branch blobs, not working-tree files).
-const vaultDirs = resolveVaultDirsFromCwd();
+const memDirs = resolveMemDirsFromCwd();
 
-// Check against every vault — block if any vault claims the file
-for (const root of vaultDirs) {
+// Check against every mem — block if any mem claims the file
+for (const root of memDirs) {
   const resolved = resolve(root);
   const result = checkEditTarget(filePath, resolved, existsSync(resolved));
   if (result.action === 'block') {

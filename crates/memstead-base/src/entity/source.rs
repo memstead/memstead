@@ -2,7 +2,7 @@
 //!
 //! Two backend-agnostic shapes live here: a directory on disk (for
 //! live, writable workspaces) and a sealed `.mem` zip archive (for read-only
-//! attached vaults). The git-tree shape lives in
+//! attached mems). The git-tree shape lives in
 //! `memstead-git-branch::entity::git_tree_source`. All shapes feed the
 //! same parse pipeline via the helper [`crate::entity::loader::parse_entries`].
 
@@ -16,9 +16,9 @@ pub enum EntitySource {
     /// A directory on disk. Walked recursively; engine-internal
     /// directories (`.git/`, `.memstead/`) are always skipped.
     Directory { root: PathBuf },
-    /// A sealed `.mem` vault archive: a zip containing the same markdown
+    /// A sealed `.mem` mem archive: a zip containing the same markdown
     /// tree a `Directory` would. Read-only; loaded as a dep alongside
-    /// the primary vault. Zip-slip protected via `enclosed_name`.
+    /// the primary mem. Zip-slip protected via `enclosed_name`.
     ZipArchive(PathBuf),
 }
 
@@ -124,7 +124,7 @@ fn read_zip_archive(
         // extract, but we also never want to surface their content.
         if entry.is_symlink() {
             return Err(LoadError::InvalidArchive(format!(
-                "entry '{raw_name}': symlinks are not allowed in sealed vault archives"
+                "entry '{raw_name}': symlinks are not allowed in sealed mem archives"
             )));
         }
 
@@ -150,8 +150,8 @@ fn read_zip_archive(
         if !relative_path.ends_with(".md") {
             // Non-markdown entries (including the meta-dir config) are
             // silently skipped here. The entity source only yields
-            // entity content; vault metadata is read by
-            // `vault_cache::read_published_config` on a separate pass.
+            // entity content; mem metadata is read by
+            // `mem_cache::read_published_config` on a separate pass.
             continue;
         }
 
@@ -200,7 +200,7 @@ fn find_markdown_files(
         let name = file_name.to_string_lossy();
 
         if path.is_dir() {
-            if name.as_ref() == ".git" || name.as_ref() == crate::vault::VAULT_META_DIR {
+            if name.as_ref() == ".git" || name.as_ref() == crate::mem::MEM_META_DIR {
                 continue;
             }
             find_markdown_files(root, &path, files)?;

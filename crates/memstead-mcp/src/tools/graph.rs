@@ -39,8 +39,8 @@ pub struct SearchParams {
         description = "Structured flat query. Fields: `any: [terms]` (OR, ranks entities matching more terms higher — no explicit AND needed), `not: [terms]` (exclusion), `phrase: \"exact adjacency\"`, `field: \"title\"|section-key` (narrow all three). Omit (or pass `{}`) to use search as a pure structural/metadata filter — hits come back in title-ascending order. No stemming: include morphological variants explicitly (run, running, runs)."
     )]
     pub query: Option<Query>,
-    #[schemars(description = "Only entities in this vault")]
-    pub vault: Option<String>,
+    #[schemars(description = "Only entities in this mem")]
+    pub mem: Option<String>,
     #[schemars(description = "Only entities of this type (e.g. \"spec\", \"memo\")")]
     pub entity_type: Option<String>,
     #[schemars(
@@ -83,7 +83,7 @@ pub struct SearchParams {
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct OverviewParams {
     #[schemars(
-        description = "Re-run community detection before returning overview (default: false). Detection is workspace-global: `rebuild` recomputes the Louvain partition over the *whole* workspace graph — it never scopes to `vault`, even when `vault` is also passed."
+        description = "Re-run community detection before returning overview (default: false). Detection is workspace-global: `rebuild` recomputes the Louvain partition over the *whole* workspace graph — it never scopes to `mem`, even when `mem` is also passed."
     )]
     pub rebuild: Option<bool>,
     #[schemars(
@@ -91,31 +91,31 @@ pub struct OverviewParams {
     )]
     pub chunk: Option<usize>,
     #[schemars(
-        description = "Restrict `vaults[]` and `schemas[]` to a single writable vault. `used_by` inside each schema still lists all vaults sharing it. Community scope: `vault` filters which clusters are *reported* (and makes `community_bridges` source-in-vault only) — it does NOT re-run detection per vault. Detection is always workspace-global and cluster ids stay the global-pass ids; passing `vault` never renumbers or re-scopes the partition. Because detection is global and disconnected / sparsely-connected nodes collapse into a single catch-all rather than forming their own cluster, a small or isolated vault-local subgraph may surface as no cluster at all under a `vault` filter."
+        description = "Restrict `mems[]` and `schemas[]` to a single writable mem. `used_by` inside each schema still lists all mems sharing it. Community scope: `mem` filters which clusters are *reported* (and makes `community_bridges` source-in-mem only) — it does NOT re-run detection per mem. Detection is always workspace-global and cluster ids stay the global-pass ids; passing `mem` never renumbers or re-scopes the partition. Because detection is global and disconnected / sparsely-connected nodes collapse into a single catch-all rather than forming their own cluster, a small or isolated mem-local subgraph may surface as no cluster at all under a `mem` filter."
     )]
-    pub vault: Option<String>,
+    pub mem: Option<String>,
     #[schemars(
-        description = "Opt into heavy content. Allowed keys: \"community_members\" (entity lists per cluster), \"community_bridges\" (inter-cluster edge aggregation with up to 3 sample edges per pair), \"vault_distribution\" (per-vault type_distribution), \"dangling_links\" (renders a `## Dangling Links` section listing each unresolved body wiki-link as `source → target (in section)`; richer aggregation tracked in #12/#13). `include` keys are always shipped regardless of the token budget — use it to force content you need. Unknown keys emit a typed `warnings` entry. Schema bodies are not in this set — call memstead_schema(name=...) for the full per-type catalogue."
+        description = "Opt into heavy content. Allowed keys: \"community_members\" (entity lists per cluster), \"community_bridges\" (inter-cluster edge aggregation with up to 3 sample edges per pair), \"mem_distribution\" (per-mem type_distribution), \"dangling_links\" (renders a `## Dangling Links` section listing each unresolved body wiki-link as `source → target (in section)`; richer aggregation tracked in #12/#13). `include` keys are always shipped regardless of the token budget — use it to force content you need. Unknown keys emit a typed `warnings` entry. Schema bodies are not in this set — call memstead_schema(name=...) for the full per-type catalogue."
     )]
     pub include: Option<Vec<String>>,
     #[schemars(
-        description = "Target token budget for heavy content only (`community_members`, `community_bridges`, `vault_distribution`, `dangling_links`). Default: 8000. Hard-required content (vault roster, schema refs with relationship vocabulary, community titles, workspace policy) always ships in addition — total response size will exceed this budget. When hard-required content alone exceeds the budget, `overview_mode=\"overbudget\"` signals the agent to raise the budget or scope via `vault`. Heavy content not in `include` is greedy-filled until the budget is exhausted; anything left over is advertised in `hints[]` with `estimated_tokens`. `include` keys bypass the budget. Budgets below ~10 tokens are safe but unproductive — the structured envelope still arrives (`overview_mode=\"overbudget\"`) but no useful chunking happens and the full body ships as one chunk."
+        description = "Target token budget for heavy content only (`community_members`, `community_bridges`, `mem_distribution`, `dangling_links`). Default: 8000. Hard-required content (mem roster, schema refs with relationship vocabulary, community titles, workspace policy) always ships in addition — total response size will exceed this budget. When hard-required content alone exceeds the budget, `overview_mode=\"overbudget\"` signals the agent to raise the budget or scope via `mem`. Heavy content not in `include` is greedy-filled until the budget is exhausted; anything left over is advertised in `hints[]` with `estimated_tokens`. `include` keys bypass the budget. Budgets below ~10 tokens are safe but unproductive — the structured envelope still arrives (`overview_mode=\"overbudget\"`) but no useful chunking happens and the full body ships as one chunk."
     )]
     pub token_budget: Option<usize>,
 }
 
-/// Parameters for memstead_schema. Exactly one of `name` or `vault`
+/// Parameters for memstead_schema. Exactly one of `name` or `mem`
 /// must be supplied; passing both is an `INVALID_INPUT` error.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct SchemaParams {
     #[schemars(
-        description = "Schema name as listed in memstead_overview's `## Schemas` section (e.g. \"default\" or \"default@1.0.0\"). Schemas are workspace-globally unique by name; the workspace registry resolves a bare name to the pinned version. Mutually exclusive with `vault`."
+        description = "Schema name as listed in memstead_overview's `## Schemas` section (e.g. \"default\" or \"default@1.0.0\"). Schemas are workspace-globally unique by name; the workspace registry resolves a bare name to the pinned version. Mutually exclusive with `mem`."
     )]
     pub name: Option<String>,
     #[schemars(
-        description = "Vault name as listed in memstead_overview's `## Vaults` section. The engine resolves the vault's pinned `schema_ref` from the workspace's mount roster and proceeds identically to the `name`-driven path. Mutually exclusive with `name`. Returns `UNKNOWN_VAULT` when the vault is not mounted."
+        description = "Mem name as listed in memstead_overview's `## Mems` section. The engine resolves the mem's pinned `schema_ref` from the workspace's mount roster and proceeds identically to the `name`-driven path. Mutually exclusive with `name`. Returns `UNKNOWN_MEM` when the mem is not mounted."
     )]
-    pub vault: Option<String>,
+    pub mem: Option<String>,
     #[schemars(
         description = "Verbosity of the schema body. `\"full\"` (default, absent) returns the complete payload — every description, `when_to_use`, write-rule, and writing-guidance string. `\"lite\"` returns a cheap cold-start skeleton: entity-type names with their section keys (and `required` markers) and metadata-field shapes (name, `required`, `enum`, `default`), relationship-type names with their `allowed_sources`/`allowed_targets`, `manual_authoring`, `acyclic`, and `per_edge_description` — plus the top-level `alias_target_rel_type` pointer — with the long-form prose dropped. The lite skeleton carries every flag needed to author a legal write; escalate to full only for the human-readable guidance. Heavy arrays ship under distinct keys per mode (`types`/`relationships` vs. `types_summary`/`relationships_summary`). Any value other than `\"full\"`/`\"lite\"` returns `INVALID_INPUT` naming the bad value."
     )]

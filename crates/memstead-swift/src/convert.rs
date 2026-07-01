@@ -11,7 +11,7 @@
 
 use memstead_base::{
     entity as core_entity, graph as core_graph, ops as core_ops, store as core_store,
-    vault as core_vault,
+    mem as core_mem,
 };
 
 use crate::types::{
@@ -19,7 +19,7 @@ use crate::types::{
     EdgeTypeCount, Entity, HealthIssue, HealthSummary, ListResult, MetadataEntry, MetadataValue,
     MissingField, ParseRecoveryEntry, ParseRecoveryReport, Query, RelationDirection, RelationEdge,
     Relations, ReloadResult, Relationship, SearchHit, SearchResult, SearchScope, Section,
-    StaleEntity, Stats, VaultSchemaOutcome,
+    StaleEntity, Stats, MemSchemaOutcome,
 };
 
 // ---------------------------------------------------------------------------
@@ -40,7 +40,7 @@ pub(crate) fn entity_to_ffi(entity: &core_entity::Entity) -> Entity {
         id: entity.id.to_string(),
         title: entity.title.clone(),
         entity_type: entity.entity_type.clone(),
-        vault: entity.vault.clone(),
+        mem: entity.mem.clone(),
         file_path: entity.file_path.clone(),
         metadata: entity
             .metadata
@@ -79,7 +79,7 @@ pub(crate) fn entity_to_ffi(entity: &core_entity::Entity) -> Entity {
 pub(crate) fn stats_to_ffi(
     stats: core_ops::Stats,
     store: &core_store::Store,
-    vault_router: &core_vault::VaultRouterSnapshot,
+    mem_router: &core_mem::MemRouterSnapshot,
 ) -> Stats {
 
     let mut edge_types: Vec<EdgeTypeCount> = stats
@@ -101,18 +101,18 @@ pub(crate) fn stats_to_ffi(
     let real = stats.entity_count as u64;
     let stub_count = (store.len() as u64).saturating_sub(real);
 
-    let mut writable_vaults: Vec<String> = vault_router.writable_vaults().iter().cloned().collect();
-    writable_vaults.sort();
+    let mut writable_mems: Vec<String> = mem_router.writable_mems().iter().cloned().collect();
+    writable_mems.sort();
 
     let writable_set: std::collections::HashSet<&String> =
-        vault_router.writable_vaults().iter().collect();
-    let mut read_vaults: Vec<String> = vault_router
-        .visible_vaults()
+        mem_router.writable_mems().iter().collect();
+    let mut read_mems: Vec<String> = mem_router
+        .visible_mems()
         .iter()
         .filter(|n| !writable_set.contains(*n))
         .cloned()
         .collect();
-    read_vaults.sort();
+    read_mems.sort();
 
     Stats {
         entity_count: real,
@@ -120,10 +120,10 @@ pub(crate) fn stats_to_ffi(
         edge_count: stats.edge_count as u64,
         edge_types,
         community_count: stats.community_count as u64,
-        vault_count: stats.vault_count as u64,
+        mem_count: stats.mem_count as u64,
         types_in_use: stats.types_in_use,
-        writable_vaults,
-        read_vaults,
+        writable_mems,
+        read_mems,
     }
 }
 
@@ -180,7 +180,7 @@ fn query_from_ffi(q: Query) -> core_ops::Query {
 pub(crate) fn search_scope_from_ffi(scope: SearchScope) -> core_ops::SearchScope {
     core_ops::SearchScope {
         query: scope.query.map(query_from_ffi),
-        vault: scope.vault,
+        mem: scope.mem,
         entity_type: scope.entity_type,
         limit: scope.limit.map(|v| v as usize),
         offset: scope.offset.map(|v| v as usize),
@@ -204,7 +204,7 @@ fn hit_to_ffi(hit: core_ops::SearchHit) -> SearchHit {
     SearchHit {
         id: hit.id.to_string(),
         title: hit.title,
-        vault: hit.vault,
+        mem: hit.mem,
         entity_type: hit.entity_type,
         stub: hit.stub,
         score: hit.score,
@@ -353,7 +353,7 @@ pub(crate) fn reload_result_to_ffi(result: core_ops::ReloadResult) -> ReloadResu
 }
 
 // ---------------------------------------------------------------------------
-// Per-vault commit-delta + agent-notes feed.
+// Per-mem commit-delta + agent-notes feed.
 // ---------------------------------------------------------------------------
 
 pub(crate) fn change_envelope_to_ffi(envelope: memstead_base::ChangeEnvelope) -> ChangeEnvelope {
@@ -389,11 +389,11 @@ pub(crate) fn change_envelope_to_ffi(envelope: memstead_base::ChangeEnvelope) ->
 }
 
 pub(crate) fn changes_report_to_ffi(report: memstead_base::ChangesReport) -> ChangesReport {
-    // The core report's per-vault delta carries `vault`, `since`,
+    // The core report's per-mem delta carries `mem`, `since`,
     // `head`, and `changes`. The FFI surface keeps the agent-notes
     // pass as a distinct method so consumers compose them explicitly.
     ChangesReport {
-        vault: report.vault,
+        mem: report.mem,
         since: report.since,
         head: report.head,
         changes: report
@@ -406,7 +406,7 @@ pub(crate) fn changes_report_to_ffi(report: memstead_base::ChangesReport) -> Cha
 
 pub(crate) fn commit_note_to_ffi(note: memstead_base::ops::CommitNote) -> CommitNote {
     CommitNote {
-        vault: note.vault,
+        mem: note.mem,
         sha: note.sha,
         subject: note.subject,
         tool_verb: note.tool_verb,
@@ -423,7 +423,7 @@ pub(crate) fn agent_notes_report_to_ffi(
     report: memstead_base::ops::AgentNotesReport,
 ) -> AgentNotesReport {
     AgentNotesReport {
-        vault: report.vault,
+        mem: report.mem,
         since: report.since,
         head: report.head,
         notes: report.notes.into_iter().map(commit_note_to_ffi).collect(),
@@ -454,7 +454,7 @@ pub(crate) fn parse_recovery_report_to_ffi(
 
 pub(crate) fn set_schema_outcome_to_ffi(
     outcome: memstead_base::engine::SetSchemaOutcome,
-) -> VaultSchemaOutcome {
+) -> MemSchemaOutcome {
     use memstead_base::engine::SetSchemaResult;
     // Mirror the MCP wire token (serde `rename_all = "snake_case"`) so the
     // app branches on the same `outcome` string an agent would.
@@ -465,8 +465,8 @@ pub(crate) fn set_schema_outcome_to_ffi(
         SetSchemaResult::MigrationPending => "migration_pending",
     }
     .to_string();
-    VaultSchemaOutcome {
-        vault: outcome.vault,
+    MemSchemaOutcome {
+        mem: outcome.mem,
         schema_pin: outcome.schema_pin,
         migration_target: outcome.migration_target,
         outcome: outcome_str,

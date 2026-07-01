@@ -39,7 +39,7 @@ memstead_overview
 memstead_health { include_config: true }
 ```
 
-`memstead_health` with `include_config: true` returns counts, the vault list, and each writable vault's `writeGuidance`; `memstead_overview` gives the community clusters. Briefly tell the user what's already in the graph. If entities exist in the writable vault, mention them. The selected vault's `writeGuidance` (granularity, extraction rules, abstraction level) guides what to capture and how to structure entities.
+`memstead_health` with `include_config: true` returns counts, the mem list, and each writable mem's `writeGuidance`; `memstead_overview` gives the community clusters. Briefly tell the user what's already in the graph. If entities exist in the writable mem, mention them. The selected mem's `writeGuidance` (granularity, extraction rules, abstraction level) guides what to capture and how to structure entities.
 
 ## Step 3: Start the conversation
 
@@ -70,6 +70,6 @@ Show a summary: entities created, relationships established, open questions for 
 
 ## Rules
 
-- **Granularity**: Follow the writable vault's `writeGuidance.granularity` rule. Fallback: one entity per process, concept, or cohesive knowledge unit.
+- **Granularity**: Follow the writable mem's `writeGuidance.granularity` rule. Fallback: one entity per process, concept, or cohesive knowledge unit.
 - **Level**: M0 for concrete things, M1 for rules/conventions, M2 for patterns.
-- **Vault**: Use the project's writable vault. Ask if unclear.
+- **Mem**: Use the project's writable mem. Ask if unclear.

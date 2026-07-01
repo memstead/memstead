@@ -15,15 +15,15 @@ export function escapeRegex(str) {
 const ENTITY_NAME_RE = '[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\\.md';
 
 /**
- * Check if a command references an entity .md file inside the vault directory.
+ * Check if a command references an entity .md file inside the mem directory.
  * Only matches filenames following entity naming convention (lowercase kebab-case).
  * @param {string} command - The shell command
- * @param {string} vaultDir - The vault directory name (e.g. 'specs')
+ * @param {string} memDir - The mem directory name (e.g. 'specs')
  * @returns {boolean}
  */
-export function referencesEntityFile(command, vaultDir) {
+export function referencesEntityFile(command, memDir) {
   const pattern = new RegExp(
-    `(?:^|[\\s"'\`/])(?:\\./)?(?:${escapeRegex(vaultDir)})/(?:[a-z0-9][a-z0-9_-]*/)*${ENTITY_NAME_RE}(?:[\\s"'\`]|$)`,
+    `(?:^|[\\s"'\`/])(?:\\./)?(?:${escapeRegex(memDir)})/(?:[a-z0-9][a-z0-9_-]*/)*${ENTITY_NAME_RE}(?:[\\s"'\`]|$)`,
   );
   return pattern.test(command);
 }
@@ -69,12 +69,12 @@ export function isWriteCommand(command) {
 /**
  * Full check: should a bash command be blocked?
  * @param {string} command - The shell command
- * @param {string} vaultDir - The vault directory name
+ * @param {string} memDir - The mem directory name
  * @returns {{ action: 'block'|'allow', reason?: string }}
  */
-export function checkBashCommand(command, vaultDir) {
+export function checkBashCommand(command, memDir) {
   if (!command) return { action: 'allow' };
-  if (!referencesEntityFile(command, vaultDir)) return { action: 'allow' };
+  if (!referencesEntityFile(command, memDir)) return { action: 'allow' };
   if (!isWriteCommand(command)) return { action: 'allow' };
 
   return {

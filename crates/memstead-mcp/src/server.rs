@@ -17,7 +17,7 @@ use memstead_git_branch::ops::envelope;
 
 // Backend-neutral types live in memstead-base.
 use memstead_base::vcs::{Actor, ClientId};
-use memstead_base::{EntityId, SearchScope, ops::VaultChangedNotice, ops::WarningHint};
+use memstead_base::{EntityId, SearchScope, ops::MemChangedNotice, ops::WarningHint};
 use memstead_base::chunking::{apply_chunking, estimate_tokens};
 use memstead_base::render;
 
@@ -72,10 +72,10 @@ pub struct McpServer {
     /// pass-through.
     plugin: Arc<HashMap<String, toml::Table>>,
     /// Process-scoped operator-mode posture. When `true`, the
-    /// `memstead_vault_create` / `memstead_vault_delete` orchestrators bypass
-    /// the workspace `[[vault_management.create]]` /
-    /// `[[vault_management.delete]]` allowlists and the
-    /// `VAULT_REFERENCED_BY_POLICY` safeguard. Set only by the
+    /// `memstead_mem_create` / `memstead_mem_delete` orchestrators bypass
+    /// the workspace `[[mem_management.create]]` /
+    /// `[[mem_management.delete]]` allowlists and the
+    /// `MEM_REFERENCED_BY_POLICY` safeguard. Set only by the
     /// `memstead-mcp --operator-mode` boot path; agent-spawned servers
     /// (Claude Code plugin, macOS chat subprocess) always boot with
     /// this `false` and have no in-band channel to flip it. Surfaced
@@ -224,23 +224,23 @@ impl McpServer {
         )
     }
 
-    /// Get the default writable vault name from the unified engine.
-    /// Returns `None` when the engine has no writable vaults.
+    /// Get the default writable mem name from the unified engine.
+    /// Returns `None` when the engine has no writable mems.
     ///
-    /// Delegates to [`Engine::default_writable_vault`] — the first
-    /// writable mount in declaration order (the stable seed vault), NOT
-    /// `writable_vaults().iter().next()` off an unordered set. Creating a
-    /// second vault no longer silently retargets omitted-`vault` writes.
-    fn primary_vault(&self) -> Option<String> {
+    /// Delegates to [`Engine::default_writable_mem`] — the first
+    /// writable mount in declaration order (the stable seed mem), NOT
+    /// `writable_mems().iter().next()` off an unordered set. Creating a
+    /// second mem no longer silently retargets omitted-`mem` writes.
+    fn primary_mem(&self) -> Option<String> {
         let engine = self.unified_engine.lock().ok()?;
-        engine.default_writable_vault().map(|s| s.to_string())
+        engine.default_writable_mem().map(|s| s.to_string())
     }
 
-    /// Resolve a vault name, defaulting to primary.
-    fn resolve_vault(&self, vault: Option<&str>) -> String {
-        vault
+    /// Resolve a mem name, defaulting to primary.
+    fn resolve_mem(&self, mem: Option<&str>) -> String {
+        mem
             .map(|v| v.to_string())
-            .or_else(|| self.primary_vault())
+            .or_else(|| self.primary_mem())
             .unwrap_or_else(|| "default".to_string())
     }
 }
@@ -304,16 +304,16 @@ fn validate_entity_id(id: &str) -> Option<CallToolResult> {
 
 /// Validate the optional agent-authored `note` field on a mutation call.
 /// Returns an `INVALID_INPUT` envelope when the note exceeds
-/// `memstead_engine::vault_management::NOTE_MAX_LEN` Unicode scalar values, matching the
-/// vault-lifecycle orchestrators. Empty / absent values succeed.
+/// `memstead_engine::mem_management::NOTE_MAX_LEN` Unicode scalar values, matching the
+/// mem-lifecycle orchestrators. Empty / absent values succeed.
 /// Whitespace-only notes are allowed at the edge (the engine side
 /// collapses them to "no body line" during commit-message assembly).
 fn validate_note(note: Option<&str>) -> Option<CallToolResult> {
     let Some(n) = note else {
         return None;
     };
-    if n.chars().count() > memstead_engine::vault_management::NOTE_MAX_LEN {
-        let max = memstead_engine::vault_management::NOTE_MAX_LEN;
+    if n.chars().count() > memstead_engine::mem_management::NOTE_MAX_LEN {
+        let max = memstead_engine::mem_management::NOTE_MAX_LEN;
         let msg = format!(
             "note exceeds {max} characters — shorten the agent-authored \
              provenance line to one sentence."
@@ -443,7 +443,7 @@ fn md_with_structured(markdown: String, structured: serde_json::Value) -> CallTo
 
 
 /// Prepend a `> [!warning]` admonition block describing drift events
-/// (`VaultReloaded` warnings from [`Engine::reload_if_stale`])
+/// (`MemReloaded` warnings from [`Engine::reload_if_stale`])
 /// to a markdown response body. Visible to agents inline at the top
 /// of the rendered output so a reasoning loop reading e.g.
 /// `memstead_entity` notices the snapshot shifted under it without
@@ -451,33 +451,33 @@ fn md_with_structured(markdown: String, structured: serde_json::Value) -> CallTo
 ///
 /// No-op when `drift_warnings` is empty so the common (single-engine)
 /// path produces byte-identical markdown to pre-multi-engine-coherence.
-/// Attach the structured `vault_changed` notices a just-completed
+/// Attach the structured `mem_changed` notices a just-completed
 /// operation accumulated (reload-before-operation) to a JSON response
-/// body under the `vault_changed` key. No-op when `notices` is empty,
+/// body under the `mem_changed` key. No-op when `notices` is empty,
 /// so the common single-engine path leaves the body byte-identical.
-fn attach_vault_changed(body: &mut serde_json::Value, notices: Vec<VaultChangedNotice>) {
+fn attach_mem_changed(body: &mut serde_json::Value, notices: Vec<MemChangedNotice>) {
     if notices.is_empty() {
         return;
     }
-    body["vault_changed"] =
+    body["mem_changed"] =
         serde_json::to_value(&notices).unwrap_or(serde_json::Value::Null);
 }
 
-/// Attach the target vault's durability marker to a mutation response.
-/// `durable: false` means the vault's storage is volatile (in-memory) —
+/// Attach the target mem's durability marker to a mutation response.
+/// `durable: false` means the mem's storage is volatile (in-memory) —
 /// the accompanying `commit_sha` is shaped like a git SHA but denotes
 /// nothing that survives process restart or session-TTL eviction. This is
-/// the per-write echo of the same per-vault marker `overview` / `health`
+/// the per-write echo of the same per-mem marker `overview` / `health`
 /// carry, derived from the same `MountStorage::is_durable()`; it is
 /// orthogonal to `commit_sha.is_empty()` (which says only whether a commit
 /// happened), so an agent never has to conflate "no commit" with "commit
-/// in RAM". Defaults to `false` for an unresolvable vault — the engine
+/// in RAM". Defaults to `false` for an unresolvable mem — the engine
 /// never claims a durability it cannot vouch for.
-fn attach_durability(body: &mut serde_json::Value, engine: &memstead_base::Engine, vault: &str) {
+fn attach_durability(body: &mut serde_json::Value, engine: &memstead_base::Engine, mem: &str) {
     let durable = engine
         .mounts()
         .iter()
-        .find(|m| m.vault == vault)
+        .find(|m| m.mem == mem)
         .map(|m| m.storage.is_durable())
         .unwrap_or(false);
     if let Some(obj) = body.as_object_mut() {
@@ -485,7 +485,7 @@ fn attach_durability(body: &mut serde_json::Value, engine: &memstead_base::Engin
     }
 }
 
-/// Attach `vault_changed` notices to a response's `structured_content`
+/// Attach `mem_changed` notices to a response's `structured_content`
 /// envelope (success or error — anything whose `structured_content` is
 /// a JSON object). A mutation that reloaded then refused (e.g.
 /// `HASH_MISMATCH`) carries the notice alongside the refusal; a read
@@ -493,9 +493,9 @@ fn attach_durability(body: &mut serde_json::Value, engine: &memstead_base::Engin
 /// Draining here also keeps the engine stash from leaking into the next
 /// operation. No-op when `notices` is empty or the envelope is not a
 /// JSON object.
-fn attach_vault_changed_to_result(
+fn attach_mem_changed_to_result(
     mut res: CallToolResult,
-    notices: Vec<VaultChangedNotice>,
+    notices: Vec<MemChangedNotice>,
 ) -> CallToolResult {
     if notices.is_empty() {
         return res;
@@ -506,25 +506,25 @@ fn attach_vault_changed_to_result(
         .and_then(|sc| sc.as_object_mut())
     {
         obj.insert(
-            "vault_changed".to_string(),
+            "mem_changed".to_string(),
             serde_json::to_value(&notices).unwrap_or(serde_json::Value::Null),
         );
     }
     res
 }
 
-/// Reconstruct one `VaultReloaded` warning per stashed notice. Used on
-/// error paths that hold only the drained `vault_changed` notices and
+/// Reconstruct one `MemReloaded` warning per stashed notice. Used on
+/// error paths that hold only the drained `mem_changed` notices and
 /// no `drift_warnings` Vec — mutation handlers, whose reload happens
 /// inside the engine and surfaces solely as a stashed notice. The
 /// `entities_loaded` count comes from the notice's own delta size so
 /// the synthesised warning Display matches what a read handler's
-/// `WarningHint::VaultReloaded` would render for the same reload.
-fn notices_as_reload_warnings(notices: &[VaultChangedNotice]) -> Vec<WarningHint> {
+/// `WarningHint::MemReloaded` would render for the same reload.
+fn notices_as_reload_warnings(notices: &[MemChangedNotice]) -> Vec<WarningHint> {
     notices
         .iter()
-        .map(|n| WarningHint::VaultReloaded {
-            vault: n.vault.clone(),
+        .map(|n| WarningHint::MemReloaded {
+            mem: n.mem.clone(),
             old_head: n.from_head.clone(),
             new_head: n.to_head.clone(),
             entities_loaded: n.entity_count(),
@@ -533,25 +533,25 @@ fn notices_as_reload_warnings(notices: &[VaultChangedNotice]) -> Vec<WarningHint
 }
 
 /// Attach reload drift to an *error* response on the same channel split
-/// a successful response uses: the full per-entity `vault_changed`
-/// notice on `structured_content`, plus the `VAULT_RELOADED` admonition
+/// a successful response uses: the full per-entity `mem_changed`
+/// notice on `structured_content`, plus the `MEM_RELOADED` admonition
 /// the read success path prepends, on the text channel. Never carries
 /// the serialised notice on the text channel — that would make an error
 /// response richer than the matching success (a new asymmetry); the
 /// text channel gets only the warning line.
 ///
 /// Every error early-return reachable *after* a
-/// `take_vault_changed_notices()` drain routes through this so a reload
+/// `take_mem_changed_notices()` drain routes through this so a reload
 /// that happened during the operation reaches the agent whether the
 /// operation then succeeded or failed. No-op when both inputs are empty,
 /// so the common no-drift path stays byte-identical to pre-fix.
 fn attach_drift_to_error(
     res: CallToolResult,
     drift_warnings: &[WarningHint],
-    notices: Vec<VaultChangedNotice>,
+    notices: Vec<MemChangedNotice>,
 ) -> CallToolResult {
     let res = prepend_drift_warnings_to_result_text(res, drift_warnings);
-    attach_vault_changed_to_result(res, notices)
+    attach_mem_changed_to_result(res, notices)
 }
 
 /// Prepend the drift admonition (the same `> [!warning]` block the read
@@ -585,7 +585,7 @@ fn prepend_drift_warnings_md(md: String, drift_warnings: &[WarningHint]) -> Stri
     }
     let mut prefix = String::new();
     prefix.push_str(
-        "> [!warning] Engine snapshot reloaded — sibling writer advanced an on-disk vault HEAD\n",
+        "> [!warning] Engine snapshot reloaded — sibling writer advanced an on-disk mem HEAD\n",
     );
     for w in drift_warnings {
         prefix.push_str(&format!(">\n> - **{}**: {}\n", w.code(), w));
@@ -595,23 +595,23 @@ fn prepend_drift_warnings_md(md: String, drift_warnings: &[WarningHint]) -> Stri
     prefix
 }
 
-/// Format the canonical schema pin for a known vault as `name@version`,
-/// or `None` if the vault is not registered. Source of truth is the
-/// engine's `VaultState.schema_ref`, which always reflects the schema
+/// Format the canonical schema pin for a known mem as `name@version`,
+/// or `None` if the mem is not registered. Source of truth is the
+/// engine's `MemState.schema_ref`, which always reflects the schema
 /// actually loaded — never a stale on-disk pin.
 ///
-// Per-vault schema pin / workspace policy / cross-catalogue schema
+// Per-mem schema pin / workspace policy / cross-catalogue schema
 // lookup helpers live in `memstead_engine::overview` so the shared
 // composer (this MCP tool + the pro CLI) and the rest of this server
 // reach the same canonical implementation. The wrappers below stay so
 // the existing ~14 call sites in this file continue to compile
 // unchanged; their bodies just forward.
 
-fn vault_schema_ref_unified(
+fn mem_schema_ref_unified(
     engine: &memstead_base::Engine,
-    vault_name: &str,
+    mem_name: &str,
 ) -> Option<String> {
-    memstead_engine::overview::vault_schema_ref(engine, vault_name)
+    memstead_engine::overview::mem_schema_ref(engine, mem_name)
 }
 
 fn find_schema_unified<'a>(
@@ -621,9 +621,9 @@ fn find_schema_unified<'a>(
     memstead_engine::overview::find_schema(engine, sref)
 }
 
-/// Resolve a schema by bare name across vault-pinned, workspace, and
+/// Resolve a schema by bare name across mem-pinned, workspace, and
 /// built-in catalogues. Mirrors `find_schema_unified`'s precedence:
-/// vault-pinned first, then workspace, then built-ins. Used by
+/// mem-pinned first, then workspace, then built-ins. Used by
 /// `memstead_schema(name="<bare>")` for the path that doesn't carry a
 /// `@<version>` pin — picks the first matching schema by name.
 fn find_schema_by_name<'a>(
@@ -650,28 +650,28 @@ fn find_schema_by_name<'a>(
         .find(|s| s.manifest.name == name)
 }
 
-/// Inject `_vault_schema: <ref>` as the first line inside the YAML
+/// Inject `_mem_schema: <ref>` as the first line inside the YAML
 /// frontmatter block of a rendered markdown response. No-op when the
 /// markdown does not start with `---\n` (defensive — a future renderer
 /// without frontmatter must not get a malformed prefix). Idempotent: if
-/// `_vault_schema:` is already present at the top of the frontmatter the
+/// `_mem_schema:` is already present at the top of the frontmatter the
 /// second call is a silent no-op so chunked responses do not double-stamp.
-fn inject_md_vault_schema(md: &mut String, schema_ref: &str) {
+fn inject_md_mem_schema(md: &mut String, schema_ref: &str) {
     if !md.starts_with("---\n") {
         return;
     }
-    if md[4..].starts_with("_vault_schema:") {
+    if md[4..].starts_with("_mem_schema:") {
         return;
     }
-    md.insert_str(4, &format!("_vault_schema: {schema_ref}\n"));
+    md.insert_str(4, &format!("_mem_schema: {schema_ref}\n"));
 }
 
-/// Insert `_vault_schema: <ref>` at the top level of a JSON-shaped tool
+/// Insert `_mem_schema: <ref>` at the top level of a JSON-shaped tool
 /// response built via [`json_response`]. Refreshes the text channel so
 /// pretty-printed JSON stays in lockstep with `structured_content`. Silent
 /// no-op when the response has no structured content or the structured
 /// content is not a JSON object — the original response survives unchanged.
-fn with_vault_schema_anchor(mut res: CallToolResult, schema_ref: &str) -> CallToolResult {
+fn with_mem_schema_anchor(mut res: CallToolResult, schema_ref: &str) -> CallToolResult {
     let Some(sc) = res.structured_content.as_mut() else {
         return res;
     };
@@ -679,7 +679,7 @@ fn with_vault_schema_anchor(mut res: CallToolResult, schema_ref: &str) -> CallTo
         return res;
     };
     obj.insert(
-        "_vault_schema".to_string(),
+        "_mem_schema".to_string(),
         serde_json::Value::String(schema_ref.to_string()),
     );
     if let Ok(text) = serde_json::to_string_pretty(&*sc) {
@@ -759,19 +759,19 @@ fn engine_err_unified(
                 }),
             ),
         ),
-        E::UnknownVault(name) => {
-            // #55: attach `known_vaults` so this generic mapper matches the
-            // dedicated vault-not-found handler regardless of which path
+        E::UnknownMem(name) => {
+            // #55: attach `known_mems` so this generic mapper matches the
+            // dedicated mem-not-found handler regardless of which path
             // raised the error.
-            let known_vaults: Vec<String> =
-                engine.mounts().iter().map(|m| m.vault.clone()).collect();
+            let known_mems: Vec<String> =
+                engine.mounts().iter().map(|m| m.mem.clone()).collect();
             tool_error_with_payload(
-                "UNKNOWN_VAULT",
+                "UNKNOWN_MEM",
                 &message,
                 envelope(
-                    "UNKNOWN_VAULT",
+                    "UNKNOWN_MEM",
                     message.clone(),
-                    serde_json::json!({ "name": name, "known_vaults": known_vaults }),
+                    serde_json::json!({ "name": name, "known_mems": known_mems }),
                 ),
             )
         }
@@ -785,7 +785,7 @@ fn engine_err_unified(
             ),
         ),
         E::PushedCommitsProtected {
-            vault,
+            mem,
             target_sha,
             pushed_shas,
         } => tool_error_with_payload(
@@ -795,7 +795,7 @@ fn engine_err_unified(
                 "PUSHED_COMMITS_PROTECTED",
                 message.clone(),
                 serde_json::json!({
-                    "vault": vault,
+                    "mem": mem,
                     "target_sha": target_sha,
                     "pushed_shas": pushed_shas,
                 }),
@@ -810,26 +810,26 @@ fn engine_err_unified(
                 serde_json::json!({ "remote": name }),
             ),
         ),
-        E::LocalDivergence { vault, remote_ref } => tool_error_with_payload(
+        E::LocalDivergence { mem, remote_ref } => tool_error_with_payload(
             "LOCAL_DIVERGENCE",
             &message,
             envelope(
                 "LOCAL_DIVERGENCE",
                 message.clone(),
-                serde_json::json!({ "vault": vault, "remote_ref": remote_ref }),
+                serde_json::json!({ "mem": mem, "remote_ref": remote_ref }),
             ),
         ),
-        E::NonFastForward { vault, remote } => tool_error_with_payload(
+        E::NonFastForward { mem, remote } => tool_error_with_payload(
             "NON_FAST_FORWARD",
             &message,
             envelope(
                 "NON_FAST_FORWARD",
                 message.clone(),
-                serde_json::json!({ "vault": vault, "remote": remote }),
+                serde_json::json!({ "mem": mem, "remote": remote }),
             ),
         ),
         E::LocalInvalidState {
-            vault,
+            mem,
             remote,
             detail,
         } => tool_error_with_payload(
@@ -839,14 +839,14 @@ fn engine_err_unified(
                 "LOCAL_INVALID_STATE",
                 message.clone(),
                 serde_json::json!({
-                    "vault": vault,
+                    "mem": mem,
                     "remote": remote,
                     "detail": detail,
                 }),
             ),
         ),
         E::SchemaViolationInFetch {
-            vault,
+            mem,
             ref_name,
             violations,
         } => tool_error_with_payload(
@@ -856,19 +856,19 @@ fn engine_err_unified(
                 "SCHEMA_VIOLATION_IN_FETCH",
                 message.clone(),
                 serde_json::json!({
-                    "vault": vault,
+                    "mem": mem,
                     "ref": ref_name,
                     "violations": violations,
                 }),
             ),
         ),
-        E::ReadOnlyMount(vault) => tool_error_with_payload(
+        E::ReadOnlyMount(mem) => tool_error_with_payload(
             "READ_ONLY_MOUNT",
             &message,
             envelope(
                 "READ_ONLY_MOUNT",
                 message.clone(),
-                serde_json::json!({ "vault": vault }),
+                serde_json::json!({ "mem": mem }),
             ),
         ),
         E::UnknownType {
@@ -893,8 +893,8 @@ fn engine_err_unified(
         E::HasIncomingRefs { id, referrers } => {
             // Project each ReferrerInfo into the wire shape the
             // memstead_delete description advertises: `{ from_id,
-            // rel_types, vault, capability: "write" }`. The capability
-            // is constant on this path — only Write-Vault referrers
+            // rel_types, mem, capability: "write" }`. The capability
+            // is constant on this path — only Write-Mem referrers
             // ever surface here (ReadOnly referrers ride the
             // residual-stub demotion path). Per-source dedup happens
             // upstream: `rel_types` carries every edge
@@ -905,7 +905,7 @@ fn engine_err_unified(
                     serde_json::json!({
                         "from_id": r.from_id,
                         "rel_types": r.rel_types,
-                        "vault": r.vault,
+                        "mem": r.mem,
                         "capability": "write",
                     })
                 })
@@ -920,19 +920,19 @@ fn engine_err_unified(
                 ),
             )
         }
-        E::VaultHasIncomingRefs { vault, referrers } => {
-            // Vault-level mirror of HasIncomingRefs (F15 / CLI F8): the
-            // vault-delete edge-graph check. Same `{from_id,
-            // rel_types, vault}` projection; capability is omitted
-            // because the vault-level check already filtered to
-            // Write-Vault sources upstream.
+        E::MemHasIncomingRefs { mem, referrers } => {
+            // Mem-level mirror of HasIncomingRefs (F15 / CLI F8): the
+            // mem-delete edge-graph check. Same `{from_id,
+            // rel_types, mem}` projection; capability is omitted
+            // because the mem-level check already filtered to
+            // Write-Mem sources upstream.
             let referrers_json: Vec<_> = referrers
                 .iter()
                 .map(|r| {
                     serde_json::json!({
                         "from_id": r.from_id,
                         "rel_types": r.rel_types,
-                        "vault": r.vault,
+                        "mem": r.mem,
                     })
                 })
                 .collect();
@@ -942,23 +942,23 @@ fn engine_err_unified(
                 envelope(
                     e.code(),
                     message.clone(),
-                    serde_json::json!({ "vault": vault, "referrers": referrers_json }),
+                    serde_json::json!({ "mem": mem, "referrers": referrers_json }),
                 ),
             )
         }
-        E::CrossVaultLinkNotAllowed { from_vault, to_vault } => tool_error_with_payload(
+        E::CrossMemLinkNotAllowed { from_mem, to_mem } => tool_error_with_payload(
             e.code(),
             &message,
             envelope(
                 e.code(),
                 message.clone(),
                 serde_json::json!({
-                    "from_vault": from_vault,
-                    "to_vault": to_vault,
+                    "from_mem": from_mem,
+                    "to_mem": to_mem,
                 }),
             ),
         ),
-        E::CrossVaultTargetNotFound { target_id, target_vault } => tool_error_with_payload(
+        E::CrossMemTargetNotFound { target_id, target_mem } => tool_error_with_payload(
             e.code(),
             &message,
             envelope(
@@ -966,11 +966,11 @@ fn engine_err_unified(
                 message.clone(),
                 serde_json::json!({
                     "target_id": target_id,
-                    "target_vault": target_vault,
+                    "target_mem": target_mem,
                 }),
             ),
         ),
-        E::CrossVaultEdgeNotDeclared {
+        E::CrossMemEdgeNotDeclared {
             source_schema,
             target_schema,
             rel_type,
@@ -1239,11 +1239,11 @@ fn engine_err_unified(
                 }),
             ),
         ),
-        E::InvalidWikiLinkVault { raw, section, reason } => tool_error_with_payload(
-            "INVALID_VAULT_NAME",
+        E::InvalidWikiLinkMem { raw, section, reason } => tool_error_with_payload(
+            "INVALID_MEM_NAME",
             &message,
             envelope(
-                "INVALID_VAULT_NAME",
+                "INVALID_MEM_NAME",
                 message.clone(),
                 serde_json::json!({
                     "raw": raw,
@@ -1273,13 +1273,13 @@ fn engine_err_unified(
         ),
         E::Validation(verr) => unified_validation_envelope(verr.clone()),
         // Lifecycle envelopes: the unified
-        // `vault_management::create_vault` / `delete_vault` paths
+        // `mem_management::create_mem` / `delete_mem` paths
         // surface these on the same wire contract.
-        E::VaultNameCollision { name, source_origin } => tool_error_with_payload(
-            "VAULT_NAME_COLLISION",
+        E::MemNameCollision { name, source_origin } => tool_error_with_payload(
+            "MEM_NAME_COLLISION",
             &message,
             envelope(
-                "VAULT_NAME_COLLISION",
+                "MEM_NAME_COLLISION",
                 message.clone(),
                 serde_json::json!({
                     "name": name,
@@ -1287,13 +1287,13 @@ fn engine_err_unified(
                 }),
             ),
         ),
-        E::SchemaNotFound { vault, pin, sources } => tool_error_with_payload(
+        E::SchemaNotFound { mem, pin, sources } => tool_error_with_payload(
             "SCHEMA_NOT_FOUND",
             &message,
             envelope(
                 "SCHEMA_NOT_FOUND",
                 message.clone(),
-                serde_json::json!({ "vault": vault, "pin": pin, "sources": sources }),
+                serde_json::json!({ "mem": mem, "pin": pin, "sources": sources }),
             ),
         ),
         E::SchemaResolverInit(detail) => tool_error_with_payload(
@@ -1305,11 +1305,11 @@ fn engine_err_unified(
                 serde_json::json!({ "detail": detail }),
             ),
         ),
-        E::Vault(detail) => tool_error_with_payload(
-            "VAULT_ERROR",
+        E::Mem(detail) => tool_error_with_payload(
+            "MEM_ERROR",
             &message,
             envelope(
-                "VAULT_ERROR",
+                "MEM_ERROR",
                 message.clone(),
                 serde_json::json!({ "detail": detail }),
             ),
@@ -1340,16 +1340,16 @@ fn engine_err_unified(
                 }),
             ),
         ),
-        E::VaultConfigIncomplete { vault, missing_fields } => tool_error_with_payload(
-            "VAULT_CONFIG_INCOMPLETE",
+        E::MemConfigIncomplete { mem, missing_fields } => tool_error_with_payload(
+            "MEM_CONFIG_INCOMPLETE",
             &message,
             envelope(
-                "VAULT_CONFIG_INCOMPLETE",
+                "MEM_CONFIG_INCOMPLETE",
                 message.clone(),
                 serde_json::json!({
-                    "vault": vault,
+                    "mem": mem,
                     "missing_fields": missing_fields,
-                    "set_via": format!("memstead vault set-version {vault} <version>"),
+                    "set_via": format!("memstead mem set-version {mem} <version>"),
                 }),
             ),
         ),
@@ -1422,33 +1422,33 @@ fn engine_err_unified(
                 }),
             ),
         ),
-        E::RenameBlockedByCrossVaultPolicy { from_vault, blocked_referrers } => {
+        E::RenameBlockedByCrossMemPolicy { from_mem, blocked_referrers } => {
             let entries: Vec<_> = blocked_referrers
                 .iter()
                 .map(|r| {
                     serde_json::json!({
-                        "from_vault": r.from_vault,
-                        "to_vault": r.to_vault,
+                        "from_mem": r.from_mem,
+                        "to_mem": r.to_mem,
                         "count": r.count,
                     })
                 })
                 .collect();
             tool_error_with_payload(
-                "RENAME_BLOCKED_BY_CROSS_VAULT_POLICY",
+                "RENAME_BLOCKED_BY_CROSS_MEM_POLICY",
                 &message,
                 envelope(
-                    "RENAME_BLOCKED_BY_CROSS_VAULT_POLICY",
+                    "RENAME_BLOCKED_BY_CROSS_MEM_POLICY",
                     message.clone(),
                     serde_json::json!({
-                        "from_vault": from_vault,
+                        "from_mem": from_mem,
                         "blocked_referrers": entries,
                     }),
                 ),
             )
         }
         E::RenamePartialFailure {
-            committed_vaults,
-            failed_vault,
+            committed_mems,
+            failed_mem,
             failure_cause,
         } => tool_error_with_payload(
             "RENAME_PARTIAL_FAILURE",
@@ -1457,17 +1457,17 @@ fn engine_err_unified(
                 "RENAME_PARTIAL_FAILURE",
                 message.clone(),
                 serde_json::json!({
-                    "committed_vaults": committed_vaults,
-                    "failed_vault": failed_vault,
+                    "committed_mems": committed_mems,
+                    "failed_mem": failed_mem,
                     "failure_cause": failure_cause,
                 }),
             ),
         ),
-        E::DuplicateVault(name) => tool_error_with_payload(
-            "DUPLICATE_VAULT",
+        E::DuplicateMem(name) => tool_error_with_payload(
+            "DUPLICATE_MEM",
             &message,
             envelope(
-                "DUPLICATE_VAULT",
+                "DUPLICATE_MEM",
                 message.clone(),
                 serde_json::json!({ "name": name }),
             ),
@@ -1494,10 +1494,10 @@ fn engine_err_unified(
             ),
         ),
         E::Backend(inner) => tool_error_with_payload(
-            "VAULT_ERROR",
+            "MEM_ERROR",
             &message,
             envelope(
-                "VAULT_ERROR",
+                "MEM_ERROR",
                 message.clone(),
                 serde_json::json!({ "detail": inner.to_string() }),
             ),
@@ -1512,10 +1512,10 @@ fn engine_err_unified(
             ),
         ),
         // Typed refusal when
-        // `export_markdown` targets a vault whose active backend
+        // `export_markdown` targets a mem whose active backend
         // doesn't support markdown regeneration.
         E::MarkdownExportUnsupportedBackend {
-            vault,
+            mem,
             active_backend,
             supported_backends,
         } => tool_error_with_payload(
@@ -1525,7 +1525,7 @@ fn engine_err_unified(
                 "MARKDOWN_EXPORT_UNSUPPORTED_BACKEND",
                 message.clone(),
                 serde_json::json!({
-                    "vault": vault,
+                    "mem": mem,
                     "active_backend": active_backend,
                     "supported_backends": supported_backends,
                 }),
@@ -1546,13 +1546,13 @@ fn engine_err_unified(
                 }),
             ),
         ),
-        E::InvalidChangesCursor { vault, since } => tool_error_with_payload(
+        E::InvalidChangesCursor { mem, since } => tool_error_with_payload(
             "INVALID_CURSOR",
             &message,
             envelope(
                 "INVALID_CURSOR",
                 message.clone(),
-                serde_json::json!({ "vault": vault, "since": since }),
+                serde_json::json!({ "mem": mem, "since": since }),
             ),
         ),
     }
@@ -1560,8 +1560,8 @@ fn engine_err_unified(
 
 /// Typed-envelope translator for `ProEngineError`. Delegates wrapped
 /// basis errors to [`engine_err_unified`]; constructs the lifecycle-
-/// specific envelopes (`VAULT_PATH_NOT_ALLOWED`,
-/// `VAULT_REFERENCED_BY_POLICY`, `VAULT_SCHEMA_NOT_ALLOWED`,
+/// specific envelopes (`MEM_PATH_NOT_ALLOWED`,
+/// `MEM_REFERENCED_BY_POLICY`, `MEM_SCHEMA_NOT_ALLOWED`,
 /// `CONFIG_ERROR`) here. The wire shape is
 /// bit-identical to what `engine_err_unified` produced for the same
 /// variants before the lifecycle variants moved off
@@ -1572,8 +1572,8 @@ fn pro_engine_err_unified(
 ) -> CallToolResult {
     use memstead_engine::ProEngineError as PE;
     // The text-channel message uses the rich-prose renderer so lifecycle
-    // refusals (VAULT_PATH_NOT_ALLOWED, VAULT_SCHEMA_NOT_ALLOWED,
-    // VAULT_REFERENCED_BY_POLICY) inline their full recovery payload
+    // refusals (MEM_PATH_NOT_ALLOWED, MEM_SCHEMA_NOT_ALLOWED,
+    // MEM_REFERENCED_BY_POLICY) inline their full recovery payload
     // inline rather than relying on the structured channel for
     // recovery context.
     let message = e.prose_render();
@@ -1581,17 +1581,17 @@ fn pro_engine_err_unified(
         // #55: thread the engine so the wrapped-basis path enriches
         // not-found envelopes the same as every other call site.
         PE::Basis(inner) => engine_err_unified(inner, engine),
-        PE::VaultPathNotAllowed {
+        PE::MemPathNotAllowed {
             attempted,
             candidate,
             patterns,
             reason,
             policy_table,
         } => tool_error_with_payload(
-            "VAULT_PATH_NOT_ALLOWED",
+            "MEM_PATH_NOT_ALLOWED",
             &message,
             envelope(
-                "VAULT_PATH_NOT_ALLOWED",
+                "MEM_PATH_NOT_ALLOWED",
                 message.clone(),
                 serde_json::json!({
                     "attempted": attempted.display().to_string(),
@@ -1602,11 +1602,11 @@ fn pro_engine_err_unified(
                 }),
             ),
         ),
-        PE::InvalidVaultName { name, reason } => tool_error_with_payload(
-            "INVALID_VAULT_NAME",
+        PE::InvalidMemName { name, reason } => tool_error_with_payload(
+            "INVALID_MEM_NAME",
             &message,
             envelope(
-                "INVALID_VAULT_NAME",
+                "INVALID_MEM_NAME",
                 message.clone(),
                 serde_json::json!({
                     "name": name,
@@ -1614,16 +1614,16 @@ fn pro_engine_err_unified(
                 }),
             ),
         ),
-        PE::VaultSchemaNotAllowed {
+        PE::MemSchemaNotAllowed {
             candidate,
             matched_pattern,
             requested_schema,
             allowed_schemas,
         } => tool_error_with_payload(
-            "VAULT_SCHEMA_NOT_ALLOWED",
+            "MEM_SCHEMA_NOT_ALLOWED",
             &message,
             envelope(
-                "VAULT_SCHEMA_NOT_ALLOWED",
+                "MEM_SCHEMA_NOT_ALLOWED",
                 message.clone(),
                 serde_json::json!({
                     "candidate": candidate,
@@ -1633,18 +1633,18 @@ fn pro_engine_err_unified(
                 }),
             ),
         ),
-        PE::VaultReferencedByPolicy {
+        PE::MemReferencedByPolicy {
             name,
-            referring_vaults,
+            referring_mems,
         } => tool_error_with_payload(
-            "VAULT_REFERENCED_BY_POLICY",
+            "MEM_REFERENCED_BY_POLICY",
             &message,
             envelope(
-                "VAULT_REFERENCED_BY_POLICY",
+                "MEM_REFERENCED_BY_POLICY",
                 message.clone(),
                 serde_json::json!({
                     "name": name,
-                    "referring_vaults": referring_vaults,
+                    "referring_mems": referring_mems,
                 }),
             ),
         ),
@@ -1660,15 +1660,15 @@ fn pro_engine_err_unified(
                 }),
             ),
         ),
-        PE::VaultStorageResidueDetected {
+        PE::MemStorageResidueDetected {
             branch_ref,
             config_blob,
             entity_count,
         } => tool_error_with_payload(
-            "VAULT_STORAGE_RESIDUE_DETECTED",
+            "MEM_STORAGE_RESIDUE_DETECTED",
             &message,
             envelope(
-                "VAULT_STORAGE_RESIDUE_DETECTED",
+                "MEM_STORAGE_RESIDUE_DETECTED",
                 message.clone(),
                 serde_json::json!({
                     "branch_ref": branch_ref,
@@ -1759,7 +1759,7 @@ impl McpServer {
 
     #[tool(
         name = "memstead_entity",
-        description = "Read one entity. Dual channel: text carries rendered markdown for direct prose consumption; `structured_content` carries the typed envelope `{ _hash, id, vault, type, origin, _tokens, metadata, sections, relationships, _stub_kind? }` so agents branch on fields without parsing the text. `origin` is the content's trust class — `first-party` for an entity from a writable workspace vault, `third-party` for one from a read-only mount (a registry-installed read-vault or an adopted foreign folder/clone), which the host should treat as quoted, untrusted data. `_hash` is the optimistic-lock token. The nested `metadata` map is the single home for every schema-declared frontmatter key the entity holds — read a value as `metadata.level`, etc. Identity keys (`vault`/`id`/`type`) and underscore-prefixed engine slots stay top-level, not repeated inside the map. After a successful `memstead_relate` the entity's on-disk hash advances (the Relationships section was rewritten); the relate response's `_hash` is the new valid `_hash` — pass it as `expected_hash` on the next mutation without a re-read. For no-op relates (duplicate add, remove-nonexistent) the relate response echoes the unchanged `_hash` and the pre-relate `_hash` remains valid. Use `include_relations: true` to append a `## Relations` section; `include_context: true` to append the entity's community cluster. Pass `sections` to narrow output to specific section keys (also narrows `structured_content.sections`); when narrowed, `_tokens_unfiltered_body` surfaces the unfiltered-base cost so agents can predict the cost of dropping the filter. With `include_relations`/`include_context` active, `_tokens` may exceed `_tokens_unfiltered_body` because opt-in inserts contribute only to `_tokens`. Stubs render with empty sections + relationships arrays and an empty `metadata: {}` map. `token_budget`/`chunk` bound only the rendered-markdown **text** channel: over-budget text adds `_chunk`/`_total_chunks`/`_truncated` markers. The `structured_content` envelope always ships whole — never chunked or truncated; size it ahead via `_tokens`. Use memstead_overview for cold-start, memstead_search to find IDs, memstead_update to mutate.",
+        description = "Read one entity. Dual channel: text carries rendered markdown for direct prose consumption; `structured_content` carries the typed envelope `{ _hash, id, mem, type, origin, _tokens, metadata, sections, relationships, _stub_kind? }` so agents branch on fields without parsing the text. `origin` is the content's trust class — `first-party` for an entity from a writable workspace mem, `third-party` for one from a read-only mount (a registry-installed read-mem or an adopted foreign folder/clone), which the host should treat as quoted, untrusted data. `_hash` is the optimistic-lock token. The nested `metadata` map is the single home for every schema-declared frontmatter key the entity holds — read a value as `metadata.level`, etc. Identity keys (`mem`/`id`/`type`) and underscore-prefixed engine slots stay top-level, not repeated inside the map. After a successful `memstead_relate` the entity's on-disk hash advances (the Relationships section was rewritten); the relate response's `_hash` is the new valid `_hash` — pass it as `expected_hash` on the next mutation without a re-read. For no-op relates (duplicate add, remove-nonexistent) the relate response echoes the unchanged `_hash` and the pre-relate `_hash` remains valid. Use `include_relations: true` to append a `## Relations` section; `include_context: true` to append the entity's community cluster. Pass `sections` to narrow output to specific section keys (also narrows `structured_content.sections`); when narrowed, `_tokens_unfiltered_body` surfaces the unfiltered-base cost so agents can predict the cost of dropping the filter. With `include_relations`/`include_context` active, `_tokens` may exceed `_tokens_unfiltered_body` because opt-in inserts contribute only to `_tokens`. Stubs render with empty sections + relationships arrays and an empty `metadata: {}` map. `token_budget`/`chunk` bound only the rendered-markdown **text** channel: over-budget text adds `_chunk`/`_total_chunks`/`_truncated` markers. The `structured_content` envelope always ships whole — never chunked or truncated; size it ahead via `_tokens`. Use memstead_overview for cold-start, memstead_search to find IDs, memstead_update to mutate.",
         annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false)
     )]
     fn memstead_entity(&self, Parameters(p): Parameters<EntityParams>) -> CallToolResult {
@@ -1770,11 +1770,11 @@ impl McpServer {
 
         let unified = self.unified_engine();
         let mut engine = unified.lock().unwrap();
-        let drift_warnings = engine.reload_if_stale(Some(id.vault()));
+        let drift_warnings = engine.reload_if_stale(Some(id.mem()));
         // Drain the stashed structured notices: attached to the
         // response's `structured_content` below (and the markdown
-        // `VAULT_RELOADED` warning still rides the text channel).
-        let vault_changed_notices = engine.take_vault_changed_notices();
+        // `MEM_RELOADED` warning still rides the text channel).
+        let mem_changed_notices = engine.take_mem_changed_notices();
         let entity = match engine.get_entity(&id) {
             Some(e) => e.clone(),
             // Drift must survive the error path too: a sibling that
@@ -1786,11 +1786,11 @@ impl McpServer {
                 return attach_drift_to_error(
                     not_found_error(engine.store(), &id),
                     &drift_warnings,
-                    vault_changed_notices,
+                    mem_changed_notices,
                 );
             }
         };
-        let schema_anchor = vault_schema_ref_unified(&engine, id.vault());
+        let schema_anchor = mem_schema_ref_unified(&engine, id.mem());
 
         let sections_filter = p.sections.as_deref();
         let mut md = render::render_entity_markdown(&entity, sections_filter);
@@ -1813,12 +1813,12 @@ impl McpServer {
         }
 
         if let Some(ref s) = schema_anchor {
-            inject_md_vault_schema(&mut md, s);
+            inject_md_mem_schema(&mut md, s);
         }
 
         let mut extra_fm: Vec<(&str, &str)> = vec![("_hash", &entity.content_hash)];
         if let Some(ref s) = schema_anchor {
-            extra_fm.push(("_vault_schema", s.as_str()));
+            extra_fm.push(("_mem_schema", s.as_str()));
         }
 
         // Structured envelope
@@ -1849,22 +1849,22 @@ impl McpServer {
             engine.store().outgoing(&id),
         );
         // Data-origin label: an entity from a read-only mount (a
-        // registry-installed read-vault or an adopted foreign folder/
+        // registry-installed read-mem or an adopted foreign folder/
         // clone) is third-party — the consuming agent/host should treat
-        // its body as quoted, untrusted data. Writable-vault content is
+        // its body as quoted, untrusted data. Writable-mem content is
         // first-party. Additive top-level field on the structured channel.
         if let Some(obj) = structured.as_object_mut() {
             obj.insert(
                 "origin".into(),
-                serde_json::json!(engine.vault_origin_class(id.vault()).as_wire()),
+                serde_json::json!(engine.mem_origin_class(id.mem()).as_wire()),
             );
             // Authoring provenance carried in the installed archive. Emitted
-            // only when the vault ships a provenance payload; `history`
+            // only when the mem ships a provenance payload; `history`
             // makes the "full commit history not shipped" decision
             // observable, and `rationale` is `null` when this entity was
             // authored without a note — absence reported as absence, never
-            // a fabricated value. A vault with no payload omits the field.
-            if let Some(prov) = engine.archive_provenance_for(id.vault()) {
+            // a fabricated value. A mem with no payload omits the field.
+            if let Some(prov) = engine.archive_provenance_for(id.mem()) {
                 let mut block = serde_json::Map::new();
                 block.insert("history".into(), serde_json::json!(prov.history));
                 let rec = prov.entity(id.path());
@@ -1890,7 +1890,7 @@ impl McpServer {
         }
 
         let budget = p.token_budget.unwrap_or(self.token_budget);
-        attach_vault_changed_to_result(
+        attach_mem_changed_to_result(
             match apply_chunking(&md, budget, p.chunk, &extra_fm) {
                 Ok(result) => md_with_structured(
                     prepend_drift_warnings_md(result, &drift_warnings),
@@ -1901,13 +1901,13 @@ impl McpServer {
                     &drift_warnings,
                 ),
             },
-            vault_changed_notices,
+            mem_changed_notices,
         )
     }
 
     #[tool(
         name = "memstead_search",
-        description = "Search entities by lexical content + structural filters. Dual channel: text carries the rendered markdown (prose with score lines + frontmatter counters); `structured_content` carries the typed `SearchResultEnvelope` `{ _total, _returned, _offset, _total_tokens, hits[], facets, warnings }` where each hit ships `score`, `score_breakdown`, `matched_terms`, `expansion`, `origin` (`first-party`/`third-party` trust class), and `snippet` (section bodies via memstead_entity). A page is bounded to `token_budget` (default 12000); an overflowing page is trimmed with a `SEARCH_RESULTS_TRUNCATED` warning (`kept`/`budget`), `_total` stays the full count, page with `offset`. Warnings ride as structured `{code, details, message}` entries (same shape every other tool emits) — branch on `code`. The caller expands a concept into keyword variants. Put variants into `query.any` (OR — ranks higher matches automatically); add excludes to `query.not`; use `query.phrase` for exact adjacency; use `query.field` to restrict to a single field. Set `expand_via` to relationship types — reached hits surface with `expansion` metadata + decayed score (0.5^depth). `facets` (by_type, by_vault, by_level, by_status, by_confidence, by_subsection, by_expansion) compose results structurally. Sub-heading matches carry `heading_path`. `stub: true|false` filters by stub status (combining with `entity_type` flags `STUB_FILTER_EXCLUDES_ALL`). Equality filters on `filterable: equality` fields ride on `filters` (e.g. `{\"level\": \"M0\"}`); one code per outcome, branch on `code`: `FILTER_TYPE_SCOPED` (declared on other types — applied with type-narrowing), `FIELD_NOT_FILTERABLE` (declared but not filterable — ignored, result unfiltered not emptied), `UNKNOWN_FILTER_KEY` (no schema declares it — ignored), `INVALID_ENUM_VALUE` (value outside the field's `enum_values` — applies but matches nothing, `details.allowed` lists the values). A `related_to` neighbourhood is ranked by proximity (nearer first) and bounded with `NEIGHBOURHOOD_CAPPED`. Range filters on `filterable: range` fields ride on `range_filters` (`min_<field>`/`max_<field>`/`<field>_before`/`<field>_after`), same contract: `RANGE_FILTER_KEY_MALFORMED`, `RANGE_FILTER_TYPE_SCOPED`, `UNKNOWN_RANGE_FILTER_FIELD`, `FIELD_NOT_RANGE_FILTERABLE`. Per-vault search-index unavailability (missing index or search-index execution failure) surfaces `SEARCH_VAULT_INDEX_UNAVAILABLE` with `details.vault` and `details.reason`. Omit `query` for a pure metadata filter.",
+        description = "Search entities by lexical content + structural filters. Dual channel: text carries the rendered markdown (prose with score lines + frontmatter counters); `structured_content` carries the typed `SearchResultEnvelope` `{ _total, _returned, _offset, _total_tokens, hits[], facets, warnings }` where each hit ships `score`, `score_breakdown`, `matched_terms`, `expansion`, `origin` (`first-party`/`third-party` trust class), and `snippet` (section bodies via memstead_entity). A page is bounded to `token_budget` (default 12000); an overflowing page is trimmed with a `SEARCH_RESULTS_TRUNCATED` warning (`kept`/`budget`), `_total` stays the full count, page with `offset`. Warnings ride as structured `{code, details, message}` entries (same shape every other tool emits) — branch on `code`. The caller expands a concept into keyword variants. Put variants into `query.any` (OR — ranks higher matches automatically); add excludes to `query.not`; use `query.phrase` for exact adjacency; use `query.field` to restrict to a single field. Set `expand_via` to relationship types — reached hits surface with `expansion` metadata + decayed score (0.5^depth). `facets` (by_type, by_mem, by_level, by_status, by_confidence, by_subsection, by_expansion) compose results structurally. Sub-heading matches carry `heading_path`. `stub: true|false` filters by stub status (combining with `entity_type` flags `STUB_FILTER_EXCLUDES_ALL`). Equality filters on `filterable: equality` fields ride on `filters` (e.g. `{\"level\": \"M0\"}`); one code per outcome, branch on `code`: `FILTER_TYPE_SCOPED` (declared on other types — applied with type-narrowing), `FIELD_NOT_FILTERABLE` (declared but not filterable — ignored, result unfiltered not emptied), `UNKNOWN_FILTER_KEY` (no schema declares it — ignored), `INVALID_ENUM_VALUE` (value outside the field's `enum_values` — applies but matches nothing, `details.allowed` lists the values). A `related_to` neighbourhood is ranked by proximity (nearer first) and bounded with `NEIGHBOURHOOD_CAPPED`. Range filters on `filterable: range` fields ride on `range_filters` (`min_<field>`/`max_<field>`/`<field>_before`/`<field>_after`), same contract: `RANGE_FILTER_KEY_MALFORMED`, `RANGE_FILTER_TYPE_SCOPED`, `UNKNOWN_RANGE_FILTER_FIELD`, `FIELD_NOT_RANGE_FILTERABLE`. Per-mem search-index unavailability (missing index or search-index execution failure) surfaces `SEARCH_MEM_INDEX_UNAVAILABLE` with `details.mem` and `details.reason`. Omit `query` for a pure metadata filter.",
         annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false)
     )]
     fn memstead_search(&self, Parameters(p): Parameters<SearchParams>) -> CallToolResult {
@@ -1923,17 +1923,17 @@ impl McpServer {
             has_not = q.is_some_and(|q| !q.not.is_empty()),
             has_field = q.is_some_and(|q| q.field.is_some()),
             has_expand = p.expand_via.as_ref().is_some_and(|v| !v.is_empty()),
-            vault_scope = if p.vault.is_some() { "one" } else { "all" },
+            mem_scope = if p.mem.is_some() { "one" } else { "all" },
             "memstead_search invoked"
         );
 
-        // Snapshot the vault filter for drift detection before the scope
-        // construction below moves `p.vault`.
-        let vault_filter = p.vault.clone();
+        // Snapshot the mem filter for drift detection before the scope
+        // construction below moves `p.mem`.
+        let mem_filter = p.mem.clone();
 
         let scope = SearchScope {
             query: p.query,
-            vault: p.vault,
+            mem: p.mem,
             entity_type: p.entity_type,
             limit: p.limit,
             offset: p.offset,
@@ -1955,15 +1955,15 @@ impl McpServer {
 
         let unified = self.unified_engine();
         let mut engine = unified.lock().unwrap();
-        let drift_warnings = engine.reload_if_stale(vault_filter.as_deref());
-        let vault_changed_notices = engine.take_vault_changed_notices();
+        let drift_warnings = engine.reload_if_stale(mem_filter.as_deref());
+        let mem_changed_notices = engine.take_mem_changed_notices();
         let result = match engine.search(&scope) {
             Ok(r) => r,
             Err(e) => {
                 return attach_drift_to_error(
                     engine_err_unified(e, &engine),
                     &drift_warnings,
-                    vault_changed_notices,
+                    mem_changed_notices,
                 );
             }
         };
@@ -1978,9 +1978,9 @@ impl McpServer {
         let mut structured = serde_json::to_value(&envelope)
             .unwrap_or(serde_json::Value::Null);
         // Data-origin label per hit: a snippet from a read-only mount (a
-        // registry-installed read-vault or an adopted foreign folder/
+        // registry-installed read-mem or an adopted foreign folder/
         // clone) is third-party — the consuming agent/host should treat
-        // it as quoted, untrusted data. Each hit already carries `vault`;
+        // it as quoted, untrusted data. Each hit already carries `mem`;
         // stamp `origin` from its mount's class. Additive per-hit field.
         if let Some(hits) = structured
             .get_mut("hits")
@@ -1992,19 +1992,19 @@ impl McpServer {
                 let Some(obj) = hit.as_object_mut() else {
                     continue;
                 };
-                let Some(vault) = obj.get("vault").and_then(|v| v.as_str()).map(|s| s.to_string())
+                let Some(mem) = obj.get("mem").and_then(|v| v.as_str()).map(|s| s.to_string())
                 else {
                     continue;
                 };
                 let wire = *class_of
-                    .entry(vault.clone())
-                    .or_insert_with(|| engine.vault_origin_class(&vault).as_wire());
+                    .entry(mem.clone())
+                    .or_insert_with(|| engine.mem_origin_class(&mem).as_wire());
                 obj.insert("origin".into(), serde_json::json!(wire));
             }
         }
-        attach_vault_changed_to_result(
+        attach_mem_changed_to_result(
             md_with_structured(prepend_drift_warnings_md(md, &drift_warnings), structured),
-            vault_changed_notices,
+            mem_changed_notices,
         )
     }
 
@@ -2014,7 +2014,7 @@ impl McpServer {
 
     #[tool(
         name = "memstead_overview",
-        description = "Start here. Returns the schema catalogue, vault inventory, and community clusters as markdown. Schemas list as `{ref, description}` only — call `memstead_schema(name=<ref>)` for full per-type bodies (sections, fields, relationship vocabulary, write_rules) before any `memstead_create` / `memstead_update` / `memstead_relate`; cache per session, schema is workspace-stable. Token-budget-driven: hard-required content (vault roster, schema refs, community titles, workspace policy) always ships; heavy content is greedy-filled into the remaining budget by default-priority. Anything that didn't fit appears in the `## Hints` section with `estimated_tokens`; re-query by passing `key` into `include[]`. Override priority with `include`: keys there always ship, even past budget. Allowed `include` keys: `community_members`, `community_bridges`, `vault_distribution`, `dangling_links`. Control the budget via `token_budget` (default 8000). Frontmatter `_overview_mode` is `\"complete\"` (nothing dropped), `\"reduced\"` (heavy content omitted — see the Hints section), or `\"overbudget\"` (hard-required content alone exceeded the budget; raise `token_budget` or scope with `vault`). Workspace-level mutation and link policy is surfaced in `## Workspace policy` and mirrored into the `_policy` frontmatter slot — entries appear only when the value deviates from the engine default (`require_notes`, `cross_vault_links` posture). Pass `vault` to scope vaults and schemas to one writable vault. Community detection is workspace-global: `vault` scopes which clusters are *reported* (and makes `community_bridges` source-in-vault only, asymmetric — matches memstead_health), but never re-runs detection per vault and never renumbers cluster ids, so a small or disconnected vault-local subgraph may surface as no cluster (sparsely-connected / edge-less nodes collapse into one catch-all rather than forming their own). `rebuild: true` recomputes that same global Louvain partition. Non-fatal issues surface under `## Warnings` with a stable `code`. Use memstead_schema for full schema bodies; memstead_entity to read a specific entity; memstead_search to find IDs; memstead_health for node/edge counts.",
+        description = "Start here. Returns the schema catalogue, mem inventory, and community clusters as markdown. Schemas list as `{ref, description}` only — call `memstead_schema(name=<ref>)` for full per-type bodies (sections, fields, relationship vocabulary, write_rules) before any `memstead_create` / `memstead_update` / `memstead_relate`; cache per session, schema is workspace-stable. Token-budget-driven: hard-required content (mem roster, schema refs, community titles, workspace policy) always ships; heavy content is greedy-filled into the remaining budget by default-priority. Anything that didn't fit appears in the `## Hints` section with `estimated_tokens`; re-query by passing `key` into `include[]`. Override priority with `include`: keys there always ship, even past budget. Allowed `include` keys: `community_members`, `community_bridges`, `mem_distribution`, `dangling_links`. Control the budget via `token_budget` (default 8000). Frontmatter `_overview_mode` is `\"complete\"` (nothing dropped), `\"reduced\"` (heavy content omitted — see the Hints section), or `\"overbudget\"` (hard-required content alone exceeded the budget; raise `token_budget` or scope with `mem`). Workspace-level mutation and link policy is surfaced in `## Workspace policy` and mirrored into the `_policy` frontmatter slot — entries appear only when the value deviates from the engine default (`require_notes`, `cross_mem_links` posture). Pass `mem` to scope mems and schemas to one writable mem. Community detection is workspace-global: `mem` scopes which clusters are *reported* (and makes `community_bridges` source-in-mem only, asymmetric — matches memstead_health), but never re-runs detection per mem and never renumbers cluster ids, so a small or disconnected mem-local subgraph may surface as no cluster (sparsely-connected / edge-less nodes collapse into one catch-all rather than forming their own). `rebuild: true` recomputes that same global Louvain partition. Non-fatal issues surface under `## Warnings` with a stable `code`. Use memstead_schema for full schema bodies; memstead_entity to read a specific entity; memstead_search to find IDs; memstead_health for node/edge counts.",
         annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false),
         meta = always_load_meta()
     )]
@@ -2038,13 +2038,13 @@ impl McpServer {
         unified: Arc<Mutex<memstead_base::Engine>>,
     ) -> CallToolResult {
         let mut engine = unified.lock().unwrap();
-        let drift_warnings = engine.reload_if_stale(p.vault.as_deref());
-        let _ = engine.take_vault_changed_notices(); // leak-proof drain; see memstead_entity
+        let drift_warnings = engine.reload_if_stale(p.mem.as_deref());
+        let _ = engine.take_mem_changed_notices(); // leak-proof drain; see memstead_entity
 
         let include = p.include.clone().unwrap_or_default();
         let args = memstead_engine::overview::OverviewArgs {
             include: &include,
-            vault: p.vault.as_deref(),
+            mem: p.mem.as_deref(),
             rebuild: p.rebuild.unwrap_or(false) && p.chunk.unwrap_or(1) <= 1,
             token_budget: p
                 .token_budget
@@ -2072,23 +2072,23 @@ impl McpServer {
                     ),
                 );
             }
-            Err(memstead_engine::overview::ComposeOverviewError::UnknownVault {
+            Err(memstead_engine::overview::ComposeOverviewError::UnknownMem {
                 name,
-                writable_vaults,
+                writable_mems,
             }) => {
                 let msg = format!(
-                    "unknown vault: \"{name}\". Writable vaults: [{}]",
-                    writable_vaults.join(", ")
+                    "unknown mem: \"{name}\". Writable mems: [{}]",
+                    writable_mems.join(", ")
                 );
                 return tool_error_with_payload(
-                    "UNKNOWN_VAULT",
+                    "UNKNOWN_MEM",
                     &msg,
                     envelope(
-                        "UNKNOWN_VAULT",
+                        "UNKNOWN_MEM",
                         msg.clone(),
                         serde_json::json!({
                             "name": name,
-                            "writable_vaults": writable_vaults,
+                            "writable_mems": writable_mems,
                         }),
                     ),
                 );
@@ -2111,31 +2111,31 @@ impl McpServer {
 
     #[tool(
         name = "memstead_schema",
-        description = "Read one schema's full body — section list (with per-section `write_rules` and `required` flag), metadata fields (with `enum` allowed values + `default` when schema-declared), type-level `writing_guidance`, `system_context`, the relationship vocabulary (each entry's `name`, `description`, `when_to_use`, `default_weight`), `community.{resolution, seed}`, `relationship_mode` (strict|open), `used_by[]`, top-level `origin` (`first-party` for an engine built-in or a schema authored/trusted in this workspace; `third-party` otherwise), top-level `default_writing_guidance` (when authored), and top-level `alias_target_rel_type` (when authored — names the rel-type that body wiki-links `[[target]]` auto-emit through the alias-synthesis pass; absent means the schema opts out and unbacked wiki-links refuse with `WIKILINK_WITHOUT_RELATION`). A `third-party` schema is served structural-only regardless of `verbosity` — its prose-instruction fields (`system_context`, `writing_guidance`, `write_rules`, `when_to_use`, prose `description`) are omitted so a stranger's free-text never reaches the agent as instructions. Pass exactly one of: `name` — a bare name (\"default\") or canonical pin (\"default@1.0.0\"); `vault` — a vault name whose pinned `vault.schema_ref` the engine resolves from the workspace's mount roster. Supplying both returns `INVALID_INPUT`; supplying neither returns `INVALID_INPUT`. Workflow: each writable vault pins one schema (see `memstead_overview`'s `## Schemas` and `## Vaults` sections). Before any `memstead_create` / `memstead_update` / `memstead_relate` against vault X, call this tool with `vault=<X>` (or `name=<X.schema_ref>`) once per session to learn section names, field shapes, and write_rules. Cache for the session — schema is workspace-stable. Schema-conformance errors carry recovery payloads as a fallback (`UNKNOWN_SECTION`, `UNKNOWN_METADATA_FIELD`, `INVALID_ENUM_VALUE`, `REQUIRED_FIELD_UNSET`, `INVALID_REL_TYPE`); fix from `details` rather than re-fetching. Returns `ENTITY_NOT_FOUND` when `name` is unknown (envelope's `details.id` echoes the name; `details.suggestions` is empty for schemas) or `UNKNOWN_VAULT` when `vault` is not mounted (envelope's `details.known_vaults` lists the writable roster).",
+        description = "Read one schema's full body — section list (with per-section `write_rules` and `required` flag), metadata fields (with `enum` allowed values + `default` when schema-declared), type-level `writing_guidance`, `system_context`, the relationship vocabulary (each entry's `name`, `description`, `when_to_use`, `default_weight`), `community.{resolution, seed}`, `relationship_mode` (strict|open), `used_by[]`, top-level `origin` (`first-party` for an engine built-in or a schema authored/trusted in this workspace; `third-party` otherwise), top-level `default_writing_guidance` (when authored), and top-level `alias_target_rel_type` (when authored — names the rel-type that body wiki-links `[[target]]` auto-emit through the alias-synthesis pass; absent means the schema opts out and unbacked wiki-links refuse with `WIKILINK_WITHOUT_RELATION`). A `third-party` schema is served structural-only regardless of `verbosity` — its prose-instruction fields (`system_context`, `writing_guidance`, `write_rules`, `when_to_use`, prose `description`) are omitted so a stranger's free-text never reaches the agent as instructions. Pass exactly one of: `name` — a bare name (\"default\") or canonical pin (\"default@1.0.0\"); `mem` — a mem name whose pinned `mem.schema_ref` the engine resolves from the workspace's mount roster. Supplying both returns `INVALID_INPUT`; supplying neither returns `INVALID_INPUT`. Workflow: each writable mem pins one schema (see `memstead_overview`'s `## Schemas` and `## Mems` sections). Before any `memstead_create` / `memstead_update` / `memstead_relate` against mem X, call this tool with `mem=<X>` (or `name=<X.schema_ref>`) once per session to learn section names, field shapes, and write_rules. Cache for the session — schema is workspace-stable. Schema-conformance errors carry recovery payloads as a fallback (`UNKNOWN_SECTION`, `UNKNOWN_METADATA_FIELD`, `INVALID_ENUM_VALUE`, `REQUIRED_FIELD_UNSET`, `INVALID_REL_TYPE`); fix from `details` rather than re-fetching. Returns `ENTITY_NOT_FOUND` when `name` is unknown (envelope's `details.id` echoes the name; `details.suggestions` is empty for schemas) or `UNKNOWN_MEM` when `mem` is not mounted (envelope's `details.known_mems` lists the writable roster).",
         annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false)
     )]
     fn memstead_schema(&self, Parameters(p): Parameters<SchemaParams>) -> CallToolResult {
         // The unified engine exposes `schemas()` as a HashMap keyed by
-        // vault name (one schema per vault per V1). suggest_name is
-        // not available on the unified surface (the per-vault HashMap
+        // mem name (one schema per mem per V1). suggest_name is
+        // not available on the unified surface (the per-mem HashMap
         // has no fuzzy index); not-found errors carry an empty
         // suggestions list — wire shape stays consistent.
         let unified = self.unified_engine();
         let mut engine = unified.lock().unwrap();
         let drift_warnings = engine.reload_if_stale(None);
-        let vault_changed_notices = engine.take_vault_changed_notices();
+        let mem_changed_notices = engine.take_mem_changed_notices();
 
         // Resolve the effective schema name. Accept exactly one of
-        // `name` (canonical) or `vault` (mount-roster lookup); the
+        // `name` (canonical) or `mem` (mount-roster lookup); the
         // pair `(Some, Some)` and `(None, None)` are typed input
         // errors so an agent that misreads the API gets a precise
-        // failure rather than silent fallback. `vault` resolves
+        // failure rather than silent fallback. `mem` resolves
         // through the same cascade as `name` once the engine maps
-        // the vault to its pinned `schema_ref`.
-        let effective_name: String = match (p.name.as_deref(), p.vault.as_deref()) {
+        // the mem to its pinned `schema_ref`.
+        let effective_name: String = match (p.name.as_deref(), p.mem.as_deref()) {
             (Some(_), Some(_)) => {
                 let msg =
-                    "memstead_schema accepts exactly one of `name` or `vault`, not both.".to_string();
+                    "memstead_schema accepts exactly one of `name` or `mem`, not both.".to_string();
                 return attach_drift_to_error(
                     tool_error_with_payload(
                         "INVALID_INPUT",
@@ -2147,12 +2147,12 @@ impl McpServer {
                         ),
                     ),
                     &drift_warnings,
-                    vault_changed_notices,
+                    mem_changed_notices,
                 );
             }
             (None, None) => {
                 let msg =
-                    "memstead_schema requires either `name` or `vault`.".to_string();
+                    "memstead_schema requires either `name` or `mem`.".to_string();
                 return attach_drift_to_error(
                     tool_error_with_payload(
                         "INVALID_INPUT",
@@ -2164,34 +2164,34 @@ impl McpServer {
                         ),
                     ),
                     &drift_warnings,
-                    vault_changed_notices,
+                    mem_changed_notices,
                 );
             }
             (Some(name), None) => name.to_string(),
-            (None, Some(vault)) => match engine.mount(vault) {
+            (None, Some(mem)) => match engine.mount(mem) {
                 Some(m) => m.schema.as_ref().map(|s| s.to_string()).unwrap_or_default(),
                 None => {
-                    let known_vaults: Vec<String> = engine
+                    let known_mems: Vec<String> = engine
                         .mounts()
                         .iter()
-                        .map(|m| m.vault.clone())
+                        .map(|m| m.mem.clone())
                         .collect();
-                    let msg = format!("unknown vault: \"{vault}\"");
+                    let msg = format!("unknown mem: \"{mem}\"");
                     return attach_drift_to_error(
                         tool_error_with_payload(
-                            "UNKNOWN_VAULT",
+                            "UNKNOWN_MEM",
                             &msg,
                             envelope(
-                                "UNKNOWN_VAULT",
+                                "UNKNOWN_MEM",
                                 msg.clone(),
                                 serde_json::json!({
-                                    "name": vault,
-                                    "known_vaults": known_vaults,
+                                    "name": mem,
+                                    "known_mems": known_mems,
                                 }),
                             ),
                         ),
                         &drift_warnings,
-                        vault_changed_notices,
+                        mem_changed_notices,
                     );
                 }
             },
@@ -2199,11 +2199,11 @@ impl McpServer {
 
         // Lookup: name@version path uses parsed pin; bare-name path
         // picks the first matching schema by name. Cascade covers
-        // vault-pinned, workspace-loaded, and embedded built-in
-        // catalogues so any pin `memstead_vault_create` would accept also
+        // mem-pinned, workspace-loaded, and embedded built-in
+        // catalogues so any pin `memstead_mem_create` would accept also
         // resolves through `memstead_schema` — agents reading
         // `memstead_overview`'s lifecycle namespaces can introspect their
-        // schemas without first creating a vault.
+        // schemas without first creating a mem.
         let schema_arc: Option<std::sync::Arc<memstead_schema::Schema>> =
             if effective_name.contains('@') {
                 match effective_name.parse::<memstead_schema::SchemaRef>() {
@@ -2231,12 +2231,12 @@ impl McpServer {
                         ),
                     ),
                     &drift_warnings,
-                    vault_changed_notices,
+                    mem_changed_notices,
                 );
             }
         };
 
-        // `used_by` — every writable vault whose pinned schema
+        // `used_by` — every writable mem whose pinned schema
         // resolves to this one. Iterate mounts(), compare each
         // mount.schema with the matched schema's canonical pin.
         let canon = format!("{}@{}", schema.manifest.name, schema.version);
@@ -2244,7 +2244,7 @@ impl McpServer {
             .mounts()
             .iter()
             .filter(|m| m.schema.as_ref().map(|s| s.to_string()).as_deref() == Some(canon.as_str()))
-            .map(|m| m.vault.clone())
+            .map(|m| m.mem.clone())
             .collect();
         used_by.sort();
 
@@ -2273,7 +2273,7 @@ impl McpServer {
                             ),
                         ),
                         &drift_warnings,
-                        vault_changed_notices,
+                        mem_changed_notices,
                     );
                 }
             },
@@ -2287,7 +2287,7 @@ impl McpServer {
         for w in &drift_warnings {
             res = append_warning_hint(res, w);
         }
-        attach_vault_changed_to_result(res, vault_changed_notices)
+        attach_mem_changed_to_result(res, mem_changed_notices)
     }
 
     // ----------------------------------------------------------------------
@@ -2296,14 +2296,14 @@ impl McpServer {
 
     #[tool(
         name = "memstead_create",
-        description = "Create a new entity. Read the target vault's schema first via `memstead_schema(name=<vault.schema_ref>)` (cached per session) — required sections, allowed metadata fields, relationship vocabulary, and write_rules live there. Required: `title`, `entity_type`, plus the type's required sections. The entity ID is the vault name plus a Unicode-aware slug of the title (e.g. \"Große Änderung\" → \"große-änderung\"). A title the slug pipeline cannot represent (emoji, punctuation, non-alphanumerics) or that slugifies to empty is refused with `INVALID_TITLE` carrying a `proposed_slug` to retry. `vault` defaults to the primary writable vault. Pass `relations` to wire edges inline (e.g. `[{to: \"specs--parent-id\", type: \"PART_OF\"}]`); unresolved targets auto-create stubs at that ID. Optional `note` (≤280 chars) lands in the commit body; missing when `[mutations].require_notes=true` emits `NOTE_MISSING`. Schema-bound failures carry recovery payload: `UNKNOWN_SECTION`/`UNKNOWN_METADATA_FIELD` ship `details.declared` + nearest-match `suggestion`; `INVALID_ENUM_VALUE` ships `details.allowed`, `details.field_description`, `suggestion`, `details.type_write_rules`; `REQUIRED_FIELD_UNSET` ships `details.field_description`, `details.enum_values`, `details.type_write_rules` — also fires on create when the caller omits a required-no-default metadata field, superseding the `MISSING_REQUIRED_FIELD` warning; `MISSING_REQUIRED_SECTION` ships per-section `write_rules` plus the top-level `type_guidance` map — refused on create so it never lands with a placeholder body; `INVALID_REL_TYPE` ships `details.allowed` (`{name, when_to_use}`) + `suggestion`. Other warnings (entity still lands): `UNDECLARED_RELATIONSHIP_OPEN`, `INLINE_WIKI_LINK_AUTO_STUBBED` (`[[wiki-link]]` in bodies auto-stubs unresolved targets; review `details.stubs` to catch prose-induced ghosts), `MISSING_REQUIRED_OUTGOING` (lists unsatisfied `required_outgoing` per `details.missing[]={relationships, cardinality}`; follow up with memstead_relate). Real writes return `commit_sha` (per-vault git; gitdir via `memstead_health include_config=true`) for polling via memstead_changes_since. `dry_run: true` validates then previews a VALID entity: response carries prospective `id`, `file_path`, `_hash`, warnings, `type_guidance`, and any `incoming` edges adopted from a pre-existing stub, with `commit_sha` empty — but an INVALID entity refuses with the same typed envelope a real call returns, not a warnings-list preview. Use memstead_relate for edges, memstead_update for sections.",
+        description = "Create a new entity. Read the target mem's schema first via `memstead_schema(name=<mem.schema_ref>)` (cached per session) — required sections, allowed metadata fields, relationship vocabulary, and write_rules live there. Required: `title`, `entity_type`, plus the type's required sections. The entity ID is the mem name plus a Unicode-aware slug of the title (e.g. \"Große Änderung\" → \"große-änderung\"). A title the slug pipeline cannot represent (emoji, punctuation, non-alphanumerics) or that slugifies to empty is refused with `INVALID_TITLE` carrying a `proposed_slug` to retry. `mem` defaults to the primary writable mem. Pass `relations` to wire edges inline (e.g. `[{to: \"specs--parent-id\", type: \"PART_OF\"}]`); unresolved targets auto-create stubs at that ID. Optional `note` (≤280 chars) lands in the commit body; missing when `[mutations].require_notes=true` emits `NOTE_MISSING`. Schema-bound failures carry recovery payload: `UNKNOWN_SECTION`/`UNKNOWN_METADATA_FIELD` ship `details.declared` + nearest-match `suggestion`; `INVALID_ENUM_VALUE` ships `details.allowed`, `details.field_description`, `suggestion`, `details.type_write_rules`; `REQUIRED_FIELD_UNSET` ships `details.field_description`, `details.enum_values`, `details.type_write_rules` — also fires on create when the caller omits a required-no-default metadata field, superseding the `MISSING_REQUIRED_FIELD` warning; `MISSING_REQUIRED_SECTION` ships per-section `write_rules` plus the top-level `type_guidance` map — refused on create so it never lands with a placeholder body; `INVALID_REL_TYPE` ships `details.allowed` (`{name, when_to_use}`) + `suggestion`. Other warnings (entity still lands): `UNDECLARED_RELATIONSHIP_OPEN`, `INLINE_WIKI_LINK_AUTO_STUBBED` (`[[wiki-link]]` in bodies auto-stubs unresolved targets; review `details.stubs` to catch prose-induced ghosts), `MISSING_REQUIRED_OUTGOING` (lists unsatisfied `required_outgoing` per `details.missing[]={relationships, cardinality}`; follow up with memstead_relate). Real writes return `commit_sha` (per-mem git; gitdir via `memstead_health include_config=true`) for polling via memstead_changes_since. `dry_run: true` validates then previews a VALID entity: response carries prospective `id`, `file_path`, `_hash`, warnings, `type_guidance`, and any `incoming` edges adopted from a pre-existing stub, with `commit_sha` empty — but an INVALID entity refuses with the same typed envelope a real call returns, not a warnings-list preview. Use memstead_relate for edges, memstead_update for sections.",
         annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = false, open_world_hint = false)
     )]
     fn memstead_create(&self, Parameters(p): Parameters<CreateParams>) -> CallToolResult {
         if let Some(err) = validate_note(p.note.as_deref()) {
             return err;
         }
-        let vault = self.resolve_vault(p.vault.as_deref());
+        let mem = self.resolve_mem(p.mem.as_deref());
         let dry_run = p.dry_run.unwrap_or(false);
 
         // Wire JSON matches the `CreateResult` contract.
@@ -2321,7 +2321,7 @@ impl McpServer {
             })
             .collect();
         let args = memstead_base::CreateEntityArgs {
-            vault: vault.clone(),
+            mem: mem.clone(),
             title: p.title.clone(),
             entity_type: p.entity_type.clone(),
             sections: p.sections.unwrap_or_default(),
@@ -2343,7 +2343,7 @@ impl McpServer {
                 let mut body = serde_json::json!({
                     "id": outcome.id.to_string(),
                     "title": outcome.title,
-                    "vault": outcome.vault,
+                    "mem": outcome.mem,
                     "file_path": outcome.file_path,
                     "created_date": outcome.created_date,
                     "_hash": outcome.content_hash,
@@ -2363,23 +2363,23 @@ impl McpServer {
                         serde_json::to_value(&outcome.relations_declared)
                             .unwrap_or(serde_json::Value::Null);
                 }
-                attach_durability(&mut body, &engine, &outcome.vault);
-                attach_vault_changed(&mut body, engine.take_vault_changed_notices());
+                attach_durability(&mut body, &engine, &outcome.mem);
+                attach_mem_changed(&mut body, engine.take_mem_changed_notices());
                 let res = json_response(&body);
-                match vault_schema_ref_unified(&engine, &vault) {
-                    Some(s) => with_vault_schema_anchor(res, &s),
+                match mem_schema_ref_unified(&engine, &mem) {
+                    Some(s) => with_mem_schema_anchor(res, &s),
                     None => res,
                 }
             }
             Err(e) => {
                 // The notice already rode `structured_content` here;
-                // the text channel lacked the `VAULT_RELOADED` line a
+                // the text channel lacked the `MEM_RELOADED` line a
                 // successful response carries. A mutation reloads inside
                 // the engine, so reconstruct the warning from the
                 // drained notices to match the success channel split —
                 // collision (`HASH_MISMATCH`) is the path drift matters
                 // most, since it lands on the very entity being written.
-                let notices = engine.take_vault_changed_notices();
+                let notices = engine.take_mem_changed_notices();
                 let warnings = notices_as_reload_warnings(&notices);
                 attach_drift_to_error(engine_err_unified(e, &engine), &warnings, notices)
             }
@@ -2388,7 +2388,7 @@ impl McpServer {
 
     #[tool(
         name = "memstead_update",
-        description = "Modify an existing entity. Pre-fetch the target vault's schema via `memstead_schema(name=<vault.schema_ref>)` once per session — section names and write_rules live there. Read the entity first via memstead_entity and pass its hash as `expected_hash` — mismatch emits `HASH_MISMATCH` (`details.current` carries the live hash). `INLINE_WIKI_LINK_AUTO_STUBBED` warns when `[[…]]` parses to unresolved ids; `details.stubs` lists ghosts. `MISSING_REQUIRED_OUTGOING` warns when the type's `required_outgoing` blocks stay unsatisfied (payload mirrors memstead_create's; clear via memstead_relate). Three section modes: `sections` (replace), `append_sections` (append), `patch_sections` (find-and-replace, first or every via `all: true`). One mode per key. `patch_sections` errors on missing `old` or empty section. Schema-bound errors carry recovery payloads: `UNKNOWN_SECTION` / `UNKNOWN_METADATA_FIELD` ship `details.declared` + nearest-match `suggestion`; `INVALID_ENUM_VALUE` ships `details.allowed`, `details.field_description`, `suggestion`, `details.type_write_rules`; `REQUIRED_FIELD_UNSET` ships the same field+enum+rules payload. `metadata` sets frontmatter; `metadata_unset` removes it (silently no-ops on absent or section keys). Setting and unsetting the same key is a hard error. Read-only (set/unset → `READ_ONLY_FIELD`): `vault`, `id`, `type` (memstead_rename for title; delete+create for type/vault) plus engine-stamped `created_date` / `last_modified`. Stubs cannot be updated — memstead_create as real first. Optional `note` (≤280 chars) — see memstead_create; missing emits `NOTE_MISSING`. No-op short-circuit: post-state bytes-identical to disk (e.g. same-day auto-stamp, already-declared relation, absent-key unset, empty payload) returns `UPDATE_NOOP`, empty `commit_sha`, unchanged `_hash` — `expected_hash` stays stable. `dry_run: true` validates then previews OR recovers from a stale hash: it bypasses ONLY the `expected_hash` check (returns current `_hash` + `prospective_hash`), but section/field validation still refuses with the same typed envelope a real call returns — dry_run never reports an invalid update as clean. Reuse the current `_hash` as `expected_hash`, never `prospective_hash` — auto-stamped `last_modified` shifts the latter. A body-link removal orphaning its stub target GC's it into `orphan_stubs_removed`. Real-write responses carry `commit_sha` (per-vault git; gitdir via `memstead_health include_config=true`) for polling via memstead_changes_since.",
+        description = "Modify an existing entity. Pre-fetch the target mem's schema via `memstead_schema(name=<mem.schema_ref>)` once per session — section names and write_rules live there. Read the entity first via memstead_entity and pass its hash as `expected_hash` — mismatch emits `HASH_MISMATCH` (`details.current` carries the live hash). `INLINE_WIKI_LINK_AUTO_STUBBED` warns when `[[…]]` parses to unresolved ids; `details.stubs` lists ghosts. `MISSING_REQUIRED_OUTGOING` warns when the type's `required_outgoing` blocks stay unsatisfied (payload mirrors memstead_create's; clear via memstead_relate). Three section modes: `sections` (replace), `append_sections` (append), `patch_sections` (find-and-replace, first or every via `all: true`). One mode per key. `patch_sections` errors on missing `old` or empty section. Schema-bound errors carry recovery payloads: `UNKNOWN_SECTION` / `UNKNOWN_METADATA_FIELD` ship `details.declared` + nearest-match `suggestion`; `INVALID_ENUM_VALUE` ships `details.allowed`, `details.field_description`, `suggestion`, `details.type_write_rules`; `REQUIRED_FIELD_UNSET` ships the same field+enum+rules payload. `metadata` sets frontmatter; `metadata_unset` removes it (silently no-ops on absent or section keys). Setting and unsetting the same key is a hard error. Read-only (set/unset → `READ_ONLY_FIELD`): `mem`, `id`, `type` (memstead_rename for title; delete+create for type/mem) plus engine-stamped `created_date` / `last_modified`. Stubs cannot be updated — memstead_create as real first. Optional `note` (≤280 chars) — see memstead_create; missing emits `NOTE_MISSING`. No-op short-circuit: post-state bytes-identical to disk (e.g. same-day auto-stamp, already-declared relation, absent-key unset, empty payload) returns `UPDATE_NOOP`, empty `commit_sha`, unchanged `_hash` — `expected_hash` stays stable. `dry_run: true` validates then previews OR recovers from a stale hash: it bypasses ONLY the `expected_hash` check (returns current `_hash` + `prospective_hash`), but section/field validation still refuses with the same typed envelope a real call returns — dry_run never reports an invalid update as clean. Reuse the current `_hash` as `expected_hash`, never `prospective_hash` — auto-stamped `last_modified` shifts the latter. A body-link removal orphaning its stub target GC's it into `orphan_stubs_removed`. Real-write responses carry `commit_sha` (per-mem git; gitdir via `memstead_health include_config=true`) for polling via memstead_changes_since.",
         annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = false, open_world_hint = false)
     )]
     fn memstead_update(&self, Parameters(p): Parameters<UpdateParams>) -> CallToolResult {
@@ -2399,7 +2399,7 @@ impl McpServer {
             return err;
         }
         let id = EntityId::canonical(&p.id);
-        let vault_for_anchor = id.vault().to_string();
+        let mem_for_anchor = id.mem().to_string();
         let dry_run = p.dry_run.unwrap_or(false);
 
         // Wire JSON matches the `UpdateResult` contract.
@@ -2501,23 +2501,23 @@ impl McpServer {
                         serde_json::to_value(&outcome.relations_declared)
                             .unwrap_or(serde_json::Value::Null);
                 }
-                attach_durability(&mut body, &engine, outcome.id.vault());
-                attach_vault_changed(&mut body, engine.take_vault_changed_notices());
+                attach_durability(&mut body, &engine, outcome.id.mem());
+                attach_mem_changed(&mut body, engine.take_mem_changed_notices());
                 let res = json_response(&body);
-                match vault_schema_ref_unified(&engine, &vault_for_anchor) {
-                    Some(s) => with_vault_schema_anchor(res, &s),
+                match mem_schema_ref_unified(&engine, &mem_for_anchor) {
+                    Some(s) => with_mem_schema_anchor(res, &s),
                     None => res,
                 }
             }
             Err(e) => {
                 // The notice already rode `structured_content` here;
-                // the text channel lacked the `VAULT_RELOADED` line a
+                // the text channel lacked the `MEM_RELOADED` line a
                 // successful response carries. A mutation reloads inside
                 // the engine, so reconstruct the warning from the
                 // drained notices to match the success channel split —
                 // collision (`HASH_MISMATCH`) is the path drift matters
                 // most, since it lands on the very entity being written.
-                let notices = engine.take_vault_changed_notices();
+                let notices = engine.take_mem_changed_notices();
                 let warnings = notices_as_reload_warnings(&notices);
                 attach_drift_to_error(engine_err_unified(e, &engine), &warnings, notices)
             }
@@ -2526,7 +2526,7 @@ impl McpServer {
 
     #[tool(
         name = "memstead_relate",
-        description = "Connect two entities with a typed edge. Pre-fetch the target vault's schema via `memstead_schema(name=<vault.schema_ref>)` once per session — relationship vocabulary and shape live there. Type names are case-insensitive; stored canonically as UPPER_SNAKE_CASE. Unknown rel-types return `INVALID_REL_TYPE` with `details.allowed` (each `{name, when_to_use}`) and nearest-match `suggestion`. Shape pinned via `source_types` / `target_types` — add-path violations return `INVALID_REL_SHAPE` with `details.rel_type`, `details.from_type`, `details.to_type`, `details.allowed_source_types`, `details.allowed_target_types`, `suggestion`. Remove skips shape validation; existing violations surface via `memstead_health`. Pass `remove: true` to delete an edge. Source (`from`) must be real; target (`to`) may be auto-stubbed (wiki-link slug grammar — malformed ids return `INVALID_ENTITY_ID` with `details.id` / `details.reason`). Cross-vault edges policy-gated by `cross_vault_links` / `default_cross_links`: denial returns `CROSS_VAULT_LINK_NOT_ALLOWED`; absent ReadOnly targets return `CROSS_VAULT_TARGET_NOT_FOUND`; cross-different-schema edges undeclared in `cross_vault_relationships` return `CROSS_VAULT_EDGE_NOT_DECLARED`. Auto-stubs into an uncreated vault emit `CROSS_VAULT_TARGET_VAULT_UNCREATED`. Cycle-closing edges on `acyclic: true` types return `RELATIONSHIP_CYCLE` with `details.rel_type`, `details.from`, `details.to`, `details.existing_path`, `details.path_truncated`. Add-existing / remove-missing are typed-warning no-ops (`DUPLICATE_RELATIONSHIP` / `NO_SUCH_RELATIONSHIP`, empty `commit_sha`). Optional `note` (≤280 chars) — see memstead_create. Response `_hash` is next mutation's `expected_hash`. Edges never move files — entities live at `{vault}/{slug}.md`. On `remove: true`, a stub whose last incoming edge dropped is GC'd and listed in `orphan_stubs_removed`; surviving body wiki-links refuse with `RELATION_HAS_BODY_LINKS` (`details.body_links` — drop them via `memstead_update` and retry). Real-writes carry `commit_sha` (per-vault git; gitdir via `memstead_health include_config=true`) for polling via memstead_changes_since.",
+        description = "Connect two entities with a typed edge. Pre-fetch the target mem's schema via `memstead_schema(name=<mem.schema_ref>)` once per session — relationship vocabulary and shape live there. Type names are case-insensitive; stored canonically as UPPER_SNAKE_CASE. Unknown rel-types return `INVALID_REL_TYPE` with `details.allowed` (each `{name, when_to_use}`) and nearest-match `suggestion`. Shape pinned via `source_types` / `target_types` — add-path violations return `INVALID_REL_SHAPE` with `details.rel_type`, `details.from_type`, `details.to_type`, `details.allowed_source_types`, `details.allowed_target_types`, `suggestion`. Remove skips shape validation; existing violations surface via `memstead_health`. Pass `remove: true` to delete an edge. Source (`from`) must be real; target (`to`) may be auto-stubbed (wiki-link slug grammar — malformed ids return `INVALID_ENTITY_ID` with `details.id` / `details.reason`). Cross-mem edges policy-gated by `cross_mem_links` / `default_cross_links`: denial returns `CROSS_MEM_LINK_NOT_ALLOWED`; absent ReadOnly targets return `CROSS_MEM_TARGET_NOT_FOUND`; cross-different-schema edges undeclared in `cross_mem_relationships` return `CROSS_MEM_EDGE_NOT_DECLARED`. Auto-stubs into an uncreated mem emit `CROSS_MEM_TARGET_MEM_UNCREATED`. Cycle-closing edges on `acyclic: true` types return `RELATIONSHIP_CYCLE` with `details.rel_type`, `details.from`, `details.to`, `details.existing_path`, `details.path_truncated`. Add-existing / remove-missing are typed-warning no-ops (`DUPLICATE_RELATIONSHIP` / `NO_SUCH_RELATIONSHIP`, empty `commit_sha`). Optional `note` (≤280 chars) — see memstead_create. Response `_hash` is next mutation's `expected_hash`. Edges never move files — entities live at `{mem}/{slug}.md`. On `remove: true`, a stub whose last incoming edge dropped is GC'd and listed in `orphan_stubs_removed`; surviving body wiki-links refuse with `RELATION_HAS_BODY_LINKS` (`details.body_links` — drop them via `memstead_update` and retry). Real-writes carry `commit_sha` (per-mem git; gitdir via `memstead_health include_config=true`) for polling via memstead_changes_since.",
         annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = true, open_world_hint = false)
     )]
     fn memstead_relate(&self, Parameters(p): Parameters<RelateParams>) -> CallToolResult {
@@ -2535,7 +2535,7 @@ impl McpServer {
         }
         let from = EntityId::canonical(&p.from);
         let to = EntityId::canonical(&p.to);
-        let vault_for_anchor = from.vault().to_string();
+        let mem_for_anchor = from.mem().to_string();
         let remove = p.remove.unwrap_or(false);
 
         // Wire JSON mirrors pro's `RelateResult` shape — the unified
@@ -2595,23 +2595,23 @@ impl McpServer {
                         .map(|i| i.to_string())
                         .collect::<Vec<_>>()
                 );
-                attach_durability(&mut body, &engine, outcome.from.vault());
-                attach_vault_changed(&mut body, engine.take_vault_changed_notices());
+                attach_durability(&mut body, &engine, outcome.from.mem());
+                attach_mem_changed(&mut body, engine.take_mem_changed_notices());
                 let res = json_response(&body);
-                match vault_schema_ref_unified(&engine, &vault_for_anchor) {
-                    Some(s) => with_vault_schema_anchor(res, &s),
+                match mem_schema_ref_unified(&engine, &mem_for_anchor) {
+                    Some(s) => with_mem_schema_anchor(res, &s),
                     None => res,
                 }
             }
             Err(e) => {
                 // The notice already rode `structured_content` here;
-                // the text channel lacked the `VAULT_RELOADED` line a
+                // the text channel lacked the `MEM_RELOADED` line a
                 // successful response carries. A mutation reloads inside
                 // the engine, so reconstruct the warning from the
                 // drained notices to match the success channel split —
                 // collision (`HASH_MISMATCH`) is the path drift matters
                 // most, since it lands on the very entity being written.
-                let notices = engine.take_vault_changed_notices();
+                let notices = engine.take_mem_changed_notices();
                 let warnings = notices_as_reload_warnings(&notices);
                 attach_drift_to_error(engine_err_unified(e, &engine), &warnings, notices)
             }
@@ -2620,7 +2620,7 @@ impl McpServer {
 
     #[tool(
         name = "memstead_delete",
-        description = "Remove an entity permanently. Deletes the entity's store record, every edge touching it (both directions), and its markdown file on disk. Requires `expected_hash` (read the entity via memstead_entity first — mirrors memstead_update / memstead_rename for optimistic locking); mismatch emits `HASH_MISMATCH` with `details.current` carrying the current on-disk hash. Binary semantics: any incoming reference from another entity in a Write-Vault refuses the delete with `HAS_INCOMING_REFS` and `details.referrers` listing each `{from_id, rel_types, vault}` (one entry per unique source, rel_types collapses multi-edge cases) — the agent removes the offending references via `memstead_relate --remove` (or `memstead_update` for body wiki-links) before retrying. There is no force flag. When the only incoming references come from ReadOnly mounts (archives), the delete proceeds: the on-disk file is removed and the in-memory entity is demoted to a stub at the same id so the surviving edges keep a valid target — the response carries a `RESIDUAL_STUB_FOR_READONLY_REFERRERS` warning naming the surviving referrers. PART_OF children survive the delete: their parent edge is removed; file paths are unaffected (every entity already lives at `{vault}/{slug}.md`). Stubs (`_hash` empty) are deleted with `expected_hash: \"\"` — the hash check is skipped because there is nothing to compare. Optional `note` (≤280 chars) — shared provenance contract, see memstead_create. Response carries `relations_removed` (edges removed by this delete), `orphan_stubs_removed` (ids of stub entities whose last incoming edge was this entity — they are GC'd in the same op so the graph stays tidy; field is serde-omitted when empty), `warnings` (residual-stub warning when the demote path applied), and `commit_sha` (per-vault git; gitdir via `memstead_health include_config=true`) for polling via memstead_changes_since.",
+        description = "Remove an entity permanently. Deletes the entity's store record, every edge touching it (both directions), and its markdown file on disk. Requires `expected_hash` (read the entity via memstead_entity first — mirrors memstead_update / memstead_rename for optimistic locking); mismatch emits `HASH_MISMATCH` with `details.current` carrying the current on-disk hash. Binary semantics: any incoming reference from another entity in a Write-Mem refuses the delete with `HAS_INCOMING_REFS` and `details.referrers` listing each `{from_id, rel_types, mem}` (one entry per unique source, rel_types collapses multi-edge cases) — the agent removes the offending references via `memstead_relate --remove` (or `memstead_update` for body wiki-links) before retrying. There is no force flag. When the only incoming references come from ReadOnly mounts (archives), the delete proceeds: the on-disk file is removed and the in-memory entity is demoted to a stub at the same id so the surviving edges keep a valid target — the response carries a `RESIDUAL_STUB_FOR_READONLY_REFERRERS` warning naming the surviving referrers. PART_OF children survive the delete: their parent edge is removed; file paths are unaffected (every entity already lives at `{mem}/{slug}.md`). Stubs (`_hash` empty) are deleted with `expected_hash: \"\"` — the hash check is skipped because there is nothing to compare. Optional `note` (≤280 chars) — shared provenance contract, see memstead_create. Response carries `relations_removed` (edges removed by this delete), `orphan_stubs_removed` (ids of stub entities whose last incoming edge was this entity — they are GC'd in the same op so the graph stays tidy; field is serde-omitted when empty), `warnings` (residual-stub warning when the demote path applied), and `commit_sha` (per-mem git; gitdir via `memstead_health include_config=true`) for polling via memstead_changes_since.",
         annotations(read_only_hint = false, destructive_hint = true, idempotent_hint = false, open_world_hint = false)
     )]
     fn memstead_delete(&self, Parameters(p): Parameters<DeleteParams>) -> CallToolResult {
@@ -2643,9 +2643,9 @@ impl McpServer {
 
         let unified = self.unified_engine();
         let mut engine = unified.lock().unwrap();
-        // Capture the schema-ref BEFORE the delete — vault may
+        // Capture the schema-ref BEFORE the delete — mem may
         // drop with the last entity.
-        let vault_for_anchor = vault_schema_ref_unified(&engine, id.vault());
+        let mem_for_anchor = mem_schema_ref_unified(&engine, id.mem());
         let args = memstead_base::DeleteEntityArgs {
             id: id.clone(),
             expected_hash: expected_hash_opt,
@@ -2674,11 +2674,11 @@ impl McpServer {
                             .collect::<Vec<_>>()
                     );
                 }
-                attach_durability(&mut body, &engine, id.vault());
-                attach_vault_changed(&mut body, engine.take_vault_changed_notices());
+                attach_durability(&mut body, &engine, id.mem());
+                attach_mem_changed(&mut body, engine.take_mem_changed_notices());
                 let mut res = json_response(&body);
-                if let Some(s) = vault_for_anchor.as_deref() {
-                    res = with_vault_schema_anchor(res, s);
+                if let Some(s) = mem_for_anchor.as_deref() {
+                    res = with_mem_schema_anchor(res, s);
                 }
                 // Surface every engine-emitted warning on the outcome
                 // (residual-stub demotion, and the `NOTE_MISSING`
@@ -2691,13 +2691,13 @@ impl McpServer {
             }
             Err(e) => {
                 // The notice already rode `structured_content` here;
-                // the text channel lacked the `VAULT_RELOADED` line a
+                // the text channel lacked the `MEM_RELOADED` line a
                 // successful response carries. A mutation reloads inside
                 // the engine, so reconstruct the warning from the
                 // drained notices to match the success channel split —
                 // collision (`HASH_MISMATCH`) is the path drift matters
                 // most, since it lands on the very entity being written.
-                let notices = engine.take_vault_changed_notices();
+                let notices = engine.take_mem_changed_notices();
                 let warnings = notices_as_reload_warnings(&notices);
                 attach_drift_to_error(engine_err_unified(e, &engine), &warnings, notices)
             }
@@ -2706,7 +2706,7 @@ impl McpServer {
 
     #[tool(
         name = "memstead_rename",
-        description = "Rename an entity by changing its title. Updates the entity ID (vault prefix preserved) and its markdown file path (`{new_slug}.md` at vault root). Atomic referrer rewrite: every Write-Vault entity whose `relationships` or section bodies point at the old id has its `[[old-slug]]` tokens rewritten in one per-vault commit. Cross-vault referrers are gated by `cross_vault_links` policy in the propagated edge's actual direction (`referrer_vault → renamed_vault`) — a blocked direction aborts up-front with `RENAME_BLOCKED_BY_CROSS_VAULT_POLICY` (`details.from_vault`, `details.blocked_referrers[{from_vault, to_vault, count}]`) before any write lands. Per-peer commits are parent-pinned; sibling-writer drift mid-rename surfaces `RENAME_PARTIAL_FAILURE` (`details.committed_vaults`, `details.failed_vault`, `details.failure_cause`) so the agent retries the failed vault after reloading. Every per-vault commit in one rename shares a `logical_operation_id` in its provenance — correlate multi-vault renames via `memstead_changes_since`. ReadOnly referrers can't be rewritten; the old id is demoted to a stub in-memory holding the surviving incoming edges, and the response carries `RESIDUAL_STUB_FOR_READONLY_REFERRERS` naming each surviving referrer. Requires `expected_hash` (read via memstead_entity first); mismatch emits `HASH_MISMATCH` with `details.current` carrying the current on-disk hash. Slug-noop short-circuit: when the new title's slug matches the current one, `old_id` equals `new_id`, `commit_sha` is empty, and `warnings` carries `TITLE_NORMALIZED_TO_SLUG_NOOP`. ID collisions error — pick a different title. Stubs cannot be renamed (create a real entity instead). Optional `note` (≤280 chars) — shared provenance contract, see memstead_create. Response carries `old_id`, `new_id`, `_hash` (post-rename on-disk hash — pass as `expected_hash` on the next mutation, mirrors `memstead_relate`), `commit_sha` (per-vault git; gitdir via `memstead_health include_config=true`), and `warnings`.",
+        description = "Rename an entity by changing its title. Updates the entity ID (mem prefix preserved) and its markdown file path (`{new_slug}.md` at mem root). Atomic referrer rewrite: every Write-Mem entity whose `relationships` or section bodies point at the old id has its `[[old-slug]]` tokens rewritten in one per-mem commit. Cross-mem referrers are gated by `cross_mem_links` policy in the propagated edge's actual direction (`referrer_mem → renamed_mem`) — a blocked direction aborts up-front with `RENAME_BLOCKED_BY_CROSS_MEM_POLICY` (`details.from_mem`, `details.blocked_referrers[{from_mem, to_mem, count}]`) before any write lands. Per-peer commits are parent-pinned; sibling-writer drift mid-rename surfaces `RENAME_PARTIAL_FAILURE` (`details.committed_mems`, `details.failed_mem`, `details.failure_cause`) so the agent retries the failed mem after reloading. Every per-mem commit in one rename shares a `logical_operation_id` in its provenance — correlate multi-mem renames via `memstead_changes_since`. ReadOnly referrers can't be rewritten; the old id is demoted to a stub in-memory holding the surviving incoming edges, and the response carries `RESIDUAL_STUB_FOR_READONLY_REFERRERS` naming each surviving referrer. Requires `expected_hash` (read via memstead_entity first); mismatch emits `HASH_MISMATCH` with `details.current` carrying the current on-disk hash. Slug-noop short-circuit: when the new title's slug matches the current one, `old_id` equals `new_id`, `commit_sha` is empty, and `warnings` carries `TITLE_NORMALIZED_TO_SLUG_NOOP`. ID collisions error — pick a different title. Stubs cannot be renamed (create a real entity instead). Optional `note` (≤280 chars) — shared provenance contract, see memstead_create. Response carries `old_id`, `new_id`, `_hash` (post-rename on-disk hash — pass as `expected_hash` on the next mutation, mirrors `memstead_relate`), `commit_sha` (per-mem git; gitdir via `memstead_health include_config=true`), and `warnings`.",
         annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = false, open_world_hint = false)
     )]
     fn memstead_rename(&self, Parameters(p): Parameters<RenameParams>) -> CallToolResult {
@@ -2717,7 +2717,7 @@ impl McpServer {
             return err;
         }
         let id = EntityId::canonical(&p.id);
-        let vault_for_anchor = id.vault().to_string();
+        let mem_for_anchor = id.mem().to_string();
 
         // Unified outcome exposes `old_path` / `new_path` directly
         // (matching pro's `RenameResult` shape).
@@ -2745,23 +2745,23 @@ impl McpServer {
                     "commit_sha": outcome.commit_sha,
                     "warnings": outcome.warnings,
                 });
-                attach_durability(&mut body, &engine, id.vault());
-                attach_vault_changed(&mut body, engine.take_vault_changed_notices());
+                attach_durability(&mut body, &engine, id.mem());
+                attach_mem_changed(&mut body, engine.take_mem_changed_notices());
                 let res = json_response(&body);
-                match vault_schema_ref_unified(&engine, &vault_for_anchor) {
-                    Some(s) => with_vault_schema_anchor(res, &s),
+                match mem_schema_ref_unified(&engine, &mem_for_anchor) {
+                    Some(s) => with_mem_schema_anchor(res, &s),
                     None => res,
                 }
             }
             Err(e) => {
                 // The notice already rode `structured_content` here;
-                // the text channel lacked the `VAULT_RELOADED` line a
+                // the text channel lacked the `MEM_RELOADED` line a
                 // successful response carries. A mutation reloads inside
                 // the engine, so reconstruct the warning from the
                 // drained notices to match the success channel split —
                 // collision (`HASH_MISMATCH`) is the path drift matters
                 // most, since it lands on the very entity being written.
-                let notices = engine.take_vault_changed_notices();
+                let notices = engine.take_mem_changed_notices();
                 let warnings = notices_as_reload_warnings(&notices);
                 attach_drift_to_error(engine_err_unified(e, &engine), &warnings, notices)
             }
@@ -2774,18 +2774,18 @@ impl McpServer {
 
     #[tool(
         name = "memstead_health",
-        description = "Return graph health metrics. The typed payload is `structured_content` (always whole); the text channel is pretty JSON, becoming chunkable markdown only past `token_budget` (page via `chunk`). Default: summary counts (entities, orphans, stubs, stale, missing-fields, communities; also per-schema via `orphans_by_schema`/`communities_by_schema`, raw totals kept), node/edge totals, type/edge distributions, `writable_vaults` + `read_vaults` roster, `default_writable_vault` (omitted-`vault` target), and `vault_schemas`. Pass `include` to drill in — allowed keys: `orphans`, `stubs`, `most_connected`, `missing_fields`, `stale`, `dangling_links`, `tags`, `missing_required_outgoing`, `conformance`, `integrity`. `conformance` lints entities against `target_schema` or each vault's pin into `findings` (`{id, axis, code, detail}`, write-time typed codes); `integrity` adds `DANGLING_LINK`/`ORPHAN_STUB`. `dangling_links` scans bodies for `[[id]]` refs lacking on-disk files; entries carry `from`, `target_id`, `target_path`, `section`. `tags` aggregates authored tag strings into `tag_distribution` (count desc, capped by `limit`), `tag_distribution_folded` (drift sidecar; entries when ≥2 casings share a canonical tag), and `untagged_entities`. `missing_required_outgoing` lists entities with unsatisfied `required_outgoing` blocks (`id`/`title`/`entity_type`/`vault`/`missing[]`). `most_connected` entries carry `total`/`incoming`/`outgoing` (all edges) plus `typed_total`/`typed_incoming`/`typed_outgoing` (mention edges excluded); ranked by `typed_total` then `total` then id, so a co-mention hub doesn't outrank a dependency hub. Unknown include keys emit `UNKNOWN_INCLUDE_KEY` on warnings. `limit` caps `most_connected`/`tag_distribution` at 10; above 100 clamped via `LIMIT_CLAMPED`. `SUSPICIOUS_NESTED_PREFIX` flags nested-prefix drift (fix via memstead_update). `DUPLICATE_SECTION_HEADING` flags a section key whose `## Heading` was declared twice (first body kept). `OUTER_REPO_NOT_IGNORING_VAULT_REPO` surfaces when the workspace is embedded in another git checkout not ignoring `vault-repo/`. `VAULT_RELOADED` flags an auto-reload after a sibling writer advanced the on-disk HEAD. Pass `vault` to scope counts/details to one writable vault; roster fields stay global. Under a filter, edge counts are source-in-vault only, `dangling_links` and `warnings` filter to in-filter entities. Set `include_config: true` to add `mutations` (`require_notes`), opaque `plugin` map, and a `vaults` detail array: per entry `origin`, optional `vcs` (`gitdir`/`worktree`/`head`), opaque `write_guidance` map, and `extra` (forward-compat catch-all).",
+        description = "Return graph health metrics. The typed payload is `structured_content` (always whole); the text channel is pretty JSON, becoming chunkable markdown only past `token_budget` (page via `chunk`). Default: summary counts (entities, orphans, stubs, stale, missing-fields, communities; also per-schema via `orphans_by_schema`/`communities_by_schema`, raw totals kept), node/edge totals, type/edge distributions, `writable_mems` + `read_mems` roster, `default_writable_mem` (omitted-`mem` target), and `mem_schemas`. Pass `include` to drill in — allowed keys: `orphans`, `stubs`, `most_connected`, `missing_fields`, `stale`, `dangling_links`, `tags`, `missing_required_outgoing`, `conformance`, `integrity`. `conformance` lints entities against `target_schema` or each mem's pin into `findings` (`{id, axis, code, detail}`, write-time typed codes); `integrity` adds `DANGLING_LINK`/`ORPHAN_STUB`. `dangling_links` scans bodies for `[[id]]` refs lacking on-disk files; entries carry `from`, `target_id`, `target_path`, `section`. `tags` aggregates authored tag strings into `tag_distribution` (count desc, capped by `limit`), `tag_distribution_folded` (drift sidecar; entries when ≥2 casings share a canonical tag), and `untagged_entities`. `missing_required_outgoing` lists entities with unsatisfied `required_outgoing` blocks (`id`/`title`/`entity_type`/`mem`/`missing[]`). `most_connected` entries carry `total`/`incoming`/`outgoing` (all edges) plus `typed_total`/`typed_incoming`/`typed_outgoing` (mention edges excluded); ranked by `typed_total` then `total` then id, so a co-mention hub doesn't outrank a dependency hub. Unknown include keys emit `UNKNOWN_INCLUDE_KEY` on warnings. `limit` caps `most_connected`/`tag_distribution` at 10; above 100 clamped via `LIMIT_CLAMPED`. `SUSPICIOUS_NESTED_PREFIX` flags nested-prefix drift (fix via memstead_update). `DUPLICATE_SECTION_HEADING` flags a section key whose `## Heading` was declared twice (first body kept). `OUTER_REPO_NOT_IGNORING_MEM_REPO` surfaces when the workspace is embedded in another git checkout not ignoring `mem-repo/`. `MEM_RELOADED` flags an auto-reload after a sibling writer advanced the on-disk HEAD. Pass `mem` to scope counts/details to one writable mem; roster fields stay global. Under a filter, edge counts are source-in-mem only, `dangling_links` and `warnings` filter to in-filter entities. Set `include_config: true` to add `mutations` (`require_notes`), opaque `plugin` map, and a `mems` detail array: per entry `origin`, optional `vcs` (`gitdir`/`worktree`/`head`), opaque `write_guidance` map, and `extra` (forward-compat catch-all).",
         annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false)
     )]
     fn memstead_health(&self, Parameters(p): Parameters<HealthParams>) -> CallToolResult {
         // include_config: true is served end-to-end via the unified
-        // accessors (gitdir_for / worktree_for / vault_head_sha /
-        // vault_config_for). `mutations` + `plugin` remain server
+        // accessors (gitdir_for / worktree_for / mem_head_sha /
+        // mem_config_for). `mutations` + `plugin` remain server
         // state on `self`.
         //
         // Caveat: git-branch mounts return `None` from
-        // `vault_config_for` until the backend's config-read path
-        // lifts; under include_config: true their per-vault entries
+        // `mem_config_for` until the backend's config-read path
+        // lifts; under include_config: true their per-mem entries
         // emit without `write_guidance` / `extra` (the `vcs` block
         // is present instead).
         let unified = self.unified_engine();
@@ -2794,11 +2794,11 @@ impl McpServer {
 
 
     /// Body of [`Self::memstead_health`]. Default shape (`summary`,
-    /// totals, distributions, rosters, `vault_schemas`) plus the
+    /// totals, distributions, rosters, `mem_schemas`) plus the
     /// eight `include` detail sections (orphans, stubs,
     /// most_connected, missing_fields, stale, dangling_links, tags,
     /// missing_required_outgoing). `include_config: true` adds
-    /// `mutations`, `plugin`, and per-vault `vcs` / `write_guidance`
+    /// `mutations`, `plugin`, and per-mem `vcs` / `write_guidance`
     /// / `extra` — the vcs subobject for git-branch mounts uses
     /// the worktree heuristic from
     /// [`memstead_base::Engine::worktree_for`].
@@ -2808,12 +2808,12 @@ impl McpServer {
         unified: Arc<Mutex<memstead_base::Engine>>,
     ) -> CallToolResult {
         let mut engine = unified.lock().unwrap();
-        let drift_warnings = engine.reload_if_stale(p.vault.as_deref());
-        let vault_changed_notices = engine.take_vault_changed_notices();
+        let drift_warnings = engine.reload_if_stale(p.mem.as_deref());
+        let mem_changed_notices = engine.take_mem_changed_notices();
 
         let include = p.include.unwrap_or_default();
         let args = memstead_engine::health::HealthArgs {
-            vault: p.vault.as_deref(),
+            mem: p.mem.as_deref(),
             include: &include,
             limit: p.limit,
             target_schema: p.target_schema.as_deref(),
@@ -2842,23 +2842,23 @@ impl McpServer {
             &config,
         ) {
             Ok(v) => v,
-            Err(memstead_engine::health::ComposeHealthError::UnknownVault {
+            Err(memstead_engine::health::ComposeHealthError::UnknownMem {
                 name,
-                writable_vaults,
+                writable_mems,
             }) => {
                 let msg = format!(
-                    "unknown vault: \"{name}\". Writable vaults: [{}]",
-                    writable_vaults.join(", ")
+                    "unknown mem: \"{name}\". Writable mems: [{}]",
+                    writable_mems.join(", ")
                 );
                 return tool_error_with_payload(
-                    "UNKNOWN_VAULT",
+                    "UNKNOWN_MEM",
                     &msg,
                     envelope(
-                        "UNKNOWN_VAULT",
+                        "UNKNOWN_MEM",
                         msg.clone(),
                         serde_json::json!({
                             "name": name,
-                            "writable_vaults": writable_vaults,
+                            "writable_mems": writable_mems,
                         }),
                     ),
                 );
@@ -2884,22 +2884,22 @@ impl McpServer {
         };
 
         let res = json_response(&result);
-        let res = match p.vault.as_deref().and_then(|v| vault_schema_ref_unified(&engine, v)) {
-            Some(s) => with_vault_schema_anchor(res, &s),
+        let res = match p.mem.as_deref().and_then(|v| mem_schema_ref_unified(&engine, v)) {
+            Some(s) => with_mem_schema_anchor(res, &s),
             None => res,
         };
-        let res = attach_vault_changed_to_result(res, vault_changed_notices);
+        let res = attach_mem_changed_to_result(res, mem_changed_notices);
         // #57: the text channel is chunkable markdown rendered from the
         // final structured payload (which ships whole), so a multi-include
         // report can't overflow the response cap. Done last — after the
-        // anchor / vault-changed post-processing that mutates
+        // anchor / mem-changed post-processing that mutates
         // `structured_content`.
         finalize_health_text(res, p.token_budget.unwrap_or(self.token_budget), p.chunk)
     }
 
     #[tool(
         name = "memstead_changes_since",
-        description = "Per-vault commit-delta feed — reads the vault's own git repo (gitdir via `memstead_health include_config=true`). Pass `since` = a commit SHA previously returned by any mutation (`commit_sha` from create / update / delete / rename / relate responses), or the canonical git empty-tree hash `4b825dc642cb6eb9a060e54bf8d69288fbee4904` for a fresh-client first sync (fresh vaults also return that hash as `head`). Returns a flat list of entity-level events — each event's `action` is one of `added`, `updated`, `removed`, `renamed`. Non-`removed` events carry `entity_type` (schema type name, e.g. spec, memo), looked up from the post-diff store; `removed` events carry `entity_type: null` alongside `title: null`. Engine-authored renames pair via commit-note provenance (`memstead: rename <old> → <new>`) — exact, similarity-independent, transitively composed across multi-step rename chains in the same window. Non-engine renames (`git mv`, pre-provenance migrations) fall back to a content-similarity scorer (default 0.6, tunable via `rename_similarity` in [0.1, 1.0]), capped at 1000 rewrite pairs per diff. Either path surfaces as a single `renamed` event with `from_id` and `to_id` rather than a removed+added pair. Out-of-range `rename_similarity` values refuse with `INVALID_INPUT` naming `details.allowed_range` and `details.requested`. `head` echoes the current HEAD SHA — save it as the next polling cursor (prefer full SHAs over refs). No pagination — every qualifying commit ships in one response. Pass `include_notes: true` to fold per-commit agent-notes (`notes[]`) and `memstead_ref` (SHA of the unified schema + per-vault-config registry) into the response — outer-repo auto-commit gets deltas, notes, and the registry-ref sha in one round-trip. Unknown or malformed `since` returns `INVALID_CURSOR` with `details.vault` and `details.since`.",
+        description = "Per-mem commit-delta feed — reads the mem's own git repo (gitdir via `memstead_health include_config=true`). Pass `since` = a commit SHA previously returned by any mutation (`commit_sha` from create / update / delete / rename / relate responses), or the canonical git empty-tree hash `4b825dc642cb6eb9a060e54bf8d69288fbee4904` for a fresh-client first sync (fresh mems also return that hash as `head`). Returns a flat list of entity-level events — each event's `action` is one of `added`, `updated`, `removed`, `renamed`. Non-`removed` events carry `entity_type` (schema type name, e.g. spec, memo), looked up from the post-diff store; `removed` events carry `entity_type: null` alongside `title: null`. Engine-authored renames pair via commit-note provenance (`memstead: rename <old> → <new>`) — exact, similarity-independent, transitively composed across multi-step rename chains in the same window. Non-engine renames (`git mv`, pre-provenance migrations) fall back to a content-similarity scorer (default 0.6, tunable via `rename_similarity` in [0.1, 1.0]), capped at 1000 rewrite pairs per diff. Either path surfaces as a single `renamed` event with `from_id` and `to_id` rather than a removed+added pair. Out-of-range `rename_similarity` values refuse with `INVALID_INPUT` naming `details.allowed_range` and `details.requested`. `head` echoes the current HEAD SHA — save it as the next polling cursor (prefer full SHAs over refs). No pagination — every qualifying commit ships in one response. Pass `include_notes: true` to fold per-commit agent-notes (`notes[]`) and `memstead_ref` (SHA of the unified schema + per-mem-config registry) into the response — outer-repo auto-commit gets deltas, notes, and the registry-ref sha in one round-trip. Unknown or malformed `since` returns `INVALID_CURSOR` with `details.mem` and `details.since`.",
         annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false)
     )]
     fn memstead_changes_since(&self, Parameters(p): Parameters<ChangesSinceParams>) -> CallToolResult {
@@ -2913,10 +2913,10 @@ impl McpServer {
         let include_notes = p.include_notes;
         let unified = self.unified_engine();
         let mut engine = unified.lock().unwrap();
-        let drift_warnings = engine.reload_if_stale(Some(&p.vault));
-        let vault_changed_notices = engine.take_vault_changed_notices();
-        let vault_for_anchor = p.vault.clone();
-        let res = match engine.changes_since(&p.vault, &p.since, p.rename_similarity) {
+        let drift_warnings = engine.reload_if_stale(Some(&p.mem));
+        let mem_changed_notices = engine.take_mem_changed_notices();
+        let mem_for_anchor = p.mem.clone();
+        let res = match engine.changes_since(&p.mem, &p.since, p.rename_similarity) {
             Ok(mut report) => {
                 if !include_notes {
                     report.notes = None;
@@ -2926,8 +2926,8 @@ impl McpServer {
                 for w in &drift_warnings {
                     res = append_warning_hint(res, w);
                 }
-                match vault_schema_ref_unified(&engine, &vault_for_anchor) {
-                    Some(s) => with_vault_schema_anchor(res, &s),
+                match mem_schema_ref_unified(&engine, &mem_for_anchor) {
+                    Some(s) => with_mem_schema_anchor(res, &s),
                     None => res,
                 }
             }
@@ -2936,23 +2936,23 @@ impl McpServer {
                 // `code` matches `EngineError::code()` for the underlying
                 // variant. A bad `since` cursor now arrives as the typed
                 // `EngineError::InvalidChangesCursor` (code `INVALID_CURSOR`,
-                // `details.vault` + untruncated `details.since`) — lifted
+                // `details.mem` + untruncated `details.since`) — lifted
                 // from the backend's typed marker in `Engine::changes_since`
                 // rather than sniffed out of a raw backend message string here.
-                // Genuine backend faults still surface `VAULT_ERROR`.
+                // Genuine backend faults still surface `MEM_ERROR`.
                 // The structured notice rides via the shared
-                // `attach_vault_changed_to_result` below; prepend the
-                // `VAULT_RELOADED` text line here so the error path
+                // `attach_mem_changed_to_result` below; prepend the
+                // `MEM_RELOADED` text line here so the error path
                 // carries the same channel split a success carries.
                 prepend_drift_warnings_to_result_text(engine_err_unified(e, &engine), &drift_warnings)
             }
         };
-        attach_vault_changed_to_result(res, vault_changed_notices)
+        attach_mem_changed_to_result(res, mem_changed_notices)
     }
 
     #[tool(
         name = "memstead_diff",
-        description = "Return a two-ref structural diff at entity granularity. Walks the tree at `ref_a` and the tree at `ref_b` in the vault's gitdir, surfacing per-entity changes as `entries[]` whose `status` is one of `added`, `modified`, `deleted`, `renamed`, `invalid_entity`. Each entry carries the full markdown body on both sides by default in `content_before` / `content_after`; pass `include_content: false` for the metadata-only shape (`id`, `title`, `entity_type`, `status`). Ref-handling conventions mirror `memstead_changes_since`: the canonical empty-tree sentinel `4b825dc642cb6eb9a060e54bf8d69288fbee4904` is accepted as either ref and short-circuits to git's empty tree (first-sync diffs against a fresh vault use this for `ref_a`); a bare `HEAD` resolves to the selected vault's branch tip rather than the gitdir's symbolic HEAD. Cross-vault diffs work via fully-qualified refs naming the peer vault's branch; cross-different-gitdir diffs are out of scope (the op operates on one vault-repo). Refusal codes: `UNKNOWN_VAULT` (`details.name`), `UNKNOWN_REF` (`details.ref`), `INVALID_INPUT` for folder / archive mounts and for `rename_similarity` outside the allowed range. Rename detection uses content-similarity tuned by `rename_similarity`; agent-notes-driven rename-chain collapse is a follow-up. Each entry's `ripple` field carries per-side `{from_id, side}` entries for entities with inbound wiki-links to the affected entry — `side: \"ref_a\"` lists referrers at the `ref_a` snapshot, `side: \"ref_b\"` at `ref_b`. Pass `include_ripple: false` to omit the field entirely (e.g. for large vaults where the per-side wiki-link scan is the dominant cost). Response top-level: `ref_a`, `ref_b`, `resolved_a_sha`, `resolved_b_sha`, `config`, `entries`.",
+        description = "Return a two-ref structural diff at entity granularity. Walks the tree at `ref_a` and the tree at `ref_b` in the mem's gitdir, surfacing per-entity changes as `entries[]` whose `status` is one of `added`, `modified`, `deleted`, `renamed`, `invalid_entity`. Each entry carries the full markdown body on both sides by default in `content_before` / `content_after`; pass `include_content: false` for the metadata-only shape (`id`, `title`, `entity_type`, `status`). Ref-handling conventions mirror `memstead_changes_since`: the canonical empty-tree sentinel `4b825dc642cb6eb9a060e54bf8d69288fbee4904` is accepted as either ref and short-circuits to git's empty tree (first-sync diffs against a fresh mem use this for `ref_a`); a bare `HEAD` resolves to the selected mem's branch tip rather than the gitdir's symbolic HEAD. Cross-mem diffs work via fully-qualified refs naming the peer mem's branch; cross-different-gitdir diffs are out of scope (the op operates on one mem-repo). Refusal codes: `UNKNOWN_MEM` (`details.name`), `UNKNOWN_REF` (`details.ref`), `INVALID_INPUT` for folder / archive mounts and for `rename_similarity` outside the allowed range. Rename detection uses content-similarity tuned by `rename_similarity`; agent-notes-driven rename-chain collapse is a follow-up. Each entry's `ripple` field carries per-side `{from_id, side}` entries for entities with inbound wiki-links to the affected entry — `side: \"ref_a\"` lists referrers at the `ref_a` snapshot, `side: \"ref_b\"` at `ref_b`. Pass `include_ripple: false` to omit the field entirely (e.g. for large mems where the per-side wiki-link scan is the dominant cost). Response top-level: `ref_a`, `ref_b`, `resolved_a_sha`, `resolved_b_sha`, `config`, `entries`.",
         annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false)
     )]
     fn memstead_diff(&self, Parameters(p): Parameters<DiffParams>) -> CallToolResult {
@@ -2965,7 +2965,7 @@ impl McpServer {
             include_content: p.include_content,
             include_ripple: p.include_ripple,
         };
-        match engine.diff(&p.vault, &p.ref_a, &p.ref_b, Some(config)) {
+        match engine.diff(&p.mem, &p.ref_a, &p.ref_b, Some(config)) {
             Ok(diff) => json_response(&diff),
             Err(e) => engine_err_unified(e, &engine),
         }
@@ -2973,15 +2973,15 @@ impl McpServer {
 
     #[tool(
         name = "memstead_reload",
-        description = "Reload one writable vault's slice of the in-memory store from its on-disk branch tip — or every writable vault when `vault` is omitted. For multi-engine coexistence: a sibling (forked subagent, macOS app, parallel terminal) or out-of-band `git pull` may have advanced HEAD past this engine's snapshot. The auto-reload-on-read pipeline surfaces `VAULT_RELOADED` on the next read; this tool is explicit operator-driven refresh for the rare cases the throttle missed. Not a workaround for direct .md edits — restart the server instead. Per-vault form is cheap (~10 ms per few-hundred-entity vault); workspace-wide scales linearly. Response: `reports[]`, each entry `{ vault, head_before, head_after, entities_loaded, changed_entity_ids[] }`. `head_before` is the engine's prior cached SHA (canonical empty-tree hash for fresh vaults); `head_after` is the freshly-peeled branch tip. `changed_entity_ids` is the union of added ∪ content-hash-changed ∪ removed entity ids — pass `head_before` to `memstead_changes_since` for the full per-entity diff. The workspace-wide form (omit `vault`) additionally picks up CLI writes to allowlist / cross-link / mutation policy (via `memstead workspace allow-create` etc.) without process restart. Per-vault form skips that workspace-level settings refresh. **Vault membership is fixed at process boot** — neither form re-scans the mount manifest. In-band lifecycle goes through `memstead_vault_create` / `memstead_vault_delete`; out-of-band creates / deletes require an MCP server restart.",
+        description = "Reload one writable mem's slice of the in-memory store from its on-disk branch tip — or every writable mem when `mem` is omitted. For multi-engine coexistence: a sibling (forked subagent, macOS app, parallel terminal) or out-of-band `git pull` may have advanced HEAD past this engine's snapshot. The auto-reload-on-read pipeline surfaces `MEM_RELOADED` on the next read; this tool is explicit operator-driven refresh for the rare cases the throttle missed. Not a workaround for direct .md edits — restart the server instead. Per-mem form is cheap (~10 ms per few-hundred-entity mem); workspace-wide scales linearly. Response: `reports[]`, each entry `{ mem, head_before, head_after, entities_loaded, changed_entity_ids[] }`. `head_before` is the engine's prior cached SHA (canonical empty-tree hash for fresh mems); `head_after` is the freshly-peeled branch tip. `changed_entity_ids` is the union of added ∪ content-hash-changed ∪ removed entity ids — pass `head_before` to `memstead_changes_since` for the full per-entity diff. The workspace-wide form (omit `mem`) additionally picks up CLI writes to allowlist / cross-link / mutation policy (via `memstead workspace allow-create` etc.) without process restart. Per-mem form skips that workspace-level settings refresh. **Mem membership is fixed at process boot** — neither form re-scans the mount manifest. In-band lifecycle goes through `memstead_mem_create` / `memstead_mem_delete`; out-of-band creates / deletes require an MCP server restart.",
         annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = true, open_world_hint = false)
     )]
     fn memstead_reload(&self, Parameters(p): Parameters<ReloadParams>) -> CallToolResult {
         let unified = self.unified_engine();
         let mut engine = unified.lock().unwrap();
-        let result = match p.vault.as_deref() {
-            Some(name) => engine.reload_one_vault_report(name).map(|r| vec![r]),
-            None => engine.reload_each_writable_vault_reports(),
+        let result = match p.mem.as_deref() {
+            Some(name) => engine.reload_one_mem_report(name).map(|r| vec![r]),
+            None => engine.reload_each_writable_mem_reports(),
         };
         match result {
             Ok(reports) => {
@@ -2991,52 +2991,52 @@ impl McpServer {
             // `engine_err_unified` reads `EngineError::code()` for the
             // underlying variant so the wire envelope here carries the
             // same typed token the rest of the surface emits for the
-            // same fire condition — `VAULT_ERROR` for backend wraps,
-            // `UNKNOWN_VAULT` for missing-vault, etc.
+            // same fire condition — `MEM_ERROR` for backend wraps,
+            // `UNKNOWN_MEM` for missing-mem, etc.
             Err(e) => engine_err_unified(e, &engine),
         }
     }
 
     // ----------------------------------------------------------------------
-    // Vault lifecycle tools
+    // Mem lifecycle tools
     // ----------------------------------------------------------------------
 
     #[tool(
-        name = "memstead_vault_create",
-        description = "Create and register a new writable vault at runtime. Requires workspace opt-in via `[[vault_management.create]]` rules (each `pattern` + `schemas[]`) — discover via `memstead_overview`'s `## Lifecycle Namespaces`. Engine composes the lifecycle candidate, canonicalizes `location`, runs first-match-wins glob over the rule list, then checks `schema` against the matched rule's `schemas[]` (`[\"*\"]` admits any). Two error envelopes: `VAULT_PATH_NOT_ALLOWED` carries `details.candidate`, `details.patterns`, `details.reason` (`no_allowlist_configured` / `no_match` / `outside_workspace`); `VAULT_SCHEMA_NOT_ALLOWED` carries `details.candidate`, `details.matched_pattern`, `details.requested_schema`, `details.allowed_schemas`. Name-collision check runs only after a path match — out-of-namespace collision surfaces as `VAULT_PATH_NOT_ALLOWED`, not `VAULT_NAME_COLLISION`. Storage-residue probe catches residue surviving a prior `memstead vault unregister` or a crash; residue left by a deliberate unregister reattaches and emits `VAULT_REATTACHED_AFTER_UNREGISTER` (audit signal); residue from a crash refuses with `VAULT_STORAGE_RESIDUE_DETECTED` — run `memstead vault delete <name>` first. Cross-vault edge authorization is workspace policy (`[cross_vault_links]`); the matched create-rule may carry `default_cross_links`. Bootstraps the gitdir per `vcs`, loads any pre-existing markdown, and produces a seed commit carrying `note` (≤280 chars). Response carries `location`, `seed_commit_sha` for `memstead_changes_since` polling, and `schema_ref` (gitdir via `memstead_health include_config=true`). Pass `include_schema: true` to additionally inline the full schema body — byte-identical to `memstead_schema(name=<resolved-schema>)`. Default `false`. A vault already present at the location returns `CONFIG_ERROR`. Seed-commit failure leaves partial disk state — no implicit rollback.",
+        name = "memstead_mem_create",
+        description = "Create and register a new writable mem at runtime. Requires workspace opt-in via `[[mem_management.create]]` rules (each `pattern` + `schemas[]`) — discover via `memstead_overview`'s `## Lifecycle Namespaces`. Engine composes the lifecycle candidate, canonicalizes `location`, runs first-match-wins glob over the rule list, then checks `schema` against the matched rule's `schemas[]` (`[\"*\"]` admits any). Two error envelopes: `MEM_PATH_NOT_ALLOWED` carries `details.candidate`, `details.patterns`, `details.reason` (`no_allowlist_configured` / `no_match` / `outside_workspace`); `MEM_SCHEMA_NOT_ALLOWED` carries `details.candidate`, `details.matched_pattern`, `details.requested_schema`, `details.allowed_schemas`. Name-collision check runs only after a path match — out-of-namespace collision surfaces as `MEM_PATH_NOT_ALLOWED`, not `MEM_NAME_COLLISION`. Storage-residue probe catches residue surviving a prior `memstead mem unregister` or a crash; residue left by a deliberate unregister reattaches and emits `MEM_REATTACHED_AFTER_UNREGISTER` (audit signal); residue from a crash refuses with `MEM_STORAGE_RESIDUE_DETECTED` — run `memstead mem delete <name>` first. Cross-mem edge authorization is workspace policy (`[cross_mem_links]`); the matched create-rule may carry `default_cross_links`. Bootstraps the gitdir per `vcs`, loads any pre-existing markdown, and produces a seed commit carrying `note` (≤280 chars). Response carries `location`, `seed_commit_sha` for `memstead_changes_since` polling, and `schema_ref` (gitdir via `memstead_health include_config=true`). Pass `include_schema: true` to additionally inline the full schema body — byte-identical to `memstead_schema(name=<resolved-schema>)`. Default `false`. A mem already present at the location returns `CONFIG_ERROR`. Seed-commit failure leaves partial disk state — no implicit rollback.",
         annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = false, open_world_hint = false)
     )]
-    fn memstead_vault_create(
+    fn memstead_mem_create(
         &self,
-        Parameters(p): Parameters<crate::lifecycle::VaultCreateParams>,
+        Parameters(p): Parameters<crate::lifecycle::MemCreateParams>,
     ) -> CallToolResult {
         // Collisions surface via the snapshot probe with the
         // `{name, source}` envelope (callers branch on `code` only).
         let unified = self.unified_engine();
-        self.memstead_vault_create_unified(p, unified.clone())
+        self.memstead_mem_create_unified(p, unified.clone())
     }
 
     #[tool(
-        name = "memstead_vault_delete",
-        description = "Remove a writable vault at runtime — always destructive: removes the vault and prunes every backend-visible artifact. Requires workspace opt-in via `[[vault_management.delete]]` rules — discover the current policy via `memstead_overview`'s `## Lifecycle Namespaces` section. Engine resolves `name` (`UNKNOWN_VAULT` otherwise), composes the lifecycle candidate from the vault's full hierarchical path (or the bare name for flat-layout vaults), runs first-match-wins glob lookup over the delete rule list (rejecting `no_allowlist_configured` or `no_match` with `VAULT_PATH_NOT_ALLOWED`; `details.candidate` carries the composed string, `details.patterns` lists rules checked, `details.reason` discriminates). Refuses `VAULT_REFERENCED_BY_POLICY` when the workspace `cross_vault_links` policy grants this vault as a write target (`details.referring_vaults` names them). Refuses `VAULT_HAS_INCOMING_REFS` when write-vault graph edges still target it (`details.referrers` lists each `{from_id, rel_types, vault}` — remove via `memstead_relate` / `memstead_update` first). On success the vault is gone — reads no longer see it and its backing storage is removed. The workspace policy is atomically scrubbed of the now-dangling `[cross_vault_links]` grants naming the deleted vault on either side. The `[[vault_management.create]]` / `[[vault_management.delete]]` allowlist rules are PRESERVED (exact-name and wildcard alike) — they are forward-looking permissions for the name, so re-creating a vault of the same name needs no fresh allow-create/allow-delete. No per-vault commit — `note` (≤280 chars) rides on the provenance context. Response: `name`, `deleted_from_router: true`, `files_deleted: true`, and `allowlist_entries_removed[{table, pattern?, from?, to?}]` listing the scrubbed cross-link grants (`table` is always `cross_vault_links`; empty when none named the vault). On partial cleanup failure `files_deleted` ends `false` and `VAULT_FILES_NOT_DELETED` warnings name the survivors: `details.reason` is `rmdir_failed` (with `details.path` + `details.error`) or `backend_prune_failed` (with `details.error`).",
+        name = "memstead_mem_delete",
+        description = "Remove a writable mem at runtime — always destructive: removes the mem and prunes every backend-visible artifact. Requires workspace opt-in via `[[mem_management.delete]]` rules — discover the current policy via `memstead_overview`'s `## Lifecycle Namespaces` section. Engine resolves `name` (`UNKNOWN_MEM` otherwise), composes the lifecycle candidate from the mem's full hierarchical path (or the bare name for flat-layout mems), runs first-match-wins glob lookup over the delete rule list (rejecting `no_allowlist_configured` or `no_match` with `MEM_PATH_NOT_ALLOWED`; `details.candidate` carries the composed string, `details.patterns` lists rules checked, `details.reason` discriminates). Refuses `MEM_REFERENCED_BY_POLICY` when the workspace `cross_mem_links` policy grants this mem as a write target (`details.referring_mems` names them). Refuses `MEM_HAS_INCOMING_REFS` when write-mem graph edges still target it (`details.referrers` lists each `{from_id, rel_types, mem}` — remove via `memstead_relate` / `memstead_update` first). On success the mem is gone — reads no longer see it and its backing storage is removed. The workspace policy is atomically scrubbed of the now-dangling `[cross_mem_links]` grants naming the deleted mem on either side. The `[[mem_management.create]]` / `[[mem_management.delete]]` allowlist rules are PRESERVED (exact-name and wildcard alike) — they are forward-looking permissions for the name, so re-creating a mem of the same name needs no fresh allow-create/allow-delete. No per-mem commit — `note` (≤280 chars) rides on the provenance context. Response: `name`, `deleted_from_router: true`, `files_deleted: true`, and `allowlist_entries_removed[{table, pattern?, from?, to?}]` listing the scrubbed cross-link grants (`table` is always `cross_mem_links`; empty when none named the mem). On partial cleanup failure `files_deleted` ends `false` and `MEM_FILES_NOT_DELETED` warnings name the survivors: `details.reason` is `rmdir_failed` (with `details.path` + `details.error`) or `backend_prune_failed` (with `details.error`).",
         annotations(read_only_hint = false, destructive_hint = true, idempotent_hint = false, open_world_hint = false)
     )]
-    fn memstead_vault_delete(
+    fn memstead_mem_delete(
         &self,
-        Parameters(p): Parameters<crate::lifecycle::VaultDeleteParams>,
+        Parameters(p): Parameters<crate::lifecycle::MemDeleteParams>,
     ) -> CallToolResult {
         let unified = self.unified_engine();
-        self.memstead_vault_delete_unified(p, unified.clone())
+        self.memstead_mem_delete_unified(p, unified.clone())
     }
 
     #[tool(
-        name = "memstead_vault_set_version",
-        description = "Update a registered vault's `version` field. The version is consumed by `memstead_export --format vault` to stamp the archive filename and the `.mem` archive's published config — bump before publishing. Vault-create seeds `0.1.0` automatically, so this tool is the only surface that needs to fire when an agent or operator is ready to ship a new version. Gate-free: no `[[vault_management.*]]` allowlist check, no operator-mode bypass needed. Validates the new version as semver; malformed values refuse with `INVALID_INPUT`. Unknown vault name refuses with `UNKNOWN_VAULT`; read-only vault refuses with `READ_ONLY_MOUNT`; a vault whose config failed to load returns `INVALID_INPUT`. Response carries `{vault, old_version, new_version, warnings}`; `VAULT_RELOADED` rides on `warnings` when a sibling engine commit landed between the engine's prior snapshot and this write (no extra read needed to learn the drift).",
+        name = "memstead_mem_set_version",
+        description = "Update a registered mem's `version` field. The version is consumed by `memstead_export --format mem` to stamp the archive filename and the `.mem` archive's published config — bump before publishing. Mem-create seeds `0.1.0` automatically, so this tool is the only surface that needs to fire when an agent or operator is ready to ship a new version. Gate-free: no `[[mem_management.*]]` allowlist check, no operator-mode bypass needed. Validates the new version as semver; malformed values refuse with `INVALID_INPUT`. Unknown mem name refuses with `UNKNOWN_MEM`; read-only mem refuses with `READ_ONLY_MOUNT`; a mem whose config failed to load returns `INVALID_INPUT`. Response carries `{mem, old_version, new_version, warnings}`; `MEM_RELOADED` rides on `warnings` when a sibling engine commit landed between the engine's prior snapshot and this write (no extra read needed to learn the drift).",
         annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = false, open_world_hint = false)
     )]
-    fn memstead_vault_set_version(
+    fn memstead_mem_set_version(
         &self,
-        Parameters(p): Parameters<crate::lifecycle::VaultSetVersionParams>,
+        Parameters(p): Parameters<crate::lifecycle::MemSetVersionParams>,
     ) -> CallToolResult {
         let new_version = match semver::Version::parse(&p.version) {
             Ok(v) => v,
@@ -3055,26 +3055,26 @@ impl McpServer {
         };
         let unified = self.unified_engine();
         let mut engine = unified.lock().unwrap();
-        match engine.set_vault_version(&p.name, new_version, p.note.as_deref()) {
+        match engine.set_mem_version(&p.name, new_version, p.note.as_deref()) {
             Ok(outcome) => {
                 let mut body = serde_json::json!({
-                    "vault": outcome.vault,
+                    "mem": outcome.mem,
                     "old_version": outcome.old_version.map(|v| v.to_string()),
                     "new_version": outcome.new_version.to_string(),
                     "warnings": outcome.warnings,
                 });
-                attach_vault_changed(&mut body, engine.take_vault_changed_notices());
+                attach_mem_changed(&mut body, engine.take_mem_changed_notices());
                 json_response(&body)
             }
             Err(e) => {
                 // The notice already rode `structured_content` here;
-                // the text channel lacked the `VAULT_RELOADED` line a
+                // the text channel lacked the `MEM_RELOADED` line a
                 // successful response carries. A mutation reloads inside
                 // the engine, so reconstruct the warning from the
                 // drained notices to match the success channel split —
                 // collision (`HASH_MISMATCH`) is the path drift matters
                 // most, since it lands on the very entity being written.
-                let notices = engine.take_vault_changed_notices();
+                let notices = engine.take_mem_changed_notices();
                 let warnings = notices_as_reload_warnings(&notices);
                 attach_drift_to_error(engine_err_unified(e, &engine), &warnings, notices)
             }
@@ -3082,13 +3082,13 @@ impl McpServer {
     }
 
     #[tool(
-        name = "memstead_vault_set_schema",
-        description = "Update a vault's schema pin — the integrity-driven schema-migration trigger. Stable response `{vault, schema_pin, migration_target, outcome, findings}`; branch on `outcome`: `noop` (requested == current pin), `switched` (vault already integral against the target — pin moved atomically), `migration_started` (not integral — vault enters dual-pin: writes now validate against the target, `findings` lists the non-integral entities as `{id, axis, code, detail}`), `migration_pending` (same target re-issued while repairs remain — `findings` carries the remaining entities). Migration loop: read `findings`, read both schemas via `memstead_schema`, repair each entity via `memstead_update` (validated strictly against the target; `relations_unset` is available on non-conformant entities), then re-issue this call — once every entity is integral it completes the switch. Reads stay permissive throughout; the dual-pin state survives engine restarts. Unknown vault refuses `UNKNOWN_VAULT`; a schema ref that resolves to no loaded schema refuses `SCHEMA_NOT_FOUND`; malformed refs refuse `INVALID_INPUT`. Distinct from `memstead_vault_set_version`, which sets the vault *content* version, never the pin.",
+        name = "memstead_mem_set_schema",
+        description = "Update a mem's schema pin — the integrity-driven schema-migration trigger. Stable response `{mem, schema_pin, migration_target, outcome, findings}`; branch on `outcome`: `noop` (requested == current pin), `switched` (mem already integral against the target — pin moved atomically), `migration_started` (not integral — mem enters dual-pin: writes now validate against the target, `findings` lists the non-integral entities as `{id, axis, code, detail}`), `migration_pending` (same target re-issued while repairs remain — `findings` carries the remaining entities). Migration loop: read `findings`, read both schemas via `memstead_schema`, repair each entity via `memstead_update` (validated strictly against the target; `relations_unset` is available on non-conformant entities), then re-issue this call — once every entity is integral it completes the switch. Reads stay permissive throughout; the dual-pin state survives engine restarts. Unknown mem refuses `UNKNOWN_MEM`; a schema ref that resolves to no loaded schema refuses `SCHEMA_NOT_FOUND`; malformed refs refuse `INVALID_INPUT`. Distinct from `memstead_mem_set_version`, which sets the mem *content* version, never the pin.",
         annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = false, open_world_hint = false)
     )]
-    fn memstead_vault_set_schema(
+    fn memstead_mem_set_schema(
         &self,
-        Parameters(p): Parameters<crate::lifecycle::VaultSetSchemaParams>,
+        Parameters(p): Parameters<crate::lifecycle::MemSetSchemaParams>,
     ) -> CallToolResult {
         let target = match p.schema.parse::<memstead_schema::SchemaRef>() {
             Ok(r) => r,
@@ -3107,25 +3107,25 @@ impl McpServer {
         };
         let unified = self.unified_engine();
         let mut engine = unified.lock().unwrap();
-        match engine.set_vault_schema(&p.vault, &target) {
+        match engine.set_mem_schema(&p.mem, &target) {
             Ok(outcome) => {
                 let mut body =
                     serde_json::to_value(&outcome).expect("SetSchemaOutcome serialises");
-                attach_vault_changed(&mut body, engine.take_vault_changed_notices());
+                attach_mem_changed(&mut body, engine.take_mem_changed_notices());
                 json_response(&body)
             }
             Err(e) => {
-                let notices = engine.take_vault_changed_notices();
+                let notices = engine.take_mem_changed_notices();
                 let warnings = notices_as_reload_warnings(&notices);
                 attach_drift_to_error(engine_err_unified(e, &engine), &warnings, notices)
             }
         }
     }
 
-    /// Body of [`Self::memstead_vault_create`].
-    fn memstead_vault_create_unified(
+    /// Body of [`Self::memstead_mem_create`].
+    fn memstead_mem_create_unified(
         &self,
-        p: crate::lifecycle::VaultCreateParams,
+        p: crate::lifecycle::MemCreateParams,
         unified: Arc<Mutex<memstead_base::Engine>>,
     ) -> CallToolResult {
         let mut engine = unified.lock().unwrap();
@@ -3148,7 +3148,7 @@ impl McpServer {
 
         // Resolve the inlined-schema verbosity up front — *before* the
         // create side-effect — so a bad value refuses cleanly rather than
-        // after the vault has already landed on disk. Only meaningful when
+        // after the mem has already landed on disk. Only meaningful when
         // `include_schema` is set; ignored otherwise per the param
         // contract (so a moot typo doesn't sink an otherwise-valid create).
         let schema_verbosity = if p.include_schema {
@@ -3181,8 +3181,8 @@ impl McpServer {
 
         // Hierarchical paths are first-class. The separate `path`
         // wire-shape field retired; `name` carries the full
-        // identifier (`team/sub-vault`) verbatim.
-        let params = memstead_engine::vault_management::VaultCreateParams {
+        // identifier (`team/sub-mem`) verbatim.
+        let params = memstead_engine::mem_management::MemCreateParams {
             name: p.name,
             location: std::path::PathBuf::from(p.location),
             schema_ref,
@@ -3200,7 +3200,7 @@ impl McpServer {
             write_guidance: p.write_guidance,
         };
 
-        match memstead_engine::vault_management::create_vault(&mut engine, params) {
+        match memstead_engine::mem_management::create_mem(&mut engine, params) {
             Ok(response) => {
                 // Build wire response with the same shape pro emits.
                 let body = serde_json::json!({
@@ -3210,7 +3210,7 @@ impl McpServer {
                     "seed_commit_sha": response.seed_commit_sha,
                 });
                 // The engine ships the
-                // `VAULT_REATTACHED_AFTER_UNREGISTER` warning on the
+                // `MEM_REATTACHED_AFTER_UNREGISTER` warning on the
                 // create response. Surface every response-side warning
                 // via `append_warning_hint` so MCP callers see the
                 // structured envelope alongside the success payload.
@@ -3224,7 +3224,7 @@ impl McpServer {
                 // full schema body only when the caller opts in via
                 // `include_schema: true`. Otherwise every successful
                 // create would ship ~25 KB of schema body, even for the
-                // agent's second+ vault on the same schema where the
+                // agent's second+ mem on the same schema where the
                 // value is workspace-stable and already cached.
                 let schema_payload = if p.include_schema {
                     engine
@@ -3257,8 +3257,8 @@ impl McpServer {
                 } else {
                     res
                 };
-                match vault_schema_ref_unified(&engine, &response.name) {
-                    Some(s) => with_vault_schema_anchor(res, &s),
+                match mem_schema_ref_unified(&engine, &response.name) {
+                    Some(s) => with_mem_schema_anchor(res, &s),
                     None => res,
                 }
             }
@@ -3266,20 +3266,20 @@ impl McpServer {
         }
     }
 
-    /// Unified-engine path for [`Self::memstead_vault_delete`].
-    fn memstead_vault_delete_unified(
+    /// Unified-engine path for [`Self::memstead_mem_delete`].
+    fn memstead_mem_delete_unified(
         &self,
-        p: crate::lifecycle::VaultDeleteParams,
+        p: crate::lifecycle::MemDeleteParams,
         unified: Arc<Mutex<memstead_base::Engine>>,
     ) -> CallToolResult {
         let mut engine = unified.lock().unwrap();
 
-        // MCP `memstead_vault_delete`
+        // MCP `memstead_mem_delete`
         // always means destructive. The wire shape no longer exposes
         // `delete_files`; the wrapper hardcodes `true` so the engine
-        // runs both refusal gates (`VAULT_REFERENCED_BY_POLICY`,
-        // `VAULT_HAS_INCOMING_REFS`) and the policy scrub on success.
-        let params = memstead_engine::vault_management::VaultDeleteParams {
+        // runs both refusal gates (`MEM_REFERENCED_BY_POLICY`,
+        // `MEM_HAS_INCOMING_REFS`) and the policy scrub on success.
+        let params = memstead_engine::mem_management::MemDeleteParams {
             name: p.name,
             delete_files: true,
             note: p.note,
@@ -3287,10 +3287,10 @@ impl McpServer {
         };
 
         // Snapshot the schema-ref BEFORE the delete so the response
-        // can still anchor to the now-departed vault's schema.
-        let vault_for_anchor = vault_schema_ref_unified(&engine, &params.name);
+        // can still anchor to the now-departed mem's schema.
+        let mem_for_anchor = mem_schema_ref_unified(&engine, &params.name);
 
-        match memstead_engine::vault_management::delete_vault(&mut engine, params) {
+        match memstead_engine::mem_management::delete_mem(&mut engine, params) {
             Ok(response) => {
                 let body = serde_json::json!({
                     "name": response.name,
@@ -3303,8 +3303,8 @@ impl McpServer {
                     "allowlist_entries_removed": &response.allowlist_entries_removed,
                 });
                 let res = json_response(&body);
-                let res = match vault_for_anchor {
-                    Some(s) => with_vault_schema_anchor(res, &s),
+                let res = match mem_for_anchor {
+                    Some(s) => with_mem_schema_anchor(res, &s),
                     None => res,
                 };
                 // Surface every engine-emitted warning: disk-cleanup
@@ -3324,9 +3324,9 @@ impl McpServer {
     // ------------------------------------------------------------------
     // Six MCP tools wrapping the
     // engine-located `workspace_config_edit` writers. Closes the F7
-    // dynamic-vault-lifecycle gap — an MCP-driven agent can now
-    // grant a cross-vault link, perform the multi-vault work, then
-    // revoke the grant and delete the target vault all without
+    // dynamic-mem-lifecycle gap — an MCP-driven agent can now
+    // grant a cross-mem link, perform the multi-mem work, then
+    // revoke the grant and delete the target mem all without
     // dropping to the CLI. Each tool is idempotent: re-grant /
     // re-revoke / re-add / re-remove return success with a typed
     // warning rather than an error.
@@ -3334,19 +3334,19 @@ impl McpServer {
 
     #[tool(
         name = "memstead_workspace_grant_cross_link",
-        description = "Grant vault `from` permission to author cross-vault links into vault `to`. Mutates the `[cross_vault_links]` workspace policy. Dynamic-vault-lifecycle workflow: `memstead_vault_create → memstead_workspace_grant_cross_link → memstead_relate cross-vault → memstead_relate remove → memstead_workspace_revoke_cross_link → memstead_vault_delete`. Idempotent: re-grant of an existing grant returns success with `GRANT_ALREADY_PRESENT` warning, file unchanged. Conflict mode (wildcard against an existing specific list, or a named target against an existing wildcard) returns `CROSS_LINK_CONFLICT` — operators pick a single shape per `from`-vault. Refuses with `WORKSPACE_NOT_INITIALISED` when the workspace config is missing, `INVALID_TOML` when the file fails to parse, `IO_ERROR` on write failure. Response carries `{from, to, warnings}`.",
+        description = "Grant mem `from` permission to author cross-mem links into mem `to`. Mutates the `[cross_mem_links]` workspace policy. Dynamic-mem-lifecycle workflow: `memstead_mem_create → memstead_workspace_grant_cross_link → memstead_relate cross-mem → memstead_relate remove → memstead_workspace_revoke_cross_link → memstead_mem_delete`. Idempotent: re-grant of an existing grant returns success with `GRANT_ALREADY_PRESENT` warning, file unchanged. Conflict mode (wildcard against an existing specific list, or a named target against an existing wildcard) returns `CROSS_LINK_CONFLICT` — operators pick a single shape per `from`-mem. Refuses with `WORKSPACE_NOT_INITIALISED` when the workspace config is missing, `INVALID_TOML` when the file fails to parse, `IO_ERROR` on write failure. Response carries `{from, to, warnings}`.",
         annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = true, open_world_hint = false)
     )]
     fn memstead_workspace_grant_cross_link(
         &self,
         Parameters(p): Parameters<crate::lifecycle::WorkspaceGrantCrossLinkParams>,
     ) -> CallToolResult {
-        // Registered vaults (any mount) drive the grant's target
+        // Registered mems (any mount) drive the grant's target
         // validation; collect owned names so the dispatch closure
         // doesn't hold the engine lock.
-        let known_vaults: Vec<String> = {
+        let known_mems: Vec<String> = {
             let engine = self.unified_engine().lock().unwrap();
-            engine.vault_names().iter().map(|s| s.to_string()).collect()
+            engine.mem_names().iter().map(|s| s.to_string()).collect()
         };
         self.workspace_edit_dispatch("grant_cross_link", |root| {
             let target = memstead_engine::workspace_config_edit::CrossLinkTarget::parse(&p.to);
@@ -3354,7 +3354,7 @@ impl McpServer {
                 root,
                 &p.from,
                 &target,
-                &known_vaults,
+                &known_mems,
             )
                 .map(|warnings| {
                     serde_json::json!({
@@ -3368,7 +3368,7 @@ impl McpServer {
 
     #[tool(
         name = "memstead_workspace_revoke_cross_link",
-        description = "Revoke vault `from`'s permission to author cross-vault links into vault `to`. Mutates the `[cross_vault_links]` workspace policy; when the underlying list becomes empty, the `from` key is dropped entirely. Dynamic-vault-lifecycle workflow: revoke before `memstead_vault_delete` to clear the `VAULT_REFERENCED_BY_POLICY` refusal. Idempotent: re-revoke of an absent grant returns success with `GRANT_NOT_FOUND` warning, file unchanged. Refuses with `WORKSPACE_NOT_INITIALISED` when the workspace config is missing, `INVALID_TOML` when the file fails to parse, `IO_ERROR` on write failure. Response carries `{from, to, warnings}`.",
+        description = "Revoke mem `from`'s permission to author cross-mem links into mem `to`. Mutates the `[cross_mem_links]` workspace policy; when the underlying list becomes empty, the `from` key is dropped entirely. Dynamic-mem-lifecycle workflow: revoke before `memstead_mem_delete` to clear the `MEM_REFERENCED_BY_POLICY` refusal. Idempotent: re-revoke of an absent grant returns success with `GRANT_NOT_FOUND` warning, file unchanged. Refuses with `WORKSPACE_NOT_INITIALISED` when the workspace config is missing, `INVALID_TOML` when the file fails to parse, `IO_ERROR` on write failure. Response carries `{from, to, warnings}`.",
         annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = true, open_world_hint = false)
     )]
     fn memstead_workspace_revoke_cross_link(
@@ -3390,7 +3390,7 @@ impl McpServer {
 
     #[tool(
         name = "memstead_workspace_allow_create",
-        description = "Append a `[[vault_management.create]]` rule admitting vault names matching `pattern` with the given schema pins. The allowlist gates `memstead_vault_create`; without a matching rule, vault creation refuses with `VAULT_PATH_NOT_ALLOWED`. Pass `before` to lift the new rule above an existing pattern; without `before` the rule appends at the end (lowest priority). Pass `default_cross_links` to confer a cross-vault link grant on every vault matching `pattern` — saves a follow-up `memstead_workspace_grant_cross_link`. The grant is rule-derived and evaluated lazily at relate time (it is NOT written into the `[cross_vault_links]` table); `memstead_overview` surfaces it under the matching pattern in `## Lifecycle Namespaces` and as the `cross_vault_links_from_rules` workspace-policy posture. Idempotent: re-add with the same `pattern` AND the same `schemas` set returns success with `RULE_ALREADY_PRESENT` warning, file unchanged (schema-set comparison is order- and duplicate-insensitive). Re-adding an existing `pattern` with a *different* `schemas` set is refused with `RULE_EXISTS_SCHEMAS_DIFFER` (`details.stored_schemas`, `details.requested_schemas`, `details.recovery`) — this verb only adds rules, it does not modify a rule's schema pins; to change them, `memstead_workspace_revoke_create` the pattern then re-add with the new schemas. `before` resolution failure surfaces as `BEFORE_PATTERN_NOT_FOUND`. Refuses with `WORKSPACE_NOT_INITIALISED` when the workspace config is missing.",
+        description = "Append a `[[mem_management.create]]` rule admitting mem names matching `pattern` with the given schema pins. The allowlist gates `memstead_mem_create`; without a matching rule, mem creation refuses with `MEM_PATH_NOT_ALLOWED`. Pass `before` to lift the new rule above an existing pattern; without `before` the rule appends at the end (lowest priority). Pass `default_cross_links` to confer a cross-mem link grant on every mem matching `pattern` — saves a follow-up `memstead_workspace_grant_cross_link`. The grant is rule-derived and evaluated lazily at relate time (it is NOT written into the `[cross_mem_links]` table); `memstead_overview` surfaces it under the matching pattern in `## Lifecycle Namespaces` and as the `cross_mem_links_from_rules` workspace-policy posture. Idempotent: re-add with the same `pattern` AND the same `schemas` set returns success with `RULE_ALREADY_PRESENT` warning, file unchanged (schema-set comparison is order- and duplicate-insensitive). Re-adding an existing `pattern` with a *different* `schemas` set is refused with `RULE_EXISTS_SCHEMAS_DIFFER` (`details.stored_schemas`, `details.requested_schemas`, `details.recovery`) — this verb only adds rules, it does not modify a rule's schema pins; to change them, `memstead_workspace_revoke_create` the pattern then re-add with the new schemas. `before` resolution failure surfaces as `BEFORE_PATTERN_NOT_FOUND`. Refuses with `WORKSPACE_NOT_INITIALISED` when the workspace config is missing.",
         annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = true, open_world_hint = false)
     )]
     fn memstead_workspace_allow_create(
@@ -3436,7 +3436,7 @@ impl McpServer {
 
     #[tool(
         name = "memstead_workspace_revoke_create",
-        description = "Remove a `[[vault_management.create]]` rule by `pattern`. Counterpart to `memstead_workspace_allow_create`. Idempotent: revoking a `pattern` with no matching rule returns success with `RULE_NOT_FOUND_NOOP` warning, file unchanged. Refuses with `WORKSPACE_NOT_INITIALISED` when the workspace config is missing, `INVALID_TOML` on parse failure, `IO_ERROR` on write failure. Response carries `{pattern, warnings}`.",
+        description = "Remove a `[[mem_management.create]]` rule by `pattern`. Counterpart to `memstead_workspace_allow_create`. Idempotent: revoking a `pattern` with no matching rule returns success with `RULE_NOT_FOUND_NOOP` warning, file unchanged. Refuses with `WORKSPACE_NOT_INITIALISED` when the workspace config is missing, `INVALID_TOML` on parse failure, `IO_ERROR` on write failure. Response carries `{pattern, warnings}`.",
         annotations(read_only_hint = false, destructive_hint = true, idempotent_hint = true, open_world_hint = false)
     )]
     fn memstead_workspace_revoke_create(
@@ -3457,7 +3457,7 @@ impl McpServer {
 
     #[tool(
         name = "memstead_workspace_allow_delete",
-        description = "Append a `[[vault_management.delete]]` rule admitting deletes of vault names matching `pattern`. Symmetric counterpart to `memstead_workspace_allow_create` — agent-creatable equals agent-deletable. Without a matching rule, `memstead_vault_delete` refuses with `VAULT_PATH_NOT_ALLOWED`. Idempotent: re-add with the same `pattern` returns success with `RULE_ALREADY_PRESENT` warning, file unchanged. Refuses with `WORKSPACE_NOT_INITIALISED` when the workspace config is missing.",
+        description = "Append a `[[mem_management.delete]]` rule admitting deletes of mem names matching `pattern`. Symmetric counterpart to `memstead_workspace_allow_create` — agent-creatable equals agent-deletable. Without a matching rule, `memstead_mem_delete` refuses with `MEM_PATH_NOT_ALLOWED`. Idempotent: re-add with the same `pattern` returns success with `RULE_ALREADY_PRESENT` warning, file unchanged. Refuses with `WORKSPACE_NOT_INITIALISED` when the workspace config is missing.",
         annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = true, open_world_hint = false)
     )]
     fn memstead_workspace_allow_delete(
@@ -3478,7 +3478,7 @@ impl McpServer {
 
     #[tool(
         name = "memstead_workspace_revoke_delete",
-        description = "Remove a `[[vault_management.delete]]` rule by `pattern`. Counterpart to `memstead_workspace_allow_delete`. Idempotent: revoking a `pattern` with no matching rule returns success with `RULE_NOT_FOUND_NOOP` warning, file unchanged. Refuses with `WORKSPACE_NOT_INITIALISED` when the workspace config is missing, `INVALID_TOML` on parse failure, `IO_ERROR` on write failure. Response carries `{pattern, warnings}`.",
+        description = "Remove a `[[mem_management.delete]]` rule by `pattern`. Counterpart to `memstead_workspace_allow_delete`. Idempotent: revoking a `pattern` with no matching rule returns success with `RULE_NOT_FOUND_NOOP` warning, file unchanged. Refuses with `WORKSPACE_NOT_INITIALISED` when the workspace config is missing, `INVALID_TOML` on parse failure, `IO_ERROR` on write failure. Response carries `{pattern, warnings}`.",
         annotations(read_only_hint = false, destructive_hint = true, idempotent_hint = true, open_world_hint = false)
     )]
     fn memstead_workspace_revoke_delete(
@@ -3551,7 +3551,7 @@ impl McpServer {
 }
 
 /// Render a `Vec<WorkspaceEditWarning>` as a JSON array of
-/// `{code, message}` entries. Mirrors the shape `memstead_vault_delete`
+/// `{code, message}` entries. Mirrors the shape `memstead_mem_delete`
 /// uses for its warnings so agents have one consistent decoder.
 fn warnings_payload(
     warnings: &[memstead_engine::workspace_config_edit::WorkspaceEditWarning],
@@ -3608,7 +3608,7 @@ fn workspace_edit_err_to_envelope(
 #[tool_handler(
     name = "memstead",
     version = "0.1.0",
-    instructions = "Memstead: schema-agnostic graph engine for typed, interconnected markdown entities. Each vault is a typed model of a chosen subject — its modal flavour follows from its schema (knowledge / planning / inquiry / spec / hybrid). Each vault pins one schema; types and relationships are vocabulary-controlled. Cold-start: call memstead_overview first for the schema catalogue (`{ref, description}` per schema), vault inventory, and communities (token-budgeted; drill via include/hints). Schema-discovery contract: each writable vault pins one schema (visible on overview's `## Vaults` entries). Before any memstead_create / memstead_update / memstead_relate against vault X, call memstead_schema(name=<X.schema_ref>) once per session to learn section names, field shapes, relationship vocabulary, and write_rules. Cache for the session — schema is workspace-stable. Schema-conformance errors carry recovery payloads as a fallback (UNKNOWN_SECTION, UNKNOWN_METADATA_FIELD, INVALID_ENUM_VALUE, REQUIRED_FIELD_UNSET, INVALID_REL_TYPE, INVALID_REL_SHAPE, MISSING_REQUIRED_SECTION) — fix from `details` rather than re-fetching the schema after every error. Edge model is alias: body wiki-links `[[X]]` are foreign-key references to entries in the auto-managed `## Relationships` section. Schemas with `alias_target_rel_type` auto-emit relations of that rel-type (e.g. REFERENCES) from each body wiki-link via the alias-synthesis pass; explicit author of the named rel-type refuses with RELATION_MANUAL_AUTHORING_FORBIDDEN. Schemas without the pointer refuse unbacked body wiki-links with WIKILINK_WITHOUT_RELATION. Removing a relation while body wiki-links to its target remain refuses only when no other relation to that target survives (RELATION_HAS_BODY_LINKS — set-membership semantics). Common workflows: search entities by content/structure (memstead_search — omit query for pure metadata filter); read one (memstead_entity — `_hash` is the optimistic-locking token for mutations); read one schema (memstead_schema); create/update/relate/rename/delete entities (memstead_create, memstead_update, memstead_relate, memstead_rename, memstead_delete); manage workspace vaults including planning phases (memstead_vault_create, memstead_vault_delete); inspect drift and per-vault config (memstead_health); poll commit deltas for incremental sync (memstead_changes_since). Errors and warnings ship as { code, message, details } on structured_content; branch on the stable UPPER_SNAKE_CASE code. The text channel mirrors the same code inline as `ERROR [<CODE>]: <message>` so consumers that only read `result.content[0].text` still recover the code with a one-line regex. Never edit `.md` spec files directly — always go through Memstead tools. Error codes: ENTITY_NOT_FOUND, ENTITY_ALREADY_EXISTS, UNKNOWN_VAULT, HASH_MISMATCH, RELATIONSHIP_CYCLE, UNKNOWN_SECTION, UNKNOWN_METADATA_FIELD, UNKNOWN_ENTITY_TYPE, INVALID_ENUM_VALUE, INVALID_REL_TYPE, INVALID_REL_SHAPE, READ_ONLY_FIELD, REQUIRED_FIELD_UNSET, SET_AND_UNSET_CONFLICT, CONFLICTING_SECTION_MODES, SECTION_NOT_UPDATABLE, PATCH_OLD_NOT_FOUND, PATCH_SECTION_EMPTY, CROSS_VAULT_LINK_NOT_ALLOWED, CROSS_VAULT_TARGET_NOT_FOUND, CROSS_VAULT_EDGE_NOT_DECLARED, VAULT_NOT_WRITABLE, CROSS_VAULT_LINK_TARGET_NOT_FOUND, VAULT_NAME_COLLISION, VAULT_PATH_NOT_ALLOWED, INVALID_VAULT_NAME, VAULT_SCHEMA_NOT_ALLOWED, VAULT_BRANCH_MISSING, VAULT_REFERENCED_BY_POLICY, HAS_INCOMING_REFS, STUB_NOT_UPDATABLE, STUB_NOT_RENAMABLE, STUB_CANNOT_RELATE, INVALID_ENTITY_ID, WIKILINK_WITHOUT_RELATION, RELATION_HAS_BODY_LINKS, MISSING_REQUIRED_DESCRIPTION, DESCRIPTION_NOT_PERMITTED, RELATION_MANUAL_AUTHORING_FORBIDDEN, SCHEMA_NOT_FOUND, SCHEMA_RESOLVER_INIT_FAILED, PARSE_ERROR, VAULT_ERROR, INVALID_INPUT, VCS_ERROR, INTERNAL_IO_ERROR, CONFIG_ERROR, EXPORT_ERROR, WORKSPACE_SCHEMAS_ERROR, SCHEMA_CACHE_COLLISION, TOOL_DISABLED, INVALID_CURSOR. Health warning: OUTER_REPO_NOT_IGNORING_VAULT_REPO. Relate warnings: AUTO_STUB_CREATED. Delete warning: RESIDUAL_STUB_FOR_READONLY_REFERRERS. Boot warnings: PARSED_RELATION_INVALID, AMBIGUOUS_DESCRIPTION_DELIMITER, MISSING_REQUIRED_DESCRIPTION, DESCRIPTION_NOT_PERMITTED. Mutation warning: MISSING_REQUIRED_OUTGOING."
+    instructions = "Memstead: schema-agnostic graph engine for typed, interconnected markdown entities. Each mem is a typed model of a chosen subject — its modal flavour follows from its schema (knowledge / planning / inquiry / spec / hybrid). Each mem pins one schema; types and relationships are vocabulary-controlled. Granularity: a mem is the packaged unit — a whole typed model, typically 1,000-5,000 entities; an entity is never called a mem (a mem is not one \"memory\"/fact). Cold-start: call memstead_overview first for the schema catalogue (`{ref, description}` per schema), mem inventory, and communities (token-budgeted; drill via include/hints). Schema-discovery contract: each writable mem pins one schema (visible on overview's `## Mems` entries). Before any memstead_create / memstead_update / memstead_relate against mem X, call memstead_schema(name=<X.schema_ref>) once per session to learn section names, field shapes, relationship vocabulary, and write_rules. Cache for the session — schema is workspace-stable. Schema-conformance errors carry recovery payloads as a fallback (UNKNOWN_SECTION, UNKNOWN_METADATA_FIELD, INVALID_ENUM_VALUE, REQUIRED_FIELD_UNSET, INVALID_REL_TYPE, INVALID_REL_SHAPE, MISSING_REQUIRED_SECTION) — fix from `details` rather than re-fetching the schema after every error. Edge model is alias: body wiki-links `[[X]]` are foreign-key references to entries in the auto-managed `## Relationships` section. Schemas with `alias_target_rel_type` auto-emit relations of that rel-type (e.g. REFERENCES) from each body wiki-link via the alias-synthesis pass; explicit author of the named rel-type refuses with RELATION_MANUAL_AUTHORING_FORBIDDEN. Schemas without the pointer refuse unbacked body wiki-links with WIKILINK_WITHOUT_RELATION. Removing a relation while body wiki-links to its target remain refuses only when no other relation to that target survives (RELATION_HAS_BODY_LINKS — set-membership semantics). Common workflows: search entities by content/structure (memstead_search — omit query for pure metadata filter); read one (memstead_entity — `_hash` is the optimistic-locking token for mutations); read one schema (memstead_schema); create/update/relate/rename/delete entities (memstead_create, memstead_update, memstead_relate, memstead_rename, memstead_delete); manage workspace mems including planning phases (memstead_mem_create, memstead_mem_delete); inspect drift and per-mem config (memstead_health); poll commit deltas for incremental sync (memstead_changes_since). Errors and warnings ship as { code, message, details } on structured_content; branch on the stable UPPER_SNAKE_CASE code. The text channel mirrors the same code inline as `ERROR [<CODE>]: <message>` so consumers that only read `result.content[0].text` still recover the code with a one-line regex. Never edit `.md` spec files directly — always go through Memstead tools. Error codes: ENTITY_NOT_FOUND, ENTITY_ALREADY_EXISTS, UNKNOWN_MEM, HASH_MISMATCH, RELATIONSHIP_CYCLE, UNKNOWN_SECTION, UNKNOWN_METADATA_FIELD, UNKNOWN_ENTITY_TYPE, INVALID_ENUM_VALUE, INVALID_REL_TYPE, INVALID_REL_SHAPE, READ_ONLY_FIELD, REQUIRED_FIELD_UNSET, SET_AND_UNSET_CONFLICT, CONFLICTING_SECTION_MODES, SECTION_NOT_UPDATABLE, PATCH_OLD_NOT_FOUND, PATCH_SECTION_EMPTY, CROSS_MEM_LINK_NOT_ALLOWED, CROSS_MEM_TARGET_NOT_FOUND, CROSS_MEM_EDGE_NOT_DECLARED, MEM_NOT_WRITABLE, CROSS_MEM_LINK_TARGET_NOT_FOUND, MEM_NAME_COLLISION, MEM_PATH_NOT_ALLOWED, INVALID_MEM_NAME, MEM_SCHEMA_NOT_ALLOWED, MEM_BRANCH_MISSING, MEM_REFERENCED_BY_POLICY, HAS_INCOMING_REFS, STUB_NOT_UPDATABLE, STUB_NOT_RENAMABLE, STUB_CANNOT_RELATE, INVALID_ENTITY_ID, WIKILINK_WITHOUT_RELATION, RELATION_HAS_BODY_LINKS, MISSING_REQUIRED_DESCRIPTION, DESCRIPTION_NOT_PERMITTED, RELATION_MANUAL_AUTHORING_FORBIDDEN, SCHEMA_NOT_FOUND, SCHEMA_RESOLVER_INIT_FAILED, PARSE_ERROR, MEM_ERROR, INVALID_INPUT, VCS_ERROR, INTERNAL_IO_ERROR, CONFIG_ERROR, EXPORT_ERROR, WORKSPACE_SCHEMAS_ERROR, SCHEMA_CACHE_COLLISION, TOOL_DISABLED, INVALID_CURSOR. Health warning: OUTER_REPO_NOT_IGNORING_MEM_REPO. Relate warnings: AUTO_STUB_CREATED. Delete warning: RESIDUAL_STUB_FOR_READONLY_REFERRERS. Boot warnings: PARSED_RELATION_INVALID, AMBIGUOUS_DESCRIPTION_DELIMITER, MISSING_REQUIRED_DESCRIPTION, DESCRIPTION_NOT_PERMITTED. Mutation warning: MISSING_REQUIRED_OUTGOING."
 )]
 impl ServerHandler for McpServer {
     /// Capture the client's `clientInfo` from the initialize handshake so
@@ -3700,30 +3700,30 @@ mod tests {
     use tempfile::TempDir;
 
     /// Build the workspace directory layout used by every test in this
-    /// module: a `specs` vault with two seed entities and an
-    /// auto-seeded `vault-repo/.git/` so the git-branch backend factory
+    /// module: a `specs` mem with two seed entities and an
+    /// auto-seeded `mem-repo/.git/` so the git-branch backend factory
     /// has a real gitdir to point at.
     fn setup_test_workspace() -> TempDir {
         let tmp = TempDir::new().unwrap();
         // Dir basename must equal the declared `name` per the
         // basename-invariant. Router key matches too for consistency.
-        let vault_dir = tmp.path().join("specs");
-        fs::create_dir_all(vault_dir.join(".memstead")).unwrap();
+        let mem_dir = tmp.path().join("specs");
+        fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
 
         fs::write(
-            vault_dir.join(".memstead/config.json"),
+            mem_dir.join(".memstead/config.json"),
             r#"{"version":"0.1.0","schema":"default@1.0.0","mediums":{},"projections":{}}"#,
         )
         .unwrap();
 
         fs::write(
-            vault_dir.join("entity-a.md"),
+            mem_dir.join("entity-a.md"),
             "---\ntype: spec\ncreated_date: 2026-01-15\nlast_modified: 2026-04-12\nlevel: M0\ntags: backend\n---\n# Entity A\n\n## Identity\n\nFirst test entity.\n\n## Purpose\n\nTesting the MCP server.\n\n## Relationships\n\n- **USES**: [[entity-b]]\n",
         )
         .unwrap();
 
         fs::write(
-            vault_dir.join("entity-b.md"),
+            mem_dir.join("entity-b.md"),
             "---\ntype: spec\ncreated_date: 2026-02-01\nlast_modified: 2026-04-12\nlevel: M1\ntags: frontend\n---\n# Entity B\n\n## Identity\n\nSecond test entity.\n\n## Purpose\n\nDependency of Entity A.\n",
         )
         .unwrap();
@@ -3744,22 +3744,22 @@ mod tests {
         (server, tmp)
     }
 
-    /// Build a unified `memstead_base::Engine` from any disk-shaped vault
+    /// Build a unified `memstead_base::Engine` from any disk-shaped mem
     /// directories under `workspace_root` — every subdir carrying
     /// `.memstead/config.json` becomes a folder-backend `Mount`.
     fn setup_unified_test_engine(workspace_root: &std::path::Path) -> memstead_base::Engine {
         use memstead_base::workspace::{
             Mount, MountCapability, MountLifecycle, MountStorage,
         };
-        let mut mounts: Vec<(Mount, Box<dyn memstead_base::backend::VaultBackend>)> = Vec::new();
+        let mut mounts: Vec<(Mount, Box<dyn memstead_base::backend::MemBackend>)> = Vec::new();
         for entry in std::fs::read_dir(workspace_root).unwrap().flatten() {
             let p = entry.path();
             if !p.is_dir() {
                 continue;
             }
-            // Skip the auto-seeded vault-repo gitdir — folder mounts
+            // Skip the auto-seeded mem-repo gitdir — folder mounts
             // only.
-            if p.file_name().and_then(|s| s.to_str()) == Some("vault-repo") {
+            if p.file_name().and_then(|s| s.to_str()) == Some("mem-repo") {
                 continue;
             }
             let cfg = p.join(".memstead").join("config.json");
@@ -3777,7 +3777,7 @@ mod tests {
                 .to_string();
             let schema = Some(schema_str.parse().unwrap());
             let mount = Mount {
-                vault: name,
+                mem: name,
                 schema,
                 storage: MountStorage::Folder { path: p.clone() },
                 capability: MountCapability::Write,
@@ -3790,13 +3790,13 @@ mod tests {
         }
         let mut engine = memstead_base::Engine::from_mounts(mounts).unwrap();
         // Install the pro backend factory so
-        // `vault_management::create_vault` can materialise
+        // `mem_management::create_mem` can materialise
         // git-branch backends when its workspace-shape heuristic
-        // fires. Test fixtures auto-seed a vault-repo
+        // fires. Test fixtures auto-seed a mem-repo
         // (`auto_seeded_settings`) so the heuristic always picks
-        // `MountStorage::GitBranch` for runtime-created vaults — the
+        // `MountStorage::GitBranch` for runtime-created mems — the
         // basis default factory would reject with
-        // `GitBranchRequiresVaultRepoFeature`.
+        // `GitBranchRequiresMemRepoFeature`.
         engine.set_backend_factory(memstead_git_branch::storage::instantiate_pro_backend);
         engine
     }
@@ -3805,9 +3805,9 @@ mod tests {
     /// git-branch backend rather than the folder backend.
     ///
     /// Test fixtures that call `auto_seeded_settings(tmp.path())`
-    /// produce a `<tmp>/vault-repo/.git/` with a branch
-    /// `refs/heads/<vault>` per disk vault. Mutations through this
-    /// engine variant land as real commits on the vault-repo
+    /// produce a `<tmp>/mem-repo/.git/` with a branch
+    /// `refs/heads/<mem>` per disk mem. Mutations through this
+    /// engine variant land as real commits on the mem-repo
     /// gitdir, producing 40-char hex `commit_sha` /
     /// `seed_commit_sha` values that lifecycle / commit-body tests
     /// assert on.
@@ -3818,15 +3818,15 @@ mod tests {
         // Canonicalise the gitdir so `engine.gitdir_for(name)` matches
         // pro's canonical paths (TempDir on macOS returns a symlink
         // to /private/var/...; pro canonicalizes at init).
-        let gitdir = workspace_root.join("vault-repo").join(".git");
+        let gitdir = workspace_root.join("mem-repo").join(".git");
         let gitdir = gitdir.canonicalize().unwrap_or(gitdir);
-        let mut mounts: Vec<(Mount, Box<dyn memstead_base::backend::VaultBackend>)> = Vec::new();
+        let mut mounts: Vec<(Mount, Box<dyn memstead_base::backend::MemBackend>)> = Vec::new();
         for entry in std::fs::read_dir(workspace_root).unwrap().flatten() {
             let p = entry.path();
             if !p.is_dir() {
                 continue;
             }
-            if p.file_name().and_then(|s| s.to_str()) == Some("vault-repo") {
+            if p.file_name().and_then(|s| s.to_str()) == Some("mem-repo") {
                 continue;
             }
             let cfg = p.join(".memstead").join("config.json");
@@ -3845,7 +3845,7 @@ mod tests {
             let schema = Some(schema_str.parse().unwrap());
             let mount = Mount {
                 migration_target: None,
-                vault: name.clone(),
+                mem: name.clone(),
                 schema,
                 storage: MountStorage::GitBranch {
                     gitdir: gitdir.clone(),
@@ -3859,7 +3859,7 @@ mod tests {
             mounts.push((mount, backend));
         }
         let mut engine = memstead_base::Engine::from_mounts(mounts).unwrap();
-        // Install the pro backend factory so create_vault's
+        // Install the pro backend factory so create_mem's
         // git-branch path can materialise a backend when the
         // workspace-shape heuristic fires.
         engine.set_backend_factory(memstead_git_branch::storage::instantiate_pro_backend);
@@ -3951,9 +3951,9 @@ mod tests {
                 .collect()
         }
 
-        /// Vault names from the `## Vaults` block — each `### <name>` heading.
-        fn vault_names(&self) -> Vec<String> {
-            self.section_h3("## Vaults", "## ")
+        /// Mem names from the `## Mems` block — each `### <name>` heading.
+        fn mem_names(&self) -> Vec<String> {
+            self.section_h3("## Mems", "## ")
                 .iter()
                 .map(|l| l.trim_start_matches("### ").trim().to_string())
                 .collect()
@@ -4045,7 +4045,7 @@ mod tests {
                 let _ = server.memstead_overview(Parameters(OverviewParams {
                     rebuild: Some(true),
                     chunk: None,
-                    vault: None,
+                    mem: None,
                     include: None,
                     token_budget: None,
                 }));
@@ -4109,8 +4109,8 @@ mod tests {
     fn other_read_tools_emit_no_structured_content_on_success() {
         let (server, _tmp) = setup_dual_test_engine();
 
-        // memstead_overview — default, with include, with vault filter.
-        for (include, vault) in [
+        // memstead_overview — default, with include, with mem filter.
+        for (include, mem) in [
             (None, None),
             (Some(vec!["community_members".to_string()]), None),
             (None, Some("specs".to_string())),
@@ -4118,7 +4118,7 @@ mod tests {
             let r = server.memstead_overview(Parameters(OverviewParams {
                 rebuild: Some(true),
                 chunk: None,
-                vault,
+                mem,
                 include,
                 token_budget: None,
             }));
@@ -4133,7 +4133,7 @@ mod tests {
     fn search_params_defaults() -> SearchParams {
         SearchParams {
             query: None,
-            vault: None,
+            mem: None,
             entity_type: None,
             expand_via: None,
             expand_depth: None,
@@ -4211,7 +4211,7 @@ mod tests {
         let result = server.memstead_health(Parameters(HealthParams {
             include: None,
             limit: None,
-            vault: None,
+            mem: None,
             include_config: false,
             token_budget: Some(5),
             chunk: None,
@@ -4234,29 +4234,29 @@ mod tests {
     }
 
     /// Durability honesty (Plan 02, Part A) refusal complement: a
-    /// folder-backed (durable on disk) vault reports `durable: true` /
-    /// `storage: folder` in the `include_config` vault detail — the marker
-    /// reflects the real backend, so a durable vault never reads ephemeral.
+    /// folder-backed (durable on disk) mem reports `durable: true` /
+    /// `storage: folder` in the `include_config` mem detail — the marker
+    /// reflects the real backend, so a durable mem never reads ephemeral.
     #[test]
-    fn folder_vault_health_detail_reports_durable() {
+    fn folder_mem_health_detail_reports_durable() {
         let (server, _tmp) = setup_test_engine();
         let result = server.memstead_health(Parameters(HealthParams {
             include: None,
             limit: None,
-            vault: None,
+            mem: None,
             include_config: true,
             token_budget: None,
             chunk: None,
             target_schema: None,
         }));
         let sc = result.structured_content.clone().unwrap();
-        let vaults = sc["vaults"]
+        let mems = sc["mems"]
             .as_array()
-            .expect("include_config carries the per-vault detail array");
-        assert!(!vaults.is_empty(), "at least one writable folder vault");
-        for v in vaults {
-            assert_eq!(v["durable"], true, "folder vault must report durable: {v}");
-            assert_eq!(v["storage"], "folder", "folder vault storage kind: {v}");
+            .expect("include_config carries the per-mem detail array");
+        assert!(!mems.is_empty(), "at least one writable folder mem");
+        for v in mems {
+            assert_eq!(v["durable"], true, "folder mem must report durable: {v}");
+            assert_eq!(v["storage"], "folder", "folder mem storage kind: {v}");
         }
     }
 
@@ -4268,7 +4268,7 @@ mod tests {
         let result = server.memstead_health(Parameters(HealthParams {
             include: None,
             limit: None,
-            vault: None,
+            mem: None,
             include_config: false,
             token_budget: None,
             chunk: None,
@@ -4289,7 +4289,7 @@ mod tests {
         let result = server.memstead_health(Parameters(HealthParams {
             include: None,
             limit: None,
-            vault: None,
+            mem: None,
             include_config: false,
             token_budget: None,
             chunk: None,
@@ -4304,9 +4304,9 @@ mod tests {
         assert!(json["total_edges"].as_u64().unwrap() >= 1);
         assert!(json["edge_types"].is_array());
         assert!(json["type_distribution"].is_array());
-        assert!(json["writable_vaults"].is_array());
-        assert!(json["read_vaults"].is_array());
-        assert!(json["vault_schemas"].is_array());
+        assert!(json["writable_mems"].is_array());
+        assert!(json["read_mems"].is_array());
+        assert!(json["mem_schemas"].is_array());
     }
 
     #[test]
@@ -4316,7 +4316,7 @@ mod tests {
         let result = server.memstead_health(Parameters(HealthParams {
             include: None,
             limit: None,
-            vault: None,
+            mem: None,
             include_config: false,
             token_budget: None,
             chunk: None,
@@ -4346,7 +4346,7 @@ mod tests {
             let result = server.memstead_health(Parameters(HealthParams {
                 include: None,
                 limit: None,
-                vault: None,
+                mem: None,
                 include_config,
                 target_schema: None,
                 token_budget: None,
@@ -4365,15 +4365,15 @@ mod tests {
         }
     }
 
-    /// F6: under `memstead_health(vault=B)`,
-    /// `most_connected` degrees count only source-in-vault edges, matching
-    /// the same response's `total_edges`/`edge_types`. A cross-vault edge
+    /// F6: under `memstead_health(mem=B)`,
+    /// `most_connected` degrees count only source-in-mem edges, matching
+    /// the same response's `total_edges`/`edge_types`. A cross-mem edge
     /// `A→B` is excluded from B's scoped aggregate, so it must also be
     /// excluded from B's node degree — pre-fix the per-node degree reused
     /// the global adjacency and reported a degree that included an edge the
     /// same scoped response did not count.
     #[test]
-    fn health_scoped_most_connected_degrees_exclude_cross_vault_incoming() {
+    fn health_scoped_most_connected_degrees_exclude_cross_mem_incoming() {
         use memstead_base::workspace::{Mount, MountCapability, MountLifecycle, MountStorage};
 
         let tmp = TempDir::new().unwrap();
@@ -4381,8 +4381,8 @@ mod tests {
         let b_dir = tmp.path().join("memos");
         std::fs::create_dir_all(&a_dir).unwrap();
         std::fs::create_dir_all(&b_dir).unwrap();
-        let mk_mount = |vault: &str, path: std::path::PathBuf| Mount {
-            vault: vault.to_string(),
+        let mk_mount = |mem: &str, path: std::path::PathBuf| Mount {
+            mem: mem.to_string(),
             schema: Some("default@1.0.0".parse().unwrap()),
             storage: MountStorage::Folder { path },
             capability: MountCapability::Write,
@@ -4390,37 +4390,37 @@ mod tests {
             cross_linkable: true,
             migration_target: None,
         };
-        let a_writer = memstead_base::storage::FilesystemVaultWriter::new(a_dir.clone());
-        let b_writer = memstead_base::storage::FilesystemVaultWriter::new(b_dir.clone());
+        let a_writer = memstead_base::storage::FilesystemMemWriter::new(a_dir.clone());
+        let b_writer = memstead_base::storage::FilesystemMemWriter::new(b_dir.clone());
         let mut engine = memstead_base::Engine::from_mounts(vec![
             (
                 mk_mount("specs", a_dir),
-                Box::new(a_writer) as Box<dyn memstead_base::backend::VaultBackend>,
+                Box::new(a_writer) as Box<dyn memstead_base::backend::MemBackend>,
             ),
             (
                 mk_mount("memos", b_dir),
-                Box::new(b_writer) as Box<dyn memstead_base::backend::VaultBackend>,
+                Box::new(b_writer) as Box<dyn memstead_base::backend::MemBackend>,
             ),
         ])
         .unwrap();
-        // Grant specs → memos so the cross-vault relate lands.
+        // Grant specs → memos so the cross-mem relate lands.
         let mut cross_links = std::collections::BTreeMap::new();
         cross_links.insert(
             "specs".to_string(),
             memstead_schema::workspace_config::CrossLinkValue::Wildcard,
         );
         engine.set_settings(memstead_base::WorkspaceSettings {
-            cross_vault_links: cross_links,
+            cross_mem_links: cross_links,
             ..Default::default()
         });
         let server = McpServer::new(engine, crate::config::DEFAULT_TOKEN_BUDGET);
 
-        let mk = |vault: &str, title: &str| {
+        let mk = |mem: &str, title: &str| {
             let mut sections = indexmap::IndexMap::new();
             sections.insert("identity".to_string(), "the identity".to_string());
             sections.insert("purpose".to_string(), "the purpose".to_string());
             let r = server.memstead_create(Parameters(CreateParams {
-                vault: Some(vault.to_string()),
+                mem: Some(mem.to_string()),
                 title: title.to_string(),
                 entity_type: "spec".to_string(),
                 sections: Some(sections),
@@ -4446,8 +4446,8 @@ mod tests {
             }));
             assert!(!r.is_error.unwrap_or(false), "relate {from}->{to}: {}", extract_text(&r));
         };
-        // Intra-vault incoming (source in memos → counted) and a
-        // cross-vault incoming (source in specs → excluded under vault=memos).
+        // Intra-mem incoming (source in memos → counted) and a
+        // cross-mem incoming (source in specs → excluded under mem=memos).
         relate("memos--hub", "memos--target");
         relate("specs--source", "memos--target");
 
@@ -4455,7 +4455,7 @@ mod tests {
         let global = server.memstead_health(Parameters(HealthParams {
             include: Some(vec!["most_connected".to_string()]),
             limit: None,
-            vault: None,
+            mem: None,
             include_config: false,
             token_budget: None,
             chunk: None,
@@ -4471,12 +4471,12 @@ mod tests {
             .expect("target in global most_connected");
         assert_eq!(g_target["incoming"].as_u64(), Some(2), "global degree counts both edges");
 
-        // Scoped to memos: the cross-vault incoming from specs is excluded
+        // Scoped to memos: the cross-mem incoming from specs is excluded
         // from both the aggregate and the node degree.
         let scoped = server.memstead_health(Parameters(HealthParams {
             include: Some(vec!["most_connected".to_string()]),
             limit: None,
-            vault: Some("memos".to_string()),
+            mem: Some("memos".to_string()),
             include_config: false,
             token_budget: None,
             chunk: None,
@@ -4493,12 +4493,12 @@ mod tests {
         assert_eq!(
             s_target["incoming"].as_u64(),
             Some(1),
-            "scoped degree must exclude the cross-vault incoming edge: {s_target}",
+            "scoped degree must exclude the cross-mem incoming edge: {s_target}",
         );
         assert_eq!(s_target["outgoing"].as_u64(), Some(0));
         assert_eq!(s_target["total"].as_u64(), Some(1));
         // The scoped aggregate counts only the one source-in-memos edge
-        // (hub→target); the cross-vault USES is source-in-specs, excluded —
+        // (hub→target); the cross-mem USES is source-in-specs, excluded —
         // so the node's degree and the aggregate now describe one subgraph.
         assert_eq!(
             sjson["total_edges"].as_u64(),
@@ -4509,13 +4509,13 @@ mod tests {
     }
 
     /// Scoped `memstead_health` reports a community count that reflects the
-    /// vault: an empty vault → 0 communities (consistent with its 0
+    /// mem: an empty mem → 0 communities (consistent with its 0
     /// entities, no "0 entities / N communities" contradiction), and a
-    /// non-empty vault → exactly the clusters with ≥1 member in it. The
+    /// non-empty mem → exactly the clusters with ≥1 member in it. The
     /// global (unscoped) count is unchanged. Filters the global
-    /// partition — no per-vault detection.
+    /// partition — no per-mem detection.
     #[test]
-    fn health_scoped_community_count_reflects_vault() {
+    fn health_scoped_community_count_reflects_mem() {
         use memstead_base::workspace::{Mount, MountCapability, MountLifecycle, MountStorage};
 
         let tmp = TempDir::new().unwrap();
@@ -4525,8 +4525,8 @@ mod tests {
         for d in [&specs_dir, &memos_dir, &scratch_dir] {
             std::fs::create_dir_all(d).unwrap();
         }
-        let mk_mount = |vault: &str, path: std::path::PathBuf| Mount {
-            vault: vault.to_string(),
+        let mk_mount = |mem: &str, path: std::path::PathBuf| Mount {
+            mem: mem.to_string(),
             schema: Some("default@1.0.0".parse().unwrap()),
             storage: MountStorage::Folder { path },
             capability: MountCapability::Write,
@@ -4537,30 +4537,30 @@ mod tests {
         let mut engine = memstead_base::Engine::from_mounts(vec![
             (
                 mk_mount("specs", specs_dir.clone()),
-                Box::new(memstead_base::storage::FilesystemVaultWriter::new(specs_dir))
-                    as Box<dyn memstead_base::backend::VaultBackend>,
+                Box::new(memstead_base::storage::FilesystemMemWriter::new(specs_dir))
+                    as Box<dyn memstead_base::backend::MemBackend>,
             ),
             (
                 mk_mount("memos", memos_dir.clone()),
-                Box::new(memstead_base::storage::FilesystemVaultWriter::new(memos_dir))
-                    as Box<dyn memstead_base::backend::VaultBackend>,
+                Box::new(memstead_base::storage::FilesystemMemWriter::new(memos_dir))
+                    as Box<dyn memstead_base::backend::MemBackend>,
             ),
             (
                 mk_mount("scratch", scratch_dir.clone()),
-                Box::new(memstead_base::storage::FilesystemVaultWriter::new(scratch_dir))
-                    as Box<dyn memstead_base::backend::VaultBackend>,
+                Box::new(memstead_base::storage::FilesystemMemWriter::new(scratch_dir))
+                    as Box<dyn memstead_base::backend::MemBackend>,
             ),
         ])
         .unwrap();
         let _ = &mut engine;
         let server = McpServer::new(engine, crate::config::DEFAULT_TOKEN_BUDGET);
 
-        let mk = |vault: &str, title: &str| {
+        let mk = |mem: &str, title: &str| {
             let mut sections = indexmap::IndexMap::new();
             sections.insert("identity".to_string(), "the identity".to_string());
             sections.insert("purpose".to_string(), "the purpose".to_string());
             let r = server.memstead_create(Parameters(CreateParams {
-                vault: Some(vault.to_string()),
+                mem: Some(mem.to_string()),
                 title: title.to_string(),
                 entity_type: "spec".to_string(),
                 sections: Some(sections),
@@ -4582,7 +4582,7 @@ mod tests {
             }));
             assert!(!r.is_error.unwrap_or(false), "relate {from}->{to}: {}", extract_text(&r));
         };
-        // Two disconnected intra-vault edges → two clusters, one wholly
+        // Two disconnected intra-mem edges → two clusters, one wholly
         // in `specs`, one wholly in `memos`. `scratch` stays empty.
         mk("specs", "A1");
         mk("specs", "A2");
@@ -4591,11 +4591,11 @@ mod tests {
         mk("memos", "B2");
         relate("memos--b1", "memos--b2");
 
-        let total_communities = |vault: Option<&str>| -> u64 {
+        let total_communities = |mem: Option<&str>| -> u64 {
             let r = server.memstead_health(Parameters(HealthParams {
                 include: None,
                 limit: None,
-                vault: vault.map(String::from),
+                mem: mem.map(String::from),
                 include_config: false,
             token_budget: None,
             chunk: None,
@@ -4604,11 +4604,11 @@ mod tests {
             let j: serde_json::Value = serde_json::from_str(&extract_text(&r)).unwrap();
             j["summary"]["total_communities"].as_u64().unwrap()
         };
-        let total_entities = |vault: Option<&str>| -> u64 {
+        let total_entities = |mem: Option<&str>| -> u64 {
             let r = server.memstead_health(Parameters(HealthParams {
                 include: None,
                 limit: None,
-                vault: vault.map(String::from),
+                mem: mem.map(String::from),
                 include_config: false,
             token_budget: None,
             chunk: None,
@@ -4622,32 +4622,32 @@ mod tests {
         assert_eq!(total_communities(None), 2, "global community count");
         assert_eq!(total_entities(None), 4, "global entity count");
 
-        // Empty vault: 0 entities, 0
+        // Empty mem: 0 entities, 0
         // communities (was 0 entities / 2 communities pre-fix).
         assert_eq!(total_entities(Some("scratch")), 0);
         assert_eq!(
             total_communities(Some("scratch")),
             0,
-            "empty vault must report 0 communities, not the global count",
+            "empty mem must report 0 communities, not the global count",
         );
 
         // Non-empty scope: exactly the one cluster whose members live in
-        // the vault.
+        // the mem.
         assert_eq!(total_entities(Some("specs")), 2);
         assert_eq!(total_communities(Some("specs")), 1, "specs touches one cluster");
         assert_eq!(total_entities(Some("memos")), 2);
         assert_eq!(total_communities(Some("memos")), 1, "memos touches one cluster");
     }
 
-    /// Scoped `memstead_overview` frontmatter reflects the vault: an empty
-    /// vault reports `_entity_count: 0` / `_cluster_count: 0` and a
+    /// Scoped `memstead_overview` frontmatter reflects the mem: an empty
+    /// mem reports `_entity_count: 0` / `_cluster_count: 0` and a
     /// "no communities" `## Communities` section — consistent with its
-    /// `## Vaults` roster (was `_entity_count: N` / global clusters
-    /// pre-fix). A non-empty scope reports the vault's own count and only
+    /// `## Mems` roster (was `_entity_count: N` / global clusters
+    /// pre-fix). A non-empty scope reports the mem's own count and only
     /// its clusters. Global (unscoped) overview is unchanged. Mirrors the
-    /// health fix via the shared `clusters_in_vault` helper.
+    /// health fix via the shared `clusters_in_mem` helper.
     #[test]
-    fn overview_scoped_entity_and_community_count_reflect_vault() {
+    fn overview_scoped_entity_and_community_count_reflect_mem() {
         use memstead_base::workspace::{Mount, MountCapability, MountLifecycle, MountStorage};
 
         let tmp = TempDir::new().unwrap();
@@ -4656,8 +4656,8 @@ mod tests {
         for d in [&specs_dir, &scratch_dir] {
             std::fs::create_dir_all(d).unwrap();
         }
-        let mk_mount = |vault: &str, path: std::path::PathBuf| Mount {
-            vault: vault.to_string(),
+        let mk_mount = |mem: &str, path: std::path::PathBuf| Mount {
+            mem: mem.to_string(),
             schema: Some("default@1.0.0".parse().unwrap()),
             storage: MountStorage::Folder { path },
             capability: MountCapability::Write,
@@ -4668,13 +4668,13 @@ mod tests {
         let engine = memstead_base::Engine::from_mounts(vec![
             (
                 mk_mount("specs", specs_dir.clone()),
-                Box::new(memstead_base::storage::FilesystemVaultWriter::new(specs_dir))
-                    as Box<dyn memstead_base::backend::VaultBackend>,
+                Box::new(memstead_base::storage::FilesystemMemWriter::new(specs_dir))
+                    as Box<dyn memstead_base::backend::MemBackend>,
             ),
             (
                 mk_mount("scratch", scratch_dir.clone()),
-                Box::new(memstead_base::storage::FilesystemVaultWriter::new(scratch_dir))
-                    as Box<dyn memstead_base::backend::VaultBackend>,
+                Box::new(memstead_base::storage::FilesystemMemWriter::new(scratch_dir))
+                    as Box<dyn memstead_base::backend::MemBackend>,
             ),
         ])
         .unwrap();
@@ -4685,7 +4685,7 @@ mod tests {
             sections.insert("identity".to_string(), "the identity".to_string());
             sections.insert("purpose".to_string(), "the purpose".to_string());
             let r = server.memstead_create(Parameters(CreateParams {
-                vault: Some("specs".to_string()),
+                mem: Some("specs".to_string()),
                 title: title.to_string(),
                 entity_type: "spec".to_string(),
                 sections: Some(sections),
@@ -4708,11 +4708,11 @@ mod tests {
         }));
         assert!(!r.is_error.unwrap_or(false), "relate: {}", extract_text(&r));
 
-        let overview = |vault: Option<&str>| -> String {
+        let overview = |mem: Option<&str>| -> String {
             extract_text(&server.memstead_overview(Parameters(OverviewParams {
                 rebuild: None,
                 chunk: None,
-                vault: vault.map(String::from),
+                mem: mem.map(String::from),
                 include: None,
                 token_budget: None,
             })))
@@ -4723,23 +4723,23 @@ mod tests {
         assert!(global.contains("_entity_count: 2"), "global entity count: {global}");
         assert!(global.contains("_cluster_count: 1"), "global cluster count: {global}");
 
-        // Empty vault: reconcilable summary — 0 entities, 0 clusters, no
+        // Empty mem: reconcilable summary — 0 entities, 0 clusters, no
         // communities listed.
         let empty = overview(Some("scratch"));
         assert!(
             empty.contains("_entity_count: 0"),
-            "empty-vault scope must report 0 entities: {empty}",
+            "empty-mem scope must report 0 entities: {empty}",
         );
         assert!(
             empty.contains("_cluster_count: 0"),
-            "empty-vault scope must report 0 clusters, not the global count: {empty}",
+            "empty-mem scope must report 0 clusters, not the global count: {empty}",
         );
         assert!(
             empty.contains("_(no communities"),
-            "empty-vault scope must render the no-communities section: {empty}",
+            "empty-mem scope must render the no-communities section: {empty}",
         );
 
-        // Non-empty scope: the vault's own count and its one cluster.
+        // Non-empty scope: the mem's own count and its one cluster.
         let scoped = overview(Some("specs"));
         assert!(scoped.contains("_entity_count: 2"), "specs scope entity count: {scoped}");
         assert!(scoped.contains("_cluster_count: 1"), "specs scope cluster count: {scoped}");
@@ -4756,7 +4756,7 @@ mod tests {
         let result = server.memstead_health(Parameters(HealthParams {
             include: Some(vec!["missing_required_outgoing".to_string()]),
             limit: None,
-            vault: None,
+            mem: None,
             include_config: false,
             token_budget: None,
             chunk: None,
@@ -4820,7 +4820,7 @@ mod tests {
         let mcp = server.memstead_health(Parameters(HealthParams {
             include: Some(include.clone()),
             limit: None,
-            vault: None,
+            mem: None,
             include_config: false,
             token_budget: None,
             chunk: None,
@@ -4842,9 +4842,9 @@ mod tests {
             let unified = server.unified_engine();
             let mut engine = unified.lock().unwrap();
             let drift = engine.reload_if_stale(None);
-            let _ = engine.take_vault_changed_notices();
+            let _ = engine.take_mem_changed_notices();
             let args = memstead_engine::health::HealthArgs {
-                vault: None,
+                mem: None,
                 include: &include,
                 limit: None,
                 target_schema: None,
@@ -4872,17 +4872,17 @@ mod tests {
 
     /// Migration wire surface: the migration
     /// trigger's stable five-field response, the dual-pin
-    /// confirmation on `memstead_health`'s `vault_schemas`, and the typed
+    /// confirmation on `memstead_health`'s `mem_schemas`, and the typed
     /// refusals. The standard fixture's `spec` entities are
     /// non-conformant against the built-in `planning` schema (no `spec` type), so
     /// migrating to it enters dual-pin.
     #[test]
-    fn vault_set_schema_wire_lifecycle_and_health_confirmation() {
+    fn mem_set_schema_wire_lifecycle_and_health_confirmation() {
         let (server, _tmp) = setup_dual_test_engine();
         let call = |schema: &str| {
-            server.memstead_vault_set_schema(Parameters(
-                crate::lifecycle::VaultSetSchemaParams {
-                    vault: "specs".to_string(),
+            server.memstead_mem_set_schema(Parameters(
+                crate::lifecycle::MemSetSchemaParams {
+                    mem: "specs".to_string(),
                     schema: schema.to_string(),
                     note: None,
                 },
@@ -4893,7 +4893,7 @@ mod tests {
         let json: serde_json::Value =
             serde_json::from_str(&extract_text(&call("default@1.0.0"))).unwrap();
         assert_eq!(json["outcome"].as_str(), Some("noop"));
-        assert_eq!(json["vault"].as_str(), Some("specs"));
+        assert_eq!(json["mem"].as_str(), Some("specs"));
         assert_eq!(json["schema_pin"].as_str(), Some("default@1.0.0"));
         assert!(json["migration_target"].is_null());
         assert_eq!(json["findings"].as_array().map(|a| a.len()), Some(0));
@@ -4913,7 +4913,7 @@ mod tests {
         let health = server.memstead_health(Parameters(HealthParams {
             include: None,
             limit: None,
-            vault: Some("specs".to_string()),
+            mem: Some("specs".to_string()),
             include_config: false,
             token_budget: None,
             chunk: None,
@@ -4922,11 +4922,11 @@ mod tests {
         // #57: the text channel is now chunked markdown; the typed payload
         // lives in structured_content (always whole).
         let hj: serde_json::Value = health.structured_content.clone().unwrap();
-        let entry = hj["vault_schemas"]
+        let entry = hj["mem_schemas"]
             .as_array()
             .unwrap()
             .iter()
-            .find(|e| e["vault"].as_str() == Some("specs"))
+            .find(|e| e["mem"].as_str() == Some("specs"))
             .expect("specs entry present")
             .clone();
         assert_eq!(entry["schema"].as_str(), Some("default@1.0.0"));
@@ -4950,7 +4950,7 @@ mod tests {
         let result = server.memstead_health(Parameters(HealthParams {
             include: Some(vec!["conformance".to_string()]),
             limit: None,
-            vault: None,
+            mem: None,
             include_config: false,
             token_budget: None,
             chunk: None,
@@ -4990,15 +4990,15 @@ mod tests {
     #[test]
     fn health_integrity_include_returns_both_axes_with_write_time_codes() {
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().join("specs");
-        fs::create_dir_all(vault_dir.join(".memstead")).unwrap();
+        let mem_dir = tmp.path().join("specs");
+        fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
         fs::write(
-            vault_dir.join(".memstead/config.json"),
+            mem_dir.join(".memstead/config.json"),
             r#"{"version":"0.1.0","schema":"default@1.0.0","mediums":{},"projections":{}}"#,
         )
         .unwrap();
         fs::write(
-            vault_dir.join("drifted.md"),
+            mem_dir.join("drifted.md"),
             "---\ntype: spec\ncreated_date: 2026-01-15\nlast_modified: 2026-04-12\nzzz_bogus_field: x\n---\n# Drifted\n\n## Identity\n\nCarries an undeclared metadata field.\n\n## Purpose\n\nConformance-break fixture.\n\n## Relationships\n\n- **USES**: [[never-created]]\n",
         )
         .unwrap();
@@ -5010,7 +5010,7 @@ mod tests {
             let result = server.memstead_health(Parameters(HealthParams {
                 include: Some(vec!["integrity".to_string()]),
                 limit: None,
-                vault: Some("specs".to_string()),
+                mem: Some("specs".to_string()),
                 include_config: false,
             token_budget: None,
             chunk: None,
@@ -5060,7 +5060,7 @@ mod tests {
             server.memstead_health(Parameters(HealthParams {
                 include: Some(vec!["conformance".to_string()]),
                 limit: None,
-                vault: None,
+                mem: None,
                 include_config: false,
             token_budget: None,
             chunk: None,
@@ -5100,10 +5100,10 @@ mod tests {
         // entries carry a `**Reachable as:**` line naming every
         // pattern that can pin them.
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().join("specs");
-        fs::create_dir_all(vault_dir.join(".memstead")).unwrap();
+        let mem_dir = tmp.path().join("specs");
+        fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
         fs::write(
-            vault_dir.join(".memstead/config.json"),
+            mem_dir.join(".memstead/config.json"),
             r#"{"version":"0.1.0","schema":"default@1.0.0","mediums":{},"projections":{}}"#,
         )
         .unwrap();
@@ -5111,18 +5111,18 @@ mod tests {
         let settings = memstead_git_branch::test_support::auto_seed_with_settings(
             tmp.path(),
             memstead_base::WorkspaceSettings {
-                vault_create_rules: vec![
+                mem_create_rules: vec![
                     memstead_base::CreateRuleSetting { pattern: "exec-*".to_string(), schemas: vec!["default@1.0.0".to_string()], default_cross_links: None },
                     memstead_base::CreateRuleSetting { pattern: "plan-*".to_string(), schemas: vec!["default@1.0.0".to_string()], default_cross_links: None },
                 ],
-                vault_delete_rules: vec![memstead_base::DeleteRuleSetting {
+                mem_delete_rules: vec![memstead_base::DeleteRuleSetting {
                     pattern: "exec-*".to_string(),
                 }],
                 ..Default::default()
             },
         );
         let unified_settings = settings.clone();
-        let _ = (vault_dir, settings);
+        let _ = (mem_dir, settings);
         let mut unified = setup_unified_test_engine(tmp.path());
         unified.set_settings(unified_settings);
         let canonical_root = std::fs::canonicalize(tmp.path()).unwrap_or_else(|_| tmp.path().to_path_buf());
@@ -5132,7 +5132,7 @@ mod tests {
         let result = server.memstead_overview(Parameters(OverviewParams {
             rebuild: None,
             chunk: None,
-            vault: None,
+            mem: None,
             include: None,
             token_budget: None,
         }));
@@ -5156,43 +5156,43 @@ mod tests {
 
     /// Lifecycle-Namespaces rendering surfaces rule schema pins
     /// verbatim — no `(unresolved)` annotation, even for schemas no
-    /// registered vault currently pins. The annotation was previously
+    /// registered mem currently pins. The annotation was previously
     /// fired for any pin not in `engine.schemas()` or
     /// `engine.workspace_schemas()`, mis-flagging built-in schemas as
     /// non-functional and causing agents to skip working namespaces
-    /// (vault-lifecycle-audit Item 03). The `(invalid)` annotation
+    /// (mem-lifecycle-audit Item 03). The `(invalid)` annotation
     /// still fires for malformed pins — that's a real operator-config
     /// bug worth flagging.
     #[test]
     fn lifecycle_section_does_not_label_resolvable_pins_as_unresolved() {
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().join("specs");
-        fs::create_dir_all(vault_dir.join(".memstead")).unwrap();
+        let mem_dir = tmp.path().join("specs");
+        fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
         fs::write(
-            vault_dir.join(".memstead/config.json"),
+            mem_dir.join(".memstead/config.json"),
             r#"{"version":"0.1.0","schema":"default@1.0.0","mediums":{},"projections":{}}"#,
         )
         .unwrap();
 
-        // `planning@0.1.0` is a built-in schema, but no vault in this
+        // `planning@0.1.0` is a built-in schema, but no mem in this
         // fixture pins it. Pre-fix the lifecycle rendering would mark
         // it `(unresolved)`; post-fix the raw pin surfaces verbatim.
         let settings = memstead_git_branch::test_support::auto_seed_with_settings(
             tmp.path(),
             memstead_base::WorkspaceSettings {
-                vault_create_rules: vec![memstead_base::CreateRuleSetting {
+                mem_create_rules: vec![memstead_base::CreateRuleSetting {
                     pattern: "planning/plan-*".to_string(),
                     schemas: vec!["planning@0.1.0".to_string()],
                     default_cross_links: None,
                 }],
-                vault_delete_rules: vec![memstead_base::DeleteRuleSetting {
+                mem_delete_rules: vec![memstead_base::DeleteRuleSetting {
                     pattern: "planning/plan-*".to_string(),
                 }],
                 ..Default::default()
             },
         );
         let unified_settings = settings.clone();
-        let _ = (vault_dir, settings);
+        let _ = (mem_dir, settings);
         let mut unified = setup_unified_test_engine(tmp.path());
         unified.set_settings(unified_settings);
         let canonical_root = std::fs::canonicalize(tmp.path())
@@ -5203,7 +5203,7 @@ mod tests {
         let result = server.memstead_overview(Parameters(OverviewParams {
             rebuild: None,
             chunk: None,
-            vault: None,
+            mem: None,
             include: None,
             token_budget: None,
         }));
@@ -5225,10 +5225,10 @@ mod tests {
     #[test]
     fn lifecycle_section_keeps_invalid_annotation_for_malformed_pins() {
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().join("specs");
-        fs::create_dir_all(vault_dir.join(".memstead")).unwrap();
+        let mem_dir = tmp.path().join("specs");
+        fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
         fs::write(
-            vault_dir.join(".memstead/config.json"),
+            mem_dir.join(".memstead/config.json"),
             r#"{"version":"0.1.0","schema":"default@1.0.0","mediums":{},"projections":{}}"#,
         )
         .unwrap();
@@ -5236,17 +5236,17 @@ mod tests {
         let settings = memstead_git_branch::test_support::auto_seed_with_settings(
             tmp.path(),
             memstead_base::WorkspaceSettings {
-                vault_create_rules: vec![memstead_base::CreateRuleSetting {
+                mem_create_rules: vec![memstead_base::CreateRuleSetting {
                     pattern: "exec-*".to_string(),
                     schemas: vec!["not a valid pin".to_string()],
                     default_cross_links: None,
                 }],
-                vault_delete_rules: vec![],
+                mem_delete_rules: vec![],
                 ..Default::default()
             },
         );
         let unified_settings = settings.clone();
-        let _ = (vault_dir, settings);
+        let _ = (mem_dir, settings);
         let mut unified = setup_unified_test_engine(tmp.path());
         unified.set_settings(unified_settings);
         let canonical_root = std::fs::canonicalize(tmp.path())
@@ -5257,7 +5257,7 @@ mod tests {
         let result = server.memstead_overview(Parameters(OverviewParams {
             rebuild: None,
             chunk: None,
-            vault: None,
+            mem: None,
             include: None,
             token_budget: None,
         }));
@@ -5275,10 +5275,10 @@ mod tests {
     #[test]
     fn overview_workspace_policy_silent_on_defaults() {
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().join("specs");
-        fs::create_dir_all(vault_dir.join(".memstead")).unwrap();
+        let mem_dir = tmp.path().join("specs");
+        fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
         fs::write(
-            vault_dir.join(".memstead/config.json"),
+            mem_dir.join(".memstead/config.json"),
             r#"{"version":"0.1.0","schema":"default@1.0.0","mediums":{},"projections":{}}"#,
         )
         .unwrap();
@@ -5287,7 +5287,7 @@ mod tests {
             memstead_base::WorkspaceSettings::default(),
         );
         let unified_settings = settings.clone();
-        let _ = (vault_dir, settings);
+        let _ = (mem_dir, settings);
         let mut unified = setup_unified_test_engine(tmp.path());
         unified.set_settings(unified_settings);
         let canonical_root = std::fs::canonicalize(tmp.path())
@@ -5298,7 +5298,7 @@ mod tests {
         let result = server.memstead_overview(Parameters(OverviewParams {
             rebuild: None,
             chunk: None,
-            vault: None,
+            mem: None,
             include: None,
             token_budget: None,
         }));
@@ -5318,10 +5318,10 @@ mod tests {
     #[test]
     fn overview_workspace_policy_surfaces_require_notes() {
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().join("specs");
-        fs::create_dir_all(vault_dir.join(".memstead")).unwrap();
+        let mem_dir = tmp.path().join("specs");
+        fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
         fs::write(
-            vault_dir.join(".memstead/config.json"),
+            mem_dir.join(".memstead/config.json"),
             r#"{"version":"0.1.0","schema":"default@1.0.0","mediums":{},"projections":{}}"#,
         )
         .unwrap();
@@ -5335,7 +5335,7 @@ mod tests {
             },
         );
         let unified_settings = settings.clone();
-        let _ = (vault_dir, settings);
+        let _ = (mem_dir, settings);
         let mut unified = setup_unified_test_engine(tmp.path());
         unified.set_settings(unified_settings);
         let canonical_root = std::fs::canonicalize(tmp.path())
@@ -5346,7 +5346,7 @@ mod tests {
         let result = server.memstead_overview(Parameters(OverviewParams {
             rebuild: None,
             chunk: None,
-            vault: None,
+            mem: None,
             include: None,
             token_budget: None,
         }));
@@ -5366,10 +5366,10 @@ mod tests {
     }
 
     /// Any schema referenced in a rule's `schemas[]` becomes visible
-    /// in `## Schemas`, even when no vault pins it. Builds a
+    /// in `## Schemas`, even when no mem pins it. Builds a
     /// workspace where the only pinned schema is `default@1.0.0` but
     /// a rule lists `tinyschema@0.1.0` (registered via the workspace-
-    /// level schemas dir but not pinned by any vault). The overview
+    /// level schemas dir but not pinned by any mem). The overview
     /// must surface `tinyschema` as a full schema entry with the
     /// `**Reachable as:**` cross-reference pointing at the rule.
     #[test]
@@ -5382,7 +5382,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
 
         // Stage a workspace-level schemas dir carrying a second
-        // schema (mirrors the `VAULT_SCHEMA_NOT_ALLOWED` engine test
+        // schema (mirrors the `MEM_SCHEMA_NOT_ALLOWED` engine test
         // fixture). Minimal manifest: identity + open relationships
         // with the engine-required `_default`.
         let schemas_dir = tmp.path().join("schemas");
@@ -5408,10 +5408,10 @@ community:
         )
         .unwrap();
 
-        let vault_dir = tmp.path().join("specs");
-        fs::create_dir_all(vault_dir.join(".memstead")).unwrap();
+        let mem_dir = tmp.path().join("specs");
+        fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
         fs::write(
-            vault_dir.join(".memstead/config.json"),
+            mem_dir.join(".memstead/config.json"),
             r#"{"version":"0.1.0","schema":"default@1.0.0","mediums":{},"projections":{}}"#,
         )
         .unwrap();
@@ -5419,21 +5419,21 @@ community:
         let settings = memstead_git_branch::test_support::auto_seed_with_settings(
             tmp.path(),
             memstead_base::WorkspaceSettings {
-                // Rule pins `tinyschema@0.1.0` — no vault references
+                // Rule pins `tinyschema@0.1.0` — no mem references
                 // this schema.
-                vault_create_rules: vec![memstead_base::CreateRuleSetting { pattern: "exec-*".to_string(), schemas: vec!["tinyschema@0.1.0".to_string()], default_cross_links: None }],
-                vault_delete_rules: vec![],
+                mem_create_rules: vec![memstead_base::CreateRuleSetting { pattern: "exec-*".to_string(), schemas: vec!["tinyschema@0.1.0".to_string()], default_cross_links: None }],
+                mem_delete_rules: vec![],
                 ..Default::default()
             },
         );
         let unified_settings = settings.clone();
-        let _ = (vault_dir.clone(), settings);
+        let _ = (mem_dir.clone(), settings);
         // Build unified with the folder mount + workspace schemas_dir
         // so tinyschema is loaded into the unified engine's catalogue.
         let mount = memstead_base::workspace::Mount {
-            vault: "specs".to_string(),
+            mem: "specs".to_string(),
             schema: Some("default@1.0.0".parse().unwrap()),
-            storage: memstead_base::workspace::MountStorage::Folder { path: vault_dir },
+            storage: memstead_base::workspace::MountStorage::Folder { path: mem_dir },
             capability: memstead_base::workspace::MountCapability::Write,
             lifecycle: memstead_base::workspace::MountLifecycle::Eager,
             cross_linkable: true,
@@ -5453,14 +5453,14 @@ community:
         let result = server.memstead_overview(Parameters(OverviewParams {
             rebuild: None,
             chunk: None,
-            vault: None,
+            mem: None,
             include: None,
             token_budget: None,
         }));
         let text = extract_text(&result);
 
         // tinyschema appears as a `### tinyschema@0.1.0` heading in
-        // the `## Schemas` block — same surface as the vault-pinned
+        // the `## Schemas` block — same surface as the mem-pinned
         // `default@1.0.0`, so the agent gets full description + types
         // + relationship vocabulary, not just a literal string in the
         // lifecycle namespaces section.
@@ -5494,10 +5494,10 @@ community:
     }
 
     #[test]
-    fn health_with_include_config_surfaces_writable_vault_origins() {
+    fn health_with_include_config_surfaces_writable_mem_origins() {
         // Under `include_config: true`, the response carries a
-        // `vaults` detail array with `{ name, origin }` per writable vault.
-        // A freshly `Engine::init`ed vault from explicit `VaultInit` input
+        // `mems` detail array with `{ name, origin }` per writable mem.
+        // A freshly `Engine::init`ed mem from explicit `MemInit` input
         // is `ExplicitToml` → origin slug "explicit". Absent from the
         // response means the detail array wasn't emitted (regression
         // guard).
@@ -5505,7 +5505,7 @@ community:
         let result = server.memstead_health(Parameters(HealthParams {
             include: None,
             limit: None,
-            vault: None,
+            mem: None,
             include_config: true,
             token_budget: None,
             chunk: None,
@@ -5513,33 +5513,33 @@ community:
         }));
         let text = extract_text(&result);
         let json: serde_json::Value = serde_json::from_str(&text).unwrap();
-        let vaults = json
-            .get("vaults")
+        let mems = json
+            .get("mems")
             .and_then(|v| v.as_array())
-            .expect("vaults detail array present when include_config is true");
-        assert!(!vaults.is_empty(), "at least one writable vault expected");
-        for entry in vaults {
+            .expect("mems detail array present when include_config is true");
+        assert!(!mems.is_empty(), "at least one writable mem expected");
+        for entry in mems {
             assert!(entry.get("name").and_then(|n| n.as_str()).is_some());
             assert_eq!(
                 entry.get("origin").and_then(|o| o.as_str()),
                 Some("explicit"),
-                "setup_test_engine vault must carry origin=explicit, entry={entry}",
+                "setup_test_engine mem must carry origin=explicit, entry={entry}",
             );
         }
     }
 
     #[test]
-    fn health_with_include_config_surfaces_per_vault_vcs_subobject() {
+    fn health_with_include_config_surfaces_per_mem_vcs_subobject() {
         // `include_config: true`
         // adds a `vcs: { gitdir, worktree }` subobject to each writable
-        // vault entry. Paths must be absolute and canonical, and must
+        // mem entry. Paths must be absolute and canonical, and must
         // match what `Engine::gitdir_for` / `worktree_for` return when
         // called directly — the MCP payload is the public form of
         // those primitives for the Stop-hook flow.
         //
         // `memstead_health_unified` emits the vcs subobject for
         // git-branch mounts when the workspace root carries the
-        // disk-shape vault folder (`worktree_for` resolves the
+        // disk-shape mem folder (`worktree_for` resolves the
         // worktree via the disk-shape composition).
         let tmp = setup_test_workspace();
         let mut unified = setup_unified_test_engine_git_branch(tmp.path());
@@ -5549,7 +5549,7 @@ community:
         let result = server.memstead_health(Parameters(HealthParams {
             include: None,
             limit: None,
-            vault: None,
+            mem: None,
             include_config: true,
             token_budget: None,
             chunk: None,
@@ -5557,18 +5557,18 @@ community:
         }));
         let text = extract_text(&result);
         let json: serde_json::Value = serde_json::from_str(&text).unwrap();
-        let vaults = json
-            .get("vaults")
+        let mems = json
+            .get("mems")
             .and_then(|v| v.as_array())
-            .expect("vaults detail array present when include_config is true");
+            .expect("mems detail array present when include_config is true");
         let unified = server.unified_engine().clone();
         let engine = unified.lock().unwrap();
-        for entry in vaults {
+        for entry in mems {
             let name = entry.get("name").and_then(|n| n.as_str()).unwrap();
             let vcs = entry
                 .get("vcs")
                 .and_then(|v| v.as_object())
-                .expect("vcs subobject present on writable-vault entry");
+                .expect("vcs subobject present on writable-mem entry");
             let gitdir = std::path::PathBuf::from(
                 vcs.get("gitdir")
                     .and_then(|v| v.as_str())
@@ -5609,7 +5609,7 @@ community:
         let result = server_default.memstead_health(Parameters(HealthParams {
             include: None,
             limit: None,
-            vault: None,
+            mem: None,
             include_config: true,
             token_budget: None,
             chunk: None,
@@ -5626,10 +5626,10 @@ community:
         // Now with non-default values threaded through the full-surface
         // constructor. Both must round-trip.
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().join("specs");
-        fs::create_dir_all(vault_dir.join(".memstead")).unwrap();
+        let mem_dir = tmp.path().join("specs");
+        fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
         fs::write(
-            vault_dir.join(".memstead/config.json"),
+            mem_dir.join(".memstead/config.json"),
             r#"{"version":"0.1.0","schema":"default@1.0.0","mediums":{},"projections":{}}"#,
         )
         .unwrap();
@@ -5657,7 +5657,7 @@ community:
         let result = server.memstead_health(Parameters(HealthParams {
             include: None,
             limit: None,
-            vault: None,
+            mem: None,
             include_config: true,
             token_budget: None,
             chunk: None,
@@ -5684,7 +5684,7 @@ community:
         let result = server.memstead_health(Parameters(HealthParams {
             include: None,
             limit: None,
-            vault: None,
+            mem: None,
             include_config: false,
             token_budget: None,
             chunk: None,
@@ -5697,15 +5697,15 @@ community:
     }
 
     #[test]
-    fn health_without_include_config_omits_vaults_detail() {
-        // Absent opt-in → the `vaults` detail array is not emitted.
+    fn health_without_include_config_omits_mems_detail() {
+        // Absent opt-in → the `mems` detail array is not emitted.
         // Clients that never call with `include_config: true` pay zero
         // extra bytes and the default-posture contract is preserved.
         let (server, _tmp) = setup_dual_test_engine();
         let result = server.memstead_health(Parameters(HealthParams {
             include: None,
             limit: None,
-            vault: None,
+            mem: None,
             include_config: false,
             token_budget: None,
             chunk: None,
@@ -5714,14 +5714,14 @@ community:
         let text = extract_text(&result);
         let json: serde_json::Value = serde_json::from_str(&text).unwrap();
         assert!(
-            json.get("vaults").is_none(),
-            "vaults detail array must be absent when include_config is false"
+            json.get("mems").is_none(),
+            "mems detail array must be absent when include_config is false"
         );
     }
 
     #[test]
-    fn health_after_runtime_create_lists_new_vault_with_origin_runtime_created() {
-        // A vault registered via `memstead_vault_create` surfaces with
+    fn health_after_runtime_create_lists_new_mem_with_origin_runtime_created() {
+        // A mem registered via `memstead_mem_create` surfaces with
         // `origin: "runtime_created"` on a subsequent `memstead_health
         // { include_config: true }` call. Pins the provenance path
         // skills rely on to distinguish explicit-init and
@@ -5729,11 +5729,11 @@ community:
         // round-trip.
         let tmp = TempDir::new().unwrap();
         let settings = memstead_base::WorkspaceSettings {
-            vault_create_rules: vec![
+            mem_create_rules: vec![
                 memstead_base::CreateRuleSetting { pattern: "*".to_string(), schemas: vec!["default@1.0.0".to_string()], default_cross_links: None },
                 memstead_base::CreateRuleSetting { pattern: "**".to_string(), schemas: vec!["default@1.0.0".to_string()], default_cross_links: None },
             ],
-            vault_delete_rules: vec![],
+            mem_delete_rules: vec![],
             ..Default::default()
         };
         memstead_git_branch::test_support::auto_seed_with_settings(tmp.path(), settings.clone());
@@ -5743,7 +5743,7 @@ community:
         unified.set_workspace_root(canonical_root);
         let server = McpServer::new(unified, crate::config::DEFAULT_TOKEN_BUDGET);
         let target = tmp.path().join("runtime-born");
-        let create_result = server.memstead_vault_create(Parameters(TlsVaultCreateParams {
+        let create_result = server.memstead_mem_create(Parameters(TlsMemCreateParams {
             schema_verbosity: None,
             write_guidance: Default::default(),
             name: "runtime-born".to_string(),
@@ -5764,7 +5764,7 @@ community:
         let health_result = server.memstead_health(Parameters(HealthParams {
             include: None,
             limit: None,
-            vault: None,
+            mem: None,
             include_config: true,
             token_budget: None,
             chunk: None,
@@ -5772,18 +5772,18 @@ community:
         }));
         // #57: typed payload from structured_content (text is now markdown).
         let json: serde_json::Value = health_result.structured_content.clone().unwrap();
-        let vaults = json
-            .get("vaults")
+        let mems = json
+            .get("mems")
             .and_then(|v| v.as_array())
-            .expect("vaults detail array present");
-        let entry = vaults
+            .expect("mems detail array present");
+        let entry = mems
             .iter()
             .find(|v| v.get("name").and_then(|n| n.as_str()) == Some("runtime-born"))
-            .expect("runtime-born vault must be listed");
+            .expect("runtime-born mem must be listed");
         assert_eq!(
             entry.get("origin").and_then(|o| o.as_str()),
             Some("runtime_created"),
-            "runtime-created vault must carry origin=runtime_created",
+            "runtime-created mem must carry origin=runtime_created",
         );
     }
 
@@ -5823,7 +5823,7 @@ community:
     /// Data-origin labelling: `memstead_entity` and `memstead_search`
     /// stamp `origin` on the served content. An entity/hit from a writable
     /// mount is `first-party`; one from a read-only mount (a stand-in for
-    /// a registry-installed read-vault or an adopted foreign folder/clone)
+    /// a registry-installed read-mem or an adopted foreign folder/clone)
     /// is `third-party` so the consuming agent treats it as quoted,
     /// untrusted data.
     #[test]
@@ -5846,8 +5846,8 @@ community:
         )
         .unwrap();
 
-        let mk = |vault: &str, dir: std::path::PathBuf, cap: MountCapability| Mount {
-            vault: vault.to_string(),
+        let mk = |mem: &str, dir: std::path::PathBuf, cap: MountCapability| Mount {
+            mem: mem.to_string(),
             schema: Some("default@1.0.0".parse().unwrap()),
             storage: MountStorage::Folder { path: dir },
             capability: cap,
@@ -5855,7 +5855,7 @@ community:
             cross_linkable: true,
             migration_target: None,
         };
-        let mounts: Vec<(Mount, Box<dyn memstead_base::backend::VaultBackend>)> = vec![
+        let mounts: Vec<(Mount, Box<dyn memstead_base::backend::MemBackend>)> = vec![
             {
                 let m = mk("local", writable_dir, MountCapability::Write);
                 let b = memstead_base::instantiate_basis_backend(&m).unwrap();
@@ -5902,34 +5902,34 @@ community:
         );
 
         // Search hits carry per-hit data-origin labels keyed on each
-        // hit's source vault.
+        // hit's source mem.
         let search = server.memstead_search(Parameters(search_params_defaults()));
         let sc = search.structured_content.clone().unwrap();
         let hits = sc.get("hits").and_then(|h| h.as_array()).expect("hits[]");
-        let origin_of = |vault: &str| -> Option<String> {
+        let origin_of = |mem: &str| -> Option<String> {
             hits.iter()
-                .find(|h| h.get("vault").and_then(|v| v.as_str()) == Some(vault))
+                .find(|h| h.get("mem").and_then(|v| v.as_str()) == Some(mem))
                 .and_then(|h| h.get("origin").and_then(|o| o.as_str()))
                 .map(|s| s.to_string())
         };
         assert_eq!(
             origin_of("local").as_deref(),
             Some("first-party"),
-            "writable-vault hit is first-party"
+            "writable-mem hit is first-party"
         );
         assert_eq!(
             origin_of("external").as_deref(),
             Some("third-party"),
-            "read-only-vault hit is third-party"
+            "read-only-mem hit is third-party"
         );
     }
 
-    /// `memstead_overview` marks a read-only (third-party) vault's data
-    /// origin at the cold-start surface so an agent learns which vaults
+    /// `memstead_overview` marks a read-only (third-party) mem's data
+    /// origin at the cold-start surface so an agent learns which mems
     /// are untrusted before reading their content; a writable (first-party)
-    /// vault stays unmarked.
+    /// mem stays unmarked.
     #[test]
-    fn overview_marks_read_only_vault_third_party_origin() {
+    fn overview_marks_read_only_mem_third_party_origin() {
         use memstead_base::workspace::{Mount, MountCapability, MountLifecycle, MountStorage};
 
         let tmp = TempDir::new().unwrap();
@@ -5948,8 +5948,8 @@ community:
         )
         .unwrap();
 
-        let mk = |vault: &str, dir: std::path::PathBuf, cap: MountCapability| Mount {
-            vault: vault.to_string(),
+        let mk = |mem: &str, dir: std::path::PathBuf, cap: MountCapability| Mount {
+            mem: mem.to_string(),
             schema: Some("default@1.0.0".parse().unwrap()),
             storage: MountStorage::Folder { path: dir },
             capability: cap,
@@ -5957,7 +5957,7 @@ community:
             cross_linkable: true,
             migration_target: None,
         };
-        let mounts: Vec<(Mount, Box<dyn memstead_base::backend::VaultBackend>)> = vec![
+        let mounts: Vec<(Mount, Box<dyn memstead_base::backend::MemBackend>)> = vec![
             {
                 let m = mk("local", writable_dir, MountCapability::Write);
                 let b = memstead_base::instantiate_basis_backend(&m).unwrap();
@@ -5975,42 +5975,42 @@ community:
         let text = extract_text(&server.memstead_overview(Parameters(OverviewParams {
             rebuild: None,
             chunk: None,
-            vault: None,
+            mem: None,
             include: None,
             token_budget: None,
         })));
 
-        // The read-only vault carries the third-party origin marker.
+        // The read-only mem carries the third-party origin marker.
         let external_section = text
             .split("### external")
             .nth(1)
-            .expect("overview lists the external vault");
+            .expect("overview lists the external mem");
         let external_block = external_section.split("### ").next().unwrap();
         assert!(
             external_block.contains("**Origin:** third-party"),
-            "read-only vault must be marked third-party in overview; got:\n{external_block}"
+            "read-only mem must be marked third-party in overview; got:\n{external_block}"
         );
 
-        // The writable vault stays unmarked (first-party, common case).
+        // The writable mem stays unmarked (first-party, common case).
         let local_section = text
             .split("### local")
             .nth(1)
-            .expect("overview lists the local vault");
+            .expect("overview lists the local mem");
         let local_block = local_section.split("### ").next().unwrap();
         assert!(
             !local_block.contains("**Origin:**"),
-            "writable vault must not carry an origin marker; got:\n{local_block}"
+            "writable mem must not carry an origin marker; got:\n{local_block}"
         );
     }
 
-    /// `memstead_vault_create` end-to-end through the unified engine.
+    /// `memstead_mem_create` end-to-end through the unified engine.
     #[test]
-    fn test_memstead_vault_create_via_unified_engine_path() {
+    fn test_memstead_mem_create_via_unified_engine_path() {
         let tmp = setup_test_workspace();
         let seed_dir = tmp.path().join("seed");
-        let writer = memstead_base::storage::FilesystemVaultWriter::new(seed_dir.clone());
+        let writer = memstead_base::storage::FilesystemMemWriter::new(seed_dir.clone());
         let mount = memstead_base::Mount {
-            vault: "seed".to_string(),
+            mem: "seed".to_string(),
             schema: Some("default@1.0.0".parse().unwrap()),
             storage: memstead_base::MountStorage::Folder { path: seed_dir },
             capability: memstead_base::MountCapability::Write,
@@ -6020,32 +6020,32 @@ community:
         };
         let mut unified = memstead_base::Engine::from_mounts(vec![(
             mount,
-            Box::new(writer) as Box<dyn memstead_base::backend::VaultBackend>,
+            Box::new(writer) as Box<dyn memstead_base::backend::MemBackend>,
         )])
         .unwrap();
-        // Install the pro backend factory so create_vault's
+        // Install the pro backend factory so create_mem's
         // git-branch path can materialise a writer when the
         // workspace-shape heuristic fires.
         unified.set_backend_factory(memstead_git_branch::storage::instantiate_pro_backend);
         // Canonicalise the workspace_root so the outside_workspace
-        // check inside create_vault compares canonical paths
+        // check inside create_mem compares canonical paths
         // consistently (macOS resolves `/var/...` → `/private/var/...`).
         let workspace_root = tmp.path().canonicalize().unwrap();
         unified.set_workspace_root(workspace_root.clone());
         unified.set_settings(memstead_base::WorkspaceSettings {
-            vault_create_rules: vec![memstead_base::CreateRuleSetting {
+            mem_create_rules: vec![memstead_base::CreateRuleSetting {
                 pattern: "*".to_string(),
                 schemas: vec!["*".to_string()],
                 default_cross_links: None,
             }],
-            vault_delete_rules: Vec::new(),
-            cross_vault_links: Default::default(),
+            mem_delete_rules: Vec::new(),
+            cross_mem_links: Default::default(),
             ..Default::default()
         });
         let server = McpServer::new(unified, crate::config::DEFAULT_TOKEN_BUDGET);
 
-        let result = server.memstead_vault_create(Parameters(
-            crate::lifecycle::VaultCreateParams {
+        let result = server.memstead_mem_create(Parameters(
+            crate::lifecycle::MemCreateParams {
                 schema_verbosity: None,
                 write_guidance: Default::default(),
                 name: "alpha".to_string(),
@@ -6070,16 +6070,16 @@ community:
         assert!(text.contains("\"location\""));
         assert!(text.contains("\"schema_ref\""));
         assert!(text.contains("\"seed_commit_sha\""));
-        // The new vault's name surfaces.
+        // The new mem's name surfaces.
         assert!(text.contains("alpha"));
         // Schema priming payload is folded in.
         assert!(text.contains("\"schema\""));
 
         // Surface parity (Plan 01): the include_schema inline path honours
-        // `schema_verbosity: "lite"` — a first-vault create can prime on the
+        // `schema_verbosity: "lite"` — a first-mem create can prime on the
         // cheap skeleton instead of the ~25 KB full body.
         let lite_create =
-            server.memstead_vault_create(Parameters(crate::lifecycle::VaultCreateParams {
+            server.memstead_mem_create(Parameters(crate::lifecycle::MemCreateParams {
                 schema_verbosity: Some("lite".to_string()),
                 write_guidance: Default::default(),
                 name: "beta".to_string(),
@@ -6106,9 +6106,9 @@ community:
             "lite inline drops the rich types[] array"
         );
 
-        // An unknown schema_verbosity refuses up front (before the vault
+        // An unknown schema_verbosity refuses up front (before the mem
         // lands) rather than silently inlining full.
-        let bad = server.memstead_vault_create(Parameters(crate::lifecycle::VaultCreateParams {
+        let bad = server.memstead_mem_create(Parameters(crate::lifecycle::MemCreateParams {
             schema_verbosity: Some("brief".to_string()),
             write_guidance: Default::default(),
             name: "gamma".to_string(),
@@ -6126,14 +6126,14 @@ community:
         assert_eq!(bad.structured_content.unwrap()["code"], "INVALID_INPUT");
     }
 
-    /// `memstead_vault_delete` end-to-end through the unified engine.
+    /// `memstead_mem_delete` end-to-end through the unified engine.
     #[test]
-    fn test_memstead_vault_delete_via_unified_engine_path() {
+    fn test_memstead_mem_delete_via_unified_engine_path() {
         let tmp = setup_test_workspace();
         let target_dir = tmp.path().join("specs");
-        let writer = memstead_base::storage::FilesystemVaultWriter::new(target_dir.clone());
+        let writer = memstead_base::storage::FilesystemMemWriter::new(target_dir.clone());
         let mount = memstead_base::Mount {
-            vault: "specs".to_string(),
+            mem: "specs".to_string(),
             schema: Some("default@1.0.0".parse().unwrap()),
             storage: memstead_base::MountStorage::Folder {
                 path: target_dir.clone(),
@@ -6145,21 +6145,21 @@ community:
         };
         let mut unified = memstead_base::Engine::from_mounts(vec![(
             mount,
-            Box::new(writer) as Box<dyn memstead_base::backend::VaultBackend>,
+            Box::new(writer) as Box<dyn memstead_base::backend::MemBackend>,
         )])
         .unwrap();
         unified.set_settings(memstead_base::WorkspaceSettings {
-            vault_create_rules: Vec::new(),
-            vault_delete_rules: vec![memstead_base::DeleteRuleSetting {
+            mem_create_rules: Vec::new(),
+            mem_delete_rules: vec![memstead_base::DeleteRuleSetting {
                 pattern: "*".to_string(),
             }],
-            cross_vault_links: Default::default(),
+            cross_mem_links: Default::default(),
             ..Default::default()
         });
         let server = McpServer::new(unified, crate::config::DEFAULT_TOKEN_BUDGET);
 
-        let result = server.memstead_vault_delete(Parameters(
-            crate::lifecycle::VaultDeleteParams {
+        let result = server.memstead_mem_delete(Parameters(
+            crate::lifecycle::MemDeleteParams {
                 name: "specs".to_string(),
                 note: None,
             },
@@ -6178,17 +6178,17 @@ community:
 
     /// `memstead_overview` end-to-end through the unified engine.
     /// Verifies the response carries the load-bearing markdown
-    /// sections (`## Schemas`, `## Vaults`, `## Communities`,
+    /// sections (`## Schemas`, `## Mems`, `## Communities`,
     /// `## Lifecycle Namespaces`).
     #[test]
     fn test_memstead_overview_via_unified_engine_path() {
         let tmp = setup_test_workspace();
-        let vault_dir = tmp.path().join("specs");
-        let writer = memstead_base::storage::FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().join("specs");
+        let writer = memstead_base::storage::FilesystemMemWriter::new(mem_dir.clone());
         let mount = memstead_base::Mount {
-            vault: "specs".to_string(),
+            mem: "specs".to_string(),
             schema: Some("default@1.0.0".parse().unwrap()),
-            storage: memstead_base::MountStorage::Folder { path: vault_dir },
+            storage: memstead_base::MountStorage::Folder { path: mem_dir },
             capability: memstead_base::MountCapability::Write,
             lifecycle: memstead_base::MountLifecycle::Eager,
             cross_linkable: true,
@@ -6196,13 +6196,13 @@ community:
         };
         let unified = memstead_base::Engine::from_mounts(vec![(
             mount,
-            Box::new(writer) as Box<dyn memstead_base::backend::VaultBackend>,
+            Box::new(writer) as Box<dyn memstead_base::backend::MemBackend>,
         )])
         .unwrap();
         let server = McpServer::new(unified, crate::config::DEFAULT_TOKEN_BUDGET);
 
         let result = server.memstead_overview(Parameters(OverviewParams {
-            vault: None,
+            mem: None,
             include: None,
             token_budget: None,
             chunk: None,
@@ -6217,9 +6217,9 @@ community:
         // Load-bearing markdown sections.
         assert!(text.contains("## Lifecycle Namespaces"));
         assert!(text.contains("## Schemas"));
-        assert!(text.contains("## Vaults"));
+        assert!(text.contains("## Mems"));
         assert!(text.contains("## Communities"));
-        // The fixture vault should surface.
+        // The fixture mem should surface.
         assert!(text.contains("### specs"));
         // The fixture schema ref should surface.
         assert!(text.contains("default@1.0.0"));
@@ -6227,17 +6227,17 @@ community:
 
     /// `memstead_health` default body end-to-end through the unified
     /// engine. Verifies the default-shape response carries
-    /// `writable_vaults`, `read_vaults`, `vault_schemas`, summary
+    /// `writable_mems`, `read_mems`, `mem_schemas`, summary
     /// counts, and edge totals.
     #[test]
     fn test_memstead_health_default_body_via_unified_engine_path() {
         let tmp = setup_test_workspace();
-        let vault_dir = tmp.path().join("specs");
-        let writer = memstead_base::storage::FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().join("specs");
+        let writer = memstead_base::storage::FilesystemMemWriter::new(mem_dir.clone());
         let mount = memstead_base::Mount {
-            vault: "specs".to_string(),
+            mem: "specs".to_string(),
             schema: Some("default@1.0.0".parse().unwrap()),
-            storage: memstead_base::MountStorage::Folder { path: vault_dir },
+            storage: memstead_base::MountStorage::Folder { path: mem_dir },
             capability: memstead_base::MountCapability::Write,
             lifecycle: memstead_base::MountLifecycle::Eager,
             cross_linkable: true,
@@ -6245,7 +6245,7 @@ community:
         };
         let unified = memstead_base::Engine::from_mounts(vec![(
             mount,
-            Box::new(writer) as Box<dyn memstead_base::backend::VaultBackend>,
+            Box::new(writer) as Box<dyn memstead_base::backend::MemBackend>,
         )])
         .unwrap();
         let server = McpServer::new(unified, crate::config::DEFAULT_TOKEN_BUDGET);
@@ -6254,7 +6254,7 @@ community:
         let result = server.memstead_health(Parameters(HealthParams {
             include: None,
             limit: None,
-            vault: None,
+            mem: None,
             include_config: false,
             token_budget: None,
             chunk: None,
@@ -6263,18 +6263,18 @@ community:
         assert!(!result.is_error.unwrap_or(false));
         let text = extract_text(&result);
         // Default-shape fields present.
-        assert!(text.contains("\"writable_vaults\""));
-        assert!(text.contains("\"read_vaults\""));
-        assert!(text.contains("\"vault_schemas\""));
+        assert!(text.contains("\"writable_mems\""));
+        assert!(text.contains("\"read_mems\""));
+        assert!(text.contains("\"mem_schemas\""));
         assert!(text.contains("\"summary\""));
         assert!(text.contains("\"total_entities\""));
         assert!(text.contains("\"edge_types\""));
-        // The fixture vault should surface.
+        // The fixture mem should surface.
         assert!(text.contains("\"specs\""));
     }
 
     /// `memstead_health` with `include_config: true` end-to-end. The
-    /// per-vault `vaults` detail block surfaces `origin`, the
+    /// per-mem `mems` detail block surfaces `origin`, the
     /// optional `vcs` block, and the parsed
     /// `.memstead/config.json` (`write_guidance` + `extra`). F6
     /// renamed the wire-facing key from camelCase `writeGuidance`
@@ -6284,23 +6284,23 @@ community:
     #[test]
     fn test_memstead_health_include_config_via_unified_engine_path() {
         let tmp = setup_test_workspace();
-        let vault_dir = tmp.path().join("specs");
+        let mem_dir = tmp.path().join("specs");
 
-        // Drop a `.memstead/config.json` so `vault_config_for` surfaces
+        // Drop a `.memstead/config.json` so `mem_config_for` surfaces
         // a non-empty `write_guidance` block in the response.
-        std::fs::create_dir_all(vault_dir.join(".memstead")).unwrap();
+        std::fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
         let config_body = r#"{
             "format": 1,
             "schema": "default@1.0.0",
             "writeGuidance": { "tone": "formal" }
         }"#;
-        std::fs::write(vault_dir.join(".memstead").join("config.json"), config_body).unwrap();
+        std::fs::write(mem_dir.join(".memstead").join("config.json"), config_body).unwrap();
 
-        let writer = memstead_base::storage::FilesystemVaultWriter::new(vault_dir.clone());
+        let writer = memstead_base::storage::FilesystemMemWriter::new(mem_dir.clone());
         let mount = memstead_base::Mount {
-            vault: "specs".to_string(),
+            mem: "specs".to_string(),
             schema: Some("default@1.0.0".parse().unwrap()),
-            storage: memstead_base::MountStorage::Folder { path: vault_dir },
+            storage: memstead_base::MountStorage::Folder { path: mem_dir },
             capability: memstead_base::MountCapability::Write,
             lifecycle: memstead_base::MountLifecycle::Eager,
             cross_linkable: true,
@@ -6308,7 +6308,7 @@ community:
         };
         let unified = memstead_base::Engine::from_mounts(vec![(
             mount,
-            Box::new(writer) as Box<dyn memstead_base::backend::VaultBackend>,
+            Box::new(writer) as Box<dyn memstead_base::backend::MemBackend>,
         )])
         .unwrap();
         let server = McpServer::new(unified, crate::config::DEFAULT_TOKEN_BUDGET);
@@ -6316,7 +6316,7 @@ community:
         let result = server.memstead_health(Parameters(HealthParams {
             include: None,
             limit: None,
-            vault: None,
+            mem: None,
             include_config: true,
             token_budget: None,
             chunk: None,
@@ -6329,13 +6329,13 @@ community:
             .expect("structured_content present");
         assert!(payload.get("mutations").is_some(), "mutations present: {payload}");
         assert!(payload.get("plugin").is_some(), "plugin present: {payload}");
-        let vaults = payload["vaults"].as_array().expect("vaults[] array");
-        let entry = vaults
+        let mems = payload["mems"].as_array().expect("mems[] array");
+        let entry = mems
             .iter()
             .find(|v| v["name"] == "specs")
             .expect("specs entry");
         // Folder mount: vcs.worktree must be present (gitdir is
-        // git-branch-only; head may be absent on a fresh vault).
+        // git-branch-only; head may be absent on a fresh mem).
         let vcs = entry["vcs"].as_object().expect("vcs block present for folder mount");
         assert!(vcs.contains_key("worktree"), "vcs.worktree present: {vcs:?}");
         // Snake_case rename — old camelCase must NOT appear on the wire.
@@ -6356,12 +6356,12 @@ community:
     #[test]
     fn test_memstead_entity_via_unified_engine_path() {
         let tmp = setup_test_workspace();
-        let vault_dir = tmp.path().join("specs");
-        let writer = memstead_base::storage::FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().join("specs");
+        let writer = memstead_base::storage::FilesystemMemWriter::new(mem_dir.clone());
         let mount = memstead_base::Mount {
-            vault: "specs".to_string(),
+            mem: "specs".to_string(),
             schema: Some("default@1.0.0".parse().unwrap()),
-            storage: memstead_base::MountStorage::Folder { path: vault_dir },
+            storage: memstead_base::MountStorage::Folder { path: mem_dir },
             capability: memstead_base::MountCapability::Write,
             lifecycle: memstead_base::MountLifecycle::Eager,
             cross_linkable: true,
@@ -6369,7 +6369,7 @@ community:
         };
         let unified = memstead_base::Engine::from_mounts(vec![(
             mount,
-            Box::new(writer) as Box<dyn memstead_base::backend::VaultBackend>,
+            Box::new(writer) as Box<dyn memstead_base::backend::MemBackend>,
         )])
         .unwrap();
         let server = McpServer::new(unified, crate::config::DEFAULT_TOKEN_BUDGET);
@@ -6401,19 +6401,19 @@ community:
         assert!(extract_text(&missing).contains("not found"));
     }
 
-    /// `memstead_schema` end-to-end. The engine's per-vault HashMap
+    /// `memstead_schema` end-to-end. The engine's per-mem HashMap
     /// shape iterates values for name+version lookup; the not-found
     /// envelope ships an empty suggestions list. `used_by` derives
     /// from `engine.mounts()`.
     #[test]
     fn test_memstead_schema_via_unified_engine_path() {
         let tmp = setup_test_workspace();
-        let vault_dir = tmp.path().join("specs");
-        let writer = memstead_base::storage::FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().join("specs");
+        let writer = memstead_base::storage::FilesystemMemWriter::new(mem_dir.clone());
         let mount = memstead_base::Mount {
-            vault: "specs".to_string(),
+            mem: "specs".to_string(),
             schema: Some("default@1.0.0".parse().unwrap()),
-            storage: memstead_base::MountStorage::Folder { path: vault_dir },
+            storage: memstead_base::MountStorage::Folder { path: mem_dir },
             capability: memstead_base::MountCapability::Write,
             lifecycle: memstead_base::MountLifecycle::Eager,
             cross_linkable: true,
@@ -6421,7 +6421,7 @@ community:
         };
         let unified = memstead_base::Engine::from_mounts(vec![(
             mount,
-            Box::new(writer) as Box<dyn memstead_base::backend::VaultBackend>,
+            Box::new(writer) as Box<dyn memstead_base::backend::MemBackend>,
         )])
         .unwrap();
         let server = McpServer::new(unified, crate::config::DEFAULT_TOKEN_BUDGET);
@@ -6430,16 +6430,16 @@ community:
         let result = server.memstead_schema(Parameters(SchemaParams {
             verbosity: None,
             name: Some("default".to_string()),
-            vault: None,
+            mem: None,
         }));
         assert!(!result.is_error.unwrap_or(false));
         let text = extract_text(&result);
         assert!(text.contains("\"ref\""));
         assert!(text.contains("\"used_by\""));
-        // The fixture vault "specs" pins default@1.0.0 → it appears in used_by.
+        // The fixture mem "specs" pins default@1.0.0 → it appears in used_by.
         assert!(text.contains("\"specs\""));
 
-        // Intra-vault
+        // Intra-mem
         // relationship entries surface `allowed_sources` and
         // `allowed_targets` so agents can pre-filter rel-types for
         // their `(from_type, to_type)` pair without trial-and-error
@@ -6463,7 +6463,7 @@ community:
         let missing = server.memstead_schema(Parameters(SchemaParams {
             verbosity: None,
             name: Some("no-such-schema".to_string()),
-            vault: None,
+            mem: None,
         }));
         assert!(missing.is_error.unwrap_or(false));
         let text = extract_text(&missing);
@@ -6479,12 +6479,12 @@ community:
     #[test]
     fn test_memstead_schema_verbosity_toggle() {
         let tmp = setup_test_workspace();
-        let vault_dir = tmp.path().join("specs");
-        let writer = memstead_base::storage::FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().join("specs");
+        let writer = memstead_base::storage::FilesystemMemWriter::new(mem_dir.clone());
         let mount = memstead_base::Mount {
-            vault: "specs".to_string(),
+            mem: "specs".to_string(),
             schema: Some("default@1.0.0".parse().unwrap()),
-            storage: memstead_base::MountStorage::Folder { path: vault_dir },
+            storage: memstead_base::MountStorage::Folder { path: mem_dir },
             capability: memstead_base::MountCapability::Write,
             lifecycle: memstead_base::MountLifecycle::Eager,
             cross_linkable: true,
@@ -6492,7 +6492,7 @@ community:
         };
         let unified = memstead_base::Engine::from_mounts(vec![(
             mount,
-            Box::new(writer) as Box<dyn memstead_base::backend::VaultBackend>,
+            Box::new(writer) as Box<dyn memstead_base::backend::MemBackend>,
         )])
         .unwrap();
         let server = McpServer::new(unified, crate::config::DEFAULT_TOKEN_BUDGET);
@@ -6501,7 +6501,7 @@ community:
             server.memstead_schema(Parameters(SchemaParams {
                 verbosity: verbosity.map(|s| s.to_string()),
                 name: Some("default".to_string()),
-                vault: None,
+                mem: None,
             }))
         };
 
@@ -6532,7 +6532,7 @@ community:
         assert!(full_body["types"].is_array(), "full keeps rich types");
         assert!(full_body["description"].is_string(), "full keeps prose");
 
-        // Lite is smaller than full on the same vault.
+        // Lite is smaller than full on the same mem.
         let lite_len = serde_json::to_string(&lite_body).unwrap().len();
         let full_len = serde_json::to_string(&full_body).unwrap().len();
         assert!(lite_len < full_len, "lite ({lite_len}) < full ({full_len})");
@@ -6553,25 +6553,25 @@ community:
         );
     }
 
-    /// `memstead_schema` resolves built-in schemas even when no vault pins
+    /// `memstead_schema` resolves built-in schemas even when no mem pins
     /// them. Closes the documented discovery contract:
     /// `memstead_overview` advertises lifecycle namespaces whose schemas
     /// (`default@1.0.0`, `planning@0.1.0`) the workspace does not
     /// necessarily pin yet; an agent must still be able to introspect
-    /// the schema by name before committing to `memstead_vault_create`.
-    /// The unified engine's catalogue cascade (vault-pinned →
+    /// the schema by name before committing to `memstead_mem_create`.
+    /// The unified engine's catalogue cascade (mem-pinned →
     /// workspace → built-ins) walks all three on every call.
     #[test]
-    fn test_memstead_schema_resolves_builtin_when_no_vault_pins_it() {
+    fn test_memstead_schema_resolves_builtin_when_no_mem_pins_it() {
         let tmp = setup_test_workspace();
-        let vault_dir = tmp.path().join("specs");
-        let writer = memstead_base::storage::FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().join("specs");
+        let writer = memstead_base::storage::FilesystemMemWriter::new(mem_dir.clone());
         // Pin a builtin that's NOT `planning@0.1.0` so the planning
         // resolution path must go through the builtin catalogue.
         let mount = memstead_base::Mount {
-            vault: "specs".to_string(),
+            mem: "specs".to_string(),
             schema: Some("default@1.0.0".parse().unwrap()),
-            storage: memstead_base::MountStorage::Folder { path: vault_dir },
+            storage: memstead_base::MountStorage::Folder { path: mem_dir },
             capability: memstead_base::MountCapability::Write,
             lifecycle: memstead_base::MountLifecycle::Eager,
             cross_linkable: true,
@@ -6579,30 +6579,30 @@ community:
         };
         let unified = memstead_base::Engine::from_mounts(vec![(
             mount,
-            Box::new(writer) as Box<dyn memstead_base::backend::VaultBackend>,
+            Box::new(writer) as Box<dyn memstead_base::backend::MemBackend>,
         )])
         .unwrap();
         let server = McpServer::new(unified, crate::config::DEFAULT_TOKEN_BUDGET);
 
-        // `default@1.0.0` is also a builtin; pinned-by-vault resolves
+        // `default@1.0.0` is also a builtin; pinned-by-mem resolves
         // first but the canonical-pin path is what agents call.
         let result = server.memstead_schema(Parameters(SchemaParams {
             verbosity: None,
             name: Some("default@1.0.0".to_string()),
-            vault: None,
+            mem: None,
         }));
         assert!(!result.is_error.unwrap_or(false));
         let text = extract_text(&result);
         assert!(text.contains("\"ref\""));
         assert!(text.contains("\"default@1.0.0\""));
 
-        // `planning@0.1.0` — no vault pins this; resolution must fall
+        // `planning@0.1.0` — no mem pins this; resolution must fall
         // through to the builtin catalogue. Prior to the fix this
         // returned ENTITY_NOT_FOUND.
         let result = server.memstead_schema(Parameters(SchemaParams {
             verbosity: None,
             name: Some("planning@0.1.0".to_string()),
-            vault: None,
+            mem: None,
         }));
         assert!(
             !result.is_error.unwrap_or(false),
@@ -6612,35 +6612,35 @@ community:
         let text = extract_text(&result);
         assert!(text.contains("\"ref\""));
         assert!(text.contains("\"planning@0.1.0\""));
-        // No vault pins planning, so used_by[] is empty.
+        // No mem pins planning, so used_by[] is empty.
         assert!(text.contains("\"used_by\": []"));
 
         // Bare-name lookup also routes through the cascade.
         let result = server.memstead_schema(Parameters(SchemaParams {
             verbosity: None,
             name: Some("planning".to_string()),
-            vault: None,
+            mem: None,
         }));
         assert!(!result.is_error.unwrap_or(false));
         let text = extract_text(&result);
         assert!(text.contains("\"planning@0.1.0\""));
     }
 
-    /// `memstead_schema(vault=<name>)` resolves the vault's pinned
+    /// `memstead_schema(mem=<name>)` resolves the mem's pinned
     /// `schema_ref` from the mount roster — closes the one-hop
     /// round-trip an agent would otherwise pay when it cold-starts
     /// through `memstead_overview` and wants to write against a specific
-    /// vault. Same wire shape as the `name`-driven path; the only
+    /// mem. Same wire shape as the `name`-driven path; the only
     /// difference is the lookup key.
     #[test]
-    fn test_memstead_schema_vault_shortcut() {
+    fn test_memstead_schema_mem_shortcut() {
         let tmp = setup_test_workspace();
-        let vault_dir = tmp.path().join("specs");
-        let writer = memstead_base::storage::FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().join("specs");
+        let writer = memstead_base::storage::FilesystemMemWriter::new(mem_dir.clone());
         let mount = memstead_base::Mount {
-            vault: "specs".to_string(),
+            mem: "specs".to_string(),
             schema: Some("default@1.0.0".parse().unwrap()),
-            storage: memstead_base::MountStorage::Folder { path: vault_dir },
+            storage: memstead_base::MountStorage::Folder { path: mem_dir },
             capability: memstead_base::MountCapability::Write,
             lifecycle: memstead_base::MountLifecycle::Eager,
             cross_linkable: true,
@@ -6648,41 +6648,41 @@ community:
         };
         let unified = memstead_base::Engine::from_mounts(vec![(
             mount,
-            Box::new(writer) as Box<dyn memstead_base::backend::VaultBackend>,
+            Box::new(writer) as Box<dyn memstead_base::backend::MemBackend>,
         )])
         .unwrap();
         let server = McpServer::new(unified, crate::config::DEFAULT_TOKEN_BUDGET);
 
-        // Happy path: vault → pinned schema.
+        // Happy path: mem → pinned schema.
         let result = server.memstead_schema(Parameters(SchemaParams {
             verbosity: None,
             name: None,
-            vault: Some("specs".to_string()),
+            mem: Some("specs".to_string()),
         }));
         assert!(!result.is_error.unwrap_or(false), "{:?}", extract_text(&result));
         let text = extract_text(&result);
         assert!(text.contains("\"default@1.0.0\""));
         assert!(text.contains("\"specs\""));
 
-        // Unknown vault: typed UNKNOWN_VAULT with `details.known_vaults`.
+        // Unknown mem: typed UNKNOWN_MEM with `details.known_mems`.
         let result = server.memstead_schema(Parameters(SchemaParams {
             verbosity: None,
             name: None,
-            vault: Some("not-a-vault".to_string()),
+            mem: Some("not-a-mem".to_string()),
         }));
         assert!(result.is_error.unwrap_or(false));
         let text = extract_text(&result);
-        assert!(text.contains("UNKNOWN_VAULT"), "got: {text}");
+        assert!(text.contains("UNKNOWN_MEM"), "got: {text}");
         let envelope = result.structured_content.as_ref().unwrap();
-        assert_eq!(envelope["code"], "UNKNOWN_VAULT");
-        let known = envelope["details"]["known_vaults"].as_array().unwrap();
+        assert_eq!(envelope["code"], "UNKNOWN_MEM");
+        let known = envelope["details"]["known_mems"].as_array().unwrap();
         assert!(known.iter().any(|v| v == "specs"));
 
-        // Conflict: both name and vault → INVALID_INPUT.
+        // Conflict: both name and mem → INVALID_INPUT.
         let result = server.memstead_schema(Parameters(SchemaParams {
             verbosity: None,
             name: Some("default".to_string()),
-            vault: Some("specs".to_string()),
+            mem: Some("specs".to_string()),
         }));
         assert!(result.is_error.unwrap_or(false));
         let envelope = result.structured_content.as_ref().unwrap();
@@ -6692,7 +6692,7 @@ community:
         let result = server.memstead_schema(Parameters(SchemaParams {
             verbosity: None,
             name: None,
-            vault: None,
+            mem: None,
         }));
         assert!(result.is_error.unwrap_or(false));
         let envelope = result.structured_content.as_ref().unwrap();
@@ -6704,12 +6704,12 @@ community:
     #[test]
     fn test_memstead_reload_via_unified_engine_path() {
         let tmp = setup_test_workspace();
-        let vault_dir = tmp.path().join("specs");
-        let writer = memstead_base::storage::FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().join("specs");
+        let writer = memstead_base::storage::FilesystemMemWriter::new(mem_dir.clone());
         let mount = memstead_base::Mount {
-            vault: "specs".to_string(),
+            mem: "specs".to_string(),
             schema: Some("default@1.0.0".parse().unwrap()),
-            storage: memstead_base::MountStorage::Folder { path: vault_dir },
+            storage: memstead_base::MountStorage::Folder { path: mem_dir },
             capability: memstead_base::MountCapability::Write,
             lifecycle: memstead_base::MountLifecycle::Eager,
             cross_linkable: true,
@@ -6717,20 +6717,20 @@ community:
         };
         let unified = memstead_base::Engine::from_mounts(vec![(
             mount,
-            Box::new(writer) as Box<dyn memstead_base::backend::VaultBackend>,
+            Box::new(writer) as Box<dyn memstead_base::backend::MemBackend>,
         )])
         .unwrap();
         let server = McpServer::new(unified, crate::config::DEFAULT_TOKEN_BUDGET);
 
         let result = server.memstead_reload(Parameters(ReloadParams {
-            vault: Some("specs".to_string()),
+            mem: Some("specs".to_string()),
         }));
         assert!(!result.is_error.unwrap_or(false));
         let text = extract_text(&result);
-        // Rich-shape response: each report carries vault, head_before,
+        // Rich-shape response: each report carries mem, head_before,
         // head_after, entities_loaded, changed_entity_ids.
         assert!(text.contains("\"reports\""));
-        assert!(text.contains("\"vault\""));
+        assert!(text.contains("\"mem\""));
         assert!(text.contains("\"head_before\""));
         assert!(text.contains("\"head_after\""));
         assert!(text.contains("\"entities_loaded\""));
@@ -6738,18 +6738,18 @@ community:
     }
 
     /// `memstead_changes_since` end-to-end with `include_notes = false`.
-    /// Folder-backed vault with no changelog returns an empty
+    /// Folder-backed mem with no changelog returns an empty
     /// `changes` array but still produces a well-formed response
-    /// carrying `vault`, `since`, `head`.
+    /// carrying `mem`, `since`, `head`.
     #[test]
     fn test_memstead_changes_since_via_unified_engine_path() {
         let tmp = setup_test_workspace();
-        let vault_dir = tmp.path().join("specs");
-        let writer = memstead_base::storage::FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().join("specs");
+        let writer = memstead_base::storage::FilesystemMemWriter::new(mem_dir.clone());
         let mount = memstead_base::Mount {
-            vault: "specs".to_string(),
+            mem: "specs".to_string(),
             schema: Some("default@1.0.0".parse().unwrap()),
-            storage: memstead_base::MountStorage::Folder { path: vault_dir },
+            storage: memstead_base::MountStorage::Folder { path: mem_dir },
             capability: memstead_base::MountCapability::Write,
             lifecycle: memstead_base::MountLifecycle::Eager,
             cross_linkable: true,
@@ -6757,22 +6757,22 @@ community:
         };
         let unified = memstead_base::Engine::from_mounts(vec![(
             mount,
-            Box::new(writer) as Box<dyn memstead_base::backend::VaultBackend>,
+            Box::new(writer) as Box<dyn memstead_base::backend::MemBackend>,
         )])
         .unwrap();
         let server = McpServer::new(unified, crate::config::DEFAULT_TOKEN_BUDGET);
 
         let result = server.memstead_changes_since(Parameters(ChangesSinceParams {
-            vault: "specs".to_string(),
+            mem: "specs".to_string(),
             since: memstead_base::ops::EMPTY_TREE_SHA.to_string(),
             rename_similarity: None,
             include_notes: false,
         }));
         assert!(!result.is_error.unwrap_or(false));
         let text = extract_text(&result);
-        // Unified ChangesReport shape: vault + since + head + changes
+        // Unified ChangesReport shape: mem + since + head + changes
         // (notes / memstead_ref absent — those are git-branch-specific).
-        assert!(text.contains("\"vault\""));
+        assert!(text.contains("\"mem\""));
         assert!(text.contains("\"since\""));
         assert!(text.contains("\"head\""));
         assert!(text.contains("\"changes\""));
@@ -6785,12 +6785,12 @@ community:
     #[test]
     fn test_unified_validation_envelopes_carry_recovery_payload() {
         let tmp = setup_test_workspace();
-        let vault_dir = tmp.path().join("specs");
-        let writer = memstead_base::storage::FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().join("specs");
+        let writer = memstead_base::storage::FilesystemMemWriter::new(mem_dir.clone());
         let mount = memstead_base::Mount {
-            vault: "specs".to_string(),
+            mem: "specs".to_string(),
             schema: Some("default@1.0.0".parse().unwrap()),
-            storage: memstead_base::MountStorage::Folder { path: vault_dir },
+            storage: memstead_base::MountStorage::Folder { path: mem_dir },
             capability: memstead_base::MountCapability::Write,
             lifecycle: memstead_base::MountLifecycle::Eager,
             cross_linkable: true,
@@ -6798,7 +6798,7 @@ community:
         };
         let unified = memstead_base::Engine::from_mounts(vec![(
             mount,
-            Box::new(writer) as Box<dyn memstead_base::backend::VaultBackend>,
+            Box::new(writer) as Box<dyn memstead_base::backend::MemBackend>,
         )])
         .unwrap();
         let server = McpServer::new(unified, crate::config::DEFAULT_TOKEN_BUDGET);
@@ -6863,12 +6863,12 @@ community:
     #[test]
     fn test_unified_mutation_handlers_emit_typed_error_envelopes() {
         let tmp = setup_test_workspace();
-        let vault_dir = tmp.path().join("specs");
-        let writer = memstead_base::storage::FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().join("specs");
+        let writer = memstead_base::storage::FilesystemMemWriter::new(mem_dir.clone());
         let mount = memstead_base::Mount {
-            vault: "specs".to_string(),
+            mem: "specs".to_string(),
             schema: Some("default@1.0.0".parse().unwrap()),
-            storage: memstead_base::MountStorage::Folder { path: vault_dir },
+            storage: memstead_base::MountStorage::Folder { path: mem_dir },
             capability: memstead_base::MountCapability::Write,
             lifecycle: memstead_base::MountLifecycle::Eager,
             cross_linkable: true,
@@ -6876,7 +6876,7 @@ community:
         };
         let unified = memstead_base::Engine::from_mounts(vec![(
             mount,
-            Box::new(writer) as Box<dyn memstead_base::backend::VaultBackend>,
+            Box::new(writer) as Box<dyn memstead_base::backend::MemBackend>,
         )])
         .unwrap();
         let server = McpServer::new(unified, crate::config::DEFAULT_TOKEN_BUDGET);
@@ -6916,8 +6916,8 @@ community:
 
     /// #55: a not-found from the *generic* `engine_err_unified` mapper
     /// carries the same recovery details as the dedicated handlers —
-    /// `suggestions` for ENTITY_NOT_FOUND, `known_vaults` for
-    /// UNKNOWN_VAULT — so the envelope is uniform regardless of which
+    /// `suggestions` for ENTITY_NOT_FOUND, `known_mems` for
+    /// UNKNOWN_MEM — so the envelope is uniform regardless of which
     /// internal path raised it.
     #[test]
     fn generic_not_found_envelopes_carry_recovery_details() {
@@ -6937,15 +6937,15 @@ community:
             "generic ENTITY_NOT_FOUND must carry suggestions: {body}"
         );
 
-        // UNKNOWN_VAULT via the reload handler's generic mapper.
-        let bad_vault = server.memstead_reload(Parameters(ReloadParams {
-            vault: Some("no-such-vault".to_string()),
+        // UNKNOWN_MEM via the reload handler's generic mapper.
+        let bad_mem = server.memstead_reload(Parameters(ReloadParams {
+            mem: Some("no-such-mem".to_string()),
         }));
-        let body2 = bad_vault.structured_content.unwrap();
-        assert_eq!(body2["code"], "UNKNOWN_VAULT");
+        let body2 = bad_mem.structured_content.unwrap();
+        assert_eq!(body2["code"], "UNKNOWN_MEM");
         assert!(
-            body2["details"]["known_vaults"].is_array(),
-            "generic UNKNOWN_VAULT must carry known_vaults: {body2}"
+            body2["details"]["known_mems"].is_array(),
+            "generic UNKNOWN_MEM must carry known_mems: {body2}"
         );
     }
 
@@ -6965,12 +6965,12 @@ community:
     #[test]
     fn text_channel_carries_typed_error_code_inline() {
         let tmp = setup_test_workspace();
-        let vault_dir = tmp.path().join("specs");
-        let writer = memstead_base::storage::FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().join("specs");
+        let writer = memstead_base::storage::FilesystemMemWriter::new(mem_dir.clone());
         let mount = memstead_base::Mount {
-            vault: "specs".to_string(),
+            mem: "specs".to_string(),
             schema: Some("default@1.0.0".parse().unwrap()),
-            storage: memstead_base::MountStorage::Folder { path: vault_dir },
+            storage: memstead_base::MountStorage::Folder { path: mem_dir },
             capability: memstead_base::MountCapability::Write,
             lifecycle: memstead_base::MountLifecycle::Eager,
             cross_linkable: true,
@@ -6978,7 +6978,7 @@ community:
         };
         let unified = memstead_base::Engine::from_mounts(vec![(
             mount,
-            Box::new(writer) as Box<dyn memstead_base::backend::VaultBackend>,
+            Box::new(writer) as Box<dyn memstead_base::backend::MemBackend>,
         )])
         .unwrap();
         let server = McpServer::new(unified, crate::config::DEFAULT_TOKEN_BUDGET);
@@ -7010,9 +7010,9 @@ community:
             );
         }
 
-        // UNKNOWN_VAULT — create against a vault that isn't mounted.
-        let unknown_vault = server.memstead_create(Parameters(CreateParams {
-            vault: Some("nonexistent-vault".to_string()),
+        // UNKNOWN_MEM — create against a mem that isn't mounted.
+        let unknown_mem = server.memstead_create(Parameters(CreateParams {
+            mem: Some("nonexistent-mem".to_string()),
             title: "Anything".to_string(),
             entity_type: "spec".to_string(),
             sections: None,
@@ -7021,11 +7021,11 @@ community:
             dry_run: None,
             note: None,
         }));
-        assert_text_carries_code(&unknown_vault, "UNKNOWN_VAULT");
+        assert_text_carries_code(&unknown_mem, "UNKNOWN_MEM");
 
         // UNKNOWN_ENTITY_TYPE — create with an undeclared type.
         let unknown_type = server.memstead_create(Parameters(CreateParams {
-            vault: Some("specs".to_string()),
+            mem: Some("specs".to_string()),
             title: "Misshapen".to_string(),
             entity_type: "definitely-not-a-real-type".to_string(),
             sections: None,
@@ -7110,7 +7110,7 @@ community:
         dup_sections.insert("purpose".to_string(), "the purpose".to_string());
         let _seed = server
             .memstead_create(Parameters(CreateParams {
-                vault: Some("specs".to_string()),
+                mem: Some("specs".to_string()),
                 title: "Duplicate Probe".to_string(),
                 entity_type: "spec".to_string(),
                 sections: Some(dup_sections.clone()),
@@ -7120,7 +7120,7 @@ community:
                 note: None,
             }));
         let dup = server.memstead_create(Parameters(CreateParams {
-            vault: Some("specs".to_string()),
+            mem: Some("specs".to_string()),
             title: "Duplicate Probe".to_string(),
             entity_type: "spec".to_string(),
             sections: Some(dup_sections),
@@ -7139,7 +7139,7 @@ community:
     /// the wildcard `INTERNAL` arm in `engine_err_unified`, hiding
     /// the typed code from agents branching on `structured_content`.
     /// The filesystem-server projection already carries the variant;
-    /// this test exercises the vault-repo path that was diverging.
+    /// this test exercises the mem-repo path that was diverging.
     #[test]
     fn relation_has_body_links_surfaces_on_unified_server() {
         let (server, _tmp) = setup_test_engine();
@@ -7158,7 +7158,7 @@ community:
         // `manual_authoring: forbidden` posture, so the declaration
         // stays empty and the synthesis path produces the relation.
         let created = server.memstead_create(Parameters(CreateParams {
-            vault: Some("specs".to_string()),
+            mem: Some("specs".to_string()),
             title: "Body Link Source".to_string(),
             entity_type: "spec".to_string(),
             sections: Some(sections),
@@ -7222,10 +7222,10 @@ community:
     fn create_title_length_capped_in_sync_with_read_path() {
         let (server, _tmp) = setup_test_engine();
         let max = memstead_base::ENTITY_ID_MAX_LEN;
-        let vault = "specs";
-        // vault.len()=5 + "--"=2 ⇒ 7-char prefix. Slug-friendly title
+        let mem = "specs";
+        // mem.len()=5 + "--"=2 ⇒ 7-char prefix. Slug-friendly title
         // entirely of letters; lowercase already, so slug == title.
-        let prefix_len = vault.len() + "--".len();
+        let prefix_len = mem.len() + "--".len();
 
         // Title whose derived id sits at the cap → accepted. Seed
         // identity + purpose so the spec lands.
@@ -7234,7 +7234,7 @@ community:
         seed_sections.insert("identity".to_string(), "the identity".to_string());
         seed_sections.insert("purpose".to_string(), "the purpose".to_string());
         let ok = server.memstead_create(Parameters(CreateParams {
-            vault: Some(vault.to_string()),
+            mem: Some(mem.to_string()),
             title: just_fits_title.clone(),
             entity_type: "spec".to_string(),
             sections: Some(seed_sections.clone()),
@@ -7251,7 +7251,7 @@ community:
 
         // Read-path symmetry — the surviving entity is reachable.
         let read = server.memstead_entity(Parameters(EntityParams {
-            id: format!("{vault}--{just_fits_title}"),
+            id: format!("{mem}--{just_fits_title}"),
             include_relations: None,
             include_context: None,
             sections: None,
@@ -7267,7 +7267,7 @@ community:
         // One character over → INVALID_TITLE envelope with recovery payload.
         let over_title = "a".repeat(max - prefix_len + 1);
         let too_long = server.memstead_create(Parameters(CreateParams {
-            vault: Some(vault.to_string()),
+            mem: Some(mem.to_string()),
             title: over_title.clone(),
             entity_type: "spec".to_string(),
             sections: None,
@@ -7296,7 +7296,7 @@ community:
         assert_eq!(payload["details"]["reason"], "id_too_long");
         assert_eq!(payload["details"]["length"].as_u64(), Some((max + 1) as u64));
         assert_eq!(payload["details"]["max"].as_u64(), Some(max as u64));
-        let echoed_id = format!("{vault}--{over_title}");
+        let echoed_id = format!("{mem}--{over_title}");
         assert_eq!(payload["details"]["input"].as_str(), Some(echoed_id.as_str()));
         assert_eq!(
             payload["details"]["input"].as_str().unwrap().chars().count() as u64,
@@ -7323,7 +7323,7 @@ community:
         bad.insert("identity".to_string(), "ok".to_string());
         bad.insert("purpose".to_string(), "line1\u{0}line2".to_string());
         let create = server.memstead_create(Parameters(CreateParams {
-            vault: Some("specs".to_string()),
+            mem: Some("specs".to_string()),
             title: "Nul Carrier".to_string(),
             entity_type: "spec".to_string(),
             sections: Some(bad),
@@ -7359,7 +7359,7 @@ community:
         clean.insert("identity".to_string(), "ok".to_string());
         clean.insert("purpose".to_string(), "clean body".to_string());
         let ok = server.memstead_create(Parameters(CreateParams {
-            vault: Some("specs".to_string()),
+            mem: Some("specs".to_string()),
             title: "Clean Carrier".to_string(),
             entity_type: "spec".to_string(),
             sections: Some(clean),
@@ -7422,7 +7422,7 @@ community:
             native_sections.insert("identity".to_string(), "identity".to_string());
             native_sections.insert("purpose".to_string(), "purpose".to_string());
             let create = server.memstead_create(Parameters(CreateParams {
-                vault: Some("specs".to_string()),
+                mem: Some("specs".to_string()),
                 title: title.to_string(),
                 entity_type: "spec".to_string(),
                 sections: Some(native_sections),
@@ -7495,7 +7495,7 @@ community:
     fn all_emoji_title_refuses_with_invalid_title_envelope() {
         let (server, _tmp) = setup_test_engine();
         let create = server.memstead_create(Parameters(CreateParams {
-            vault: Some("specs".to_string()),
+            mem: Some("specs".to_string()),
             title: "🚀✨".to_string(),
             entity_type: "spec".to_string(),
             sections: None,
@@ -7542,7 +7542,7 @@ community:
     fn control_char_title_refuses_with_invalid_title_envelope() {
         let (server, _tmp) = setup_test_engine();
         let create = server.memstead_create(Parameters(CreateParams {
-            vault: Some("specs".to_string()),
+            mem: Some("specs".to_string()),
             title: "Tab\tand\nnewline title".to_string(),
             entity_type: "spec".to_string(),
             sections: None,
@@ -7583,12 +7583,12 @@ community:
     #[test]
     fn test_memstead_relate_via_unified_engine_path() {
         let tmp = setup_test_workspace();
-        let vault_dir = tmp.path().join("specs");
-        let writer = memstead_base::storage::FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().join("specs");
+        let writer = memstead_base::storage::FilesystemMemWriter::new(mem_dir.clone());
         let mount = memstead_base::Mount {
-            vault: "specs".to_string(),
+            mem: "specs".to_string(),
             schema: Some("default@1.0.0".parse().unwrap()),
-            storage: memstead_base::MountStorage::Folder { path: vault_dir },
+            storage: memstead_base::MountStorage::Folder { path: mem_dir },
             capability: memstead_base::MountCapability::Write,
             lifecycle: memstead_base::MountLifecycle::Eager,
             cross_linkable: true,
@@ -7596,7 +7596,7 @@ community:
         };
         let unified = memstead_base::Engine::from_mounts(vec![(
             mount,
-            Box::new(writer) as Box<dyn memstead_base::backend::VaultBackend>,
+            Box::new(writer) as Box<dyn memstead_base::backend::MemBackend>,
         )])
         .unwrap();
         let server = McpServer::new(unified, crate::config::DEFAULT_TOKEN_BUDGET);
@@ -7621,8 +7621,8 @@ community:
         assert!(text.contains("\"source\": \"explicit\""));
         assert!(text.contains("\"_hash\""));
         assert!(text.contains("\"commit_sha\""));
-        // Schema anchor injected via vault_schema_ref_unified.
-        assert!(text.contains("\"_vault_schema\""));
+        // Schema anchor injected via mem_schema_ref_unified.
+        assert!(text.contains("\"_mem_schema\""));
 
         // Stub-creation path: relate to a non-existent target. The
         // unified engine creates the stub and surfaces it as an
@@ -7659,12 +7659,12 @@ community:
     #[test]
     fn test_memstead_update_via_unified_engine_path() {
         let tmp = setup_test_workspace();
-        let vault_dir = tmp.path().join("specs");
-        let writer = memstead_base::storage::FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().join("specs");
+        let writer = memstead_base::storage::FilesystemMemWriter::new(mem_dir.clone());
         let mount = memstead_base::Mount {
-            vault: "specs".to_string(),
+            mem: "specs".to_string(),
             schema: Some("default@1.0.0".parse().unwrap()),
-            storage: memstead_base::MountStorage::Folder { path: vault_dir },
+            storage: memstead_base::MountStorage::Folder { path: mem_dir },
             capability: memstead_base::MountCapability::Write,
             lifecycle: memstead_base::MountLifecycle::Eager,
             cross_linkable: true,
@@ -7672,7 +7672,7 @@ community:
         };
         let unified = memstead_base::Engine::from_mounts(vec![(
             mount,
-            Box::new(writer) as Box<dyn memstead_base::backend::VaultBackend>,
+            Box::new(writer) as Box<dyn memstead_base::backend::MemBackend>,
         )])
         .unwrap();
         let server = McpServer::new(unified, crate::config::DEFAULT_TOKEN_BUDGET);
@@ -7706,7 +7706,7 @@ community:
         let text = extract_text(&result);
         // Pro-shape wire fields: id, title, nested
         // modified_sections/modified_metadata, content_hash,
-        // commit_sha, _vault_schema.
+        // commit_sha, _mem_schema.
         assert!(text.contains("\"id\""));
         assert!(text.contains("\"title\""));
         assert!(text.contains("\"modified_sections\""));
@@ -7715,7 +7715,7 @@ community:
         assert!(text.contains("\"modified_metadata\""));
         assert!(text.contains("\"_hash\""));
         assert!(text.contains("\"commit_sha\""));
-        assert!(text.contains("\"_vault_schema\""));
+        assert!(text.contains("\"_mem_schema\""));
         // Empty append/patch slots stripped to match pro's
         // skip_serializing_if convention.
         assert!(
@@ -7734,12 +7734,12 @@ community:
     #[test]
     fn test_memstead_create_via_unified_engine_path() {
         let tmp = setup_test_workspace();
-        let vault_dir = tmp.path().join("specs");
-        let writer = memstead_base::storage::FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().join("specs");
+        let writer = memstead_base::storage::FilesystemMemWriter::new(mem_dir.clone());
         let mount = memstead_base::Mount {
-            vault: "specs".to_string(),
+            mem: "specs".to_string(),
             schema: Some("default@1.0.0".parse().unwrap()),
-            storage: memstead_base::MountStorage::Folder { path: vault_dir },
+            storage: memstead_base::MountStorage::Folder { path: mem_dir },
             capability: memstead_base::MountCapability::Write,
             lifecycle: memstead_base::MountLifecycle::Eager,
             cross_linkable: true,
@@ -7747,7 +7747,7 @@ community:
         };
         let unified = memstead_base::Engine::from_mounts(vec![(
             mount,
-            Box::new(writer) as Box<dyn memstead_base::backend::VaultBackend>,
+            Box::new(writer) as Box<dyn memstead_base::backend::MemBackend>,
         )])
         .unwrap();
         let server = McpServer::new(unified, crate::config::DEFAULT_TOKEN_BUDGET);
@@ -7762,7 +7762,7 @@ community:
         let result = server.memstead_create(Parameters(CreateParams {
             title: "Brand New Spec".to_string(),
             entity_type: "spec".to_string(),
-            vault: None,
+            mem: None,
             sections: Some(sections),
             metadata: None,
             relations: None,
@@ -7771,16 +7771,16 @@ community:
         }));
         assert!(!result.is_error.unwrap_or(false), "{}", extract_text(&result));
         let text = extract_text(&result);
-        // Pro-shape wire fields: id, title, vault, file_path,
-        // created_date, content_hash, commit_sha, _vault_schema.
+        // Pro-shape wire fields: id, title, mem, file_path,
+        // created_date, content_hash, commit_sha, _mem_schema.
         assert!(text.contains("\"id\""));
         assert!(text.contains("\"title\": \"Brand New Spec\""));
-        assert!(text.contains("\"vault\": \"specs\""));
+        assert!(text.contains("\"mem\": \"specs\""));
         assert!(text.contains("\"file_path\": \"brand-new-spec.md\""));
         assert!(text.contains("\"created_date\""));
         assert!(text.contains("\"_hash\""));
         assert!(text.contains("\"commit_sha\""));
-        assert!(text.contains("\"_vault_schema\""));
+        assert!(text.contains("\"_mem_schema\""));
         // Greenfield: incoming_count + incoming skip-serialised.
         assert!(
             !text.contains("\"incoming_count\""),
@@ -7790,7 +7790,7 @@ community:
         // dry_run path falls back to the pro engine — verified by
         // observing the response carries the same pro shape but the
         // unified engine wasn't touched (we'd see two entities if
-        // it had been). With no pro vault wired, dry_run on the
+        // it had been). With no pro mem wired, dry_run on the
         // unified branch is unreachable in this test fixture; we
         // skip exercising it here (covered by pro-side tests).
 
@@ -7816,7 +7816,7 @@ community:
         let adopt = server.memstead_create(Parameters(CreateParams {
             title: "Future Decision".to_string(),
             entity_type: "spec".to_string(),
-            vault: None,
+            mem: None,
             sections: Some(adopt_sections),
             metadata: None,
             relations: None,
@@ -7838,12 +7838,12 @@ community:
     #[test]
     fn test_memstead_delete_via_unified_engine_path() {
         let tmp = setup_test_workspace();
-        let vault_dir = tmp.path().join("specs");
-        let writer = memstead_base::storage::FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().join("specs");
+        let writer = memstead_base::storage::FilesystemMemWriter::new(mem_dir.clone());
         let mount = memstead_base::Mount {
-            vault: "specs".to_string(),
+            mem: "specs".to_string(),
             schema: Some("default@1.0.0".parse().unwrap()),
-            storage: memstead_base::MountStorage::Folder { path: vault_dir },
+            storage: memstead_base::MountStorage::Folder { path: mem_dir },
             capability: memstead_base::MountCapability::Write,
             lifecycle: memstead_base::MountLifecycle::Eager,
             cross_linkable: true,
@@ -7851,7 +7851,7 @@ community:
         };
         let unified = memstead_base::Engine::from_mounts(vec![(
             mount,
-            Box::new(writer) as Box<dyn memstead_base::backend::VaultBackend>,
+            Box::new(writer) as Box<dyn memstead_base::backend::MemBackend>,
         )])
         .unwrap();
         let server = McpServer::new(unified, crate::config::DEFAULT_TOKEN_BUDGET);
@@ -7888,7 +7888,7 @@ community:
             "wire shape must skip removed_incoming",
         );
         // Schema anchor injected.
-        assert!(text.contains("\"_vault_schema\""));
+        assert!(text.contains("\"_mem_schema\""));
 
         // Confirm the entity is gone from the unified store.
         {
@@ -7908,12 +7908,12 @@ community:
     #[test]
     fn test_memstead_rename_via_unified_engine_path() {
         let tmp = setup_test_workspace();
-        let vault_dir = tmp.path().join("specs");
-        let writer = memstead_base::storage::FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().join("specs");
+        let writer = memstead_base::storage::FilesystemMemWriter::new(mem_dir.clone());
         let mount = memstead_base::Mount {
-            vault: "specs".to_string(),
+            mem: "specs".to_string(),
             schema: Some("default@1.0.0".parse().unwrap()),
-            storage: memstead_base::MountStorage::Folder { path: vault_dir },
+            storage: memstead_base::MountStorage::Folder { path: mem_dir },
             capability: memstead_base::MountCapability::Write,
             lifecycle: memstead_base::MountLifecycle::Eager,
             cross_linkable: true,
@@ -7921,7 +7921,7 @@ community:
         };
         let unified = memstead_base::Engine::from_mounts(vec![(
             mount,
-            Box::new(writer) as Box<dyn memstead_base::backend::VaultBackend>,
+            Box::new(writer) as Box<dyn memstead_base::backend::MemBackend>,
         )])
         .unwrap();
         let server = McpServer::new(unified, crate::config::DEFAULT_TOKEN_BUDGET);
@@ -7954,7 +7954,7 @@ community:
         assert!(text.contains("\"new_path\""));
         assert!(text.contains("\"_hash\""));
         assert!(text.contains("\"commit_sha\""));
-        assert!(text.contains("\"_vault_schema\""));
+        assert!(text.contains("\"_mem_schema\""));
         // The new title's slug should appear in the new id/path.
         assert!(text.contains("renamed-entity-a"));
 
@@ -8044,7 +8044,7 @@ community:
         let _ = server.memstead_overview(Parameters(OverviewParams {
             rebuild: Some(true),
             chunk: None,
-            vault: None,
+            mem: None,
             include: None,
             token_budget: None,
         }));
@@ -8069,7 +8069,7 @@ community:
         let _ = server.memstead_overview(Parameters(OverviewParams {
             rebuild: Some(true),
             chunk: None,
-            vault: None,
+            mem: None,
             include: None,
             token_budget: None,
         }));
@@ -8095,7 +8095,7 @@ community:
                 any: vec!["Entity".into(), "A".into()],
                 ..Default::default()
             }),
-            vault: None,
+            mem: None,
             entity_type: None,
             expand_via: None,
             expand_depth: None,
@@ -8122,7 +8122,7 @@ community:
         let (server, _tmp) = setup_dual_test_engine();
         let result = server.memstead_search(Parameters(SearchParams {
             query: None,
-            vault: None,
+            mem: None,
             entity_type: Some("spec".to_string()),
             expand_via: None,
             expand_depth: None,
@@ -8154,7 +8154,7 @@ community:
                 any: vec!["Entity".into(), "A".into()],
                 ..Default::default()
             }),
-            vault: None,
+            mem: None,
             entity_type: None,
             expand_via: None,
             expand_depth: None,
@@ -8200,7 +8200,7 @@ community:
         // Filter-only mode — absorbed-list path.
         let filter_only = server.memstead_search(Parameters(SearchParams {
             query: None,
-            vault: None,
+            mem: None,
             entity_type: Some("spec".to_string()),
             expand_via: None,
             expand_depth: None,
@@ -8235,7 +8235,7 @@ community:
         // First page: limit=1, offset=0
         let page1 = extract_text(&server.memstead_search(Parameters(SearchParams {
             query: None,
-            vault: None,
+            mem: None,
             entity_type: Some("spec".to_string()),
             expand_via: None,
             expand_depth: None,
@@ -8255,7 +8255,7 @@ community:
         // Second page: limit=1, offset=1
         let page2 = extract_text(&server.memstead_search(Parameters(SearchParams {
             query: None,
-            vault: None,
+            mem: None,
             entity_type: Some("spec".to_string()),
             expand_via: None,
             expand_depth: None,
@@ -8284,17 +8284,17 @@ community:
     fn test_memstead_search_via_unified_engine_path() {
         let tmp = setup_test_workspace();
 
-        // Construct a unified engine reading the same vault directory
+        // Construct a unified engine reading the same mem directory
         // the pro engine reads. The folder backend trait impl on
-        // FilesystemVaultWriter walks the vault tree on `from_mounts`,
+        // FilesystemMemWriter walks the mem tree on `from_mounts`,
         // populating the unified store with the same entities pro
         // already loaded.
-        let vault_dir = tmp.path().join("specs");
-        let writer = memstead_base::storage::FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().join("specs");
+        let writer = memstead_base::storage::FilesystemMemWriter::new(mem_dir.clone());
         let mount = memstead_base::Mount {
-            vault: "specs".to_string(),
+            mem: "specs".to_string(),
             schema: Some("default@1.0.0".parse().unwrap()),
-            storage: memstead_base::MountStorage::Folder { path: vault_dir },
+            storage: memstead_base::MountStorage::Folder { path: mem_dir },
             capability: memstead_base::MountCapability::Write,
             lifecycle: memstead_base::MountLifecycle::Eager,
             cross_linkable: true,
@@ -8302,7 +8302,7 @@ community:
         };
         let unified = memstead_base::Engine::from_mounts(vec![(
             mount,
-            Box::new(writer) as Box<dyn memstead_base::backend::VaultBackend>,
+            Box::new(writer) as Box<dyn memstead_base::backend::MemBackend>,
         )])
         .unwrap();
         let server = McpServer::new(unified, crate::config::DEFAULT_TOKEN_BUDGET);
@@ -8313,7 +8313,7 @@ community:
                 any: vec!["Entity".into(), "A".into()],
                 ..Default::default()
             }),
-            vault: None,
+            mem: None,
             entity_type: None,
             expand_via: None,
             expand_depth: None,
@@ -8340,7 +8340,7 @@ community:
         let result = server.memstead_overview(Parameters(OverviewParams {
             rebuild: None,
             chunk: None,
-            vault: None,
+            mem: None,
             include: None,
             token_budget: None,
         }));
@@ -8348,16 +8348,16 @@ community:
         assert!(text.contains("_cluster_count:"));
     }
 
-    /// Overview carries schemas, vaults, communities, budget metadata
+    /// Overview carries schemas, mems, communities, budget metadata
     /// as Markdown (no JSON sidecar). Schema bodies live on
     /// `memstead_schema(name=...)` — overview lists `{ref, description}` only.
     #[test]
-    fn overview_includes_schemas_vaults_communities() {
+    fn overview_includes_schemas_mems_communities() {
         let (server, _tmp) = setup_dual_test_engine();
         let result = server.memstead_overview(Parameters(OverviewParams {
             rebuild: Some(true),
             chunk: None,
-            vault: None,
+            mem: None,
             include: None,
             token_budget: Some(16000),
         }));
@@ -8367,7 +8367,7 @@ community:
         );
         let parsed = ParsedOverview::from(&result);
 
-        // Schemas block — one writable vault → one schema entry.
+        // Schemas block — one writable mem → one schema entry.
         assert_eq!(parsed.schema_refs(), vec!["default@1.0.0".to_string()]);
 
         // Schema bodies are no longer in overview — the lite catalogue
@@ -8388,16 +8388,16 @@ community:
             parsed.text
         );
 
-        // Vaults block.
-        assert_eq!(parsed.vault_names(), vec!["specs".to_string()]);
+        // Mems block.
+        assert_eq!(parsed.mem_names(), vec!["specs".to_string()]);
         assert!(parsed.text.contains("- **Schema:** default@1.0.0"));
-        // F1: per-vault `version` surfaces under the Vaults block so
+        // F1: per-mem `version` surfaces under the Mems block so
         // an agent reading the overview sees the publish version
         // without a separate `memstead_health include_config` round-trip.
         // The test fixture seeds `version: "0.1.0"`.
         assert!(
             parsed.text.contains("- **Version:** 0.1.0"),
-            "Vaults block must surface the per-vault version; got:\n{}",
+            "Mems block must surface the per-mem version; got:\n{}",
             parsed.text,
         );
 
@@ -8408,15 +8408,15 @@ community:
     }
 
     /// Cold-start path: empty graph, but the schema block must still be full.
-    /// Guards against the failure mode where an agent hits a fresh vault, has
+    /// Guards against the failure mode where an agent hits a fresh mem, has
     /// nothing to read-before-write, and lacks any template to author from.
     #[test]
     fn overview_on_empty_graph_still_returns_schema() {
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().join("empty");
-        fs::create_dir_all(vault_dir.join(".memstead")).unwrap();
+        let mem_dir = tmp.path().join("empty");
+        fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
         fs::write(
-            vault_dir.join(".memstead/config.json"),
+            mem_dir.join(".memstead/config.json"),
             r#"{"version":"0.1.0","schema":"default@1.0.0","mediums":{},"projections":{}}"#,
         )
         .unwrap();
@@ -8424,12 +8424,12 @@ community:
         memstead_git_branch::test_support::auto_seeded_settings(tmp.path());
         let server = McpServer::new(setup_unified_test_engine(tmp.path()), crate::config::DEFAULT_TOKEN_BUDGET);
 
-        // See `overview_includes_schemas_vaults_communities` for the
+        // See `overview_includes_schemas_mems_communities` for the
         // budget rationale.
         let result = server.memstead_overview(Parameters(OverviewParams {
             rebuild: Some(true),
             chunk: None,
-            vault: None,
+            mem: None,
             include: None,
             token_budget: Some(16000),
         }));
@@ -8445,7 +8445,7 @@ community:
             parsed.text
         );
 
-        assert_eq!(parsed.vault_names(), vec!["empty".to_string()]);
+        assert_eq!(parsed.mem_names(), vec!["empty".to_string()]);
         assert!(parsed.text.contains("- **Entities:** 0"));
 
         // Empty graph: the heavy-content pool is trivial — nothing to drop.
@@ -8457,10 +8457,10 @@ community:
         );
     }
 
-    /// Two writable vaults pinned to the same schema collapse into one
+    /// Two writable mems pinned to the same schema collapse into one
     /// `schemas[]` entry — deduplicated by `ref`, with `used_by` carrying
-    /// both vault names in sorted order. Keeps the cold-start payload
-    /// tractable when a workspace has many vaults on a shared schema.
+    /// both mem names in sorted order. Keeps the cold-start payload
+    /// tractable when a workspace has many mems on a shared schema.
     #[test]
     fn overview_dedups_shared_schema() {
         let tmp = TempDir::new().unwrap();
@@ -8488,7 +8488,7 @@ community:
         let result = server.memstead_overview(Parameters(OverviewParams {
             rebuild: Some(true),
             chunk: None,
-            vault: None,
+            mem: None,
             include: None,
             token_budget: None,
         }));
@@ -8498,10 +8498,10 @@ community:
         assert_eq!(
             parsed.schema_refs(),
             vec!["default@1.0.0".to_string()],
-            "two vaults on the same schema → exactly one schema heading"
+            "two mems on the same schema → exactly one schema heading"
         );
         // `used_by` left overview's `## Schemas` section with the schema-tool
-        // split; both vaults still appear under `## Vaults`, and an agent
+        // split; both mems still appear under `## Mems`, and an agent
         // resolves the pinning by calling `memstead_schema(name=default@1.0.0)`.
         assert!(
             !parsed.text.contains("**Used by:**"),
@@ -8509,19 +8509,19 @@ community:
             parsed.text
         );
         assert_eq!(
-            parsed.vault_names(),
+            parsed.mem_names(),
             vec!["alpha".to_string(), "beta".to_string()],
-            "both writable vaults must appear"
+            "both writable mems must appear"
         );
         assert!(!parsed.overview_mode().is_empty());
     }
 
-    /// Build a two-vault engine (alpha + beta, both pinned to `default@1.0.0`)
-    /// with one entity each — enough to exercise the `vault` filter
+    /// Build a two-mem engine (alpha + beta, both pinned to `default@1.0.0`)
+    /// with one entity each — enough to exercise the `mem` filter
     /// without fighting per-test fixture boilerplate. Returns the server
     /// plus the tempdir so callers can keep it alive for the duration
     /// of the test.
-    fn setup_two_vault_engine() -> (McpServer, TempDir) {
+    fn setup_two_mem_engine() -> (McpServer, TempDir) {
         let tmp = TempDir::new().unwrap();
 
         let alpha_dir = tmp.path().join("alpha");
@@ -8533,7 +8533,7 @@ community:
         .unwrap();
         fs::write(
             alpha_dir.join("alpha-root.md"),
-            "---\ntype: spec\ncreated_date: 2026-01-15\nlast_modified: 2026-04-12\nlevel: M0\n---\n# Alpha Root\n\n## Identity\n\nAlpha vault's seed entity.\n\n## Purpose\n\nFilter test fixture.\n",
+            "---\ntype: spec\ncreated_date: 2026-01-15\nlast_modified: 2026-04-12\nlevel: M0\n---\n# Alpha Root\n\n## Identity\n\nAlpha mem's seed entity.\n\n## Purpose\n\nFilter test fixture.\n",
         )
         .unwrap();
 
@@ -8546,7 +8546,7 @@ community:
         .unwrap();
         fs::write(
             beta_dir.join("beta-root.md"),
-            "---\ntype: spec\ncreated_date: 2026-01-15\nlast_modified: 2026-04-12\nlevel: M0\n---\n# Beta Root\n\n## Identity\n\nBeta vault's seed entity.\n\n## Purpose\n\nFilter test fixture.\n",
+            "---\ntype: spec\ncreated_date: 2026-01-15\nlast_modified: 2026-04-12\nlevel: M0\n---\n# Beta Root\n\n## Identity\n\nBeta mem's seed entity.\n\n## Purpose\n\nFilter test fixture.\n",
         )
         .unwrap();
 
@@ -8557,25 +8557,25 @@ community:
         (server, tmp)
     }
 
-    /// `vault` filter narrows `vaults[]` to one entry and `schemas[]` to the
-    /// ref that vault uses — but `used_by` inside each schema still lists
-    /// every vault sharing it, so the agent keeps global context.
+    /// `mem` filter narrows `mems[]` to one entry and `schemas[]` to the
+    /// ref that mem uses — but `used_by` inside each schema still lists
+    /// every mem sharing it, so the agent keeps global context.
     #[test]
-    fn overview_filtered_to_one_vault() {
-        let (server, _tmp) = setup_two_vault_engine();
+    fn overview_filtered_to_one_mem() {
+        let (server, _tmp) = setup_two_mem_engine();
 
         let result = server.memstead_overview(Parameters(OverviewParams {
             rebuild: Some(true),
             chunk: None,
-            vault: Some("alpha".to_string()),
+            mem: Some("alpha".to_string()),
             include: None,
             token_budget: None,
         }));
         assert!(result.structured_content.is_none());
         let parsed = ParsedOverview::from(&result);
 
-        // Filtered vault — only `alpha` appears in the vault block.
-        assert_eq!(parsed.vault_names(), vec!["alpha".to_string()]);
+        // Filtered mem — only `alpha` appears in the mem block.
+        assert_eq!(parsed.mem_names(), vec!["alpha".to_string()]);
         assert_eq!(parsed.schema_refs(), vec!["default@1.0.0".to_string()]);
         // `used_by` moved to memstead_schema's response; overview no longer
         // ships it. Agents fetch the pinning list with one
@@ -8600,22 +8600,22 @@ community:
     // Budget-driven overview coverage.
     // ----------------------------------------------------------------------
 
-    /// Build a two-vault engine then establish a cross-vault edge via
-    /// `memstead_relate` so community detection treats the two vaults as
+    /// Build a two-mem engine then establish a cross-mem edge via
+    /// `memstead_relate` so community detection treats the two mems as
     /// separate clusters bridged by an inter-cluster edge. Returns the
     /// server plus the tempdir.
     ///
-    /// Note: `memstead_relate` rejects cross-vault edges, so for these tests
-    /// we seed two entities inside one vault but in structurally-distinct
-    /// Louvain neighbourhoods by wiring many same-vault leaves to each
+    /// Note: `memstead_relate` rejects cross-mem edges, so for these tests
+    /// we seed two entities inside one mem but in structurally-distinct
+    /// Louvain neighbourhoods by wiring many same-mem leaves to each
     /// root. Louvain produces two clusters, the single root↔root edge is
     /// inter-cluster, and `community_bridges` picks it up.
     fn setup_bridge_engine() -> (McpServer, TempDir) {
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().join("bridge");
-        fs::create_dir_all(vault_dir.join(".memstead")).unwrap();
+        let mem_dir = tmp.path().join("bridge");
+        fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
         fs::write(
-            vault_dir.join(".memstead/config.json"),
+            mem_dir.join(".memstead/config.json"),
             r#"{"version":"0.1.0","schema":"default@1.0.0","mediums":{},"projections":{}}"#,
         )
         .unwrap();
@@ -8630,14 +8630,14 @@ community:
             let body = format!(
                 "{fm}# {name}\n\n## Identity\n\nHub {name}.\n\n## Purpose\n\nBridge fixture.\n\n## Relationships\n\n{rels}"
             );
-            fs::write(vault_dir.join(format!("{name}.md")), body).unwrap();
+            fs::write(mem_dir.join(format!("{name}.md")), body).unwrap();
         }
         for side in ["alpha", "beta"] {
             for i in 0..4 {
                 let body = format!(
                     "{fm}# {side} leaf {i}\n\n## Identity\n\nLeaf {i} of {side}.\n\n## Purpose\n\nCluster filler.\n\n## Relationships\n\n- **USES**: [[{side}-hub]]\n"
                 );
-                fs::write(vault_dir.join(format!("{side}-leaf-{i}.md")), body).unwrap();
+                fs::write(mem_dir.join(format!("{side}-leaf-{i}.md")), body).unwrap();
             }
         }
 
@@ -8655,7 +8655,7 @@ community:
         let result = server.memstead_overview(Parameters(OverviewParams {
             rebuild: Some(true),
             chunk: None,
-            vault: None,
+            mem: None,
             include: None,
             token_budget: None,
         }));
@@ -8670,7 +8670,7 @@ community:
         let result = server.memstead_overview(Parameters(OverviewParams {
             rebuild: Some(true),
             chunk: None,
-            vault: None,
+            mem: None,
             include: None,
             token_budget: Some(2000),
         }));
@@ -8686,7 +8686,7 @@ community:
         let result = server.memstead_overview(Parameters(OverviewParams {
             rebuild: Some(true),
             chunk: None,
-            vault: None,
+            mem: None,
             include: None,
             token_budget: Some(16000),
         }));
@@ -8706,28 +8706,28 @@ community:
             "Schemas block must point at the new memstead_schema reader; got:\n{}",
             parsed.text
         );
-        // vault_distribution shipped → per-vault `By type` row renders.
+        // mem_distribution shipped → per-mem `By type` row renders.
         assert!(
             parsed.text.contains("**By type:**"),
-            "vault_distribution shipped ⇒ 'By type' row; got:\n{}",
+            "mem_distribution shipped ⇒ 'By type' row; got:\n{}",
             parsed.text
         );
         assert!(parsed.budget_used() <= 16000);
     }
 
-    /// Tight budget forces heavy keys (community_members, vault_distribution,
+    /// Tight budget forces heavy keys (community_members, mem_distribution,
     /// community_bridges, dangling_links) to drop into `## Hints`. Schema
     /// bodies are no longer in this set — they live on `memstead_schema`.
     #[test]
     fn overview_large_graph_over_budget_reduces_with_hints() {
         let (server, _tmp) = setup_dual_test_engine();
-        // Budget of 30 is below community_members + vault_distribution costs
-        // on the test fixture, but slim schema list + vault roster must
+        // Budget of 30 is below community_members + mem_distribution costs
+        // on the test fixture, but slim schema list + mem roster must
         // always ship as hard-required.
         let result = server.memstead_overview(Parameters(OverviewParams {
             rebuild: Some(true),
             chunk: None,
-            vault: None,
+            mem: None,
             include: None,
             token_budget: Some(30),
         }));
@@ -8759,7 +8759,7 @@ community:
         let result = server.memstead_overview(Parameters(OverviewParams {
             rebuild: Some(true),
             chunk: None,
-            vault: None,
+            mem: None,
             include: Some(vec!["community_members".to_string()]),
             token_budget: Some(50),
         }));
@@ -8786,7 +8786,7 @@ community:
         let result = server.memstead_overview(Parameters(OverviewParams {
             rebuild: Some(true),
             chunk: None,
-            vault: None,
+            mem: None,
             include: Some(vec!["schema_types".to_string()]),
             token_budget: None,
         }));
@@ -8809,12 +8809,12 @@ community:
     #[test]
     fn overview_hints_render_in_markdown_body() {
         let (server, _tmp) = setup_dual_test_engine();
-        // Budget 30 is below community_members + vault_distribution costs
+        // Budget 30 is below community_members + mem_distribution costs
         // on the test fixture, forcing at least one hint.
         let result = server.memstead_overview(Parameters(OverviewParams {
             rebuild: Some(true),
             chunk: None,
-            vault: None,
+            mem: None,
             include: None,
             token_budget: Some(30),
         }));
@@ -8842,7 +8842,7 @@ community:
         let result = server.memstead_overview(Parameters(OverviewParams {
             rebuild: Some(true),
             chunk: None,
-            vault: None,
+            mem: None,
             include: None,
             token_budget: Some(100),
         }));
@@ -8868,7 +8868,7 @@ community:
     }
 
     /// Hard-required content is never truncated. With an impossibly small
-    /// budget, the schema list (`{ref, description}`) and vault roster
+    /// budget, the schema list (`{ref, description}`) and mem roster
     /// still ship. Schema bodies (relationship vocabulary, types) live on
     /// `memstead_schema(name=...)` and are no longer overview's concern.
     #[test]
@@ -8877,7 +8877,7 @@ community:
         let result = server.memstead_overview(Parameters(OverviewParams {
             rebuild: Some(true),
             chunk: None,
-            vault: None,
+            mem: None,
             include: None,
             token_budget: Some(10),
         }));
@@ -8902,7 +8902,7 @@ community:
         let result = server.memstead_overview(Parameters(OverviewParams {
             rebuild: Some(true),
             chunk: None,
-            vault: None,
+            mem: None,
             include: None,
             token_budget: Some(10),
         }));
@@ -8915,7 +8915,7 @@ community:
         let hints: std::collections::BTreeSet<String> = parsed.hint_keys().into_iter().collect();
         // All four heavy keys appear as hints — nothing fit. Schema
         // bodies left the heavy set with the schema-tool split.
-        assert!(hints.contains("vault_distribution"));
+        assert!(hints.contains("mem_distribution"));
         assert!(hints.contains("community_members"));
         assert!(hints.contains("community_bridges"));
         assert!(hints.contains("dangling_links"));
@@ -8933,7 +8933,7 @@ community:
         let result = server.memstead_overview(Parameters(OverviewParams {
             rebuild: Some(true),
             chunk: None,
-            vault: None,
+            mem: None,
             include: Some(vec!["bogus".to_string()]),
             token_budget: None,
         }));
@@ -8961,7 +8961,7 @@ community:
         let result = server.memstead_overview(Parameters(OverviewParams {
             rebuild: Some(true),
             chunk: None,
-            vault: None,
+            mem: None,
             include: Some(vec!["community_bridges".to_string()]),
             token_budget: None,
         }));
@@ -8981,13 +8981,13 @@ community:
         assert!(parsed.text.contains("- **Edge types:**"));
     }
 
-    /// With a vault filter, `community_bridges` lists only edges whose
-    /// source entity lives in that vault — asymmetric, matching
-    /// `memstead_health`. Build a two-vault engine with beta having no outgoing
+    /// With a mem filter, `community_bridges` lists only edges whose
+    /// source entity lives in that mem — asymmetric, matching
+    /// `memstead_health`. Build a two-mem engine with beta having no outgoing
     /// edges, then filter to beta: the bridge pool must be empty even
     /// though the cross-cluster edge exists in the global graph.
     #[test]
-    fn overview_vault_filter_scopes_bridges_source_side() {
+    fn overview_mem_filter_scopes_bridges_source_side() {
         let tmp = TempDir::new().unwrap();
 
         let alpha_dir = tmp.path().join("alpha");
@@ -9024,14 +9024,14 @@ community:
         let result = server.memstead_overview(Parameters(OverviewParams {
             rebuild: Some(true),
             chunk: None,
-            vault: Some("beta".to_string()),
+            mem: Some("beta".to_string()),
             include: Some(vec!["community_bridges".to_string()]),
             token_budget: None,
         }));
         let parsed = ParsedOverview::from(&result);
         assert!(
             parsed.bridge_headings().is_empty(),
-            "bridges filtered to beta must be empty — source-in-vault only; got:\n{}",
+            "bridges filtered to beta must be empty — source-in-mem only; got:\n{}",
             parsed.text
         );
     }
@@ -9042,12 +9042,12 @@ community:
     /// the `## Dangling Links` block never rendered; the test fails
     /// against that state.
     #[test]
-    fn overview_dangling_links_surfaces_stub_targets_single_vault() {
+    fn overview_dangling_links_surfaces_stub_targets_single_mem() {
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().join("specs");
-        fs::create_dir_all(vault_dir.join(".memstead")).unwrap();
+        let mem_dir = tmp.path().join("specs");
+        fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
         fs::write(
-            vault_dir.join(".memstead/config.json"),
+            mem_dir.join(".memstead/config.json"),
             r#"{"version":"0.1.0","schema":"default@1.0.0","mediums":{},"projections":{}}"#,
         )
         .unwrap();
@@ -9055,7 +9055,7 @@ community:
         // load. The stub is the dangling signal mirrored from the
         // health surface's `health_dangling_links_surfaces_stub_targets`.
         fs::write(
-            vault_dir.join("a.md"),
+            mem_dir.join("a.md"),
             "---\ntype: spec\ncreated_date: 2026-01-15\nlast_modified: 2026-04-12\nlevel: M0\n---\n# A\n\n## Identity\n\nFixture.\n\n## Purpose\n\nRefers to [[gone]] in prose.\n",
         )
         .unwrap();
@@ -9069,7 +9069,7 @@ community:
         let result = server.memstead_overview(Parameters(OverviewParams {
             rebuild: Some(true),
             chunk: None,
-            vault: None,
+            mem: None,
             include: Some(vec!["dangling_links".to_string()]),
             token_budget: None,
         }));
@@ -9091,14 +9091,14 @@ community:
         );
     }
 
-    /// Cross-vault dangling resolution: a link from vault A to a real
-    /// target in vault B is NOT dangling (the unified engine resolves
-    /// targets across all mounts); a link from vault A to a non-
-    /// existent target in vault B IS dangling. This pins pro's
+    /// Cross-mem dangling resolution: a link from mem A to a real
+    /// target in mem B is NOT dangling (the unified engine resolves
+    /// targets across all mounts); a link from mem A to a non-
+    /// existent target in mem B IS dangling. This pins pro's
     /// multi-mount semantics — naïvely scanning each mount in
-    /// isolation would mis-flag the cross-vault hit.
+    /// isolation would mis-flag the cross-mem hit.
     #[test]
-    fn overview_dangling_links_cross_vault_respects_unified_store() {
+    fn overview_dangling_links_cross_mem_respects_unified_store() {
         let tmp = TempDir::new().unwrap();
         let alpha_dir = tmp.path().join("alpha");
         fs::create_dir_all(alpha_dir.join(".memstead")).unwrap();
@@ -9110,7 +9110,7 @@ community:
         // alpha--root carries two body wiki-links: `[[orphan]]` aliases
         // a relation to an absent target (dangling — target missing
         // case), `[[beta:anchor]]` is backed by an explicit
-        // cross-vault REFERENCES entry (alias is valid, target lives).
+        // cross-mem REFERENCES entry (alias is valid, target lives).
         // Acceptance under the alias model: only the missing-target
         // case appears in dangling_links.
         fs::write(
@@ -9128,7 +9128,7 @@ community:
         .unwrap();
         fs::write(
             beta_dir.join("anchor.md"),
-            "---\ntype: spec\ncreated_date: 2026-01-15\nlast_modified: 2026-04-12\nlevel: M0\n---\n# Anchor\n\n## Identity\n\nReachable cross-vault target.\n\n## Purpose\n\nMust not appear in dangling links.\n",
+            "---\ntype: spec\ncreated_date: 2026-01-15\nlast_modified: 2026-04-12\nlevel: M0\n---\n# Anchor\n\n## Identity\n\nReachable cross-mem target.\n\n## Purpose\n\nMust not appear in dangling links.\n",
         )
         .unwrap();
 
@@ -9142,14 +9142,14 @@ community:
         let result = server.memstead_overview(Parameters(OverviewParams {
             rebuild: Some(true),
             chunk: None,
-            vault: None,
+            mem: None,
             include: Some(vec!["dangling_links".to_string()]),
             token_budget: None,
         }));
         let parsed = ParsedOverview::from(&result);
         // Slice out the Dangling Links block — `beta--anchor` may
         // surface in other sections (Communities lists every member),
-        // so the cross-vault non-flagging assertion has to look only
+        // so the cross-mem non-flagging assertion has to look only
         // at the block under test.
         let dangling_block: String = {
             let mut block = String::new();
@@ -9171,17 +9171,17 @@ community:
         };
         assert!(
             parsed.text.contains("## Dangling Links"),
-            "overview must render Dangling Links when the cross-vault sweep finds one:\n{}",
+            "overview must render Dangling Links when the cross-mem sweep finds one:\n{}",
             parsed.text
         );
         assert!(
             dangling_block.contains("alpha--orphan"),
-            "dangling target inside the source vault must be listed: dangling-block=\n{dangling_block}\nfull=\n{}",
+            "dangling target inside the source mem must be listed: dangling-block=\n{dangling_block}\nfull=\n{}",
             parsed.text
         );
         assert!(
             !dangling_block.contains("beta--anchor"),
-            "cross-vault link to a real target must NOT be flagged dangling: dangling-block=\n{dangling_block}"
+            "cross-mem link to a real target must NOT be flagged dangling: dangling-block=\n{dangling_block}"
         );
     }
 
@@ -9191,10 +9191,10 @@ community:
     #[test]
     fn overview_community_bridges_caps_sample_edges_at_three() {
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().join("caps");
-        fs::create_dir_all(vault_dir.join(".memstead")).unwrap();
+        let mem_dir = tmp.path().join("caps");
+        fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
         fs::write(
-            vault_dir.join(".memstead/config.json"),
+            mem_dir.join(".memstead/config.json"),
             r#"{"version":"0.1.0","schema":"default@1.0.0","mediums":{},"projections":{}}"#,
         )
         .unwrap();
@@ -9211,7 +9211,7 @@ community:
                 }
             }
             let body = format!("{fm}# a{i}\n\n## Identity\n\nSource {i}.\n\n## Purpose\n\nBridge fixture.\n\n## Relationships\n\n{rels}");
-            fs::write(vault_dir.join(format!("a{i}.md")), body).unwrap();
+            fs::write(mem_dir.join(format!("a{i}.md")), body).unwrap();
         }
         for i in 0..4 {
             let mut rels = format!("- **USES**: [[hub]]\n");
@@ -9221,10 +9221,10 @@ community:
                 }
             }
             let body = format!("{fm}# b{i}\n\n## Identity\n\nHub leaf {i}.\n\n## Purpose\n\nBridge fixture.\n\n## Relationships\n\n{rels}");
-            fs::write(vault_dir.join(format!("b{i}.md")), body).unwrap();
+            fs::write(mem_dir.join(format!("b{i}.md")), body).unwrap();
         }
         fs::write(
-            vault_dir.join("hub.md"),
+            mem_dir.join("hub.md"),
             format!("{fm}# hub\n\n## Identity\n\nHub.\n\n## Purpose\n\nBridge fixture.\n"),
         )
         .unwrap();
@@ -9235,7 +9235,7 @@ community:
         let result = server.memstead_overview(Parameters(OverviewParams {
             rebuild: Some(true),
             chunk: None,
-            vault: None,
+            mem: None,
             include: Some(vec!["community_bridges".to_string()]),
             token_budget: None,
         }));
@@ -9322,7 +9322,7 @@ community:
         let first = server.memstead_overview(Parameters(OverviewParams {
             rebuild: Some(true),
             chunk: None,
-            vault: None,
+            mem: None,
             include: Some(vec!["community_bridges".to_string()]),
             token_budget: None,
         }));
@@ -9343,7 +9343,7 @@ community:
         let second = server.memstead_overview(Parameters(OverviewParams {
             rebuild: Some(true),
             chunk: None,
-            vault: None,
+            mem: None,
             include: Some(vec!["community_bridges".to_string()]),
             token_budget: None,
         }));
@@ -9379,7 +9379,7 @@ community:
             let r = server.memstead_overview(Parameters(OverviewParams {
                 rebuild: Some(true),
                 chunk: None,
-                vault: None,
+                mem: None,
                 include: None,
                 token_budget: Some(100),
             }));
@@ -9419,34 +9419,34 @@ community:
         );
     }
 
-    /// Unknown vault name is a tool error, not a silent empty response —
-    /// and the error enumerates valid vaults so the agent can retry
+    /// Unknown mem name is a tool error, not a silent empty response —
+    /// and the error enumerates valid mems so the agent can retry
     /// without a second round-trip.
     #[test]
-    fn overview_unknown_vault_errors() {
-        let (server, _tmp) = setup_two_vault_engine();
+    fn overview_unknown_mem_errors() {
+        let (server, _tmp) = setup_two_mem_engine();
         let result = server.memstead_overview(Parameters(OverviewParams {
             rebuild: None,
             chunk: None,
-            vault: Some("ghost".to_string()),
+            mem: Some("ghost".to_string()),
             include: None,
             token_budget: None,
         }));
         assert_eq!(result.is_error, Some(true));
         let text = extract_text(&result);
-        assert!(text.contains("ghost"), "error should name the bad vault: {text}");
+        assert!(text.contains("ghost"), "error should name the bad mem: {text}");
         assert!(
             text.contains("alpha") && text.contains("beta"),
-            "error should list writable vaults: {text}"
+            "error should list writable mems: {text}"
         );
     }
 
     /// Health filter narrows every entity-scoped count, distribution, and
-    /// detail list to the filter vault while keeping the workspace roster
-    /// (`writable_vaults`/`read_vaults`) and community count global.
+    /// detail list to the filter mem while keeping the workspace roster
+    /// (`writable_mems`/`read_mems`) and community count global.
     #[test]
-    fn health_filtered_to_one_vault() {
-        let (server, _tmp) = setup_two_vault_engine();
+    fn health_filtered_to_one_mem() {
+        let (server, _tmp) = setup_two_mem_engine();
 
         let result = server.memstead_health(Parameters(HealthParams {
             include: Some(vec![
@@ -9454,7 +9454,7 @@ community:
                 "most_connected".to_string(),
             ]),
             limit: None,
-            vault: Some("alpha".to_string()),
+            mem: Some("alpha".to_string()),
             include_config: false,
             token_budget: None,
             chunk: None,
@@ -9463,7 +9463,7 @@ community:
         let text = extract_text(&result);
         let json: serde_json::Value = serde_json::from_str(&text).unwrap();
 
-        assert_eq!(json["vault"], "alpha", "vault echo marks filter mode");
+        assert_eq!(json["mem"], "alpha", "mem echo marks filter mode");
         assert_eq!(json["summary"]["total_entities"].as_u64().unwrap(), 1);
         assert_eq!(json["real_nodes"].as_u64().unwrap(), 1);
 
@@ -9475,8 +9475,8 @@ community:
             .sum();
         assert_eq!(total, 1, "type_distribution narrows to alpha");
 
-        // Writable vaults still lists both — roster must not be filtered.
-        let writable: Vec<String> = json["writable_vaults"]
+        // Writable mems still lists both — roster must not be filtered.
+        let writable: Vec<String> = json["writable_mems"]
             .as_array()
             .unwrap()
             .iter()
@@ -9485,13 +9485,13 @@ community:
         assert_eq!(
             writable,
             vec!["alpha".to_string(), "beta".to_string()],
-            "writable_vaults stays global under a filter"
+            "writable_mems stays global under a filter"
         );
 
-        // vault_schemas narrows to alpha's single pin.
-        let vault_schemas = json["vault_schemas"].as_array().unwrap();
-        assert_eq!(vault_schemas.len(), 1);
-        assert_eq!(vault_schemas[0]["vault"], "alpha");
+        // mem_schemas narrows to alpha's single pin.
+        let mem_schemas = json["mem_schemas"].as_array().unwrap();
+        assert_eq!(mem_schemas.len(), 1);
+        assert_eq!(mem_schemas[0]["mem"], "alpha");
 
         // Most-connected list must not leak beta entities.
         if let Some(arr) = json.get("most_connected").and_then(|v| v.as_array()) {
@@ -9503,15 +9503,15 @@ community:
     }
 
     /// Default (unfiltered) health keeps the global aggregate shape —
-    /// no per-vault filtering unless a `vault` argument is supplied.
+    /// no per-mem filtering unless a `mem` argument is supplied.
     #[test]
     fn health_unfiltered_aggregates_all() {
-        let (server, _tmp) = setup_two_vault_engine();
+        let (server, _tmp) = setup_two_mem_engine();
 
         let result = server.memstead_health(Parameters(HealthParams {
             include: None,
             limit: None,
-            vault: None,
+            mem: None,
             include_config: false,
             token_budget: None,
             chunk: None,
@@ -9520,29 +9520,29 @@ community:
         let text = extract_text(&result);
         let json: serde_json::Value = serde_json::from_str(&text).unwrap();
 
-        assert!(json["vault"].is_null(), "unfiltered mode echoes null");
+        assert!(json["mem"].is_null(), "unfiltered mode echoes null");
         assert_eq!(json["summary"]["total_entities"].as_u64().unwrap(), 2);
         assert_eq!(json["real_nodes"].as_u64().unwrap(), 2);
 
-        // vault_schemas sources from VaultState.name — both vaults visible.
-        let names: Vec<String> = json["vault_schemas"]
+        // mem_schemas sources from MemState.name — both mems visible.
+        let names: Vec<String> = json["mem_schemas"]
             .as_array()
             .unwrap()
             .iter()
-            .map(|v| v["vault"].as_str().unwrap().to_string())
+            .map(|v| v["mem"].as_str().unwrap().to_string())
             .collect();
         assert!(names.contains(&"alpha".to_string()));
         assert!(names.contains(&"beta".to_string()));
     }
 
-    /// Unknown vault on `health` errors with the same contract as `overview`.
+    /// Unknown mem on `health` errors with the same contract as `overview`.
     #[test]
-    fn health_unknown_vault_errors() {
-        let (server, _tmp) = setup_two_vault_engine();
+    fn health_unknown_mem_errors() {
+        let (server, _tmp) = setup_two_mem_engine();
         let result = server.memstead_health(Parameters(HealthParams {
             include: None,
             limit: None,
-            vault: Some("ghost".to_string()),
+            mem: Some("ghost".to_string()),
             include_config: false,
             token_budget: None,
             chunk: None,
@@ -9563,7 +9563,7 @@ community:
         let result = server.memstead_create(Parameters(CreateParams {
             title: "Bad Type Entity".to_string(),
             entity_type: "bogus".to_string(),
-            vault: Some("specs".to_string()),
+            mem: Some("specs".to_string()),
             sections: None,
             metadata: None,
             relations: None,
@@ -9597,7 +9597,7 @@ community:
         let result = server.memstead_create(Parameters(CreateParams {
             title: "Große Änderung".to_string(),
             entity_type: "spec".to_string(),
-            vault: Some("specs".to_string()),
+            mem: Some("specs".to_string()),
             sections: Some(IndexMap::from_iter([
                 ("identity".to_string(), "Preview.".to_string()),
                 ("purpose".to_string(), "Preview.".to_string()),
@@ -9629,7 +9629,7 @@ community:
         let real = server.memstead_create(Parameters(CreateParams {
             title: "Große Änderung".to_string(),
             entity_type: "spec".to_string(),
-            vault: Some("specs".to_string()),
+            mem: Some("specs".to_string()),
             sections: Some(IndexMap::from_iter([
                 ("identity".to_string(), "Preview.".to_string()),
                 ("purpose".to_string(), "Preview.".to_string()),
@@ -9672,7 +9672,7 @@ community:
         // (and no `schema` alias) must fail to deserialize into CreateParams.
         let payload = serde_json::json!({
             "title": "No Type",
-            "vault": "specs"
+            "mem": "specs"
         });
         let err = serde_json::from_value::<CreateParams>(payload)
             .expect_err("deserialization should fail without entity_type");
@@ -9685,13 +9685,13 @@ community:
 
     /// `memstead_health` response must expose load-time nested-prefix
     /// warnings on `warnings` so agents see drift without reaching into
-    /// engine internals. Bootstraps a fixture whose plugin vault has an
+    /// engine internals. Bootstraps a fixture whose plugin mem has an
     /// inline `[[plugin--foo]]` link and asserts the wire carries a
     /// `SUSPICIOUS_NESTED_PREFIX` envelope.
     #[test]
     fn health_surfaces_nested_prefix_load_warnings() {
         let tmp = TempDir::new().unwrap();
-        let plugin_dir = tmp.path().join("test-vault-plugin");
+        let plugin_dir = tmp.path().join("test-mem-plugin");
         fs::create_dir_all(plugin_dir.join(".memstead")).unwrap();
         fs::write(
             plugin_dir.join(".memstead/config.json"),
@@ -9715,7 +9715,7 @@ community:
         let result = server.memstead_health(Parameters(HealthParams {
             include: None,
             limit: None,
-            vault: None,
+            mem: None,
             include_config: false,
             token_budget: None,
             chunk: None,
@@ -9732,34 +9732,34 @@ community:
             .expect("nested-prefix warning must appear on the wire");
         assert_eq!(
             drift["details"]["from"].as_str(),
-            Some("test-vault-plugin--drifted"),
+            Some("test-mem-plugin--drifted"),
             "details.from must identify the authoring entity"
         );
         assert_eq!(
             drift["details"]["resolved_id"].as_str(),
             Some("plugin--foo"),
-            "details.resolved_id must carry the tier-0 cross-vault id the body link resolves to"
+            "details.resolved_id must carry the tier-0 cross-mem id the body link resolves to"
         );
         assert_eq!(
             drift["details"]["candidate_target"].as_str(),
-            Some("test-vault-plugin--foo"),
-            "pass-2 fallback must find the same-vault bare-slug target"
+            Some("test-mem-plugin--foo"),
+            "pass-2 fallback must find the same-mem bare-slug target"
         );
         assert_eq!(drift["details"]["section"].as_str(), Some("purpose"));
     }
 
-    /// `memstead_health(vault=X)` filters vault-attributable warnings to
-    /// vault X. Pre-fix the SUSPICIOUS_NESTED_PREFIX warning emitted
-    /// for one vault's drift leaked into queries scoped to a sibling
-    /// vault — agents couldn't act on it because the offending entity
+    /// `memstead_health(mem=X)` filters mem-attributable warnings to
+    /// mem X. Pre-fix the SUSPICIOUS_NESTED_PREFIX warning emitted
+    /// for one mem's drift leaked into queries scoped to a sibling
+    /// mem — agents couldn't act on it because the offending entity
     /// wasn't in their scope. The fix keeps the warning on global
-    /// queries and on queries scoped to the warning's source vault,
+    /// queries and on queries scoped to the warning's source mem,
     /// and drops it from queries scoped elsewhere.
     #[test]
-    fn health_warnings_respect_vault_filter() {
+    fn health_warnings_respect_mem_filter() {
         let tmp = TempDir::new().unwrap();
-        // Vault A — carries the nested-prefix drift.
-        let plugin_dir = tmp.path().join("test-vault-plugin");
+        // Mem A — carries the nested-prefix drift.
+        let plugin_dir = tmp.path().join("test-mem-plugin");
         fs::create_dir_all(plugin_dir.join(".memstead")).unwrap();
         fs::write(
             plugin_dir.join(".memstead/config.json"),
@@ -9777,7 +9777,7 @@ community:
         )
         .unwrap();
 
-        // Vault B — clean.
+        // Mem B — clean.
         let clean_dir = tmp.path().join("specs");
         fs::create_dir_all(clean_dir.join(".memstead")).unwrap();
         fs::write(
@@ -9797,11 +9797,11 @@ community:
             crate::config::DEFAULT_TOKEN_BUDGET,
         );
 
-        // Global (no vault filter): drift surfaces.
+        // Global (no mem filter): drift surfaces.
         let global = server.memstead_health(Parameters(HealthParams {
             include: None,
             limit: None,
-            vault: None,
+            mem: None,
             include_config: false,
             token_budget: None,
             chunk: None,
@@ -9819,11 +9819,11 @@ community:
             "global query must surface the drift"
         );
 
-        // Scoped to the offending vault: drift surfaces.
+        // Scoped to the offending mem: drift surfaces.
         let scoped_to_offender = server.memstead_health(Parameters(HealthParams {
             include: None,
             limit: None,
-            vault: Some("test-vault-plugin".to_string()),
+            mem: Some("test-mem-plugin".to_string()),
             include_config: false,
             token_budget: None,
             chunk: None,
@@ -9846,7 +9846,7 @@ community:
         let scoped_clean = server.memstead_health(Parameters(HealthParams {
             include: None,
             limit: None,
-            vault: Some("specs".to_string()),
+            mem: Some("specs".to_string()),
             include_config: false,
             token_budget: None,
             chunk: None,
@@ -9860,7 +9860,7 @@ community:
                 !clean_warnings
                     .iter()
                     .any(|w| w["code"] == "SUSPICIOUS_NESTED_PREFIX"),
-                "scoped-to-clean must NOT surface another vault's drift; got {clean_warnings:?}"
+                "scoped-to-clean must NOT surface another mem's drift; got {clean_warnings:?}"
             );
         }
     }
@@ -9871,7 +9871,7 @@ community:
         let result = server.memstead_health(Parameters(HealthParams {
             include: None,
             limit: None,
-            vault: None,
+            mem: None,
             include_config: false,
             token_budget: None,
             chunk: None,
@@ -9899,7 +9899,7 @@ community:
         let result = server.memstead_health(Parameters(HealthParams {
             include: Some(vec!["orphans".into()]),
             limit: None,
-            vault: None,
+            mem: None,
             include_config: false,
             token_budget: None,
             chunk: None,
@@ -9922,7 +9922,7 @@ community:
         let result = server.memstead_create(Parameters(CreateParams {
             title: "New Entity".to_string(),
             entity_type: "spec".to_string(),
-            vault: Some("specs".to_string()),
+            mem: Some("specs".to_string()),
             sections: Some(IndexMap::from_iter([
                 ("identity".to_string(), "A new entity".to_string()),
                 ("purpose".to_string(), "Testing CRUD".to_string()),
@@ -9943,7 +9943,7 @@ community:
         let id = create_json["id"].as_str().unwrap().to_string();
         assert_eq!(
             id, "specs--new-entity",
-            "ID should be derived from vault + slug(title)"
+            "ID should be derived from mem + slug(title)"
         );
         let hash = create_json["_hash"].as_str().unwrap().to_string();
 
@@ -10119,15 +10119,15 @@ community:
         assert_eq!(sc["details"]["to"], "specs--entity-a");
     }
 
-    /// `memstead_relate` rejects cross-vault edges with the typed
-    /// `CROSS_VAULT_LINK_NOT_ALLOWED` envelope on `structured_content`
-    /// when the workspace's `[cross_vault_links]` policy denies the
-    /// pairing. The default-empty policy denies every cross-vault
-    /// pair, so this fixture (two vaults, no policy) trips the
+    /// `memstead_relate` rejects cross-mem edges with the typed
+    /// `CROSS_MEM_LINK_NOT_ALLOWED` envelope on `structured_content`
+    /// when the workspace's `[cross_mem_links]` policy denies the
+    /// pairing. The default-empty policy denies every cross-mem
+    /// pair, so this fixture (two mems, no policy) trips the
     /// envelope.
     #[test]
-    fn relate_cross_vault_surfaces_typed_envelope() {
-        let (server, _tmp) = setup_two_vault_engine();
+    fn relate_cross_mem_surfaces_typed_envelope() {
+        let (server, _tmp) = setup_two_mem_engine();
         let result = server.memstead_relate(Parameters(RelateParams {
             from: "alpha--alpha-root".to_string(),
             to: "beta--beta-root".to_string(),
@@ -10138,15 +10138,15 @@ community:
         }));
         assert!(
             result.is_error.unwrap_or(false),
-            "cross-vault relate must error when policy denies"
+            "cross-mem relate must error when policy denies"
         );
         let sc = result
             .structured_content
             .as_ref()
-            .expect("CROSS_VAULT_LINK_NOT_ALLOWED must carry structured_content");
-        assert_eq!(sc["code"], "CROSS_VAULT_LINK_NOT_ALLOWED");
-        assert_eq!(sc["details"]["from_vault"], "alpha");
-        assert_eq!(sc["details"]["to_vault"], "beta");
+            .expect("CROSS_MEM_LINK_NOT_ALLOWED must carry structured_content");
+        assert_eq!(sc["code"], "CROSS_MEM_LINK_NOT_ALLOWED");
+        assert_eq!(sc["details"]["from_mem"], "alpha");
+        assert_eq!(sc["details"]["to_mem"], "beta");
         assert!(
             sc["message"].as_str().is_some_and(|m| !m.is_empty()),
             "message field must be populated: {sc:?}"
@@ -10359,16 +10359,16 @@ community:
     }
 
     /// `memstead_relate` add path with a shape-violating pair on a
-    /// vault pinned to `software@0.1.0` returns the typed
+    /// mem pinned to `software@0.1.0` returns the typed
     /// `INVALID_REL_SHAPE` envelope with the documented
     /// `details.*` payload. Locks Item 03 of the graph-correctness contract.
     #[test]
     fn relate_shape_violation_surfaces_typed_envelope() {
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().join("software-vault");
-        fs::create_dir_all(vault_dir.join(".memstead")).unwrap();
+        let mem_dir = tmp.path().join("software-mem");
+        fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
         fs::write(
-            vault_dir.join(".memstead/config.json"),
+            mem_dir.join(".memstead/config.json"),
             r#"{"version":"0.1.0","schema":"software@0.1.0","mediums":{},"projections":{}}"#,
         )
         .unwrap();
@@ -10376,12 +10376,12 @@ community:
         // is shape-violating; the target type does not gate the source-side
         // check.
         fs::write(
-            vault_dir.join("source-spec.md"),
+            mem_dir.join("source-spec.md"),
             "---\ntype: spec\ncreated_date: 2026-05-13\nlast_modified: 2026-05-13\nlevel: M0\nstability: evolving\n---\n# Source Spec\n\n## Identity\nSource entity body.\n\n## Purpose\nForcing a shape-violating OWNS.\n",
         )
         .unwrap();
         fs::write(
-            vault_dir.join("target-spec.md"),
+            mem_dir.join("target-spec.md"),
             "---\ntype: spec\ncreated_date: 2026-05-13\nlast_modified: 2026-05-13\nlevel: M0\nstability: evolving\n---\n# Target Spec\n\n## Identity\nTarget entity body.\n\n## Purpose\nReceiver of the OWNS attempt.\n",
         )
         .unwrap();
@@ -10391,7 +10391,7 @@ community:
 
         // Sanity: the spec source exists.
         let _ = server.memstead_entity(Parameters(EntityParams {
-            id: "software-vault--source-spec".to_string(),
+            id: "software-mem--source-spec".to_string(),
             sections: None,
             include_relations: None,
             include_context: None,
@@ -10400,8 +10400,8 @@ community:
         }));
 
         let result = server.memstead_relate(Parameters(RelateParams {
-            from: "software-vault--source-spec".to_string(),
-            to: "software-vault--target-spec".to_string(),
+            from: "software-mem--source-spec".to_string(),
+            to: "software-mem--target-spec".to_string(),
             r#type: "OWNS".to_string(),
             remove: None,
             note: None,
@@ -10447,22 +10447,22 @@ community:
     #[test]
     fn relate_remove_skips_shape_validation() {
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().join("software-vault");
-        fs::create_dir_all(vault_dir.join(".memstead")).unwrap();
+        let mem_dir = tmp.path().join("software-mem");
+        fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
         fs::write(
-            vault_dir.join(".memstead/config.json"),
+            mem_dir.join(".memstead/config.json"),
             r#"{"version":"0.1.0","schema":"software@0.1.0","mediums":{},"projections":{}}"#,
         )
         .unwrap();
         // Seed an entity that already has a shape-violating OWNS edge
         // baked into its markdown — simulates a pre-constraint state.
         fs::write(
-            vault_dir.join("legacy-spec.md"),
+            mem_dir.join("legacy-spec.md"),
             "---\ntype: spec\ncreated_date: 2026-05-13\nlast_modified: 2026-05-13\nlevel: M0\nstability: evolving\n---\n# Legacy Spec\n\n## Identity\nCarries a pre-constraint OWNS edge.\n\n## Purpose\nVerifies the cleanup path.\n\n## Relationships\n- **OWNS**: [[legacy-target]]\n",
         )
         .unwrap();
         fs::write(
-            vault_dir.join("legacy-target.md"),
+            mem_dir.join("legacy-target.md"),
             "---\ntype: spec\ncreated_date: 2026-05-13\nlast_modified: 2026-05-13\nlevel: M0\nstability: evolving\n---\n# Legacy Target\n\n## Identity\nReceives the shape-violating OWNS.\n\n## Purpose\nMust remain removable.\n",
         )
         .unwrap();
@@ -10472,8 +10472,8 @@ community:
 
         // Remove the existing shape-violating edge — must succeed.
         let result = server.memstead_relate(Parameters(RelateParams {
-            from: "software-vault--legacy-spec".to_string(),
-            to: "software-vault--legacy-target".to_string(),
+            from: "software-mem--legacy-spec".to_string(),
+            to: "software-mem--legacy-target".to_string(),
             r#type: "OWNS".to_string(),
             remove: Some(true),
             note: None,
@@ -10528,7 +10528,7 @@ community:
         let result = server.memstead_health(Parameters(HealthParams {
             include: Some(vec!["most_connected".to_string()]),
             limit: Some(1000),
-            vault: None,
+            mem: None,
             include_config: false,
             token_budget: None,
             chunk: None,
@@ -10566,7 +10566,7 @@ community:
     }
 
     /// No clamp triggered ⇒ no `LIMIT_CLAMPED` entry.
-    /// The `OUTER_REPO_NOT_IGNORING_VAULT_REPO` warning may fire when the
+    /// The `OUTER_REPO_NOT_IGNORING_MEM_REPO` warning may fire when the
     /// test workspace is embedded under a `/var/folders/.../.git`
     /// leftover — that's an environmental warning unrelated to the
     /// clamp behaviour the test pins. Filter to `LIMIT_CLAMPED`
@@ -10577,7 +10577,7 @@ community:
         let result = server.memstead_health(Parameters(HealthParams {
             include: Some(vec!["most_connected".to_string()]),
             limit: Some(10),
-            vault: None,
+            mem: None,
             include_config: false,
             token_budget: None,
             chunk: None,
@@ -10612,7 +10612,7 @@ community:
         let create = server.memstead_create(Parameters(CreateParams {
             title: "Wire Shape".to_string(),
             entity_type: "spec".to_string(),
-            vault: Some("specs".to_string()),
+            mem: Some("specs".to_string()),
             sections: Some(IndexMap::from_iter([
                 ("identity".to_string(), "i".to_string()),
                 ("purpose".to_string(), "p".to_string()),
@@ -10974,7 +10974,7 @@ community:
         let create = server.memstead_create(Parameters(CreateParams {
             title: "Rename Wire".to_string(),
             entity_type: "spec".to_string(),
-            vault: Some("specs".to_string()),
+            mem: Some("specs".to_string()),
             sections: Some(IndexMap::from_iter([
                 ("identity".to_string(), "x".to_string()),
                 ("purpose".to_string(), "y".to_string()),
@@ -11146,7 +11146,7 @@ community:
         let result = server.memstead_health(Parameters(HealthParams {
             include: Some(vec!["orphans".into(), "bogus".into()]),
             limit: None,
-            vault: None,
+            mem: None,
             include_config: false,
             token_budget: None,
             chunk: None,
@@ -11202,10 +11202,10 @@ community:
     #[test]
     fn health_dangling_links_surfaces_stub_targets() {
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().join("specs");
-        fs::create_dir_all(vault_dir.join(".memstead")).unwrap();
+        let mem_dir = tmp.path().join("specs");
+        fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
         fs::write(
-            vault_dir.join(".memstead/config.json"),
+            mem_dir.join(".memstead/config.json"),
             r#"{"version":"0.1.0","schema":"default@1.0.0","mediums":{},"projections":{}}"#,
         )
         .unwrap();
@@ -11213,7 +11213,7 @@ community:
         // has no file and therefore auto-stubs at load time. The stub
         // is the dangling signal.
         fs::write(
-            vault_dir.join("a.md"),
+            mem_dir.join("a.md"),
             "---\ntype: spec\ncreated_date: 2026-01-15\nlast_modified: 2026-04-12\nlevel: M0\n---\n# A\n\n## Identity\n\nFixture.\n\n## Purpose\n\nRefers to [[gone]] in prose.\n",
         )
         .unwrap();
@@ -11224,7 +11224,7 @@ community:
         let result = server.memstead_health(Parameters(HealthParams {
             include: Some(vec!["dangling_links".to_string()]),
             limit: None,
-            vault: None,
+            mem: None,
             include_config: false,
             token_budget: None,
             chunk: None,
@@ -11260,7 +11260,7 @@ community:
         let result = server.memstead_health(Parameters(HealthParams {
             include: Some(vec!["tags".to_string()]),
             limit: None,
-            vault: None,
+            mem: None,
             include_config: false,
             token_budget: None,
             chunk: None,
@@ -11294,7 +11294,7 @@ community:
         let result_no_include = server.memstead_health(Parameters(HealthParams {
             include: None,
             limit: None,
-            vault: None,
+            mem: None,
             include_config: false,
             token_budget: None,
             chunk: None,
@@ -11308,38 +11308,38 @@ community:
     }
 
     // ------------------------------------------------------------------
-    // memstead_vault_create — envelope + happy-path wire tests.
+    // memstead_mem_create — envelope + happy-path wire tests.
     //
     // The engine-level contract is covered in
-    // `memstead-git-branch/tests/vault_management.rs`; these tests pin the
+    // `memstead-git-branch/tests/mem_management.rs`; these tests pin the
     // MCP-layer envelope shape (structured_content `{code, message,
     // details}`) and the success-path JSON response so the contract the
     // agent sees doesn't drift from the handler's wire surface.
     // ------------------------------------------------------------------
 
-    use crate::lifecycle::VaultCreateParams as TlsVaultCreateParams;
+    use crate::lifecycle::MemCreateParams as TlsMemCreateParams;
     use memstead_base::WorkspaceSettings;
 
     /// Build an `McpServer` around an empty engine with permissive
-    /// `[[vault_management.create]]` rules rooted at the given
+    /// `[[mem_management.create]]` rules rooted at the given
     /// TempDir. Two patterns: a flat `*` (single-segment leaves) and a
     /// `**` (any depth, including hierarchical path-and-leaf
-    /// candidates) — the minimum surface `memstead_vault_create` tests
+    /// candidates) — the minimum surface `memstead_mem_create` tests
     /// need to exercise both flat and hierarchical layouts under
     /// gitignore-style matching.
     fn setup_lifecycle_server(tmp: &TempDir) -> McpServer {
         // The engine produces real 40-char hex `seed_commit_sha`
-        // values when mounted on a vault-repo (backend factory +
+        // values when mounted on a mem-repo (backend factory +
         // storage heuristic). Use the git-branch test-engine helper
-        // so memstead_vault_create asserts against real commit shas.
+        // so memstead_mem_create asserts against real commit shas.
         let pro_settings = memstead_git_branch::test_support::auto_seed_with_settings(
             tmp.path(),
             WorkspaceSettings {
-                vault_create_rules: vec![
+                mem_create_rules: vec![
                     memstead_base::CreateRuleSetting { pattern: "*".to_string(), schemas: vec!["default@1.0.0".to_string()], default_cross_links: None },
                     memstead_base::CreateRuleSetting { pattern: "**".to_string(), schemas: vec!["default@1.0.0".to_string()], default_cross_links: None },
                 ],
-                vault_delete_rules: vec![],
+                mem_delete_rules: vec![],
                 ..Default::default()
             },
         );
@@ -11353,11 +11353,11 @@ community:
     }
 
     #[test]
-    fn memstead_vault_create_happy_path_returns_seed_sha() {
+    fn memstead_mem_create_happy_path_returns_seed_sha() {
         let tmp = TempDir::new().unwrap();
         let server = setup_lifecycle_server(&tmp);
         let target = tmp.path().join("fresh");
-        let result = server.memstead_vault_create(Parameters(TlsVaultCreateParams {
+        let result = server.memstead_mem_create(Parameters(TlsMemCreateParams {
             schema_verbosity: None,
             write_guidance: Default::default(),
             name: "fresh".to_string(),
@@ -11388,22 +11388,22 @@ community:
         );
     }
 
-    /// Goal 2 (hierarchical content branches): a `memstead_vault_create`
+    /// Goal 2 (hierarchical content branches): a `memstead_mem_create`
     /// call that supplies an organizational `path` lands the new
     /// content branch at `refs/heads/<path>/<leaf>` and the matching
-    /// per-vault config at `__MEMSTEAD:vaults/<path>/<leaf>/config.json`. The
+    /// per-mem config at `__MEMSTEAD:mems/<path>/<leaf>/config.json`. The
     /// leaf-only API surface still works — `read_config(ws, leaf)`
     /// transparently resolves to the full hierarchical path.
     #[test]
-    fn memstead_vault_create_hierarchical_path_lands_branch_and_config() {
+    fn memstead_mem_create_hierarchical_path_lands_branch_and_config() {
         // Hierarchical paths are first-class. `name = "planning/hier"` is the
-        // canonical hierarchical-vault input — no separate `path`
+        // canonical hierarchical-mem input — no separate `path`
         // wire field. The branch ref + `__MEMSTEAD` config blob land at
-        // `refs/heads/planning/hier` / `vaults/planning/hier/config.json`.
+        // `refs/heads/planning/hier` / `mems/planning/hier/config.json`.
         let tmp = TempDir::new().unwrap();
         let server = setup_lifecycle_server(&tmp);
         let target = tmp.path().join("hier");
-        let result = server.memstead_vault_create(Parameters(TlsVaultCreateParams {
+        let result = server.memstead_mem_create(Parameters(TlsMemCreateParams {
             schema_verbosity: None,
             write_guidance: Default::default(),
             name: "planning/hier".to_string(),
@@ -11421,8 +11421,8 @@ community:
         );
 
         // Branch landed at `refs/heads/planning/hier`.
-        let gitdir = tmp.path().join("vault-repo").join(".git");
-        let repo = gix::open(&gitdir).expect("vault-repo must open");
+        let gitdir = tmp.path().join("mem-repo").join(".git");
+        let repo = gix::open(&gitdir).expect("mem-repo must open");
         assert!(
             matches!(
                 repo.try_find_reference("refs/heads/planning/hier"),
@@ -11439,7 +11439,7 @@ community:
         );
 
         // Config readable by leaf (resolver maps leaf → full path).
-        let cfg = memstead_git_branch::vault_repo_config::read_config(tmp.path(), "hier")
+        let cfg = memstead_git_branch::mem_repo_config::read_config(tmp.path(), "hier")
             .expect("read_config must resolve leaf to hierarchical path");
         // Goal 3 made `name` optional in the on-disk config. The
         // engine omits it on writes; the legacy fixture path may
@@ -11447,13 +11447,13 @@ community:
         assert!(cfg.name.is_none() || cfg.name.as_deref() == Some("hier"));
     }
 
-    /// A vault-create whose leaf already exists in the vault-repo at
+    /// A mem-create whose leaf already exists in the mem-repo at
     /// a different organizational path is rejected with
-    /// `VAULT_NAME_COLLISION` before any disk side effect lands. The
+    /// `MEM_NAME_COLLISION` before any disk side effect lands. The
     /// envelope payload carries the colliding full paths so the agent
     /// can disambiguate without a second round trip.
     #[test]
-    fn memstead_vault_create_tree_walk_collision_rejected_with_paths() {
+    fn memstead_mem_create_tree_walk_collision_rejected_with_paths() {
         let tmp = TempDir::new().unwrap();
         let server = setup_lifecycle_server(&tmp);
 
@@ -11461,7 +11461,7 @@ community:
         // via a successful create. After this, leaf `engine` is
         // sealed at `refs/heads/demo/engine`.
         let first_target = tmp.path().join("engine");
-        let first = server.memstead_vault_create(Parameters(TlsVaultCreateParams {
+        let first = server.memstead_mem_create(Parameters(TlsMemCreateParams {
             schema_verbosity: None,
             write_guidance: Default::default(),
             name: "engine".to_string(),
@@ -11484,7 +11484,7 @@ community:
         // but the tree-walk probe enriches the envelope with
         // `colliding_paths` and `suggestion` regardless.
         let second_target = tmp.path().join("engine-second");
-        let second = server.memstead_vault_create(Parameters(TlsVaultCreateParams {
+        let second = server.memstead_mem_create(Parameters(TlsMemCreateParams {
             schema_verbosity: None,
             write_guidance: Default::default(),
             name: "engine".to_string(),
@@ -11506,11 +11506,11 @@ community:
             .structured_content
             .clone()
             .expect("collision must carry envelope");
-        assert_eq!(envelope["code"], "VAULT_NAME_COLLISION");
+        assert_eq!(envelope["code"], "MEM_NAME_COLLISION");
         let details = &envelope["details"];
         assert_eq!(details["name"], "engine");
         // Collisions surface through the snapshot probe
-        // (`vault_router.origin_for_vault`) with the `{name, source}`
+        // (`mem_router.origin_for_mem`) with the `{name, source}`
         // payload. Agents branch on `code` only. The collision is
         // detected and rejected before any disk write at the second
         // target.
@@ -11520,16 +11520,16 @@ community:
         );
     }
 
-    /// The vault-name
+    /// The mem-name
     /// grammar refuses malformed hierarchical paths (leading slash,
     /// double slash, etc.) before any disk side effect lands.
     /// `INVALID_INPUT` envelope is returned.
     #[test]
-    fn memstead_vault_create_rejects_invalid_name_grammar() {
+    fn memstead_mem_create_rejects_invalid_name_grammar() {
         let tmp = TempDir::new().unwrap();
         let server = setup_lifecycle_server(&tmp);
         let target = tmp.path().join("bad");
-        let result = server.memstead_vault_create(Parameters(TlsVaultCreateParams {
+        let result = server.memstead_mem_create(Parameters(TlsMemCreateParams {
             schema_verbosity: None,
             write_guidance: Default::default(),
             name: "/leading-slash".to_string(),
@@ -11546,27 +11546,27 @@ community:
         );
         let text = extract_text(&result);
         // Structural-failure
-        // refusals surface as the typed `INVALID_VAULT_NAME` code
+        // refusals surface as the typed `INVALID_MEM_NAME` code
         // with a `details.reason` discriminator. `/leading-slash`
         // would fail the regex grammar, classified as `invalid_char`.
         assert!(
-            text.contains("INVALID_VAULT_NAME"),
-            "envelope must surface INVALID_VAULT_NAME refusal, got: {}",
+            text.contains("INVALID_MEM_NAME"),
+            "envelope must surface INVALID_MEM_NAME refusal, got: {}",
             text
         );
     }
 
     #[test]
-    fn memstead_vault_create_path_not_allowed_emits_structured_envelope() {
-        // Empty allowlist surfaces VAULT_PATH_NOT_ALLOWED through
-        // `memstead_engine::vault_management::create_vault`'s pre-check.
+    fn memstead_mem_create_path_not_allowed_emits_structured_envelope() {
+        // Empty allowlist surfaces MEM_PATH_NOT_ALLOWED through
+        // `memstead_engine::mem_management::create_mem`'s pre-check.
         let tmp = TempDir::new().unwrap();
         // Empty allowlist.
         let settings = memstead_git_branch::test_support::auto_seed_with_settings(
             tmp.path(),
             WorkspaceSettings {
-                vault_create_rules: vec![],
-                vault_delete_rules: vec![],
+                mem_create_rules: vec![],
+                mem_delete_rules: vec![],
                 ..Default::default()
             },
         );
@@ -11579,7 +11579,7 @@ community:
         let server = McpServer::new(unified, crate::config::DEFAULT_TOKEN_BUDGET);
 
         let target = tmp.path().join("blocked");
-        let result = server.memstead_vault_create(Parameters(TlsVaultCreateParams {
+        let result = server.memstead_mem_create(Parameters(TlsMemCreateParams {
             schema_verbosity: None,
             write_guidance: Default::default(),
             name: "blocked".to_string(),
@@ -11595,7 +11595,7 @@ community:
         let envelope = result
             .structured_content
             .expect("error must carry structured envelope");
-        assert_eq!(envelope["code"], "VAULT_PATH_NOT_ALLOWED");
+        assert_eq!(envelope["code"], "MEM_PATH_NOT_ALLOWED");
         assert!(envelope.get("message").is_some());
         let details = envelope
             .get("details")
@@ -11606,14 +11606,14 @@ community:
     }
 
     #[test]
-    fn memstead_vault_create_name_collision_envelope_carries_source() {
+    fn memstead_mem_create_name_collision_envelope_carries_source() {
         let tmp = TempDir::new().unwrap();
         let server = setup_lifecycle_server(&tmp);
 
         // First create — succeeds. Basename must equal the name under
         // the basename-invariant, so the location is `tmp/same/`.
         let first = tmp.path().join("same");
-        let ok = server.memstead_vault_create(Parameters(TlsVaultCreateParams {
+        let ok = server.memstead_mem_create(Parameters(TlsMemCreateParams {
             schema_verbosity: None,
             write_guidance: Default::default(),
             name: "same".to_string(),
@@ -11631,7 +11631,7 @@ community:
         // (nested under `b/`). Basename still matches `name`.
         std::fs::create_dir_all(tmp.path().join("b")).unwrap();
         let second = tmp.path().join("b").join("same");
-        let err = server.memstead_vault_create(Parameters(TlsVaultCreateParams {
+        let err = server.memstead_mem_create(Parameters(TlsMemCreateParams {
             schema_verbosity: None,
             write_guidance: Default::default(),
             name: "same".to_string(),
@@ -11647,14 +11647,14 @@ community:
         let envelope = err
             .structured_content
             .expect("collision must carry envelope");
-        assert_eq!(envelope["code"], "VAULT_NAME_COLLISION");
+        assert_eq!(envelope["code"], "MEM_NAME_COLLISION");
         let source = envelope["details"]["source"]
             .as_str()
             .expect("details.source must be a string");
         // The snapshot probe renders as `runtime-created at <ts>
-        // by memstead_vault_create`.
+        // by memstead_mem_create`.
         assert!(
-            source.contains("runtime-created") && source.contains("memstead_vault_create"),
+            source.contains("runtime-created") && source.contains("memstead_mem_create"),
             "snapshot-probe collision source must identify the runtime registration: {source}"
         );
     }
@@ -11662,33 +11662,33 @@ community:
     /// Cold-boot persistence regression.
     ///
     /// Reproduces a showstopper where a successful
-    /// `memstead_vault_create` writes the per-vault branch + `__MEMSTEAD`
+    /// `memstead_mem_create` writes the per-mem branch + `__MEMSTEAD`
     /// config but NOT the workspace mount manifest, so the very next
-    /// CLI / MCP process boots without the new vault.
+    /// CLI / MCP process boots without the new mem.
     ///
     /// Asserts the engine-side persistence fix:
     /// 1. The mount manifest (`.memstead/state/mounts.json`) is rewritten
     ///    on create — a fresh `FileWorkspaceStore::load` sees the
     ///    new mount.
     /// 2. A second create with the same name surfaces
-    ///    `VAULT_NAME_COLLISION` (in-process; the in-memory router
+    ///    `MEM_NAME_COLLISION` (in-process; the in-memory router
     ///    already carries the mount). Combined with point 1, the
     ///    cold-boot collision is symmetric.
-    /// 3. After `memstead_vault_delete`, the manifest no longer carries
+    /// 3. After `memstead_mem_delete`, the manifest no longer carries
     ///    the mount.
     #[test]
-    fn memstead_vault_create_persists_mount_for_cold_boot() {
+    fn memstead_mem_create_persists_mount_for_cold_boot() {
         let tmp = TempDir::new().unwrap();
         let server = setup_lifecycle_server_with_delete(&tmp);
         let canonical_root = std::fs::canonicalize(tmp.path())
             .unwrap_or_else(|_| tmp.path().to_path_buf());
 
         // No mount file yet — auto_seed doesn't create one when no
-        // pre-existing disk vaults are present.
+        // pre-existing disk mems are present.
         let mounts_path = canonical_root.join(".memstead").join("state").join("mounts.json");
 
         let target = canonical_root.join("persisted");
-        let ok = server.memstead_vault_create(Parameters(TlsVaultCreateParams {
+        let ok = server.memstead_mem_create(Parameters(TlsMemCreateParams {
             schema_verbosity: None,
             write_guidance: Default::default(),
             name: "persisted".to_string(),
@@ -11709,7 +11709,7 @@ community:
         // new mount.
         assert!(
             mounts_path.is_file(),
-            "create must write {} so cold-boot sees the new vault",
+            "create must write {} so cold-boot sees the new mem",
             mounts_path.display()
         );
         let reloaded = <memstead_base::FileWorkspaceStore as memstead_base::WorkspaceStoreAdapter>::load(
@@ -11718,14 +11718,14 @@ community:
         )
         .expect("reload must succeed");
         assert!(
-            reloaded.mounts.iter().any(|m| m.vault == "persisted"),
-            "cold-boot workspace must include the freshly-created vault: {:?}",
-            reloaded.mounts.iter().map(|m| &m.vault).collect::<Vec<_>>()
+            reloaded.mounts.iter().any(|m| m.mem == "persisted"),
+            "cold-boot workspace must include the freshly-created mem: {:?}",
+            reloaded.mounts.iter().map(|m| &m.mem).collect::<Vec<_>>()
         );
 
-        // Second create with the same name trips VAULT_NAME_COLLISION —
+        // Second create with the same name trips MEM_NAME_COLLISION —
         // F3 follows from the persistence fix.
-        let dup = server.memstead_vault_create(Parameters(TlsVaultCreateParams {
+        let dup = server.memstead_mem_create(Parameters(TlsMemCreateParams {
             schema_verbosity: None,
             write_guidance: Default::default(),
             name: "persisted".to_string(),
@@ -11739,16 +11739,16 @@ community:
         assert_eq!(
             dup.is_error,
             Some(true),
-            "second create of an already-persisted vault must collide"
+            "second create of an already-persisted mem must collide"
         );
         let envelope = dup
             .structured_content
             .expect("collision must carry envelope");
-        assert_eq!(envelope["code"], "VAULT_NAME_COLLISION");
+        assert_eq!(envelope["code"], "MEM_NAME_COLLISION");
 
         // Delete persists too — the manifest no longer carries the
         // mount after a successful unregister.
-        let del = server.memstead_vault_delete(Parameters(TlsVaultDeleteParams {
+        let del = server.memstead_mem_delete(Parameters(TlsMemDeleteParams {
             name: "persisted".to_string(),
             note: None,
         }));
@@ -11764,16 +11764,16 @@ community:
             )
             .expect("post-delete reload must succeed");
         assert!(
-            after_delete.mounts.iter().all(|m| m.vault != "persisted"),
-            "cold-boot workspace must NOT include the deleted vault"
+            after_delete.mounts.iter().all(|m| m.mem != "persisted"),
+            "cold-boot workspace must NOT include the deleted mem"
         );
     }
 
     #[test]
-    fn memstead_vault_create_invalid_schema_ref_emits_invalid_input() {
+    fn memstead_mem_create_invalid_schema_ref_emits_invalid_input() {
         let tmp = TempDir::new().unwrap();
         let server = setup_lifecycle_server(&tmp);
-        let result = server.memstead_vault_create(Parameters(TlsVaultCreateParams {
+        let result = server.memstead_mem_create(Parameters(TlsMemCreateParams {
             schema_verbosity: None,
             write_guidance: Default::default(),
             name: "bad-schema".to_string(),
@@ -11793,20 +11793,20 @@ community:
     }
 
     // ------------------------------------------------------------------
-    // memstead_vault_delete — envelope + happy-path wire tests.
+    // memstead_mem_delete — envelope + happy-path wire tests.
     // ------------------------------------------------------------------
 
-    use crate::lifecycle::VaultDeleteParams as TlsVaultDeleteParams;
+    use crate::lifecycle::MemDeleteParams as TlsMemDeleteParams;
 
     /// Build an `McpServer` around an empty engine with matching create +
-    /// delete allowlists rooted at the given TempDir, so `memstead_vault_delete`
-    /// can actually unregister what a prior `memstead_vault_create` set up.
+    /// delete allowlists rooted at the given TempDir, so `memstead_mem_delete`
+    /// can actually unregister what a prior `memstead_mem_create` set up.
     fn setup_lifecycle_server_with_delete(tmp: &TempDir) -> McpServer {
         let pro_settings = memstead_git_branch::test_support::auto_seed_with_settings(
             tmp.path(),
             WorkspaceSettings {
-                vault_create_rules: vec![memstead_base::CreateRuleSetting { pattern: "*".to_string(), schemas: vec!["default@1.0.0".to_string()], default_cross_links: None }],
-                vault_delete_rules: vec![memstead_base::DeleteRuleSetting { pattern: "*".to_string() }],
+                mem_create_rules: vec![memstead_base::CreateRuleSetting { pattern: "*".to_string(), schemas: vec!["default@1.0.0".to_string()], default_cross_links: None }],
+                mem_delete_rules: vec![memstead_base::DeleteRuleSetting { pattern: "*".to_string() }],
                 ..Default::default()
             },
         );
@@ -11820,13 +11820,13 @@ community:
     }
 
     #[test]
-    fn memstead_vault_delete_happy_path_returns_destructive_response() {
+    fn memstead_mem_delete_happy_path_returns_destructive_response() {
         let tmp = TempDir::new().unwrap();
         let server = setup_lifecycle_server_with_delete(&tmp);
 
-        // Seed a vault first so delete has something to remove.
+        // Seed a mem first so delete has something to remove.
         let target = tmp.path().join("wipe");
-        let create_result = server.memstead_vault_create(Parameters(TlsVaultCreateParams {
+        let create_result = server.memstead_mem_create(Parameters(TlsMemCreateParams {
             schema_verbosity: None,
             write_guidance: Default::default(),
             name: "wipe".to_string(),
@@ -11840,12 +11840,12 @@ community:
         }));
         assert!(create_result.is_error.is_none() || create_result.is_error == Some(false));
 
-        // MCP `memstead_vault_delete`
+        // MCP `memstead_mem_delete`
         // is always destructive. The wrapper hardcodes `delete_files:
-        // true`; the engine prunes the per-vault branch + `__MEMSTEAD` config
+        // true`; the engine prunes the per-mem branch + `__MEMSTEAD` config
         // blob in one ref-edit transaction and the response carries
         // `files_deleted: true`.
-        let result = server.memstead_vault_delete(Parameters(TlsVaultDeleteParams {
+        let result = server.memstead_mem_delete(Parameters(TlsMemDeleteParams {
             name: "wipe".to_string(),
             note: Some("mcp handler happy path".to_string()),
         }));
@@ -11863,14 +11863,14 @@ community:
     }
 
     #[test]
-    fn memstead_vault_delete_path_not_allowed_emits_structured_envelope() {
+    fn memstead_mem_delete_path_not_allowed_emits_structured_envelope() {
         let tmp = TempDir::new().unwrap();
         // Create allowlist is permissive, delete allowlist is empty.
         let settings = memstead_git_branch::test_support::auto_seed_with_settings(
             tmp.path(),
             WorkspaceSettings {
-                vault_create_rules: vec![memstead_base::CreateRuleSetting { pattern: "*".to_string(), schemas: vec!["default@1.0.0".to_string()], default_cross_links: None }],
-                vault_delete_rules: vec![],
+                mem_create_rules: vec![memstead_base::CreateRuleSetting { pattern: "*".to_string(), schemas: vec!["default@1.0.0".to_string()], default_cross_links: None }],
+                mem_delete_rules: vec![],
                 ..Default::default()
             },
         );
@@ -11882,9 +11882,9 @@ community:
         unified.set_workspace_root(canonical_root);
         let server = McpServer::new(unified, crate::config::DEFAULT_TOKEN_BUDGET);
 
-        // Set up a vault we can try to delete.
+        // Set up a mem we can try to delete.
         let target = tmp.path().join("pinned");
-        let _ = server.memstead_vault_create(Parameters(TlsVaultCreateParams {
+        let _ = server.memstead_mem_create(Parameters(TlsMemCreateParams {
             schema_verbosity: None,
             write_guidance: Default::default(),
             name: "pinned".to_string(),
@@ -11897,7 +11897,7 @@ community:
             include_schema: false,
         }));
 
-        let result = server.memstead_vault_delete(Parameters(TlsVaultDeleteParams {
+        let result = server.memstead_mem_delete(Parameters(TlsMemDeleteParams {
             name: "pinned".to_string(),
             note: None,
         }));
@@ -11905,7 +11905,7 @@ community:
         let envelope = result
             .structured_content
             .expect("error must carry structured envelope");
-        assert_eq!(envelope["code"], "VAULT_PATH_NOT_ALLOWED");
+        assert_eq!(envelope["code"], "MEM_PATH_NOT_ALLOWED");
         let details = envelope
             .get("details")
             .expect("envelope must carry details");
@@ -11913,11 +11913,11 @@ community:
     }
 
     #[test]
-    fn memstead_vault_delete_unknown_vault_emits_unknown_vault_envelope() {
+    fn memstead_mem_delete_unknown_mem_emits_unknown_mem_envelope() {
         let tmp = TempDir::new().unwrap();
         let server = setup_lifecycle_server_with_delete(&tmp);
 
-        let result = server.memstead_vault_delete(Parameters(TlsVaultDeleteParams {
+        let result = server.memstead_mem_delete(Parameters(TlsMemDeleteParams {
             name: "ghost".to_string(),
             note: None,
         }));
@@ -11925,26 +11925,26 @@ community:
         let envelope = result
             .structured_content
             .expect("unknown must carry envelope");
-        assert_eq!(envelope["code"], "UNKNOWN_VAULT");
+        assert_eq!(envelope["code"], "UNKNOWN_MEM");
     }
 
-    /// `VAULT_REFERENCED_BY_POLICY` fires when the workspace-level
-    /// `[cross_vault_links]` policy grants any other writable vault
+    /// `MEM_REFERENCED_BY_POLICY` fires when the workspace-level
+    /// `[cross_mem_links]` policy grants any other writable mem
     /// permission to write into the delete target. Build an engine
     /// where `plan-x = ["primary"]` is declared in the effective
     /// cross-link map, then attempt to delete `primary` and assert
-    /// the envelope surfaces the granting vault.
+    /// the envelope surfaces the granting mem.
     #[test]
-    fn memstead_vault_delete_policy_grant_envelope_carries_referring_vaults() {
+    fn memstead_mem_delete_policy_grant_envelope_carries_referring_mems() {
         use std::collections::BTreeMap;
         let tmp = TempDir::new().unwrap();
 
-        // Seed both vaults via the create-allowlisted server, then
+        // Seed both mems via the create-allowlisted server, then
         // re-init the engine with explicit cross-link policy (no MCP
-        // path mutates `[cross_vault_links]`; the operator edits
+        // path mutates `[cross_mem_links]`; the operator edits
         // `.memstead/workspace.toml` directly).
         let server = setup_lifecycle_server_with_delete(&tmp);
-        let _ = server.memstead_vault_create(Parameters(TlsVaultCreateParams {
+        let _ = server.memstead_mem_create(Parameters(TlsMemCreateParams {
             schema_verbosity: None,
             write_guidance: Default::default(),
             name: "primary".to_string(),
@@ -11955,7 +11955,7 @@ community:
         recovery: None,
             include_schema: false,
         }));
-        let _ = server.memstead_vault_create(Parameters(TlsVaultCreateParams {
+        let _ = server.memstead_mem_create(Parameters(TlsMemCreateParams {
             schema_verbosity: None,
             write_guidance: Default::default(),
             name: "plan-x".to_string(),
@@ -11967,8 +11967,8 @@ community:
             include_schema: false,
         }));
         // Drop the seeded server; rebuild the engine with explicit
-        // `cross_vault_links` so plan-x → primary is the effective
-        // policy. Engine re-init reads the existing vault-repo state.
+        // `cross_mem_links` so plan-x → primary is the effective
+        // policy. Engine re-init reads the existing mem-repo state.
         drop(server);
 
         let mut links: BTreeMap<String, memstead_schema::workspace_config::CrossLinkValue> =
@@ -11980,31 +11980,31 @@ community:
             ]),
         );
         let settings = WorkspaceSettings {
-            vault_create_rules: vec![memstead_base::CreateRuleSetting { pattern: "*".to_string(), schemas: vec!["default@1.0.0".to_string()], default_cross_links: None }],
-            vault_delete_rules: vec![memstead_base::DeleteRuleSetting {
+            mem_create_rules: vec![memstead_base::CreateRuleSetting { pattern: "*".to_string(), schemas: vec!["default@1.0.0".to_string()], default_cross_links: None }],
+            mem_delete_rules: vec![memstead_base::DeleteRuleSetting {
                 pattern: "*".to_string(),
             }],
-            cross_vault_links: links,
+            cross_mem_links: links,
             ..Default::default()
         };
         // Build an engine that mounts the runtime-created
-        // git-branch vaults with the cross_vault_links policy. Walk
-        // `vault-repo/.git/refs/heads/` to enumerate mounts —
+        // git-branch mems with the cross_mem_links policy. Walk
+        // `mem-repo/.git/refs/heads/` to enumerate mounts —
         // `setup_unified_test_engine_git_branch` looks for
-        // disk-shape vault dirs which don't exist for pure
-        // runtime-created git-branch vaults.
-        let gitdir = tmp.path().join("vault-repo").join(".git");
+        // disk-shape mem dirs which don't exist for pure
+        // runtime-created git-branch mems.
+        let gitdir = tmp.path().join("mem-repo").join(".git");
         let canonical_gitdir = gitdir.canonicalize().unwrap_or(gitdir.clone());
-        let mut mounts: Vec<(memstead_base::Mount, Box<dyn memstead_base::backend::VaultBackend>)> =
+        let mut mounts: Vec<(memstead_base::Mount, Box<dyn memstead_base::backend::MemBackend>)> =
             Vec::new();
-        for vault_name in ["primary", "plan-x"] {
+        for mem_name in ["primary", "plan-x"] {
             let mount = memstead_base::Mount {
                 migration_target: None,
-                vault: vault_name.to_string(),
+                mem: mem_name.to_string(),
                 schema: Some("default@1.0.0".parse().unwrap()),
                 storage: memstead_base::MountStorage::GitBranch {
                     gitdir: canonical_gitdir.clone(),
-                    branch: format!("refs/heads/{vault_name}"),
+                    branch: format!("refs/heads/{mem_name}"),
                 },
                 capability: memstead_base::MountCapability::Write,
                 lifecycle: memstead_base::MountLifecycle::Eager,
@@ -12023,11 +12023,11 @@ community:
 
         // The MCP surface is
         // always destructive (no `delete_files` parameter on the wire).
-        // The policy safeguard fires whenever a `[cross_vault_links]`
+        // The policy safeguard fires whenever a `[cross_mem_links]`
         // grant points at the target — router-only unregister with
         // storage-preserved is reachable only via the CLI's
-        // `memstead vault unregister` verb.
-        let result = server.memstead_vault_delete(Parameters(TlsVaultDeleteParams {
+        // `memstead mem unregister` verb.
+        let result = server.memstead_mem_delete(Parameters(TlsMemDeleteParams {
             name: "primary".to_string(),
             note: None,
         }));
@@ -12035,32 +12035,32 @@ community:
         let envelope = result
             .structured_content
             .expect("reference-block must carry envelope");
-        assert_eq!(envelope["code"], "VAULT_REFERENCED_BY_POLICY");
+        assert_eq!(envelope["code"], "MEM_REFERENCED_BY_POLICY");
         let details = envelope
             .get("details")
             .expect("envelope must carry details");
         assert_eq!(details["name"], "primary");
         assert_eq!(
-            details["referring_vaults"],
+            details["referring_mems"],
             serde_json::json!(["plan-x"]),
-            "details.referring_vaults must name the blocking referrer"
+            "details.referring_mems must name the blocking referrer"
         );
     }
 
-    /// `memstead_vault_delete delete_files=true` against a vault-db-backed
-    /// (git-branch) mount runs the symmetric cleanup: the per-vault
-    /// branch + `__MEMSTEAD:vaults/<name>/config.json` are pruned, the
+    /// `memstead_mem_delete delete_files=true` against a mem-db-backed
+    /// (git-branch) mount runs the symmetric cleanup: the per-mem
+    /// branch + `__MEMSTEAD:mems/<name>/config.json` are pruned, the
     /// response carries `files_deleted: true`, and no
-    /// `VAULT_FILES_NOT_DELETED` warning is emitted. Counterpart to
+    /// `MEM_FILES_NOT_DELETED` warning is emitted. Counterpart to
     /// the folder-mount test below — together they pin the agent-
     /// creatable-equals-agent-deletable contract for both backends.
     #[test]
-    fn memstead_vault_delete_with_delete_files_true_on_vault_db_mount_prunes_branch_and_config() {
+    fn memstead_mem_delete_with_delete_files_true_on_mem_db_mount_prunes_branch_and_config() {
         let tmp = TempDir::new().unwrap();
         let server = setup_lifecycle_server_with_delete(&tmp);
-        let gitdir = tmp.path().join("vault-repo").join(".git");
+        let gitdir = tmp.path().join("mem-repo").join(".git");
 
-        let _ = server.memstead_vault_create(Parameters(TlsVaultCreateParams {
+        let _ = server.memstead_mem_create(Parameters(TlsMemCreateParams {
             schema_verbosity: None,
             write_guidance: Default::default(),
             name: "ephemeral".to_string(),
@@ -12072,12 +12072,12 @@ community:
             include_schema: false,
         }));
         // Pre-condition: create wrote the branch + the __MEMSTEAD entry.
-        let repo = gix::open(&gitdir).expect("vault-repo gitdir open");
+        let repo = gix::open(&gitdir).expect("mem-repo gitdir open");
         assert!(
             repo.try_find_reference("refs/heads/ephemeral")
                 .unwrap()
                 .is_some(),
-            "create must seed the per-vault branch"
+            "create must seed the per-mem branch"
         );
         let memstead_tree = repo
             .try_find_reference("refs/heads/__MEMSTEAD")
@@ -12092,13 +12092,13 @@ community:
             .unwrap();
         assert!(
             memstead_tree
-                .lookup_entry_by_path("vaults/ephemeral/config.json")
+                .lookup_entry_by_path("mems/ephemeral/config.json")
                 .unwrap()
                 .is_some(),
-            "create must seed __MEMSTEAD:vaults/ephemeral/config.json"
+            "create must seed __MEMSTEAD:mems/ephemeral/config.json"
         );
 
-        let result = server.memstead_vault_delete(Parameters(TlsVaultDeleteParams {
+        let result = server.memstead_mem_delete(Parameters(TlsMemDeleteParams {
             name: "ephemeral".to_string(),
             note: None,
         }));
@@ -12113,18 +12113,18 @@ community:
         assert_eq!(
             sc["files_deleted"],
             serde_json::Value::Bool(true),
-            "vault-db delete_files=true now prunes the branch + __MEMSTEAD config — files_deleted must be true"
+            "mem-db delete_files=true now prunes the branch + __MEMSTEAD config — files_deleted must be true"
         );
         if let Some(warnings) = sc.get("warnings").and_then(|v| v.as_array()) {
             assert!(
                 warnings
                     .iter()
-                    .all(|w| w["code"] != "VAULT_FILES_NOT_DELETED"),
-                "no VAULT_FILES_NOT_DELETED warning when cleanup succeeded: {warnings:?}"
+                    .all(|w| w["code"] != "MEM_FILES_NOT_DELETED"),
+                "no MEM_FILES_NOT_DELETED warning when cleanup succeeded: {warnings:?}"
             );
         }
         // Post-condition: branch gone, __MEMSTEAD entry gone.
-        let repo = gix::open(&gitdir).expect("vault-repo gitdir reopen");
+        let repo = gix::open(&gitdir).expect("mem-repo gitdir reopen");
         assert!(
             repo.try_find_reference("refs/heads/ephemeral")
                 .unwrap()
@@ -12134,7 +12134,7 @@ community:
         let memstead_tree = repo
             .try_find_reference("refs/heads/__MEMSTEAD")
             .unwrap()
-            .expect("__MEMSTEAD survives the per-vault prune")
+            .expect("__MEMSTEAD survives the per-mem prune")
             .into_fully_peeled_id()
             .unwrap()
             .object()
@@ -12144,33 +12144,33 @@ community:
             .unwrap();
         assert!(
             memstead_tree
-                .lookup_entry_by_path("vaults/ephemeral/config.json")
+                .lookup_entry_by_path("mems/ephemeral/config.json")
                 .unwrap()
                 .is_none(),
-            "delete must prune __MEMSTEAD:vaults/ephemeral/config.json"
+            "delete must prune __MEMSTEAD:mems/ephemeral/config.json"
         );
     }
 
-    /// Folder-backend happy path: `delete_files=true` on a vault whose
+    /// Folder-backend happy path: `delete_files=true` on a mem whose
     /// directory exists removes the directory and reports
-    /// `files_deleted: true` with no `VAULT_FILES_NOT_DELETED` warning.
-    /// Companion to the vault-db-backed test above — together they
+    /// `files_deleted: true` with no `MEM_FILES_NOT_DELETED` warning.
+    /// Companion to the mem-db-backed test above — together they
     /// pin the two halves of the documented contract.
     #[test]
-    fn memstead_vault_delete_with_delete_files_true_on_folder_mount_removes_dir() {
+    fn memstead_mem_delete_with_delete_files_true_on_folder_mount_removes_dir() {
         let tmp = TempDir::new().unwrap();
         // Build a basis-flavour engine: folder backend only, no
-        // vault-repo seeded. The create orchestrator's heuristic then
-        // picks `MountStorage::Folder { path }` so `dir_for_vault`
-        // returns Some on the registered vault.
+        // mem-repo seeded. The create orchestrator's heuristic then
+        // picks `MountStorage::Folder { path }` so `dir_for_mem`
+        // returns Some on the registered mem.
         let mut unified = memstead_base::Engine::from_mounts(Vec::new()).unwrap();
         unified.set_settings(WorkspaceSettings {
-            vault_create_rules: vec![memstead_base::CreateRuleSetting {
+            mem_create_rules: vec![memstead_base::CreateRuleSetting {
                 pattern: "*".to_string(),
                 schemas: vec!["default@1.0.0".to_string()],
                 default_cross_links: None,
             }],
-            vault_delete_rules: vec![memstead_base::DeleteRuleSetting {
+            mem_delete_rules: vec![memstead_base::DeleteRuleSetting {
                 pattern: "*".to_string(),
             }],
             ..Default::default()
@@ -12180,21 +12180,21 @@ community:
         unified.set_workspace_root(canonical_root);
         let server = McpServer::new(unified, crate::config::DEFAULT_TOKEN_BUDGET);
 
-        let vault_dir = tmp.path().join("scratch");
-        let _ = server.memstead_vault_create(Parameters(TlsVaultCreateParams {
+        let mem_dir = tmp.path().join("scratch");
+        let _ = server.memstead_mem_create(Parameters(TlsMemCreateParams {
             schema_verbosity: None,
             write_guidance: Default::default(),
             name: "scratch".to_string(),
-            location: vault_dir.to_string_lossy().into_owned(),
+            location: mem_dir.to_string_lossy().into_owned(),
             schema: "default@1.0.0".to_string(),
             vcs: None,
             note: None,
         recovery: None,
             include_schema: false,
         }));
-        assert!(vault_dir.is_dir(), "create must produce the vault dir on disk");
+        assert!(mem_dir.is_dir(), "create must produce the mem dir on disk");
 
-        let result = server.memstead_vault_delete(Parameters(TlsVaultDeleteParams {
+        let result = server.memstead_mem_delete(Parameters(TlsMemDeleteParams {
             name: "scratch".to_string(),
             note: None,
         }));
@@ -12212,39 +12212,39 @@ community:
             "rmdir on a removable directory must report files_deleted: true"
         );
         // The directory must be physically gone.
-        assert!(!vault_dir.exists(), "the on-disk directory must be removed");
-        // No VAULT_FILES_NOT_DELETED warning — the cleanup ran cleanly.
+        assert!(!mem_dir.exists(), "the on-disk directory must be removed");
+        // No MEM_FILES_NOT_DELETED warning — the cleanup ran cleanly.
         if let Some(warnings) = sc.get("warnings").and_then(|v| v.as_array()) {
             assert!(
                 warnings
                     .iter()
-                    .all(|w| w["code"] != "VAULT_FILES_NOT_DELETED"),
-                "no VAULT_FILES_NOT_DELETED warning when rmdir succeeded: {warnings:?}"
+                    .all(|w| w["code"] != "MEM_FILES_NOT_DELETED"),
+                "no MEM_FILES_NOT_DELETED warning when rmdir succeeded: {warnings:?}"
             );
         }
     }
 
-    /// Hierarchical vault-db round-trip:
-    /// `memstead_vault_create name=plan-q4 path=planning schema=…` followed by
-    /// `memstead_vault_delete name=plan-q4 delete_files=true` leaves zero
+    /// Hierarchical mem-db round-trip:
+    /// `memstead_mem_create name=plan-q4 path=planning schema=…` followed by
+    /// `memstead_mem_delete name=plan-q4 delete_files=true` leaves zero
     /// trace of the hierarchical branch + `__MEMSTEAD` config. The branch
     /// ref under `refs/heads/planning/plan-q4` and the tree path
-    /// `vaults/planning/plan-q4/config.json` must both be gone after
+    /// `mems/planning/plan-q4/config.json` must both be gone after
     /// the delete. Pairs with the flat case (`exec-*` / `ephemeral`)
     /// above — together they pin the path-composition contract on
     /// both halves of the lifecycle.
     #[test]
-    fn memstead_vault_delete_hierarchical_path_prunes_branch_and_config() {
+    fn memstead_mem_delete_hierarchical_path_prunes_branch_and_config() {
         let tmp = TempDir::new().unwrap();
         let pro_settings = memstead_git_branch::test_support::auto_seed_with_settings(
             tmp.path(),
             WorkspaceSettings {
-                vault_create_rules: vec![memstead_base::CreateRuleSetting {
+                mem_create_rules: vec![memstead_base::CreateRuleSetting {
                     pattern: "planning/plan-*".to_string(),
                     schemas: vec!["default@1.0.0".to_string()],
                     default_cross_links: None,
                 }],
-                vault_delete_rules: vec![memstead_base::DeleteRuleSetting {
+                mem_delete_rules: vec![memstead_base::DeleteRuleSetting {
                     pattern: "planning/plan-*".to_string(),
                 }],
                 ..Default::default()
@@ -12256,12 +12256,12 @@ community:
             .unwrap_or_else(|_| tmp.path().to_path_buf());
         unified.set_workspace_root(canonical_root);
         let server = McpServer::new(unified, crate::config::DEFAULT_TOKEN_BUDGET);
-        let gitdir = tmp.path().join("vault-repo").join(".git");
+        let gitdir = tmp.path().join("mem-repo").join(".git");
 
-        // Create the hierarchical vault. The full
+        // Create the hierarchical mem. The full
         // `planning/plan-q4` name is the canonical input — no
         // separate `path` field.
-        let create_result = server.memstead_vault_create(Parameters(TlsVaultCreateParams {
+        let create_result = server.memstead_mem_create(Parameters(TlsMemCreateParams {
             schema_verbosity: None,
             write_guidance: Default::default(),
             name: "planning/plan-q4".to_string(),
@@ -12283,7 +12283,7 @@ community:
         );
 
         // Pre-condition: hierarchical branch + config exist.
-        let repo = gix::open(&gitdir).expect("vault-repo open");
+        let repo = gix::open(&gitdir).expect("mem-repo open");
         assert!(
             repo.try_find_reference("refs/heads/planning/plan-q4")
                 .unwrap()
@@ -12303,15 +12303,15 @@ community:
             .unwrap();
         assert!(
             memstead_tree
-                .lookup_entry_by_path("vaults/planning/plan-q4/config.json")
+                .lookup_entry_by_path("mems/planning/plan-q4/config.json")
                 .unwrap()
                 .is_some(),
-            "create must seed __MEMSTEAD:vaults/planning/plan-q4/config.json"
+            "create must seed __MEMSTEAD:mems/planning/plan-q4/config.json"
         );
 
         // Symmetric cleanup — MCP delete is always destructive, and
-        // the vault name IS the full hierarchical path.
-        let delete_result = server.memstead_vault_delete(Parameters(TlsVaultDeleteParams {
+        // the mem name IS the full hierarchical path.
+        let delete_result = server.memstead_mem_delete(Parameters(TlsMemDeleteParams {
             name: "planning/plan-q4".to_string(),
             note: None,
         }));
@@ -12326,11 +12326,11 @@ community:
         assert_eq!(
             sc["files_deleted"],
             serde_json::Value::Bool(true),
-            "hierarchical vault-db delete_files=true must report files_deleted: true"
+            "hierarchical mem-db delete_files=true must report files_deleted: true"
         );
 
         // Post-condition: both branch + config gone.
-        let repo = gix::open(&gitdir).expect("vault-repo reopen");
+        let repo = gix::open(&gitdir).expect("mem-repo reopen");
         assert!(
             repo.try_find_reference("refs/heads/planning/plan-q4")
                 .unwrap()
@@ -12350,19 +12350,19 @@ community:
             .unwrap();
         assert!(
             memstead_tree
-                .lookup_entry_by_path("vaults/planning/plan-q4/config.json")
+                .lookup_entry_by_path("mems/planning/plan-q4/config.json")
                 .unwrap()
                 .is_none(),
-            "delete must prune __MEMSTEAD:vaults/planning/plan-q4/config.json"
+            "delete must prune __MEMSTEAD:mems/planning/plan-q4/config.json"
         );
         // The empty `planning/` ancestor directory is gix-pruned on the
         // tree write — assert it's gone too.
         assert!(
             memstead_tree
-                .lookup_entry_by_path("vaults/planning")
+                .lookup_entry_by_path("mems/planning")
                 .unwrap()
                 .is_none(),
-            "delete must collapse the empty `vaults/planning/` ancestor"
+            "delete must collapse the empty `mems/planning/` ancestor"
         );
     }
 
@@ -12376,7 +12376,7 @@ community:
         use std::collections::HashSet;
 
         /// Build an `McpServer` with the same engine as `setup_test_engine`
-        /// plus an explicit disabled-tool set. Keeps the vault fixture
+        /// plus an explicit disabled-tool set. Keeps the mem fixture
         /// identical so baseline assertions carry over.
         fn setup_filtered_server(disabled: &[&str]) -> (McpServer, tempfile::TempDir) {
             // Reuse the existing engine factory, then rewrap with the
@@ -12384,14 +12384,14 @@ community:
             // throw it away and construct a fresh one sharing the same
             // tmp fixture so the filter lands on the same graph state.
             let tmp = tempfile::TempDir::new().unwrap();
-            let vault_dir = tmp.path().join("specs");
-            std::fs::create_dir_all(vault_dir.join(".memstead")).unwrap();
+            let mem_dir = tmp.path().join("specs");
+            std::fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
             std::fs::write(
-                vault_dir.join(".memstead/config.json"),
+                mem_dir.join(".memstead/config.json"),
                 r#"{"version":"0.1.0","schema":"default@1.0.0","mediums":{},"projections":{}}"#,
             )
             .unwrap();
-            let _ = vault_dir;
+            let _ = mem_dir;
             memstead_git_branch::test_support::auto_seeded_settings(tmp.path());
             let set: HashSet<String> = disabled.iter().map(|s| s.to_string()).collect();
             let server = McpServer::new_with_filter(
@@ -12423,14 +12423,14 @@ community:
 
         #[test]
         fn filter_omits_disabled_names_from_list() {
-            let (server, _tmp) = setup_filtered_server(&["memstead_vault_create", "memstead_vault_delete"]);
+            let (server, _tmp) = setup_filtered_server(&["memstead_mem_create", "memstead_mem_delete"]);
             let names: Vec<String> = server
                 .filtered_tool_list()
                 .iter()
                 .map(|t| t.name.to_string())
                 .collect();
-            assert!(!names.iter().any(|n| n == "memstead_vault_create"));
-            assert!(!names.iter().any(|n| n == "memstead_vault_delete"));
+            assert!(!names.iter().any(|n| n == "memstead_mem_create"));
+            assert!(!names.iter().any(|n| n == "memstead_mem_delete"));
             // Every other tool still present — verify by cardinality +
             // presence of a well-known read tool.
             assert!(names.iter().any(|n| n == "memstead_entity"));
@@ -12442,23 +12442,23 @@ community:
         #[test]
         fn get_tool_returns_none_for_disabled_name() {
             use rmcp::ServerHandler;
-            let (server, _tmp) = setup_filtered_server(&["memstead_vault_create"]);
-            assert!(server.get_tool("memstead_vault_create").is_none());
+            let (server, _tmp) = setup_filtered_server(&["memstead_mem_create"]);
+            assert!(server.get_tool("memstead_mem_create").is_none());
             // Non-disabled name still resolves.
             assert!(server.get_tool("memstead_entity").is_some());
         }
 
         #[test]
         fn tool_disabled_envelope_carries_code_and_details() {
-            let (server, _tmp) = setup_filtered_server(&["memstead_vault_create"]);
-            let result = server.tool_disabled_response("memstead_vault_create");
+            let (server, _tmp) = setup_filtered_server(&["memstead_mem_create"]);
+            let result = server.tool_disabled_response("memstead_mem_create");
             assert_eq!(result.is_error, Some(true));
             let env = result
                 .structured_content
                 .expect("tool_disabled must carry structured_content");
             assert_eq!(env["code"], "TOOL_DISABLED");
             let details = env.get("details").expect("details present");
-            assert_eq!(details["tool"], "memstead_vault_create");
+            assert_eq!(details["tool"], "memstead_mem_create");
             assert_eq!(
                 details["config_source"],
                 "/tmp/test.memstead.toml",
@@ -12472,14 +12472,14 @@ community:
             // config). The envelope drops the field entirely so agents
             // don't decode a stub path.
             let tmp = tempfile::TempDir::new().unwrap();
-            let vault_dir = tmp.path().join("specs");
-            std::fs::create_dir_all(vault_dir.join(".memstead")).unwrap();
+            let mem_dir = tmp.path().join("specs");
+            std::fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
             std::fs::write(
-                vault_dir.join(".memstead/config.json"),
+                mem_dir.join(".memstead/config.json"),
                 r#"{"version":"0.1.0","schema":"default@1.0.0","mediums":{},"projections":{}}"#,
             )
             .unwrap();
-            let _ = vault_dir;
+            let _ = mem_dir;
             memstead_git_branch::test_support::auto_seeded_settings(tmp.path());
             let mut set = HashSet::new();
             set.insert("memstead_entity".to_string());
@@ -12500,32 +12500,32 @@ community:
         }
 
         #[test]
-        fn chat_agent_scenario_hides_vault_lifecycle_pair() {
+        fn chat_agent_scenario_hides_mem_lifecycle_pair() {
             // Mirrors the macOS chat-agent's intended config: the app's
-            // `WorkspaceService` owns vault lifecycle, so the in-process
-            // chat agent never sees `memstead_vault_create` /
-            // `memstead_vault_delete` on its MCP surface.
+            // `WorkspaceService` owns mem lifecycle, so the in-process
+            // chat agent never sees `memstead_mem_create` /
+            // `memstead_mem_delete` on its MCP surface.
             use rmcp::ServerHandler;
             let (server, _tmp) =
-                setup_filtered_server(&["memstead_vault_create", "memstead_vault_delete"]);
+                setup_filtered_server(&["memstead_mem_create", "memstead_mem_delete"]);
             // List omits both.
             let names: Vec<String> = server
                 .filtered_tool_list()
                 .iter()
                 .map(|t| t.name.to_string())
                 .collect();
-            assert!(!names.iter().any(|n| n == "memstead_vault_create"));
-            assert!(!names.iter().any(|n| n == "memstead_vault_delete"));
+            assert!(!names.iter().any(|n| n == "memstead_mem_create"));
+            assert!(!names.iter().any(|n| n == "memstead_mem_delete"));
             // get_tool rejects.
-            assert!(server.get_tool("memstead_vault_create").is_none());
-            assert!(server.get_tool("memstead_vault_delete").is_none());
+            assert!(server.get_tool("memstead_mem_create").is_none());
+            assert!(server.get_tool("memstead_mem_delete").is_none());
             // Direct response envelope for a filtered call.
-            let resp = server.tool_disabled_response("memstead_vault_create");
+            let resp = server.tool_disabled_response("memstead_mem_create");
             assert_eq!(resp.is_error, Some(true));
             // Non-filtered tools still reachable.
             assert!(server.get_tool("memstead_entity").is_some());
             assert!(server.get_tool("memstead_search").is_some());
-            assert!(server.is_tool_disabled("memstead_vault_create"));
+            assert!(server.is_tool_disabled("memstead_mem_create"));
             assert!(!server.is_tool_disabled("memstead_entity"));
         }
 
@@ -12533,10 +12533,10 @@ community:
         fn is_tool_disabled_matches_exactly_no_glob() {
             // Plan invariant: exact string equality, no glob / prefix
             // semantics. A partial match must not trigger the filter.
-            let (server, _tmp) = setup_filtered_server(&["memstead_vault_create"]);
-            assert!(server.is_tool_disabled("memstead_vault_create"));
-            assert!(!server.is_tool_disabled("memstead_vault_create_extra"));
-            assert!(!server.is_tool_disabled("memstead_vault"));
+            let (server, _tmp) = setup_filtered_server(&["memstead_mem_create"]);
+            assert!(server.is_tool_disabled("memstead_mem_create"));
+            assert!(!server.is_tool_disabled("memstead_mem_create_extra"));
+            assert!(!server.is_tool_disabled("memstead_mem"));
             assert!(!server.is_tool_disabled("memstead_"));
         }
     }
@@ -12551,7 +12551,7 @@ community:
         use super::*;
         use crate::tools::mutation::{CreateParams, UpdateParams};
 
-        /// Open the per-vault gitdir and return the `HEAD` commit's
+        /// Open the per-mem gitdir and return the `HEAD` commit's
         /// raw message. Shells out to `git log -1 --format=%B` so we
         /// don't pull `gix` into the `memstead-mcp` dev-dependency surface
         /// just for one test — the production crate already depends
@@ -12559,22 +12559,22 @@ community:
         /// shouldn't take that direct dep. Uses the engine's own
         /// `gitdir_for` resolver so the test tracks whatever layout
         /// the default resolver produced (isolated `.git/` under the
-        /// vault root today).
-        fn head_commit_message(server: &McpServer, vault: &str) -> String {
+        /// mem root today).
+        fn head_commit_message(server: &McpServer, mem: &str) -> String {
             let gitdir = {
                 let unified = server.unified_engine().clone();
                 let engine = unified.lock().unwrap();
                 engine
-                    .gitdir_for(vault)
-                    .expect("gitdir resolves for fixture vault")
+                    .gitdir_for(mem)
+                    .expect("gitdir resolves for fixture mem")
             };
-            // Vault-repo-backed vaults commit to `refs/heads/<vault>`;
-            // the shared `vault-repo/.git/`'s HEAD points at `main`
+            // Mem-repo-backed mems commit to `refs/heads/<mem>`;
+            // the shared `mem-repo/.git/`'s HEAD points at `main`
             // (workspace configs branch), so a plain `git log -1` would
             // read the seed commit instead of the entity write. Try the
-            // per-vault branch first; fall back to HEAD for legacy
-            // disk-backed vaults whose only branch is HEAD.
-            let per_vault_ref = format!("refs/heads/{vault}");
+            // per-mem branch first; fall back to HEAD for legacy
+            // disk-backed mems whose only branch is HEAD.
+            let per_mem_ref = format!("refs/heads/{mem}");
             let try_log = |rev: &str| {
                 std::process::Command::new("git")
                     .arg("--git-dir")
@@ -12587,7 +12587,7 @@ community:
                     .expect("git log invocation succeeds")
             };
             let output = {
-                let first = try_log(&per_vault_ref);
+                let first = try_log(&per_mem_ref);
                 if first.status.success() {
                     first
                 } else {
@@ -12608,18 +12608,18 @@ community:
         /// module-level helper; only the constructor changes.
         fn server_with_require_notes(require: bool) -> (McpServer, TempDir) {
             let (_default_server, tmp) = setup_dual_test_engine();
-            // Re-read the fixture vault under a fresh Engine because
+            // Re-read the fixture mem under a fresh Engine because
             // `setup_test_engine` already consumed it; the simpler
             // path is to rebuild the engine from the same on-disk
             // state, which is canonical because `Engine::init` is
             // deterministic over the fixture directory.
-            let _vault_dir = tmp.path().join("specs");
+            let _mem_dir = tmp.path().join("specs");
             memstead_git_branch::test_support::auto_seeded_settings(tmp.path());
             let mutations = crate::config::MutationsSection {
                 require_notes: Some(require),
             };
             // Build a git-branch engine so `memstead_create` /
-            // `memstead_update` write to vault-repo and
+            // `memstead_update` write to mem-repo and
             // `head_commit_message` reads from the same gitdir.
             let mut unified = setup_unified_test_engine_git_branch(tmp.path());
             let canonical_root = std::fs::canonicalize(tmp.path())
@@ -12653,7 +12653,7 @@ community:
             let result = server.memstead_create(Parameters(CreateParams {
                 title: "Foo Invariant".into(),
                 entity_type: "spec".into(),
-                vault: None,
+                mem: None,
                 sections: Some(sections),
                 metadata: None,
                 relations: None,
@@ -12788,7 +12788,7 @@ community:
             let result = server.memstead_create(Parameters(CreateParams {
                 title: "Blank Note Path".into(),
                 entity_type: "spec".into(),
-                vault: None,
+                mem: None,
                 sections: Some(sections),
                 metadata: None,
                 relations: None,
@@ -12815,11 +12815,11 @@ community:
             let mut sections = IndexMap::new();
             sections.insert("identity".into(), "c".into());
             sections.insert("purpose".into(), "d".into());
-            let oversized: String = "x".repeat(memstead_engine::vault_management::NOTE_MAX_LEN + 1);
+            let oversized: String = "x".repeat(memstead_engine::mem_management::NOTE_MAX_LEN + 1);
             let result = server.memstead_create(Parameters(CreateParams {
                 title: "Oversized Note".into(),
                 entity_type: "spec".into(),
-                vault: None,
+                mem: None,
                 sections: Some(sections),
                 metadata: None,
                 relations: None,
@@ -12839,11 +12839,11 @@ community:
         }
     }
 
-    /// Every single-vault response carries
-    /// `_vault_schema: <name>@<version>` so agents read
+    /// Every single-mem response carries
+    /// `_mem_schema: <name>@<version>` so agents read
     /// the canonical schema pin in the same response they're already
-    /// looking at. Multi-vault responses and pre-resolve errors carry no
-    /// anchor (no single vault to point at).
+    /// looking at. Multi-mem responses and pre-resolve errors carry no
+    /// anchor (no single mem to point at).
     mod schema_anchor {
         use super::*;
 
@@ -12865,7 +12865,7 @@ community:
             let result = server.memstead_create(Parameters(CreateParams {
                 title: "Anchor Probe".to_string(),
                 entity_type: "spec".to_string(),
-                vault: Some("specs".to_string()),
+                mem: Some("specs".to_string()),
                 sections: Some(IndexMap::from_iter([
                     ("identity".to_string(), "Probe.".to_string()),
                     ("purpose".to_string(), "Probe.".to_string()),
@@ -12877,14 +12877,14 @@ community:
             }));
             assert!(!result.is_error.unwrap_or(false));
             assert_eq!(
-                payload(&result)["_vault_schema"].as_str(),
+                payload(&result)["_mem_schema"].as_str(),
                 Some("default@1.0.0"),
             );
         }
 
-        /// `memstead_update` derives the vault from the entity ID — the anchor
-        /// must follow the same vault even though the params have no
-        /// explicit `vault` field.
+        /// `memstead_update` derives the mem from the entity ID — the anchor
+        /// must follow the same mem even though the params have no
+        /// explicit `mem` field.
         #[test]
         fn memstead_update_response_carries_anchor() {
             let (server, _tmp) = setup_dual_test_engine();
@@ -12926,7 +12926,7 @@ community:
             }));
             assert!(!result.is_error.unwrap_or(false), "{}", extract_text(&result));
             assert_eq!(
-                payload(&result)["_vault_schema"].as_str(),
+                payload(&result)["_mem_schema"].as_str(),
                 Some("default@1.0.0"),
             );
         }
@@ -12992,7 +12992,7 @@ community:
             );
         }
 
-        /// `memstead_relate` resolves vault from the source entity. Even on a
+        /// `memstead_relate` resolves mem from the source entity. Even on a
         /// duplicate-relationship warning path the anchor must ship.
         #[test]
         fn memstead_relate_response_carries_anchor() {
@@ -13007,7 +13007,7 @@ community:
             }));
             assert!(!result.is_error.unwrap_or(false), "{}", extract_text(&result));
             assert_eq!(
-                payload(&result)["_vault_schema"].as_str(),
+                payload(&result)["_mem_schema"].as_str(),
                 Some("default@1.0.0"),
             );
         }
@@ -13028,13 +13028,13 @@ community:
             }));
             let text = extract_text(&result);
             assert!(
-                text.contains("_vault_schema: default@1.0.0"),
+                text.contains("_mem_schema: default@1.0.0"),
                 "anchor missing from entity frontmatter:\n{text}"
             );
         }
 
         /// Stub reads carry the anchor too — the entity is a placeholder
-        /// but the vault is real and known. Pinned so a future regression
+        /// but the mem is real and known. Pinned so a future regression
         /// stripping anchors from "incomplete" entities is caught.
         #[test]
         fn memstead_entity_frontmatter_carries_anchor_for_stub() {
@@ -13059,18 +13059,18 @@ community:
             }));
             let text = extract_text(&result);
             assert!(
-                text.contains("_vault_schema: default@1.0.0"),
+                text.contains("_mem_schema: default@1.0.0"),
                 "stub frontmatter must still carry the anchor:\n{text}"
             );
         }
 
-        /// `memstead_overview` scoped to a single vault carries the anchor in
+        /// `memstead_overview` scoped to a single mem carries the anchor in
         /// its frontmatter.
         #[test]
-        fn memstead_overview_single_vault_carries_anchor() {
+        fn memstead_overview_single_mem_carries_anchor() {
             let (server, _tmp) = setup_dual_test_engine();
             let result = server.memstead_overview(Parameters(OverviewParams {
-                vault: Some("specs".to_string()),
+                mem: Some("specs".to_string()),
                 rebuild: Some(true),
                 chunk: None,
                 token_budget: None,
@@ -13078,18 +13078,18 @@ community:
             }));
             let text = extract_text(&result);
             assert!(
-                text.contains("_vault_schema: default@1.0.0"),
-                "single-vault overview must carry the anchor:\n{text}"
+                text.contains("_mem_schema: default@1.0.0"),
+                "single-mem overview must carry the anchor:\n{text}"
             );
         }
 
-        /// Multi-vault `memstead_overview` (no `vault` filter) skips the
-        /// anchor — there's no single vault to point at.
+        /// Multi-mem `memstead_overview` (no `mem` filter) skips the
+        /// anchor — there's no single mem to point at.
         #[test]
-        fn memstead_overview_multi_vault_omits_anchor() {
+        fn memstead_overview_multi_mem_omits_anchor() {
             let (server, _tmp) = setup_dual_test_engine();
             let result = server.memstead_overview(Parameters(OverviewParams {
-                vault: None,
+                mem: None,
                 rebuild: Some(true),
                 chunk: None,
                 token_budget: None,
@@ -13097,59 +13097,59 @@ community:
             }));
             let text = extract_text(&result);
             assert!(
-                !text.contains("_vault_schema:"),
-                "multi-vault overview must NOT carry an anchor:\n{text}"
+                !text.contains("_mem_schema:"),
+                "multi-mem overview must NOT carry an anchor:\n{text}"
             );
         }
 
         /// `memstead_health` inherits the same single-vs-multi rule: scoped
-        /// to one vault → anchor; global → no anchor.
+        /// to one mem → anchor; global → no anchor.
         #[test]
-        fn memstead_health_single_vault_carries_anchor() {
+        fn memstead_health_single_mem_carries_anchor() {
             let (server, _tmp) = setup_dual_test_engine();
             let result = server.memstead_health(Parameters(HealthParams {
                 include: None,
                 limit: None,
-                vault: Some("specs".to_string()),
+                mem: Some("specs".to_string()),
                 include_config: false,
             token_budget: None,
             chunk: None,
             target_schema: None,
         }));
             assert_eq!(
-                payload(&result)["_vault_schema"].as_str(),
+                payload(&result)["_mem_schema"].as_str(),
                 Some("default@1.0.0"),
             );
         }
 
         #[test]
-        fn memstead_health_multi_vault_omits_anchor() {
+        fn memstead_health_multi_mem_omits_anchor() {
             let (server, _tmp) = setup_dual_test_engine();
             let result = server.memstead_health(Parameters(HealthParams {
                 include: None,
                 limit: None,
-                vault: None,
+                mem: None,
                 include_config: false,
             token_budget: None,
             chunk: None,
             target_schema: None,
         }));
             assert!(
-                payload(&result).get("_vault_schema").is_none(),
+                payload(&result).get("_mem_schema").is_none(),
                 "global health must not carry an anchor: {:?}",
                 payload(&result)
             );
         }
 
         /// Pre-resolve errors carry no anchor — the engine never resolved
-        /// a vault to point at. Pinning this so a future "always inject
+        /// a mem to point at. Pinning this so a future "always inject
         /// even on errors" change does not silently anchor to the wrong
-        /// vault.
+        /// mem.
         #[test]
-        fn pre_resolve_unknown_vault_carries_no_anchor() {
+        fn pre_resolve_unknown_mem_carries_no_anchor() {
             let (server, _tmp) = setup_dual_test_engine();
             let result = server.memstead_entity(Parameters(EntityParams {
-                id: "ghost-vault--missing-entity".to_string(),
+                id: "ghost-mem--missing-entity".to_string(),
                 sections: None,
                 include_relations: None,
                 include_context: None,
@@ -13163,22 +13163,22 @@ community:
             assert_eq!(result.is_error, Some(true));
             let text = extract_text(&result);
             assert!(
-                !text.contains("_vault_schema:"),
+                !text.contains("_mem_schema:"),
                 "pre-resolve error markdown must not anchor: {text}"
             );
             if let Some(sc) = result.structured_content.as_ref() {
                 assert!(
-                    sc.get("_vault_schema").is_none(),
+                    sc.get("_mem_schema").is_none(),
                     "pre-resolve error envelope must not anchor: {sc:?}"
                 );
             }
         }
     }
 
-    /// Agent-schema-priming contract — `memstead_vault_create` returns the
+    /// Agent-schema-priming contract — `memstead_mem_create` returns the
     /// full per-type catalogue under `schema`, byte-identical to what
-    /// `memstead_schema(name=<resolved-schema>)` would ship for the same vault.
-    /// Primes the agent that just created the vault with everything they
+    /// `memstead_schema(name=<resolved-schema>)` would ship for the same mem.
+    /// Primes the agent that just created the mem with everything they
     /// need to write into it.
     mod schema_payload {
         use super::*;
@@ -13191,15 +13191,15 @@ community:
             let settings = memstead_git_branch::test_support::auto_seed_with_settings(
                 tmp.path(),
                 WorkspaceSettings {
-                        vault_create_rules: vec![memstead_base::CreateRuleSetting { pattern: "*".to_string(), schemas: vec!["default@1.0.0".to_string()], default_cross_links: None }],
-                    vault_delete_rules: vec![],
+                        mem_create_rules: vec![memstead_base::CreateRuleSetting { pattern: "*".to_string(), schemas: vec!["default@1.0.0".to_string()], default_cross_links: None }],
+                    mem_delete_rules: vec![],
                     ..Default::default()
                 },
             );
             let unified_settings = settings.clone();
             let _ = settings;
             // Install the create-rule policy on the unified engine
-            // so memstead_vault_create_unified's gating sees it.
+            // so memstead_mem_create_unified's gating sees it.
             // Canonicalise tmp.path() because TempDir returns a
             // symlink (e.g. /var/.../) on macOS while canonical
             // paths resolve to /private/var/...; the
@@ -13213,13 +13213,13 @@ community:
             (server, tmp)
         }
 
-        /// Create a vault and return the response's structured payload.
+        /// Create a mem and return the response's structured payload.
         /// `include_schema:
         /// true` is required to surface the schema body — these tests
         /// exist *to verify* the inlined body, so the opt-in fires.
         fn create_and_get_payload(server: &McpServer, tmp: &TempDir, name: &str) -> serde_json::Value {
             let target = tmp.path().join(name);
-            let result = server.memstead_vault_create(Parameters(TlsVaultCreateParams {
+            let result = server.memstead_mem_create(Parameters(TlsMemCreateParams {
             schema_verbosity: None,
                 write_guidance: Default::default(),
                 name: name.to_string(),
@@ -13243,12 +13243,12 @@ community:
         /// The schema payload exists, names the pinned schema, and ships
         /// the full type catalogue (not the lite `types_summary`).
         #[test]
-        fn vault_create_response_carries_full_schema_catalogue() {
+        fn mem_create_response_carries_full_schema_catalogue() {
             let (server, tmp) = setup();
             let payload = create_and_get_payload(&server, &tmp, "fresh-payload");
             let schema = payload
                 .get("schema")
-                .expect("schema block present in vault_create response");
+                .expect("schema block present in mem_create response");
             assert_eq!(schema["ref"].as_str(), Some("default@1.0.0"));
             assert!(
                 schema.get("types").is_some(),
@@ -13267,7 +13267,7 @@ community:
         /// Schema-level
         /// `default_writing_guidance` is surfaced at the top level of the
         /// schema payload so plugin-side resolvers (`writing-guidance.mjs`)
-        /// can concatenate the schema-generic prose with per-vault
+        /// can concatenate the schema-generic prose with per-mem
         /// additions in one place. Authored as block scalars in YAML;
         /// payload value is the raw `String` (chomp behaviour follows the
         /// loader's serde rules).
@@ -13276,7 +13276,7 @@ community:
             // Build a minimal schema fixture in-memory carrying both
             // `avoid` and `goal`. Direct call to `build_schema_payload`
             // — the field flows through every consumer (memstead_overview,
-            // memstead_vault_create) via the same helper.
+            // memstead_mem_create) via the same helper.
             let manifest_yaml = r#"name: tests-dwg
 version: 0.1.0
 description: dwg test schema
@@ -13581,13 +13581,13 @@ write_rules: []
             );
         }
 
-        /// A schema with a `cross_vault_relationships:`
+        /// A schema with a `cross_mem_relationships:`
         /// section surfaces it on the response as a top-level field
         /// with the same shape as the YAML (array of
-        /// `{ to_schema, definitions }`). The intra-vault
+        /// `{ to_schema, definitions }`). The intra-mem
         /// `relationships` block continues to round-trip.
         #[test]
-        fn schema_payload_surfaces_cross_vault_relationships() {
+        fn schema_payload_surfaces_cross_mem_relationships() {
             let manifest_yaml = r#"name: tests-cv
 version: 0.1.0
 description: cv test schema
@@ -13603,7 +13603,7 @@ relationships:
     - name: _default
       description: fallback
       default_weight: 1.0
-cross_vault_relationships:
+cross_mem_relationships:
   - to_schema: other
     definitions:
       - name: ADDRESSES
@@ -13648,8 +13648,8 @@ write_rules: []
             );
             let payload = render::build_schema_payload(&schema, vec!["v".to_string()], render::SchemaVerbosity::Full, render::OriginClass::FirstParty);
             let cv = payload
-                .get("cross_vault_relationships")
-                .expect("cross_vault_relationships must surface at top level")
+                .get("cross_mem_relationships")
+                .expect("cross_mem_relationships must surface at top level")
                 .as_array()
                 .expect("array");
             assert_eq!(cv.len(), 1);
@@ -13665,22 +13665,22 @@ write_rules: []
                 defs[0]["target_types"].as_array().unwrap()[0].as_str(),
                 Some("foreign_type")
             );
-            // Intra-vault relationships block continues to round-trip.
+            // Intra-mem relationships block continues to round-trip.
             let intra = payload["relationships"].as_array().unwrap();
             assert!(intra.iter().any(|r| r["name"] == "PART_OF"));
         }
 
-        /// A schema with no `cross_vault_relationships:` declarations
+        /// A schema with no `cross_mem_relationships:` declarations
         /// produces no top-level key — presence-of-key is the
-        /// consumer's signal that the schema speaks cross-vault.
+        /// consumer's signal that the schema speaks cross-mem.
         #[test]
-        fn schema_payload_omits_cross_vault_relationships_when_absent() {
+        fn schema_payload_omits_cross_mem_relationships_when_absent() {
             let (server, tmp) = setup();
             let payload = create_and_get_payload(&server, &tmp, "no-cv");
             let schema = &payload["schema"];
             assert!(
-                schema.get("cross_vault_relationships").is_none(),
-                "default schema has no cross-vault entries → key must be absent; got {schema}"
+                schema.get("cross_mem_relationships").is_none(),
+                "default schema has no cross-mem entries → key must be absent; got {schema}"
             );
         }
 
@@ -13714,7 +13714,7 @@ write_rules: []
             // relationship list so the suppression has something to
             // strip. Direct call to `build_schema_payload` so the
             // assertion runs against the helper that every consumer
-            // (memstead_schema, memstead_overview, memstead_vault_create) uses.
+            // (memstead_schema, memstead_overview, memstead_mem_create) uses.
             let manifest_yaml = r#"name: tests-no-default
 version: 0.1.0
 description: t
@@ -13936,13 +13936,13 @@ write_rules: []
             );
         }
 
-        /// The schema payload from `memstead_vault_create` matches the schema
+        /// The schema payload from `memstead_mem_create` matches the schema
         /// payload from `memstead_schema(name=<resolved-schema>)` — pins that
         /// both surfaces share one helper (`build_schema_payload`) and do
         /// not drift. The priming contract anchors on `memstead_schema`
         /// rather than on overview.
         #[test]
-        fn vault_create_payload_matches_memstead_schema() {
+        fn mem_create_payload_matches_memstead_schema() {
             let (server, tmp) = setup();
             let payload = create_and_get_payload(&server, &tmp, "byte-identical");
             let create_schema = payload["schema"].clone();
@@ -13950,11 +13950,11 @@ write_rules: []
 
             // memstead_schema returns the full schema body as a JSON
             // structured-content response — byte-equality with the
-            // priming payload from memstead_vault_create is the contract.
+            // priming payload from memstead_mem_create is the contract.
             let schema_result = server.memstead_schema(Parameters(SchemaParams {
             verbosity: None,
                 name: Some(schema_ref.clone()),
-                vault: None,
+                mem: None,
             }));
             assert!(
                 !schema_result.is_error.unwrap_or(false),
@@ -13966,10 +13966,10 @@ write_rules: []
                 .expect("memstead_schema returns structured_content");
 
             // The two payloads share one helper and must agree
-            // field-by-field except for `used_by`, which is the vault
-            // list at the moment of the call (vault_create's response
+            // field-by-field except for `used_by`, which is the mem
+            // list at the moment of the call (mem_create's response
             // captures it during creation; the engine's reverse-index
-            // computes the same set from the registered vaults).
+            // computes the same set from the registered mems).
             let mut a = create_schema.clone();
             let mut b = schema_payload.clone();
             // Both should now list ["byte-identical"]. Strip the field
@@ -13982,19 +13982,19 @@ write_rules: []
             }
             assert_eq!(
                 a, b,
-                "vault_create.schema and memstead_schema must return identical payloads (modulo used_by)"
+                "mem_create.schema and memstead_schema must return identical payloads (modulo used_by)"
             );
 
-            // `used_by` itself must list the just-created vault on
+            // `used_by` itself must list the just-created mem on
             // both surfaces.
-            for (label, payload) in [("vault_create", &create_schema), ("memstead_schema", &schema_payload)] {
+            for (label, payload) in [("mem_create", &create_schema), ("memstead_schema", &schema_payload)] {
                 let used_by = payload["used_by"].as_array().unwrap_or_else(|| {
                     panic!("{label}.used_by must be an array; got {payload}")
                 });
                 let names: Vec<&str> = used_by.iter().filter_map(|v| v.as_str()).collect();
                 assert!(
                     names.contains(&"byte-identical"),
-                    "{label}.used_by must list the just-created vault; got {names:?}"
+                    "{label}.used_by must list the just-created mem; got {names:?}"
                 );
             }
 
@@ -14004,7 +14004,7 @@ write_rules: []
             let overview = server.memstead_overview(Parameters(OverviewParams {
                 rebuild: Some(true),
                 chunk: None,
-                vault: Some("byte-identical".to_string()),
+                mem: Some("byte-identical".to_string()),
                 include: None,
                 token_budget: Some(32_000),
             }));
@@ -14035,14 +14035,14 @@ write_rules: []
         #[test]
         fn memstead_schema_mcp_path_matches_direct_builder_bytes() {
             let (server, tmp) = setup();
-            // Register a vault so `used_by` resolves to a known set.
+            // Register a mem so `used_by` resolves to a known set.
             let _ = create_and_get_payload(&server, &tmp, "byte-identical-direct");
 
             // MCP path: structured_content of the memstead_schema tool.
             let schema_result = server.memstead_schema(Parameters(SchemaParams {
             verbosity: None,
                 name: Some("default@1.0.0".to_string()),
-                vault: None,
+                mem: None,
             }));
             assert!(
                 !schema_result.is_error.unwrap_or(false),
@@ -14071,7 +14071,7 @@ write_rules: []
                         m.schema.as_ref().map(|s| s.to_string()).as_deref()
                             == Some(canon.as_str())
                     })
-                    .map(|m| m.vault.clone())
+                    .map(|m| m.mem.clone())
                     .collect();
                 used_by.sort();
                 render::build_schema_payload(&schema, used_by, render::SchemaVerbosity::Full, render::OriginClass::FirstParty)
@@ -14122,7 +14122,7 @@ write_rules: []
             let result = server.memstead_create(Parameters(CreateParams {
                 title: "Bare Spec".to_string(),
                 entity_type: "spec".to_string(),
-                vault: Some("specs".to_string()),
+                mem: Some("specs".to_string()),
                 // Omit identity/purpose so MISSING_REQUIRED_SECTION fires.
                 sections: None,
                 metadata: None,
@@ -14183,7 +14183,7 @@ write_rules: []
             let result = server.memstead_create(Parameters(CreateParams {
                 title: "Complete Spec".to_string(),
                 entity_type: "spec".to_string(),
-                vault: Some("specs".to_string()),
+                mem: Some("specs".to_string()),
                 sections: Some(indexmap::IndexMap::from_iter([
                     ("identity".to_string(), "what it is".to_string()),
                     ("purpose".to_string(), "why it exists".to_string()),
@@ -14277,7 +14277,7 @@ write_rules: []
             let result = server.memstead_create(Parameters(CreateParams {
                 title: "Bad Level".to_string(),
                 entity_type: "spec".to_string(),
-                vault: Some("specs".to_string()),
+                mem: Some("specs".to_string()),
                 sections: Some(IndexMap::from_iter([
                     ("identity".to_string(), "x".to_string()),
                     ("purpose".to_string(), "x".to_string()),
@@ -14374,7 +14374,7 @@ write_rules: []
             let result = server.memstead_create(Parameters(CreateParams {
                 title: "Probe".to_string(),
                 entity_type: "spec".to_string(),
-                vault: Some("specs".to_string()),
+                mem: Some("specs".to_string()),
                 sections: Some(IndexMap::from_iter([
                     ("idntity".to_string(), "typo".to_string()),
                 ])),
@@ -14402,7 +14402,7 @@ write_rules: []
             let result = server.memstead_create(Parameters(CreateParams {
                 title: "Probe".to_string(),
                 entity_type: "spec".to_string(),
-                vault: Some("specs".to_string()),
+                mem: Some("specs".to_string()),
                 sections: Some(IndexMap::from_iter([
                     ("identity".to_string(), "x".to_string()),
                     ("purpose".to_string(), "x".to_string()),
@@ -14445,7 +14445,7 @@ write_rules: []
             let result = server.memstead_create(Parameters(CreateParams {
                 title: "Inline Demo".to_string(),
                 entity_type: "spec".to_string(),
-                vault: Some("specs".to_string()),
+                mem: Some("specs".to_string()),
                 sections: Some(sections),
                 metadata: None,
                 relations: Some(vec![crate::tools::mutation::RelationInput {
@@ -14491,7 +14491,7 @@ write_rules: []
             let create_res = server.memstead_create(Parameters(CreateParams {
                 title: "Symmetry Create".to_string(),
                 entity_type: "spec".to_string(),
-                vault: Some("specs".to_string()),
+                mem: Some("specs".to_string()),
                 sections: Some(create_sections),
                 metadata: None,
                 relations: Some(vec![crate::tools::mutation::RelationInput {
@@ -14580,7 +14580,7 @@ write_rules: []
             let result = server.memstead_create(Parameters(CreateParams {
                 title: "Real Link Demo".to_string(),
                 entity_type: "spec".to_string(),
-                vault: Some("specs".to_string()),
+                mem: Some("specs".to_string()),
                 sections: Some(sections),
                 metadata: None,
                 relations: None,
@@ -14604,8 +14604,8 @@ write_rules: []
 
     /// F1 (coprobe-coherence-notice-fixes): reload drift must reach the
     /// agent on *error* responses too, on the same channel split a
-    /// success carries — the full `vault_changed` notice on
-    /// `structured_content`, the `VAULT_RELOADED` admonition on the text
+    /// success carries — the full `mem_changed` notice on
+    /// `structured_content`, the `MEM_RELOADED` admonition on the text
     /// channel. Pre-fix the read-path 404 early-return consumed the
     /// drained notice and surfaced it on neither channel, silently
     /// swallowing the whole reload window; the mutation error arms
@@ -14614,7 +14614,7 @@ write_rules: []
     mod f1_drift_on_error_paths {
         use super::*;
         use memstead_base::vcs::{Actor, ClientId};
-        use memstead_git_branch::test_support::init_real_vault_repo;
+        use memstead_git_branch::test_support::init_real_mem_repo;
         use memstead_git_branch::workspace_store::engine_from_workspace_root;
 
         fn client() -> ClientId {
@@ -14630,7 +14630,7 @@ write_rules: []
             let r = server.memstead_create(Parameters(CreateParams {
                 title: title.to_string(),
                 entity_type: "spec".to_string(),
-                vault: Some("specs".to_string()),
+                mem: Some("specs".to_string()),
                 sections: Some(sections),
                 metadata: None,
                 relations: None,
@@ -14684,17 +14684,17 @@ write_rules: []
         }
 
         /// The notices array a response carries on `structured_content`,
-        /// or `None` when the `vault_changed` key is absent.
-        fn vault_changed(res: &CallToolResult) -> Option<serde_json::Value> {
+        /// or `None` when the `mem_changed` key is absent.
+        fn mem_changed(res: &CallToolResult) -> Option<serde_json::Value> {
             res.structured_content
                 .as_ref()
-                .and_then(|sc| sc.get("vault_changed").cloned())
+                .and_then(|sc| sc.get("mem_changed").cloned())
         }
 
         #[test]
         fn entity_not_found_after_sibling_delete_carries_window_notice_and_warning_line() {
             let tmp = TempDir::new().unwrap();
-            init_real_vault_repo(tmp.path(), &[("specs", "default@1.0.0")]);
+            init_real_mem_repo(tmp.path(), &[("specs", "default@1.0.0")]);
             let engine_a = engine_from_workspace_root(tmp.path()).expect("engine A boots");
             let server = McpServer::new(engine_a, crate::config::DEFAULT_TOKEN_BUDGET);
 
@@ -14727,12 +14727,12 @@ write_rules: []
             assert!(text.contains("ENTITY_NOT_FOUND"), "text carries the code: {text}");
             assert!(
                 text.contains("Engine snapshot reloaded"),
-                "404 text carries the VAULT_RELOADED admonition: {text}",
+                "404 text carries the MEM_RELOADED admonition: {text}",
             );
 
-            let vc = vault_changed(&r).expect("404 carries vault_changed on structured_content");
+            let vc = mem_changed(&r).expect("404 carries mem_changed on structured_content");
             let notices = vc.as_array().expect("notices is an array");
-            assert_eq!(notices.len(), 1, "one notice for the one reloaded vault");
+            assert_eq!(notices.len(), 1, "one notice for the one reloaded mem");
             let entries = notices[0]["changes"]["entries"]
                 .as_array()
                 .expect("detailed notice carries entries");
@@ -14754,7 +14754,7 @@ write_rules: []
             let z = read_entity(&server, "specs--entity-z");
             assert!(!z.is_error.unwrap_or(false), "Z reads cleanly: {}", extract_text(&z));
             assert!(
-                vault_changed(&z).is_none(),
+                mem_changed(&z).is_none(),
                 "quiescent follow-on read carries no notice (no leak): {:?}",
                 z.structured_content,
             );
@@ -14767,7 +14767,7 @@ write_rules: []
         #[test]
         fn update_hash_mismatch_carries_notice_and_warning_line() {
             let tmp = TempDir::new().unwrap();
-            init_real_vault_repo(tmp.path(), &[("specs", "default@1.0.0")]);
+            init_real_mem_repo(tmp.path(), &[("specs", "default@1.0.0")]);
             let engine_a = engine_from_workspace_root(tmp.path()).expect("engine A boots");
             let server = McpServer::new(engine_a, crate::config::DEFAULT_TOKEN_BUDGET);
 
@@ -14805,9 +14805,9 @@ write_rules: []
             assert!(text.contains("HASH_MISMATCH"), "text carries the refusal code: {text}");
             assert!(
                 text.contains("Engine snapshot reloaded"),
-                "HASH_MISMATCH text now carries the VAULT_RELOADED warning line: {text}",
+                "HASH_MISMATCH text now carries the MEM_RELOADED warning line: {text}",
             );
-            let vc = vault_changed(&r).expect("HASH_MISMATCH carries vault_changed (regression guard)");
+            let vc = mem_changed(&r).expect("HASH_MISMATCH carries mem_changed (regression guard)");
             let notices = vc.as_array().expect("notices array");
             assert_eq!(notices.len(), 1, "one notice for the collision reload");
             let entries = notices[0]["changes"]["entries"].as_array().expect("entries");

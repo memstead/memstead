@@ -16,8 +16,8 @@ pub struct ArmConfig {
     pub model: String,
     pub system_prompt: String,
     pub task_text: String,
-    /// The MCP config that mounts the subject vault. `Some` for the vault-on arm,
-    /// `None` for vault-off. The vault-off arm has every other tool but no
+    /// The MCP config that mounts the subject mem. `Some` for the mem-on arm,
+    /// `None` for mem-off. The mem-off arm has every other tool but no
     /// `memstead_*` surface.
     pub mcp_config: Option<PathBuf>,
 }
@@ -35,14 +35,14 @@ pub fn build_arms(
     mcp_config: Option<PathBuf>,
 ) -> (ArmConfig, ArmConfig) {
     let on = ArmConfig {
-        condition: Condition::VaultOn,
+        condition: Condition::MemOn,
         model: model.to_string(),
         system_prompt: system_prompt.to_string(),
         task_text: task.prompt.clone(),
         mcp_config,
     };
     let off = ArmConfig {
-        condition: Condition::VaultOff,
+        condition: Condition::MemOff,
         mcp_config: None,
         ..on.clone()
     };
@@ -87,10 +87,10 @@ pub fn check_single_variable(on: &ArmConfig, off: &ArmConfig) -> Result<()> {
 
 /// Confirm the arm actually exercised the mount path it claims.
 ///
-/// Vault-on must show at least one `memstead_*` tool call — otherwise the mount
-/// silently failed and the "with vault" answer was produced without the vault,
-/// which would understate the delta. Vault-off must show *no* `memstead_*` call —
-/// otherwise the vault leaked into the control arm. Either way the trial is
+/// Mem-on must show at least one `memstead_*` tool call — otherwise the mount
+/// silently failed and the "with mem" answer was produced without the mem,
+/// which would understate the delta. Mem-off must show *no* `memstead_*` call —
+/// otherwise the mem leaked into the control arm. Either way the trial is
 /// invalid and the run stops rather than reporting a corrupted number.
 pub fn validate_mount_evidence(condition: Condition, answer: &AgentAnswer) -> Result<()> {
     let used_memstead = answer
@@ -98,12 +98,12 @@ pub fn validate_mount_evidence(condition: Condition, answer: &AgentAnswer) -> Re
         .iter()
         .any(|t| is_memstead_tool(t));
     match condition {
-        Condition::VaultOn if !used_memstead => bail!(
-            "invalid trial: vault-on arm shows no memstead_* tool use — the MCP mount \
-             did not engage, so this answer was not actually produced with the vault"
+        Condition::MemOn if !used_memstead => bail!(
+            "invalid trial: mem-on arm shows no memstead_* tool use — the MCP mount \
+             did not engage, so this answer was not actually produced with the mem"
         ),
-        Condition::VaultOff if used_memstead => bail!(
-            "invalid trial: vault-off arm shows memstead_* tool use — the vault leaked \
+        Condition::MemOff if used_memstead => bail!(
+            "invalid trial: mem-off arm shows memstead_* tool use — the mem leaked \
              into the control arm: {}",
             answer
                 .tool_calls
@@ -138,8 +138,8 @@ mod tests {
     #[test]
     fn build_arms_differ_only_in_mount() {
         let (on, off) = build_arms(&task(), "claude-x", "sys", Some("/tmp/on.json".into()));
-        assert_eq!(on.condition, Condition::VaultOn);
-        assert_eq!(off.condition, Condition::VaultOff);
+        assert_eq!(on.condition, Condition::MemOn);
+        assert_eq!(off.condition, Condition::MemOff);
         assert_eq!(on.mcp_config, Some("/tmp/on.json".into()));
         assert_eq!(off.mcp_config, None);
         // Everything else matches.
@@ -182,36 +182,36 @@ mod tests {
     }
 
     #[test]
-    fn vault_on_without_memstead_tool_is_invalid() {
+    fn mem_on_without_memstead_tool_is_invalid() {
         let ans = AgentAnswer { text: "answer".into(), tool_calls: vec!["Read".into()] };
-        assert!(validate_mount_evidence(Condition::VaultOn, &ans).is_err());
+        assert!(validate_mount_evidence(Condition::MemOn, &ans).is_err());
     }
 
     #[test]
-    fn vault_on_with_memstead_tool_is_valid() {
+    fn mem_on_with_memstead_tool_is_valid() {
         let ans = AgentAnswer {
             text: "answer".into(),
             tool_calls: vec!["mcp__memstead__memstead_search".into()],
         };
-        validate_mount_evidence(Condition::VaultOn, &ans).unwrap();
+        validate_mount_evidence(Condition::MemOn, &ans).unwrap();
     }
 
     #[test]
-    fn vault_off_with_memstead_tool_is_invalid() {
-        // The vault leaked into the control arm.
+    fn mem_off_with_memstead_tool_is_invalid() {
+        // The mem leaked into the control arm.
         let ans = AgentAnswer {
             text: "answer".into(),
             tool_calls: vec!["mcp__memstead__memstead_entity".into()],
         };
-        assert!(validate_mount_evidence(Condition::VaultOff, &ans).is_err());
+        assert!(validate_mount_evidence(Condition::MemOff, &ans).is_err());
     }
 
     #[test]
-    fn vault_off_without_memstead_tool_is_valid() {
+    fn mem_off_without_memstead_tool_is_valid() {
         let ans = AgentAnswer {
             text: "answer".into(),
             tool_calls: vec!["Read".into(), "Grep".into()],
         };
-        validate_mount_evidence(Condition::VaultOff, &ans).unwrap();
+        validate_mount_evidence(Condition::MemOff, &ans).unwrap();
     }
 }

@@ -15,13 +15,13 @@ when_to_use: |
   level, or adding a capability the legacy did not have. If the new
   system will just port the capability, no divergence is needed.
 boundaries:
-  - Not a technology choice without behavioral impact — "we use Postgres instead of MySQL" is usually not a divergence unless behavior genuinely changes. Capture purely-technical decisions as `decision` entities in a software@0.1.0 vault if at all.
+  - Not a technology choice without behavioral impact — "we use Postgres instead of MySQL" is usually not a divergence unless behavior genuinely changes. Capture purely-technical decisions as `decision` entities in a software@0.1.0 mem if at all.
   - Not a design note for a target-spec — use the Design section of the target-spec.
   - Not a speculative idea — proposed divergences may exist while being discussed, but accept or reject them; do not let them accumulate indefinitely.
 system_message: |
   A divergence is mandatory whenever the new system deliberately deviates
   from legacy behavior. It links DIVERGES_FROM to the affected capability
-  in the paired Legacy vault, and — unless the kind is "drop" —
+  in the paired Legacy mem, and — unless the kind is "drop" —
   MANIFESTS_IN the target-spec that carries the new behavior.
 
   Kinds:
@@ -46,7 +46,7 @@ sections:
     required: true
     search_weight: 20.0
     write_rules:
-      - "One to three sentences summarizing what the legacy system did for the affected capability. Keep it short — the full capability description lives in the Legacy vault; this is the at-a-glance summary."
+      - "One to three sentences summarizing what the legacy system did for the affected capability. Keep it short — the full capability description lives in the Legacy mem; this is the at-a-glance summary."
   - key: new_behavior
     heading: New behavior
     required: false
@@ -96,9 +96,9 @@ updatable_fields: [title, rationale, original_behavior, new_behavior, tradeoffs,
 health_required_fields: [rationale, original_behavior, kind]
 staleness_threshold_days: 365
 write_rules:
-  - "Every divergence MUST link DIVERGES_FROM to a capability in the paired Legacy vault. A divergence without an anchor in legacy is not a divergence."
+  - "Every divergence MUST link DIVERGES_FROM to a capability in the paired Legacy mem. A divergence without an anchor in legacy is not a divergence."
   - "Every divergence except kind=drop MUST link MANIFESTS_IN to a target-spec. Kind=drop has no successor and is the one exception."
   - "Kind=add is for capabilities the legacy did not have. DIVERGES_FROM is still required — link to a sibling capability in the same area to establish context, or create a placeholder legacy capability with empty evidence and the reasoning explained there."
   - "Title should name the deviation concisely ('Drop manual price override', 'Simplify role model to three roles'). Avoid technology names in titles — those belong in tradeoffs or new_behavior."
   - "Status proposed → accepted once the team commits; proposed → rejected if the idea is dropped. Do not delete rejected divergences — keeping them recorded prevents the idea from being re-proposed without reference to the prior rejection."
-  - "Relationships: DIVERGES_FROM (cross-vault, required), MANIFESTS_IN (intra-vault, required unless kind=drop), REFERENCES for wiki-links."
+  - "Relationships: DIVERGES_FROM (cross-mem, required), MANIFESTS_IN (intra-mem, required unless kind=drop), REFERENCES for wiki-links."

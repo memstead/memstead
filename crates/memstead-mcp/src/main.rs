@@ -2,14 +2,14 @@
 //! binary that every external integration invokes (Claude Code plugin,
 //! macOS spawn path, install scripts, `MEMSTEAD_MCP_BIN` env var).
 //!
-//! One crate, two build configs. The default build (`vault-repo` feature
-//! on) serves the multi-vault, git-backed engine; `--no-default-features`
+//! One crate, two build configs. The default build (`mem-repo` feature
+//! on) serves the multi-mem, git-backed engine; `--no-default-features`
 //! serves the folder + archive engine only (no `gix`, no
 //! `memstead-git-branch`) — a CI / wasm-adjacent config, not shipped.
 //!
 //! Workspace resolution (both configs): walk upward from cwd for the
 //! first ancestor that carries `.memstead/workspace.toml`. Operators on
-//! pre-rebuild layouts run `memstead vault-repo init` to bootstrap a
+//! pre-rebuild layouts run `memstead mem-repo init` to bootstrap a
 //! fresh workspace.
 
 use std::path::PathBuf;
@@ -19,33 +19,33 @@ use clap::Parser;
 use rmcp::ServiceExt;
 use rmcp::transport::stdio;
 
-#[cfg(feature = "vault-repo")]
+#[cfg(feature = "mem-repo")]
 use clap::ArgAction;
 
 /// memstead-mcp — serves the Memstead graph engine over MCP on stdio.
 #[derive(Parser, Debug)]
 #[command(name = "memstead-mcp", version, about, long_about = None)]
 struct Args {
-    /// Attach a sealed `.mem` vault as a read-only reference. Repeatable —
-    /// `--read-vault a.mem --read-vault b.mem` attaches both. Each path
-    /// is installed into the global vault cache (if the cached file is
-    /// missing) and registered in the first writable vault's `readVaults`
+    /// Attach a sealed `.mem` mem as a read-only reference. Repeatable —
+    /// `--read-mem a.mem --read-mem b.mem` attaches both. Each path
+    /// is installed into the global mem cache (if the cached file is
+    /// missing) and registered in the first writable mem's `readMems`
     /// with `source: { type: "local" }` so the next run picks it up from
     /// the config alone.
-    #[cfg(feature = "vault-repo")]
-    #[arg(long = "read-vault", value_name = "PATH", action = ArgAction::Append)]
-    read_vaults: Vec<PathBuf>,
+    #[cfg(feature = "mem-repo")]
+    #[arg(long = "read-mem", value_name = "PATH", action = ArgAction::Append)]
+    read_mems: Vec<PathBuf>,
 
-    /// Operator-mode startup signal. When set, vault-lifecycle calls
-    /// (`memstead_vault_create`, `memstead_vault_delete`) bypass the
-    /// `[vault_management]` allowlists in `.memstead/workspace.toml` and
-    /// the `VAULT_REFERENCED_BY_POLICY` safeguard on delete. The flag is
+    /// Operator-mode startup signal. When set, mem-lifecycle calls
+    /// (`memstead_mem_create`, `memstead_mem_delete`) bypass the
+    /// `[mem_management]` allowlists in `.memstead/workspace.toml` and
+    /// the `MEM_REFERENCED_BY_POLICY` safeguard on delete. The flag is
     /// process-scoped — children spawned without it are not in
     /// operator-mode, and there is no env-var equivalent. `memstead`
-    /// sets this flag when it spawns `memstead-mcp` for `memstead vault init`
-    /// / `memstead vault delete`. Agent-spawned servers (Claude Code
+    /// sets this flag when it spawns `memstead-mcp` for `memstead mem init`
+    /// / `memstead mem delete`. Agent-spawned servers (Claude Code
     /// plugin, macOS chat subprocess) do not.
-    #[cfg(feature = "vault-repo")]
+    #[cfg(feature = "mem-repo")]
     #[arg(long = "operator-mode", default_value_t = false)]
     operator_mode: bool,
 }
@@ -58,7 +58,7 @@ async fn main() -> anyhow::Result<()> {
     let workspace_root = find_workspace_root(&cwd).ok_or_else(|| {
         anyhow::anyhow!(
             "CONFIG_ERROR: no `.memstead/workspace.toml` workspace found in cwd or any \
-             ancestor. Run `memstead vault-repo init` to bootstrap a new workspace."
+             ancestor. Run `memstead mem-repo init` to bootstrap a new workspace."
         )
     })?;
 
@@ -92,7 +92,7 @@ fn init_tracing() {
 }
 
 /// Boot the lean MCP server (folder + archive backends only).
-#[cfg(not(feature = "vault-repo"))]
+#[cfg(not(feature = "mem-repo"))]
 async fn run(_args: Args, workspace_root: PathBuf) -> anyhow::Result<()> {
     init_tracing();
 
@@ -116,14 +116,14 @@ async fn run(_args: Args, workspace_root: PathBuf) -> anyhow::Result<()> {
 /// `memstead_git_branch::engine_from_workspace_root`, then sources
 /// `token_budget` / `disabled_tools` / `mutations` / `plugin` from
 /// `Engine::settings()`.
-#[cfg(feature = "vault-repo")]
+#[cfg(feature = "mem-repo")]
 async fn run(args: Args, workspace_root: PathBuf) -> anyhow::Result<()> {
     use memstead_mcp::config::{DEFAULT_TOKEN_BUDGET, validate_disabled_tools};
-    use memstead_mcp::read_vaults;
+    use memstead_mcp::read_mems;
 
     init_tracing();
 
-    tracing::info!("boot: vault-repo workspace at {}", workspace_root.display());
+    tracing::info!("boot: mem-repo workspace at {}", workspace_root.display());
 
     let engine = memstead_git_branch::workspace_store::engine_from_workspace_root(&workspace_root)
         .with_context(|| format!("failed to load workspace at {}", workspace_root.display()))?;
@@ -138,8 +138,8 @@ async fn run(args: Args, workspace_root: PathBuf) -> anyhow::Result<()> {
 
     if args.operator_mode {
         tracing::info!(
-            "memstead-mcp: --operator-mode active — vault-lifecycle calls bypass \
-             `[vault_management]` allowlists and the `VAULT_REFERENCED_BY_POLICY` \
+            "memstead-mcp: --operator-mode active — mem-lifecycle calls bypass \
+             `[mem_management]` allowlists and the `MEM_REFERENCED_BY_POLICY` \
              safeguard for this process."
         );
     }
@@ -151,21 +151,21 @@ async fn run(args: Args, workspace_root: PathBuf) -> anyhow::Result<()> {
     let mutations = settings.mutations.clone();
     let plugin = settings.plugin.clone();
 
-    if !args.read_vaults.is_empty() {
-        let target_vault_name = engine
-            .vault_router()
-            .writable_vaults()
+    if !args.read_mems.is_empty() {
+        let target_mem_name = engine
+            .mem_router()
+            .writable_mems()
             .iter()
             .next()
             .cloned()
             .ok_or_else(|| {
                 anyhow::anyhow!(
-                    "CONFIG_ERROR: --read-vault was supplied but no writable vault is registered to receive the registration."
+                    "CONFIG_ERROR: --read-mem was supplied but no writable mem is registered to receive the registration."
                 )
             })?;
-        let target = memstead_git_branch::vault_cache::TargetVault::VaultRepo {
+        let target = memstead_git_branch::mem_cache::TargetMem::MemRepo {
             workspace_root: &workspace_root,
-            vault_name: &target_vault_name,
+            mem_name: &target_mem_name,
         };
         let install_ctx = memstead_git_branch::CommitContext {
             actor: memstead_git_branch::Actor::Cli,
@@ -179,24 +179,24 @@ async fn run(args: Args, workspace_root: PathBuf) -> anyhow::Result<()> {
             entity_ids: None,
         };
         let install_message = format!(
-            "memstead: install (read-vault registration into {target_vault_name})"
+            "memstead: install (read-mem registration into {target_mem_name})"
         );
         let cwd = std::env::current_dir()
-            .context("Could not determine current directory for --read-vault resolution")?;
+            .context("Could not determine current directory for --read-mem resolution")?;
         // Pass the workspace's writable-mount roster so
-        // `install_read_vault` can refuse archives whose authoritative
+        // `install_read_mem` can refuse archives whose authoritative
         // name shadows a writable. An earlier shape reported install
-        // success while `hydrate_read_vaults` silently skipped the
+        // success while `hydrate_read_mems` silently skipped the
         // registration.
         let writable: Vec<String> = engine
-            .vault_router()
-            .writable_vaults()
+            .mem_router()
+            .writable_mems()
             .iter()
             .map(|n| n.to_string())
             .collect();
         let writable_refs: Vec<&str> = writable.iter().map(String::as_str).collect();
-        let results = read_vaults::install_read_vaults(
-            &args.read_vaults,
+        let results = read_mems::install_read_mems(
+            &args.read_mems,
             target,
             &install_ctx,
             &install_message,
@@ -205,10 +205,10 @@ async fn run(args: Args, workspace_root: PathBuf) -> anyhow::Result<()> {
         );
         for result in results {
             match result {
-                read_vaults::ReadVaultResult::Installed { archive, outcome } => {
+                read_mems::ReadMemResult::Installed { archive, outcome } => {
                     tracing::info!(
-                        "installed read-vault {} from {} (cache_copy={}, registered={})",
-                        outcome.vault_name,
+                        "installed read-mem {} from {} (cache_copy={}, registered={})",
+                        outcome.mem_name,
                         archive.display(),
                         outcome.copied_to_cache,
                         outcome.registered_in_config,
@@ -218,16 +218,16 @@ async fn run(args: Args, workspace_root: PathBuf) -> anyhow::Result<()> {
                     // the log is the response channel here.
                     for warning in &outcome.warnings {
                         tracing::warn!(
-                            "read-vault {}: [{}] {}",
-                            outcome.vault_name,
+                            "read-mem {}: [{}] {}",
+                            outcome.mem_name,
                             warning.code(),
                             warning.message(),
                         );
                     }
                 }
-                read_vaults::ReadVaultResult::Failed { archive, error } => {
+                read_mems::ReadMemResult::Failed { archive, error } => {
                     tracing::warn!(
-                        "skipped --read-vault {}: {}",
+                        "skipped --read-mem {}: {}",
                         archive.display(),
                         error
                     );

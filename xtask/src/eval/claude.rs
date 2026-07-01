@@ -6,9 +6,9 @@
 //! precisely one place — whether
 //! `--mcp-config` (and the `memstead_*` allow-list) is present:
 //!
-//! - **vault-on** mounts the subject vault over MCP and whitelists only
+//! - **mem-on** mounts the subject mem over MCP and whitelists only
 //!   `mcp__memstead__*`, so the agent's only tool is the graph.
-//! - **vault-off** passes no MCP config and an empty allow-list, so the agent
+//! - **mem-off** passes no MCP config and an empty allow-list, so the agent
 //!   answers from the bare model — every other condition identical.
 //!
 //! That isolation is the whole point: the delta is attributable to the graph and
@@ -29,8 +29,8 @@ pub struct ClaudeRunner {
     /// confound control: claude's built-in file tools (Read/Grep/Glob/Bash) are
     /// auto-allowed regardless of `--allowedTools` under this permission mode, so
     /// the only way to deny both arms direct codebase access is to give them a
-    /// directory with no codebase in it. The mounted vault uses absolute paths
-    /// and is reachable from anywhere — so vault-on can still read the graph
+    /// directory with no codebase in it. The mounted mem uses absolute paths
+    /// and is reachable from anywhere — so mem-on can still read the graph
     /// while neither arm can read the source tree. The single variable holds.
     pub sandbox_dir: PathBuf,
 }
@@ -81,17 +81,17 @@ impl Runner for ClaudeRunner {
 /// Build the `claude -p` argument vector for an arm.
 ///
 /// Pure and unit-tested: the single-variable property is visible here — the
-/// vault-on branch is the only one that adds `--mcp-config` and the `memstead_*`
+/// mem-on branch is the only one that adds `--mcp-config` and the `memstead_*`
 /// allow-list; everything before the `match` is identical across arms.
 ///
 /// Tool gating is done entirely through `--allowedTools` under
 /// `--permission-mode dontAsk`: in that mode any tool *not* on the allow-list is
-/// auto-denied, so the allow-list is the exclusive tool set. vault-on allows only
+/// auto-denied, so the allow-list is the exclusive tool set. mem-on allows only
 /// `mcp__memstead__*` (the graph, and nothing that could read the codebase
-/// directly — no confound); vault-off allows nothing (the bare model). We
+/// directly — no confound); mem-off allows nothing (the bare model). We
 /// deliberately do **not** pass `--tools ""`: in current `claude`, that flag
 /// suppresses MCP tool registration entirely, leaving the agent tool-less and
-/// prone to *fabricating* tool-call text instead of mounting the vault.
+/// prone to *fabricating* tool-call text instead of mounting the mem.
 pub fn build_args(arm: &ArmConfig) -> Vec<String> {
     let mut args = vec![
         "-p".to_string(),
@@ -110,13 +110,13 @@ pub fn build_args(arm: &ArmConfig) -> Vec<String> {
         arm.system_prompt.clone(),
     ];
     match (arm.condition, arm.mcp_config.as_ref()) {
-        (Condition::VaultOn, Some(cfg)) => {
+        (Condition::MemOn, Some(cfg)) => {
             args.push("--mcp-config".to_string());
             args.push(cfg.display().to_string());
             args.push("--allowedTools".to_string());
             args.push("mcp__memstead__*".to_string());
         }
-        // vault-off, or a degenerate vault-on with no mount: no MCP, no tools.
+        // mem-off, or a degenerate mem-on with no mount: no MCP, no tools.
         _ => {
             args.push("--allowedTools".to_string());
             args.push(String::new());
@@ -206,7 +206,7 @@ mod tests {
     }
 
     #[test]
-    fn vault_on_args_carry_mcp_config_and_allowlist() {
+    fn mem_on_args_carry_mcp_config_and_allowlist() {
         let (on, _) = build_arms(&task(), "claude-opus-4-8", "sys", Some("/tmp/on.json".into()));
         let args = build_args(&on);
         assert!(args.windows(2).any(|w| w[0] == "--mcp-config" && w[1] == "/tmp/on.json"));
@@ -217,7 +217,7 @@ mod tests {
     }
 
     #[test]
-    fn vault_off_args_have_no_mcp_and_empty_allowlist() {
+    fn mem_off_args_have_no_mcp_and_empty_allowlist() {
         let (_, off) = build_arms(&task(), "claude-opus-4-8", "sys", Some("/tmp/on.json".into()));
         let args = build_args(&off);
         assert!(!args.iter().any(|a| a == "--mcp-config"), "{args:?}");
@@ -263,7 +263,7 @@ mod tests {
     }
 
     #[test]
-    fn vault_off_stream_has_no_tool_calls() {
+    fn mem_off_stream_has_no_tool_calls() {
         // A bare-model answer — exactly what validate_mount_evidence expects off.
         let stream = r#"{"type":"assistant","message":{"content":[{"type":"text","text":"from memory: X"}]}}"#;
         let ans = parse_stream_json(stream).unwrap();

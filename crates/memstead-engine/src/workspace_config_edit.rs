@@ -4,7 +4,7 @@
 //! revoke-delete / grant-cross-link / revoke-cross-link / set-mutations`
 //! subcommand family. Every operation is a load → mutate → write triple;
 //! `toml_edit` preserves operator-authored comments and formatting on
-//! sections the CLI doesn't touch (cross-vault forward-reference
+//! sections the CLI doesn't touch (cross-mem forward-reference
 //! rationale, ingest-namespace pairings, operator-mode bypass semantics,
 //! pattern-grammar examples).
 //!
@@ -42,7 +42,7 @@ pub enum WorkspaceEditError {
     BeforePatternNotFound { section: &'static str, pattern: String },
     /// `grant_cross_link` with `*` against an existing specific list,
     /// or with a specific target against an existing `*`. Operators
-    /// pick a single shape per `from`-vault.
+    /// pick a single shape per `from`-mem.
     CrossLinkConflict { from: String, message: String },
     /// `add_create_rule` called for a pattern that already exists but
     /// with a **different** schema set. Refused rather than silently
@@ -82,14 +82,14 @@ pub enum WorkspaceEditWarning {
     /// isn't currently permitted. File unchanged.
     GrantNotFound { from: String, to: String },
     /// `grant_cross_link` named a `to` target that isn't a registered
-    /// vault (and isn't the `*` wildcard). The grant still persists —
-    /// the forward-reference workflow (grant before the target vault
+    /// mem (and isn't the `*` wildcard). The grant still persists —
+    /// the forward-reference workflow (grant before the target mem
     /// exists) is legitimate — but a likely typo is surfaced.
     CrossLinkTargetUnregistered { to: String },
-    /// `grant_cross_link` named `to == from` — a self-grant. Intra-vault
+    /// `grant_cross_link` named `to == from` — a self-grant. Intra-mem
     /// links never traverse the cross-link gate, so the grant is a
     /// no-op. It still persists; the meaninglessness is surfaced.
-    CrossLinkSelfGrantNoop { vault: String },
+    CrossLinkSelfGrantNoop { mem: String },
 }
 
 impl WorkspaceEditWarning {
@@ -120,19 +120,19 @@ impl std::fmt::Display for WorkspaceEditWarning {
             ),
             Self::GrantAlreadyPresent { from, to } => write!(
                 f,
-                "`[cross_vault_links]` already grants {from} → {to} — file unchanged"
+                "`[cross_mem_links]` already grants {from} → {to} — file unchanged"
             ),
             Self::GrantNotFound { from, to } => write!(
                 f,
-                "`[cross_vault_links]` does not grant {from} → {to} — file unchanged"
+                "`[cross_mem_links]` does not grant {from} → {to} — file unchanged"
             ),
             Self::CrossLinkTargetUnregistered { to } => write!(
                 f,
-                "cross-link target `{to}` is not a registered vault — the grant is persisted (forward-reference is allowed) but will validate no relate until `{to}` exists"
+                "cross-link target `{to}` is not a registered mem — the grant is persisted (forward-reference is allowed) but will validate no relate until `{to}` exists"
             ),
-            Self::CrossLinkSelfGrantNoop { vault } => write!(
+            Self::CrossLinkSelfGrantNoop { mem } => write!(
                 f,
-                "self-grant `{vault} → {vault}` is a no-op — intra-vault links never traverse the cross-link gate; the grant is persisted but has no effect"
+                "self-grant `{mem} → {mem}` is a no-op — intra-mem links never traverse the cross-link gate; the grant is persisted but has no effect"
             ),
         }
     }
@@ -143,7 +143,7 @@ impl std::fmt::Display for WorkspaceEditError {
         match self {
             Self::WorkspaceNotInitialised { path, .. } => write!(
                 f,
-                "no `.memstead/workspace.toml` at {} — run `memstead vault-repo init` or `memstead init` first",
+                "no `.memstead/workspace.toml` at {} — run `memstead mem-repo init` or `memstead init` first",
                 path.display()
             ),
             Self::InvalidToml { path, message } => {
@@ -155,7 +155,7 @@ impl std::fmt::Display for WorkspaceEditError {
             ),
             Self::CrossLinkConflict { from, message } => write!(
                 f,
-                "`[cross_vault_links]` rejects edit for `{from}`: {message}"
+                "`[cross_mem_links]` rejects edit for `{from}`: {message}"
             ),
             Self::RuleExistsSchemasDiffer {
                 section,
@@ -218,7 +218,7 @@ fn save(path: &Path, doc: &DocumentMut) -> Result<(), WorkspaceEditError> {
         .map_err(|source| WorkspaceEditError::Io { path: path.to_path_buf(), source })
 }
 
-/// Either-or shape mirroring `[cross_vault_links]` semantics on disk:
+/// Either-or shape mirroring `[cross_mem_links]` semantics on disk:
 /// `<from> = "*"` (wildcard) or `<from> = ["a", "b"]` (allowlist). The
 /// CLI exposes both via `--target *` and `--target <name>` on
 /// `grant-cross-link`.
@@ -235,7 +235,7 @@ impl CrossLinkTarget {
     /// Parse a CLI-supplied target token. `*` maps to the wildcard
     /// shape; anything else maps to the named shape verbatim. The
     /// caller validates name shape elsewhere (the engine's existing
-    /// vault-name validation runs on load).
+    /// mem-name validation runs on load).
     pub fn parse(raw: &str) -> Self {
         if raw == "*" {
             Self::Wildcard
@@ -246,7 +246,7 @@ impl CrossLinkTarget {
 }
 
 /// `memstead workspace allow-create <pattern> --schema <pin>[,…] [--cross-link …]
-/// [--before <pattern>]` — append a `[[vault_management.create]]` rule.
+/// [--before <pattern>]` — append a `[[mem_management.create]]` rule.
 /// Default ordering is append (lowest priority); `before` flags lift it
 /// above the named pattern.
 pub fn add_create_rule(
@@ -257,7 +257,7 @@ pub fn add_create_rule(
     before: Option<&str>,
 ) -> Result<Vec<WorkspaceEditWarning>, WorkspaceEditError> {
     let (path, mut doc) = load(workspace_root)?;
-    let section = ensure_array_of_tables(&mut doc, "vault_management", "create");
+    let section = ensure_array_of_tables(&mut doc, "mem_management", "create");
 
     if let Some(idx) = find_pattern_index(section, pattern) {
         // Pattern already present. Compare the stored schema set against
@@ -268,12 +268,12 @@ pub fn add_create_rule(
         let stored = read_rule_schemas(section, idx);
         if schema_sets_equal(&stored, schemas) {
             return Ok(vec![WorkspaceEditWarning::RuleAlreadyPresent {
-                section: "vault_management.create",
+                section: "mem_management.create",
                 pattern: pattern.to_string(),
             }]);
         }
         return Err(WorkspaceEditError::RuleExistsSchemasDiffer {
-            section: "vault_management.create",
+            section: "mem_management.create",
             pattern: pattern.to_string(),
             stored,
             requested: schemas.to_vec(),
@@ -294,7 +294,7 @@ pub fn add_create_rule(
     if let Some(before_pattern) = before {
         let idx = find_pattern_index(section, before_pattern).ok_or_else(|| {
             WorkspaceEditError::BeforePatternNotFound {
-                section: "vault_management.create",
+                section: "mem_management.create",
                 pattern: before_pattern.to_string(),
             }
         })?;
@@ -320,18 +320,18 @@ pub fn add_create_rule(
 }
 
 /// `memstead workspace revoke-create <pattern>` — remove a
-/// `[[vault_management.create]]` rule by pattern.
+/// `[[mem_management.create]]` rule by pattern.
 pub fn remove_create_rule(
     workspace_root: &Path,
     pattern: &str,
 ) -> Result<Vec<WorkspaceEditWarning>, WorkspaceEditError> {
     let (path, mut doc) = load(workspace_root)?;
-    let section = ensure_array_of_tables(&mut doc, "vault_management", "create");
+    let section = ensure_array_of_tables(&mut doc, "mem_management", "create");
     let idx = match find_pattern_index(section, pattern) {
         Some(i) => i,
         None => {
             return Ok(vec![WorkspaceEditWarning::RuleNotFoundNoop {
-                section: "vault_management.create",
+                section: "mem_management.create",
                 pattern: pattern.to_string(),
             }]);
         }
@@ -342,16 +342,16 @@ pub fn remove_create_rule(
 }
 
 /// `memstead workspace allow-delete <pattern>` — append a
-/// `[[vault_management.delete]]` rule.
+/// `[[mem_management.delete]]` rule.
 pub fn add_delete_rule(
     workspace_root: &Path,
     pattern: &str,
 ) -> Result<Vec<WorkspaceEditWarning>, WorkspaceEditError> {
     let (path, mut doc) = load(workspace_root)?;
-    let section = ensure_array_of_tables(&mut doc, "vault_management", "delete");
+    let section = ensure_array_of_tables(&mut doc, "mem_management", "delete");
     if find_pattern_index(section, pattern).is_some() {
         return Ok(vec![WorkspaceEditWarning::RuleAlreadyPresent {
-            section: "vault_management.delete",
+            section: "mem_management.delete",
             pattern: pattern.to_string(),
         }]);
     }
@@ -363,18 +363,18 @@ pub fn add_delete_rule(
 }
 
 /// `memstead workspace revoke-delete <pattern>` — remove a
-/// `[[vault_management.delete]]` rule by pattern.
+/// `[[mem_management.delete]]` rule by pattern.
 pub fn remove_delete_rule(
     workspace_root: &Path,
     pattern: &str,
 ) -> Result<Vec<WorkspaceEditWarning>, WorkspaceEditError> {
     let (path, mut doc) = load(workspace_root)?;
-    let section = ensure_array_of_tables(&mut doc, "vault_management", "delete");
+    let section = ensure_array_of_tables(&mut doc, "mem_management", "delete");
     let idx = match find_pattern_index(section, pattern) {
         Some(i) => i,
         None => {
             return Ok(vec![WorkspaceEditWarning::RuleNotFoundNoop {
-                section: "vault_management.delete",
+                section: "mem_management.delete",
                 pattern: pattern.to_string(),
             }]);
         }
@@ -385,27 +385,27 @@ pub fn remove_delete_rule(
 }
 
 /// `memstead workspace grant-cross-link <from> <to>` — add `to` to the
-/// allowlist for `from` in `[cross_vault_links]`. `to == "*"` sets the
+/// allowlist for `from` in `[cross_mem_links]`. `to == "*"` sets the
 /// wildcard shape; named targets accumulate into a list.
 pub fn grant_cross_link(
     workspace_root: &Path,
     from: &str,
     to: &CrossLinkTarget,
-    known_vaults: &[String],
+    known_mems: &[String],
 ) -> Result<Vec<WorkspaceEditWarning>, WorkspaceEditError> {
     // Diligence (matching the sibling `revoke_cross_link`'s warn-on-
     // anomaly behaviour): warn — never block — on a self-grant or an
     // unregistered named target. The grant still persists so the
-    // forward-reference workflow (grant before the target vault exists)
-    // stays open. The `*` wildcard is a legitimate non-vault token and
+    // forward-reference workflow (grant before the target mem exists)
+    // stays open. The `*` wildcard is a legitimate non-mem token and
     // is not validated against the registered set.
     let mut warnings: Vec<WorkspaceEditWarning> = Vec::new();
     if let CrossLinkTarget::Named(name) = to {
         if name == from {
             warnings.push(WorkspaceEditWarning::CrossLinkSelfGrantNoop {
-                vault: from.to_string(),
+                mem: from.to_string(),
             });
-        } else if !known_vaults.iter().any(|v| v == name) {
+        } else if !known_mems.iter().any(|v| v == name) {
             warnings.push(WorkspaceEditWarning::CrossLinkTargetUnregistered {
                 to: name.clone(),
             });
@@ -413,7 +413,7 @@ pub fn grant_cross_link(
     }
 
     let (path, mut doc) = load(workspace_root)?;
-    let table = ensure_table(&mut doc, "cross_vault_links");
+    let table = ensure_table(&mut doc, "cross_mem_links");
     match (table.get(from), to) {
         (None, CrossLinkTarget::Wildcard) => {
             table.insert(from, Item::Value(Value::from("*")));
@@ -480,7 +480,7 @@ pub fn revoke_cross_link(
     to: &CrossLinkTarget,
 ) -> Result<Vec<WorkspaceEditWarning>, WorkspaceEditError> {
     let (path, mut doc) = load(workspace_root)?;
-    let table = ensure_table(&mut doc, "cross_vault_links");
+    let table = ensure_table(&mut doc, "cross_mem_links");
     let removed = match (table.get(from), to) {
         (None, _) => false,
         (Some(Item::Value(Value::String(s))), CrossLinkTarget::Wildcard) if s.value() == "*" => {
@@ -535,29 +535,29 @@ pub fn set_mutation_require_notes(
     save(&path, &doc)
 }
 
-/// Scrub `.memstead/workspace.toml` of the now-dangling `[cross_vault_links]`
-/// grants naming `vault_name` so the workspace no longer references a
-/// vault the engine just destructively deleted. The
-/// `[[vault_management.create]]` / `[[vault_management.delete]]`
+/// Scrub `.memstead/workspace.toml` of the now-dangling `[cross_mem_links]`
+/// grants naming `mem_name` so the workspace no longer references a
+/// mem the engine just destructively deleted. The
+/// `[[mem_management.create]]` / `[[mem_management.delete]]`
 /// allowlist rules are deliberately left intact.
 ///
 /// Two passes, both on the in-memory `DocumentMut` before one final
 /// save:
-///   1. `[cross_vault_links]` — drop the key `vault_name` if present
-///      (the deleted vault as `from`).
-///   2. `[cross_vault_links]` — remove `vault_name` from every other
+///   1. `[cross_mem_links]` — drop the key `mem_name` if present
+///      (the deleted mem as `from`).
+///   2. `[cross_mem_links]` — remove `mem_name` from every other
 ///      key's allowlist `Array`. When an allowlist becomes empty,
 ///      drop the key entirely (mirrors `revoke_cross_link`).
 ///
-/// What is NOT scrubbed, and why: the `[[vault_management.create]]` /
-/// `[[vault_management.delete]]` rules are forward-looking *permissions
+/// What is NOT scrubbed, and why: the `[[mem_management.create]]` /
+/// `[[mem_management.delete]]` rules are forward-looking *permissions
 /// for a name*, not references to the deleted *instance*. A cross-link
 /// grant `test → other` names the gone instance and genuinely dangles,
-/// so it is scrubbed; a `[[vault_management.create]]` rule for `other`
-/// means "an agent may bring a vault named `other` into existence" and
+/// so it is scrubbed; a `[[mem_management.create]]` rule for `other`
+/// means "an agent may bring a mem named `other` into existence" and
 /// stays true after the delete. Scrubbing it would silently revoke a
 /// guarded-config permission as a side effect of an instance op, and
-/// force a fresh `allow-create` before the next `vault init other` —
+/// force a fresh `allow-create` before the next `mem init other` —
 /// exactly the re-attach friction `unregister` avoids by preserving
 /// policy. So `delete` is idempotent w.r.t. a later re-create.
 ///
@@ -569,9 +569,9 @@ pub fn set_mutation_require_notes(
 ///
 /// IO failures surface as `WorkspaceEditError::Io`; the caller's outer
 /// engine-error type wraps that.
-pub fn scrub_policy_for_deleted_vault(
+pub fn scrub_policy_for_deleted_mem(
     workspace_root: &Path,
-    vault_name: &str,
+    mem_name: &str,
 ) -> Result<Vec<ScrubbedEntry>, WorkspaceEditError> {
     let path = workspace_toml_path(workspace_root);
     let text = match fs::read_to_string(&path) {
@@ -590,11 +590,11 @@ pub fn scrub_policy_for_deleted_vault(
 
     let mut scrubbed: Vec<ScrubbedEntry> = Vec::new();
 
-    if let Some(item) = doc.get_mut("cross_vault_links") {
+    if let Some(item) = doc.get_mut("cross_mem_links") {
         if let Some(table) = item.as_table_mut() {
-            // The deleted vault's own key — every grant `vault_name
+            // The deleted mem's own key — every grant `mem_name
             // → <anything>` is dropped wholesale.
-            if let Some(removed) = table.remove(vault_name) {
+            if let Some(removed) = table.remove(mem_name) {
                 let targets = match removed {
                     Item::Value(Value::Array(arr)) => arr
                         .iter()
@@ -608,34 +608,34 @@ pub fn scrub_policy_for_deleted_vault(
                 };
                 if targets.is_empty() {
                     scrubbed.push(ScrubbedEntry::CrossLink {
-                        from: vault_name.to_string(),
+                        from: mem_name.to_string(),
                         to: "*".to_string(),
                     });
                 } else {
                     for to in targets {
                         scrubbed.push(ScrubbedEntry::CrossLink {
-                            from: vault_name.to_string(),
+                            from: mem_name.to_string(),
                             to,
                         });
                     }
                 }
             }
-            // Peer entries referencing the deleted vault as a grant
+            // Peer entries referencing the deleted mem as a grant
             // target — drop the entry from the array; collapse empty
             // arrays.
             let keys: Vec<String> = table.iter().map(|(k, _)| k.to_string()).collect();
             for key in keys {
                 let drop_key = match table.get(&key) {
                     Some(Item::Value(Value::Array(arr))) => {
-                        if array_contains(arr, vault_name) {
+                        if array_contains(arr, mem_name) {
                             let mut arr = arr.clone();
                             arr.retain(|v| match v {
-                                Value::String(s) => s.value() != vault_name,
+                                Value::String(s) => s.value() != mem_name,
                                 _ => true,
                             });
                             scrubbed.push(ScrubbedEntry::CrossLink {
                                 from: key.clone(),
-                                to: vault_name.to_string(),
+                                to: mem_name.to_string(),
                             });
                             if arr.is_empty() {
                                 true
@@ -656,10 +656,10 @@ pub fn scrub_policy_for_deleted_vault(
         }
     }
 
-    // The `[[vault_management.create]]` / `[[vault_management.delete]]`
+    // The `[[mem_management.create]]` / `[[mem_management.delete]]`
     // allowlist rules are deliberately NOT scrubbed — see this
     // function's doc-comment for why deleting an instance must not
-    // revoke the forward-looking permission to (re-)create a vault of
+    // revoke the forward-looking permission to (re-)create a mem of
     // the same name.
 
     if !scrubbed.is_empty() {
@@ -668,20 +668,20 @@ pub fn scrub_policy_for_deleted_vault(
     Ok(scrubbed)
 }
 
-/// One scrubbed entry returned from [`scrub_policy_for_deleted_vault`].
-/// The `memstead_vault_delete` response surfaces these so an agent sees
+/// One scrubbed entry returned from [`scrub_policy_for_deleted_mem`].
+/// The `memstead_mem_delete` response surfaces these so an agent sees
 /// every policy side effect in one round-trip. Only dangling
-/// `[cross_vault_links]` grants are scrubbed; the
-/// `[[vault_management.*]]` allowlist rules are preserved, so this enum
+/// `[cross_mem_links]` grants are scrubbed; the
+/// `[[mem_management.*]]` allowlist rules are preserved, so this enum
 /// carries the one scrubbed shape.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ScrubbedEntry {
-    /// `[cross_vault_links]` grant naming the deleted vault on
+    /// `[cross_mem_links]` grant naming the deleted mem on
     /// either side.
     CrossLink {
-        /// Source vault — the grant's table key.
+        /// Source mem — the grant's table key.
         from: String,
-        /// Target vault — array element or wildcard `"*"`.
+        /// Target mem — array element or wildcard `"*"`.
         to: String,
     },
 }
@@ -710,7 +710,7 @@ fn ensure_array_of_tables<'a>(
     let outer_table = doc
         .get_mut(outer)
         .and_then(|i| i.as_table_mut())
-        .expect("vault_management must be a table");
+        .expect("mem_management must be a table");
     if !outer_table.contains_key(inner) {
         outer_table.insert(inner, Item::ArrayOfTables(ArrayOfTables::new()));
     }
@@ -780,7 +780,7 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
-    const DEFAULT_BODY: &str = "format = \"memstead-git-branch-1\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n";
+    const DEFAULT_BODY: &str = "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n";
 
     fn seed(body: &str) -> TempDir {
         let tmp = TempDir::new().unwrap();
@@ -794,7 +794,7 @@ mod tests {
         fs::read_to_string(workspace_toml_path(root)).unwrap()
     }
 
-    /// Registered-vault set for `grant_cross_link` target validation.
+    /// Registered-mem set for `grant_cross_link` target validation.
     /// Covers every named `to` target the grant tests use, so the
     /// behaviour-focused tests don't trip the `CROSS_LINK_TARGET_
     /// UNREGISTERED` warning. Target-validation behaviour is exercised
@@ -818,7 +818,7 @@ mod tests {
         )
         .unwrap();
         let body = read(tmp.path());
-        assert!(body.contains("[[vault_management.create]]"), "got:\n{body}");
+        assert!(body.contains("[[mem_management.create]]"), "got:\n{body}");
         assert!(body.contains("pattern = \"exec-*\""), "got:\n{body}");
         assert!(body.contains("schemas = [\"default@1.0.0\"]"), "got:\n{body}");
     }
@@ -1025,7 +1025,7 @@ mod tests {
         let tmp = seed(DEFAULT_BODY);
         add_delete_rule(tmp.path(), "exec-*").unwrap();
         let body = read(tmp.path());
-        assert!(body.contains("[[vault_management.delete]]"), "got:\n{body}");
+        assert!(body.contains("[[mem_management.delete]]"), "got:\n{body}");
         assert!(body.contains("pattern = \"exec-*\""), "got:\n{body}");
         remove_delete_rule(tmp.path(), "exec-*").unwrap();
         let body = read(tmp.path());
@@ -1096,7 +1096,7 @@ mod tests {
         assert_eq!(err.code(), "CROSS_LINK_CONFLICT");
     }
 
-    /// A named `to` target that isn't a registered vault warns
+    /// A named `to` target that isn't a registered mem warns
     /// `CROSS_LINK_TARGET_UNREGISTERED` — but the grant still persists
     /// (the forward-reference workflow stays open).
     #[test]
@@ -1106,7 +1106,7 @@ mod tests {
         let warnings = grant_cross_link(
             tmp.path(),
             "plugin",
-            &CrossLinkTarget::Named("future-vault".to_string()),
+            &CrossLinkTarget::Named("future-mem".to_string()),
             &registered,
         )
         .unwrap();
@@ -1114,7 +1114,7 @@ mod tests {
         assert_eq!(warnings[0].code(), "CROSS_LINK_TARGET_UNREGISTERED");
         // Grant persisted despite the warning.
         assert!(
-            read(tmp.path()).contains("plugin = [\"future-vault\"]"),
+            read(tmp.path()).contains("plugin = [\"future-mem\"]"),
             "grant must persist for the forward-reference workflow: {}",
             read(tmp.path())
         );
@@ -1137,7 +1137,7 @@ mod tests {
         assert!(read(tmp.path()).contains("plugin = [\"plugin\"]"));
     }
 
-    /// The `*` wildcard is a legitimate non-vault token — it is NOT
+    /// The `*` wildcard is a legitimate non-mem token — it is NOT
     /// validated against the registered set, so granting `*` against an
     /// empty registry warns nothing.
     #[test]
@@ -1256,14 +1256,14 @@ mod tests {
         // operator-mode bypass semantics). toml_edit must preserve
         // every byte the CLI doesn't intentionally touch.
         let body = "# operator comment 1\n\
-format = \"memstead-git-branch-1\"\n\
+format = \"memstead-git-branch-2\"\n\
 \n\
 # operator comment 2\n\
 [persistence_adapter]\n\
 name = \"file-two-layer\"\n\
 \n\
 # section explanation that must survive\n\
-[cross_vault_links]\n\
+[cross_mem_links]\n\
 plugin = [\"engine\"]  # inline pin\n";
         let tmp = seed(body);
 
@@ -1275,40 +1275,40 @@ plugin = [\"engine\"]  # inline pin\n";
         assert!(new_body.contains("# operator comment 2"));
         assert!(new_body.contains("# section explanation that must survive"));
         assert!(new_body.contains("# inline pin"));
-        assert!(new_body.contains("[[vault_management.create]]"));
+        assert!(new_body.contains("[[mem_management.create]]"));
     }
 
-    /// A destructive delete scrubs only the dangling `[cross_vault_links]`
-    /// grants naming the deleted vault — its own key and every peer's
+    /// A destructive delete scrubs only the dangling `[cross_mem_links]`
+    /// grants naming the deleted mem — its own key and every peer's
     /// allowlist value (with empty-list key drop). The
-    /// `[[vault_management.create]]` / `[[vault_management.delete]]`
+    /// `[[mem_management.create]]` / `[[mem_management.delete]]`
     /// allowlist rules survive unconditionally — even the exact-name
     /// ones — because they are forward-looking permissions for the name,
     /// not references to the gone instance.
     #[test]
-    fn scrub_policy_for_deleted_vault_drops_cross_links_but_keeps_allowlist_rules() {
-        let body = "format = \"memstead-git-branch-1\"\n\n\
-            [cross_vault_links]\n\
+    fn scrub_policy_for_deleted_mem_drops_cross_links_but_keeps_allowlist_rules() {
+        let body = "format = \"memstead-git-branch-2\"\n\n\
+            [cross_mem_links]\n\
             other = [\"test\"]\n\
             test = [\"other\", \"keep\"]\n\
             \n\
-            [[vault_management.create]]\n\
+            [[mem_management.create]]\n\
             pattern = \"other\"\n\
             schemas = [\"default@1.0.0\"]\n\
             \n\
-            [[vault_management.create]]\n\
+            [[mem_management.create]]\n\
             pattern = \"*\"\n\
             schemas = [\"default@1.0.0\"]\n\
             \n\
-            [[vault_management.delete]]\n\
+            [[mem_management.delete]]\n\
             pattern = \"other\"\n\
             \n\
-            [[vault_management.delete]]\n\
+            [[mem_management.delete]]\n\
             pattern = \"team/*\"\n";
         let tmp = seed(body);
-        let scrubbed = scrub_policy_for_deleted_vault(tmp.path(), "other").unwrap();
+        let scrubbed = scrub_policy_for_deleted_mem(tmp.path(), "other").unwrap();
         // Only cross-link grants are reported as scrubbed — never a
-        // `vault_management.*` rule. Both the deleted vault's own key
+        // `mem_management.*` rule. Both the deleted mem's own key
         // (`other → test`) and the peer value (`test → other`) are
         // reported.
         assert!(
@@ -1322,30 +1322,30 @@ plugin = [\"engine\"]  # inline pin\n";
                 from: "other".to_string(),
                 to: "test".to_string(),
             }),
-            "deleted vault's own grant must be reported scrubbed, got: {scrubbed:?}"
+            "deleted mem's own grant must be reported scrubbed, got: {scrubbed:?}"
         );
         assert!(
             scrubbed.contains(&ScrubbedEntry::CrossLink {
                 from: "test".to_string(),
                 to: "other".to_string(),
             }),
-            "peer grant naming the deleted vault must be reported scrubbed, got: {scrubbed:?}"
+            "peer grant naming the deleted mem must be reported scrubbed, got: {scrubbed:?}"
         );
         let after = read(tmp.path());
         // `other` key removed entirely.
         assert!(
             !after.contains("\nother = ["),
-            "`other` key must be scrubbed from cross_vault_links — got:\n{after}"
+            "`other` key must be scrubbed from cross_mem_links — got:\n{after}"
         );
         // `other` value removed from `test`'s allowlist; `keep` survives.
         assert!(after.contains("\"keep\""), "non-target values must survive");
         // The exact-name `pattern = "other"` rules in BOTH
-        // `[[vault_management.create]]` and `.delete]]` survive — the
+        // `[[mem_management.create]]` and `.delete]]` survive — the
         // forward-looking permission for the name `other` is preserved.
         assert_eq!(
             after.matches("pattern = \"other\"").count(),
             2,
-            "exact-name vault_management.{{create,delete}} rules for `other` must survive — got:\n{after}"
+            "exact-name mem_management.{{create,delete}} rules for `other` must survive — got:\n{after}"
         );
         assert!(after.contains("pattern = \"*\""), "wildcard `*` rule must survive");
         assert!(after.contains("pattern = \"team/*\""), "glob `team/*` rule must survive");
@@ -1355,41 +1355,41 @@ plugin = [\"engine\"]  # inline pin\n";
     /// shouldn't crash the scrub. The function is best-effort — a
     /// missing file is a no-op and surfaces no error.
     #[test]
-    fn scrub_policy_for_deleted_vault_missing_file_is_noop() {
+    fn scrub_policy_for_deleted_mem_missing_file_is_noop() {
         let tmp = TempDir::new().unwrap();
         // No `.memstead/workspace.toml` seeded.
-        let outcome = scrub_policy_for_deleted_vault(tmp.path(), "other");
+        let outcome = scrub_policy_for_deleted_mem(tmp.path(), "other");
         assert!(outcome.is_ok(), "missing workspace.toml must not error");
     }
 
     /// Acceptance complement: a successful delete that doesn't touch
     /// any policy entry leaves the file byte-identical (no save).
     #[test]
-    fn scrub_policy_for_deleted_vault_no_match_leaves_file_unchanged() {
-        let body = "format = \"memstead-git-branch-1\"\n\n\
-            [cross_vault_links]\n\
+    fn scrub_policy_for_deleted_mem_no_match_leaves_file_unchanged() {
+        let body = "format = \"memstead-git-branch-2\"\n\n\
+            [cross_mem_links]\n\
             test = [\"keep\"]\n\
             \n\
-            [[vault_management.create]]\n\
+            [[mem_management.create]]\n\
             pattern = \"*\"\n\
             schemas = [\"default@1.0.0\"]\n";
         let tmp = seed(body);
         let before = read(tmp.path());
-        scrub_policy_for_deleted_vault(tmp.path(), "ghost").unwrap();
+        scrub_policy_for_deleted_mem(tmp.path(), "ghost").unwrap();
         let after = read(tmp.path());
         assert_eq!(before, after, "unrelated delete must not rewrite the file");
     }
 
     /// Acceptance complement: when the only entry in an allowlist
-    /// names the deleted vault, the underlying key is dropped — same
+    /// names the deleted mem, the underlying key is dropped — same
     /// shape as `revoke_cross_link`.
     #[test]
-    fn scrub_policy_for_deleted_vault_drops_emptied_allowlist_key() {
-        let body = "format = \"memstead-git-branch-1\"\n\n\
-            [cross_vault_links]\n\
+    fn scrub_policy_for_deleted_mem_drops_emptied_allowlist_key() {
+        let body = "format = \"memstead-git-branch-2\"\n\n\
+            [cross_mem_links]\n\
             test = [\"other\"]\n";
         let tmp = seed(body);
-        scrub_policy_for_deleted_vault(tmp.path(), "other").unwrap();
+        scrub_policy_for_deleted_mem(tmp.path(), "other").unwrap();
         let after = read(tmp.path());
         assert!(
             !after.contains("\ntest = ["),

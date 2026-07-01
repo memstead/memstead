@@ -1,7 +1,7 @@
-//! Per-vault tantivy index wrapper with write-through semantics.
+//! Per-mem tantivy index wrapper with write-through semantics.
 //!
-//! `VaultIndex` owns one `tantivy::Index` and — for write-vaults — a long-
-//! lived `IndexWriter`. Read-vault archives are immutable: their indexes
+//! `MemIndex` owns one `tantivy::Index` and — for write-mems — a long-
+//! lived `IndexWriter`. Read-mem archives are immutable: their indexes
 //! are populated once at engine init and then drop the writer, so any
 //! accidental mutation attempt surfaces as an error rather than silently
 //! stale data.
@@ -21,26 +21,26 @@ use super::tokenizer;
 /// entities without forcing mid-build flushes).
 const WRITER_HEAP_BYTES: usize = 50_000_000;
 
-/// One vault's index. Drop the writer (`finalize_read_only`) after the
-/// initial build for read-vault archives; write-vaults keep it for the
+/// One mem's index. Drop the writer (`finalize_read_only`) after the
+/// initial build for read-mem archives; write-mems keep it for the
 /// lifetime of the engine.
-pub struct VaultIndex {
-    pub vault: String,
+pub struct MemIndex {
+    pub mem: String,
     pub fields: IndexFields,
     pub index: Index,
     writer: Option<IndexWriter>,
 }
 
-impl VaultIndex {
-    /// Build an in-RAM index for a vault. `schema` may be `None` when the
-    /// vault's pinned schema failed to resolve; fixed fields still index.
-    pub fn build_in_ram(vault: String, schema: Option<&Arc<Schema>>) -> tantivy::Result<Self> {
+impl MemIndex {
+    /// Build an in-RAM index for a mem. `schema` may be `None` when the
+    /// mem's pinned schema failed to resolve; fixed fields still index.
+    pub fn build_in_ram(mem: String, schema: Option<&Arc<Schema>>) -> tantivy::Result<Self> {
         let fields = IndexFields::build(schema);
         let index = Index::create_in_ram(fields.schema.clone());
         tokenizer::register(index.tokenizers());
         let writer = index.writer(WRITER_HEAP_BYTES)?;
         Ok(Self {
-            vault,
+            mem,
             fields,
             index,
             writer: Some(writer),
@@ -75,8 +75,8 @@ impl VaultIndex {
         }
         let Some(writer) = self.writer.as_mut() else {
             return Err(tantivy::TantivyError::InvalidArgument(format!(
-                "vault '{}' index is read-only",
-                self.vault
+                "mem '{}' index is read-only",
+                self.mem
             )));
         };
         let id_term = Term::from_field_text(self.fields.id, entity.id.as_ref());
@@ -84,7 +84,7 @@ impl VaultIndex {
 
         let mut doc = TantivyDocument::new();
         doc.add_text(self.fields.id, entity.id.as_ref());
-        doc.add_text(self.fields.vault, &entity.vault);
+        doc.add_text(self.fields.mem, &entity.mem);
         doc.add_text(self.fields.entity_type, &entity.entity_type);
         doc.add_text(self.fields.title, &entity.title);
 
@@ -108,8 +108,8 @@ impl VaultIndex {
     pub fn remove_entity(&mut self, id: &EntityId) -> tantivy::Result<()> {
         let Some(writer) = self.writer.as_mut() else {
             return Err(tantivy::TantivyError::InvalidArgument(format!(
-                "vault '{}' index is read-only",
-                self.vault
+                "mem '{}' index is read-only",
+                self.mem
             )));
         };
         let id_term = Term::from_field_text(self.fields.id, id.as_ref());
@@ -118,7 +118,7 @@ impl VaultIndex {
     }
 
     /// Flush pending writes. Read-only indexes succeed as a no-op so
-    /// callers can commit across all vaults uniformly during bulk builds.
+    /// callers can commit across all mems uniformly during bulk builds.
     pub fn commit(&mut self) -> tantivy::Result<()> {
         if let Some(writer) = self.writer.as_mut() {
             writer.commit()?;
@@ -159,15 +159,15 @@ mod tests {
     use crate::entity::Entity;
     use indexmap::IndexMap;
 
-    fn make_entity(name: &str, vault: &str) -> Entity {
+    fn make_entity(name: &str, mem: &str) -> Entity {
         let mut sections = IndexMap::new();
         sections.insert("identity".into(), format!("Identity of {name}."));
         sections.insert("purpose".into(), format!("Purpose of {name}."));
         Entity {
-            id: EntityId::new(vault, name),
+            id: EntityId::new(mem, name),
             title: name.to_string(),
             entity_type: "spec".into(),
-            vault: vault.into(),
+            mem: mem.into(),
             file_path: format!("{name}.md"),
             metadata: IndexMap::new(),
             sections,
@@ -182,7 +182,7 @@ mod tests {
     #[test]
     fn index_then_remove_roundtrips() {
         let schema = memstead_schema::Schema::builtin_default();
-        let mut idx = VaultIndex::build_in_ram("specs".into(), Some(&schema)).unwrap();
+        let mut idx = MemIndex::build_in_ram("specs".into(), Some(&schema)).unwrap();
         let entity = make_entity("alpha", "specs");
         idx.index_entity(&entity).unwrap();
         idx.commit().unwrap();
@@ -197,7 +197,7 @@ mod tests {
     #[test]
     fn read_only_index_rejects_mutations() {
         let schema = memstead_schema::Schema::builtin_default();
-        let mut idx = VaultIndex::build_in_ram("archive".into(), Some(&schema)).unwrap();
+        let mut idx = MemIndex::build_in_ram("archive".into(), Some(&schema)).unwrap();
         let entity = make_entity("fixed", "archive");
         idx.index_entity(&entity).unwrap();
         idx.commit().unwrap();
@@ -213,7 +213,7 @@ mod tests {
     #[test]
     fn reindexing_same_id_replaces_not_duplicates() {
         let schema = memstead_schema::Schema::builtin_default();
-        let mut idx = VaultIndex::build_in_ram("specs".into(), Some(&schema)).unwrap();
+        let mut idx = MemIndex::build_in_ram("specs".into(), Some(&schema)).unwrap();
         let mut entity = make_entity("beta", "specs");
         idx.index_entity(&entity).unwrap();
         entity.title = "Beta renamed".into();
@@ -225,7 +225,7 @@ mod tests {
     #[test]
     fn stubs_are_skipped() {
         let schema = memstead_schema::Schema::builtin_default();
-        let mut idx = VaultIndex::build_in_ram("specs".into(), Some(&schema)).unwrap();
+        let mut idx = MemIndex::build_in_ram("specs".into(), Some(&schema)).unwrap();
         let mut entity = make_entity("ghost", "specs");
         entity.stub = true;
         idx.index_entity(&entity).unwrap();

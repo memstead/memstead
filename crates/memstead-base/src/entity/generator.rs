@@ -39,22 +39,22 @@ pub fn generate_markdown(entity: &Entity, schema: &TypeDefinition) -> String {
     }
 
     // Relationships section (between required and optional).
-    // Cross-vault relations render as `[[<vault>:<slug>]]` so the
+    // Cross-mem relations render as `[[<mem>:<slug>]]` so the
     // wiki-link round-trips through the parser (which interprets
-    // bare-slug `[[<slug>]]` as same-vault). Pre-fix the renderer
+    // bare-slug `[[<slug>]]` as same-mem). Pre-fix the renderer
     // always emitted `[[<slug>]]`, breaking the round-trip for
-    // cross-vault relations — the parser would land them in the
-    // entity's own vault and the in-memory edge would drift from
+    // cross-mem relations — the parser would land them in the
+    // entity's own mem and the in-memory edge would drift from
     // the on-disk intent.
     if !entity.relationships.is_empty() {
         let rel_lines: Vec<String> = entity
             .relationships
             .iter()
             .map(|r| {
-                let link = if r.target.vault() == entity.vault {
+                let link = if r.target.mem() == entity.mem {
                     r.target.path().to_string()
                 } else {
-                    format!("{}:{}", r.target.vault(), r.target.path())
+                    format!("{}:{}", r.target.mem(), r.target.path())
                 };
                 // Em-dash form when the relation carries a per-edge
                 // description; canonical delimiter is the three-byte
@@ -197,7 +197,7 @@ mod tests {
     use indexmap::IndexMap;
     use memstead_schema::{builtin_names, type_by_name};
 
-    fn make_entity(title: &str, vault: &str) -> Entity {
+    fn make_entity(title: &str, mem: &str) -> Entity {
         let schema = type_by_name(builtin_names::SPEC).unwrap();
         let mut metadata = IndexMap::new();
         metadata.insert("level".to_string(), MetadataValue::String("M0".to_string()));
@@ -227,10 +227,10 @@ mod tests {
 
         let slug = crate::entity::id::title_to_slug(title).unwrap();
         Entity {
-            id: EntityId::new(vault, &slug),
+            id: EntityId::new(mem, &slug),
             title: title.to_string(),
             entity_type: "spec".to_string(),
-            vault: vault.to_string(),
+            mem: mem.to_string(),
             file_path: format!("{slug}.md"),
             metadata,
             sections,
@@ -268,7 +268,7 @@ mod tests {
             id: EntityId::new("assertions", &slug),
             title: title.to_string(),
             entity_type: "assertion".to_string(),
-            vault: "assertions".to_string(),
+            mem: "assertions".to_string(),
             file_path: format!("{slug}.md"),
             metadata,
             sections,
@@ -427,7 +427,7 @@ mod tests {
             id: EntityId::new("narratives", "no-optional"),
             title: "No Optional".to_string(),
             entity_type: "narrative".to_string(),
-            vault: "narratives".to_string(),
+            mem: "narratives".to_string(),
             file_path: "no-optional.md".to_string(),
             metadata,
             sections,
@@ -548,7 +548,7 @@ Some content with [[inline-link]].
     /// next read and strict ingress rejects the canonical bytes.
     ///
     /// Regression lock for the narrative-schema `temporal_range` bug
-    /// surfaced by V3's project-vaults round-trip test.
+    /// surfaced by V3's project-mems round-trip test.
     #[test]
     fn generate_quotes_number_shaped_string_value() {
         let schema = type_by_name(builtin_names::NARRATIVE).unwrap();
@@ -587,7 +587,7 @@ Some content with [[inline-link]].
             id: EntityId::new("specs", "ambiguous"),
             title: "Ambiguous".to_string(),
             entity_type: "narrative".to_string(),
-            vault: "specs".to_string(),
+            mem: "specs".to_string(),
             file_path: "ambiguous.md".to_string(),
             metadata,
             sections,

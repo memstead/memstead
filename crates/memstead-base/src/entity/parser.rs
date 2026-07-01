@@ -22,9 +22,9 @@ pub fn parse_markdown(
     content: &str,
     relative_path: &str,
     schema: &TypeDefinition,
-    vault: &str,
+    mem: &str,
 ) -> Result<ParseResult, ParseError> {
-    let id = file_path_to_id(relative_path, vault);
+    let id = file_path_to_id(relative_path, mem);
 
     // Compute content hash from raw markdown
     let content_hash = compute_hash(content);
@@ -50,13 +50,13 @@ pub fn parse_markdown(
     // source so boot / reload / attach sites can report them in
     // `LoadCollector::warnings`.
     let rel_heading_key = "relationships";
-    let entity_id_for_rel_warnings = file_path_to_id(relative_path, vault);
+    let entity_id_for_rel_warnings = file_path_to_id(relative_path, mem);
     let (relationships, rel_parse_warnings) = parse_relationships_with_warnings(
         sections_map
             .get(rel_heading_key)
             .map(|s| s.as_str())
             .unwrap_or(""),
-        vault,
+        mem,
         Some(&entity_id_for_rel_warnings),
     );
 
@@ -83,7 +83,7 @@ pub fn parse_markdown(
     let mut parsed_metadata = parse_metadata(&metadata);
 
     // Determine type from metadata or default, and ensure it's in metadata.
-    // The entity's `type:` frontmatter key takes precedence over the vault's
+    // The entity's `type:` frontmatter key takes precedence over the mem's
     // default type — parse-time resolution means each file is authoritative
     // about its own type.
     let type_name = parsed_metadata
@@ -108,7 +108,7 @@ pub fn parse_markdown(
     // and dangling-link reporters keep working against legacy
     // entities. The mutation pipeline re-extracts strictly via
     // `extract_inline_links` and refuses on grammar violations.
-    let inline_links = extract_inline_links_lenient(&inline_link_text, vault);
+    let inline_links = extract_inline_links_lenient(&inline_link_text, mem);
 
     // Filter out targets already covered by explicit relationships
     let explicit_targets: HashSet<_> = relationships.iter().map(|r| &r.target).collect();
@@ -130,7 +130,7 @@ pub fn parse_markdown(
         .filter(|s| !s.catch_all)
         .map(|s| s.key.as_str())
         .collect();
-    let entity_id_for_warnings = file_path_to_id(relative_path, vault);
+    let entity_id_for_warnings = file_path_to_id(relative_path, mem);
     let mut parse_warnings: Vec<crate::ops::WarningHint> = duplicate_headings
         .into_iter()
         .filter(|d| declared_keys.contains(d.key.as_str()))
@@ -147,7 +147,7 @@ pub fn parse_markdown(
         id,
         title,
         entity_type: type_name,
-        vault: vault.to_string(),
+        mem: mem.to_string(),
         file_path: relative_path.to_string(),
         metadata: parsed_metadata,
         sections: result_sections,
@@ -168,16 +168,16 @@ pub fn parse_markdown(
 /// Parse an entity from a file on disk.
 pub fn parse_file(
     path: &Path,
-    vault_dir: &Path,
+    mem_dir: &Path,
     schema: &TypeDefinition,
-    vault: &str,
+    mem: &str,
 ) -> Result<ParseResult, ParseError> {
     let content = std::fs::read_to_string(path)?;
     let relative_path = path
-        .strip_prefix(vault_dir)
+        .strip_prefix(mem_dir)
         .unwrap_or(path)
         .to_string_lossy();
-    parse_markdown(&content, &relative_path, schema, vault)
+    parse_markdown(&content, &relative_path, schema, mem)
 }
 
 // ---------------------------------------------------------------------------
@@ -186,7 +186,7 @@ pub fn parse_file(
 
 /// Extract the `type:` value from frontmatter without running the full parser.
 ///
-/// Used by the loader to resolve each file's type independently — the vault
+/// Used by the loader to resolve each file's type independently — the mem
 /// config's default type is only a fallback for files that don't declare one.
 /// Returns None if there's no frontmatter, no `type:` line, or it's empty.
 pub fn peek_type_from_frontmatter(content: &str) -> Option<String> {
@@ -662,7 +662,7 @@ fn build_catch_all(sections: &HashMap<String, String>, schema: &TypeDefinition) 
 /// normalise the row to the simple form on next write.
 pub(crate) fn parse_relationships_with_warnings(
     text: &str,
-    vault: &str,
+    mem: &str,
     entity_id: Option<&EntityId>,
 ) -> (Vec<Relationship>, Vec<crate::ops::WarningHint>) {
     // Anchor on the canonical row prefix `- **TYPE**: [[<target>]]` and
@@ -678,7 +678,7 @@ pub(crate) fn parse_relationships_with_warnings(
         // the wiki-link grammar continue to round-trip. The mutation
         // pipeline (`memstead_relate`, declare_relations) gates strictly
         // via `validate_relation_target_grammar`.
-        let target = wiki_link_to_id_lenient(&cap[2], vault);
+        let target = wiki_link_to_id_lenient(&cap[2], mem);
         let tail = cap.name("tail").map(|m| m.as_str()).unwrap_or("");
         let description = match classify_description_tail(tail) {
             DescriptionTail::None => None,
@@ -779,7 +779,7 @@ pub fn extract_wiki_links(content: &str) -> Vec<WikiLink> {
         .collect()
 }
 
-/// Extract unique vault-prefixed entity IDs from inline wiki-links,
+/// Extract unique mem-prefixed entity IDs from inline wiki-links,
 /// strictly validating each target against the slug-form grammar.
 /// Strips fenced code blocks and inline code before scanning.
 ///
@@ -793,7 +793,7 @@ pub fn extract_wiki_links(content: &str) -> Vec<WikiLink> {
 /// tolerate pre-strict on-disk drift use [`extract_inline_links_lenient`].
 pub(crate) fn extract_inline_links(
     text: &str,
-    vault: &str,
+    mem: &str,
 ) -> Result<Vec<EntityId>, Vec<WikiLinkError>> {
     let stripped = mask_code_blocks(text);
     let inline_re = Regex::new(r"`[^`]+`").unwrap();
@@ -805,7 +805,7 @@ pub(crate) fn extract_inline_links(
     let mut errors = Vec::new();
 
     for cap in link_re.captures_iter(&stripped) {
-        match wiki_link_to_id(&cap[1], vault) {
+        match wiki_link_to_id(&cap[1], mem) {
             Ok(id) => {
                 if errors.is_empty() && seen.insert(id.0.clone()) {
                     links.push(id);
@@ -828,7 +828,7 @@ pub(crate) fn extract_inline_links(
 /// engines, partial-mutation rollbacks) keeps flowing through dangling-
 /// link reporters and graph inspectors. Mutation paths MUST NOT use this
 /// helper — see [`extract_inline_links`] for the strict variant.
-pub fn extract_inline_links_lenient(text: &str, vault: &str) -> Vec<EntityId> {
+pub fn extract_inline_links_lenient(text: &str, mem: &str) -> Vec<EntityId> {
     let stripped = mask_code_blocks(text);
     let inline_re = Regex::new(r"`[^`]+`").unwrap();
     let stripped = inline_re.replace_all(&stripped, "");
@@ -838,7 +838,7 @@ pub fn extract_inline_links_lenient(text: &str, vault: &str) -> Vec<EntityId> {
     let mut links = Vec::new();
 
     for cap in link_re.captures_iter(&stripped) {
-        let id = wiki_link_to_id_lenient(&cap[1], vault);
+        let id = wiki_link_to_id_lenient(&cap[1], mem);
         if seen.insert(id.0.clone()) {
             links.push(id);
         }
@@ -1109,7 +1109,7 @@ Some specification content with [[inline-link]].
         let entity = &result.entity;
         assert_eq!(entity.id.0, "specs--test-entity");
         assert_eq!(entity.title, "Test Entity");
-        assert_eq!(entity.vault, "specs");
+        assert_eq!(entity.mem, "specs");
         assert_eq!(
             entity.metadata["type"],
             MetadataValue::String("spec".to_string())
@@ -1159,7 +1159,7 @@ Sled wins on pure-Rust dependency footprint.
         let entity = &result.entity;
         assert_eq!(entity.id.0, "memos--use-sled");
         assert_eq!(entity.title, "Use Sled For Storage");
-        assert_eq!(entity.vault, "memos");
+        assert_eq!(entity.mem, "memos");
         assert_eq!(
             entity.metadata["type"],
             MetadataValue::String("memo".to_string())

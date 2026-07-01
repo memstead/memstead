@@ -56,7 +56,7 @@ mod tests {
         let known = vec![
             "memstead_entity".to_string(),
             "memstead_search".to_string(),
-            "memstead_vault_create".to_string(),
+            "memstead_mem_create".to_string(),
         ];
         let requested = vec![
             "memstead_entity".to_string(),

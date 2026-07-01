@@ -1,7 +1,7 @@
-//! `memstead branch-reset <vault> <target_sha>` — the engine's history-
+//! `memstead branch-reset <mem> <target_sha>` — the engine's history-
 //! rewrite primitive exposed as a CLI subcommand.
 //!
-//! Replay workflows that need to rewind a vault's branch pointer to
+//! Replay workflows that need to rewind a mem's branch pointer to
 //! retry against a different upstream state consume this. Safety
 //! contract lives on `Engine::branch_reset`: no pushed commit can be
 //! discarded by the reset (the engine's definition of "pushed" is
@@ -14,11 +14,11 @@ use clap::Args;
 use crate::CliError;
 use crate::setup::{CliContext, CliEngine};
 
-/// `memstead branch-reset <vault> <target_sha>` arguments.
+/// `memstead branch-reset <mem> <target_sha>` arguments.
 #[derive(Args, Debug)]
 pub struct BranchResetArgs {
-    /// Vault whose branch pointer to reset. Must be git-branch-backed.
-    pub vault: String,
+    /// Mem whose branch pointer to reset. Must be git-branch-backed.
+    pub mem: String,
     /// Target ref or SHA. Accepts anything `git rev-parse` admits —
     /// branch names, abbreviated SHAs, full SHAs, tags.
     pub target_sha: String,
@@ -26,8 +26,8 @@ pub struct BranchResetArgs {
 
 pub fn run(ctx: &CliContext, args: BranchResetArgs) -> anyhow::Result<()> {
     let outcome = match ctx.cli_engine()? {
-        CliEngine::VaultRepo(mut engine) => engine
-            .branch_reset(&args.vault, &args.target_sha)
+        CliEngine::MemRepo(mut engine) => engine
+            .branch_reset(&args.mem, &args.target_sha)
             .map_err(CliError::from_engine_op)?,
         CliEngine::Filesystem(_) => {
             // Folder mounts have no git refs — same refusal the
@@ -37,8 +37,8 @@ pub fn run(ctx: &CliContext, args: BranchResetArgs) -> anyhow::Result<()> {
                 code: "INVALID_INPUT",
                 kind: crate::output::ExitKind::Validation,
                 message: format!(
-                    "vault '{}' is not git-backed — `memstead branch-reset` requires a git-branch mount",
-                    args.vault,
+                    "mem '{}' is not git-backed — `memstead branch-reset` requires a git-branch mount",
+                    args.mem,
                 ),
                 details: None,
             }
@@ -61,7 +61,7 @@ pub fn run(ctx: &CliContext, args: BranchResetArgs) -> anyhow::Result<()> {
         };
         crate::output::print_markdown(&format!(
             "# Branch reset: `{}`\n\n- Branch ref: `{}`\n- Previous: `{}`\n- New: `{}`\n- Discarded commits:\n{}",
-            outcome.vault,
+            outcome.mem,
             outcome.branch_ref,
             outcome.previous_sha,
             outcome.new_sha,

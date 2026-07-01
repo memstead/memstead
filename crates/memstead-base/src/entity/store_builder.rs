@@ -1,7 +1,7 @@
 //! Shared helper for turning `ParseResult`s into a populated `Store`.
 //!
 //! The runtime engine calls this during `Engine::init` + `reload` and
-//! `attach_read_vault`. The strict validator calls it during V1 graph
+//! `attach_read_mem`. The strict validator calls it during V1 graph
 //! construction. Having one implementation guarantees both paths use
 //! identical stub + edge semantics.
 
@@ -15,7 +15,7 @@ use crate::store::{Edge, EdgeSource, Store};
 
 /// Context passed to `push_entities_into_store` for load-time drift
 /// detection. Load-path call sites pass `Some(LoadCollector { .. })` so
-/// authored nested-prefix wiki-links (the classic vault-rename drift
+/// authored nested-prefix wiki-links (the classic mem-rename drift
 /// footprint) emit a `SuspiciousNestedPrefix` warning — mutation-path
 /// call sites pass `None` to stay silent (an author editing an entity
 /// that still has a drifted link should not see the warning refire on
@@ -23,15 +23,15 @@ use crate::store::{Edge, EdgeSource, Store};
 pub struct LoadCollector<'a> {
     /// Target for emitted warnings — typically `&mut engine.load_warnings`.
     pub warnings: &'a mut Vec<WarningHint>,
-    /// Known-vault last-segment suffixes, derived from the vault roster
-    /// (e.g. `test-vault-plugin` → `plugin`). A nested-prefix link
+    /// Known-mem last-segment suffixes, derived from the mem roster
+    /// (e.g. `test-mem-plugin` → `plugin`). A nested-prefix link
     /// is detected when a target id has the shape
-    /// `<current-vault>--<suffix>--<rest>` where `<suffix>` is in this
-    /// set and `<suffix>` is not the entity's own vault's last segment.
+    /// `<current-mem>--<suffix>--<rest>` where `<suffix>` is in this
+    /// set and `<suffix>` is not the entity's own mem's last segment.
     pub known_suffixes: &'a [String],
-    /// Full vault-name roster (writable + read vaults). Used by the
-    /// two-pass candidate resolver to probe cross-vault matches.
-    pub vault_names: &'a [String],
+    /// Full mem-name roster (writable + read mems). Used by the
+    /// two-pass candidate resolver to probe cross-mem matches.
+    pub mem_names: &'a [String],
 }
 
 /// Upsert parse results into the store, adding explicit relationship
@@ -51,7 +51,7 @@ pub fn push_entities_into_store(
     _fallback_schema: &TypeDefinition,
     mut load_ctx: Option<LoadCollector<'_>>,
 ) {
-    // Stash id + vault + sections per entity for a post-upsert drift
+    // Stash id + mem + sections per entity for a post-upsert drift
     // scan. We can't scan before upsert: the two-pass resolver needs
     // ALL entities in the batch to be present so a bare-slug fallback
     // can find intra-batch targets regardless of filesystem iteration
@@ -60,7 +60,7 @@ pub fn push_entities_into_store(
 
     for parse_result in parse_results {
         let entity_id = parse_result.entity.id.clone();
-        let entity_vault = parse_result.entity.vault.clone();
+        let entity_mem = parse_result.entity.mem.clone();
 
         // Surface parse-time warnings (e.g. duplicate section headings) at
         // load / reload / attach sites. Mutation paths build their own
@@ -74,7 +74,7 @@ pub fn push_entities_into_store(
         if load_ctx.is_some() {
             drift_scan_inputs.push((
                 entity_id.clone(),
-                entity_vault,
+                entity_mem,
                 parse_result.entity.sections.clone(),
             ));
         }
@@ -108,43 +108,43 @@ pub fn push_entities_into_store(
     }
 
     // Post-upsert drift scan — every batch entity is now in the store,
-    // so pass-2 (same-vault bare-slug) finds intra-batch targets too.
+    // so pass-2 (same-mem bare-slug) finds intra-batch targets too.
     if let Some(ctx) = load_ctx.as_mut() {
-        for (id, vault, sections) in &drift_scan_inputs {
-            scan_nested_prefix_drift(id, vault, sections, ctx, store);
+        for (id, mem, sections) in &drift_scan_inputs {
+            scan_nested_prefix_drift(id, mem, sections, ctx, store);
         }
     }
 }
 
-/// Re-add edges that point INTO `reloaded_vault` from entities living in
-/// other vaults, after a per-vault reload of `reloaded_vault`.
+/// Re-add edges that point INTO `reloaded_mem` from entities living in
+/// other mems, after a per-mem reload of `reloaded_mem`.
 ///
-/// The per-vault removal cascade ([`Store::remove`] via
-/// [`Store::remove_entities_by_vault`]) drops every incoming mirror of the
-/// reloaded vault's nodes — including cross-vault edges sourced from an
-/// un-reloaded vault — and the re-push ([`push_entities_into_store`]) only
-/// rebuilds edges authored by the reloaded vault's own entities. So a
-/// cross-vault edge `A→B` (A in another vault) survives in A's record and
+/// The per-mem removal cascade ([`Store::remove`] via
+/// [`Store::remove_entities_by_mem`]) drops every incoming mirror of the
+/// reloaded mem's nodes — including cross-mem edges sourced from an
+/// un-reloaded mem — and the re-push ([`push_entities_into_store`]) only
+/// rebuilds edges authored by the reloaded mem's own entities. So a
+/// cross-mem edge `A→B` (A in another mem) survives in A's record and
 /// on disk but vanishes from the in-memory adjacency until a workspace-wide
 /// reload rebuilds A's side. This pass restores it from the authoritative
-/// source records, so a per-vault reload of B and a workspace-wide reload
+/// source records, so a per-mem reload of B and a workspace-wide reload
 /// converge to the same incoming adjacency for B.
 ///
 /// Mirrors `push_entities_into_store`'s edge construction exactly: auto-stub
 /// a missing target and add the edge as `EdgeSource::Explicit`. A following
 /// [`remap_alias_target_edge_sources`] reclassifies alias-derived sources
-/// (the same post-pass the reload already runs over the re-pushed vault),
-/// so an alias/body-link cross-vault edge keeps its `BodyLink` source. The
+/// (the same post-pass the reload already runs over the re-pushed mem),
+/// so an alias/body-link cross-mem edge keeps its `BodyLink` source. The
 /// scan is over in-memory records only — it never re-reads or re-parses
-/// another vault's backend, preserving the cheap-per-vault-reload property.
-pub fn reconstruct_incoming_cross_vault_edges(store: &mut Store, reloaded_vault: &str) {
+/// another mem's backend, preserving the cheap-per-mem-reload property.
+pub fn reconstruct_incoming_cross_mem_edges(store: &mut Store, reloaded_mem: &str) {
     let mut to_add: Vec<(EntityId, Edge)> = Vec::new();
     for entity in store.all_entities() {
-        if entity.vault == reloaded_vault {
+        if entity.mem == reloaded_mem {
             continue;
         }
         for rel in &entity.relationships {
-            if rel.target.vault() == reloaded_vault {
+            if rel.target.mem() == reloaded_mem {
                 to_add.push((
                     entity.id.clone(),
                     Edge {
@@ -164,30 +164,30 @@ pub fn reconstruct_incoming_cross_vault_edges(store: &mut Store, reloaded_vault:
     }
 }
 
-/// Extract the last `-`-separated segment of a vault name (e.g.
-/// `test-vault-plugin` → `plugin`). Used to derive the
-/// known-vault-suffix set from the roster.
-pub fn last_segment_suffix(vault_name: &str) -> &str {
-    vault_name.rsplit('-').next().unwrap_or(vault_name)
+/// Extract the last `-`-separated segment of a mem name (e.g.
+/// `test-mem-plugin` → `plugin`). Used to derive the
+/// known-mem-suffix set from the roster.
+pub fn last_segment_suffix(mem_name: &str) -> &str {
+    mem_name.rsplit('-').next().unwrap_or(mem_name)
 }
 
-/// Scan an entity's section bodies for wiki-links whose vault prefix
-/// matches a known vault last-segment but is NOT the full vault name —
+/// Scan an entity's section bodies for wiki-links whose mem prefix
+/// matches a known mem last-segment but is NOT the full mem name —
 /// i.e. the author wrote the short-form (`[[plugin--foo]]`) instead of
-/// the bare-slug form (same-vault target) or the canonical
+/// the bare-slug form (same-mem target) or the canonical
 /// fully-qualified form. Each hit produces a `SuspiciousNestedPrefix`
 /// warning with a two-pass resolved candidate.
 ///
-/// Tier-0 `<vault>--<slug>` recognition resolves the body link to the
-/// named vault directly. A known short-name being used where a bare
+/// Tier-0 `<mem>--<slug>` recognition resolves the body link to the
+/// named mem directly. A known short-name being used where a bare
 /// slug or a fully-qualified id was intended is the canonical drift
-/// pattern; the detector matches on the resolved target's vault.
+/// pattern; the detector matches on the resolved target's mem.
 /// Runs before the entity is upserted so the candidate probe reflects
 /// the store state *before* this entity's own auto-stub would mask a
-/// real intra-vault match.
+/// real intra-mem match.
 fn scan_nested_prefix_drift(
     from: &EntityId,
-    current_vault: &str,
+    current_mem: &str,
     sections: &IndexMap<String, String>,
     ctx: &mut LoadCollector<'_>,
     store: &Store,
@@ -195,40 +195,40 @@ fn scan_nested_prefix_drift(
     for (section, body) in sections {
         // Reuse the same extractor DanglingLink uses so semantics stay
         // aligned (code-block masking, inline-code skipping, alias handling).
-        for target_id in extract_inline_links_lenient(body, current_vault) {
-            let target_vault = target_id.vault();
-            // Skip when the body link resolves into the current vault —
-            // bare-slug authoring is the canonical same-vault form, no
+        for target_id in extract_inline_links_lenient(body, current_mem) {
+            let target_mem = target_id.mem();
+            // Skip when the body link resolves into the current mem —
+            // bare-slug authoring is the canonical same-mem form, no
             // drift to surface.
-            if target_vault == current_vault {
+            if target_mem == current_mem {
                 continue;
             }
-            // A colon/dash link whose target vault is itself a full
+            // A colon/dash link whose target mem is itself a full
             // roster member AND whose target entity actually exists is a
-            // legitimate cross-vault reference, not drift: pass-1 of the
+            // legitimate cross-mem reference, not drift: pass-1 of the
             // two-pass resolver would just rediscover the same id, so the
             // warning's "did you mean" candidate equals the already-
             // resolved target — a self-contradicting false positive (the
-            // macos→engine case). Skip it. A real-vault target whose
+            // macos→engine case). Skip it. A real-mem target whose
             // entity is *missing* is left to fire (it may be genuine
-            // rename-drift where a suffix-sibling vault holds the real
+            // rename-drift where a suffix-sibling mem holds the real
             // entity — see `suffix_collision_resolves_first_match`).
-            if ctx.vault_names.iter().any(|v| v.as_str() == target_vault)
+            if ctx.mem_names.iter().any(|v| v.as_str() == target_mem)
                 && store.get(&target_id).is_some_and(|e| !e.stub)
             {
                 continue;
             }
-            // Fire when the target's vault matches a known last-segment
-            // suffix of some vault in the roster. Self-suffix is NOT
-            // excluded — `[[plugin--x]]` inside `test-vault-plugin`
-            // (suffix `plugin`, with no `plugin` vault) remains the
+            // Fire when the target's mem matches a known last-segment
+            // suffix of some mem in the roster. Self-suffix is NOT
+            // excluded — `[[plugin--x]]` inside `test-mem-plugin`
+            // (suffix `plugin`, with no `plugin` mem) remains the
             // empirically-dominant drift pattern.
             for suffix in ctx.known_suffixes.iter() {
-                if target_vault == suffix {
+                if target_mem == suffix {
                     let candidate_target = resolve_two_pass(
                         target_id.path(),
-                        current_vault,
-                        ctx.vault_names,
+                        current_mem,
+                        ctx.mem_names,
                         store,
                     );
                     ctx.warnings.push(WarningHint::SuspiciousNestedPrefix {
@@ -247,30 +247,30 @@ fn scan_nested_prefix_drift(
 /// Two-pass resolver for a stripped slug (the `<rest>` part of a
 /// nested-prefix drift hit).
 ///
-/// Pass 1 (cross-vault-first): probe `<V>--<rest>` against every
-/// non-current vault in the roster. If exactly one match resolves to a
-/// real entity, the author probably meant that cross-vault entity.
+/// Pass 1 (cross-mem-first): probe `<V>--<rest>` against every
+/// non-current mem in the roster. If exactly one match resolves to a
+/// real entity, the author probably meant that cross-mem entity.
 ///
-/// Pass 2 (same-vault bare-slug): if no unique cross-vault match,
-/// probe `<current_vault>--<rest>`. If that resolves to a real entity,
-/// the author probably meant the bare slug form in the current vault.
+/// Pass 2 (same-mem bare-slug): if no unique cross-mem match,
+/// probe `<current_mem>--<rest>`. If that resolves to a real entity,
+/// the author probably meant the bare slug form in the current mem.
 ///
-/// Returns `None` on zero hits, multiple cross-vault hits (ambiguous),
+/// Returns `None` on zero hits, multiple cross-mem hits (ambiguous),
 /// or when the matched candidate is a stub. Callers surface the
 /// `None` case so the author can disambiguate by hand — the warning
 /// still fires.
 fn resolve_two_pass(
     rest: &str,
-    current_vault: &str,
-    vault_names: &[String],
+    current_mem: &str,
+    mem_names: &[String],
     store: &Store,
 ) -> Option<EntityId> {
     let mut hits: Vec<EntityId> = Vec::new();
-    for vault in vault_names {
-        if vault == current_vault {
+    for mem in mem_names {
+        if mem == current_mem {
             continue;
         }
-        let candidate = EntityId::new(vault, rest);
+        let candidate = EntityId::new(mem, rest);
         if let Some(e) = store.get(&candidate)
             && !e.stub
         {
@@ -280,8 +280,8 @@ fn resolve_two_pass(
     match hits.len() {
         1 => hits.pop(),
         0 => {
-            // Pass 2: same-vault bare-slug fallback.
-            let candidate = EntityId::new(current_vault, rest);
+            // Pass 2: same-mem bare-slug fallback.
+            let candidate = EntityId::new(current_mem, rest);
             if let Some(e) = store.get(&candidate)
                 && !e.stub
             {
@@ -290,12 +290,12 @@ fn resolve_two_pass(
                 None
             }
         }
-        _ => None, // ambiguous cross-vault match
+        _ => None, // ambiguous cross-mem match
     }
 }
 
 /// Validate every loaded entity's `## Relationships` entries against
-/// the source vault's schema and the wiki-link grammar. Invalid
+/// the source mem's schema and the wiki-link grammar. Invalid
 /// relations are dropped from both the store's edge index and the
 /// entity's in-memory `relationships` list; each drop emits a
 /// `PARSED_RELATION_INVALID` warning naming the offending entity,
@@ -304,14 +304,14 @@ fn resolve_two_pass(
 /// Four reasons fire today:
 /// - `grammar` — the target id's path does not match the wiki-link
 ///   grammar (`^[a-z0-9-]+(/[a-z0-9-]+)*$`).
-/// - `unknown_rel_type` — the rel-type is not declared in the vault's
+/// - `unknown_rel_type` — the rel-type is not declared in the mem's
 ///   schema and the schema is in `strict` mode. Open-mode schemas
 ///   admit the relation without a warning (mirrors the mutation
 ///   surface).
 /// - `shape` — the `(source_type, target_type)` pair is not allowed
 ///   by the declared `source_types` / `target_types`. `target_type`
 ///   is looked up from the store post-load, so the check sees the
-///   real type for any target — including cross-vault targets
+///   real type for any target — including cross-mem targets
 ///   loaded from another mount. Stub targets (no `entity_type`) skip
 ///   the target-side check; the relation lands and the shape will be
 ///   re-verified when the stub is promoted to a real entity.
@@ -336,13 +336,13 @@ pub fn validate_loaded_relations(
     use crate::entity::Relationship;
     use crate::entity::id::validate_id_path_grammar;
     use crate::runtime_validator::{
-        CrossVaultRelCheck, validate_cross_vault_edge, validate_rel_shape, validate_rel_type,
+        CrossMemRelCheck, validate_cross_mem_edge, validate_rel_shape, validate_rel_type,
     };
     use crate::workspace::MountCapability;
     use memstead_schema::SchemaRef;
 
-    let origin_for = |vault: &str| -> &'static str {
-        match mount_caps.get(vault) {
+    let origin_for = |mem: &str| -> &'static str {
+        match mount_caps.get(mem) {
             Some(MountCapability::ReadOnly) => "readonly",
             _ => "writable",
         }
@@ -354,7 +354,7 @@ pub fn validate_loaded_relations(
         if entity.stub {
             continue;
         }
-        let Some(schema) = schemas.get(entity.vault.as_str()) else {
+        let Some(schema) = schemas.get(entity.mem.as_str()) else {
             continue;
         };
         for rel in &entity.relationships {
@@ -362,23 +362,23 @@ pub fn validate_loaded_relations(
                 to_drop.push((entity.id.clone(), rel.clone(), "grammar"));
                 continue;
             }
-            // Cross-vault-different edges validate against the
-            // source schema's `cross_vault_relationships:` section,
-            // not its intra-vault `relationships.definitions`. Same-
-            // schema cross-vault and same-vault fall through to the
-            // intra-vault path — matching the runtime relate flow's
+            // Cross-mem-different edges validate against the
+            // source schema's `cross_mem_relationships:` section,
+            // not its intra-mem `relationships.definitions`. Same-
+            // schema cross-mem and same-mem fall through to the
+            // intra-mem path — matching the runtime relate flow's
             // routing rule.
-            let target_vault = rel.target.vault();
-            let target_schema = if entity.vault.as_str() == target_vault {
+            let target_mem = rel.target.mem();
+            let target_schema = if entity.mem.as_str() == target_mem {
                 None
             } else {
-                schemas.get(target_vault).cloned()
+                schemas.get(target_mem).cloned()
             };
             let target_schema_ref: Option<SchemaRef> = target_schema.as_ref().map(|s| {
                 let (name, version) = s.id();
                 SchemaRef::new(name, version)
             });
-            let cross_vault_different = match (&target_schema_ref, schema.id()) {
+            let cross_mem_different = match (&target_schema_ref, schema.id()) {
                 (Some(target), (src_name, _)) => target.name != src_name,
                 (None, _) => false,
             };
@@ -386,29 +386,29 @@ pub fn validate_loaded_relations(
                 .get(&rel.target)
                 .map(|e| e.entity_type.clone())
                 .filter(|t| !t.is_empty());
-            if cross_vault_different {
+            if cross_mem_different {
                 let target_ref = target_schema_ref.as_ref().expect("present when different");
-                match validate_cross_vault_edge(
+                match validate_cross_mem_edge(
                     &rel.rel_type,
                     entity.entity_type.as_str(),
                     target_type.as_deref(),
                     schema.as_ref(),
                     target_ref,
                 ) {
-                    CrossVaultRelCheck::Ok => {}
-                    CrossVaultRelCheck::EdgeNotDeclared => {
+                    CrossMemRelCheck::Ok => {}
+                    CrossMemRelCheck::EdgeNotDeclared => {
                         to_drop.push((
                             entity.id.clone(),
                             rel.clone(),
-                            "cross_vault_not_declared",
+                            "cross_mem_not_declared",
                         ));
                         continue;
                     }
-                    CrossVaultRelCheck::Invalid(_) => {
-                        // Same drop semantics as the intra-vault
+                    CrossMemRelCheck::Invalid(_) => {
+                        // Same drop semantics as the intra-mem
                         // shape/vocabulary branch — boot is silent
                         // best-effort cleanup.
-                        to_drop.push((entity.id.clone(), rel.clone(), "cross_vault_shape"));
+                        to_drop.push((entity.id.clone(), rel.clone(), "cross_mem_shape"));
                         continue;
                     }
                 }
@@ -432,7 +432,7 @@ pub fn validate_loaded_relations(
         }
     }
     for (from_id, rel, reason) in to_drop {
-        let origin = origin_for(from_id.vault()).to_string();
+        let origin = origin_for(from_id.mem()).to_string();
         store.remove_edge(&from_id, &rel.target, &rel.rel_type);
         if let Some(entity) = store.get_mut(&from_id) {
             entity
@@ -474,37 +474,37 @@ pub fn validate_loaded_relations(
             if entity.stub {
                 continue;
             }
-            let Some(schema) = schemas.get(entity.vault.as_str()) else {
+            let Some(schema) = schemas.get(entity.mem.as_str()) else {
                 continue;
             };
             for rel in &entity.relationships {
                 // Look up the posture in the routing-appropriate
-                // definition. Cross-vault-different routes through
-                // the source schema's cross_vault_relationships entry
-                // for the target schema; intra-vault and same-schema
-                // cross-vault fall through to the intra-vault
+                // definition. Cross-mem-different routes through
+                // the source schema's cross_mem_relationships entry
+                // for the target schema; intra-mem and same-schema
+                // cross-mem fall through to the intra-mem
                 // relationships.definitions.
-                let target_vault = rel.target.vault();
-                let target_schema = if entity.vault.as_str() == target_vault {
+                let target_mem = rel.target.mem();
+                let target_schema = if entity.mem.as_str() == target_mem {
                     None
                 } else {
-                    schemas.get(target_vault).cloned()
+                    schemas.get(target_mem).cloned()
                 };
                 let target_schema_ref: Option<SchemaRef> =
                     target_schema.as_ref().map(|s| {
                         let (name, version) = s.id();
                         SchemaRef::new(name, version)
                     });
-                let cross_vault_different = match (&target_schema_ref, schema.id()) {
+                let cross_mem_different = match (&target_schema_ref, schema.id()) {
                     (Some(target), (src_name, _)) => target.name != src_name,
                     (None, _) => false,
                 };
-                let posture = if cross_vault_different {
+                let posture = if cross_mem_different {
                     let target_ref = target_schema_ref
                         .as_ref()
-                        .expect("target_schema_ref is Some when cross_vault_different");
+                        .expect("target_schema_ref is Some when cross_mem_different");
                     schema
-                        .cross_vault_entry(&target_ref.name)
+                        .cross_mem_entry(&target_ref.name)
                         .and_then(|entry| {
                             entry.definitions.iter().find(|d| d.name == rel.rel_type)
                         })
@@ -561,7 +561,7 @@ pub fn validate_loaded_relations(
     // schema-clean; cycles closed by edges that pass shape are the
     // residual hazard hand-edits can produce. Single pass per
     // rel-type — for each acyclic rel-type, build the workspace-wide
-    // adjacency list of edges whose source vault declares that
+    // adjacency list of edges whose source mem declares that
     // rel-type as acyclic, then DFS with three-color marking
     // (white / gray / black). On encountering a gray node from a
     // gray parent, the traversing edge is a back-edge — drop it and
@@ -587,14 +587,14 @@ pub fn validate_loaded_relations(
     let mut cycle_drops: Vec<(EntityId, EntityId, String)> = Vec::new();
     for rel_type in &acyclic_rel_types {
         // Adjacency list scoped to this rel-type. Includes edges
-        // whose source vault's schema declares the rel-type as
-        // acyclic — a vault whose schema doesn't declare the type
+        // whose source mem's schema declares the rel-type as
+        // acyclic — a mem whose schema doesn't declare the type
         // acyclic shouldn't have its edges dropped just because a
-        // sibling vault does.
+        // sibling mem does.
         let mut adj: std::collections::HashMap<EntityId, Vec<EntityId>> =
             std::collections::HashMap::new();
         for entity in store.all_entities() {
-            let Some(schema) = schemas.get(entity.vault.as_str()) else {
+            let Some(schema) = schemas.get(entity.mem.as_str()) else {
                 continue;
             };
             if !schema.relationship_acyclic(rel_type) {
@@ -673,7 +673,7 @@ pub fn validate_loaded_relations(
     }
 
     for (from_id, target, rel_type) in cycle_drops {
-        let origin = origin_for(from_id.vault()).to_string();
+        let origin = origin_for(from_id.mem()).to_string();
         store.remove_edge(&from_id, &target, &rel_type);
         if let Some(entity) = store.get_mut(&from_id) {
             entity
@@ -700,7 +700,7 @@ pub fn validate_loaded_relations(
     }
 }
 
-/// Remap edge sources to reflect each source vault's
+/// Remap edge sources to reflect each source mem's
 /// `alias_target_rel_type` schema pointer: edges whose `rel_type`
 /// equals the pointer are flipped from `Explicit` to `BodyLink`.
 /// Idempotent — running it repeatedly produces the same result.
@@ -724,7 +724,7 @@ pub fn remap_alias_target_edge_sources(
 ) {
     let mut remaps: Vec<(EntityId, EntityId, String)> = Vec::new();
     for entity in store.all_entities() {
-        let Some(schema) = schemas.get(entity.vault.as_str()) else {
+        let Some(schema) = schemas.get(entity.mem.as_str()) else {
             continue;
         };
         let Some(pointer) = schema.alias_target_rel_type() else {
@@ -759,7 +759,7 @@ pub fn make_stub(id: EntityId) -> Entity {
     Entity {
         title: id.name().to_string(),
         entity_type: String::new(),
-        vault: id.vault().to_string(),
+        mem: id.mem().to_string(),
         file_path: String::new(),
         metadata: IndexMap::new(),
         sections: IndexMap::new(),
@@ -784,7 +784,7 @@ mod tests {
 
     fn real_entity(id_str: &str, sections: &[(&str, &str)]) -> ParseResult {
         let id = EntityId(id_str.to_string());
-        let vault = id.vault().to_string();
+        let mem = id.mem().to_string();
         let mut sec = IndexMap::new();
         for (k, v) in sections {
             sec.insert(k.to_string(), v.to_string());
@@ -793,7 +793,7 @@ mod tests {
             entity: Entity {
                 title: id.name().to_string(),
                 entity_type: "spec".to_string(),
-                vault,
+                mem,
                 file_path: format!("{}.md", id.name()),
                 metadata: IndexMap::new(),
                 sections: sec,
@@ -809,24 +809,24 @@ mod tests {
         }
     }
 
-    /// Plugin-vault entity with `[[plugin--foo]]` in a section and a
-    /// real `test-vault-plugin--foo` already in the store → warning
-    /// fires with a populated `candidate_target` (same-vault bare-slug
+    /// Plugin-mem entity with `[[plugin--foo]]` in a section and a
+    /// real `test-mem-plugin--foo` already in the store → warning
+    /// fires with a populated `candidate_target` (same-mem bare-slug
     /// resolution, pass 2 of the two-pass resolver).
     #[test]
     fn nested_prefix_emits_warning_with_candidate() {
         let fallback = default_fallback();
         let mut store = Store::new();
 
-        let target = real_entity("test-vault-plugin--foo", &[]);
+        let target = real_entity("test-mem-plugin--foo", &[]);
         push_entities_into_store(&mut store, vec![target], &fallback, None);
 
         let author = real_entity(
-            "test-vault-plugin--author",
+            "test-mem-plugin--author",
             &[("constraints", "See [[plugin--foo]] for details.")],
         );
         let mut warnings = Vec::new();
-        let vault_names = vec!["test-vault-plugin".to_string()];
+        let mem_names = vec!["test-mem-plugin".to_string()];
         let known_suffixes = vec!["plugin".to_string()];
         push_entities_into_store(
             &mut store,
@@ -835,7 +835,7 @@ mod tests {
             Some(LoadCollector {
                 warnings: &mut warnings,
                 known_suffixes: &known_suffixes,
-                vault_names: &vault_names,
+                mem_names: &mem_names,
             }),
         );
 
@@ -847,14 +847,14 @@ mod tests {
                 candidate_target,
                 section,
             } => {
-                assert_eq!(from.as_ref(), "test-vault-plugin--author");
+                assert_eq!(from.as_ref(), "test-mem-plugin--author");
                 // Tier-0 resolves `[[plugin--foo]]` to `plugin--foo`
                 // directly (not a phantom
-                // `test-vault-plugin--plugin--foo`).
+                // `test-mem-plugin--plugin--foo`).
                 assert_eq!(resolved_id.as_ref(), "plugin--foo");
                 assert_eq!(
                     candidate_target.as_ref().map(|c| c.as_ref()),
-                    Some("test-vault-plugin--foo")
+                    Some("test-mem-plugin--foo")
                 );
                 assert_eq!(section, "constraints");
             }
@@ -862,14 +862,14 @@ mod tests {
         }
     }
 
-    /// #41 narrowing: a colon/dash cross-vault link whose target vault
+    /// #41 narrowing: a colon/dash cross-mem link whose target mem
     /// is itself a full roster member is legitimate — no nested-prefix
-    /// warning, even though that vault name also appears as a known
+    /// warning, even though that mem name also appears as a known
     /// suffix. This is the macos→engine false positive the heuristic
     /// used to emit (the "did you mean" candidate equalled the resolved
     /// target — self-contradicting).
     #[test]
-    fn nested_prefix_skips_when_target_is_a_real_vault() {
+    fn nested_prefix_skips_when_target_is_a_real_mem() {
         let fallback = default_fallback();
         let mut store = Store::new();
 
@@ -881,8 +881,8 @@ mod tests {
             &[("constraints", "See [[engine--foo]] for details.")],
         );
         let mut warnings = Vec::new();
-        let vault_names = vec!["macos".to_string(), "engine".to_string()];
-        // `engine` is both a real vault AND its own last-segment suffix.
+        let mem_names = vec!["macos".to_string(), "engine".to_string()];
+        // `engine` is both a real mem AND its own last-segment suffix.
         let known_suffixes = vec!["macos".to_string(), "engine".to_string()];
         push_entities_into_store(
             &mut store,
@@ -891,13 +891,13 @@ mod tests {
             Some(LoadCollector {
                 warnings: &mut warnings,
                 known_suffixes: &known_suffixes,
-                vault_names: &vault_names,
+                mem_names: &mem_names,
             }),
         );
 
         assert!(
             warnings.is_empty(),
-            "a cross-vault link to a real vault must not warn: {warnings:?}"
+            "a cross-mem link to a real mem must not warn: {warnings:?}"
         );
     }
 
@@ -909,11 +909,11 @@ mod tests {
         let mut store = Store::new();
 
         let author = real_entity(
-            "test-vault-plugin--author",
+            "test-mem-plugin--author",
             &[("constraints", "[[plugin--ghost]]")],
         );
         let mut warnings = Vec::new();
-        let vault_names = vec!["test-vault-plugin".to_string()];
+        let mem_names = vec!["test-mem-plugin".to_string()];
         let known_suffixes = vec!["plugin".to_string()];
         push_entities_into_store(
             &mut store,
@@ -922,7 +922,7 @@ mod tests {
             Some(LoadCollector {
                 warnings: &mut warnings,
                 known_suffixes: &known_suffixes,
-                vault_names: &vault_names,
+                mem_names: &mem_names,
             }),
         );
 
@@ -935,7 +935,7 @@ mod tests {
         }
     }
 
-    /// Bare-slug link (`[[foo]]`) resolves to `<current-vault>--foo` —
+    /// Bare-slug link (`[[foo]]`) resolves to `<current-mem>--foo` —
     /// no nested prefix, no warning.
     #[test]
     fn non_nested_link_no_warning() {
@@ -943,11 +943,11 @@ mod tests {
         let mut store = Store::new();
 
         let author = real_entity(
-            "test-vault-plugin--author",
+            "test-mem-plugin--author",
             &[("constraints", "[[foo]]")],
         );
         let mut warnings = Vec::new();
-        let vault_names = vec!["test-vault-plugin".to_string()];
+        let mem_names = vec!["test-mem-plugin".to_string()];
         let known_suffixes = vec!["plugin".to_string()];
         push_entities_into_store(
             &mut store,
@@ -956,38 +956,38 @@ mod tests {
             Some(LoadCollector {
                 warnings: &mut warnings,
                 known_suffixes: &known_suffixes,
-                vault_names: &vault_names,
+                mem_names: &mem_names,
             }),
         );
         assert!(warnings.is_empty());
     }
 
-    /// Fully-qualified cross-vault link resolves to a different vault's
-    /// id, not `<current-vault>--<suffix>--...`, so no nested prefix.
-    /// Note: `[[<vault>--slug]]` in the section body literally resolves
-    /// via wiki_link_to_id to `<current>--<vault>--slug` (nested), so
+    /// Fully-qualified cross-mem link resolves to a different mem's
+    /// id, not `<current-mem>--<suffix>--...`, so no nested prefix.
+    /// Note: `[[<mem>--slug]]` in the section body literally resolves
+    /// via wiki_link_to_id to `<current>--<mem>--slug` (nested), so
     /// this pattern is ambiguous by construction — the detector fires
     /// with a candidate that points at the fully-qualified target.
     /// Callers should write the full id or bare slug, not
-    /// `<vault>--slug` from outside that vault.
+    /// `<mem>--slug` from outside that mem.
     #[test]
-    fn cross_vault_qualified_fires_with_cross_vault_candidate() {
+    fn cross_mem_qualified_fires_with_cross_mem_candidate() {
         let fallback = default_fallback();
         let mut store = Store::new();
 
-        // Real entity in the engine vault.
-        let target = real_entity("test-vault-engine--health", &[]);
+        // Real entity in the engine mem.
+        let target = real_entity("test-mem-engine--health", &[]);
         push_entities_into_store(&mut store, vec![target], &fallback, None);
 
-        // Plugin-vault author writes `[[engine--health]]`.
+        // Plugin-mem author writes `[[engine--health]]`.
         let author = real_entity(
-            "test-vault-plugin--author",
+            "test-mem-plugin--author",
             &[("purpose", "See [[engine--health]].")],
         );
         let mut warnings = Vec::new();
-        let vault_names = vec![
-            "test-vault-engine".to_string(),
-            "test-vault-plugin".to_string(),
+        let mem_names = vec![
+            "test-mem-engine".to_string(),
+            "test-mem-plugin".to_string(),
         ];
         let known_suffixes = vec!["engine".to_string(), "plugin".to_string()];
         push_entities_into_store(
@@ -997,7 +997,7 @@ mod tests {
             Some(LoadCollector {
                 warnings: &mut warnings,
                 known_suffixes: &known_suffixes,
-                vault_names: &vault_names,
+                mem_names: &mem_names,
             }),
         );
         assert_eq!(warnings.len(), 1);
@@ -1007,15 +1007,15 @@ mod tests {
             } => {
                 assert_eq!(
                     candidate_target.as_ref().map(|c| c.as_ref()),
-                    Some("test-vault-engine--health"),
-                    "cross-vault pass-1 must find the engine vault candidate"
+                    Some("test-mem-engine--health"),
+                    "cross-mem pass-1 must find the engine mem candidate"
                 );
             }
             other => panic!("unexpected variant: {other:?}"),
         }
     }
 
-    /// Two vaults sharing a last-segment suffix: both contribute to the
+    /// Two mems sharing a last-segment suffix: both contribute to the
     /// known-suffix set, the warning fires, and `candidate_target` is
     /// the one that has a real entity. Locks the suffix-collision
     /// resolution semantics.
@@ -1024,7 +1024,7 @@ mod tests {
         let fallback = default_fallback();
         let mut store = Store::new();
 
-        // Vault A = `alpha`, Vault B = `beta-alpha`, both have suffix "alpha".
+        // Mem A = `alpha`, Mem B = `beta-alpha`, both have suffix "alpha".
         // Real entity lives in `beta-alpha--target`.
         let target = real_entity("beta-alpha--target", &[]);
         push_entities_into_store(&mut store, vec![target], &fallback, None);
@@ -1035,7 +1035,7 @@ mod tests {
             &[("purpose", "[[alpha--target]]")],
         );
         let mut warnings = Vec::new();
-        let vault_names = vec!["alpha".to_string(), "beta-alpha".to_string()];
+        let mem_names = vec!["alpha".to_string(), "beta-alpha".to_string()];
         let known_suffixes = vec!["alpha".to_string(), "alpha".to_string()]; // collision
         push_entities_into_store(
             &mut store,
@@ -1044,7 +1044,7 @@ mod tests {
             Some(LoadCollector {
                 warnings: &mut warnings,
                 known_suffixes: &known_suffixes,
-                vault_names: &vault_names,
+                mem_names: &mem_names,
             }),
         );
         assert_eq!(warnings.len(), 1, "collision must not duplicate the warning");
@@ -1052,9 +1052,9 @@ mod tests {
             WarningHint::SuspiciousNestedPrefix {
                 candidate_target, ..
             } => {
-                // Pass 1 cross-vault probe excludes `beta-alpha` (self),
+                // Pass 1 cross-mem probe excludes `beta-alpha` (self),
                 // probes `alpha` — no real entity there, so pass 2
-                // falls back to same-vault bare-slug `beta-alpha--target`
+                // falls back to same-mem bare-slug `beta-alpha--target`
                 // which is real.
                 assert_eq!(
                     candidate_target.as_ref().map(|c| c.as_ref()),

@@ -20,5 +20,5 @@ What this skill must achieve. Use this as the reference when tuning SKILL.md.
 
 ## IDs and links
 
-- IDs are vault-prefixed: vault--entity-name
-- wiki-links: [[name]] or [[path/to/name]] — always resolve within the current vault
+- IDs are mem-prefixed: mem--entity-name
+- wiki-links: [[name]] or [[path/to/name]] — always resolve within the current mem

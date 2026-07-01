@@ -1,7 +1,7 @@
 //! `memstead-serve` — a generic, deployment-agnostic read-only server exposing
-//! one sealed Memstead vault to agents over HTTP.
+//! one sealed Memstead mem to agents over HTTP.
 //!
-//! A vault is reached two ways and only two ways: an MCP-capable agent connects
+//! A mem is reached two ways and only two ways: an MCP-capable agent connects
 //! over `/mcp` (the full read tool surface, including search); everyone else —
 //! a no-MCP agent's fetch tool, a browser, a crawler — reads it as plain,
 //! link-navigated HTML pages (`/agent`, `/overview`, `/entity/<id>`,
@@ -19,7 +19,7 @@
 //! test). The production mount is a sealed `.mem` archive
 //! ([`MountStorage::Archive`]) which refuses writes at the backend as
 //! defense-in-depth, but read-only-by-construction is the primary guarantee.
-//! Which vault, the authority identity, and the static site are all inputs —
+//! Which mem, the authority identity, and the static site are all inputs —
 //! nothing here is tied to a particular deployment.
 
 use std::sync::Arc;
@@ -61,10 +61,10 @@ pub struct AppState {
     pub authority: String,
     /// Trust origin this deployment vouches for its read-only served
     /// content. Defaults to [`OriginClass::ThirdParty`] — an arbitrary
-    /// served vault is untrusted data until the operator declares
+    /// served mem is untrusted data until the operator declares
     /// otherwise. The curated memstead.ai read tier sets
     /// [`OriginClass::FirstParty`] via [`Self::with_content_origin`].
-    /// Surfaced per read-only vault on the discovery manifest; a publisher
+    /// Surfaced per read-only mem on the discovery manifest; a publisher
     /// cannot forge it (it is operator config, not content).
     pub content_origin: OriginClass,
     /// Soft-launch gate. ON (the production default, via
@@ -114,16 +114,16 @@ impl AppState {
     }
 }
 
-/// Build a read-only [`Engine`] mounting one vault from `storage`. Production
+/// Build a read-only [`Engine`] mounting one mem from `storage`. Production
 /// passes [`MountStorage::Archive`] (a sealed `.mem`); tests pass
 /// [`MountStorage::Folder`]. The mount is always [`MountCapability::ReadOnly`].
 pub fn mount_read_only(
-    vault: impl Into<String>,
+    mem: impl Into<String>,
     schema: memstead_schema::SchemaRef,
     storage: MountStorage,
 ) -> Result<Engine, memstead_base::EngineError> {
     let mount = Mount {
-        vault: vault.into(),
+        mem: mem.into(),
         schema: Some(schema),
         storage,
         capability: MountCapability::ReadOnly,
@@ -132,20 +132,20 @@ pub fn mount_read_only(
         migration_target: None,
     };
     let backend = memstead_base::workspace_store::instantiate_basis_backend(&mount)
-        .map_err(|e| memstead_base::EngineError::Vault(e.to_string()))?;
+        .map_err(|e| memstead_base::EngineError::Mem(e.to_string()))?;
     Engine::from_mounts(vec![(mount, backend)])
 }
 
-/// The curated "what is Memstead" content vault, embedded at compile time so
+/// The curated "what is Memstead" content mem, embedded at compile time so
 /// both servers ship real content with no external files. A flat folder of
 /// `.md` concept entities; the folder backend reads them when mounted.
 static EMBEDDED_CONTENT: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/content/memstead");
 
-/// Vault name the embedded curated content vault mounts under.
-pub const EMBEDDED_CONTENT_VAULT: &str = "memstead";
+/// Mem name the embedded curated content mem mounts under.
+pub const EMBEDDED_CONTENT_MEM: &str = "memstead";
 
-/// Write the embedded curated content vault to a fresh temp directory and
-/// return its path. Mounted read-only as the content vault when no external
+/// Write the embedded curated content mem to a fresh temp directory and
+/// return its path. Mounted read-only as the content mem when no external
 /// source is configured, so the read tier and the session server both serve
 /// real "what is Memstead" content out of the box.
 pub fn materialize_embedded_content() -> std::io::Result<std::path::PathBuf> {
@@ -300,11 +300,11 @@ Then: `{base}{read_prefix}/overview` (the map), `{base}{read_prefix}/entities` \
 `{base}{read_prefix}/schema` (the vocabulary). Every page links to the next — \
 follow the links.\n\
 \n\
-## MCP (capable clients) — search, write, a private sketch vault\n\
+## MCP (capable clients) — search, write, a private sketch mem\n\
 \n\
 There is no search on the HTML surface; to search this graph, or to write to \
 one, attach the native streamable-HTTP MCP endpoint at `{base}{read_prefix}/mcp`. \
-It reads this graph and mints a private, writable sketch vault per connection \
+It reads this graph and mints a private, writable sketch mem per connection \
 (watch it at the `/v/<id>` link the handshake returns).\n\
 `claude mcp add --transport http {authority} {base}{read_prefix}/mcp`\n"
     )
@@ -320,7 +320,7 @@ async fn runbook_handler(State(state): State<AppState>) -> Response {
 
 /// A dependency-free liveness probe for the deployment platform (Railway's
 /// `healthcheckPath`). It asserts only that the process is accepting
-/// connections — the read routes cover whether the vault is queryable — so it
+/// connections — the read routes cover whether the mem is queryable — so it
 /// stays a cheap constant 200 and never touches the engine lock.
 async fn healthz_handler() -> Response {
     axum::Json(json!({ "status": "ok" })).into_response()
@@ -534,7 +534,7 @@ pub fn placeholder_landing(authority: &str) -> String {
 <p>A read-only Memstead knowledge graph — typed, interconnected markdown entities. \
 Point an agent at it, or explore the graph yourself.</p>\n\
 <!-- The interactive 3D graph mounts here once the Astro build is embedded. -->\n\
-<div id=\"vault-graph\"></div>\n\
+<div id=\"mem-graph\"></div>\n\
 <h2>Point your agent here</h2>\n\
 <p>MCP-capable clients:</p>\n\
 <pre><code>claude mcp add --transport http {authority} {authority}/mcp</code></pre>\n\
@@ -550,31 +550,31 @@ Point an agent at it, or explore the graph yourself.</p>\n\
 // Discovery manifest (`/.well-known/memstead-authority.json`)
 // ---------------------------------------------------------------------------
 
-/// Minimal discovery manifest: the authority identity, the published vault(s)
+/// Minimal discovery manifest: the authority identity, the published mem(s)
 /// each with its schema pin, and the endpoint URLs. The first real
 /// implementation of `VISION.md`'s `memstead-authority.json` standard.
 async fn authority_handler(State(state): State<AppState>) -> Response {
     let engine = state.engine.lock().await;
-    let vaults: Vec<serde_json::Value> = engine
+    let mems: Vec<serde_json::Value> = engine
         .mounts()
         .iter()
         .map(|m| {
-            // Machine-readable trust origin per served vault so a
+            // Machine-readable trust origin per served mem so a
             // consuming agent/host knows whether to treat the content as
             // authority-vouched or quoted, untrusted data. A writable
-            // (session sketch) vault is first-party — the user's own work.
-            // A read-only served vault's origin is a *deployment fact* the
+            // (session sketch) mem is first-party — the user's own work.
+            // A read-only served mem's origin is a *deployment fact* the
             // serving authority declares (`content_origin`): the curated
             // memstead.ai read tier vouches for its content as first-party;
-            // an arbitrary served vault defaults to third-party (untrusted)
+            // an arbitrary served mem defaults to third-party (untrusted)
             // until the deployment opts in. A publisher cannot forge this —
             // it is set by the operator running the server, not by content.
-            let origin = match engine.vault_origin_class(&m.vault) {
+            let origin = match engine.mem_origin_class(&m.mem) {
                 OriginClass::FirstParty => OriginClass::FirstParty,
                 OriginClass::ThirdParty => state.content_origin,
             };
             json!({
-                "name": m.vault,
+                "name": m.mem,
                 "schema": m.schema.as_ref().map(|s| s.as_display()).unwrap_or_default(),
                 "origin": origin.as_wire(),
             })
@@ -590,7 +590,7 @@ async fn authority_handler(State(state): State<AppState>) -> Response {
     let manifest = json!({
         "authority": state.authority,
         "base_url": base,
-        "vaults": vaults,
+        "mems": mems,
         "endpoints": {
             "mcp": format!("{base}{rp}/mcp"),
             "agent": format!("{base}{rp}/agent"),
@@ -702,7 +702,7 @@ async fn overview_handler(State(state): State<AppState>) -> Response {
     let mut guard = state.engine.lock().await;
     let args = OverviewArgs {
         include: &[],
-        vault: None,
+        mem: None,
         rebuild: false,
         token_budget: memstead_engine::overview::DEFAULT_OVERVIEW_BUDGET,
         operator_mode: false,
@@ -723,14 +723,14 @@ async fn overview_handler(State(state): State<AppState>) -> Response {
             let title = format!("{} — overview", state.authority);
             html_page_response(html_document(&title, &body))
         }
-        Err(ComposeOverviewError::UnknownVault {
+        Err(ComposeOverviewError::UnknownMem {
             name,
-            writable_vaults,
+            writable_mems,
         }) => error_response(
             StatusCode::NOT_FOUND,
-            "UNKNOWN_VAULT",
-            format!("unknown vault: \"{name}\""),
-            json!({ "name": name, "writable_vaults": writable_vaults }),
+            "UNKNOWN_MEM",
+            format!("unknown mem: \"{name}\""),
+            json!({ "name": name, "writable_mems": writable_mems }),
         ),
         Err(e @ ComposeOverviewError::InvalidIncludeKeySchemaTypes) => error_response(
             StatusCode::BAD_REQUEST,
@@ -966,15 +966,15 @@ fn html_page_response(body: String) -> Response {
 /// The canonical agent instruction page: what this is, how to read it, and how
 /// to talk to the user about it. Stable instruction content (rarely changes),
 /// kept short so it survives a fetch tool's summarisation. Pure HTML; the
-/// authority and vault (the graph's subject) are interpolated.
-fn agent_page(authority: &str, vault: &str, rp: &str) -> String {
+/// authority and mem (the graph's subject) are interpolated.
+fn agent_page(authority: &str, mem: &str, rp: &str) -> String {
     let nav = nav_links(rp, &[
         ("/overview", "overview"),
         ("/entities", "entities"),
         ("/schema", "schema"),
     ]);
     let a = esc_html(authority);
-    let v = esc_html(vault);
+    let v = esc_html(mem);
     let body = format!(
         "{nav}\
 <h1>{a} — for the agent reading this</h1>\n\
@@ -1009,12 +1009,12 @@ Memstead exposes an MCP endpoint they can connect to.</li>\n\
 
 async fn agent_handler(State(state): State<AppState>) -> Response {
     let engine = state.engine.lock().await;
-    let vault = engine
+    let mem = engine
         .mounts()
         .first()
-        .map(|m| m.vault.clone())
+        .map(|m| m.mem.clone())
         .unwrap_or_else(|| state.authority.clone());
-    html_page_response(agent_page(&state.authority, &vault, state.read_prefix()))
+    html_page_response(agent_page(&state.authority, &mem, state.read_prefix()))
 }
 
 // ---------------------------------------------------------------------------
@@ -1159,18 +1159,18 @@ async fn entities_handler(
 }
 
 // ---------------------------------------------------------------------------
-// `/schema` — the vault's type and relationship vocabulary as HTML
+// `/schema` — the mem's type and relationship vocabulary as HTML
 // ---------------------------------------------------------------------------
 
 async fn schema_handler(State(state): State<AppState>) -> Response {
     let engine = state.engine.lock().await;
-    // Single-vault public surface: resolve the flagship vault's pinned schema.
+    // Single-mem public surface: resolve the flagship mem's pinned schema.
     let mounts = engine.mounts();
     let Some(sref) = mounts.first().and_then(|m| m.schema.clone()) else {
         return error_response(
             StatusCode::NOT_FOUND,
             "ENTITY_NOT_FOUND",
-            "no schema pinned on the mounted vault",
+            "no schema pinned on the mounted mem",
             serde_json::Value::Null,
         );
     };
@@ -1265,10 +1265,10 @@ pub fn read_only_instructions() -> String {
 over MCP. This endpoint cannot mutate — it lists exactly five read tools \
 ({tools}) and refuses every other tool on call with TOOL_NOT_FOUND. All \
 mutation tools (memstead_create, memstead_update, memstead_delete, \
-memstead_relate, memstead_rename), lifecycle tools (memstead_vault_create, \
-memstead_vault_delete), and workspace-policy tools are unavailable here. \
-Cold-start: call memstead_overview for the schema catalogue and vault \
-inventory; read a vault's schema via memstead_schema; find entities with \
+memstead_relate, memstead_rename), lifecycle tools (memstead_mem_create, \
+memstead_mem_delete), and workspace-policy tools are unavailable here. \
+Cold-start: call memstead_overview for the schema catalogue and mem \
+inventory; read a mem's schema via memstead_schema; find entities with \
 memstead_search; read one with memstead_entity; inspect graph shape with \
 memstead_health.",
         tools = MCP_READ_TOOLS.join(", "),
@@ -1286,7 +1286,7 @@ impl ServerHandler for ReadOnlyMcpServer {
         info.server_info.name = "memstead-serve".to_string();
         info.server_info.title = Some("Memstead (read-only)".to_string());
         info.server_info.description = Some(
-            "Read-only MCP surface over a sealed Memstead vault — five read tools, no write path."
+            "Read-only MCP surface over a sealed Memstead mem — five read tools, no write path."
                 .to_string(),
         );
         info.instructions = Some(read_only_instructions());
@@ -1388,8 +1388,8 @@ pub fn build_app(
 
 /// The unified single-origin router: the same human site + HTML read pages as
 /// [`build_router`], but the WRITABLE connection-born session `/mcp` (each
-/// MCP connection mints its own ephemeral sketch vault beside a shared
-/// read-only content vault) replaces the read-only MCP, and the per-session
+/// MCP connection mints its own ephemeral sketch mem beside a shared
+/// read-only content mem) replaces the read-only MCP, and the per-session
 /// view-data routes (`/v/{id}/graph|stream|export`) are mounted alongside.
 ///
 /// One binary, one origin: the website AND the writable MCP live under the same
@@ -1438,8 +1438,8 @@ mod tests {
     use http_body_util::BodyExt;
     use tower::ServiceExt;
 
-    /// A read-only AppState over an empty folder-backed vault. The HTTP surface
-    /// is exercised regardless of entity content; an empty vault keeps the
+    /// A read-only AppState over an empty folder-backed mem. The HTTP surface
+    /// is exercised regardless of entity content; an empty mem keeps the
     /// fixture trivial.
     fn test_state() -> (AppState, tempfile::TempDir) {
         let tmp = tempfile::TempDir::new().unwrap();
@@ -1452,10 +1452,10 @@ mod tests {
             },
         )
         .expect("read-only folder mount");
-        (AppState::new(engine, "vault.example"), tmp)
+        (AppState::new(engine, "mem.example"), tmp)
     }
 
-    /// A read-only AppState over a folder vault seeded with one `concept`
+    /// A read-only AppState over a folder mem seeded with one `concept`
     /// entity. Returns the loaded entity's id (discovered from the engine, not
     /// guessed) so the entity route can be exercised on its 200 path.
     fn seeded_state() -> (AppState, tempfile::TempDir, String) {
@@ -1481,11 +1481,11 @@ Widgets compose into larger systems; modularity is why they matter.\n",
             .all_ids()
             .next()
             .map(|i| i.0.clone())
-            .expect("one entity loaded from the seeded vault");
-        (AppState::new(engine, "vault.example"), tmp, id)
+            .expect("one entity loaded from the seeded mem");
+        (AppState::new(engine, "mem.example"), tmp, id)
     }
 
-    /// A `ReadOnlyMcpServer` over its own empty folder vault (the `/mcp`
+    /// A `ReadOnlyMcpServer` over its own empty folder mem (the `/mcp`
     /// surface gets a separate engine from `/api`).
     fn mcp_server() -> (ReadOnlyMcpServer, tempfile::TempDir) {
         let tmp = tempfile::TempDir::new().unwrap();
@@ -1526,7 +1526,7 @@ Widgets compose into larger systems; modularity is why they matter.\n",
         (status, headers, String::from_utf8(bytes.to_vec()).unwrap())
     }
 
-    /// The curated content vault is embedded in the binary and materializes to
+    /// The curated content mem is embedded in the binary and materializes to
     /// disk, so both servers serve real "what is Memstead" content by default
     /// with no external files.
     #[test]
@@ -1536,7 +1536,7 @@ Widgets compose into larger systems; modularity is why they matter.\n",
             .filter_map(|f| f.path().file_name().map(|n| n.to_string_lossy().into_owned()))
             .collect();
         assert!(names.len() >= 11, "embedded content carries the concept files: {names:?}");
-        for expected in ["memstead.md", "vault.md", "schema.md", "mcp-layer.md"] {
+        for expected in ["memstead.md", "mem.md", "schema.md", "mcp-layer.md"] {
             assert!(names.iter().any(|n| n == expected), "embedded {expected}: {names:?}");
         }
 
@@ -1644,50 +1644,50 @@ Widgets compose into larger systems; modularity is why they matter.\n",
     }
 
     #[tokio::test]
-    async fn authority_manifest_names_vault_schema_and_endpoints() {
+    async fn authority_manifest_names_mem_schema_and_endpoints() {
         let (state, _tmp) = test_state();
         let app = build_router(state);
         let (status, _h, body) = get(&app, "/.well-known/memstead-authority.json", None).await;
         assert_eq!(status, StatusCode::OK);
         let manifest: serde_json::Value = serde_json::from_str(&body).unwrap();
-        assert_eq!(manifest["authority"].as_str(), Some("vault.example"));
-        let vaults = manifest["vaults"].as_array().expect("vaults array");
-        assert_eq!(vaults.len(), 1);
-        assert_eq!(vaults[0]["name"].as_str(), Some("flagship"));
-        assert_eq!(vaults[0]["schema"].as_str(), Some("default@1.0.0"));
-        // Default deployment vouches for nothing: a read-only served vault
+        assert_eq!(manifest["authority"].as_str(), Some("mem.example"));
+        let mems = manifest["mems"].as_array().expect("mems array");
+        assert_eq!(mems.len(), 1);
+        assert_eq!(mems[0]["name"].as_str(), Some("flagship"));
+        assert_eq!(mems[0]["schema"].as_str(), Some("default@1.0.0"));
+        // Default deployment vouches for nothing: a read-only served mem
         // is third-party (untrusted) until the operator declares otherwise.
         assert_eq!(
-            vaults[0]["origin"].as_str(),
+            mems[0]["origin"].as_str(),
             Some("third-party"),
             "default content_origin is the safe third-party"
         );
         // Endpoints are absolute so allowlist-bound fetch agents can follow them.
         // They name the HTML pages and /mcp — and no /api/* read route.
-        assert_eq!(manifest["base_url"].as_str(), Some("https://vault.example"));
+        assert_eq!(manifest["base_url"].as_str(), Some("https://mem.example"));
         assert_eq!(
             manifest["endpoints"]["mcp"].as_str(),
-            Some("https://vault.example/mcp")
+            Some("https://mem.example/mcp")
         );
         assert_eq!(
             manifest["endpoints"]["agent"].as_str(),
-            Some("https://vault.example/agent")
+            Some("https://mem.example/agent")
         );
         assert_eq!(
             manifest["endpoints"]["overview"].as_str(),
-            Some("https://vault.example/overview")
+            Some("https://mem.example/overview")
         );
         assert_eq!(
             manifest["endpoints"]["entities"].as_str(),
-            Some("https://vault.example/entities")
+            Some("https://mem.example/entities")
         );
         assert_eq!(
             manifest["endpoints"]["entity"].as_str(),
-            Some("https://vault.example/entity/<id>")
+            Some("https://mem.example/entity/<id>")
         );
         assert_eq!(
             manifest["endpoints"]["schema"].as_str(),
-            Some("https://vault.example/schema")
+            Some("https://mem.example/schema")
         );
         // No /api/* read route is named anywhere in the manifest.
         assert!(
@@ -1708,9 +1708,9 @@ Widgets compose into larger systems; modularity is why they matter.\n",
         let (status, _h, body) = get(&app, "/.well-known/memstead-authority.json", None).await;
         assert_eq!(status, StatusCode::OK);
         let manifest: serde_json::Value = serde_json::from_str(&body).unwrap();
-        let vaults = manifest["vaults"].as_array().expect("vaults array");
+        let mems = manifest["mems"].as_array().expect("mems array");
         assert_eq!(
-            vaults[0]["origin"].as_str(),
+            mems[0]["origin"].as_str(),
             Some("first-party"),
             "a deployment that vouches for its content exposes first-party"
         );
@@ -1759,7 +1759,7 @@ Widgets compose into larger systems; modularity is why they matter.\n",
                 "engine--schema-registry".to_string(),
                 "Schema registry".to_string(),
             ),
-            ("engine--vault".to_string(), "Vault".to_string()),
+            ("engine--mem".to_string(), "Mem".to_string()),
         ];
 
         // Cluster bullets `- <id>` → `- [Title](/entity/<id>)`; a shorter id must
@@ -1779,21 +1779,21 @@ Widgets compose into larger systems; modularity is why they matter.\n",
         );
 
         // Community-bridge operands: ` <id> →` (left) and `→ <id>\n` (right).
-        let mut bridge = "  - `DEPENDS_ON` engine--schema → engine--vault\n".to_string();
+        let mut bridge = "  - `DEPENDS_ON` engine--schema → engine--mem\n".to_string();
         bridge = linkify_anchored(bridge, &id_titles, "", " ", " →");
         bridge = linkify_anchored(bridge, &id_titles, "", "→ ", "\n");
         assert!(bridge.contains("[Schema](/entity/engine--schema) →"));
-        assert!(bridge.contains("→ [Vault](/entity/engine--vault)\n"));
+        assert!(bridge.contains("→ [Mem](/entity/engine--mem)\n"));
 
         // Body wiki-links `[[<id>]]` → `[Title](/entity/<id>)`, brackets consumed.
         let out = linkify_wikilinks(
-            "See [[engine--vault]] and [[engine--schema-registry]].".to_string(),
+            "See [[engine--mem]] and [[engine--schema-registry]].".to_string(),
             &id_titles,
             "",
         );
         assert_eq!(
             out,
-            "See [Vault](/entity/engine--vault) and \
+            "See [Mem](/entity/engine--mem) and \
 [Schema registry](/entity/engine--schema-registry)."
         );
     }
@@ -1928,7 +1928,7 @@ Widgets compose into larger systems; modularity is why they matter.\n",
 
     /// Schema self-consistency across the surviving read surfaces: the discovery
     /// manifest, the `/overview` map, and the `/schema` page all report the
-    /// engine vault's pinned schema, and the overview marks the vault read-only
+    /// engine mem's pinned schema, and the overview marks the mem read-only
     /// rather than rendering "not writable" as "absent".
     #[tokio::test]
     async fn schema_is_consistent_across_authority_overview_and_schema_page() {
@@ -1936,14 +1936,14 @@ Widgets compose into larger systems; modularity is why they matter.\n",
         let app = build_router(state);
         const SCHEMA: &str = "default@1.0.0";
 
-        // Discovery manifest — reads the per-vault pin directly off the mount.
+        // Discovery manifest — reads the per-mem pin directly off the mount.
         let (status, _h, body) = get(&app, "/.well-known/memstead-authority.json", None).await;
         assert_eq!(status, StatusCode::OK);
         let manifest: serde_json::Value = serde_json::from_str(&body).unwrap();
-        assert_eq!(manifest["vaults"][0]["schema"].as_str(), Some(SCHEMA));
+        assert_eq!(manifest["mems"][0]["schema"].as_str(), Some(SCHEMA));
 
         // Overview — the schema appears in the rendered map, with no empty-schema
-        // placeholder, and the vault is marked read-only.
+        // placeholder, and the mem is marked read-only.
         let (status, _h, body) = get(&app, "/overview", None).await;
         assert_eq!(status, StatusCode::OK);
         assert!(body.contains(SCHEMA), "overview names the schema: {body}");
@@ -1953,7 +1953,7 @@ Widgets compose into larger systems; modularity is why they matter.\n",
         );
         assert!(
             body.contains("Access:") && body.contains("read-only"),
-            "overview marks the vault read-only: {body}"
+            "overview marks the mem read-only: {body}"
         );
 
         // Schema page — reachable and naming the same schema vocabulary.
@@ -1965,8 +1965,8 @@ Widgets compose into larger systems; modularity is why they matter.\n",
     /// Overview layout under the sealed read-only mount: the rendered map opens
     /// with substantive, queryable content (the schema summary), not a run of
     /// empty write-oriented sections. The `Lifecycle Namespaces` placeholder is
-    /// suppressed when there are no writable vaults; nothing actionable is
-    /// dropped (Schemas, Vaults, Communities all remain reachable as headings).
+    /// suppressed when there are no writable mems; nothing actionable is
+    /// dropped (Schemas, Mems, Communities all remain reachable as headings).
     #[tokio::test]
     async fn overview_leads_with_content_under_sealed_mount() {
         let (state, _tmp) = test_state();
@@ -1991,8 +1991,8 @@ Widgets compose into larger systems; modularity is why they matter.\n",
             "overview must lead with the schema summary: {body}"
         );
 
-        // Nothing actionable dropped — Vaults and Communities remain reachable.
-        assert!(body.contains("<h2>Vaults</h2>"), "Vaults section remains: {body}");
+        // Nothing actionable dropped — Mems and Communities remain reachable.
+        assert!(body.contains("<h2>Mems</h2>"), "Mems section remains: {body}");
         assert!(body.contains("<h2>Communities</h2>"), "Communities section remains: {body}");
     }
 
@@ -2077,7 +2077,7 @@ Widgets compose into larger systems; modularity is why they matter.\n",
             // No absolute authority href in the navigable body (the manifest is
             // exempt; these are graph pages).
             assert!(
-                !body.contains("https://vault.example/"),
+                !body.contains("https://mem.example/"),
                 "{uri} must emit no absolute authority href: {body}"
             );
         }
@@ -2127,7 +2127,7 @@ Widgets compose into larger systems; modularity is why they matter.\n",
     /// `/overview`, follows an entity link, and reads the answer from
     /// `/entity/<id>` — every hop plain HTML, no MCP involved.
     #[tokio::test]
-    async fn naive_agent_reaches_vault_content_via_html_alone() {
+    async fn naive_agent_reaches_mem_content_via_html_alone() {
         let (state, _tmp, id) = seeded_state();
         let app = build_router(state);
 
@@ -2212,7 +2212,7 @@ Widgets compose into larger systems; modularity is why they matter.\n",
             .uri("/mcp")
             // Real HTTP/1.1 clients always send Host; oneshot does not, and the
             // transport requires it present.
-            .header("host", "vault.example")
+            .header("host", "mem.example")
             .header("content-type", "application/json")
             .header("accept", "application/json, text/event-stream")
             .body(Body::from(init))
@@ -2251,8 +2251,8 @@ Widgets compose into larger systems; modularity is why they matter.\n",
             "memstead_delete",
             "memstead_relate",
             "memstead_rename",
-            "memstead_vault_create",
-            "memstead_vault_delete",
+            "memstead_mem_create",
+            "memstead_mem_delete",
         ] {
             assert!(
                 instr.contains(absent),
@@ -2275,7 +2275,7 @@ Widgets compose into larger systems; modularity is why they matter.\n",
         let mut req = Request::builder()
             .method("POST")
             .uri("/mcp")
-            .header("host", "vault.example")
+            .header("host", "mem.example")
             .header("content-type", "application/json")
             .header("accept", "application/json, text/event-stream");
         if let Some(s) = session {
@@ -2397,14 +2397,14 @@ Widgets compose into larger systems; modularity is why they matter.\n",
             // Placeholder landing — the one-paste bootstrap and the bare
             // authority URL for a fetch agent.
             assert!(
-                html.contains("claude mcp add --transport http vault.example vault.example/mcp"),
+                html.contains("claude mcp add --transport http mem.example mem.example/mcp"),
                 "placeholder carries the MCP one-paste bootstrap line: {html}"
             );
             assert!(
-                html.contains("vault.example"),
+                html.contains("mem.example"),
                 "placeholder carries the bare URL to hand a fetch agent"
             );
-            assert!(html.contains("vault-graph"), "placeholder carries the graph mount");
+            assert!(html.contains("mem-graph"), "placeholder carries the graph mount");
         }
 
         // Polarity: agent surfaces unchanged across markdown, */*, and absent.
@@ -2435,7 +2435,7 @@ Widgets compose into larger systems; modularity is why they matter.\n",
 
     /// When the Astro build is embedded (after `npm run build` in
     /// the configured site dist), the served browser landing carries the real
-    /// interactive graph: the VaultGraph data payload (the flagship vault's
+    /// interactive graph: the MemGraph data payload (the flagship mem's
     /// `serialize_graph_json` export) and the 3d-force-graph runtime. On a
     /// Rust-only checkout the embed is empty and this is a no-op — the
     /// placeholder, asserted above, is what ships then.
@@ -2452,7 +2452,7 @@ Widgets compose into larger systems; modularity is why they matter.\n",
         // no longer inlined; the human face injects it at runtime. So assert
         // the runbook surface
         // and that the human-face runtime + graph data asset are wired, not the
-        // old inline `#vault-graph` markup.
+        // old inline `#mem-graph` markup.
         assert!(
             html.contains("id=\"mh-runbook\""),
             "real landing is the agent runbook surface"

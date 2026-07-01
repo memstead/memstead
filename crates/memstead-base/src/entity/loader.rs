@@ -1,4 +1,4 @@
-//! Filesystem walker — loads all .md files from vault directories into entities.
+//! Filesystem walker — loads all .md files from mem directories into entities.
 //!
 //! Thin wrapper over `entity::source::EntitySource`: the source hands back
 //! `(relative_path, content)` pairs, and this module layers on the
@@ -17,37 +17,37 @@ use super::parser;
 use super::source::EntitySource;
 
 /// Resolve the per-entity `TypeDefinition` for a markdown entry against
-/// the vault's pinned schema. Resolution order:
+/// the mem's pinned schema. Resolution order:
 ///
 /// 1. If the file's frontmatter declares `type: foo`, look `foo` up in
-///    the vault schema. Hit → use that type.
+///    the mem schema. Hit → use that type.
 /// 2. Same name, default-schema fallback (`type_by_name(name)`). Hit →
 ///    use that type. This preserves the pre-cutover behavior for files
-///    declaring a type the vault schema does not declare (typo, in-flight
+///    declaring a type the mem schema does not declare (typo, in-flight
 ///    schema migration, archived dummy data).
-/// 3. No frontmatter type: fall back to the vault schema's `spec` type;
-///    if the vault schema has no `spec`, fall back to the default
+/// 3. No frontmatter type: fall back to the mem schema's `spec` type;
+///    if the mem schema has no `spec`, fall back to the default
 ///    schema's `spec` (always available — used as the engine-wide
 ///    sentinel via `engine_fallback_type`).
 ///
 /// The function never panics — the final default-schema `spec` lookup is
 /// guaranteed to exist by the schema crate's invariants.
-fn resolve_type_for_entry(vault_schema: &Schema, content: &str) -> Arc<TypeDefinition> {
+fn resolve_type_for_entry(mem_schema: &Schema, content: &str) -> Arc<TypeDefinition> {
     if let Some(name) = parser::peek_type_from_frontmatter(content) {
-        if let Some(t) = vault_schema.get_type(&name) {
+        if let Some(t) = mem_schema.get_type(&name) {
             return t;
         }
         if let Some(t) = type_by_name(&name) {
             return t;
         }
     }
-    vault_schema
+    mem_schema
         .get_type("spec")
         .or_else(|| type_by_name("spec"))
         .expect("default-schema spec must always exist")
 }
 
-/// Result of loading a vault directory.
+/// Result of loading a mem directory.
 pub struct LoadResult {
     /// Successfully parsed entities with their inline links.
     pub entities: Vec<ParseResult>,
@@ -55,91 +55,91 @@ pub struct LoadResult {
     pub errors: Vec<(PathBuf, String)>,
 }
 
-/// Load all entities from a vault directory.
+/// Load all entities from a mem directory.
 ///
 /// Walks the directory recursively, finds `.md` files, parses each.
 /// Collects parse errors without stopping — returns all entities + all errors.
 /// Sequential reads for deterministic ordering.
-pub fn load_vault(
-    vault_dir: &std::path::Path,
-    vault: &str,
-    vault_schema: &Schema,
+pub fn load_mem(
+    mem_dir: &std::path::Path,
+    mem: &str,
+    mem_schema: &Schema,
 ) -> Result<LoadResult, LoadError> {
     load_from_source(
         EntitySource::Directory {
-            root: vault_dir.to_path_buf(),
+            root: mem_dir.to_path_buf(),
         },
-        vault,
-        vault_schema,
+        mem,
+        mem_schema,
     )
 }
 
-/// Load all entities from a sealed `.mem` vault archive.
+/// Load all entities from a sealed `.mem` mem archive.
 ///
-/// Shape-identical to `load_vault` — opens the zip, yields one
+/// Shape-identical to `load_mem` — opens the zip, yields one
 /// `ParseResult` per `.md` entry, collects per-file errors. The
 /// archive's `.memstead/config.json` is not consulted here; use
-/// `vault_cache::read_published_config` up front if you need identity
+/// `mem_cache::read_published_config` up front if you need identity
 /// or format-version checks before loading entities.
 ///
-/// Strips any explicit relationship whose target is outside this vault's
-/// own vault and logs it. v1 keeps every vault an island, and
-/// `memstead_relate` already rejects cross-vault edges on the write side —
+/// Strips any explicit relationship whose target is outside this mem's
+/// own mem and logs it. v1 keeps every mem an island, and
+/// `memstead_relate` already rejects cross-mem edges on the write side —
 /// this is the defensive pass for hand-edited archives that may still
-/// carry them. Inline wiki-links are already same-vault by construction
-/// (`wiki_link_to_id` resolves every `[[…]]` to `current_vault`), so no
+/// carry them. Inline wiki-links are already same-mem by construction
+/// (`wiki_link_to_id` resolves every `[[…]]` to `current_mem`), so no
 /// sanitization is needed for the inline-links list.
-pub fn load_vault_archive(
+pub fn load_mem_archive(
     archive_path: &std::path::Path,
-    vault: &str,
-    vault_schema: &Schema,
+    mem: &str,
+    mem_schema: &Schema,
 ) -> Result<LoadResult, LoadError> {
     // Archives are self-contained and schema-published — their internal
     // layout is frozen at publish time. No skip list applies.
     let mut result = load_from_source(
         EntitySource::ZipArchive(archive_path.to_path_buf()),
-        vault,
-        vault_schema,
+        mem,
+        mem_schema,
     )?;
-    sanitize_cross_vault_relationships(&mut result.entities, vault);
+    sanitize_cross_mem_relationships(&mut result.entities, mem);
     Ok(result)
 }
 
-/// Strip relationships whose target lives outside the given vault.
+/// Strip relationships whose target lives outside the given mem.
 ///
 /// Mutates `parse_results.entity.relationships` in place. Logs each
 /// stripped relationship at `warn` level so surprises surface in the
-/// user's logs, with a summary line per vault when any were removed.
+/// user's logs, with a summary line per mem when any were removed.
 /// Intentionally does not fail the load — the load policy is
 /// best-effort-with-warnings, matching the engine's log+skip handling
 /// for missing or corrupt archives.
-fn sanitize_cross_vault_relationships(parse_results: &mut [ParseResult], vault: &str) {
+fn sanitize_cross_mem_relationships(parse_results: &mut [ParseResult], mem: &str) {
     let mut stripped_total: usize = 0;
     for parse_result in parse_results.iter_mut() {
         let entity_id = parse_result.entity.id.clone();
         let before = parse_result.entity.relationships.len();
         parse_result.entity.relationships.retain(|rel| {
-            let same_vault = rel.target.vault() == vault;
-            if !same_vault {
+            let same_mem = rel.target.mem() == mem;
+            if !same_mem {
                 tracing::warn!(
-                    vault = vault,
+                    mem = mem,
                     from = %entity_id,
                     to = %rel.target,
                     rel_type = rel.rel_type.as_str(),
-                    "stripping cross-vault relationship from read vault \
-                     (published archives are self-contained; cross-vault \
+                    "stripping cross-mem relationship from read mem \
+                     (published archives are self-contained; cross-mem \
                      authorization is workspace-local and does not travel)"
                 );
             }
-            same_vault
+            same_mem
         });
         stripped_total += before - parse_result.entity.relationships.len();
     }
     if stripped_total > 0 {
         tracing::warn!(
-            vault = vault,
+            mem = mem,
             stripped = stripped_total,
-            "read vault contained {} cross-vault relationship(s); stripped on load",
+            "read mem contained {} cross-mem relationship(s); stripped on load",
             stripped_total
         );
     }
@@ -149,30 +149,30 @@ fn sanitize_cross_vault_relationships(parse_results: &mut [ParseResult], vault: 
 /// directory-backed (writable) and archive-backed (read-only) loads.
 ///
 /// Per-entity type resolution goes through `resolve_type_for_entry` —
-/// the vault's pinned schema is the authority, with the default schema
-/// as a fallback for files declaring a type the vault schema does not
+/// the mem's pinned schema is the authority, with the default schema
+/// as a fallback for files declaring a type the mem schema does not
 /// declare. This matches the engine's mutation-time schema lookup
-/// (`schema_for_vault`) so parse-time consumers (duplicate-section
+/// (`schema_for_mem`) so parse-time consumers (duplicate-section
 /// warnings, missing-required-section warnings, write_rules retrieval)
 /// see the schema the workspace pinned, not the engine default.
 fn load_from_source(
     source: EntitySource,
-    vault: &str,
-    vault_schema: &Schema,
+    mem: &str,
+    mem_schema: &Schema,
 ) -> Result<LoadResult, LoadError> {
     let (source_entries, read_errors) = source.read_all()?;
-    Ok(parse_entries(source_entries, read_errors, vault, vault_schema))
+    Ok(parse_entries(source_entries, read_errors, mem, mem_schema))
 }
 
-/// Parse a pre-collected set of source entries against the vault's
+/// Parse a pre-collected set of source entries against the mem's
 /// schema. Public so the workspace-side git-tree adapter can reuse the
 /// same parse loop without re-implementing empty-file skipping or the
 /// per-entity schema lookup.
 pub fn parse_entries(
     source_entries: Vec<super::source::SourceEntry>,
     read_errors: Vec<super::source::SourceReadError>,
-    vault: &str,
-    vault_schema: &Schema,
+    mem: &str,
+    mem_schema: &Schema,
 ) -> LoadResult {
     let mut entities = Vec::new();
     let mut errors: Vec<(PathBuf, String)> = read_errors
@@ -186,13 +186,13 @@ pub fn parse_entries(
             continue;
         }
 
-        let resolved_type = resolve_type_for_entry(vault_schema, &entry.content);
+        let resolved_type = resolve_type_for_entry(mem_schema, &entry.content);
 
         match parser::parse_markdown(
             &entry.content,
             &entry.relative_path,
             resolved_type.as_ref(),
-            vault,
+            mem,
         ) {
             Ok(mut result) => {
                 result.entity.file_path = entry.relative_path;
@@ -209,7 +209,7 @@ pub fn parse_entries(
 
 #[derive(Debug, thiserror::Error)]
 pub enum LoadError {
-    #[error("vault directory not found: {0}")]
+    #[error("mem directory not found: {0}")]
     DirNotFound(String),
     #[error("parse error in {file}: {source}")]
     Parse {
@@ -252,7 +252,7 @@ mod tests {
     use std::fs;
     use tempfile::TempDir;
 
-    fn setup_vault(entities: &[(&str, &str)]) -> TempDir {
+    fn setup_mem(entities: &[(&str, &str)]) -> TempDir {
         let dir = TempDir::new().unwrap();
         for (name, content) in entities {
             let path = dir.path().join(name);
@@ -270,12 +270,12 @@ mod tests {
 
     #[test]
     fn load_single_entity() {
-        let dir = setup_vault(&[(
+        let dir = setup_mem(&[(
             "test-entity.md",
             "---\ntype: spec\n---\n# Test Entity\n\n## Identity\n\nTest.\n",
         )]);
         let schema = Schema::builtin_default();
-        let result = load_vault(dir.path(), "specs", &schema).unwrap();
+        let result = load_mem(dir.path(), "specs", &schema).unwrap();
         assert_eq!(result.entities.len(), 1);
         assert!(result.errors.is_empty());
         assert_eq!(result.entities[0].entity.title, "Test Entity");
@@ -283,7 +283,7 @@ mod tests {
 
     #[test]
     fn load_nested_entities() {
-        let dir = setup_vault(&[
+        let dir = setup_mem(&[
             (
                 "parent.md",
                 "---\ntype: spec\n---\n# Parent\n\n## Identity\n\nParent entity.\n",
@@ -294,7 +294,7 @@ mod tests {
             ),
         ]);
         let schema = Schema::builtin_default();
-        let result = load_vault(dir.path(), "specs", &schema).unwrap();
+        let result = load_mem(dir.path(), "specs", &schema).unwrap();
         assert_eq!(result.entities.len(), 2);
     }
 
@@ -303,7 +303,7 @@ mod tests {
         // `.git/` and `.memstead/` are engine-internal and must never
         // yield entities. Other dot-prefixed directories (e.g.
         // `.obsidian/`) DO load by default.
-        let dir = setup_vault(&[
+        let dir = setup_mem(&[
             (
                 "visible.md",
                 "---\ntype: spec\n---\n# Visible\n\n## Identity\n\nTest.\n",
@@ -318,14 +318,14 @@ mod tests {
             ),
         ]);
         let schema = Schema::builtin_default();
-        let result = load_vault(dir.path(), "specs", &schema).unwrap();
+        let result = load_mem(dir.path(), "specs", &schema).unwrap();
         assert_eq!(result.entities.len(), 1);
         assert_eq!(result.entities[0].entity.title, "Visible");
     }
 
     #[test]
     fn load_skips_empty_files() {
-        let dir = setup_vault(&[
+        let dir = setup_mem(&[
             (
                 "real.md",
                 "---\ntype: spec\n---\n# Real\n\n## Identity\n\nContent.\n",
@@ -334,20 +334,20 @@ mod tests {
             ("whitespace.md", "   \n  \n  "),
         ]);
         let schema = Schema::builtin_default();
-        let result = load_vault(dir.path(), "specs", &schema).unwrap();
+        let result = load_mem(dir.path(), "specs", &schema).unwrap();
         assert_eq!(result.entities.len(), 1);
     }
 
     #[test]
     fn load_nonexistent_dir() {
         let schema = Schema::builtin_default();
-        let result = load_vault(std::path::Path::new("/nonexistent/path"), "specs", &schema);
+        let result = load_mem(std::path::Path::new("/nonexistent/path"), "specs", &schema);
         assert!(result.is_err());
     }
 
     #[test]
-    fn load_mixed_schema_vault_uses_per_file_schema() {
-        // Principle file and concept file in the same vault, loaded with the
+    fn load_mixed_schema_mem_uses_per_file_schema() {
+        // Principle file and concept file in the same mem, loaded with the
         // concept schema as the (fallback) default. Each entity must parse
         // against its own frontmatter-declared schema.
         let principle_body = "---\ntype: principle\n---\n\
@@ -363,14 +363,14 @@ mod tests {
 ## Explanation\n\nExplanation body.\n\n\
 ## Boundaries\n\nBoundaries body.\n\n\
 ## Significance\n\nSignificance body.\n";
-        let dir = setup_vault(&[("p.md", principle_body), ("c.md", concept_body)]);
+        let dir = setup_mem(&[("p.md", principle_body), ("c.md", concept_body)]);
 
         // Both files declare their type explicitly, so the loader's
         // schema-driven type lookup picks the right TypeDefinition per
         // entity from the default schema regardless of which "fallback"
         // would apply.
         let schema = Schema::builtin_default();
-        let result = load_vault(dir.path(), "knowledge", &schema).unwrap();
+        let result = load_mem(dir.path(), "knowledge", &schema).unwrap();
         assert_eq!(result.entities.len(), 2);
         assert!(result.errors.is_empty());
 
@@ -400,13 +400,13 @@ mod tests {
     }
 
     #[test]
-    fn load_vault_falls_back_when_frontmatter_missing_schema() {
+    fn load_mem_falls_back_when_frontmatter_missing_schema() {
         let body = "---\nlevel: M0\n---\n\
 # Fallback Case\n\n\
 ## Identity\n\nBody.\n";
-        let dir = setup_vault(&[("x.md", body)]);
+        let dir = setup_mem(&[("x.md", body)]);
         let schema = Schema::builtin_default();
-        let result = load_vault(dir.path(), "specs", &schema).unwrap();
+        let result = load_mem(dir.path(), "specs", &schema).unwrap();
         assert_eq!(result.entities.len(), 1);
         let entity = &result.entities[0].entity;
         assert_eq!(entity.entity_type, "spec");
@@ -414,13 +414,13 @@ mod tests {
     }
 
     #[test]
-    fn load_vault_falls_back_on_unknown_type_name() {
+    fn load_mem_falls_back_on_unknown_type_name() {
         let body = "---\ntype: nonexistent-type\n---\n\
 # Unknown Case\n\n\
 ## Identity\n\nBody.\n";
-        let dir = setup_vault(&[("x.md", body)]);
+        let dir = setup_mem(&[("x.md", body)]);
         let schema = Schema::builtin_default();
-        let result = load_vault(dir.path(), "specs", &schema).unwrap();
+        let result = load_mem(dir.path(), "specs", &schema).unwrap();
         assert_eq!(result.entities.len(), 1);
         let entity = &result.entities[0].entity;
         // Parser preserves the frontmatter type name verbatim in entity.entity_type.
@@ -429,24 +429,24 @@ mod tests {
         assert!(entity.sections.contains_key("identity"));
     }
 
-    // --- cross-vault relationship sanitization ---
+    // --- cross-mem relationship sanitization ---
 
     /// Build a ParseResult directly. The markdown parser can't naturally
-    /// emit a cross-vault relationship (`wiki_link_to_id` forces every
-    /// target into the current vault), so the defensive strip is
+    /// emit a cross-mem relationship (`wiki_link_to_id` forces every
+    /// target into the current mem), so the defensive strip is
     /// exercised by synthesizing the poisoned state directly.
     fn synthetic_parse_result(
-        entity_vault: &str,
+        entity_mem: &str,
         entity_slug: &str,
         rels: Vec<Relationship>,
     ) -> ParseResult {
-        let id = EntityId::new(entity_vault, entity_slug);
+        let id = EntityId::new(entity_mem, entity_slug);
         ParseResult {
             entity: Entity {
                 id: id.clone(),
                 title: entity_slug.to_string(),
                 entity_type: "spec".to_string(),
-                vault: entity_vault.to_string(),
+                mem: entity_mem.to_string(),
                 file_path: format!("{entity_slug}.md"),
                 metadata: IndexMap::new(),
                 sections: IndexMap::new(),
@@ -462,10 +462,10 @@ mod tests {
     }
 
     #[test]
-    fn sanitize_strips_cross_vault_relationships() {
-        // Poisoned fixture: one in-vault edge (kept) and one out-of-vault
+    fn sanitize_strips_cross_mem_relationships() {
+        // Poisoned fixture: one in-mem edge (kept) and one out-of-mem
         // edge (stripped). Guards against hand-edited archives that carry
-        // pre-v1 cross-vault references — the read-side mirror of the
+        // pre-v1 cross-mem references — the read-side mirror of the
         // write-side guard in `engine::mutation::relate`.
         let same = Relationship {
             rel_type: "USES".to_string(),
@@ -483,16 +483,16 @@ mod tests {
             vec![same.clone(), cross.clone()],
         )];
 
-        sanitize_cross_vault_relationships(&mut results, "aws-patterns");
+        sanitize_cross_mem_relationships(&mut results, "aws-patterns");
 
         let kept = &results[0].entity.relationships;
-        assert_eq!(kept.len(), 1, "cross-vault edge must be stripped");
+        assert_eq!(kept.len(), 1, "cross-mem edge must be stripped");
         assert_eq!(kept[0].target, same.target);
         assert_eq!(kept[0].rel_type, same.rel_type);
     }
 
     #[test]
-    fn sanitize_is_noop_when_all_relationships_are_same_vault() {
+    fn sanitize_is_noop_when_all_relationships_are_same_mem() {
         let rel = Relationship {
             rel_type: "USES".to_string(),
             target: EntityId::new("aws-patterns", "lambda"),
@@ -504,7 +504,7 @@ mod tests {
             vec![rel.clone()],
         )];
 
-        sanitize_cross_vault_relationships(&mut results, "aws-patterns");
+        sanitize_cross_mem_relationships(&mut results, "aws-patterns");
 
         assert_eq!(results[0].entity.relationships.len(), 1);
         assert_eq!(results[0].entity.relationships[0].target, rel.target);
@@ -512,8 +512,8 @@ mod tests {
 
     #[test]
     fn sanitize_handles_multiple_entities_with_mixed_edges() {
-        // Two entities: first has only same-vault edges, second has only
-        // cross-vault ones. After sanitization the second ends up empty
+        // Two entities: first has only same-mem edges, second has only
+        // cross-mem ones. After sanitization the second ends up empty
         // and the first is untouched.
         let a_rel = Relationship {
             rel_type: "USES".to_string(),
@@ -539,7 +539,7 @@ mod tests {
             ),
         ];
 
-        sanitize_cross_vault_relationships(&mut results, "aws-patterns");
+        sanitize_cross_mem_relationships(&mut results, "aws-patterns");
 
         assert_eq!(results[0].entity.relationships.len(), 1);
         assert!(results[1].entity.relationships.is_empty());
@@ -547,7 +547,7 @@ mod tests {
 
     #[test]
     fn load_collects_parse_errors() {
-        let dir = setup_vault(&[
+        let dir = setup_mem(&[
             (
                 "good.md",
                 "---\ntype: spec\n---\n# Good\n\n## Identity\n\nGood.\n",
@@ -559,7 +559,7 @@ mod tests {
             ),
         ]);
         let schema = Schema::builtin_default();
-        let result = load_vault(dir.path(), "specs", &schema).unwrap();
+        let result = load_mem(dir.path(), "specs", &schema).unwrap();
         // Both should parse — no-title falls back to filename-derived title
         assert_eq!(result.entities.len(), 2);
     }

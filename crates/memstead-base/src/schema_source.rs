@@ -47,7 +47,7 @@ pub trait SchemaSource {
 
     /// Write a schema package — `(relative-path, bytes)` pairs such as
     /// `("schema.yaml", …)`, `("types/<t>.yaml", …)`,
-    /// `("vault-template.json", …)` — into the source's storage.
+    /// `("mem-template.json", …)` — into the source's storage.
     /// Read-only sources return [`SchemaSourceError::ReadOnly`].
     fn write_schema(
         &self,

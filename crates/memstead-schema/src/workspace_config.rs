@@ -1,8 +1,8 @@
-//! Cross-vault-link policy value parsing for `.memstead/workspace.toml`.
+//! Cross-mem-link policy value parsing for `.memstead/workspace.toml`.
 //!
-//! [`CrossLinkValue`] is the shared shape behind `[cross_vault_links]`
-//! and `[[vault_management.create]].default_cross_links` — an operator
-//! writes either `"*"` (wildcard) or a list of vault names. Each engine
+//! [`CrossLinkValue`] is the shared shape behind `[cross_mem_links]`
+//! and `[[mem_management.create]].default_cross_links` — an operator
+//! writes either `"*"` (wildcard) or a list of mem names. Each engine
 //! crate that loads workspace policy (`memstead-base`,
 //! `memstead-engine`, `memstead-mcp`, `memstead-cli`) calls
 //! [`CrossLinkValue::parse_toml`] when lifting those tables; the value
@@ -10,27 +10,27 @@
 
 use crate::config::ConfigError;
 
-/// One entry in `[cross_vault_links]` (and the matching shape that
-/// `[[vault_management.create]].default_cross_links` uses). The operator
-/// writes either a list of vault names or the literal string `"*"`; mixed
+/// One entry in `[cross_mem_links]` (and the matching shape that
+/// `[[mem_management.create]].default_cross_links` uses). The operator
+/// writes either a list of mem names or the literal string `"*"`; mixed
 /// lists containing `"*"` are rejected at parse with `CONFIG_ERROR`.
 ///
 /// Empty lists (`[]`) are valid and behave identically to omission of
 /// the key — kept as an explicit shape so an operator can encode "this
-/// vault is intentionally locked down" without relying on absence.
+/// mem is intentionally locked down" without relying on absence.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CrossLinkValue {
     /// Wildcard — any current writable target is admitted.
     Wildcard,
-    /// Explicit allowlist of vault names. May be empty (default-deny
-    /// for that vault).
+    /// Explicit allowlist of mem names. May be empty (default-deny
+    /// for that mem).
     List(Vec<String>),
 }
 
 impl CrossLinkValue {
     /// Parse a TOML value into a `CrossLinkValue`, rejecting mixed lists
     /// containing `"*"` and any non-string-list shape. Used by both
-    /// `[cross_vault_links]` and `[[vault_management.create]].default_cross_links`.
+    /// `[cross_mem_links]` and `[[mem_management.create]].default_cross_links`.
     pub fn parse_toml(
         location: &str,
         value: &toml::Value,
@@ -38,7 +38,7 @@ impl CrossLinkValue {
         match value {
             toml::Value::String(s) if s == "*" => Ok(Self::Wildcard),
             toml::Value::String(other) => Err(ConfigError::Other(format!(
-                "{location}: expected `\"*\"` or a list of vault names, got string {other:?}"
+                "{location}: expected `\"*\"` or a list of mem names, got string {other:?}"
             ))),
             toml::Value::Array(items) => {
                 let mut names: Vec<String> = Vec::with_capacity(items.len());
@@ -50,13 +50,13 @@ impl CrossLinkValue {
                         }
                         toml::Value::String(s) if s.is_empty() => {
                             return Err(ConfigError::Other(format!(
-                                "{location}[{idx}]: vault name must not be empty"
+                                "{location}[{idx}]: mem name must not be empty"
                             )));
                         }
                         toml::Value::String(s) => names.push(s.clone()),
                         _ => {
                             return Err(ConfigError::Other(format!(
-                                "{location}[{idx}]: expected string vault name, got {item}"
+                                "{location}[{idx}]: expected string mem name, got {item}"
                             )));
                         }
                     }
@@ -74,7 +74,7 @@ impl CrossLinkValue {
                 }
             }
             other => Err(ConfigError::Other(format!(
-                "{location}: expected `\"*\"` or a list of vault names, got {other}"
+                "{location}: expected `\"*\"` or a list of mem names, got {other}"
             ))),
         }
     }
@@ -131,7 +131,7 @@ mod tests {
     }
 
     #[test]
-    fn empty_vault_name_is_rejected() {
+    fn empty_mem_name_is_rejected() {
         let err = CrossLinkValue::parse_toml("[loc]", &val("[\"\"]")).unwrap_err();
         assert!(format!("{err}").contains("must not be empty"));
     }
@@ -139,7 +139,7 @@ mod tests {
     #[test]
     fn non_string_list_entry_is_rejected() {
         let err = CrossLinkValue::parse_toml("[loc]", &val("[1]")).unwrap_err();
-        assert!(format!("{err}").contains("expected string vault name"));
+        assert!(format!("{err}").contains("expected string mem name"));
     }
 
     #[test]

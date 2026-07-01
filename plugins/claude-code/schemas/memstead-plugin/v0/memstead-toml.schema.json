@@ -2,17 +2,17 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://memstead.io/schemas/memstead-plugin/v0/memstead-toml",
   "title": "memstead-plugin/v0 .memstead.toml",
-  "description": "Top-level workspace manifest for a memstead-plugin/v0 workspace. The plugin reads this file to discover the registered vaults and any client- or plugin-namespaced configuration. The engine consumes only `vaults`; `schemas_dir` is retired and ignored (the engine loads workspace schemas from the fixed `.memstead/schemas/` path), and the four-primitive configs live at fixed `.memstead/{mediums,facets,projections,ingests}/` paths rather than via directory-pointer keys. The remainder is plugin-owned. Validation gates the plugin loader on the `format` version key. Pass-through tables under `[clients.*]` and `[plugin.*]` are accepted without further constraint so plugin extensions can declare their own keys.",
+  "description": "Top-level workspace manifest for a memstead-plugin/v0 workspace. The plugin reads this file to discover the registered mems and any client- or plugin-namespaced configuration. The engine consumes only `mems`; `schemas_dir` is retired and ignored (the engine loads workspace schemas from the fixed `.memstead/schemas/` path), and the four-primitive configs live at fixed `.memstead/{mediums,facets,projections,ingests}/` paths rather than via directory-pointer keys. The remainder is plugin-owned. Validation gates the plugin loader on the `format` version key. Pass-through tables under `[clients.*]` and `[plugin.*]` are accepted without further constraint so plugin extensions can declare their own keys.",
   "type": "object",
-  "required": ["format", "vaults"],
+  "required": ["format", "mems"],
   "properties": {
     "format": {
       "description": "Pinned format version. Producers must emit this exact string for v0; the plugin loader rejects any other value with a clear error listing supported versions.",
       "type": "string",
       "const": "memstead-plugin/v0"
     },
-    "vaults": {
-      "description": "Explicitly registered vault paths, relative to this file's directory. No auto-discovery. Runtime-created vaults are appended here by `memstead_vault_create`.",
+    "mems": {
+      "description": "Explicitly registered mem paths, relative to this file's directory. No auto-discovery. Runtime-created mems are appended here by `memstead_mem_create`.",
       "type": "array",
       "items": { "type": "string", "minLength": 1 },
       "uniqueItems": true
@@ -26,8 +26,8 @@
       "description": "Engine-owned mutation policy. See WorkspaceToml in memstead-schema for accepted keys.",
       "type": "object"
     },
-    "vault_management": {
-      "description": "Engine-owned vault lifecycle policy. Two array-of-tables — `[[vault_management.create]]` (per rule: `pattern` + `schemas[]`) and `[[vault_management.delete]]` (per rule: `pattern` only). Glob matching is gitignore-style over the composed candidate `<path>/<name>`. The legacy `allowed_create_patterns` / `allowed_delete_patterns` flat-list shape is rejected at parse.",
+    "mem_management": {
+      "description": "Engine-owned mem lifecycle policy. Two array-of-tables — `[[mem_management.create]]` (per rule: `pattern` + `schemas[]`) and `[[mem_management.delete]]` (per rule: `pattern` only). Glob matching is gitignore-style over the composed candidate `<path>/<name>`. The legacy `allowed_create_patterns` / `allowed_delete_patterns` flat-list shape is rejected at parse.",
       "type": "object",
       "properties": {
         "create": {

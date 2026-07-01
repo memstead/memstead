@@ -14,9 +14,9 @@ Every route registered on the axum router in `memstead-registry`. The route inve
 - [`POST` `/api/admin/denylist`](#post-api-admin-denylist)
 - [`GET` `/api/index`](#get-api-index)
 - [`POST` `/api/publish`](#post-api-publish)
-- [`DELETE` `/api/vault/{scope}/{name_ext}`](#delete-api-vault--scope---name-ext-)
-- [`GET` `/api/vault/{scope}/{name_ext}`](#get-api-vault--scope---name-ext-)
-- [`GET` `/api/vault/{scope}/{name}/{version_ext}`](#get-api-vault--scope---name---version-ext-)
+- [`DELETE` `/api/mem/{scope}/{name_ext}`](#delete-api-mem--scope---name-ext-)
+- [`GET` `/api/mem/{scope}/{name_ext}`](#get-api-mem--scope---name-ext-)
+- [`GET` `/api/mem/{scope}/{name}/{version_ext}`](#get-api-mem--scope---name---version-ext-)
 - [`GET` `/healthz`](#get-healthz)
 - [`GET` `/v/{scope}/{name}`](#get-v--scope---name-)
 
@@ -75,7 +75,7 @@ pub async fn post_publish(
 
 **`ApiError` variants emitted:** `BodyEmpty`, `BodyTooLarge`, `ContentBlocked`, `Internal`, `RateLimited`, `TermsNotAccepted`, `Tombstoned`, `Validation`, `ValidatorTimeout`, `VersionExists`
 
-## `DELETE /api/vault/{scope}/{name_ext}` <span id="delete-api-vault--scope---name-ext-"></span>
+## `DELETE /api/mem/{scope}/{name_ext}` <span id="delete-api-mem--scope---name-ext-"></span>
 
 **Handler:** `handlers::unpublish::delete_unpublish`
 
@@ -91,7 +91,7 @@ pub async fn delete_unpublish(
 
 **`ApiError` variants emitted:** `Forbidden`, `Internal`, `NotFound`
 
-## `GET /api/vault/{scope}/{name_ext}` <span id="get-api-vault--scope---name-ext-"></span>
+## `GET /api/mem/{scope}/{name_ext}` <span id="get-api-mem--scope---name-ext-"></span>
 
 **Handler:** `handlers::artifacts::get_artifact`
 
@@ -106,7 +106,7 @@ pub async fn get_artifact(
 
 **`ApiError` variants emitted:** `NotFound`
 
-## `GET /api/vault/{scope}/{name}/{version_ext}` <span id="get-api-vault--scope---name---version-ext-"></span>
+## `GET /api/mem/{scope}/{name}/{version_ext}` <span id="get-api-mem--scope---name---version-ext-"></span>
 
 **Handler:** `handlers::artifacts::get_artifact_versioned`
 
@@ -135,12 +135,12 @@ pub async fn get_healthz(State(state): State<AppState>) -> impl IntoResponse
 
 ## `GET /v/{scope}/{name}` <span id="get-v--scope---name-"></span>
 
-**Handler:** `handlers::vault_page::get_vault_page`
+**Handler:** `handlers::mem_page::get_mem_page`
 
 **Signature:**
 
 ```rust
-pub async fn get_vault_page(
+pub async fn get_mem_page(
     State(state): State<AppState>,
     Path((scope, name)): Path<(String, String)>,
 ) -> ApiResult<Response>

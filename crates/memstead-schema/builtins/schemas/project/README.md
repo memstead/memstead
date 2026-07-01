@@ -6,10 +6,10 @@ holdings, motion, surroundings, and rules:
 
 | Cluster | Type | Purpose |
 |---|---|---|
-| Identity | `vision` | Durable north star, one to three per vault |
+| Identity | `vision` | Durable north star, one to three per mem |
 | Identity | `positioning` | Versioned pitch + audience, one current per audience |
 | Identity | `brand` | Name + identity layer per surface |
-| Holdings | `pillar` | Top-level subsystem, bridges to a code vault |
+| Holdings | `pillar` | Top-level subsystem, bridges to a code mem |
 | Holdings | `evidence` | Empirical anchor for a strategic claim |
 | Motion | `bet` | Strategic wager carrying risk |
 | Motion | `milestone` | Project-level checkpoint |
@@ -19,44 +19,44 @@ holdings, motion, surroundings, and rules:
 
 The graph carries durable project posture — not phase-scoped plans
 (use `planning@0.1.0`) and not code state (use `software@0.1.0`).
-Pair this vault with one or more code-side vaults that the project
-vault references via cross-vault links; the code vaults stay
+Pair this mem with one or more code-side mems that the project
+mem references via cross-mem links; the code mems stay
 autonomous and unaware of the project layer.
 
 This schema ships **built into the engine** — every install resolves
 `project@0.1.0` with no copy step. Pin it directly when you create a
-project vault (below); fork it only when you want to customize the
+project mem (below); fork it only when you want to customize the
 vocabulary.
 
 ## How to use
 
-### One project, one project vault
+### One project, one project mem
 
-A project vault carries the strategic, operational, and competitive
+A project mem carries the strategic, operational, and competitive
 view of one project. The convention that pairs with this schema:
 
 ```
-<workspace>/<project>/                  ← the project vault (pinned project@0.1.0)
-<workspace>/<code-vault-1>/             ← e.g. engine
-<workspace>/<code-vault-2>/             ← e.g. app
+<workspace>/<project>/                  ← the project mem (pinned project@0.1.0)
+<workspace>/<code-mem-1>/             ← e.g. engine
+<workspace>/<code-mem-2>/             ← e.g. app
 …
 ```
 
-1. Create the project vault pinned to the built-in schema, filling the
-   instance write-guidance keys the package's `vault-template.json`
+1. Create the project mem pinned to the built-in schema, filling the
+   instance write-guidance keys the package's `mem-template.json`
    lists (here, `scope`):
 
    ```
-   memstead vault init <workspace>/<project> --schema project@0.1.0 \
-       --write-guidance '{"scope": "<one paragraph: what this project is and which code vaults it references>"}'
+   memstead mem init <workspace>/<project> --schema project@0.1.0 \
+       --write-guidance '{"scope": "<one paragraph: what this project is and which code mems it references>"}'
    ```
 
    The agent should refuse to write blind if `scope` is left as a
    placeholder at run time. To customize the vocabulary itself, fork the
    schema into local storage first with `memstead schema install project`.
 
-2. Configure cross-vault links so the project vault may reference
-   the code-side vaults:
+2. Configure cross-mem links so the project mem may reference
+   the code-side mems:
 
    ```
    memstead workspace grant-cross-link project engine
@@ -64,16 +64,16 @@ view of one project. The convention that pairs with this schema:
    memstead workspace grant-cross-link project plugin
    ```
 
-   The reverse direction (code vaults referencing the project vault)
+   The reverse direction (code mems referencing the project mem)
    is intentionally not granted — the project layer observes; it
-   does not become an authority the code vaults reason against.
-   Hand-editing the `[cross_vault_links]` block in
+   does not become an authority the code mems reason against.
+   Hand-editing the `[cross_mem_links]` block in
    `.memstead/workspace.toml` is the advanced fallback for batch edits;
    the CLI is the primary surface and the only path that triggers the
    live-engine reload pairing on `memstead_reload`.
 
 5. Call `memstead_reload` (or restart the MCP server) so the registry
-   picks up the new schema. `memstead_reload` without a `vault` parameter
+   picks up the new schema. `memstead_reload` without a `mem` parameter
    also re-reads `.memstead/workspace.toml`, so the cross-link grants
    from step 4 become visible without restart.
 
@@ -95,7 +95,7 @@ view of one project. The convention that pairs with this schema:
      |
      | THREATENS
      ↓
-   pillar (subsystem) ←-- REFERENCES --→ <code-vault>
+   pillar (subsystem) ←-- REFERENCES --→ <code-mem>
      ↑ MOTIVATED_BY              (auto-emitted from
    milestone (committed              wiki-links)
      checkpoint)
@@ -106,7 +106,7 @@ view of one project. The convention that pairs with this schema:
    positioning
 ```
 
-The project vault is **observer**: it references code-side vaults
+The project mem is **observer**: it references code-side mems
 but they do not reference back. When a `vision`, `positioning`, or
 `brand` evolves, supersede the old entity rather than editing it —
 the lineage of how the project's identity and posture evolved is
@@ -118,7 +118,7 @@ high-value.
 
 | Type | Purpose | Key test |
 |---|---|---|
-| `vision` | Long-arc destination | One to three per vault; superseded, not edited |
+| `vision` | Long-arc destination | One to three per mem; superseded, not edited |
 | `positioning` | Audience-facing pitch | At most one `current` per audience |
 | `brand` | Name + identity per surface | At most one `active` per surface |
 
@@ -126,7 +126,7 @@ high-value.
 
 | Type | Purpose | Key test |
 |---|---|---|
-| `pillar` | Top-level subsystem | Must REFERENCES a code-vault entity |
+| `pillar` | Top-level subsystem | Must REFERENCES a code-mem entity |
 | `evidence` | Empirical anchor | Must STRENGTHENS / WEAKENS / VALIDATES / CONTRADICTS something |
 
 ### Motion — what we do
@@ -170,7 +170,7 @@ neighbors).
 
 The schema explicitly excludes code-specific edges (`REALIZES`,
 `OWNS`, `MAINTAINS`, `VIOLATES`, `DEPRECATES`) — those belong in the
-code-side schema this project vault pairs with.
+code-side schema this project mem pairs with.
 
 ## No `risk` type
 
@@ -182,8 +182,8 @@ already carried by `bet`.
 
 ## Evolving the schema
 
-Bump `version` in `schema.yaml` on any shape change. Project vaults
-pin exact versions (`project@0.1.0`), so an active project vault
+Bump `version` in `schema.yaml` on any shape change. Project mems
+pin exact versions (`project@0.1.0`), so an active project mem
 keeps working against the pinned version until explicitly updated.
 Ship new versions alongside old ones rather than editing in place.
 
@@ -193,7 +193,7 @@ is the right time to harden v1.
 
 ## Reference
 
-- Per-vault scaffolding (instance write guidance): [`vault-template.json`](./vault-template.json)
+- Per-mem scaffolding (instance write guidance): [`mem-template.json`](./mem-template.json)
 - Companion code-side schema: [../../software/](../../software/)
 - Companion phase-scoped schema: [../../planning/](../../planning/)
 - Authoring guide: [dev/authoring-schemas.md](../../../dev/authoring-schemas.md)

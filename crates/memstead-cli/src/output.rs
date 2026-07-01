@@ -8,7 +8,7 @@
 //! | 0 | Success |
 //! | 1 | Generic error (IO, engine init, parse) |
 //! | 2 | Usage / invalid arguments (emitted by clap) |
-//! | 3 | Not found (entity / vault / resource missing) |
+//! | 3 | Not found (entity / mem / resource missing) |
 //! | 4 | Hash mismatch (optimistic-lock violation) |
 //! | 5 | Validation error (schema, relation type, etc.) |
 //!

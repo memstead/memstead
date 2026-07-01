@@ -111,24 +111,24 @@ impl Store {
         self.nodes.values()
     }
 
-    /// Drop every entity whose `EntityId::vault()` matches `vault`,
+    /// Drop every entity whose `EntityId::mem()` matches `mem`,
     /// cascading edges via the existing [`Store::remove`] mechanism.
     /// Returns the number of entities removed (excluding edge-only
     /// cascades — same accounting as `remove`).
     ///
-    /// Used by [`Engine::reload_one_vault`] to clear one vault's slice
+    /// Used by [`Engine::reload_one_mem`] to clear one mem's slice
     /// of the store before reloading entities from the on-disk branch
     /// tip. Pure-iteration implementation: walks `all_ids()`, filters
-    /// by vault, then calls `remove` on each. The 132-entity workspace
-    /// today reloads the whole store in <1 s so the per-vault filtered
+    /// by mem, then calls `remove` on each. The 132-entity workspace
+    /// today reloads the whole store in <1 s so the per-mem filtered
     /// case is microseconds; if the workspace ever grows past
-    /// 10k entities the loop can switch to a vault-keyed bucket on
+    /// 10k entities the loop can switch to a mem-keyed bucket on
     /// `Store` without changing this signature.
-    pub fn remove_entities_by_vault(&mut self, vault: &str) -> usize {
+    pub fn remove_entities_by_mem(&mut self, mem: &str) -> usize {
         let to_remove: Vec<EntityId> = self
             .nodes
             .keys()
-            .filter(|id| id.vault() == vault)
+            .filter(|id| id.mem() == mem)
             .cloned()
             .collect();
         let count = to_remove.len();
@@ -289,12 +289,12 @@ mod tests {
     use crate::Relationship;
     use indexmap::IndexMap;
 
-    fn stub_entity(id: &str, vault: &str) -> Entity {
+    fn stub_entity(id: &str, mem: &str) -> Entity {
         Entity {
             id: EntityId(id.to_string()),
             title: id.to_string(),
             entity_type: "spec".to_string(),
-            vault: vault.to_string(),
+            mem: mem.to_string(),
             file_path: String::new(),
             metadata: IndexMap::new(),
             sections: IndexMap::new(),

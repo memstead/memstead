@@ -1,13 +1,13 @@
 # `default` schema
 
-`default@1.0.0` is the built-in memstead schema. It ships embedded in the engine binary via `include_dir!` and backs any vault whose `.memstead/config.json` does not override it. Ten entity types spanning spec-authoring and knowledge capture, one shared relationship vocabulary, strict mode.
+`default@1.0.0` is the built-in memstead schema. It ships embedded in the engine binary via `include_dir!` and backs any mem whose `.memstead/config.json` does not override it. Ten entity types spanning spec-authoring and knowledge capture, one shared relationship vocabulary, strict mode.
 
 Use when you want a general-purpose knowledge graph without authoring a custom schema. Author a dedicated schema when the domain vocabulary is specialised enough that generic types would hurt agent judgement — see [../../../examples/minimal/](../../../examples/minimal/) and [dev/authoring-schemas.md](../../../../../dev/authoring-schemas.md) for the authoring flow.
 
-## Vault pinning
+## Mem pinning
 
 ```jsonc
-// <vault>/.memstead/config.json
+// <mem>/.memstead/config.json
 { "schema": "default@1.0.0" }
 ```
 
@@ -45,7 +45,7 @@ Strict mode — 37 declared relationships plus the required `_default` fallback.
 
 | Relationship | Meaning |
 |---|---|
-| `PART_OF` | Hierarchical containment (graph edge only — files stay flat at vault root) |
+| `PART_OF` | Hierarchical containment (graph edge only — files stay flat at mem root) |
 | `REFERENCES` | Soft reference — auto-emitted from inline wiki-links |
 | `DEPENDS_ON` | Logical dependency — source breaks if target removed |
 | `IMPLEMENTS` | Concrete implementation of an abstract spec |

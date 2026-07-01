@@ -6,9 +6,9 @@ description: |
   graph — everything else (options, decisions, steps, risks, open
   questions) exists in service of one or more goals.
 when_to_use: |
-  Use to state the purpose of the planning phase. A planning vault
+  Use to state the purpose of the planning phase. A planning mem
   typically carries 1-3 goals. If you need more, split the planning
-  into separate vaults — a single vault should have a coherent
+  into separate mems — a single mem should have a coherent
   scope.
 boundaries:
   - Not a specific decision or action — use `decision` or `step`.
@@ -59,7 +59,7 @@ sections:
     catch_all: true
 metadata_fields:
   - key: priority
-    description: How critical this goal is relative to other goals in the same vault.
+    description: How critical this goal is relative to other goals in the same mem.
     field_type: string
     default_value: high
     enum_values: [critical, high, medium, low]
@@ -81,4 +81,4 @@ write_rules:
   - "Success criteria are concrete and checkable. 'Improve X' is not a goal; 'X latency stays under 200ms at p99' is."
   - "Out-of-scope is high-value — name at least what you explicitly are NOT planning to address."
   - "Link MOTIVATED_BY to the external trigger that set this planning in motion. A goal without motivation is unsourced."
-  - "Sub-goals connect via PART_OF. Keep the hierarchy shallow — a planning vault with more than two goal levels is likely too broad."
+  - "Sub-goals connect via PART_OF. Keep the hierarchy shallow — a planning mem with more than two goal levels is likely too broad."

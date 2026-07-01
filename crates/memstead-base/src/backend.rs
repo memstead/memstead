@@ -1,4 +1,4 @@
-//! `VaultBackend` — uniform trait surface over folder, git-branch,
+//! `MemBackend` — uniform trait surface over folder, git-branch,
 //! and archive storage.
 //!
 //! Bytes-level: list / read / write / delete / move / commit /
@@ -8,19 +8,19 @@
 //! search index live in one place regardless of which backend serves
 //! a given mount.
 //!
-//! Today's [`crate::storage::VaultWriter`] is a write-side subset of
-//! this trait. As each backend gains its `VaultBackend` impl the
-//! `VaultWriter` references in that backend's call sites collapse
-//! into the unified surface; `VaultWriter` stays in
+//! Today's [`crate::storage::MemWriter`] is a write-side subset of
+//! this trait. As each backend gains its `MemBackend` impl the
+//! `MemWriter` references in that backend's call sites collapse
+//! into the unified surface; `MemWriter` stays in
 //! `crate::storage::filesystem` for now as the on-disk write helpers
-//! it embodies are reused by the folder-backend `VaultBackend` impl.
+//! it embodies are reused by the folder-backend `MemBackend` impl.
 //!
 //! ## Per-backend write semantics
 //!
-//! - **Folder** — writes go to the workspace's vault subdirectory;
+//! - **Folder** — writes go to the workspace's mem subdirectory;
 //!   commit is a no-op CAS-token mint (no history).
 //! - **Git-branch** — writes buffer in memory, commit produces a real
-//!   git commit on the per-vault branch with the trailer block.
+//!   git commit on the per-mem branch with the trailer block.
 //! - **Archive** — writes return [`BackendError::Sealed`] without
 //!   touching disk. Read methods return live content from inside the
 //!   sealed `.mem` zip.
@@ -28,10 +28,10 @@
 use std::path::{Path, PathBuf};
 
 use crate::provenance::Provenance;
-use crate::storage::{CommitId, VaultWriterError};
+use crate::storage::{CommitId, MemWriterError};
 use crate::vcs::CommitContext;
 
-/// Vault-backend trait. Implementations live next to the backend's
+/// Mem-backend trait. Implementations live next to the backend's
 /// other code (folder under `crate::storage::filesystem`; git-branch
 /// in the renamed-from-`memstead-git-branch` crate; archive under the
 /// archive read-paths in `crate::entity` once that wiring lands).
@@ -42,8 +42,8 @@ use crate::vcs::CommitContext;
 /// bytes). Backends that cannot write return [`BackendError::Sealed`]
 /// from the write methods — typed and stable so callers branch on
 /// the discriminant rather than parsing a message string.
-pub trait VaultBackend: Send + Sync {
-    /// Vault-relative paths of every entity-bearing file the backend
+pub trait MemBackend: Send + Sync {
+    /// Mem-relative paths of every entity-bearing file the backend
     /// holds. Order is not specified; callers that need stable
     /// ordering sort.
     fn list_entities(&self) -> Result<Vec<PathBuf>, BackendError>;
@@ -107,9 +107,9 @@ pub trait VaultBackend: Send + Sync {
     /// `expected_parent` because there's no concept of a parent to
     /// pin against — drift detection on those mounts is a no-op
     /// today and stays a no-op here. The git-branch backend
-    /// overrides to check the per-vault branch tip and surfaces
+    /// overrides to check the per-mem branch tip and surfaces
     /// the mismatch with a typed error the engine layer can map to
-    /// `VAULT_RELOADED` / `RENAME_PARTIAL_FAILURE`.
+    /// `MEM_RELOADED` / `RENAME_PARTIAL_FAILURE`.
     ///
     /// Default impl: ignore `expected_parent` and delegate to
     /// [`Self::commit`]. Bisect-safe — existing callers using
@@ -145,7 +145,7 @@ pub trait VaultBackend: Send + Sync {
     /// archive) inherit the default impl returning `Ok(None)`; the
     /// engine treats `None` as "no drift signal available" and skips
     /// drift detection for that mount. The git-branch backend
-    /// overrides to return the per-vault branch tip's commit SHA hex.
+    /// overrides to return the per-mem branch tip's commit SHA hex.
     ///
     /// Returning `Err` is reserved for backend-internal failures
     /// (refdb hiccup, archive read failure, etc.); the engine logs
@@ -155,20 +155,20 @@ pub trait VaultBackend: Send + Sync {
         Ok(None)
     }
 
-    /// Read the per-vault `.memstead/config.json` payload, if any.
+    /// Read the per-mem `.memstead/config.json` payload, if any.
     ///
-    /// Returns the raw bytes the backend has for the vault's
+    /// Returns the raw bytes the backend has for the mem's
     /// config. The engine parses via
-    /// [`memstead_schema::config::parse_vault_config`] and stores the
-    /// result on the [`crate::Engine::vault_config_for`] accessor.
+    /// [`memstead_schema::config::parse_mem_config`] and stores the
+    /// result on the [`crate::Engine::mem_config_for`] accessor.
     ///
     /// Default impl returns `Ok(None)` — backends that don't
     /// surface a config (or haven't yet implemented this primitive)
     /// inherit and signal "no config available". The engine
-    /// treats `None` the same as a parse failure: `vault_config_for`
-    /// returns `None` for the affected vault, and consumers
+    /// treats `None` the same as a parse failure: `mem_config_for`
+    /// returns `None` for the affected mem, and consumers
     /// (`memstead_health { include_config: true }`) emit empty
-    /// `writeGuidance` + `extra` blocks for that vault.
+    /// `writeGuidance` + `extra` blocks for that mem.
     ///
     /// Mirrors the pattern of [`Self::current_head`] —
     /// backend-internal capability with a sensible no-op default.
@@ -177,8 +177,8 @@ pub trait VaultBackend: Send + Sync {
     /// - Folder backend reads `<root>/.memstead/config.json`.
     /// - Archive backend reads `.memstead/config.json` from inside the
     ///   zip.
-    /// - Git-branch backend reads `__MEMSTEAD:vaults/<vault>/config.json`.
-    fn read_vault_config(&self) -> Result<Option<Vec<u8>>, BackendError> {
+    /// - Git-branch backend reads `__MEMSTEAD:mems/<mem>/config.json`.
+    fn read_mem_config(&self) -> Result<Option<Vec<u8>>, BackendError> {
         Ok(None)
     }
 
@@ -191,13 +191,13 @@ pub trait VaultBackend: Send + Sync {
     /// `Ok(None)` — a backend with no provenance member (a pre-provenance
     /// archive, the folder/git-branch backends until their read paths
     /// lift) inherits and signals "provenance absent". Mirrors
-    /// [`Self::read_vault_config`].
+    /// [`Self::read_mem_config`].
     fn read_archive_provenance(&self) -> Result<Option<Vec<u8>>, BackendError> {
         Ok(None)
     }
 
-    /// Write the per-vault `.memstead/config.json` payload. Symmetric
-    /// counterpart to [`Self::read_vault_config`].
+    /// Write the per-mem `.memstead/config.json` payload. Symmetric
+    /// counterpart to [`Self::read_mem_config`].
     ///
     /// Backends that cannot persist a config (today: archive)
     /// inherit the default and return [`BackendError::Sealed`]. The
@@ -207,8 +207,8 @@ pub trait VaultBackend: Send + Sync {
     /// Implementations:
     /// - Folder backend writes `<root>/.memstead/config.json` to disk.
     /// - Git-branch backend writes
-    ///   `__MEMSTEAD:vaults/<vault>/config.json` (workspace-level ref) —
-    ///   its own commit, separate from any per-vault-branch
+    ///   `__MEMSTEAD:mems/<mem>/config.json` (workspace-level ref) —
+    ///   its own commit, separate from any per-mem-branch
     ///   mutation.
     /// - Archive backend returns [`BackendError::Sealed`] — sealed
     ///   archives never re-write configs.
@@ -217,30 +217,30 @@ pub trait VaultBackend: Send + Sync {
     /// [`Self::read_entity`] / [`Self::write_entity`]: the trait
     /// surface stays balanced so the engine doesn't branch on
     /// backend type for write paths.
-    fn write_vault_config(&self, _bytes: &[u8]) -> Result<(), BackendError> {
+    fn write_mem_config(&self, _bytes: &[u8]) -> Result<(), BackendError> {
         Err(BackendError::Sealed)
     }
 
-    /// Like [`Self::write_vault_config`] but records `note` (an optional
+    /// Like [`Self::write_mem_config`] but records `note` (an optional
     /// agent/operator-supplied provenance reason) on the resulting
     /// commit body. The default delegates to the note-less form, so
     /// backends without a commit (folder) simply ignore the note; the
     /// git-branch backend overrides this to thread `note` into the
-    /// `__MEMSTEAD`-ref commit. Lets `set_vault_version` carry a `--note`
-    /// like the other commit-producing vault-lifecycle operations.
-    fn write_vault_config_with_note(
+    /// `__MEMSTEAD`-ref commit. Lets `set_mem_version` carry a `--note`
+    /// like the other commit-producing mem-lifecycle operations.
+    fn write_mem_config_with_note(
         &self,
         bytes: &[u8],
         _note: Option<&str>,
     ) -> Result<(), BackendError> {
-        self.write_vault_config(bytes)
+        self.write_mem_config(bytes)
     }
 
-    /// Drop every backend-side artifact for this vault — the
+    /// Drop every backend-side artifact for this mem — the
     /// symmetric counterpart to the writes performed by
-    /// `memstead_vault_create` (entity-seed commit on the per-vault
-    /// branch + [`Self::write_vault_config`] on `__MEMSTEAD`). Called by
-    /// `memstead_vault_delete` orchestration when `delete_files=true` and
+    /// `memstead_mem_create` (entity-seed commit on the per-mem
+    /// branch + [`Self::write_mem_config`] on `__MEMSTEAD`). Called by
+    /// `memstead_mem_delete` orchestration when `delete_files=true` and
     /// the delete rule matched, to give the backend a chance to
     /// prune ref-store state the engine alone has the git authority
     /// to touch.
@@ -248,20 +248,20 @@ pub trait VaultBackend: Send + Sync {
     /// Idempotent: safe to call on a backend whose artifacts already
     /// went away (a sibling engine pruned them, the branch was
     /// deleted manually, etc.). The default impl returns `Ok(())` —
-    /// backends whose on-disk state is fully captured by the vault
+    /// backends whose on-disk state is fully captured by the mem
     /// directory (folder, archive) inherit the no-op. The
     /// orchestrator handles its `remove_dir_all` separately at the
     /// outer layer.
     ///
     /// Implementations:
     /// - Folder backend keeps the default — its disk state is the
-    ///   vault directory, which the orchestrator rmdirs.
+    ///   mem directory, which the orchestrator rmdirs.
     /// - Archive backend keeps the default — sealed archives have
     ///   nothing additional to prune.
     /// - Git-branch backend deletes `refs/heads/<branch_leaf>` and
     ///   commits a tree edit on `refs/heads/__MEMSTEAD` that removes
-    ///   `vaults/<branch_leaf>/config.json`. `<branch_leaf>` is the
-    ///   vault's full hierarchical path (e.g.
+    ///   `mems/<branch_leaf>/config.json`. `<branch_leaf>` is the
+    ///   mem's full hierarchical path (e.g.
     ///   `planning/plan-q4-revamp` or the bare `<name>` for flat
     ///   layouts).
     fn delete_artifacts(&self) -> Result<(), BackendError> {
@@ -269,7 +269,7 @@ pub trait VaultBackend: Send + Sync {
     }
 }
 
-/// Errors surfaced by [`VaultBackend`].
+/// Errors surfaced by [`MemBackend`].
 ///
 /// The `Sealed` variant is the typed read-only signal — backends
 /// that physically cannot write (archive) return it from every
@@ -279,16 +279,16 @@ pub trait VaultBackend: Send + Sync {
 /// capability check.
 #[derive(Debug, thiserror::Error)]
 pub enum BackendError {
-    /// Re-thrown from the existing [`VaultWriterError`] surface so
-    /// folder-backend implementations can lift `VaultWriter`
+    /// Re-thrown from the existing [`MemWriterError`] surface so
+    /// folder-backend implementations can lift `MemWriter`
     /// failures without lossy conversion.
     #[error(transparent)]
-    VaultWriter(#[from] VaultWriterError),
+    MemWriter(#[from] MemWriterError),
     /// Backend physically rejects writes. Returned by the archive
     /// backend and any future read-only backend (e.g. registry pin).
     #[error("backend is sealed (writes rejected)")]
     Sealed,
-    /// Filesystem IO failure outside the [`VaultWriterError`] path.
+    /// Filesystem IO failure outside the [`MemWriterError`] path.
     #[error("backend io error: {0}")]
     Io(#[from] std::io::Error),
     /// Backend-specific failure not modelled by the variants above.
@@ -297,20 +297,20 @@ pub enum BackendError {
     #[error("backend error: {0}")]
     Other(String),
     /// Parent-ref pinning guard tripped on
-    /// [`VaultBackend::commit_with_expected_parent`] — the backend's
+    /// [`MemBackend::commit_with_expected_parent`] — the backend's
     /// current head no longer matches the caller's `expected_parent`.
     /// A sibling writer (another `Engine` instance, an out-of-band
     /// `git pull`, a manual git operation) advanced the on-disk state
     /// between the snapshot the caller pinned and now. The engine
-    /// layer maps this into `VAULT_RELOADED` /
-    /// `RENAME_PARTIAL_FAILURE` depending on whether other vaults
+    /// layer maps this into `MEM_RELOADED` /
+    /// `RENAME_PARTIAL_FAILURE` depending on whether other mems
     /// already committed in the same logical operation. Today only
     /// the git-branch backend (planned override) produces this
     /// variant; folder and archive backends inherit the default impl
     /// of `commit_with_expected_parent` which delegates to `commit`
     /// without parent checking.
     #[error(
-        "parent-ref mismatch: expected {expected}, found {actual} — sibling writer advanced the vault"
+        "parent-ref mismatch: expected {expected}, found {actual} — sibling writer advanced the mem"
     )]
     ParentMismatch { expected: String, actual: String },
 }

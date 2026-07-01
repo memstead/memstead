@@ -3,7 +3,7 @@
  *
  * Verifies that `loadWorkspace` reading the new `.memstead/{mediums,facets,
  * projections,ingests}/` layout produces the same internal assembled shape
- * (`ingests[].sources[].scope.{type,scope.tree}`, `destinations[].vault`)
+ * (`ingests[].sources[].scope.{type,scope.tree}`, `destinations[].mem`)
  * that `inject.mjs` consumes — so a migrated workspace behaves identically to
  * the legacy one. The engine dump is injected via `opts.fetchDump`.
  */
@@ -18,7 +18,7 @@ import { loadWorkspace } from './workspace-loader.mjs';
 
 const DUMP = {
   format: 'workspace-dump/v0',
-  vaults: [
+  mems: [
     { name: 'macos', schema: 'software@0.1.0' },
     { name: 'engine', schema: 'software@0.1.0' },
   ],
@@ -52,8 +52,8 @@ describe('workspace-loader — four-primitive store', () => {
         JSON.stringify({
           intent: 'i',
           source_facets: ['source-tree'],
-          reference_vaults: ['engine'],
-          destination_vault: 'macos',
+          reference_mems: ['engine'],
+          destination_mem: 'macos',
         })
       );
       writeFileSync(
@@ -76,14 +76,14 @@ describe('workspace-loader — four-primitive store', () => {
       assert.equal(primary.facet.mediumType, 'codebase');
       assert.deepEqual(primary.facet.scope.tree, [{ path: '../macos/**/*.swift', mode: 'allow' }]);
 
-      // Reference vault preserved as a reference source.
+      // Reference mem preserved as a reference source.
       const ref = ing.sources.find((s) => s.role === 'reference');
       assert.ok(ref, 'reference source present');
-      assert.equal(ref.vault, 'engine');
+      assert.equal(ref.mem, 'engine');
 
-      // Single destination from destination_vault.
+      // Single destination from destination_mem.
       assert.equal(ing.destinations.length, 1);
-      assert.equal(ing.destinations[0].vault, 'macos');
+      assert.equal(ing.destinations[0].mem, 'macos');
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

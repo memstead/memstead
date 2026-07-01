@@ -12,25 +12,25 @@ use crate::setup::{CliContext, CliEngine};
 
 /// Describe one type, or list all types when no name is given.
 ///
-/// Resolves the schema against the workspace's writable vault when
+/// Resolves the schema against the workspace's writable mem when
 /// exactly one is loaded (so the catalogue agents read matches the
-/// schema `memstead create` will validate against). Multi-vault workspaces
-/// pin the choice via `--vault <name>`. Workspaces with zero writable
-/// vaults fall back to the engine built-in default so the cold-start
+/// schema `memstead create` will validate against). Multi-mem workspaces
+/// pin the choice via `--mem <name>`. Workspaces with zero writable
+/// mems fall back to the engine built-in default so the cold-start
 /// probe-from-scratch flow keeps working.
 #[derive(Parser, Debug)]
 pub struct Args {
     pub name: Option<String>,
 
-    /// Resolve the schema from this writable vault's pin. Required
-    /// when the workspace has more than one writable vault; defaults
-    /// to the lone writable vault otherwise.
+    /// Resolve the schema from this writable mem's pin. Required
+    /// when the workspace has more than one writable mem; defaults
+    /// to the lone writable mem otherwise.
     #[arg(long)]
-    pub vault: Option<String>,
+    pub mem: Option<String>,
 }
 
 pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
-    let schema = resolve_schema(ctx, args.vault.as_deref())?;
+    let schema = resolve_schema(ctx, args.mem.as_deref())?;
     let (schema_name, schema_version) = schema.id();
     let schema_label = format!("{schema_name}@{schema_version}");
 
@@ -83,21 +83,21 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
 /// Resolve which schema `memstead type` describes.
 ///
 /// Resolution order:
-/// 1. `--vault <name>` supplied: error if the name matches no loaded
-///    vault (writable OR RO); otherwise use that vault's schema.
+/// 1. `--mem <name>` supplied: error if the name matches no loaded
+///    mem (writable OR RO); otherwise use that mem's schema.
 ///    Schema introspection is a read-only operation — RO mounts are
 ///    first-class read targets, so resolving against them is admitted.
-/// 2. Exactly one writable vault loaded: use its schema (the common case
-///    for the bare `memstead type` invocation, since the implicit-vault
+/// 2. Exactly one writable mem loaded: use its schema (the common case
+///    for the bare `memstead type` invocation, since the implicit-mem
 ///    default still picks a writable target — RO mounts are explicit-
-///    only via `--vault`).
-/// 3. Multiple writable vaults loaded: error with an actionable message
-///    listing them and pointing at `--vault`.
-/// 4. Zero writable vaults (no workspace, cold-start probe): fall back
+///    only via `--mem`).
+/// 3. Multiple writable mems loaded: error with an actionable message
+///    listing them and pointing at `--mem`.
+/// 4. Zero writable mems (no workspace, cold-start probe): fall back
 ///    to the engine built-in default so the catalogue is still readable.
 fn resolve_schema(
     ctx: &CliContext,
-    vault: Option<&str>,
+    mem: Option<&str>,
 ) -> anyhow::Result<Arc<Schema>> {
     let engine = match ctx.cli_engine() {
         Ok(e) => e,
@@ -106,28 +106,28 @@ fn resolve_schema(
         Err(_) => return Ok(Schema::builtin_default()),
     };
     let engine: memstead_base::Engine = match engine {
-        #[cfg(feature = "vault-repo")]
-        CliEngine::VaultRepo(e) => e,
+        #[cfg(feature = "mem-repo")]
+        CliEngine::MemRepo(e) => e,
         CliEngine::Filesystem(e) => e,
     };
-    let writable: Vec<&str> = engine.writable_vault_names();
-    let all_loaded: Vec<&str> = engine.vault_names();
-    let resolved_vault: &str = match vault {
+    let writable: Vec<&str> = engine.writable_mem_names();
+    let all_loaded: Vec<&str> = engine.mem_names();
+    let resolved_mem: &str = match mem {
         Some(name) => {
-            // F25: `--vault` resolves against every loaded
-            // vault, not just the writable subset. Schema lookup is
+            // F25: `--mem` resolves against every loaded
+            // mem, not just the writable subset. Schema lookup is
             // read-only; RO mounts have schemas worth introspecting.
             if !all_loaded.iter().any(|w| *w == name) {
                 let known = if all_loaded.is_empty() {
-                    "no vaults loaded".to_string()
+                    "no mems loaded".to_string()
                 } else {
-                    format!("known vaults: [{}]", all_loaded.join(", "))
+                    format!("known mems: [{}]", all_loaded.join(", "))
                 };
                 return Err(CliError {
-                    code: "UNKNOWN_VAULT",
+                    code: "UNKNOWN_MEM",
                     kind: ExitKind::NotFound,
-                    message: format!("unknown vault: {name} — {known}"),
-                    details: Some(json!({ "vault": name, "known_vaults": all_loaded })),
+                    message: format!("unknown mem: {name} — {known}"),
+                    details: Some(json!({ "mem": name, "known_mems": all_loaded })),
                 }
                 .into());
             }
@@ -137,12 +137,12 @@ fn resolve_schema(
             0 => return Ok(Schema::builtin_default()),
             1 => writable[0],
             _ => {
-                // When every writable vault pins the same schema, the
-                // type definition is identical regardless of which vault
-                // answers — drop the `--vault` ceremony and pick any.
-                // Refuse only when the writable vaults pin *different*
+                // When every writable mem pins the same schema, the
+                // type definition is identical regardless of which mem
+                // answers — drop the `--mem` ceremony and pick any.
+                // Refuse only when the writable mems pin *different*
                 // schemas (the answer would genuinely depend on the
-                // choice; rendering one vault's type as the answer for
+                // choice; rendering one mem's type as the answer for
                 // all would be silently wrong).
                 let schemas = engine.schemas();
                 let schema_id = |v: &str| {
@@ -158,13 +158,13 @@ fn resolve_schema(
                 } else {
                     return Err(CliError::new(
                         ExitKind::Validation,
-                        "AMBIGUOUS_VAULT",
+                        "AMBIGUOUS_MEM",
                         format!(
-                            "writable vaults pin different schemas ([{}]) — pass `--vault <name>` to pick one",
+                            "writable mems pin different schemas ([{}]) — pass `--mem <name>` to pick one",
                             writable.join(", ")
                         ),
                     )
-                    .with_details(json!({ "vaults": writable }))
+                    .with_details(json!({ "mems": writable }))
                     .into());
                 }
             }
@@ -172,7 +172,7 @@ fn resolve_schema(
     };
     Ok(engine
         .schemas()
-        .get(resolved_vault)
+        .get(resolved_mem)
         .cloned()
         .unwrap_or_else(|| Schema::builtin_default()))
 }

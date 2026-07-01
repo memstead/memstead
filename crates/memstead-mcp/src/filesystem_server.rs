@@ -1,15 +1,15 @@
-//! filesystem-vault MCP server — parallel module to [`crate::server`].
+//! filesystem-mem MCP server — parallel module to [`crate::server`].
 //!
-//! Boots when `memstead-mcp/src/main.rs` runs without the `vault-repo`
+//! Boots when `memstead-mcp/src/main.rs` runs without the `mem-repo`
 //! feature against a `.memstead/workspace.toml` workspace that carries
-//! only folder + archive mounts (no `vault-repo/.git/`). Wraps the
+//! only folder + archive mounts (no `mem-repo/.git/`). Wraps the
 //! unified [`memstead_base::Engine`] behind the same rmcp ServerHandler
-//! shape the vault-repo `McpServer` uses, but ports only the subset
-//! of tools that make sense in a single-vault history-free context.
+//! shape the mem-repo `McpServer` uses, but ports only the subset
+//! of tools that make sense in a single-mem history-free context.
 //!
 //! Per-mutation provenance lands in `.memstead/changes.jsonl` (the
-//! filesystem-vault analogue of the commit-body trailer the
-//! vault-repo server writes).
+//! filesystem-mem analogue of the commit-body trailer the
+//! mem-repo server writes).
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -89,25 +89,25 @@ impl FilesystemMcpServer {
         }
     }
 
-    /// Export the server's single vault as `.mem` archive bytes. Used by
+    /// Export the server's single mem as `.mem` archive bytes. Used by
     /// embedding services (the session server) to hand a visitor a
-    /// self-describing copy of the vault their agent built. The server's
-    /// engine carries exactly one vault (filesystem / session vaults are
-    /// single-vault by design); this exports it.
-    pub fn export_vault_to_bytes(&self) -> Result<Vec<u8>, memstead_base::EngineError> {
+    /// self-describing copy of the mem their agent built. The server's
+    /// engine carries exactly one mem (filesystem / session mems are
+    /// single-mem by design); this exports it.
+    pub fn export_mem_to_bytes(&self) -> Result<Vec<u8>, memstead_base::EngineError> {
         let engine = self.engine.lock().expect("filesystem MCP engine mutex poisoned");
-        let vault = engine
-            .vault_names()
+        let mem = engine
+            .mem_names()
             .into_iter()
             .next()
             .map(String::from)
             .ok_or_else(|| {
-                memstead_base::EngineError::InvalidInput("no vault to export".to_string())
+                memstead_base::EngineError::InvalidInput("no mem to export".to_string())
             })?;
-        engine.export_vault_to_bytes(&vault)
+        engine.export_mem_to_bytes(&mem)
     }
 
-    /// Count of real (non-stub) entities across the server's vault. Used
+    /// Count of real (non-stub) entities across the server's mem. Used
     /// by embedding services (the session server) to enforce a
     /// per-session resource cap before admitting a create.
     pub fn entity_count(&self) -> usize {
@@ -194,23 +194,23 @@ fn json_response<T: serde::Serialize>(data: &T) -> CallToolResult {
     result
 }
 
-/// Whether the named vault's storage is durable (persists past restart /
+/// Whether the named mem's storage is durable (persists past restart /
 /// session-TTL eviction), derived from its mount's `MountStorage` kind.
 /// On the ephemeral in-memory sketch this returns `false` — the per-write
 /// `durable` echo on every mutation response is how an agent learns its
 /// `commit_sha` denotes nothing durable. Defaults to `false` for an
-/// unresolvable vault: the engine never claims a durability it can't vouch
+/// unresolvable mem: the engine never claims a durability it can't vouch
 /// for.
-fn vault_is_durable(engine: &memstead_base::Engine, vault: &str) -> bool {
+fn mem_is_durable(engine: &memstead_base::Engine, mem: &str) -> bool {
     engine
         .mounts()
         .iter()
-        .find(|m| m.vault == vault)
+        .find(|m| m.mem == mem)
         .map(|m| m.storage.is_durable())
         .unwrap_or(false)
 }
 
-/// Refuse params the filesystem-vault MCP surface does not honour rather
+/// Refuse params the filesystem-mem MCP surface does not honour rather
 /// than silently dropping them (Plan 03, Part B). Each `(name, meaningful)`
 /// pair flags a param this surface hardwires off; `meaningful` is true when
 /// the caller passed it with an effect they expect (a non-empty map/list, or
@@ -231,9 +231,9 @@ fn reject_unsupported_params(params: &[(&str, bool)]) -> Option<CallToolResult> 
         return None;
     }
     let msg = format!(
-        "the filesystem-vault surface does not implement: {}. These params were \
+        "the filesystem-mem surface does not implement: {}. These params were \
          refused, not silently ignored — pass them only to the unified engine \
-         (vault-repo MCP / CLI), or omit them.",
+         (mem-repo MCP / CLI), or omit them.",
         dropped.join(", ")
     );
     Some(tool_error_with_details(
@@ -244,17 +244,17 @@ fn reject_unsupported_params(params: &[(&str, bool)]) -> Option<CallToolResult> 
 }
 
 /// Map an [`EngineError`] to an MCP error envelope. Codes match the
-/// vault-repo error-code vocabulary (`HASH_MISMATCH`, `ENTITY_NOT_FOUND`,
-/// `ENTITY_ALREADY_EXISTS`, etc.) so agents that handle vault-repo
+/// mem-repo error-code vocabulary (`HASH_MISMATCH`, `ENTITY_NOT_FOUND`,
+/// `ENTITY_ALREADY_EXISTS`, etc.) so agents that handle mem-repo
 /// errors get the same shape here.
 ///
-/// Variants that should never trip on a single-vault filesystem-vault
-/// boot path (`DuplicateVault`, `UnknownVault`, `ReadOnlyMount`) still
+/// Variants that should never trip on a single-mem filesystem-mem
+/// boot path (`DuplicateMem`, `UnknownMem`, `ReadOnlyMount`) still
 /// fall into a generic `INTERNAL` envelope so the wire shape is total —
 /// a future bug that produced one of those wouldn't crash the handler.
 /// Schema-resolution failures (`SchemaNotFound`, `SchemaResolverInit`)
 /// surface as their own typed codes via [`EngineError::code()`] so
-/// callers see the same wire contract here as on the vault-repo server.
+/// callers see the same wire contract here as on the mem-repo server.
 fn engine_op_error(err: EngineError) -> CallToolResult {
     // Pre-compute the canonical Display string. Variants that take the
     // engine's Display rendering verbatim use this — variants that build
@@ -366,7 +366,7 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
                     serde_json::json!({
                         "from_id": r.from_id,
                         "rel_types": r.rel_types,
-                        "vault": r.vault,
+                        "mem": r.mem,
                         "capability": "write",
                     })
                 })
@@ -382,47 +382,47 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
             result.structured_content = Some(payload);
             result
         }
-        EngineError::VaultHasIncomingRefs { vault, referrers } => {
-            // Single-vault filesystem boot path never produces
-            // VaultHasIncomingRefs in practice — vault-delete is a
+        EngineError::MemHasIncomingRefs { mem, referrers } => {
+            // Single-mem filesystem boot path never produces
+            // MemHasIncomingRefs in practice — mem-delete is a
             // pro-only operation. The arm is here for exhaustiveness;
             // the envelope shape matches the pro-side mapping so
             // wire-byte parity holds if the filesystem flavour ever
-            // gains a vault-delete surface.
+            // gains a mem-delete surface.
             let referrers_json: Vec<_> = referrers
                 .iter()
                 .map(|r| {
                     serde_json::json!({
                         "from_id": r.from_id,
                         "rel_types": r.rel_types,
-                        "vault": r.vault,
+                        "mem": r.mem,
                     })
                 })
                 .collect();
             let message = display;
             let payload = serde_json::json!({
-                "code": "VAULT_HAS_INCOMING_REFS",
+                "code": "MEM_HAS_INCOMING_REFS",
                 "message": message.clone(),
-                "details": { "vault": vault, "referrers": referrers_json },
+                "details": { "mem": mem, "referrers": referrers_json },
             });
-            let text = format!("ERROR [VAULT_HAS_INCOMING_REFS]: {message}");
+            let text = format!("ERROR [MEM_HAS_INCOMING_REFS]: {message}");
             let mut result = CallToolResult::error(vec![Content::text(text)]);
             result.structured_content = Some(payload);
             result
         }
-        EngineError::CrossVaultLinkNotAllowed { from_vault, to_vault } => tool_error(
-            "CROSS_VAULT_LINK_NOT_ALLOWED",
+        EngineError::CrossMemLinkNotAllowed { from_mem, to_mem } => tool_error(
+            "CROSS_MEM_LINK_NOT_ALLOWED",
             &format!(
-                "cross-vault link from `{from_vault}` to `{to_vault}` is not allowed by the workspace `[cross_vault_links]` policy"
+                "cross-mem link from `{from_mem}` to `{to_mem}` is not allowed by the workspace `[cross_mem_links]` policy"
             ),
         ),
-        EngineError::CrossVaultTargetNotFound { target_id, target_vault } => tool_error(
-            "CROSS_VAULT_TARGET_NOT_FOUND",
+        EngineError::CrossMemTargetNotFound { target_id, target_mem } => tool_error(
+            "CROSS_MEM_TARGET_NOT_FOUND",
             &format!(
-                "cross-vault target `{target_id}` is absent in read-only vault `{target_vault}` — auto-stub is unavailable across the read-only boundary"
+                "cross-mem target `{target_id}` is absent in read-only mem `{target_mem}` — auto-stub is unavailable across the read-only boundary"
             ),
         ),
-        EngineError::CrossVaultEdgeNotDeclared {
+        EngineError::CrossMemEdgeNotDeclared {
             source_schema,
             target_schema,
             rel_type,
@@ -431,7 +431,7 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
         } => {
             let message = display;
             let payload = serde_json::json!({
-                "code": "CROSS_VAULT_EDGE_NOT_DECLARED",
+                "code": "CROSS_MEM_EDGE_NOT_DECLARED",
                 "message": message.clone(),
                 "details": {
                     "source_schema": source_schema,
@@ -441,7 +441,7 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
                     "to_id": to_id,
                 },
             });
-            let text = format!("ERROR [CROSS_VAULT_EDGE_NOT_DECLARED]: {message}");
+            let text = format!("ERROR [CROSS_MEM_EDGE_NOT_DECLARED]: {message}");
             let mut result = CallToolResult::error(vec![Content::text(text)]);
             result.structured_content = Some(payload);
             result
@@ -496,16 +496,16 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
             result.structured_content = Some(payload);
             result
         }
-        EngineError::RenamePartialFailure { committed_vaults, failed_vault, failure_cause } => {
+        EngineError::RenamePartialFailure { committed_mems, failed_mem, failure_cause } => {
             let message = format!(
-                "rename partial-failure: vault `{failed_vault}` aborted with cause {failure_cause:?} after {committed_vaults:?} already committed — reload and retry, or reconcile manually"
+                "rename partial-failure: mem `{failed_mem}` aborted with cause {failure_cause:?} after {committed_mems:?} already committed — reload and retry, or reconcile manually"
             );
             let payload = serde_json::json!({
                 "code": "RENAME_PARTIAL_FAILURE",
                 "message": message.clone(),
                 "details": {
-                    "committed_vaults": committed_vaults,
-                    "failed_vault": failed_vault,
+                    "committed_mems": committed_mems,
+                    "failed_mem": failed_mem,
                     "failure_cause": failure_cause,
                 },
             });
@@ -514,27 +514,27 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
             result.structured_content = Some(payload);
             result
         }
-        EngineError::RenameBlockedByCrossVaultPolicy { ref from_vault, ref blocked_referrers } => {
+        EngineError::RenameBlockedByCrossMemPolicy { ref from_mem, ref blocked_referrers } => {
             let message = err.to_string();
             let entries: Vec<_> = blocked_referrers
                 .iter()
                 .map(|r| {
                     serde_json::json!({
-                        "from_vault": r.from_vault,
-                        "to_vault": r.to_vault,
+                        "from_mem": r.from_mem,
+                        "to_mem": r.to_mem,
                         "count": r.count,
                     })
                 })
                 .collect();
             let payload = serde_json::json!({
-                "code": "RENAME_BLOCKED_BY_CROSS_VAULT_POLICY",
+                "code": "RENAME_BLOCKED_BY_CROSS_MEM_POLICY",
                 "message": message.clone(),
                 "details": {
-                    "from_vault": from_vault,
+                    "from_mem": from_mem,
                     "blocked_referrers": entries,
                 },
             });
-            let text = format!("ERROR [RENAME_BLOCKED_BY_CROSS_VAULT_POLICY]: {message}");
+            let text = format!("ERROR [RENAME_BLOCKED_BY_CROSS_MEM_POLICY]: {message}");
             let mut result = CallToolResult::error(vec![Content::text(text)]);
             result.structured_content = Some(payload);
             result
@@ -611,12 +611,12 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
                 })),
             )
         }
-        EngineError::InvalidWikiLinkVault { raw, section, reason } => {
+        EngineError::InvalidWikiLinkMem { raw, section, reason } => {
             let message = format!(
-                "body wiki-link vault prefix '{raw}' in section '{section}' is not a valid vault name: {reason}"
+                "body wiki-link mem prefix '{raw}' in section '{section}' is not a valid mem name: {reason}"
             );
             tool_error_with_details(
-                "INVALID_VAULT_NAME",
+                "INVALID_MEM_NAME",
                 &message,
                 Some(serde_json::json!({
                     "raw": raw,
@@ -766,10 +766,10 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
         }
         // Codes follow `EngineError::code()` — the single wire-code
         // source every surface (pro MCP, CLI, wasm) shares. These two
-        // historically drifted (`VAULT_WRITER_ERROR` / `PARSE_AFTER_WRITE`);
+        // historically drifted (`MEM_WRITER_ERROR` / `PARSE_AFTER_WRITE`);
         // `basis_backend_and_parse_after_write_codes_follow_code_contract`
         // pins them to `code()` so a re-divergence fails the build.
-        EngineError::Backend(e) => tool_error("VAULT_ERROR", &e.to_string()),
+        EngineError::Backend(e) => tool_error("MEM_ERROR", &e.to_string()),
         EngineError::ParseAfterWrite(e) => {
             tool_error("PARSE_ERROR", &format!("parse-after-write failed: {e}"))
         }
@@ -777,9 +777,9 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
         EngineError::Validation(v) => validation_envelope(v),
         // Schema-resolution, boot-path, and lifecycle variants surface
         // as their own typed codes so the wire contract matches the
-        // vault-repo server. Pre-fix this set collapsed to `INTERNAL`
+        // mem-repo server. Pre-fix this set collapsed to `INTERNAL`
         // — a basis-fireable variant (multi-folder workspaces can trip
-        // DuplicateVault / UnknownVault; cross_vault_links policy can
+        // DuplicateMem / UnknownMem; cross_mem_links policy can
         // trip ReadOnlyMount; generic input validation produces
         // InvalidInput) shipped as INTERNAL instead of its typed code,
         // breaking the agent contract that the structured code matches
@@ -827,8 +827,8 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
         ),
         e @ EngineError::SchemaNotFound { .. }
         | e @ EngineError::SchemaResolverInit(_)
-        | e @ EngineError::DuplicateVault(_)
-        | e @ EngineError::UnknownVault(_)
+        | e @ EngineError::DuplicateMem(_)
+        | e @ EngineError::UnknownMem(_)
         | e @ EngineError::UnknownRef(_)
         | e @ EngineError::UnknownRemote(_)
         | e @ EngineError::LocalDivergence { .. }
@@ -837,8 +837,8 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
         | e @ EngineError::SchemaViolationInFetch { .. }
         | e @ EngineError::PushedCommitsProtected { .. }
         | e @ EngineError::ReadOnlyMount(_)
-        | e @ EngineError::Vault(_)
-        | e @ EngineError::VaultNameCollision { .. }
+        | e @ EngineError::Mem(_)
+        | e @ EngineError::MemNameCollision { .. }
         | e @ EngineError::InvalidInput(_) => tool_error(e.code(), &e.to_string()),
         EngineError::RenameSimilarityOutOfRange {
             requested,
@@ -855,18 +855,18 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
                 "allowed_range": [allowed_min, allowed_max],
             })),
         ),
-        EngineError::VaultConfigIncomplete { vault, missing_fields } => {
+        EngineError::MemConfigIncomplete { mem, missing_fields } => {
             let message = format!(
-                "vault `{vault}` config is missing required field(s) {missing_fields:?} — \
-                 set via `memstead vault set-version {vault} <version>` (e.g. 0.1.0)"
+                "mem `{mem}` config is missing required field(s) {missing_fields:?} — \
+                 set via `memstead mem set-version {mem} <version>` (e.g. 0.1.0)"
             );
             tool_error_with_details(
-                "VAULT_CONFIG_INCOMPLETE",
+                "MEM_CONFIG_INCOMPLETE",
                 &message,
                 Some(serde_json::json!({
-                    "vault": vault,
+                    "mem": mem,
                     "missing_fields": missing_fields,
-                    "set_via": format!("memstead vault set-version {vault} <version>"),
+                    "set_via": format!("memstead mem set-version {mem} <version>"),
                 })),
             )
         }
@@ -878,19 +878,19 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
             )
         }
         // Typed refusal when
-        // `export_markdown` targets a vault whose active backend
+        // `export_markdown` targets a mem whose active backend
         // doesn't support markdown regeneration. Filesystem-backed
         // workspaces don't reach this arm today (single folder mount),
         // but the variant must be handled to keep the match exhaustive.
         ref err @ EngineError::MarkdownExportUnsupportedBackend {
-            ref vault,
+            ref mem,
             ref active_backend,
             ref supported_backends,
         } => tool_error_with_details(
             "MARKDOWN_EXPORT_UNSUPPORTED_BACKEND",
             &err.to_string(),
             Some(serde_json::json!({
-                "vault": vault,
+                "mem": mem,
                 "active_backend": active_backend,
                 "supported_backends": supported_backends,
             })),
@@ -908,13 +908,13 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
         ),
         // A bad `since` cursor on `memstead_changes_since`. The folder backend
         // keys `since` off timestamps rather than commit SHAs, so this
-        // arm isn't reached on a filesystem-vault workspace today, but the
+        // arm isn't reached on a filesystem-mem workspace today, but the
         // variant must be handled to keep the match exhaustive.
-        ref err @ EngineError::InvalidChangesCursor { ref vault, ref since } => {
+        ref err @ EngineError::InvalidChangesCursor { ref mem, ref since } => {
             tool_error_with_details(
                 "INVALID_CURSOR",
                 &err.to_string(),
-                Some(serde_json::json!({ "vault": vault, "since": since })),
+                Some(serde_json::json!({ "mem": mem, "since": since })),
             )
         }
     }
@@ -923,7 +923,7 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
 /// Map a runtime [`memstead_base::runtime_validator::ValidationError`] to
 /// the MCP wire envelope. Thin delegation to the shared
 /// [`crate::error_envelopes::validation_envelope`] so the wire shape
-/// stays bit-identical with the vault-repo `server.rs` handlers.
+/// stays bit-identical with the mem-repo `server.rs` handlers.
 fn validation_envelope(
     err: memstead_base::runtime_validator::ValidationError,
 ) -> CallToolResult {
@@ -934,7 +934,7 @@ fn validation_envelope(
 impl FilesystemMcpServer {
     #[tool(
         name = "memstead_entity",
-        description = "Read one entity as markdown (filesystem-vault flavour). Same JSON shape as the vault-repo `memstead_entity`. Frontmatter carries `_hash` (content hash) for optimistic locking on follow-up mutations.",
+        description = "Read one entity as markdown (filesystem-mem flavour). Same JSON shape as the mem-repo `memstead_entity`. Frontmatter carries `_hash` (content hash) for optimistic locking on follow-up mutations.",
         annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false)
     )]
     fn memstead_entity(&self, Parameters(p): Parameters<EntityParams>) -> CallToolResult {
@@ -957,7 +957,7 @@ impl FilesystemMcpServer {
         }
 
         // Append `## Relations` when the caller asked for it. Mirrors
-        // the vault-repo entity handler — outgoing + incoming edges
+        // the mem-repo entity handler — outgoing + incoming edges
         // grouped by direction, rendered as a Markdown table.
         if p.include_relations.unwrap_or(false) {
             let outgoing = engine.store().outgoing(&id).to_vec();
@@ -1011,7 +1011,7 @@ impl FilesystemMcpServer {
 
     #[tool(
         name = "memstead_create",
-        description = "Create a new entity in the filesystem-vault workspace. Required: `title`, `entity_type`. Optional `sections`, `metadata`, `note`, `vault`. `vault` selects the target mount; omit it to land in the default writable vault (the first writable mount in declaration order). A create aimed at a read-only mount is refused with READ_ONLY_MOUNT. The `note` lands in `.memstead/changes.jsonl` (the filesystem-vault analogue of the vault-repo commit body). `relations` and `dry_run` are not implemented on this surface: passing a non-empty `relations` or `dry_run: true` is REFUSED up front with `UNSUPPORTED_PARAM` (`details.params` names them), never silently ignored — so a `dry_run` preview can never accidentally land a real write. Omit them, or use the unified engine (vault-repo MCP / CLI) which honours both.",
+        description = "Create a new entity in the filesystem-mem workspace. Required: `title`, `entity_type`. Optional `sections`, `metadata`, `note`, `mem`. `mem` selects the target mount; omit it to land in the default writable mem (the first writable mount in declaration order). A create aimed at a read-only mount is refused with READ_ONLY_MOUNT. The `note` lands in `.memstead/changes.jsonl` (the filesystem-mem analogue of the mem-repo commit body). `relations` and `dry_run` are not implemented on this surface: passing a non-empty `relations` or `dry_run: true` is REFUSED up front with `UNSUPPORTED_PARAM` (`details.params` names them), never silently ignored — so a `dry_run` preview can never accidentally land a real write. Omit them, or use the unified engine (mem-repo MCP / CLI) which honours both.",
         annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = false, open_world_hint = false)
     )]
     fn memstead_create(&self, Parameters(p): Parameters<CreateParams>) -> CallToolResult {
@@ -1030,36 +1030,36 @@ impl FilesystemMcpServer {
         }
         let mut engine = self.engine.lock().unwrap();
         let (actor, client) = self.actor_and_client();
-        // Resolve the target vault. An explicit, non-empty `vault` is
+        // Resolve the target mem. An explicit, non-empty `mem` is
         // honoured verbatim — so a multi-mount engine (e.g. a read-only
-        // content vault alongside a writable sketch vault) can be targeted
+        // content mem alongside a writable sketch mem) can be targeted
         // by name, and a create aimed at a read-only mount surfaces the
         // engine's READ_ONLY_MOUNT refusal rather than being silently
         // redirected to the writable mount. Omitted → the default writable
-        // vault (first writable mount in declaration order), falling back to
+        // mem (first writable mount in declaration order), falling back to
         // the first mount so a read-only-only engine still resolves a name
         // (the create then refuses with READ_ONLY_MOUNT, never panics on an
-        // empty vault). Single-vault filesystem workspaces are unaffected:
-        // the sole vault is both the first and the default writable one.
-        let vault = match p.vault.as_deref() {
+        // empty mem). Single-mem filesystem workspaces are unaffected:
+        // the sole mem is both the first and the default writable one.
+        let mem = match p.mem.as_deref() {
             Some(v) if !v.is_empty() => v.to_string(),
             _ => engine
-                .default_writable_vault()
-                .or_else(|| engine.vault_names().into_iter().next())
+                .default_writable_mem()
+                .or_else(|| engine.mem_names().into_iter().next())
                 .map(String::from)
                 .unwrap_or_default(),
         };
         let args = CreateEntityArgs {
-            vault,
+            mem,
             title: p.title,
             entity_type: p.entity_type,
             sections: p.sections.unwrap_or_default(),
             metadata: p.metadata.unwrap_or_default(),
-            // The filesystem-vault MCP surface doesn't (yet)
+            // The filesystem-mem MCP surface doesn't (yet)
             // accept inline relations on the wire — pass empty;
             // operators wire edges via memstead_relate post-create.
             relations: Vec::new(),
-            // dry_run not exposed on the filesystem-vault tool
+            // dry_run not exposed on the filesystem-mem tool
             // surface; operators preview changes by reading first
             // and inspecting on the agent side.
             dry_run: false,
@@ -1069,12 +1069,12 @@ impl FilesystemMcpServer {
                 // WarningHint's Serialize impl produces the same
                 // `{code, message, details}` envelope the manual
                 // synthesis used to emit. commit_sha + title +
-                // vault are now first-class on the outcome.
-                let durable = vault_is_durable(&engine, &outcome.vault);
+                // mem are now first-class on the outcome.
+                let durable = mem_is_durable(&engine, &outcome.mem);
                 let body = serde_json::json!({
                     "id": outcome.id.to_string(),
                     "title": outcome.title,
-                    "vault": outcome.vault,
+                    "mem": outcome.mem,
                     "file_path": outcome.file_path,
                     "_hash": outcome.content_hash,
                     "commit_sha": outcome.commit_sha,
@@ -1090,7 +1090,7 @@ impl FilesystemMcpServer {
 
     #[tool(
         name = "memstead_update",
-        description = "Update an existing entity in the filesystem-vault workspace. `expected_hash` (from a previous memstead_entity read) is required — mismatch returns code HASH_MISMATCH with details.current carrying the live hash. This surface honours `sections` (replace) + `metadata` (set) + `metadata_unset` + `declare_relations` + `relations_unset`. The vault-repo `append_sections` / `patch_sections` / `dry_run` shapes are NOT implemented here: passing a non-empty `append_sections` / `patch_sections`, or `dry_run: true`, is REFUSED up front with `UNSUPPORTED_PARAM` (`details.params` names them), never silently ignored — an agent that patches is told its patch was dropped instead of believing it applied. Omit them, or use the unified engine (vault-repo MCP / CLI) which honours all three.",
+        description = "Update an existing entity in the filesystem-mem workspace. `expected_hash` (from a previous memstead_entity read) is required — mismatch returns code HASH_MISMATCH with details.current carrying the live hash. This surface honours `sections` (replace) + `metadata` (set) + `metadata_unset` + `declare_relations` + `relations_unset`. The mem-repo `append_sections` / `patch_sections` / `dry_run` shapes are NOT implemented here: passing a non-empty `append_sections` / `patch_sections`, or `dry_run: true`, is REFUSED up front with `UNSUPPORTED_PARAM` (`details.params` names them), never silently ignored — an agent that patches is told its patch was dropped instead of believing it applied. Omit them, or use the unified engine (mem-repo MCP / CLI) which honours all three.",
         annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = false, open_world_hint = false)
     )]
     fn memstead_update(&self, Parameters(p): Parameters<UpdateParams>) -> CallToolResult {
@@ -1128,7 +1128,7 @@ impl FilesystemMcpServer {
             id: EntityId(p.id),
             expected_hash: Some(p.expected_hash),
             sections: p.sections.unwrap_or_default(),
-            // The filesystem-vault tool doesn't expose
+            // The filesystem-mem tool doesn't expose
             // append_sections / patch_sections on the wire yet;
             // pass empty.
             append_sections: IndexMap::new(),
@@ -1149,7 +1149,7 @@ impl FilesystemMcpServer {
         };
         match engine.update_entity(args, actor, client.as_ref(), p.note.as_deref()) {
             Ok(outcome) => {
-                let durable = vault_is_durable(&engine, outcome.id.vault());
+                let durable = mem_is_durable(&engine, outcome.id.mem());
                 let body = serde_json::json!({
                     "id": outcome.id.to_string(),
                     "file_path": outcome.file_path,
@@ -1182,7 +1182,7 @@ impl FilesystemMcpServer {
 
     #[tool(
         name = "memstead_delete",
-        description = "Delete an entity from the filesystem-vault workspace. `expected_hash` is required (read first via memstead_entity); mismatch returns HASH_MISMATCH. Refuses entities with incoming references unless the agent passes `force` via the workspace-level config (v1 has no per-call force toggle on the MCP surface — use `memstead delete --force` on the CLI). The `note` lands in `.memstead/changes.jsonl`.",
+        description = "Delete an entity from the filesystem-mem workspace. `expected_hash` is required (read first via memstead_entity); mismatch returns HASH_MISMATCH. Refuses entities with incoming references unless the agent passes `force` via the workspace-level config (v1 has no per-call force toggle on the MCP surface — use `memstead delete --force` on the CLI). The `note` lands in `.memstead/changes.jsonl`.",
         annotations(read_only_hint = false, destructive_hint = true, idempotent_hint = false, open_world_hint = false)
     )]
     fn memstead_delete(&self, Parameters(p): Parameters<DeleteParams>) -> CallToolResult {
@@ -1202,7 +1202,7 @@ impl FilesystemMcpServer {
         };
         match engine.delete_entity(args, actor, client.as_ref(), p.note.as_deref()) {
             Ok(outcome) => {
-                let durable = vault_is_durable(&engine, outcome.id.vault());
+                let durable = mem_is_durable(&engine, outcome.id.mem());
                 let body = serde_json::json!({
                     "id": outcome.id.to_string(),
                     "file_path": outcome.file_path,
@@ -1220,10 +1220,10 @@ impl FilesystemMcpServer {
 
     #[tool(
         name = "memstead_relate",
-        description = "Add or remove a typed relationship between two entities in the same filesystem-vault. Cross-vault targets are rejected with CROSS_VAULT_RELATION (filesystem-vault is single-vault by design). `remove: true` drops the matching pair if present; otherwise the call appends. No-op paths (already present add, absent remove) succeed silently and do not append a changelog line.",
+        description = "Add or remove a typed relationship between two entities in the same filesystem-mem. Cross-mem targets are rejected with CROSS_MEM_RELATION (filesystem-mem is single-mem by design). `remove: true` drops the matching pair if present; otherwise the call appends. No-op paths (already present add, absent remove) succeed silently and do not append a changelog line.",
         // idempotent_hint = true: relate's duplicate-add and
         // remove-nonexistent paths are typed-warning no-ops, so a retry
-        // converges. Matches the vault-repo server's annotation —
+        // converges. Matches the mem-repo server's annotation —
         // `relate_annotation_is_idempotent_on_both_flavours` pins parity.
         annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = true, open_world_hint = false)
     )]
@@ -1231,7 +1231,7 @@ impl FilesystemMcpServer {
         let mut engine = self.engine.lock().unwrap();
         let (actor, client) = self.actor_and_client();
         // Relate is hash-stable: the source's content_hash does not
-        // change under add/remove. The vault-repo tool surface omits
+        // change under add/remove. The mem-repo tool surface omits
         // `expected_hash` for relate, so we pass `None` and let the
         // engine's single-writer assumption stand.
         let args = RelateEntityArgs {
@@ -1257,10 +1257,10 @@ impl FilesystemMcpServer {
                 // deprecated top-level `stub_warning` field in Item
                 // 03). WarningHint's Serialize impl produces the
                 // `{ code, message, details }` envelope shared with
-                // the vault-repo `RelateResult`.
+                // the mem-repo `RelateResult`.
                 // Surface `orphan_stubs_removed` so the basis surface
                 // matches pro on the relate response shape.
-                let durable = vault_is_durable(&engine, outcome.from.vault());
+                let durable = mem_is_durable(&engine, outcome.from.mem());
                 let body = serde_json::json!({
                     "from": outcome.from.to_string(),
                     "to": outcome.to.to_string(),
@@ -1285,7 +1285,7 @@ impl FilesystemMcpServer {
 
     #[tool(
         name = "memstead_search",
-        description = "Search entities by lexical content + structural filters. Same JSON shape as the vault-repo `memstead_search`. The first call after engine init or any mutation pays a one-time search-index build (scales with entity count); subsequent calls reuse the cache. Pass an empty `query: {}` (or omit it) for a metadata-only structural filter — the list shape folds in here. Filters: `vault`, `entity_type`, `edge_type` (first-class engine axes), `stub`, plus `filters: { <field>: <value> }` for any schema-declared `filterable: equality` field (e.g. `{\"level\": \"M0\", \"tags\": \"auth\"}`). Strict type-narrowing: an entity whose type doesn't declare a *filterable* field is excluded (warning `FILTER_TYPE_SCOPED`); a field declared but not filterable on any reachable type is ignored — the result equals the same search without it (warning `FIELD_NOT_FILTERABLE`), never emptied, in both the scoped and unscoped case; a key no schema declares is ignored (`UNKNOWN_FILTER_KEY`). Pagination via `limit` / `offset`. Section bodies are not shipped per hit — read them with `memstead_entity`. A page is bounded to `token_budget` (default 12000): an overflowing page returns the highest-ranked hits that fit with a `SEARCH_RESULTS_TRUNCATED` warning (`kept`/`budget`) while `_total` stays the full count — page on with `offset` or raise `token_budget`.",
+        description = "Search entities by lexical content + structural filters. Same JSON shape as the mem-repo `memstead_search`. The first call after engine init or any mutation pays a one-time search-index build (scales with entity count); subsequent calls reuse the cache. Pass an empty `query: {}` (or omit it) for a metadata-only structural filter — the list shape folds in here. Filters: `mem`, `entity_type`, `edge_type` (first-class engine axes), `stub`, plus `filters: { <field>: <value> }` for any schema-declared `filterable: equality` field (e.g. `{\"level\": \"M0\", \"tags\": \"auth\"}`). Strict type-narrowing: an entity whose type doesn't declare a *filterable* field is excluded (warning `FILTER_TYPE_SCOPED`); a field declared but not filterable on any reachable type is ignored — the result equals the same search without it (warning `FIELD_NOT_FILTERABLE`), never emptied, in both the scoped and unscoped case; a key no schema declares is ignored (`UNKNOWN_FILTER_KEY`). Pagination via `limit` / `offset`. Section bodies are not shipped per hit — read them with `memstead_entity`. A page is bounded to `token_budget` (default 12000): an overflowing page returns the highest-ranked hits that fit with a `SEARCH_RESULTS_TRUNCATED` warning (`kept`/`budget`) while `_total` stays the full count — page on with `offset` or raise `token_budget`.",
         annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false)
     )]
     fn memstead_search(&self, Parameters(p): Parameters<SearchParams>) -> CallToolResult {
@@ -1293,7 +1293,7 @@ impl FilesystemMcpServer {
         let filters = p.filters.unwrap_or_default();
         let scope = SearchScope {
             query: p.query,
-            vault: p.vault,
+            mem: p.mem,
             entity_type: p.entity_type,
             limit: p.limit,
             offset: p.offset,
@@ -1329,7 +1329,7 @@ impl FilesystemMcpServer {
 
     #[tool(
         name = "memstead_health",
-        description = "Health summary for the filesystem-vault workspace: orphans, stubs, missing required fields, stale entities. Returns the same JSON shape as the vault-repo `memstead_health` (single-vault, so `writable_vaults` carries one entry). Detail sections are produced via the kernel's `compute_health`. `include` accepts the shared health key set — today the basis surface dispatches `dangling_links` (matching the vault-repo response shape: `{from, target_id, target_path, section}`) and validates every key against the allowed set, emitting `UNKNOWN_INCLUDE_KEY` on the response's `warnings[]` for typos. `conformance` / `integrity` are dispatched too: `conformance` lints every entity against the effective schema (the pin, or `target_schema` when given) into a `findings` array of `{id, axis, code, detail}` with write-time typed codes; `integrity` adds the consistency axis (DANGLING_LINK, ORPHAN_STUB) to the same list. Other detail keys (`orphans`, `stubs`, …) are accepted but the v1 surface returns the full report regardless — narrowing is a follow-up.",
+        description = "Health summary for the filesystem-mem workspace: orphans, stubs, missing required fields, stale entities. Returns the same JSON shape as the mem-repo `memstead_health` (single-mem, so `writable_mems` carries one entry). Detail sections are produced via the kernel's `compute_health`. `include` accepts the shared health key set — today the basis surface dispatches `dangling_links` (matching the mem-repo response shape: `{from, target_id, target_path, section}`) and validates every key against the allowed set, emitting `UNKNOWN_INCLUDE_KEY` on the response's `warnings[]` for typos. `conformance` / `integrity` are dispatched too: `conformance` lints every entity against the effective schema (the pin, or `target_schema` when given) into a `findings` array of `{id, axis, code, detail}` with write-time typed codes; `integrity` adds the consistency axis (DANGLING_LINK, ORPHAN_STUB) to the same list. Other detail keys (`orphans`, `stubs`, …) are accepted but the v1 surface returns the full report regardless — narrowing is a follow-up.",
         annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false)
     )]
     fn memstead_health(&self, Parameters(p): Parameters<HealthParams>) -> CallToolResult {
@@ -1364,8 +1364,8 @@ impl FilesystemMcpServer {
 
         // Conformance axis (`conformance`), or both axes
         // (`integrity`) — same `findings` slot and `{ id, axis, code,
-        // detail }` shape as the vault-repo flavour. Filesystem-vault
-        // is single-vault: the scan covers the one mounted vault.
+        // detail }` shape as the mem-repo flavour. Filesystem-mem
+        // is single-mem: the scan covers the one mounted mem.
         if include.iter().any(|s| s == "conformance" || s == "integrity") {
             let target: Option<memstead_schema::SchemaRef> = match p.target_schema.as_deref() {
                 None => None,
@@ -1379,10 +1379,10 @@ impl FilesystemMcpServer {
                     }
                 },
             };
-            let mut vault_names: Vec<String> = engine.schemas().keys().cloned().collect();
-            vault_names.sort();
+            let mut mem_names: Vec<String> = engine.schemas().keys().cloned().collect();
+            mem_names.sort();
             let mut findings = Vec::new();
-            for v in &vault_names {
+            for v in &mem_names {
                 match engine.conformance_findings(v, target.as_ref()) {
                     Ok(f) => findings.extend(f),
                     Err(e) => {
@@ -1406,16 +1406,16 @@ impl FilesystemMcpServer {
 
     #[tool(
         name = "memstead_schema",
-        description = "Read the workspace's pinned schema as a JSON document — `ref` (canonical `name@version`), `relationship_mode`, the relationship vocabulary, `community`, `used_by[]`, top-level `origin` (`first-party` / `third-party`; a third-party schema is served structural-only with its prose-instruction fields omitted), top-level `alias_target_rel_type` (when authored — the rel-type body wiki-links `[[target]]` auto-emit), and per-type section/field detail. Accepts either `name` (bare name or canonical pin) or `vault` (the workspace's single vault). Passing both is `INVALID_INPUT`. v1 surface returns the engine's pinned schema regardless of which form is used (filesystem-vault is single-vault, single-schema). Pass `verbosity: \"lite\"` for a cheap cold-start skeleton — entity-type names + section keys + field shapes, relationship names + endpoints, the alias pointer, prose dropped (heavy arrays ship as `types_summary`/`relationships_summary`); default `\"full\"`. An unrecognized `verbosity` returns `INVALID_INPUT`. Returns `ENTITY_NOT_FOUND` when `name` explicitly mismatches the pinned schema; `UNKNOWN_VAULT` when `vault` is not the workspace's vault.",
+        description = "Read the workspace's pinned schema as a JSON document — `ref` (canonical `name@version`), `relationship_mode`, the relationship vocabulary, `community`, `used_by[]`, top-level `origin` (`first-party` / `third-party`; a third-party schema is served structural-only with its prose-instruction fields omitted), top-level `alias_target_rel_type` (when authored — the rel-type body wiki-links `[[target]]` auto-emit), and per-type section/field detail. Accepts either `name` (bare name or canonical pin) or `mem` (the workspace's single mem). Passing both is `INVALID_INPUT`. v1 surface returns the engine's pinned schema regardless of which form is used (filesystem-mem is single-mem, single-schema). Pass `verbosity: \"lite\"` for a cheap cold-start skeleton — entity-type names + section keys + field shapes, relationship names + endpoints, the alias pointer, prose dropped (heavy arrays ship as `types_summary`/`relationships_summary`); default `\"full\"`. An unrecognized `verbosity` returns `INVALID_INPUT`. Returns `ENTITY_NOT_FOUND` when `name` explicitly mismatches the pinned schema; `UNKNOWN_MEM` when `mem` is not the workspace's mem.",
         annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false)
     )]
     fn memstead_schema(&self, Parameters(p): Parameters<SchemaParams>) -> CallToolResult {
         let engine = self.engine.lock().unwrap();
-        // filesystem-vault is single-vault by design; the new engine
+        // filesystem-mem is single-mem by design; the new engine
         // carries one schemas[] entry. Pick it.
-        let Some((vault_name, schema)) = engine.schemas().iter().next() else {
+        let Some((mem_name, schema)) = engine.schemas().iter().next() else {
             // Genuinely-systemic: the filesystem boot path always
-            // mounts exactly one vault and pins exactly one schema. An
+            // mounts exactly one mem and pins exactly one schema. An
             // empty `schemas()` map means engine construction itself
             // is inconsistent — no agent-side recovery applies, so
             // `INTERNAL` is the honest wire code (this class of
@@ -1430,25 +1430,25 @@ impl FilesystemMcpServer {
         let pinned_version = schema.version.to_string();
         let canon = format!("{pinned_name}@{pinned_version}");
 
-        // Validate (`name`, `vault`) input shape; either resolves to a
+        // Validate (`name`, `mem`) input shape; either resolves to a
         // string the lookup below checks against the pinned schema.
-        // The `vault` path is provided for parity with the vault-repo
-        // flavour; in filesystem-vault the single vault always maps
+        // The `mem` path is provided for parity with the mem-repo
+        // flavour; in filesystem-mem the single mem always maps
         // to the single schema.
-        let want_owned: String = match (p.name.as_deref(), p.vault.as_deref()) {
+        let want_owned: String = match (p.name.as_deref(), p.mem.as_deref()) {
             (Some(_), Some(_)) => {
                 return tool_error(
                     "INVALID_INPUT",
-                    "memstead_schema accepts exactly one of `name` or `vault`, not both.",
+                    "memstead_schema accepts exactly one of `name` or `mem`, not both.",
                 );
             }
             (Some(name), None) => name.trim().to_string(),
-            (None, Some(vault)) => {
-                if vault != vault_name.as_str() {
+            (None, Some(mem)) => {
+                if mem != mem_name.as_str() {
                     return tool_error(
-                        "UNKNOWN_VAULT",
+                        "UNKNOWN_MEM",
                         &format!(
-                            "unknown vault: {vault:?} — workspace mounts {vault_name:?}"
+                            "unknown mem: {mem:?} — workspace mounts {mem_name:?}"
                         ),
                     );
                 }
@@ -1486,8 +1486,8 @@ impl FilesystemMcpServer {
         };
 
         // One shared, transport-neutral builder for every schema-read
-        // surface (vault-repo MCP, the HTTP `/api/schema` endpoint, and
-        // this filesystem-vault flavour) — no second divergent renderer
+        // surface (mem-repo MCP, the HTTP `/api/schema` endpoint, and
+        // this filesystem-mem flavour) — no second divergent renderer
         // to drift. `ref` carries the canonical `name@version`, and
         // `alias_target_rel_type` rides along, so the public surface now
         // advertises the body-wiki-link edge-authoring rule the full
@@ -1497,7 +1497,7 @@ impl FilesystemMcpServer {
         let origin = engine.schema_origin(schema);
         let payload = memstead_base::render::build_schema_payload(
             schema,
-            vec![vault_name.to_string()],
+            vec![mem_name.to_string()],
             verbosity,
             origin,
         );
@@ -1507,7 +1507,7 @@ impl FilesystemMcpServer {
 
     #[tool(
         name = "memstead_diff",
-        description = "Two-ref structural diff at entity granularity. **Filesystem-vault flavour:** folder mounts carry no git refs, so this tool refuses with `INVALID_INPUT` against folder-backed vaults. Use the vault-repo flavour for the real diff; the surface stays for cross-flavour clients that hit either server.",
+        description = "Two-ref structural diff at entity granularity. **Filesystem-mem flavour:** folder mounts carry no git refs, so this tool refuses with `INVALID_INPUT` against folder-backed mems. Use the mem-repo flavour for the real diff; the surface stays for cross-flavour clients that hit either server.",
         annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false)
     )]
     fn memstead_diff(&self, Parameters(p): Parameters<DiffParams>) -> CallToolResult {
@@ -1519,7 +1519,7 @@ impl FilesystemMcpServer {
             include_content: p.include_content,
             include_ripple: p.include_ripple,
         };
-        match engine.diff(&p.vault, &p.ref_a, &p.ref_b, Some(config)) {
+        match engine.diff(&p.mem, &p.ref_a, &p.ref_b, Some(config)) {
             Ok(diff) => json_response(&diff),
             Err(e) => engine_op_error(e),
         }
@@ -1527,7 +1527,7 @@ impl FilesystemMcpServer {
 
     #[tool(
         name = "memstead_changes_since",
-        description = "Read the per-mutation changelog at `.memstead/changes.jsonl` since a given RFC 3339 timestamp. **Diverges from the vault-repo flavour** — filesystem-vault has no commit history, so `since` is a timestamp string (e.g. `\"2026-05-08T15:30:00.000Z\"`) and the response yields the JSONL entries with `ts > since` as a structured array. Pass an empty string or the UNIX epoch (`\"1970-01-01T00:00:00.000Z\"`) for a full dump. The `vault` field is accepted for shape compatibility with the vault-repo flavour but ignored — single-vault. `rename_similarity` and `include_notes` are also accepted but ignored.",
+        description = "Read the per-mutation changelog at `.memstead/changes.jsonl` since a given RFC 3339 timestamp. **Diverges from the mem-repo flavour** — filesystem-mem has no commit history, so `since` is a timestamp string (e.g. `\"2026-05-08T15:30:00.000Z\"`) and the response yields the JSONL entries with `ts > since` as a structured array. Pass an empty string or the UNIX epoch (`\"1970-01-01T00:00:00.000Z\"`) for a full dump. The `mem` field is accepted for shape compatibility with the mem-repo flavour but ignored — single-mem. `rename_similarity` and `include_notes` are also accepted but ignored.",
         annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false)
     )]
     fn memstead_changes_since(&self, Parameters(p): Parameters<ChangesSinceParams>) -> CallToolResult {
@@ -1535,7 +1535,7 @@ impl FilesystemMcpServer {
         // (mounts can be heterogeneous); use the captured field.
         let log_path = self
             .workspace_root
-            .join(memstead_base::VAULT_META_DIR)
+            .join(memstead_base::MEM_META_DIR)
             .join("changes.jsonl");
         let raw = match std::fs::read_to_string(&log_path) {
             Ok(s) => s,
@@ -1576,7 +1576,7 @@ impl FilesystemMcpServer {
 
     #[tool(
         name = "memstead_rename",
-        description = "Rename an entity by changing its title. The slug, id, and on-disk file path follow. `expected_hash` is required. Atomic referrer rewrite: every Write-Vault entity whose relationships or section bodies point at the old id has its `[[old-slug]]` tokens rewritten in one per-vault commit; ReadOnly referrers leave a residual stub at the old id holding the surviving incoming edges.",
+        description = "Rename an entity by changing its title. The slug, id, and on-disk file path follow. `expected_hash` is required. Atomic referrer rewrite: every Write-Mem entity whose relationships or section bodies point at the old id has its `[[old-slug]]` tokens rewritten in one per-mem commit; ReadOnly referrers leave a residual stub at the old id holding the surviving incoming edges.",
         annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = false, open_world_hint = false)
     )]
     fn memstead_rename(&self, Parameters(p): Parameters<RenameParams>) -> CallToolResult {
@@ -1589,7 +1589,7 @@ impl FilesystemMcpServer {
         };
         match engine.rename_entity(args, actor, client.as_ref(), p.note.as_deref()) {
             Ok(outcome) => {
-                let durable = vault_is_durable(&engine, outcome.new_id.vault());
+                let durable = mem_is_durable(&engine, outcome.new_id.mem());
                 let body = serde_json::json!({
                     "old_id": outcome.old_id.to_string(),
                     "new_id": outcome.new_id.to_string(),
@@ -1609,7 +1609,7 @@ impl FilesystemMcpServer {
 
     #[tool(
         name = "memstead_overview",
-        description = "Cold-start entry point for filesystem-vault workspaces. Returns the schema catalogue, the (single) vault entry, and the community clusters as Markdown. Schemas list as `{ref, description}` only — call `memstead_schema(name=<ref>)` for full per-type bodies. Token-budget-driven: hard-required content (vault, schema, community titles) always ships; heavy content greedy-fills the remaining budget by default-priority. Anything that didn't fit is advertised under `## Hints` with `estimated_tokens`; re-query by passing `key` into `include[]`. Allowed `include` keys: `community_members`, `community_bridges`, `vault_distribution`, `dangling_links`. `vault` parameter is accepted for shape compatibility but only the workspace's single vault matches; an unknown name returns an error. Set `rebuild: true` to invalidate the community memo before computing — it recomputes the whole-graph Louvain partition (detection is global; there is no per-subgraph scoping). A small or disconnected subgraph may surface as no cluster: sparsely-connected / edge-less nodes collapse into a single catch-all rather than forming their own cluster, so building a handful of loosely-linked entities and expecting a distinct cluster will come back empty. The `## Vaults` entry carries a `durable` flag and `storage` kind — on this in-memory sketch it reads `durable: false` / `storage: in-memory`, i.e. writes are volatile and evicted on session-TTL / restart. The vault-repo `## Lifecycle Namespaces` section is omitted — filesystem-vault has no vault-creation rules. Frontmatter `_overview_mode` is `\"complete\"`, `\"reduced\"`, or `\"overbudget\"`.",
+        description = "Cold-start entry point for filesystem-mem workspaces. Returns the schema catalogue, the (single) mem entry, and the community clusters as Markdown. Schemas list as `{ref, description}` only — call `memstead_schema(name=<ref>)` for full per-type bodies. Token-budget-driven: hard-required content (mem, schema, community titles) always ships; heavy content greedy-fills the remaining budget by default-priority. Anything that didn't fit is advertised under `## Hints` with `estimated_tokens`; re-query by passing `key` into `include[]`. Allowed `include` keys: `community_members`, `community_bridges`, `mem_distribution`, `dangling_links`. `mem` parameter is accepted for shape compatibility but only the workspace's single mem matches; an unknown name returns an error. Set `rebuild: true` to invalidate the community memo before computing — it recomputes the whole-graph Louvain partition (detection is global; there is no per-subgraph scoping). A small or disconnected subgraph may surface as no cluster: sparsely-connected / edge-less nodes collapse into a single catch-all rather than forming their own cluster, so building a handful of loosely-linked entities and expecting a distinct cluster will come back empty. The `## Mems` entry carries a `durable` flag and `storage` kind — on this in-memory sketch it reads `durable: false` / `storage: in-memory`, i.e. writes are volatile and evicted on session-TTL / restart. The mem-repo `## Lifecycle Namespaces` section is omitted — filesystem-mem has no mem-creation rules. Frontmatter `_overview_mode` is `\"complete\"`, `\"reduced\"`, or `\"overbudget\"`.",
         annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false)
     )]
     fn memstead_overview(&self, Parameters(p): Parameters<OverviewParams>) -> CallToolResult {
@@ -1617,12 +1617,12 @@ impl FilesystemMcpServer {
         const ALLOWED_OVERVIEW_INCLUDE: &[&str] = &[
             "community_members",
             "community_bridges",
-            "vault_distribution",
+            "mem_distribution",
             "dangling_links",
         ];
 
         // Schema-tool split: the legacy `schema_types` include key is gone;
-        // surface the same actionable error the vault-repo flavour does so an agent that
+        // surface the same actionable error the mem-repo flavour does so an agent that
         // still passes it gets a clear hint to call memstead_schema instead.
         if let Some(include) = p.include.as_ref()
             && include.iter().any(|k| k == "schema_types")
@@ -1638,22 +1638,22 @@ impl FilesystemMcpServer {
             engine.invalidate_communities();
         }
 
-        // --- Vault filter validation ---
-        // filesystem-vault has exactly one vault. A non-matching `vault`
-        // is a typed error — same shape as the vault-repo surface.
-        let vault_name = engine
-            .vault_names()
+        // --- Mem filter validation ---
+        // filesystem-mem has exactly one mem. A non-matching `mem`
+        // is a typed error — same shape as the mem-repo surface.
+        let mem_name = engine
+            .mem_names()
             .into_iter()
             .next()
             .map(String::from)
             .unwrap_or_default();
-        if let Some(v) = p.vault.as_deref()
-            && v != vault_name
+        if let Some(v) = p.mem.as_deref()
+            && v != mem_name
         {
             return tool_error(
                 "INVALID_INPUT",
                 &format!(
-                    "unknown vault: \"{v}\". Writable vaults: [{vault_name}]"
+                    "unknown mem: \"{v}\". Writable mems: [{mem_name}]"
                 ),
             );
         }
@@ -1686,7 +1686,7 @@ impl FilesystemMcpServer {
         // --- Schema (single entry) ---
         let Some((_, schema)) = engine.schemas().iter().next() else {
             // Genuinely-systemic: the filesystem boot path always
-            // mounts exactly one vault and pins exactly one schema. An
+            // mounts exactly one mem and pins exactly one schema. An
             // empty `schemas()` map means engine construction itself
             // is inconsistent — no agent-side recovery applies, so
             // `INTERNAL` is the honest wire code (this class of
@@ -1706,36 +1706,36 @@ impl FilesystemMcpServer {
             "description": schema.manifest.description,
         })];
 
-        // --- Vault (single entry, lite + full variants) ---
+        // --- Mem (single entry, lite + full variants) ---
         let mut entity_count: usize = 0;
         let mut type_dist: std::collections::BTreeMap<String, usize> = Default::default();
         for e in engine.store().all_entities() {
-            if e.stub || e.vault != vault_name {
+            if e.stub || e.mem != mem_name {
                 continue;
             }
             entity_count += 1;
             *type_dist.entry(e.entity_type.clone()).or_default() += 1;
         }
-        // Per-vault storage backend → durability marker, derived from the
+        // Per-mem storage backend → durability marker, derived from the
         // mount's `MountStorage` kind. On the ephemeral sketch this reads
-        // `in-memory` / `durable: false`, so an agent learns the vault is
+        // `in-memory` / `durable: false`, so an agent learns the mem is
         // volatile (writes evicted on session-TTL / restart) before its
         // first write rather than after a reset.
         let (storage, durable) = engine
             .mounts()
             .iter()
-            .find(|m| m.vault == vault_name)
+            .find(|m| m.mem == mem_name)
             .map(|m| (m.storage.backend_id(), m.storage.is_durable()))
             .unwrap_or(("unknown", false));
-        let vaults_lite = vec![serde_json::json!({
-            "name": vault_name,
+        let mems_lite = vec![serde_json::json!({
+            "name": mem_name,
             "schema": schema_canon,
             "entity_count": entity_count,
             "storage": storage,
             "durable": durable,
         })];
-        let vaults_full = vec![serde_json::json!({
-            "name": vault_name,
+        let mems_full = vec![serde_json::json!({
+            "name": mem_name,
             "schema": schema_canon,
             "entity_count": entity_count,
             "type_distribution": type_dist,
@@ -1788,22 +1788,22 @@ impl FilesystemMcpServer {
         let hard_required_cost = estimate_tokens(
             &serde_json::to_string(&schemas_slim).unwrap_or_default(),
         ) + estimate_tokens(
-            &serde_json::to_string(&vaults_lite).unwrap_or_default(),
+            &serde_json::to_string(&mems_lite).unwrap_or_default(),
         ) + estimate_tokens(
             &serde_json::to_string(&communities_lite).unwrap_or_default(),
         );
         let overbudget = hard_required_cost > budget;
 
-        let vault_distribution_component =
-            serde_json::to_value(&vaults_full).unwrap_or(serde_json::Value::Array(Vec::new()));
+        let mem_distribution_component =
+            serde_json::to_value(&mems_full).unwrap_or(serde_json::Value::Array(Vec::new()));
         let community_members_component = serde_json::to_value(&communities_full)
             .unwrap_or(serde_json::Value::Array(Vec::new()));
 
-        let vault_distribution_cost = estimate_tokens(
-            &serde_json::to_string(&vault_distribution_component).unwrap_or_default(),
+        let mem_distribution_cost = estimate_tokens(
+            &serde_json::to_string(&mem_distribution_component).unwrap_or_default(),
         )
         .saturating_sub(estimate_tokens(
-            &serde_json::to_string(&vaults_lite).unwrap_or_default(),
+            &serde_json::to_string(&mems_lite).unwrap_or_default(),
         ));
         let community_members_cost = estimate_tokens(
             &serde_json::to_string(&community_members_component).unwrap_or_default(),
@@ -1820,9 +1820,9 @@ impl FilesystemMcpServer {
         // --- Greedy fill ---
         let candidates: [(&'static str, usize, serde_json::Value); 4] = [
             (
-                "vault_distribution",
-                vault_distribution_cost,
-                vault_distribution_component,
+                "mem_distribution",
+                mem_distribution_cost,
+                mem_distribution_component,
             ),
             (
                 "community_members",
@@ -1867,10 +1867,10 @@ impl FilesystemMcpServer {
         };
 
         let schemas_out = schemas_slim.clone();
-        let vaults_out = if emitted.contains_key("vault_distribution") {
-            vaults_full.clone()
+        let mems_out = if emitted.contains_key("mem_distribution") {
+            mems_full.clone()
         } else {
-            vaults_lite.clone()
+            mems_lite.clone()
         };
 
         // --- Markdown render ---
@@ -1882,7 +1882,7 @@ impl FilesystemMcpServer {
 
         let mut md = String::new();
         md.push_str("---\n");
-        md.push_str(&format!("_vault_schema: {schema_canon}\n"));
+        md.push_str(&format!("_mem_schema: {schema_canon}\n"));
         md.push_str(&format!("_overview_mode: {overview_mode}\n"));
         md.push_str(&format!("_budget_requested: {budget}\n"));
         md.push_str(&format!("_budget_used: {used}\n"));
@@ -1910,16 +1910,16 @@ impl FilesystemMcpServer {
             }
         }
 
-        // Vaults
-        let emit_vault_distribution = emitted.contains_key("vault_distribution");
-        md.push_str("## Vaults\n\n");
-        for v in &vaults_out {
+        // Mems
+        let emit_mem_distribution = emitted.contains_key("mem_distribution");
+        md.push_str("## Mems\n\n");
+        for v in &mems_out {
             let name = v["name"].as_str().unwrap_or("?");
             let schema_ref = v["schema"].as_str().unwrap_or("(unspecified)");
             let count = v["entity_count"].as_u64().unwrap_or(0);
             md.push_str(&format!("### {name}\n\n"));
             md.push_str(&format!("- **Schema:** {schema_ref}\n"));
-            // Flag ephemeral storage loudly; durable-on-disk vaults keep
+            // Flag ephemeral storage loudly; durable-on-disk mems keep
             // their lines unchanged. On the sketch this is the line that
             // tells an agent its `commit_sha` is volatile before it writes.
             if v["durable"].as_bool() == Some(false) {
@@ -1929,7 +1929,7 @@ impl FilesystemMcpServer {
                 ));
             }
             md.push_str(&format!("- **Entities:** {count}\n"));
-            if emit_vault_distribution
+            if emit_mem_distribution
                 && let Some(td) = v["type_distribution"].as_object()
                 && !td.is_empty()
             {
@@ -2052,7 +2052,7 @@ impl FilesystemMcpServer {
     router = FilesystemMcpServer::tool_router(),
     name = "memstead-mcp",
     version = "0.1.0",
-    instructions = "Memstead: schema-agnostic graph engine over typed, interconnected markdown entities. Each vault is a typed model of a chosen subject — its modal flavour (knowledge, planning, inquiry, spec, or any mix) follows from the schema the vault pins. Cold-start: call memstead_overview first for the schema catalogue and vault inventory; read a vault's schema via memstead_schema before mutating."
+    instructions = "Memstead: schema-agnostic graph engine over typed, interconnected markdown entities. Each mem is a typed model of a chosen subject — its modal flavour (knowledge, planning, inquiry, spec, or any mix) follows from the schema the mem pins. Granularity: a mem is the packaged unit — a whole typed model, typically 1,000-5,000 entities; an entity is never called a mem (a mem is not one \"memory\"/fact). Cold-start: call memstead_overview first for the schema catalogue and mem inventory; read a mem's schema via memstead_schema before mutating."
 )]
 impl ServerHandler for FilesystemMcpServer {
     async fn initialize(
@@ -2107,8 +2107,8 @@ mod tests {
     /// The basis MCP error map must emit the same wire code as
     /// `EngineError::code()` — the single source every surface (pro MCP,
     /// CLI, wasm) follows. `Backend` and `ParseAfterWrite` historically
-    /// shipped `VAULT_WRITER_ERROR` / `PARSE_AFTER_WRITE` here, diverging
-    /// from `code()`'s `VAULT_ERROR` / `PARSE_ERROR`. Pin them so a
+    /// shipped `MEM_WRITER_ERROR` / `PARSE_AFTER_WRITE` here, diverging
+    /// from `code()`'s `MEM_ERROR` / `PARSE_ERROR`. Pin them so a
     /// re-divergence fails the build.
     #[test]
     fn basis_backend_and_parse_after_write_codes_follow_code_contract() {
@@ -2134,9 +2134,9 @@ mod tests {
     }
 
     /// `memstead_relate` is idempotent on the basis surface, matching the
-    /// vault-repo server: duplicate-add and remove-nonexistent are
+    /// mem-repo server: duplicate-add and remove-nonexistent are
     /// typed-warning no-ops, so a retry converges. The pro-side
-    /// annotation meta-test is `vault-repo`-gated; this basis-side test
+    /// annotation meta-test is `mem-repo`-gated; this basis-side test
     /// pins the parity so the two flavours cannot silently re-diverge.
     #[test]
     fn relate_annotation_is_idempotent_on_basis() {
@@ -2152,7 +2152,7 @@ mod tests {
         assert_eq!(
             ann.idempotent_hint,
             Some(true),
-            "basis memstead_relate idempotent_hint must match the vault-repo server's `true`"
+            "basis memstead_relate idempotent_hint must match the mem-repo server's `true`"
         );
     }
 
@@ -2166,12 +2166,12 @@ mod tests {
         let memstead = tmp.path().join(".memstead");
         std::fs::write(
             memstead.join("workspace.toml"),
-            "format = \"memstead-git-branch-1\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+            "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
         )
         .unwrap();
         let workspace = memstead_base::Workspace {
             mounts: vec![memstead_base::Mount {
-                vault: name.to_string(),
+                mem: name.to_string(),
                 schema: Some(pin),
                 storage: memstead_base::MountStorage::Folder {
                     path: tmp.path().to_path_buf(),
@@ -2203,7 +2203,7 @@ mod tests {
         let create_params = CreateParams {
             title: "First".to_string(),
             entity_type: "spec".to_string(),
-            vault: None,
+            mem: None,
             sections: Some(sections),
             metadata: None,
             relations: None,
@@ -2251,21 +2251,21 @@ mod tests {
         assert!(text.contains("_hash:"));
     }
 
-    /// Build a two-mount engine — a writable in-memory `sketch` vault
-    /// (declared first) and a read-only in-memory `content` vault — so the
-    /// create handler's multi-mount vault resolution is exercised at this
+    /// Build a two-mount engine — a writable in-memory `sketch` mem
+    /// (declared first) and a read-only in-memory `content` mem — so the
+    /// create handler's multi-mount mem resolution is exercised at this
     /// layer. Mirrors the session server's two-tier shape.
     fn two_mount_engine() -> memstead_base::Engine {
-        use memstead_base::backend::VaultBackend;
+        use memstead_base::backend::MemBackend;
         use memstead_base::storage::InMemoryBackend;
         use memstead_base::{Mount, MountCapability, MountLifecycle, MountStorage};
         let pin: SchemaRef = "default@1.0.0".parse().unwrap();
-        let build = |name: &str, cap: MountCapability| -> (Mount, Box<dyn VaultBackend>) {
+        let build = |name: &str, cap: MountCapability| -> (Mount, Box<dyn MemBackend>) {
             let backend = InMemoryBackend::new();
             let cfg = format!(r#"{{"version":"0.1.0","schema":"{pin}"}}"#).into_bytes();
-            backend.write_vault_config(&cfg).unwrap();
+            backend.write_mem_config(&cfg).unwrap();
             let mount = Mount {
-                vault: name.to_string(),
+                mem: name.to_string(),
                 schema: Some(pin.clone()),
                 storage: MountStorage::InMemory,
                 capability: cap,
@@ -2273,7 +2273,7 @@ mod tests {
                 cross_linkable: true,
                 migration_target: None,
             };
-            (mount, Box::new(backend) as Box<dyn VaultBackend>)
+            (mount, Box::new(backend) as Box<dyn MemBackend>)
         };
         memstead_base::Engine::from_mounts(vec![
             build("sketch", MountCapability::Write),
@@ -2289,11 +2289,11 @@ mod tests {
         Some(s)
     }
 
-    fn create_params(title: &str, vault: Option<&str>) -> CreateParams {
+    fn create_params(title: &str, mem: Option<&str>) -> CreateParams {
         CreateParams {
             title: title.to_string(),
             entity_type: "spec".to_string(),
-            vault: vault.map(String::from),
+            mem: mem.map(String::from),
             sections: spec_sections(),
             metadata: None,
             relations: None,
@@ -2303,28 +2303,28 @@ mod tests {
     }
 
     /// Multi-mount create-targeting: with a writable `sketch` and a
-    /// read-only `content` vault mounted together, an omitted `vault` lands
+    /// read-only `content` mem mounted together, an omitted `mem` lands
     /// in the writable mount (not the alphabetically-first read-only one);
     /// an explicit read-only target is refused with READ_ONLY_MOUNT rather
     /// than silently redirected; an explicit writable target is honoured.
     #[test]
-    fn create_resolves_target_vault_across_multiple_mounts() {
+    fn create_resolves_target_mem_across_multiple_mounts() {
         let server = FilesystemMcpServer::from_engine(two_mount_engine(), std::path::PathBuf::new());
 
-        // Omitted vault → default writable mount (`sketch`).
+        // Omitted mem → default writable mount (`sketch`).
         let r = server.memstead_create(Parameters(create_params("Default Target", None)));
         assert!(
             !r.is_error.unwrap_or(false),
-            "omitted-vault create must land in the writable mount: {:?}",
+            "omitted-mem create must land in the writable mount: {:?}",
             r.structured_content
         );
         assert_eq!(
             r.structured_content.as_ref().unwrap()["id"].as_str(),
             Some("sketch--default-target"),
-            "create defaults to the writable vault, not the read-only one"
+            "create defaults to the writable mem, not the read-only one"
         );
 
-        // Explicit read-only vault → typed refusal, not a redirect.
+        // Explicit read-only mem → typed refusal, not a redirect.
         let r = server.memstead_create(Parameters(create_params("Into Content", Some("content"))));
         assert!(r.is_error.unwrap_or(false), "write to a read-only mount must refuse");
         assert_eq!(
@@ -2332,7 +2332,7 @@ mod tests {
             "the engine capability layer refuses the read-only target"
         );
 
-        // Explicit writable vault → honoured.
+        // Explicit writable mem → honoured.
         let r = server.memstead_create(Parameters(create_params("Explicit Sketch", Some("sketch"))));
         assert!(
             !r.is_error.unwrap_or(false),
@@ -2475,7 +2475,7 @@ mod tests {
         let result = server.memstead_create(Parameters(CreateParams {
             title: "X".into(),
             entity_type: "totally-not-a-type".into(),
-            vault: None,
+            mem: None,
             sections: None,
             metadata: None,
             relations: None,
@@ -2504,7 +2504,7 @@ mod tests {
         let result = server.memstead_create(Parameters(CreateParams {
             title: "Stray Memo".into(),
             entity_type: "memo".into(),
-            vault: None,
+            mem: None,
             sections: Some(sections),
             metadata: None,
             relations: None,
@@ -2547,7 +2547,7 @@ mod tests {
         let result = server.memstead_create(Parameters(CreateParams {
             title: "Empty Memo".into(),
             entity_type: "memo".into(),
-            vault: None,
+            mem: None,
             sections: Some(IndexMap::new()),
             metadata: None,
             relations: None,
@@ -2583,7 +2583,7 @@ mod tests {
         let result = server.memstead_create(Parameters(CreateParams {
             title: "Bad Level".into(),
             entity_type: "spec".into(),
-            vault: None,
+            mem: None,
             sections: None,
             metadata: Some(metadata),
             relations: None,
@@ -2598,8 +2598,8 @@ mod tests {
     }
 
     /// Unknown metadata fields surface `UNKNOWN_METADATA_FIELD`. The
-    /// vault-repo path emits the same code; this guard pins the
-    /// filesystem-vault contract so future refactors don't silently
+    /// mem-repo path emits the same code; this guard pins the
+    /// filesystem-mem contract so future refactors don't silently
     /// drop the gate.
     #[test]
     fn create_rejects_unknown_metadata_field() {
@@ -2613,7 +2613,7 @@ mod tests {
         let result = server.memstead_create(Parameters(CreateParams {
             title: "Stray Field".into(),
             entity_type: "spec".into(),
-            vault: None,
+            mem: None,
             sections: None,
             metadata: Some(metadata),
             relations: None,
@@ -2657,7 +2657,7 @@ mod tests {
         let result = server.memstead_create(Parameters(CreateParams {
             title: title.into(),
             entity_type: "spec".into(),
-            vault: None,
+            mem: None,
             sections: Some(seeded_sections),
             metadata: None,
             relations: None,
@@ -2732,7 +2732,7 @@ mod tests {
     }
 
     /// `memstead_update` must reject any attempt to mutate the read-only
-    /// metadata triple (`vault`, `id`, `type`) on either set or unset
+    /// metadata triple (`mem`, `id`, `type`) on either set or unset
     /// — the entity-id contract depends on those staying stable.
     #[test]
     fn update_rejects_read_only_metadata_set() {
@@ -2741,7 +2741,7 @@ mod tests {
         let server = FilesystemMcpServer::from_workspace_root(tmp.path()).unwrap();
         let (id, hash) = seed_via_mcp(&server, "Locked");
 
-        for field in ["vault", "id", "type"] {
+        for field in ["mem", "id", "type"] {
             let mut metadata = IndexMap::new();
             metadata.insert(field.to_string(), "garbage".to_string());
             let result = server.memstead_update(Parameters(UpdateParams {
@@ -2927,7 +2927,7 @@ mod tests {
     }
 
     #[test]
-    fn relate_rejects_cross_vault_target() {
+    fn relate_rejects_cross_mem_target() {
         let tmp = TempDir::new().unwrap();
         write_workspace(&tmp, "demo");
         let server = FilesystemMcpServer::from_workspace_root(tmp.path()).unwrap();
@@ -2944,7 +2944,7 @@ mod tests {
         assert!(result.is_error.unwrap_or(false));
         assert_eq!(
             result.structured_content.unwrap()["code"],
-            "CROSS_VAULT_LINK_NOT_ALLOWED"
+            "CROSS_MEM_LINK_NOT_ALLOWED"
         );
     }
 
@@ -2959,7 +2959,7 @@ mod tests {
 
         let result = server.memstead_search(Parameters(SearchParams {
             query: None,
-            vault: None,
+            mem: None,
             entity_type: None,
             expand_via: None,
             expand_depth: None,
@@ -3002,7 +3002,7 @@ mod tests {
 
         let result = server.memstead_search(Parameters(SearchParams {
             query: None,
-            vault: None,
+            mem: None,
             entity_type: None,
             expand_via: None,
             expand_depth: None,
@@ -3045,7 +3045,7 @@ mod tests {
 
         let result = server.memstead_search(Parameters(SearchParams {
             query: None,
-            vault: None,
+            mem: None,
             entity_type: Some("spec".to_string()),
             expand_via: None,
             expand_depth: None,
@@ -3085,7 +3085,7 @@ mod tests {
 
         let result = server.memstead_search(Parameters(SearchParams {
             query: None,
-            vault: None,
+            mem: None,
             entity_type: Some("spec".to_string()),
             expand_via: None,
             expand_depth: None,
@@ -3120,7 +3120,7 @@ mod tests {
 
         let result = server.memstead_search(Parameters(SearchParams {
             query: None,
-            vault: None,
+            mem: None,
             entity_type: None,
             expand_via: None,
             expand_depth: None,
@@ -3155,7 +3155,7 @@ mod tests {
         // Filter to a non-existent type → empty hits.
         let result = server.memstead_search(Parameters(SearchParams {
             query: None,
-            vault: None,
+            mem: None,
             entity_type: Some("totally-not-a-type".into()),
             expand_via: None,
             expand_depth: None,
@@ -3188,7 +3188,7 @@ mod tests {
         let result = server.memstead_health(Parameters(HealthParams {
             include: None,
             limit: None,
-            vault: None,
+            mem: None,
             include_config: false,
             target_schema: None,
             token_budget: None,
@@ -3196,7 +3196,7 @@ mod tests {
         }));
         assert!(!result.is_error.unwrap_or(false));
         let body = result.structured_content.unwrap();
-        // The summary structure carries totals and a per-vault map.
+        // The summary structure carries totals and a per-mem map.
         // We do not pin field names here (memstead-base owns the shape),
         // just assert the response is a non-empty JSON object.
         assert!(body.is_object());
@@ -3225,7 +3225,7 @@ mod tests {
 
         // Health must reflect the post-boot mutation — the seeded
         // entity is visible via the stats projection (stub_count and
-        // missing_fields can both be 0 on a fresh vault with a
+        // missing_fields can both be 0 on a fresh mem with a
         // well-formed seed). Use a query for the entity directly:
         // memstead_search by title term proves the engine re-boot sees
         // the new entity. If `health` had been boot-cached, the
@@ -3237,7 +3237,7 @@ mod tests {
                 phrase: None,
                 field: None,
             }),
-            vault: None,
+            mem: None,
             entity_type: None,
             expand_via: None,
             expand_depth: None,
@@ -3270,7 +3270,7 @@ mod tests {
             let result = server.memstead_schema(Parameters(SchemaParams {
             verbosity: None,
                 name: Some(name.into()),
-                vault: None,
+                mem: None,
             }));
             assert!(!result.is_error.unwrap_or(false), "name={name:?}");
             let body = result.structured_content.unwrap();
@@ -3282,11 +3282,11 @@ mod tests {
             assert_eq!(body["used_by"][0], "demo");
         }
 
-        // `vault` shortcut resolves the same schema.
+        // `mem` shortcut resolves the same schema.
         let result = server.memstead_schema(Parameters(SchemaParams {
             verbosity: None,
             name: None,
-            vault: Some("demo".into()),
+            mem: Some("demo".into()),
         }));
         assert!(!result.is_error.unwrap_or(false));
         let body = result.structured_content.unwrap();
@@ -3294,7 +3294,7 @@ mod tests {
     }
 
     /// Surface parity: the public filesystem `/mcp` flavour honours the
-    /// same `verbosity` toggle as the vault-repo surface (Plan 01) — it
+    /// same `verbosity` toggle as the mem-repo surface (Plan 01) — it
     /// converged onto the shared `build_schema_payload`, so lite is the
     /// identical structural skeleton and an unknown value refuses typed.
     #[test]
@@ -3306,7 +3306,7 @@ mod tests {
         let lite = server.memstead_schema(Parameters(SchemaParams {
             verbosity: Some("lite".into()),
             name: None,
-            vault: Some("demo".into()),
+            mem: Some("demo".into()),
         }));
         assert!(!lite.is_error.unwrap_or(false));
         let lite_body = lite.structured_content.unwrap();
@@ -3321,7 +3321,7 @@ mod tests {
         let unknown = server.memstead_schema(Parameters(SchemaParams {
             verbosity: Some("brief".into()),
             name: None,
-            vault: Some("demo".into()),
+            mem: Some("demo".into()),
         }));
         assert!(
             unknown.is_error.unwrap_or(false),
@@ -3332,7 +3332,7 @@ mod tests {
     }
 
     #[test]
-    fn schema_rejects_both_name_and_vault() {
+    fn schema_rejects_both_name_and_mem() {
         let tmp = TempDir::new().unwrap();
         write_workspace(&tmp, "demo");
         let server = FilesystemMcpServer::from_workspace_root(tmp.path()).unwrap();
@@ -3340,7 +3340,7 @@ mod tests {
         let result = server.memstead_schema(Parameters(SchemaParams {
             verbosity: None,
             name: Some("default".into()),
-            vault: Some("demo".into()),
+            mem: Some("demo".into()),
         }));
         assert!(result.is_error.unwrap_or(false));
         let body = result.content[0]
@@ -3351,7 +3351,7 @@ mod tests {
     }
 
     #[test]
-    fn schema_rejects_unknown_vault() {
+    fn schema_rejects_unknown_mem() {
         let tmp = TempDir::new().unwrap();
         write_workspace(&tmp, "demo");
         let server = FilesystemMcpServer::from_workspace_root(tmp.path()).unwrap();
@@ -3359,14 +3359,14 @@ mod tests {
         let result = server.memstead_schema(Parameters(SchemaParams {
             verbosity: None,
             name: None,
-            vault: Some("nope".into()),
+            mem: Some("nope".into()),
         }));
         assert!(result.is_error.unwrap_or(false));
         let body = result.content[0]
             .as_text()
             .map(|t| t.text.clone())
             .unwrap_or_default();
-        assert!(body.contains("UNKNOWN_VAULT"), "got: {body}");
+        assert!(body.contains("UNKNOWN_MEM"), "got: {body}");
     }
 
     #[test]
@@ -3378,7 +3378,7 @@ mod tests {
         let result = server.memstead_schema(Parameters(SchemaParams {
             verbosity: None,
             name: Some("totally-not-a-schema".into()),
-            vault: None,
+            mem: None,
         }));
         assert!(result.is_error.unwrap_or(false));
         let body = result.structured_content.unwrap();
@@ -3398,7 +3398,7 @@ mod tests {
 
         // Empty `since` → all three entries.
         let result = server.memstead_changes_since(Parameters(ChangesSinceParams {
-            vault: "demo".into(),
+            mem: "demo".into(),
             since: "".into(),
             rename_similarity: None,
             include_notes: false,
@@ -3414,7 +3414,7 @@ mod tests {
 
         // `since` set to a far-future timestamp → empty.
         let result = server.memstead_changes_since(Parameters(ChangesSinceParams {
-            vault: "demo".into(),
+            mem: "demo".into(),
             since: "9999-01-01T00:00:00.000Z".into(),
             rename_similarity: None,
             include_notes: false,
@@ -3431,7 +3431,7 @@ mod tests {
         write_workspace(&tmp, "demo");
         let server = FilesystemMcpServer::from_workspace_root(tmp.path()).unwrap();
         let result = server.memstead_changes_since(Parameters(ChangesSinceParams {
-            vault: "demo".into(),
+            mem: "demo".into(),
             since: "".into(),
             rename_similarity: None,
             include_notes: false,
@@ -3514,7 +3514,7 @@ mod tests {
         server.memstead_create(Parameters(CreateParams {
             title: "Match".into(),
             entity_type: "spec".into(),
-            vault: None,
+            mem: None,
             sections: Some(secs),
             metadata: None,
             relations: None,
@@ -3527,7 +3527,7 @@ mod tests {
         server.memstead_create(Parameters(CreateParams {
             title: "Other".into(),
             entity_type: "spec".into(),
-            vault: None,
+            mem: None,
             sections: Some(other_secs),
             metadata: None,
             relations: None,
@@ -3544,7 +3544,7 @@ mod tests {
                 phrase: None,
                 field: None,
             }),
-            vault: None,
+            mem: None,
             entity_type: None,
             expand_via: None,
             expand_depth: None,
@@ -3581,7 +3581,7 @@ mod tests {
 
         let result = server.memstead_search(Parameters(SearchParams {
             query: None,
-            vault: None,
+            mem: None,
             entity_type: None,
             expand_via: None,
             expand_depth: None,
@@ -3603,7 +3603,7 @@ mod tests {
     }
 
     #[test]
-    fn overview_returns_schema_and_vault_sections() {
+    fn overview_returns_schema_and_mem_sections() {
         let tmp = TempDir::new().unwrap();
         write_workspace(&tmp, "demo");
         let server = FilesystemMcpServer::from_workspace_root(tmp.path()).unwrap();
@@ -3613,7 +3613,7 @@ mod tests {
         let result = server.memstead_overview(Parameters(OverviewParams {
             rebuild: None,
             chunk: None,
-            vault: None,
+            mem: None,
             include: None,
             token_budget: None,
         }));
@@ -3622,17 +3622,17 @@ mod tests {
         // Frontmatter carries the workspace's pinned schema and an
         // overview_mode field; the markdown body has the standard
         // section headings.
-        assert!(text.contains("_vault_schema: default@1.0.0"));
+        assert!(text.contains("_mem_schema: default@1.0.0"));
         assert!(text.contains("_overview_mode:"));
         assert!(text.contains("## Schemas"));
-        assert!(text.contains("## Vaults"));
+        assert!(text.contains("## Mems"));
         assert!(text.contains("### demo"));
         assert!(text.contains("- **Entities:** 2"));
         assert!(text.contains("## Communities"));
     }
 
     #[test]
-    fn overview_rejects_unknown_vault_filter() {
+    fn overview_rejects_unknown_mem_filter() {
         let tmp = TempDir::new().unwrap();
         write_workspace(&tmp, "demo");
         let server = FilesystemMcpServer::from_workspace_root(tmp.path()).unwrap();
@@ -3640,7 +3640,7 @@ mod tests {
         let result = server.memstead_overview(Parameters(OverviewParams {
             rebuild: None,
             chunk: None,
-            vault: Some("not-the-vault".into()),
+            mem: Some("not-the-mem".into()),
             include: None,
             token_budget: None,
         }));
@@ -3669,7 +3669,7 @@ mod tests {
         let result = server.memstead_overview(Parameters(OverviewParams {
             rebuild: None,
             chunk: None,
-            vault: None,
+            mem: None,
             include: Some(vec!["community_members".into()]),
             token_budget: None,
         }));
@@ -3726,7 +3726,7 @@ mod tests {
         let result = server.memstead_overview(Parameters(OverviewParams {
             rebuild: None,
             chunk: None,
-            vault: None,
+            mem: None,
             include: Some(vec!["dangling_links".into()]),
             token_budget: None,
         }));
@@ -3763,7 +3763,7 @@ mod tests {
         let result = server.memstead_overview(Parameters(OverviewParams {
             rebuild: None,
             chunk: None,
-            vault: None,
+            mem: None,
             include: Some(vec!["totally-bogus".into()]),
             token_budget: None,
         }));
@@ -3782,7 +3782,7 @@ mod tests {
         let result = server.memstead_overview(Parameters(OverviewParams {
             rebuild: None,
             chunk: None,
-            vault: None,
+            mem: None,
             include: Some(vec!["schema_types".into()]),
             token_budget: None,
         }));

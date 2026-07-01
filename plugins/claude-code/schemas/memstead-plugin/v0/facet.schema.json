@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://memstead.io/schemas/memstead-plugin/v0/facet",
   "title": "memstead-plugin/v0 facet",
-  "description": "A Facet is a named way a projection engages with a medium — a specific perspective from which the projection reads or writes it. Each facet file lives at `.memstead/facets/<vault>/<name>.json`; the filename stem is the facet's reference key, used by a projection's `source_facets`. A facet holds a selection (allow/deny `scope` over the referenced medium), an optional engagement contract (verbs/tools/discipline — shape is medium-type- and side-specific, so it is free-form), and an optional deterministic preparation step. The four-primitive successor to the old `scope` file's engagement half. A facet always references exactly one medium.",
+  "description": "A Facet is a named way a projection engages with a medium — a specific perspective from which the projection reads or writes it. Each facet file lives at `.memstead/facets/<mem>/<name>.json`; the filename stem is the facet's reference key, used by a projection's `source_facets`. A facet holds a selection (allow/deny `scope` over the referenced medium), an optional engagement contract (verbs/tools/discipline — shape is medium-type- and side-specific, so it is free-form), and an optional deterministic preparation step. The four-primitive successor to the old `scope` file's engagement half. A facet always references exactly one medium.",
   "type": "object",
   "required": ["name", "medium"],
   "properties": {
@@ -12,7 +12,7 @@
       "minLength": 1
     },
     "medium": {
-      "description": "The medium (by name) this facet is a perspective on. Resolves to `.memstead/mediums/<vault>/<medium>.json` under the same vault directory.",
+      "description": "The medium (by name) this facet is a perspective on. Resolves to `.memstead/mediums/<mem>/<medium>.json` under the same mem directory.",
       "type": "string",
       "minLength": 1
     },

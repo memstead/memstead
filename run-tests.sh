@@ -14,7 +14,7 @@ echo ""
 echo "══════════════════════════════════"
 echo "  Testing: engine (Rust, pro flavour)"
 echo "══════════════════════════════════"
-if (cd "$ROOT" && cargo nextest run --workspace --features vault-repo); then
+if (cd "$ROOT" && cargo nextest run --workspace --features mem-repo); then
   echo "  ✓ engine (pro) passed"
 else
   FAILED+=("engine-pro")
@@ -36,9 +36,9 @@ fi
 
 echo ""
 echo "══════════════════════════════════"
-echo "  Gate: plugin must not call git against vault-repo"
+echo "  Gate: plugin must not call git against mem-repo"
 echo "══════════════════════════════════"
-# Plugin code must reach vault-repo via memstead-cli (subprocess) or
+# Plugin code must reach mem-repo via memstead-cli (subprocess) or
 # memstead-mcp (MCP); writes go through MCP. Outer-repo git operations on
 # the user's project repo are explicitly carved out.
 if "$ROOT/plugins/claude-code/scripts/check-architecture.sh"; then

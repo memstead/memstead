@@ -8,9 +8,9 @@
 //! outputs into the FFI records defined in `src/types.rs`. All business
 //! logic stays in the engine crates.
 //!
-//! Boot path: `Engine::new(vaults)` uses `current_dir()` as the workspace
+//! Boot path: `Engine::new(mems)` uses `current_dir()` as the workspace
 //! root and calls `memstead_git_branch::workspace_store::engine_from_workspace_root`
-//! — the same entry point `memstead-mcp` uses. The `vaults` parameter is
+//! — the same entry point `memstead-mcp` uses. The `mems` parameter is
 //! retained for FFI compatibility but no longer drives mount resolution
 //! (mounts are read from `.memstead/state/mounts.json`).
 
@@ -29,9 +29,9 @@ pub use types::{
     EdgeTypeCount, Entity, HealthIssue, HealthOptions, ListResult, MetadataEntry, MetadataValue,
     MissingField, ParseRecoveryEntry, ParseRecoveryReport, Query, RelationDirection, RelationEdge,
     Relations, ReloadResult, Relationship, SearchHit, SearchResult, SearchScope, Section,
-    StaleEntity, Stats, VaultBackendKind, VaultCreateOutcome, VaultCreateRequest,
-    VaultDeleteOutcome, DanglingCrossVaultEdge, VaultExportOutcome, VaultInit, VaultRosterEntry,
-    VaultSchemaOutcome, VaultVersionOutcome, HealthSummary,
+    StaleEntity, Stats, MemBackendKind, MemCreateOutcome, MemCreateRequest,
+    MemDeleteOutcome, DanglingCrossMemEdge, MemExportOutcome, MemInit, MemRosterEntry,
+    MemSchemaOutcome, MemVersionOutcome, HealthSummary,
 };
 
 uniffi::include_scaffolding!("memstead");
@@ -41,27 +41,27 @@ pub fn version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
-/// Enumerate the vaults of the workspace at `project_root`. Walks the
-/// `vault-repo/.git/` branch list and produces one `VaultInit` per vault
+/// Enumerate the mems of the workspace at `project_root`. Walks the
+/// `mem-repo/.git/` branch list and produces one `MemInit` per mem
 /// (excluding `main` and registry refs). Returns an empty list when no
-/// real vault-repo is present.
+/// real mem-repo is present.
 ///
 /// The macOS app calls this before constructing the Engine so the UI can
-/// show the vault list independently. The Engine itself loads its mounts
+/// show the mem list independently. The Engine itself loads its mounts
 /// from `.memstead/state/mounts.json` and does not consume the returned
-/// VaultInit list.
-pub fn discover_vaults(project_root: String) -> Vec<VaultInit> {
+/// MemInit list.
+pub fn discover_mems(project_root: String) -> Vec<MemInit> {
     let root = Path::new(&project_root);
-    let names = match memstead_git_branch::discover::enumerate_vault_repo_branches(root) {
+    let names = match memstead_git_branch::discover::enumerate_mem_repo_branches(root) {
         Some(names) => names,
         None => return Vec::new(),
     };
     names
         .iter()
         .filter_map(|name| {
-            memstead_git_branch::vault_repo_config::vault_init_from_branch(root, name).ok()
+            memstead_git_branch::mem_repo_config::mem_init_from_branch(root, name).ok()
         })
-        .map(|init| VaultInit {
+        .map(|init| MemInit {
             name: init.name,
             dir: init
                 .dir
@@ -90,13 +90,13 @@ pub fn engine_open(workspace_root: String) -> Result<Arc<Engine>, MemsteadError>
     ))?))
 }
 
-/// Initialise a brand-new filesystem (folder-backed) vault at `root` — the
+/// Initialise a brand-new filesystem (folder-backed) mem at `root` — the
 /// engine-owned bootstrap the macOS app routes through instead of writing
 /// `.memstead/config.json` from Swift. Delegates to
-/// `memstead_base::filesystem::config::init_filesystem_vault`, which writes the
+/// `memstead_base::filesystem::config::init_filesystem_mem`, which writes the
 /// seed config + `.memstead/` markers + one-folder-mount roster; the caller
 /// then opens it via [`engine_open`]. A malformed schema ref refuses cleanly.
-pub fn init_filesystem_vault(
+pub fn init_filesystem_mem(
     root: String,
     name: String,
     schema: String,
@@ -106,7 +106,7 @@ pub fn init_filesystem_vault(
         .map_err(|e| MemsteadError::ValidationFailed {
             message: format!("invalid schema ref {schema:?}: {e}"),
         })?;
-    memstead_base::filesystem::config::init_filesystem_vault(Path::new(&root), &name, &schema_ref)
+    memstead_base::filesystem::config::init_filesystem_mem(Path::new(&root), &name, &schema_ref)
         .map_err(|e| MemsteadError::IoError {
             message: e.to_string(),
         })?;
@@ -122,10 +122,10 @@ pub struct Engine {
 
 impl Engine {
     /// Construct an engine rooted at the current working directory. The
-    /// `vaults` parameter is retained for FFI compatibility but is
+    /// `mems` parameter is retained for FFI compatibility but is
     /// ignored — mounts come from `.memstead/state/mounts.json` via the
     /// workspace-store loader.
-    pub fn new(_vaults: Vec<VaultInit>) -> Result<Self, MemsteadError> {
+    pub fn new(_mems: Vec<MemInit>) -> Result<Self, MemsteadError> {
         let workspace_root =
             std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         Self::from_workspace_root(&workspace_root)
@@ -147,7 +147,7 @@ impl Engine {
 
     pub fn get_stats(&self) -> Stats {
         let engine = self.inner.lock().expect("memstead-swift engine mutex poisoned");
-        convert::stats_to_ffi(engine.stats(), engine.store(), engine.vault_router())
+        convert::stats_to_ffi(engine.stats(), engine.store(), engine.mem_router())
     }
 
     pub fn get_health(&self, _options: HealthOptions) -> HealthSummary {
@@ -199,62 +199,62 @@ impl Engine {
         convert::clusters_to_ffi(engine.communities())
     }
 
-    /// The workspace vault roster — one entry per mounted vault carrying
+    /// The workspace mem roster — one entry per mounted mem carrying
     /// the per-mount facts the home sidebar renders. Backend kind,
     /// capability, and schema pin come straight from the engine's mounts;
-    /// the entity count is the live non-stub count for each vault; drift is
+    /// the entity count is the live non-stub count for each mem; drift is
     /// the engine's read-only probe (git-branch only). No Swift-side
-    /// reconstruction — a vault the engine reports read-only is never shown
+    /// reconstruction — a mem the engine reports read-only is never shown
     /// writable.
-    pub fn vault_roster(&self) -> Vec<VaultRosterEntry> {
+    pub fn mem_roster(&self) -> Vec<MemRosterEntry> {
         use memstead_base::workspace::{MountCapability, MountStorage};
         let engine = self.inner.lock().expect("memstead-swift engine mutex poisoned");
 
-        // Live non-stub entity count per vault, in one pass over the store.
+        // Live non-stub entity count per mem, in one pass over the store.
         let mut counts: std::collections::HashMap<&str, u64> = std::collections::HashMap::new();
         for entity in engine.store().all_entities() {
             if !entity.stub {
-                *counts.entry(entity.vault.as_str()).or_insert(0) += 1;
+                *counts.entry(entity.mem.as_str()).or_insert(0) += 1;
             }
         }
 
-        let mut roster: Vec<VaultRosterEntry> = engine
+        let mut roster: Vec<MemRosterEntry> = engine
             .mounts()
             .into_iter()
             .map(|mount| {
                 let backend = match mount.storage {
-                    MountStorage::GitBranch { .. } => VaultBackendKind::GitBranch,
-                    MountStorage::Folder { .. } => VaultBackendKind::Folder,
-                    MountStorage::Archive { .. } => VaultBackendKind::Archive,
-                    MountStorage::InMemory => VaultBackendKind::InMemory,
+                    MountStorage::GitBranch { .. } => MemBackendKind::GitBranch,
+                    MountStorage::Folder { .. } => MemBackendKind::Folder,
+                    MountStorage::Archive { .. } => MemBackendKind::Archive,
+                    MountStorage::InMemory => MemBackendKind::InMemory,
                 };
-                VaultRosterEntry {
-                    vault: mount.vault.clone(),
+                MemRosterEntry {
+                    mem: mount.mem.clone(),
                     backend,
                     writable: mount.capability == MountCapability::Write,
                     schema_pin: mount.schema.as_ref().map(|s| s.to_string()),
-                    entity_count: counts.get(mount.vault.as_str()).copied().unwrap_or(0),
+                    entity_count: counts.get(mount.mem.as_str()).copied().unwrap_or(0),
                     // Drift is git-branch-only and advisory; a probe error
                     // collapses to `false` (the engine method already
                     // swallows backend errors).
-                    drifted: engine.vault_drifted(&mount.vault).unwrap_or(false),
+                    drifted: engine.mem_drifted(&mount.mem).unwrap_or(false),
                 }
             })
             .collect();
         // Stable order for SwiftUI Identifiable lists.
-        roster.sort_by(|a, b| a.vault.cmp(&b.vault));
+        roster.sort_by(|a, b| a.mem.cmp(&b.mem));
         roster
     }
 
-    /// Workspace-wide reload. Aggregates per-vault reload diffs from
-    /// `reload_each_writable_vault` into a single `ReloadResult`.
+    /// Workspace-wide reload. Aggregates per-mem reload diffs from
+    /// `reload_each_writable_mem` into a single `ReloadResult`.
     pub fn reload(&self) -> Result<ReloadResult, MemsteadError> {
         let mut engine = self.inner.lock().expect("memstead-swift engine mutex poisoned");
-        let per_vault = engine.reload_each_writable_vault()?;
+        let per_mem = engine.reload_each_writable_mem()?;
         let mut added = Vec::new();
         let mut changed = Vec::new();
         let mut removed = Vec::new();
-        for (_, r) in per_vault {
+        for (_, r) in per_mem {
             added.extend(r.added);
             changed.extend(r.changed);
             removed.extend(r.removed);
@@ -266,29 +266,29 @@ impl Engine {
         }))
     }
 
-    pub fn vault_head_sha(&self, vault: String) -> Result<Option<String>, MemsteadError> {
+    pub fn mem_head_sha(&self, mem: String) -> Result<Option<String>, MemsteadError> {
         let engine = self.inner.lock().expect("memstead-swift engine mutex poisoned");
-        Ok(engine.vault_head_sha(&vault)?)
+        Ok(engine.mem_head_sha(&mem)?)
     }
 
     pub fn changes_since(
         &self,
-        vault: String,
+        mem: String,
         since: String,
         rename_similarity: Option<f32>,
     ) -> Result<ChangesReport, MemsteadError> {
         let engine = self.inner.lock().expect("memstead-swift engine mutex poisoned");
-        let report = engine.changes_since(&vault, &since, rename_similarity)?;
+        let report = engine.changes_since(&mem, &since, rename_similarity)?;
         Ok(convert::changes_report_to_ffi(report))
     }
 
     pub fn agent_notes(
         &self,
-        vault: String,
+        mem: String,
         since: String,
     ) -> Result<AgentNotesReport, MemsteadError> {
         let engine = self.inner.lock().expect("memstead-swift engine mutex poisoned");
-        let report = match engine.mount(&vault) {
+        let report = match engine.mount(&mem) {
             Some(m) => match &m.storage {
                 memstead_base::MountStorage::GitBranch { gitdir, branch } => {
                     let ref_name = if branch.starts_with("refs/") {
@@ -297,7 +297,7 @@ impl Engine {
                         format!("refs/heads/{branch}")
                     };
                     memstead_git_branch::ops::agent_notes::agent_notes_since(
-                        &vault,
+                        &mem,
                         gitdir,
                         &since,
                         Some(&ref_name),
@@ -307,7 +307,7 @@ impl Engine {
                     })?
                 }
                 _ => memstead_base::ops::AgentNotesReport {
-                    vault: vault.clone(),
+                    mem: mem.clone(),
                     since: since.clone(),
                     head: since.clone(),
                     notes: Vec::new(),
@@ -315,9 +315,9 @@ impl Engine {
                 },
             },
             None => {
-                return Err(MemsteadError::UnknownVault {
-                    name: vault,
-                    writable_vaults: Vec::new(),
+                return Err(MemsteadError::UnknownMem {
+                    name: mem,
+                    writable_mems: Vec::new(),
                 });
             }
         };
@@ -325,7 +325,7 @@ impl Engine {
     }
 
     /// Bulk-fix accumulated parse-time relation drift across every
-    /// writable vault — the UniFFI counterpart to `memstead recover`.
+    /// writable mem — the UniFFI counterpart to `memstead recover`.
     ///
     /// This is the first **disk-mutating** UniFFI method: it locks the
     /// shared engine, re-renders each writable source entity carrying a
@@ -365,129 +365,129 @@ impl Engine {
     /// Create a medium from a JSON-encoded `Medium`. See `Engine::add_medium`.
     pub fn add_medium(
         &self,
-        vault: String,
+        mem: String,
         name: String,
         medium_json: String,
     ) -> Result<(), MemsteadError> {
         let mut engine = self.inner.lock().expect("memstead-swift engine mutex poisoned");
-        engine.add_medium_json(&vault, &name, &medium_json)?;
+        engine.add_medium_json(&mem, &name, &medium_json)?;
         Ok(())
     }
 
     /// Overwrite a medium from a JSON-encoded `Medium`. See `Engine::update_medium`.
     pub fn update_medium(
         &self,
-        vault: String,
+        mem: String,
         name: String,
         medium_json: String,
     ) -> Result<(), MemsteadError> {
         let mut engine = self.inner.lock().expect("memstead-swift engine mutex poisoned");
-        engine.update_medium_json(&vault, &name, &medium_json)?;
+        engine.update_medium_json(&mem, &name, &medium_json)?;
         Ok(())
     }
 
     /// Delete a medium (refused while a facet references it). See `Engine::delete_medium`.
-    pub fn delete_medium(&self, vault: String, name: String) -> Result<(), MemsteadError> {
+    pub fn delete_medium(&self, mem: String, name: String) -> Result<(), MemsteadError> {
         let mut engine = self.inner.lock().expect("memstead-swift engine mutex poisoned");
-        engine.delete_medium(&vault, &name)?;
+        engine.delete_medium(&mem, &name)?;
         Ok(())
     }
 
     /// Rename a medium, repointing dependent facets. See `Engine::rename_medium`.
     pub fn rename_medium(
         &self,
-        vault: String,
+        mem: String,
         old_name: String,
         new_name: String,
     ) -> Result<(), MemsteadError> {
         let mut engine = self.inner.lock().expect("memstead-swift engine mutex poisoned");
-        engine.rename_medium(&vault, &old_name, &new_name)?;
+        engine.rename_medium(&mem, &old_name, &new_name)?;
         Ok(())
     }
 
     /// Create a facet from a JSON-encoded `Facet`. See `Engine::add_facet`.
     pub fn add_facet(
         &self,
-        vault: String,
+        mem: String,
         name: String,
         facet_json: String,
     ) -> Result<(), MemsteadError> {
         let mut engine = self.inner.lock().expect("memstead-swift engine mutex poisoned");
-        engine.add_facet_json(&vault, &name, &facet_json)?;
+        engine.add_facet_json(&mem, &name, &facet_json)?;
         Ok(())
     }
 
     /// Overwrite a facet from a JSON-encoded `Facet`. See `Engine::update_facet`.
     pub fn update_facet(
         &self,
-        vault: String,
+        mem: String,
         name: String,
         facet_json: String,
     ) -> Result<(), MemsteadError> {
         let mut engine = self.inner.lock().expect("memstead-swift engine mutex poisoned");
-        engine.update_facet_json(&vault, &name, &facet_json)?;
+        engine.update_facet_json(&mem, &name, &facet_json)?;
         Ok(())
     }
 
     /// Delete a facet (refused while a projection references it). See `Engine::delete_facet`.
-    pub fn delete_facet(&self, vault: String, name: String) -> Result<(), MemsteadError> {
+    pub fn delete_facet(&self, mem: String, name: String) -> Result<(), MemsteadError> {
         let mut engine = self.inner.lock().expect("memstead-swift engine mutex poisoned");
-        engine.delete_facet(&vault, &name)?;
+        engine.delete_facet(&mem, &name)?;
         Ok(())
     }
 
     /// Rename a facet, repointing dependent projections. See `Engine::rename_facet`.
     pub fn rename_facet(
         &self,
-        vault: String,
+        mem: String,
         old_name: String,
         new_name: String,
     ) -> Result<(), MemsteadError> {
         let mut engine = self.inner.lock().expect("memstead-swift engine mutex poisoned");
-        engine.rename_facet(&vault, &old_name, &new_name)?;
+        engine.rename_facet(&mem, &old_name, &new_name)?;
         Ok(())
     }
 
     /// Create a projection from a JSON-encoded `Projection`. See `Engine::add_projection`.
     pub fn add_projection(
         &self,
-        vault: String,
+        mem: String,
         name: String,
         projection_json: String,
     ) -> Result<(), MemsteadError> {
         let mut engine = self.inner.lock().expect("memstead-swift engine mutex poisoned");
-        engine.add_projection_json(&vault, &name, &projection_json)?;
+        engine.add_projection_json(&mem, &name, &projection_json)?;
         Ok(())
     }
 
     /// Overwrite a projection from a JSON-encoded `Projection`. See `Engine::update_projection`.
     pub fn update_projection(
         &self,
-        vault: String,
+        mem: String,
         name: String,
         projection_json: String,
     ) -> Result<(), MemsteadError> {
         let mut engine = self.inner.lock().expect("memstead-swift engine mutex poisoned");
-        engine.update_projection_json(&vault, &name, &projection_json)?;
+        engine.update_projection_json(&mem, &name, &projection_json)?;
         Ok(())
     }
 
     /// Delete a projection (refused while an ingest runs it). See `Engine::delete_projection`.
-    pub fn delete_projection(&self, vault: String, name: String) -> Result<(), MemsteadError> {
+    pub fn delete_projection(&self, mem: String, name: String) -> Result<(), MemsteadError> {
         let mut engine = self.inner.lock().expect("memstead-swift engine mutex poisoned");
-        engine.delete_projection(&vault, &name)?;
+        engine.delete_projection(&mem, &name)?;
         Ok(())
     }
 
     /// Rename a projection, repointing dependent ingests. See `Engine::rename_projection`.
     pub fn rename_projection(
         &self,
-        vault: String,
+        mem: String,
         old_name: String,
         new_name: String,
     ) -> Result<(), MemsteadError> {
         let mut engine = self.inner.lock().expect("memstead-swift engine mutex poisoned");
-        engine.rename_projection(&vault, &old_name, &new_name)?;
+        engine.rename_projection(&mem, &old_name, &new_name)?;
         Ok(())
     }
 
@@ -529,23 +529,23 @@ impl Engine {
         engine.pipeline_configs_json()
     }
 
-    // --- Vault lifecycle ---------------------------------------------------
+    // --- Mem lifecycle ---------------------------------------------------
     //
     // The macOS roster routes create/delete/set-schema/set-version here
-    // instead of mutating the vault-repo from Swift. create/delete delegate
-    // to the `memstead_engine::vault_management` orchestrators (the same
-    // entry points `memstead-mcp` calls behind `memstead_vault_create` /
-    // `memstead_vault_delete`); set-schema/set-version are methods directly
+    // instead of mutating the mem-repo from Swift. create/delete delegate
+    // to the `memstead_engine::mem_management` orchestrators (the same
+    // entry points `memstead-mcp` calls behind `memstead_mem_create` /
+    // `memstead_mem_delete`); set-schema/set-version are methods directly
     // on `memstead_base::Engine`. The engine owns backend instantiation,
     // allowlist gating, the policy scrub, and the seed/version commits — the
     // binding only re-shapes inputs and flattens outcomes.
 
-    /// Create and register a writable vault. Mirrors `memstead_vault_create`.
-    /// See `memstead_engine::vault_management::create_vault`.
-    pub fn create_vault(
+    /// Create and register a writable mem. Mirrors `memstead_mem_create`.
+    /// See `memstead_engine::mem_management::create_mem`.
+    pub fn create_mem(
         &self,
-        request: VaultCreateRequest,
-    ) -> Result<VaultCreateOutcome, MemsteadError> {
+        request: MemCreateRequest,
+    ) -> Result<MemCreateOutcome, MemsteadError> {
         let schema_ref = request
             .schema
             .parse::<memstead_schema::SchemaRef>()
@@ -554,13 +554,13 @@ impl Engine {
             })?;
         // The two scalar VCS fields collapse back into the engine's nested
         // `VcsConfig`. Only `vcs_gitdir` gates the override; `vcs_worktree`
-        // defaults to `"."` (vault root) when omitted — the engine's
+        // defaults to `"."` (mem root) when omitted — the engine's
         // isolated default shape.
         let vcs = request.vcs_gitdir.map(|gitdir| memstead_schema::VcsConfig {
             gitdir,
             worktree: request.vcs_worktree.unwrap_or_else(|| ".".to_string()),
         });
-        let params = memstead_engine::vault_management::VaultCreateParams {
+        let params = memstead_engine::mem_management::MemCreateParams {
             name: request.name,
             location: PathBuf::from(request.location),
             schema_ref,
@@ -571,8 +571,8 @@ impl Engine {
             write_guidance: std::collections::HashMap::new(),
         };
         let mut engine = self.inner.lock().expect("memstead-swift engine mutex poisoned");
-        let response = memstead_engine::vault_management::create_vault(&mut engine, params)?;
-        Ok(VaultCreateOutcome {
+        let response = memstead_engine::mem_management::create_mem(&mut engine, params)?;
+        Ok(MemCreateOutcome {
             name: response.name,
             location: response.location.to_string_lossy().to_string(),
             schema_ref: response.schema_ref.to_string(),
@@ -581,24 +581,24 @@ impl Engine {
         })
     }
 
-    /// Destructively remove a writable vault. Mirrors `memstead_vault_delete`
+    /// Destructively remove a writable mem. Mirrors `memstead_mem_delete`
     /// (always `delete_files: true`). See
-    /// `memstead_engine::vault_management::delete_vault`.
-    pub fn delete_vault(
+    /// `memstead_engine::mem_management::delete_mem`.
+    pub fn delete_mem(
         &self,
         name: String,
         note: Option<String>,
         operator_mode: bool,
-    ) -> Result<VaultDeleteOutcome, MemsteadError> {
-        let params = memstead_engine::vault_management::VaultDeleteParams {
+    ) -> Result<MemDeleteOutcome, MemsteadError> {
+        let params = memstead_engine::mem_management::MemDeleteParams {
             name,
             delete_files: true,
             note,
             operator_mode,
         };
         let mut engine = self.inner.lock().expect("memstead-swift engine mutex poisoned");
-        let response = memstead_engine::vault_management::delete_vault(&mut engine, params)?;
-        Ok(VaultDeleteOutcome {
+        let response = memstead_engine::mem_management::delete_mem(&mut engine, params)?;
+        Ok(MemDeleteOutcome {
             name: response.name,
             deleted_from_router: response.deleted_from_router,
             files_deleted: response.files_deleted,
@@ -606,71 +606,71 @@ impl Engine {
         })
     }
 
-    /// Set a vault's schema pin — the integrity-driven migration trigger.
-    /// Mirrors `memstead_vault_set_schema`. See
-    /// `memstead_base::Engine::set_vault_schema`.
-    pub fn set_vault_schema(
+    /// Set a mem's schema pin — the integrity-driven migration trigger.
+    /// Mirrors `memstead_mem_set_schema`. See
+    /// `memstead_base::Engine::set_mem_schema`.
+    pub fn set_mem_schema(
         &self,
-        vault: String,
+        mem: String,
         schema: String,
-    ) -> Result<VaultSchemaOutcome, MemsteadError> {
+    ) -> Result<MemSchemaOutcome, MemsteadError> {
         let target = schema
             .parse::<memstead_schema::SchemaRef>()
             .map_err(|e| MemsteadError::ValidationFailed {
                 message: format!("invalid schema ref {schema:?}: {e}"),
             })?;
         let mut engine = self.inner.lock().expect("memstead-swift engine mutex poisoned");
-        let outcome = engine.set_vault_schema(&vault, &target)?;
+        let outcome = engine.set_mem_schema(&mem, &target)?;
         Ok(convert::set_schema_outcome_to_ffi(outcome))
     }
 
-    /// Set a vault's content `version` (consumed by export to stamp the
-    /// archive). Mirrors `memstead_vault_set_version`. See
-    /// `memstead_base::Engine::set_vault_version`.
-    pub fn set_vault_version(
+    /// Set a mem's content `version` (consumed by export to stamp the
+    /// archive). Mirrors `memstead_mem_set_version`. See
+    /// `memstead_base::Engine::set_mem_version`.
+    pub fn set_mem_version(
         &self,
-        vault: String,
+        mem: String,
         version: String,
         note: Option<String>,
-    ) -> Result<VaultVersionOutcome, MemsteadError> {
+    ) -> Result<MemVersionOutcome, MemsteadError> {
         let new_version =
             semver::Version::parse(&version).map_err(|e| MemsteadError::ValidationFailed {
                 message: format!("version {version:?} is not a valid semver: {e}"),
             })?;
         let mut engine = self.inner.lock().expect("memstead-swift engine mutex poisoned");
-        let outcome = engine.set_vault_version(&vault, new_version, note.as_deref())?;
-        Ok(VaultVersionOutcome {
-            vault: outcome.vault,
+        let outcome = engine.set_mem_version(&mem, new_version, note.as_deref())?;
+        Ok(MemVersionOutcome {
+            mem: outcome.mem,
             old_version: outcome.old_version.map(|v| v.to_string()),
             new_version: outcome.new_version.to_string(),
             warnings: outcome.warnings.iter().map(|w| w.to_string()).collect(),
         })
     }
 
-    /// Export a vault as a portable `.mem` archive at `output_path`.
+    /// Export a mem as a portable `.mem` archive at `output_path`.
     /// Backend-symmetric — the engine snapshots a folder mount, walks a
     /// git-branch tip, and refuses archive (sealed) / in-memory
-    /// (unsupported) mounts. See `memstead_base::Engine::export_vault`.
-    pub fn export_vault(
+    /// (unsupported) mounts. See `memstead_base::Engine::export_mem`.
+    pub fn export_mem(
         &self,
-        vault: String,
+        mem: String,
         output_path: String,
-    ) -> Result<VaultExportOutcome, MemsteadError> {
+    ) -> Result<MemExportOutcome, MemsteadError> {
         let engine = self.inner.lock().expect("memstead-swift engine mutex poisoned");
-        let result = engine.export_vault(&vault, Path::new(&output_path))?;
-        Ok(VaultExportOutcome {
+        let result = engine.export_mem(&mem, Path::new(&output_path))?;
+        Ok(MemExportOutcome {
             archive_path: result.archive_path,
             name: result.name,
             version: result.version,
             entity_count: result.entity_count as u64,
             size_bytes: result.size_bytes,
-            dangling_cross_vault_edges: result
-                .dangling_cross_vault_edges
+            dangling_cross_mem_edges: result
+                .dangling_cross_mem_edges
                 .into_iter()
-                .map(|e| DanglingCrossVaultEdge {
+                .map(|e| DanglingCrossMemEdge {
                     entity_path: e.entity_path,
                     target_id: e.target_id,
-                    target_vault: e.target_vault,
+                    target_mem: e.target_mem,
                 })
                 .collect(),
         })
@@ -679,11 +679,11 @@ impl Engine {
     /// Test-only constructor that accepts an explicit `workspace_root`,
     /// bypassing the cwd fallback. Used by in-process tests (and any
     /// external harness opting in via the `test-support` feature) so the
-    /// engine can be rooted at a `TempDir` whose `vault-repo/.git/` has
+    /// engine can be rooted at a `TempDir` whose `mem-repo/.git/` has
     /// been seeded by `memstead_git_branch::test_support`.
     #[cfg(any(test, feature = "test-support"))]
     pub fn new_for_test(
-        _vaults: Vec<VaultInit>,
+        _mems: Vec<MemInit>,
         workspace_root: PathBuf,
     ) -> Result<Self, MemsteadError> {
         Self::from_workspace_root(&workspace_root)
@@ -696,7 +696,7 @@ impl Engine {
 // suite links — never into the featureless framework the Release app ships.
 // ---------------------------------------------------------------------------
 
-/// Canonical two-entity fixture: a `specs` vault holding `entity-a` (which
+/// Canonical two-entity fixture: a `specs` mem holding `entity-a` (which
 /// USES `entity-b`) and `entity-b`. Shared by the Rust-side parity tests and
 /// the FFI `TestSupport` seeder so a regression shows up identically on both
 /// surfaces.
@@ -706,14 +706,14 @@ const FIXTURE_ENTITY_A: &str = "---\ntype: spec\ncreated_date: 2026-01-15\nlast_
 #[cfg(any(test, feature = "test-support"))]
 const FIXTURE_ENTITY_B: &str = "---\ntype: spec\ncreated_date: 2026-02-01\nlast_modified: 2026-04-12\nlevel: M1\ntags: frontend\n---\n# Entity B\n\n## Identity\n\nSecond test entity.\n\n## Purpose\n\nDependency of Entity A.\n";
 
-/// Seed the canonical fixture into a real `vault-repo/.git` under
+/// Seed the canonical fixture into a real `mem-repo/.git` under
 /// `workspace_root`. Routes through the engine's own
 /// `memstead_git_branch::test_support` helper — callers never shell out to
-/// `git` or write refs directly, preserving "the engine owns vault-repo
+/// `git` or write refs directly, preserving "the engine owns mem-repo
 /// state."
 #[cfg(any(test, feature = "test-support"))]
 fn seed_canonical_fixture(workspace_root: &Path) {
-    memstead_git_branch::test_support::init_real_vault_repo_with_entities(
+    memstead_git_branch::test_support::init_real_mem_repo_with_entities(
         workspace_root,
         &[(
             "specs",
@@ -738,7 +738,7 @@ impl TestSupport {
         Self
     }
 
-    /// Seed the canonical two-entity fixture into a fresh `vault-repo/.git`
+    /// Seed the canonical two-entity fixture into a fresh `mem-repo/.git`
     /// under `workspace_root` and return an `Engine` rooted there.
     pub fn seeded_engine(&self, workspace_root: String) -> Result<Arc<Engine>, MemsteadError> {
         let root = PathBuf::from(workspace_root);
@@ -760,7 +760,7 @@ mod tests {
     use std::collections::HashMap;
     use tempfile::TempDir;
 
-    /// Minimal two-entity vault fixture. Lays down a real `vault-repo-git`
+    /// Minimal two-entity mem fixture. Lays down a real `mem-repo-git`
     /// (`main` + `specs` branch carrying entity blobs) so dispatcher
     /// GitTree reads pin the engine state without disk shells.
     fn setup_test_engine() -> (Engine, TempDir) {
@@ -768,7 +768,7 @@ mod tests {
         seed_canonical_fixture(tmp.path());
 
         let engine = Engine::new_for_test(
-            vec![VaultInit {
+            vec![MemInit {
                 name: "specs".to_string(),
                 dir: String::new(),
                 schema_name: "default".to_string(),
@@ -792,18 +792,18 @@ mod tests {
         let stats = engine.get_stats();
         assert!(stats.entity_count >= 2, "entity_count: {}", stats.entity_count);
         assert!(stats.edge_count >= 1, "edge_count: {}", stats.edge_count);
-        assert_eq!(stats.vault_count, 1);
+        assert_eq!(stats.mem_count, 1);
         assert!(stats.types_in_use.iter().any(|t| t == "spec"));
         assert_eq!(stats.stub_count, 0);
-        assert_eq!(stats.writable_vaults, vec!["specs".to_string()]);
-        assert!(stats.read_vaults.is_empty());
+        assert_eq!(stats.writable_mems, vec!["specs".to_string()]);
+        assert!(stats.read_mems.is_empty());
     }
 
     #[test]
     fn engine_open_roots_at_explicit_seeded_workspace() {
         // Seed a real git-branch workspace, then open it through the
         // production FFI entry (not the cwd-fallback constructor). The
-        // returned engine must carry the seeded vault's real data.
+        // returned engine must carry the seeded mem's real data.
         let tmp = TempDir::new().expect("tempdir");
         seed_canonical_fixture(tmp.path());
 
@@ -811,7 +811,7 @@ mod tests {
             .expect("engine_open on a seeded workspace");
         let stats = engine.get_stats();
         assert!(stats.entity_count >= 2, "entity_count: {}", stats.entity_count);
-        assert_eq!(stats.writable_vaults, vec!["specs".to_string()]);
+        assert_eq!(stats.writable_mems, vec!["specs".to_string()]);
     }
 
     #[test]
@@ -822,10 +822,10 @@ mod tests {
         let tmp = TempDir::new().expect("tempdir");
         let root = tmp.path();
 
-        let vault_dir = root.join("notes");
-        std::fs::create_dir_all(&vault_dir).expect("vault dir");
+        let mem_dir = root.join("notes");
+        std::fs::create_dir_all(&mem_dir).expect("mem dir");
         std::fs::write(
-            vault_dir.join("hello.md"),
+            mem_dir.join("hello.md"),
             "---\ntype: spec\n---\n# Hello\n\n## Identity\n\nA.\n",
         )
         .expect("entity");
@@ -834,19 +834,19 @@ mod tests {
         std::fs::create_dir_all(memstead.join("state")).expect("state dir");
         std::fs::write(
             memstead.join("workspace.toml"),
-            "format = \"memstead-git-branch-1\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+            "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
         )
         .expect("workspace.toml");
         std::fs::write(
             memstead.join("state").join("mounts.json"),
-            r#"{"format":"memstead-mounts-2","mounts":[{"vault":"notes","schema":"default@1.0.0","storage":{"type":"folder","path":"notes"},"capability":"write","lifecycle":"eager","cross_linkable":true}]}"#,
+            r#"{"format":"memstead-mounts-3","mounts":[{"mem":"notes","schema":"default@1.0.0","storage":{"type":"folder","path":"notes"},"capability":"write","lifecycle":"eager","cross_linkable":true}]}"#,
         )
         .expect("mounts.json");
 
         let engine = engine_open(root.to_string_lossy().to_string())
             .expect("folder workspace opens through engine_open");
         let stats = engine.get_stats();
-        assert_eq!(stats.writable_vaults, vec!["notes".to_string()]);
+        assert_eq!(stats.writable_mems, vec!["notes".to_string()]);
         assert!(stats.entity_count >= 1, "entity_count: {}", stats.entity_count);
     }
 
@@ -876,13 +876,13 @@ mod tests {
     }
 
     #[test]
-    fn discover_vaults_picks_up_fixture() {
+    fn discover_mems_picks_up_fixture() {
         let (_engine, tmp) = setup_test_engine();
-        let vaults = discover_vaults(tmp.path().to_string_lossy().to_string());
-        assert_eq!(vaults.len(), 1, "expected one discovered vault");
-        assert_eq!(vaults[0].name, "specs");
-        assert_eq!(vaults[0].schema_name, "default");
-        assert_eq!(vaults[0].schema_version, "1.0.0");
+        let mems = discover_mems(tmp.path().to_string_lossy().to_string());
+        assert_eq!(mems.len(), 1, "expected one discovered mem");
+        assert_eq!(mems[0].name, "specs");
+        assert_eq!(mems[0].schema_name, "default");
+        assert_eq!(mems[0].schema_version, "1.0.0");
     }
 
     #[test]
@@ -902,7 +902,7 @@ mod tests {
         let (engine, _tmp) = setup_test_engine();
         let result = engine.list_entities(SearchScope {
             query: None,
-            vault: None,
+            mem: None,
             entity_type: None,
             limit: Some(100),
             offset: None,
@@ -928,7 +928,7 @@ mod tests {
                 any_of: vec!["Second".to_string()],
                 ..Default::default()
             }),
-            vault: None,
+            mem: None,
             entity_type: None,
             limit: Some(10),
             offset: None,
@@ -1009,12 +1009,12 @@ mod tests {
     }
 
     #[test]
-    fn vault_head_sha_returns_some_for_seeded_vault() {
+    fn mem_head_sha_returns_some_for_seeded_mem() {
         let (engine, _tmp) = setup_test_engine();
         let head = engine
-            .vault_head_sha("specs".to_string())
-            .expect("vault_head_sha");
-        assert!(head.is_some(), "expected seeded vault to have a HEAD");
+            .mem_head_sha("specs".to_string())
+            .expect("mem_head_sha");
+        assert!(head.is_some(), "expected seeded mem to have a HEAD");
         let sha = head.unwrap();
         assert_eq!(sha.len(), 40, "head must be 40-char hex, got: {sha}");
         assert!(
@@ -1024,14 +1024,14 @@ mod tests {
     }
 
     #[test]
-    fn vault_head_sha_unknown_vault_errors() {
+    fn mem_head_sha_unknown_mem_errors() {
         let (engine, _tmp) = setup_test_engine();
         let err = engine
-            .vault_head_sha("no-such".to_string())
+            .mem_head_sha("no-such".to_string())
             .unwrap_err();
         match err {
-            MemsteadError::UnknownVault { name, .. } => assert_eq!(name, "no-such"),
-            other => panic!("expected UnknownVault, got {other:?}"),
+            MemsteadError::UnknownMem { name, .. } => assert_eq!(name, "no-such"),
+            other => panic!("expected UnknownMem, got {other:?}"),
         }
     }
 
@@ -1045,7 +1045,7 @@ mod tests {
                 None,
             )
             .expect("changes_since");
-        assert_eq!(report.vault, "specs");
+        assert_eq!(report.mem, "specs");
         let added: Vec<_> = report
             .changes
             .iter()
@@ -1064,7 +1064,7 @@ mod tests {
         let report = engine
             .agent_notes("specs".to_string(), memstead_base::EMPTY_TREE_SHA.to_string())
             .expect("agent_notes");
-        assert_eq!(report.vault, "specs");
+        assert_eq!(report.mem, "specs");
         // Fixture seeds `__MEMSTEAD` via the migrator; the FFI contract
         // being locked here is that `memstead_ref` round-trips without
         // crashing.
@@ -1076,14 +1076,14 @@ mod tests {
     fn apply_parse_recovery_clears_drift_through_ffi() {
         // AC #14: parse-recovery must succeed through the UniFFI surface
         // the same way `memstead recover` does on equivalent input. Seed
-        // a vault whose source entity declares an unknown rel-type; the
+        // a mem whose source entity declares an unknown rel-type; the
         // parser drops it at load (PARSED_RELATION_INVALID). The first
         // disk-mutating UniFFI method must recover it and report
         // `removed`, then be idempotent on the now-clean workspace.
         let tmp = TempDir::new().expect("tempdir");
         let target = "---\ntype: spec\ncreated_date: 2026-01-15\nlast_modified: 2026-04-12\nlevel: M0\n---\n# Target\n\n## Identity\n\nTarget body.\n";
         let source = "---\ntype: spec\ncreated_date: 2026-01-15\nlast_modified: 2026-04-12\nlevel: M0\n---\n# Source\n\n## Identity\n\nSource body.\n\n## Relationships\n\n- **MADE_UP_TYPE_A**: [[specs--target]]\n";
-        memstead_git_branch::test_support::init_real_vault_repo_with_entities(
+        memstead_git_branch::test_support::init_real_mem_repo_with_entities(
             tmp.path(),
             &[(
                 "specs",
@@ -1129,71 +1129,71 @@ mod tests {
         }
     }
 
-    // --- Vault lifecycle through the FFI -----------------------------------
+    // --- Mem lifecycle through the FFI -----------------------------------
 
     #[test]
-    fn set_vault_version_bumps_through_ffi() {
+    fn set_mem_version_bumps_through_ffi() {
         // The gate-free version op: seed `specs` at 0.1.0, bump to 0.2.0,
         // and confirm the outcome reflects the new version through the FFI.
         let (engine, _tmp) = setup_test_engine();
         let outcome = engine
-            .set_vault_version("specs".to_string(), "0.2.0".to_string(), Some("ship".into()))
+            .set_mem_version("specs".to_string(), "0.2.0".to_string(), Some("ship".into()))
             .expect("version bump succeeds through the FFI surface");
-        assert_eq!(outcome.vault, "specs");
+        assert_eq!(outcome.mem, "specs");
         assert_eq!(outcome.new_version, "0.2.0");
         // A second read confirms the engine persisted the bump.
         let again = engine
-            .set_vault_version("specs".to_string(), "0.3.0".to_string(), None)
+            .set_mem_version("specs".to_string(), "0.3.0".to_string(), None)
             .expect("second bump succeeds");
         assert_eq!(again.old_version.as_deref(), Some("0.2.0"));
         assert_eq!(again.new_version, "0.3.0");
     }
 
     #[test]
-    fn set_vault_version_rejects_bad_semver() {
+    fn set_mem_version_rejects_bad_semver() {
         let (engine, _tmp) = setup_test_engine();
         let err = engine
-            .set_vault_version("specs".to_string(), "not-semver".to_string(), None)
+            .set_mem_version("specs".to_string(), "not-semver".to_string(), None)
             .expect_err("malformed semver must refuse");
         assert!(matches!(err, MemsteadError::ValidationFailed { .. }), "got {err:?}");
     }
 
     #[test]
-    fn set_vault_schema_noop_when_pin_unchanged() {
+    fn set_mem_schema_noop_when_pin_unchanged() {
         // Re-pinning to the current schema is a noop — the FFI surfaces the
         // same `outcome` wire token an agent would branch on over MCP.
         let (engine, _tmp) = setup_test_engine();
         let outcome = engine
-            .set_vault_schema("specs".to_string(), "default@1.0.0".to_string())
+            .set_mem_schema("specs".to_string(), "default@1.0.0".to_string())
             .expect("noop re-pin succeeds");
-        assert_eq!(outcome.vault, "specs");
+        assert_eq!(outcome.mem, "specs");
         assert_eq!(outcome.outcome, "noop");
         assert_eq!(outcome.schema_pin, "default@1.0.0");
         assert!(outcome.findings.is_empty());
     }
 
     #[test]
-    fn set_vault_schema_rejects_unknown_vault() {
+    fn set_mem_schema_rejects_unknown_mem() {
         let (engine, _tmp) = setup_test_engine();
         let err = engine
-            .set_vault_schema("no-such-vault".to_string(), "default@1.0.0".to_string())
-            .expect_err("unknown vault must refuse");
-        // `UnknownVault` survives the `ProEngineError::Basis` → `EngineError`
+            .set_mem_schema("no-such-mem".to_string(), "default@1.0.0".to_string())
+            .expect_err("unknown mem must refuse");
+        // `UnknownMem` survives the `ProEngineError::Basis` → `EngineError`
         // lift into the typed Swift variant.
-        assert!(matches!(err, MemsteadError::UnknownVault { .. }), "got {err:?}");
+        assert!(matches!(err, MemsteadError::UnknownMem { .. }), "got {err:?}");
     }
 
     #[test]
-    fn create_then_delete_vault_through_ffi() {
-        // Operator-mode create (skips the `[[vault_management.create]]`
-        // allowlist) lands a new git-branch vault the engine then lists; a
-        // matching delete removes it. No vault-repo mutation originates in
+    fn create_then_delete_mem_through_ffi() {
+        // Operator-mode create (skips the `[[mem_management.create]]`
+        // allowlist) lands a new git-branch mem the engine then lists; a
+        // matching delete removes it. No mem-repo mutation originates in
         // Swift — the binding only re-shapes the request and the engine
         // owns backend instantiation and the seed commit.
         let (engine, tmp) = setup_test_engine();
         let target = tmp.path().join("fresh");
         let created = engine
-            .create_vault(VaultCreateRequest {
+            .create_mem(MemCreateRequest {
                 name: "fresh".to_string(),
                 location: target.to_string_lossy().into_owned(),
                 schema: "default@1.0.0".to_string(),
@@ -1208,16 +1208,16 @@ mod tests {
         // Git-branch backends produce a real 40-char hex seed sha.
         assert_eq!(created.seed_commit_sha.len(), 40, "sha: {}", created.seed_commit_sha);
 
-        // The engine now lists the created vault without a restart.
+        // The engine now lists the created mem without a restart.
         let stats = engine.get_stats();
         assert!(
-            stats.writable_vaults.iter().any(|v| v == "fresh"),
-            "created vault must appear in the roster: {:?}",
-            stats.writable_vaults
+            stats.writable_mems.iter().any(|v| v == "fresh"),
+            "created mem must appear in the roster: {:?}",
+            stats.writable_mems
         );
 
         let deleted = engine
-            .delete_vault("fresh".to_string(), Some("cleanup".into()), true)
+            .delete_mem("fresh".to_string(), Some("cleanup".into()), true)
             .expect("operator-mode delete succeeds through the FFI");
         assert_eq!(deleted.name, "fresh");
         assert!(deleted.deleted_from_router);
@@ -1225,38 +1225,38 @@ mod tests {
         // Gone from the roster after the delete.
         let after = engine.get_stats();
         assert!(
-            !after.writable_vaults.iter().any(|v| v == "fresh"),
-            "deleted vault must be gone: {:?}",
-            after.writable_vaults
+            !after.writable_mems.iter().any(|v| v == "fresh"),
+            "deleted mem must be gone: {:?}",
+            after.writable_mems
         );
     }
 
     #[test]
-    fn init_filesystem_vault_then_open_roundtrips() {
-        // The engine-routed bootstrap: initialise a brand-new folder vault
+    fn init_filesystem_mem_then_open_roundtrips() {
+        // The engine-routed bootstrap: initialise a brand-new folder mem
         // from nothing (no Swift config write), then open it — the seed
-        // structure roots and lists the one vault.
+        // structure roots and lists the one mem.
         let tmp = TempDir::new().expect("tempdir");
         let root = tmp.path().join("notes");
-        init_filesystem_vault(
+        init_filesystem_mem(
             root.to_string_lossy().into_owned(),
             "notes".to_string(),
             "default@1.0.0".to_string(),
         )
-        .expect("init_filesystem_vault succeeds");
+        .expect("init_filesystem_mem succeeds");
 
         let engine = engine_open(root.to_string_lossy().to_string())
-            .expect("the init'd vault opens through engine_open");
-        let roster = engine.vault_roster();
+            .expect("the init'd mem opens through engine_open");
+        let roster = engine.mem_roster();
         assert_eq!(roster.len(), 1, "roster: {roster:?}");
-        assert_eq!(roster[0].vault, "notes");
-        assert_eq!(roster[0].backend, VaultBackendKind::Folder);
+        assert_eq!(roster[0].mem, "notes");
+        assert_eq!(roster[0].backend, MemBackendKind::Folder);
     }
 
     #[test]
-    fn init_filesystem_vault_rejects_bad_schema() {
+    fn init_filesystem_mem_rejects_bad_schema() {
         let tmp = TempDir::new().expect("tempdir");
-        let err = init_filesystem_vault(
+        let err = init_filesystem_mem(
             tmp.path().join("v").to_string_lossy().into_owned(),
             "v".to_string(),
             "not a ref".to_string(),
@@ -1266,8 +1266,8 @@ mod tests {
     }
 
     #[test]
-    fn engine_open_roots_a_standalone_folder_vault() {
-        // Goal 5 (engine side): opening a single bare vault — a directory
+    fn engine_open_roots_a_standalone_folder_mem() {
+        // Goal 5 (engine side): opening a single bare mem — a directory
         // with `.memstead/config.json` but no `workspace.toml` — yields the
         // same rooted engine + one-entry roster as a workspace, through the
         // very `engine_open` entry the macOS app uses. No separate non-rooted
@@ -1287,41 +1287,41 @@ mod tests {
         .expect("entity");
 
         let engine = engine_open(root.to_string_lossy().to_string())
-            .expect("a standalone vault opens through engine_open");
-        let roster = engine.vault_roster();
-        assert_eq!(roster.len(), 1, "one mount for the standalone vault: {roster:?}");
-        assert_eq!(roster[0].backend, VaultBackendKind::Folder);
+            .expect("a standalone mem opens through engine_open");
+        let roster = engine.mem_roster();
+        assert_eq!(roster.len(), 1, "one mount for the standalone mem: {roster:?}");
+        assert_eq!(roster[0].backend, MemBackendKind::Folder);
         assert!(engine.get_stats().entity_count >= 1);
     }
 
     #[test]
-    fn vault_roster_reports_engine_sourced_facts() {
-        // The seeded fixture is one writable git-branch vault with two
+    fn mem_roster_reports_engine_sourced_facts() {
+        // The seeded fixture is one writable git-branch mem with two
         // entities. The roster reflects engine truth: backend kind,
         // capability, schema pin, count — and no drift on a fresh boot.
         let (engine, _tmp) = setup_test_engine();
-        let roster = engine.vault_roster();
+        let roster = engine.mem_roster();
         assert_eq!(roster.len(), 1, "roster: {roster:?}");
         let specs = &roster[0];
-        assert_eq!(specs.vault, "specs");
-        assert_eq!(specs.backend, VaultBackendKind::GitBranch);
-        assert!(specs.writable, "seeded git-branch vault is writable");
+        assert_eq!(specs.mem, "specs");
+        assert_eq!(specs.backend, MemBackendKind::GitBranch);
+        assert!(specs.writable, "seeded git-branch mem is writable");
         assert_eq!(specs.schema_pin.as_deref(), Some("default@1.0.0"));
         assert_eq!(specs.entity_count, 2, "two seeded entities");
         assert!(!specs.drifted, "no sibling writer → no drift on fresh boot");
     }
 
     #[test]
-    fn vault_roster_distinguishes_folder_backend() {
+    fn mem_roster_distinguishes_folder_backend() {
         // A folder-backed workspace surfaces a Folder roster entry — the
         // backend kind is engine-sourced, not reconstructed Swift-side, so
         // it discriminates folder from git-branch by construction.
         let tmp = TempDir::new().expect("tempdir");
         let root = tmp.path();
-        let vault_dir = root.join("notes");
-        std::fs::create_dir_all(&vault_dir).expect("vault dir");
+        let mem_dir = root.join("notes");
+        std::fs::create_dir_all(&mem_dir).expect("mem dir");
         std::fs::write(
-            vault_dir.join("hello.md"),
+            mem_dir.join("hello.md"),
             "---\ntype: spec\n---\n# Hello\n\n## Identity\n\nA.\n",
         )
         .expect("entity");
@@ -1329,46 +1329,46 @@ mod tests {
         std::fs::create_dir_all(memstead.join("state")).expect("state dir");
         std::fs::write(
             memstead.join("workspace.toml"),
-            "format = \"memstead-git-branch-1\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+            "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
         )
         .expect("workspace.toml");
         std::fs::write(
             memstead.join("state").join("mounts.json"),
-            r#"{"format":"memstead-mounts-2","mounts":[{"vault":"notes","schema":"default@1.0.0","storage":{"type":"folder","path":"notes"},"capability":"write","lifecycle":"eager","cross_linkable":true}]}"#,
+            r#"{"format":"memstead-mounts-3","mounts":[{"mem":"notes","schema":"default@1.0.0","storage":{"type":"folder","path":"notes"},"capability":"write","lifecycle":"eager","cross_linkable":true}]}"#,
         )
         .expect("mounts.json");
 
         let engine = engine_open(root.to_string_lossy().to_string())
             .expect("folder workspace opens");
-        let roster = engine.vault_roster();
+        let roster = engine.mem_roster();
         assert_eq!(roster.len(), 1, "roster: {roster:?}");
-        assert_eq!(roster[0].vault, "notes");
-        assert_eq!(roster[0].backend, VaultBackendKind::Folder);
+        assert_eq!(roster[0].mem, "notes");
+        assert_eq!(roster[0].backend, MemBackendKind::Folder);
         // Folder backends never drift (no tracked head).
         assert!(!roster[0].drifted);
     }
 
     #[test]
-    fn export_vault_produces_a_mountable_archive() {
-        // AC: "exporting a vault as `.mem` produces an archive the engine can
+    fn export_mem_produces_a_mountable_archive() {
+        // AC: "exporting a mem as `.mem` produces an archive the engine can
         // subsequently mount read-only." Bump the version first (export
         // refuses a config without one), export to a temp path through the
         // FFI, then re-mount the bytes via `Engine::from_archive_bytes` and
         // confirm the embedded entities survived the round-trip.
         let (engine, tmp) = setup_test_engine();
         engine
-            .set_vault_version("specs".to_string(), "1.0.0".to_string(), None)
+            .set_mem_version("specs".to_string(), "1.0.0".to_string(), None)
             .expect("version bump precondition");
 
         let out_path = tmp.path().join("specs.mem");
         let outcome = engine
-            .export_vault("specs".to_string(), out_path.to_string_lossy().into_owned())
+            .export_mem("specs".to_string(), out_path.to_string_lossy().into_owned())
             .expect("export succeeds through the FFI");
         assert_eq!(outcome.name, "specs");
         assert_eq!(outcome.version, "1.0.0");
         assert!(outcome.entity_count >= 2, "entity_count: {}", outcome.entity_count);
         assert!(outcome.size_bytes > 0);
-        assert!(outcome.dangling_cross_vault_edges.is_empty());
+        assert!(outcome.dangling_cross_mem_edges.is_empty());
         assert!(out_path.is_file(), "archive must land at the requested path");
 
         // The engine can mount the produced archive read-only.
@@ -1382,21 +1382,21 @@ mod tests {
     }
 
     #[test]
-    fn export_vault_rejects_unknown_vault() {
+    fn export_mem_rejects_unknown_mem() {
         let (engine, tmp) = setup_test_engine();
         let out_path = tmp.path().join("nope.mem");
         let err = engine
-            .export_vault("no-such-vault".to_string(), out_path.to_string_lossy().into_owned())
-            .expect_err("unknown vault must refuse");
-        assert!(matches!(err, MemsteadError::UnknownVault { .. }), "got {err:?}");
+            .export_mem("no-such-mem".to_string(), out_path.to_string_lossy().into_owned())
+            .expect_err("unknown mem must refuse");
+        assert!(matches!(err, MemsteadError::UnknownMem { .. }), "got {err:?}");
     }
 
     #[test]
-    fn create_vault_rejects_bad_schema_ref() {
+    fn create_mem_rejects_bad_schema_ref() {
         let (engine, tmp) = setup_test_engine();
         let target = tmp.path().join("bad");
         let err = engine
-            .create_vault(VaultCreateRequest {
+            .create_mem(MemCreateRequest {
                 name: "bad".to_string(),
                 location: target.to_string_lossy().into_owned(),
                 schema: "not a valid ref".to_string(),

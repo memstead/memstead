@@ -18,7 +18,7 @@ use serde::Deserialize;
 
 use memstead_base::vcs::Actor;
 use memstead_base::{EntityId, UpdateEntityArgs};
-#[cfg(feature = "vault-repo")]
+#[cfg(feature = "mem-repo")]
 use memstead_base::ops::PatchArg;
 
 use crate::CliError;
@@ -72,7 +72,7 @@ pub struct Args {
     pub metadata: Vec<String>,
 
     /// Remove a metadata field: repeatable `--metadata-unset KEY`. Silent
-    /// no-op if the key is absent; errors on read-only fields (vault/id/type
+    /// no-op if the key is absent; errors on read-only fields (mem/id/type
     /// plus the engine-stamped created_date/last_modified) or
     /// schema-required fields.
     #[arg(long = "metadata-unset", value_name = "KEY")]
@@ -81,12 +81,12 @@ pub struct Args {
     /// Atomic batched relation declaration: repeatable
     /// `--declare-relations REL_TYPE:TARGET_ID`. Each entry is
     /// validated like an individual `memstead relate` call (schema-shape,
-    /// cross-vault policy, target-id grammar) and appended to the
+    /// cross-mem policy, target-id grammar) and appended to the
     /// entity's relations BEFORE the strict wiki-link/relation
     /// validator runs. Lets the agent add `[[target]]` body
     /// wiki-links AND declare the backing relation in one
     /// `memstead update` call without an interleaved `memstead relate`.
-    /// Absent Write-vault targets are auto-stubbed identically to
+    /// Absent Write-mem targets are auto-stubbed identically to
     /// `memstead relate`'s add path. Each successful declaration is
     /// echoed in the response's `relations_declared` (with
     /// `target_was_stubbed` flagging the auto-stub case).
@@ -134,9 +134,9 @@ struct UpdatePayload {
 
 #[derive(Debug, Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
-#[cfg_attr(not(feature = "vault-repo"), allow(dead_code))]
+#[cfg_attr(not(feature = "mem-repo"), allow(dead_code))]
 struct DeclareRelationPayload {
-    /// Target entity id (`vault--slug` or cross-vault form).
+    /// Target entity id (`mem--slug` or cross-mem form).
     to: String,
     /// Relationship type — case-insensitive on input; engine
     /// canonicalises to UPPER_SNAKE_CASE.
@@ -149,7 +149,7 @@ struct DeclareRelationPayload {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-#[cfg_attr(not(feature = "vault-repo"), allow(dead_code))]
+#[cfg_attr(not(feature = "mem-repo"), allow(dead_code))]
 struct PatchPayload {
     old: String,
     new: String,
@@ -202,9 +202,9 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     let entity_id = EntityId::canonical(&payload.id);
 
     match ctx.cli_engine()? {
-        #[cfg(feature = "vault-repo")]
-        CliEngine::VaultRepo(mut engine) => {
-            let expected_hash = resolve_hash_vault_repo(
+        #[cfg(feature = "mem-repo")]
+        CliEngine::MemRepo(mut engine) => {
+            let expected_hash = resolve_hash_mem_repo(
                 &engine,
                 &entity_id,
                 payload.expected_hash,
@@ -255,12 +255,12 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                     &crate::setup::cli_ctx_with_note(args.note.clone()),
                 )
                 .map_err(CliError::from_engine_op)?;
-            let vault_changed = engine.take_vault_changed_notices();
+            let mem_changed = engine.take_mem_changed_notices();
 
             if ctx.json {
                 let mut body =
                     serde_json::to_value(&result).unwrap_or(serde_json::Value::Null);
-                super::merge_vault_changed_json(&mut body, &vault_changed);
+                super::merge_mem_changed_json(&mut body, &mem_changed);
                 print_json(&body)?;
             } else {
                 let header = if payload.dry_run {
@@ -302,13 +302,13 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                     body.push_str(&format!("\n- Warnings: {}", parts.join("; ")));
                 }
                 body.push_str(&format!("\n- Hash: `{}`", result.content_hash));
-                body.push_str(&super::render_vault_changed_block(&vault_changed));
+                body.push_str(&super::render_mem_changed_block(&mem_changed));
                 print_markdown(&body);
             }
         }
         CliEngine::Filesystem(mut engine) => {
-            // The filesystem-vault `memstead_update` surface is intentionally
-            // smaller than vault-repo's: whole-section replacement,
+            // The filesystem-mem `memstead_update` surface is intentionally
+            // smaller than mem-repo's: whole-section replacement,
             // metadata set, and metadata unset are honoured;
             // append_sections / patch_sections / dry_run are not yet
             // wired on the filesystem engine. Surface that as a clear
@@ -317,7 +317,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 return Err(CliError::new(
                     ExitKind::Validation,
                     "INVALID_INPUT",
-                    "--append is not yet supported on filesystem-vault `memstead update`",
+                    "--append is not yet supported on filesystem-mem `memstead update`",
                 )
                 .into());
             }
@@ -325,7 +325,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 return Err(CliError::new(
                     ExitKind::Validation,
                     "INVALID_INPUT",
-                    "--patch / --patch-all are not yet supported on filesystem-vault `memstead update`",
+                    "--patch / --patch-all are not yet supported on filesystem-mem `memstead update`",
                 )
                 .into());
             }
@@ -333,7 +333,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 return Err(CliError::new(
                     ExitKind::Validation,
                     "INVALID_INPUT",
-                    "--dry-run is not yet supported on filesystem-vault `memstead update`",
+                    "--dry-run is not yet supported on filesystem-mem `memstead update`",
                 )
                 .into());
             }
@@ -458,7 +458,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
 
 /// Render `modified_sections` as `identity (replaced), constraints (appended)`.
 /// Returns `None` when nothing was modified, letting the caller omit the line.
-#[cfg(feature = "vault-repo")]
+#[cfg(feature = "mem-repo")]
 fn render_section_mutations(m: &memstead_git_branch::ModifiedSections) -> Option<String> {
     let mut parts = Vec::new();
     for k in &m.replaced {
@@ -474,7 +474,7 @@ fn render_section_mutations(m: &memstead_git_branch::ModifiedSections) -> Option
 }
 
 /// Render `modified_metadata` as `level (set), tags (unset)`. `None` when empty.
-#[cfg(feature = "vault-repo")]
+#[cfg(feature = "mem-repo")]
 fn render_metadata_mutations(m: &memstead_git_branch::ModifiedMetadata) -> Option<String> {
     let mut parts = Vec::new();
     for k in &m.set {
@@ -496,8 +496,8 @@ fn render_metadata_mutations(m: &memstead_git_branch::ModifiedMetadata) -> Optio
 ///   bother reading the entity first," `--force` for "I intend to overwrite
 ///   regardless of what's there."
 /// * Strict (default) → use the explicit `--expected-hash` / JSON field, else error.
-#[cfg(feature = "vault-repo")]
-fn resolve_hash_vault_repo(
+#[cfg(feature = "mem-repo")]
+fn resolve_hash_mem_repo(
     engine: &memstead_base::Engine,
     id: &EntityId,
     explicit: Option<String>,
@@ -518,7 +518,7 @@ fn resolve_hash_vault_repo(
     require_explicit_hash(explicit)
 }
 
-/// Filesystem-vault counterpart of [`resolve_hash_vault_repo`]. Same
+/// Filesystem-mem counterpart of [`resolve_hash_mem_repo`]. Same
 /// semantics; differs only in the engine accessor type.
 fn resolve_hash_filesystem(
     engine: &memstead_base::Engine,
@@ -556,8 +556,8 @@ fn require_explicit_hash(explicit: Option<String>) -> anyhow::Result<String> {
 
 /// Parse repeatable `--declare-relations REL_TYPE:TARGET_ID` into
 /// the structured payload used downstream. Splits on the FIRST `:`
-/// so the target id can itself contain colons (cross-vault
-/// `[[vault:slug]]` form). The rel-type half must match the
+/// so the target id can itself contain colons (cross-mem
+/// `[[mem:slug]]` form). The rel-type half must match the
 /// `[A-Za-z][A-Za-z_]*` grammar already used by `memstead relate`;
 /// validation against the workspace's schema vocabulary happens at
 /// the engine layer.

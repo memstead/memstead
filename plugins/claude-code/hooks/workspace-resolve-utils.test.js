@@ -5,8 +5,8 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import {
   findWorkspaceRoot,
-  readFolderVaultDirs,
-  resolveVaultDirs,
+  readFolderMemDirs,
+  resolveMemDirs,
 } from './workspace-resolve-utils.mjs';
 import { checkEditTarget } from './guard-entity-edit-utils.mjs';
 
@@ -18,7 +18,7 @@ function makeWorkspace(mounts, storeDir = '.memstead') {
   writeFileSync(join(root, storeDir, 'workspace.toml'), 'format = "test"\n');
   writeFileSync(
     join(root, storeDir, 'state', 'mounts.json'),
-    JSON.stringify({ format: 'memstead-mounts-2', mounts }),
+    JSON.stringify({ format: 'memstead-mounts-3', mounts }),
   );
   return root;
 }
@@ -51,35 +51,35 @@ describe('findWorkspaceRoot', () => {
   });
 });
 
-describe('readFolderVaultDirs', () => {
+describe('readFolderMemDirs', () => {
   after(cleanup);
 
   it('returns [] for a pure git-branch workspace (no working-tree entity files)', () => {
     const root = makeWorkspace([
-      { vault: 'engine', storage: { type: 'git-branch', gitdir: 'vault-repo/.git', branch: 'refs/heads/memstead/engine' } },
-      { vault: 'plugin', storage: { type: 'git-branch', gitdir: 'vault-repo/.git', branch: 'refs/heads/memstead/plugin' } },
+      { mem: 'engine', storage: { type: 'git-branch', gitdir: 'mem-repo/.git', branch: 'refs/heads/memstead/engine' } },
+      { mem: 'plugin', storage: { type: 'git-branch', gitdir: 'mem-repo/.git', branch: 'refs/heads/memstead/plugin' } },
     ]);
     fixtures.push(root);
-    assert.deepEqual(readFolderVaultDirs(root), []);
+    assert.deepEqual(readFolderMemDirs(root), []);
   });
 
   it('returns folder mount dirs resolved against the workspace root', () => {
     const root = makeWorkspace([
-      { vault: 'engine', storage: { type: 'folder', path: 'engine' } },
-      { vault: 'notes', storage: { type: 'folder', path: 'sub/notes' } },
-      { vault: 'sealed', storage: { type: 'archive', path: 'x.mem' } },
+      { mem: 'engine', storage: { type: 'folder', path: 'engine' } },
+      { mem: 'notes', storage: { type: 'folder', path: 'sub/notes' } },
+      { mem: 'sealed', storage: { type: 'archive', path: 'x.mem' } },
     ]);
     fixtures.push(root);
-    assert.deepEqual(readFolderVaultDirs(root), [
+    assert.deepEqual(readFolderMemDirs(root), [
       resolve(root, 'engine'),
       resolve(root, 'sub/notes'),
     ]);
   });
 
-  it('falls back to the vault name when a folder mount omits a path', () => {
-    const root = makeWorkspace([{ vault: 'engine', storage: { type: 'folder' } }]);
+  it('falls back to the mem name when a folder mount omits a path', () => {
+    const root = makeWorkspace([{ mem: 'engine', storage: { type: 'folder' } }]);
     fixtures.push(root);
-    assert.deepEqual(readFolderVaultDirs(root), [resolve(root, 'engine')]);
+    assert.deepEqual(readFolderMemDirs(root), [resolve(root, 'engine')]);
   });
 
   it('returns [] when mounts.json is absent', () => {
@@ -87,44 +87,44 @@ describe('readFolderVaultDirs', () => {
     mkdirSync(join(root, '.memstead'), { recursive: true });
     writeFileSync(join(root, '.memstead', 'workspace.toml'), 'format = "test"\n');
     fixtures.push(root);
-    assert.deepEqual(readFolderVaultDirs(root), []);
+    assert.deepEqual(readFolderMemDirs(root), []);
   });
 });
 
-describe('resolveVaultDirs', () => {
+describe('resolveMemDirs', () => {
   after(cleanup);
 
-  it('honors explicit --vault args (legacy/hand-authored configs) over walk-up', () => {
-    const cfg = { mcpServers: { memstead: { args: ['--vault', './specs'] } } };
+  it('honors explicit --mem args (legacy/hand-authored configs) over walk-up', () => {
+    const cfg = { mcpServers: { memstead: { args: ['--mem', './specs'] } } };
     assert.deepEqual(
-      resolveVaultDirs({ cwd: '/project', mcpConfig: cfg }),
+      resolveMemDirs({ cwd: '/project', mcpConfig: cfg }),
       [resolve('/project', './specs')],
     );
   });
 
-  it('falls back to walk-up + folder mounts when no --vault arg is present', () => {
-    const root = makeWorkspace([{ vault: 'engine', storage: { type: 'folder', path: 'engine' } }]);
+  it('falls back to walk-up + folder mounts when no --mem arg is present', () => {
+    const root = makeWorkspace([{ mem: 'engine', storage: { type: 'folder', path: 'engine' } }]);
     fixtures.push(root);
     const cfg = { mcpServers: { memstead: { command: 'sh', args: ['-c', 'cd x && exec memstead-mcp'] } } };
     assert.deepEqual(
-      resolveVaultDirs({ cwd: root, mcpConfig: cfg }),
+      resolveMemDirs({ cwd: root, mcpConfig: cfg }),
       [resolve(root, 'engine')],
     );
   });
 
   it('returns [] for a git-branch workspace (the real memstead layout)', () => {
     const root = makeWorkspace([
-      { vault: 'engine', storage: { type: 'git-branch', gitdir: 'vault-repo/.git', branch: 'refs/heads/memstead/engine' } },
+      { mem: 'engine', storage: { type: 'git-branch', gitdir: 'mem-repo/.git', branch: 'refs/heads/memstead/engine' } },
     ]);
     fixtures.push(root);
     const cfg = { mcpServers: { memstead: { command: 'sh', args: ['-c', 'cd graph && exec ../memstead-mcp'] } } };
-    assert.deepEqual(resolveVaultDirs({ cwd: root, mcpConfig: cfg }), []);
+    assert.deepEqual(resolveMemDirs({ cwd: root, mcpConfig: cfg }), []);
   });
 
   it('returns [] when cwd is not inside any workspace', () => {
     const orphan = mkdtempSync(join(tmpdir(), 'memstead-orphan2-'));
     fixtures.push(orphan);
-    assert.deepEqual(resolveVaultDirs({ cwd: orphan, mcpConfig: null }), []);
+    assert.deepEqual(resolveMemDirs({ cwd: orphan, mcpConfig: null }), []);
   });
 
   // The real memstead shape: .mcp.json at the project root, workspace in a
@@ -138,11 +138,11 @@ describe('resolveVaultDirs', () => {
     writeFileSync(join(wsDir, '.memstead', 'workspace.toml'), 'format = "test"\n');
     writeFileSync(
       join(wsDir, '.memstead', 'state', 'mounts.json'),
-      JSON.stringify({ mounts: [{ vault: 'engine', storage: { type: 'folder', path: 'engine' } }] }),
+      JSON.stringify({ mounts: [{ mem: 'engine', storage: { type: 'folder', path: 'engine' } }] }),
     );
     const cfg = { mcpServers: { memstead: { command: 'sh', args: ['-c', 'cd sub-ws && exec ../memstead-mcp'] } } };
     assert.deepEqual(
-      resolveVaultDirs({ cwd: projectRoot, mcpConfig: cfg }),
+      resolveMemDirs({ cwd: projectRoot, mcpConfig: cfg }),
       [resolve(wsDir, 'engine')],
     );
   });
@@ -152,34 +152,34 @@ describe('resolveVaultDirs', () => {
     fixtures.push(projectRoot);
     const wsDir = join(projectRoot, 'graph');
     mkdirSync(join(wsDir, '.memstead', 'state'), { recursive: true });
-    writeFileSync(join(wsDir, '.memstead', 'workspace.toml'), 'format = "memstead-git-branch-1"\n');
+    writeFileSync(join(wsDir, '.memstead', 'workspace.toml'), 'format = "memstead-git-branch-2"\n');
     writeFileSync(
       join(wsDir, '.memstead', 'state', 'mounts.json'),
-      JSON.stringify({ mounts: [{ vault: 'engine', storage: { type: 'git-branch', gitdir: 'vault-repo/.git', branch: 'refs/heads/memstead/engine' } }] }),
+      JSON.stringify({ mounts: [{ mem: 'engine', storage: { type: 'git-branch', gitdir: 'mem-repo/.git', branch: 'refs/heads/memstead/engine' } }] }),
     );
     const cfg = { mcpServers: { memstead: { command: 'sh', args: ['-c', 'cd graph && exec ../engine/target/release/memstead-mcp'] } } };
-    assert.deepEqual(resolveVaultDirs({ cwd: projectRoot, mcpConfig: cfg }), []);
+    assert.deepEqual(resolveMemDirs({ cwd: projectRoot, mcpConfig: cfg }), []);
   });
 });
 
 // End-to-end: on a folder workspace the resolved dir feeds checkEditTarget and
 // a real entity edit is blocked — the behavior the previous ./specs fallback lost.
-describe('resolved dir blocks a real folder-vault entity edit', () => {
+describe('resolved dir blocks a real folder-mem entity edit', () => {
   after(cleanup);
 
-  it('blocks an entity-named .md inside a resolved folder vault', () => {
-    const root = makeWorkspace([{ vault: 'engine', storage: { type: 'folder', path: 'engine' } }]);
+  it('blocks an entity-named .md inside a resolved folder mem', () => {
+    const root = makeWorkspace([{ mem: 'engine', storage: { type: 'folder', path: 'engine' } }]);
     mkdirSync(join(root, 'engine'), { recursive: true });
     fixtures.push(root);
 
     const cfg = { mcpServers: { memstead: { command: 'sh', args: ['-c', 'cd . && exec memstead-mcp'] } } };
-    const [vaultDir] = resolveVaultDirs({ cwd: root, mcpConfig: cfg });
-    assert.ok(vaultDir, 'a folder vault dir resolves');
+    const [memDir] = resolveMemDirs({ cwd: root, mcpConfig: cfg });
+    assert.ok(memDir, 'a folder mem dir resolves');
 
-    const entityEdit = checkEditTarget(join(vaultDir, 'cross-vault-edge.md'), vaultDir, existsSync(vaultDir));
+    const entityEdit = checkEditTarget(join(memDir, 'cross-mem-edge.md'), memDir, existsSync(memDir));
     assert.equal(entityEdit.action, 'block');
 
-    const readmeEdit = checkEditTarget(join(vaultDir, 'README.md'), vaultDir, existsSync(vaultDir));
+    const readmeEdit = checkEditTarget(join(memDir, 'README.md'), memDir, existsSync(memDir));
     assert.equal(readmeEdit.action, 'allow');
   });
 });

@@ -1,10 +1,10 @@
 //! `memstead_changes_since` — two-tree diff between a caller-provided commit
-//! SHA and the vault's current HEAD, with rename detection tunable via
+//! SHA and the mem's current HEAD, with rename detection tunable via
 //! `rename_similarity` (default 60%).
 //!
 //! Agents remember the `commit_sha` returned by every mutation and feed it
 //! back through this op to pick up incremental deltas without re-scanning
-//! the whole vault. The response is a flat list of [`ChangeEnvelope`]s —
+//! the whole mem. The response is a flat list of [`ChangeEnvelope`]s —
 //! one per touched entity — with renames surfaced as a single event rather
 //! than a removed + added pair (at the selected similarity threshold).
 //!
@@ -39,7 +39,7 @@ pub use memstead_base::ops::{
     RENAME_SIMILARITY_MAX, RENAME_SIMILARITY_MIN,
 };
 
-/// Flat diff between `since` and HEAD for one vault. `head` echoes the
+/// Flat diff between `since` and HEAD for one mem. `head` echoes the
 /// resolved HEAD commit SHA so agents can remember it as the next
 /// polling cursor — saves a round-trip to `memstead_health`. `warnings`
 /// carries typed `{code, message, details}` envelopes (e.g.
@@ -53,7 +53,7 @@ pub use memstead_base::ops::{
 /// `__MEMSTEAD` ref tip in one round-trip.
 #[derive(Debug, Clone, Serialize)]
 pub struct ChangesReport {
-    pub vault: String,
+    pub mem: String,
     pub since: String,
     pub head: String,
     pub changes: Vec<ChangeEnvelope>,
@@ -65,7 +65,7 @@ pub struct ChangesReport {
     pub memstead_ref: Option<String>,
 }
 
-/// Compute [`ChangesReport`] for `vault_name`, whose gix repository lives
+/// Compute [`ChangesReport`] for `mem_name`, whose gix repository lives
 /// at `git_dir`. `since` is any gix-resolvable commit spec (commit SHA,
 /// ref name, `HEAD~1`, …) plus the empty-tree sentinel.
 ///
@@ -74,10 +74,10 @@ pub struct ChangesReport {
 /// - Empty repository (no HEAD) + non-sentinel `since` → same.
 /// - Empty repository + sentinel `since` → empty report (`head` echoes
 ///   the sentinel). Matches the "nothing committed yet, nothing to diff"
-///   contract so fresh clients don't crash on a brand-new vault.
+///   contract so fresh clients don't crash on a brand-new mem.
 pub fn changes_since(
     store: &Store,
-    vault_name: &str,
+    mem_name: &str,
     git_dir: &Path,
     since: &str,
     rename_similarity: f32,
@@ -85,23 +85,23 @@ pub fn changes_since(
 ) -> Result<ChangesReport, VcsError> {
     let repo = gix::open(git_dir)?;
 
-    // #53: anchor a `HEAD`-based `since` revspec on the vault branch so
-    // `HEAD~5` / `^` resolve against the per-vault branch tip, not the
+    // #53: anchor a `HEAD`-based `since` revspec on the mem branch so
+    // `HEAD~5` / `^` resolve against the per-mem branch tip, not the
     // gitdir's symbolic HEAD (the dummy default branch). Only for the
-    // vault-repo backend (signalled by `head_ref` being `Some`); disk-
-    // backed vaults keep gitdir-HEAD semantics. The original `since` is
+    // mem-repo backend (signalled by `head_ref` being `Some`); disk-
+    // backed mems keep gitdir-HEAD semantics. The original `since` is
     // echoed in the response and error messages.
     let resolve_since = match head_ref {
-        Some(_) => crate::ops::diff::normalise_ref_for_vault(vault_name, since),
+        Some(_) => crate::ops::diff::normalise_ref_for_mem(mem_name, since),
         None => since.to_string(),
     };
 
-    // Resolve the head tip. For disk-backed vaults `head_ref` is `None`
-    // and we read the symbolic HEAD; for vault-repo-backed vaults the
-    // engine passes `refs/heads/<vault>` so we walk the per-vault branch
+    // Resolve the head tip. For disk-backed mems `head_ref` is `None`
+    // and we read the symbolic HEAD; for mem-repo-backed mems the
+    // engine passes `refs/heads/<mem>` so we walk the per-mem branch
     // tip the writer commits to. If the repo has no matching commit yet
     // (fresh repo, fresh ref) the head tree is the empty tree — fresh
-    // clients sync against a fresh vault via the sentinel without first
+    // clients sync against a fresh mem via the sentinel without first
     // forcing a mutation.
     let head_lookup: Result<gix::Commit<'_>, ()> = match head_ref {
         Some(ref_name) => repo
@@ -132,7 +132,7 @@ pub fn changes_since(
     // and `__MEMSTEAD` ref ride on `BackendChanges` so MCP `include_notes`
     // becomes a renderer-side filter, not an engine-side trigger.
     let notes_report = crate::ops::agent_notes::agent_notes_since(
-        vault_name, git_dir, &resolve_since, head_ref,
+        mem_name, git_dir, &resolve_since, head_ref,
     )?;
     let rename_map = build_authoritative_rename_map(&notes_report.notes);
 
@@ -163,7 +163,7 @@ pub fn changes_since(
     // feed for provenance reconstruction.
     if since_tree.id == head_tree.id {
         return Ok(ChangesReport {
-            vault: vault_name.to_string(),
+            mem: mem_name.to_string(),
             since: since.to_string(),
             head: head_sha,
             changes: Vec::new(),
@@ -204,17 +204,17 @@ pub fn changes_since(
                 use gix::object::tree::diff::Change;
                 match change {
                     Change::Addition { location, .. } => {
-                        if let Some(id) = path_to_entity_id(vault_name, location.as_ref()) {
+                        if let Some(id) = path_to_entity_id(mem_name, location.as_ref()) {
                             additions.push(id);
                         }
                     }
                     Change::Deletion { location, .. } => {
-                        if let Some(id) = path_to_entity_id(vault_name, location.as_ref()) {
+                        if let Some(id) = path_to_entity_id(mem_name, location.as_ref()) {
                             deletions.push(id);
                         }
                     }
                     Change::Modification { location, .. } => {
-                        if let Some(id) = path_to_entity_id(vault_name, location.as_ref()) {
+                        if let Some(id) = path_to_entity_id(mem_name, location.as_ref()) {
                             modifications.push(id);
                         }
                     }
@@ -223,8 +223,8 @@ pub fn changes_since(
                         location,
                         ..
                     } => {
-                        let from = path_to_entity_id(vault_name, source_location.as_ref());
-                        let to = path_to_entity_id(vault_name, location.as_ref());
+                        let from = path_to_entity_id(mem_name, source_location.as_ref());
+                        let to = path_to_entity_id(mem_name, location.as_ref());
                         if let (Some(from_id), Some(to_id)) = (from, to) {
                             gix_rewrites.push((from_id, to_id));
                         }
@@ -245,7 +245,7 @@ pub fn changes_since(
     );
 
     Ok(ChangesReport {
-        vault: vault_name.to_string(),
+        mem: mem_name.to_string(),
         since: since.to_string(),
         head: head_sha,
         changes: envelopes,
@@ -265,9 +265,9 @@ pub fn changes_since(
 /// the (logically equivalent but harder to consume) `A → B` plus
 /// `B → C` pair.
 ///
-/// Cross-vault peer commits — subject `memstead: rename A → B (cross-vault
+/// Cross-mem peer commits — subject `memstead: rename A → B (cross-mem
 /// rewrite in V)` — are filtered out. They modify wiki-link bodies in
-/// the peer vault but never add or remove A or B there, so the local
+/// the peer mem but never add or remove A or B there, so the local
 /// diff would never match them; including them is harmless but
 /// confusing for downstream readers of the map.
 fn build_authoritative_rename_map(notes: &[CommitNote]) -> HashMap<EntityId, EntityId> {
@@ -297,10 +297,10 @@ fn build_authoritative_rename_map(notes: &[CommitNote]) -> HashMap<EntityId, Ent
 }
 
 /// Split the `entity_id` field of a parsed rename commit subject into
-/// `(old_id, new_id)`. Returns `None` for cross-vault peer rewrites
+/// `(old_id, new_id)`. Returns `None` for cross-mem peer rewrites
 /// (parenthetical qualifier) and malformed entries.
 pub(super) fn parse_rename_entity_field(field: &str) -> Option<(EntityId, EntityId)> {
-    if field.contains("(cross-vault rewrite") {
+    if field.contains("(cross-mem rewrite") {
         return None;
     }
     let mut parts = field.splitn(2, " → ");
@@ -414,10 +414,10 @@ fn combine_with_rename_map(
     envelopes
 }
 
-/// Translate a tree-diff path into a vault-qualified `EntityId`. Returns
+/// Translate a tree-diff path into a mem-qualified `EntityId`. Returns
 /// `None` for non-entity paths so engine config / schema edits don't
 /// leak into the entity-level delta surface.
-fn path_to_entity_id(vault: &str, path: &gix::bstr::BStr) -> Option<EntityId> {
+fn path_to_entity_id(mem: &str, path: &gix::bstr::BStr) -> Option<EntityId> {
     let s = std::str::from_utf8(path.as_ref()).ok()?;
     if s.is_empty() || !s.ends_with(".md") {
         return None;
@@ -426,7 +426,7 @@ fn path_to_entity_id(vault: &str, path: &gix::bstr::BStr) -> Option<EntityId> {
     if s.starts_with(".memstead/") {
         return None;
     }
-    Some(file_path_to_id(s, vault))
+    Some(file_path_to_id(s, mem))
 }
 
 /// Best-effort title lookup. Stubs resolve to their hollow title (usually
@@ -449,7 +449,7 @@ mod tests {
 
     fn rename_note(old: &str, new: &str) -> CommitNote {
         CommitNote {
-            vault: "specs".to_string(),
+            mem: "specs".to_string(),
             sha: "abc".to_string(),
             subject: format!("memstead: rename {old} → {new}"),
             tool_verb: Some("rename".to_string()),
@@ -473,13 +473,13 @@ mod tests {
     }
 
     #[test]
-    fn parse_rename_entity_field_rejects_cross_vault_rewrite_qualifier() {
-        // Cross-vault peer rewrites carry a parenthetical qualifier
+    fn parse_rename_entity_field_rejects_cross_mem_rewrite_qualifier() {
+        // Cross-mem peer rewrites carry a parenthetical qualifier
         // (rename.rs:433 path); they describe a rename that happened
-        // in some other vault and so cannot drive local pairing.
+        // in some other mem and so cannot drive local pairing.
         assert!(
             parse_rename_entity_field(
-                "specs--old → specs--new (cross-vault rewrite in `other`)"
+                "specs--old → specs--new (cross-mem rewrite in `other`)"
             )
             .is_none()
         );
@@ -507,25 +507,25 @@ mod tests {
     }
 
     #[test]
-    fn build_authoritative_rename_map_skips_cross_vault_peer_commits() {
-        // The renaming entity's vault commit drives pairing; cross-
-        // vault peer commits (subject carries the `(cross-vault
+    fn build_authoritative_rename_map_skips_cross_mem_peer_commits() {
+        // The renaming entity's mem commit drives pairing; cross-
+        // mem peer commits (subject carries the `(cross-mem
         // rewrite in V)` qualifier) only rewrite wiki-link bodies in
         // the peer and don't add/remove the renaming entity there.
         let mut peer = rename_note("specs--a", "specs--b");
-        peer.subject = "memstead: rename specs--a → specs--b (cross-vault rewrite in `peers`)"
+        peer.subject = "memstead: rename specs--a → specs--b (cross-mem rewrite in `peers`)"
             .to_string();
         peer.entity_id = Some(
-            "specs--a → specs--b (cross-vault rewrite in `peers`)".to_string(),
+            "specs--a → specs--b (cross-mem rewrite in `peers`)".to_string(),
         );
         let map = build_authoritative_rename_map(&[peer]);
-        assert!(map.is_empty(), "cross-vault peer commit must not enter the map: {map:?}");
+        assert!(map.is_empty(), "cross-mem peer commit must not enter the map: {map:?}");
     }
 
     #[test]
     fn build_authoritative_rename_map_ignores_non_rename_verbs() {
         let note = CommitNote {
-            vault: "specs".to_string(),
+            mem: "specs".to_string(),
             sha: "abc".to_string(),
             subject: "memstead: update specs--foo".to_string(),
             tool_verb: Some("update".to_string()),
@@ -669,7 +669,7 @@ mod tests {
     }
 
     #[test]
-    fn path_to_entity_id_strips_md_and_prefixes_vault() {
+    fn path_to_entity_id_strips_md_and_prefixes_mem() {
         let bstr = gix::bstr::BString::from("architecture/result.md");
         let id = path_to_entity_id("specs", bstr.as_ref()).unwrap();
         assert_eq!(id.0, "specs--architecture/result");

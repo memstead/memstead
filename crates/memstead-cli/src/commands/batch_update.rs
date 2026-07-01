@@ -195,9 +195,9 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     let result = engine
         .batch_update(updates, Actor::Cli, None)
         .map_err(CliError::from_engine_op)?;
-    // Reload-before-op runs inside `batch_update` for every vault the
-    // batch touches; drain any `vault_changed` notice it stashed.
-    let vault_changed = engine.take_vault_changed_notices();
+    // Reload-before-op runs inside `batch_update` for every mem the
+    // batch touches; drain any `mem_changed` notice it stashed.
+    let mem_changed = engine.take_mem_changed_notices();
 
     // A SUCCESSFUL batch renders exactly as before — the structured
     // result on stdout (`--json`) or the per-entry breakdown (human) —
@@ -205,11 +205,11 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     if result.applied {
         if ctx.json {
             let mut body = serde_json::to_value(&result).unwrap_or(serde_json::Value::Null);
-            crate::commands::merge_vault_changed_json(&mut body, &vault_changed);
+            crate::commands::merge_mem_changed_json(&mut body, &mem_changed);
             print_json(&body)?;
         } else {
             let mut md = render_batch_markdown(&result);
-            md.push_str(&crate::commands::render_vault_changed_block(&vault_changed));
+            md.push_str(&crate::commands::render_mem_changed_block(&mem_changed));
             print_markdown(&md);
         }
         return Ok(());
@@ -273,7 +273,7 @@ fn render_batch_markdown(result: &memstead_base::ops::BatchResult) -> String {
 /// `code` is the stable `BATCH_REFUSED` token; the `ExitKind` mirrors the
 /// dominant (refusal-tripping) entry's failure so `$?` matches single
 /// `update` and the documented table (hash mismatch → 4, missing entity /
-/// vault → 3, schema/policy refusal → 5). The full [`BatchResult`] rides
+/// mem → 3, schema/policy refusal → 5). The full [`BatchResult`] rides
 /// on `details` — per-entry codes stay available without re-running.
 fn batch_refused_error(result: &memstead_base::ops::BatchResult) -> CliError {
     let dominant = result.results.iter().find(|e| e.error.is_some());
@@ -301,7 +301,7 @@ fn batch_refused_error(result: &memstead_base::ops::BatchResult) -> CliError {
 fn batch_refused_exit_kind(code: &str) -> ExitKind {
     match code {
         "HASH_MISMATCH" => ExitKind::HashMismatch,
-        "ENTITY_NOT_FOUND" | "UNKNOWN_VAULT" => ExitKind::NotFound,
+        "ENTITY_NOT_FOUND" | "UNKNOWN_MEM" => ExitKind::NotFound,
         _ => ExitKind::Validation,
     }
 }

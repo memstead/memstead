@@ -72,7 +72,7 @@ impl Judge for ClaudeJudge {
 }
 
 /// Compose the grading prompt. Deliberately label-free: REFERENCE and CANDIDATE,
-/// never "vault-on"/"vault-off".
+/// never "mem-on"/"mem-off".
 pub fn build_judge_prompt(reference: &str, candidate: &str) -> String {
     format!("REFERENCE:\n{reference}\n\nCANDIDATE:\n{candidate}\n\nScore the candidate now.")
 }
@@ -167,8 +167,8 @@ mod tests {
     fn judge_prompt_is_label_free() {
         let p = build_judge_prompt("ref text", "cand text");
         let lower = p.to_lowercase();
-        assert!(!lower.contains("vault-on"));
-        assert!(!lower.contains("vault-off"));
+        assert!(!lower.contains("mem-on"));
+        assert!(!lower.contains("mem-off"));
         assert!(!lower.contains("mounted"));
         assert!(p.contains("ref text") && p.contains("cand text"));
     }

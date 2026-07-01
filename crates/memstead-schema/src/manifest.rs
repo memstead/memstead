@@ -19,21 +19,21 @@ pub struct SchemaManifest {
     pub relationships: RelationshipVocabulary,
     pub community: CommunityConfig,
     /// Schema-generic writing guidance — `avoid` and `goal` prose that
-    /// applies to every vault pinned to this schema. The plugin layer
-    /// concatenates these with per-vault `writeGuidance.avoid_additions`
+    /// applies to every mem pinned to this schema. The plugin layer
+    /// concatenates these with per-mem `writeGuidance.avoid_additions`
     /// / `goal_additions` (an opaque pass-through on the engine side —
-    /// see `VaultConfig::write_guidance`'s contract).
+    /// see `MemConfig::write_guidance`'s contract).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_writing_guidance: Option<DefaultWritingGuidance>,
-    /// Outbound cross-vault relationship vocabulary, per target schema
+    /// Outbound cross-mem relationship vocabulary, per target schema
     /// domain. Each entry names a target schema (bare name — never a
     /// version; eligibility is name-based) and lists rel-types that may
     /// cross the boundary in that direction. Absent or `[]` means the
-    /// schema declares no outbound cross-vault edges. Source-ownership
+    /// schema declares no outbound cross-mem edges. Source-ownership
     /// only — third-party bridge schemas are not modelled; each
     /// direction is owned by exactly one schema.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub cross_vault_relationships: Vec<CrossVaultRelationshipEntry>,
+    pub cross_mem_relationships: Vec<CrossMemRelationshipEntry>,
     /// Schema-level pointer naming the rel-type that body wiki-links
     /// `[[target]]` should auto-emit as engine-synthesised relations.
     /// `None` (default) means the schema is opt-out of alias synthesis
@@ -45,7 +45,7 @@ pub struct SchemaManifest {
     pub alias_target_rel_type: Option<String>,
 }
 
-/// One outbound cross-vault declaration — a target schema domain
+/// One outbound cross-mem declaration — a target schema domain
 /// (named, never versioned) and the rel-types admitted in that
 /// direction.
 ///
@@ -55,11 +55,11 @@ pub struct SchemaManifest {
 /// at source-schema load time.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct CrossVaultRelationshipEntry {
+pub struct CrossMemRelationshipEntry {
     /// Bare name of the target schema — the domain identity. A version
     /// suffix (`software@1.0.0`) or range (`software@^1.0`) is rejected
-    /// at schema load: cross-vault eligibility is name-based, so the
-    /// declaration is satisfied by a target vault pinning *any* version
+    /// at schema load: cross-mem eligibility is name-based, so the
+    /// declaration is satisfied by a target mem pinning *any* version
     /// of the named schema.
     pub to_schema: String,
     pub definitions: Vec<RelationshipDef>,
@@ -68,7 +68,7 @@ pub struct CrossVaultRelationshipEntry {
 /// Schema-level writing-guidance defaults. Both fields are optional so a
 /// schema can ship `avoid` without a `goal` (or vice versa). The engine
 /// surfaces them via `build_schema_payload` at the top level of the
-/// schema-payload JSON; resolution (concatenation with vault additions)
+/// schema-payload JSON; resolution (concatenation with mem additions)
 /// lives in the plugin layer.
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]

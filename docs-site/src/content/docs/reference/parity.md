@@ -26,9 +26,9 @@ Every public engine operation across the four programmatic surfaces (MCP, CLI, U
 | `relate` | `memstead_relate` *(lean + full)* | `relate` *(lean + full)* | — | — |
 | `delete` | `memstead_delete` *(lean + full)* | `delete` *(lean + full)* | — | — |
 | `rename` | `memstead_rename` *(lean + full)* | `rename` *(lean + full)* | — | — |
-| `vault-create` | `memstead_vault_create` *(full only)* | `vault` *(full only)* | — | — |
-| `vault-delete` | `memstead_vault_delete` *(full only)* | `vault` *(full only)* | — | — |
-| `vault-set-version` | `memstead_vault_set_version` *(full only)* | `vault` *(full only)* | — | — |
+| `mem-create` | `memstead_mem_create` *(full only)* | `mem` *(full only)* | — | — |
+| `mem-delete` | `memstead_mem_delete` *(full only)* | `mem` *(full only)* | — | — |
+| `mem-set-version` | `memstead_mem_set_version` *(full only)* | `mem` *(full only)* | — | — |
 | `workspace-allow-create` | `memstead_workspace_allow_create` *(full only)* | `workspace` *(full only)* | — | — |
 | `workspace-revoke-create` | `memstead_workspace_revoke_create` *(full only)* | `workspace` *(full only)* | — | — |
 | `workspace-allow-delete` | `memstead_workspace_allow_delete` *(full only)* | `workspace` *(full only)* | — | — |
@@ -41,10 +41,10 @@ Every public engine operation across the four programmatic surfaces (MCP, CLI, U
 | `push` | — | — | — | — |
 | `branch-reset` | — | — | — | — |
 | `agent-notes` | — | — | `agent_notes` | — |
-| `vault-head-sha` | — | — | `vault_head_sha` | — |
+| `mem-head-sha` | — | — | `mem_head_sha` | — |
 | `from-snapshot` | — | — | — | `fromSnapshot` |
 | `apply-commit` | — | — | — | `applyCommit` |
-| `vault-names` | — | — | — | `vaultNames` |
+| `mem-names` | — | — | — | `memNames` |
 | `set-panic-hook` | — | — | — | `setPanicHook` |
 
 ## Unaligned
@@ -54,7 +54,7 @@ Surface entries the registry does not pin to a logical operation. Either add a r
 ### Unaligned — MCP
 
 - `memstead_diff`
-- `memstead_vault_set_schema`
+- `memstead_mem_set_schema`
 
 ### Unaligned — CLI
 
@@ -71,7 +71,7 @@ Surface entries the registry does not pin to a logical operation. Either add a r
 - `publish`
 - `schema`
 - `unpublish`
-- `vault-repo`
+- `mem-repo`
 
 ### Unaligned — UniFFI
 
@@ -79,23 +79,23 @@ Surface entries the registry does not pin to a logical operation. Either add a r
 - `add_ingest`
 - `add_medium`
 - `add_projection`
-- `create_vault`
+- `create_mem`
 - `delete_facet`
 - `delete_ingest`
 - `delete_medium`
 - `delete_projection`
-- `delete_vault`
-- `export_vault`
+- `delete_mem`
+- `export_mem`
 - `pipeline_configs_json`
 - `rename_facet`
 - `rename_ingest`
 - `rename_medium`
 - `rename_projection`
-- `set_vault_schema`
-- `set_vault_version`
+- `set_mem_schema`
+- `set_mem_version`
 - `update_facet`
 - `update_ingest`
 - `update_medium`
 - `update_projection`
-- `vault_roster`
+- `mem_roster`
 

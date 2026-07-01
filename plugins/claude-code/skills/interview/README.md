@@ -24,11 +24,11 @@ What this skill must achieve. Use this as the reference when tuning SKILL.md.
 
 ## State management
 
-- interview mode persists via the vault's `.memstead/interview-active` state file — the SKILL writes it and the `inject-context` hook reads `<vault-dir>/.memstead/interview-active`; both must agree
+- interview mode persists via the mem's `.memstead/interview-active` state file — the SKILL writes it and the `inject-context` hook reads `<mem-dir>/.memstead/interview-active`; both must agree
 - the UserPromptSubmit hook re-injects interview rules every turn
 - clean up the state file when the interview ends
 
 ## writeGuidance-driven
 
-- uses the writable vault's `writeGuidance` for granularity, extraction, and abstraction rules
+- uses the writable mem's `writeGuidance` for granularity, extraction, and abstraction rules
 - loaded via `memstead_health { include_config: true }` — never reads `.memstead/config.json` directly

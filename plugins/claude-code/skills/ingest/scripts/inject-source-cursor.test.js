@@ -7,7 +7,7 @@
  * `sync_state` baseline), runs inject.mjs as a subprocess, and asserts on
  * the emitted prompt — the observability seam the plan names. The dump's
  * `sync_state` is rewritten between runs to simulate the agent advancing
- * (or not advancing) the engine baseline via `vault set-sync-state`.
+ * (or not advancing) the engine baseline via `mem set-sync-state`.
  */
 
 import { describe, it, beforeEach, afterEach } from 'node:test';
@@ -37,14 +37,14 @@ function makeWorkspace(files) {
   return root;
 }
 
-// Write/overwrite the fake dump. `syncState` is the per-vault engine
+// Write/overwrite the fake dump. `syncState` is the per-mem engine
 // baseline keyed by `<ingest>/<facet>`; the engine omits it when empty,
 // so an undefined value writes no key.
 function writeDump(root, syncState) {
   const dump = {
     format: 'workspace-dump/v0',
     workspace_root: root,
-    vaults: [
+    mems: [
       {
         name: 'engine-dest',
         schema: 'sample@0.1.0',
@@ -77,7 +77,7 @@ function buildWorkspace(srcFiles, { changeDetection = 'mtime' } = {}) {
     },
     '.memstead/projections/engine-dest/graph.json': {
       source_facets: ['src'],
-      destination_vault: 'engine-dest',
+      destination_mem: 'engine-dest',
     },
     '.memstead/ingests/discovery-run.json': {
       projection: 'engine-dest/graph',
@@ -109,7 +109,7 @@ function runInject(root, args = ['discovery-run'], extraEnv = {}) {
   return { stdout: res.stdout, stderr: res.stderr, status: res.status };
 }
 
-// Pull the token out of an emitted `memstead vault set-sync-state <vault>
+// Pull the token out of an emitted `memstead mem set-sync-state <mem>
 // '<key>' '<token>'` command line.
 function extractToken(stdout, key) {
   const re = new RegExp(`set-sync-state\\s+\\S+\\s+'${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}'\\s+'(.+)'`);

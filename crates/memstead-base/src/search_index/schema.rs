@@ -1,9 +1,9 @@
-//! Per-vault tantivy schema construction.
+//! Per-mem tantivy schema construction.
 //!
-//! A vault's indexed shape is derived from its resolved `memstead_schema::Schema`:
+//! A mem's indexed shape is derived from its resolved `memstead_schema::Schema`:
 //! the union of all types' section keys becomes the set of text fields,
 //! and every metadata field with `Filterable::Equality | Range` becomes a
-//! `STRING` fast field. Fixed fields (`id`, `vault`, `entity_type`, `title`)
+//! `STRING` fast field. Fixed fields (`id`, `mem`, `entity_type`, `title`)
 //! are always present.
 //!
 //! Field lookups at index/query time go through `IndexFields` rather than
@@ -20,12 +20,12 @@ use tantivy::schema::{
 
 use super::tokenizer::MEMSTEAD_TOKENIZER;
 
-/// Tantivy schema + pre-resolved field handles for a single vault index.
+/// Tantivy schema + pre-resolved field handles for a single mem index.
 #[derive(Clone, Debug)]
 pub struct IndexFields {
     pub schema: TantivySchema,
     pub id: Field,
-    pub vault: Field,
+    pub mem: Field,
     pub entity_type: Field,
     pub title: Field,
     /// Section-key → tantivy text field. Keys mirror the section keys the
@@ -37,24 +37,24 @@ pub struct IndexFields {
 }
 
 impl IndexFields {
-    /// Build the tantivy schema for a vault given the resolved vault schema.
+    /// Build the tantivy schema for a mem given the resolved mem schema.
     ///
-    /// Falls back to a minimal fixed-field schema when `vault_schema` is
-    /// `None` — useful for read-vaults whose pinned schema failed to
-    /// resolve (we still index id/vault/title so structural filters work).
-    pub fn build(vault_schema: Option<&Arc<Schema>>) -> Self {
+    /// Falls back to a minimal fixed-field schema when `mem_schema` is
+    /// `None` — useful for read-mems whose pinned schema failed to
+    /// resolve (we still index id/mem/title so structural filters work).
+    pub fn build(mem_schema: Option<&Arc<Schema>>) -> Self {
         let mut builder = SchemaBuilder::new();
 
-        // Fixed fields — id/vault are STRING for exact-match; title is a
+        // Fixed fields — id/mem are STRING for exact-match; title is a
         // tokenized TEXT field with the memstead analyzer.
         let id = builder.add_text_field("id", STRING | STORED);
-        let vault = builder.add_text_field("vault", STRING | STORED);
+        let mem = builder.add_text_field("mem", STRING | STORED);
         let entity_type = builder.add_text_field("entity_type", STRING | STORED);
         let title = builder.add_text_field("title", text_options());
 
-        // Union of section keys across every type in the vault's schema.
+        // Union of section keys across every type in the mem's schema.
         // BTreeSet — deterministic field order across runs, cheap to diff.
-        let section_keys: BTreeSet<String> = match vault_schema {
+        let section_keys: BTreeSet<String> = match mem_schema {
             Some(schema) => schema
                 .types
                 .values()
@@ -71,7 +71,7 @@ impl IndexFields {
         // Filterable metadata — one STRING field per unique key. Per-type
         // collisions on the same key are fine since `Filterable::Equality`
         // fields carry the same lexical value across types.
-        let filterable_keys: BTreeSet<String> = match vault_schema {
+        let filterable_keys: BTreeSet<String> = match mem_schema {
             Some(schema) => schema
                 .types
                 .values()
@@ -94,7 +94,7 @@ impl IndexFields {
         Self {
             schema,
             id,
-            vault,
+            mem,
             entity_type,
             title,
             sections,
@@ -122,7 +122,7 @@ mod tests {
     fn build_without_schema_still_has_fixed_fields() {
         let fields = IndexFields::build(None);
         assert!(fields.schema.get_field("id").is_ok());
-        assert!(fields.schema.get_field("vault").is_ok());
+        assert!(fields.schema.get_field("mem").is_ok());
         assert!(fields.schema.get_field("title").is_ok());
         assert!(fields.sections.is_empty());
         assert!(fields.metadata.is_empty());

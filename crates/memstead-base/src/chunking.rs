@@ -115,7 +115,7 @@ pub fn apply_chunking(
     // Every chunk carries the entity-level frontmatter (`type`,
     // `level`, `stability`, `created_date`, `last_modified`,
     // `_tokens_unfiltered_body`, …) merged with caller-supplied
-    // `extra_fm` (`_hash`, `_vault_schema`) and the chunk-walk signals
+    // `extra_fm` (`_hash`, `_mem_schema`) and the chunk-walk signals
     // (`_truncated`, `_chunk`, `_total_chunks`). The entity frontmatter
     // is preserved on every chunk so an agent reading any single chunk
     // in isolation can answer "what kind of entity is this and when was
@@ -363,7 +363,7 @@ mod tests {
 
         let result = apply_chunking(&md, /* tiny budget */ 100, Some(1), &[
             ("_hash", "fresh-hash"),
-            ("_vault_schema", "default@1.0.0"),
+            ("_mem_schema", "default@1.0.0"),
         ])
         .unwrap();
         for key in [
@@ -384,7 +384,7 @@ mod tests {
             "extra_fm must override the original frontmatter's `_hash`",
         );
         assert!(
-            result.contains("_vault_schema: default@1.0.0"),
+            result.contains("_mem_schema: default@1.0.0"),
             "extra_fm key must be present",
         );
         // Chunk-walk signals always emitted.

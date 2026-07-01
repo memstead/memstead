@@ -17,12 +17,12 @@ use std::sync::Arc;
 use memstead_schema::{Schema, loader::SchemaLoadError};
 
 /// Errors raised while reading workspace schemas from
-/// `vault-repo-git:__MEMSTEAD:schemas/`.
+/// `mem-repo-git:__MEMSTEAD:schemas/`.
 #[derive(Debug, thiserror::Error)]
-pub enum VaultRepoSchemasError {
-    /// `vault-repo/.git/` exists but cannot be opened (corrupt repo, IO
+pub enum MemRepoSchemasError {
+    /// `mem-repo/.git/` exists but cannot be opened (corrupt repo, IO
     /// failure under the object database).
-    #[error("could not open vault-repo gitdir: {0}")]
+    #[error("could not open mem-repo gitdir: {0}")]
     GixOpen(String),
     /// Generic gix-tree read failure (object missing, corrupt tree, IO
     /// underneath the object database). The wrapped message names the
@@ -49,12 +49,12 @@ pub enum VaultRepoSchemasError {
 /// that callers branch on so the engine can decide whether to overlay
 /// schemas, fall back to disk, or surface an error.
 pub enum LoadOutcome {
-    /// `vault-repo/.git/` is missing or carries no `__MEMSTEAD` ref — the
-    /// workspace is not a real vault-repo (legacy disk-shaped, empty
+    /// `mem-repo/.git/` is missing or carries no `__MEMSTEAD` ref — the
+    /// workspace is not a real mem-repo (legacy disk-shaped, empty
     /// stub, or pre-migration). Caller falls back to its disk-based
     /// schema source.
-    NoVaultRepo,
-    /// Real vault-repo exists but the `__MEMSTEAD:schemas/` subtree is
+    NoMemRepo,
+    /// Real mem-repo exists but the `__MEMSTEAD:schemas/` subtree is
     /// absent (or its tree carries no schema directories). No schemas
     /// to overlay; caller may still load a disk-based source if
     /// configured.
@@ -63,32 +63,32 @@ pub enum LoadOutcome {
     Schemas(Vec<Arc<Schema>>),
 }
 
-/// Load every workspace-level schema from the vault-repo's unified
+/// Load every workspace-level schema from the mem-repo's unified
 /// `__MEMSTEAD:schemas/<name>@<version>/` tree.
 ///
 /// Thin wrapper around
 /// [`crate::storage_memstead::load_schemas_from_memstead_ref`].
 ///
-/// `workspace_root` is the directory holding `vault-repo/.git/`.
+/// `workspace_root` is the directory holding `mem-repo/.git/`.
 pub fn load_schemas_from_ref(
     workspace_root: &Path,
-) -> Result<LoadOutcome, VaultRepoSchemasError> {
+) -> Result<LoadOutcome, MemRepoSchemasError> {
     crate::storage_memstead::load_schemas_from_memstead_ref(workspace_root)
 }
 
 /// The git-branch backend's [`SchemaSource`](memstead_base::schema_source::SchemaSource):
 /// schemas live on the `__MEMSTEAD:schemas/<name>@<version>/` ref of the
-/// workspace's `vault-repo/.git`. `read_schemas` wraps
+/// workspace's `mem-repo/.git`. `read_schemas` wraps
 /// [`load_schemas_from_ref`]; `write_schema` wraps
 /// [`crate::storage_memstead::write_schema_to_memstead_ref`]. The engine
-/// owns vault-repo state, so this type is constructed and used inside the
+/// owns mem-repo state, so this type is constructed and used inside the
 /// engine layer, never by an external consumer directly.
 pub struct GitBranchSchemaSource {
     workspace_root: std::path::PathBuf,
 }
 
 impl GitBranchSchemaSource {
-    /// Build a git-branch source for a workspace (its `vault-repo/.git`).
+    /// Build a git-branch source for a workspace (its `mem-repo/.git`).
     pub fn for_workspace(workspace_root: &Path) -> Self {
         Self {
             workspace_root: workspace_root.to_path_buf(),
@@ -102,9 +102,9 @@ impl memstead_base::schema_source::SchemaSource for GitBranchSchemaSource {
     ) -> Result<Vec<Arc<Schema>>, memstead_base::schema_source::SchemaSourceError> {
         match load_schemas_from_ref(&self.workspace_root) {
             Ok(LoadOutcome::Schemas(schemas)) => Ok(schemas),
-            // No vault-repo or no `__MEMSTEAD:schemas/` subtree → nothing
+            // No mem-repo or no `__MEMSTEAD:schemas/` subtree → nothing
             // to overlay; the catalogue falls back to built-ins.
-            Ok(LoadOutcome::NoVaultRepo) | Ok(LoadOutcome::NoSchemas) => Ok(Vec::new()),
+            Ok(LoadOutcome::NoMemRepo) | Ok(LoadOutcome::NoSchemas) => Ok(Vec::new()),
             Err(e) => Err(memstead_base::schema_source::SchemaSourceError::Read(e.to_string())),
         }
     }
@@ -115,7 +115,7 @@ impl memstead_base::schema_source::SchemaSource for GitBranchSchemaSource {
         version: &str,
         files: &[(String, Vec<u8>)],
     ) -> Result<(), memstead_base::schema_source::SchemaSourceError> {
-        let gitdir = self.workspace_root.join("vault-repo").join(".git");
+        let gitdir = self.workspace_root.join("mem-repo").join(".git");
         crate::storage_memstead::write_schema_to_memstead_ref(&gitdir, name, version, files)
             .map(|_| ())
             .map_err(|e| memstead_base::schema_source::SchemaSourceError::Write(e.to_string()))
@@ -127,14 +127,14 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
-    /// Seed `<root>/vault-repo/.git/` as a real bare repo carrying both
+    /// Seed `<root>/mem-repo/.git/` as a real bare repo carrying both
     /// `__SYSTEM` (empty seed) and `__SCHEMAS:<name>/{schema.yaml,
     /// types/*.yaml}` for each supplied schema. Returns the temp root.
-    fn seed_vault_repo_with_schemas(
+    fn seed_mem_repo_with_schemas(
         schemas: &[(&str, &str, &[(&str, &str)])],
     ) -> TempDir {
         let tmp = TempDir::new().unwrap();
-        let gitdir = tmp.path().join("vault-repo").join(".git");
+        let gitdir = tmp.path().join("mem-repo").join(".git");
         std::fs::create_dir_all(&gitdir).unwrap();
         let repo = gix::init_bare(&gitdir).unwrap();
 
@@ -144,7 +144,7 @@ mod tests {
             time: gix::date::Time { seconds: 0, offset: 0 },
         };
 
-        // Seed `__SYSTEM` with an empty tree so the "is real vault-repo"
+        // Seed `__SYSTEM` with an empty tree so the "is real mem-repo"
         // gate flips to true.
         {
             let mut buf = gix::date::parse::TimeBuf::default();
@@ -215,7 +215,7 @@ mod tests {
         use memstead_base::schema_source::SchemaSource;
 
         let tmp = TempDir::new().unwrap();
-        let gitdir = tmp.path().join("vault-repo").join(".git");
+        let gitdir = tmp.path().join("mem-repo").join(".git");
         std::fs::create_dir_all(&gitdir).unwrap();
         gix::init_bare(&gitdir).unwrap();
 
@@ -279,7 +279,7 @@ write_rules: []
         assert_eq!(schemas[0].manifest.name, "refsrc");
     }
 
-    /// `vault-repo-git:__SCHEMAS:software/` loads as a single
+    /// `mem-repo-git:__SCHEMAS:software/` loads as a single
     /// `Schema` whose manifest name + version match the embedded
     /// YAML. Pins the gix-tree-walk path against the smallest valid
     /// schema shape — one type, the required `_default` relationship.
@@ -287,8 +287,8 @@ write_rules: []
     fn schema_registry_loads_software_schema_from_schemas_ref() {
         let manifest = r#"name: software
 version: 1.0.0
-description: Minimal software schema for the vault-repo gix-loader test.
-when_to_use: In the vault_repo_schemas loader test only.
+description: Minimal software schema for the mem-repo gix-loader test.
+when_to_use: In the mem_repo_schemas loader test only.
 types:
   - sample
 relationships:
@@ -341,7 +341,7 @@ staleness_threshold_days: 90
 write_rules:
   - Keep it short.
 "#;
-        let tmp = seed_vault_repo_with_schemas(&[(
+        let tmp = seed_mem_repo_with_schemas(&[(
             "software",
             manifest,
             &[("sample", sample_type)],
@@ -353,7 +353,7 @@ write_rules:
             other => panic!(
                 "expected Schemas outcome, got: {}",
                 match other {
-                    LoadOutcome::NoVaultRepo => "NoVaultRepo",
+                    LoadOutcome::NoMemRepo => "NoMemRepo",
                     LoadOutcome::NoSchemas => "NoSchemas",
                     LoadOutcome::Schemas(_) => unreachable!(),
                 }
@@ -365,44 +365,44 @@ write_rules:
         assert_eq!(schema.version, semver::Version::new(1, 0, 0));
     }
 
-    /// A workspace without `vault-repo/.git/` returns `NoVaultRepo` so
+    /// A workspace without `mem-repo/.git/` returns `NoMemRepo` so
     /// the caller can fall back to its disk-based schema source.
     #[test]
-    fn no_vault_repo_returns_no_vault_repo() {
+    fn no_mem_repo_returns_no_mem_repo() {
         let tmp = TempDir::new().unwrap();
         let outcome = load_schemas_from_ref(tmp.path()).expect("loader must not error");
-        assert!(matches!(outcome, LoadOutcome::NoVaultRepo));
+        assert!(matches!(outcome, LoadOutcome::NoMemRepo));
     }
 
-    /// An empty stub vault-repo (created by `init_vault_repo_stub` —
+    /// An empty stub mem-repo (created by `init_mem_repo_stub` —
     /// `gix::init_bare` with no commits) carries no `__SYSTEM` ref and
-    /// returns `NoVaultRepo`. Pins the legacy-fixture compatibility
-    /// also relied on by the engine's "is real vault-repo" gate.
+    /// returns `NoMemRepo`. Pins the legacy-fixture compatibility
+    /// also relied on by the engine's "is real mem-repo" gate.
     #[test]
-    fn empty_stub_vault_repo_returns_no_vault_repo() {
+    fn empty_stub_mem_repo_returns_no_mem_repo() {
         let tmp = TempDir::new().unwrap();
-        let gitdir = tmp.path().join("vault-repo").join(".git");
+        let gitdir = tmp.path().join("mem-repo").join(".git");
         std::fs::create_dir_all(&gitdir).unwrap();
         gix::init_bare(&gitdir).unwrap();
         let outcome = load_schemas_from_ref(tmp.path()).expect("loader must not error");
-        assert!(matches!(outcome, LoadOutcome::NoVaultRepo));
+        assert!(matches!(outcome, LoadOutcome::NoMemRepo));
     }
 
-    /// A real vault-repo whose `__SYSTEM` ref exists but `__SCHEMAS` is
+    /// A real mem-repo whose `__SYSTEM` ref exists but `__SCHEMAS` is
     /// absent returns `NoSchemas` — the caller may still consult its
     /// disk-based source. Pins the LoadOutcome variant the
     /// orchestrator branches on.
     ///
-    /// Post-s139 cutover: the loader reads `__MEMSTEAD` only. A vault-repo
-    /// with no `__MEMSTEAD` ref surfaces as `NoVaultRepo`, not `NoSchemas`
+    /// Post-s139 cutover: the loader reads `__MEMSTEAD` only. A mem-repo
+    /// with no `__MEMSTEAD` ref surfaces as `NoMemRepo`, not `NoSchemas`
     /// (the latter is reserved for `__MEMSTEAD` exists but its `schemas/`
     /// subtree is empty). The orchestrator branches both variants the
     /// same way (fall back to disk overlay), so the runtime contract
     /// is preserved even though the outcome variant changed.
     #[test]
-    fn vault_repo_without_memstead_ref_returns_no_vault_repo() {
+    fn mem_repo_without_memstead_ref_returns_no_mem_repo() {
         let tmp = TempDir::new().unwrap();
-        let gitdir = tmp.path().join("vault-repo").join(".git");
+        let gitdir = tmp.path().join("mem-repo").join(".git");
         std::fs::create_dir_all(&gitdir).unwrap();
         let repo = gix::init_bare(&gitdir).unwrap();
 
@@ -424,7 +424,7 @@ write_rules:
         .unwrap();
 
         let outcome = load_schemas_from_ref(tmp.path()).expect("loader must not error");
-        assert!(matches!(outcome, LoadOutcome::NoVaultRepo));
+        assert!(matches!(outcome, LoadOutcome::NoMemRepo));
     }
 
     // The earlier `loader_prefers_memstead_when_present` and
@@ -442,7 +442,7 @@ write_rules:
     impl std::fmt::Debug for LoadOutcome {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             match self {
-                LoadOutcome::NoVaultRepo => f.write_str("NoVaultRepo"),
+                LoadOutcome::NoMemRepo => f.write_str("NoMemRepo"),
                 LoadOutcome::NoSchemas => f.write_str("NoSchemas"),
                 LoadOutcome::Schemas(s) => write!(f, "Schemas({})", s.len()),
             }

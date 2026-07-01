@@ -14,7 +14,7 @@ Restore the graph to the state of an earlier git commit.
 
 1. **Resolve paths**: Read `.mcp.json` and extract from `mcpServers.memstead.args`:
    - `memstead-home` (path after `--memstead-home`, if present — otherwise Memstead is local to the project)
-   - `vault` (path after `--vault`, default `./specs`)
+   - `mem` (path after `--mem`, default `./specs`)
 2. **Show commits**: `git log --oneline -10 -- specs/` — show last 10 entity commits
 3. **User selects**: Ask which commit to restore (unless specified in $ARGUMENTS)
 4. **Restore entities**: `git checkout <commit> -- specs/`

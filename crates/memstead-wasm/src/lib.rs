@@ -89,10 +89,10 @@ impl Engine {
     }
 
     /// Apply an externally-produced commit envelope to the in-memory
-    /// store. Parsed against the vault's pinned schema; on any parse
+    /// store. Parsed against the mem's pinned schema; on any parse
     /// failure the entire envelope is refused and the store stays at
-    /// its prior SHA. Emits the same `VaultChangedEvent` every other
-    /// vault-advance flows through.
+    /// its prior SHA. Emits the same `MemChangedEvent` every other
+    /// mem-advance flows through.
     ///
     /// The `envelope` parameter accepts the JSON shape the bridge's
     /// `/commits` endpoint produces — `serde-wasm-bindgen` decodes
@@ -108,7 +108,7 @@ impl Engine {
             .map_err(engine_err)
     }
 
-    /// Read one entity by id (`<vault>--<slug>` shape). Returns
+    /// Read one entity by id (`<mem>--<slug>` shape). Returns
     /// `undefined` when the id is not in the store — same shape the
     /// MCP `memstead_entity` tool surfaces for a miss.
     #[wasm_bindgen(js_name = getEntity)]
@@ -121,7 +121,7 @@ impl Engine {
     }
 
     /// Health summary for the engine — entity counts, edge counts,
-    /// per-vault breakdown. Mirrors the shape `memstead_health` returns
+    /// per-mem breakdown. Mirrors the shape `memstead_health` returns
     /// in MCP.
     #[wasm_bindgen]
     pub fn health(&self) -> Result<JsValue, JsValue> {
@@ -155,14 +155,14 @@ impl Engine {
         ))
     }
 
-    /// Vault names this engine is mounted against. Cheap accessor —
+    /// Mem names this engine is mounted against. Cheap accessor —
     /// useful for diagnostic UIs and for routing follow-up reads
-    /// without re-deriving the vault list from health output.
-    #[wasm_bindgen(js_name = vaultNames)]
-    pub fn vault_names(&self) -> Result<JsValue, JsValue> {
+    /// without re-deriving the mem list from health output.
+    #[wasm_bindgen(js_name = memNames)]
+    pub fn mem_names(&self) -> Result<JsValue, JsValue> {
         let names: Vec<String> = self
             .inner
-            .vault_names()
+            .mem_names()
             .iter()
             .map(|s| s.to_string())
             .collect();
@@ -194,7 +194,7 @@ fn engine_err(e: EngineError) -> JsValue {
 fn from_archive_bytes_err(e: FromArchiveBytesError) -> JsValue {
     let code = match &e {
         FromArchiveBytesError::Validation(_) => "ARCHIVE_VALIDATION_FAILED",
-        FromArchiveBytesError::InvalidConfig(_) => "INVALID_VAULT_CONFIG",
+        FromArchiveBytesError::InvalidConfig(_) => "INVALID_MEM_CONFIG",
         FromArchiveBytesError::EmbeddedSchemaInvalid(_) => "EMBEDDED_SCHEMA_INVALID",
         FromArchiveBytesError::Engine(inner) => inner.code(),
     };

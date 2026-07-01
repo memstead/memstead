@@ -1,4 +1,4 @@
-#![cfg(feature = "vault-repo")]
+#![cfg(feature = "mem-repo")]
 //! Locks the shape of the agent-facing MCP surface.
 //!
 //! The surface is the `EXPECTED_TOOLS` list below — read-only:
@@ -6,9 +6,9 @@
 //! `memstead_schema`, `memstead_search`; mutation: `memstead_create`,
 //! `memstead_delete`, `memstead_relate`, `memstead_rename`,
 //! `memstead_update`; admin: `memstead_changes_since`, `memstead_diff`,
-//! `memstead_reload`; vault lifecycle: `memstead_vault_create`,
-//! `memstead_vault_delete`, `memstead_vault_set_schema`,
-//! `memstead_vault_set_version`; workspace policy:
+//! `memstead_reload`; mem lifecycle: `memstead_mem_create`,
+//! `memstead_mem_delete`, `memstead_mem_set_schema`,
+//! `memstead_mem_set_version`; workspace policy:
 //! `memstead_workspace_allow_create` / `_allow_delete` /
 //! `_grant_cross_link` / `_revoke_create` / `_revoke_cross_link` /
 //! `_revoke_delete`. The asserted count is `EXPECTED_TOOLS.len()` —
@@ -22,12 +22,12 @@
 //! `memstead_batch_update`, `memstead_export`, `memstead_stats`,
 //! `memstead_relations`, `memstead_context`, `memstead_type_info` are gone.
 //!
-//! Vault lifecycle is not workspace configuration, but both are on the
-//! MCP surface. The lifecycle family (`memstead_vault_create` /
-//! `memstead_vault_delete` / `memstead_vault_set_schema` /
-//! `memstead_vault_set_version`) creates/removes/reconfigures a whole
-//! vault at runtime; workspace-policy mutation (allowlists and
-//! cross-vault link policy in `.memstead/workspace.toml`) is the
+//! Mem lifecycle is not workspace configuration, but both are on the
+//! MCP surface. The lifecycle family (`memstead_mem_create` /
+//! `memstead_mem_delete` / `memstead_mem_set_schema` /
+//! `memstead_mem_set_version`) creates/removes/reconfigures a whole
+//! mem at runtime; workspace-policy mutation (allowlists and
+//! cross-mem link policy in `.memstead/workspace.toml`) is the
 //! `memstead_workspace_*` family. The macOS app edits the same policy
 //! in-process via its `WorkspaceService`. Every MCP tool must carry the
 //! `memstead_` prefix — an un-namespaced `workspace_*` tool (or any
@@ -57,15 +57,15 @@ const EXPECTED_TOOLS: &[&str] = &[
     "memstead_changes_since",
     "memstead_diff",
     "memstead_reload",
-    // Vault lifecycle (4)
-    "memstead_vault_create",
-    "memstead_vault_delete",
-    "memstead_vault_set_schema",
-    "memstead_vault_set_version",
+    // Mem lifecycle (4)
+    "memstead_mem_create",
+    "memstead_mem_delete",
+    "memstead_mem_set_schema",
+    "memstead_mem_set_version",
     // Workspace-policy mutations (6).
-    // Closes [MCP F7] by exposing the cross-vault-link grant +
+    // Closes [MCP F7] by exposing the cross-mem-link grant +
     // revoke surface and the lifecycle allowlist editor — an
-    // MCP-driven agent can now complete the full dynamic vault
+    // MCP-driven agent can now complete the full dynamic mem
     // lifecycle without dropping to CLI.
     "memstead_workspace_allow_create",
     "memstead_workspace_allow_delete",
@@ -287,14 +287,14 @@ fn dry_run_docs_describe_refusal_not_a_warnings_preview() {
 }
 
 /// Plan 02, Part B: the overview surface documents that community
-/// detection is workspace-global — `vault=` scopes which clusters are
+/// detection is workspace-global — `mem=` scopes which clusters are
 /// *reported*, not detection, and a sparse / disconnected subgraph may
 /// form no cluster at all. Pins the docs so the expectation-gap fix
-/// (the report's "vault= looks like it scopes communities") does not
+/// (the report's "mem= looks like it scopes communities") does not
 /// silently regress on either the param docs or the tool description.
 #[test]
 fn overview_documents_workspace_global_community_scope() {
-    // `vault` / `rebuild` param docs live in the input schema.
+    // `mem` / `rebuild` param docs live in the input schema.
     let schema = schema_for("memstead_overview");
     assert!(
         schema.contains("workspace-global"),
@@ -332,23 +332,23 @@ fn schema_for(tool_name: &str) -> String {
         .unwrap_or_else(|e| panic!("{tool_name} input_schema must serialize: {e}"))
 }
 
-/// `memstead_vault_create` exposes a
+/// `memstead_mem_create` exposes a
 /// `recovery` parameter on the wire shape with three accepted
 /// enum values (`reattach`, `force_overwrite`, `hard_cleanup_first`)
 /// matching `RecoveryAction::as_wire_str()`. Pin the schema so a
 /// rename / drop on either side trips the test, and the
 /// snake_case tokens stay stable.
 #[test]
-fn memstead_vault_create_schema_exposes_recovery_enum() {
-    let schema = schema_for("memstead_vault_create");
+fn memstead_mem_create_schema_exposes_recovery_enum() {
+    let schema = schema_for("memstead_mem_create");
     assert!(
         schema.contains("\"recovery\""),
-        "memstead_vault_create schema must expose `recovery` param. Schema: {schema}"
+        "memstead_mem_create schema must expose `recovery` param. Schema: {schema}"
     );
     for variant in ["reattach", "force_overwrite", "hard_cleanup_first"] {
         assert!(
             schema.contains(&format!("\"{variant}\"")),
-            "memstead_vault_create.recovery schema must expose variant `{variant}`. Schema: {schema}"
+            "memstead_mem_create.recovery schema must expose variant `{variant}`. Schema: {schema}"
         );
     }
 }
@@ -499,42 +499,42 @@ fn expected_hints(tool_name: &str) -> HintTriple {
             idempotent: Some(true),
             open_world: Some(false),
         },
-        // `memstead_vault_create` is a write op but not flagged `destructive`
+        // `memstead_mem_create` is a write op but not flagged `destructive`
         // (no existing data is rewritten — a seed commit in a fresh
         // gitdir is an additive op from the workspace's perspective).
         // `idempotent = false` because a second call with the same name
-        // hits `VAULT_NAME_COLLISION`, not a no-op.
-        "memstead_vault_create" => HintTriple {
+        // hits `MEM_NAME_COLLISION`, not a no-op.
+        "memstead_mem_create" => HintTriple {
             read_only: Some(false),
             destructive: Some(false),
             idempotent: Some(false),
             open_world: Some(false),
         },
-        // `memstead_vault_delete` — unregisters (and optionally rmdirs) a
-        // vault. Destructive with `delete_files: true`; still
+        // `memstead_mem_delete` — unregisters (and optionally rmdirs) a
+        // mem. Destructive with `delete_files: true`; still
         // destructive when `false` because the router-side effect is
         // immediate and not automatically reversible without a skill
         // re-running the explicit registration.
-        "memstead_vault_delete" => HintTriple {
+        "memstead_mem_delete" => HintTriple {
             read_only: Some(false),
             destructive: Some(true),
             idempotent: Some(false),
             open_world: Some(false),
         },
-        // `memstead_vault_set_version` — bumps a vault's `version` field
+        // `memstead_mem_set_version` — bumps a mem's `version` field
         // and persists through the backend. Mutation (read_only=false)
         // but not destructive — the prior value is overwritten in
         // place. `idempotent=false`: calling it twice with the same
         // version is technically a no-op on disk, but the response
         // still ships `{old, new}` and the engine writes the config
         // bytes either way.
-        "memstead_vault_set_schema" => HintTriple {
+        "memstead_mem_set_schema" => HintTriple {
             read_only: Some(false),
             destructive: Some(false),
             idempotent: Some(false),
             open_world: Some(false),
         },
-        "memstead_vault_set_version" => HintTriple {
+        "memstead_mem_set_version" => HintTriple {
             read_only: Some(false),
             destructive: Some(false),
             idempotent: Some(false),
@@ -543,10 +543,10 @@ fn expected_hints(tool_name: &str) -> HintTriple {
         // Workspace-policy mutations.
         // All idempotent (`Err` → `Ok(Warning)` flip) and
         // non-destructive (the rule lists / grant tables grow or
-        // shrink, but underlying vault data is never touched). The
+        // shrink, but underlying mem data is never touched). The
         // `revoke` half flips `destructive=true` because removing a
         // grant or rule changes downstream authorization (e.g.,
-        // future `memstead_vault_create` may refuse).
+        // future `memstead_mem_create` may refuse).
         "memstead_workspace_grant_cross_link" => HintTriple {
             read_only: Some(false),
             destructive: Some(false),
@@ -638,16 +638,16 @@ fn descriptions() -> Vec<(String, String)> {
 }
 
 /// Description must lead with an active verb (or an active-verbal phrase
-/// like "Per-vault"). Curated allowlist, not an exhaustive dictionary —
+/// like "Per-mem"). Curated allowlist, not an exhaustive dictionary —
 /// new entries go here deliberately as the surface evolves. Rejects the
 /// two most common filler openers ("This tool…", "Allows you to…").
 #[test]
 fn descriptions_start_with_verb() {
-    // Curated — extend deliberately. "Per-vault" is permanent for
+    // Curated — extend deliberately. "Per-mem" is permanent for
     // `memstead_changes_since`; "Search" is permanent for `memstead_search`.
     const ALLOWED_LEADS: &[&str] = &[
         "Read", "Find", "Search", "Create", "Modify", "Remove", "Rename",
-        "Connect", "Return", "Start", "Per-vault", "List", "Check",
+        "Connect", "Return", "Start", "Per-mem", "List", "Check",
         "Unregister", "Reload", "Update",
         // The six `memstead_workspace_*` tools lead with operation
         // verbs.
@@ -707,7 +707,7 @@ fn descriptions_have_no_todo_markers() {
 #[test]
 fn descriptions_length_bounds() {
     const MIN_WORDS: usize = 30;
-    // The `OUTER_REPO_NOT_IGNORING_VAULT_REPO` surface description on
+    // The `OUTER_REPO_NOT_IGNORING_MEM_REPO` surface description on
     // `memstead_health` pushes its word count to 228. The
     // `memstead_schema` precondition line on memstead_create /
     // memstead_update / memstead_relate bumps the cap to 260. The
@@ -768,8 +768,8 @@ fn descriptions_reference_only_existing_params() {
 /// Extract content between single-backtick pairs. Filters out anything
 /// that clearly isn't an identifier reference (JSON blobs, SHAs, ranges,
 /// long freeform strings). Keeps dotted paths (`query.field`), plain
-/// identifiers (`vault`), subscripted paths (`vaults[]`), and slashed
-/// alternatives (`writable_vaults`/`read_vaults` — kept as one token
+/// identifiers (`mem`), subscripted paths (`mems[]`), and slashed
+/// alternatives (`writable_mems`/`read_mems` — kept as one token
 /// because that's how the description writes it; we split on `/` inside
 /// `is_allowed_reference`).
 fn extract_backtick_tokens(desc: &str) -> Vec<String> {
@@ -823,9 +823,9 @@ fn extract_backtick_tokens(desc: &str) -> Vec<String> {
 /// For a slashed pair `a/b` both halves must resolve. Plain identifiers
 /// just need to be in the schema OR one of the allowlists.
 fn is_allowed_reference(tool_name: &str, token: &str, schema: &str) -> bool {
-    // Trailing-slash directory references (e.g. `vault-repo/`) — strip
+    // Trailing-slash directory references (e.g. `mem-repo/`) — strip
     // the slash and resolve the bare name. Without this the slashed
-    // branch below would split into `["vault-repo", ""]` and reject the
+    // branch below would split into `["mem-repo", ""]` and reject the
     // empty half.
     if token.ends_with('/') && !token.is_empty() {
         let trimmed = &token[..token.len() - 1];
@@ -865,7 +865,7 @@ fn is_allowed_reference(tool_name: &str, token: &str, schema: &str) -> bool {
 /// response fields. Keep this list short; prefer extending a tool-level
 /// allowlist when a reference is actually structural.
 const GENERIC_REFS: &[&str] = &[
-    "true", "false", "null", "markdown", "JSON", "chunk", "vault", "sections",
+    "true", "false", "null", "markdown", "JSON", "chunk", "mem", "sections",
     "structured_content",
 ];
 
@@ -885,7 +885,7 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "memstead_relate", "_hash", "expected_hash",
             // Structured envelope alongside the markdown text channel.
             "structured_content", "sections",
-            "id", "vault", "type", "level", "stability",
+            "id", "mem", "type", "level", "stability",
             "created_date", "last_modified",
             // `metadata` is the single home for frontmatter keys; the
             // description names the map and dotted reads
@@ -899,7 +899,7 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "facets", "matched_terms", "score_breakdown", "expansion",
             // Per-hit data-origin trust label + its two values.
             "origin", "first-party", "third-party",
-            "heading_path", "by_subsection", "by_type", "by_vault", "by_level",
+            "heading_path", "by_subsection", "by_type", "by_mem", "by_level",
             "by_status", "by_confidence", "by_expansion",
             // Dotted forms from the input `query` struct — allowed as
             // full tokens so `query.any`, `query.not`, etc. resolve even
@@ -917,7 +917,7 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             // `code`.
             "FILTER_TYPE_SCOPED", "RANGE_FILTER_TYPE_SCOPED",
             "RANGE_FILTER_KEY_MALFORMED", "UNKNOWN_RANGE_FILTER_FIELD",
-            "FIELD_NOT_RANGE_FILTERABLE", "SEARCH_VAULT_INDEX_UNAVAILABLE",
+            "FIELD_NOT_RANGE_FILTERABLE", "SEARCH_MEM_INDEX_UNAVAILABLE",
             // Token-budget guard: an overflowing page is trimmed with a
             // `SEARCH_RESULTS_TRUNCATED` warning carrying `kept`/`budget`.
             "SEARCH_RESULTS_TRUNCATED", "kept", "budget",
@@ -926,10 +926,10 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "range_filters", "min_<field>", "max_<field>",
             "<field>_before", "<field>_after",
             // Warning-envelope shape — every search warning ships
-            // `code`, `details`, `message`; `details.vault` /
-            // `details.reason` are named on the `SEARCH_VAULT_INDEX_UNAVAILABLE`
+            // `code`, `details`, `message`; `details.mem` /
+            // `details.reason` are named on the `SEARCH_MEM_INDEX_UNAVAILABLE`
             // recovery prose.
-            "code", "details.vault", "details.reason",
+            "code", "details.mem", "details.reason",
             // Structured envelope top-level fields surfaced in the
             // description so agents know to branch on `structured_content`.
             "structured_content", "SearchResultEnvelope",
@@ -939,12 +939,12 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "score", "snippet", "sections",
         ],
         "memstead_overview" => &[
-            "vaults", "schemas",
+            "mems", "schemas",
             "overview_mode", "_overview_mode", "budget", "total_entities", "hints",
             "community_bridges", "dangling_links",
             "estimated_tokens",
             // `include` allowed-keys — named literally in the description
-            "community_members", "vault_distribution",
+            "community_members", "mem_distribution",
             // response-shape fields referenced in prose
             "key",
             // Warning envelope `code` field — errors and warnings ride on
@@ -957,7 +957,7 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "memstead_create", "memstead_update", "memstead_relate",
             // Workspace-policy surface — frontmatter slot + the
             // policy fields named in the description.
-            "_policy", "require_notes", "cross_vault_links",
+            "_policy", "require_notes", "cross_mem_links",
         ],
         "memstead_schema" => &[
             // Response-shape fields shipped by build_schema_payload.
@@ -972,18 +972,18 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "enum", "default_weight", "default", "required",
             // Sibling-tool references named in the workflow imperative.
             "memstead_create", "memstead_update", "memstead_relate", "memstead_overview",
-            // Per-vault schema pin reference embedded in the imperative.
-            "vault.schema_ref",
+            // Per-mem schema pin reference embedded in the imperative.
+            "mem.schema_ref",
             // Recovery-payload error codes named literally.
             "UNKNOWN_SECTION", "UNKNOWN_METADATA_FIELD", "INVALID_ENUM_VALUE",
             "REQUIRED_FIELD_UNSET", "INVALID_REL_TYPE", "ENTITY_NOT_FOUND",
             // Validator-refusal code named when describing the
             // alias-synthesis opt-out posture in the response prose.
             "WIKILINK_WITHOUT_RELATION",
-            // Item E codes — `vault`-shortcut input validation.
-            "INVALID_INPUT", "UNKNOWN_VAULT",
+            // Item E codes — `mem`-shortcut input validation.
+            "INVALID_INPUT", "UNKNOWN_MEM",
             "details.id", "details.suggestions", "details",
-            "details.known_vaults",
+            "details.known_mems",
         ],
         "memstead_create" => &[
             "warnings", "commit_sha",
@@ -1043,7 +1043,7 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             // lists it here (shared shape with relate / delete).
             "orphan_stubs_removed",
             // Read-only field list: error code + the engine-stamped
-            // metadata fields named alongside vault/id/type.
+            // metadata fields named alongside mem/id/type.
             "READ_ONLY_FIELD", "created_date", "last_modified",
             // Shared note/require_notes surface.
             "NOTE_MISSING", "note",
@@ -1052,7 +1052,7 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "relations_removed", "commit_sha", "warnings",
             // Error-envelope code + details field referenced literally.
             "HASH_MISMATCH", "details.current",
-            // Refuse-on-write-vault-referrers contract.
+            // Refuse-on-write-mem-referrers contract.
             "HAS_INCOMING_REFS", "details.referrers",
             "memstead_relate", "memstead_update",
             // Residual-stub demotion path (only-ReadOnly referrers).
@@ -1078,17 +1078,17 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "memstead_relate", "memstead_health", "memstead_changes_since",
             // Atomic referrer-rewrite contract (
             // the delete/rename reference-coherence contract). Rename now
-            // walks Write-Vault referrers in one per-vault commit;
-            // cross-vault peers are policy-gated; sibling-writer drift on a
+            // walks Write-Mem referrers in one per-mem commit;
+            // cross-mem peers are policy-gated; sibling-writer drift on a
             // peer surfaces a partial-failure envelope; the in-memory
             // residual-stub demotion path applies when the only surviving
             // referrers live in ReadOnly mounts.
             "relationships",
-            "cross_vault_links",
-            "RENAME_BLOCKED_BY_CROSS_VAULT_POLICY",
-            "details.from_vault", "details.blocked_referrers",
+            "cross_mem_links",
+            "RENAME_BLOCKED_BY_CROSS_MEM_POLICY",
+            "details.from_mem", "details.blocked_referrers",
             "RENAME_PARTIAL_FAILURE",
-            "details.committed_vaults", "details.failed_vault",
+            "details.committed_mems", "details.failed_mem",
             "details.failure_cause",
             "logical_operation_id",
             "RESIDUAL_STUB_FOR_READONLY_REFERRERS",
@@ -1134,31 +1134,31 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             // Stub-GC response field — stubs whose last incoming edge was
             // dropped by this relate(remove) are GC'd in the same op.
             "orphan_stubs_removed",
-            // Cross-vault relate is policy-gated.
-            "cross_vault_links", "default_cross_links",
-            "CROSS_VAULT_LINK_NOT_ALLOWED",
-            "details.from_vault", "details.to_vault",
-            "CROSS_VAULT_TARGET_NOT_FOUND",
-            "details.target_id", "details.target_vault",
-            // Cross-vault relate to an uncreated target vault — auto-stub
+            // Cross-mem relate is policy-gated.
+            "cross_mem_links", "default_cross_links",
+            "CROSS_MEM_LINK_NOT_ALLOWED",
+            "details.from_mem", "details.to_mem",
+            "CROSS_MEM_TARGET_NOT_FOUND",
+            "details.target_id", "details.target_mem",
+            // Cross-mem relate to an uncreated target mem — auto-stub
             // still lands; warning surfaces so typos vs. forward
             // references are distinguishable.
-            "CROSS_VAULT_TARGET_VAULT_UNCREATED",
-            // Cross-vault edge to a different schema gated on the
-            // source schema's `cross_vault_relationships:` section.
-            "CROSS_VAULT_EDGE_NOT_DECLARED",
+            "CROSS_MEM_TARGET_MEM_UNCREATED",
+            // Cross-mem edge to a different schema gated on the
+            // source schema's `cross_mem_relationships:` section.
+            "CROSS_MEM_EDGE_NOT_DECLARED",
             "source_schema", "target_schema",
             "rel_type", "from_id", "to_id",
             "details.source_schema", "details.target_schema",
             "details.rel_type", "details.from_id", "details.to_id",
-            "cross_vault_relationships",
+            "cross_mem_relationships",
             // Shared note/require_notes surface.
             "note",
         ],
         "memstead_health" => &[
-            "writable_vaults", "default_writable_vault", "read_vaults", "orphans", "stubs",
+            "writable_mems", "default_writable_mem", "read_mems", "orphans", "stubs",
             "most_connected", "missing_fields", "stale", "warnings",
-            "community_count", "vault_schemas",
+            "community_count", "mem_schemas",
             "dangling_links", "from", "target_id", "target_path", "section",
             "total", "incoming", "outgoing",
             "typed_total", "typed_incoming", "typed_outgoing",
@@ -1183,25 +1183,25 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "DUPLICATE_SECTION_HEADING",
             "memstead_update",
             // Workspace-policy surface emitted under `include_config: true`
-            // (vault-lifecycle-tools Sessions 1 + 5). Per-vault detail
+            // (mem-lifecycle-tools Sessions 1 + 5). Per-mem detail
             // array + origin enum land on the response shape the
             // description advertises. Lifecycle policy itself moved to
-            // `memstead_overview` (vault-lifecycle-policy plan) — the two
+            // `memstead_overview` (mem-lifecycle-policy plan) — the two
             // related identifiers stay on the description so agents
             // following the cross-reference still parse cleanly.
-            "vaults", "origin",
+            "mems", "origin",
             "explicit", "runtime_created",
-            "memstead_overview", "vault_management.create", "vault_management.delete",
+            "memstead_overview", "mem_management.create", "mem_management.delete",
             // `[mutations]`,
-            // `[plugin.*]`, and per-vault `vcs: { gitdir, worktree }` all
+            // `[plugin.*]`, and per-mem `vcs: { gitdir, worktree }` all
             // surface under `include_config: true` so the Stop hook can
             // resolve gitdirs and plugins can read their opaque config
             // sub-tables in one round-trip.
             "mutations", "require_notes", "plugin",
             "vcs", "gitdir", "worktree", "head",
-            // Per-vault
+            // Per-mem
             // `write_guidance` (opaque string map) and `extra` (unknown
-            // top-level config keys) now ride on the `vaults` detail
+            // top-level config keys) now ride on the `mems` detail
             // entries under `include_config: true`. F6 renamed the
             // wire-facing key from camelCase `writeGuidance` to
             // snake_case `write_guidance` for parity with the rest of
@@ -1212,20 +1212,20 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             // description names the warning code, the directory, the
             // outer-repo `.gitignore`, and the structured fields on
             // the warning envelope.
-            "OUTER_REPO_NOT_IGNORING_VAULT_REPO",
-            "vault-repo", ".gitignore",
+            "OUTER_REPO_NOT_IGNORING_MEM_REPO",
+            "mem-repo", ".gitignore",
             "details.outer_repo_root", "details.workspace_root",
             // Multi-engine coherence (engine-multi-engine-coherence.md):
-            // VAULT_RELOADED auto-reload warning fires on any read
+            // MEM_RELOADED auto-reload warning fires on any read
             // response when a sibling writer advanced the on-disk HEAD
             // past the engine's cached snapshot.
-            "VAULT_RELOADED",
+            "MEM_RELOADED",
             // The missing_required_outgoing
             // include surfaces a per-entity report list with the same
-            // payload shape as the per-write warning, plus a vault
-            // qualifier (entities are scanned cross-vault by default).
+            // payload shape as the per-write warning, plus a mem
+            // qualifier (entities are scanned cross-mem by default).
             "missing_required_outgoing", "required_outgoing",
-            "entity_type", "id", "vault",
+            "entity_type", "id", "mem",
             "missing", "relationships", "cardinality", "title",
         ],
         "memstead_diff" => &[
@@ -1239,7 +1239,7 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             // EntityDiff `status` discriminator values surfaced in prose.
             "added", "modified", "deleted", "renamed", "invalid_entity",
             // Refusal codes named literally.
-            "UNKNOWN_VAULT", "UNKNOWN_REF", "INVALID_INPUT",
+            "UNKNOWN_MEM", "UNKNOWN_REF", "INVALID_INPUT",
             "details.name", "details.ref",
             // Ref-handling conventions named in the docstring.
             // Sibling tool reference (alignment claim).
@@ -1256,24 +1256,24 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             // (promoted from the prior clamp+warn shape).
             "INVALID_INPUT", "details.allowed_range", "details.requested",
             // Unknown / malformed `since` SHA returns a typed envelope.
-            "INVALID_CURSOR", "details.vault", "details.since",
+            "INVALID_CURSOR", "details.mem", "details.since",
             // `include_notes: true` ride-along — `memstead_ref` is the SHA
-            // of the workspace `__MEMSTEAD` ref (unified schemas + per-vault
+            // of the workspace `__MEMSTEAD` ref (unified schemas + per-mem
             // configs).
             "memstead_ref", "__MEMSTEAD",
         ],
         "memstead_reload" => &[
-            // Response-shape fields surfaced by the per-vault `ReloadReport`.
+            // Response-shape fields surfaced by the per-mem `ReloadReport`.
             "reports", "head_before", "head_after", "entities_loaded",
             "changed_entity_ids",
             // Auto-reload-on-read warning the description points at.
-            "VAULT_RELOADED",
+            "MEM_RELOADED",
             // Cross-tool reference for diff-list lookup.
             "memstead_changes_since",
             // Membership-fixed-at-boot clause cites the lifecycle tools that
-            // *do* mutate the in-memory router atomically (vault-lifecycle-audit
+            // *do* mutate the in-memory router atomically (mem-lifecycle-audit
             // Item 02), so an agent reading the warning knows where to go.
-            "memstead_vault_create", "memstead_vault_delete",
+            "memstead_mem_create", "memstead_mem_delete",
             // Workspace-config-reload pairing (Item 03 of
             // workspace-config-via-cli.md): the workspace-wide form re-reads
             // `.memstead/workspace.toml`. The slashed-token allowlist rule
@@ -1283,7 +1283,7 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             // time and doesn't need an allowlist entry.
             ".memstead", "workspace.toml",
         ],
-        "memstead_vault_create" => &[
+        "memstead_mem_create" => &[
             // Response-shape fields.
             "seed_commit_sha", "commit_sha", "schema_ref",
             // Schema-payload fields — the full schema catalogue ships
@@ -1293,16 +1293,16 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "schema", "write_rules", "writing_guidance", "system_context",
             "when_to_use",
             // Error codes named literally in the description.
-            "VAULT_PATH_NOT_ALLOWED", "VAULT_SCHEMA_NOT_ALLOWED",
-            "VAULT_NAME_COLLISION", "CONFIG_ERROR",
+            "MEM_PATH_NOT_ALLOWED", "MEM_SCHEMA_NOT_ALLOWED",
+            "MEM_NAME_COLLISION", "CONFIG_ERROR",
             // The description names
             // the storage-residue refusal envelope, the
             // reattach-after-unregister warning, the `__MEMSTEAD`
             // registry ref the probe inspects, and the
             // `unregistered_at` tombstone field on the residual
             // config.
-            "VAULT_STORAGE_RESIDUE_DETECTED",
-            "VAULT_REATTACHED_AFTER_UNREGISTER",
+            "MEM_STORAGE_RESIDUE_DETECTED",
+            "MEM_REATTACHED_AFTER_UNREGISTER",
             "__MEMSTEAD", "unregistered_at",
             // Error-envelope `details` field references — both
             // envelopes (path + schema) carry these.
@@ -1317,124 +1317,124 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             // Composed-candidate vocabulary (lifecycle-policy plan).
             "pattern",
             // Workspace-config tokens referenced verbatim.
-            "vault_management.create", "schemas",
+            "mem_management.create", "schemas",
             // Cross-link policy tokens (workspace-cross-link-policy plan).
-            "cross_vault_links", "default_cross_links",
+            "cross_mem_links", "default_cross_links",
             // `.memstead/workspace.toml` is named literally in the description;
             // the slashed-token check resolves each half against this list.
             ".memstead", "workspace.toml",
         ],
-        "memstead_vault_delete" => &[
+        "memstead_mem_delete" => &[
             // Response-shape fields.
             "deleted_from_router", "files_deleted",
             // Scrubbed-entry audit field surfaces the policy
             // side-effects in one round-trip.
             "allowlist_entries_removed", "table", "pattern", "from", "to",
-            // Allowlist tables named verbatim — `vault_management.*`
+            // Allowlist tables named verbatim — `mem_management.*`
             // is two tables; the slashed-token check resolves each
             // half independently.
-            "vault_management.create", "vault_management.delete",
-            "vault_management", "create", "delete",
+            "mem_management.create", "mem_management.delete",
+            "mem_management", "create", "delete",
             // Error codes named literally in the description.
-            "UNKNOWN_VAULT", "VAULT_PATH_NOT_ALLOWED",
-            "VAULT_REFERENCED_BY_POLICY", "VAULT_HAS_INCOMING_REFS",
+            "UNKNOWN_MEM", "MEM_PATH_NOT_ALLOWED",
+            "MEM_REFERENCED_BY_POLICY", "MEM_HAS_INCOMING_REFS",
             // `.memstead/workspace.toml` is named literally in the
-            // VAULT_REFERENCED_BY_POLICY recovery guidance — point
+            // MEM_REFERENCED_BY_POLICY recovery guidance — point
             // operators at the cross-link grant they have to revoke.
             // The slashed-token check resolves each half against
             // this list.
             ".memstead", "workspace.toml",
             // Workspace-policy token referenced verbatim in the
             // policy-grant description.
-            "cross_vault_links",
+            "cross_mem_links",
             // Disk-cleanup warning emitted when `delete_files=true`
             // leaves a backend-visible artifact behind — either the
             // folder rmdir failed or the git-branch ref-edit
             // transaction failed.
-            "VAULT_FILES_NOT_DELETED",
+            "MEM_FILES_NOT_DELETED",
             // Error-envelope `details` field references.
-            "details.referring_vaults", "details.referrers",
+            "details.referring_mems", "details.referrers",
             "details.candidate", "details.patterns",
-            // `details` fields named in the VAULT_FILES_NOT_DELETED
+            // `details` fields named in the MEM_FILES_NOT_DELETED
             // warning's payload.
             "details.reason", "details.path", "details.error",
             // Reason discriminator literals carried in the warning's
             // `details.reason`.
             "rmdir_failed", "backend_prune_failed",
             // Cross-tool references — `memstead_relate` / `memstead_update`
-            // appear in the `VAULT_HAS_INCOMING_REFS` recovery guidance
+            // appear in the `MEM_HAS_INCOMING_REFS` recovery guidance
             // (remove the offending edges before retrying).
             "memstead_health", "memstead_overview", "memstead_relate", "memstead_update",
             // Config-discovery tokens embedded in the description.
             "no_allowlist_configured", "no_match",
             // Workspace-config tokens referenced verbatim.
-            "vault_management.delete",
+            "mem_management.delete",
         ],
-        // `memstead_vault_set_schema` — the integrity-driven schema-migration
+        // `memstead_mem_set_schema` — the integrity-driven schema-migration
         // trigger. Response discriminator values, the findings shape,
         // and the cross-referenced tools/params named in the
         // description.
-        "memstead_vault_set_schema" => &[
+        "memstead_mem_set_schema" => &[
             "outcome", "noop", "switched", "migration_started", "migration_pending",
             "findings", "schema_pin", "migration_target",
-            "relations_unset", "memstead_schema", "memstead_update", "memstead_vault_set_version",
-            "UNKNOWN_VAULT", "SCHEMA_NOT_FOUND", "INVALID_INPUT",
+            "relations_unset", "memstead_schema", "memstead_update", "memstead_mem_set_version",
+            "UNKNOWN_MEM", "SCHEMA_NOT_FOUND", "INVALID_INPUT",
         ],
-        "memstead_vault_set_version" => &[
+        "memstead_mem_set_version" => &[
             // Response-shape fields.
-            "vault", "old_version", "new_version", "warnings",
+            "mem", "old_version", "new_version", "warnings",
             // Error codes named literally in the description.
-            "INVALID_INPUT", "UNKNOWN_VAULT", "READ_ONLY_MOUNT",
+            "INVALID_INPUT", "UNKNOWN_MEM", "READ_ONLY_MOUNT",
             // Warning code emitted on concurrent-drift detection.
-            "VAULT_RELOADED",
+            "MEM_RELOADED",
             // Other named codes / types the description cites.
-            "VaultConfig", "write_vault_config",
+            "MemConfig", "write_mem_config",
             // Config-blob layout strings the description names.
             // `.mem` is the sealed-archive extension.
-            ".memstead", ".mem", "config.json", "__MEMSTEAD", "vaults",
+            ".memstead", ".mem", "config.json", "__MEMSTEAD", "mems",
             // Cross-tool reference.
             "memstead_export",
             // Allowlist token (description disclaims operator-mode bypass).
-            "vault_management",
+            "mem_management",
             // Version-default literal.
             "0.1.0",
         ],
         // Workspace-policy mutation tools.
         "memstead_workspace_grant_cross_link" => &[
             // Response-shape + section-name refs.
-            "from", "to", "warnings", "cross_vault_links",
+            "from", "to", "warnings", "cross_mem_links",
             // Idempotency warning + conflict error codes.
             "GRANT_ALREADY_PRESENT", "CROSS_LINK_CONFLICT",
             "WORKSPACE_NOT_INITIALISED", "INVALID_TOML", "IO_ERROR",
             // F7 workflow cross-tool references.
-            "memstead_vault_create", "memstead_vault_delete", "memstead_relate",
+            "memstead_mem_create", "memstead_mem_delete", "memstead_relate",
             "memstead_workspace_revoke_cross_link",
             // Workspace config path tokens.
             ".memstead", "workspace.toml",
         ],
         "memstead_workspace_revoke_cross_link" => &[
-            "from", "to", "warnings", "cross_vault_links",
-            "GRANT_NOT_FOUND", "VAULT_REFERENCED_BY_POLICY",
+            "from", "to", "warnings", "cross_mem_links",
+            "GRANT_NOT_FOUND", "MEM_REFERENCED_BY_POLICY",
             "WORKSPACE_NOT_INITIALISED", "INVALID_TOML", "IO_ERROR",
-            "memstead_vault_delete",
+            "memstead_mem_delete",
             ".memstead", "workspace.toml",
         ],
         "memstead_workspace_allow_create" => &[
             "pattern", "schemas", "before", "default_cross_links", "warnings",
             // Section names cited in the description.
-            "vault_management.create", "cross_vault_links",
+            "mem_management.create", "cross_mem_links",
             // Idempotency warning + related error codes.
             "RULE_ALREADY_PRESENT", "BEFORE_PATTERN_NOT_FOUND",
-            "WORKSPACE_NOT_INITIALISED", "VAULT_PATH_NOT_ALLOWED",
+            "WORKSPACE_NOT_INITIALISED", "MEM_PATH_NOT_ALLOWED",
             // Schema-differ refusal code + its structured recovery payload.
             "RULE_EXISTS_SCHEMAS_DIFFER",
             "details.stored_schemas", "details.requested_schemas", "details.recovery",
             // Cross-tool refs.
-            "memstead_vault_create", "memstead_workspace_grant_cross_link", "memstead_overview",
+            "memstead_mem_create", "memstead_workspace_grant_cross_link", "memstead_overview",
             "memstead_workspace_revoke_create",
             // Rule-derived cross-link grant is surfaced under this
             // workspace-policy posture key.
-            "cross_vault_links_from_rules",
+            "cross_mem_links_from_rules",
             // `.memstead/workspace.toml` slashed token.
             ".memstead", "workspace.toml",
         ],
@@ -1447,10 +1447,10 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
         ],
         "memstead_workspace_allow_delete" => &[
             "pattern", "warnings",
-            "vault_management.delete",
+            "mem_management.delete",
             "RULE_ALREADY_PRESENT",
-            "WORKSPACE_NOT_INITIALISED", "VAULT_PATH_NOT_ALLOWED",
-            "memstead_vault_delete", "memstead_workspace_allow_create",
+            "WORKSPACE_NOT_INITIALISED", "MEM_PATH_NOT_ALLOWED",
+            "memstead_mem_delete", "memstead_workspace_allow_create",
             ".memstead", "workspace.toml",
         ],
         "memstead_workspace_revoke_delete" => &[
@@ -1484,7 +1484,7 @@ const STRUCTURED_ERROR_CODES: &[&str] = &[
     // Lookup
     "ENTITY_NOT_FOUND",
     "ENTITY_ALREADY_EXISTS",
-    "UNKNOWN_VAULT",
+    "UNKNOWN_MEM",
     // Optimistic locking / structural
     "HASH_MISMATCH",
     "RELATIONSHIP_CYCLE",
@@ -1503,17 +1503,17 @@ const STRUCTURED_ERROR_CODES: &[&str] = &[
     "SECTION_NOT_UPDATABLE",
     "PATCH_OLD_NOT_FOUND",
     "PATCH_SECTION_EMPTY",
-    // Vault invariants
-    "CROSS_VAULT_LINK_NOT_ALLOWED",
-    "CROSS_VAULT_TARGET_NOT_FOUND",
-    "VAULT_NOT_WRITABLE",
-    "CROSS_VAULT_LINK_TARGET_NOT_FOUND",
-    "VAULT_NAME_COLLISION",
-    "VAULT_PATH_NOT_ALLOWED",
-    "VAULT_SCHEMA_NOT_ALLOWED",
-    "VAULT_BRANCH_MISSING",
-    "VAULT_REFERENCED_BY_POLICY",
-    // Refuse-on-write-vault-referrers (replaces force flag).
+    // Mem invariants
+    "CROSS_MEM_LINK_NOT_ALLOWED",
+    "CROSS_MEM_TARGET_NOT_FOUND",
+    "MEM_NOT_WRITABLE",
+    "CROSS_MEM_LINK_TARGET_NOT_FOUND",
+    "MEM_NAME_COLLISION",
+    "MEM_PATH_NOT_ALLOWED",
+    "MEM_SCHEMA_NOT_ALLOWED",
+    "MEM_BRANCH_MISSING",
+    "MEM_REFERENCED_BY_POLICY",
+    // Refuse-on-write-mem-referrers (replaces force flag).
     "HAS_INCOMING_REFS",
     // Stub guards
     "STUB_NOT_UPDATABLE",
@@ -1531,14 +1531,14 @@ const STRUCTURED_ERROR_CODES: &[&str] = &[
     // Strict wiki-link/relation invariant — typed envelope.
     "WIKILINK_WITHOUT_RELATION",
     // Rename-policy/partial-failure variants — typed envelopes.
-    "RENAME_BLOCKED_BY_CROSS_VAULT_POLICY",
+    "RENAME_BLOCKED_BY_CROSS_MEM_POLICY",
     "RENAME_PARTIAL_FAILURE",
     // Schema resolution
     "SCHEMA_NOT_FOUND",
     "SCHEMA_RESOLVER_INIT_FAILED",
     // Fallback / boundary
     "PARSE_ERROR",
-    "VAULT_ERROR",
+    "MEM_ERROR",
     "INVALID_INPUT",
     "VCS_ERROR",
     "INTERNAL_IO_ERROR",
@@ -1569,7 +1569,7 @@ fn all_description_text() -> String {
 /// doesn't need a running `McpServer` — drift between this copy and the
 /// `#[tool_handler(instructions = …)]` literal is caught by
 /// `server_instructions_copy_matches_live` below.
-const SERVER_INSTRUCTIONS_COPY: &str = "Memstead: schema-agnostic graph engine for typed, interconnected markdown entities. Each vault is a typed model of a chosen subject — its modal flavour follows from its schema (knowledge / planning / inquiry / spec / hybrid). Each vault pins one schema; types and relationships are vocabulary-controlled. Cold-start: call memstead_overview first for the schema catalogue (`{ref, description}` per schema), vault inventory, and communities (token-budgeted; drill via include/hints). Schema-discovery contract: each writable vault pins one schema (visible on overview's `## Vaults` entries). Before any memstead_create / memstead_update / memstead_relate against vault X, call memstead_schema(name=<X.schema_ref>) once per session to learn section names, field shapes, relationship vocabulary, and write_rules. Cache for the session — schema is workspace-stable. Schema-conformance errors carry recovery payloads as a fallback (UNKNOWN_SECTION, UNKNOWN_METADATA_FIELD, INVALID_ENUM_VALUE, REQUIRED_FIELD_UNSET, INVALID_REL_TYPE, INVALID_REL_SHAPE, MISSING_REQUIRED_SECTION) — fix from `details` rather than re-fetching the schema after every error. Edge model is alias: body wiki-links `[[X]]` are foreign-key references to entries in the auto-managed `## Relationships` section. Schemas with `alias_target_rel_type` auto-emit relations of that rel-type (e.g. REFERENCES) from each body wiki-link via the alias-synthesis pass; explicit author of the named rel-type refuses with RELATION_MANUAL_AUTHORING_FORBIDDEN. Schemas without the pointer refuse unbacked body wiki-links with WIKILINK_WITHOUT_RELATION. Removing a relation while body wiki-links to its target remain refuses only when no other relation to that target survives (RELATION_HAS_BODY_LINKS — set-membership semantics). Common workflows: search entities by content/structure (memstead_search — omit query for pure metadata filter); read one (memstead_entity — `_hash` is the optimistic-locking token for mutations); read one schema (memstead_schema); create/update/relate/rename/delete entities (memstead_create, memstead_update, memstead_relate, memstead_rename, memstead_delete); manage workspace vaults including planning phases (memstead_vault_create, memstead_vault_delete); inspect drift and per-vault config (memstead_health); poll commit deltas for incremental sync (memstead_changes_since). Errors and warnings ship as { code, message, details } on structured_content; branch on the stable UPPER_SNAKE_CASE code. The text channel mirrors the same code inline as `ERROR [<CODE>]: <message>` so consumers that only read `result.content[0].text` still recover the code with a one-line regex. Never edit `.md` spec files directly — always go through Memstead tools. Error codes: ENTITY_NOT_FOUND, ENTITY_ALREADY_EXISTS, UNKNOWN_VAULT, HASH_MISMATCH, RELATIONSHIP_CYCLE, UNKNOWN_SECTION, UNKNOWN_METADATA_FIELD, UNKNOWN_ENTITY_TYPE, INVALID_ENUM_VALUE, INVALID_REL_TYPE, INVALID_REL_SHAPE, READ_ONLY_FIELD, REQUIRED_FIELD_UNSET, SET_AND_UNSET_CONFLICT, CONFLICTING_SECTION_MODES, SECTION_NOT_UPDATABLE, PATCH_OLD_NOT_FOUND, PATCH_SECTION_EMPTY, CROSS_VAULT_LINK_NOT_ALLOWED, CROSS_VAULT_TARGET_NOT_FOUND, CROSS_VAULT_EDGE_NOT_DECLARED, VAULT_NOT_WRITABLE, CROSS_VAULT_LINK_TARGET_NOT_FOUND, VAULT_NAME_COLLISION, VAULT_PATH_NOT_ALLOWED, INVALID_VAULT_NAME, VAULT_SCHEMA_NOT_ALLOWED, VAULT_BRANCH_MISSING, VAULT_REFERENCED_BY_POLICY, HAS_INCOMING_REFS, STUB_NOT_UPDATABLE, STUB_NOT_RENAMABLE, STUB_CANNOT_RELATE, INVALID_ENTITY_ID, WIKILINK_WITHOUT_RELATION, RELATION_HAS_BODY_LINKS, MISSING_REQUIRED_DESCRIPTION, DESCRIPTION_NOT_PERMITTED, RELATION_MANUAL_AUTHORING_FORBIDDEN, SCHEMA_NOT_FOUND, SCHEMA_RESOLVER_INIT_FAILED, PARSE_ERROR, VAULT_ERROR, INVALID_INPUT, VCS_ERROR, INTERNAL_IO_ERROR, CONFIG_ERROR, EXPORT_ERROR, WORKSPACE_SCHEMAS_ERROR, SCHEMA_CACHE_COLLISION, TOOL_DISABLED, INVALID_CURSOR. Health warning: OUTER_REPO_NOT_IGNORING_VAULT_REPO. Relate warnings: AUTO_STUB_CREATED. Delete warning: RESIDUAL_STUB_FOR_READONLY_REFERRERS. Boot warnings: PARSED_RELATION_INVALID, AMBIGUOUS_DESCRIPTION_DELIMITER, MISSING_REQUIRED_DESCRIPTION, DESCRIPTION_NOT_PERMITTED. Mutation warning: MISSING_REQUIRED_OUTGOING.";
+const SERVER_INSTRUCTIONS_COPY: &str = "Memstead: schema-agnostic graph engine for typed, interconnected markdown entities. Each mem is a typed model of a chosen subject — its modal flavour follows from its schema (knowledge / planning / inquiry / spec / hybrid). Each mem pins one schema; types and relationships are vocabulary-controlled. Cold-start: call memstead_overview first for the schema catalogue (`{ref, description}` per schema), mem inventory, and communities (token-budgeted; drill via include/hints). Schema-discovery contract: each writable mem pins one schema (visible on overview's `## Mems` entries). Before any memstead_create / memstead_update / memstead_relate against mem X, call memstead_schema(name=<X.schema_ref>) once per session to learn section names, field shapes, relationship vocabulary, and write_rules. Cache for the session — schema is workspace-stable. Schema-conformance errors carry recovery payloads as a fallback (UNKNOWN_SECTION, UNKNOWN_METADATA_FIELD, INVALID_ENUM_VALUE, REQUIRED_FIELD_UNSET, INVALID_REL_TYPE, INVALID_REL_SHAPE, MISSING_REQUIRED_SECTION) — fix from `details` rather than re-fetching the schema after every error. Edge model is alias: body wiki-links `[[X]]` are foreign-key references to entries in the auto-managed `## Relationships` section. Schemas with `alias_target_rel_type` auto-emit relations of that rel-type (e.g. REFERENCES) from each body wiki-link via the alias-synthesis pass; explicit author of the named rel-type refuses with RELATION_MANUAL_AUTHORING_FORBIDDEN. Schemas without the pointer refuse unbacked body wiki-links with WIKILINK_WITHOUT_RELATION. Removing a relation while body wiki-links to its target remain refuses only when no other relation to that target survives (RELATION_HAS_BODY_LINKS — set-membership semantics). Common workflows: search entities by content/structure (memstead_search — omit query for pure metadata filter); read one (memstead_entity — `_hash` is the optimistic-locking token for mutations); read one schema (memstead_schema); create/update/relate/rename/delete entities (memstead_create, memstead_update, memstead_relate, memstead_rename, memstead_delete); manage workspace mems including planning phases (memstead_mem_create, memstead_mem_delete); inspect drift and per-mem config (memstead_health); poll commit deltas for incremental sync (memstead_changes_since). Errors and warnings ship as { code, message, details } on structured_content; branch on the stable UPPER_SNAKE_CASE code. The text channel mirrors the same code inline as `ERROR [<CODE>]: <message>` so consumers that only read `result.content[0].text` still recover the code with a one-line regex. Never edit `.md` spec files directly — always go through Memstead tools. Error codes: ENTITY_NOT_FOUND, ENTITY_ALREADY_EXISTS, UNKNOWN_MEM, HASH_MISMATCH, RELATIONSHIP_CYCLE, UNKNOWN_SECTION, UNKNOWN_METADATA_FIELD, UNKNOWN_ENTITY_TYPE, INVALID_ENUM_VALUE, INVALID_REL_TYPE, INVALID_REL_SHAPE, READ_ONLY_FIELD, REQUIRED_FIELD_UNSET, SET_AND_UNSET_CONFLICT, CONFLICTING_SECTION_MODES, SECTION_NOT_UPDATABLE, PATCH_OLD_NOT_FOUND, PATCH_SECTION_EMPTY, CROSS_MEM_LINK_NOT_ALLOWED, CROSS_MEM_TARGET_NOT_FOUND, CROSS_MEM_EDGE_NOT_DECLARED, MEM_NOT_WRITABLE, CROSS_MEM_LINK_TARGET_NOT_FOUND, MEM_NAME_COLLISION, MEM_PATH_NOT_ALLOWED, INVALID_MEM_NAME, MEM_SCHEMA_NOT_ALLOWED, MEM_BRANCH_MISSING, MEM_REFERENCED_BY_POLICY, HAS_INCOMING_REFS, STUB_NOT_UPDATABLE, STUB_NOT_RENAMABLE, STUB_CANNOT_RELATE, INVALID_ENTITY_ID, WIKILINK_WITHOUT_RELATION, RELATION_HAS_BODY_LINKS, MISSING_REQUIRED_DESCRIPTION, DESCRIPTION_NOT_PERMITTED, RELATION_MANUAL_AUTHORING_FORBIDDEN, SCHEMA_NOT_FOUND, SCHEMA_RESOLVER_INIT_FAILED, PARSE_ERROR, MEM_ERROR, INVALID_INPUT, VCS_ERROR, INTERNAL_IO_ERROR, CONFIG_ERROR, EXPORT_ERROR, WORKSPACE_SCHEMAS_ERROR, SCHEMA_CACHE_COLLISION, TOOL_DISABLED, INVALID_CURSOR. Health warning: OUTER_REPO_NOT_IGNORING_MEM_REPO. Relate warnings: AUTO_STUB_CREATED. Delete warning: RESIDUAL_STUB_FOR_READONLY_REFERRERS. Boot warnings: PARSED_RELATION_INVALID, AMBIGUOUS_DESCRIPTION_DELIMITER, MISSING_REQUIRED_DESCRIPTION, DESCRIPTION_NOT_PERMITTED. Mutation warning: MISSING_REQUIRED_OUTGOING.";
 
 fn server_instructions_text() -> &'static str {
     SERVER_INSTRUCTIONS_COPY
@@ -1672,13 +1672,13 @@ fn every_error_code_appears_in_a_description() {
 }
 
 /// Every mutation that mentions `commit_sha` must qualify it with the
-/// per-vault git storage location and point agents at the canonical
+/// per-mem git storage location and point agents at the canonical
 /// discovery path (`memstead_health { include_config: true }`) so they don't
 /// try `git log <sha>` at the project root. Misinterpretation of the SHA
 /// origin was the #1 source of agent confusion before this lock.
 ///
 /// The discovery qualifier is `memstead_health` with `include_config` — the
-/// gitdir location is per-vault configurable (see vcs-config.md Phase 1)
+/// gitdir location is per-mem configurable (see vcs-config.md Phase 1)
 /// and the `memstead_health.vcs` subobject is the LLM-facing discovery
 /// surface.
 #[test]
@@ -1698,13 +1698,13 @@ fn every_mutation_description_clarifies_commit_sha_origin() {
         if !desc.contains("commit_sha") {
             continue; // tool doesn't mention it — not a violation
         }
-        let has_per_vault = desc.contains("per-vault git");
+        let has_per_mem = desc.contains("per-mem git");
         let has_discovery = desc.contains("memstead_health")
             && desc.contains("include_config");
-        if !(has_per_vault && has_discovery) {
+        if !(has_per_mem && has_discovery) {
             violations.push(format!(
                 "{name}: description mentions `commit_sha` but omits the \
-                 per-vault-git qualifier or the \
+                 per-mem-git qualifier or the \
                  `memstead_health include_config=true` discovery pointer"
             ));
         }
@@ -1956,7 +1956,7 @@ fn memstead_overview_carries_always_load_meta() {
 
 /// Ad-hoc measurement printout for the Item-D trim audit. Run with:
 ///
-///     cargo test --features vault-repo -p memstead-mcp --test tool_surface \
+///     cargo test --features mem-repo -p memstead-mcp --test tool_surface \
 ///         print_description_sizes -- --nocapture --ignored
 ///
 /// Reports per-tool word/byte sizes plus the server-instructions block

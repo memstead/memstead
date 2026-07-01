@@ -1,13 +1,13 @@
 # Pro-build CI smoke. Builds the pro flavour of `memstead` and `memstead-mcp`
-# (`--features vault-repo`, links `gix` and `memstead-git-branch`) and
-# exercises the full mutation surface against a vault-repo workspace
-# bootstrapped via `memstead vault-repo init` + `memstead vault init`.
+# (`--features mem-repo`, links `gix` and `memstead-git-branch`) and
+# exercises the full mutation surface against a mem-repo workspace
+# bootstrapped via `memstead mem-repo init` + `memstead mem init`.
 #
 # Sister workflow to `basis-smoke.yml`: same harness
 # (`ci/mcp_client.py`), same shape (build → upload → probe), but
-# the workspace setup uses the gitdir-backed vault-repo path and the
-# probe asserts the 14-tool pro surface (`memstead_vault_create`,
-# `memstead_vault_delete`, `memstead_reload` are pro-only).
+# the workspace setup uses the gitdir-backed mem-repo path and the
+# probe asserts the 14-tool pro surface (`memstead_mem_create`,
+# `memstead_mem_delete`, `memstead_reload` are pro-only).
 #
 # Why a separate workflow rather than a matrix dimension on
 # `basis-smoke.yml`: the build artefacts are different (basis vs pro
@@ -47,8 +47,8 @@ jobs:
           # crate sets so sharing the cache wouldn't help anyway.
           shared-key: pro-build
 
-      # `memstead-cli` / `memstead-mcp` build the full multi-vault flavour
-      # by default (the `vault-repo` feature is on by default) and produce
+      # `memstead-cli` / `memstead-mcp` build the full multi-mem flavour
+      # by default (the `mem-repo` feature is on by default) and produce
       # the `memstead` / `memstead-mcp` binaries. `--no-default-features`
       # would yield the lean build (exercised by `basis-smoke.yml`).
       - name: Build pro
@@ -64,7 +64,7 @@ jobs:
           retention-days: 1
 
   smoke:
-    name: Pro smoke (vault-repo round-trip)
+    name: Pro smoke (mem-repo round-trip)
     needs: build-pro
     runs-on: ubuntu-latest
     steps:
@@ -76,7 +76,7 @@ jobs:
       - name: Make binaries executable
         run: chmod +x bin/memstead bin/memstead-mcp
       - name: Run pro smoke
-        # `memstead vault init` spawns `memstead-mcp`; pass the path through
+        # `memstead mem init` spawns `memstead-mcp`; pass the path through
         # `MEMSTEAD_MCP_BIN` so the spawn finds the right binary
         # without a system-wide install. The probe sets this env var
         # itself, but a sibling test that bypasses it would surface

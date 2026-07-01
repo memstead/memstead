@@ -1,17 +1,17 @@
-//! `memstead publish [<file.mem>]` — upload a vault to the registry.
+//! `memstead publish [<file.mem>]` — upload a mem to the registry.
 //!
 //! Three input shapes, resolved in priority order:
 //!
 //! - **`memstead publish <file.mem>`** — archive-already-built. Publish
-//!   pre-existing bytes (e.g. produced by `memstead export --format vault`).
-//! - **`memstead publish --vault <name>`** — export-and-publish in one
+//!   pre-existing bytes (e.g. produced by `memstead export --format mem`).
+//! - **`memstead publish --mem <name>`** — export-and-publish in one
 //!   step. Opens the current workspace's engine (any backend, including
-//!   git-branch vault-repo), assembles the named vault's `.mem` archive
-//!   in-process via [`memstead_base::Engine::export_vault_to_bytes`],
+//!   git-branch mem-repo), assembles the named mem's `.mem` archive
+//!   in-process via [`memstead_base::Engine::export_mem_to_bytes`],
 //!   stages it through a tempfile, and posts. This is the one-step path
-//!   for vault-repo workspaces, where there is no folder to wrap up.
-//! - **`memstead publish`** (no archive arg, no `--vault`) —
-//!   filesystem-vault assembly. Walks up from cwd to the workspace
+//!   for mem-repo workspaces, where there is no folder to wrap up.
+//! - **`memstead publish`** (no archive arg, no `--mem`) —
+//!   filesystem-mem assembly. Walks up from cwd to the workspace
 //!   marker, builds the archive in-memory via
 //!   [`memstead_base::filesystem::publish::assemble_archive`], and posts.
 //!   Equivalent to "wrap up what's in the current folder and ship it".
@@ -20,7 +20,7 @@
 //! `~/.config/memstead/credentials` → GitHub Device Flow on first use
 //! (only if stdin is a TTY; CI sees "missing MEMSTEAD_TOKEN" instead).
 //!
-//! On success prints `<scope>/<name> vX.Y.Z` + the full vault URL so the
+//! On success prints `<scope>/<name> vX.Y.Z` + the full mem URL so the
 //! user has a clickable link.
 
 use std::io::IsTerminal;
@@ -40,28 +40,28 @@ use crate::setup::{CliContext, CliEngine};
 #[derive(Parser, Debug)]
 pub struct Args {
     /// Path to a `.mem` archive on disk. Omit to assemble the
-    /// archive from the surrounding filesystem-vault workspace
+    /// archive from the surrounding filesystem-mem workspace
     /// (walks up from cwd looking for `.memstead/config.json`).
     #[arg(value_name = "PATH")]
     pub archive: Option<PathBuf>,
 
-    /// Override the workspace root for the no-arg / `--vault` shapes.
+    /// Override the workspace root for the no-arg / `--mem` shapes.
     /// Ignored when an archive PATH is provided. Defaults to walking up
     /// from cwd.
     #[arg(long, value_name = "PATH")]
     pub workspace: Option<PathBuf>,
 
-    /// Export-and-publish a named vault from the current workspace in
-    /// one step — the path for vault-repo (multi-vault, git-branch)
+    /// Export-and-publish a named mem from the current workspace in
+    /// one step — the path for mem-repo (multi-mem, git-branch)
     /// workspaces, which have no folder to wrap up. Ignored when an
-    /// archive PATH is provided. A single-vault folder workspace can
+    /// archive PATH is provided. A single-mem folder workspace can
     /// omit this and just run `memstead publish`.
     #[arg(long, value_name = "NAME")]
-    pub vault: Option<String>,
+    pub mem: Option<String>,
 
     /// Override the auto-derived scope — admin-only, reserved scopes
     /// only (currently just `memstead`). Without this flag the registry
-    /// stores the vault under your GitHub username.
+    /// stores the mem under your GitHub username.
     #[arg(long, value_name = "NAME")]
     pub scope: Option<String>,
 
@@ -74,16 +74,16 @@ pub struct Args {
     #[arg(long, value_name = "URL")]
     pub registry: Option<String>,
 
-    /// Set the vault's version to this semver and publish in one step,
-    /// persisting the bump to the vault config (like `npm version` +
-    /// `npm publish`). Requires `--vault <name>`; not valid with a
+    /// Set the mem's version to this semver and publish in one step,
+    /// persisting the bump to the mem config (like `npm version` +
+    /// `npm publish`). Requires `--mem <name>`; not valid with a
     /// pre-built archive PATH, whose version is already baked in. Omit
-    /// to publish whatever version the vault config currently carries.
+    /// to publish whatever version the mem config currently carries.
     #[arg(long, value_name = "SEMVER")]
     pub version: Option<String>,
 
     /// Assemble and resolve everything, print exactly what would be
-    /// published (vault, version, scope, archive size), but POST
+    /// published (mem, version, scope, archive size), but POST
     /// nothing and mutate nothing — including no version bump. The safe
     /// way to confirm a publish before it goes out.
     #[arg(long)]
@@ -96,7 +96,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     let client = registry::build_http()?;
 
     // 0. Validate `--version` up front: it persists a bump through the
-    //    workspace engine, so it needs `--vault <name>` and is
+    //    workspace engine, so it needs `--mem <name>` and is
     //    meaningless against pre-built archive bytes whose version is
     //    already sealed.
     let target_version = match args.version.as_deref() {
@@ -105,15 +105,15 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 return Err(CliError::new(
                     ExitKind::Validation,
                     "INVALID_INPUT",
-                    "--version cannot be combined with a pre-built archive PATH (its version is already baked in) — drop the PATH and use --vault, or re-export at the new version",
+                    "--version cannot be combined with a pre-built archive PATH (its version is already baked in) — drop the PATH and use --mem, or re-export at the new version",
                 )
                 .into());
             }
-            if args.vault.is_none() {
+            if args.mem.is_none() {
                 return Err(CliError::new(
                     ExitKind::Validation,
                     "INVALID_INPUT",
-                    "--version requires --vault <name> so the bump knows which vault to re-version",
+                    "--version requires --mem <name> so the bump knows which mem to re-version",
                 )
                 .into());
             }
@@ -129,7 +129,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     };
 
     // 1. Resolve archive bytes by input shape (priority order):
-    //    archive PATH > `--vault NAME` (engine export-to-bytes, any
+    //    archive PATH > `--mem NAME` (engine export-to-bytes, any
     //    backend) > bare (folder assembly). The two assembling shapes
     //    stage their bytes through a tempfile so the existing
     //    `registry::publish` POST path stays file-based; the tempfile
@@ -140,11 +140,11 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     let (archive_path, _tempfile_guard): (PathBuf, Option<NamedTempFile>) =
         if let Some(p) = args.archive {
             (p, None)
-        } else if let Some(vault_name) = args.vault.as_deref() {
+        } else if let Some(mem_name) = args.mem.as_deref() {
             let workspace_root = resolve_workspace_root(args.workspace.as_deref())?;
             let mut engine = match ctx.cli_engine_at(&workspace_root)? {
-                #[cfg(feature = "vault-repo")]
-                CliEngine::VaultRepo(e) => e,
+                #[cfg(feature = "mem-repo")]
+                CliEngine::MemRepo(e) => e,
                 CliEngine::Filesystem(e) => e,
             };
             // Persist the version bump before exporting — but never
@@ -152,8 +152,8 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             if let Some(ver) = target_version.clone() {
                 if !args.dry_run {
                     engine
-                        .set_vault_version(
-                            vault_name,
+                        .set_mem_version(
+                            mem_name,
                             ver,
                             Some("version bump for registry publish"),
                         )
@@ -165,12 +165,12 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 .map(|v| v.to_string())
                 .or_else(|| {
                     engine
-                        .vault_config_for(vault_name)
+                        .mem_config_for(mem_name)
                         .and_then(|c| c.version.clone())
                         .map(|v| v.to_string())
                 });
             let bytes = engine
-                .export_vault_to_bytes(vault_name)
+                .export_mem_to_bytes(mem_name)
                 .map_err(CliError::from_engine_op)?;
             stage_bytes_to_tempfile(&bytes)?
         } else {
@@ -192,7 +192,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             ctx,
             &base,
             &archive_path,
-            args.vault.as_deref(),
+            args.mem.as_deref(),
             resolved_version.as_deref(),
             args.scope.as_deref(),
         );
@@ -262,7 +262,7 @@ fn domain_scope(scope: Option<&str>) -> Option<String> {
 /// Build the per-publish domain signature: canonicalize the archive (the
 /// signature covers the canonical content hash the registry will also compute),
 /// then sign `(hash, scope, name, version, now)` with the domain's stored key.
-#[cfg(feature = "vault-repo")]
+#[cfg(feature = "mem-repo")]
 fn build_domain_signature(
     archive_path: &Path,
     scope: &str,
@@ -310,7 +310,7 @@ fn build_domain_signature(
 /// Lean build: canonicalizing an archive needs the git-branch validator, which
 /// is only compiled into the full `memstead` binary. Domain publishing is
 /// therefore unavailable here.
-#[cfg(not(feature = "vault-repo"))]
+#[cfg(not(feature = "mem-repo"))]
 fn build_domain_signature(
     _archive_path: &Path,
     _scope: &str,
@@ -333,17 +333,17 @@ fn emit_dry_run(
     ctx: &CliContext,
     base: &str,
     archive_path: &Path,
-    vault: Option<&str>,
+    mem: Option<&str>,
     version: Option<&str>,
     scope: Option<&str>,
 ) -> anyhow::Result<()> {
     let size = std::fs::metadata(archive_path).map(|m| m.len()).unwrap_or(0);
-    let vault_label = vault.unwrap_or("(workspace vault)");
-    let version_label = version.unwrap_or("(from vault config / archive)");
+    let mem_label = mem.unwrap_or("(workspace mem)");
+    let version_label = version.unwrap_or("(from mem config / archive)");
     if ctx.json {
         print_json(&json!({
             "dry_run": true,
-            "vault": vault,
+            "mem": mem,
             "version": version,
             "scope": scope,
             "archive_bytes": size,
@@ -357,7 +357,7 @@ fn emit_dry_run(
         };
         print_markdown(&format!(
             "# Dry run — would publish\n\n\
-             - Vault: `{vault_label}`\n\
+             - Mem: `{mem_label}`\n\
              - Version: `{version_label}`\n\
              - Scope: {scope_label}\n\
              - Archive: {size} bytes\n\
@@ -402,7 +402,7 @@ fn find_filesystem_workspace_root() -> anyhow::Result<PathBuf> {
 
 /// Resolve the workspace root for the assembling shapes: honour an
 /// explicit `--workspace` override (validated against the marker) or
-/// walk up from cwd. Shared by the `--vault` and bare-folder paths.
+/// walk up from cwd. Shared by the `--mem` and bare-folder paths.
 fn resolve_workspace_root(workspace: Option<&Path>) -> anyhow::Result<PathBuf> {
     match workspace {
         Some(p) => {
@@ -644,7 +644,7 @@ mod tests {
         std::fs::create_dir_all(&memstead_dir).unwrap();
         std::fs::write(
             memstead_dir.join("workspace.toml"),
-            "format = \"memstead-git-branch-1\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+            "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
         )
         .unwrap();
         // Round-trip via serde so the test does not need a direct
@@ -724,7 +724,7 @@ mod tests {
                 Args {
                     archive: None,
                     workspace: Some(workspace),
-                    vault: None,
+                    mem: None,
                     scope: None,
                     version: None,
                     dry_run: false,
@@ -755,7 +755,7 @@ mod tests {
             Args {
                 archive: None,
                 workspace: Some(tmp.path().to_path_buf()),
-                vault: None,
+                mem: None,
                 scope: None,
                 version: None,
                 dry_run: false,
@@ -772,16 +772,16 @@ mod tests {
     }
 
     #[test]
-    fn publish_vault_flag_routes_through_engine_and_maps_unknown_vault() {
-        // `--vault NAME` must take the engine export-to-bytes branch
+    fn publish_mem_flag_routes_through_engine_and_maps_unknown_mem() {
+        // `--mem NAME` must take the engine export-to-bytes branch
         // (not the bare folder assembly): it opens the workspace engine
-        // and asks it to export the named vault. A name the workspace
-        // does not carry surfaces the engine's typed `UNKNOWN_VAULT`
+        // and asks it to export the named mem. A name the workspace
+        // does not carry surfaces the engine's typed `UNKNOWN_MEM`
         // through `from_engine_op` rather than a folder-assembly error —
         // proof the new dispatch reaches the engine path. The happy
-        // path (a real vault → zip bytes) reuses the same
-        // `export_vault_to_bytes` primitive that `memstead export
-        // --format vault` exercises under test.
+        // path (a real mem → zip bytes) reuses the same
+        // `export_mem_to_bytes` primitive that `memstead export
+        // --format mem` exercises under test.
         let tmp = TempDir::new().unwrap();
         write_publishable_workspace(&tmp, "demo");
         let ctx = CliContext { json: false, quiet: false };
@@ -790,7 +790,7 @@ mod tests {
             Args {
                 archive: None,
                 workspace: Some(tmp.path().to_path_buf()),
-                vault: Some("nonexistent".to_string()),
+                mem: Some("nonexistent".to_string()),
                 scope: None,
                 version: None,
                 dry_run: false,
@@ -801,15 +801,15 @@ mod tests {
         .unwrap_err();
         let msg = err.to_string();
         assert!(
-            msg.contains("unknown vault") || msg.contains("nonexistent"),
-            "expected an engine UNKNOWN_VAULT error from the --vault path, got: {msg}"
+            msg.contains("unknown mem") || msg.contains("nonexistent"),
+            "expected an engine UNKNOWN_MEM error from the --mem path, got: {msg}"
         );
     }
 
     #[test]
-    fn publish_version_without_vault_is_rejected_before_any_io() {
+    fn publish_version_without_mem_is_rejected_before_any_io() {
         // `--version` persists a bump through the workspace engine, so
-        // it is meaningless without `--vault` — and must refuse up front
+        // it is meaningless without `--mem` — and must refuse up front
         // (no workspace touched, no network) with an actionable message.
         let ctx = CliContext { json: false, quiet: false };
         let err = run(
@@ -817,7 +817,7 @@ mod tests {
             Args {
                 archive: None,
                 workspace: None,
-                vault: None,
+                mem: None,
                 scope: None,
                 version: Some("0.2.0".to_string()),
                 dry_run: false,
@@ -828,8 +828,8 @@ mod tests {
         .unwrap_err();
         let msg = err.to_string();
         assert!(
-            msg.contains("--version requires --vault"),
-            "expected a --version-requires-vault refusal, got: {msg}"
+            msg.contains("--version requires --mem"),
+            "expected a --version-requires-mem refusal, got: {msg}"
         );
     }
 
@@ -852,7 +852,7 @@ mod tests {
                 Args {
                     archive: None,
                     workspace: Some(workspace),
-                    vault: None,
+                    mem: None,
                     scope: None,
                     version: None,
                     dry_run: true,

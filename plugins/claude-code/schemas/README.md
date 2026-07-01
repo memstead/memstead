@@ -18,9 +18,9 @@ schemas/
   memstead-plugin/
     v0/
       memstead-toml.schema.json          # `.memstead.toml` (parsed-as-JSON)
-      medium.schema.json                 # `.memstead/mediums/<vault>/<name>.json`
-      facet.schema.json                  # `.memstead/facets/<vault>/<name>.json`
-      projection.schema.json             # `.memstead/projections/<vault>/<name>.json`
+      medium.schema.json                 # `.memstead/mediums/<mem>/<name>.json`
+      facet.schema.json                  # `.memstead/facets/<mem>/<name>.json`
+      projection.schema.json             # `.memstead/projections/<mem>/<name>.json`
       ingest.schema.json                 # `.memstead/ingests/<name>.json`
       examples/
         memstead-toml.minimal.json
@@ -77,8 +77,8 @@ runtime gate.
 ## Engine vs. plugin ownership
 
 `.memstead.toml` carries both engine-owned and plugin-owned keys. The
-`memstead-toml.schema.json` document covers the union — `vaults`,
-`mutations`, `vault_management`, and `drift` are engine-owned. `schemas_dir`
+`memstead-toml.schema.json` document covers the union — `mems`,
+`mutations`, `mem_management`, and `drift` are engine-owned. `schemas_dir`
 is retired and ignored by the engine (workspace schemas load from the
 fixed `.memstead/schemas/` path); the namespaced `[clients.*]` and `[plugin.*]`
 tables are plugin-owned. Engine accepts plugin-owned keys as typed

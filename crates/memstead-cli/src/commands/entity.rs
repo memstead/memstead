@@ -54,8 +54,8 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     // `BodyLink` / `Hierarchy`); the entity's `relationships` vec
     // doesn't encode it.
     let (entity, output, outgoing_snapshot) = match ctx.cli_engine()? {
-        #[cfg(feature = "vault-repo")]
-        CliEngine::VaultRepo(engine) => {
+        #[cfg(feature = "mem-repo")]
+        CliEngine::MemRepo(engine) => {
             let entity = engine.get_entity(&id).cloned().ok_or_else(not_found)?;
             let md = render_with_optional_relations(&entity, &id, engine.store(), &args);
             let outgoing = engine.store().outgoing(&id).to_vec();
@@ -78,7 +78,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     if ctx.json {
         // The CLI `--json`
         // shape mirrors the MCP `structured_content` envelope —
-        // typed fields (`_hash`, `id`, `vault`, `type`, sections,
+        // typed fields (`_hash`, `id`, `mem`, `type`, sections,
         // relationships) rather than a
         // `{ markdown: "..." }` flat shape that would force agents to
         // string-scrape frontmatter for `_hash`. Greenfield

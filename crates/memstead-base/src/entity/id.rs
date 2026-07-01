@@ -3,8 +3,8 @@
 use super::EntityId;
 use unicode_normalization::UnicodeNormalization;
 
-/// Cap on the full `vault--slug` entity id (Unicode scalar length).
-/// 200 leaves headroom for `vault--`-style prefixes and the `.md`
+/// Cap on the full `mem--slug` entity id (Unicode scalar length).
+/// 200 leaves headroom for `mem--`-style prefixes and the `.md`
 /// suffix against the 255-byte `NAME_MAX` ceiling on common
 /// filesystems. The read-path validator on the MCP surface and the
 /// write-path slug derivation share this constant so an entity that
@@ -19,30 +19,30 @@ pub const ENTITY_ID_MAX_LEN: usize = 200;
 /// [`validate_and_derive_slug`] returns them when the input would have
 /// fallen back to the hash slug or would have had characters dropped;
 /// [`enforce_id_length`] returns [`Self::IdTooLong`] when the
-/// derived `vault--slug` exceeds the read-path length cap.
+/// derived `mem--slug` exceeds the read-path length cap.
 ///
 /// Loader and parse paths continue to call [`title_to_slug`] so
 /// pre-gate entities created with the old permissive pipeline remain
 /// readable.
 #[derive(Debug, thiserror::Error)]
 pub enum SlugError {
-    /// The derived `vault--slug` id exceeds [`ENTITY_ID_MAX_LEN`]. The
+    /// The derived `mem--slug` id exceeds [`ENTITY_ID_MAX_LEN`]. The
     /// read-path validator rejects ids past this length, so without
     /// this guard a title that the write path accepts produces an
     /// entity that is silently unreachable on read.
     ///
-    /// The bound is on the **composed id** (`<vault>--<slug>`), which is
-    /// also the on-disk filename — so the budget is vault-name-dependent
-    /// and the same title can be valid in a short-named vault and rejected
+    /// The bound is on the **composed id** (`<mem>--<slug>`), which is
+    /// also the on-disk filename — so the budget is mem-name-dependent
+    /// and the same title can be valid in a short-named mem and rejected
     /// in a longer-named one. `input` echoes that composed id (not the
     /// title) so it agrees with `length`: the payload measures one
     /// quantity, the id, end to end. `max` is [`ENTITY_ID_MAX_LEN`] so the
     /// agent can shorten by the exact delta. F2 + F4.
     #[error(
-        "entity id \"{input}\" is {length} characters (max {max}); the id is `<vault>--<slug>`, so the title budget shrinks as the vault name grows — shorten the title"
+        "entity id \"{input}\" is {length} characters (max {max}); the id is `<mem>--<slug>`, so the title budget shrinks as the mem name grows — shorten the title"
     )]
     IdTooLong {
-        /// The composed `<vault>--<slug>` id whose length exceeded the
+        /// The composed `<mem>--<slug>` id whose length exceeded the
         /// cap. Echoed as the `input` wire field so `input` and `length`
         /// describe the same measured quantity.
         input: String,
@@ -108,11 +108,11 @@ impl SlugError {
     }
 }
 
-/// The separator between vault and entity path in IDs.
-/// Build an EntityId from vault and title.
-pub fn build_id(vault: &str, title: &str) -> Result<EntityId, SlugError> {
+/// The separator between mem and entity path in IDs.
+/// Build an EntityId from mem and title.
+pub fn build_id(mem: &str, title: &str) -> Result<EntityId, SlugError> {
     let slug = title_to_slug(title)?;
-    let id = EntityId::new(vault, &slug);
+    let id = EntityId::new(mem, &slug);
     enforce_id_length(id.as_ref())?;
     Ok(id)
 }
@@ -121,7 +121,7 @@ pub fn build_id(vault: &str, title: &str) -> Result<EntityId, SlugError> {
 /// [`ENTITY_ID_MAX_LEN`]. Shared by [`build_id`] and the engine's
 /// `create_entity` / `rename_entity` paths so the write side never
 /// produces an id the read side would refuse. The cap is on the
-/// composed `<vault>--<slug>` id (which is also the filename), so the
+/// composed `<mem>--<slug>` id (which is also the filename), so the
 /// error echoes the id itself — the `reason`, the echoed `input`, and
 /// the reported `length` all describe the id, not the title. F2 + F4.
 pub fn enforce_id_length(id: &str) -> Result<(), SlugError> {
@@ -260,7 +260,7 @@ pub fn validate_and_derive_slug(title: &str) -> Result<String, SlugError> {
 /// Deterministic 8-char hex digest used as the fallback slug when
 /// the title contains no Unicode alphanumeric characters (the
 /// residual case of [`title_to_slug`]'s pipeline). 32 bits is
-/// plenty for collision-resistance inside a single vault; the
+/// plenty for collision-resistance inside a single mem; the
 /// fallback only fires for titles that contain no
 /// agent-meaningful characters anyway, so the opaque form is
 /// acceptable. F1 (option A backstop).
@@ -273,12 +273,12 @@ fn short_hash(input: &str) -> String {
     )
 }
 
-/// Convert a relative file path to a vault-prefixed entity ID.
+/// Convert a relative file path to a mem-prefixed entity ID.
 ///
 /// `file_path_to_id("architecture/result.md", "specs")` → `specs--architecture/result`
-pub fn file_path_to_id(path: &str, vault: &str) -> EntityId {
+pub fn file_path_to_id(path: &str, mem: &str) -> EntityId {
     let stripped = path.strip_suffix(".md").unwrap_or(path);
-    EntityId::new(vault, stripped)
+    EntityId::new(mem, stripped)
 }
 
 /// Strict wiki-link grammar refusal. Returned by [`wiki_link_to_id`]
@@ -286,9 +286,9 @@ pub fn file_path_to_id(path: &str, vault: &str) -> EntityId {
 /// not resolve to a slug-form `EntityId`. Two variants matching the
 /// two grammars a wiki-link target carries:
 ///
-/// - [`Self::InvalidVaultName`] — Tier-2 prefix `[[vault:slug]]`'s
-///   vault name fails [`validate_vault_name_grammar`]. Recovery is
-///   manual: vault names are fixed identifiers in the workspace, not
+/// - [`Self::InvalidMemName`] — Tier-2 prefix `[[mem:slug]]`'s
+///   mem name fails [`validate_mem_name_grammar`]. Recovery is
+///   manual: mem names are fixed identifiers in the workspace, not
 ///   free-form text the agent can slugify.
 /// - [`Self::InvalidTarget`] — the slug-form path fails
 ///   [`validate_id_path_grammar`]. Carries the
@@ -297,8 +297,8 @@ pub fn file_path_to_id(path: &str, vault: &str) -> EntityId {
 ///   all-emoji).
 #[derive(Debug, thiserror::Error, Clone)]
 pub enum WikiLinkError {
-    #[error("vault prefix '{raw}' is not a valid vault name: {reason}")]
-    InvalidVaultName { raw: String, reason: String },
+    #[error("mem prefix '{raw}' is not a valid mem name: {reason}")]
+    InvalidMemName { raw: String, reason: String },
     #[error("wiki-link target '{raw}' is not slug-form: {reason}")]
     InvalidTarget {
         raw: String,
@@ -320,40 +320,40 @@ fn wiki_link_suggestion(raw: &str) -> Option<String> {
     validate_id_path_grammar(&derived).is_ok().then_some(derived)
 }
 
-/// Convert a wiki-link target to a vault-prefixed entity ID, refusing
+/// Convert a wiki-link target to a mem-prefixed entity ID, refusing
 /// non-slug-form inputs.
 ///
 /// Recognises three grammars:
-/// - **Tier 0** `[[<vault>--<slug>]]` — cross-vault dash-form,
+/// - **Tier 0** `[[<mem>--<slug>]]` — cross-mem dash-form,
 ///   symmetric with every engine-emitted ID: body wiki-links accept
-///   the canonical `<vault>--<slug>` form the engine writes elsewhere
+///   the canonical `<mem>--<slug>` form the engine writes elsewhere
 ///   so an agent can author the same grammar in both directions.
-///   `<vault>` must match the single-segment vault-name grammar
-///   (`[a-z0-9-]+`, no `/`); hierarchical vault names stay on the
-///   Tier-2 colon-form. Cross-vault routing is policy-gated downstream in
+///   `<mem>` must match the single-segment mem-name grammar
+///   (`[a-z0-9-]+`, no `/`); hierarchical mem names stay on the
+///   Tier-2 colon-form. Cross-mem routing is policy-gated downstream in
 ///   the alias-synthesis pass (same code path that already gates
 ///   body-link → REFERENCES emission).
-/// - **Tier 1** `[[slug]]` or `[[a/b/c]]` — same-vault, resolves to
-///   `<current_vault>--<slug>`.
-/// - **Tier 2** `[[leaf:slug]]` — cross-vault, same vault-repo, resolves
+/// - **Tier 1** `[[slug]]` or `[[a/b/c]]` — same-mem, resolves to
+///   `<current_mem>--<slug>`.
+/// - **Tier 2** `[[leaf:slug]]` — cross-mem, same mem-repo, resolves
 ///   to `<leaf>--<slug>`. Hierarchical paths are first-class: the
-///   prefix accepts the full `team/sub-vault` form, so
-///   `[[team/sub-vault:auth-service]]` resolves to
-///   `team/sub-vault--auth-service`. Tier-1 with a
-///   hierarchical-vault dash-prefix (`[[team/sub-vault--auth-service]]`)
+///   prefix accepts the full `team/sub-mem` form, so
+///   `[[team/sub-mem:auth-service]]` resolves to
+///   `team/sub-mem--auth-service`. Tier-1 with a
+///   hierarchical-mem dash-prefix (`[[team/sub-mem--auth-service]]`)
 ///   remains unsupported — that combination is genuinely ambiguous
-///   between a cross-vault reference into a hierarchical vault and a
-///   same-vault entity at a hierarchical slug. Operators authoring
+///   between a cross-mem reference into a hierarchical mem and a
+///   same-mem entity at a hierarchical slug. Operators authoring
 ///   such references must use the colon Tier-2 form.
 ///
 /// Strips `[[` / `]]`, Obsidian alias (`|display`), `../` prefixes, `.md`
-/// suffix, and a redundant leading `<current_vault>--` (so an agent that
-/// writes the canonical fully-qualified id `[[vault--slug]]` produces the
+/// suffix, and a redundant leading `<current_mem>--` (so an agent that
+/// writes the canonical fully-qualified id `[[mem--slug]]` produces the
 /// same `EntityId` as the bare-slug form `[[slug]]` instead of doubly-
-/// prefixing into `vault--vault--slug`).
+/// prefixing into `mem--mem--slug`).
 ///
 /// Strictness: any input whose Tier-2 prefix fails
-/// [`validate_vault_name_grammar`] or whose resolved slug fails
+/// [`validate_mem_name_grammar`] or whose resolved slug fails
 /// [`validate_id_path_grammar`] refuses with [`WikiLinkError`]. There is
 /// no permissive form that constructs an `EntityId` from any character
 /// sequence between the brackets — callers
@@ -365,11 +365,11 @@ fn wiki_link_suggestion(raw: &str) -> Option<String> {
 ///
 /// Hierarchical-dash ambiguity: the Tier-1 fallback refuses inputs whose post-
 /// self-prefix-strip slug contains BOTH `/` and `--`
-/// (`[[team/sub-vault--target]]`). The combination is grammatically
-/// ambiguous between a cross-vault reference into a hierarchical vault
-/// and a same-vault entity at a hierarchical slug; the refusal carries
-/// the canonical colon form (`team/sub-vault:target`) as `suggested`.
-pub fn wiki_link_to_id(link: &str, current_vault: &str) -> Result<EntityId, WikiLinkError> {
+/// (`[[team/sub-mem--target]]`). The combination is grammatically
+/// ambiguous between a cross-mem reference into a hierarchical mem
+/// and a same-mem entity at a hierarchical slug; the refusal carries
+/// the canonical colon form (`team/sub-mem:target`) as `suggested`.
+pub fn wiki_link_to_id(link: &str, current_mem: &str) -> Result<EntityId, WikiLinkError> {
     let stripped = strip_wiki_link_decorations(link);
 
     if !stripped.contains("::")
@@ -378,8 +378,8 @@ pub fn wiki_link_to_id(link: &str, current_vault: &str) -> Result<EntityId, Wiki
         let (prefix, rest) = stripped.split_at(colon_idx);
         let slug_part = &rest[1..];
         if !prefix.is_empty() && !slug_part.is_empty() {
-            if let Err(reason) = validate_vault_name_grammar(prefix) {
-                return Err(WikiLinkError::InvalidVaultName {
+            if let Err(reason) = validate_mem_name_grammar(prefix) {
+                return Err(WikiLinkError::InvalidMemName {
                     raw: prefix.to_string(),
                     reason,
                 });
@@ -397,13 +397,13 @@ pub fn wiki_link_to_id(link: &str, current_vault: &str) -> Result<EntityId, Wiki
         }
     }
 
-    // Tier 0 — cross-vault dash form `<vault>--<slug>`. Symmetric
+    // Tier 0 — cross-mem dash form `<mem>--<slug>`. Symmetric
     // with every engine-emitted ID. Recognises only
-    // single-segment vault names (no `/` in the prefix); the
-    // hierarchical-vault dash form is grammatically ambiguous (see
+    // single-segment mem names (no `/` in the prefix); the
+    // hierarchical-mem dash form is grammatically ambiguous (see
     // the dash/slash refusal further down) and stays on the colon
-    // Tier-2 form. Routes to the named vault even when it differs
-    // from `current_vault` — the cross-vault policy gate fires in
+    // Tier-2 form. Routes to the named mem even when it differs
+    // from `current_mem` — the cross-mem policy gate fires in
     // the alias-synthesis pass, not here.
     if let Some(dash_idx) = stripped.find("--") {
         let prefix = &stripped[..dash_idx];
@@ -411,48 +411,48 @@ pub fn wiki_link_to_id(link: &str, current_vault: &str) -> Result<EntityId, Wiki
         if !prefix.is_empty()
             && !suffix.is_empty()
             && !prefix.contains('/')
-            && validate_vault_name_grammar(prefix).is_ok()
+            && validate_mem_name_grammar(prefix).is_ok()
             && validate_id_path_grammar(suffix).is_ok()
         {
             return Ok(EntityId::new(prefix, suffix));
         }
     }
 
-    let slug = if !current_vault.is_empty() {
-        let self_prefix = format!("{current_vault}--");
+    let slug = if !current_mem.is_empty() {
+        let self_prefix = format!("{current_mem}--");
         stripped.strip_prefix(self_prefix.as_str()).unwrap_or(&stripped)
     } else {
         &stripped
     };
     // A slug carrying BOTH `/` and `--` is grammatically ambiguous —
-    // it could be a cross-vault reference into a hierarchical vault
-    // (`team/sub-vault--target` → vault `team/sub-vault`, slug `target`)
-    // or a same-vault entity at a hierarchical slug that happens to
+    // it could be a cross-mem reference into a hierarchical mem
+    // (`team/sub-mem--target` → mem `team/sub-mem`, slug `target`)
+    // or a same-mem entity at a hierarchical slug that happens to
     // contain `--`. The docstring above pins the canonical disambiguation
-    // (colon-form for cross-vault) but the dash form silently collapsed
-    // to the same-vault interpretation pre-fix, landing phantom stubs
-    // for any agent writing `[[team/sub-vault--target]]` in body text.
+    // (colon-form for cross-mem) but the dash form silently collapsed
+    // to the same-mem interpretation pre-fix, landing phantom stubs
+    // for any agent writing `[[team/sub-mem--target]]` in body text.
     // Refuse and surface the colon-form as the recovery hint.
     if let Some(dash_idx) = slug.find("--")
         && slug[..dash_idx].contains('/')
     {
         let prefix = &slug[..dash_idx];
         let suffix = &slug[dash_idx + 2..];
-        let cross_vault_form = format!("{prefix}:{suffix}");
-        let same_vault_form = if current_vault.is_empty() {
-            format!("<current-vault>:{slug}")
+        let cross_mem_form = format!("{prefix}:{suffix}");
+        let same_mem_form = if current_mem.is_empty() {
+            format!("<current-mem>:{slug}")
         } else {
-            format!("{current_vault}:{slug}")
+            format!("{current_mem}:{slug}")
         };
         return Err(WikiLinkError::InvalidTarget {
             raw: stripped.to_string(),
-            suggested: Some(cross_vault_form),
+            suggested: Some(cross_mem_form),
             reason: format!(
                 "wiki-link target contains both '/' and '--', which is ambiguous \
-                 between a cross-vault reference into a hierarchical vault and a \
-                 same-vault entity at a hierarchical slug; use the colon form \
-                 '[[{prefix}:{suffix}]]' for a cross-vault reference, or \
-                 '[[{same_vault_form}]]' for a same-vault entity whose slug \
+                 between a cross-mem reference into a hierarchical mem and a \
+                 same-mem entity at a hierarchical slug; use the colon form \
+                 '[[{prefix}:{suffix}]]' for a cross-mem reference, or \
+                 '[[{same_mem_form}]]' for a same-mem entity whose slug \
                  contains '--'"
             ),
         });
@@ -464,7 +464,7 @@ pub fn wiki_link_to_id(link: &str, current_vault: &str) -> Result<EntityId, Wiki
             reason,
         });
     }
-    Ok(EntityId::new(current_vault, slug))
+    Ok(EntityId::new(current_mem, slug))
 }
 
 /// Permissive wiki-link decoder for read-side scanners that must
@@ -475,7 +475,7 @@ pub fn wiki_link_to_id(link: &str, current_vault: &str) -> Result<EntityId, Wiki
 /// unchanged. Mutation paths MUST
 /// NOT use this helper; they use [`wiki_link_to_id`] and propagate
 /// the typed refusal.
-pub fn wiki_link_to_id_lenient(link: &str, current_vault: &str) -> EntityId {
+pub fn wiki_link_to_id_lenient(link: &str, current_mem: &str) -> EntityId {
     let stripped = strip_wiki_link_decorations(link);
 
     if !stripped.contains("::")
@@ -488,7 +488,7 @@ pub fn wiki_link_to_id_lenient(link: &str, current_vault: &str) -> EntityId {
         }
     }
 
-    // Tier 0 — cross-vault dash form. Read-side mirror of the strict
+    // Tier 0 — cross-mem dash form. Read-side mirror of the strict
     // decoder's recognition so dangling-link reports and graph
     // inspectors interpret on-disk `[[other--target]]` the same way
     // the mutation gate writes it. Pre-strict drift on older entities
@@ -501,20 +501,20 @@ pub fn wiki_link_to_id_lenient(link: &str, current_vault: &str) -> EntityId {
         if !prefix.is_empty()
             && !suffix.is_empty()
             && !prefix.contains('/')
-            && validate_vault_name_grammar(prefix).is_ok()
+            && validate_mem_name_grammar(prefix).is_ok()
             && validate_id_path_grammar(suffix).is_ok()
         {
             return EntityId::new(prefix, suffix);
         }
     }
 
-    let slug = if !current_vault.is_empty() {
-        let self_prefix = format!("{current_vault}--");
+    let slug = if !current_mem.is_empty() {
+        let self_prefix = format!("{current_mem}--");
         stripped.strip_prefix(self_prefix.as_str()).unwrap_or(&stripped)
     } else {
         &stripped
     };
-    EntityId::new(current_vault, slug)
+    EntityId::new(current_mem, slug)
 }
 
 /// Strip `[[`/`]]`, the Obsidian alias suffix `|display`, the section
@@ -549,7 +549,7 @@ fn strip_wiki_link_decorations(link: &str) -> String {
 }
 
 /// Compute the file path for an entity given its ID and base directory.
-/// The path is relative to the vault directory.
+/// The path is relative to the mem directory.
 ///
 /// `specs--architecture/result-entity` → `architecture/result-entity.md`
 pub fn id_to_file_path(id: &EntityId) -> String {
@@ -567,8 +567,8 @@ pub fn id_to_file_path(id: &EntityId) -> String {
 /// Unicode lowercase letters (`\p{Ll}`), case-less letters
 /// (`\p{Lo}` — CJK, Arabic, Hebrew, Devanagari, Thai, …), modifier
 /// letters (`\p{Lm}` — e.g. Japanese prolonged-sound mark `ー`),
-/// any Unicode numeric (`\p{N}`), and hyphen. Vault names stay
-/// ASCII — see [`validate_vault_name_grammar`]. F1 (option B+A).
+/// any Unicode numeric (`\p{N}`), and hyphen. Mem names stay
+/// ASCII — see [`validate_mem_name_grammar`]. F1 (option B+A).
 ///
 /// Returns the original path on success, an error message on failure.
 /// Callers wrap the failure into a typed envelope (e.g.
@@ -593,8 +593,8 @@ pub fn validate_id_path_grammar(path: &str) -> Result<&str, String> {
     }
 }
 
-/// Validate a vault name (left side of `--`). Hierarchical paths are
-/// first-class: vault names accept `<segment>(/<segment>)*` where each
+/// Validate a mem name (left side of `--`). Hierarchical paths are
+/// first-class: mem names accept `<segment>(/<segment>)*` where each
 /// segment matches the single-segment rule (`[a-z0-9-]+`). Leading slashes,
 /// trailing slashes, double slashes, and any character outside the
 /// allowed segment alphabet are explicit refusals.
@@ -602,17 +602,17 @@ pub fn validate_id_path_grammar(path: &str) -> Result<&str, String> {
 /// Flat (single-segment) names work unchanged — the
 /// regex's `(/<segment>)*` tail matches zero or more times. The
 /// storage representation uses the full path for the
-/// `__MEMSTEAD` config blob (`__MEMSTEAD:vaults/<path>/config.json`), the
+/// `__MEMSTEAD` config blob (`__MEMSTEAD:mems/<path>/config.json`), the
 /// branch ref (`refs/heads/<path>`), and the in-memory router key.
-pub fn validate_vault_name_grammar(vault: &str) -> Result<&str, String> {
+pub fn validate_mem_name_grammar(mem: &str) -> Result<&str, String> {
     use std::sync::OnceLock;
     static RE: OnceLock<regex::Regex> = OnceLock::new();
     let re = RE.get_or_init(|| regex::Regex::new(r"^[a-z0-9-]+(/[a-z0-9-]+)*$").unwrap());
-    if re.is_match(vault) {
-        Ok(vault)
+    if re.is_match(mem) {
+        Ok(mem)
     } else {
         Err(format!(
-            "vault name '{vault}' must match ^[a-z0-9-]+(/[a-z0-9-]+)*$ \
+            "mem name '{mem}' must match ^[a-z0-9-]+(/[a-z0-9-]+)*$ \
              (lowercase ASCII / digits / hyphens, optionally segmented \
              by '/' for hierarchical layouts; no leading, trailing, or \
              double slashes)"
@@ -637,43 +637,43 @@ pub fn validate_rel_type(rel_type: &str) -> Result<String, String> {
 mod tests {
     use super::*;
 
-    /// Vault-name grammar accepts hierarchical paths and refuses
+    /// Mem-name grammar accepts hierarchical paths and refuses
     /// malformations. Flat (single-segment) names continue to work —
     /// the regex's `(/<segment>)*` tail matches zero or more times.
     #[test]
-    fn validate_vault_name_grammar_accepts_hierarchical_paths() {
+    fn validate_mem_name_grammar_accepts_hierarchical_paths() {
         // Flat layouts (regression).
-        assert!(validate_vault_name_grammar("specs").is_ok());
-        assert!(validate_vault_name_grammar("my-vault").is_ok());
-        assert!(validate_vault_name_grammar("v1").is_ok());
+        assert!(validate_mem_name_grammar("specs").is_ok());
+        assert!(validate_mem_name_grammar("my-mem").is_ok());
+        assert!(validate_mem_name_grammar("v1").is_ok());
         // Hierarchical layouts.
-        assert!(validate_vault_name_grammar("team/sub-vault").is_ok());
-        assert!(validate_vault_name_grammar("a/b/c/d").is_ok());
-        assert!(validate_vault_name_grammar("planning/2026-q1").is_ok());
+        assert!(validate_mem_name_grammar("team/sub-mem").is_ok());
+        assert!(validate_mem_name_grammar("a/b/c/d").is_ok());
+        assert!(validate_mem_name_grammar("planning/2026-q1").is_ok());
     }
 
     /// Grammar refusals are explicit. Each malformation
     /// case (`/team`, `team/`, `team//sub`,
     /// uppercase / underscore / dot) returns an `Err`.
     #[test]
-    fn validate_vault_name_grammar_refuses_malformations() {
+    fn validate_mem_name_grammar_refuses_malformations() {
         // Leading slash.
-        assert!(validate_vault_name_grammar("/team/sub").is_err());
+        assert!(validate_mem_name_grammar("/team/sub").is_err());
         // Trailing slash.
-        assert!(validate_vault_name_grammar("team/sub/").is_err());
+        assert!(validate_mem_name_grammar("team/sub/").is_err());
         // Double slash.
-        assert!(validate_vault_name_grammar("team//sub").is_err());
+        assert!(validate_mem_name_grammar("team//sub").is_err());
         // Empty.
-        assert!(validate_vault_name_grammar("").is_err());
+        assert!(validate_mem_name_grammar("").is_err());
         // Uppercase.
-        assert!(validate_vault_name_grammar("Team/Sub").is_err());
+        assert!(validate_mem_name_grammar("Team/Sub").is_err());
         // Underscore (not in allowed alphabet).
-        assert!(validate_vault_name_grammar("team_sub").is_err());
-        assert!(validate_vault_name_grammar("team/sub_vault").is_err());
+        assert!(validate_mem_name_grammar("team_sub").is_err());
+        assert!(validate_mem_name_grammar("team/sub_mem").is_err());
         // Dot.
-        assert!(validate_vault_name_grammar("team.sub").is_err());
+        assert!(validate_mem_name_grammar("team.sub").is_err());
         // Space.
-        assert!(validate_vault_name_grammar("team sub").is_err());
+        assert!(validate_mem_name_grammar("team sub").is_err());
     }
 
     #[test]
@@ -942,27 +942,27 @@ mod tests {
     }
 
     /// F2 + F4: a title that derives a slug whose full
-    /// `vault--slug` id sits at the 200-char ceiling is accepted;
+    /// `mem--slug` id sits at the 200-char ceiling is accepted;
     /// one byte over is rejected with a recovery-friendly error.
     /// `build_id` is the canonical write-side entry, so both
     /// behaviours land here.
     #[test]
     fn build_id_enforces_length_cap() {
-        let vault = "specs";
-        // vault.len()=5, "--"=2 → 7-char prefix. Slug of 193 chars
+        let mem = "specs";
+        // mem.len()=5, "--"=2 → 7-char prefix. Slug of 193 chars
         // produces a 200-char id; 194 chars trips the cap.
-        let just_fits = "a".repeat(ENTITY_ID_MAX_LEN - vault.len() - 2);
-        let ok = build_id(vault, &just_fits).expect("at-cap id must pass");
+        let just_fits = "a".repeat(ENTITY_ID_MAX_LEN - mem.len() - 2);
+        let ok = build_id(mem, &just_fits).expect("at-cap id must pass");
         assert_eq!(ok.as_ref().chars().count(), ENTITY_ID_MAX_LEN);
 
-        let one_over = "a".repeat(ENTITY_ID_MAX_LEN - vault.len() - 2 + 1);
-        let err = build_id(vault, &one_over).unwrap_err();
+        let one_over = "a".repeat(ENTITY_ID_MAX_LEN - mem.len() - 2 + 1);
+        let err = build_id(mem, &one_over).unwrap_err();
         let SlugError::IdTooLong { input, length, max } = err else {
             panic!("expected IdTooLong, got {err:?}");
         };
         // `input` echoes the composed id, not the title, so it agrees
         // with `length`.
-        assert_eq!(input, format!("{vault}--{one_over}"));
+        assert_eq!(input, format!("{mem}--{one_over}"));
         assert_eq!(input.chars().count(), length);
         assert_eq!(length, ENTITY_ID_MAX_LEN + 1);
         assert_eq!(max, ENTITY_ID_MAX_LEN);
@@ -1026,8 +1026,8 @@ mod tests {
         );
     }
 
-    /// Agents writing the canonical fully-qualified id `[[vault--slug]]`
-    /// must not be doubly-prefixed into `vault--vault--slug`.
+    /// Agents writing the canonical fully-qualified id `[[mem--slug]]`
+    /// must not be doubly-prefixed into `mem--mem--slug`.
     #[test]
     fn wiki_link_to_id_strips_redundant_self_prefix() {
         assert_eq!(
@@ -1035,8 +1035,8 @@ mod tests {
             "specs--result-entity"
         );
         assert_eq!(
-            wiki_link_to_id("test-vault-mini--engine", "test-vault-mini").unwrap().0,
-            "test-vault-mini--engine"
+            wiki_link_to_id("test-mem-mini--engine", "test-mem-mini").unwrap().0,
+            "test-mem-mini--engine"
         );
         assert_eq!(
             wiki_link_to_id("specs--target.md|Display", "specs").unwrap().0,
@@ -1047,7 +1047,7 @@ mod tests {
             "specs--parent/child"
         );
         // Self-prefix stripping is one-shot, not iterative — a second
-        // embedded `<current_vault>--` is preserved so cross-vault-style
+        // embedded `<current_mem>--` is preserved so cross-mem-style
         // drift stays visible.
         assert_eq!(
             wiki_link_to_id("specs--specs--slug", "specs").unwrap().0,
@@ -1055,46 +1055,46 @@ mod tests {
         );
     }
 
-    /// Cross-vault dash form `[[<vault>--<slug>]]` routes to the named
-    /// vault rather than silently re-prepending the source vault into a
+    /// Cross-mem dash form `[[<mem>--<slug>]]` routes to the named
+    /// mem rather than silently re-prepending the source mem into a
     /// phantom `specs--other--entity` stub.
-    /// The cross-vault policy gate (alias-synthesis pass) refuses the
+    /// The cross-mem policy gate (alias-synthesis pass) refuses the
     /// auto-stub when the workspace policy denies the direction —
     /// that gate is exercised in engine-layer tests.
     #[test]
-    fn wiki_link_to_id_tier_zero_cross_vault_dash_form() {
+    fn wiki_link_to_id_tier_zero_cross_mem_dash_form() {
         assert_eq!(
             wiki_link_to_id("other--entity", "specs").unwrap().0,
             "other--entity"
         );
         assert_eq!(
-            wiki_link_to_id("nonexistent-vault--target", "specs").unwrap().0,
-            "nonexistent-vault--target"
+            wiki_link_to_id("nonexistent-mem--target", "specs").unwrap().0,
+            "nonexistent-mem--target"
         );
     }
 
-    /// Tier-0 dash form collapses cleanly when the named vault is the
-    /// source vault — equivalent to the self-prefix-strip fast path
+    /// Tier-0 dash form collapses cleanly when the named mem is the
+    /// source mem — equivalent to the self-prefix-strip fast path
     /// for bare-slug authoring.
     #[test]
-    fn wiki_link_to_id_tier_zero_self_vault_dash_form() {
+    fn wiki_link_to_id_tier_zero_self_mem_dash_form() {
         assert_eq!(
             wiki_link_to_id("specs--target", "specs").unwrap().0,
             "specs--target"
         );
     }
 
-    /// Tier-0 only admits single-segment vault names — the
+    /// Tier-0 only admits single-segment mem names — the
     /// hierarchical dash form stays on the colon Tier-2 recovery
     /// path. The pre-existing slash-dash ambiguity refusal is what
-    /// fires here (cross-vault into a hierarchical vault is
-    /// grammatically ambiguous with a same-vault hierarchical slug).
+    /// fires here (cross-mem into a hierarchical mem is
+    /// grammatically ambiguous with a same-mem hierarchical slug).
     #[test]
     fn wiki_link_to_id_tier_zero_refuses_hierarchical_prefix() {
-        let err = wiki_link_to_id("team/sub-vault--target", "specs").unwrap_err();
+        let err = wiki_link_to_id("team/sub-mem--target", "specs").unwrap_err();
         match err {
             WikiLinkError::InvalidTarget { suggested, .. } => {
-                assert_eq!(suggested.as_deref(), Some("team/sub-vault:target"));
+                assert_eq!(suggested.as_deref(), Some("team/sub-mem:target"));
             }
             other => panic!("expected InvalidTarget, got {other:?}"),
         }
@@ -1126,26 +1126,26 @@ mod tests {
         );
     }
 
-    /// Cross-vault routing and anchor stripping compose: a cross-vault
+    /// Cross-mem routing and anchor stripping compose: a cross-mem
     /// anchored form resolves under tier-0 and strips the anchor.
     #[test]
-    fn wiki_link_to_id_cross_vault_anchored_composes() {
+    fn wiki_link_to_id_cross_mem_anchored_composes() {
         assert_eq!(
             wiki_link_to_id("other--target#section", "specs").unwrap().0,
             "other--target"
         );
     }
 
-    /// Empty `current_vault` opts out of self-prefix stripping so a
+    /// Empty `current_mem` opts out of self-prefix stripping so a
     /// literal leading `--` (which would never legitimately occur, but
-    /// could collide with `format!("{vault}--", vault="")`) stays intact.
+    /// could collide with `format!("{mem}--", mem="")`) stays intact.
     #[test]
-    fn wiki_link_to_id_empty_vault_does_not_strip() {
+    fn wiki_link_to_id_empty_mem_does_not_strip() {
         assert_eq!(wiki_link_to_id("--weird", "").unwrap().0, "----weird");
     }
 
     #[test]
-    fn wiki_link_to_id_tier_two_cross_vault() {
+    fn wiki_link_to_id_tier_two_cross_mem() {
         assert_eq!(
             wiki_link_to_id("engine:health", "plugin").unwrap().0,
             "engine--health"
@@ -1184,16 +1184,16 @@ mod tests {
     #[test]
     fn wiki_link_to_id_tier_one_strips_hierarchical_self_prefix() {
         assert_eq!(
-            wiki_link_to_id("team/sub-vault--auth-service", "team/sub-vault").unwrap().0,
-            "team/sub-vault--auth-service"
+            wiki_link_to_id("team/sub-mem--auth-service", "team/sub-mem").unwrap().0,
+            "team/sub-mem--auth-service"
         );
     }
 
     #[test]
-    fn wiki_link_to_id_tier_one_bare_slug_from_hierarchical_vault() {
+    fn wiki_link_to_id_tier_one_bare_slug_from_hierarchical_mem() {
         assert_eq!(
-            wiki_link_to_id("auth-service", "team/sub-vault").unwrap().0,
-            "team/sub-vault--auth-service"
+            wiki_link_to_id("auth-service", "team/sub-mem").unwrap().0,
+            "team/sub-mem--auth-service"
         );
     }
 
@@ -1233,7 +1233,7 @@ mod tests {
         assert_eq!(suggested.as_deref(), Some("knowledge-graph"));
     }
 
-    /// Tier-2 with natural-form slug suggests `vault:slug`
+    /// Tier-2 with natural-form slug suggests `mem:slug`
     /// preserving the prefix. The agent rewrites only the slug part.
     #[test]
     fn wiki_link_to_id_tier_two_natural_slug_refuses_with_prefixed_suggestion() {
@@ -1246,83 +1246,83 @@ mod tests {
     }
 
     /// Tier-1 dash form
-    /// with `/` in the would-be vault prefix is grammatically
-    /// ambiguous (cross-vault into a hierarchical vault vs same-vault
+    /// with `/` in the would-be mem prefix is grammatically
+    /// ambiguous (cross-mem into a hierarchical mem vs same-mem
     /// hierarchical slug). Refusal carries the colon-form as
     /// `suggested` so the agent's recovery is a one-character edit.
     #[test]
     fn wiki_link_to_id_hierarchical_dash_form_refuses_with_colon_suggestion() {
-        let err = wiki_link_to_id("team/sub-vault--auth-service", "test").unwrap_err();
+        let err = wiki_link_to_id("team/sub-mem--auth-service", "test").unwrap_err();
         let WikiLinkError::InvalidTarget { raw, suggested, reason } = err else {
             panic!("expected InvalidTarget, got {err:?}");
         };
-        assert_eq!(raw, "team/sub-vault--auth-service");
-        assert_eq!(suggested.as_deref(), Some("team/sub-vault:auth-service"));
+        assert_eq!(raw, "team/sub-mem--auth-service");
+        assert_eq!(suggested.as_deref(), Some("team/sub-mem:auth-service"));
         // Reason names both disambiguations.
         assert!(
-            reason.contains("team/sub-vault:auth-service"),
-            "reason must surface the cross-vault colon form: {reason}"
+            reason.contains("team/sub-mem:auth-service"),
+            "reason must surface the cross-mem colon form: {reason}"
         );
         assert!(
-            reason.contains("test:team/sub-vault--auth-service"),
-            "reason must surface the same-vault hierarchical form: {reason}"
+            reason.contains("test:team/sub-mem--auth-service"),
+            "reason must surface the same-mem hierarchical form: {reason}"
         );
     }
 
     /// For self-prefixed dash form, tier-0 splits on the FIRST `--`, so
-    /// `[[test--team/sub--target]]` resolves as vault `test`, slug
-    /// `team/sub--target` — a same-vault entity with a hierarchical
+    /// `[[test--team/sub--target]]` resolves as mem `test`, slug
+    /// `team/sub--target` — a same-mem entity with a hierarchical
     /// slug containing `--`. The ambiguity gate in the slug position
-    /// does not apply because the vault/slug boundary is
+    /// does not apply because the mem/slug boundary is
     /// pinned by tier-0's grammar.
     #[test]
     fn wiki_link_to_id_self_prefixed_dash_form_resolves_via_tier_zero() {
         let id = wiki_link_to_id("test--team/sub--target", "test").unwrap();
-        assert_eq!(id.vault(), "test");
+        assert_eq!(id.mem(), "test");
         assert_eq!(id.path(), "team/sub--target");
     }
 
     /// A bare hierarchical slug (no `--`) continues to
-    /// resolve to a same-vault entity. The refusal is keyed on the
+    /// resolve to a same-mem entity. The refusal is keyed on the
     /// simultaneous presence of `/` AND `--`, not on `/` alone.
     #[test]
     fn wiki_link_to_id_bare_hierarchical_slug_still_resolves() {
-        let id = wiki_link_to_id("team/sub-vault", "test").unwrap();
-        assert_eq!(id.vault(), "test");
-        assert_eq!(id.path(), "team/sub-vault");
+        let id = wiki_link_to_id("team/sub-mem", "test").unwrap();
+        assert_eq!(id.mem(), "test");
+        assert_eq!(id.path(), "team/sub-mem");
     }
 
-    /// Colon-form for cross-vault hierarchical reference
+    /// Colon-form for cross-mem hierarchical reference
     /// continues to resolve correctly (the canonical disambiguation).
     #[test]
-    fn wiki_link_to_id_hierarchical_colon_form_resolves_cross_vault() {
-        let id = wiki_link_to_id("team/sub-vault:auth-service", "test").unwrap();
-        assert_eq!(id.vault(), "team/sub-vault");
+    fn wiki_link_to_id_hierarchical_colon_form_resolves_cross_mem() {
+        let id = wiki_link_to_id("team/sub-mem:auth-service", "test").unwrap();
+        assert_eq!(id.mem(), "team/sub-mem");
         assert_eq!(id.path(), "auth-service");
     }
 
-    /// Flat `[[<other-vault>--<slug>]]` routes to the named vault under
-    /// tier-0 rather than silently re-prefixing with the source vault into
-    /// a phantom `test--other--target` stub. The cross-vault policy
+    /// Flat `[[<other-mem>--<slug>]]` routes to the named mem under
+    /// tier-0 rather than silently re-prefixing with the source mem into
+    /// a phantom `test--other--target` stub. The cross-mem policy
     /// gate enforces routing legality in the alias-synthesis pass —
     /// that gate is exercised in engine-layer tests.
     #[test]
     fn wiki_link_to_id_flat_foreign_dash_form_routes_via_tier_zero() {
         let id = wiki_link_to_id("other--target", "test").unwrap();
-        assert_eq!(id.vault(), "other");
+        assert_eq!(id.mem(), "other");
         assert_eq!(id.path(), "target");
     }
 
-    /// Tier-2 with non-ASCII vault prefix refuses with
-    /// `InvalidVaultName`. Vault names are ASCII-only operator
+    /// Tier-2 with non-ASCII mem prefix refuses with
+    /// `InvalidMemName`. Mem names are ASCII-only operator
     /// identifiers; the agent cannot auto-slugify them.
     #[test]
-    fn wiki_link_to_id_tier_two_bad_vault_refuses_with_distinct_error() {
-        let err = wiki_link_to_id("Other Vault:foo", "plugin").unwrap_err();
-        let WikiLinkError::InvalidVaultName { raw, .. } = err else {
-            panic!("expected InvalidVaultName, got {err:?}");
+    fn wiki_link_to_id_tier_two_bad_mem_refuses_with_distinct_error() {
+        let err = wiki_link_to_id("Other Mem:foo", "plugin").unwrap_err();
+        let WikiLinkError::InvalidMemName { raw, .. } = err else {
+            panic!("expected InvalidMemName, got {err:?}");
         };
-        assert_eq!(raw, "Other Vault");
+        assert_eq!(raw, "Other Mem");
     }
 
     /// Pathological inputs (empty, all punctuation) refuse
@@ -1387,15 +1387,15 @@ mod tests {
     #[test]
     fn entity_id_parts() {
         let id = EntityId::new("specs", "parent/child");
-        assert_eq!(id.vault(), "specs");
+        assert_eq!(id.mem(), "specs");
         assert_eq!(id.path(), "parent/child");
         assert_eq!(id.name(), "child");
     }
 
     #[test]
-    fn entity_id_no_vault() {
+    fn entity_id_no_mem() {
         let id = EntityId("result-entity".to_string());
-        assert_eq!(id.vault(), "");
+        assert_eq!(id.mem(), "");
         assert_eq!(id.path(), "result-entity");
         assert_eq!(id.name(), "result-entity");
     }

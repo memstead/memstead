@@ -1,7 +1,7 @@
-#![cfg(feature = "vault-repo")]
+#![cfg(feature = "mem-repo")]
 //! Agent-surface polish:
 //! `--quiet` parity with `--json`, the exit-code-table documenting the
-//! clap usage-error code, and the `vault unregister` / `workspace` help
+//! clap usage-error code, and the `mem unregister` / `workspace` help
 //! text matching what those commands actually do. Asserted at the clap
 //! tree level (no subprocess) so the checks pin the declared surface the
 //! `--help` renderer and the doc generator both read.
@@ -47,23 +47,23 @@ fn exit_code_table_documents_usage_error_two() {
     }
 }
 
-/// Combined `about` + `long_about` text for a `vault <sub>` subcommand.
-fn vault_sub_help(sub: &str) -> String {
+/// Combined `about` + `long_about` text for a `mem <sub>` subcommand.
+fn mem_sub_help(sub: &str) -> String {
     let cmd = Cli::command();
-    let vault = cmd.find_subcommand("vault").expect("vault subcommand present");
-    let s = vault.find_subcommand(sub).unwrap_or_else(|| panic!("vault {sub} present"));
+    let mem = cmd.find_subcommand("mem").expect("mem subcommand present");
+    let s = mem.find_subcommand(sub).unwrap_or_else(|| panic!("mem {sub} present"));
     let about = s.get_about().map(|a| a.to_string()).unwrap_or_default();
     let long = s.get_long_about().map(|a| a.to_string()).unwrap_or_default();
     format!("{about}\n{long}")
 }
 
-/// CLI F4: `vault unregister --help` documents the
-/// `VAULT_HAS_INCOMING_REFS` precondition and its recovery.
+/// CLI F4: `mem unregister --help` documents the
+/// `MEM_HAS_INCOMING_REFS` precondition and its recovery.
 #[test]
-fn vault_unregister_help_documents_incoming_refs_refusal() {
-    let help = vault_sub_help("unregister");
+fn mem_unregister_help_documents_incoming_refs_refusal() {
+    let help = mem_sub_help("unregister");
     assert!(
-        help.contains("VAULT_HAS_INCOMING_REFS"),
+        help.contains("MEM_HAS_INCOMING_REFS"),
         "unregister help must name the incoming-refs refusal; got:\n{help}",
     );
     assert!(

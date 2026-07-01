@@ -10,10 +10,10 @@ use serde::{Deserialize, Serialize};
 /// what happened without a follow-up `memstead_changes_since` poll.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BranchResetOutcome {
-    /// Vault name whose branch pointer moved.
-    pub vault: String,
-    /// Full ref name of the moved branch (`refs/heads/<vault>` for
-    /// flat layouts, `refs/heads/<path>/<vault>` for hierarchical
+    /// Mem name whose branch pointer moved.
+    pub mem: String,
+    /// Full ref name of the moved branch (`refs/heads/<mem>` for
+    /// flat layouts, `refs/heads/<path>/<mem>` for hierarchical
     /// ones).
     pub branch_ref: String,
     /// SHA the branch pointed at before the reset.

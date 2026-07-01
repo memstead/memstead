@@ -15,7 +15,7 @@ use crate::output::ExitKind;
 #[command(after_long_help = super::FILTER_HELP)]
 pub struct Args {
     #[arg(long)]
-    pub vault: Option<String>,
+    pub mem: Option<String>,
 
     #[arg(long = "type")]
     pub entity_type: Option<String>,
@@ -62,7 +62,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     }
 
     let scope = SearchScope {
-        vault: args.vault,
+        mem: args.mem,
         entity_type: args.entity_type,
         limit: args.limit,
         offset: args.offset,
@@ -72,22 +72,22 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     };
 
     let result = match ctx.cli_engine()? {
-        #[cfg(feature = "vault-repo")]
-        CliEngine::VaultRepo(engine) => {
-            // Validate `--vault` upfront so unknown names error
+        #[cfg(feature = "mem-repo")]
+        CliEngine::MemRepo(engine) => {
+            // Validate `--mem` upfront so unknown names error
             // typed instead of silently returning `_total: 0` — matches
-            // `memstead create --vault X`'s symmetry.
-            if let Some(name) = scope.vault.as_deref() {
+            // `memstead create --mem X`'s symmetry.
+            if let Some(name) = scope.mem.as_deref() {
                 if engine.mount(name).is_none() {
-                    return Err(unknown_vault_error(name, &engine).into());
+                    return Err(unknown_mem_error(name, &engine).into());
                 }
             }
             engine.list(&scope)
         }
         CliEngine::Filesystem(engine) => {
-            if let Some(name) = scope.vault.as_deref() {
+            if let Some(name) = scope.mem.as_deref() {
                 if engine.mount(name).is_none() {
-                    return Err(unknown_vault_error(name, &engine).into());
+                    return Err(unknown_mem_error(name, &engine).into());
                 }
             }
             engine.list(&scope)
@@ -103,24 +103,24 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Typed `UNKNOWN_VAULT` envelope for `memstead list --vault X` / `memstead search --vault X`
-/// when `X` resolves to no mount. Mirrors `memstead create --vault X`'s pre-fix
+/// Typed `UNKNOWN_MEM` envelope for `memstead list --mem X` / `memstead search --mem X`
+/// when `X` resolves to no mount. Mirrors `memstead create --mem X`'s pre-fix
 /// behaviour: read-side commands now reject unknown names instead of silently
 /// returning empty results.
-pub(super) fn unknown_vault_error(name: &str, engine: &memstead_base::Engine) -> CliError {
-    let known: Vec<&str> = engine.vault_names();
+pub(super) fn unknown_mem_error(name: &str, engine: &memstead_base::Engine) -> CliError {
+    let known: Vec<&str> = engine.mem_names();
     let detail = if known.is_empty() {
-        "no vaults loaded — run `memstead workspace dump` for the workspace state".to_string()
+        "no mems loaded — run `memstead workspace dump` for the workspace state".to_string()
     } else {
         format!(
-            "known vaults: [{}]. Run `memstead workspace dump` for the full snapshot.",
+            "known mems: [{}]. Run `memstead workspace dump` for the full snapshot.",
             known.join(", ")
         )
     };
     CliError {
-        code: "UNKNOWN_VAULT",
+        code: "UNKNOWN_MEM",
         kind: ExitKind::NotFound,
-        message: format!("unknown vault: {name} — {detail}"),
-        details: Some(serde_json::json!({ "vault": name })),
+        message: format!("unknown mem: {name} — {detail}"),
+        details: Some(serde_json::json!({ "mem": name })),
     }
 }

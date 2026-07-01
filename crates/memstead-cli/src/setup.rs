@@ -2,7 +2,7 @@
 //! synchronously (no tokio) for the CLI to call into directly.
 //!
 //! Post-rebuild there is one workspace marker: `.memstead/workspace.toml`
-//! at the workspace root. The `vault-repo` Cargo feature decides
+//! at the workspace root. The `mem-repo` Cargo feature decides
 //! which engine factory consumes it — pro routes through
 //! [`memstead_git_branch::workspace_store::engine_from_workspace_root`]
 //! (git-branch backends plus folder + archive), basis routes through
@@ -14,7 +14,7 @@
 //! can still surface an actionable "this is the basis binary, your
 //! workspace has git-branch mounts" error when the operator points a
 //! basis binary at a pro workspace — the shape tag is derived from
-//! `vault-repo/.git` co-existing with the marker rather than the
+//! `mem-repo/.git` co-existing with the marker rather than the
 //! marker itself.
 
 use std::path::{Path, PathBuf};
@@ -23,9 +23,9 @@ use anyhow::Context;
 
 use memstead_base::Engine as BaseEngine;
 use memstead_base::vcs::ClientId;
-#[cfg(feature = "vault-repo")]
+#[cfg(feature = "mem-repo")]
 use memstead_base::vcs::{Actor, CommitContext};
-#[cfg(feature = "vault-repo")]
+#[cfg(feature = "mem-repo")]
 use memstead_git_branch::workspace_store::engine_from_workspace_root;
 
 use crate::CliError;
@@ -40,13 +40,13 @@ use crate::output::ExitKind;
 pub const WORKSPACE_NOT_INITIALISED_CODE: &str = "WORKSPACE_NOT_INITIALISED";
 
 /// Recovery command suggested when no `.memstead/workspace.toml` is
-/// reachable from cwd. `memstead vault-repo init` in the pro build (this
-/// binary speaks vault-repo); `memstead init` in the basis build. The
+/// reachable from cwd. `memstead mem-repo init` in the pro build (this
+/// binary speaks mem-repo); `memstead init` in the basis build. The
 /// structured `hint.recovery_command` field carries this token
 /// verbatim so an agent can re-exec it.
-#[cfg(feature = "vault-repo")]
-pub const WORKSPACE_RECOVERY_COMMAND: &str = "memstead vault-repo init";
-#[cfg(not(feature = "vault-repo"))]
+#[cfg(feature = "mem-repo")]
+pub const WORKSPACE_RECOVERY_COMMAND: &str = "memstead mem-repo init";
+#[cfg(not(feature = "mem-repo"))]
 pub const WORKSPACE_RECOVERY_COMMAND: &str = "memstead init";
 
 /// Build the typed `WORKSPACE_NOT_INITIALISED` exit envelope. Goes
@@ -76,11 +76,11 @@ pub struct CliContext {
 /// to pick the right engine accessor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorkspaceShape {
-    /// Vault-repo workspace — multi-vault, git-backed.
-    /// The `.memstead/workspace.toml` root also carries `vault-repo/.git/`.
-    VaultRepo,
-    /// Filesystem-vault workspace — single-vault, history-free.
-    /// The `.memstead/workspace.toml` root has no `vault-repo/.git/`.
+    /// Mem-repo workspace — multi-mem, git-backed.
+    /// The `.memstead/workspace.toml` root also carries `mem-repo/.git/`.
+    MemRepo,
+    /// Filesystem-mem workspace — single-mem, history-free.
+    /// The `.memstead/workspace.toml` root has no `mem-repo/.git/`.
     Filesystem,
 }
 
@@ -89,14 +89,14 @@ pub enum WorkspaceShape {
 /// store accessor (`engine.store()`) lives on both flavours so simple
 /// read commands can share most of their bodies.
 ///
-/// The `VaultRepo` variant is only present under the `vault-repo`
+/// The `MemRepo` variant is only present under the `mem-repo`
 /// feature. In the basis build (`--no-default-features`) the enum
 /// collapses to a single `Filesystem` arm — every subcommand's
 /// dispatch elides the missing arm via `cfg`.
 pub enum CliEngine {
-    #[cfg(feature = "vault-repo")]
-    VaultRepo(BaseEngine),
-    /// Filesystem-vault flavour, served by the unified [`memstead_base::Engine`].
+    #[cfg(feature = "mem-repo")]
+    MemRepo(BaseEngine),
+    /// Filesystem-mem flavour, served by the unified [`memstead_base::Engine`].
     Filesystem(BaseEngine),
 }
 
@@ -106,16 +106,16 @@ impl CliContext {
     ///
     /// Post-rebuild the marker is shape-neutral — the same
     /// `.memstead/workspace.toml` carries both folder-only workspaces and
-    /// vault-repo workspaces. The flavour tag comes from whether the
-    /// workspace root also carries `vault-repo/.git/` (vault-repo
+    /// mem-repo workspaces. The flavour tag comes from whether the
+    /// workspace root also carries `mem-repo/.git/` (mem-repo
     /// flavour) or not (folder-only flavour). The basis CLI uses this
     /// distinction to surface "this is the basis binary" when the
     /// operator points it at a workspace with git-branch mounts.
     pub fn workspace_shape(&self) -> Option<(WorkspaceShape, PathBuf)> {
         let cwd = std::env::current_dir().ok()?;
         let root = find_workspace_root(&cwd)?;
-        let shape = if root.join("vault-repo").join(".git").is_dir() {
-            WorkspaceShape::VaultRepo
+        let shape = if root.join("mem-repo").join(".git").is_dir() {
+            WorkspaceShape::MemRepo
         } else {
             WorkspaceShape::Filesystem
         };
@@ -124,18 +124,18 @@ impl CliContext {
 
     /// Build a [`CliEngine`] from the current cwd. The workspace
     /// marker `.memstead/workspace.toml` resolves either flavour; the
-    /// presence of `vault-repo/.git/` switches the engine factory.
+    /// presence of `mem-repo/.git/` switches the engine factory.
     ///
-    /// On the basis build (`--no-default-features`) the vault-repo
+    /// On the basis build (`--no-default-features`) the mem-repo
     /// branch surfaces a clear "not built into this binary" error so
-    /// a user pointing the basis build at a vault-repo workspace
+    /// a user pointing the basis build at a mem-repo workspace
     /// gets an actionable signal rather than a confusing "no
     /// workspace" bail.
     pub fn cli_engine(&self) -> anyhow::Result<CliEngine> {
         match self.workspace_shape() {
             Some((_, root)) => self.cli_engine_at(&root),
             None => Err(workspace_not_initialised_error(
-                "No workspace found. Run from a directory containing `.memstead/workspace.toml` (run `memstead init` for a folder-mount workspace, or `memstead vault-repo init` for a vault-repo workspace).",
+                "No workspace found. Run from a directory containing `.memstead/workspace.toml` (run `memstead init` for a folder-mount workspace, or `memstead mem-repo init` for a mem-repo workspace).",
             )
             .into()),
         }
@@ -143,25 +143,25 @@ impl CliContext {
 
     /// Build a [`CliEngine`] rooted at an explicit workspace directory,
     /// skipping the cwd walk-up. The flavour is still derived from
-    /// whether `<root>/vault-repo/.git/` is present, so callers that
+    /// whether `<root>/mem-repo/.git/` is present, so callers that
     /// already know the root (e.g. `memstead publish --workspace`) get
     /// the same factory selection as [`Self::cli_engine`]. The split
     /// also gives subcommands a chdir-free, unit-testable engine seam.
     pub fn cli_engine_at(&self, root: &Path) -> anyhow::Result<CliEngine> {
-        if root.join("vault-repo").join(".git").is_dir() {
-            #[cfg(feature = "vault-repo")]
+        if root.join("mem-repo").join(".git").is_dir() {
+            #[cfg(feature = "mem-repo")]
             {
                 let engine = engine_from_workspace_root(root)
                     .map_err(|e| anyhow::anyhow!("init engine at {}: {e:#}", root.display()))?;
-                return Ok(CliEngine::VaultRepo(engine));
+                return Ok(CliEngine::MemRepo(engine));
             }
-            #[cfg(not(feature = "vault-repo"))]
+            #[cfg(not(feature = "mem-repo"))]
             {
                 return Err(CliError {
                     kind: ExitKind::Generic,
                     code: "UNSUPPORTED_WORKSPACE_SHAPE",
                     message:
-                        "this is the basis build of memstead (folder-mount only); the workspace is vault-repo-shaped (`vault-repo/.git/` present). Install the pro build (`cargo build --features vault-repo`) or run from a workspace whose mounts are all folder-backed."
+                        "this is the basis build of memstead (folder-mount only); the workspace is mem-repo-shaped (`mem-repo/.git/` present). Install the pro build (`cargo build --features mem-repo`) or run from a workspace whose mounts are all folder-backed."
                             .to_string(),
                     details: None,
                 }
@@ -169,42 +169,42 @@ impl CliContext {
             }
         }
         let engine = BaseEngine::from_workspace_root(root)
-            .with_context(|| format!("init filesystem-vault engine at {}", root.display()))?;
+            .with_context(|| format!("init filesystem-mem engine at {}", root.display()))?;
         Ok(CliEngine::Filesystem(engine))
     }
 
-    /// Build the unified [`memstead_base::Engine`] for a vault-repo-shaped
+    /// Build the unified [`memstead_base::Engine`] for a mem-repo-shaped
     /// workspace. Delegates to `engine_from_workspace_root` which
     /// handles layout detection, mount enumeration, schema resolution,
-    /// and readVaults hydration in one pass.
+    /// and readMems hydration in one pass.
     ///
     /// Only compiled into the pro build — the basis build never sees a
-    /// vault-repo workspace because `cli_engine()` rejects it before
+    /// mem-repo workspace because `cli_engine()` rejects it before
     /// reaching here.
-    #[cfg(feature = "vault-repo")]
+    #[cfg(feature = "mem-repo")]
     pub fn engine(&self) -> anyhow::Result<BaseEngine> {
         let cwd = std::env::current_dir().context("Could not determine current directory")?;
 
         let Some(root) = find_workspace_root(&cwd) else {
             return Err(workspace_not_initialised_error(
-                "No workspace found. Run from a directory containing `.memstead/workspace.toml` (run `memstead vault-repo init` to bootstrap).",
+                "No workspace found. Run from a directory containing `.memstead/workspace.toml` (run `memstead mem-repo init` to bootstrap).",
             )
             .into());
         };
 
         // Subcommands routed through `engine()` (rather than
-        // `cli_engine()`) require vault-repo shape — they read /
+        // `cli_engine()`) require mem-repo shape — they read /
         // write commit-shaped artefacts (`workspace dump` snapshots,
         // `batch-update` commit envelopes) that have no analogue on a
-        // folder-mount-only workspace. Surface the vault-repo-only
+        // folder-mount-only workspace. Surface the mem-repo-only
         // tag here so callers print an actionable message instead of
         // booting into a foldery engine and erroring later.
-        if !root.join("vault-repo").join(".git").is_dir() {
+        if !root.join("mem-repo").join(".git").is_dir() {
             return Err(CliError {
                 kind: ExitKind::Generic,
                 code: "UNSUPPORTED_WORKSPACE_SHAPE",
                 message:
-                    "this subcommand is vault-repo-only and not yet supported on filesystem-vault workspaces — run from a vault-repo workspace, or use `memstead stats` / `memstead list` / `memstead search` / `memstead entity` / `memstead health` / `memstead create|update|delete|relate|rename` instead."
+                    "this subcommand is mem-repo-only and not yet supported on filesystem-mem workspaces — run from a mem-repo workspace, or use `memstead stats` / `memstead list` / `memstead search` / `memstead entity` / `memstead health` / `memstead create|update|delete|relate|rename` instead."
                         .to_string(),
                 details: None,
             }
@@ -340,10 +340,10 @@ mod tests {
 /// subcommands aren't MCP tools and the commit subject (`memstead: create …`)
 /// already carries the action verb — a second taxonomy would drift.
 ///
-/// Only used by vault-repo write paths today; filesystem-vault write
+/// Only used by mem-repo write paths today; filesystem-mem write
 /// paths assemble their own provenance directly. The function therefore
-/// only compiles when `vault-repo` is enabled.
-#[cfg(feature = "vault-repo")]
+/// only compiles when `mem-repo` is enabled.
+#[cfg(feature = "mem-repo")]
 pub fn cli_ctx() -> CommitContext<'static> {
     cli_ctx_with_note(None)
 }
@@ -366,7 +366,7 @@ pub fn cli_client_id() -> ClientId {
 /// The note rides into the same payload slot the MCP `note` parameter
 /// uses; the engine's `require_notes` policy gate fires `NOTE_MISSING`
 /// symmetrically across both surfaces.
-#[cfg(feature = "vault-repo")]
+#[cfg(feature = "mem-repo")]
 pub fn cli_ctx_with_note(note: Option<String>) -> CommitContext<'static> {
     CommitContext {
         actor: Actor::Cli,
@@ -378,16 +378,16 @@ pub fn cli_ctx_with_note(note: Option<String>) -> CommitContext<'static> {
     }
 }
 
-/// Build the unified [`memstead_base::Engine`] for a vault-repo-shaped
+/// Build the unified [`memstead_base::Engine`] for a mem-repo-shaped
 /// workspace. Delegates to `engine_from_workspace_root` which
 /// handles layout detection, mount enumeration, schema resolution,
-/// and readVaults hydration in one pass.
+/// and readMems hydration in one pass.
 ///
-/// Subcommands routed through this helper require vault-repo shape —
+/// Subcommands routed through this helper require mem-repo shape —
 /// they read / write commit-shaped artefacts (`workspace dump`
 /// snapshots, `batch-update` commit envelopes) that have no analogue
 /// on a folder-mount-only workspace.
-#[cfg(feature = "vault-repo")]
+#[cfg(feature = "mem-repo")]
 pub fn pro_engine(_ctx: &CliContext) -> anyhow::Result<BaseEngine> {
     let cwd = std::env::current_dir().map_err(|e| {
         CliError::new(
@@ -399,17 +399,17 @@ pub fn pro_engine(_ctx: &CliContext) -> anyhow::Result<BaseEngine> {
 
     let Some(root) = find_workspace_root(&cwd) else {
         return Err(workspace_not_initialised_error(
-            "No workspace found. Run from a directory containing `.memstead/workspace.toml` (run `memstead vault-repo init` to bootstrap).",
+            "No workspace found. Run from a directory containing `.memstead/workspace.toml` (run `memstead mem-repo init` to bootstrap).",
         )
         .into());
     };
 
-    if !root.join("vault-repo").join(".git").is_dir() {
+    if !root.join("mem-repo").join(".git").is_dir() {
         return Err(CliError {
             code: "UNSUPPORTED_WORKSPACE_SHAPE",
             kind: ExitKind::Generic,
             message:
-                "this subcommand is vault-repo-only and not yet supported on filesystem-vault workspaces — run from a vault-repo workspace, or use `memstead stats` / `memstead list` / `memstead search` / `memstead entity` / `memstead health` / `memstead create|update|delete|relate|rename` instead."
+                "this subcommand is mem-repo-only and not yet supported on filesystem-mem workspaces — run from a mem-repo workspace, or use `memstead stats` / `memstead list` / `memstead search` / `memstead entity` / `memstead health` / `memstead create|update|delete|relate|rename` instead."
                     .to_string(),
             details: None,
         }

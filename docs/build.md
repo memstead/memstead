@@ -49,7 +49,7 @@ On macOS, before running the test suite the first time, follow [docs/macos-dev-s
 The engine has two build flavours:
 
 - **basis** — default features, folder backend only, no `gix`. `cargo build --no-default-features`.
-- **pro** — adds the git-branch storage backend. `cargo build --features vault-repo`. This is the local-dev default.
+- **pro** — adds the git-branch storage backend. `cargo build --features mem-repo`. This is the local-dev default.
 
 Both must stay green. `./run-tests.sh` runs both flavours plus the plugin gates; CI runs them as separate smoke jobs.
 
@@ -61,7 +61,7 @@ Both must stay green. `./run-tests.sh` runs both flavours plus the plugin gates;
 
 ```bash
 cargo build --workspace                  # debug build, fast incremental
-cargo nextest run --workspace --features vault-repo   # run all tests (~5 s when warm)
+cargo nextest run --workspace --features mem-repo   # run all tests (~5 s when warm)
 ```
 
 Cargo handles incremental builds — only changed crates and their dependents recompile. Workspace-crate edits typically rebuild in <30 s. Use this during active iteration; full `./build-engine.sh` is overkill until you actually need the new CLI/MCP binaries.
@@ -122,9 +122,9 @@ Workspace crates stay unoptimised so incremental rebuilds during development are
 
 | Feature | Purpose | Default? |
 |---|---|---|
-| `git-object-storage` | The git-object write path. Mutations go through `gix::object::tree::Editor` against the vault-repo's `.git/`. No working tree. | Yes |
+| `git-object-storage` | The git-object write path. Mutations go through `gix::object::tree::Editor` against the mem-repo's `.git/`. No working tree. | Yes |
 | `disk-storage` | Legacy path: every mutation writes a real file and `vcs::commit` rebuilds the tree by walking disk. Kept compiled-in for rollback. | No |
-| `test-support` | Exposes `init_vault_db_stub` for downstream test crates. | No |
+| `test-support` | Exposes `init_mem_db_stub` for downstream test crates. | No |
 
 Default `cargo build --workspace` (and `./build-engine.sh`) builds with `git-object-storage`. To compile the rollback path:
 

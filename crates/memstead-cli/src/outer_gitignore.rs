@@ -1,10 +1,10 @@
 //! Shared helper: detect the enclosing git repo and append a path to
 //! its `.gitignore`.
 //!
-//! Used by both `memstead vault init` (legacy disk-vault bootstrap) and
-//! `memstead vault-repo init` (post-cutover vault-repo-git bootstrap). The two
-//! commands differ in *what* path they ignore (vault root vs. the
-//! `vault-repo/` directory) but share every other rule:
+//! Used by both `memstead mem init` (legacy disk-mem bootstrap) and
+//! `memstead mem-repo init` (post-cutover mem-repo-git bootstrap). The two
+//! commands differ in *what* path they ignore (mem root vs. the
+//! `mem-repo/` directory) but share every other rule:
 //!
 //! - Walk upward from a starting directory looking for `.git/`.
 //! - Refuse to modify a `.gitignore` whose owning repo is `$HOME` —
@@ -42,7 +42,7 @@ pub enum OuterRepoOutcome {
 /// Walk upward from `start` looking for an outer `.git/` directory; on
 /// success append `ignore_path` (rendered relative to the outer root)
 /// to that repo's `.gitignore`. The starting directory is the parent of
-/// the new gitdir / vault-repo so we don't rediscover our own git.
+/// the new gitdir / mem-repo so we don't rediscover our own git.
 ///
 /// `ignore_path` must lie inside the discovered outer repo for the
 /// relative-path rendering to succeed; if `strip_prefix` fails the

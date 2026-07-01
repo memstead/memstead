@@ -73,4 +73,4 @@ Include drift signals from `memstead_health` if available — entities with rece
 - **Fix broken relations only** — don't attempt semantic fixes that need human judgment.
 - **Community summaries describe the cluster's shared concern** — "These entities define the MCP transport layer" not "Contains entity-a, entity-b, entity-c."
 - **No state file** — every invocation is self-contained. Run it whenever you want a health check.
-- **Respect read-only vaults** — never attempt to fix issues in read-only vaults.
+- **Respect read-only mems** — never attempt to fix issues in read-only mems.

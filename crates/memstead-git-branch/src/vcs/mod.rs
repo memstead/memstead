@@ -1,9 +1,9 @@
-//! Per-vault version control via `gix`. Each vault owns a gix repository
-//! whose gitdir and worktree are resolved from the vault's config at
+//! Per-mem version control via `gix`. Each mem owns a gix repository
+//! whose gitdir and worktree are resolved from the mem's config at
 //! `Engine::init` time — isolated from any outer project repo and from
 //! the developer's `~/.gitconfig`.
 //!
-//! Gitdir defaults to `<vault>/.git/` and worktree to the vault root; the
+//! Gitdir defaults to `<mem>/.git/` and worktree to the mem root; the
 //! optional `vcs` block in `.memstead/config.json` overrides either (notably
 //! the shared-gitdir idiom `{ "../.git", ".." }`). On first init the
 //! repo is bootstrapped and its per-repo config is patched with
@@ -28,7 +28,7 @@
 //!
 //! ## In-process serialization: per-branch mutex
 //!
-//! A vault's commits race on a single git ref (today: HEAD's symref
+//! A mem's commits race on a single git ref (today: HEAD's symref
 //! target on the disk adapter, an explicit branch name on the git-tree
 //! adapter). Without serialization two concurrent commits against the
 //! same ref would either produce an orphan parent chain or fail gix's
@@ -53,7 +53,7 @@
 //! a custom `flock` layer.
 //!
 //! **Lock-order rule.** When a code path holds more than one per-branch
-//! mutex simultaneously (e.g. a cross-vault move that touches two
+//! mutex simultaneously (e.g. a cross-mem move that touches two
 //! branches under one shared multi-root gitdir), the mutexes MUST be
 //! acquired in lexicographic ref-name order to prevent deadlock.
 //! [`acquire_branch_mutexes_in_order`] enforces this by sorting before
@@ -79,7 +79,7 @@ static BRANCH_MUTEXES: OnceLock<Mutex<HashMap<String, Arc<Mutex<()>>>>> = OnceLo
 // The lock-order rule says callers must acquire branch mutexes in
 // lexicographic order; a thread that already holds `b` and then
 // requests `a` (where `a < b`) is a bug, not just a stylistic issue —
-// in a multi-vault future where two threads each hold one of `(a, b)`
+// in a multi-mem future where two threads each hold one of `(a, b)`
 // and request the other, the program deadlocks. The debug assertion
 // inside `acquire_branch_mutex` surfaces the bug at the offending
 // acquisition site instead of in a hung process. Release builds skip
@@ -172,7 +172,7 @@ impl Drop for BranchMutexGuard {
 /// Acquire branch mutexes for every ref in `refs`, after sorting them
 /// in lexicographic order. Returns the guards in acquisition order
 /// (lex-sorted). Used by code paths that need to serialize against
-/// more than one branch at once — e.g. a cross-vault move under a
+/// more than one branch at once — e.g. a cross-mem move under a
 /// shared multi-root gitdir.
 ///
 /// Holding the returned `Vec` keeps every branch locked; dropping it
@@ -236,7 +236,7 @@ pub use memstead_base::vcs::{
 /// engine today. `changes_since` goes straight to
 /// `gix::diff::tree` without expanding this trait.
 pub trait Vcs: Send + Sync {
-    /// Stage the paths (typically a single vault directory) into the repo's
+    /// Stage the paths (typically a single mem directory) into the repo's
     /// tree and create a commit on HEAD. `message` is the caller's prose —
     /// the implementation appends the provenance trailers derived from
     /// `ctx` (`Tool:`, `Actor:`, `Client:`) and picks the author signature
@@ -289,10 +289,10 @@ impl From<gix::object::write::Error> for VcsError {
     }
 }
 
-/// Open or initialize the per-vault gix repository.
+/// Open or initialize the per-mem gix repository.
 ///
 /// `git_dir` holds HEAD, refs, objects, and config. `work_tree` is the
-/// vault root (or, in the shared-gitdir idiom, the directory that owns
+/// mem root (or, in the shared-gitdir idiom, the directory that owns
 /// the gitdir). Both must be absolute or already canonicalized —
 /// `commit` strips `work_tree` from each staged path to compute the
 /// in-tree relative path.
@@ -345,7 +345,7 @@ pub fn create_vcs(
     // Canonicalize the stored paths. Shared-gitdir configs express
     // `worktree` with `..` segments (e.g. `../.git`, `..`); `strip_prefix`
     // is a purely syntactic operation and would fail against a raw
-    // `<vault>/..` prefix. Canonicalizing here once makes every later
+    // `<mem>/..` prefix. Canonicalizing here once makes every later
     // subpath computation reliable.
     let git_dir_canon = std::fs::canonicalize(git_dir).unwrap_or_else(|_| git_dir.to_path_buf());
     let work_tree_canon =
@@ -438,7 +438,7 @@ fn write_per_repo_config(git_dir: &Path, kvs: &[(&str, &str, &str)]) -> Result<(
     Ok(())
 }
 
-/// Per-vault gix-backed VCS. Opens the repo on every commit — gix repos are
+/// Per-mem gix-backed VCS. Opens the repo on every commit — gix repos are
 /// cheap to open and this avoids any cross-thread shared-state concerns.
 struct GixVcs {
     git_dir: PathBuf,
@@ -469,26 +469,26 @@ impl Vcs for GixVcs {
             ))
         })?;
 
-        // Vault-scoped commit tree. The contract is "preserve HEAD minus
-        // every vault-subpath in `paths`, then re-upsert what's on disk":
+        // Mem-scoped commit tree. The contract is "preserve HEAD minus
+        // every mem-subpath in `paths`, then re-upsert what's on disk":
         //
         // 1. Callers bundle paths that are either all-isolated (empty
-        //    subpath — the vault owns the whole worktree) or all-shared
+        //    subpath — the mem owns the whole worktree) or all-shared
         //    (non-empty subpaths under one shared worktree). Mixing both
         //    shapes in one call would silently discard the shared
-        //    vault's HEAD subtree once the empty case forced an
+        //    mem's HEAD subtree once the empty case forced an
         //    `empty_tree()` start; the `debug_assert!` below pins that
-        //    contract so a future multi-vault caller fails loudly in
+        //    contract so a future multi-mem caller fails loudly in
         //    debug builds rather than corrupting history in release.
         // 2. All-empty → start from `empty_tree` (a full rebuild;
         //    deletions surface without per-file diff bookkeeping).
         // 3. All-non-empty → start from HEAD's tree (or `empty_tree` on
-        //    genesis) and wholesale-remove each vault's subtree before
-        //    re-upserting so sibling vaults under the same gitdir
+        //    genesis) and wholesale-remove each mem's subtree before
+        //    re-upserting so sibling mems under the same gitdir
         //    survive our commit unchanged.
         let subpaths: Vec<String> = paths
             .iter()
-            .map(|p| vault_subpath(&self.work_tree, p))
+            .map(|p| mem_subpath(&self.work_tree, p))
             .collect::<Result<_, _>>()?;
         debug_assert!(
             subpaths.iter().all(|s| s.is_empty())
@@ -519,7 +519,7 @@ impl Vcs for GixVcs {
         };
 
         for (path, subpath) in paths.iter().zip(subpaths.iter()) {
-            // Drop the vault's prior subtree so deletions on disk surface
+            // Drop the mem's prior subtree so deletions on disk surface
             // in the tree. Empty subpath already started from `empty_tree`.
             if !subpath.is_empty() {
                 editor
@@ -566,29 +566,29 @@ impl Vcs for GixVcs {
     }
 }
 
-/// Compute the vault's subpath within the worktree as a forward-slash
-/// separated string. The empty string means "the vault owns the whole
-/// worktree" (isolated idiom); a non-empty string means "the vault lives
+/// Compute the mem's subpath within the worktree as a forward-slash
+/// separated string. The empty string means "the mem owns the whole
+/// worktree" (isolated idiom); a non-empty string means "the mem lives
 /// under `<subpath>` inside a shared worktree".
 ///
 /// `work_tree` is expected to be canonical (invariant:
-/// `VaultState.resolved_worktree` is canonicalized at `Engine::init`;
-/// `GixVcs.work_tree` is canonicalized in `create_vcs`). `vault_path` is
+/// `MemState.resolved_worktree` is canonicalized at `Engine::init`;
+/// `GixVcs.work_tree` is canonicalized in `create_vcs`). `mem_path` is
 /// canonicalized defensively here because mutation callers thread it
 /// through from `state.dir`, and `strip_prefix` is a purely syntactic
 /// operation — any `..` or symlink in the raw path would defeat it.
 ///
-/// Returns `VcsError::Git` when the vault path is not under the
+/// Returns `VcsError::Git` when the mem path is not under the
 /// worktree. Silent fallback to an empty subpath would be destructive
-/// in shared-gitdir mode: a misconfigured vault would commit at the
+/// in shared-gitdir mode: a misconfigured mem would commit at the
 /// tree root and wipe every sibling's subtree.
-pub(crate) fn vault_subpath(work_tree: &Path, vault_path: &Path) -> Result<String, VcsError> {
-    let canon_vault =
-        std::fs::canonicalize(vault_path).unwrap_or_else(|_| vault_path.to_path_buf());
-    let rel = canon_vault.strip_prefix(work_tree).map_err(|_| {
+pub(crate) fn mem_subpath(work_tree: &Path, mem_path: &Path) -> Result<String, VcsError> {
+    let canon_mem =
+        std::fs::canonicalize(mem_path).unwrap_or_else(|_| mem_path.to_path_buf());
+    let rel = canon_mem.strip_prefix(work_tree).map_err(|_| {
         VcsError::Git(format!(
-            "vault path {} is not under worktree {}",
-            vault_path.display(),
+            "mem path {} is not under worktree {}",
+            mem_path.display(),
             work_tree.display(),
         ))
     })?;
@@ -600,7 +600,7 @@ pub(crate) fn vault_subpath(work_tree: &Path, vault_path: &Path) -> Result<Strin
 }
 
 /// Join a relative on-disk path (forward-slash-normalised) under the
-/// vault's `subpath` within the worktree. Empty subpath → the relative
+/// mem's `subpath` within the worktree. Empty subpath → the relative
 /// path stands alone. Empty relative → returns the subpath by itself.
 fn join_subpath(subpath: &str, rel: &str) -> String {
     if subpath.is_empty() {
@@ -612,17 +612,17 @@ fn join_subpath(subpath: &str, rel: &str) -> String {
     }
 }
 
-/// Walk the vault's subdirectory on disk and upsert every file into the
+/// Walk the mem's subdirectory on disk and upsert every file into the
 /// editor at its worktree-relative location (i.e. prefixed with the
-/// vault's `subpath`). Skips the gix git-dir, the `.memstead/cache/`
+/// mem's `subpath`). Skips the gix git-dir, the `.memstead/cache/`
 /// regenerable-artefacts directory, and any stray `.git/` entries.
 ///
-/// `path` is typically the vault root; a single-file path is supported
+/// `path` is typically the mem root; a single-file path is supported
 /// for completeness, though no current caller uses that shape.
 ///
-/// The walker is scoped to `path` (the vault's on-disk subdirectory) —
+/// The walker is scoped to `path` (the mem's on-disk subdirectory) —
 /// not the worktree root. In shared-gitdir mode this is what keeps
-/// sibling vaults out of vault A's commit tree: A's commit never walks
+/// sibling mems out of mem A's commit tree: A's commit never walks
 /// B's subdirectory, so no sibling bytes can leak in.
 fn apply_path(
     repo: &gix::Repository,
@@ -649,7 +649,7 @@ fn apply_path(
                 if e.file_name() == OsStr::new(".git") {
                     return false;
                 }
-                // Path components beneath the vault directory must not
+                // Path components beneath the mem directory must not
                 // re-trip the cache guard; `is_ignored` compares starting
                 // at `.memstead/cache`, so a subpath-relative view is the
                 // right input.
@@ -663,7 +663,7 @@ fn apply_path(
             if !entry.file_type().is_file() {
                 continue;
             }
-            let rel_in_vault = match entry.path().strip_prefix(path) {
+            let rel_in_mem = match entry.path().strip_prefix(path) {
                 Ok(p) => p
                     .components()
                     .filter_map(|c| c.as_os_str().to_str())
@@ -671,7 +671,7 @@ fn apply_path(
                     .join("/"),
                 Err(_) => continue,
             };
-            let in_tree_path = join_subpath(subpath, &rel_in_vault);
+            let in_tree_path = join_subpath(subpath, &rel_in_mem);
             upsert_file(repo, editor, entry.path(), &in_tree_path)?;
         }
     }
@@ -730,7 +730,7 @@ fn is_executable(_path: &Path) -> bool {
 /// that exercise mutation paths without touching a real repo. The returned
 /// SHAs are deterministic monotonic sentinels (`noop-0`, `noop-1`, …)
 /// distinguishable from real SHAs by prefix — `changes_since`
-/// relies on that distinction to produce empty deltas for noop vaults.
+/// relies on that distinction to produce empty deltas for noop mems.
 pub struct NoopVcs {
     counter: std::sync::atomic::AtomicU64,
 }
@@ -769,30 +769,30 @@ mod tests {
     use std::fs;
     use tempfile::TempDir;
 
-    /// Build a fresh `<tmp>/vault` directory with a `.memstead/` subdir and
+    /// Build a fresh `<tmp>/mem` directory with a `.memstead/` subdir and
     /// the matching `git_dir` path. Mirrors the on-disk layout of a real
-    /// vault.
-    fn make_vault_paths(tmp: &Path) -> (PathBuf, PathBuf) {
-        let vault = tmp.join("vault");
-        let git_dir = vault.join(".git");
-        fs::create_dir_all(vault.join(".memstead")).unwrap();
-        (vault, git_dir)
+    /// mem.
+    fn make_mem_paths(tmp: &Path) -> (PathBuf, PathBuf) {
+        let mem = tmp.join("mem");
+        let git_dir = mem.join(".git");
+        fs::create_dir_all(mem.join(".memstead")).unwrap();
+        (mem, git_dir)
     }
 
     #[test]
     fn create_vcs_initializes_fresh_dir() {
         let dir = TempDir::new().unwrap();
-        let (vault, git_dir) = make_vault_paths(dir.path());
-        let vcs = create_vcs(&git_dir, &vault).unwrap();
-        let sha = vcs.commit(&[&vault], "initial", &CommitContext::internal()).unwrap();
+        let (mem, git_dir) = make_mem_paths(dir.path());
+        let vcs = create_vcs(&git_dir, &mem).unwrap();
+        let sha = vcs.commit(&[&mem], "initial", &CommitContext::internal()).unwrap();
         assert_eq!(sha.len(), 40, "commit sha must be 40-char hex");
     }
 
     #[test]
     fn create_vcs_writes_structural_config_on_first_init() {
         let dir = TempDir::new().unwrap();
-        let (vault, git_dir) = make_vault_paths(dir.path());
-        let _vcs = create_vcs(&git_dir, &vault).unwrap();
+        let (mem, git_dir) = make_mem_paths(dir.path());
+        let _vcs = create_vcs(&git_dir, &mem).unwrap();
 
         let config = fs::read_to_string(git_dir.join("config")).unwrap();
         // Isolated layout: gitdir is a direct child of the worktree, so
@@ -815,10 +815,10 @@ mod tests {
     #[test]
     fn create_vcs_reapplies_gpgsign_on_reopen() {
         let dir = TempDir::new().unwrap();
-        let (vault, git_dir) = make_vault_paths(dir.path());
+        let (mem, git_dir) = make_mem_paths(dir.path());
 
         // First init writes the full config.
-        let _ = create_vcs(&git_dir, &vault).unwrap();
+        let _ = create_vcs(&git_dir, &mem).unwrap();
 
         // Simulate a user editing the per-repo config to enable signing.
         let original = fs::read_to_string(git_dir.join("config")).unwrap();
@@ -827,7 +827,7 @@ mod tests {
 
         // Re-open must clobber gpgsign back to false but leave the
         // structural fields alone.
-        let _ = create_vcs(&git_dir, &vault).unwrap();
+        let _ = create_vcs(&git_dir, &mem).unwrap();
         let after = fs::read_to_string(git_dir.join("config")).unwrap();
         assert!(after.contains("gpgsign = false"), "got:\n{after}");
         assert!(after.contains("logallrefupdates = true"), "got:\n{after}");
@@ -836,12 +836,12 @@ mod tests {
     #[test]
     fn commit_writes_file_into_tree() {
         let dir = TempDir::new().unwrap();
-        let (vault, git_dir) = make_vault_paths(dir.path());
-        fs::write(vault.join("test.md"), "hello").unwrap();
+        let (mem, git_dir) = make_mem_paths(dir.path());
+        fs::write(mem.join("test.md"), "hello").unwrap();
 
-        let vcs = create_vcs(&git_dir, &vault).unwrap();
+        let vcs = create_vcs(&git_dir, &mem).unwrap();
         let sha = vcs
-            .commit(&[&vault], "add test.md", &CommitContext::internal())
+            .commit(&[&mem], "add test.md", &CommitContext::internal())
             .unwrap();
         assert_eq!(sha.len(), 40);
 
@@ -856,16 +856,16 @@ mod tests {
     #[test]
     fn commit_excludes_cache_subdir() {
         let dir = TempDir::new().unwrap();
-        let (vault, git_dir) = make_vault_paths(dir.path());
+        let (mem, git_dir) = make_mem_paths(dir.path());
 
         // Author files
-        fs::write(vault.join("real.md"), "real").unwrap();
+        fs::write(mem.join("real.md"), "real").unwrap();
         // Cache files under `.memstead/cache/` must never reach the tree.
-        fs::create_dir_all(vault.join(".memstead/cache/prompts")).unwrap();
-        fs::write(vault.join(".memstead/cache/prompts/p.txt"), "noise").unwrap();
+        fs::create_dir_all(mem.join(".memstead/cache/prompts")).unwrap();
+        fs::write(mem.join(".memstead/cache/prompts/p.txt"), "noise").unwrap();
 
-        let vcs = create_vcs(&git_dir, &vault).unwrap();
-        vcs.commit(&[&vault], "initial", &CommitContext::internal()).unwrap();
+        let vcs = create_vcs(&git_dir, &mem).unwrap();
+        vcs.commit(&[&mem], "initial", &CommitContext::internal()).unwrap();
 
         let repo = gix::open(&git_dir).unwrap();
         let tree = repo.head_commit().unwrap().tree().unwrap();
@@ -891,15 +891,15 @@ mod tests {
     #[test]
     fn commit_second_time_with_deletion_removes_from_tree() {
         let dir = TempDir::new().unwrap();
-        let (vault, git_dir) = make_vault_paths(dir.path());
-        fs::write(vault.join("keep.md"), "keep").unwrap();
-        fs::write(vault.join("drop.md"), "drop").unwrap();
+        let (mem, git_dir) = make_mem_paths(dir.path());
+        fs::write(mem.join("keep.md"), "keep").unwrap();
+        fs::write(mem.join("drop.md"), "drop").unwrap();
 
-        let vcs = create_vcs(&git_dir, &vault).unwrap();
-        vcs.commit(&[&vault], "initial", &CommitContext::internal()).unwrap();
+        let vcs = create_vcs(&git_dir, &mem).unwrap();
+        vcs.commit(&[&mem], "initial", &CommitContext::internal()).unwrap();
 
-        fs::remove_file(vault.join("drop.md")).unwrap();
-        vcs.commit(&[&vault], "drop one", &CommitContext::internal())
+        fs::remove_file(mem.join("drop.md")).unwrap();
+        vcs.commit(&[&mem], "drop one", &CommitContext::internal())
             .unwrap();
 
         let repo = gix::open(&git_dir).unwrap();
@@ -914,11 +914,11 @@ mod tests {
     #[test]
     fn commit_author_is_deterministic() {
         let dir = TempDir::new().unwrap();
-        let (vault, git_dir) = make_vault_paths(dir.path());
-        fs::write(vault.join("a.md"), "a").unwrap();
+        let (mem, git_dir) = make_mem_paths(dir.path());
+        fs::write(mem.join("a.md"), "a").unwrap();
 
-        let vcs = create_vcs(&git_dir, &vault).unwrap();
-        vcs.commit(&[&vault], "x", &CommitContext::internal())
+        let vcs = create_vcs(&git_dir, &mem).unwrap();
+        vcs.commit(&[&mem], "x", &CommitContext::internal())
             .unwrap();
 
         let repo = gix::open(&git_dir).unwrap();
@@ -955,10 +955,10 @@ mod tests {
     #[test]
     fn commit_with_agent_context_sets_author_and_trailers() {
         let dir = TempDir::new().unwrap();
-        let (vault, git_dir) = make_vault_paths(dir.path());
-        fs::write(vault.join("a.md"), "a").unwrap();
+        let (mem, git_dir) = make_mem_paths(dir.path());
+        fs::write(mem.join("a.md"), "a").unwrap();
 
-        let vcs = create_vcs(&git_dir, &vault).unwrap();
+        let vcs = create_vcs(&git_dir, &mem).unwrap();
         let ctx = CommitContext {
             actor: Actor::Agent,
             client: Some(ClientId {
@@ -970,7 +970,7 @@ mod tests {
             logical_operation_id: None,
             entity_ids: None,
         };
-        vcs.commit(&[&vault], "memstead: update specs--a", &ctx).unwrap();
+        vcs.commit(&[&mem], "memstead: update specs--a", &ctx).unwrap();
 
         let (name, email, message) = head_commit_parts(&git_dir);
         assert_eq!(name, "claude-code");
@@ -986,10 +986,10 @@ mod tests {
     #[test]
     fn commit_with_external_context_sets_external_author_and_actor_trailer() {
         let dir = TempDir::new().unwrap();
-        let (vault, git_dir) = make_vault_paths(dir.path());
-        fs::write(vault.join("a.md"), "a").unwrap();
+        let (mem, git_dir) = make_mem_paths(dir.path());
+        fs::write(mem.join("a.md"), "a").unwrap();
 
-        let vcs = create_vcs(&git_dir, &vault).unwrap();
+        let vcs = create_vcs(&git_dir, &mem).unwrap();
         let ctx = CommitContext {
             actor: Actor::External,
             client: None,
@@ -998,7 +998,7 @@ mod tests {
             logical_operation_id: None,
             entity_ids: None,
         };
-        vcs.commit(&[&vault], "external edits (1 files)", &ctx).unwrap();
+        vcs.commit(&[&mem], "external edits (1 files)", &ctx).unwrap();
 
         let (name, email, message) = head_commit_parts(&git_dir);
         assert_eq!(name, "external");
@@ -1011,10 +1011,10 @@ mod tests {
     #[test]
     fn commit_with_cli_context_emits_trailers_and_author() {
         let dir = TempDir::new().unwrap();
-        let (vault, git_dir) = make_vault_paths(dir.path());
-        fs::write(vault.join("a.md"), "a").unwrap();
+        let (mem, git_dir) = make_mem_paths(dir.path());
+        fs::write(mem.join("a.md"), "a").unwrap();
 
-        let vcs = create_vcs(&git_dir, &vault).unwrap();
+        let vcs = create_vcs(&git_dir, &mem).unwrap();
 
         // Cli without a ClientId falls back to the committer identity.
         let ctx_no_client = CommitContext {
@@ -1025,7 +1025,7 @@ mod tests {
             logical_operation_id: None,
             entity_ids: None,
         };
-        vcs.commit(&[&vault], "memstead: create specs--a", &ctx_no_client)
+        vcs.commit(&[&mem], "memstead: create specs--a", &ctx_no_client)
             .unwrap();
         let (name, email, message) = head_commit_parts(&git_dir);
         assert_eq!(name, COMMITTER_NAME);
@@ -1034,7 +1034,7 @@ mod tests {
         assert!(!message.contains("Client:"));
 
         // Cli with a ClientId yields the derived author + Client trailer.
-        fs::write(vault.join("b.md"), "b").unwrap();
+        fs::write(mem.join("b.md"), "b").unwrap();
         let ctx_with_client = CommitContext {
             actor: Actor::Cli,
             client: Some(ClientId {
@@ -1046,7 +1046,7 @@ mod tests {
             logical_operation_id: None,
             entity_ids: None,
         };
-        vcs.commit(&[&vault], "memstead: create specs--b", &ctx_with_client)
+        vcs.commit(&[&mem], "memstead: create specs--b", &ctx_with_client)
             .unwrap();
         let (name, email, message) = head_commit_parts(&git_dir);
         assert_eq!(name, "memstead-cli");
@@ -1284,7 +1284,7 @@ mod tests {
     }
 
     #[test]
-    fn cross_vault_acquires_in_lex_order() {
+    fn cross_mem_acquires_in_lex_order() {
         // Pass refs in non-lex order; the helper must sort and
         // acquire in lex order. We verify by reading back the held
         // keys via the debug-only thread-local while the guards are

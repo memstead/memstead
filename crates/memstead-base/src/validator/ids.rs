@@ -42,7 +42,7 @@ mod tests {
             id: EntityId(id.to_string()),
             title: String::new(),
             entity_type: "spec".to_string(),
-            vault: "v".to_string(),
+            mem: "v".to_string(),
             file_path: file_path.to_string(),
             metadata: IndexMap::new(),
             sections: IndexMap::new(),

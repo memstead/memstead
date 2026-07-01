@@ -1,1 +1,1 @@
-{ "intent": "Rust engine source.", "source_facets": [ "source-tree" ], "reference_vaults": [], "destination_vault": "engine" }
+{ "intent": "Rust engine source.", "source_facets": [ "source-tree" ], "reference_mems": [], "destination_mem": "engine" }

@@ -1,4 +1,4 @@
-//! `agent_notes_since` — walk a vault's branch from a caller-provided
+//! `agent_notes_since` — walk a mem's branch from a caller-provided
 //! cursor to the current tip and return one [`CommitNote`] per commit
 //! along the way, with the body parsed into structured fields.
 //!
@@ -11,7 +11,7 @@
 //! Subject shapes the engine emits (see callers of `format_commit_message`):
 //! - `memstead: <verb> <id>` (entity CRUD: `create`, `update`, `delete`)
 //! - `memstead: <verb> <from> → <to>` (`rename`, `relate`, `unrelate`)
-//! - `memstead: vault_<verb> <name>` (lifecycle, with optional ` (config)` /
+//! - `memstead: mem_<verb> <name>` (lifecycle, with optional ` (config)` /
 //!   ` (seal)` qualifier)
 //!
 //! The parser captures the verb token and the remainder of the subject
@@ -32,8 +32,8 @@ use crate::vcs::VcsError;
 // (and `memstead_git_branch::{CommitNote, ...}` via lib.rs) keep working.
 pub use memstead_base::ops::agent_notes::{AgentNotesReport, CommitNote};
 
-/// Resolve `refs/heads/__MEMSTEAD` (unified schemas + per-vault configs)
-/// in the vault-repo gitdir shared by every writable vault. Returns
+/// Resolve `refs/heads/__MEMSTEAD` (unified schemas + per-mem configs)
+/// in the mem-repo gitdir shared by every writable mem. Returns
 /// `None` when the ref does not exist — pre-migration workspaces and
 /// fresh repos legitimately have no `__MEMSTEAD` yet.
 pub fn read_memstead_ref(git_dir: &Path) -> Result<Option<String>, VcsError> {
@@ -93,7 +93,7 @@ pub fn parse_commit_message(body: &str) -> ParsedCommit {
     let subject = lines.next().unwrap_or("").trim_end().to_string();
 
     // Subject parser: `memstead: <verb> <rest>`. The remainder may itself
-    // contain spaces (rename arrow, vault qualifier) — we capture it
+    // contain spaces (rename arrow, mem qualifier) — we capture it
     // verbatim into `entity_id`. Non-engine subjects (e.g. external drift
     // commits a developer typed by hand) leave both fields `None`.
     let (tool_verb, entity_id) = parse_subject(&subject);
@@ -223,7 +223,7 @@ fn collect_note(slice: &[&str]) -> Option<String> {
     }
 }
 
-/// Walk the per-vault branch from `since` (exclusive) to the current
+/// Walk the per-mem branch from `since` (exclusive) to the current
 /// branch tip (inclusive) and return one [`CommitNote`] per commit on
 /// the path, parsed via [`parse_commit_message`]. Order: newest first
 /// (matches `git log` default).
@@ -233,10 +233,10 @@ fn collect_note(slice: &[&str]) -> Option<String> {
 /// empty report with `head` echoing the empty-tree sentinel.
 ///
 /// `head_ref` follows the same convention as
-/// [`crate::ops::changes::changes_since`]: pass `Some("refs/heads/<vault>")`
-/// for vault-repo-backed vaults, `None` to fall back to the gix HEAD.
+/// [`crate::ops::changes::changes_since`]: pass `Some("refs/heads/<mem>")`
+/// for mem-repo-backed mems, `None` to fall back to the gix HEAD.
 pub fn agent_notes_since(
-    vault_name: &str,
+    mem_name: &str,
     git_dir: &Path,
     since: &str,
     head_ref: Option<&str>,
@@ -257,7 +257,7 @@ pub fn agent_notes_since(
         Err(()) => {
             let memstead_ref = read_memstead_ref(git_dir)?;
             return Ok(AgentNotesReport {
-                vault: vault_name.to_string(),
+                mem: mem_name.to_string(),
                 since: since.to_string(),
                 head: EMPTY_TREE_SHA.to_string(),
                 notes: Vec::new(),
@@ -318,7 +318,7 @@ pub fn agent_notes_since(
 
         let parsed = parse_commit_message(&body_string);
         notes.push(CommitNote {
-            vault: vault_name.to_string(),
+            mem: mem_name.to_string(),
             sha,
             subject: parsed.subject,
             tool_verb: parsed.tool_verb,
@@ -336,7 +336,7 @@ pub fn agent_notes_since(
     let memstead_ref = read_memstead_ref(git_dir)?;
 
     Ok(AgentNotesReport {
-        vault: vault_name.to_string(),
+        mem: mem_name.to_string(),
         since: since.to_string(),
         head: head_sha,
         notes,
@@ -364,9 +364,9 @@ mod tests {
 
     #[test]
     fn parser_round_trips_logical_operation_id_trailer() {
-        // Multi-vault rename commits carry a `Logical-Op:` trailer so
+        // Multi-mem rename commits carry a `Logical-Op:` trailer so
         // consumers reading the commit log can correlate every
-        // per-vault commit a single rename produced. The folder
+        // per-mem commit a single rename produced. The folder
         // backend's JSONL writer carries the same id under its
         // `"logical_op"` field — both paths must round-trip back to
         // `Provenance.logical_operation_id`.

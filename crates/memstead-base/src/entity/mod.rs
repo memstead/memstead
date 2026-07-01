@@ -21,12 +21,12 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 
-/// Unique entity identifier: `vault--entity-path`.
+/// Unique entity identifier: `mem--entity-path`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 pub struct EntityId(pub String);
 
 impl EntityId {
-    /// Construct a vault-qualified entity id. Both inputs are NFC-
+    /// Construct a mem-qualified entity id. Both inputs are NFC-
     /// normalised before joining so the in-memory `HashMap<EntityId, ..>`
     /// key matches across compose-form variants. Without this gate, a
     /// title `"café"` (NFC) creates an entity whose id is the NFC byte
@@ -34,17 +34,17 @@ impl EntityId {
     /// produces a byte-different `EntityId` and the store reports
     /// `ENTITY_NOT_FOUND`. The write path already NFC-normalises the
     /// title before slug derivation; this constructor closes the read
-    /// path. Vault names are constrained to ASCII (per the vault grammar
-    /// in [`crate::entity::id`]), so the NFC pass on the vault half is
+    /// path. Mem names are constrained to ASCII (per the mem grammar
+    /// in [`crate::entity::id`]), so the NFC pass on the mem half is
     /// structurally a no-op — applied uniformly for symmetry.
-    pub fn new(vault: &str, slug: &str) -> Self {
+    pub fn new(mem: &str, slug: &str) -> Self {
         use unicode_normalization::UnicodeNormalization;
-        let vault_nfc: String = vault.nfc().collect();
+        let mem_nfc: String = mem.nfc().collect();
         let slug_nfc: String = slug.nfc().collect();
-        Self(format!("{vault_nfc}--{slug_nfc}"))
+        Self(format!("{mem_nfc}--{slug_nfc}"))
     }
 
-    /// Construct from a full `vault--slug` id, NFC-normalising the
+    /// Construct from a full `mem--slug` id, NFC-normalising the
     /// string. Use this at every read-path entry point that receives an
     /// id string from outside the engine (MCP tool params, CLI argv,
     /// file-path reconstruction). Direct `EntityId(s)` construction
@@ -55,8 +55,8 @@ impl EntityId {
         Self(id.nfc().collect())
     }
 
-    /// Extract the vault part: `specs--my-entity` → `specs`.
-    pub fn vault(&self) -> &str {
+    /// Extract the mem part: `specs--my-entity` → `specs`.
+    pub fn mem(&self) -> &str {
         match self.0.find("--") {
             Some(idx) => &self.0[..idx],
             None => "",
@@ -72,7 +72,7 @@ impl EntityId {
         }
     }
 
-    /// Extract the full path after vault: `specs--parent/child` → `parent/child`.
+    /// Extract the full path after mem: `specs--parent/child` → `parent/child`.
     pub fn path(&self) -> &str {
         match self.0.find("--") {
             Some(idx) => &self.0[idx + 2..],
@@ -145,7 +145,7 @@ pub struct Entity {
     pub id: EntityId,
     pub title: String,
     pub entity_type: String,
-    pub vault: String,
+    pub mem: String,
     pub file_path: String,
     /// Frontmatter metadata. Ordered (IndexMap) so iteration preserves the
     /// YAML key order the parser saw — required for deterministic rendering
@@ -203,7 +203,7 @@ pub enum StubKind {
     /// The canonical post-reload variant for every stub.
     LoadTime,
     /// Left over by a `memstead_delete` or `memstead_rename` of a real
-    /// Write-Vault entity whose surviving incoming references all
+    /// Write-Mem entity whose surviving incoming references all
     /// live in ReadOnly mounts at the time. The in-memory stub
     /// preserves those edges so `incoming(<old-id>)` stays
     /// consistent with what a fresh boot from disk would produce.
@@ -289,56 +289,56 @@ pub struct ParseResult {
 }
 
 /// Rewrite relationship and inline-link targets whose slug has a
-/// `"<vault>--<rest>"` shape where `<vault>` is a visible-writable vault
-/// name. Same-vault wiki-links (no `--` prefix, or a prefix that is not a
-/// known vault) are left unchanged — the resolver is additive and byte-
-/// identical for inputs without a known-vault prefix.
+/// `"<mem>--<rest>"` shape where `<mem>` is a visible-writable mem
+/// name. Same-mem wiki-links (no `--` prefix, or a prefix that is not a
+/// known mem) are left unchanged — the resolver is additive and byte-
+/// identical for inputs without a known-mem prefix.
 ///
-/// The parser is single-vault by construction: every produced target is
-/// `EntityId(current_vault, slug)`. This helper runs immediately after
+/// The parser is single-mem by construction: every produced target is
+/// `EntityId(current_mem, slug)`. This helper runs immediately after
 /// `parse_markdown` / `parse_file` at every parse-result consumer site so
-/// cross-vault references land in the store with the correct target vault.
-pub fn resolve_cross_vault_refs(
+/// cross-mem references land in the store with the correct target mem.
+pub fn resolve_cross_mem_refs(
     relationships: &mut [Relationship],
     inline_links: &mut [EntityId],
-    current_vault: &str,
+    current_mem: &str,
     visible_writable: &HashSet<String>,
 ) {
     for rel in relationships.iter_mut() {
-        if let Some(resolved) = rewrite_target(&rel.target, current_vault, visible_writable) {
+        if let Some(resolved) = rewrite_target(&rel.target, current_mem, visible_writable) {
             rel.target = resolved;
         }
     }
     for link in inline_links.iter_mut() {
-        if let Some(resolved) = rewrite_target(link, current_vault, visible_writable) {
+        if let Some(resolved) = rewrite_target(link, current_mem, visible_writable) {
             *link = resolved;
         }
     }
 }
 
 /// If `target`'s slug has a `"<prefix>--<rest>"` shape where `prefix` is a
-/// visible-writable vault name (and differs from `current_vault`), return
+/// visible-writable mem name (and differs from `current_mem`), return
 /// the rewritten `EntityId(prefix, rest)`. Otherwise return `None`.
 ///
 /// The split is on the **first** `--` so legacy slugs like
-/// `"some-legacy--slug"` stay same-vault whenever `"some-legacy"` is not a
-/// registered vault. Self-prefix (`prefix == current_vault`) is also a
+/// `"some-legacy--slug"` stay same-mem whenever `"some-legacy"` is not a
+/// registered mem. Self-prefix (`prefix == current_mem`) is also a
 /// no-op — it would round-trip to the same `EntityId`, but skipping the
 /// rewrite avoids an unnecessary allocation.
 fn rewrite_target(
     target: &EntityId,
-    current_vault: &str,
+    current_mem: &str,
     visible_writable: &HashSet<String>,
 ) -> Option<EntityId> {
-    if target.vault() != current_vault {
-        // Already points at another vault — this can happen when the
+    if target.mem() != current_mem {
+        // Already points at another mem — this can happen when the
         // resolver is chained (idempotent) or when the target came from
         // a non-parser path. Nothing to do.
         return None;
     }
     let path = target.path();
     let (prefix, rest) = path.split_once("--")?;
-    if prefix == current_vault {
+    if prefix == current_mem {
         return None;
     }
     if visible_writable.contains(prefix) {
@@ -356,20 +356,20 @@ mod resolve_tests {
         names.iter().map(|s| s.to_string()).collect()
     }
 
-    fn rel(rel_type: &str, vault: &str, slug: &str) -> Relationship {
+    fn rel(rel_type: &str, mem: &str, slug: &str) -> Relationship {
         Relationship {
             rel_type: rel_type.to_string(),
-            target: EntityId::new(vault, slug),
+            target: EntityId::new(mem, slug),
             description: None,
         }
     }
 
     #[test]
-    fn rewrites_cross_vault_relationship_when_prefix_is_known() {
+    fn rewrites_cross_mem_relationship_when_prefix_is_known() {
         let mut rels = vec![rel("USES", "plan", "main--foo")];
         let mut inline: Vec<EntityId> = Vec::new();
-        resolve_cross_vault_refs(&mut rels, &mut inline, "plan", &roster(&["main", "plan"]));
-        assert_eq!(rels[0].target.vault(), "main");
+        resolve_cross_mem_refs(&mut rels, &mut inline, "plan", &roster(&["main", "plan"]));
+        assert_eq!(rels[0].target.mem(), "main");
         assert_eq!(rels[0].target.path(), "foo");
     }
 
@@ -377,8 +377,8 @@ mod resolve_tests {
     fn leaves_relationship_unchanged_when_prefix_not_in_roster() {
         let mut rels = vec![rel("USES", "plan", "main--foo")];
         let mut inline: Vec<EntityId> = Vec::new();
-        resolve_cross_vault_refs(&mut rels, &mut inline, "plan", &roster(&["plan"]));
-        assert_eq!(rels[0].target.vault(), "plan");
+        resolve_cross_mem_refs(&mut rels, &mut inline, "plan", &roster(&["plan"]));
+        assert_eq!(rels[0].target.mem(), "plan");
         assert_eq!(rels[0].target.path(), "main--foo");
     }
 
@@ -386,17 +386,17 @@ mod resolve_tests {
     fn target_without_double_dash_is_unchanged() {
         let mut rels = vec![rel("USES", "plan", "foo")];
         let mut inline: Vec<EntityId> = Vec::new();
-        resolve_cross_vault_refs(&mut rels, &mut inline, "plan", &roster(&["main", "plan"]));
-        assert_eq!(rels[0].target.vault(), "plan");
+        resolve_cross_mem_refs(&mut rels, &mut inline, "plan", &roster(&["main", "plan"]));
+        assert_eq!(rels[0].target.mem(), "plan");
         assert_eq!(rels[0].target.path(), "foo");
     }
 
     #[test]
-    fn legacy_slug_with_unknown_prefix_stays_same_vault() {
+    fn legacy_slug_with_unknown_prefix_stays_same_mem() {
         let mut rels = vec![rel("USES", "plan", "some-legacy--slug")];
         let mut inline: Vec<EntityId> = Vec::new();
-        resolve_cross_vault_refs(&mut rels, &mut inline, "plan", &roster(&["main", "plan"]));
-        assert_eq!(rels[0].target.vault(), "plan");
+        resolve_cross_mem_refs(&mut rels, &mut inline, "plan", &roster(&["main", "plan"]));
+        assert_eq!(rels[0].target.mem(), "plan");
         assert_eq!(rels[0].target.path(), "some-legacy--slug");
     }
 
@@ -404,22 +404,22 @@ mod resolve_tests {
     fn rewrites_inline_links_identically_to_relationships() {
         let mut rels = vec![rel("USES", "plan", "main--foo")];
         let mut inline: Vec<EntityId> = vec![EntityId::new("plan", "main--bar")];
-        resolve_cross_vault_refs(&mut rels, &mut inline, "plan", &roster(&["main", "plan"]));
-        assert_eq!(rels[0].target.vault(), "main");
+        resolve_cross_mem_refs(&mut rels, &mut inline, "plan", &roster(&["main", "plan"]));
+        assert_eq!(rels[0].target.mem(), "main");
         assert_eq!(rels[0].target.path(), "foo");
-        assert_eq!(inline[0].vault(), "main");
+        assert_eq!(inline[0].mem(), "main");
         assert_eq!(inline[0].path(), "bar");
     }
 
     #[test]
-    fn self_prefix_is_same_vault_noop() {
+    fn self_prefix_is_same_mem_noop() {
         let mut rels = vec![rel("USES", "plan", "plan--foo")];
         let mut inline: Vec<EntityId> = Vec::new();
-        resolve_cross_vault_refs(&mut rels, &mut inline, "plan", &roster(&["main", "plan"]));
-        // "plan--foo" with current_vault="plan" is a same-vault slug
+        resolve_cross_mem_refs(&mut rels, &mut inline, "plan", &roster(&["main", "plan"]));
+        // "plan--foo" with current_mem="plan" is a same-mem slug
         // containing `--`; the resolver leaves it alone so the entity
         // id stays `plan--plan--foo` (which equals the input).
-        assert_eq!(rels[0].target.vault(), "plan");
+        assert_eq!(rels[0].target.mem(), "plan");
         assert_eq!(rels[0].target.path(), "plan--foo");
     }
 
@@ -429,20 +429,20 @@ mod resolve_tests {
         // and rest=`foo--bar` → `EntityId("main", "foo--bar")`.
         let mut rels = vec![rel("USES", "plan", "main--foo--bar")];
         let mut inline: Vec<EntityId> = Vec::new();
-        resolve_cross_vault_refs(&mut rels, &mut inline, "plan", &roster(&["main", "plan"]));
-        assert_eq!(rels[0].target.vault(), "main");
+        resolve_cross_mem_refs(&mut rels, &mut inline, "plan", &roster(&["main", "plan"]));
+        assert_eq!(rels[0].target.mem(), "main");
         assert_eq!(rels[0].target.path(), "foo--bar");
     }
 
     #[test]
-    fn target_already_in_another_vault_is_untouched() {
-        // A relationship whose target already points at another vault
+    fn target_already_in_another_mem_is_untouched() {
+        // A relationship whose target already points at another mem
         // (e.g. carried through a chained-resolver path) is idempotent
         // under a second call.
         let mut rels = vec![rel("USES", "main", "foo")];
         let mut inline: Vec<EntityId> = Vec::new();
-        resolve_cross_vault_refs(&mut rels, &mut inline, "plan", &roster(&["main", "plan"]));
-        assert_eq!(rels[0].target.vault(), "main");
+        resolve_cross_mem_refs(&mut rels, &mut inline, "plan", &roster(&["main", "plan"]));
+        assert_eq!(rels[0].target.mem(), "main");
         assert_eq!(rels[0].target.path(), "foo");
     }
 }

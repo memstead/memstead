@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Pro-build smoke: vault-repo round-trip.
+"""Pro-build smoke: mem-repo round-trip.
 
-Mirrors `basis_smoke.py` for the pro flavour. Bootstraps a vault-repo
-workspace (`memstead vault-repo init` + `memstead vault init`), boots the pro
+Mirrors `basis_smoke.py` for the pro flavour. Bootstraps a mem-repo
+workspace (`memstead mem-repo init` + `memstead mem init`), boots the pro
 `memstead-mcp`, exercises the full mutation surface end-to-end:
 
 * `memstead_create` a source + a target
@@ -13,7 +13,7 @@ workspace (`memstead vault-repo init` + `memstead vault init`), boots the pro
 * `memstead_changes_since` returns the entities since the workspace's
   initial empty-tree commit (the canonical fresh-client first sync).
 
-The vault-repo path's surface differs from filesystem in subtle ways
+The mem-repo path's surface differs from filesystem in subtle ways
 (14-tool surface, gitdir-backed commits, different changelog
 mechanism), so this probe runs the same shape as basis-mutation
 without the JSONL changelog inspection.
@@ -38,12 +38,12 @@ from mcp_client import (  # noqa: E402
     assert_true,
     cleanup_workspace,
     fresh_workspace,
-    init_vault_repo_workspace,
+    init_mem_repo_workspace,
 )
 
 
 # Canonical empty-tree git hash. `memstead_changes_since since=<this>`
-# returns every entity in the vault as `added` — the "fresh client
+# returns every entity in the mem as `added` — the "fresh client
 # first sync" semantic.
 EMPTY_TREE_SHA = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
@@ -51,12 +51,12 @@ EMPTY_TREE_SHA = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 def run(memstead: Path, memstead_mcp: Path) -> int:
     workspace = fresh_workspace()
     try:
-        init_vault_repo_workspace(memstead, memstead_mcp, workspace)
+        init_mem_repo_workspace(memstead, memstead_mcp, workspace)
 
         with McpServer(memstead_mcp, workspace) as server:
             tools = server.list_tools()
             # Pro surface is 14 tools — read-only + mutation +
-            # vault-lifecycle (`memstead_vault_create`, `memstead_vault_delete`)
+            # mem-lifecycle (`memstead_mem_create`, `memstead_mem_delete`)
             # + `memstead_reload`. The probe exercises the entity-surface
             # subset; the lifecycle tools are covered in
             # `memstead-workspace`'s in-process tests already.
@@ -67,8 +67,8 @@ def run(memstead: Path, memstead_mcp: Path) -> int:
                 "memstead_update",
                 "memstead_relate",
                 "memstead_changes_since",
-                "memstead_vault_create",
-                "memstead_vault_delete",
+                "memstead_mem_create",
+                "memstead_mem_delete",
                 "memstead_reload",
             ):
                 assert_true(required in tools, f"pro tool surface missing {required}")
@@ -79,7 +79,7 @@ def run(memstead: Path, memstead_mcp: Path) -> int:
                 {
                     "title": "Source",
                     "entity_type": "spec",
-                    "vault": "myvault",
+                    "mem": "mymem",
                     "sections": {
                         "identity": "Source entity for pro smoke.",
                         "purpose": "Drives update / relate / search checks.",
@@ -96,7 +96,7 @@ def run(memstead: Path, memstead_mcp: Path) -> int:
                 {
                     "title": "Target",
                     "entity_type": "spec",
-                    "vault": "myvault",
+                    "mem": "mymem",
                     "sections": {
                         "identity": "Target entity for pro smoke.",
                         "purpose": "Lives at the receiving end of the USES edge.",
@@ -149,7 +149,7 @@ def run(memstead: Path, memstead_mcp: Path) -> int:
             # as added.
             changes = server.call(
                 "memstead_changes_since",
-                {"vault": "myvault", "since": EMPTY_TREE_SHA},
+                {"mem": "mymem", "since": EMPTY_TREE_SHA},
             )
             assert_eq(changes.is_error, False, "changes_since")
             for required_id in (source_id, target_id):

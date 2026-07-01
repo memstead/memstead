@@ -184,29 +184,29 @@ class McpServer:
 # ---- workspace helpers ------------------------------------------------------
 
 
-def init_vault_repo_workspace(
+def init_mem_repo_workspace(
     memstead_binary: Path,
     memstead_mcp_binary: Path,
     root: Path,
-    vault_name: str = "myvault",
+    mem_name: str = "mymem",
     schema: str = "default@1.0.0",
 ) -> None:
-    """Bootstrap a vault-repo workspace at `root`.
+    """Bootstrap a mem-repo workspace at `root`.
 
     Three steps, mirroring the documented cold-start flow:
 
-    * `memstead vault-repo init` writes `vault-repo/.git/` with the unified
+    * `memstead mem-repo init` writes `mem-repo/.git/` with the unified
       `__MEMSTEAD` registry ref, the `main` README, and the
       `.memstead/workspace.toml` workspace marker.
-    * `memstead workspace allow-create` adds the `[[vault_management.create]]`
-      allowlist rule — a fresh workspace has none, and `vault init`
-      refuses with VAULT_PATH_NOT_ALLOWED without it.
-    * `memstead vault init` registers the writable vault. The vault command
+    * `memstead workspace allow-create` adds the `[[mem_management.create]]`
+      allowlist rule — a fresh workspace has none, and `mem init`
+      refuses with MEM_PATH_NOT_ALLOWED without it.
+    * `memstead mem init` registers the writable mem. The mem command
       spawns `memstead-mcp` itself (operator-mode) and calls
-      `memstead_vault_create` — passing `MEMSTEAD_MCP_BIN` as an env var so the
+      `memstead_mem_create` — passing `MEMSTEAD_MCP_BIN` as an env var so the
       spawn finds the right binary without a system-wide install.
 
-    Vault-repo commits go through gix, which needs a committer
+    Mem-repo commits go through gix, which needs a committer
     identity for the reflog — CI runners have no git config, so pin
     one process-wide (the McpServer spawned later inherits it too).
     """
@@ -215,13 +215,13 @@ def init_vault_repo_workspace(
     for var in ("GIT_AUTHOR_EMAIL", "GIT_COMMITTER_EMAIL"):
         os.environ.setdefault(var, "ci@memstead.io")
     subprocess.run(
-        [str(memstead_binary), "vault-repo", "init"],
+        [str(memstead_binary), "mem-repo", "init"],
         cwd=str(root),
         check=True,
         capture_output=True,
     )
     subprocess.run(
-        [str(memstead_binary), "workspace", "allow-create", "--schema", "*", vault_name],
+        [str(memstead_binary), "workspace", "allow-create", "--schema", "*", mem_name],
         cwd=str(root),
         check=True,
         capture_output=True,
@@ -229,7 +229,7 @@ def init_vault_repo_workspace(
     env = os.environ.copy()
     env["MEMSTEAD_MCP_BIN"] = str(memstead_mcp_binary)
     subprocess.run(
-        [str(memstead_binary), "vault", "init", vault_name, "--schema", schema],
+        [str(memstead_binary), "mem", "init", mem_name, "--schema", schema],
         cwd=str(root),
         check=True,
         capture_output=True,

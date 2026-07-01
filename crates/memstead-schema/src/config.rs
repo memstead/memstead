@@ -1,10 +1,10 @@
-//! Vault configuration loading, validation, and top-level CRUD.
+//! Mem configuration loading, validation, and top-level CRUD.
 //!
 //! Handles `.memstead/config.json` parsing, cross-field validation, and the
 //! `update_config_field` write helper. Projections/mediums, their
 //! validators, and the pre-rework migration have been dropped by the
 //! workspace rewrite — `projections` / `mediums`
-//! survive as unknown keys captured into `VaultConfig.extra` so legacy
+//! survive as unknown keys captured into `MemConfig.extra` so legacy
 //! configs still round-trip, but the engine does not interpret them.
 //!
 //! Port of @memstead/config (config-contract.js, index.js) and
@@ -16,16 +16,16 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-/// The per-vault engine-internal directory under a folder vault's
-/// root — `<vault_root>/.memstead/` holds `config.json` and
+/// The per-mem engine-internal directory under a folder mem's
+/// root — `<mem_root>/.memstead/` holds `config.json` and
 /// `changes.jsonl`. Defined here (rather than in `memstead-base`)
-/// because vault-config loading lives in this crate and `memstead-base`
+/// because mem-config loading lives in this crate and `memstead-base`
 /// depends on it; `memstead-base` re-exports the constant for
 /// downstream consumers. Distinct from the workspace store directory
 /// (`memstead_base::WORKSPACE_STORE_DIR`) and from the in-zip member
 /// paths inside sealed archives ([`ARCHIVE_META_DIR`]), which are a
 /// separate on-disk format and never use this constant.
-pub const VAULT_META_DIR: &str = ".memstead";
+pub const MEM_META_DIR: &str = ".memstead";
 
 // ---------------------------------------------------------------------------
 // Sealed-archive surface constants
@@ -94,7 +94,7 @@ pub struct ConfigCheckResult {
 }
 
 // ---------------------------------------------------------------------------
-// Vault config types (deserialized from .memstead/config.json)
+// Mem config types (deserialized from .memstead/config.json)
 // ---------------------------------------------------------------------------
 
 /// Role-based publish config.
@@ -120,23 +120,23 @@ pub struct CommunityOverride {
     pub seed: Option<u32>,
 }
 
-/// One entry in `VaultConfig.read_vaults` — a read-only sealed vault
-/// archive attached to the primary vault as reference material.
+/// One entry in `MemConfig.read_mems` — a read-only sealed mem
+/// archive attached to the primary mem as reference material.
 ///
 /// The engine resolves each entry to a cache file: when `cache_key` is
-/// present, `<vault_cache_dir>/<name>-<cache_key>.mem` (content-addressed
-/// — see [`ReadVaultSpec::cache_key`]); otherwise the legacy
-/// `<vault_cache_dir>/<name>.mem`.
+/// present, `<mem_cache_dir>/<name>-<cache_key>.mem` (content-addressed
+/// — see [`ReadMemSpec::cache_key`]); otherwise the legacy
+/// `<mem_cache_dir>/<name>.mem`.
 ///
-/// Kept as a struct (rather than collapsing to a bare `ReadVaultSource`)
+/// Kept as a struct (rather than collapsing to a bare `ReadMemSource`)
 /// so forward-compatible fields can be added without another schema break.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ReadVaultSpec {
-    pub source: ReadVaultSource,
+pub struct ReadMemSpec {
+    pub source: ReadMemSource,
     /// Content-address of the installed archive — a short hex digest of
     /// the validator's canonical bytes. The install path writes the cache
     /// file at `<cache>/<name>-<cache_key>.mem`, so two distinct archives
-    /// sharing an internal vault name land in distinct files (no collision)
+    /// sharing an internal mem name land in distinct files (no collision)
     /// and re-installing identical bytes resolves to the same file (dedup).
     /// `None` for legacy registrations written before content-addressing;
     /// the loader then falls back to the bare `<name>.mem` path.
@@ -144,14 +144,14 @@ pub struct ReadVaultSpec {
     pub cache_key: Option<String>,
 }
 
-/// How the app reconstitutes a read vault's cache file when missing.
+/// How the app reconstitutes a read mem's cache file when missing.
 ///
 /// The engine itself never fetches; `source` is metadata consumed by the
 /// app's installer. A `Registry` variant with scope/name identifiers
 /// will be added once the memstead.io registry ships.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
-pub enum ReadVaultSource {
+pub enum ReadMemSource {
     /// User dropped an archive file onto the app. App cannot auto-reinstall —
     /// it prompts the user to drop the original file again.
     Local,
@@ -167,7 +167,7 @@ pub enum ReadVaultSource {
 
 /// Reference to a schema by exact name and version — `name@x.y.z`.
 ///
-/// Serializes/deserializes as a single string so vault configs read
+/// Serializes/deserializes as a single string so mem configs read
 /// `{ "schema": "default@1.0.0" }` on disk. Range syntax (`^`, `~`,
 /// `latest`) is rejected — schema pinning is strict and explicit.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -244,16 +244,16 @@ impl<'de> Deserialize<'de> for SchemaRef {
     }
 }
 
-// `VaultSchemaPin` (the two-variant pin with a name-only fallback) was
-// retired here. Vault configs now declare a strict `<name>@<version>`
+// `MemSchemaPin` (the two-variant pin with a name-only fallback) was
+// retired here. Mem configs now declare a strict `<name>@<version>`
 // pin parsed directly through [`SchemaRef`]; bare-name pins are
 // rejected at config load.
 
-/// VCS layout for a writable vault — optional `{ gitdir, worktree }` pair
+/// VCS layout for a writable mem — optional `{ gitdir, worktree }` pair
 /// in `.memstead/config.json`. When absent, the engine resolves the default:
-/// `.git/` at vault root with `.` as worktree.
+/// `.git/` at mem root with `.` as worktree.
 ///
-/// Paths are relative to vault root and interpreted by `memstead-git-branch` —
+/// Paths are relative to mem root and interpreted by `memstead-git-branch` —
 /// this crate just carries them through serde. Masterplan §3.4 is
 /// explicit that the primitive is a pair of paths; the two canonical
 /// idioms (isolated `{ ".git", "." }` and shared `{ "../.git", ".." }`)
@@ -261,11 +261,11 @@ impl<'de> Deserialize<'de> for SchemaRef {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct VcsConfig {
-    /// Path to the gitdir relative to vault root. Required when the
+    /// Path to the gitdir relative to mem root. Required when the
     /// `vcs` block is present.
     pub gitdir: String,
-    /// Path to the worktree relative to vault root. Optional within the
-    /// `vcs` block — defaults to `"."` (vault root) when omitted.
+    /// Path to the worktree relative to mem root. Optional within the
+    /// `vcs` block — defaults to `"."` (mem root) when omitted.
     #[serde(default = "vcs_worktree_default")]
     pub worktree: String,
 }
@@ -278,7 +278,7 @@ fn vcs_worktree_default() -> String {
 /// (`{ gitdir, worktree? }`) and returns `None` for any non-object value
 /// (string, number, boolean, null). A missing field is also `None`.
 ///
-/// Motivation: an older macOS Vault-mode UI wrote `"vcs": "system"`
+/// Motivation: an older macOS Mem-mode UI wrote `"vcs": "system"`
 /// (and similar sentinel strings) into `.memstead/config.json` files that
 /// now must continue to load without editing those files by hand.
 /// Strict validation of the object form — unknown keys, missing
@@ -300,41 +300,41 @@ where
     }
 }
 
-/// Full vault configuration loaded from .memstead/config.json.
+/// Full mem configuration loaded from .memstead/config.json.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct VaultConfig {
-    /// Optional vault name. The leaf folder name under
-    /// `__MEMSTEAD:vaults/` (and the disk basename on the legacy disk
+pub struct MemConfig {
+    /// Optional mem name. The leaf folder name under
+    /// `__MEMSTEAD:mems/` (and the disk basename on the legacy disk
     /// path) is authoritative; engine-written configs omit this
     /// field. Tolerated on read for pre-cutover configs and for the
-    /// [`PublishedVaultConfig`] conversion path that still requires
+    /// [`PublishedMemConfig`] conversion path that still requires
     /// an explicit identity (the caller passes the name in when
     /// projecting).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
 
-    /// Semver version of the vault content. Read at vault-archive export
+    /// Semver version of the mem content. Read at mem-archive export
     /// time so the engine always knows the current version without manual
     /// tracking. Parsed at config load — invalid version strings fail fast
     /// with a source-attributed serde error rather than slipping through to
     /// export (where the issue only surfaces when a downstream loader tries
-    /// to resolve a `semver::VersionReq` against the vault).
+    /// to resolve a `semver::VersionReq` against the mem).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<semver::Version>,
 
-    /// One-line description of the vault, surfaced in vault-archive metadata
+    /// One-line description of the mem, surfaced in mem-archive metadata
     /// and UI.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
 
-    /// Optional author attribution, surfaced in vault-archive metadata.
+    /// Optional author attribution, surfaced in mem-archive metadata.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub authors: Option<Vec<String>>,
 
-    /// Schema this vault is pinned to. Exact `<name>@<version>` pin
+    /// Schema this mem is pinned to. Exact `<name>@<version>` pin
     /// only — bare-name forms are rejected at config load. Exactly one
-    /// schema per vault. The `Option` keeps serde tolerant so a missing
+    /// schema per mem. The `Option` keeps serde tolerant so a missing
     /// key surfaces as a structured error from `check_config` rather
     /// than a deserialize panic; a `None` value is a validation error.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -343,7 +343,7 @@ pub struct VaultConfig {
     /// Opaque string-map passed through by the engine. Agents and
     /// plugin prompt renderers are free to invent their own keys; the
     /// engine does not parse, validate, or interpret any value inside.
-    /// Stripped from `PublishedVaultConfig` — guidance is workspace-
+    /// Stripped from `PublishedMemConfig` — guidance is workspace-
     /// local authorship metadata, not part of the published identity.
     ///
     /// Pre-2026-04-24 this field was `Option<Value>`; the workspace
@@ -359,35 +359,35 @@ pub struct VaultConfig {
     pub publish: Option<PublishConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub language: Option<String>,
-    /// Read-only sealed-archive vaults attached to this vault as reference
-    /// material. Key is the vault name (matches the archive's
+    /// Read-only sealed-archive mems attached to this mem as reference
+    /// material. Key is the mem name (matches the archive's
     /// config name). Engine resolves each entry to
-    /// `<vault_cache_dir>/<name>.mem` at init time. An empty or omitted
-    /// map means no attached vaults — a graph with no reference material.
+    /// `<mem_cache_dir>/<name>.mem` at init time. An empty or omitted
+    /// map means no attached mems — a graph with no reference material.
     ///
     /// `BTreeMap` (not `HashMap`) so iteration and serialization order
     /// are stable — reproducible log output and diff-friendly config on
-    /// disk. Explicit `rename = "readVaults"` documents the on-disk name
+    /// disk. Explicit `rename = "readMems"` documents the on-disk name
     /// at the field (the struct-level `rename_all = "camelCase"` already
     /// handles it, but explicit rename is greppable from either side).
     #[serde(
-        rename = "readVaults",
+        rename = "readMems",
         default,
         skip_serializing_if = "BTreeMap::is_empty"
     )]
-    pub read_vaults: BTreeMap<String, ReadVaultSpec>,
+    pub read_mems: BTreeMap<String, ReadMemSpec>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub community: Option<CommunityOverride>,
 
     /// Optional VCS layout override. When absent, `memstead-git-branch` resolves
-    /// the default at init time: `.git/` at vault root with `.` as
+    /// the default at init time: `.git/` at mem root with `.` as
     /// worktree. When present, `gitdir` and `worktree` are paths
-    /// relative to the vault root. Stripped from `PublishedVaultConfig`
+    /// relative to the mem root. Stripped from `PublishedMemConfig`
     /// — VCS layout is workspace-local mechanics, not part of the
-    /// published vault's identity.
+    /// published mem's identity.
     ///
     /// Deserialization is tolerant of legacy non-object values (e.g.
-    /// `"vcs": "system"` — the sentinel an older macOS Vault-mode
+    /// `"vcs": "system"` — the sentinel an older macOS Mem-mode
     /// UI wrote): any non-object form deserializes to `None` and falls
     /// back to the default-resolution path. The object form is validated
     /// strictly.
@@ -398,18 +398,18 @@ pub struct VaultConfig {
     )]
     pub vcs: Option<VcsConfig>,
 
-    /// Tombstone marker written by `memstead vault unregister`. ISO-8601
+    /// Tombstone marker written by `memstead mem unregister`. ISO-8601
     /// UTC timestamp (`YYYY-MM-DDTHH:MM:SSZ`) recorded at the moment
-    /// the vault was unregistered while its storage was preserved.
-    /// When `memstead vault init <same-name>`
+    /// the mem was unregistered while its storage was preserved.
+    /// When `memstead mem init <same-name>`
     /// probes the storage and finds an `unregistered_at` value, it
     /// treats the residue as deliberate operator state and defaults
     /// to the `Reattach` recovery action (adopting the preserved
     /// entities and clearing the tombstone). Absence (`None`) on
-    /// otherwise-present residue triggers `VAULT_STORAGE_RESIDUE_DETECTED`
+    /// otherwise-present residue triggers `MEM_STORAGE_RESIDUE_DETECTED`
     /// unless the caller passes an explicit `recovery` flag. Stripped
-    /// from `PublishedVaultConfig` — tombstones are workspace-local
-    /// lifecycle state, not part of the published vault's identity.
+    /// from `PublishedMemConfig` — tombstones are workspace-local
+    /// lifecycle state, not part of the published mem's identity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unregistered_at: Option<String>,
 
@@ -425,11 +425,11 @@ pub struct VaultConfig {
     /// string. This is the durable, shared baseline against which a
     /// fresh ingest iteration diffs "what changed since last time";
     /// it survives a skill-cache wipe and a machine change because it
-    /// lives in engine-held vault config, not ephemeral plugin cache.
+    /// lives in engine-held mem config, not ephemeral plugin cache.
     ///
-    /// Stripped from `PublishedVaultConfig` — sync state is
+    /// Stripped from `PublishedMemConfig` — sync state is
     /// workspace-local ingest bookkeeping, not part of a published
-    /// vault's identity. `BTreeMap` (not `HashMap`) for stable
+    /// mem's identity. `BTreeMap` (not `HashMap`) for stable
     /// serialization order: diff-friendly config on disk and
     /// reproducible dump output.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -438,7 +438,7 @@ pub struct VaultConfig {
     /// Extra fields not in the known set (captured for round-tripping).
     ///
     /// Historical tombstones:
-    /// - `defaultSchema` (pre-2026-04): legacy per-vault default type.
+    /// - `defaultSchema` (pre-2026-04): legacy per-mem default type.
     ///   Per-entity `type:` frontmatter is authoritative now.
     /// - `types: [...]` (pre-schema-artifact, 2026-04): replaced by
     ///   `schema: "<name>@<version>"`. Legacy entries are hard-rejected
@@ -448,16 +448,16 @@ pub struct VaultConfig {
 }
 
 // ---------------------------------------------------------------------------
-// Published (archive) vault config
+// Published (archive) mem config
 // ---------------------------------------------------------------------------
 
-/// Strict-ingress shape of a vault config. This is the **only** metadata
-/// form that enters a `.mem` archive. `VaultConfig` carries author-only
-/// fields (writeGuidance, rules, publish, readVaults, language,
+/// Strict-ingress shape of a mem config. This is the **only** metadata
+/// form that enters a `.mem` archive. `MemConfig` carries author-only
+/// fields (writeGuidance, rules, publish, readMems, language,
 /// community, defaultSchema, vcs, plus any key captured in
 /// `extra`) that never belong in a published archive;
-/// `published_config_from` projects `VaultConfig` →
-/// `PublishedVaultConfig`, dropping everything outside the whitelist.
+/// `published_config_from` projects `MemConfig` →
+/// `PublishedMemConfig`, dropping everything outside the whitelist.
 ///
 /// `deny_unknown_fields` + no `serde(flatten)` on purpose: the validator
 /// re-parses this shape with the same struct as defense-in-depth, so any
@@ -465,7 +465,7 @@ pub struct VaultConfig {
 /// instead of a silently-tolerated payload.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct PublishedVaultConfig {
+pub struct PublishedMemConfig {
     pub format: u32,
     pub name: String,
     pub version: semver::Version,
@@ -481,7 +481,7 @@ pub struct PublishedVaultConfig {
 /// moved from top-level `schema/` to the meta-dir schema tree). `format: 1` (V1)
 /// and `format: 2` (V2, top-level `schema/` tree) archives are rejected
 /// cleanly (pre-release, no external users to migrate).
-pub const PUBLISHED_VAULT_FORMAT: u32 = 3;
+pub const PUBLISHED_MEM_FORMAT: u32 = 3;
 
 /// Errors returned by `published_config_from`. Actionable messages —
 /// the caller (export pipeline, publish pipeline) surfaces these
@@ -489,7 +489,7 @@ pub const PUBLISHED_VAULT_FORMAT: u32 = 3;
 #[derive(Debug, thiserror::Error)]
 pub enum PublishConversionError {
     #[error(
-        "config.version is required for vault publish — set it in .memstead/config.json"
+        "config.version is required for mem publish — set it in .memstead/config.json"
     )]
     MissingVersion,
     #[error(
@@ -497,28 +497,28 @@ pub enum PublishConversionError {
     )]
     MissingSchema,
     #[error(
-        "publish requires an explicit vault name — caller must pass the leaf folder name (Goal 3 of vault-repo-restructure dropped the in-config `name` requirement)"
+        "publish requires an explicit mem name — caller must pass the leaf folder name (Goal 3 of mem-repo-restructure dropped the in-config `name` requirement)"
     )]
     MissingName,
 }
 
 /// The whitelist projection. Everything author-only is discarded; only
 /// the fields that make sense outside the author's working directory
-/// ride into the archive. `format` is pinned at `PUBLISHED_VAULT_FORMAT`.
+/// ride into the archive. `format` is pinned at `PUBLISHED_MEM_FORMAT`.
 ///
 /// `name` is supplied explicitly by the caller — the on-disk `name`
 /// field is optional and the engine no longer treats it as the
-/// vault-identity source. The published archive still needs an
+/// mem-identity source. The published archive still needs an
 /// identity, so the publishing path passes the leaf folder name
-/// (`__MEMSTEAD:vaults/<path>/<leaf>/config.json`'s `<leaf>`, or the
+/// (`__MEMSTEAD:mems/<path>/<leaf>/config.json`'s `<leaf>`, or the
 /// disk basename on the legacy disk path) here. Falls back to the
 /// in-config `name` field when the caller passes an empty string and
 /// the config still carries a legacy `name` value (so pre-cutover
 /// archives published before the migration land cleanly).
 pub fn published_config_from(
-    config: &VaultConfig,
+    config: &MemConfig,
     name: &str,
-) -> Result<PublishedVaultConfig, PublishConversionError> {
+) -> Result<PublishedMemConfig, PublishConversionError> {
     let version = config
         .version
         .clone()
@@ -535,8 +535,8 @@ pub fn published_config_from(
     } else {
         name.to_string()
     };
-    Ok(PublishedVaultConfig {
-        format: PUBLISHED_VAULT_FORMAT,
+    Ok(PublishedMemConfig {
+        format: PUBLISHED_MEM_FORMAT,
         name: resolved_name,
         version,
         description: config.description.clone(),
@@ -558,7 +558,7 @@ const KNOWN_TOP_LEVEL_KEYS: &[&str] = &[
     "rules",
     "publish",
     "language",
-    "readVaults",
+    "readMems",
     "community",
     "vcs",
     "syncState",
@@ -583,15 +583,15 @@ const LEGACY_TOMBSTONE_KEYS: &[(&str, &str)] = &[
     ),
     (
         "name",
-        "Legacy `name` field detected — the vault leaf folder under `__MEMSTEAD:vaults/` (or the \
+        "Legacy `name` field detected — the mem leaf folder under `__MEMSTEAD:mems/` (or the \
          disk basename on the legacy disk path) is path-derived under the unified layout; \
          remove the field from `.memstead/config.json`.",
     ),
     (
         "belongsTo",
-        "Legacy `belongsTo` field detected — cross-vault authorization moved to the \
-         workspace-level `[cross_vault_links]` section in `.memstead/workspace.toml`. Remove the \
-         field from `.memstead/config.json` and add an entry under `[cross_vault_links]` \
+        "Legacy `belongsTo` field detected — cross-mem authorization moved to the \
+         workspace-level `[cross_mem_links]` section in `.memstead/workspace.toml`. Remove the \
+         field from `.memstead/config.json` and add an entry under `[cross_mem_links]` \
          instead.",
     ),
 ];
@@ -651,20 +651,20 @@ pub fn check_config(config: &Value) -> ConfigCheckResult {
         ),
     }
 
-    // 4. Read-vaults map — source presence and shape.
+    // 4. Read-mems map — source presence and shape.
     //    Cache-file existence is checked at engine init (`Engine::init`
-    //    via `vault_cache`), not here, so isolated schema tests don't
+    //    via `mem_cache`), not here, so isolated schema tests don't
     //    need real archive fixture files. The cached archive's config is
     //    authoritative for the version; no `version` or `path` is
     //    recorded in the config entry.
-    if let Some(Value::Object(vaults)) = obj.get("readVaults") {
-        for (name, spec) in vaults {
-            let entry_path = format!("readVaults.{name}");
+    if let Some(Value::Object(mems)) = obj.get("readMems") {
+        for (name, spec) in mems {
+            let entry_path = format!("readMems.{name}");
 
             let spec_obj = match spec.as_object() {
                 Some(o) => o,
                 None => {
-                    errors.push(format!("{entry_path}: read-vault entry must be an object"));
+                    errors.push(format!("{entry_path}: read-mem entry must be an object"));
                     continue;
                 }
             };
@@ -673,7 +673,7 @@ pub fn check_config(config: &Value) -> ConfigCheckResult {
                 Some(s) => s,
                 None => {
                     errors.push(format!(
-                        "{entry_path}.source: read-vault entry must declare a source \
+                        "{entry_path}.source: read-mem entry must declare a source \
                          (e.g. {{\"type\": \"local\"}} or {{\"type\": \"url\", \"url\": \"…\"}})"
                     ));
                     continue;
@@ -703,8 +703,8 @@ pub fn check_config(config: &Value) -> ConfigCheckResult {
     }
 
     // 5. `belongsTo` is now a tombstone (see `LEGACY_TOMBSTONE_KEYS`).
-    //    Cross-vault authorization moved to the workspace-level
-    //    `[cross_vault_links]` section in `.memstead/workspace.toml`. Per-vault config
+    //    Cross-mem authorization moved to the workspace-level
+    //    `[cross_mem_links]` section in `.memstead/workspace.toml`. Per-mem config
     //    blobs that still carry the field are rejected with the
     //    tombstone error above; no shape validation runs here.
 
@@ -740,10 +740,10 @@ pub fn check_config(config: &Value) -> ConfigCheckResult {
 // Config loading
 // ---------------------------------------------------------------------------
 
-/// Load and parse a config from a vault directory.
-/// Reads `<vault_dir>/.memstead/config.json`.
-pub fn load_config(vault_dir: &Path) -> Result<(Value, PathBuf), ConfigError> {
-    let config_path = vault_dir.join(VAULT_META_DIR).join("config.json");
+/// Load and parse a config from a mem directory.
+/// Reads `<mem_dir>/.memstead/config.json`.
+pub fn load_config(mem_dir: &Path) -> Result<(Value, PathBuf), ConfigError> {
+    let config_path = mem_dir.join(MEM_META_DIR).join("config.json");
     let raw = std::fs::read_to_string(&config_path).map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
             ConfigError::NotFound(config_path.display().to_string())
@@ -756,21 +756,21 @@ pub fn load_config(vault_dir: &Path) -> Result<(Value, PathBuf), ConfigError> {
     Ok((parsed, config_path))
 }
 
-/// Parse a raw JSON value into a VaultConfig.
-pub fn parse_vault_config(value: &Value) -> Result<VaultConfig, ConfigError> {
+/// Parse a raw JSON value into a MemConfig.
+pub fn parse_mem_config(value: &Value) -> Result<MemConfig, ConfigError> {
     serde_json::from_value(value.clone()).map_err(|e| ConfigError::Other(e.to_string()))
 }
 
-/// Load, validate, and parse a vault config from disk.
-pub fn load_and_validate(vault_dir: &Path) -> Result<VaultConfig, ConfigError> {
-    let (raw, _path) = load_config(vault_dir)?;
+/// Load, validate, and parse a mem config from disk.
+pub fn load_and_validate(mem_dir: &Path) -> Result<MemConfig, ConfigError> {
+    let (raw, _path) = load_config(mem_dir)?;
 
     let result = check_config(&raw);
     if !result.valid {
         return Err(ConfigError::ValidationFailed(result.errors));
     }
 
-    parse_vault_config(&raw)
+    parse_mem_config(&raw)
 }
 
 // ---------------------------------------------------------------------------
@@ -815,7 +815,7 @@ const ALLOWED_UPDATE_FIELDS: &[&str] = &[
     "authors",
     "writeGuidance",
     "rules",
-    "readVaults",
+    "readMems",
     "schema",
     "language",
     "publish",
@@ -875,7 +875,7 @@ mod tests {
 
     /// The in-config `name` field is optional — configs without a
     /// `name` key are valid; the leaf folder name under
-    /// `__MEMSTEAD:vaults/` (or the disk basename on the legacy disk
+    /// `__MEMSTEAD:mems/` (or the disk basename on the legacy disk
     /// path) is the authoritative identifier instead.
     #[test]
     fn check_missing_name_now_valid() {
@@ -884,22 +884,22 @@ mod tests {
         assert!(result.valid, "errors: {:?}", result.errors);
     }
 
-    /// `parse_vault_config` produces a `VaultConfig` whose `name` is
+    /// `parse_mem_config` produces a `MemConfig` whose `name` is
     /// `None` when the on-disk config omits the field. Pins the
     /// Goal 3 wire-shape contract.
     #[test]
-    fn parse_vault_config_name_none_when_field_absent() {
+    fn parse_mem_config_name_none_when_field_absent() {
         let config = json!({"schema": "default@1.0.0"});
-        let parsed = parse_vault_config(&config).expect("name-less config parses");
+        let parsed = parse_mem_config(&config).expect("name-less config parses");
         assert!(parsed.name.is_none());
     }
 
-    /// Round-trip: a `VaultConfig` whose `name` is `None` serialises
+    /// Round-trip: a `MemConfig` whose `name` is `None` serialises
     /// without the `name` key (skip-if-none on the serde attribute).
     /// Pins the on-disk minimisation contract.
     #[test]
-    fn vault_config_omits_name_when_none_on_serialize() {
-        let cfg = VaultConfig {
+    fn mem_config_omits_name_when_none_on_serialize() {
+        let cfg = MemConfig {
             name: None,
             version: None,
             description: None,
@@ -909,7 +909,7 @@ mod tests {
             rules: None,
             publish: None,
             language: None,
-            read_vaults: Default::default(),
+            read_mems: Default::default(),
             community: None,
             vcs: None,
             unregistered_at: None,
@@ -928,7 +928,7 @@ mod tests {
     /// non-empty shapes collapse onto the legacy tombstone reject.
     #[test]
     fn check_legacy_name_field_rejected() {
-        for value in [json!(""), json!("@test/vault")] {
+        for value in [json!(""), json!("@test/mem")] {
             let config = json!({"name": value, "schema": "default@1.0.0"});
             let result = check_config(&config);
             assert!(!result.valid, "name={value}: expected reject");
@@ -975,8 +975,8 @@ mod tests {
 
     #[test]
     fn check_schema_bare_name_rejected() {
-        // Bare-name pins are rejected at load — every vault config must
-        // declare an exact `<name>@<version>` pin so cross-vault link
+        // Bare-name pins are rejected at load — every mem config must
+        // declare an exact `<name>@<version>` pin so cross-mem link
         // matching and archive identity are unambiguous.
         let config = json!({"schema": "default"});
         let result = check_config(&config);
@@ -1039,7 +1039,7 @@ mod tests {
         // Archives record a concrete schema version; a config without a
         // `schema` field cannot be published.
         let json = json!({ "version": "1.0.0" });
-        let config = parse_vault_config(&json).unwrap();
+        let config = parse_mem_config(&json).unwrap();
         let err = published_config_from(&config, "demo").unwrap_err();
         assert!(matches!(err, PublishConversionError::MissingSchema));
     }
@@ -1050,7 +1050,7 @@ mod tests {
             "version": "1.0.0",
             "schema": "software@2.3.4"
         });
-        let config = parse_vault_config(&json).unwrap();
+        let config = parse_mem_config(&json).unwrap();
         let published = published_config_from(&config, "demo").expect("versioned pin publishes");
         assert_eq!(published.name, "demo");
         assert_eq!(published.schema.name, "software");
@@ -1079,7 +1079,7 @@ mod tests {
             "schema": "default@1.0.0",
             "defaultSchema": "concept"
         });
-        let cfg: VaultConfig = serde_json::from_value(raw).expect("config deserialized");
+        let cfg: MemConfig = serde_json::from_value(raw).expect("config deserialized");
         assert!(
             cfg.extra.contains_key("defaultSchema"),
             "legacy field should be preserved in extra: {:?}",
@@ -1124,17 +1124,17 @@ mod tests {
         );
     }
 
-    // --- VaultConfig slimdown ---
+    // --- MemConfig slimdown ---
 
     #[test]
     fn slim_config_with_only_retained_core_fields_loads() {
         // The post-slimdown engine reads a minimal config carrying only
         // the fields it actually uses. `schema`, `vcs`, `writeGuidance`
         // are the intent-level retained set; serde-required collection
-        // defaults fill the rest. The vault leaf identity is path-derived
-        // (Goal 3 of vault-repo-restructure) so the in-config `name`
-        // field is now a tombstone (Goal 10). Cross-vault authorization
-        // moved to `.memstead/workspace.toml`'s `[cross_vault_links]` section.
+        // defaults fill the rest. The mem leaf identity is path-derived
+        // (Goal 3 of mem-repo-restructure) so the in-config `name`
+        // field is now a tombstone (Goal 10). Cross-mem authorization
+        // moved to `.memstead/workspace.toml`'s `[cross_mem_links]` section.
         let raw = json!({
             "schema": "default@1.0.0",
             "writeGuidance": {
@@ -1145,7 +1145,7 @@ mod tests {
         });
         let check = check_config(&raw);
         assert!(check.valid, "errors: {:?}", check.errors);
-        let parsed = parse_vault_config(&raw).expect("slim config parses");
+        let parsed = parse_mem_config(&raw).expect("slim config parses");
         assert!(parsed.name.is_none());
         assert_eq!(parsed.write_guidance.len(), 2);
         assert_eq!(
@@ -1160,7 +1160,7 @@ mod tests {
     fn legacy_projections_block_lands_in_extra_without_error() {
         // Pre-rewrite configs carrying `projections` / `mediums` blocks
         // are no longer interpreted by the engine, but round-tripping
-        // them must not fail — the blocks fall into `VaultConfig.extra`
+        // them must not fail — the blocks fall into `MemConfig.extra`
         // so read-modify-write preserves authorship. check_config emits
         // a "Unknown config key" warning per unrecognised top-level key.
         let raw = json!({
@@ -1193,7 +1193,7 @@ mod tests {
             check.warnings
         );
 
-        let parsed = parse_vault_config(&raw).expect("legacy config parses");
+        let parsed = parse_mem_config(&raw).expect("legacy config parses");
         assert!(
             parsed.extra.contains_key("projections"),
             "legacy `projections` must land in extra: {:?}",
@@ -1221,7 +1221,7 @@ mod tests {
                 "count": 42
             }
         });
-        let parsed = parse_vault_config(&raw).expect("config parses");
+        let parsed = parse_mem_config(&raw).expect("config parses");
         assert_eq!(parsed.write_guidance.len(), 4);
         assert_eq!(
             parsed.write_guidance.get("style").and_then(|v| v.as_str()),
@@ -1258,7 +1258,7 @@ mod tests {
         // `skip_serializing_if = "HashMap::is_empty"` keeps an unset
         // writeGuidance off the wire entirely so existing minimal
         // configs don't gain an empty `{}` after a round-trip.
-        let parsed: VaultConfig = serde_json::from_value(minimal_valid_config()).unwrap();
+        let parsed: MemConfig = serde_json::from_value(minimal_valid_config()).unwrap();
         assert!(parsed.write_guidance.is_empty());
         let wire = serde_json::to_value(&parsed).unwrap();
         assert!(
@@ -1269,7 +1269,7 @@ mod tests {
 
     #[test]
     fn published_config_strips_extra_and_write_guidance() {
-        // `PublishedVaultConfig` uses `deny_unknown_fields` with a
+        // `PublishedMemConfig` uses `deny_unknown_fields` with a
         // fixed whitelist — the catchall `extra` and the pass-through
         // `writeGuidance` both fall off the projection. This guards
         // against a future reviewer adding either to the whitelist by
@@ -1283,7 +1283,7 @@ mod tests {
         guidance.insert("style".to_string(), json!("structured"));
         let mut sync_state = BTreeMap::new();
         sync_state.insert("engine-graph/source-files".to_string(), "deadbeef".to_string());
-        let cfg = VaultConfig {
+        let cfg = MemConfig {
             name: Some("demo".to_string()),
             version: Some(semver::Version::new(0, 1, 0)),
             description: None,
@@ -1293,7 +1293,7 @@ mod tests {
             rules: None,
             publish: None,
             language: None,
-            read_vaults: BTreeMap::new(),
+            read_mems: BTreeMap::new(),
             community: None,
             vcs: None,
             unregistered_at: None,
@@ -1372,7 +1372,7 @@ mod tests {
             "schema": "default@1.0.0",
             "version": "1.2.3-beta.4"
         });
-        let parsed = parse_vault_config(&cfg).expect("valid semver should parse");
+        let parsed = parse_mem_config(&cfg).expect("valid semver should parse");
         let v = parsed.version.expect("version present");
         assert_eq!(v.major, 1);
         assert_eq!(v.minor, 2);
@@ -1387,7 +1387,7 @@ mod tests {
             "schema": "default@1.0.0",
             "version": "1.2"
         });
-        let err = parse_vault_config(&cfg).expect_err("invalid semver must fail at parse");
+        let err = parse_mem_config(&cfg).expect_err("invalid semver must fail at parse");
         let msg = format!("{err}");
         assert!(
             msg.contains("version"),
@@ -1401,7 +1401,7 @@ mod tests {
             "schema": "default@1.0.0",
             "version": "potato"
         });
-        let err = parse_vault_config(&cfg).expect_err("garbage must fail at parse");
+        let err = parse_mem_config(&cfg).expect_err("garbage must fail at parse");
         let msg = format!("{err}");
         assert!(
             msg.contains("version"),
@@ -1409,32 +1409,32 @@ mod tests {
         );
     }
 
-    // --- readVaults: `{ source: { type, … } }` entries — no path or
+    // --- readMems: `{ source: { type, … } }` entries — no path or
     //     version fields (the cached archive's config is authoritative) ---
 
     #[test]
-    fn parse_accepts_read_vaults_with_local_source() {
+    fn parse_accepts_read_mems_with_local_source() {
         let cfg = json!({
             "schema": "default@1.0.0",
-            "readVaults": {
+            "readMems": {
                 "internal-notes": { "source": { "type": "local" } }
             }
         });
         let check = check_config(&cfg);
         assert!(check.valid, "errors: {:?}", check.errors);
-        let parsed = parse_vault_config(&cfg).expect("valid readVaults must parse");
+        let parsed = parse_mem_config(&cfg).expect("valid readMems must parse");
         let spec = parsed
-            .read_vaults
+            .read_mems
             .get("internal-notes")
             .expect("entry present");
-        assert!(matches!(spec.source, ReadVaultSource::Local));
+        assert!(matches!(spec.source, ReadMemSource::Local));
     }
 
     #[test]
-    fn parse_accepts_read_vaults_with_url_source() {
+    fn parse_accepts_read_mems_with_url_source() {
         let cfg = json!({
             "schema": "default@1.0.0",
-            "readVaults": {
+            "readMems": {
                 "aws-patterns": {
                     "source": {
                         "type": "url",
@@ -1445,13 +1445,13 @@ mod tests {
         });
         let check = check_config(&cfg);
         assert!(check.valid, "errors: {:?}", check.errors);
-        let parsed = parse_vault_config(&cfg).expect("valid readVaults must parse");
+        let parsed = parse_mem_config(&cfg).expect("valid readMems must parse");
         let spec = parsed
-            .read_vaults
+            .read_mems
             .get("aws-patterns")
             .expect("entry present");
         match &spec.source {
-            ReadVaultSource::Url { url } => {
+            ReadMemSource::Url { url } => {
                 assert_eq!(url, "https://example.com/aws-patterns.mem")
             }
             _ => panic!("expected Url source, got {:?}", spec.source),
@@ -1459,29 +1459,29 @@ mod tests {
     }
 
     #[test]
-    fn parse_accepts_empty_read_vaults_map() {
+    fn parse_accepts_empty_read_mems_map() {
         let cfg = json!({
             "schema": "default@1.0.0",
-            "readVaults": {}
+            "readMems": {}
         });
-        let parsed = parse_vault_config(&cfg).expect("empty readVaults must parse");
-        assert!(parsed.read_vaults.is_empty());
+        let parsed = parse_mem_config(&cfg).expect("empty readMems must parse");
+        assert!(parsed.read_mems.is_empty());
     }
 
     #[test]
-    fn parse_accepts_omitted_read_vaults() {
+    fn parse_accepts_omitted_read_mems() {
         let cfg = json!({
             "schema": "default@1.0.0"
         });
-        let parsed = parse_vault_config(&cfg).expect("omitted readVaults must parse");
-        assert!(parsed.read_vaults.is_empty());
+        let parsed = parse_mem_config(&cfg).expect("omitted readMems must parse");
+        assert!(parsed.read_mems.is_empty());
     }
 
     #[test]
-    fn check_rejects_read_vault_without_source() {
+    fn check_rejects_read_mem_without_source() {
         let cfg = json!({
             "schema": "default@1.0.0",
-            "readVaults": { "p": {} }
+            "readMems": { "p": {} }
         });
         let check = check_config(&cfg);
         assert!(!check.valid);
@@ -1493,10 +1493,10 @@ mod tests {
     }
 
     #[test]
-    fn check_rejects_read_vault_with_unknown_source_type() {
+    fn check_rejects_read_mem_with_unknown_source_type() {
         let cfg = json!({
             "schema": "default@1.0.0",
-            "readVaults": {
+            "readMems": {
                 "p": { "source": { "type": "ftp", "url": "ftp://..." } }
             }
         });
@@ -1516,7 +1516,7 @@ mod tests {
     fn check_rejects_url_source_with_empty_url() {
         let cfg = json!({
             "schema": "default@1.0.0",
-            "readVaults": {
+            "readMems": {
                 "p": { "source": { "type": "url", "url": "" } }
             }
         });
@@ -1533,7 +1533,7 @@ mod tests {
     fn check_rejects_registry_source_type_reserved_for_phase_d() {
         let cfg = json!({
             "schema": "default@1.0.0",
-            "readVaults": {
+            "readMems": {
                 "p": { "source": { "type": "registry" } }
             }
         });
@@ -1552,21 +1552,21 @@ mod tests {
         );
     }
 
-    /// Guards the `BTreeMap` choice: serialized read_vaults must come out
+    /// Guards the `BTreeMap` choice: serialized read_mems must come out
     /// in key-sorted order regardless of insertion order, so config files
     /// on disk and log output are reproducible. A future "optimisation"
     /// that reintroduces `HashMap` would break this.
     #[test]
-    fn read_vaults_serialization_order_is_key_sorted() {
+    fn read_mems_serialization_order_is_key_sorted() {
         let cfg = json!({
             "schema": "default@1.0.0",
-            "readVaults": {
+            "readMems": {
                 "zebra": { "source": { "type": "local" } },
                 "alpha": { "source": { "type": "local" } },
                 "mango": { "source": { "type": "local" } }
             }
         });
-        let parsed = parse_vault_config(&cfg).expect("valid config must parse");
+        let parsed = parse_mem_config(&cfg).expect("valid config must parse");
         let reserialized = serde_json::to_string(&parsed).expect("serialization must succeed");
         let alpha = reserialized.find("alpha").expect("alpha present");
         let mango = reserialized.find("mango").expect("mango present");
@@ -1585,14 +1585,14 @@ mod tests {
             "schema": "default@1.0.0",
             "vcs": { "gitdir": "../.git", "worktree": ".." }
         });
-        let parsed = parse_vault_config(&cfg).expect("valid config must parse");
+        let parsed = parse_mem_config(&cfg).expect("valid config must parse");
         let vcs = parsed.vcs.as_ref().expect("vcs must be Some");
         assert_eq!(vcs.gitdir, "../.git");
         assert_eq!(vcs.worktree, "..");
 
         // Round-trip.
         let reserialized = serde_json::to_value(&parsed).unwrap();
-        let round = parse_vault_config(&reserialized).expect("round-trip parse");
+        let round = parse_mem_config(&reserialized).expect("round-trip parse");
         assert_eq!(round.vcs.as_ref().unwrap().gitdir, "../.git");
         assert_eq!(round.vcs.as_ref().unwrap().worktree, "..");
     }
@@ -1603,7 +1603,7 @@ mod tests {
             "schema": "default@1.0.0",
             "vcs": { "gitdir": ".git" }
         });
-        let parsed = parse_vault_config(&cfg).expect("valid config must parse");
+        let parsed = parse_mem_config(&cfg).expect("valid config must parse");
         let vcs = parsed.vcs.as_ref().expect("vcs must be Some");
         assert_eq!(vcs.gitdir, ".git");
         assert_eq!(vcs.worktree, ".", "worktree must default to \".\"");
@@ -1612,7 +1612,7 @@ mod tests {
     #[test]
     fn vcs_config_absent_is_none() {
         let cfg = json!({ "schema": "default@1.0.0"  });
-        let parsed = parse_vault_config(&cfg).expect("valid config must parse");
+        let parsed = parse_mem_config(&cfg).expect("valid config must parse");
         assert!(parsed.vcs.is_none(), "missing vcs must deserialize to None");
     }
 
@@ -1625,7 +1625,7 @@ mod tests {
             "schema": "default@1.0.0",
             "vcs": "system"
         });
-        let parsed = parse_vault_config(&cfg).expect("legacy vcs string must parse");
+        let parsed = parse_mem_config(&cfg).expect("legacy vcs string must parse");
         assert!(parsed.vcs.is_none(), "legacy string must deserialize to None");
     }
 
@@ -1633,11 +1633,11 @@ mod tests {
     fn published_config_strips_vcs() {
         // `published_config_from` must drop the `vcs` block — VCS layout
         // is workspace-local mechanics, never part of the published
-        // vault's identity. This is guaranteed by the whitelist
-        // projection: `PublishedVaultConfig` has no `vcs` field, so a
-        // VaultConfig carrying `vcs: Some(...)` projects to a
-        // PublishedVaultConfig with no `vcs` on the wire.
-        let mut cfg = VaultConfig {
+        // mem's identity. This is guaranteed by the whitelist
+        // projection: `PublishedMemConfig` has no `vcs` field, so a
+        // MemConfig carrying `vcs: Some(...)` projects to a
+        // PublishedMemConfig with no `vcs` on the wire.
+        let mut cfg = MemConfig {
             name: Some("demo".to_string()),
             version: Some(semver::Version::new(0, 1, 0)),
             description: None,
@@ -1647,7 +1647,7 @@ mod tests {
             rules: None,
             publish: None,
             language: None,
-            read_vaults: BTreeMap::new(),
+            read_mems: BTreeMap::new(),
             community: None,
             vcs: None,
             unregistered_at: None,
@@ -1668,9 +1668,9 @@ mod tests {
 
     // ----- belongsTo legacy tombstone -----
 
-    /// `belongsTo` is now a tombstone — cross-vault authorization
-    /// migrated to the workspace-level `[cross_vault_links]` section in
-    /// `.memstead/workspace.toml`. A per-vault config blob carrying `belongsTo` is
+    /// `belongsTo` is now a tombstone — cross-mem authorization
+    /// migrated to the workspace-level `[cross_mem_links]` section in
+    /// `.memstead/workspace.toml`. A per-mem config blob carrying `belongsTo` is
     /// rejected with `LEGACY_FIELD_PRESENT`.
     #[test]
     fn belongs_to_field_is_legacy_tombstone() {
@@ -1683,7 +1683,7 @@ mod tests {
         assert_eq!(result.error_code.as_deref(), Some("LEGACY_FIELD_PRESENT"));
         assert!(
             result.errors.iter().any(|e| e.contains("belongsTo")
-                && e.contains("cross_vault_links")),
+                && e.contains("cross_mem_links")),
             "tombstone error must name the field and the replacement section: {:?}",
             result.errors
         );

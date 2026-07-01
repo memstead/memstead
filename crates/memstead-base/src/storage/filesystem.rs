@@ -1,11 +1,11 @@
-//! Filesystem-backed [`VaultWriter`](super::VaultWriter) — the gix-free
-//! companion to [`memstead_git_branch::storage::git_tree::GitTreeVaultWriter`].
-//! Used by filesystem vaults, where entities live as plain files under a
+//! Filesystem-backed [`MemWriter`](super::MemWriter) — the gix-free
+//! companion to [`memstead_git_branch::storage::git_tree::GitTreeMemWriter`].
+//! Used by filesystem mems, where entities live as plain files under a
 //! workspace root and there is no commit history.
 //!
 //! ## Buffer + commit
 //!
-//! Mutations buffer in memory until [`FilesystemVaultWriter::commit`].
+//! Mutations buffer in memory until [`FilesystemMemWriter::commit`].
 //! Per-path final-state collapse mirrors the git-tree adapter: a chain
 //! of write/delete ops on the same path collapses to a single terminal
 //! state by commit time. Move resolves at call-time into a
@@ -17,7 +17,7 @@
 //! Per-file writes are atomic via write-to-temp + rename. Multi-op
 //! commits are *not* transactional: a failure partway through leaves
 //! earlier ops landed and later ops untouched. Single-writer is
-//! assumed; concurrent writers against the same vault are out of scope.
+//! assumed; concurrent writers against the same mem are out of scope.
 //!
 //! ## CommitId
 //!
@@ -32,13 +32,13 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use super::{CommitId, VaultWriter, VaultWriterError};
-// `VaultBackend` is referenced via fully-qualified path in the impl
+use super::{CommitId, MemWriter, MemWriterError};
+// `MemBackend` is referenced via fully-qualified path in the impl
 // declaration below so it does NOT enter this module's name lookup.
 // Both traits expose `write_entity` / `delete_entity` / etc.; importing
 // both at module scope would make every dot-syntax call on a
-// `FilesystemVaultWriter` ambiguous (existing tests included). Tests
-// that exercise the `VaultBackend` impl pull it in via a local `use`
+// `FilesystemMemWriter` ambiguous (existing tests included). Tests
+// that exercise the `MemBackend` impl pull it in via a local `use`
 // at the function level.
 use crate::backend::BackendError;
 use crate::filesystem::changelog::{
@@ -73,15 +73,15 @@ impl Pending {
     }
 }
 
-/// Filesystem-backed [`VaultWriter`]. Mutations buffer in memory until
+/// Filesystem-backed [`MemWriter`]. Mutations buffer in memory until
 /// [`Self::commit`]; commit replays them against the directory at
 /// `root` with per-file write-to-temp + rename atomicity.
-pub struct FilesystemVaultWriter {
+pub struct FilesystemMemWriter {
     root: PathBuf,
     pending: Mutex<Pending>,
 }
 
-impl FilesystemVaultWriter {
+impl FilesystemMemWriter {
     /// Build a writer rooted at `root`. The directory must already
     /// exist; sub-directories are created lazily as commits run.
     pub fn new(root: PathBuf) -> Self {
@@ -94,7 +94,7 @@ impl FilesystemVaultWriter {
     /// Read the current bytes at `rel_key` from the buffered op log if
     /// present, otherwise from disk. Used by `move_entity` to resolve
     /// the source content.
-    fn read_source(&self, pending: &Pending, rel_key: &str) -> Result<Option<Vec<u8>>, VaultWriterError> {
+    fn read_source(&self, pending: &Pending, rel_key: &str) -> Result<Option<Vec<u8>>, MemWriterError> {
         if let Some(PendingState::Upsert(bytes)) = pending.ops.get(rel_key) {
             return Ok(Some(bytes.clone()));
         }
@@ -105,22 +105,22 @@ impl FilesystemVaultWriter {
         match std::fs::read(&full) {
             Ok(bytes) => Ok(Some(bytes)),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-            Err(e) => Err(VaultWriterError::Io(e)),
+            Err(e) => Err(MemWriterError::Io(e)),
         }
     }
 }
 
-/// Normalise a vault-relative path to a forward-slash key. Rejects
-/// empty paths, absolute paths, and any path that escapes the vault
+/// Normalise a mem-relative path to a forward-slash key. Rejects
+/// empty paths, absolute paths, and any path that escapes the mem
 /// root via `..`. Mirrors `git_tree::normalise_rel_path` so the two
 /// adapters reject the same inputs.
 ///
 /// `pub(crate)` so the in-memory backend reuses the exact same
 /// rejection rules — a third hand-rolled copy would be free to drift.
-pub(crate) fn normalise_rel_path(rel_path: &Path) -> Result<String, VaultWriterError> {
+pub(crate) fn normalise_rel_path(rel_path: &Path) -> Result<String, MemWriterError> {
     if rel_path.as_os_str().is_empty() {
-        return Err(VaultWriterError::Path(
-            "vault-relative path is empty".to_string(),
+        return Err(MemWriterError::Path(
+            "mem-relative path is empty".to_string(),
         ));
     }
     let mut parts: Vec<String> = Vec::new();
@@ -130,7 +130,7 @@ pub(crate) fn normalise_rel_path(rel_path: &Path) -> Result<String, VaultWriterE
             Component::Normal(s) => match s.to_str() {
                 Some(p) if !p.is_empty() => parts.push(p.to_string()),
                 _ => {
-                    return Err(VaultWriterError::Path(format!(
+                    return Err(MemWriterError::Path(format!(
                         "non-utf-8 or empty path component in {}",
                         rel_path.display()
                     )))
@@ -138,7 +138,7 @@ pub(crate) fn normalise_rel_path(rel_path: &Path) -> Result<String, VaultWriterE
             },
             Component::CurDir => continue,
             Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
-                return Err(VaultWriterError::Path(format!(
+                return Err(MemWriterError::Path(format!(
                     "path traversal or absolute component in {}",
                     rel_path.display()
                 )));
@@ -146,44 +146,44 @@ pub(crate) fn normalise_rel_path(rel_path: &Path) -> Result<String, VaultWriterE
         }
     }
     if parts.is_empty() {
-        return Err(VaultWriterError::Path(
-            "vault-relative path is empty after normalisation".to_string(),
+        return Err(MemWriterError::Path(
+            "mem-relative path is empty after normalisation".to_string(),
         ));
     }
     Ok(parts.join("/"))
 }
 
-impl VaultWriter for FilesystemVaultWriter {
-    fn write_entity(&self, rel_path: &Path, content: &[u8]) -> Result<(), VaultWriterError> {
+impl MemWriter for FilesystemMemWriter {
+    fn write_entity(&self, rel_path: &Path, content: &[u8]) -> Result<(), MemWriterError> {
         let key = normalise_rel_path(rel_path)?;
         let mut pending = self.pending.lock().map_err(|_| {
-            VaultWriterError::Path("filesystem writer pending state poisoned".to_string())
+            MemWriterError::Path("filesystem writer pending state poisoned".to_string())
         })?;
         pending.ops.insert(key, PendingState::Upsert(content.to_vec()));
         Ok(())
     }
 
-    fn delete_entity(&self, rel_path: &Path) -> Result<(), VaultWriterError> {
+    fn delete_entity(&self, rel_path: &Path) -> Result<(), MemWriterError> {
         let key = normalise_rel_path(rel_path)?;
         let mut pending = self.pending.lock().map_err(|_| {
-            VaultWriterError::Path("filesystem writer pending state poisoned".to_string())
+            MemWriterError::Path("filesystem writer pending state poisoned".to_string())
         })?;
         pending.ops.insert(key, PendingState::Delete);
         Ok(())
     }
 
-    fn move_entity(&self, from: &Path, to: &Path) -> Result<(), VaultWriterError> {
+    fn move_entity(&self, from: &Path, to: &Path) -> Result<(), MemWriterError> {
         let from_key = normalise_rel_path(from)?;
         let to_key = normalise_rel_path(to)?;
         let mut pending = self.pending.lock().map_err(|_| {
-            VaultWriterError::Path("filesystem writer pending state poisoned".to_string())
+            MemWriterError::Path("filesystem writer pending state poisoned".to_string())
         })?;
 
         let bytes = match pending.ops.remove(&from_key) {
             Some(PendingState::Upsert(b)) => b,
             Some(PendingState::Delete) => {
                 pending.ops.insert(from_key, PendingState::Delete);
-                return Err(VaultWriterError::Path(format!(
+                return Err(MemWriterError::Path(format!(
                     "move source {} is already pending deletion",
                     from.display()
                 )));
@@ -191,7 +191,7 @@ impl VaultWriter for FilesystemVaultWriter {
             None => match self.read_source(&pending, &from_key)? {
                 Some(b) => b,
                 None => {
-                    return Err(VaultWriterError::Path(format!(
+                    return Err(MemWriterError::Path(format!(
                         "move source {} does not exist",
                         from.display()
                     )));
@@ -200,7 +200,7 @@ impl VaultWriter for FilesystemVaultWriter {
         };
 
         if matches!(pending.ops.get(&to_key), Some(PendingState::Upsert(_))) {
-            return Err(VaultWriterError::Path(format!(
+            return Err(MemWriterError::Path(format!(
                 "move target {} already has a pending write",
                 to.display()
             )));
@@ -214,9 +214,9 @@ impl VaultWriter for FilesystemVaultWriter {
         &self,
         _message: &str,
         _ctx: &CommitContext<'_>,
-    ) -> Result<CommitId, VaultWriterError> {
+    ) -> Result<CommitId, MemWriterError> {
         let mut pending = self.pending.lock().map_err(|_| {
-            VaultWriterError::Path("filesystem writer pending state poisoned".to_string())
+            MemWriterError::Path("filesystem writer pending state poisoned".to_string())
         })?;
 
         for (key, state) in pending.ops.iter() {
@@ -226,7 +226,7 @@ impl VaultWriter for FilesystemVaultWriter {
                 PendingState::Delete => match std::fs::remove_file(&target) {
                     Ok(()) => {}
                     Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                    Err(e) => return Err(VaultWriterError::Io(e)),
+                    Err(e) => return Err(MemWriterError::Io(e)),
                 },
             }
         }
@@ -236,7 +236,7 @@ impl VaultWriter for FilesystemVaultWriter {
     }
 }
 
-impl crate::backend::VaultBackend for FilesystemVaultWriter {
+impl crate::backend::MemBackend for FilesystemMemWriter {
     fn list_entities(&self) -> Result<Vec<PathBuf>, BackendError> {
         let mut out = Vec::new();
         if !self.root.exists() {
@@ -266,15 +266,15 @@ impl crate::backend::VaultBackend for FilesystemVaultWriter {
     }
 
     fn write_entity(&self, rel_path: &Path, content: &[u8]) -> Result<(), BackendError> {
-        <Self as VaultWriter>::write_entity(self, rel_path, content).map_err(Into::into)
+        <Self as MemWriter>::write_entity(self, rel_path, content).map_err(Into::into)
     }
 
     fn delete_entity(&self, rel_path: &Path) -> Result<(), BackendError> {
-        <Self as VaultWriter>::delete_entity(self, rel_path).map_err(Into::into)
+        <Self as MemWriter>::delete_entity(self, rel_path).map_err(Into::into)
     }
 
     fn move_entity(&self, from: &Path, to: &Path) -> Result<(), BackendError> {
-        <Self as VaultWriter>::move_entity(self, from, to).map_err(Into::into)
+        <Self as MemWriter>::move_entity(self, from, to).map_err(Into::into)
     }
 
     fn discard_pending(&self) -> Result<(), BackendError> {
@@ -293,16 +293,16 @@ impl crate::backend::VaultBackend for FilesystemVaultWriter {
         message: &str,
         ctx: &CommitContext<'_>,
     ) -> Result<CommitId, BackendError> {
-        <Self as VaultWriter>::commit(self, message, ctx).map_err(Into::into)
+        <Self as MemWriter>::commit(self, message, ctx).map_err(Into::into)
     }
 
-    fn read_vault_config(&self) -> Result<Option<Vec<u8>>, BackendError> {
+    fn read_mem_config(&self) -> Result<Option<Vec<u8>>, BackendError> {
         // Folder backend reads `<root>/.memstead/config.json`.
         // Missing file → Ok(None); other IO errors propagate as
         // BackendError.
         let config_path = self
             .root
-            .join(crate::vault::VAULT_META_DIR)
+            .join(crate::mem::MEM_META_DIR)
             .join("config.json");
         match std::fs::read(&config_path) {
             Ok(bytes) => Ok(Some(bytes)),
@@ -311,14 +311,14 @@ impl crate::backend::VaultBackend for FilesystemVaultWriter {
         }
     }
 
-    fn write_vault_config(&self, bytes: &[u8]) -> Result<(), BackendError> {
+    fn write_mem_config(&self, bytes: &[u8]) -> Result<(), BackendError> {
         // Folder backend writes `<root>/.memstead/config.json` to disk.
         // Creates the `.memstead/` directory if missing. Existing config
         // is overwritten — caller's responsibility to gate against
         // overwrites if that's the contract (the unified
-        // `vault_management::create_vault` Step 4 already does the
+        // `mem_management::create_mem` Step 4 already does the
         // refusal-to-overwrite check upstream).
-        let memstead_dir = self.root.join(crate::vault::VAULT_META_DIR);
+        let memstead_dir = self.root.join(crate::mem::MEM_META_DIR);
         std::fs::create_dir_all(&memstead_dir).map_err(BackendError::Io)?;
         let config_path = memstead_dir.join("config.json");
         std::fs::write(&config_path, bytes).map_err(BackendError::Io)
@@ -398,8 +398,8 @@ impl crate::backend::VaultBackend for FilesystemVaultWriter {
     }
 }
 
-/// Walk `dir` for `.md` files, accumulating vault-relative paths in
-/// `out`. Skips the vault's `.memstead/` umbrella so the engine never
+/// Walk `dir` for `.md` files, accumulating mem-relative paths in
+/// `out`. Skips the mem's `.memstead/` umbrella so the engine never
 /// confuses changelog / config / schema files with entity-bearing
 /// markdown.
 fn walk_for_md(
@@ -418,7 +418,7 @@ fn walk_for_md(
         let file_type = entry.file_type().map_err(BackendError::Io)?;
         if file_type.is_dir() {
             let name = entry.file_name();
-            if name == crate::vault::VAULT_META_DIR {
+            if name == crate::mem::MEM_META_DIR {
                 continue;
             }
             walk_for_md(root, &path, out)?;
@@ -437,17 +437,17 @@ fn walk_for_md(
 /// then rename. Creates parent directories as needed. The temp file
 /// shares the target's parent so the rename is same-fs (atomic on
 /// POSIX). On rename failure, the temp file is best-effort removed.
-fn atomic_write(target: &Path, bytes: &[u8]) -> Result<(), VaultWriterError> {
+fn atomic_write(target: &Path, bytes: &[u8]) -> Result<(), MemWriterError> {
     if let Some(parent) = target.parent() {
         if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent).map_err(VaultWriterError::Io)?;
+            std::fs::create_dir_all(parent).map_err(MemWriterError::Io)?;
         }
     }
     let tmp = make_tmp_path(target);
-    std::fs::write(&tmp, bytes).map_err(VaultWriterError::Io)?;
+    std::fs::write(&tmp, bytes).map_err(MemWriterError::Io)?;
     if let Err(e) = std::fs::rename(&tmp, target) {
         let _ = std::fs::remove_file(&tmp);
-        return Err(VaultWriterError::Io(e));
+        return Err(MemWriterError::Io(e));
     }
     Ok(())
 }
@@ -514,7 +514,7 @@ mod tests {
     #[test]
     fn write_then_commit_round_trip() {
         let tmp = TempDir::new().unwrap();
-        let writer = FilesystemVaultWriter::new(tmp.path().to_path_buf());
+        let writer = FilesystemMemWriter::new(tmp.path().to_path_buf());
 
         writer
             .write_entity(Path::new("notes/hello.md"), b"# hi\n")
@@ -529,7 +529,7 @@ mod tests {
     #[test]
     fn delete_removes_path() {
         let tmp = TempDir::new().unwrap();
-        let writer = FilesystemVaultWriter::new(tmp.path().to_path_buf());
+        let writer = FilesystemMemWriter::new(tmp.path().to_path_buf());
 
         writer.write_entity(Path::new("a.md"), b"a").unwrap();
         writer.write_entity(Path::new("b.md"), b"b").unwrap();
@@ -545,7 +545,7 @@ mod tests {
     #[test]
     fn delete_of_missing_path_is_idempotent() {
         let tmp = TempDir::new().unwrap();
-        let writer = FilesystemVaultWriter::new(tmp.path().to_path_buf());
+        let writer = FilesystemMemWriter::new(tmp.path().to_path_buf());
 
         writer.delete_entity(Path::new("never-existed.md")).unwrap();
         writer.commit("noop delete", &ctx_for_test()).unwrap();
@@ -554,7 +554,7 @@ mod tests {
     #[test]
     fn move_renames_path() {
         let tmp = TempDir::new().unwrap();
-        let writer = FilesystemVaultWriter::new(tmp.path().to_path_buf());
+        let writer = FilesystemMemWriter::new(tmp.path().to_path_buf());
 
         writer.write_entity(Path::new("from.md"), b"payload").unwrap();
         writer.commit("seed", &ctx_for_test()).unwrap();
@@ -572,7 +572,7 @@ mod tests {
     #[test]
     fn move_with_pending_upsert_carries_bytes() {
         let tmp = TempDir::new().unwrap();
-        let writer = FilesystemVaultWriter::new(tmp.path().to_path_buf());
+        let writer = FilesystemMemWriter::new(tmp.path().to_path_buf());
 
         writer.write_entity(Path::new("a.md"), b"alpha").unwrap();
         writer
@@ -587,31 +587,31 @@ mod tests {
     #[test]
     fn move_missing_source_errors() {
         let tmp = TempDir::new().unwrap();
-        let writer = FilesystemVaultWriter::new(tmp.path().to_path_buf());
+        let writer = FilesystemMemWriter::new(tmp.path().to_path_buf());
 
         let err = writer
             .move_entity(Path::new("ghost.md"), Path::new("here.md"))
             .unwrap_err();
-        assert!(matches!(err, VaultWriterError::Path(_)));
+        assert!(matches!(err, MemWriterError::Path(_)));
     }
 
     #[test]
     fn move_with_pending_target_upsert_errors() {
         let tmp = TempDir::new().unwrap();
-        let writer = FilesystemVaultWriter::new(tmp.path().to_path_buf());
+        let writer = FilesystemMemWriter::new(tmp.path().to_path_buf());
 
         writer.write_entity(Path::new("from.md"), b"x").unwrap();
         writer.write_entity(Path::new("to.md"), b"y").unwrap();
         let err = writer
             .move_entity(Path::new("from.md"), Path::new("to.md"))
             .unwrap_err();
-        assert!(matches!(err, VaultWriterError::Path(_)));
+        assert!(matches!(err, MemWriterError::Path(_)));
     }
 
     #[test]
     fn multi_op_commit() {
         let tmp = TempDir::new().unwrap();
-        let writer = FilesystemVaultWriter::new(tmp.path().to_path_buf());
+        let writer = FilesystemMemWriter::new(tmp.path().to_path_buf());
 
         writer.write_entity(Path::new("doomed.md"), b"x").unwrap();
         writer.commit("seed", &ctx_for_test()).unwrap();
@@ -634,38 +634,38 @@ mod tests {
     #[test]
     fn rejects_path_traversal() {
         let tmp = TempDir::new().unwrap();
-        let writer = FilesystemVaultWriter::new(tmp.path().to_path_buf());
+        let writer = FilesystemMemWriter::new(tmp.path().to_path_buf());
 
         let err = writer
             .write_entity(Path::new("../escape.md"), b"x")
             .unwrap_err();
-        assert!(matches!(err, VaultWriterError::Path(_)));
+        assert!(matches!(err, MemWriterError::Path(_)));
     }
 
     #[test]
     fn rejects_absolute_path() {
         let tmp = TempDir::new().unwrap();
-        let writer = FilesystemVaultWriter::new(tmp.path().to_path_buf());
+        let writer = FilesystemMemWriter::new(tmp.path().to_path_buf());
 
         let err = writer
             .write_entity(Path::new("/etc/passwd"), b"x")
             .unwrap_err();
-        assert!(matches!(err, VaultWriterError::Path(_)));
+        assert!(matches!(err, MemWriterError::Path(_)));
     }
 
     #[test]
     fn rejects_empty_path() {
         let tmp = TempDir::new().unwrap();
-        let writer = FilesystemVaultWriter::new(tmp.path().to_path_buf());
+        let writer = FilesystemMemWriter::new(tmp.path().to_path_buf());
 
         let err = writer.write_entity(Path::new(""), b"x").unwrap_err();
-        assert!(matches!(err, VaultWriterError::Path(_)));
+        assert!(matches!(err, MemWriterError::Path(_)));
     }
 
     #[test]
     fn write_overwrites_existing_file() {
         let tmp = TempDir::new().unwrap();
-        let writer = FilesystemVaultWriter::new(tmp.path().to_path_buf());
+        let writer = FilesystemMemWriter::new(tmp.path().to_path_buf());
 
         writer.write_entity(Path::new("a.md"), b"first").unwrap();
         writer.commit("c1", &ctx_for_test()).unwrap();
@@ -678,7 +678,7 @@ mod tests {
     #[test]
     fn no_temp_files_left_after_commit() {
         let tmp = TempDir::new().unwrap();
-        let writer = FilesystemVaultWriter::new(tmp.path().to_path_buf());
+        let writer = FilesystemMemWriter::new(tmp.path().to_path_buf());
 
         writer.write_entity(Path::new("a.md"), b"a").unwrap();
         writer
@@ -712,7 +712,7 @@ mod tests {
     #[test]
     fn commit_id_is_unique_across_calls() {
         let tmp = TempDir::new().unwrap();
-        let writer = FilesystemVaultWriter::new(tmp.path().to_path_buf());
+        let writer = FilesystemMemWriter::new(tmp.path().to_path_buf());
 
         writer.write_entity(Path::new("a.md"), b"a").unwrap();
         let id1 = writer.commit("c1", &ctx_for_test()).unwrap();
@@ -725,7 +725,7 @@ mod tests {
     #[test]
     fn pending_buffer_clears_on_commit() {
         let tmp = TempDir::new().unwrap();
-        let writer = FilesystemVaultWriter::new(tmp.path().to_path_buf());
+        let writer = FilesystemMemWriter::new(tmp.path().to_path_buf());
 
         writer.write_entity(Path::new("a.md"), b"a").unwrap();
         writer.commit("c1", &ctx_for_test()).unwrap();
@@ -737,29 +737,29 @@ mod tests {
         assert_eq!(std::fs::read(tmp.path().join("a.md")).unwrap(), b"a");
     }
 
-    // --- VaultBackend impl ----------------------------------------
+    // --- MemBackend impl ----------------------------------------
 
-    /// Folder backend's `write_vault_config` writes
+    /// Folder backend's `write_mem_config` writes
     /// `<root>/.memstead/config.json`, creating the umbrella directory
-    /// if needed. The subsequent `read_vault_config` round-trips the
+    /// if needed. The subsequent `read_mem_config` round-trips the
     /// bytes.
     #[test]
-    fn backend_write_vault_config_round_trips_via_read() {
-        use crate::backend::VaultBackend;
+    fn backend_write_mem_config_round_trips_via_read() {
+        use crate::backend::MemBackend;
 
         let tmp = TempDir::new().unwrap();
-        let writer = FilesystemVaultWriter::new(tmp.path().to_path_buf());
-        let backend: &dyn VaultBackend = &writer;
+        let writer = FilesystemMemWriter::new(tmp.path().to_path_buf());
+        let backend: &dyn MemBackend = &writer;
 
         // No config yet — read returns None.
-        assert!(backend.read_vault_config().unwrap().is_none());
+        assert!(backend.read_mem_config().unwrap().is_none());
 
         // Write — creates `.memstead/` umbrella + the config blob.
         let bytes = br#"{"version":"0.1.0","schema":"default@1.0.0"}"#.to_vec();
-        backend.write_vault_config(&bytes).unwrap();
+        backend.write_mem_config(&bytes).unwrap();
 
         // Read returns the same bytes.
-        let read_back = backend.read_vault_config().unwrap();
+        let read_back = backend.read_mem_config().unwrap();
         assert_eq!(read_back, Some(bytes.clone()));
         // Config file lands at `<root>/.memstead/config.json`.
         let on_disk = std::fs::read(tmp.path().join(".memstead/config.json")).unwrap();
@@ -768,17 +768,17 @@ mod tests {
 
     #[test]
     fn backend_list_entities_returns_only_md_outside_meta_dirs() {
-        use crate::backend::VaultBackend;
+        use crate::backend::MemBackend;
 
         let tmp = TempDir::new().unwrap();
-        let writer = FilesystemVaultWriter::new(tmp.path().to_path_buf());
+        let writer = FilesystemMemWriter::new(tmp.path().to_path_buf());
 
         // With both traits in scope, dot-syntax `writer.foo(...)`
-        // is ambiguous — seed via fully-qualified VaultWriter calls.
-        <FilesystemVaultWriter as VaultWriter>::write_entity(&writer, Path::new("a.md"), b"a").unwrap();
-        <FilesystemVaultWriter as VaultWriter>::write_entity(&writer, Path::new("nested/b.md"), b"b").unwrap();
-        <FilesystemVaultWriter as VaultWriter>::write_entity(&writer, Path::new("notes.json"), b"{}").unwrap();
-        <FilesystemVaultWriter as VaultWriter>::commit(&writer, "seed", &ctx_for_test()).unwrap();
+        // is ambiguous — seed via fully-qualified MemWriter calls.
+        <FilesystemMemWriter as MemWriter>::write_entity(&writer, Path::new("a.md"), b"a").unwrap();
+        <FilesystemMemWriter as MemWriter>::write_entity(&writer, Path::new("nested/b.md"), b"b").unwrap();
+        <FilesystemMemWriter as MemWriter>::write_entity(&writer, Path::new("notes.json"), b"{}").unwrap();
+        <FilesystemMemWriter as MemWriter>::commit(&writer, "seed", &ctx_for_test()).unwrap();
         // The current `.memstead/` meta dir is skipped by the walker.
         // An ordinary dot-dir (`.other/`) is not special, so markdown
         // under it is walked like any other non-meta path.
@@ -788,7 +788,7 @@ mod tests {
         std::fs::create_dir_all(tmp.path().join(".other")).unwrap();
         std::fs::write(tmp.path().join(".other/notes.md"), b"#").unwrap();
 
-        let backend: &dyn VaultBackend = &writer;
+        let backend: &dyn MemBackend = &writer;
         let mut paths: Vec<String> = backend
             .list_entities()
             .unwrap()
@@ -809,19 +809,19 @@ mod tests {
     #[test]
     fn backend_read_entity_consults_pending_then_disk() {
         let tmp = TempDir::new().unwrap();
-        let writer = FilesystemVaultWriter::new(tmp.path().to_path_buf());
+        let writer = FilesystemMemWriter::new(tmp.path().to_path_buf());
 
-        // Seed via the legacy VaultWriter trait — both traits expose
-        // `write_entity`; importing `VaultBackend` later in the test
+        // Seed via the legacy MemWriter trait — both traits expose
+        // `write_entity`; importing `MemBackend` later in the test
         // makes the dot-syntax ambiguous, so we route the seed
         // through the trait that's still implicitly in scope here.
         let _ =
-            <FilesystemVaultWriter as VaultWriter>::write_entity(&writer, Path::new("on_disk.md"), b"disk")
+            <FilesystemMemWriter as MemWriter>::write_entity(&writer, Path::new("on_disk.md"), b"disk")
                 .unwrap();
-        <FilesystemVaultWriter as VaultWriter>::commit(&writer, "seed", &ctx_for_test()).unwrap();
+        <FilesystemMemWriter as MemWriter>::commit(&writer, "seed", &ctx_for_test()).unwrap();
 
-        use crate::backend::VaultBackend;
-        let backend: &dyn VaultBackend = &writer;
+        use crate::backend::MemBackend;
+        let backend: &dyn MemBackend = &writer;
         // Disk path → reads from disk.
         assert_eq!(
             backend.read_entity(Path::new("on_disk.md")).unwrap(),
@@ -843,9 +843,9 @@ mod tests {
     #[test]
     fn backend_provenance_round_trips_through_jsonl() {
         let tmp = TempDir::new().unwrap();
-        let writer = FilesystemVaultWriter::new(tmp.path().to_path_buf());
-        use crate::backend::VaultBackend;
-        let backend: &dyn VaultBackend = &writer;
+        let writer = FilesystemMemWriter::new(tmp.path().to_path_buf());
+        use crate::backend::MemBackend;
+        let backend: &dyn MemBackend = &writer;
 
         let client = ClientId {
             name: "claude-code".into(),
@@ -895,9 +895,9 @@ mod tests {
     #[test]
     fn backend_provenance_cursor_filters_by_timestamp() {
         let tmp = TempDir::new().unwrap();
-        let writer = FilesystemVaultWriter::new(tmp.path().to_path_buf());
-        use crate::backend::VaultBackend;
-        let backend: &dyn VaultBackend = &writer;
+        let writer = FilesystemMemWriter::new(tmp.path().to_path_buf());
+        use crate::backend::MemBackend;
+        let backend: &dyn MemBackend = &writer;
 
         for (secs, label) in [
             (1_700_000_000u64, "first"),
@@ -927,9 +927,9 @@ mod tests {
     #[test]
     fn backend_read_provenance_handles_missing_log() {
         let tmp = TempDir::new().unwrap();
-        let writer = FilesystemVaultWriter::new(tmp.path().to_path_buf());
-        use crate::backend::VaultBackend;
-        let backend: &dyn VaultBackend = &writer;
+        let writer = FilesystemMemWriter::new(tmp.path().to_path_buf());
+        use crate::backend::MemBackend;
+        let backend: &dyn MemBackend = &writer;
         // No mutations yet → no `.memstead/changes.jsonl` → empty result, no error.
         assert!(backend.read_provenance(None).unwrap().is_empty());
     }
@@ -939,7 +939,7 @@ mod tests {
     /// Helper: append a single Provenance event with an explicit
     /// timestamp, so tests get deterministic JSONL ordering.
     fn append_at(
-        backend: &dyn crate::backend::VaultBackend,
+        backend: &dyn crate::backend::MemBackend,
         secs: u64,
         kind: ProvenanceKind,
         entity: &str,
@@ -958,7 +958,7 @@ mod tests {
 
     #[test]
     fn folder_changes_since_no_log_returns_empty_at_cursor() {
-        // Fresh vault, no `.memstead/changes.jsonl` → empty BackendChanges
+        // Fresh mem, no `.memstead/changes.jsonl` → empty BackendChanges
         // with `head` echoing the cursor.
         let tmp = TempDir::new().unwrap();
         let result = crate::ops::folder_changes_since(
@@ -975,7 +975,7 @@ mod tests {
     #[test]
     fn folder_changes_since_create_only_yields_added_envelope() {
         let tmp = TempDir::new().unwrap();
-        let writer = FilesystemVaultWriter::new(tmp.path().to_path_buf());
+        let writer = FilesystemMemWriter::new(tmp.path().to_path_buf());
         append_at(&writer, 1_700_000_000, ProvenanceKind::Create, "specs--alpha");
 
         let result = crate::ops::folder_changes_since(
@@ -1002,7 +1002,7 @@ mod tests {
         // Within the cursor window, an entity that was created and then
         // deleted nets out to Removed (final state wins for Delete).
         let tmp = TempDir::new().unwrap();
-        let writer = FilesystemVaultWriter::new(tmp.path().to_path_buf());
+        let writer = FilesystemMemWriter::new(tmp.path().to_path_buf());
         append_at(&writer, 1_700_000_000, ProvenanceKind::Create, "specs--ephemeral");
         append_at(&writer, 1_700_000_001, ProvenanceKind::Delete, "specs--ephemeral");
 
@@ -1024,7 +1024,7 @@ mod tests {
     #[test]
     fn folder_changes_since_update_only_yields_updated_envelope() {
         let tmp = TempDir::new().unwrap();
-        let writer = FilesystemVaultWriter::new(tmp.path().to_path_buf());
+        let writer = FilesystemMemWriter::new(tmp.path().to_path_buf());
         append_at(&writer, 1_700_000_000, ProvenanceKind::Update, "specs--alpha");
 
         let result = crate::ops::folder_changes_since(
@@ -1045,7 +1045,7 @@ mod tests {
         // Three events at three timestamps; cursor between first and
         // second drops the first event from the window.
         let tmp = TempDir::new().unwrap();
-        let writer = FilesystemVaultWriter::new(tmp.path().to_path_buf());
+        let writer = FilesystemMemWriter::new(tmp.path().to_path_buf());
         append_at(&writer, 1_700_000_000, ProvenanceKind::Create, "specs--first");
         append_at(&writer, 1_750_000_000, ProvenanceKind::Create, "specs--middle");
         append_at(&writer, 1_800_000_000, ProvenanceKind::Create, "specs--last");
@@ -1072,12 +1072,12 @@ mod tests {
     }
 
     #[test]
-    fn folder_changes_since_skips_events_for_other_vaults() {
+    fn folder_changes_since_skips_events_for_other_mems() {
         // Defensive: changelog drift could carry events for another
-        // vault prefix; the impl filters them out so envelopes only
-        // surface for the queried vault.
+        // mem prefix; the impl filters them out so envelopes only
+        // surface for the queried mem.
         let tmp = TempDir::new().unwrap();
-        let writer = FilesystemVaultWriter::new(tmp.path().to_path_buf());
+        let writer = FilesystemMemWriter::new(tmp.path().to_path_buf());
         append_at(&writer, 1_700_000_000, ProvenanceKind::Create, "specs--mine");
         append_at(&writer, 1_700_000_001, ProvenanceKind::Create, "other--theirs");
 
@@ -1101,8 +1101,8 @@ mod tests {
         // Batch events have entity=null. They don't surface as
         // envelopes (no per-entity id to attach to).
         let tmp = TempDir::new().unwrap();
-        let writer = FilesystemVaultWriter::new(tmp.path().to_path_buf());
-        use crate::backend::VaultBackend;
+        let writer = FilesystemMemWriter::new(tmp.path().to_path_buf());
+        use crate::backend::MemBackend;
         // append_at requires an entity; use append_provenance directly
         // for the batch-with-no-entity case.
         writer
@@ -1137,7 +1137,7 @@ mod tests {
     fn folder_changes_since_head_echoes_cursor_when_no_events_in_window() {
         // Events exist but all before the cursor → head echoes cursor.
         let tmp = TempDir::new().unwrap();
-        let writer = FilesystemVaultWriter::new(tmp.path().to_path_buf());
+        let writer = FilesystemMemWriter::new(tmp.path().to_path_buf());
         append_at(&writer, 1_700_000_000, ProvenanceKind::Create, "specs--old");
 
         let cursor = changelog::format_rfc3339_utc(
@@ -1150,11 +1150,11 @@ mod tests {
     }
 
     #[test]
-    fn backend_writes_delegate_to_vaultwriter() {
+    fn backend_writes_delegate_to_memwriter() {
         let tmp = TempDir::new().unwrap();
-        let writer = FilesystemVaultWriter::new(tmp.path().to_path_buf());
-        use crate::backend::VaultBackend;
-        let backend: &dyn VaultBackend = &writer;
+        let writer = FilesystemMemWriter::new(tmp.path().to_path_buf());
+        use crate::backend::MemBackend;
+        let backend: &dyn MemBackend = &writer;
 
         backend.write_entity(Path::new("a.md"), b"alpha").unwrap();
         backend.commit("seed", &ctx_for_test()).unwrap();

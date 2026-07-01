@@ -1,8 +1,8 @@
 /**
  * inject-graph-cursor.test.js — integration tests for the `graph` source
- * change-detection strategy. A graph source is another vault; its change
- * signal is the source vault's `snapshot_token` (on the dump) plus
- * `memstead changes --vault <src> --since <baseline>` (stubbed by the
+ * change-detection strategy. A graph source is another mem; its change
+ * signal is the source mem's `snapshot_token` (on the dump) plus
+ * `memstead changes --mem <src> --since <baseline>` (stubbed by the
  * fake `memstead`). The changed slice is entity ids, not file paths.
  */
 
@@ -28,8 +28,8 @@ function writeFiles(root, files) {
   }
 }
 
-// Dump with a source graph vault (`engine`, carrying snapshot_token) and a
-// destination vault (`engine-dest`, carrying the sync_state baseline).
+// Dump with a source graph mem (`engine`, carrying snapshot_token) and a
+// destination mem (`engine-dest`, carrying the sync_state baseline).
 function writeDump(root, { srcSnapshot, baseline }) {
   const dest = {
     name: 'engine-dest', schema: 'sample@0.1.0', description: null,
@@ -43,7 +43,7 @@ function writeDump(root, { srcSnapshot, baseline }) {
   const dump = {
     format: 'workspace-dump/v0',
     workspace_root: root,
-    vaults: [dest, src],
+    mems: [dest, src],
     schemas: { 'sample@0.1.0': { default_writing_guidance: { goal: 'G', avoid: 'A' } } },
   };
   writeFileSync(join(root, '.fake-dump.json'), JSON.stringify(dump, null, 2));
@@ -53,10 +53,10 @@ function buildGraphWorkspace({ srcSnapshot = CURRENT, baseline = BASELINE, chang
   const root = mkdtempSync(join(tmpdir(), 'memstead-graph-cursor-'));
   writeFiles(root, {
     '.memstead.toml': `format = "memstead-plugin/v0"\n`,
-    // A graph-typed medium whose pointer is the SOURCE vault id.
+    // A graph-typed medium whose pointer is the SOURCE mem id.
     '.memstead/mediums/engine-dest/graphsrc.json': { name: 'graphsrc', type: 'graph', pointer: 'engine' },
     '.memstead/facets/engine-dest/graphsrc.json': { name: 'graphsrc', medium: 'graphsrc' },
-    '.memstead/projections/engine-dest/graph.json': { source_facets: ['graphsrc'], destination_vault: 'engine-dest' },
+    '.memstead/projections/engine-dest/graph.json': { source_facets: ['graphsrc'], destination_mem: 'engine-dest' },
     '.memstead/ingests/graph-run.json': { projection: 'engine-dest/graph', mode: 'discovery', trigger: 'manual' },
   });
   if (changes !== undefined) writeFileSync(join(root, '.fake-changes.json'), JSON.stringify(changes));
@@ -95,7 +95,7 @@ describe('graph cursor — changed slice from snapshot-token diff', () => {
     assert.match(r.stdout, /\*\*Added:\*\*[\s\S]*engine--new-thing/);
     assert.match(r.stdout, /\*\*Modified:\*\*[\s\S]*engine--operations-layer/);
     assert.match(r.stdout, /\*\*Deleted:\*\*[\s\S]*engine--gone-thing/);
-    // The recorded-baseline token is the source vault's current snapshot.
+    // The recorded-baseline token is the source mem's current snapshot.
     assert.match(r.stdout, new RegExp(`set-sync-state engine-dest 'graph-run/graphsrc' '${CURRENT}'`));
   });
 

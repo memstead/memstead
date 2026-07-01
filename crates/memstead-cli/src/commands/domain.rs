@@ -32,7 +32,7 @@ pub enum DomainAction {
 
 #[derive(Parser, Debug)]
 pub struct KeygenArgs {
-    /// The domain you control, e.g. `acme.com`. Vaults publish under
+    /// The domain you control, e.g. `acme.com`. Mems publish under
     /// `<domain>:<handle>`.
     #[arg(long, value_name = "DOMAIN")]
     pub domain: String,

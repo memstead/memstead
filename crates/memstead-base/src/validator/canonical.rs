@@ -9,7 +9,7 @@
 use std::io::{Cursor, Write};
 use std::sync::Arc;
 
-use memstead_schema::{ARCHIVE_CONFIG_PATH, PublishedVaultConfig, Schema, type_by_name};
+use memstead_schema::{ARCHIVE_CONFIG_PATH, PublishedMemConfig, Schema, type_by_name};
 use zip::CompressionMethod;
 use zip::DateTime;
 use zip::write::SimpleFileOptions;
@@ -28,7 +28,7 @@ use crate::entity::{Entity, id::id_to_file_path};
 /// with fixed mtime so two semantically equal archives produce
 /// identical bytes.
 pub fn canonical_bytes(
-    config: &PublishedVaultConfig,
+    config: &PublishedMemConfig,
     entities: &[Entity],
     schema_files: &[SchemaFile],
     embedded_schema: Option<&Arc<Schema>>,
@@ -109,11 +109,11 @@ fn normalize_lf(s: &str) -> String {
     s.replace("\r\n", "\n")
 }
 
-/// Serialize a `PublishedVaultConfig` as canonical JSON: sorted keys,
+/// Serialize a `PublishedMemConfig` as canonical JSON: sorted keys,
 /// two-space indent, LF line endings, trailing `\n`. Uses
 /// serde_json's default string-escape rules (so behavior matches the
 /// parser's tolerance).
-pub fn canonical_json(config: &PublishedVaultConfig) -> Result<String, ValidationError> {
+pub fn canonical_json(config: &PublishedMemConfig) -> Result<String, ValidationError> {
     let value = serde_json::to_value(config)
         .map_err(|e| ValidationError::InvalidConfig { reason: e.to_string() })?;
     let mut out = String::new();
@@ -190,12 +190,12 @@ mod tests {
     use super::*;
     use semver::Version;
 
-    fn config() -> PublishedVaultConfig {
-        PublishedVaultConfig {
-            format: memstead_schema::PUBLISHED_VAULT_FORMAT,
+    fn config() -> PublishedMemConfig {
+        PublishedMemConfig {
+            format: memstead_schema::PUBLISHED_MEM_FORMAT,
             name: "example".to_string(),
             version: Version::parse("0.1.0").unwrap(),
-            description: Some("a test vault".to_string()),
+            description: Some("a test mem".to_string()),
             authors: Some(vec!["Alice".to_string(), "Bob".to_string()]),
             schema: "default@1.0.0".parse().unwrap(),
         }
@@ -205,7 +205,7 @@ mod tests {
     fn canonical_json_is_alpha_sorted() {
         let json = canonical_json(&config()).unwrap();
         // Top-level keys in sorted order: authors, description, format, name, schema, version
-        let expected = "{\n  \"authors\": [\n    \"Alice\",\n    \"Bob\"\n  ],\n  \"description\": \"a test vault\",\n  \"format\": 3,\n  \"name\": \"example\",\n  \"schema\": \"default@1.0.0\",\n  \"version\": \"0.1.0\"\n}\n";
+        let expected = "{\n  \"authors\": [\n    \"Alice\",\n    \"Bob\"\n  ],\n  \"description\": \"a test mem\",\n  \"format\": 3,\n  \"name\": \"example\",\n  \"schema\": \"default@1.0.0\",\n  \"version\": \"0.1.0\"\n}\n";
         assert_eq!(json, expected);
     }
 

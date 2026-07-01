@@ -4,9 +4,9 @@
 
 **Memstead gives AI agents a durable, typed memory you own.** Your agent's knowledge lives as plain markdown in a git repository — readable by you, diffable in review, with no database and no vendor lock-in. Any MCP-capable agent (Claude Code, Codex, Gemini, …) or the `memstead` CLI reads and writes it through a schema *you* control, and the engine enforces that schema on every write so the graph never drifts into mush.
 
-Under the hood: each **vault** is a typed graph of interconnected entities. A **schema** you pin defines the entity types, their sections, and the relationships allowed between them — knowledge, plans, specs, inquiry, or any mix. Knowledge graphs are one well-known slice; Memstead generalises across all of them.
+Under the hood: each **mem** is a typed graph of interconnected entities. A **schema** you pin defines the entity types, their sections, and the relationships allowed between them — knowledge, plans, specs, inquiry, or any mix. Knowledge graphs are one well-known slice; Memstead generalises across all of them.
 
-Use it for software specs, ADRs, decision logs, ontologies, research notes, or any domain you define. For precise definitions of *vault*, *schema*, *workspace*, *mount*, and other terms, see [GLOSSARY.md](GLOSSARY.md).
+Use it for software specs, ADRs, decision logs, ontologies, research notes, or any domain you define. For precise definitions of *mem*, *schema*, *workspace*, *mount*, and other terms, see [GLOSSARY.md](GLOSSARY.md).
 
 ## Quickstart
 
@@ -27,7 +27,7 @@ This compiles the workspace and installs two binaries to `~/.cargo/bin`: `memste
 ```bash
 mkdir my-graph && cd my-graph
 
-# Create a workspace with one vault, pinned to the built-in schema.
+# Create a workspace with one mem, pinned to the built-in schema.
 memstead init --name my-graph --schema default@1.0.0
 
 # Add your first entity (the `concept` type needs a definition + explanation).
@@ -40,7 +40,7 @@ memstead stats              # node / edge counts and type distribution
 memstead search idempotency # find it back
 ```
 
-That's a working graph: a workspace, a schema-pinned vault, and a typed entity in git. The `default` schema ships ten general-purpose types (`concept`, `assertion`, `memo`, `spec`, `inquiry`, …); run `memstead type` to list them, or author your own schema for a specialised domain.
+That's a working graph: a workspace, a schema-pinned mem, and a typed entity in git. The `default` schema ships ten general-purpose types (`concept`, `assertion`, `memo`, `spec`, `inquiry`, …); run `memstead type` to list them, or author your own schema for a specialised domain.
 
 **4. (Optional) Let an AI agent read and write it.**
 
@@ -59,18 +59,18 @@ That's a working graph: a workspace, a schema-pinned vault, and a typed entity i
 
   `memstead-mcp` walks up from its working directory looking for `.memstead/workspace.toml`, so spawn it from anywhere inside (or under) the workspace — no extra arguments needed. Restart the agent so it picks up the new server.
 
-## Share and reuse vaults
+## Share and reuse mems
 
-Publish a vault to the [memstead.io](https://memstead.io) registry, and install someone else's with one command:
+Publish a mem to the [memstead.io](https://memstead.io) registry, and install someone else's with one command:
 
 ```bash
-memstead export --format vault -o my.mem
+memstead export --format mem -o my.mem
 memstead publish my.mem        # GitHub Device Flow on first use
 
-memstead install scope/name    # pull a published vault into your workspace
+memstead install scope/name    # pull a published mem into your workspace
 ```
 
-**Trust posture — a non-first-party vault is untrusted input.** A vault installed from the registry or adopted from a foreign folder/clone is a channel for *someone else's* text to enter your agent's reasoning loop. Memstead treats it as untrusted: the engine serves a non-first-party vault's schema as structure only (its `system_context` / `write_rules` prose is withheld, never served as instructions), and tags non-first-party entity content with a machine-readable `origin` on every read surface (`memstead_schema`, `memstead_entity`, `memstead_search`, `memstead_overview`, the registry manifest, the served read tier's discovery manifest). A consuming agent/host should treat third-party content as quoted data, not instructions. The engine guarantees its half — omit foreign instruction-prose, label foreign data — but cannot force the calling host to gate consequential actions on untrusted input; that residual is the host's. See `SECURITY.md`.
+**Trust posture — a non-first-party mem is untrusted input.** A mem installed from the registry or adopted from a foreign folder/clone is a channel for *someone else's* text to enter your agent's reasoning loop. Memstead treats it as untrusted: the engine serves a non-first-party mem's schema as structure only (its `system_context` / `write_rules` prose is withheld, never served as instructions), and tags non-first-party entity content with a machine-readable `origin` on every read surface (`memstead_schema`, `memstead_entity`, `memstead_search`, `memstead_overview`, the registry manifest, the served read tier's discovery manifest). A consuming agent/host should treat third-party content as quoted data, not instructions. The engine guarantees its half — omit foreign instruction-prose, label foreign data — but cannot force the calling host to gate consequential actions on untrusted input; that residual is the host's. See `SECURITY.md`.
 
 ## Reference
 
@@ -118,7 +118,7 @@ Run the test suite (engine in both build flavours + the plugin):
 ./run-tests.sh
 ```
 
-The engine builds in two flavours from one set of crates: the default build is the full multi-vault, git-backed engine; `--no-default-features` is the lean folder-only build (a CI / dependency-hygiene config). For which crate produces which binary, profiles, feature flags, and troubleshooting, see [docs/build.md](docs/build.md).
+The engine builds in two flavours from one set of crates: the default build is the full multi-mem, git-backed engine; `--no-default-features` is the lean folder-only build (a CI / dependency-hygiene config). For which crate produces which binary, profiles, feature flags, and troubleshooting, see [docs/build.md](docs/build.md).
 
 ```bash
 # Force-restart the MCP server (kills all instances; your agent auto-restarts it)

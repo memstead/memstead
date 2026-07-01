@@ -1,14 +1,14 @@
 // Typed error envelope. `code` mirrors the bridge's `BridgeError`
-// codes (`UNKNOWN_VAULT`, `UNKNOWN_COMMIT`, `DELTA_TOO_LARGE`,
+// codes (`UNKNOWN_MEM`, `UNKNOWN_COMMIT`, `DELTA_TOO_LARGE`,
 // `INVALID_SEARCH_QUERY`, `ENGINE_ERROR`, `GIT_ERROR`) plus client-
 // internal sentinels (`CLIENT_CLOSED`, `NOT_OPEN`, `NETWORK`,
 // `UNEXPECTED_RESPONSE`).
 
-import type { VaultSyncClientError } from "./types.js";
+import type { MemSyncClientError } from "./types.js";
 
 /** Stable bridge-side codes the client recognises and routes on. */
 export const BRIDGE_CODES = {
-  UNKNOWN_VAULT: "UNKNOWN_VAULT",
+  UNKNOWN_MEM: "UNKNOWN_MEM",
   UNKNOWN_COMMIT: "UNKNOWN_COMMIT",
   DELTA_TOO_LARGE: "DELTA_TOO_LARGE",
   INVALID_SEARCH_QUERY: "INVALID_SEARCH_QUERY",
@@ -25,11 +25,11 @@ export const CLIENT_CODES = {
   UNEXPECTED_RESPONSE: "UNEXPECTED_RESPONSE",
 } as const;
 
-/** Concrete `Error` subclass — `instanceof VaultSyncError` is the
+/** Concrete `Error` subclass — `instanceof MemSyncError` is the
  * recommended branch for consumers; `error.code` is the agent-
  * actionable token. */
-export class VaultSyncError extends Error implements VaultSyncClientError {
-  override readonly name = "VaultSyncError";
+export class MemSyncError extends Error implements MemSyncClientError {
+  override readonly name = "MemSyncError";
   readonly code: string;
   readonly status?: number;
   readonly details?: unknown;
@@ -54,13 +54,13 @@ interface BridgeErrorEnvelope {
   details?: unknown;
 }
 
-/** Turn a non-OK `Response` into a `VaultSyncError`. Tries to parse
+/** Turn a non-OK `Response` into a `MemSyncError`. Tries to parse
  * the body as a typed envelope; falls back to a generic
  * `UNEXPECTED_RESPONSE` when the body isn't JSON or omits `code`. */
 export async function errorFromResponse(
   response: Response,
   fallbackContext: string,
-): Promise<VaultSyncError> {
+): Promise<MemSyncError> {
   let envelope: BridgeErrorEnvelope | undefined;
   try {
     envelope = (await response.json()) as BridgeErrorEnvelope;
@@ -70,7 +70,7 @@ export async function errorFromResponse(
   const code = envelope?.code ?? CLIENT_CODES.UNEXPECTED_RESPONSE;
   const message =
     envelope?.message ?? `${fallbackContext}: HTTP ${response.status}`;
-  return new VaultSyncError(code, message, {
+  return new MemSyncError(code, message, {
     status: response.status,
     details: envelope?.details,
   });

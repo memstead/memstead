@@ -10,7 +10,7 @@ What this skill must achieve. Use this as the reference when tuning SKILL.md.
 ## Output
 
 - stats: node count, edge count, stub count, edge type distribution
-- directory: entities grouped by vault with level and identity
+- directory: entities grouped by mem with level and identity
 - health: stubs and orphans listed, or confirmed absent
 
 ## Principles

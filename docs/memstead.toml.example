@@ -9,11 +9,11 @@
 # for the full resolution order.
 
 # ---------------------------------------------------------------------
-# Core vault roster
+# Core mem roster
 # ---------------------------------------------------------------------
 
-# vaults = ["memstead/engine", "memstead/macos", "memstead/plugin"]
-# read_vaults = []
+# mems = ["memstead/engine", "memstead/macos", "memstead/plugin"]
+# read_mems = []
 # auto_discover = false
 
 # ---------------------------------------------------------------------
@@ -31,13 +31,13 @@
 # token_budget = 10000
 
 # ---------------------------------------------------------------------
-# Vault lifecycle authorization
+# Mem lifecycle authorization
 # ---------------------------------------------------------------------
 #
-# Enables `memstead_vault_create` and `memstead_vault_delete` at runtime. The
-# default posture is conservative: when `[vault_management]` is absent
+# Enables `memstead_mem_create` and `memstead_mem_delete` at runtime. The
+# default posture is conservative: when `[mem_management]` is absent
 # or either glob list is empty, the corresponding lifecycle tool
-# rejects every input with `VAULT_PATH_NOT_ALLOWED`. Opt in
+# rejects every input with `MEM_PATH_NOT_ALLOWED`. Opt in
 # explicitly by listing allowed paths here.
 #
 # Globs use gitignore semantics (`*` does not cross `/`; `**` matches
@@ -46,12 +46,12 @@
 # compiled patterns at runtime via
 # `memstead_health { include_config: true }`.
 
-# [vault_management]
+# [mem_management]
 # allowed_create_paths = [
 #   "memstead/*",          # top-level under /memstead/
-#   "*/.plans/*",      # plan subvaults anywhere
-#   "*/.subvaults/*",  # general subvaults anywhere
+#   "*/.plans/*",      # plan submems anywhere
+#   "*/.submems/*",  # general submems anywhere
 # ]
 # allowed_delete_paths = [
-#   "*/.plans/*",      # only plan subvaults are delete-eligible
+#   "*/.plans/*",      # only plan submems are delete-eligible
 # ]

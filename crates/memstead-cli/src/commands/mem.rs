@@ -1,24 +1,24 @@
-//! `memstead vault init` / `memstead vault delete` — pro-only vault-lifecycle
+//! `memstead mem init` / `memstead mem delete` — pro-only mem-lifecycle
 //! CLI front-ends.
 //!
 //! Both subcommands call the
-//! engine in-process via `memstead_engine::vault_management::create_vault` /
-//! `delete_vault`. An earlier design spawned `memstead-mcp --operator-mode`
+//! engine in-process via `memstead_engine::mem_management::create_mem` /
+//! `delete_mem`. An earlier design spawned `memstead-mcp --operator-mode`
 //! as a child process and drove the matching MCP tool over JSON-RPC
 //! — wire-format parity with the agent path was the intent,
 //! but the CLI-as-MCP-consumer relationship cut against CLAUDE.md's
 //! "CLI, MCP, UniFFI are siblings over the engine" posture. In-process
 //! collapses CLI and MCP onto the same Rust call, with `operator_mode:
 //! true` hardcoded at the call site so the engine bypasses the
-//! `[[vault_management.create]]` / `[[vault_management.delete]]`
-//! allowlists and the `VAULT_REFERENCED_BY_POLICY` safeguard for these
+//! `[[mem_management.create]]` / `[[mem_management.delete]]`
+//! allowlists and the `MEM_REFERENCED_BY_POLICY` safeguard for these
 //! two operator-tool surfaces (matching the spirit of the
 //! transport-establishes-posture rule).
 //!
 //! Outer-repo gitignore: a CLI-only concern. The shared helper in
 //! [`crate::outer_gitignore`] walks upward from the workspace root
 //! looking for an enclosing `.git/`, then idempotently appends the
-//! workspace path (or `vault-repo/` inside it) to the outer repo's
+//! workspace path (or `mem-repo/` inside it) to the outer repo's
 //! `.gitignore`. Refused for `$HOME` and disabled by `--no-gitignore`.
 
 use std::path::PathBuf;
@@ -29,90 +29,90 @@ use crate::outer_gitignore::{OuterRepoOutcome, apply_outer_gitignore};
 use crate::CliError;
 use crate::output::ExitKind;
 use crate::setup::{CliContext, CliEngine, find_workspace_root};
-use memstead_engine::vault_management::{
-    self, VaultCreateParams, VaultCreateResponse, VaultDeleteParams, VaultDeleteResponse,
+use memstead_engine::mem_management::{
+    self, MemCreateParams, MemCreateResponse, MemDeleteParams, MemDeleteResponse,
 };
 
-/// Subcommands under `memstead vault`.
+/// Subcommands under `memstead mem`.
 #[derive(Subcommand, Debug)]
-pub enum VaultAction {
-    /// Register a new vault via the engine's vault-management
+pub enum MemAction {
+    /// Register a new mem via the engine's mem-management
     /// orchestrator.
     Init(InitArgs),
-    /// Router-only removal — unregisters the vault from the workspace
+    /// Router-only removal — unregisters the mem from the workspace
     /// but leaves its stored content in place for archive workflows.
-    /// Cross-vault grants pointing at the unregistered vault stay valid
-    /// (the data they rely on survives); a follow-up `memstead vault init
+    /// Cross-mem grants pointing at the unregistered mem stay valid
+    /// (the data they rely on survives); a follow-up `memstead mem init
     /// <same name>` re-attaches against the preserved storage. Refuses
-    /// with `VAULT_HAS_INCOMING_REFS` when entities in other vaults still
-    /// link into this one — remove those incoming cross-vault references
-    /// first (mirrors `vault delete`'s precondition).
+    /// with `MEM_HAS_INCOMING_REFS` when entities in other mems still
+    /// link into this one — remove those incoming cross-mem references
+    /// first (mirrors `mem delete`'s precondition).
     Unregister(UnregisterArgs),
-    /// Storage-destroying removal — unregisters the vault AND deletes
-    /// its stored content. Refuses with `VAULT_REFERENCED_BY_POLICY`
-    /// when any other writable vault has a `cross_vault_links` grant
+    /// Storage-destroying removal — unregisters the mem AND deletes
+    /// its stored content. Refuses with `MEM_REFERENCED_BY_POLICY`
+    /// when any other writable mem has a `cross_mem_links` grant
     /// pointing at the target (revoke the grant first). For router-only
-    /// removal that keeps the storage, use `memstead vault unregister`.
+    /// removal that keeps the storage, use `memstead mem unregister`.
     Delete(DeleteArgs),
-    /// Update a vault's `version` field. The version is consumed by
-    /// `memstead export --format vault` to stamp the archive filename and
+    /// Update a mem's `version` field. The version is consumed by
+    /// `memstead export --format mem` to stamp the archive filename and
     /// the `.mem` archive's published config. `version` is seeded at
     /// init (`0.1.0`); bump via this command before publishing.
     #[command(name = "set-version")]
     SetVersion(SetVersionArgs),
-    /// Set a vault's schema pin — the integrity-driven schema-migration
-    /// trigger. Already-integral vaults switch immediately; otherwise
-    /// the vault enters dual-pin migration (writes validate against
+    /// Set a mem's schema pin — the integrity-driven schema-migration
+    /// trigger. Already-integral mems switch immediately; otherwise
+    /// the mem enters dual-pin migration (writes validate against
     /// the target) and the response lists the non-integral entities.
     /// Re-issue after repairing to complete the switch.
     #[command(name = "set-schema")]
     SetSchema(SetSchemaArgs),
-    /// Set (or clear) one opaque sync-state token in a vault's config —
+    /// Set (or clear) one opaque sync-state token in a mem's config —
     /// the ingest layer's durable "last synced source state" baseline.
     /// `<KEY>` and `<TOKEN>` are opaque to the engine (the ingest layer
     /// keys per `(ingest, facet)` and owns the token's meaning). An
-    /// empty `<TOKEN>` clears the key. Written into the per-vault config
+    /// empty `<TOKEN>` clears the key. Written into the per-mem config
     /// and surfaced verbatim on `memstead workspace dump`.
     #[command(name = "set-sync-state")]
     SetSyncState(SetSyncStateArgs),
-    /// Enumerate every mounted vault in the workspace with its
+    /// Enumerate every mounted mem in the workspace with its
     /// schema pin, version, entity count, and capability (writable
     /// vs read-only). Markdown by default; pass `--json` (root flag)
     /// for the structured envelope.
     List(ListArgs),
 }
 
-/// `memstead vault list` — no positional args. The verb itself is the
+/// `memstead mem list` — no positional args. The verb itself is the
 /// signal; `--json` (root-level) toggles the output shape.
 #[derive(Args, Debug)]
 pub struct ListArgs {}
 
-/// `memstead vault set-version <NAME> <VERSION>` arguments.
+/// `memstead mem set-version <NAME> <VERSION>` arguments.
 #[derive(Args, Debug)]
 pub struct SetVersionArgs {
-    /// Vault name (the leaf-folder identifier the engine assigned at
+    /// Mem name (the leaf-folder identifier the engine assigned at
     /// init time). Must already be registered in the workspace.
     pub name: String,
 
     /// New semver version (e.g. `0.2.0`, `1.0.0-beta.1`). Malformed
     /// values refuse with `INVALID_INPUT`. The engine bypasses the
-    /// vault-create allowlist for this surface — set-version is
+    /// mem-create allowlist for this surface — set-version is
     /// gate-free.
     pub version: String,
 
     /// Optional provenance note (≤280 chars) recorded on the
     /// version-bump commit body, like the other commit-producing
-    /// vault-lifecycle commands. When the workspace sets
+    /// mem-lifecycle commands. When the workspace sets
     /// `require_notes`, omitting it rides a non-blocking `NOTE_MISSING`
     /// warning (the bump still lands).
     #[arg(long)]
     pub note: Option<String>,
 }
 
-/// `memstead vault set-sync-state <NAME> <KEY> <TOKEN>` arguments.
+/// `memstead mem set-sync-state <NAME> <KEY> <TOKEN>` arguments.
 #[derive(Args, Debug)]
 pub struct SetSyncStateArgs {
-    /// Vault name (must be registered in the workspace).
+    /// Mem name (must be registered in the workspace).
     pub name: String,
 
     /// Opaque sync-state key. The ingest layer keys per `(ingest,
@@ -127,15 +127,15 @@ pub struct SetSyncStateArgs {
     pub token: String,
 
     /// Optional provenance note (≤280 chars) recorded on the commit
-    /// body, like the other commit-producing vault-lifecycle commands.
+    /// body, like the other commit-producing mem-lifecycle commands.
     #[arg(long)]
     pub note: Option<String>,
 }
 
-/// `memstead vault set-schema <NAME> <SCHEMA>` arguments.
+/// `memstead mem set-schema <NAME> <SCHEMA>` arguments.
 #[derive(Args, Debug)]
 pub struct SetSchemaArgs {
-    /// Vault name (must be registered in the workspace).
+    /// Mem name (must be registered in the workspace).
     pub name: String,
 
     /// Target schema ref, exact `name@x.y.z`. Must resolve against
@@ -144,21 +144,21 @@ pub struct SetSchemaArgs {
     pub schema: String,
 }
 
-/// `memstead vault init <path>` arguments.
+/// `memstead mem init <path>` arguments.
 ///
 /// `--vcs-shared` translates into the engine's `vcs` block;
 /// `--no-gitignore` suppresses the outer-repo `.gitignore` append. The
-/// `<path>` argument supplies the new vault's `location` (relative
+/// `<path>` argument supplies the new mem's `location` (relative
 /// to the workspace root) plus its `name` (basename of the path); a
 /// slashed `<a>/<b>` form additionally derives `--org-path a` so
-/// `memstead vault init a/b` and `memstead vault init b --org-path a` produce
-/// identical engine calls. Cross-vault edge authorization is
-/// workspace-level policy (`[cross_vault_links]` in `.memstead/workspace.toml`); the
+/// `memstead mem init a/b` and `memstead mem init b --org-path a` produce
+/// identical engine calls. Cross-mem edge authorization is
+/// workspace-level policy (`[cross_mem_links]` in `.memstead/workspace.toml`); the
 /// previous `--belongs-to` flag is gone.
 #[derive(Args, Debug)]
 pub struct InitArgs {
-    /// Vault name — the full hierarchical identifier (e.g. `foo` for
-    /// a flat-layout vault, `team/sub-vault` for a hierarchical
+    /// Mem name — the full hierarchical identifier (e.g. `foo` for
+    /// a flat-layout mem, `team/sub-mem` for a hierarchical
     /// layout). The value flows through to the engine verbatim with no
     /// auto-split or composition step. Grammar:
     /// `[a-z0-9-]+(/[a-z0-9-]+)*` — lowercase ASCII letters, digits,
@@ -167,12 +167,12 @@ pub struct InitArgs {
     /// `INVALID_INPUT`).
     pub path: PathBuf,
 
-    /// Schema pin (`name@x.y.z`) for the new vault. Defaults to
+    /// Schema pin (`name@x.y.z`) for the new mem. Defaults to
     /// `default@1.0.0` so the common case stays one argument.
     #[arg(long, default_value = "default@1.0.0")]
     pub schema: String,
 
-    /// Pass a shared-gitdir `vcs` block to `memstead_vault_create`:
+    /// Pass a shared-gitdir `vcs` block to `memstead_mem_create`:
     /// `{ "gitdir": "../.git", "worktree": ".." }`. Without this flag the
     /// engine uses the default isolated layout.
     #[arg(long)]
@@ -189,8 +189,8 @@ pub struct InitArgs {
     #[arg(long)]
     pub note: Option<String>,
 
-    /// Adopt residual entities left by a prior `memstead vault unregister`
-    /// at this vault's path instead of failing on detected residue.
+    /// Adopt residual entities left by a prior `memstead mem unregister`
+    /// at this mem's path instead of failing on detected residue.
     /// Default when the residue carries an `unregistered_at` tombstone
     /// (the deliberate unregister signal); pass `--reattach` explicitly
     /// to override for crash-residue you have verified is safe to adopt.
@@ -199,22 +199,22 @@ pub struct InitArgs {
     #[arg(long, group = "recovery_action")]
     pub reattach: bool,
 
-    /// Destroy residual storage at this vault's path and proceed with a
+    /// Destroy residual storage at this mem's path and proceed with a
     /// fresh create. **Not yet implemented** — currently refuses with
-    /// `INVALID_INPUT` pointing at `memstead vault delete <name>`. Mutually
+    /// `INVALID_INPUT` pointing at `memstead mem delete <name>`. Mutually
     /// exclusive with `--reattach` and `--hard-cleanup-first`.
     #[arg(long = "force-overwrite", group = "recovery_action")]
     pub force_overwrite: bool,
 
-    /// Refuse with `VAULT_STORAGE_RESIDUE_DETECTED` instructing the
-    /// caller to run `memstead vault delete <name>` first — a hard barrier
+    /// Refuse with `MEM_STORAGE_RESIDUE_DETECTED` instructing the
+    /// caller to run `memstead mem delete <name>` first — a hard barrier
     /// that keeps residue cleanup a separate, named operation rather
     /// than destructive auto-recovery. Mutually exclusive with
     /// `--reattach` and `--force-overwrite`.
     #[arg(long = "hard-cleanup-first", group = "recovery_action")]
     pub hard_cleanup_first: bool,
 
-    /// Bypass the workspace `[[vault_management.create]]` allowlist
+    /// Bypass the workspace `[[mem_management.create]]` allowlist
     /// for this invocation. The CLI honours the allowlist by default
     /// (matching the MCP-surface posture); operator-mode is explicit
     /// opt-in. Also settable via the `MEMSTEAD_OPERATOR_MODE=1` env var for
@@ -226,73 +226,73 @@ pub struct InitArgs {
     pub operator_mode: bool,
 
     /// Optional per-instance writing guidance as a JSON object, written
-    /// verbatim into the new vault's config `writeGuidance` map — e.g.
+    /// verbatim into the new mem's config `writeGuidance` map — e.g.
     /// `--write-guidance '{"phase_context":"early design","stack":"Rust"}'`.
     /// Opaque to the engine (schema-strictness D8 — the keys are
     /// client-owned vocabulary); a wrapper that read the schema
-    /// package's `vault-template.json` fills the instance keys. Omit to
+    /// package's `mem-template.json` fills the instance keys. Omit to
     /// seed no guidance. Must be a JSON object; anything else refuses
     /// with `INVALID_INPUT`.
     #[arg(long = "write-guidance")]
     pub write_guidance: Option<String>,
 }
 
-/// `memstead vault delete <name>` arguments — full destruction. The
-/// CLI honours the workspace `[[vault_management.delete]]`
+/// `memstead mem delete <name>` arguments — full destruction. The
+/// CLI honours the workspace `[[mem_management.delete]]`
 /// allowlist by default; pass `--operator-mode` or set
 /// `MEMSTEAD_OPERATOR_MODE=1` to skip the allowlist. The
-/// `VAULT_REFERENCED_BY_POLICY` and `VAULT_HAS_INCOMING_REFS`
+/// `MEM_REFERENCED_BY_POLICY` and `MEM_HAS_INCOMING_REFS`
 /// safeguards always fire regardless of operator-mode. The verb
 /// uniquely identifies the storage-destroying intent — use
-/// `memstead vault unregister` for router-only removal.
+/// `memstead mem unregister` for router-only removal.
 ///
 /// On success delete scrubs only the now-dangling
-/// `[cross_vault_links]` grants naming this vault on either side
+/// `[cross_mem_links]` grants naming this mem on either side
 /// (reported in the `## Allowlist entries scrubbed` block of the
 /// response) — those reference the gone instance and would otherwise
-/// dangle. The workspace's `[[vault_management.create]]` /
-/// `[[vault_management.delete]]` allowlist rules are PRESERVED, exact
+/// dangle. The workspace's `[[mem_management.create]]` /
+/// `[[mem_management.delete]]` allowlist rules are PRESERVED, exact
 /// name and glob alike: they are forward-looking permissions for the
-/// name, not references to the instance. Re-creating a vault of the
+/// name, not references to the instance. Re-creating a mem of the
 /// same name afterward needs no fresh `allow-create` / `allow-delete`
 /// grant.
 #[derive(Args, Debug)]
 pub struct DeleteArgs {
-    /// Name of the vault to destroy.
+    /// Name of the mem to destroy.
     pub name: String,
 
     /// Optional provenance note (≤280 chars). Captured on the engine
     /// trace surface; surfaces via the outer-repo Stop hook. No
-    /// per-vault commit is produced by delete.
+    /// per-mem commit is produced by delete.
     #[arg(long)]
     pub note: Option<String>,
 
-    /// Bypass the workspace `[[vault_management.delete]]` allowlist
+    /// Bypass the workspace `[[mem_management.delete]]` allowlist
     /// for this invocation. See `InitArgs::operator_mode` for the
     /// full design rationale. Also settable via `MEMSTEAD_OPERATOR_MODE=1`.
     #[arg(long = "operator-mode")]
     pub operator_mode: bool,
 }
 
-/// `memstead vault unregister <name>` arguments — router-only removal,
+/// `memstead mem unregister <name>` arguments — router-only removal,
 /// storage preserved. The CLI honours the workspace
-/// `[[vault_management.delete]]` allowlist by default; pass
+/// `[[mem_management.delete]]` allowlist by default; pass
 /// `--operator-mode` or set `MEMSTEAD_OPERATOR_MODE=1` to skip the
-/// allowlist. The `VAULT_REFERENCED_BY_POLICY` safeguard does not
+/// allowlist. The `MEM_REFERENCED_BY_POLICY` safeguard does not
 /// apply to unregister (storage is preserved), so unregistering a
-/// vault with cross-vault grants pointing at it succeeds without
+/// mem with cross-mem grants pointing at it succeeds without
 /// refusing — the data the grants rely on survives.
 ///
-/// Refuses with `VAULT_HAS_INCOMING_REFS` when an entity in another
-/// Write-Vault still carries a graph edge into this vault (`details.referrers`
-/// names each `{from_id, rel_types, vault}`) — remove those edges via
+/// Refuses with `MEM_HAS_INCOMING_REFS` when an entity in another
+/// Write-Mem still carries a graph edge into this mem (`details.referrers`
+/// names each `{from_id, rel_types, mem}`) — remove those edges via
 /// `memstead relate --remove` / `memstead update` first. This guard fires for
 /// `unregister` just as it does for `delete`: the edge-graph axis is
 /// independent of the storage-preservation choice, so a gentle
-/// removal that left dangling cross-vault edges would be just as broken.
+/// removal that left dangling cross-mem edges would be just as broken.
 #[derive(Args, Debug)]
 pub struct UnregisterArgs {
-    /// Name of the vault to unregister.
+    /// Name of the mem to unregister.
     pub name: String,
 
     /// Optional provenance note (≤280 chars). Captured on the engine
@@ -300,7 +300,7 @@ pub struct UnregisterArgs {
     #[arg(long)]
     pub note: Option<String>,
 
-    /// Bypass the workspace `[[vault_management.delete]]` allowlist
+    /// Bypass the workspace `[[mem_management.delete]]` allowlist
     /// for this invocation. See `InitArgs::operator_mode` for the
     /// full design rationale. Also settable via `MEMSTEAD_OPERATOR_MODE=1`.
     #[arg(long = "operator-mode")]
@@ -317,29 +317,29 @@ pub fn run(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
     // engine's own boot precondition — `memstead-mcp` walks for it too.
     let workspace_root = find_workspace_root(&cwd).ok_or_else(|| {
         validation_error(format!(
-            "no workspace found above {}. Run `memstead vault-repo init` first or \
+            "no workspace found above {}. Run `memstead mem-repo init` first or \
              change directory into an existing workspace.",
             cwd.display(),
         ))
     })?;
 
-    // Hierarchical paths are first-class vault identifiers. The CLI forwards
-    // the `<PATH>` argument verbatim as `params.name` (`team/sub-vault`
-    // or just `sub-vault` — the engine's vault-name grammar
+    // Hierarchical paths are first-class mem identifiers. The CLI forwards
+    // the `<PATH>` argument verbatim as `params.name` (`team/sub-mem`
+    // or just `sub-mem` — the engine's mem-name grammar
     // validates the shape). There is no `--org-path` flag or path-vs-name
     // auto-split — the value flows through unchanged.
-    let vault_name = args
+    let mem_name = args
         .path
         .to_str()
         .map(|s| s.to_string())
         .ok_or_else(|| {
             invalid_input_error(format!(
-                "vault name {:?} is not valid UTF-8 — vault names must be ASCII \
+                "mem name {:?} is not valid UTF-8 — mem names must be ASCII \
                  (lowercase letters / digits / hyphens) optionally segmented by '/'.",
                 args.path.display(),
             ))
         })?;
-    let location = vault_name.clone();
+    let location = mem_name.clone();
 
     let schema_ref: memstead_schema::SchemaRef = args.schema.parse().map_err(|e| {
         invalid_input_error(format!("invalid schema ref {:?}: {e}", args.schema))
@@ -361,14 +361,14 @@ pub fn run(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
             invalid_input_error(format!("--write-guidance must be a JSON object: {e}"))
         })?,
     };
-    let params = VaultCreateParams {
-        name: vault_name.clone(),
+    let params = MemCreateParams {
+        name: mem_name.clone(),
         location: PathBuf::from(&location),
         schema_ref,
         vcs: vcs_config,
         note: args.note.clone(),
         write_guidance,
-        // The workspace `[[vault_management.create]]`
+        // The workspace `[[mem_management.create]]`
         // allowlist applies to CLI calls by default; the operator
         // opts into bypass explicitly via `--operator-mode` (flag
         // wins) or `MEMSTEAD_OPERATOR_MODE=1` (env-var fallback).
@@ -381,15 +381,15 @@ pub fn run(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
     };
 
     let mut engine = match ctx.cli_engine()? {
-        CliEngine::VaultRepo(e) => e,
+        CliEngine::MemRepo(e) => e,
         CliEngine::Filesystem(_) => {
             return Err(validation_error(format!(
-                "`memstead vault init` requires a vault-repo workspace; the workspace at {} is filesystem-shaped. Use `memstead vault-repo init` first to migrate.",
+                "`memstead mem init` requires a mem-repo workspace; the workspace at {} is filesystem-shaped. Use `memstead mem-repo init` first to migrate.",
                 workspace_root.display(),
             )));
         }
     };
-    let response = vault_management::create_vault(&mut engine, params)
+    let response = mem_management::create_mem(&mut engine, params)
         .map_err(pro_engine_err_to_cli)?;
     if ctx.json {
         crate::output::print_json(&serde_json::json!({
@@ -397,7 +397,7 @@ pub fn run(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
             "location": response.location,
             "schema_ref": response.schema_ref.to_string(),
             "seed_commit_sha": response.seed_commit_sha,
-            // The reattach branch surfaces `VAULT_REATTACHED_AFTER_UNREGISTER`
+            // The reattach branch surfaces `MEM_REATTACHED_AFTER_UNREGISTER`
             // through the response envelope rather than dropping it on
             // the floor. Fresh-create ships an empty array.
             "warnings": response
@@ -407,15 +407,15 @@ pub fn run(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
                 .collect::<Vec<_>>(),
         }))?;
     } else {
-        crate::output::print_markdown(&render_vault_create_markdown(&response));
+        crate::output::print_markdown(&render_mem_create_markdown(&response));
     }
 
-    // Outer-repo gitignore handling. Append `vault-repo/` (the post-cutover
-    // gitignore target — every vault's content lives inside that one
+    // Outer-repo gitignore handling. Append `mem-repo/` (the post-cutover
+    // gitignore target — every mem's content lives inside that one
     // directory) to the outer repo's `.gitignore`. Idempotent on re-run;
     // refuses when the outer is `$HOME`.
     if !args.no_gitignore {
-        let vault_repo_path = workspace_root.join("vault-repo");
+        let mem_repo_path = workspace_root.join("mem-repo");
         let walk_start = workspace_root
             .parent()
             .map(|p| p.to_path_buf())
@@ -426,7 +426,7 @@ pub fn run(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
         // `--help` advertises and steers callers to pipe through `jq`). A
         // human still sees it on the terminal in normal runs; `--quiet`
         // suppresses it, the first time this site consults the flag.
-        match apply_outer_gitignore(&walk_start, &vault_repo_path)? {
+        match apply_outer_gitignore(&walk_start, &mem_repo_path)? {
             OuterRepoOutcome::Appended { outer_root, rel } => {
                 if !ctx.quiet {
                     eprintln!(
@@ -449,12 +449,12 @@ pub fn run(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
         }
     }
 
-    // Client-side vault-template consumption: when the operator did not
+    // Client-side mem-template consumption: when the operator did not
     // supply --write-guidance, surface the resolved schema's
-    // vault-template instance keys so they know what to fill. The engine
+    // mem-template instance keys so they know what to fill. The engine
     // treats `writeGuidance` opaquely — filling is the operator's job.
     if let Some(note) =
-        vault_template_guidance_note(&response.schema_ref, args.write_guidance.is_some())
+        mem_template_guidance_note(&response.schema_ref, args.write_guidance.is_some())
         && !ctx.quiet
     {
         eprintln!("  template: {note}");
@@ -464,20 +464,20 @@ pub fn run(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
 }
 
 /// When the operator did not supply `--write-guidance`, surface the
-/// resolved (built-in) schema's `vault-template.json` instance guidance
+/// resolved (built-in) schema's `mem-template.json` instance guidance
 /// keys so they know what to fill. Returns the operator notice, or
 /// `None` when there is nothing to surface — guidance was already given,
 /// the schema ships no template, or its template carries no guidance.
 /// Reads only built-in templates; an installed/authored package's
 /// template is a follow-up.
-fn vault_template_guidance_note(
+fn mem_template_guidance_note(
     schema_ref: &memstead_schema::SchemaRef,
     guidance_given: bool,
 ) -> Option<String> {
     if guidance_given {
         return None;
     }
-    let template = memstead_schema::builtins::builtin_vault_template(&schema_ref.name)?;
+    let template = memstead_schema::builtins::builtin_mem_template(&schema_ref.name)?;
     let wg = template.get("writeGuidance")?.as_object()?;
     if wg.is_empty() {
         return None;
@@ -485,9 +485,9 @@ fn vault_template_guidance_note(
     let keys: Vec<&str> = wg.keys().map(String::as_str).collect();
     let first = keys.first().copied().unwrap_or("key");
     Some(format!(
-        "schema {schema_ref} ships a vault-template with instance guidance key(s) [{}] — \
-         the vault was created without guidance. Re-run with \
-         --write-guidance '{{\"{first}\": \"…\"}}' (or edit the vault config) to fill them.",
+        "schema {schema_ref} ships a mem-template with instance guidance key(s) [{}] — \
+         the mem was created without guidance. Re-run with \
+         --write-guidance '{{\"{first}\": \"…\"}}' (or edit the mem config) to fill them.",
         keys.join(", "),
     ))
 }
@@ -542,28 +542,28 @@ fn run_delete_inner(
     })?;
     let workspace_root = find_workspace_root(&cwd).ok_or_else(|| {
         validation_error(format!(
-            "no workspace found above {}. `memstead vault {verb}` must run \
+            "no workspace found above {}. `memstead mem {verb}` must run \
              inside a configured workspace.",
             cwd.display(),
         ))
     })?;
 
-    let params = VaultDeleteParams {
+    let params = MemDeleteParams {
         name: name.clone(),
         delete_files,
         note: note.clone(),
         operator_mode,
     };
     let mut engine = match ctx.cli_engine()? {
-        CliEngine::VaultRepo(e) => e,
+        CliEngine::MemRepo(e) => e,
         CliEngine::Filesystem(_) => {
             return Err(validation_error(format!(
-                "`memstead vault {verb}` requires a vault-repo workspace; the workspace at {} is filesystem-shaped.",
+                "`memstead mem {verb}` requires a mem-repo workspace; the workspace at {} is filesystem-shaped.",
                 workspace_root.display(),
             )));
         }
     };
-    let response = vault_management::delete_vault(&mut engine, params)
+    let response = mem_management::delete_mem(&mut engine, params)
         .map_err(pro_engine_err_to_cli)?;
     if ctx.json {
         crate::output::print_json(&serde_json::json!({
@@ -580,28 +580,28 @@ fn run_delete_inner(
             "allowlist_entries_removed": &response.allowlist_entries_removed,
         }))?;
     } else {
-        crate::output::print_markdown(&render_vault_delete_markdown(&response, verb));
+        crate::output::print_markdown(&render_mem_delete_markdown(&response, verb));
     }
     Ok(())
 }
 
-/// Render a successful `VaultCreateResponse` as a CLI markdown block.
+/// Render a successful `MemCreateResponse` as a CLI markdown block.
 /// The CLI owns its own prose rather than echoing the MCP subprocess's
 /// pre-rendered text channel.
-fn render_vault_create_markdown(r: &VaultCreateResponse) -> String {
+fn render_mem_create_markdown(r: &MemCreateResponse) -> String {
     // The reattach
-    // branch surfaces a `VAULT_REATTACHED_AFTER_UNREGISTER` warning on
+    // branch surfaces a `MEM_REATTACHED_AFTER_UNREGISTER` warning on
     // the response. Adjust the heading so an operator picking up an
     // empty `seed_commit_sha` plus the reattach warning learns the
     // branch tip kept its prior history rather than starting fresh.
     let reattached = r
         .warnings
         .iter()
-        .any(|w| matches!(w, memstead_base::ops::WarningHint::VaultReattachedAfterUnregister { .. }));
+        .any(|w| matches!(w, memstead_base::ops::WarningHint::MemReattachedAfterUnregister { .. }));
     let heading = if reattached {
-        format!("# Vault `{}` reattached\n\n", r.name)
+        format!("# Mem `{}` reattached\n\n", r.name)
     } else {
-        format!("# Vault `{}` created\n\n", r.name)
+        format!("# Mem `{}` created\n\n", r.name)
     };
     let mut out = heading;
     out.push_str(&format!("- Location: `{}`\n", r.location.display()));
@@ -616,16 +616,16 @@ fn render_vault_create_markdown(r: &VaultCreateResponse) -> String {
     out
 }
 
-/// Render a successful `VaultDeleteResponse` as a CLI markdown block.
+/// Render a successful `MemDeleteResponse` as a CLI markdown block.
 /// `verb` is the CLI subcommand name (`"delete"` or `"unregister"`)
 /// — drives the heading prose so the output matches the user's
 /// invocation.
-fn render_vault_delete_markdown(r: &VaultDeleteResponse, verb: &str) -> String {
+fn render_mem_delete_markdown(r: &MemDeleteResponse, verb: &str) -> String {
     let past_participle = match verb {
         "unregister" => "unregistered",
         _ => "deleted",
     };
-    let mut out = format!("# Vault `{}` {past_participle}\n\n", r.name);
+    let mut out = format!("# Mem `{}` {past_participle}\n\n", r.name);
     out.push_str(&format!(
         "- Removed from router: {}\n",
         r.deleted_from_router,
@@ -671,9 +671,9 @@ fn render_vault_delete_markdown(r: &VaultDeleteResponse, verb: &str) -> String {
 /// delegate to [`crate::CliError::from_engine_op`] so the per-variant
 /// exit-kind mapping (`NotFound` → exit 3, `HashMismatch` → exit 4,
 /// validation → exit 5, generic → exit 1) is consumed in one place;
-/// lifecycle variants (`VAULT_PATH_NOT_ALLOWED`,
-/// `VAULT_SCHEMA_NOT_ALLOWED`, `VAULT_REFERENCED_BY_POLICY`,
-/// `INVALID_VAULT_NAME`, `CONFIG_ERROR`, `VAULT_STORAGE_RESIDUE_DETECTED`)
+/// lifecycle variants (`MEM_PATH_NOT_ALLOWED`,
+/// `MEM_SCHEMA_NOT_ALLOWED`, `MEM_REFERENCED_BY_POLICY`,
+/// `INVALID_MEM_NAME`, `CONFIG_ERROR`, `MEM_STORAGE_RESIDUE_DETECTED`)
 /// are user-recoverable validation refusals and land at exit 5.
 ///
 /// Sourcing from the engine error directly means any new engine code
@@ -699,9 +699,9 @@ fn pro_engine_err_to_cli(err: memstead_engine::ProEngineError) -> anyhow::Error 
     }
 }
 
-/// `memstead vault set-version <NAME> <VERSION>` — bump the vault's
+/// `memstead mem set-version <NAME> <VERSION>` — bump the mem's
 /// `version` field via the in-process engine, persisting through the
-/// backend's `write_vault_config`. Unlike `init` / `delete`, this
+/// backend's `write_mem_config`. Unlike `init` / `delete`, this
 /// surface doesn't spawn the MCP subprocess: set-version is gate-free
 /// (no operator-mode bypass needed), so a direct engine call keeps
 /// the implementation simpler and faster.
@@ -715,11 +715,11 @@ pub fn run_set_version(ctx: &CliContext, args: SetVersionArgs) -> anyhow::Result
 
     let note = args.note.as_deref();
     let outcome = match ctx.cli_engine()? {
-        crate::setup::CliEngine::VaultRepo(mut engine) => engine
-            .set_vault_version(&args.name, new_version, note)
+        crate::setup::CliEngine::MemRepo(mut engine) => engine
+            .set_mem_version(&args.name, new_version, note)
             .map_err(crate::CliError::from_engine_op)?,
         crate::setup::CliEngine::Filesystem(mut engine) => engine
-            .set_vault_version(&args.name, new_version, note)
+            .set_mem_version(&args.name, new_version, note)
             .map_err(crate::CliError::from_engine_op)?,
     };
 
@@ -742,25 +742,25 @@ pub fn run_set_version(ctx: &CliContext, args: SetVersionArgs) -> anyhow::Result
             format!("\n\n> warnings:\n> - {}", rendered.join("\n> - "))
         };
         crate::output::print_markdown(&format!(
-            "# Vault `{}` version updated\n\n- Old version: {}\n- New version: {}{}",
-            outcome.vault, old, outcome.new_version, warnings,
+            "# Mem `{}` version updated\n\n- Old version: {}\n- New version: {}{}",
+            outcome.mem, old, outcome.new_version, warnings,
         ));
     }
     Ok(())
 }
 
-/// `memstead vault set-sync-state <NAME> <KEY> <TOKEN>` — set or clear
-/// one opaque sync-state token in a vault's config via the in-process
-/// engine, persisting through the backend's `write_vault_config`. Like
+/// `memstead mem set-sync-state <NAME> <KEY> <TOKEN>` — set or clear
+/// one opaque sync-state token in a mem's config via the in-process
+/// engine, persisting through the backend's `write_mem_config`. Like
 /// set-version, this surface is gate-free and calls the engine directly.
 pub fn run_set_sync_state(ctx: &CliContext, args: SetSyncStateArgs) -> anyhow::Result<()> {
     let note = args.note.as_deref();
     let outcome = match ctx.cli_engine()? {
-        crate::setup::CliEngine::VaultRepo(mut engine) => engine
-            .set_vault_sync_state(&args.name, &args.key, &args.token, note)
+        crate::setup::CliEngine::MemRepo(mut engine) => engine
+            .set_mem_sync_state(&args.name, &args.key, &args.token, note)
             .map_err(crate::CliError::from_engine_op)?,
         crate::setup::CliEngine::Filesystem(mut engine) => engine
-            .set_vault_sync_state(&args.name, &args.key, &args.token, note)
+            .set_mem_sync_state(&args.name, &args.key, &args.token, note)
             .map_err(crate::CliError::from_engine_op)?,
     };
 
@@ -782,8 +782,8 @@ pub fn run_set_sync_state(ctx: &CliContext, args: SetSyncStateArgs) -> anyhow::R
             format!("\n\n> warnings:\n> - {}", rendered.join("\n> - "))
         };
         crate::output::print_markdown(&format!(
-            "# Vault `{}` sync state {}\n\n- Key: `{}`{}",
-            outcome.vault, action, outcome.key, warnings,
+            "# Mem `{}` sync state {}\n\n- Key: `{}`{}",
+            outcome.mem, action, outcome.key, warnings,
         ));
     }
     Ok(())
@@ -794,11 +794,11 @@ pub fn run_set_schema(ctx: &CliContext, args: SetSchemaArgs) -> anyhow::Result<(
         invalid_input_error(format!("invalid schema ref {:?}: {e}", args.schema))
     })?;
     let outcome = match ctx.cli_engine()? {
-        crate::setup::CliEngine::VaultRepo(mut engine) => engine
-            .set_vault_schema(&args.name, &target)
+        crate::setup::CliEngine::MemRepo(mut engine) => engine
+            .set_mem_schema(&args.name, &target)
             .map_err(crate::CliError::from_engine_op)?,
         crate::setup::CliEngine::Filesystem(mut engine) => engine
-            .set_vault_schema(&args.name, &target)
+            .set_mem_schema(&args.name, &target)
             .map_err(crate::CliError::from_engine_op)?,
     };
     if ctx.json {
@@ -815,8 +815,8 @@ pub fn run_set_schema(ctx: &CliContext, args: SetSchemaArgs) -> anyhow::Result<(
             format!("\n\n## Non-integral entities\n\n{}", rendered.join("\n"))
         };
         crate::output::print_markdown(&format!(
-            "# Vault `{}` schema: {:?}\n\n- Pin: {}\n- Migration target: {}{}",
-            outcome.vault,
+            "# Mem `{}` schema: {:?}\n\n- Pin: {}\n- Migration target: {}{}",
+            outcome.mem,
             outcome.outcome,
             outcome.schema_pin,
             outcome.migration_target.as_deref().unwrap_or("<none>"),
@@ -828,7 +828,7 @@ pub fn run_set_schema(ctx: &CliContext, args: SetSchemaArgs) -> anyhow::Result<(
 
 fn generic_error(msg: String) -> anyhow::Error {
     CliError {
-        code: "VAULT_ERROR",
+        code: "MEM_ERROR",
         kind: ExitKind::Generic,
         message: msg,
         details: None,
@@ -881,21 +881,21 @@ fn recovery_from_flags(
 pub fn run_list(ctx: &CliContext, _args: ListArgs) -> anyhow::Result<()> {
     let setup_ctx = CliContext { json: ctx.json, quiet: ctx.quiet };
     let engine = crate::setup::pro_engine(&setup_ctx).map_err(|e| {
-        generic_error(format!("vault list: could not initialize engine: {e}"))
+        generic_error(format!("mem list: could not initialize engine: {e}"))
     })?;
 
     let mut rows: Vec<serde_json::Value> = Vec::new();
-    for name in engine.vault_names() {
+    for name in engine.mem_names() {
         let cfg = engine
-            .vault_configs_named()
+            .mem_configs_named()
             .find(|(n, _)| *n == name)
             .map(|(_, c)| c);
         let entity_count = engine
             .store()
             .all_entities()
-            .filter(|e| e.id.vault() == name && !e.stub)
+            .filter(|e| e.id.mem() == name && !e.stub)
             .count();
-        let capability = if engine.vault_router().is_writable(name) {
+        let capability = if engine.mem_router().is_writable(name) {
             "write"
         } else {
             "read_only"
@@ -910,13 +910,13 @@ pub fn run_list(ctx: &CliContext, _args: ListArgs) -> anyhow::Result<()> {
     }
 
     if ctx.json {
-        crate::output::print_json(&serde_json::json!({ "vaults": rows }))?;
+        crate::output::print_json(&serde_json::json!({ "mems": rows }))?;
         return Ok(());
     }
 
-    let mut lines: Vec<String> = vec![format!("# Vaults ({})", rows.len()), String::new()];
+    let mut lines: Vec<String> = vec![format!("# Mems ({})", rows.len()), String::new()];
     if rows.is_empty() {
-        lines.push("_no vaults mounted_".to_string());
+        lines.push("_no mems mounted_".to_string());
     } else {
         for v in &rows {
             let name = v["name"].as_str().unwrap_or("?");
@@ -947,73 +947,73 @@ mod tests {
             .expect("pro_engine_err_to_cli must lift to a CliError")
     }
 
-    /// The client-side vault-template consumer surfaces a built-in
+    /// The client-side mem-template consumer surfaces a built-in
     /// schema's instance guidance keys when `--write-guidance` is
     /// omitted, stays silent when guidance is given, and is silent for a
     /// schema that ships no template.
     #[test]
-    fn vault_template_guidance_note_surfaces_builtin_keys() {
+    fn mem_template_guidance_note_surfaces_builtin_keys() {
         let planning: memstead_schema::SchemaRef = "planning@0.1.0".parse().unwrap();
-        let note = vault_template_guidance_note(&planning, false)
-            .expect("planning ships a vault-template — a note is due");
+        let note = mem_template_guidance_note(&planning, false)
+            .expect("planning ships a mem-template — a note is due");
         assert!(note.contains("phase_context"), "note names the key: {note}");
         assert!(note.contains("--write-guidance"), "note tells how to fill: {note}");
         // Operator supplied guidance → nothing to surface.
-        assert!(vault_template_guidance_note(&planning, false).is_some());
-        assert!(vault_template_guidance_note(&planning, true).is_none());
-        // A schema with no vault-template → no note.
+        assert!(mem_template_guidance_note(&planning, false).is_some());
+        assert!(mem_template_guidance_note(&planning, true).is_none());
+        // A schema with no mem-template → no note.
         let default_: memstead_schema::SchemaRef = "default@1.0.0".parse().unwrap();
-        assert!(vault_template_guidance_note(&default_, false).is_none());
+        assert!(mem_template_guidance_note(&default_, false).is_none());
     }
 
-    /// The CLI's vault command surface does not translate the engine's
+    /// The CLI's mem command surface does not translate the engine's
     /// typed code through a static table — a code added on the engine
     /// side reaches the CLI envelope unchanged. Pins the regression
-    /// where `VAULT_HAS_INCOMING_REFS` silently degraded to
+    /// where `MEM_HAS_INCOMING_REFS` silently degraded to
     /// `VALIDATION_FAILED`.
     #[test]
-    fn vault_has_incoming_refs_keeps_typed_code_and_carries_details() {
-        let err = ProEngineError::Basis(EngineError::VaultHasIncomingRefs {
-            vault: "other".to_string(),
+    fn mem_has_incoming_refs_keeps_typed_code_and_carries_details() {
+        let err = ProEngineError::Basis(EngineError::MemHasIncomingRefs {
+            mem: "other".to_string(),
             referrers: vec![ReferrerInfo {
                 from_id: "test--source".to_string(),
                 rel_types: vec!["USES".to_string()],
-                vault: "test".to_string(),
+                mem: "test".to_string(),
             }],
         });
         let cli = lifted_cli_error(err);
-        assert_eq!(cli.code, "VAULT_HAS_INCOMING_REFS");
+        assert_eq!(cli.code, "MEM_HAS_INCOMING_REFS");
         assert_eq!(cli.kind, ExitKind::Validation);
         let details = cli.details.expect("details must reach the CLI envelope");
-        assert_eq!(details["vault"], "other");
+        assert_eq!(details["mem"], "other");
         let referrers = details["referrers"].as_array().expect("referrers array");
         assert_eq!(referrers.len(), 1);
         assert_eq!(referrers[0]["from_id"], "test--source");
-        assert_eq!(referrers[0]["vault"], "test");
+        assert_eq!(referrers[0]["mem"], "test");
     }
 
     /// Lifecycle refusal (a pro-only variant) is
     /// promoted through with the same code + structured details the
-    /// MCP wire ships. `VAULT_PATH_NOT_ALLOWED` carries the candidate,
+    /// MCP wire ships. `MEM_PATH_NOT_ALLOWED` carries the candidate,
     /// the patterns list, and the typed reason discriminator.
     #[test]
-    fn vault_path_not_allowed_carries_structured_details() {
-        let err = ProEngineError::VaultPathNotAllowed {
+    fn mem_path_not_allowed_carries_structured_details() {
+        let err = ProEngineError::MemPathNotAllowed {
             attempted: PathBuf::from("/ws/bogus"),
             candidate: "bogus".to_string(),
             patterns: vec!["specs".to_string(), "team/*".to_string()],
             reason: "no_match",
-            policy_table: "vault_management.create",
+            policy_table: "mem_management.create",
         };
         let cli = lifted_cli_error(err);
-        assert_eq!(cli.code, "VAULT_PATH_NOT_ALLOWED");
+        assert_eq!(cli.code, "MEM_PATH_NOT_ALLOWED");
         assert_eq!(cli.kind, ExitKind::Validation);
         let details = cli.details.expect("details");
         assert_eq!(details["candidate"], "bogus");
         assert_eq!(details["reason"], "no_match");
         assert_eq!(details["patterns"][0], "specs");
         // The `policy_table` disambiguator reaches the CLI envelope.
-        assert_eq!(details["policy_table"], "vault_management.create");
+        assert_eq!(details["policy_table"], "mem_management.create");
         assert_eq!(details["patterns"][1], "team/*");
     }
 
@@ -1023,24 +1023,24 @@ mod tests {
     #[test]
     fn lifecycle_refusal_never_degrades_to_validation_failed_token() {
         let cases = [
-            ProEngineError::VaultPathNotAllowed {
+            ProEngineError::MemPathNotAllowed {
                 attempted: PathBuf::from("/x"),
                 candidate: "x".to_string(),
                 patterns: vec![],
                 reason: "no_allowlist_configured",
-                policy_table: "vault_management.create",
+                policy_table: "mem_management.create",
             },
-            ProEngineError::VaultReferencedByPolicy {
+            ProEngineError::MemReferencedByPolicy {
                 name: "x".to_string(),
-                referring_vaults: vec!["y".to_string()],
+                referring_mems: vec!["y".to_string()],
             },
-            ProEngineError::VaultSchemaNotAllowed {
+            ProEngineError::MemSchemaNotAllowed {
                 candidate: "x".to_string(),
                 matched_pattern: "p".to_string(),
                 requested_schema: "default@1.0.0".to_string(),
                 allowed_schemas: vec!["other@1.0.0".to_string()],
             },
-            ProEngineError::InvalidVaultName {
+            ProEngineError::InvalidMemName {
                 name: "BadName".to_string(),
                 reason: "invalid_char",
             },

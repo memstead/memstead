@@ -15,7 +15,7 @@
  *   - a small **digest** `{count, watermark, aggregate}` — the durable
  *     token the engine persists per `(ingest, facet)`. Byte-comparing two
  *     digests answers "did anything change since the last sync"; it
- *     survives a skill-cache wipe because it lives in engine vault config.
+ *     survives a skill-cache wipe because it lives in engine mem config.
  *   - the **full map** — a rebuildable skill-cache memo keyed by digest,
  *     used to compute *which* files changed. On cache miss the caller
  *     degrades to a one-tick full scan (detection from the digest still

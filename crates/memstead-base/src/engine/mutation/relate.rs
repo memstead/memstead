@@ -12,7 +12,7 @@ use crate::entity::{Entity, EntityId, Relationship, normalise_description};
 use crate::ops::WarningHint;
 use crate::provenance::{Provenance, ProvenanceKind};
 use crate::runtime_validator::{
-    CrossVaultRelCheck, RelationshipCheck, validate_cross_vault_edge, validate_rel_shape,
+    CrossMemRelCheck, RelationshipCheck, validate_cross_mem_edge, validate_rel_shape,
     validate_rel_type,
 };
 use crate::vcs::{Actor, ClientId, CommitContext};
@@ -31,16 +31,16 @@ impl Engine {
 
     /// Add or remove a typed relationship on `args.source`.
     ///
-    /// Cross-vault relate is policy-gated through
-    /// [`Engine::cross_vault_link_allowed`] — the workspace's
-    /// `[cross_vault_links]` table (or per-create-rule
+    /// Cross-mem relate is policy-gated through
+    /// [`Engine::cross_mem_link_allowed`] — the workspace's
+    /// `[cross_mem_links]` table (or per-create-rule
     /// `default_cross_links` synthesis) decides whether the edge is
     /// permitted. Disallowed pairings surface
-    /// [`EngineError::CrossVaultLinkNotAllowed`]. Cross-vault relate
-    /// only writes the source entity's markdown — the target vault is
+    /// [`EngineError::CrossMemLinkNotAllowed`]. Cross-mem relate
+    /// only writes the source entity's markdown — the target mem is
     /// never written to. Auto-stub for absent targets works for
-    /// Write target vaults; ReadOnly target vaults reject absent
-    /// targets with [`EngineError::CrossVaultTargetNotFound`] because
+    /// Write target mems; ReadOnly target mems reject absent
+    /// targets with [`EngineError::CrossMemTargetNotFound`] because
     /// the engine cannot persist a stub through the read-only
     /// boundary.
     ///
@@ -55,17 +55,17 @@ impl Engine {
         note: Option<&str>,
     ) -> Result<RelateEntityOutcome, EngineError> {
         let mut args = args;
-        let source_vault = args.source.vault().to_string();
-        let target_vault = args.target.vault().to_string();
+        let source_mem = args.source.mem().to_string();
+        let target_mem = args.target.mem().to_string();
 
-        // Reload-before-operation: reload the source vault (and the
-        // target vault, when distinct) if a sibling advanced either
+        // Reload-before-operation: reload the source mem (and the
+        // target mem, when distinct) if a sibling advanced either
         // ref, so the source `expected_hash` compare and the target
         // existence/stub decisions below run against current truth.
         // The drift notice rides the outcome's `warnings`.
-        let mut drift_warnings = self.reload_if_stale(Some(&source_vault));
-        if target_vault != source_vault {
-            drift_warnings.append(&mut self.reload_if_stale(Some(&target_vault)));
+        let mut drift_warnings = self.reload_if_stale(Some(&source_mem));
+        if target_mem != source_mem {
+            drift_warnings.append(&mut self.reload_if_stale(Some(&target_mem)));
         }
 
         // Target-id grammar gate (shared helper, also called from
@@ -74,63 +74,63 @@ impl Engine {
         // implicit — a malformed source surfaces as `ENTITY_NOT_FOUND`
         // because it can never have been created.
         //
-        // The grammar check runs BEFORE the cross-vault policy check:
+        // The grammar check runs BEFORE the cross-mem policy check:
         // a bare-string target with no `--` separator (e.g.
-        // `bad target`) parses as `vault: ""`, `path: "bad target"`,
-        // and without this ordering would surface a cross-vault
-        // policy error against an empty vault name — pointing the
+        // `bad target`) parses as `mem: ""`, `path: "bad target"`,
+        // and without this ordering would surface a cross-mem
+        // policy error against an empty mem name — pointing the
         // agent at workspace policy when the actual fix is a
         // malformed id. The grammar check is intrinsic to the target
-        // id; it doesn't need to know which vault the target lives
+        // id; it doesn't need to know which mem the target lives
         // in.
         validate_relation_target_grammar(&args.target)?;
 
-        // Track whether the cross-vault target's vault is unmounted —
+        // Track whether the cross-mem target's mem is unmounted —
         // we deferred the warning emission to the canonical
         // `warnings` vec initialisation below, but the policy / RO
         // gates fire first to keep the refusal-before-warning ordering:
         // a policy refusal preempts the warning.
-        let mut target_vault_uncreated = false;
-        if source_vault != target_vault {
+        let mut target_mem_uncreated = false;
+        if source_mem != target_mem {
             // Policy gates *new* edges only — remove is structurally
             // cleanup. The same convention governs the acyclic, shape,
             // and schema gates below (each one wraps `if !args.remove`).
-            // Without this bypass, a workspace whose cross-vault grant
+            // Without this bypass, a workspace whose cross-mem grant
             // was revoked while edges still existed gets wedged: the
             // grant must be re-introduced just to delete the data it
             // permitted, then re-revoked. The gate-on-add
-            // rule holds because `cross_vault_links: named` semantically reads
+            // rule holds because `cross_mem_links: named` semantically reads
             // as "only these new edges may be created", not "these
             // edges may exist."
             if !args.remove {
-                super::validate_cross_vault_add_policy(
+                super::validate_cross_mem_add_policy(
                     self,
-                    &source_vault,
-                    &target_vault,
+                    &source_mem,
+                    &target_mem,
                 )?;
             }
-            // ReadOnly target vault: the engine has no write access to
+            // ReadOnly target mem: the engine has no write access to
             // persist a stub there, so the target must already exist
-            // before relate. (Same-vault and cross-vault-to-Write
+            // before relate. (Same-mem and cross-mem-to-Write
             // both retain the auto-stub mechanic below.)
-            if let Some(mount) = self.mount(&target_vault)
+            if let Some(mount) = self.mount(&target_mem)
                 && mount.capability == MountCapability::ReadOnly
                 && !self.store.contains(&args.target)
             {
-                return Err(EngineError::CrossVaultTargetNotFound {
+                return Err(EngineError::CrossMemTargetNotFound {
                     target_id: args.target.to_string(),
-                    target_vault: target_vault.clone(),
+                    target_mem: target_mem.clone(),
                 });
             }
-            // The target vault isn't mounted in the workspace
+            // The target mem isn't mounted in the workspace
             // at all. Policy admitted the edge so the relate must
             // succeed and auto-stub; surface a warning so the operator
             // can distinguish a typo from a deliberate forward
             // reference. The auto-stub still lands via the
             // `AutoStubCreated` path below; this layered warning is
             // additive observability.
-            if self.mount(&target_vault).is_none() {
-                target_vault_uncreated = true;
+            if self.mount(&target_mem).is_none() {
+                target_mem_uncreated = true;
             }
         }
 
@@ -151,40 +151,40 @@ impl Engine {
         let mount_idx = self
             .mounts
             .iter()
-            .position(|m| m.mount.vault == source_vault)
-            .ok_or_else(|| EngineError::UnknownVault(source_vault.clone()))?;
+            .position(|m| m.mount.mem == source_mem)
+            .ok_or_else(|| EngineError::UnknownMem(source_mem.clone()))?;
         if self.mounts[mount_idx].mount.capability != MountCapability::Write {
-            return Err(EngineError::ReadOnlyMount(source_vault));
+            return Err(EngineError::ReadOnlyMount(source_mem));
         }
 
         let schema = self
             .schemas
-            .get(&source_vault)
+            .get(&source_mem)
             .expect("schema present for every registered mount");
 
-        // Determine whether this is a cross-vault edge to a vault
+        // Determine whether this is a cross-mem edge to a mem
         // pinning a schema with a *different name*. Same-name (any
-        // version pair — a schema name is a domain) and same-vault
-        // stay on the intra-vault validation path, governed by the
-        // source vault's pinned version; cross-different-schema
+        // version pair — a schema name is a domain) and same-mem
+        // stay on the intra-mem validation path, governed by the
+        // source mem's pinned version; cross-different-schema
         // routes vocabulary and shape checks through the source
-        // schema's `cross_vault_relationships:` section.
+        // schema's `cross_mem_relationships:` section.
         //
-        // If the target vault is not mounted (unknown to the engine
+        // If the target mem is not mounted (unknown to the engine
         // — typically only in malformed callers), there is no target
         // schema to consult and the validation falls back to the
-        // intra-vault path. Real workspaces always mount the target
-        // vault before relating.
-        let target_schema = if source_vault == target_vault {
+        // intra-mem path. Real workspaces always mount the target
+        // mem before relating.
+        let target_schema = if source_mem == target_mem {
             None
         } else {
-            self.schemas.get(&target_vault).cloned()
+            self.schemas.get(&target_mem).cloned()
         };
         let target_schema_ref: Option<SchemaRef> = target_schema.as_ref().map(|s| {
             let (name, version) = s.id();
             SchemaRef::new(name, version)
         });
-        let cross_vault_different = match (&target_schema_ref, schema.id()) {
+        let cross_mem_different = match (&target_schema_ref, schema.id()) {
             (Some(target), (src_name, _)) => target.name != src_name,
             (None, _) => false,
         };
@@ -192,11 +192,11 @@ impl Engine {
         let mut warnings: Vec<WarningHint> = Vec::new();
         // Reload-before-operation drift notice, surfaced first.
         warnings.append(&mut drift_warnings);
-        // Vocabulary check: intra-vault flow consults the source
+        // Vocabulary check: intra-mem flow consults the source
         // schema's `relationships.definitions`; cross-different-schema
-        // skips this entirely (the cross-vault entry's `definitions`
+        // skips this entirely (the cross-mem entry's `definitions`
         // are the sole authority — see the add-path check below).
-        if !cross_vault_different {
+        if !cross_mem_different {
             match validate_rel_type(&args.rel_type, schema.as_ref())? {
                 RelationshipCheck::Ok => {}
                 RelationshipCheck::OpenWarning(message) => {
@@ -242,11 +242,11 @@ impl Engine {
         // removable through `memstead_relate remove=true` — otherwise the
         // graph carries unfixable shape drift. The health scan
         // surfaces the existing violations so an agent can run the
-        // cleanup pass. The same posture applies to cross-vault
+        // cleanup pass. The same posture applies to cross-mem
         // vocabulary: the cleanup path stays permissive so
         // pre-tightening edges can be dropped without first
         // re-declaring them in the source schema.
-        // Per-edge description posture (intra-vault and cross-vault).
+        // Per-edge description posture (intra-mem and cross-mem).
         // Add-only — the remove path stays permissive so pre-tightening
         // edges remain droppable (mirrors the shape-validation posture
         // below). Posture is a no-op for rel-types not declared in the
@@ -256,8 +256,8 @@ impl Engine {
                 self,
                 &args.rel_type,
                 args.description.as_deref(),
-                &source_vault,
-                &target_vault,
+                &source_mem,
+                &target_mem,
                 &args.source,
                 &args.target,
             )?;
@@ -271,30 +271,30 @@ impl Engine {
             super::validate_manual_authoring_posture(
                 self,
                 &args.rel_type,
-                &source_vault,
+                &source_mem,
                 &args.source,
                 &args.target,
             )?;
         }
 
         if !args.remove {
-            if cross_vault_different {
-                // Safe-by-construction: `cross_vault_different` only
+            if cross_mem_different {
+                // Safe-by-construction: `cross_mem_different` only
                 // becomes true when `target_schema_ref` is `Some`.
                 let target_ref = target_schema_ref
                     .as_ref()
-                    .expect("target_schema_ref is Some when cross_vault_different");
-                match validate_cross_vault_edge(
+                    .expect("target_schema_ref is Some when cross_mem_different");
+                match validate_cross_mem_edge(
                     &args.rel_type,
                     entity.entity_type.as_str(),
                     target_type.as_deref(),
                     schema.as_ref(),
                     target_ref,
                 ) {
-                    CrossVaultRelCheck::Ok => {}
-                    CrossVaultRelCheck::EdgeNotDeclared => {
+                    CrossMemRelCheck::Ok => {}
+                    CrossMemRelCheck::EdgeNotDeclared => {
                         let (src_name, src_version) = schema.id();
-                        return Err(EngineError::CrossVaultEdgeNotDeclared {
+                        return Err(EngineError::CrossMemEdgeNotDeclared {
                             source_schema: SchemaRef::new(src_name, src_version).as_display(),
                             target_schema: target_ref.as_display(),
                             rel_type: args.rel_type.clone(),
@@ -302,7 +302,7 @@ impl Engine {
                             to_id: args.target.to_string(),
                         });
                     }
-                    CrossVaultRelCheck::Invalid(v) => {
+                    CrossMemRelCheck::Invalid(v) => {
                         return Err(EngineError::Validation(v));
                     }
                 }
@@ -349,7 +349,7 @@ impl Engine {
         }
 
         // Cycle check on the real-add path: if the rel_type is
-        // declared acyclic in the vault's schema, an add closing a
+        // declared acyclic in the mem's schema, an add closing a
         // back-path through `to → … → from` is rejected with the
         // existing path (capped). Skipped on the remove path and
         // when the rel_type isn't declared acyclic. The acyclic-add
@@ -407,7 +407,7 @@ impl Engine {
                 for (section_key, body) in entity.sections.iter() {
                     let inline_targets = crate::entity::parser::extract_inline_links_lenient(
                         body,
-                        &source_vault,
+                        &source_mem,
                     );
                     if inline_targets.iter().any(|t| t == &args.target) {
                         surviving_sections.push(section_key.clone());
@@ -466,14 +466,14 @@ impl Engine {
             warnings.push(WarningHint::AutoStubCreated {
                 stub_id: args.target.clone(),
             });
-            // If the target vault is unmounted, the
-            // auto-stub above has no `_vault_schema` resolution. Layer
-            // the typed vault-uncreated warning alongside the
+            // If the target mem is unmounted, the
+            // auto-stub above has no `_mem_schema` resolution. Layer
+            // the typed mem-uncreated warning alongside the
             // `AutoStubCreated` so the operator sees both signals.
-            if target_vault_uncreated {
-                warnings.push(WarningHint::CrossVaultTargetVaultUncreated {
-                    from_vault: source_vault.clone(),
-                    to_vault: target_vault.clone(),
+            if target_mem_uncreated {
+                warnings.push(WarningHint::CrossMemTargetMemUncreated {
+                    from_mem: source_mem.clone(),
+                    to_mem: target_mem.clone(),
                     target_id: args.target.clone(),
                 });
             }
@@ -558,7 +558,7 @@ impl Engine {
         self.record_self_write(mount_idx, &commit_sha);
 
         let parse_result =
-            parse_markdown(&markdown, &file_path, type_def.as_ref(), &source_vault)
+            parse_markdown(&markdown, &file_path, type_def.as_ref(), &source_mem)
                 .map_err(|e| EngineError::ParseAfterWrite(e.to_string()))?;
         let content_hash = parse_result.entity.content_hash.clone();
 
@@ -656,13 +656,13 @@ mod tests {
     use indexmap::IndexMap;
     use tempfile::TempDir;
 
-    use crate::backend::VaultBackend;
+    use crate::backend::MemBackend;
     use crate::engine::test_helpers::*;
     use crate::engine::{
         CreateEntityArgs, Engine, EngineError, RelateAction, RelateEntityArgs,
     };
     use crate::ops::WarningHint;
-    use crate::storage::FilesystemVaultWriter;
+    use crate::storage::FilesystemMemWriter;
     use crate::vcs::{Actor, CommitContext};
 
     #[test]
@@ -672,11 +672,11 @@ mod tests {
         // edge via the alias and via `relate_entity` and assert
         // they reach the same observable post-state.
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().to_path_buf();
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
-            folder_mount("specs", vault_dir),
-            Box::new(writer) as Box<dyn VaultBackend>,
+            folder_mount("specs", mem_dir),
+            Box::new(writer) as Box<dyn MemBackend>,
         )])
         .unwrap();
 
@@ -684,7 +684,7 @@ mod tests {
         let a = engine
             .create_entity(
                 CreateEntityArgs {
-                    vault: "specs".to_string(),
+                    mem: "specs".to_string(),
                     title: "A".to_string(),
                     entity_type: "spec".to_string(),
                     sections: IndexMap::from_iter([
@@ -703,7 +703,7 @@ mod tests {
         let b = engine
             .create_entity(
                 CreateEntityArgs {
-                    vault: "specs".to_string(),
+                    mem: "specs".to_string(),
                     title: "B".to_string(),
                     entity_type: "spec".to_string(),
                     sections: IndexMap::from_iter([
@@ -1052,11 +1052,11 @@ mod tests {
         use indexmap::IndexMap;
 
         let tmp = TempDir::new().unwrap();
-        let vault_dir = tmp.path().to_path_buf();
-        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
-            folder_mount("specs", vault_dir.clone()),
-            Box::new(writer) as Box<dyn VaultBackend>,
+            folder_mount("specs", mem_dir.clone()),
+            Box::new(writer) as Box<dyn MemBackend>,
         )])
         .unwrap();
         let (actor, client) = cli_actor();
@@ -1079,7 +1079,7 @@ mod tests {
         let source = engine
             .create_entity(
                 CreateEntityArgs {
-                    vault: "specs".to_string(),
+                    mem: "specs".to_string(),
                     title: "Source".to_string(),
                     entity_type: "spec".to_string(),
                     sections,
@@ -1290,13 +1290,13 @@ mod tests {
     }
 
     #[test]
-    fn relate_entity_rejects_cross_vault_when_policy_denies() {
-        // Default workspace settings carry no `cross_vault_links`
+    fn relate_entity_rejects_cross_mem_when_policy_denies() {
+        // Default workspace settings carry no `cross_mem_links`
         // policy and no `default_cross_links` on the create rules, so
-        // `cross_vault_link_allowed` returns false for any cross-vault
+        // `cross_mem_link_allowed` returns false for any cross-mem
         // pair. The relate refuse now surfaces the typed
         // policy-denial code instead of the legacy categorical
-        // `CrossVaultRelate`.
+        // `CrossMemRelate`.
         let tmp = TempDir::new().unwrap();
         let (mut engine, source) = engine_with_seed(&tmp, "S");
         let (actor, client) = cli_actor();
@@ -1306,7 +1306,7 @@ mod tests {
                     source: source.id.clone(),
                     expected_hash: Some(source.content_hash.clone()),
                     rel_type: "USES".to_string(),
-                    target: crate::EntityId::new("other-vault", "thing"),
+                    target: crate::EntityId::new("other-mem", "thing"),
                     remove: false,
                     description: None,
                 },
@@ -1316,24 +1316,24 @@ mod tests {
             )
             .unwrap_err();
         match err {
-            EngineError::CrossVaultLinkNotAllowed { from_vault, to_vault } => {
-                assert_eq!(from_vault, "specs");
-                assert_eq!(to_vault, "other-vault");
+            EngineError::CrossMemLinkNotAllowed { from_mem, to_mem } => {
+                assert_eq!(from_mem, "specs");
+                assert_eq!(to_mem, "other-mem");
             }
-            other => panic!("expected CrossVaultLinkNotAllowed, got {other:?}"),
+            other => panic!("expected CrossMemLinkNotAllowed, got {other:?}"),
         }
     }
 
-    /// Bare-string target without a `vault--` separator is malformed
-    /// (the wiki-link grammar requires `<vault>--<path>`). Pre-fix
-    /// the cross-vault check fired first: the parser saw `vault: ""`,
-    /// compared against the source vault, and produced
-    /// `CROSS_VAULT_RELATION` — pointing the agent at workspace
-    /// `[cross_vault_links]` policy when the actual issue was a
+    /// Bare-string target without a `mem--` separator is malformed
+    /// (the wiki-link grammar requires `<mem>--<path>`). Pre-fix
+    /// the cross-mem check fired first: the parser saw `mem: ""`,
+    /// compared against the source mem, and produced
+    /// `CROSS_MEM_RELATION` — pointing the agent at workspace
+    /// `[cross_mem_links]` policy when the actual issue was a
     /// malformed id. Post-fix the grammar gate runs first; the
     /// envelope identifies the real problem.
     #[test]
-    fn relate_entity_malformed_bare_target_surfaces_invalid_entity_id_not_cross_vault() {
+    fn relate_entity_malformed_bare_target_surfaces_invalid_entity_id_not_cross_mem() {
         let tmp = TempDir::new().unwrap();
         let (mut engine, source) = engine_with_seed(&tmp, "S");
         let (actor, client) = cli_actor();
@@ -1344,7 +1344,7 @@ mod tests {
                     expected_hash: Some(source.content_hash.clone()),
                     rel_type: "USES".to_string(),
                     // No `--` separator AND contains characters the
-                    // grammar rejects. Parses as vault="", path=raw.
+                    // grammar rejects. Parses as mem="", path=raw.
                     target: crate::EntityId("bad target with spaces!!".to_string()),
                     remove: false,
                     description: None,
@@ -1360,16 +1360,16 @@ mod tests {
         );
     }
 
-    /// Companion case: target carries the source's vault prefix but a
+    /// Companion case: target carries the source's mem prefix but a
     /// grammar-violating path. The grammar check fires (same path as
-    /// the bare-string case); cross-vault stays out of the picture
-    /// because vaults match.
+    /// the bare-string case); cross-mem stays out of the picture
+    /// because mems match.
     #[test]
     fn relate_entity_malformed_prefixed_target_surfaces_invalid_entity_id() {
         let tmp = TempDir::new().unwrap();
         let (mut engine, source) = engine_with_seed(&tmp, "S");
         let (actor, client) = cli_actor();
-        let source_vault = source.id.vault().to_string();
+        let source_mem = source.id.mem().to_string();
         let err = engine
             .relate_entity(
                 RelateEntityArgs {
@@ -1377,7 +1377,7 @@ mod tests {
                     expected_hash: Some(source.content_hash.clone()),
                     rel_type: "USES".to_string(),
                     target: crate::EntityId(format!(
-                        "{source_vault}--bad target with spaces!!"
+                        "{source_mem}--bad target with spaces!!"
                     )),
                     remove: false,
                     description: None,
@@ -1504,27 +1504,27 @@ mod tests {
         );
     }
 
-    /// Cross-vault relate that policy admits
-    /// but whose target vault is not mounted in the workspace emits
-    /// `CROSS_VAULT_TARGET_VAULT_UNCREATED` alongside `AutoStubCreated`.
+    /// Cross-mem relate that policy admits
+    /// but whose target mem is not mounted in the workspace emits
+    /// `CROSS_MEM_TARGET_MEM_UNCREATED` alongside `AutoStubCreated`.
     /// The auto-stub still lands; the warning is layered observability.
     #[test]
-    fn cross_vault_relate_to_uncreated_vault_emits_typed_warning() {
+    fn cross_mem_relate_to_uncreated_mem_emits_typed_warning() {
         use memstead_schema::workspace_config::CrossLinkValue;
         let tmp = TempDir::new().unwrap();
         let (mut engine, source) = engine_with_seed(&tmp, "S");
         let (actor, client) = cli_actor();
-        // Grant `specs -> uncreated-vault` so the policy gate passes.
-        // The target vault is intentionally not mounted; the auto-stub
+        // Grant `specs -> uncreated-mem` so the policy gate passes.
+        // The target mem is intentionally not mounted; the auto-stub
         // should still land, with the typed warning attached.
         let mut settings = crate::workspace::WorkspaceSettings::default();
-        settings.cross_vault_links.insert(
+        settings.cross_mem_links.insert(
             "specs".to_string(),
-            CrossLinkValue::List(vec!["uncreated-vault".to_string()]),
+            CrossLinkValue::List(vec!["uncreated-mem".to_string()]),
         );
         engine.set_settings(settings);
 
-        let absent = crate::EntityId::new("uncreated-vault", "ghost");
+        let absent = crate::EntityId::new("uncreated-mem", "ghost");
         let outcome = engine
             .relate_entity(
                 RelateEntityArgs {
@@ -1542,22 +1542,22 @@ mod tests {
             .unwrap();
         assert_eq!(outcome.action, RelateAction::Added);
 
-        // Auto-stub created plus uncreated-vault warning, side by side.
+        // Auto-stub created plus uncreated-mem warning, side by side.
         let saw_uncreated = outcome.warnings.iter().any(|w| {
             matches!(
                 w,
-                WarningHint::CrossVaultTargetVaultUncreated {
-                    from_vault,
-                    to_vault,
+                WarningHint::CrossMemTargetMemUncreated {
+                    from_mem,
+                    to_mem,
                     target_id,
-                } if from_vault == "specs"
-                    && to_vault == "uncreated-vault"
+                } if from_mem == "specs"
+                    && to_mem == "uncreated-mem"
                     && target_id == &absent
             )
         });
         assert!(
             saw_uncreated,
-            "CrossVaultTargetVaultUncreated warning must surface; got: {:?}",
+            "CrossMemTargetMemUncreated warning must surface; got: {:?}",
             outcome.warnings
         );
         // The auto-stub still landed.
@@ -1565,17 +1565,17 @@ mod tests {
     }
 
     /// Policy refusal takes precedence
-    /// over the uncreated-vault warning. When the cross-vault link
+    /// over the uncreated-mem warning. When the cross-mem link
     /// isn't granted, the engine refuses with
-    /// `CROSS_VAULT_LINK_NOT_ALLOWED` and never reaches the warning
+    /// `CROSS_MEM_LINK_NOT_ALLOWED` and never reaches the warning
     /// emission point — there's no stub to warn about.
     #[test]
-    fn cross_vault_relate_policy_refusal_preempts_uncreated_vault_warning() {
+    fn cross_mem_relate_policy_refusal_preempts_uncreated_mem_warning() {
         let tmp = TempDir::new().unwrap();
         let (mut engine, source) = engine_with_seed(&tmp, "S");
         let (actor, client) = cli_actor();
-        // No cross_vault_links entry → policy denies.
-        let absent = crate::EntityId::new("uncreated-vault", "ghost");
+        // No cross_mem_links entry → policy denies.
+        let absent = crate::EntityId::new("uncreated-mem", "ghost");
         let err = engine
             .relate_entity(
                 RelateEntityArgs {
@@ -1591,7 +1591,7 @@ mod tests {
                 None,
             )
             .unwrap_err();
-        assert!(matches!(err, EngineError::CrossVaultLinkNotAllowed { .. }));
+        assert!(matches!(err, EngineError::CrossMemLinkNotAllowed { .. }));
         // No stub created on the refusal path.
         assert!(!engine.store().contains(&absent));
     }
@@ -1729,16 +1729,16 @@ mod tests {
         );
     }
 
-    // ---- Cross-vault vocabulary -------------------------------------
+    // ---- Cross-mem vocabulary -------------------------------------
 
-    /// Two-vault test bench wired for cross-vault routing.
-    /// Vault `src` pins `src-cv@0.1.0` whose `cross_vault_relationships`
+    /// Two-mem test bench wired for cross-mem routing.
+    /// Mem `src` pins `src-cv@0.1.0` whose `cross_mem_relationships`
     /// section declares an outbound entry to the `tgt-cv` domain with
-    /// `ADDRESSES: doc → req`. Vault `tgt` pins `tgt-cv@0.1.0`, a
+    /// `ADDRESSES: doc → req`. Mem `tgt` pins `tgt-cv@0.1.0`, a
     /// schema with a different name. The workspace policy admits the
-    /// cross-vault link so vocabulary failures surface independently
+    /// cross-mem link so vocabulary failures surface independently
     /// of permission.
-    mod cross_vault {
+    mod cross_mem {
         use std::collections::BTreeMap;
         use std::path::Path;
 
@@ -1747,13 +1747,13 @@ mod tests {
         use memstead_schema::workspace_config::CrossLinkValue;
         use tempfile::TempDir;
 
-        use crate::backend::VaultBackend;
+        use crate::backend::MemBackend;
         use crate::engine::test_helpers::*;
         use crate::engine::{
             CreateEntityArgs, CreateEntityOutcome, Engine, EngineError, RelateAction,
             RelateEntityArgs,
         };
-        use crate::storage::FilesystemVaultWriter;
+        use crate::storage::FilesystemMemWriter;
         use crate::vcs::Actor;
         use crate::workspace::{
             Mount, MountCapability, MountLifecycle, MountStorage, WorkspaceSettings,
@@ -1797,9 +1797,9 @@ write_rules: []
             format!("name: {name}\n{TYPE_BODY}")
         }
 
-        fn folder_mount_with_pin(vault: &str, path: std::path::PathBuf, pin: SchemaRef) -> Mount {
+        fn folder_mount_with_pin(mem: &str, path: std::path::PathBuf, pin: SchemaRef) -> Mount {
             Mount {
-                vault: vault.to_string(),
+                mem: mem.to_string(),
                 schema: Some(pin),
                 storage: MountStorage::Folder { path },
                 capability: MountCapability::Write,
@@ -1809,12 +1809,12 @@ write_rules: []
         }
         }
 
-        /// Build an engine with two vaults pinning two distinct schemas
-        /// and a `cross_vault_links` policy admitting the cross-edge.
-        fn two_vault_engine() -> (TempDir, Engine, CreateEntityOutcome, CreateEntityOutcome) {
+        /// Build an engine with two mems pinning two distinct schemas
+        /// and a `cross_mem_links` policy admitting the cross-edge.
+        fn two_mem_engine() -> (TempDir, Engine, CreateEntityOutcome, CreateEntityOutcome) {
             let tmp = TempDir::new().unwrap();
 
-            // Source schema with cross-vault declarations to the
+            // Source schema with cross-mem declarations to the
             // tgt-cv domain.
             let src_manifest = r#"name: src-cv
 version: 0.1.0
@@ -1826,12 +1826,12 @@ relationships:
   mode: strict
   definitions:
     - name: IMPLEMENTS
-      description: intra-vault only
+      description: intra-mem only
       default_weight: 1.0
     - name: _default
       description: fallback
       default_weight: 1.0
-cross_vault_relationships:
+cross_mem_relationships:
   - to_schema: tgt-cv
     definitions:
       - name: ADDRESSES
@@ -1843,7 +1843,7 @@ community:
   resolution: 1.0
   seed: 42
 "#;
-            // Target schema declares no cross_vault_relationships (we
+            // Target schema declares no cross_mem_relationships (we
             // never relate from tgt → src in these tests).
             let tgt_manifest = r#"name: tgt-cv
 version: 0.1.0
@@ -1870,13 +1870,13 @@ community:
             write_schema_files(&schemas_dir, "src-cv", src_manifest, &[("doc", &make_type_yaml("doc"))]);
             write_schema_files(&schemas_dir, "tgt-cv", tgt_manifest, &[("req", &make_type_yaml("req"))]);
 
-            let src_dir = tmp.path().join("vault-src");
-            let tgt_dir = tmp.path().join("vault-tgt");
+            let src_dir = tmp.path().join("mem-src");
+            let tgt_dir = tmp.path().join("mem-tgt");
             std::fs::create_dir_all(&src_dir).unwrap();
             std::fs::create_dir_all(&tgt_dir).unwrap();
 
-            let src_writer = FilesystemVaultWriter::new(src_dir.clone());
-            let tgt_writer = FilesystemVaultWriter::new(tgt_dir.clone());
+            let src_writer = FilesystemMemWriter::new(src_dir.clone());
+            let tgt_writer = FilesystemMemWriter::new(tgt_dir.clone());
             let src_pin = SchemaRef::new("src-cv", semver::Version::new(0, 1, 0));
             let tgt_pin = SchemaRef::new("tgt-cv", semver::Version::new(0, 1, 0));
 
@@ -1884,31 +1884,31 @@ community:
                 vec![
                     (
                         folder_mount_with_pin("src", src_dir, src_pin),
-                        Box::new(src_writer) as Box<dyn VaultBackend>,
+                        Box::new(src_writer) as Box<dyn MemBackend>,
                     ),
                     (
                         folder_mount_with_pin("tgt", tgt_dir, tgt_pin),
-                        Box::new(tgt_writer) as Box<dyn VaultBackend>,
+                        Box::new(tgt_writer) as Box<dyn MemBackend>,
                     ),
                 ],
                 Some(&schemas_dir),
             )
-            .expect("two-vault engine constructs");
+            .expect("two-mem engine constructs");
 
-            // Wildcard permission so cross-vault edges aren't blocked
+            // Wildcard permission so cross-mem edges aren't blocked
             // by the orthogonal policy gate (we exercise the vocabulary
             // gate here, not the permission gate).
             let mut settings = WorkspaceSettings::default();
             let mut links: BTreeMap<String, CrossLinkValue> = BTreeMap::new();
             links.insert("src".to_string(), CrossLinkValue::Wildcard);
-            settings.cross_vault_links = links;
+            settings.cross_mem_links = links;
             engine.set_settings(settings);
 
             let (actor, client) = cli_actor();
             let src_entity = engine
                 .create_entity(
                     CreateEntityArgs {
-                        vault: "src".to_string(),
+                        mem: "src".to_string(),
                         title: "Doc One".to_string(),
                         entity_type: "doc".to_string(),
                         sections: IndexMap::from_iter([(
@@ -1927,7 +1927,7 @@ community:
             let tgt_entity = engine
                 .create_entity(
                     CreateEntityArgs {
-                        vault: "tgt".to_string(),
+                        mem: "tgt".to_string(),
                         title: "Req One".to_string(),
                         entity_type: "req".to_string(),
                         sections: IndexMap::from_iter([(
@@ -1949,7 +1949,7 @@ community:
 
         #[test]
         fn cross_different_schema_admits_declared_edge() {
-            let (_tmp, mut engine, src, tgt) = two_vault_engine();
+            let (_tmp, mut engine, src, tgt) = two_mem_engine();
             let (actor, client) = cli_actor();
             let outcome = engine
                 .relate_entity(
@@ -1965,17 +1965,17 @@ community:
                     Some(&client),
                     None,
                 )
-                .expect("declared cross-vault edge admits");
+                .expect("declared cross-mem edge admits");
             assert_eq!(outcome.rel_type, "ADDRESSES");
         }
 
         /// Same schema name at different versions is the same domain:
-        /// edges between two `same-dom`-pinned vaults route through
+        /// edges between two `same-dom`-pinned mems route through
         /// the intra-schema relationship vocabulary (governed by the
-        /// source vault's pinned version) with no
-        /// `cross_vault_relationships` declaration at all.
+        /// source mem's pinned version) with no
+        /// `cross_mem_relationships` declaration at all.
         #[test]
-        fn same_name_different_version_uses_intra_vault_vocabulary() {
+        fn same_name_different_version_uses_intra_mem_vocabulary() {
             let tmp = TempDir::new().unwrap();
 
             let manifest_for = |version: &str| {
@@ -1990,7 +1990,7 @@ relationships:
   mode: strict
   definitions:
     - name: IMPLEMENTS
-      description: intra-vault vocabulary
+      description: intra-mem vocabulary
       default_weight: 1.0
     - name: _default
       description: fallback
@@ -2018,8 +2018,8 @@ community:
                 &[("doc", &make_type_yaml("doc"))],
             );
 
-            let src_dir = tmp.path().join("vault-src");
-            let tgt_dir = tmp.path().join("vault-tgt");
+            let src_dir = tmp.path().join("mem-src");
+            let tgt_dir = tmp.path().join("mem-tgt");
             std::fs::create_dir_all(&src_dir).unwrap();
             std::fs::create_dir_all(&tgt_dir).unwrap();
             let src_pin = SchemaRef::new("same-dom", semver::Version::new(0, 1, 0));
@@ -2028,11 +2028,11 @@ community:
                 vec![
                     (
                         folder_mount_with_pin("src", src_dir.clone(), src_pin),
-                        Box::new(FilesystemVaultWriter::new(src_dir)) as Box<dyn VaultBackend>,
+                        Box::new(FilesystemMemWriter::new(src_dir)) as Box<dyn MemBackend>,
                     ),
                     (
                         folder_mount_with_pin("tgt", tgt_dir.clone(), tgt_pin),
-                        Box::new(FilesystemVaultWriter::new(tgt_dir)) as Box<dyn VaultBackend>,
+                        Box::new(FilesystemMemWriter::new(tgt_dir)) as Box<dyn MemBackend>,
                     ),
                 ],
                 Some(&schemas_dir),
@@ -2042,15 +2042,15 @@ community:
             let mut settings = WorkspaceSettings::default();
             let mut links: BTreeMap<String, CrossLinkValue> = BTreeMap::new();
             links.insert("src".to_string(), CrossLinkValue::Wildcard);
-            settings.cross_vault_links = links;
+            settings.cross_mem_links = links;
             engine.set_settings(settings);
 
             let (actor, client) = cli_actor();
-            let mk_entity = |engine: &mut Engine, vault: &str, title: &str| {
+            let mk_entity = |engine: &mut Engine, mem: &str, title: &str| {
                 engine
                     .create_entity(
                         CreateEntityArgs {
-                            vault: vault.to_string(),
+                            mem: mem.to_string(),
                             title: title.to_string(),
                             entity_type: "doc".to_string(),
                             sections: IndexMap::from_iter([(
@@ -2090,10 +2090,10 @@ community:
 
         #[test]
         fn cross_different_schema_unknown_rel_type_returns_invalid_rel_type() {
-            // `IMPLEMENTS` exists intra-vault but not in the cross-vault
+            // `IMPLEMENTS` exists intra-mem but not in the cross-mem
             // entry — must refuse with INVALID_REL_TYPE against the
-            // cross-vault entry's vocabulary (not intra-vault's).
-            let (_tmp, mut engine, src, tgt) = two_vault_engine();
+            // cross-mem entry's vocabulary (not intra-mem's).
+            let (_tmp, mut engine, src, tgt) = two_mem_engine();
             let (actor, client) = cli_actor();
             let err = engine
                 .relate_entity(
@@ -2130,14 +2130,14 @@ community:
         #[test]
         fn cross_different_schema_shape_violation_returns_invalid_rel_shape() {
             // ADDRESSES is shape-pinned to source=doc, target=req in
-            // the cross-vault entry. Need a source whose type isn't doc.
+            // the cross-mem entry. Need a source whose type isn't doc.
             // src-cv only declares `doc`, so to provoke a shape miss we
-            // build a third schema with type `note` and a fresh vault —
+            // build a third schema with type `note` and a fresh mem —
             // but that requires more plumbing than this test needs.
             // Instead: exercise a target-side shape miss by relating
             // ADDRESSES to a target that doesn't exist at all — the
             // target_type lookup returns None and the target check is
-            // skipped (admits). So we exercise this via cross_vault
+            // skipped (admits). So we exercise this via cross_mem
             // unit tests instead.
             //
             // What this integration test confirms: the source-side
@@ -2149,8 +2149,8 @@ community:
 
         #[test]
         fn cross_different_schema_no_matching_entry_returns_edge_not_declared() {
-            // Build a third vault pinning a schema not declared in
-            // src-cv's cross_vault_relationships, then relate from src.
+            // Build a third mem pinning a schema not declared in
+            // src-cv's cross_mem_relationships, then relate from src.
             let tmp = TempDir::new().unwrap();
             let src_manifest = r#"name: src-cv
 version: 0.1.0
@@ -2162,12 +2162,12 @@ relationships:
   mode: strict
   definitions:
     - name: IMPLEMENTS
-      description: intra-vault
+      description: intra-mem
       default_weight: 1.0
     - name: _default
       description: fallback
       default_weight: 1.0
-cross_vault_relationships:
+cross_mem_relationships:
   - to_schema: tgt-cv
     definitions:
       - name: ADDRESSES
@@ -2179,7 +2179,7 @@ community:
   resolution: 1.0
   seed: 42
 "#;
-            // Different target schema NOT named in src's cross-vault list.
+            // Different target schema NOT named in src's cross-mem list.
             let other_manifest = r#"name: other-cv
 version: 0.1.0
 description: foreign schema
@@ -2205,8 +2205,8 @@ community:
                 other_manifest,
                 &[("thing", &make_type_yaml("thing"))],
             );
-            let src_dir = tmp.path().join("vault-src");
-            let other_dir = tmp.path().join("vault-other");
+            let src_dir = tmp.path().join("mem-src");
+            let other_dir = tmp.path().join("mem-other");
             std::fs::create_dir_all(&src_dir).unwrap();
             std::fs::create_dir_all(&other_dir).unwrap();
 
@@ -2218,7 +2218,7 @@ community:
                             src_dir.clone(),
                             SchemaRef::new("src-cv", semver::Version::new(0, 1, 0)),
                         ),
-                        Box::new(FilesystemVaultWriter::new(src_dir)) as Box<dyn VaultBackend>,
+                        Box::new(FilesystemMemWriter::new(src_dir)) as Box<dyn MemBackend>,
                     ),
                     (
                         folder_mount_with_pin(
@@ -2226,7 +2226,7 @@ community:
                             other_dir.clone(),
                             SchemaRef::new("other-cv", semver::Version::new(0, 1, 0)),
                         ),
-                        Box::new(FilesystemVaultWriter::new(other_dir)) as Box<dyn VaultBackend>,
+                        Box::new(FilesystemMemWriter::new(other_dir)) as Box<dyn MemBackend>,
                     ),
                 ],
                 Some(&schemas_dir),
@@ -2236,14 +2236,14 @@ community:
             let mut settings = WorkspaceSettings::default();
             let mut links: BTreeMap<String, CrossLinkValue> = BTreeMap::new();
             links.insert("src".to_string(), CrossLinkValue::Wildcard);
-            settings.cross_vault_links = links;
+            settings.cross_mem_links = links;
             engine.set_settings(settings);
 
             let (actor, client) = cli_actor();
             let src_entity = engine
                 .create_entity(
                     CreateEntityArgs {
-                        vault: "src".to_string(),
+                        mem: "src".to_string(),
                         title: "D".to_string(),
                         entity_type: "doc".to_string(),
                         sections: IndexMap::from_iter([("body".to_string(), "x".to_string())]),
@@ -2259,7 +2259,7 @@ community:
             let other_entity = engine
                 .create_entity(
                     CreateEntityArgs {
-                        vault: "other".to_string(),
+                        mem: "other".to_string(),
                         title: "T".to_string(),
                         entity_type: "thing".to_string(),
                         sections: IndexMap::from_iter([("body".to_string(), "x".to_string())]),
@@ -2289,7 +2289,7 @@ community:
                 )
                 .unwrap_err();
             match err {
-                EngineError::CrossVaultEdgeNotDeclared {
+                EngineError::CrossMemEdgeNotDeclared {
                     source_schema,
                     target_schema,
                     rel_type,
@@ -2302,23 +2302,23 @@ community:
                     assert_eq!(from_id, src_entity.id.to_string());
                     assert_eq!(to_id, other_entity.id.to_string());
                 }
-                other => panic!("expected CrossVaultEdgeNotDeclared, got {other:?}"),
+                other => panic!("expected CrossMemEdgeNotDeclared, got {other:?}"),
             }
         }
 
         #[test]
-        fn intra_vault_with_cross_vault_only_rel_type_returns_invalid_rel_type() {
-            // `ADDRESSES` is declared in src-cv's cross_vault_relationships
-            // only — intra-vault relate must refuse with
-            // INVALID_REL_TYPE since the intra-vault vocabulary
+        fn intra_mem_with_cross_mem_only_rel_type_returns_invalid_rel_type() {
+            // `ADDRESSES` is declared in src-cv's cross_mem_relationships
+            // only — intra-mem relate must refuse with
+            // INVALID_REL_TYPE since the intra-mem vocabulary
             // (`IMPLEMENTS` / `_default`) doesn't know it.
-            let (_tmp, mut engine, src, _tgt) = two_vault_engine();
+            let (_tmp, mut engine, src, _tgt) = two_mem_engine();
             let (actor, client) = cli_actor();
-            // Create a same-vault target.
+            // Create a same-mem target.
             let intra_target = engine
                 .create_entity(
                     CreateEntityArgs {
-                        vault: "src".to_string(),
+                        mem: "src".to_string(),
                         title: "Doc Two".to_string(),
                         entity_type: "doc".to_string(),
                         sections: IndexMap::from_iter([("body".to_string(), "x".to_string())]),
@@ -2363,11 +2363,11 @@ community:
         }
 
         #[test]
-        fn vocabulary_admissible_edge_blocked_by_policy_returns_cross_vault_link_not_allowed() {
-            // Same fixture but flip the cross-vault policy to deny.
+        fn vocabulary_admissible_edge_blocked_by_policy_returns_cross_mem_link_not_allowed() {
+            // Same fixture but flip the cross-mem policy to deny.
             // ADDRESSES is vocabulary-admissible but permission refuses
-            // it independently — surfaces CROSS_VAULT_LINK_NOT_ALLOWED.
-            let (_tmp, mut engine, src, tgt) = two_vault_engine();
+            // it independently — surfaces CROSS_MEM_LINK_NOT_ALLOWED.
+            let (_tmp, mut engine, src, tgt) = two_mem_engine();
             // Replace the wildcard policy with default-deny.
             engine.set_settings(WorkspaceSettings::default());
             let (actor, client) = cli_actor();
@@ -2387,20 +2387,20 @@ community:
                 )
                 .unwrap_err();
             assert!(
-                matches!(err, EngineError::CrossVaultLinkNotAllowed { .. }),
-                "expected CrossVaultLinkNotAllowed, got {err:?}"
+                matches!(err, EngineError::CrossMemLinkNotAllowed { .. }),
+                "expected CrossMemLinkNotAllowed, got {err:?}"
             );
         }
 
-        /// Cross-vault remove bypasses the `cross_vault_links` policy
+        /// Cross-mem remove bypasses the `cross_mem_links` policy
         /// gate. Without this, a workspace whose grant was revoked
         /// while edges still existed gets wedged: the natural recovery
         /// (`memstead_relate ... --remove`) refuses, leaving the operator
         /// to re-grant just to delete the data that the grant once
         /// permitted.
         #[test]
-        fn cross_vault_remove_bypasses_policy_after_revoke() {
-            let (_tmp, mut engine, src, tgt) = two_vault_engine();
+        fn cross_mem_remove_bypasses_policy_after_revoke() {
+            let (_tmp, mut engine, src, tgt) = two_mem_engine();
             let (actor, client) = cli_actor();
 
             // 1. Edge admits under wildcard grant.
@@ -2418,7 +2418,7 @@ community:
                     Some(&client),
                     None,
                 )
-                .expect("declared cross-vault edge admits under grant");
+                .expect("declared cross-mem edge admits under grant");
             assert_eq!(added.action, RelateAction::Added);
 
             // 2. Revoke the grant — default settings deny everything.
@@ -2442,7 +2442,7 @@ community:
                 )
                 .unwrap_err();
             assert!(
-                matches!(add_err, EngineError::CrossVaultLinkNotAllowed { .. }),
+                matches!(add_err, EngineError::CrossMemLinkNotAllowed { .. }),
                 "add path must still refuse under denial, got {add_err:?}"
             );
 
@@ -2473,12 +2473,12 @@ community:
             );
         }
 
-        /// Remove on a non-existent cross-vault edge with no grant
+        /// Remove on a non-existent cross-mem edge with no grant
         /// returns a no-op, not a policy refusal. The remove path is
-        /// permissive on absence — same shape as same-vault remove.
+        /// permissive on absence — same shape as same-mem remove.
         #[test]
-        fn cross_vault_remove_of_absent_edge_under_denial_is_no_op() {
-            let (_tmp, mut engine, src, tgt) = two_vault_engine();
+        fn cross_mem_remove_of_absent_edge_under_denial_is_no_op() {
+            let (_tmp, mut engine, src, tgt) = two_mem_engine();
             // Default-deny from the start: no edge ever existed.
             engine.set_settings(WorkspaceSettings::default());
             let (actor, client) = cli_actor();

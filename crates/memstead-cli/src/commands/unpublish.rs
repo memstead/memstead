@@ -1,4 +1,4 @@
-//! `memstead unpublish <scope>/<name>` — remove a vault from the registry.
+//! `memstead unpublish <scope>/<name>` — remove a mem from the registry.
 //!
 //! Permitted to the original uploader and to admins. Hard delete:
 //! the same `<scope>/<name>` becomes immediately re-publishable.
@@ -18,7 +18,7 @@ use crate::setup::CliContext;
 
 #[derive(Parser, Debug)]
 pub struct Args {
-    /// `<scope>/<name>` of the vault to unpublish.
+    /// `<scope>/<name>` of the mem to unpublish.
     #[arg(value_name = "SCOPE/NAME")]
     pub target: String,
 
@@ -122,9 +122,9 @@ fn map_api_error(status: reqwest::StatusCode, envelope: ApiErrorBody) -> CliErro
             .clone()
             .map(|d| format!("forbidden: {d}"))
             .unwrap_or_else(|| {
-                "forbidden — only the uploader or an admin can unpublish a vault".to_string()
+                "forbidden — only the uploader or an admin can unpublish a mem".to_string()
             }),
-        404 => "no such vault on the registry".to_string(),
+        404 => "no such mem on the registry".to_string(),
         _ => envelope
             .detail
             .clone()

@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-description = "Command-line interface for Memstead — query and mutate typed entity graphs from the shell. Default build produces the full `memstead` binary (multi-vault, git-backed); `--no-default-features` builds the lean folder-only surface."
+description = "Command-line interface for Memstead — query and mutate typed entity graphs from the shell. Default build produces the full `memstead` binary (multi-mem, git-backed); `--no-default-features` builds the lean folder-only surface."
 
 [[bin]]
 name = "memstead"
@@ -45,14 +45,14 @@ tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [features]
-# `vault-repo` is the default: it pulls in the git-branch backend
+# `mem-repo` is the default: it pulls in the git-branch backend
 # (`memstead-git-branch` + `gix`) and the full engine extension
-# (`memstead-engine`), compiling the cfg-gated `CliEngine::VaultRepo`
-# variant plus the multi-vault / vault-repo lifecycle subcommands —
+# (`memstead-engine`), compiling the cfg-gated `CliEngine::MemRepo`
+# variant plus the multi-mem / mem-repo lifecycle subcommands —
 # yielding the full `memstead` binary. `--no-default-features` drops all
 # of that, producing the lean folder-only surface whose `cli_engine()`
-# rejects vault-repo workspaces with an actionable error. The lean build
+# rejects mem-repo workspaces with an actionable error. The lean build
 # is a CI / wasm-adjacent config and dependency-hygiene guard, not a
 # shipped product.
-default = ["vault-repo"]
-vault-repo = ["dep:memstead-git-branch", "dep:gix", "dep:memstead-engine"]
+default = ["mem-repo"]
+mem-repo = ["dep:memstead-git-branch", "dep:gix", "dep:memstead-engine"]

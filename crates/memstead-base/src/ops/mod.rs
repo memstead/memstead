@@ -29,12 +29,12 @@ pub use agent_notes::{AgentNotesReport, CommitNote};
 pub use commit_envelope::{CommitEnvelope, EntityChange};
 pub use diff::{Diff, DiffConfig, EntityDiff, IncomingRipple};
 pub use branch_reset::BranchResetOutcome;
-pub use export::{VaultExportBytes, VaultExportError};
+pub use export::{MemExportBytes, MemExportError};
 pub use transport::{FetchOutcome, PullOutcome, PushOutcome, UpdatedRef};
 pub use changes::{
     BackendChanges, ChangeEnvelope, ChangesReport, EMPTY_TREE_SHA, NoticeByChange,
     NoticeChanges, RENAME_SIMILARITY_DEFAULT, RENAME_SIMILARITY_MAX, RENAME_SIMILARITY_MIN,
-    VaultChangedNotice, folder_changes_since,
+    MemChangedNotice, folder_changes_since,
 };
 
 use crate::entity::EntityId;
@@ -53,7 +53,7 @@ use std::fmt;
 pub const OVERVIEW_INCLUDE_KEYS: &[&str] = &[
     "community_members",
     "community_bridges",
-    "vault_distribution",
+    "mem_distribution",
     "dangling_links",
 ];
 
@@ -93,7 +93,7 @@ pub(crate) fn type_word_for(types: &[String]) -> &'static str {
 #[derive(Debug, Clone)]
 pub struct CreateArgs {
     pub title: String,
-    pub vault: String,
+    pub mem: String,
     pub entity_type: String,
     /// Section contents keyed by section key: `{ "<section-key>": "..." }`.
     /// Valid keys depend on the schema (see `TypeDefinition::sections`).
@@ -124,7 +124,7 @@ pub struct UpdateArgs {
     /// Metadata fields to set: `{ "<field-key>": "value" }`.
     pub metadata: IndexMap<String, String>,
     /// Metadata keys to remove from the entity. Silent no-op on absent
-    /// keys. Errors on read-only fields (vault, id, type) and on
+    /// keys. Errors on read-only fields (mem, id, type) and on
     /// schema-required fields for the entity's type.
     pub metadata_unset: Vec<String>,
     /// Dry-run mode — return proposed changes without persisting.
@@ -201,7 +201,7 @@ pub struct UpdateResult {
     /// shape for callers that ignore it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prospective_hash: Option<String>,
-    /// Per-vault commit SHA produced by this mutation. Agents remember it
+    /// Per-mem commit SHA produced by this mutation. Agents remember it
     /// and feed it to `memstead_changes_since` to pick up incremental updates.
     /// Empty for dry runs (no commit happens).
     #[serde(default)]
@@ -260,7 +260,7 @@ pub enum WarningHint {
         description: String,
         enum_values: Vec<String>,
     },
-    /// An undeclared relationship was admitted because the vault's schema
+    /// An undeclared relationship was admitted because the mem's schema
     /// is in open mode. The caller can still suggest the name be added to
     /// the schema vocabulary.
     UndeclaredRelationshipOpen {
@@ -426,12 +426,12 @@ pub enum WarningHint {
     FieldNotRangeFilterable {
         field: String,
     },
-    /// `memstead_search` could not query a target vault's search index —
-    /// either the vault has no index yet (`reason: "missing_index"`)
+    /// `memstead_search` could not query a target mem's search index —
+    /// either the mem has no index yet (`reason: "missing_index"`)
     /// or a tantivy execution failure surfaced (`reason:
     /// "query_failed"` plus the error string).
-    SearchVaultIndexUnavailable {
-        vault: String,
+    SearchMemIndexUnavailable {
+        mem: String,
         /// Discriminator: `"missing_index"` or `"query_failed"`.
         reason: &'static str,
         /// The underlying error string when `reason == "query_failed"`;
@@ -456,10 +456,10 @@ pub enum WarningHint {
         trimmed: String,
     },
     /// An inline wiki-link resolved to an ID of the form
-    /// `<current-vault>--<other-known-vault-suffix>--<slug>`. This is
-    /// almost always drift from a vault-rename — the author wrote
-    /// `[[plugin--slug]]` expecting `plugin` to be the vault prefix, but
-    /// the current vault is `test-vault-plugin`, so the literal
+    /// `<current-mem>--<other-known-mem-suffix>--<slug>`. This is
+    /// almost always drift from a mem-rename — the author wrote
+    /// `[[plugin--slug]]` expecting `plugin` to be the mem prefix, but
+    /// the current mem is `test-mem-plugin`, so the literal
     /// resolution nests the prefix. Detection only — the load path still
     /// creates the stub (no silent rewrite). Fix via `memstead_update
     /// patch_sections` to either the bare slug or the fully-qualified ID.
@@ -470,7 +470,7 @@ pub enum WarningHint {
         from: EntityId,
         resolved_id: EntityId,
         /// Stripped-and-resolved candidate via the two-pass resolver
-        /// (cross-vault lookup first, bare-slug fallback second). `None`
+        /// (cross-mem lookup first, bare-slug fallback second). `None`
         /// when no real entity was found — the author must disambiguate.
         candidate_target: Option<EntityId>,
         section: String,
@@ -499,19 +499,19 @@ pub enum WarningHint {
     SelfLinkIgnored {
         id: EntityId,
     },
-    /// `memstead_relate` to a cross-vault target whose vault is not (yet)
-    /// mounted in the workspace. The cross-vault link policy permits
+    /// `memstead_relate` to a cross-mem target whose mem is not (yet)
+    /// mounted in the workspace. The cross-mem link policy permits
     /// the edge, so the engine auto-stubs the target as a forward
-    /// reference — but with the target vault entirely absent from
-    /// `writable_vaults()`, the stub has no `_vault_schema` resolution
+    /// reference — but with the target mem entirely absent from
+    /// `writable_mems()`, the stub has no `_mem_schema` resolution
     /// and any later read sees an indeterminate-schema entity. The
-    /// warning makes the missing-vault state visible so an operator
+    /// warning makes the missing-mem state visible so an operator
     /// can distinguish a typo (intended `B` but typed `b`) from a
-    /// deliberate forward reference that expects the vault to be
+    /// deliberate forward reference that expects the mem to be
     /// created later. (F4)
-    CrossVaultTargetVaultUncreated {
-        from_vault: String,
-        to_vault: String,
+    CrossMemTargetMemUncreated {
+        from_mem: String,
+        to_mem: String,
         target_id: EntityId,
     },
     /// A mutation landed without a `note` field while the workspace
@@ -537,16 +537,16 @@ pub enum WarningHint {
     IgnoredReadonlyField { field: String, supplied: String },
     /// The workspace is embedded inside another git repository
     /// (`outer_repo_root`) whose `.gitignore` does not list
-    /// `vault-repo/`. Without that ignore line, the outer repo would
-    /// either swallow `vault-repo-git` as a nested untracked tree or
+    /// `mem-repo/`. Without that ignore line, the outer repo would
+    /// either swallow `mem-repo-git` as a nested untracked tree or
     /// (worse) record it as a submodule via gitlink — both shapes
-    /// silently corrupt the vault-repo identity.
+    /// silently corrupt the mem-repo identity.
     ///
     /// Surfaced from `memstead_health` so the agent / operator can fix
     /// the outer repo's `.gitignore` (or pass `--no-gitignore` at
-    /// `memstead vault-repo init`/`migrate-from-disk` time and accept the
+    /// `memstead mem-repo init`/`migrate-from-disk` time and accept the
     /// risk explicitly).
-    OuterRepoNotIgnoringVaultRepo {
+    OuterRepoNotIgnoringMemRepo {
         outer_repo_root: String,
         workspace_root: String,
     },
@@ -581,14 +581,14 @@ pub enum WarningHint {
     },
     /// The engine detected that a sibling writer (another `Engine`
     /// instance, an out-of-band `git pull`, etc.) advanced the on-disk
-    /// HEAD of `vault` past the engine's cached `last_known_head`, so
-    /// the engine reloaded that vault's slice of the in-memory store
+    /// HEAD of `mem` past the engine's cached `last_known_head`, so
+    /// the engine reloaded that mem's slice of the in-memory store
     /// before serving the current call. The response carries fresh
     /// content; the warning explains why state shifted under the
     /// caller. Agents that need the per-entity diff call
     /// `memstead_changes_since` with the supplied `old_head`.
-    VaultReloaded {
-        vault: String,
+    MemReloaded {
+        mem: String,
         old_head: String,
         new_head: String,
         entities_loaded: usize,
@@ -604,12 +604,12 @@ pub enum WarningHint {
     /// the edge before authoring).
     AutoStubCreated { stub_id: EntityId },
     /// A relation parsed from an entity's `## Relationships` section
-    /// at load time failed validation against the source vault's
+    /// at load time failed validation against the source mem's
     /// schema (or wiki-link grammar). The entity itself loads
     /// normally; the offending relation is dropped from the
     /// in-memory store. `reason` discriminates:
     /// - `unknown_rel_type` — the rel-type is not declared in the
-    ///   source vault's schema and the schema is in `strict` mode.
+    ///   source mem's schema and the schema is in `strict` mode.
     /// - `shape` — the `(source_type, target_type)` pair is not
     ///   allowed by the rel-type's `source_types` / `target_types`.
     /// - `cycle` — adding this relation would close a cycle in an
@@ -624,7 +624,7 @@ pub enum WarningHint {
     /// `origin` discriminates the source mount's capability:
     /// `"writable"` (the operator can fix the source markdown via
     /// `memstead_update` / `memstead_relate` and re-run) or `"readonly"`
-    /// (the source vault is mounted read-only — purely diagnostic,
+    /// (the source mem is mounted read-only — purely diagnostic,
     /// the operator either uninstalls the archive or accepts the
     /// dropped relation).
     ///
@@ -648,7 +648,7 @@ pub enum WarningHint {
         recovery: Option<ParsedRelationRecovery>,
     },
     /// `memstead_delete` (or `memstead_rename`, when implemented) on a
-    /// Write-Vault entity that had **no** Write-Vault referrers but
+    /// Write-Mem entity that had **no** Write-Mem referrers but
     /// **does** have ReadOnly-mount referrers. The on-disk file is
     /// removed and committed; the in-memory entity is demoted to a
     /// stub at the same id so the surviving incoming edges from the
@@ -663,34 +663,34 @@ pub enum WarningHint {
         id: EntityId,
         referrers: Vec<EntityId>,
     },
-    /// `memstead_vault_delete` was called with `delete_files: true` but
+    /// `memstead_mem_delete` was called with `delete_files: true` but
     /// at least one part of the symmetric cleanup did not complete.
-    /// The vault is already unregistered from the router; this
+    /// The mem is already unregistered from the router; this
     /// warning surfaces what survived so an agent reading
     /// `files_deleted: false` doesn't trigger redundant cleanup or
     /// blame the wrong layer. `reason` discriminates:
-    /// - `rmdir_failed` — folder-backed vault directory survived
+    /// - `rmdir_failed` — folder-backed mem directory survived
     ///   `remove_dir_all` (filesystem permission, busy handle, …).
     ///   `path` names the directory; `error` carries the OS-level
     ///   diagnostic.
     /// - `backend_prune_failed` — git-branch backend rejected the
     ///   ref-edit transaction that prunes
-    ///   `refs/heads/<branch_leaf>` + `__MEMSTEAD:vaults/.../config.json`
+    ///   `refs/heads/<branch_leaf>` + `__MEMSTEAD:mems/.../config.json`
     ///   (gitdir IO, concurrent writer racing the ref). `path` is
     ///   `None`; `error` carries the wrapped backend message.
     /// One emission per failed step — both can land in the same
     /// response when a folder mount somehow has both an rmdir
     /// failure and a backend cleanup failure (rare; the folder
     /// backend's `delete_artifacts` is a no-op default).
-    VaultFilesNotDeleted {
-        vault: String,
+    MemFilesNotDeleted {
+        mem: String,
         reason: String,
         path: Option<String>,
         error: Option<String>,
     },
-    /// `memstead vault init` detected a pre-existing branch + config
+    /// `memstead mem init` detected a pre-existing branch + config
     /// blob carrying the `unregistered_at` tombstone marker that
-    /// `memstead vault unregister` writes — the operator's deliberate
+    /// `memstead mem unregister` writes — the operator's deliberate
     /// "preserve for re-attach" signal. The create path adopted the
     /// residual entities, cleared the tombstone, and registered the
     /// branch as a writable mount. Audit visibility for the
@@ -698,8 +698,8 @@ pub enum WarningHint {
     /// the new mount took. `unregistered_at` carries the ISO-8601
     /// timestamp the tombstone recorded so the operator can correlate
     /// the reattach with a prior unregister event.
-    VaultReattachedAfterUnregister {
-        vault: String,
+    MemReattachedAfterUnregister {
+        mem: String,
         unregistered_at: String,
     },
     /// A `## Relationships` row was followed by trailing content that
@@ -750,17 +750,17 @@ pub enum WarningHint {
         rel_type: String,
         target: EntityId,
     },
-    /// A vault's `Mount.schema` expectation (the pin recorded in the
+    /// A mem's `Mount.schema` expectation (the pin recorded in the
     /// workspace `mounts.json`) disagreed with the authoritative pin in
-    /// the vault's own per-vault config. Boot resolves the effective
-    /// schema from the vault config (authoritative — a copied/cloned
-    /// vault is self-resolvable); this warning surfaces the discrepancy
+    /// the mem's own per-mem config. Boot resolves the effective
+    /// schema from the mem config (authoritative — a copied/cloned
+    /// mem is self-resolvable); this warning surfaces the discrepancy
     /// so neither value is silently dropped. Recovery: align the
-    /// `mounts.json` entry to the vault's config, or correct the config.
+    /// `mounts.json` entry to the mem's config, or correct the config.
     SchemaPinMismatch {
-        /// Vault whose mount expectation and config pin disagree.
-        vault: String,
-        /// Authoritative pin from the vault's per-vault config.
+        /// Mem whose mount expectation and config pin disagree.
+        mem: String,
+        /// Authoritative pin from the mem's per-mem config.
         config_pin: String,
         /// Expectation pin recorded on the workspace mount.
         mount_pin: String,
@@ -781,7 +781,7 @@ pub struct MissingRequiredOutgoingBlock {
 }
 
 /// Abstract recovery action attached to a `PARSED_RELATION_INVALID`
-/// warning when the source vault is writable. The shape is tool-
+/// warning when the source mem is writable. The shape is tool-
 /// agnostic: it names *what* to do, not *which tool* to call. A
 /// consumer (agent, bulk-fix orchestrator, app surface) maps `kind`
 /// to the concrete call on whichever MCP / CLI / UniFFI path it
@@ -848,7 +848,7 @@ impl ParsedRelationRecovery {
 ///   is `None`.
 /// - `"skipped"` — the engine intentionally did not attempt the
 ///   recovery. `reason` carries a stable code: `"readonly_mount"`
-///   (source vault is read-only and not engine-writable).
+///   (source mem is read-only and not engine-writable).
 /// - `"failed"` — the engine attempted the recovery and the underlying
 ///   mutation surfaced a typed error. `reason` carries the engine's
 ///   `UPPER_SNAKE_CASE` error code (`HASH_MISMATCH`,
@@ -899,14 +899,14 @@ impl fmt::Display for WarningHint {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             WarningHint::SchemaPinMismatch {
-                vault,
+                mem,
                 config_pin,
                 mount_pin,
             } => write!(
                 f,
-                "vault '{vault}': the workspace mount expects schema '{mount_pin}' but the \
-                 vault's own config pins '{config_pin}' — the config pin is authoritative and \
-                 was used; align the mounts.json entry or the vault config to clear this"
+                "mem '{mem}': the workspace mount expects schema '{mount_pin}' but the \
+                 mem's own config pins '{config_pin}' — the config pin is authoritative and \
+                 was used; align the mounts.json entry or the mem config to clear this"
             ),
             WarningHint::MissingRequiredSection {
                 key,
@@ -1098,22 +1098,22 @@ impl fmt::Display for WarningHint {
                 f,
                 "field '{field}' is not range-filterable — filter ignored"
             ),
-            WarningHint::SearchVaultIndexUnavailable {
-                vault,
+            WarningHint::SearchMemIndexUnavailable {
+                mem,
                 reason,
                 error,
             } => match (*reason, error.as_deref()) {
                 ("missing_index", _) => write!(
                     f,
-                    "vault '{vault}' has no search index — query returns no hits"
+                    "mem '{mem}' has no search index — query returns no hits"
                 ),
                 ("query_failed", Some(e)) => write!(
                     f,
-                    "search index for vault '{vault}' errored: {e}"
+                    "search index for mem '{mem}' errored: {e}"
                 ),
                 _ => write!(
                     f,
-                    "search index for vault '{vault}' is unavailable ({reason})"
+                    "search index for mem '{mem}' is unavailable ({reason})"
                 ),
             },
             WarningHint::TitleTrimmed {
@@ -1132,7 +1132,7 @@ impl fmt::Display for WarningHint {
                 write!(
                     f,
                     "wiki-link in {from}#{section} resolves to nested prefix \
-                     {resolved_id} — almost certainly vault-rename drift"
+                     {resolved_id} — almost certainly mem-rename drift"
                 )?;
                 if let Some(cand) = candidate_target {
                     write!(f, "; did you mean {cand}?")?;
@@ -1160,17 +1160,17 @@ impl fmt::Display for WarningHint {
                  created/updated normally; remove the `[[{slug}]]` link if it was a mistake",
                 slug = id.name(),
             ),
-            WarningHint::CrossVaultTargetVaultUncreated {
-                from_vault,
-                to_vault,
+            WarningHint::CrossMemTargetMemUncreated {
+                from_mem,
+                to_mem,
                 target_id,
             } => write!(
                 f,
-                "cross-vault relate from '{from_vault}' to '{target_id}': \
-                 target vault '{to_vault}' is not mounted in the workspace — \
-                 the auto-stub has no schema resolution until the vault is created. \
-                 If '{to_vault}' is a typo, fix the relate; if forward-reference \
-                 is intended, create the vault to promote the stub."
+                "cross-mem relate from '{from_mem}' to '{target_id}': \
+                 target mem '{to_mem}' is not mounted in the workspace — \
+                 the auto-stub has no schema resolution until the mem is created. \
+                 If '{to_mem}' is a typo, fix the relate; if forward-reference \
+                 is intended, create the mem to promote the stub."
             ),
             WarningHint::NoteMissing { tool } => write!(
                 f,
@@ -1184,16 +1184,16 @@ impl fmt::Display for WarningHint {
                  value '{supplied}' was discarded and the engine value \
                  stamped instead"
             ),
-            WarningHint::OuterRepoNotIgnoringVaultRepo {
+            WarningHint::OuterRepoNotIgnoringMemRepo {
                 outer_repo_root,
                 workspace_root,
             } => write!(
                 f,
                 "workspace at '{workspace_root}' is embedded inside the git \
                  repository at '{outer_repo_root}' but the outer .gitignore \
-                 does not list 'vault-repo/'. Add 'vault-repo/' (or the \
+                 does not list 'mem-repo/'. Add 'mem-repo/' (or the \
                  workspace-relative equivalent) to the outer repo's \
-                 .gitignore to keep vault-repo-git out of the outer index."
+                 .gitignore to keep mem-repo-git out of the outer index."
             ),
             WarningHint::MissingRequiredOutgoing {
                 entity_type,
@@ -1228,19 +1228,19 @@ impl fmt::Display for WarningHint {
                  and dropped the rest. The next read-modify-write will \
                  collapse the markdown to one heading."
             ),
-            WarningHint::VaultReloaded {
-                vault,
+            WarningHint::MemReloaded {
+                mem,
                 old_head,
                 new_head,
                 entities_loaded,
             } => write!(
                 f,
-                "vault '{vault}' was reloaded — on-disk HEAD advanced from \
+                "mem '{mem}' was reloaded — on-disk HEAD advanced from \
                  {old_head} to {new_head} (a sibling writer or out-of-band \
-                 commit landed since the engine last read the vault). \
+                 commit landed since the engine last read the mem). \
                  {entities_loaded} entities reloaded; response carries \
                  fresh content. Re-derive any conclusions that depended on \
-                 the prior content of this vault before continuing. Call \
+                 the prior content of this mem before continuing. Call \
                  `memstead_changes_since since={old_head}` for the per-entity \
                  diff."
             ),
@@ -1259,7 +1259,7 @@ impl fmt::Display for WarningHint {
                 recovery: _,
             } => {
                 let recovery_msg = if origin == "readonly" {
-                    "Source vault is mounted read-only; the engine cannot \
+                    "Source mem is mounted read-only; the engine cannot \
                      rewrite the markdown. Either uninstall the archive \
                      or accept the dropped relation."
                 } else {
@@ -1330,49 +1330,49 @@ impl fmt::Display for WarningHint {
                  normalises the row to the simple form. Drop the trailing \
                  text from the source markdown if it should not round-trip."
             ),
-            WarningHint::VaultReattachedAfterUnregister {
-                vault, unregistered_at,
+            WarningHint::MemReattachedAfterUnregister {
+                mem, unregistered_at,
             } => write!(
                 f,
-                "vault '{vault}' was reattached to pre-existing storage \
+                "mem '{mem}' was reattached to pre-existing storage \
                  that carried an `unregistered_at: {unregistered_at}` \
                  tombstone marker. The entities from the prior session \
                  were adopted; the tombstone has been cleared. If this \
-                 reattach was unexpected, run `memstead vault delete \
-                 {vault}` to destroy the storage and start fresh."
+                 reattach was unexpected, run `memstead mem delete \
+                 {mem}` to destroy the storage and start fresh."
             ),
-            WarningHint::VaultFilesNotDeleted {
-                vault, reason, path, error,
+            WarningHint::MemFilesNotDeleted {
+                mem, reason, path, error,
             } => {
                 match (reason.as_str(), path.as_deref(), error.as_deref()) {
                     ("rmdir_failed", Some(p), Some(e)) => write!(
                         f,
-                        "vault '{vault}' was unregistered but rmdir of \
+                        "mem '{mem}' was unregistered but rmdir of \
                          {p:?} failed: {e}. Files remain on disk; agent \
                          may follow up with manual cleanup."
                     ),
                     ("rmdir_failed", Some(p), None) => write!(
                         f,
-                        "vault '{vault}' was unregistered but rmdir of \
+                        "mem '{mem}' was unregistered but rmdir of \
                          {p:?} failed. Files remain on disk."
                     ),
                     ("backend_prune_failed", _, Some(e)) => write!(
                         f,
-                        "vault '{vault}' was unregistered but backend \
-                         artifact cleanup failed: {e}. The vault-repo \
-                         branch and/or `__MEMSTEAD:vaults/.../config.json` \
+                        "mem '{mem}' was unregistered but backend \
+                         artifact cleanup failed: {e}. The mem-repo \
+                         branch and/or `__MEMSTEAD:mems/.../config.json` \
                          entry may survive; rerun delete with the same \
                          arguments or have an operator inspect."
                     ),
                     ("backend_prune_failed", _, None) => write!(
                         f,
-                        "vault '{vault}' was unregistered but backend \
-                         artifact cleanup failed. The vault-repo branch \
+                        "mem '{mem}' was unregistered but backend \
+                         artifact cleanup failed. The mem-repo branch \
                          and/or `__MEMSTEAD` config entry may survive."
                     ),
                     _ => write!(
                         f,
-                        "vault '{vault}' was unregistered but \
+                        "mem '{mem}' was unregistered but \
                          `delete_files: true` did not run to completion \
                          (reason: {reason})."
                     ),
@@ -1389,7 +1389,7 @@ impl WarningHint {
     pub fn code(&self) -> &'static str {
         match self {
             Self::InlineWikiLinkAutoStubbed { .. } => "INLINE_WIKI_LINK_AUTO_STUBBED",
-            Self::CrossVaultTargetVaultUncreated { .. } => "CROSS_VAULT_TARGET_VAULT_UNCREATED",
+            Self::CrossMemTargetMemUncreated { .. } => "CROSS_MEM_TARGET_MEM_UNCREATED",
             Self::MissingRequiredSection { .. } => "MISSING_REQUIRED_SECTION",
             Self::MissingRequiredField { .. } => "MISSING_REQUIRED_FIELD",
             Self::UndeclaredRelationshipOpen { .. } => "UNDECLARED_RELATIONSHIP_OPEN",
@@ -1429,15 +1429,15 @@ impl WarningHint {
                 }
             }
             Self::FieldNotRangeFilterable { .. } => "FIELD_NOT_RANGE_FILTERABLE",
-            Self::SearchVaultIndexUnavailable { .. } => "SEARCH_VAULT_INDEX_UNAVAILABLE",
+            Self::SearchMemIndexUnavailable { .. } => "SEARCH_MEM_INDEX_UNAVAILABLE",
             Self::TitleTrimmed { .. } => "TITLE_TRIMMED",
             Self::SuspiciousNestedPrefix { .. } => "SUSPICIOUS_NESTED_PREFIX",
             Self::NoteMissing { .. } => "NOTE_MISSING",
             Self::IgnoredReadonlyField { .. } => "IGNORED_READONLY_FIELD",
-            Self::OuterRepoNotIgnoringVaultRepo { .. } => "OUTER_REPO_NOT_IGNORING_VAULT_REPO",
+            Self::OuterRepoNotIgnoringMemRepo { .. } => "OUTER_REPO_NOT_IGNORING_MEM_REPO",
             Self::MissingRequiredOutgoing { .. } => "MISSING_REQUIRED_OUTGOING",
             Self::DuplicateSectionHeading { .. } => "DUPLICATE_SECTION_HEADING",
-            Self::VaultReloaded { .. } => "VAULT_RELOADED",
+            Self::MemReloaded { .. } => "MEM_RELOADED",
             Self::SchemaPinMismatch { .. } => "SCHEMA_PIN_MISMATCH",
             Self::AutoStubCreated { .. } => "AUTO_STUB_CREATED",
             Self::SelfLinkIgnored { .. } => "SELF_LINK_IGNORED",
@@ -1445,8 +1445,8 @@ impl WarningHint {
             Self::ResidualStubForReadOnlyReferrers { .. } => {
                 "RESIDUAL_STUB_FOR_READONLY_REFERRERS"
             }
-            Self::VaultFilesNotDeleted { .. } => "VAULT_FILES_NOT_DELETED",
-            Self::VaultReattachedAfterUnregister { .. } => "VAULT_REATTACHED_AFTER_UNREGISTER",
+            Self::MemFilesNotDeleted { .. } => "MEM_FILES_NOT_DELETED",
+            Self::MemReattachedAfterUnregister { .. } => "MEM_REATTACHED_AFTER_UNREGISTER",
             Self::AmbiguousDescriptionDelimiter { .. } => "AMBIGUOUS_DESCRIPTION_DELIMITER",
             Self::ParseMissingRequiredDescription { .. } => "MISSING_REQUIRED_DESCRIPTION",
             Self::ParseDescriptionNotPermitted { .. } => "DESCRIPTION_NOT_PERMITTED",
@@ -1459,48 +1459,48 @@ impl WarningHint {
         self.to_string()
     }
 
-    /// Vault that "owns" the warning when one can be attributed.
+    /// Mem that "owns" the warning when one can be attributed.
     /// Workspace-/request-scoped variants return `None` — `memstead_health`'s
-    /// vault filter keeps those visible regardless of scope, while
-    /// vault-attributable variants drop out when the filter doesn't
+    /// mem filter keeps those visible regardless of scope, while
+    /// mem-attributable variants drop out when the filter doesn't
     /// match. The contract mirrors the data fields the same filter
-    /// gates (counts, distributions, detail lists are source-vault
+    /// gates (counts, distributions, detail lists are source-mem
     /// scoped; rosters stay global).
-    pub fn source_vault(&self) -> Option<&str> {
+    pub fn source_mem(&self) -> Option<&str> {
         match self {
-            Self::SuspiciousNestedPrefix { from, .. } => Some(from.vault()),
-            Self::DuplicateSectionHeading { entity_id, .. } => Some(entity_id.vault()),
-            Self::SchemaPinMismatch { vault, .. } => Some(vault.as_str()),
-            Self::VaultReloaded { vault, .. } => Some(vault.as_str()),
-            Self::VaultFilesNotDeleted { vault, .. } => Some(vault.as_str()),
-            Self::VaultReattachedAfterUnregister { vault, .. } => Some(vault.as_str()),
-            Self::MissingRequiredOutgoing { entity_id, .. } => Some(entity_id.vault()),
-            Self::DuplicateRelationship { from, .. } => Some(from.vault()),
-            Self::NoSuchRelationship { from, .. } => Some(from.vault()),
-            Self::InlineWikiLinkAutoStubbed { from, .. } => Some(from.vault()),
-            Self::SelfLinkIgnored { id } => Some(id.vault()),
-            Self::CrossVaultTargetVaultUncreated { from_vault, .. } => Some(from_vault.as_str()),
-            Self::AutoStubCreated { stub_id } => Some(stub_id.vault()),
-            Self::UpdateNoop { id } => Some(id.vault()),
-            Self::ParsedRelationInvalid { entity_id, .. } => Some(entity_id.vault()),
-            Self::ResidualStubForReadOnlyReferrers { id, .. } => Some(id.vault()),
-            Self::AmbiguousDescriptionDelimiter { from, .. } => Some(from.vault()),
-            Self::ParseMissingRequiredDescription { from, .. } => Some(from.vault()),
-            Self::ParseDescriptionNotPermitted { from, .. } => Some(from.vault()),
-            // Search-vault-index unavailability is attributable to the
-            // failing vault; the filter-key warnings are request-
+            Self::SuspiciousNestedPrefix { from, .. } => Some(from.mem()),
+            Self::DuplicateSectionHeading { entity_id, .. } => Some(entity_id.mem()),
+            Self::SchemaPinMismatch { mem, .. } => Some(mem.as_str()),
+            Self::MemReloaded { mem, .. } => Some(mem.as_str()),
+            Self::MemFilesNotDeleted { mem, .. } => Some(mem.as_str()),
+            Self::MemReattachedAfterUnregister { mem, .. } => Some(mem.as_str()),
+            Self::MissingRequiredOutgoing { entity_id, .. } => Some(entity_id.mem()),
+            Self::DuplicateRelationship { from, .. } => Some(from.mem()),
+            Self::NoSuchRelationship { from, .. } => Some(from.mem()),
+            Self::InlineWikiLinkAutoStubbed { from, .. } => Some(from.mem()),
+            Self::SelfLinkIgnored { id } => Some(id.mem()),
+            Self::CrossMemTargetMemUncreated { from_mem, .. } => Some(from_mem.as_str()),
+            Self::AutoStubCreated { stub_id } => Some(stub_id.mem()),
+            Self::UpdateNoop { id } => Some(id.mem()),
+            Self::ParsedRelationInvalid { entity_id, .. } => Some(entity_id.mem()),
+            Self::ResidualStubForReadOnlyReferrers { id, .. } => Some(id.mem()),
+            Self::AmbiguousDescriptionDelimiter { from, .. } => Some(from.mem()),
+            Self::ParseMissingRequiredDescription { from, .. } => Some(from.mem()),
+            Self::ParseDescriptionNotPermitted { from, .. } => Some(from.mem()),
+            // Search-mem-index unavailability is attributable to the
+            // failing mem; the filter-key warnings are request-
             // derived (the agent's filter payload) and fall through
             // to `None` below to stay visible to the caller.
-            Self::SearchVaultIndexUnavailable { vault, .. } => Some(vault.as_str()),
-            // Workspace- or request-scoped — no vault to attribute.
-            // OuterRepoNotIgnoringVaultRepo concerns the embedding repo,
-            // not a specific vault; an agent should see it under any
+            Self::SearchMemIndexUnavailable { mem, .. } => Some(mem.as_str()),
+            // Workspace- or request-scoped — no mem to attribute.
+            // OuterRepoNotIgnoringMemRepo concerns the embedding repo,
+            // not a specific mem; an agent should see it under any
             // filter. UnknownIncludeKey / LimitClamped / NoteMissing /
             // TitleNormalizedToSlugNoop / StubFilterExcludesAll /
             // UndeclaredRelationshipOpen / MissingRequiredSection /
             // MissingRequiredField are request-derived (mutation
-            // payload or schema-level), so the vault is the
-            // request's vault — `None` here keeps them visible to
+            // payload or schema-level), so the mem is the
+            // request's mem — `None` here keeps them visible to
             // the caller that triggered them.
             _ => None,
         }
@@ -1594,18 +1594,18 @@ impl WarningHint {
             WarningHint::FieldNotRangeFilterable {
                 field: "tags".into(),
             },
-            WarningHint::SearchVaultIndexUnavailable {
-                vault: "specs".into(),
+            WarningHint::SearchMemIndexUnavailable {
+                mem: "specs".into(),
                 reason: "missing_index",
                 error: None,
             },
             WarningHint::SuspiciousNestedPrefix {
-                from: EntityId("test-vault-plugin--audit-skill".into()),
+                from: EntityId("test-mem-plugin--audit-skill".into()),
                 resolved_id: EntityId(
-                    "test-vault-plugin--plugin--memstead-mcp-tool-surface".into(),
+                    "test-mem-plugin--plugin--memstead-mcp-tool-surface".into(),
                 ),
                 candidate_target: Some(EntityId(
-                    "test-vault-plugin--memstead-mcp-tool-surface".into(),
+                    "test-mem-plugin--memstead-mcp-tool-surface".into(),
                 )),
                 section: "constraints".into(),
             },
@@ -1613,15 +1613,15 @@ impl WarningHint {
                 from: EntityId("specs--demo".into()),
                 stubs: vec![EntityId("specs--example-target".into())],
             },
-            WarningHint::CrossVaultTargetVaultUncreated {
-                from_vault: "specs".into(),
-                to_vault: "memos".into(),
+            WarningHint::CrossMemTargetMemUncreated {
+                from_mem: "specs".into(),
+                to_mem: "memos".into(),
                 target_id: EntityId("memos--example".into()),
             },
             WarningHint::NoteMissing {
                 tool: "memstead_update".into(),
             },
-            WarningHint::OuterRepoNotIgnoringVaultRepo {
+            WarningHint::OuterRepoNotIgnoringMemRepo {
                 outer_repo_root: "/repos/demo".into(),
                 workspace_root: "/repos/demo/memstead".into(),
             },
@@ -1645,8 +1645,8 @@ impl WarningHint {
                 heading: "Realization".into(),
                 occurrences: 3,
             },
-            WarningHint::VaultReloaded {
-                vault: "test-vault-plugin".into(),
+            WarningHint::MemReloaded {
+                mem: "test-mem-plugin".into(),
                 old_head: "abc123".into(),
                 new_head: "def456".into(),
                 entities_loaded: 42,
@@ -1670,14 +1670,14 @@ impl WarningHint {
                 id: EntityId("specs--archived-target".into()),
                 referrers: vec![EntityId("archive--archived-source".into())],
             },
-            WarningHint::VaultFilesNotDeleted {
-                vault: "plan-example".into(),
+            WarningHint::MemFilesNotDeleted {
+                mem: "plan-example".into(),
                 reason: "backend_prune_failed".into(),
                 path: None,
                 error: Some("ref-edit transaction rejected".into()),
             },
-            WarningHint::VaultReattachedAfterUnregister {
-                vault: "plan-example".into(),
+            WarningHint::MemReattachedAfterUnregister {
+                mem: "plan-example".into(),
                 unregistered_at: "2026-05-17T08:43:29Z".into(),
             },
             WarningHint::AmbiguousDescriptionDelimiter {
@@ -1784,12 +1784,12 @@ impl WarningHint {
                 "declared_on_other_types": declared_on_other_types,
             }),
             Self::FieldNotRangeFilterable { field } => serde_json::json!({ "field": field }),
-            Self::SearchVaultIndexUnavailable {
-                vault,
+            Self::SearchMemIndexUnavailable {
+                mem,
                 reason,
                 error,
             } => serde_json::json!({
-                "vault": vault,
+                "mem": mem,
                 "reason": reason,
                 "error": error,
             }),
@@ -1816,20 +1816,20 @@ impl WarningHint {
                 "stubs": stubs,
             }),
             Self::SelfLinkIgnored { id } => serde_json::json!({ "id": id }),
-            Self::CrossVaultTargetVaultUncreated {
-                from_vault,
-                to_vault,
+            Self::CrossMemTargetMemUncreated {
+                from_mem,
+                to_mem,
                 target_id,
             } => serde_json::json!({
-                "from_vault": from_vault,
-                "to_vault": to_vault,
+                "from_mem": from_mem,
+                "to_mem": to_mem,
                 "target_id": target_id,
             }),
             Self::NoteMissing { tool } => serde_json::json!({ "tool": tool }),
             Self::IgnoredReadonlyField { field, supplied } => {
                 serde_json::json!({ "field": field, "supplied": supplied })
             }
-            Self::OuterRepoNotIgnoringVaultRepo {
+            Self::OuterRepoNotIgnoringMemRepo {
                 outer_repo_root,
                 workspace_root,
             } => serde_json::json!({
@@ -1856,13 +1856,13 @@ impl WarningHint {
                 "heading": heading,
                 "occurrences": occurrences,
             }),
-            Self::VaultReloaded {
-                vault,
+            Self::MemReloaded {
+                mem,
                 old_head,
                 new_head,
                 entities_loaded,
             } => serde_json::json!({
-                "vault": vault,
+                "mem": mem,
                 "old_head": old_head,
                 "new_head": new_head,
                 "entities_loaded": entities_loaded,
@@ -1882,14 +1882,14 @@ impl WarningHint {
                 "id": id,
                 "referrers": referrers,
             }),
-            Self::VaultFilesNotDeleted { vault, reason, path, error } => serde_json::json!({
-                "vault": vault,
+            Self::MemFilesNotDeleted { mem, reason, path, error } => serde_json::json!({
+                "mem": mem,
                 "reason": reason,
                 "path": path,
                 "error": error,
             }),
-            Self::VaultReattachedAfterUnregister { vault, unregistered_at } => serde_json::json!({
-                "vault": vault,
+            Self::MemReattachedAfterUnregister { mem, unregistered_at } => serde_json::json!({
+                "mem": mem,
                 "unregistered_at": unregistered_at,
             }),
             Self::AmbiguousDescriptionDelimiter {
@@ -1909,9 +1909,9 @@ impl WarningHint {
             Self::ParseDescriptionNotPermitted { from, rel_type, target } => {
                 serde_json::json!({ "from": from, "rel_type": rel_type, "target": target })
             }
-            Self::SchemaPinMismatch { vault, config_pin, mount_pin } => {
+            Self::SchemaPinMismatch { mem, config_pin, mount_pin } => {
                 serde_json::json!({
-                    "vault": vault,
+                    "mem": mem,
                     "config_pin": config_pin,
                     "mount_pin": mount_pin,
                 })
@@ -1958,7 +1958,7 @@ pub fn envelope(
 pub struct CreateResult {
     pub id: EntityId,
     pub title: String,
-    pub vault: String,
+    pub mem: String,
     pub file_path: String,
     pub created_date: String,
     /// Post-write content hash under the real path; the **prospective**
@@ -1966,7 +1966,7 @@ pub struct CreateResult {
     /// same inputs would produce. Wire key `_hash`.
     #[serde(rename = "_hash")]
     pub content_hash: String,
-    /// Per-vault commit SHA — see `UpdateResult::commit_sha`. Empty under
+    /// Per-mem commit SHA — see `UpdateResult::commit_sha`. Empty under
     /// `dry_run`.
     #[serde(default)]
     pub commit_sha: String,
@@ -2031,7 +2031,7 @@ pub fn project_incoming(edges: &[crate::store::InEdge]) -> Vec<IncomingRef> {
 pub struct DeleteResult {
     pub id: EntityId,
     pub relations_removed: usize,
-    /// Per-vault commit SHA — see `UpdateResult::commit_sha`.
+    /// Per-mem commit SHA — see `UpdateResult::commit_sha`.
     #[serde(default)]
     pub commit_sha: String,
     /// Stub entities that became orphaned by this delete (their last
@@ -2060,7 +2060,7 @@ pub struct RenameResult {
     /// Wire key `_hash`.
     #[serde(default, rename = "_hash", skip_serializing_if = "String::is_empty")]
     pub content_hash: String,
-    /// Per-vault commit SHA — see `UpdateResult::commit_sha`. Empty on the
+    /// Per-mem commit SHA — see `UpdateResult::commit_sha`. Empty on the
     /// no-op same-title rename (no file change, no commit).
     #[serde(default)]
     pub commit_sha: String,
@@ -2113,7 +2113,7 @@ pub struct RelateResult {
     /// the source — no `memstead_entity` re-read required. Wire key `_hash`.
     #[serde(default, rename = "_hash", skip_serializing_if = "String::is_empty")]
     pub content_hash: String,
-    /// Per-vault commit SHA — see `UpdateResult::commit_sha`.
+    /// Per-mem commit SHA — see `UpdateResult::commit_sha`.
     #[serde(default)]
     pub commit_sha: String,
     /// Typed non-fatal issues — open-mode schema admissions, duplicate-add
@@ -2141,7 +2141,7 @@ pub struct RelateResult {
 /// or, if any item fails (validation, hash mismatch, missing entity),
 /// applies *nothing* and refuses (`applied: false`) with the offending
 /// item named. There is no partial-application middle state: a refused
-/// batch leaves the on-disk vault and the in-memory store byte-identical
+/// batch leaves the on-disk mem and the in-memory store byte-identical
 /// to the pre-call state.
 #[derive(Debug, Clone, Serialize)]
 pub struct BatchResult {
@@ -2162,8 +2162,8 @@ pub struct BatchResult {
     /// at least one write — an honest `memstead_changes_since` cursor /
     /// revert handle for the whole batch. Empty when the batch was
     /// refused, when it was empty, or when every item was a no-op (no
-    /// commit happens). For a batch spanning multiple vaults this names
-    /// the last vault committed; single-vault batches (the common case)
+    /// commit happens). For a batch spanning multiple mems this names
+    /// the last mem committed; single-mem batches (the common case)
     /// name their one commit.
     #[serde(default)]
     pub commit_sha: String,
@@ -2246,7 +2246,7 @@ pub struct SearchScope {
     /// see [`Query`] for semantics. `None` (or an empty query) makes
     /// `search` behave as a metadata-only filter.
     pub query: Option<Query>,
-    pub vault: Option<String>,
+    pub mem: Option<String>,
     pub entity_type: Option<String>,
     pub limit: Option<usize>,
     pub offset: Option<usize>,
@@ -2331,7 +2331,7 @@ pub struct SubsectionFacet {
 #[derive(Debug, Clone, Default, Serialize, JsonSchema)]
 pub struct Facets {
     pub by_type: HashMap<String, usize>,
-    pub by_vault: HashMap<String, usize>,
+    pub by_mem: HashMap<String, usize>,
     pub by_level: HashMap<String, usize>,
     pub by_status: HashMap<String, usize>,
     pub by_confidence: HashMap<String, usize>,
@@ -2346,7 +2346,7 @@ pub struct Facets {
 pub struct SearchHit {
     pub id: EntityId,
     pub title: String,
-    pub vault: String,
+    pub mem: String,
     pub entity_type: String,
     pub stub: bool,
     pub score: f32,
@@ -2372,7 +2372,7 @@ pub struct SearchHit {
     /// expansion; `None` on primary hits.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expansion: Option<ExpansionInfo>,
-    /// Lead-section summary resolved against the hit's *own* vault schema
+    /// Lead-section summary resolved against the hit's *own* mem schema
     /// at search time (see [`SummaryPair`]). The renderer cannot resolve
     /// it correctly on its own — the global `type_by_name` only sees the
     /// `default` schema, so a `software`-schema hit (`requirement` →
@@ -2387,7 +2387,7 @@ pub struct SearchHit {
 }
 
 /// Lead-section `(heading, value)` for a search/list hit, resolved
-/// against the hit's own vault schema at search time. Carried in-memory
+/// against the hit's own mem schema at search time. Carried in-memory
 /// from the search op to the renderers; see [`SearchHit::summary`].
 #[derive(Debug, Clone)]
 pub struct SummaryPair {
@@ -2460,7 +2460,7 @@ pub struct HealthSummary {
     pub stub_count: usize,
     /// Typed non-fatal issues visible to every caller of `Engine::health()`.
     /// Populated in two layers: `Engine.load_warnings` contributes drift
-    /// warnings surfaced during vault load / reload / attach
+    /// warnings surfaced during mem load / reload / attach
     /// (`SuspiciousNestedPrefix`, future load-time checks); the MCP
     /// handler additionally appends request-scoped warnings (unknown
     /// `include` keys, clamped `limit`) on top of whatever the engine
@@ -2562,7 +2562,7 @@ pub struct DanglingLink {
     pub from: EntityId,
     /// Canonical ID the wiki-link resolves to. Stub-typed in the store.
     pub target_id: EntityId,
-    /// Resolved vault-relative path segment of the target ID (e.g. `gone`
+    /// Resolved mem-relative path segment of the target ID (e.g. `gone`
     /// for `specs--gone`). This is the normalised form the engine records —
     /// not the literal `[[…]]` characters as authored. Widening `WikiLink`
     /// to preserve the authored form is a future-work item if agents need
@@ -2584,7 +2584,7 @@ pub struct DanglingLink {
 /// Workspace-wide `export_markdown` returns this struct with
 /// `skipped_mounts` populated for every mount whose active backend
 /// doesn't support
-/// markdown regeneration in place (git-branch, archive). Per-vault
+/// markdown regeneration in place (git-branch, archive). Per-mem
 /// export against an incompatible backend short-circuits with
 /// `EngineError::MarkdownExportUnsupportedBackend` instead.
 #[derive(Debug, Clone, Serialize)]
@@ -2605,56 +2605,56 @@ pub struct ExportResult {
 /// `active_backend` matches [`crate::workspace::MountStorage::backend_id`].
 #[derive(Debug, Clone, Serialize)]
 pub struct SkippedMount {
-    pub vault: String,
+    pub mem: String,
     pub active_backend: String,
     pub reason: String,
 }
 
-/// Result of a `.mem` vault-archive export.
+/// Result of a `.mem` mem-archive export.
 #[derive(Debug, Clone, Serialize)]
-pub struct VaultExportResult {
+pub struct MemExportResult {
     pub archive_path: String,
     pub name: String,
     pub version: String,
     pub entity_count: usize,
     pub size_bytes: u64,
-    /// Cross-vault edges in the exported slice whose target won't travel
-    /// inside this single-vault archive — `install` will reject the
+    /// Cross-mem edges in the exported slice whose target won't travel
+    /// inside this single-mem archive — `install` will reject the
     /// archive for each one. Surfaced at export time
-    /// (`DANGLING_CROSS_VAULT_EDGE_IN_EXPORT`) so the operator sees the
+    /// (`DANGLING_CROSS_MEM_EDGE_IN_EXPORT`) so the operator sees the
     /// install-time failure before sharing. Empty for a self-contained
     /// export.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub dangling_cross_vault_edges: Vec<crate::validator::DanglingCrossVaultEdge>,
+    pub dangling_cross_mem_edges: Vec<crate::validator::DanglingCrossMemEdge>,
 }
 
-/// Result of `Engine::set_vault_version`. Carries the (vault,
+/// Result of `Engine::set_mem_version`. Carries the (mem,
 /// old_version, new_version) triple so callers (CLI, MCP) can surface
 /// the change without an extra read.
 #[derive(Debug, Clone, Serialize)]
-pub struct SetVaultVersionOutcome {
-    pub vault: String,
-    /// Previous version. `None` when the vault config carried no
+pub struct SetMemVersionOutcome {
+    pub mem: String,
+    /// Previous version. `None` when the mem config carried no
     /// version field before this call (pre-gate / externally-imported
-    /// config, or the residual `VAULT_CONFIG_INCOMPLETE` path).
+    /// config, or the residual `MEM_CONFIG_INCOMPLETE` path).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub old_version: Option<semver::Version>,
     pub new_version: semver::Version,
     /// Concurrent-drift warnings detected at the pre-write probe —
-    /// e.g. `VaultReloaded` when a sibling engine committed between
+    /// e.g. `MemReloaded` when a sibling engine committed between
     /// this engine's last snapshot and the set-version write. Empty
     /// on the happy path. F1.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<WarningHint>,
 }
 
-/// Result of `Engine::set_vault_sync_state`. Carries the (vault, key,
+/// Result of `Engine::set_mem_sync_state`. Carries the (mem, key,
 /// previous-token) triple so callers (CLI, MCP) can surface the change
 /// without an extra read. The token values are opaque to the engine —
-/// see `VaultConfig::sync_state`.
+/// see `MemConfig::sync_state`.
 #[derive(Debug, Clone, Serialize)]
-pub struct SetVaultSyncStateOutcome {
-    pub vault: String,
+pub struct SetMemSyncStateOutcome {
+    pub mem: String,
     /// The sync-state key that was set or cleared (opaque; the ingest
     /// layer keys per `(ingest, facet)`).
     pub key: String,
@@ -2666,7 +2666,7 @@ pub struct SetVaultSyncStateOutcome {
     /// set/overwrite and for a clear of an already-absent key (a no-op).
     pub removed: bool,
     /// Concurrent-drift warnings detected at the pre-write probe — e.g.
-    /// `VaultReloaded` when a sibling engine committed between this
+    /// `MemReloaded` when a sibling engine committed between this
     /// engine's last snapshot and the write. Empty on the happy path.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<WarningHint>,
@@ -2709,7 +2709,7 @@ pub struct Stats {
     pub edge_count: usize,
     pub edge_types: HashMap<String, usize>,
     pub community_count: usize,
-    pub vault_count: usize,
+    pub mem_count: usize,
     pub types_in_use: Vec<String>,
 }
 
@@ -2724,11 +2724,11 @@ pub struct ReloadResult {
     pub removed: Vec<EntityId>,
 }
 
-/// Per-vault reload outcome — produced by [`Engine::reload_one_vault`]
+/// Per-mem reload outcome — produced by [`Engine::reload_one_mem`]
 /// and surfaced verbatim in the `memstead_reload` MCP tool's response when
-/// an explicit operator-triggered reload runs against a single vault.
+/// an explicit operator-triggered reload runs against a single mem.
 /// Auto-reloads on the read path consume this internally and emit a
-/// [`WarningHint::VaultReloaded`] (which carries `vault`, `old_head`,
+/// [`WarningHint::MemReloaded`] (which carries `mem`, `old_head`,
 /// `new_head`, `entities_loaded` — the diff list is intentionally
 /// omitted from the lean warning payload; agents that need it call
 /// `memstead_changes_since` themselves with the supplied `old_head`).
@@ -2743,7 +2743,7 @@ pub struct ReloadResult {
 /// into a single set so callers don't have to merge three lists.
 #[derive(Debug, Clone, Serialize)]
 pub struct ReloadReport {
-    pub vault: String,
+    pub mem: String,
     pub head_before: String,
     pub head_after: String,
     pub entities_loaded: usize,

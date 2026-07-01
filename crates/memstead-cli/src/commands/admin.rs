@@ -17,7 +17,7 @@ use crate::setup::CliContext;
 
 #[derive(Subcommand, Debug)]
 pub enum AdminAction {
-    /// Take down a published vault (admin-only): deny-list its bytes,
+    /// Take down a published mem (admin-only): deny-list its bytes,
     /// tombstone every version, and burn the `<scope>/<name>` so neither
     /// the bytes nor the name can be re-published. The notice reference
     /// is recorded as the DSA statement-of-reasons in the audit log.
@@ -31,7 +31,7 @@ pub enum AdminAction {
 
 #[derive(Parser, Debug)]
 pub struct TakedownArgs {
-    /// `<scope>/<name>` of the vault to take down (e.g. `github:alice/my-vault`).
+    /// `<scope>/<name>` of the mem to take down (e.g. `github:alice/my-mem`).
     #[arg(value_name = "SCOPE/NAME")]
     pub target: String,
 
@@ -198,7 +198,7 @@ fn map_admin_api_error(status: reqwest::StatusCode, envelope: ApiErrorBody) -> C
     let mut msg = match status.as_u16() {
         401 => "unauthorized — set MEMSTEAD_TOKEN, run `memstead login`, or pass --token".to_string(),
         403 => "forbidden — this is an admin-only action; your GitHub login is not in MEMSTEAD_ADMINS".to_string(),
-        404 => "no such vault on the registry".to_string(),
+        404 => "no such mem on the registry".to_string(),
         _ => envelope
             .detail
             .clone()

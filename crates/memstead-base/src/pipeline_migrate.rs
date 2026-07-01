@@ -2,7 +2,7 @@
 //! workspace-store shape.
 //!
 //! The legacy configs live at the *workspace root* (not under `.memstead/`):
-//! `<root>/scopes/<vault>/<name>.json`, `<root>/projections/<vault>/<name>.json`,
+//! `<root>/scopes/<mem>/<name>.json`, `<root>/projections/<mem>/<name>.json`,
 //! `<root>/ingests/<name>.json`. This module reads them and converts to the
 //! [`crate::pipeline`] four-primitive model — the shared core of both the
 //! `memstead pipeline migrate` command (read legacy → write the store) and the
@@ -20,9 +20,9 @@
 //!   `mediums.json` engagement metadata into facets is a separate concern.
 //! - A legacy **projection**'s `sources[]` split by their reference: a
 //!   `scope_ref` (role `primary`) becomes a `source_facets` entry (the scope's
-//!   facet shares its name); a `vault` (role `reference`) becomes a
-//!   `reference_vaults` entry. The first `destinations[].vault` becomes the
-//!   single `destination_vault`.
+//!   facet shares its name); a `mem` (role `reference`) becomes a
+//!   `reference_mems` entry. The first `destinations[].mem` becomes the
+//!   single `destination_mem`.
 //! - A legacy **ingest** is structurally identical to the new [`Ingest`] and
 //!   deserialises directly.
 
@@ -31,10 +31,10 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 
 use crate::pipeline::{Facet, Ingest, Medium, MediumType, PatternEntry, PatternMode, Projection};
-use crate::pipeline_store::{PipelineConfigs, PipelineRecord, VaultPipelineRecord};
+use crate::pipeline_store::{PipelineConfigs, PipelineRecord, MemPipelineRecord};
 use crate::workspace_store::StoreError;
 
-/// Legacy `scopes/<vault>/<name>.json` shape: a medium type, a human label,
+/// Legacy `scopes/<mem>/<name>.json` shape: a medium type, a human label,
 /// and an allow/deny `tree`.
 #[derive(Debug, Deserialize)]
 struct LegacyScope {
@@ -52,7 +52,7 @@ struct LegacyScopeBody {
     tree: Vec<PatternEntry>,
 }
 
-/// Legacy `projections/<vault>/<name>.json` shape.
+/// Legacy `projections/<mem>/<name>.json` shape.
 #[derive(Debug, Deserialize)]
 struct LegacyProjection {
     #[serde(default)]
@@ -68,12 +68,12 @@ struct LegacySource {
     #[serde(default)]
     scope_ref: Option<String>,
     #[serde(default)]
-    vault: Option<String>,
+    mem: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 struct LegacyDestination {
-    vault: String,
+    mem: String,
 }
 
 /// The longest common directory prefix of a scope tree's **allow** paths,
@@ -129,23 +129,23 @@ fn convert_scope(name: &str, scope: LegacyScope) -> (Medium, Facet) {
 /// Convert a legacy projection to the four-primitive [`Projection`].
 fn convert_projection(p: LegacyProjection) -> Projection {
     let mut source_facets = Vec::new();
-    let mut reference_vaults = Vec::new();
+    let mut reference_mems = Vec::new();
     for s in p.sources {
         if let Some(scope_ref) = s.scope_ref {
             source_facets.push(scope_ref);
-        } else if let Some(vault) = s.vault {
-            reference_vaults.push(vault);
+        } else if let Some(mem) = s.mem {
+            reference_mems.push(mem);
         }
     }
     Projection {
         intent: p.intent,
         source_facets,
-        reference_vaults,
-        destination_vault: p
+        reference_mems,
+        destination_mem: p
             .destinations
             .into_iter()
             .next()
-            .map(|d| d.vault)
+            .map(|d| d.mem)
             .unwrap_or_default(),
     }
 }
@@ -162,24 +162,24 @@ fn read_legacy_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, St
     })
 }
 
-/// Walk a per-vault legacy directory (`<root>/<primitive>/<vault>/<name>.json`),
-/// yielding `(vault, name, path)` triples in sorted order. Absent → empty.
-fn walk_vault_scoped(root: &Path, primitive: &str) -> Result<Vec<(String, String, PathBuf)>, StoreError> {
+/// Walk a per-mem legacy directory (`<root>/<primitive>/<mem>/<name>.json`),
+/// yielding `(mem, name, path)` triples in sorted order. Absent → empty.
+fn walk_mem_scoped(root: &Path, primitive: &str) -> Result<Vec<(String, String, PathBuf)>, StoreError> {
     let dir = root.join(primitive);
     let mut out = Vec::new();
-    let vault_dirs = match std::fs::read_dir(&dir) {
+    let mem_dirs = match std::fs::read_dir(&dir) {
         Ok(rd) => rd,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(out),
         Err(e) => return Err(StoreError::Io { path: dir, source: e }),
     };
-    for vault_entry in vault_dirs.flatten() {
-        let vault_path = vault_entry.path();
-        if !vault_path.is_dir() {
+    for mem_entry in mem_dirs.flatten() {
+        let mem_path = mem_entry.path();
+        if !mem_path.is_dir() {
             continue;
         }
-        let vault = vault_entry.file_name().to_string_lossy().into_owned();
-        for file in std::fs::read_dir(&vault_path)
-            .map_err(|e| StoreError::Io { path: vault_path.clone(), source: e })?
+        let mem = mem_entry.file_name().to_string_lossy().into_owned();
+        for file in std::fs::read_dir(&mem_path)
+            .map_err(|e| StoreError::Io { path: mem_path.clone(), source: e })?
             .flatten()
         {
             let path = file.path();
@@ -187,7 +187,7 @@ fn walk_vault_scoped(root: &Path, primitive: &str) -> Result<Vec<(String, String
                 continue;
             }
             if let Some(name) = path.file_stem().map(|s| s.to_string_lossy().into_owned()) {
-                out.push((vault.clone(), name, path));
+                out.push((mem.clone(), name, path));
             }
         }
     }
@@ -206,25 +206,25 @@ fn walk_vault_scoped(root: &Path, primitive: &str) -> Result<Vec<(String, String
 pub fn read_legacy_pipeline_configs(workspace_root: &Path) -> Result<PipelineConfigs, StoreError> {
     let mut configs = PipelineConfigs::default();
 
-    for (vault, name, path) in walk_vault_scoped(workspace_root, "scopes")? {
+    for (mem, name, path) in walk_mem_scoped(workspace_root, "scopes")? {
         let scope: LegacyScope = read_legacy_json(&path)?;
         let (medium, facet) = convert_scope(&name, scope);
-        configs.mediums.push(VaultPipelineRecord {
-            vault: vault.clone(),
+        configs.mediums.push(MemPipelineRecord {
+            mem: mem.clone(),
             name: name.clone(),
             config: medium,
         });
-        configs.facets.push(VaultPipelineRecord {
-            vault,
+        configs.facets.push(MemPipelineRecord {
+            mem,
             name,
             config: facet,
         });
     }
 
-    for (vault, name, path) in walk_vault_scoped(workspace_root, "projections")? {
+    for (mem, name, path) in walk_mem_scoped(workspace_root, "projections")? {
         let legacy: LegacyProjection = read_legacy_json(&path)?;
-        configs.projections.push(VaultPipelineRecord {
-            vault,
+        configs.projections.push(MemPipelineRecord {
+            mem,
             name,
             config: convert_projection(legacy),
         });
@@ -271,13 +271,13 @@ pub fn read_legacy_pipeline_configs(workspace_root: &Path) -> Result<PipelineCon
 pub fn migrate_legacy_pipeline(workspace_root: &Path) -> Result<PipelineConfigs, StoreError> {
     let configs = read_legacy_pipeline_configs(workspace_root)?;
     for m in &configs.mediums {
-        crate::pipeline_store::write_medium(workspace_root, &m.vault, &m.name, &m.config)?;
+        crate::pipeline_store::write_medium(workspace_root, &m.mem, &m.name, &m.config)?;
     }
     for f in &configs.facets {
-        crate::pipeline_store::write_facet(workspace_root, &f.vault, &f.name, &f.config)?;
+        crate::pipeline_store::write_facet(workspace_root, &f.mem, &f.name, &f.config)?;
     }
     for p in &configs.projections {
-        crate::pipeline_store::write_projection(workspace_root, &p.vault, &p.name, &p.config)?;
+        crate::pipeline_store::write_projection(workspace_root, &p.mem, &p.name, &p.config)?;
     }
     for i in &configs.ingests {
         crate::pipeline_store::write_ingest(workspace_root, &i.name, &i.config)?;
@@ -338,19 +338,19 @@ mod tests {
     }
 
     #[test]
-    fn projection_sources_split_into_facets_and_reference_vaults() {
+    fn projection_sources_split_into_facets_and_reference_mems() {
         let legacy = LegacyProjection {
             intent: Some("macOS source".into()),
             sources: vec![
-                LegacySource { scope_ref: Some("source-tree".into()), vault: None },
-                LegacySource { scope_ref: None, vault: Some("engine".into()) },
+                LegacySource { scope_ref: Some("source-tree".into()), mem: None },
+                LegacySource { scope_ref: None, mem: Some("engine".into()) },
             ],
-            destinations: vec![LegacyDestination { vault: "macos".into() }],
+            destinations: vec![LegacyDestination { mem: "macos".into() }],
         };
         let p = convert_projection(legacy);
         assert_eq!(p.source_facets, vec!["source-tree".to_string()]);
-        assert_eq!(p.reference_vaults, vec!["engine".to_string()]);
-        assert_eq!(p.destination_vault, "macos");
+        assert_eq!(p.reference_mems, vec!["engine".to_string()]);
+        assert_eq!(p.destination_mem, "macos");
         assert_eq!(p.intent.as_deref(), Some("macOS source"));
     }
 
@@ -367,7 +367,7 @@ mod tests {
         std::fs::create_dir_all(root.join("projections/macos")).unwrap();
         std::fs::write(
             root.join("projections/macos/graph.json"),
-            r#"{"intent":"i","sources":[{"role":"primary","scope_ref":"source-tree"},{"role":"reference","vault":"engine"}],"destinations":[{"vault":"macos"}]}"#,
+            r#"{"intent":"i","sources":[{"role":"primary","scope_ref":"source-tree"},{"role":"reference","mem":"engine"}],"destinations":[{"mem":"macos"}]}"#,
         ).unwrap();
         std::fs::create_dir_all(root.join("ingests")).unwrap();
         std::fs::write(
@@ -379,7 +379,7 @@ mod tests {
         assert_eq!(converted.mediums.len(), 1);
         assert_eq!(converted.mediums[0].config.pointer, "../macos");
         assert_eq!(converted.facets.len(), 1);
-        assert_eq!(converted.projections[0].config.reference_vaults, vec!["engine".to_string()]);
+        assert_eq!(converted.projections[0].config.reference_mems, vec!["engine".to_string()]);
         assert_eq!(converted.ingests[0].config.mode, IngestMode::Discovery);
 
         // Written to the `.memstead/` store and reloadable by the loader.

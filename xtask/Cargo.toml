@@ -13,8 +13,8 @@ name = "xtask"
 path = "src/main.rs"
 
 [dependencies]
-memstead-cli = { workspace = true, features = ["vault-repo"] }
-memstead-mcp = { workspace = true, features = ["vault-repo"] }
+memstead-cli = { workspace = true, features = ["mem-repo"] }
+memstead-mcp = { workspace = true, features = ["mem-repo"] }
 anyhow.workspace = true
 clap = { workspace = true, features = ["derive"] }
 clap-markdown = "0.1.5"

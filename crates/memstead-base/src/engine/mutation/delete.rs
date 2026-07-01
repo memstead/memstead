@@ -15,7 +15,7 @@ use super::super::{
 use super::{gc_orphan_stubs, make_stub};
 
 /// The would-be delete outcome for an entity, derived purely from the
-/// in-memory graph (no mutation). `write_referrers` are the Write-Vault
+/// in-memory graph (no mutation). `write_referrers` are the Write-Mem
 /// sources that block a delete (`HAS_INCOMING_REFS`); `readonly_referrers`
 /// are ReadOnly-mount sources that instead trigger the residual-stub
 /// demotion. Both empty ⇒ a clean removal. Shared by [`Engine::delete_entity`]
@@ -37,11 +37,11 @@ impl DeleteReferrers {
 impl Engine {
 
     /// Classify an entity's incoming referrers by the source mount's
-    /// capability — the read-only core of the delete guard. Write-Vault
+    /// capability — the read-only core of the delete guard. Write-Mem
     /// referrers block the delete; ReadOnly referrers trigger the
     /// residual-stub demotion. Per-source dedup collapses an N-edge
     /// source into one [`ReferrerInfo`] carrying every rel-type. A
-    /// referrer in an unmounted vault is treated as Write
+    /// referrer in an unmounted mem is treated as Write
     /// (safe-by-default: refuse rather than silently demote).
     ///
     /// Pure read — no disk, commit, lock, or store mutation. Used by
@@ -51,11 +51,11 @@ impl Engine {
         let mut write_referrers: Vec<ReferrerInfo> = Vec::new();
         let mut readonly_referrers: Vec<EntityId> = Vec::new();
         for edge in self.store.incoming(id) {
-            let from_vault = edge.from.vault().to_string();
+            let from_mem = edge.from.mem().to_string();
             let cap = self
                 .mounts
                 .iter()
-                .find(|m| m.mount.vault == from_vault)
+                .find(|m| m.mount.mem == from_mem)
                 .map(|m| m.mount.capability)
                 .unwrap_or(MountCapability::Write);
             match cap {
@@ -71,7 +71,7 @@ impl Engine {
                         write_referrers.push(ReferrerInfo {
                             from_id,
                             rel_types: vec![edge.rel_type.clone()],
-                            vault: from_vault,
+                            mem: from_mem,
                         });
                     }
                 }
@@ -87,10 +87,10 @@ impl Engine {
     /// Delete an entity from its mount.
     ///
     /// Binary semantics — there is no force flag. The engine partitions
-    /// incoming references by the source vault's
+    /// incoming references by the source mem's
     /// [`MountCapability`]:
     ///
-    /// - any **Write-Vault** referrers → refuse with typed
+    /// - any **Write-Mem** referrers → refuse with typed
     ///   [`EngineError::HasIncomingRefs`] carrying the structured
     ///   referrer list;
     /// - only **ReadOnly-mount** referrers → delete the file +
@@ -113,22 +113,22 @@ impl Engine {
         note: Option<&str>,
     ) -> Result<DeleteEntityOutcome, EngineError> {
         let id = &args.id;
-        let vault = id.vault().to_string();
+        let mem = id.mem().to_string();
 
         let mount_idx = self
             .mounts
             .iter()
-            .position(|m| m.mount.vault == vault)
-            .ok_or_else(|| EngineError::UnknownVault(vault.clone()))?;
+            .position(|m| m.mount.mem == mem)
+            .ok_or_else(|| EngineError::UnknownMem(mem.clone()))?;
         if self.mounts[mount_idx].mount.capability != MountCapability::Write {
-            return Err(EngineError::ReadOnlyMount(vault));
+            return Err(EngineError::ReadOnlyMount(mem));
         }
 
         // Reload-before-operation: reload if a sibling advanced the
-        // vault ref, so the `expected_hash` compare and the
+        // mem ref, so the `expected_hash` compare and the
         // referrer classification below see current truth. Notice
         // rides the outcome's `warnings`.
-        let mut drift_warnings = self.reload_if_stale(Some(&vault));
+        let mut drift_warnings = self.reload_if_stale(Some(&mem));
 
         let entity = self
             .store
@@ -155,8 +155,8 @@ impl Engine {
         let file_path = entity.file_path.clone();
         let entity_is_stub = entity.stub;
 
-        // Partition incoming refs by the source vault's mount capability
-        // (Write-Vault referrers block; ReadOnly trigger the residual-stub
+        // Partition incoming refs by the source mem's mount capability
+        // (Write-Mem referrers block; ReadOnly trigger the residual-stub
         // demotion). The classification is shared with the CLI
         // `delete --dry-run` preview so the two cannot disagree about the
         // outcome.
@@ -192,7 +192,7 @@ impl Engine {
         // committed as their own grain — the relate that materialised
         // them committed the source entity's markdown, the stub itself
         // is in-memory + edge-index only. Routing a stub delete through
-        // `backend.delete_entity` trips `VaultWriter(Path("vault-
+        // `backend.delete_entity` trips `MemWriter(Path("mem-
         // relative path is empty"))`. Skip the backend write + commit
         // for stubs; provenance still records the explicit drop so
         // memstead_changes_since consumers see the event.
@@ -312,11 +312,11 @@ mod tests {
 
     use tempfile::TempDir;
 
-    use crate::backend::VaultBackend;
+    use crate::backend::MemBackend;
     use crate::engine::test_helpers::*;
     use crate::engine::{DeleteEntityArgs, Engine, EngineError, RelateEntityArgs};
     use crate::ops::WarningHint;
-    use crate::storage::FilesystemVaultWriter;
+    use crate::storage::FilesystemMemWriter;
 
     #[test]
     fn delete_entity_removes_file_and_store_entry() {
@@ -465,7 +465,7 @@ mod tests {
     }
 
     /// `memstead_delete id=<stub> expected_hash=""` end-to-end. The pre-fix
-    /// path tripped `BackendError::VaultWriter(Path("vault-relative
+    /// path tripped `BackendError::MemWriter(Path("mem-relative
     /// path is empty"))` because stubs carry an empty `file_path` and
     /// the backend's `delete_entity` rejected the empty path. The fix
     /// routes stub deletes around the backend write — stubs are
@@ -525,7 +525,7 @@ mod tests {
     }
 
     #[test]
-    fn delete_entity_refuses_on_write_vault_referrers_with_typed_payload() {
+    fn delete_entity_refuses_on_write_mem_referrers_with_typed_payload() {
         let tmp = TempDir::new().unwrap();
         let (mut engine, target) = engine_with_seed(&tmp, "Target");
         let (actor, client) = cli_actor();
@@ -574,7 +574,7 @@ mod tests {
                 let r = &referrers[0];
                 assert_eq!(r.from_id, source.id.to_string());
                 assert_eq!(r.rel_types, vec!["USES".to_string()]);
-                assert_eq!(r.vault, "specs");
+                assert_eq!(r.mem, "specs");
             }
             other => panic!("expected HasIncomingRefs, got {other:?}"),
         }
@@ -690,7 +690,7 @@ mod tests {
         );
     }
 
-    /// ReadOnly-only referrer path: the entity has no Write-Vault
+    /// ReadOnly-only referrer path: the entity has no Write-Mem
     /// referrers but is referenced from a ReadOnly archive. Delete
     /// removes the file and demotes the entity in-memory to a stub at
     /// the same id, preserving the incoming edges from the archive
@@ -706,10 +706,10 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let writable_dir = tmp.path().join("writable");
         std::fs::create_dir_all(&writable_dir).unwrap();
-        let writer = FilesystemVaultWriter::new(writable_dir.clone());
+        let writer = FilesystemMemWriter::new(writable_dir.clone());
 
-        // Build an archive that declares an explicit cross-vault
-        // relation into the writable vault. Under the alias model
+        // Build an archive that declares an explicit cross-mem
+        // relation into the writable mem. Under the alias model
         // edges originate from `## Relationships` only — the body
         // wiki-link aliases the declared relation.
         let archive_md = "---\ntype: spec\ncreated_date: 2026-01-15\nlast_modified: 2026-04-12\nlevel: M0\n---\n# Archived Source\n\n## Identity\n\nLinks to [[specs:target]].\n\n## Purpose\n\nFixture for residual-stub demotion.\n\n## Relationships\n\n- **REFERENCES**: [[specs:target]]\n";
@@ -720,7 +720,7 @@ mod tests {
         );
 
         let folder_mount = Mount {
-            vault: "specs".to_string(),
+            mem: "specs".to_string(),
             schema: Some(crate::engine::test_helpers::pin("default")),
             storage: MountStorage::Folder { path: writable_dir.clone() },
             capability: MountCapability::Write,
@@ -732,11 +732,11 @@ mod tests {
         let mut engine = Engine::from_mounts(vec![
             (
                 folder_mount,
-                Box::new(writer) as Box<dyn VaultBackend>,
+                Box::new(writer) as Box<dyn MemBackend>,
             ),
             (
                 archive_mount("archive", archive_path.clone()),
-                Box::new(archive_reader) as Box<dyn VaultBackend>,
+                Box::new(archive_reader) as Box<dyn MemBackend>,
             ),
         ])
         .unwrap();
@@ -778,7 +778,7 @@ mod tests {
             )
             .unwrap();
 
-        // File is gone from the writable vault.
+        // File is gone from the writable mem.
         assert!(!writable_dir.join(&target.file_path).exists());
         // Entity in the store is now a stub at the same id.
         let demoted = engine.get_entity(&target.id).expect("residual stub must remain in store");

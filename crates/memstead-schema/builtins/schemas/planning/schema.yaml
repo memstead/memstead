@@ -3,11 +3,11 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # planning@0.1.0 — knowledge-graph schema for planning phases.
 #
-# A planning vault captures the deliberation of one planning phase —
+# A planning mem captures the deliberation of one planning phase —
 # its goal, the options considered, the decisions made, the execution
-# steps, the risks, and the open questions. The vault grows as the
+# steps, the risks, and the open questions. The mem grows as the
 # planning unfolds. Once execution completes, a lens projection lifts
-# the durable artifacts into the main graph; the planning vault is
+# the durable artifacts into the main graph; the planning mem is
 # archived.
 #
 # Seven types model the phases of planning:
@@ -24,7 +24,7 @@
 # ANSWERS, RAISES).
 #
 # Pair with a main graph (usually under software@0.1.0) that this
-# planning vault references via cross-vault links and eventually
+# planning mem references via cross-mem links and eventually
 # projects into.
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -36,13 +36,13 @@ description: |
   deliberation between stating a goal and having a plan executed.
   After execution, a lens projection lifts the durable parts (accepted
   decisions, spec updates, validated risks) into the main project
-  graph; the planning vault is archived as historical record.
+  graph; the planning mem is archived as historical record.
 
 when_to_use: |
-  Use for the duration of one planning phase — a vault dedicated to
+  Use for the duration of one planning phase — a mem dedicated to
   working through one concrete question or scope. Create a new
-  planning vault per phase. Pair with a main graph (usually under
-  software@0.1.0) that this planning vault references via cross-vault
+  planning mem per phase. Pair with a main graph (usually under
+  software@0.1.0) that this planning mem references via cross-mem
   links and eventually projects into. Prefer the main graph's
   vocabulary (spec, decision, requirement, …) for durable current-
   state artifacts; use this schema only for the deliberation itself.
@@ -100,7 +100,7 @@ relationships:
     # ── Structural / reference ──────────────────────────────────────────
     - name: PART_OF
       description: Hierarchical containment — the source is structurally part of the target and meaningless without it.
-      when_to_use: Taxonomy. Parent owns the child as a structural part. Pure graph edge — files stay flat at the vault root. Not for logical dependency (use DEPENDS_ON).
+      when_to_use: Taxonomy. Parent owns the child as a structural part. Pure graph edge — files stay flat at the mem root. Not for logical dependency (use DEPENDS_ON).
       default_weight: 3.0
       acyclic: true
     - name: REFERENCES

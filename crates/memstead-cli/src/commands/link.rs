@@ -1,4 +1,4 @@
-//! `memstead link <scope/name>` — fetch a published vault from the
+//! `memstead link <scope/name>` — fetch a published mem from the
 //! registry, cache it locally, and record the dependency in the filesystem
 //! workspace config.
 //!
@@ -27,7 +27,7 @@ use crate::setup::CliContext;
 /// `memstead link` arguments.
 #[derive(Args, Debug)]
 pub struct LinkArgs {
-    /// Cross-vault dependency in `scope/name` form (no `@` prefix —
+    /// Cross-mem dependency in `scope/name` form (no `@` prefix —
     /// that is the `memstead install` shape). Tier 3 wiki-links use the
     /// same form, so the input here matches what users will type
     /// inside `[[scope/name:slug]]`.
@@ -105,12 +105,12 @@ pub fn run(ctx: &CliContext, args: LinkArgs) -> anyhow::Result<()> {
 
     let base = registry::registry_base(args.registry.as_deref());
     let client = registry::build_http()?;
-    let bytes = registry::download_vault(&client, &base, &dep.scope, &dep.name, &cache_path)
+    let bytes = registry::download_mem(&client, &base, &dep.scope, &dep.name, &cache_path)
         .map_err(|e| {
             let (msg, kind, code): (String, ExitKind, &'static str) = match e {
                 DownloadError::NotFound => (
                     format!(
-                        "registry has no vault {}/{} — check the spelling or `memstead publish` it first",
+                        "registry has no mem {}/{} — check the spelling or `memstead publish` it first",
                         dep.scope, dep.name
                     ),
                     ExitKind::NotFound,
@@ -118,7 +118,7 @@ pub fn run(ctx: &CliContext, args: LinkArgs) -> anyhow::Result<()> {
                 ),
                 DownloadError::Gone => (
                     format!(
-                        "vault {}/{} has been unpublished from the registry",
+                        "mem {}/{} has been unpublished from the registry",
                         dep.scope, dep.name
                     ),
                     ExitKind::NotFound,
@@ -224,7 +224,7 @@ mod tests {
         std::fs::create_dir_all(&memstead_dir).unwrap();
         std::fs::write(
             memstead_dir.join("workspace.toml"),
-            "format = \"memstead-git-branch-1\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+            "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
         )
         .unwrap();
         let pin: SchemaRef = "default@1.0.0".parse().unwrap();
@@ -233,7 +233,7 @@ mod tests {
     }
 
     /// Spin up a tiny axum server that serves a single fixture archive
-    /// at `/api/vault/<scope>/<name>.mem`. Returns the bound base
+    /// at `/api/mem/<scope>/<name>.mem`. Returns the bound base
     /// URL (e.g. `http://127.0.0.1:54321`) and a `JoinHandle` the
     /// caller drops to shut the server down.
     async fn spawn_fixture_registry(
@@ -246,7 +246,7 @@ mod tests {
 
         let body = Arc::new(body);
         let app: Router = Router::new().route(
-            "/api/vault/{scope_at}/{name_memstead}",
+            "/api/mem/{scope_at}/{name_memstead}",
             get({
                 let body = body.clone();
                 move |AxumPath((scope_at, name_memstead)): AxumPath<(String, String)>| {
@@ -280,7 +280,7 @@ mod tests {
         let (base, handle) =
             spawn_fixture_registry("anthropic", "core", archive_bytes.clone()).await;
 
-        // Run on a blocking thread because `registry::download_vault`
+        // Run on a blocking thread because `registry::download_mem`
         // is `reqwest::blocking`.
         let workspace = tmp.path().to_path_buf();
         let base_clone = base.clone();
@@ -383,7 +383,7 @@ mod tests {
         handle.abort();
         let msg = err.to_string();
         assert!(
-            msg.contains("registry has no vault"),
+            msg.contains("registry has no mem"),
             "expected actionable 404 message, got: {msg}"
         );
     }

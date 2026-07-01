@@ -8,10 +8,10 @@ use crate::CliError;
 use crate::output::ExitKind;
 use crate::setup::{CliContext, CliEngine};
 
-/// `memstead fetch <vault> [--remote <name>] [<refspec>...]` arguments.
+/// `memstead fetch <mem> [--remote <name>] [<refspec>...]` arguments.
 #[derive(Args, Debug)]
 pub struct FetchArgs {
-    pub vault: String,
+    pub mem: String,
     #[arg(long, default_value = "origin")]
     pub remote: String,
     /// Optional refspecs forwarded to the underlying `git fetch`.
@@ -20,18 +20,18 @@ pub struct FetchArgs {
     pub refspecs: Vec<String>,
 }
 
-/// `memstead pull <vault> [--remote <name>]` arguments.
+/// `memstead pull <mem> [--remote <name>]` arguments.
 #[derive(Args, Debug)]
 pub struct PullArgs {
-    pub vault: String,
+    pub mem: String,
     #[arg(long, default_value = "origin")]
     pub remote: String,
 }
 
-/// `memstead push <vault> [--remote <name>] [--force]` arguments.
+/// `memstead push <mem> [--remote <name>] [--force]` arguments.
 #[derive(Args, Debug)]
 pub struct PushArgs {
-    pub vault: String,
+    pub mem: String,
     #[arg(long, default_value = "origin")]
     pub remote: String,
     /// Force-push (`--force-with-lease` under the hood). Refused
@@ -43,10 +43,10 @@ pub struct PushArgs {
 
 pub fn run_fetch(ctx: &CliContext, args: FetchArgs) -> anyhow::Result<()> {
     let outcome = match ctx.cli_engine()? {
-        CliEngine::VaultRepo(engine) => engine
-            .fetch(&args.vault, &args.remote, &args.refspecs)
+        CliEngine::MemRepo(engine) => engine
+            .fetch(&args.mem, &args.remote, &args.refspecs)
             .map_err(CliError::from_engine_op)?,
-        CliEngine::Filesystem(_) => return Err(folder_refusal("memstead fetch", &args.vault)),
+        CliEngine::Filesystem(_) => return Err(folder_refusal("memstead fetch", &args.mem)),
     };
     if ctx.json {
         crate::output::print_json(&outcome)?;
@@ -84,10 +84,10 @@ pub fn run_fetch(ctx: &CliContext, args: FetchArgs) -> anyhow::Result<()> {
 
 pub fn run_pull(ctx: &CliContext, args: PullArgs) -> anyhow::Result<()> {
     let outcome = match ctx.cli_engine()? {
-        CliEngine::VaultRepo(mut engine) => engine
-            .pull(&args.vault, &args.remote)
+        CliEngine::MemRepo(mut engine) => engine
+            .pull(&args.mem, &args.remote)
             .map_err(CliError::from_engine_op)?,
-        CliEngine::Filesystem(_) => return Err(folder_refusal("memstead pull", &args.vault)),
+        CliEngine::Filesystem(_) => return Err(folder_refusal("memstead pull", &args.mem)),
     };
     if ctx.json {
         crate::output::print_json(&outcome)?;
@@ -99,7 +99,7 @@ pub fn run_pull(ctx: &CliContext, args: PullArgs) -> anyhow::Result<()> {
         };
         crate::output::print_markdown(&format!(
             "# Pulled `{}`\n\n- Branch ref: `{}`\n- Source ref: `{}`\n- Previous: `{prev}`\n- New: `{}`",
-            outcome.vault, outcome.branch_ref, outcome.source_ref, outcome.new_sha,
+            outcome.mem, outcome.branch_ref, outcome.source_ref, outcome.new_sha,
         ));
     }
     Ok(())
@@ -107,10 +107,10 @@ pub fn run_pull(ctx: &CliContext, args: PullArgs) -> anyhow::Result<()> {
 
 pub fn run_push(ctx: &CliContext, args: PushArgs) -> anyhow::Result<()> {
     let outcome = match ctx.cli_engine()? {
-        CliEngine::VaultRepo(engine) => engine
-            .push(&args.vault, &args.remote, args.force)
+        CliEngine::MemRepo(engine) => engine
+            .push(&args.mem, &args.remote, args.force)
             .map_err(CliError::from_engine_op)?,
-        CliEngine::Filesystem(_) => return Err(folder_refusal("memstead push", &args.vault)),
+        CliEngine::Filesystem(_) => return Err(folder_refusal("memstead push", &args.mem)),
     };
     if ctx.json {
         crate::output::print_json(&outcome)?;
@@ -118,18 +118,18 @@ pub fn run_push(ctx: &CliContext, args: PushArgs) -> anyhow::Result<()> {
         let force_note = if outcome.forced { " (forced)" } else { "" };
         crate::output::print_markdown(&format!(
             "# Pushed `{}` to `{}`{force_note}\n\n- Branch ref: `{}`\n- New SHA at remote: `{}`",
-            outcome.vault, outcome.remote, outcome.branch_ref, outcome.new_sha,
+            outcome.mem, outcome.remote, outcome.branch_ref, outcome.new_sha,
         ));
     }
     Ok(())
 }
 
-fn folder_refusal(op: &str, vault: &str) -> anyhow::Error {
+fn folder_refusal(op: &str, mem: &str) -> anyhow::Error {
     CliError {
         code: "INVALID_INPUT",
         kind: ExitKind::Validation,
         message: format!(
-            "vault '{vault}' is not git-backed — `{op}` requires a git-branch mount",
+            "mem '{mem}' is not git-backed — `{op}` requires a git-branch mount",
         ),
         details: None,
     }

@@ -1,4 +1,4 @@
-#![cfg(feature = "vault-repo")]
+#![cfg(feature = "mem-repo")]
 //! Integration tests for `memstead` write subcommands.
 //!
 //! Covers the core round-trip (create → read → update strict → update
@@ -20,7 +20,7 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use assert_cmd::Command;
-use memstead_git_branch::test_support::init_real_vault_repo_from_disk;
+use memstead_git_branch::test_support::init_real_mem_repo_from_disk;
 use predicates::prelude::PredicateBooleanExt;
 use predicates::str::contains;
 use serde_json::Value;
@@ -30,27 +30,27 @@ use tempfile::TempDir;
 /// path. The subdir basename equals the declared `name: "cli-write"`
 /// per the basename-invariant.
 ///
-/// Lays down `<tmp>/vault-repo/.git/` so the CLI's `find_workspace_root`
-/// walk finds `<tmp>` and the engine's `vault-repo/.git/` fail-fast
+/// Lays down `<tmp>/mem-repo/.git/` so the CLI's `find_workspace_root`
+/// walk finds `<tmp>` and the engine's `mem-repo/.git/` fail-fast
 /// accepts the workspace. Tests run the binary with
 /// `current_dir(tmp)` so the binary's `.memstead/workspace.toml` walk
 /// resolves the workspace from cwd.
-fn make_vault(tmp: &Path) -> PathBuf {
-    let vault = tmp.join("cli-write");
-    fs::create_dir_all(&vault).unwrap();
-    let store = vault.join(".memstead");
+fn make_mem(tmp: &Path) -> PathBuf {
+    let mem = tmp.join("cli-write");
+    fs::create_dir_all(&mem).unwrap();
+    let store = mem.join(".memstead");
     fs::create_dir_all(&store).unwrap();
     fs::write(
         store.join("config.json"),
         r#"{ "schema": "default@1.0.0" }"#,
     )
     .unwrap();
-    // The CLI write flow routes through the `VaultWriter` seam — for
-    // vault-repo-backed vaults commits land on `refs/heads/cli-write` of
-    // `<workspace>/vault-repo/.git/`. Seed a real vault-repo from the disk
+    // The CLI write flow routes through the `MemWriter` seam — for
+    // mem-repo-backed mems commits land on `refs/heads/cli-write` of
+    // `<workspace>/mem-repo/.git/`. Seed a real mem-repo from the disk
     // shell so reads and writes share the same gitdir tip.
-    init_real_vault_repo_from_disk(tmp, &[(&vault, "cli-write")]);
-    vault
+    init_real_mem_repo_from_disk(tmp, &[(&mem, "cli-write")]);
+    mem
 }
 
 fn memstead() -> Command {
@@ -80,7 +80,7 @@ fn entity_hash(workspace_root: &Path, id: &str) -> String {
 #[test]
 fn create_markdown() {
     let tmp = TempDir::new().unwrap();
-    let _vault = make_vault(tmp.path());
+    let _mem = make_mem(tmp.path());
 
     memstead()
         .current_dir(tmp.path())
@@ -99,14 +99,14 @@ fn create_markdown() {
         .success()
         .stdout(contains("Created `cli-write--alpha`"));
 
-    // Vault-db-backed vaults persist via `vault-repo/.git/refs/heads/<vault>`
+    // Mem-db-backed mems persist via `mem-repo/.git/refs/heads/<mem>`
     // — the stdout marker covers the same write-landed contract.
 }
 
 #[test]
 fn create_from_json_file() {
     let tmp = TempDir::new().unwrap();
-    let _vault = make_vault(tmp.path());
+    let _mem = make_mem(tmp.path());
 
     let payload = tmp.path().join("payload.json");
     // The `--from` payload uses `entity_type` (matching the response
@@ -136,7 +136,7 @@ fn create_from_json_file() {
 #[test]
 fn full_round_trip_create_update_delete() {
     let tmp = TempDir::new().unwrap();
-    let _vault = make_vault(tmp.path());
+    let _mem = make_mem(tmp.path());
 
     // Step 1 — create.
     memstead()
@@ -188,7 +188,7 @@ fn full_round_trip_create_update_delete() {
         .success()
         .stdout(contains("Deleted `cli-write--delta`"));
 
-    // Disk-existence post-condition is moot for vault-repo-backed vaults —
+    // Disk-existence post-condition is moot for mem-repo-backed mems —
     // the subsequent `memstead entity` lookups in other tests cover the
     // same "the entity is gone" contract.
 }
@@ -196,7 +196,7 @@ fn full_round_trip_create_update_delete() {
 #[test]
 fn update_requires_hash_by_default() {
     let tmp = TempDir::new().unwrap();
-    let _vault = make_vault(tmp.path());
+    let _mem = make_mem(tmp.path());
     memstead()
         .current_dir(tmp.path())
         .args([
@@ -222,7 +222,7 @@ fn update_requires_hash_by_default() {
 #[test]
 fn update_wrong_hash_returns_exit_4() {
     let tmp = TempDir::new().unwrap();
-    let _vault = make_vault(tmp.path());
+    let _mem = make_mem(tmp.path());
     memstead()
         .current_dir(tmp.path())
         .args([
@@ -250,7 +250,7 @@ fn update_wrong_hash_returns_exit_4() {
 #[test]
 fn update_wrong_hash_json_mode_carries_current() {
     let tmp = TempDir::new().unwrap();
-    let _vault = make_vault(tmp.path());
+    let _mem = make_mem(tmp.path());
     memstead()
         .current_dir(tmp.path())
         .args([
@@ -280,7 +280,7 @@ fn update_wrong_hash_json_mode_carries_current() {
 #[test]
 fn relate_adds_edge_visible_from_relations() {
     let tmp = TempDir::new().unwrap();
-    let _vault = make_vault(tmp.path());
+    let _mem = make_mem(tmp.path());
 
     for (title, slug_sections) in [("Src", "identity=s"), ("Dst", "identity=d")] {
         memstead()
@@ -312,7 +312,7 @@ fn relate_adds_edge_visible_from_relations() {
 #[test]
 fn delete_dry_run_does_not_remove_file() {
     let tmp = TempDir::new().unwrap();
-    let _vault = make_vault(tmp.path());
+    let _mem = make_mem(tmp.path());
     memstead()
         .current_dir(tmp.path())
         .args([
@@ -335,13 +335,13 @@ fn delete_dry_run_does_not_remove_file() {
 }
 
 /// `delete --dry-run` states the would-be
-/// verdict — `HAS_INCOMING_REFS` when a Write-vault referrer blocks the
+/// verdict — `HAS_INCOMING_REFS` when a Write-mem referrer blocks the
 /// delete, `would PROCEED` when nothing does — and that verdict matches
 /// the real `memstead delete` outcome in both the refuse and the allow case.
 #[test]
 fn delete_dry_run_reports_verdict_matching_real_delete() {
     let tmp = TempDir::new().unwrap();
-    let _vault = make_vault(tmp.path());
+    let _mem = make_mem(tmp.path());
     for (title, sect) in [("Src", "identity=s"), ("Dst", "identity=d")] {
         memstead()
             .current_dir(tmp.path())
@@ -352,7 +352,7 @@ fn delete_dry_run_reports_verdict_matching_real_delete() {
             .assert()
             .success();
     }
-    // src --USES--> dst: dst now has a blocking Write-vault referrer.
+    // src --USES--> dst: dst now has a blocking Write-mem referrer.
     memstead()
         .current_dir(tmp.path())
         .args(["relate", "cli-write--src", "USES", "cli-write--dst"])
@@ -400,7 +400,7 @@ fn delete_dry_run_reports_verdict_matching_real_delete() {
 #[test]
 fn rename_changes_id() {
     let tmp = TempDir::new().unwrap();
-    let _vault = make_vault(tmp.path());
+    let _mem = make_mem(tmp.path());
     memstead()
         .current_dir(tmp.path())
         .args([
@@ -433,7 +433,7 @@ fn rename_changes_id() {
 #[test]
 fn batch_update_from_file() {
     let tmp = TempDir::new().unwrap();
-    let _vault = make_vault(tmp.path());
+    let _mem = make_mem(tmp.path());
 
     for title in ["Bat1", "Bat2"] {
         memstead()
@@ -480,7 +480,7 @@ fn batch_update_from_file() {
 #[test]
 fn batch_update_refuses_whole_batch_on_one_bad_entry() {
     let tmp = TempDir::new().unwrap();
-    let _vault = make_vault(tmp.path());
+    let _mem = make_mem(tmp.path());
 
     memstead()
         .current_dir(tmp.path())
@@ -543,7 +543,7 @@ fn batch_update_refuses_whole_batch_on_one_bad_entry() {
 #[test]
 fn batch_update_json_refusal_exits_nonzero_with_envelope() {
     let tmp = TempDir::new().unwrap();
-    let _vault = make_vault(tmp.path());
+    let _mem = make_mem(tmp.path());
 
     memstead()
         .current_dir(tmp.path())
@@ -602,7 +602,7 @@ fn batch_update_json_refusal_exits_nonzero_with_envelope() {
 #[test]
 fn batch_update_json_success_unchanged_exits_zero() {
     let tmp = TempDir::new().unwrap();
-    let _vault = make_vault(tmp.path());
+    let _mem = make_mem(tmp.path());
 
     memstead()
         .current_dir(tmp.path())
@@ -649,7 +649,7 @@ fn batch_update_json_success_unchanged_exits_zero() {
 #[test]
 fn batch_update_commit_note_names_entities_via_include_notes() {
     let tmp = TempDir::new().unwrap();
-    let _vault = make_vault(tmp.path());
+    let _mem = make_mem(tmp.path());
 
     for title in ["Note1", "Note2"] {
         memstead()
@@ -726,9 +726,9 @@ fn batch_update_commit_note_names_entities_via_include_notes() {
 }
 
 // -----------------------------------------------------------------------------
-// Filesystem-vault write-side dispatch — proves Bug 2 closure for `create`,
+// Filesystem-mem write-side dispatch — proves Bug 2 closure for `create`,
 // `update`, `delete`, `relate`, `rename` on the filesystem flavour. Each test
-// initialises a fresh filesystem-vault workspace via `memstead init`, then
+// initialises a fresh filesystem-mem workspace via `memstead init`, then
 // exercises the relevant subcommand via the CLI subprocess (no engine
 // shortcuts, no hand-shaped .md seeds).
 // -----------------------------------------------------------------------------
@@ -746,7 +746,7 @@ fn init_filesystem(tmp: &TempDir, name: &str) {
 }
 
 #[test]
-fn create_works_on_filesystem_vault_workspace() {
+fn create_works_on_filesystem_mem_workspace() {
     let tmp = TempDir::new().unwrap();
     init_filesystem(&tmp, "demo");
 
@@ -779,7 +779,7 @@ fn create_works_on_filesystem_vault_workspace() {
 }
 
 #[test]
-fn update_works_on_filesystem_vault_workspace() {
+fn update_works_on_filesystem_mem_workspace() {
     let tmp = TempDir::new().unwrap();
     init_filesystem(&tmp, "demo");
 
@@ -816,7 +816,7 @@ fn update_works_on_filesystem_vault_workspace() {
 }
 
 #[test]
-fn delete_works_on_filesystem_vault_workspace() {
+fn delete_works_on_filesystem_mem_workspace() {
     let tmp = TempDir::new().unwrap();
     init_filesystem(&tmp, "demo");
 
@@ -853,7 +853,7 @@ fn delete_works_on_filesystem_vault_workspace() {
 }
 
 #[test]
-fn relate_works_on_filesystem_vault_workspace() {
+fn relate_works_on_filesystem_mem_workspace() {
     let tmp = TempDir::new().unwrap();
     init_filesystem(&tmp, "demo");
 
@@ -884,7 +884,7 @@ fn relate_works_on_filesystem_vault_workspace() {
 }
 
 #[test]
-fn rename_works_on_filesystem_vault_workspace() {
+fn rename_works_on_filesystem_mem_workspace() {
     let tmp = TempDir::new().unwrap();
     init_filesystem(&tmp, "demo");
 
@@ -920,13 +920,13 @@ fn rename_works_on_filesystem_vault_workspace() {
         .stdout(contains("demo--new-name"));
 }
 
-/// `memstead changes --since ""` on a filesystem-vault workspace reads
+/// `memstead changes --since ""` on a filesystem-mem workspace reads
 /// `.memstead/changes.jsonl` and surfaces every entry whose `ts` exceeds
 /// the cursor. After a single `create`, the log holds one row tagged
 /// with the new entity's id — exercises the filesystem dispatch arm
-/// added on top of the vault-repo path.
+/// added on top of the mem-repo path.
 #[test]
-fn changes_works_on_filesystem_vault_workspace() {
+fn changes_works_on_filesystem_mem_workspace() {
     let tmp = TempDir::new().unwrap();
     init_filesystem(&tmp, "demo");
 
@@ -954,7 +954,7 @@ fn changes_works_on_filesystem_vault_workspace() {
         .stdout(contains("demo--logged"));
 }
 
-/// `memstead export --format vault` on a filesystem-vault workspace
+/// `memstead export --format mem` on a filesystem-mem workspace
 /// invokes the `assemble_archive` path. Without a `version` field in
 /// `.memstead/config.json`, the archive shape projection refuses with a
 /// `MissingVersion` error — locks in that the CLI surfaces that
@@ -962,9 +962,9 @@ fn changes_works_on_filesystem_vault_workspace() {
 /// F1: `memstead init` now seeds `version = 0.1.0` so the failure path
 /// only fires when the field is removed (simulating a pre-gate or
 /// externally-imported config). The CLI must surface this via the
-/// typed `VAULT_CONFIG_INCOMPLETE` envelope.
+/// typed `MEM_CONFIG_INCOMPLETE` envelope.
 #[test]
-fn export_vault_on_filesystem_requires_version() {
+fn export_mem_on_filesystem_requires_version() {
     let tmp = TempDir::new().unwrap();
     init_filesystem(&tmp, "demo");
 
@@ -978,16 +978,16 @@ fn export_vault_on_filesystem_requires_version() {
 
     memstead()
         .current_dir(tmp.path())
-        .args(["export", "--format", "vault", "-o", "out.mem"])
+        .args(["export", "--format", "mem", "-o", "out.mem"])
         .assert()
         .failure();
 }
 
-/// `memstead export --format vault` on a filesystem-vault workspace with
+/// `memstead export --format mem` on a filesystem-mem workspace with
 /// a complete config (`name`, `schema`, `version`) packs the workspace
 /// into a portable `.mem` zip and writes it to `--output`.
 #[test]
-fn export_vault_on_filesystem_writes_archive() {
+fn export_mem_on_filesystem_writes_archive() {
     let tmp = TempDir::new().unwrap();
     init_filesystem(&tmp, "demo");
 
@@ -1020,7 +1020,7 @@ fn export_vault_on_filesystem_writes_archive() {
         .args([
             "export",
             "--format",
-            "vault",
+            "mem",
             "-o",
             archive_path.to_str().unwrap(),
         ])
@@ -1029,7 +1029,7 @@ fn export_vault_on_filesystem_writes_archive() {
 
     assert!(
         archive_path.is_file(),
-        "expected {} to exist after export --format vault",
+        "expected {} to exist after export --format mem",
         archive_path.display()
     );
     assert!(
@@ -1038,19 +1038,19 @@ fn export_vault_on_filesystem_writes_archive() {
     );
 }
 
-/// F1: `memstead vault set-version` updates the workspace config's
+/// F1: `memstead mem set-version` updates the workspace config's
 /// `version` field on disk. The change persists across CLI
-/// invocations — a follow-up `memstead export --format vault` uses the
+/// invocations — a follow-up `memstead export --format mem` uses the
 /// bumped version in the default archive filename.
 #[test]
-fn vault_set_version_persists_through_filesystem_backend() {
+fn mem_set_version_persists_through_filesystem_backend() {
     let tmp = TempDir::new().unwrap();
     init_filesystem(&tmp, "demo");
 
     // Engine-default seed is `0.1.0` per F1; bump to 0.2.0.
     memstead()
         .current_dir(tmp.path())
-        .args(["vault", "set-version", "demo", "0.2.0"])
+        .args(["mem", "set-version", "demo", "0.2.0"])
         .assert()
         .success();
 
@@ -1067,19 +1067,19 @@ fn vault_set_version_persists_through_filesystem_backend() {
     // Malformed semver refuses with INVALID_INPUT exit + envelope.
     memstead()
         .current_dir(tmp.path())
-        .args(["vault", "set-version", "demo", "not-a-semver"])
+        .args(["mem", "set-version", "demo", "not-a-semver"])
         .assert()
         .failure();
 
-    // Unknown vault refuses with UNKNOWN_VAULT.
+    // Unknown mem refuses with UNKNOWN_MEM.
     memstead()
         .current_dir(tmp.path())
-        .args(["vault", "set-version", "no-such-vault", "1.0.0"])
+        .args(["mem", "set-version", "no-such-mem", "1.0.0"])
         .assert()
         .failure();
 }
 
-/// `memstead export --format markdown` on a filesystem-vault workspace
+/// `memstead export --format markdown` on a filesystem-mem workspace
 /// rejects with a validation error because entities are already on
 /// disk in canonical form. Locks in the explicit "not yet supported"
 /// path instead of a silent no-op.
@@ -1096,17 +1096,17 @@ fn export_markdown_on_filesystem_rejects() {
         .stderr(contains("not yet supported"));
 }
 
-/// `memstead batch-update` is vault-repo-only because every entry needs an
-/// optimistic-locking `expected_hash` over a vault-repo commit graph.
-/// On a filesystem-vault workspace the CLI surfaces the
-/// "vault-repo-only" message so the operator knows to either move
+/// `memstead batch-update` is mem-repo-only because every entry needs an
+/// optimistic-locking `expected_hash` over a mem-repo commit graph.
+/// On a filesystem-mem workspace the CLI surfaces the
+/// "mem-repo-only" message so the operator knows to either move
 /// flavours or replay the updates one by one through `memstead update`.
 ///
 /// Only meaningful in the pro build — under `--no-default-features`
 /// the `batch-update` subcommand is gated out at the clap layer, so
 /// the bail-on-filesystem behaviour can't be exercised.
 #[test]
-fn batch_update_on_filesystem_surfaces_vault_repo_only() {
+fn batch_update_on_filesystem_surfaces_mem_repo_only() {
     let tmp = TempDir::new().unwrap();
     init_filesystem(&tmp, "demo");
 
@@ -1123,19 +1123,19 @@ fn batch_update_on_filesystem_surfaces_vault_repo_only() {
         .arg(&payload)
         .assert()
         .failure()
-        .stderr(contains("vault-repo-only"));
+        .stderr(contains("mem-repo-only"));
 }
 
-/// `memstead workspace dump` is vault-repo-only because the snapshot token
-/// is the vault's branch HEAD oid in `vault-repo/.git/`. Filesystem
-/// vaults have no git history, so the command surfaces the same
-/// "vault-repo-only" message that the legacy `engine()` fallback
+/// `memstead workspace dump` is mem-repo-only because the snapshot token
+/// is the mem's branch HEAD oid in `mem-repo/.git/`. Filesystem
+/// mems have no git history, so the command surfaces the same
+/// "mem-repo-only" message that the legacy `engine()` fallback
 /// produces.
 ///
 /// Only meaningful in the pro build — see the `batch_update_on_filesystem_*`
 /// twin for the rationale.
 #[test]
-fn workspace_dump_on_filesystem_surfaces_vault_repo_only() {
+fn workspace_dump_on_filesystem_surfaces_mem_repo_only() {
     let tmp = TempDir::new().unwrap();
     init_filesystem(&tmp, "demo");
 
@@ -1144,7 +1144,7 @@ fn workspace_dump_on_filesystem_surfaces_vault_repo_only() {
         .args(["workspace", "dump"])
         .assert()
         .failure()
-        .stderr(contains("vault-repo-only"));
+        .stderr(contains("mem-repo-only"));
 }
 
 /// `memstead update --declare-relations REL:TARGET` lands the

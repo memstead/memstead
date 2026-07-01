@@ -5,10 +5,10 @@
  *   node --test plugins/claude-code/skills/lib/writing-guidance.test.js
  *
  * Pins the resolver's six contract surfaces:
- *   - happy path:       schema default + vault additions concatenate
+ *   - happy path:       schema default + mem additions concatenate
  *   - schema-only:      no additions → schema default verbatim
  *   - empty:            nothing on either side → no `avoid` / `goal` key
- *   - legacy fallback:  vault keeps pre-migration `avoid` → use it, log
+ *   - legacy fallback:  mem keeps pre-migration `avoid` → use it, log
  *   - legacy precedence: legacy + additions both present → legacy wins
  *   - pass-through:     stack/language/granularity flow verbatim
  *
@@ -32,24 +32,24 @@ import {
 describe('resolveWritingGuidance — happy path', () => {
   beforeEach(_resetLegacyWarnCacheForTests);
 
-  it('concatenates schema default + vault avoid_additions with one blank line', () => {
+  it('concatenates schema default + mem avoid_additions with one blank line', () => {
     const schemaPayload = {
       default_writing_guidance: { avoid: 'Schema-default avoid prose.' },
     };
-    const vaultConfig = {
+    const memConfig = {
       name: 'engine',
       writeGuidance: { avoid_additions: 'Engine-specific extra.' },
     };
-    const merged = resolveWritingGuidance(schemaPayload, vaultConfig);
+    const merged = resolveWritingGuidance(schemaPayload, memConfig);
     assert.equal(merged.avoid, 'Schema-default avoid prose.\n\nEngine-specific extra.');
   });
 
-  it('returns schema default verbatim when vault has no additions', () => {
+  it('returns schema default verbatim when mem has no additions', () => {
     const schemaPayload = {
       default_writing_guidance: { avoid: 'Default only.', goal: 'Default goal.' },
     };
-    const vaultConfig = { name: 'engine', writeGuidance: { stack: 'Rust' } };
-    const merged = resolveWritingGuidance(schemaPayload, vaultConfig);
+    const memConfig = { name: 'engine', writeGuidance: { stack: 'Rust' } };
+    const merged = resolveWritingGuidance(schemaPayload, memConfig);
     assert.equal(merged.avoid, 'Default only.');
     assert.equal(merged.goal, 'Default goal.');
     assert.equal(merged.stack, 'Rust');
@@ -64,7 +64,7 @@ describe('resolveWritingGuidance — happy path', () => {
 
   it('passes through non-reserved keys (granularity, stack, language, phase_context)', () => {
     const schemaPayload = { default_writing_guidance: { avoid: 'd' } };
-    const vaultConfig = {
+    const memConfig = {
       name: 'plan',
       writeGuidance: {
         stack: 'Rust',
@@ -74,7 +74,7 @@ describe('resolveWritingGuidance — happy path', () => {
         avoid_additions: 'extra',
       },
     };
-    const merged = resolveWritingGuidance(schemaPayload, vaultConfig);
+    const merged = resolveWritingGuidance(schemaPayload, memConfig);
     assert.equal(merged.stack, 'Rust');
     assert.equal(merged.language, 'English');
     assert.equal(merged.granularity, 'one entity per concept');
@@ -88,11 +88,11 @@ describe('resolveWritingGuidance — happy path', () => {
 describe('resolveWritingGuidance — legacy fallback', () => {
   beforeEach(_resetLegacyWarnCacheForTests);
 
-  it('returns vault.writeGuidance.avoid verbatim when present (pre-migration)', () => {
+  it('returns mem.writeGuidance.avoid verbatim when present (pre-migration)', () => {
     const schemaPayload = {
       default_writing_guidance: { avoid: 'Schema default that should be ignored.' },
     };
-    const vaultConfig = {
+    const memConfig = {
       name: 'unmigrated',
       writeGuidance: { avoid: 'Legacy literal.' },
     };
@@ -101,7 +101,7 @@ describe('resolveWritingGuidance — legacy fallback', () => {
     const warnings = [];
     console.warn = (msg) => warnings.push(msg);
     try {
-      const merged = resolveWritingGuidance(schemaPayload, vaultConfig);
+      const merged = resolveWritingGuidance(schemaPayload, memConfig);
       assert.equal(merged.avoid, 'Legacy literal.');
       assert.equal(warnings.length, 1);
       assert.match(warnings[0], /unmigrated/);
@@ -113,30 +113,30 @@ describe('resolveWritingGuidance — legacy fallback', () => {
 
   it('legacy avoid wins over avoid_additions (half-finished migration)', () => {
     const schemaPayload = { default_writing_guidance: { avoid: 'def' } };
-    const vaultConfig = {
+    const memConfig = {
       name: 'half',
       writeGuidance: { avoid: 'legacy', avoid_additions: 'extra' },
     };
     const original = console.warn;
     console.warn = () => {};
     try {
-      const merged = resolveWritingGuidance(schemaPayload, vaultConfig);
+      const merged = resolveWritingGuidance(schemaPayload, memConfig);
       assert.equal(merged.avoid, 'legacy', 'legacy block must win even when additions are present');
     } finally {
       console.warn = original;
     }
   });
 
-  it('logs the deprecation warning at most once per (vault, field)', () => {
+  it('logs the deprecation warning at most once per (mem, field)', () => {
     const schemaPayload = { default_writing_guidance: {} };
-    const vaultConfig = { name: 'noisy', writeGuidance: { avoid: 'l' } };
+    const memConfig = { name: 'noisy', writeGuidance: { avoid: 'l' } };
     const original = console.warn;
     const warnings = [];
     console.warn = (msg) => warnings.push(msg);
     try {
-      resolveWritingGuidance(schemaPayload, vaultConfig);
-      resolveWritingGuidance(schemaPayload, vaultConfig);
-      resolveWritingGuidance(schemaPayload, vaultConfig);
+      resolveWritingGuidance(schemaPayload, memConfig);
+      resolveWritingGuidance(schemaPayload, memConfig);
+      resolveWritingGuidance(schemaPayload, memConfig);
       assert.equal(warnings.length, 1, 'cache must dedup repeated calls');
     } finally {
       console.warn = original;
@@ -147,12 +147,12 @@ describe('resolveWritingGuidance — legacy fallback', () => {
 describe('resolveWritingGuidance — null inputs', () => {
   beforeEach(_resetLegacyWarnCacheForTests);
 
-  it('null schema payload + null vault config → empty object', () => {
+  it('null schema payload + null mem config → empty object', () => {
     const merged = resolveWritingGuidance(null, null);
     assert.deepEqual(merged, {});
   });
 
-  it('null schema payload + vault additions only → additions become the avoid', () => {
+  it('null schema payload + mem additions only → additions become the avoid', () => {
     const merged = resolveWritingGuidance(null, {
       name: 'v',
       writeGuidance: { avoid_additions: 'just additions' },
@@ -290,11 +290,11 @@ describe('renderResolvedGuidance', () => {
 
 // ── End-to-end against representative schema YAML ───────────────────────
 //
-// Before the engine-owns-vault-repo rule these tests read shipping
-// schema YAML directly from the vault-repo `schemas/...` tree and asserted
+// Before the engine-owns-mem-repo rule these tests read shipping
+// schema YAML directly from the mem-repo `schemas/...` tree and asserted
 // properties of the ON-DISK content. Two concerns conflated: extractor
 // behaviour, and "is the shipping schema's prose correct." The plan
-// migrates the plugin off direct vault-repo file reads — so this block
+// migrates the plugin off direct mem-repo file reads — so this block
 // now exercises the extractor against an inline schema YAML carrying
 // the same shape (block-scalar `avoid` and `goal` under
 // `default_writing_guidance`, preceded and followed by other top-level
@@ -317,7 +317,7 @@ default_writing_guidance:
     Misfiled entities under the wrong type.
 
     - Stuffing prose into the wrong section.
-    - Fabricated cross-vault edges.
+    - Fabricated cross-mem edges.
   goal: |
     The graph is a comprehensive, unambiguous mirror of the codebase.
 types:
@@ -328,7 +328,7 @@ community:
     const got = extractDefaultWritingGuidance(yaml);
     assert.equal(
       got.avoid,
-      'Misfiled entities under the wrong type.\n\n- Stuffing prose into the wrong section.\n- Fabricated cross-vault edges.',
+      'Misfiled entities under the wrong type.\n\n- Stuffing prose into the wrong section.\n- Fabricated cross-mem edges.',
     );
     assert.equal(
       got.goal,

@@ -33,7 +33,7 @@ enum Command {
     /// command on the same commit must produce zero diff.
     GenerateDocs(GenerateDocsArgs),
     /// Compounding-proof eval harness. `--self-test` runs the full loop with
-    /// deterministic stubs (no `claude`, no real vault) and writes a chart-ready
+    /// deterministic stubs (no `claude`, no real mem) and writes a chart-ready
     /// data series — proving the pipeline wires up end-to-end.
     Eval(EvalArgs),
 }
@@ -41,7 +41,7 @@ enum Command {
 #[derive(clap::Args, Debug)]
 struct EvalArgs {
     /// Run the harness loop with stub runner + judge and emit a sample data
-    /// series — proves the scaffold without invoking `claude` or a real vault.
+    /// series — proves the scaffold without invoking `claude` or a real mem.
     #[arg(long)]
     self_test: bool,
     /// Where to write the JSON data series.
@@ -49,17 +49,17 @@ struct EvalArgs {
     output: PathBuf,
 
     // --- real-run options (used when --self-test is absent) ---
-    /// Name of the subject vault under test (recorded in the series).
+    /// Name of the subject mem under test (recorded in the series).
     #[arg(long)]
     subject: Option<String>,
     /// JSON task file: `[{"id","prompt","reference"}, …]`.
     #[arg(long)]
     tasks: Option<PathBuf>,
-    /// A vault state to score, as `label=path-to-mcp-config`. Repeatable; the
+    /// A mem state to score, as `label=path-to-mcp-config`. Repeatable; the
     /// compounding axis needs ≥2. `label=` (empty path) is the no-mount baseline.
     #[arg(long = "state")]
     states: Vec<String>,
-    /// Build the states from git history instead of `--state`: a vault branch
+    /// Build the states from git history instead of `--state`: a mem branch
     /// (e.g. `memstead/engine`) whose commits become the compounding axis. The
     /// oldest picked commit is the near-empty baseline, the newest the current
     /// graph.
@@ -103,27 +103,27 @@ struct EvalArgs {
     /// pre-built `--substrate-c`/`--substrate-b` files — the full write-side run.
     #[arg(long)]
     capture_corpus: Option<PathBuf>,
-    /// MCP config mounting the (empty) destination vault for the schema-forced
-    /// capture. Optional: when omitted, the harness self-provisions a fresh vault at
+    /// MCP config mounting the (empty) destination mem for the schema-forced
+    /// capture. Optional: when omitted, the harness self-provisions a fresh mem at
     /// `--capture-workspace` (a single self-contained capture run). Supply this only
-    /// to point capture at a vault you provisioned yourself.
+    /// to point capture at a mem you provisioned yourself.
     #[arg(long)]
     capture_mcp_config: Option<PathBuf>,
-    /// The destination vault's entity directory, read back as the schema-forced
+    /// The destination mem's entity directory, read back as the schema-forced
     /// substrate after capture. Paired with `--capture-mcp-config`; both omitted →
     /// the harness self-provisions and uses the provisioned workspace.
     #[arg(long)]
     capture_entity_dir: Option<PathBuf>,
-    /// Where to self-provision the empty destination vault when `--capture-mcp-config`
+    /// Where to self-provision the empty destination mem when `--capture-mcp-config`
     /// is not supplied. Cleared and re-initialised each run.
-    #[arg(long, default_value = "/tmp/eval-capture-vault")]
+    #[arg(long, default_value = "/tmp/eval-capture-mem")]
     capture_workspace: PathBuf,
     /// Path to the `memstead` CLI binary, used to `init` the self-provisioned
-    /// capture vault. Required for self-provisioning (when `--capture-mcp-config` is
+    /// capture mem. Required for self-provisioning (when `--capture-mcp-config` is
     /// absent and `--capture-corpus` is set).
     #[arg(long)]
     cli_binary: Option<PathBuf>,
-    /// Schema pin for the self-provisioned capture vault.
+    /// Schema pin for the self-provisioned capture mem.
     #[arg(long, default_value = "default@1.0.0")]
     capture_schema: String,
     /// Contamination threshold for the substrate mode's no-substrate (A) screen:
@@ -161,7 +161,7 @@ fn run_eval(args: EvalArgs) -> Result<()> {
     let subject = args
         .subject
         .clone()
-        .context("a real run needs --subject <vault name> (or pass --self-test)")?;
+        .context("a real run needs --subject <mem name> (or pass --self-test)")?;
     let tasks_path = args
         .tasks
         .clone()
@@ -202,10 +202,10 @@ fn run_eval(args: EvalArgs) -> Result<()> {
     };
     let runner = eval::claude::ClaudeRunner::default();
     let judge = eval::judge::ClaudeJudge::new(args.model.clone());
-    // Induce tool use (so the vault-on arm actually exercises the mount) while
+    // Induce tool use (so the mem-on arm actually exercises the mount) while
     // forbidding source-citation (so the answer carries no tell of which arm
-    // produced it). The vault-off arm has no tools, so it answers from the bare
-    // model; the vault-on arm researches the graph, then answers cleanly.
+    // produced it). The mem-off arm has no tools, so it answers from the bare
+    // model; the mem-on arm researches the graph, then answers cleanly.
     let system_prompt = "Answer the question as precisely and completely as you can. If any tools \
         are available to you, use them to research the answer before responding. In your final \
         answer, do NOT mention your sources, tools, or how you found the information — state the \
@@ -244,7 +244,7 @@ fn obtain_substrates(args: &EvalArgs) -> Result<(eval::substrate::Substrate, eva
     if let Some(corpus_path) = args.capture_corpus.as_ref() {
         let corpus = std::fs::read_to_string(corpus_path)
             .with_context(|| format!("reading capture corpus {}", corpus_path.display()))?;
-        // Self-provision the destination vault unless the operator supplied one, so a
+        // Self-provision the destination mem unless the operator supplied one, so a
         // real capture run is a single self-contained command.
         let (mcp_config, entity_dir) = match args.capture_mcp_config.clone() {
             Some(cfg) => (
@@ -255,14 +255,14 @@ fn obtain_substrates(args: &EvalArgs) -> Result<(eval::substrate::Substrate, eva
             ),
             None => {
                 let cli = args.cli_binary.as_ref().context(
-                    "self-provisioning the capture vault needs --cli-binary <memstead> \
+                    "self-provisioning the capture mem needs --cli-binary <memstead> \
                      (or supply --capture-mcp-config + --capture-entity-dir yourself)",
                 )?;
                 let mcp = args.mcp_binary.as_ref().context(
-                    "self-provisioning the capture vault needs --mcp-binary <memstead-mcp>",
+                    "self-provisioning the capture mem needs --mcp-binary <memstead-mcp>",
                 )?;
-                eprintln!("provisioning empty capture vault at {}…", args.capture_workspace.display());
-                let (cfg, dir) = eval::capture::provision_capture_vault(
+                eprintln!("provisioning empty capture mem at {}…", args.capture_workspace.display());
+                let (cfg, dir) = eval::capture::provision_capture_mem(
                     cli,
                     mcp,
                     &args.capture_workspace,
@@ -475,7 +475,7 @@ fn write_cli_reference(output: &Path) -> Result<()> {
         .with_context(|| format!("creating {}", cli_dir.display()))?;
 
     // One CLI crate, one reference. `xtask` links `memstead-cli` with
-    // `vault-repo` on, so this renders the full `memstead` surface.
+    // `mem-repo` on, so this renders the full `memstead` surface.
     let cli = clap_markdown::help_markdown_command(
         &memstead_cli::cli::Cli::command(),
     );

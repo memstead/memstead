@@ -467,7 +467,7 @@ mod tests {
 
     #[test]
     fn accepts_schema_package_entries() {
-        // The whitelist must admit the two shapes `export_vault` embeds:
+        // The whitelist must admit the two shapes `export_mem` embeds:
         // the manifest at `.memstead/schema/schema.yaml` and per-type YAMLs
         // under `.memstead/schema/types/`. Anything else under
         // `.memstead/schema/` is still an unknown file (asserted separately).

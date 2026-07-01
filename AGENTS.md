@@ -1,11 +1,11 @@
 # Memstead
 
-- Memstead is a schema-agnostic graph engine — each vault keeps a typed model of a chosen subject
+- Memstead is a schema-agnostic graph engine — each mem keeps a typed model of a chosen subject
 - The schema decides the modal flavour — knowledge, plans, inquiry, specs, or any mix
 - Markdown + git as foundation — readable by both humans and LLMs, diffable, no vendor lock-in
 - MCP as the AI agent access layer
 
-For project purpose and design rationale, read [VISION.md](VISION.md). For precise term definitions (vault, schema, workspace, mount, storage backend, …), read [GLOSSARY.md](GLOSSARY.md). To build and test, read [docs/build.md](docs/build.md).
+For project purpose and design rationale, read [VISION.md](VISION.md). For precise term definitions (mem, schema, workspace, mount, storage backend, …), read [GLOSSARY.md](GLOSSARY.md). To build and test, read [docs/build.md](docs/build.md).
 
 ## Structure
 
@@ -59,9 +59,9 @@ Two anti-patterns to avoid when consolidating:
 - **Action-discriminators** — `foo(action: create|update|delete, ...)` where required parameters vary per action value. Models struggle to pick the right params; each action is its own tool waiting to be extracted.
 - **Response-shape polymorphism** — return type depends on which optional params are set. Callers can't decode without branching on request shape. Use additive optional fields on a stable response shape instead.
 
-### `VAULT_RELOADED` drift warning
+### `MEM_RELOADED` drift warning
 
-A tool response carrying `VAULT_RELOADED` means a sibling engine instance committed to the same vault-repo since this engine last looked. The response already carries fresh content — the engine auto-reloaded — but cached `expected_hash` values are stale (a follow-up `memstead_update` will trip `HASH_MISMATCH`). Re-derive any conclusions that depended on the affected vault before continuing.
+A tool response carrying `MEM_RELOADED` means a sibling engine instance committed to the same mem-repo since this engine last looked. The response already carries fresh content — the engine auto-reloaded — but cached `expected_hash` values are stale (a follow-up `memstead_update` will trip `HASH_MISMATCH`). Re-derive any conclusions that depended on the affected mem before continuing.
 
 ## Code
 
@@ -76,9 +76,9 @@ A tool response carrying `VAULT_RELOADED` means a sibling engine instance commit
 
 - English only — code, commits, issues
 - Schema changes in `crates/memstead-schema/` affect downstream crates — run the full workspace test surface before considering them done
-- Workspace tests use `cargo nextest run --workspace --features vault-repo` (and `cargo nextest run --workspace --no-default-features` for basis). `cargo test` works but is ~15× slower on warm runs; the canonical invocations live in `run-tests.sh`, the nextest profile in `.config/nextest.toml`, the macOS first-run gotcha in `docs/macos-dev-setup.md`. Use `cargo nextest run` for verifications and ad-hoc test runs alike
-- The engine has two flavours: **basis** (default features, folder backend only, no `gix`) and **pro** (`--features vault-repo`, adds the git-branch backend). Local dev needs pro; helper scripts wire the flag. CI runs both
+- Workspace tests use `cargo nextest run --workspace --features mem-repo` (and `cargo nextest run --workspace --no-default-features` for basis). `cargo test` works but is ~15× slower on warm runs; the canonical invocations live in `run-tests.sh`, the nextest profile in `.config/nextest.toml`, the macOS first-run gotcha in `docs/macos-dev-setup.md`. Use `cargo nextest run` for verifications and ad-hoc test runs alike
+- The engine has two flavours: **basis** (default features, folder backend only, no `gix`) and **pro** (`--features mem-repo`, adds the git-branch backend). Local dev needs pro; helper scripts wire the flag. CI runs both
 - Never create a git branch unless the user explicitly asked for one in advance. Work and commit on the current branch
-- **The engine owns vault-repo state.** External consumers (plugin code, scripts, in-process embedders — anything outside the engine crates) MUST NOT mutate vault-repo directly: no `git` commands against the vault-repo, no raw `.md` file writes, no `vault-repo/.git/` introspection. Direct mutations skip schema validation, write rules, link-graph integrity, search-index updates, optimistic locking, and commit provenance — the graph corrupts silently. Mutations route through the engine: MCP (`memstead-mcp`) is the documented agent contract; UniFFI is for in-process embedders; CLI is for human and script use. Reads may use any surface — read paths don't violate engine invariants
+- **The engine owns mem-repo state.** External consumers (plugin code, scripts, in-process embedders — anything outside the engine crates) MUST NOT mutate mem-repo directly: no `git` commands against the mem-repo, no raw `.md` file writes, no `mem-repo/.git/` introspection. Direct mutations skip schema validation, write rules, link-graph integrity, search-index updates, optimistic locking, and commit provenance — the graph corrupts silently. Mutations route through the engine: MCP (`memstead-mcp`) is the documented agent contract; UniFFI is for in-process embedders; CLI is for human and script use. Reads may use any surface — read paths don't violate engine invariants
 - Every operation reachable through the engine SHOULD be reachable via both UniFFI and CLI. Asymmetry requires explicit justification — typically a composition-layer-specific operation
 - Breaking changes to MCP tool parameter shapes propagate in the same session through `plugins/` and `memstead-cli`

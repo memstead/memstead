@@ -9,7 +9,7 @@
 //!   lightly-structured markdown notes. No enforced schema; structure emerges.
 //! - **Schema-forced (C)** — the agent maps that same free extraction into the
 //!   engine's schema as a second step: typed entities, required fields, typed
-//!   relationships. The substrate bytes are then read back from the vault.
+//!   relationships. The substrate bytes are then read back from the mem.
 //!
 //! Three properties keep the capture from rigging the downstream comparison, each
 //! enforced here:
@@ -171,7 +171,7 @@ pub fn build_capture_prompt(config: &CaptureConfig) -> String {
     )
 }
 
-/// Read the schema-forced substrate back out of a vault's entity directory.
+/// Read the schema-forced substrate back out of a mem's entity directory.
 ///
 /// After a schema-forced capture the bytes that go into context are the entity
 /// markdown the engine wrote — read (never mutated) directly off disk, which is a
@@ -185,7 +185,7 @@ pub fn read_back_substrate(entity_dir: &std::path::Path, label: &str) -> Result<
     if files.is_empty() {
         bail!(
             "schema-forced capture produced no entity markdown under {} — the capture did not \
-             write to the vault",
+             write to the mem",
             entity_dir.display()
         );
     }
@@ -223,7 +223,7 @@ fn collect_markdown(dir: &std::path::Path, out: &mut Vec<PathBuf>) -> std::io::R
 ///
 /// Pure and unit-tested. The free-form arm runs with **no** tools (it writes its
 /// notes as the answer text); the schema-forced arm mounts the engine MCP and is
-/// allowed only `mcp__memstead__*`, so it records typed entities into the vault.
+/// allowed only `mcp__memstead__*`, so it records typed entities into the mem.
 /// Everything before the kind-specific tail — model, permission mode, the prompt —
 /// is identical, so the storage form is the lone variable here too.
 pub fn build_capture_args(config: &CaptureConfig, mcp_config: Option<&std::path::Path>) -> Vec<String> {
@@ -263,12 +263,12 @@ pub trait CaptureRunner {
 }
 
 /// Build the `memstead init` argument vector that bootstraps a fresh, empty
-/// folder-backend vault at `workspace` — the destination the schema-forced capture
+/// folder-backend mem at `workspace` — the destination the schema-forced capture
 /// writes into.
 ///
-/// Pure and unit-tested. A folder-backend vault stores each entity as a `.md` file
+/// Pure and unit-tested. A folder-backend mem stores each entity as a `.md` file
 /// in the workspace root, so after capture the substrate is read straight back off
-/// disk with no export step — which is why the destination is a folder vault, not a
+/// disk with no export step — which is why the destination is a folder mem, not a
 /// git-branch one.
 pub fn build_init_args(workspace: &std::path::Path, name: &str, schema: &str) -> Vec<String> {
     vec![
@@ -282,16 +282,16 @@ pub fn build_init_args(workspace: &std::path::Path, name: &str, schema: &str) ->
     ]
 }
 
-/// Provision a fresh empty destination vault for schema-forced capture and return
+/// Provision a fresh empty destination mem for schema-forced capture and return
 /// its `(mcp_config, entity_dir)` — the two paths [`ClaudeCapture`] needs.
 ///
 /// This is what turns a real capture run into a single self-contained command: the
 /// harness clears `workspace`, shells `memstead init` (the sanctioned CLI route —
-/// the engine owns vault state, so provisioning goes through it, never a raw file
-/// write), and writes an mcp-config pointing `memstead-mcp` at the fresh vault. The
+/// the engine owns mem state, so provisioning goes through it, never a raw file
+/// write), and writes an mcp-config pointing `memstead-mcp` at the fresh mem. The
 /// entity dir is the workspace root, where the folder backend lands each `.md`.
 /// Clearing first keeps re-runs reproducible.
-pub fn provision_capture_vault(
+pub fn provision_capture_mem(
     cli_binary: &std::path::Path,
     mcp_binary: &std::path::Path,
     workspace: &std::path::Path,
@@ -307,16 +307,16 @@ pub fn provision_capture_vault(
     let status = Command::new(cli_binary)
         .args(build_init_args(workspace, name, schema))
         .status()
-        .with_context(|| format!("spawning `{}` to init capture vault", cli_binary.display()))?;
+        .with_context(|| format!("spawning `{}` to init capture mem", cli_binary.display()))?;
     if !status.success() {
         bail!(
-            "`memstead init` failed provisioning the capture vault at {} (exit {})",
+            "`memstead init` failed provisioning the capture mem at {} (exit {})",
             workspace.display(),
             status
         );
     }
-    // The mcp-config launches the server with `cd <vault> && exec <mcp-binary>`, so
-    // a relative binary path would resolve against the vault dir and fail to start.
+    // The mcp-config launches the server with `cd <mem> && exec <mcp-binary>`, so
+    // a relative binary path would resolve against the mem dir and fail to start.
     // Canonicalise it to an absolute path so a relative `--mcp-binary` works.
     let mcp_abs = std::fs::canonicalize(mcp_binary)
         .with_context(|| format!("resolving mcp binary {}", mcp_binary.display()))?;
@@ -352,9 +352,9 @@ pub fn capture_pair<R: CaptureRunner>(
 /// entities, then reads the written markdown back from `schema_entity_dir`.
 pub struct ClaudeCapture {
     pub runner: ClaudeRunner,
-    /// MCP config mounting the (empty) destination vault for schema-forced capture.
+    /// MCP config mounting the (empty) destination mem for schema-forced capture.
     pub schema_mcp_config: Option<PathBuf>,
-    /// The vault's entity directory, read back as the schema-forced substrate.
+    /// The mem's entity directory, read back as the schema-forced substrate.
     pub schema_entity_dir: Option<PathBuf>,
 }
 
@@ -365,7 +365,7 @@ impl CaptureRunner for ClaudeCapture {
         })?;
         let mcp_config = if config.kind == CaptureKind::SchemaForced {
             let cfg = self.schema_mcp_config.as_ref().context(
-                "schema-forced capture needs an mcp-config mounting the destination vault",
+                "schema-forced capture needs an mcp-config mounting the destination mem",
             )?;
             Some(cfg.as_path())
         } else {
@@ -392,7 +392,7 @@ impl CaptureRunner for ClaudeCapture {
             }
             CaptureKind::SchemaForced => {
                 let dir = self.schema_entity_dir.as_ref().context(
-                    "schema-forced capture needs the vault entity dir to read the substrate back",
+                    "schema-forced capture needs the mem entity dir to read the substrate back",
                 )?;
                 read_back_substrate(dir, config.kind.label())
             }
@@ -492,7 +492,7 @@ mod tests {
         std::fs::write(dir.path().join("b.md"), "second entity").unwrap();
         std::fs::write(dir.path().join("a.md"), "first entity").unwrap();
         std::fs::write(dir.path().join("sub/c.md"), "nested entity").unwrap();
-        // A dotdir is ignored (it would be vault-repo .git, never substrate).
+        // A dotdir is ignored (it would be mem-repo .git, never substrate).
         std::fs::create_dir_all(dir.path().join(".git")).unwrap();
         std::fs::write(dir.path().join(".git/HEAD"), "ref: x").unwrap();
         // A non-markdown file is ignored.
@@ -535,7 +535,7 @@ mod tests {
     }
 
     #[test]
-    fn init_args_bootstrap_a_named_folder_vault() {
+    fn init_args_bootstrap_a_named_folder_mem() {
         let args = build_init_args(std::path::Path::new("/tmp/cap-ws"), "corpus", "default@1.0.0");
         assert_eq!(args[0], "init");
         assert!(args.iter().any(|a| a == "/tmp/cap-ws"));

@@ -1,14 +1,14 @@
 {
   "format": "memstead-plugin/v0",
-  "vaults": [
-    "project_vaults/engine",
-    "project_vaults/plugin",
-    "exec_vaults/example-plan"
+  "mems": [
+    "project_mems/engine",
+    "project_mems/plugin",
+    "exec_mems/example-plan"
   ],
   "mutations": {
     "require_notes": true
   },
-  "vault_management": {
+  "mem_management": {
     "create": [
       { "pattern": "exec-*", "schemas": ["default@1.0.0"] },
       { "pattern": "planning/plan-*", "schemas": ["default@1.0.0"] }

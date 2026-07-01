@@ -1,5 +1,5 @@
 //! `eval --self-test` — run the whole harness loop end-to-end with deterministic
-//! stubs (no `claude`, no real vault) and emit a chart-ready data series.
+//! stubs (no `claude`, no real mem) and emit a chart-ready data series.
 //!
 //! This proves the pipeline wires up — guards, blinding, aggregation, series
 //! emission — and gives an operator a sample artifact to point a chart renderer
@@ -11,11 +11,11 @@ use std::path::Path;
 
 use anyhow::Result;
 
-use super::{AgentAnswer, ArmConfig, Condition, Judge, Runner, TaskSpec, VaultState, run_series};
+use super::{AgentAnswer, ArmConfig, Condition, Judge, Runner, TaskSpec, MemState, run_series};
 
-/// A stub agent: the vault-on arm reaches a quality that climbs with how rich the
-/// named state is; the vault-off arm holds a fixed baseline. Mirrors the real
-/// runner's contract — vault-on carries a `memstead_*` tool call, vault-off does
+/// A stub agent: the mem-on arm reaches a quality that climbs with how rich the
+/// named state is; the mem-off arm holds a fixed baseline. Mirrors the real
+/// runner's contract — mem-on carries a `memstead_*` tool call, mem-off does
 /// not — so the mount-evidence validator exercises the same path it will in anger.
 struct StubRunner;
 
@@ -23,11 +23,11 @@ impl Runner for StubRunner {
     fn run(&self, arm: &ArmConfig) -> Result<AgentAnswer> {
         let baseline = 0.45;
         match arm.condition {
-            Condition::VaultOff => Ok(AgentAnswer {
+            Condition::MemOff => Ok(AgentAnswer {
                 text: format!("q={baseline:.3}"),
                 tool_calls: vec![],
             }),
-            Condition::VaultOn => {
+            Condition::MemOn => {
                 let q = match arm.mcp_config.as_ref().map(|p| p.to_string_lossy().to_string()) {
                     None => baseline, // empty/absent state — no lift
                     Some(label) if label.contains("mature") => 0.88,
@@ -35,8 +35,8 @@ impl Runner for StubRunner {
                     Some(_) => baseline + 0.05,
                 };
                 Ok(AgentAnswer {
-                    // A deliberate tell — the blinding scrub must remove "the vault".
-                    text: format!("q={q:.3} per the vault"),
+                    // A deliberate tell — the blinding scrub must remove "the mem".
+                    text: format!("q={q:.3} per the mem"),
                     tool_calls: vec!["mcp__memstead__memstead_search".to_string()],
                 })
             }
@@ -70,16 +70,16 @@ pub fn run(output: &Path) -> Result<()> {
         TaskSpec {
             id: "why-chosen".into(),
             prompt: "Why git-branch backend over a folder backend?".into(),
-            reference: "Per-vault branches give isolated history and optimistic locking.".into(),
+            reference: "Per-mem branches give isolated history and optimistic locking.".into(),
         },
     ];
     let states = vec![
-        VaultState { label: "empty".into(), mcp_config: None },
-        VaultState {
+        MemState { label: "empty".into(), mcp_config: None },
+        MemState {
             label: "growing".into(),
             mcp_config: Some("/tmp/eval/growing.json".into()),
         },
-        VaultState {
+        MemState {
             label: "mature".into(),
             mcp_config: Some("/tmp/eval/mature.json".into()),
         },
@@ -96,9 +96,9 @@ pub fn run(output: &Path) -> Result<()> {
     )?;
     series.write(output)?;
     eprintln!(
-        "eval self-test: wrote {} states for subject vault {:?} to {}",
+        "eval self-test: wrote {} states for subject mem {:?} to {}",
         series.points.len(),
-        series.subject_vault,
+        series.subject_mem,
         output.display()
     );
     for p in &series.points {

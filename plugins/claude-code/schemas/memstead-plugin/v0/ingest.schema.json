@@ -2,12 +2,12 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://memstead.io/schemas/memstead-plugin/v0/ingest",
   "title": "memstead-plugin/v0 ingest",
-  "description": "An ingest config wires a projection to an execution mode and trigger. Multiple ingests may target the same projection (e.g. one for manual discovery, another for continuous refinement). Each file lives at `.memstead/ingests/<name>.json`. The `projection` reference uses the form `<vault>/<name>` (no `.json` suffix), matching the on-disk path under `.memstead/projections/`.",
+  "description": "An ingest config wires a projection to an execution mode and trigger. Multiple ingests may target the same projection (e.g. one for manual discovery, another for continuous refinement). Each file lives at `.memstead/ingests/<name>.json`. The `projection` reference uses the form `<mem>/<name>` (no `.json` suffix), matching the on-disk path under `.memstead/projections/`.",
   "type": "object",
   "required": ["projection", "mode", "trigger"],
   "properties": {
     "projection": {
-      "description": "Projection reference in `<vault>/<name>` form (no `.json` suffix).",
+      "description": "Projection reference in `<mem>/<name>` form (no `.json` suffix).",
       "type": "string",
       "pattern": "^[^/\\s]+/[^/\\s]+$"
     },
@@ -38,7 +38,7 @@
       "type": "object",
       "properties": {
         "archive_source": {
-          "description": "When `true`, the inject prompt instructs the agent to archive the source vault after every destination is processed (used for one-shot lens ingests).",
+          "description": "When `true`, the inject prompt instructs the agent to archive the source mem after every destination is processed (used for one-shot lens ingests).",
           "type": "boolean"
         }
       },

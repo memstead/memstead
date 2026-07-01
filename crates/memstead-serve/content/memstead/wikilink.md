@@ -9,7 +9,7 @@ tags: memstead, relationships
 
 ## Definition
 
-A wikilink is a markdown reference from one [[entity]] to another, written as the target's id inside double square brackets — bare for a link within the same [[vault]], or prefixed with a target vault name for one that crosses a vault boundary.
+A wikilink is a markdown reference from one [[entity]] to another, written as the target's id inside double square brackets — bare for a link within the same [[mem]], or prefixed with a target mem name for one that crosses a mem boundary.
 
 ## Explanation
 
@@ -17,9 +17,9 @@ Wikilinks are how the [[graph]]'s edges are authored: a link in an entity's body
 
 ## Boundaries
 
-- A within-vault wikilink resolves inside the source [[vault]]; a cross-vault wikilink resolves through the [[workspace]] and needs a permission to cross.
+- A within-mem wikilink resolves inside the source [[mem]]; a cross-mem wikilink resolves through the [[workspace]] and needs a permission to cross.
 - A wikilink is entity content, not [[workspace]] state — the edge is part of the document, not a separate record.
 
 ## Significance
 
-Wikilinks are what make a [[vault]] a graph rather than a flat list, letting agents navigate by relationship instead of by full-text search alone.
+Wikilinks are what make a [[mem]] a graph rather than a flat list, letting agents navigate by relationship instead of by full-text search alone.

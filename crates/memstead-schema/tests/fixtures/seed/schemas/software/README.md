@@ -1,6 +1,6 @@
-# `software` — schema for software-project vaults
+# `software` — schema for software-project mems
 
-Workspace-level schema for every vault that pins `"schema": "software"` in its `.memstead/config.json`. Nine types organized around four questions a software-project graph must answer:
+Workspace-level schema for every mem that pins `"schema": "software"` in its `.memstead/config.json`. Nine types organized around four questions a software-project graph must answer:
 
 | Pillar | Types |
 |---|---|
@@ -14,9 +14,9 @@ The graph's value comes from type diversity. A graph dominated by any one type �
 
 ## Location
 
-This schema lives at the workspace level and is shared by every vault that pins it. The workspace's `.memstead/workspace.toml` declares `schemas_dir = "schemas"`, and every `schemas/<name>/` directory is discovered at load time. No per-vault copying is required — a vault's `.memstead/config.json` just references the schema by name.
+This schema lives at the workspace level and is shared by every mem that pins it. The workspace's `.memstead/workspace.toml` declares `schemas_dir = "schemas"`, and every `schemas/<name>/` directory is discovered at load time. No per-mem copying is required — a mem's `.memstead/config.json` just references the schema by name.
 
-Local usage is **unversioned**: a vault simply writes `"schema": "software"` and the engine resolves against this directory. The `version:` field in `schema.yaml` is metadata preserved for publish/archive workflows; it is not a pin.
+Local usage is **unversioned**: a mem simply writes `"schema": "software"` and the engine resolves against this directory. The `version:` field in `schema.yaml` is metadata preserved for publish/archive workflows; it is not a pin.
 
 ## Types
 
@@ -70,7 +70,7 @@ Common default-schema edges in this schema: `PART_OF`, `DEPENDS_ON`, `IMPLEMENTS
 
 ## Evolving the schema
 
-Because local use is unversioned, shape changes are in-place edits with a working-tree review. Vaults that pin the schema see changes immediately on the next engine reload — plan the rollout carefully and prefer additive changes. When a breaking shape change is needed, coordinate across every vault that pins the schema.
+Because local use is unversioned, shape changes are in-place edits with a working-tree review. Mems that pin the schema see changes immediately on the next engine reload — plan the rollout carefully and prefer additive changes. When a breaking shape change is needed, coordinate across every mem that pins the schema.
 
 For publishable or portable schema variants, author a copy under `recipes/software/schema/` where the `version` field matters and the pin becomes `software@<version>`.
 

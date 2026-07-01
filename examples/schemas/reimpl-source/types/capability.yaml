@@ -15,7 +15,7 @@ when_to_use: |
   a method call.
 boundaries:
   - Not a structural unit — do not model classes, tables, or modules as capabilities.
-  - Not a design intent for the new system — target entities live in the Target vault.
+  - Not a design intent for the new system — target entities live in the Target mem.
   - Not an unsupported claim — every capability needs evidence or it is a guess.
 system_message: |
   Capabilities are behavioral and testable. The acceptance test: "I can
@@ -100,4 +100,4 @@ write_rules:
   - "Inputs and outputs are structured — tables or lists, not prose. Prose invites untestable capabilities."
   - "Edge cases should cite evidence. A listed edge case without backing evidence is a guess and should be marked as such in notes."
   - "Prefer breadth over depth. Nest via PART_OF only when the children are genuinely sub-behaviors, not implementation details."
-  - "Relationships: PART_OF for hierarchy, REFERENCES for wiki-links. Inbound: SUPPORTS from evidence (required); REALIZES_CAPABILITY and DIVERGES_FROM from paired Target vaults (cross-vault)."
+  - "Relationships: PART_OF for hierarchy, REFERENCES for wiki-links. Inbound: SUPPORTS from evidence (required); REALIZES_CAPABILITY and DIVERGES_FROM from paired Target mems (cross-mem)."

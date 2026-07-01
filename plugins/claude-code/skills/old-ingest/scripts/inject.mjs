@@ -4,7 +4,7 @@
  *
  * Iterates `<workspace>/<ingests_dir>/*.json`. Each ingest file carries its
  * mode, trigger, batch_size, and a reference to a projection at
- * `<projections_dir>/<vault>/<name>.json`. The workspace-loader (Session 1
+ * `<projections_dir>/<mem>/<name>.json`. The workspace-loader (Session 1
  * of phase 3) produces a normalised ingest list where each entry has its
  * projection, sources (with `scope_ref` inlined), and destinations
  * pre-resolved. This script picks the next ingest (round-robin), assembles
@@ -246,15 +246,15 @@ const MEDIUMS = JSON.parse(readFileSync(new URL('../mediums.json', import.meta.u
  * Scope files have shape `{ type: "codebase" | ..., scope: { tree | domains } }`.
  * Surface each source's medium type via `source.scope.type`. Destinations are
  * always graph type in the externalised layout — there is no medium field on
- * them; the ingest writes into a vault graph.
+ * them; the ingest writes into a mem graph.
  *
  * Sources without an inlined scope (lens sources that read from another
- * vault's graph — `{vault: "plan", role: "planning graph"}`) have medium
+ * mem's graph — `{mem: "plan", role: "planning graph"}`) have medium
  * type "graph" by convention.
  */
 function sourceMediumType(src) {
   if (src?.scope?.type) return src.scope.type;
-  if (src?.vault) return 'graph';
+  if (src?.mem) return 'graph';
   return 'codebase';
 }
 
@@ -346,12 +346,12 @@ function renderIngest(ingest) {
 
   if (Array.isArray(ingest.sources) && ingest.sources.length) {
     out.push('### Sources', '');
-    const referenceVaults = [];
+    const referenceMems = [];
     for (const s of ingest.sources) {
       const label = sourceMediumType(s);
       const roleBit = s.role ? ` (${s.role})` : '';
-      const vaultBit = s.vault ? ` — vault: ${s.vault}` : '';
-      out.push(`- **${label}**${roleBit}${vaultBit}`);
+      const memBit = s.mem ? ` — mem: ${s.mem}` : '';
+      out.push(`- **${label}**${roleBit}${memBit}`);
       const tree = s.scope?.scope?.tree;
       if (tree) {
         const allows = tree.filter(r => r.mode === 'allow').map(r => r.path);
@@ -361,28 +361,28 @@ function renderIngest(ingest) {
       }
       const domains = s.scope?.scope?.domains;
       if (domains) out.push(`  - Domains: ${domains.join(', ')}`);
-      if (s.role === 'reference' && typeof s.vault === 'string' && s.vault) {
-        referenceVaults.push(s.vault);
+      if (s.role === 'reference' && typeof s.mem === 'string' && s.mem) {
+        referenceMems.push(s.mem);
       }
     }
     out.push('');
-    // Cross-vault edge guidance — surfaces when a projection lists a
-    // reference vault. Cross-vault links are workspace-policy-gated
-    // (`[cross_vault_links]` in `.memstead.toml`) and only succeed when
+    // Cross-mem edge guidance — surfaces when a projection lists a
+    // reference mem. Cross-mem links are workspace-policy-gated
+    // (`[cross_mem_links]` in `.memstead.toml`) and only succeed when
     // the target entity exists. The first line defines what `(reference)`
-    // means; the second names the actual reference vaults and their
+    // means; the second names the actual reference mems and their
     // failure modes. Both are gated on the presence of a reference source —
     // projections without one need neither.
-    if (referenceVaults.length) {
+    if (referenceMems.length) {
       out.push(
-        `Sources tagged \`(reference)\` are read-only context for cross-vault edges — search them but never write into them. Only \`(primary)\` sources are ingested into the destination.`,
+        `Sources tagged \`(reference)\` are read-only context for cross-mem edges — search them but never write into them. Only \`(primary)\` sources are ingested into the destination.`,
         ''
       );
-      const vaultList = referenceVaults
-        .map(v => `\`memstead_search vault=${v}\``)
+      const memList = referenceMems
+        .map(v => `\`memstead_search mem=${v}\``)
         .join(', ');
       out.push(
-        `**Cross-vault references:** consult ${vaultList} before authoring cross-vault edges. Targets must exist in the reference vault before linking — a wiki-link or relationship to a missing target either auto-stubs (silent) or fails authorization (\`CROSS_VAULT_RELATION\`).`,
+        `**Cross-mem references:** consult ${memList} before authoring cross-mem edges. Targets must exist in the reference mem before linking — a wiki-link or relationship to a missing target either auto-stubs (silent) or fails authorization (\`CROSS_MEM_RELATION\`).`,
         ''
       );
     }
@@ -392,7 +392,7 @@ function renderIngest(ingest) {
     out.push('### Destinations', '');
     for (const d of ingest.destinations) {
       const roleBit = d.role ? ` — ${d.role}` : '';
-      out.push(`- **${d.vault}**${roleBit}`);
+      out.push(`- **${d.mem}**${roleBit}`);
     }
     out.push('');
   }
@@ -413,34 +413,34 @@ function renderIngest(ingest) {
 // ── Write guidance + destination metadata (sourced from the engine dump) ────
 
 /**
- * Pick the ingest's primary destination vault name. Falls back to the
- * projection's owning vault for source-only refinement cases. Returns
+ * Pick the ingest's primary destination mem name. Falls back to the
+ * projection's owning mem for source-only refinement cases. Returns
  * `null` when no name resolves.
  *
- * The engine dump is the source of truth for "what vaults exist"; this
- * helper does not validate against `vaultMeta` because the
- * workspace-loader already rejected unknown vault names at projection
+ * The engine dump is the source of truth for "what mems exist"; this
+ * helper does not validate against `memMeta` because the
+ * workspace-loader already rejected unknown mem names at projection
  * resolution time.
  */
-function primaryVaultName(ingest) {
-  const first = ingest.destinations?.[0]?.vault;
+function primaryMemName(ingest) {
+  const first = ingest.destinations?.[0]?.mem;
   if (typeof first === 'string') return first;
-  if (typeof ingest.projection_vault === 'string') return ingest.projection_vault;
+  if (typeof ingest.projection_mem === 'string') return ingest.projection_mem;
   return null;
 }
 
 /**
- * Resolve the merged writing-guidance object for one vault.
+ * Resolve the merged writing-guidance object for one mem.
  *
- * Merges the vault's `writeGuidance` block from the engine dump with
+ * Merges the mem's `writeGuidance` block from the engine dump with
  * the schema's `default_writing_guidance` (also from the dump) via the
  * shared resolver at `lib/writing-guidance.mjs`. Returns `null` when
  * neither side declares anything (the renderer upstream short-circuits
  * on `null`).
  */
-function getGuidance(vaultName, vaultMeta, schemas) {
-  if (!vaultName) return null;
-  const meta = vaultMeta?.[vaultName];
+function getGuidance(memName, memMeta, schemas) {
+  if (!memName) return null;
+  const meta = memMeta?.[memName];
   if (!meta) return null;
   const config = { writeGuidance: meta.writeGuidance || {} };
   let schemaPayload = null;
@@ -455,20 +455,20 @@ function getGuidance(vaultName, vaultMeta, schemas) {
 }
 
 /**
- * Map each destination to `{vault, role, schema, description}` using
- * the engine dump's per-vault metadata. Used by the one-shot lens
+ * Map each destination to `{mem, role, schema, description}` using
+ * the engine dump's per-mem metadata. Used by the one-shot lens
  * enrichment so the agent sees per-destination metadata without
  * round-trips to memstead_health. Returns one entry per destination,
  * preserving order.
  */
-function mapDestinationMeta(destinations, vaultMeta) {
+function mapDestinationMeta(destinations, memMeta) {
   const out = [];
   for (const dst of (destinations || [])) {
-    const vault = dst?.vault;
-    if (!vault) { out.push({ ...dst }); continue; }
-    const meta = vaultMeta?.[vault] || {};
+    const mem = dst?.mem;
+    if (!mem) { out.push({ ...dst }); continue; }
+    const meta = memMeta?.[mem] || {};
     out.push({
-      vault,
+      mem,
       role: dst.role ?? null,
       schema: typeof meta.schema === 'string' ? meta.schema : null,
       description: typeof meta.description === 'string' ? meta.description : null,
@@ -484,7 +484,7 @@ function mapDestinationMeta(destinations, vaultMeta) {
  * report at end-of-run. Plugin assembles the prompt; agent owns the work.
  *
  * Sections:
- *   - Destination set     — per-destination vault, schema, role/purpose
+ *   - Destination set     — per-destination mem, schema, role/purpose
  *   - Routing rule        — verbatim from projection.rules.routing
  *   - Idempotency         — re-runs use memstead_update, never duplicate
  *   - Report schema       — per-destination success/failure/skipped contract
@@ -496,15 +496,15 @@ function assembleLensEnrichment(ingest, destinationsMeta) {
   // ── Destination set ────────────────────────────────────────────────────
   lines.push('## Destination set\n');
   lines.push('You write to each destination independently. Each row below describes one destination — the agent decides per-entity which destinations to target (see Routing rule).\n');
-  lines.push('| Vault | Schema | Purpose |');
+  lines.push('| Mem | Schema | Purpose |');
   lines.push('|-------|--------|---------|');
   for (const d of destinationsMeta) {
-    const vault = d.vault || '(unknown)';
+    const mem = d.mem || '(unknown)';
     const schema = d.schema || '(no schema declared)';
     const purpose = d.role || d.description || '(no purpose declared)';
     // Escape pipe characters in cell values to keep the table parseable.
     const cell = s => String(s).replaceAll('|', '\\|').replaceAll('\n', ' ');
-    lines.push(`| ${cell(vault)} | ${cell(schema)} | ${cell(purpose)} |`);
+    lines.push(`| ${cell(mem)} | ${cell(schema)} | ${cell(purpose)} |`);
   }
   lines.push('');
 
@@ -521,7 +521,7 @@ function assembleLensEnrichment(ingest, destinationsMeta) {
   // ── Idempotency guidance ───────────────────────────────────────────────
   lines.push('## Idempotency\n');
   lines.push('A lens may be re-run. Never duplicate an entity that already exists in a destination:\n');
-  lines.push('- Before writing, call `memstead_search` (and `memstead_entity` for the candidate) to check whether the target entity already exists in the destination vault.');
+  lines.push('- Before writing, call `memstead_search` (and `memstead_entity` for the candidate) to check whether the target entity already exists in the destination mem.');
   lines.push('- If it exists and the lifted content is meaningfully different, route the change through `memstead_update` against the existing entity.');
   lines.push('- If it exists and the lifted content matches what is already there, skip the write — record it as `skipped` with reason `already-up-to-date`.');
   lines.push('- Only call `memstead_create` when no entity for that concept exists in the destination yet.\n');
@@ -532,7 +532,7 @@ function assembleLensEnrichment(ingest, destinationsMeta) {
   lines.push('```');
   lines.push('### Report: <ingest-name>');
   lines.push('');
-  lines.push('Destination: <vault>');
+  lines.push('Destination: <mem>');
   lines.push('  created: <count>   # entities created via memstead_create');
   lines.push('  updated: <count>   # entities updated via memstead_update');
   lines.push('  skipped: <count>   # writes skipped (idempotent or out-of-scope)');
@@ -548,7 +548,7 @@ function assembleLensEnrichment(ingest, destinationsMeta) {
   const archive = ingest?.raw?.post_actions?.archive_source ?? ingest?.post_actions?.archive_source;
   if (archive) {
     lines.push('## Archive after run\n');
-    lines.push('After every destination has been processed and the report above has been emitted, archive the source planning vault. The ingest declares `post_actions.archive_source` — once the lens has lifted what belongs to each destination, the source vault is moved to its archive location and is no longer a writable target.\n');
+    lines.push('After every destination has been processed and the report above has been emitted, archive the source planning mem. The ingest declares `post_actions.archive_source` — once the lens has lifted what belongs to each destination, the source mem is moved to its archive location and is no longer a writable target.\n');
   }
 
   return lines.join('\n');
@@ -667,7 +667,7 @@ function buildEntityOverview(_ingest) {
   return '**IMPORTANT: Start by calling `memstead_search` (omit `query` for a full structural listing) to see all entities. For each source file in your batch, call `memstead_entity` to read the full content of mapped entities. You cannot evaluate coverage without reading both the source file AND the entity.**\n';
 }
 
-function assembleScoutPrompt(ingest, batch, wgBlock, vaultName) {
+function assembleScoutPrompt(ingest, batch, wgBlock, memName) {
   const terms = resolveMediumTerms(ingest);
   const lines = [];
 
@@ -687,7 +687,7 @@ function assembleScoutPrompt(ingest, batch, wgBlock, vaultName) {
   lines.push(wgBlock);
   lines.push(renderIngest(ingest));
 
-  if (vaultName) lines.push(`**Vault:** ${vaultName}\n`);
+  if (memName) lines.push(`**Mem:** ${memName}\n`);
 
   lines.push('## Save your findings\n');
   lines.push('When done, write your findings to this file via Bash:\n');
@@ -701,7 +701,7 @@ function assembleScoutPrompt(ingest, batch, wgBlock, vaultName) {
   return lines.join('\n');
 }
 
-function assembleWriterPrompt(ingest, findings, wgBlock, vaultName) {
+function assembleWriterPrompt(ingest, findings, wgBlock, memName) {
   const terms = resolveMediumTerms(ingest);
   const lines = [];
 
@@ -718,7 +718,7 @@ function assembleWriterPrompt(ingest, findings, wgBlock, vaultName) {
   lines.push(wgBlock);
   lines.push(renderIngest(ingest));
 
-  if (vaultName) lines.push(`**Vault:** ${vaultName}\n`);
+  if (memName) lines.push(`**Mem:** ${memName}\n`);
 
   lines.push('End with: `[writer | ' + ingest.name + '] {what you fixed}`\n');
 
@@ -730,15 +730,15 @@ function assembleWriterPrompt(ingest, findings, wgBlock, vaultName) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
- * Look up the engine-supplied opaque snapshot token for a vault. The
- * token changes iff vault content has changed since the last dump; the
+ * Look up the engine-supplied opaque snapshot token for a mem. The
+ * token changes iff mem content has changed since the last dump; the
  * plugin's only legal operation on it is byte-equality. Returns the
- * empty string when the vault has no token (unknown vault, or backend
+ * empty string when the mem has no token (unknown mem, or backend
  * couldn't compute one — treated as "no snapshot recorded yet").
  */
-function vaultSnapshotToken(vaultName, vaultMeta) {
-  if (!vaultName) return '';
-  const meta = vaultMeta?.[vaultName];
+function memSnapshotToken(memName, memMeta) {
+  if (!memName) return '';
+  const meta = memMeta?.[memName];
   if (!meta || typeof meta.snapshotToken !== 'string') return '';
   return meta.snapshotToken;
 }
@@ -778,7 +778,7 @@ function hasRemainingBatches(ingestName) {
  * For one-shot mode: backoff does not apply — one-shot ingests run once and
  * are removed from the eligible list via `markOneShotRan`.
  */
-function shouldSkip(ingest, vaultName, vaultMeta) {
+function shouldSkip(ingest, memName, memMeta) {
   if (ingest.mode === 'one-shot') return false;
 
   if (ingest.mode === 'refinement' && hasRemainingBatches(ingest.name)) {
@@ -788,7 +788,7 @@ function shouldSkip(ingest, vaultName, vaultMeta) {
 
   const backoff = loadBackoff();
   const entry = backoff[ingest.name] || { skip_remaining: 0, skip_level: 0, snapshot: '' };
-  const current = vaultSnapshotToken(vaultName, vaultMeta);
+  const current = memSnapshotToken(memName, memMeta);
 
   if (entry.snapshot && current !== entry.snapshot) {
     entry.skip_remaining = 0;
@@ -859,8 +859,8 @@ try {
     ingest = null;
     for (let i = 0; i < names.length; i++) {
       const candidate = eligible[(startIdx + i) % names.length];
-      const vaultName = primaryVaultName(candidate);
-      if (!shouldSkip(candidate, vaultName, ws.vaultMeta)) {
+      const memName = primaryMemName(candidate);
+      if (!shouldSkip(candidate, memName, ws.memMeta)) {
         ingest = candidate;
         break;
       }
@@ -882,11 +882,11 @@ try {
     ingest = match;
   }
 
-  const vaultName = primaryVaultName(ingest);
-  const wg = getGuidance(vaultName, ws.vaultMeta, ws.schemas);
+  const memName = primaryMemName(ingest);
+  const wg = getGuidance(memName, ws.memMeta, ws.schemas);
   const wgBlock = renderGuidance(wg);
   const mode = ingest.mode || 'discovery';
-  dbg(`ingest=${ingest.name} mode=${mode} vault=${vaultName || '(none)'}`);
+  dbg(`ingest=${ingest.name} mode=${mode} mem=${memName || '(none)'}`);
 
   // ── REFINEMENT MODE ─────────────────────────────────────────────────────
 
@@ -900,7 +900,7 @@ try {
       if (!DRY_RUN) {
         try { unlinkSync(findingsPath(ingest.name)); } catch {}
       }
-      process.stdout.write(assembleWriterPrompt(ingest, findings, wgBlock, vaultName));
+      process.stdout.write(assembleWriterPrompt(ingest, findings, wgBlock, memName));
     } else {
       const batch = nextBatch(ingest.name, ingest);
       if (!batch || !batch.files.length) {
@@ -908,7 +908,7 @@ try {
         process.exit(0);
       }
       dbg(`scout batch: ${batch.files.length} files, rotation ${batch.rotation}, batch ${batch.batchIndex}/${batch.totalBatches}`);
-      process.stdout.write(assembleScoutPrompt(ingest, batch, wgBlock, vaultName));
+      process.stdout.write(assembleScoutPrompt(ingest, batch, wgBlock, memName));
     }
     process.exit(0);
   }
@@ -927,7 +927,7 @@ try {
     const header = allMode
       ? `## Running: ${ingest.name} (${ingests.findIndex(i => i.name === ingest.name) + 1}/${ingests.length})\n\n`
       : '';
-    const vaultLine = vaultName ? `**Vault:** ${vaultName}\n\n` : '';
+    const memLine = memName ? `**Mem:** ${memName}\n\n` : '';
     const framing = taskFraming(ingest);
     const dstMedium = destinationMediumType(ingest.destinations?.[0]);
     const mediumPrompt = loadMediumPrompt(dstMedium);
@@ -937,7 +937,7 @@ try {
     // schema, optional archive. The agent iterates destinations and runs
     // memstead_create / memstead_update per destination via Claude Code's tool-use
     // loop; this prompt block carries the framing it needs.
-    const destinationsMeta = mapDestinationMeta(ingest.destinations, ws.vaultMeta);
+    const destinationsMeta = mapDestinationMeta(ingest.destinations, ws.memMeta);
     const lensEnrichment = assembleLensEnrichment(ingest, destinationsMeta);
 
     const promptParts = [
@@ -949,7 +949,7 @@ try {
       wgBlock,
       renderIngest(ingest),
       lensEnrichment,
-      vaultLine,
+      memLine,
     ].filter(Boolean);
     process.stdout.write(promptParts.join(''));
     process.exit(0);
@@ -963,13 +963,13 @@ try {
   const header = allMode
     ? `## Running: ${ingest.name} (${ingests.findIndex(i => i.name === ingest.name) + 1}/${ingests.length})\n\n`
     : '';
-  const vaultLine = vaultName ? `**Vault:** ${vaultName}\n\n` : '';
+  const memLine = memName ? `**Mem:** ${memName}\n\n` : '';
   const framing = taskFraming(ingest);
   const dstMedium = destinationMediumType(ingest.destinations?.[0]);
   const mediumPrompt = loadMediumPrompt(dstMedium);
   const skillTemplate = loadTemplate('skill-template.md', terms);
 
-  const promptParts = [header, framing, skillTemplate, mediumPrompt, wgBlock, renderIngest(ingest), vaultLine].filter(Boolean);
+  const promptParts = [header, framing, skillTemplate, mediumPrompt, wgBlock, renderIngest(ingest), memLine].filter(Boolean);
   const promptLen = promptParts.reduce((n, s) => n + s.length, 0);
   dbg(`prompt assembled: ~${Math.round(promptLen / 4)} tokens (${promptLen} chars)`);
   process.stdout.write(promptParts.join(''));

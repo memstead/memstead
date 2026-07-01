@@ -3,11 +3,11 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # project@0.1.0 — knowledge-graph schema for a running project as a whole.
 #
-# A project vault models the strategic, operational, and competitive view of
+# A project mem models the strategic, operational, and competitive view of
 # a project — what it is, what it has, what it does, what's around it, what
-# it holds to. Pairs with one or more code-side vaults (typically under
-# software@0.1.0) that the project vault references via cross-vault links;
-# the code vaults stay autonomous and unaware of the project layer.
+# it holds to. Pairs with one or more code-side mems (typically under
+# software@0.1.0) that the project mem references via cross-mem links;
+# the code mems stay autonomous and unaware of the project layer.
 #
 # Ten types in five clusters:
 #   Identity      → vision, positioning, brand
@@ -36,8 +36,8 @@ when_to_use: |
   Use to model a project as a queryable whole when the strategic,
   operational, and competitive view should be reachable through the
   graph at the same fidelity as the code view. Pair with one or more
-  code-side vaults (typically under software@0.1.0) that this vault
-  references via cross-vault links. Prefer the software schema for
+  code-side mems (typically under software@0.1.0) that this mem
+  references via cross-mem links. Prefer the software schema for
   code truth (specs, contracts, decisions about implementation) and
   the planning schema for phase-scoped deliberation; this schema
   carries durable project posture, not code state and not
@@ -66,14 +66,14 @@ system_message: |
     competitor --THREATENS--> pillar       (external pressure)
     market_signal --THREATENS--> bet       (the wave breaking)
     market_signal --VALIDATES--> bet       (the wave landing)
-    pillar --REFERENCES--> <code-vault>    (auto-emitted from wiki-links)
+    pillar --REFERENCES--> <code-mem>    (auto-emitted from wiki-links)
     positioning --SUPERSEDES--> positioning (versioned identity)
     principle --GOVERNS--> bet             (rules that limit choices)
     milestone --PART_OF--> milestone       (project hierarchy)
 
   An evidence entry without STRENGTHENS or WEAKENS is a free-floating
   note. A bet without MOTIVATED_BY is unsourced posture. A pillar
-  without a REFERENCES edge into a code-vault entity is a name without
+  without a REFERENCES edge into a code-mem entity is a name without
   realization. Relationships are UPPER_SNAKE_CASE, strict mode —
   unknown edges are rejected.
 
@@ -102,12 +102,12 @@ relationships:
     # ── Structural / reference ──────────────────────────────────────────
     - name: PART_OF
       description: Hierarchical containment — the source is structurally part of the target and meaningless without it.
-      when_to_use: Hierarchy between project elements. pillar → pillar (subsystem under subsystem), milestone → milestone (sub-checkpoint under a larger one). Pure graph edge — files stay flat at the vault root.
+      when_to_use: Hierarchy between project elements. pillar → pillar (subsystem under subsystem), milestone → milestone (sub-checkpoint under a larger one). Pure graph edge — files stay flat at the mem root.
       default_weight: 3.0
       acyclic: true
     - name: REFERENCES
       description: Soft reference without ownership or dependency.
-      when_to_use: Emitted automatically from inline wiki-links — do not author manually. The cross-vault wiki-links from this vault into code-side vaults (e.g. `[[engine:engine-workspace]]`) become REFERENCES edges that anchor pillars and evidence in the code view.
+      when_to_use: Emitted automatically from inline wiki-links — do not author manually. The cross-mem wiki-links from this mem into code-side mems (e.g. `[[engine:engine-workspace]]`) become REFERENCES edges that anchor pillars and evidence in the code view.
       default_weight: 0.5
     - name: SUPERSEDES
       description: The source replaces the target — the target is no longer current.
@@ -177,18 +177,18 @@ relationships:
       description: Fallback weight for any relationship not otherwise specified. Required by the engine.
       default_weight: 1.0
 
-# Cross-vault relationship vocabulary. Source-owned: this schema declares which
-# rel-types its entities may emit into a differently-schema'd target vault.
-# REFERENCES is re-declared here because the cross-vault path does not consult
-# the intra-vault `relationships.definitions` above. `target_types` is left
-# shape-free so a future pillar/evidence anchor into any code-vault type is
+# Cross-mem relationship vocabulary. Source-owned: this schema declares which
+# rel-types its entities may emit into a differently-schema'd target mem.
+# REFERENCES is re-declared here because the cross-mem path does not consult
+# the intra-mem `relationships.definitions` above. `target_types` is left
+# shape-free so a future pillar/evidence anchor into any code-mem type is
 # admitted rather than silently dropped.
-cross_vault_relationships:
+cross_mem_relationships:
   - to_schema: software
     definitions:
       - name: REFERENCES
-        description: Soft reference from a project entity into a code-side (software) entity — the cross-vault anchor that ties pillars and evidence to their realization in code.
-        when_to_use: Auto-emitted from inline wiki-links into a software-schema vault (engine/macos/plugin/registry). Do not author manually. Anchors a pillar (or evidence) to the code-vault entity that realizes it.
+        description: Soft reference from a project entity into a code-side (software) entity — the cross-mem anchor that ties pillars and evidence to their realization in code.
+        when_to_use: Auto-emitted from inline wiki-links into a software-schema mem (engine/macos/plugin/registry). Do not author manually. Anchors a pillar (or evidence) to the code-mem entity that realizes it.
         default_weight: 0.5
         source_types: [pillar, evidence]
 
@@ -204,7 +204,7 @@ default_writing_guidance:
   goal: |
     The project graph models the strategic, operational, and competitive
     view of one running project as a queryable whole. A reader of the
-    project vault alone — without reading the code vaults, without
+    project mem alone — without reading the code mems, without
     reading the strategy folder — should understand where the project
     stands and why. Not by reading every entity, but by reading the
     high-degree ones (the active `vision`, the current `positioning`,
@@ -222,7 +222,7 @@ default_writing_guidance:
 
     - A `bet` without MOTIVATED_BY. A bet without a motivating vision
       or external trigger is unsourced posture.
-    - A `pillar` without a REFERENCES edge into a code-vault entity.
+    - A `pillar` without a REFERENCES edge into a code-mem entity.
       Pillars exist to bridge the project view to the code view; one
       that names no realization is a name without realization.
     - An `evidence` entry without STRENGTHENS or WEAKENS. Evidence

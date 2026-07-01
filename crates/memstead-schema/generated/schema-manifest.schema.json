@@ -13,15 +13,15 @@
     "community": {
       "$ref": "#/$defs/CommunityConfig"
     },
-    "cross_vault_relationships": {
-      "description": "Outbound cross-vault relationship vocabulary, per target schema\ndomain. Each entry names a target schema (bare name — never a\nversion; eligibility is name-based) and lists rel-types that may\ncross the boundary in that direction. Absent or `[]` means the\nschema declares no outbound cross-vault edges. Source-ownership\nonly — third-party bridge schemas are not modelled; each\ndirection is owned by exactly one schema.",
+    "cross_mem_relationships": {
+      "description": "Outbound cross-mem relationship vocabulary, per target schema\ndomain. Each entry names a target schema (bare name — never a\nversion; eligibility is name-based) and lists rel-types that may\ncross the boundary in that direction. Absent or `[]` means the\nschema declares no outbound cross-mem edges. Source-ownership\nonly — third-party bridge schemas are not modelled; each\ndirection is owned by exactly one schema.",
       "type": "array",
       "items": {
-        "$ref": "#/$defs/CrossVaultRelationshipEntry"
+        "$ref": "#/$defs/CrossMemRelationshipEntry"
       }
     },
     "default_writing_guidance": {
-      "description": "Schema-generic writing guidance — `avoid` and `goal` prose that\napplies to every vault pinned to this schema. The plugin layer\nconcatenates these with per-vault `writeGuidance.avoid_additions`\n/ `goal_additions` (an opaque pass-through on the engine side —\nsee `VaultConfig::write_guidance`'s contract).",
+      "description": "Schema-generic writing guidance — `avoid` and `goal` prose that\napplies to every mem pinned to this schema. The plugin layer\nconcatenates these with per-mem `writeGuidance.avoid_additions`\n/ `goal_additions` (an opaque pass-through on the engine side —\nsee `MemConfig::write_guidance`'s contract).",
       "anyOf": [
         {
           "$ref": "#/$defs/DefaultWritingGuidance"
@@ -102,8 +102,8 @@
         "seed"
       ]
     },
-    "CrossVaultRelationshipEntry": {
-      "description": "One outbound cross-vault declaration — a target schema domain\n(named, never versioned) and the rel-types admitted in that\ndirection.\n\n`target_types` strings within each definition live in the target\nschema's namespace by construction — the source schema's loader\naccepts them as opaque since the target schema may not be present\nat source-schema load time.",
+    "CrossMemRelationshipEntry": {
+      "description": "One outbound cross-mem declaration — a target schema domain\n(named, never versioned) and the rel-types admitted in that\ndirection.\n\n`target_types` strings within each definition live in the target\nschema's namespace by construction — the source schema's loader\naccepts them as opaque since the target schema may not be present\nat source-schema load time.",
       "type": "object",
       "properties": {
         "definitions": {
@@ -113,7 +113,7 @@
           }
         },
         "to_schema": {
-          "description": "Bare name of the target schema — the domain identity. A version\nsuffix (`software@1.0.0`) or range (`software@^1.0`) is rejected\nat schema load: cross-vault eligibility is name-based, so the\ndeclaration is satisfied by a target vault pinning *any* version\nof the named schema.",
+          "description": "Bare name of the target schema — the domain identity. A version\nsuffix (`software@1.0.0`) or range (`software@^1.0`) is rejected\nat schema load: cross-mem eligibility is name-based, so the\ndeclaration is satisfied by a target mem pinning *any* version\nof the named schema.",
           "type": "string"
         }
       },
@@ -124,7 +124,7 @@
       ]
     },
     "DefaultWritingGuidance": {
-      "description": "Schema-level writing-guidance defaults. Both fields are optional so a\nschema can ship `avoid` without a `goal` (or vice versa). The engine\nsurfaces them via `build_schema_payload` at the top level of the\nschema-payload JSON; resolution (concatenation with vault additions)\nlives in the plugin layer.",
+      "description": "Schema-level writing-guidance defaults. Both fields are optional so a\nschema can ship `avoid` without a `goal` (or vice versa). The engine\nsurfaces them via `build_schema_payload` at the top level of the\nschema-payload JSON; resolution (concatenation with mem additions)\nlives in the plugin layer.",
       "type": "object",
       "properties": {
         "avoid": {

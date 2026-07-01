@@ -44,7 +44,7 @@ pub fn exists(domain: &str) -> Result<bool> {
 
 /// Generate a fresh keypair for `domain` and persist the private key. Refuses
 /// to overwrite an existing key unless `force` (rotation is deliberate — a lost
-/// old key cannot sign, so clobbering silently would strand published vaults).
+/// old key cannot sign, so clobbering silently would strand published mems).
 /// Returns the new key's `ed25519:<base64>` public-key string.
 pub fn generate(domain: &str, force: bool) -> Result<String> {
     if exists(domain)? && !force {

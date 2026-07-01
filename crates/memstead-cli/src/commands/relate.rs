@@ -98,8 +98,8 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     let remove = args.remove;
 
     let mut engine = match ctx.cli_engine()? {
-        #[cfg(feature = "vault-repo")]
-        CliEngine::VaultRepo(engine) => engine,
+        #[cfg(feature = "mem-repo")]
+        CliEngine::MemRepo(engine) => engine,
         CliEngine::Filesystem(engine) => engine,
     };
     // Pass the `memstead-cli@<version>` client identity so the relate
@@ -121,7 +121,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             args.note.as_deref(),
         )
         .map_err(CliError::from_engine_op)?;
-    let vault_changed = engine.take_vault_changed_notices();
+    let mem_changed = engine.take_mem_changed_notices();
     if ctx.json {
         // Always surface `orphan_stubs_removed` so agents and scripts branch
         // uniformly — empty array on add paths and no-op removes,
@@ -139,7 +139,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 .map(|i| i.to_string())
                 .collect::<Vec<_>>(),
         });
-        super::merge_vault_changed_json(&mut body, &vault_changed);
+        super::merge_mem_changed_json(&mut body, &mem_changed);
         print_json(&body)?;
     } else {
         let verb = if remove { "Removed" } else { "Added" };
@@ -163,9 +163,9 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 .collect();
             format!("\n\n- orphan stubs GC'd: {}", ids.join(", "))
         };
-        let vault_changed_block = super::render_vault_changed_block(&vault_changed);
+        let mem_changed_block = super::render_mem_changed_block(&mem_changed);
         print_markdown(&format!(
-            "# {verb} `{}` `{}` → `{}`{gc_block}{warnings_block}{vault_changed_block}",
+            "# {verb} `{}` `{}` → `{}`{gc_block}{warnings_block}{mem_changed_block}",
             outcome.from, outcome.rel_type, outcome.to,
         ));
     }

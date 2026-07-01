@@ -1,11 +1,11 @@
 /**
  * writing-guidance.mjs — plugin-side resolver for schema-default +
- * per-vault writing-guidance prose.
+ * per-mem writing-guidance prose.
  *
  * Two responsibilities:
  *
- * 1. `resolveWritingGuidance(schemaPayload, vaultConfig)` — merge the
- *    schema's `default_writing_guidance.{avoid, goal}` with the vault's
+ * 1. `resolveWritingGuidance(schemaPayload, memConfig)` — merge the
+ *    schema's `default_writing_guidance.{avoid, goal}` with the mem's
  *    `writeGuidance.{avoid_additions, goal_additions}` to produce one
  *    merged `{ avoid, goal, ...passthroughKeys }` object that downstream
  *    consumers (interview/SKILL.md framing, ingest's `renderGuidance`)
@@ -20,11 +20,11 @@
  *    `<workspace>/<schemas_dir>/<schema_name>/schema.yaml` directly —
  *    no MCP round-trip in that path). The MCP-driven consumers
  *    (chat-agent prompts) get the schema payload from
- *    `memstead_overview` / `memstead_vault_create` and pass that object
+ *    `memstead_overview` / `memstead_mem_create` and pass that object
  *    straight to `resolveWritingGuidance`.
  *
  * Legacy fallback (D8 deprecation path):
- *   If the vault still carries a literal `writeGuidance.avoid` (or
+ *   If the mem still carries a literal `writeGuidance.avoid` (or
  *   `goal`) — pre-migration / external workspace — the resolver
  *   returns that verbatim and emits a one-time `console.warn` per
  *   process. Schema defaults are ignored on the legacy path so the
@@ -38,22 +38,22 @@
 const _legacyWarnSeen = new Set();
 
 /**
- * Merge schema-side defaults with per-vault additions / legacy fallback.
+ * Merge schema-side defaults with per-mem additions / legacy fallback.
  *
  * @param {object|null|undefined} schemaPayload — `memstead_overview`-style
  *   schema document (or the `extractDefaultWritingGuidance` result spread
  *   under `default_writing_guidance`). Pass `null` when the schema isn't
  *   resolvable; the legacy fallback path then shoulders the load.
- * @param {object|null|undefined} vaultConfig — full
- *   `<vault>/.memstead/config.json` object. The resolver consults
- *   `vaultConfig.writeGuidance` keys.
+ * @param {object|null|undefined} memConfig — full
+ *   `<mem>/.memstead/config.json` object. The resolver consults
+ *   `memConfig.writeGuidance` keys.
  * @returns {object} merged `{ avoid, goal, ...passthroughKeys }`. Keys
  *   absent everywhere are simply not on the returned object so callers
  *   that iterate `Object.entries` don't render empty bullets.
  */
-export function resolveWritingGuidance(schemaPayload, vaultConfig) {
-  const wg = (vaultConfig && typeof vaultConfig.writeGuidance === 'object')
-    ? vaultConfig.writeGuidance
+export function resolveWritingGuidance(schemaPayload, memConfig) {
+  const wg = (memConfig && typeof memConfig.writeGuidance === 'object')
+    ? memConfig.writeGuidance
     : {};
   const def = (schemaPayload && typeof schemaPayload.default_writing_guidance === 'object')
     ? schemaPayload.default_writing_guidance
@@ -68,8 +68,8 @@ export function resolveWritingGuidance(schemaPayload, vaultConfig) {
     out[k] = v;
   }
 
-  out.avoid = mergeBlock('avoid', wg, def, vaultConfig);
-  out.goal = mergeBlock('goal', wg, def, vaultConfig);
+  out.avoid = mergeBlock('avoid', wg, def, memConfig);
+  out.goal = mergeBlock('goal', wg, def, memConfig);
 
   // Drop empty strings so consumers don't render a header for nothing.
   if (!out.avoid) delete out.avoid;
@@ -78,32 +78,32 @@ export function resolveWritingGuidance(schemaPayload, vaultConfig) {
   return out;
 }
 
-function mergeBlock(field, wg, def, vaultConfig) {
+function mergeBlock(field, wg, def, memConfig) {
   const additionsKey = `${field}_additions`;
   const additions = typeof wg[additionsKey] === 'string' ? wg[additionsKey] : '';
   const legacy = typeof wg[field] === 'string' ? wg[field] : '';
   const schemaDefault = typeof def[field] === 'string' ? def[field] : '';
 
-  // Legacy path: vault still carries a pre-migration literal `avoid` /
+  // Legacy path: mem still carries a pre-migration literal `avoid` /
   // `goal`. Preserve it verbatim, ignore the schema default, log once
-  // per process per vault per field. The migration sweep removes these
+  // per process per mem per field. The migration sweep removes these
   // legacy keys; this branch only fires for unmigrated workspaces or
   // external (post-publish) consumers that haven't caught up.
   if (legacy) {
-    const vaultName = vaultConfig?.name ?? '<unknown>';
-    const key = `${vaultName}::${field}`;
+    const memName = memConfig?.name ?? '<unknown>';
+    const key = `${memName}::${field}`;
     if (!_legacyWarnSeen.has(key)) {
       _legacyWarnSeen.add(key);
       // eslint-disable-next-line no-console
       console.warn(
-        `[memstead writing-guidance] vault '${vaultName}' carries legacy ` +
+        `[memstead writing-guidance] mem '${memName}' carries legacy ` +
         `writeGuidance.${field}; schema's default_writing_guidance.${field} ` +
-        `is ignored for this vault. Migrate by moving the prose into the ` +
-        `schema YAML and removing the per-vault key (or rename to ` +
-        `${field}_additions for vault-specific extra prose).`,
+        `is ignored for this mem. Migrate by moving the prose into the ` +
+        `schema YAML and removing the per-mem key (or rename to ` +
+        `${field}_additions for mem-specific extra prose).`,
       );
     }
-    // If the vault also carries `avoid_additions` alongside the legacy
+    // If the mem also carries `avoid_additions` alongside the legacy
     // `avoid`, prefer the legacy block per the plan's documented
     // precedence — a half-finished migration must not silently lose
     // either side.
@@ -129,7 +129,7 @@ function mergeBlock(field, wg, def, vaultConfig) {
  * indicators, anchors, references) returns the empty object. The
  * primary consumer is inject.mjs which reads schema YAML off disk; if
  * a future schema author uses an exotic YAML feature the extractor
- * doesn't recognise, the resolver falls through to vault-side
+ * doesn't recognise, the resolver falls through to mem-side
  * additions and the operator should report it.
  */
 export function extractDefaultWritingGuidance(yamlText) {

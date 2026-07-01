@@ -2,11 +2,11 @@
 //! integration tests.
 //!
 //! `Engine::init_with_settings` fail-fasts when the workspace lacks
-//! `<workspace_root>/vault-repo/.git/`. Tests that need the engine to
-//! boot use [`init_real_vault_repo`] to lay down a real `vault-repo-git`
+//! `<workspace_root>/mem-repo/.git/`. Tests that need the engine to
+//! boot use [`init_real_mem_repo`] to lay down a real `mem-repo-git`
 //! carrying `main` (operator docs) plus `__MEMSTEAD` (with
-//! `vaults/<name>/config.json` blobs) plus an empty-tree initial commit
-//! on each requested vault branch.
+//! `mems/<name>/config.json` blobs) plus an empty-tree initial commit
+//! on each requested mem branch.
 //!
 //! # Visibility
 //!
@@ -18,7 +18,7 @@
 //! # Negative-case coverage
 //!
 //! The fail-fast itself is exercised by
-//! `tests::engine_init_against_workspace_without_vault_repo_fails` in
+//! `tests::engine_init_against_workspace_without_mem_repo_fails` in
 //! `memstead-git-branch/src/lib.rs`. That test deliberately avoids calling this
 //! helper so the missing-dir error path stays covered.
 
@@ -31,15 +31,15 @@ use memstead_base::{
 };
 
 /// Write `.memstead/workspace.toml` + `.memstead/state/mounts.json` carrying
-/// one git-branch mount per `(vault, branch)` pair so the new-layout
+/// one git-branch mount per `(mem, branch)` pair so the new-layout
 /// loader (`Engine::from_workspace_root` / `engine_from_workspace_root`)
-/// discovers the workspace. `branch` defaults to `vault` when omitted.
-/// `vaults` carries `(vault_name, branch, schema_pin_str)` per mount.
+/// discovers the workspace. `branch` defaults to `mem` when omitted.
+/// `mems` carries `(mem_name, branch, schema_pin_str)` per mount.
 /// Reading the schema pin off the just-seeded gitdir would work too,
 /// but callers already know it — passing it through keeps the helper
 /// independent of the read path (and side-steps `read_config_at_gitdir`'s
 /// dependency on the gitdir already being committed).
-fn seed_new_layout(workspace_root: &Path, gitdir: &Path, vaults: &[(&str, &str, &str)]) {
+fn seed_new_layout(workspace_root: &Path, gitdir: &Path, mems: &[(&str, &str, &str)]) {
     let memstead = workspace_root.join(".memstead");
     std::fs::create_dir_all(&memstead).unwrap();
     let toml_path = memstead.join("workspace.toml");
@@ -47,18 +47,18 @@ fn seed_new_layout(workspace_root: &Path, gitdir: &Path, vaults: &[(&str, &str, 
         // schemas_dir is a top-level key — emit it BEFORE the
         // [persistence_adapter] section so TOML's greedy section
         // parsing doesn't fold it into that table.
-        let mut head = String::from("format = \"memstead-git-branch-1\"\n");
+        let mut head = String::from("format = \"memstead-git-branch-2\"\n");
         head.push_str("\n[persistence_adapter]\nname = \"file-two-layer\"\n");
         std::fs::write(&toml_path, head).unwrap();
     }
-    let mounts: Vec<Mount> = vaults
+    let mounts: Vec<Mount> = mems
         .iter()
-        .map(|(vault, branch, schema)| {
+        .map(|(mem, branch, schema)| {
             let pin: memstead_schema::SchemaRef = schema.parse().unwrap_or_else(|e| {
                 panic!("test seed: invalid schema pin {schema:?}: {e}")
             });
             Mount {
-                vault: vault.to_string(),
+                mem: mem.to_string(),
                 schema: Some(pin),
                 storage: MountStorage::GitBranch {
                     gitdir: gitdir.to_path_buf(),
@@ -80,19 +80,19 @@ fn seed_new_layout(workspace_root: &Path, gitdir: &Path, vaults: &[(&str, &str, 
         .unwrap();
 }
 
-/// Initialise `<workspace_root>/vault-repo/.git/` as a real bare repo
+/// Initialise `<workspace_root>/mem-repo/.git/` as a real bare repo
 /// carrying `main` (operator-facing docs, empty in tests) plus
-/// `__SYSTEM` (with `<name>/config.json` blobs for every vault) plus an
-/// empty-tree initial commit on each per-vault branch
+/// `__SYSTEM` (with `<name>/config.json` blobs for every mem) plus an
+/// empty-tree initial commit on each per-mem branch
 /// (`refs/heads/<name>`).
 ///
-/// `vaults` is `&[(name, schema_name)]`. Each entry produces:
+/// `mems` is `&[(name, schema_name)]`. Each entry produces:
 /// - one `<name>/config.json` blob on `__SYSTEM` of the form
 ///   `{"schema": "<schema>"}`, and
 /// - one branch `refs/heads/<name>` with an empty-tree initial commit.
 ///
-/// Mirrors the K-shape registry layout so `vault_repo_config::read_config`
-/// and `vault_init_from_branch` both work against the result.
+/// Mirrors the K-shape registry layout so `mem_repo_config::read_config`
+/// and `mem_init_from_branch` both work against the result.
 ///
 /// Idempotent: running against an existing bare repo with the same
 /// shape is a no-op (the gix repo open succeeds, the per-branch ref
@@ -101,16 +101,16 @@ fn seed_new_layout(workspace_root: &Path, gitdir: &Path, vaults: &[(&str, &str, 
 ///
 /// Panics on any gix or fs failure, mirroring the `.unwrap()` pattern
 /// the rest of the integration tests use.
-pub fn init_real_vault_repo(workspace_root: &Path, vaults: &[(&str, &str)]) -> PathBuf {
+pub fn init_real_mem_repo(workspace_root: &Path, mems: &[(&str, &str)]) -> PathBuf {
     // Process-wide lock so two parallel test threads racing on the
     // same workspace_root (e.g. multiple `PathBuf::from(".")` callers)
     // do not interleave between the `gix::open` probe and the
     // subsequent `gix::init_bare`.
     static INIT_LOCK: Mutex<()> = Mutex::new(());
 
-    let gitdir = workspace_root.join("vault-repo").join(".git");
+    let gitdir = workspace_root.join("mem-repo").join(".git");
     std::fs::create_dir_all(&gitdir)
-        .unwrap_or_else(|e| panic!("failed to create test vault-repo at {}: {e}", gitdir.display()));
+        .unwrap_or_else(|e| panic!("failed to create test mem-repo at {}: {e}", gitdir.display()));
 
     let _guard = INIT_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
@@ -118,7 +118,7 @@ pub fn init_real_vault_repo(workspace_root: &Path, vaults: &[(&str, &str)]) -> P
         Ok(r) => r,
         Err(_) => gix::init_bare(&gitdir).unwrap_or_else(|e| {
             panic!(
-                "failed to initialise bare vault-repo-git at {}: {e}",
+                "failed to initialise bare mem-repo-git at {}: {e}",
                 gitdir.display()
             )
         }),
@@ -154,9 +154,9 @@ pub fn init_real_vault_repo(workspace_root: &Path, vaults: &[(&str, &str)]) -> P
         .unwrap();
     }
 
-    // Seed `__SYSTEM` with one `<name>/config.json` blob per vault.
+    // Seed `__SYSTEM` with one `<name>/config.json` blob per mem.
     let mut system_editor = repo.empty_tree().edit().unwrap();
-    for (name, schema) in vaults {
+    for (name, schema) in mems {
         let config = format!(r#"{{"schema": "{schema}"}}"#);
         let blob = repo.write_blob(config.as_bytes()).unwrap().detach();
         system_editor
@@ -181,7 +181,7 @@ pub fn init_real_vault_repo(workspace_root: &Path, vaults: &[(&str, &str)]) -> P
     .unwrap();
 
     let empty_tree = repo.empty_tree().id().detach();
-    for (name, _) in vaults {
+    for (name, _) in mems {
         let mut buf = gix::date::parse::TimeBuf::default();
         let actor_ref = actor.to_ref(&mut buf);
         let ref_name = format!("refs/heads/{name}");
@@ -202,7 +202,7 @@ pub fn init_real_vault_repo(workspace_root: &Path, vaults: &[(&str, &str)]) -> P
     seed_new_layout(
         workspace_root,
         &gitdir,
-        &vaults
+        &mems
             .iter()
             .map(|(n, schema)| (*n, *n, *schema))
             .collect::<Vec<_>>(),
@@ -211,30 +211,30 @@ pub fn init_real_vault_repo(workspace_root: &Path, vaults: &[(&str, &str)]) -> P
     workspace_root.to_path_buf()
 }
 
-/// Auto-detect every disk-shaped vault directory directly under
+/// Auto-detect every disk-shaped mem directory directly under
 /// `workspace_root` (any subdir carrying `.memstead/config.json`), then
-/// seed `<workspace_root>/vault-repo/.git/` from those dirs. Returns a
+/// seed `<workspace_root>/mem-repo/.git/` from those dirs. Returns a
 /// default `WorkspaceSettings`.
 pub fn auto_seeded_settings(workspace_root: &Path) -> memstead_base::WorkspaceSettings {
     auto_seed_with_settings(workspace_root, memstead_base::WorkspaceSettings::default())
 }
 
 /// Like [`auto_seeded_settings`] but preserves caller-supplied
-/// `WorkspaceSettings` overrides (e.g. `vault_create_rules`,
+/// `WorkspaceSettings` overrides (e.g. `mem_create_rules`,
 /// `schemas_dir`).
 pub fn auto_seed_with_settings(
     workspace_root: &Path,
     settings: memstead_base::WorkspaceSettings,
 ) -> memstead_base::WorkspaceSettings {
-    let mut vaults: Vec<(std::path::PathBuf, String)> = Vec::new();
+    let mut mems: Vec<(std::path::PathBuf, String)> = Vec::new();
     if let Ok(rd) = std::fs::read_dir(workspace_root) {
         for entry in rd.flatten() {
             let p = entry.path();
             if !p.is_dir() {
                 continue;
             }
-            // Skip the vault-repo gitdir itself.
-            if p.file_name().and_then(|s| s.to_str()) == Some("vault-repo") {
+            // Skip the mem-repo gitdir itself.
+            if p.file_name().and_then(|s| s.to_str()) == Some("mem-repo") {
                 continue;
             }
             let cfg_path = p.join(".memstead").join("config.json");
@@ -242,88 +242,88 @@ pub fn auto_seed_with_settings(
                 continue;
             }
             // Configs no longer carry an in-config `name` field. The
-            // vault leaf identifier is the disk-path basename.
+            // mem leaf identifier is the disk-path basename.
             if let Some(name) = p.file_name().and_then(|s| s.to_str()) {
-                vaults.push((p.clone(), name.to_string()));
+                mems.push((p.clone(), name.to_string()));
             }
         }
     }
-    vaults.sort_by(|a, b| a.1.cmp(&b.1));
-    let refs: Vec<(&Path, &str)> = vaults
+    mems.sort_by(|a, b| a.1.cmp(&b.1));
+    let refs: Vec<(&Path, &str)> = mems
         .iter()
         .map(|(p, n)| (p.as_path(), n.as_str()))
         .collect();
-    init_real_vault_repo_from_disk(workspace_root, &refs);
+    init_real_mem_repo_from_disk(workspace_root, &refs);
     settings
 }
 
-/// Re-seed `<workspace_root>/vault-repo/.git/` from disk after the disk
+/// Re-seed `<workspace_root>/mem-repo/.git/` from disk after the disk
 /// shape has changed. Deletes the existing gitdir and re-runs
-/// [`init_real_vault_repo_from_disk`].
+/// [`init_real_mem_repo_from_disk`].
 ///
-/// Useful for tests that mutate disk vault content via `fs::write`
+/// Useful for tests that mutate disk mem content via `fs::write`
 /// between `init` and `engine.reload()` — without re-seeding, the
 /// dispatcher's GitTree read path keeps returning the stale tree
 /// state. Mirrors disk-fall-through behaviour where reload re-reads
 /// the live disk content.
-pub fn reseed_vault_repo_from_disk(
+pub fn reseed_mem_repo_from_disk(
     workspace_root: &Path,
-    vaults: &[(&Path, &str)],
+    mems: &[(&Path, &str)],
 ) -> PathBuf {
-    let gitdir = workspace_root.join("vault-repo").join(".git");
+    let gitdir = workspace_root.join("mem-repo").join(".git");
     let _ = std::fs::remove_dir_all(&gitdir);
-    init_real_vault_repo_from_disk(workspace_root, vaults)
+    init_real_mem_repo_from_disk(workspace_root, mems)
 }
 
-/// Migration helper: bootstrap `<workspace_root>/vault-repo/.git/` from
-/// the layout of disk-shaped vault directories already on disk.
+/// Migration helper: bootstrap `<workspace_root>/mem-repo/.git/` from
+/// the layout of disk-shaped mem directories already on disk.
 ///
-/// For each `(vault_dir, name)` entry, reads the disk-shape vault at
-/// `<workspace_root>/<vault_dir>/`:
-/// - `<vault_dir>/.memstead/config.json` (if present) → `__SYSTEM:<name>/config.json`
-/// - every `*.md` file under `<vault_dir>/` (recursive) → branch tree
+/// For each `(mem_dir, name)` entry, reads the disk-shape mem at
+/// `<workspace_root>/<mem_dir>/`:
+/// - `<mem_dir>/.memstead/config.json` (if present) → `__SYSTEM:<name>/config.json`
+/// - every `*.md` file under `<mem_dir>/` (recursive) → branch tree
 ///
-/// Use this from tests that pre-populate disk vaults via `fs::write`
+/// Use this from tests that pre-populate disk mems via `fs::write`
 /// before initialising the engine. The helper preserves the entity
 /// content so dispatcher GitTree reads return the same data the disk
 /// path used to surface.
 ///
-/// `name` is the vault name (matches `VaultInit.name`). It is used
+/// `name` is the mem name (matches `MemInit.name`). It is used
 /// for the branch ref and the `<name>/config.json` blob on `__SYSTEM`.
-pub fn init_real_vault_repo_from_disk(
+pub fn init_real_mem_repo_from_disk(
     workspace_root: &Path,
-    vaults: &[(&Path, &str)],
+    mems: &[(&Path, &str)],
 ) -> PathBuf {
-    let triples: Vec<(&Path, &str, &str)> = vaults
+    let triples: Vec<(&Path, &str, &str)> = mems
         .iter()
         .map(|(dir, name)| (*dir, *name, *name))
         .collect();
-    init_real_vault_repo_from_disk_with_paths(workspace_root, &triples)
+    init_real_mem_repo_from_disk_with_paths(workspace_root, &triples)
 }
 
-/// Hierarchical-layout variant of [`init_real_vault_repo_from_disk`].
+/// Hierarchical-layout variant of [`init_real_mem_repo_from_disk`].
 ///
-/// `vaults` is `&[(vault_dir, leaf, full_path)]`. The branch ref is
+/// `mems` is `&[(mem_dir, leaf, full_path)]`. The branch ref is
 /// sealed at `refs/heads/<full_path>` and the `__SYSTEM` config blob
 /// lands at `<full_path>/config.json`, but the engine still references
-/// the vault by its `leaf` name (matches `VaultInit.name`). Pass
+/// the mem by its `leaf` name (matches `MemInit.name`). Pass
 /// `full_path = leaf` to get flat-layout behaviour identical to
-/// [`init_real_vault_repo_from_disk`].
+/// [`init_real_mem_repo_from_disk`].
 ///
 /// Use this from tests that need to exercise the production-shape
 /// hierarchical workspace (e.g. `memstead/engine` branch with leaf
-/// `engine`). Without a hierarchical fixture the per-vault drift
+/// `engine`). Without a hierarchical fixture the per-mem drift
 /// detection helper that maps leaf → branch ref looks identical to
 /// the flat case and will not catch ref-format regressions.
-pub fn init_real_vault_repo_from_disk_with_paths(
+pub fn init_real_mem_repo_from_disk_with_paths(
     workspace_root: &Path,
-    vaults: &[(&Path, &str, &str)],
+    mems: &[(&Path, &str, &str)],
 ) -> PathBuf {
     static INIT_LOCK: Mutex<()> = Mutex::new(());
 
-    let gitdir = workspace_root.join("vault-repo").join(".git");
+    let gitdir = workspace_root.join("mem-repo").join(".git");
     std::fs::create_dir_all(&gitdir)
-        .unwrap_or_else(|e| panic!("failed to create test vault-repo at {}: {e}", gitdir.display()));
+        .unwrap_or_else(|e| panic!("failed to create test mem-repo at {}: {e}", gitdir.display()));
 
     let _guard = INIT_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
@@ -331,7 +331,7 @@ pub fn init_real_vault_repo_from_disk_with_paths(
         Ok(r) => r,
         Err(_) => gix::init_bare(&gitdir).unwrap_or_else(|e| {
             panic!(
-                "failed to initialise bare vault-repo-git at {}: {e}",
+                "failed to initialise bare mem-repo-git at {}: {e}",
                 gitdir.display()
             )
         }),
@@ -365,12 +365,12 @@ pub fn init_real_vault_repo_from_disk_with_paths(
         .unwrap();
     }
 
-    // __SYSTEM: read each vault_dir's `.memstead/config.json` (or synthesise
+    // __SYSTEM: read each mem_dir's `.memstead/config.json` (or synthesise
     // a default) and seed it as `<full_path>/config.json` so the
     // resolver maps `<leaf>` → `<full_path>` correctly.
     let mut system_editor = repo.empty_tree().edit().unwrap();
-    for (vault_dir, _leaf, full_path) in vaults {
-        let cfg_path = vault_dir.join(".memstead").join("config.json");
+    for (mem_dir, _leaf, full_path) in mems {
+        let cfg_path = mem_dir.join(".memstead").join("config.json");
         let cfg_bytes = match std::fs::read(&cfg_path) {
             Ok(b) => b,
             Err(_) => format!(
@@ -400,15 +400,15 @@ pub fn init_real_vault_repo_from_disk_with_paths(
     )
     .unwrap();
 
-    // Per-vault branches: walk each vault_dir for `*.md` files and
+    // Per-mem branches: walk each mem_dir for `*.md` files and
     // upsert them into the branch tree at their relative path. Branch
     // ref is `refs/heads/<full_path>` (flat == hierarchical when
     // `full_path == leaf`).
     let empty_tree = repo.empty_tree().id().detach();
-    for (vault_dir, _leaf, full_path) in vaults {
+    for (mem_dir, _leaf, full_path) in mems {
         let mut entities: Vec<(String, Vec<u8>)> = Vec::new();
-        if vault_dir.is_dir() {
-            collect_md_entities(vault_dir, vault_dir, &mut entities);
+        if mem_dir.is_dir() {
+            collect_md_entities(mem_dir, mem_dir, &mut entities);
         }
         let tree_id = if entities.is_empty() {
             empty_tree
@@ -452,15 +452,15 @@ pub fn init_real_vault_repo_from_disk_with_paths(
     // failures collapse via `unwrap()` — fixture setup is hard-fail.
     crate::storage_memstead::migrate_to_memstead_ref(&gitdir).unwrap();
 
-    // For each vault, lift the schema pin from `<vault_dir>/.memstead/config.json`
+    // For each mem, lift the schema pin from `<mem_dir>/.memstead/config.json`
     // (the same source the just-written `__SYSTEM` blob used). When the
     // file is missing or the field is absent we fall back to the
     // sentinel "default" pin — matches the pre-deletion `LegacyProStore`
     // behaviour and keeps the test surface stable.
-    let owned: Vec<(String, String, String)> = vaults
+    let owned: Vec<(String, String, String)> = mems
         .iter()
-        .map(|(vault_dir, leaf, full)| {
-            let pin = std::fs::read_to_string(vault_dir.join(".memstead").join("config.json"))
+        .map(|(mem_dir, leaf, full)| {
+            let pin = std::fs::read_to_string(mem_dir.join(".memstead").join("config.json"))
                 .ok()
                 .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
                 .and_then(|v| {
@@ -487,7 +487,7 @@ fn collect_md_entities(root: &Path, current: &Path, out: &mut Vec<(String, Vec<u
     };
     for entry in rd.flatten() {
         let path = entry.path();
-        // Skip the `.memstead/` and any `.git/` subtrees inside the vault.
+        // Skip the `.memstead/` and any `.git/` subtrees inside the mem.
         let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
         if name.starts_with('.') {
             continue;
@@ -504,24 +504,24 @@ fn collect_md_entities(root: &Path, current: &Path, out: &mut Vec<(String, Vec<u
     }
 }
 
-/// Initialise `<workspace_root>/vault-repo/.git/` as a real bare repo
-/// like [`init_real_vault_repo`], but additionally writes the supplied
-/// entity blobs into each vault's branch tree. `vaults_with_entities`
+/// Initialise `<workspace_root>/mem-repo/.git/` as a real bare repo
+/// like [`init_real_mem_repo`], but additionally writes the supplied
+/// entity blobs into each mem's branch tree. `mems_with_entities`
 /// is `&[(name, schema, &[(path, content)])]` — the path/content tuples
-/// land at the corresponding paths on the per-vault branch's tree.
+/// land at the corresponding paths on the per-mem branch's tree.
 ///
 /// Use this when the test asserts on entity content surfaced through
 /// the dispatcher's GitTree read path. For the simpler "engine boots,
-/// no entities" case use [`init_real_vault_repo`].
-pub fn init_real_vault_repo_with_entities(
+/// no entities" case use [`init_real_mem_repo`].
+pub fn init_real_mem_repo_with_entities(
     workspace_root: &Path,
-    vaults_with_entities: &[(&str, &str, &[(&str, &str)])],
+    mems_with_entities: &[(&str, &str, &[(&str, &str)])],
 ) -> PathBuf {
     static INIT_LOCK: Mutex<()> = Mutex::new(());
 
-    let gitdir = workspace_root.join("vault-repo").join(".git");
+    let gitdir = workspace_root.join("mem-repo").join(".git");
     std::fs::create_dir_all(&gitdir)
-        .unwrap_or_else(|e| panic!("failed to create test vault-repo at {}: {e}", gitdir.display()));
+        .unwrap_or_else(|e| panic!("failed to create test mem-repo at {}: {e}", gitdir.display()));
 
     let _guard = INIT_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
@@ -529,7 +529,7 @@ pub fn init_real_vault_repo_with_entities(
         Ok(r) => r,
         Err(_) => gix::init_bare(&gitdir).unwrap_or_else(|e| {
             panic!(
-                "failed to initialise bare vault-repo-git at {}: {e}",
+                "failed to initialise bare mem-repo-git at {}: {e}",
                 gitdir.display()
             )
         }),
@@ -563,9 +563,9 @@ pub fn init_real_vault_repo_with_entities(
         .unwrap();
     }
 
-    // __SYSTEM: per-vault `<name>/config.json` blobs.
+    // __SYSTEM: per-mem `<name>/config.json` blobs.
     let mut system_editor = repo.empty_tree().edit().unwrap();
-    for (name, schema, _) in vaults_with_entities {
+    for (name, schema, _) in mems_with_entities {
         let config = format!(r#"{{"schema": "{schema}"}}"#);
         let blob = repo.write_blob(config.as_bytes()).unwrap().detach();
         system_editor
@@ -590,7 +590,7 @@ pub fn init_real_vault_repo_with_entities(
     .unwrap();
 
     let empty_tree = repo.empty_tree().id().detach();
-    for (name, _, entities) in vaults_with_entities {
+    for (name, _, entities) in mems_with_entities {
         let tree_id = if entities.is_empty() {
             empty_tree
         } else {
@@ -624,7 +624,7 @@ pub fn init_real_vault_repo_with_entities(
     seed_new_layout(
         workspace_root,
         &gitdir,
-        &vaults_with_entities
+        &mems_with_entities
             .iter()
             .map(|(name, schema, _)| (*name, *name, *schema))
             .collect::<Vec<_>>(),

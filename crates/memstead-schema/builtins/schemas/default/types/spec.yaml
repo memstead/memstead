@@ -17,7 +17,7 @@ system_message: |
   Specs are prescriptive, not descriptive. Each entity has Identity,
   Purpose, and optional Specifies/Constraints/Rationale. PART_OF drives
   the structural hierarchy as a graph edge; files live flat at the
-  vault root. Levels: M0 concrete (vast majority), M1 patterns, M2
+  mem root. Levels: M0 concrete (vast majority), M1 patterns, M2
   structural rules.
 sections:
   - key: identity

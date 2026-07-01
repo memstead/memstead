@@ -45,9 +45,9 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     let new_title = args.new_title.clone();
 
     match ctx.cli_engine()? {
-        #[cfg(feature = "vault-repo")]
-        CliEngine::VaultRepo(mut engine) => {
-            let expected_hash = resolve_expected_hash_vault_repo(&engine, &id, &args)?;
+        #[cfg(feature = "mem-repo")]
+        CliEngine::MemRepo(mut engine) => {
+            let expected_hash = resolve_expected_hash_mem_repo(&engine, &id, &args)?;
             let result = engine
                 .rename_entity_with_ctx(
                     &id,
@@ -56,11 +56,11 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                     &crate::setup::cli_ctx_with_note(args.note.clone()),
                 )
                 .map_err(CliError::from_engine_op)?;
-            let vault_changed = engine.take_vault_changed_notices();
+            let mem_changed = engine.take_mem_changed_notices();
             if ctx.json {
                 let mut body =
                     serde_json::to_value(&result).unwrap_or(serde_json::Value::Null);
-                super::merge_vault_changed_json(&mut body, &vault_changed);
+                super::merge_mem_changed_json(&mut body, &mem_changed);
                 print_json(&body)?;
             } else {
                 print_markdown(&format!(
@@ -70,7 +70,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                     result.old_path,
                     result.new_path,
                     result.content_hash,
-                    super::render_vault_changed_block(&vault_changed),
+                    super::render_mem_changed_block(&mem_changed),
                 ));
             }
         }
@@ -120,13 +120,13 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Resolve the `expected_hash` for the vault-repo path: either the
+/// Resolve the `expected_hash` for the mem-repo path: either the
 /// flag value, or the live hash from the store under `--auto-hash` /
 /// `--force`. Mirrors the original inline logic — extracted only so
 /// the filesystem path can run the same flag plumbing without
 /// duplicating it.
-#[cfg(feature = "vault-repo")]
-fn resolve_expected_hash_vault_repo(
+#[cfg(feature = "mem-repo")]
+fn resolve_expected_hash_mem_repo(
     engine: &memstead_base::Engine,
     id: &EntityId,
     args: &Args,

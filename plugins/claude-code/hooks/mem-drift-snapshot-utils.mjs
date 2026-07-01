@@ -1,12 +1,12 @@
-// Pure helpers + the snapshot pipeline for the vault-drift-snapshot
+// Pure helpers + the snapshot pipeline for the mem-drift-snapshot
 // Stop hook. Import-safe: this module exports functions and runs no
 // top-level side effects. Tests import directly; the hook entry point
-// (`vault-drift-snapshot.mjs`) wires `runDriftSnapshot` to the real
+// (`mem-drift-snapshot.mjs`) wires `runDriftSnapshot` to the real
 // stdin / MCP-client / fs surface.
 
 import { existsSync, writeFileSync, mkdirSync, readdirSync, statSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
-import { isTrackedVault } from './vault-drift-notify-utils.mjs';
+import { isTrackedMem } from './mem-drift-notify-utils.mjs';
 import { resolveEngineCommand, withEngine } from './mcp-client.mjs';
 
 const MCP_TIMEOUT_MS = 15000;
@@ -46,24 +46,24 @@ export function pruneStaleStateFiles(driftDir, maxAgeMs) {
 }
 
 /**
- * Build the `{ vault: head_sha }` map of writable-vault HEADs from an
+ * Build the `{ mem: head_sha }` map of writable-mem HEADs from an
  * `memstead_health { include_config: true }` response. Filters via
- * `isTrackedVault` (drops `main` / `__*`). Vaults whose `vcs.head` is
+ * `isTrackedMem` (drops `main` / `__*`). Mems whose `vcs.head` is
  * absent (fresh, no commits yet) are silently skipped — without a head
  * SHA there is nothing to compare against on the next prompt.
  */
 export function extractCurrentHeads(healthResponse) {
   const writable = new Set(
-    Array.isArray(healthResponse?.writable_vaults)
-      ? healthResponse.writable_vaults
+    Array.isArray(healthResponse?.writable_mems)
+      ? healthResponse.writable_mems
       : [],
   );
-  const vaults = Array.isArray(healthResponse?.vaults) ? healthResponse.vaults : [];
+  const mems = Array.isArray(healthResponse?.mems) ? healthResponse.mems : [];
   const out = {};
-  for (const entry of vaults) {
+  for (const entry of mems) {
     if (!entry || typeof entry.name !== 'string') continue;
     if (!writable.has(entry.name)) continue;
-    if (!isTrackedVault(entry.name)) continue;
+    if (!isTrackedMem(entry.name)) continue;
     const head = entry?.vcs?.head;
     if (typeof head !== 'string' || head.length === 0) continue;
     out[entry.name] = head;
@@ -77,7 +77,7 @@ export function extractCurrentHeads(healthResponse) {
  *
  *   - 'no-engine'      — `.mcp.json` absent or `memstead` server entry missing
  *   - 'probe-failed'   — `memstead_health` errored or MCP boot failed
- *   - 'snapshot-empty' — health returned but no writable vaults to track
+ *   - 'snapshot-empty' — health returned but no writable mems to track
  *   - 'snapshotted'    — state file refreshed ({ heads, statePath })
  *
  * Mocking surface mirrors `produceOuterCommit` in `auto-commit-utils.mjs`:

@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-description = "Engine internals for Memstead — store, parser, validators, filesystem-vault engine."
+description = "Engine internals for Memstead — store, parser, validators, filesystem-mem engine."
 publish = false
 
 [dependencies]
@@ -30,7 +30,7 @@ zip.workspace = true
 # runtime-agnostic; tokio is opt-in for axum-resident consumers.
 tokio = { version = "1", default-features = false, features = ["sync"], optional = true }
 # Optional — only pulled in when the `file-watcher` feature is enabled.
-# Used by `watch_vault_repo` to surface `VaultChangedEvent`s for
+# Used by `watch_mem_repo` to surface `MemChangedEvent`s for
 # cross-process consumers (bridge HEAD-watcher, macOS live-update,
 # audit-log workers) that don't share the writer's `Engine` instance.
 notify = { version = "7", optional = true }
@@ -47,17 +47,17 @@ tantivy.workspace = true
 
 [features]
 default = []
-# Opt-in tokio convenience: `Engine::subscribe_vault_changes_broadcast`
+# Opt-in tokio convenience: `Engine::subscribe_mem_changes_broadcast`
 # wraps the Core callback API in a `tokio::sync::broadcast::Receiver`
 # so axum-style consumers can consume events as a tokio stream without
 # wiring the boilerplate themselves. Adds tokio (broadcast / sync only)
 # to the dependency graph; consumers that don't need it keep tokio out.
 tokio = ["dep:tokio"]
-# Opt-in cross-process change-event surface: `watch_vault_repo` returns
-# a `(handle, mpsc::Receiver<VaultChangedEvent>)` pair that fires on
-# every `refs/heads/<vault>` mutation in a vault-repo gitdir. Adds
+# Opt-in cross-process change-event surface: `watch_mem_repo` returns
+# a `(handle, mpsc::Receiver<MemChangedEvent>)` pair that fires on
+# every `refs/heads/<mem>` mutation in a mem-repo gitdir. Adds
 # `notify` to the dependency graph; consumers that only need the
-# in-process `Engine::subscribe_vault_changes` keep it out.
+# in-process `Engine::subscribe_mem_changes` keep it out.
 file-watcher = ["dep:notify"]
 
 [dev-dependencies]

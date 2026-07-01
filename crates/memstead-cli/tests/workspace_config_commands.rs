@@ -1,4 +1,4 @@
-#![cfg(feature = "vault-repo")]
+#![cfg(feature = "mem-repo")]
 // `memstead workspace ...` config commands ship only in the pro build.
 
 //! Integration tests for the `memstead workspace` write-side subcommand
@@ -6,7 +6,7 @@
 //!
 //! Pro flavour only — basis CLIs don't expose `memstead workspace`. Each
 //! test seeds a fresh workspace (the minimum-viable `workspace.toml`
-//! that `memstead vault-repo init` materialises), runs one or more
+//! that `memstead mem-repo init` materialises), runs one or more
 //! subcommands, and asserts on the resulting TOML and the engine's
 //! parse of it.
 
@@ -16,7 +16,7 @@ use std::path::Path;
 use assert_cmd::Command;
 use tempfile::TempDir;
 
-const DEFAULT_BODY: &str = "format = \"memstead-git-branch-1\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n";
+const DEFAULT_BODY: &str = "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n";
 
 fn memstead() -> Command {
     Command::cargo_bin("memstead").expect("memstead binary must be built by cargo")
@@ -27,7 +27,7 @@ fn seed_workspace() -> TempDir {
     let memstead_dir = tmp.path().join(".memstead");
     fs::create_dir_all(&memstead_dir).unwrap();
     fs::write(memstead_dir.join("workspace.toml"), DEFAULT_BODY).unwrap();
-    fs::create_dir_all(tmp.path().join("vault-repo").join(".git")).unwrap();
+    fs::create_dir_all(tmp.path().join("mem-repo").join(".git")).unwrap();
     tmp
 }
 
@@ -51,7 +51,7 @@ fn allow_create_writes_rule_then_re_derives_through_cli() {
         .success();
 
     let body = read_toml(ws.path());
-    assert!(body.contains("[[vault_management.create]]"), "got:\n{body}");
+    assert!(body.contains("[[mem_management.create]]"), "got:\n{body}");
     assert!(body.contains("pattern = \"exec-*\""), "got:\n{body}");
     assert!(body.contains("schemas = [\"default@1.0.0\"]"), "got:\n{body}");
 }
@@ -139,7 +139,7 @@ fn allow_delete_then_revoke_delete_roundtrip() {
         .assert()
         .success();
     let body = read_toml(ws.path());
-    assert!(body.contains("[[vault_management.delete]]"), "got:\n{body}");
+    assert!(body.contains("[[mem_management.delete]]"), "got:\n{body}");
     assert!(body.contains("pattern = \"exec-*\""), "got:\n{body}");
     memstead()
         .current_dir(ws.path())
@@ -164,7 +164,7 @@ fn grant_cross_link_named_and_wildcard() {
         .assert()
         .success();
     let body = read_toml(ws.path());
-    assert!(body.contains("[cross_vault_links]"), "got:\n{body}");
+    assert!(body.contains("[cross_mem_links]"), "got:\n{body}");
     assert!(body.contains("plugin = [\"engine\"]"), "got:\n{body}");
     assert!(body.contains("specs = \"*\""), "got:\n{body}");
 }
@@ -294,7 +294,7 @@ fn missing_workspace_returns_workspace_not_initialised_code() {
 
 /// `memstead workspace show` renders the active workspace
 /// configuration in markdown by default; `--json` emits a structured
-/// document covering vault_management, cross_vault_links, mutations,
+/// document covering mem_management, cross_mem_links, mutations,
 /// and plugin sections.
 #[test]
 fn workspace_show_renders_markdown_by_default() {
@@ -325,9 +325,9 @@ fn workspace_show_renders_markdown_by_default() {
         .clone();
     let body = String::from_utf8(output).unwrap();
     assert!(body.contains("# Workspace configuration"), "got:\n{body}");
-    assert!(body.contains("Vault management"), "got:\n{body}");
+    assert!(body.contains("Mem management"), "got:\n{body}");
     assert!(body.contains("`exec-*`"), "got:\n{body}");
-    assert!(body.contains("Cross-vault links"), "got:\n{body}");
+    assert!(body.contains("Cross-mem links"), "got:\n{body}");
     assert!(body.contains("`plugin`"), "got:\n{body}");
     assert!(body.contains("Mutations"), "got:\n{body}");
     assert!(body.contains("`require_notes`: `true`"), "got:\n{body}");
@@ -381,16 +381,16 @@ fn workspace_show_json_includes_all_sections() {
     let parsed: serde_json::Value = serde_json::from_slice(&output).expect("valid JSON");
     assert!(parsed["workspace_root"].is_string());
 
-    let create = &parsed["vault_management"]["create"];
+    let create = &parsed["mem_management"]["create"];
     assert!(create.is_array());
     assert_eq!(create[0]["pattern"], "exec-*");
     assert_eq!(create[0]["schemas"][0], "default@1.0.0");
     assert_eq!(create[0]["default_cross_links"][0], "engine");
 
-    let delete = &parsed["vault_management"]["delete"];
+    let delete = &parsed["mem_management"]["delete"];
     assert_eq!(delete[0]["pattern"], "exec-*");
 
-    let links = &parsed["cross_vault_links"];
+    let links = &parsed["cross_mem_links"];
     assert_eq!(links["plugin"][0], "engine");
     assert_eq!(links["specs"], "*");
 
@@ -409,7 +409,7 @@ fn workspace_show_empty_workspace_reports_unset_sections() {
         .stdout
         .clone();
     let body = String::from_utf8(output).unwrap();
-    assert!(body.contains("no agent-driven vault creation allowed"), "got:\n{body}");
+    assert!(body.contains("no agent-driven mem creation allowed"), "got:\n{body}");
     assert!(body.contains("default-deny"), "got:\n{body}");
     assert!(body.contains("`require_notes`: (unset"), "got:\n{body}");
 }
@@ -418,7 +418,7 @@ fn workspace_show_empty_workspace_reports_unset_sections() {
 /// be re-derived structurally end-to-end via the CLI:
 ///
 /// > The engine-semantically-owned sections of `memstead/.memstead/workspace.toml`
-/// > (`[[vault_management.*]]`, `[cross_vault_links]`, `[mutations]`,
+/// > (`[[mem_management.*]]`, `[cross_mem_links]`, `[mutations]`,
 /// > `schemas_dir`, `format`, `[persistence_adapter]`) can be re-derived
 /// > structurally end-to-end by running the CLI commands in sequence
 /// > against a fresh init.
@@ -483,13 +483,13 @@ fn end_to_end_rederive_loads_through_engine() {
     let workspace = FileWorkspaceStore::new()
         .load(ws.path())
         .expect("re-derived workspace.toml must parse through the engine loader");
-    assert_eq!(workspace.settings.vault_create_rules.len(), 2);
-    assert_eq!(workspace.settings.vault_delete_rules.len(), 2);
+    assert_eq!(workspace.settings.mem_create_rules.len(), 2);
+    assert_eq!(workspace.settings.mem_delete_rules.len(), 2);
     assert!(
-        workspace.settings.vault_create_rules.iter().any(|r| r.pattern == "planning/plan-*")
+        workspace.settings.mem_create_rules.iter().any(|r| r.pattern == "planning/plan-*")
     );
-    assert!(workspace.settings.cross_vault_links.contains_key("plugin"));
-    assert!(workspace.settings.cross_vault_links.contains_key("macos"));
+    assert!(workspace.settings.cross_mem_links.contains_key("plugin"));
+    assert!(workspace.settings.cross_mem_links.contains_key("macos"));
     assert_eq!(workspace.settings.mutations.require_notes, Some(true));
 }
 

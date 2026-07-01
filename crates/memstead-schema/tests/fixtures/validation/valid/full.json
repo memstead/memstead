@@ -15,7 +15,7 @@
     },
     "upstream": {
       "type": "graph",
-      "scope": { "domains": ["other-vault"] }
+      "scope": { "domains": ["other-mem"] }
     }
   },
   "projections": {

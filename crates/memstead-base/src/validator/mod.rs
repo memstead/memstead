@@ -7,7 +7,7 @@
 //! ingress), builds a `Store`, runs community detection, and
 //! canonically re-packs. Fails hard on any violation.
 //!
-//! Pure function: takes `&[u8]`, returns `Result<ValidatedVault,
+//! Pure function: takes `&[u8]`, returns `Result<ValidatedMem,
 //! ValidationError>`, performs no I/O.
 
 use crate::entity::Entity;
@@ -21,8 +21,8 @@ pub mod graph;
 pub mod ids;
 pub mod strict;
 
-pub use graph::DanglingCrossVaultEdge;
-pub use memstead_schema::PublishedVaultConfig;
+pub use graph::DanglingCrossMemEdge;
+pub use memstead_schema::PublishedMemConfig;
 
 /// Numeric limits enforced by archive-level checks. Callers that need
 /// different caps (e.g. enterprise registry) construct a custom
@@ -68,7 +68,7 @@ pub enum SizeCapKind {
 
 /// Aggregate statistics reported alongside a successful validation.
 #[derive(Debug, Clone)]
-pub struct VaultStats {
+pub struct MemStats {
     pub entities: usize,
     pub edges: usize,
     pub communities: usize,
@@ -79,12 +79,12 @@ pub struct VaultStats {
 /// built graph, community assignments, and the canonical bytes that
 /// should replace the input in any cache.
 #[derive(Debug)]
-pub struct ValidatedVault {
-    pub config: PublishedVaultConfig,
+pub struct ValidatedMem {
+    pub config: PublishedMemConfig,
     pub entities: Vec<Entity>,
     pub store: Store,
     pub communities: LouvainOutput,
-    pub stats: VaultStats,
+    pub stats: MemStats,
     pub canonical_bytes: Vec<u8>,
     /// Schema source files found under `.memstead/schema/` in the
     /// archive.
@@ -93,14 +93,14 @@ pub struct ValidatedVault {
     /// `format: 2` archives (top-level `schema/` tree) are rejected
     /// upstream in `check_format` and never materialize here.
     pub schema_files: Vec<archive::SchemaFile>,
-    /// Relationships whose target lives outside this vault — edges that
-    /// can't resolve inside the single-vault archive. Always empty when
+    /// Relationships whose target lives outside this mem — edges that
+    /// can't resolve inside the single-mem archive. Always empty when
     /// produced via the strict (`validate_and_normalize_archive`) path:
     /// that path refuses on the first such edge. Populated only via
     /// [`validate_and_normalize_archive_lenient`] (the export side),
     /// which collects them so `export` can warn
-    /// (`DANGLING_CROSS_VAULT_EDGE_IN_EXPORT`) rather than refuse.
-    pub dangling_cross_vault_edges: Vec<graph::DanglingCrossVaultEdge>,
+    /// (`DANGLING_CROSS_MEM_EDGE_IN_EXPORT`) rather than refuse.
+    pub dangling_cross_mem_edges: Vec<graph::DanglingCrossMemEdge>,
     /// Raw bytes of the archive's authoring-provenance payload
     /// (`.memstead/provenance.json`), or `None` when the archive carries
     /// none. Surfaced so the registry and other validation consumers can
@@ -218,8 +218,8 @@ pub enum ValidationError {
         id: String,
         paths: (String, String),
     },
-    #[error("cross-vault relationship at {path}: target {target}")]
-    CrossVaultRelationship { path: String, target: String },
+    #[error("cross-mem relationship at {path}: target {target}")]
+    CrossMemRelationship { path: String, target: String },
     #[error("graph construction failed: {0}")]
     GraphConstructionFailed(String),
     #[error("community detection failed: {0}")]
@@ -227,46 +227,46 @@ pub enum ValidationError {
 }
 
 /// The single ingress entry point. Callers (registry publish, CLI
-/// install, MCP read-vault attach, macOS drop-to-install) hand in
-/// bytes and receive either a `ValidatedVault` with canonical bytes
+/// install, MCP read-mem attach, macOS drop-to-install) hand in
+/// bytes and receive either a `ValidatedMem` with canonical bytes
 /// to install, or a typed `ValidationError`.
 ///
 /// Runs every check with `ValidatorLimits::DEFAULT`. Use
 /// `validate_and_normalize_archive_with_limits` to supply custom caps
 /// (the registry may allow larger archives; the CLI keeps defaults).
-pub fn validate_and_normalize_archive(bytes: &[u8]) -> Result<ValidatedVault, ValidationError> {
+pub fn validate_and_normalize_archive(bytes: &[u8]) -> Result<ValidatedMem, ValidationError> {
     validate_and_normalize_archive_with_limits(bytes, &ValidatorLimits::DEFAULT)
 }
 
 pub fn validate_and_normalize_archive_with_limits(
     bytes: &[u8],
     limits: &ValidatorLimits,
-) -> Result<ValidatedVault, ValidationError> {
-    // Strict posture: a cross-vault edge refuses the archive — the
+) -> Result<ValidatedMem, ValidationError> {
+    // Strict posture: a cross-mem edge refuses the archive — the
     // install / archive-load contract.
     validate_impl(bytes, limits, true)
 }
 
-/// Export-side validation: identical strict checks, except a cross-vault
-/// edge whose target won't travel inside this single-vault archive is
-/// **collected** onto [`ValidatedVault::dangling_cross_vault_edges`]
+/// Export-side validation: identical strict checks, except a cross-mem
+/// edge whose target won't travel inside this single-mem archive is
+/// **collected** onto [`ValidatedMem::dangling_cross_mem_edges`]
 /// instead of refused. Lets `export` warn
-/// (`DANGLING_CROSS_VAULT_EDGE_IN_EXPORT`) and still produce the archive,
+/// (`DANGLING_CROSS_MEM_EDGE_IN_EXPORT`) and still produce the archive,
 /// while `install` keeps refusing the same edge — one predicate, two
 /// postures. Every other strict
 /// check (schema drift, malformed markdown, …) still refuses, so export
 /// never emits an otherwise-invalid archive.
 pub fn validate_and_normalize_archive_lenient(
     bytes: &[u8],
-) -> Result<ValidatedVault, ValidationError> {
+) -> Result<ValidatedMem, ValidationError> {
     validate_impl(bytes, &ValidatorLimits::DEFAULT, false)
 }
 
-/// Cross-vault-only scan over an archive's bytes: extract + tolerant
-/// parse + the shared cross-vault predicate
-/// ([`graph::dangling_cross_vault_edges_in`]), with **no** strict
+/// Cross-mem-only scan over an archive's bytes: extract + tolerant
+/// parse + the shared cross-mem predicate
+/// ([`graph::dangling_cross_mem_edges_in`]), with **no** strict
 /// section/field validation and no store construction. Returns every
-/// edge whose target won't travel inside this single-vault archive.
+/// edge whose target won't travel inside this single-mem archive.
 ///
 /// This is the lightweight export-side detector for backends that don't
 /// otherwise run the full archive validator (the git-branch export):
@@ -274,9 +274,9 @@ pub fn validate_and_normalize_archive_lenient(
 /// taking on the strict-validation refusal posture (which is a separate,
 /// pre-existing concern). Tolerant parse means section/field drift does
 /// not refuse here — only genuinely-unparseable markdown does.
-pub fn collect_dangling_cross_vault_edges_from_bytes(
+pub fn collect_dangling_cross_mem_edges_from_bytes(
     bytes: &[u8],
-) -> Result<Vec<graph::DanglingCrossVaultEdge>, ValidationError> {
+) -> Result<Vec<graph::DanglingCrossMemEdge>, ValidationError> {
     let limits = &ValidatorLimits::DEFAULT;
     let entries = archive::extract_entries(bytes, limits)?;
     let config = config::parse_config_bytes(&entries.config_bytes)?;
@@ -308,14 +308,14 @@ pub fn collect_dangling_cross_vault_edges_from_bytes(
         parse_results.push(parse_result);
     }
 
-    Ok(graph::dangling_cross_vault_edges_in(&parse_results, &config.name))
+    Ok(graph::dangling_cross_mem_edges_in(&parse_results, &config.name))
 }
 
 fn validate_impl(
     bytes: &[u8],
     limits: &ValidatorLimits,
-    cross_vault_as_error: bool,
-) -> Result<ValidatedVault, ValidationError> {
+    cross_mem_as_error: bool,
+) -> Result<ValidatedMem, ValidationError> {
     // 1. Archive-level: unzip, enforce caps + whitelist, UTF-8 decode.
     let entries = archive::extract_entries(bytes, limits)?;
 
@@ -388,13 +388,13 @@ fn validate_impl(
         .collect();
     ids::check_unique_ids(&parsed_entities)?;
 
-    // 6. Graph: build store, detect communities, cross-vault guard.
+    // 6. Graph: build store, detect communities, cross-mem guard.
     let graph_result =
-        graph::build_and_check(parse_results, &fallback_schema, &config.name, cross_vault_as_error)?;
+        graph::build_and_check(parse_results, &fallback_schema, &config.name, cross_mem_as_error)?;
 
     let (entity_count, edge_count) = graph::tally(&graph_result.store);
 
-    let stats = VaultStats {
+    let stats = MemStats {
         entities: entity_count,
         edges: edge_count,
         communities: graph_result.communities.count,
@@ -418,7 +418,7 @@ fn validate_impl(
         entries.provenance_bytes.as_deref(),
     )?;
 
-    Ok(ValidatedVault {
+    Ok(ValidatedMem {
         config,
         entities: parsed_entities,
         store: graph_result.store,
@@ -426,7 +426,7 @@ fn validate_impl(
         stats,
         canonical_bytes,
         schema_files: entries.schema_files,
-        dangling_cross_vault_edges: graph_result.dangling_cross_vault_edges,
+        dangling_cross_mem_edges: graph_result.dangling_cross_mem_edges,
         provenance_bytes: entries.provenance_bytes,
     })
 }
@@ -441,7 +441,7 @@ fn validate_impl(
 /// so post-migration archives always hit the integrity branch.
 fn check_embedded_schema(
     schema_files: &[archive::SchemaFile],
-    config: &PublishedVaultConfig,
+    config: &PublishedMemConfig,
 ) -> Result<Option<std::sync::Arc<memstead_schema::Schema>>, ValidationError> {
     if schema_files.is_empty() {
         return Ok(None);

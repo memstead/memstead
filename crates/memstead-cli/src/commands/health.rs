@@ -29,7 +29,7 @@ pub struct Args {
     pub include: Vec<String>,
 
     /// Schema ref (`name@x.y.z`) the conformance/integrity includes
-    /// lint against instead of each vault's current pin.
+    /// lint against instead of each mem's current pin.
     #[arg(long)]
     pub target_schema: Option<String>,
 
@@ -84,9 +84,9 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         dangling_links,
         findings,
     } = match ctx.cli_engine()? {
-        #[cfg(feature = "vault-repo")]
-        CliEngine::VaultRepo(mut engine) => {
-            let mut g = gather_vault_repo(&mut engine, args.limit, include);
+        #[cfg(feature = "mem-repo")]
+        CliEngine::MemRepo(mut engine) => {
+            let mut g = gather_mem_repo(&mut engine, args.limit, include);
             g.findings = gather_findings(&engine, include, args.target_schema.as_deref())?;
             g
         }
@@ -234,7 +234,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     lines.push(format!("- Entities: {real_count}"));
     if orphans_by_schema.len() > 1 {
         // Attribute the orphan headline per schema so by-design isolates
-        // (ingest vaults) aren't read as uniform debt.
+        // (ingest mems) aren't read as uniform debt.
         let by: Vec<String> = orphans_by_schema
             .iter()
             .map(|(s, n)| format!("{}: {n}", if s.is_empty() { "(unpinned)" } else { s }))
@@ -402,7 +402,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
 /// ranking reflects dependency, not co-mention.
 type MostConnectedRow = (EntityId, String, usize, usize, usize, usize, usize, usize);
 
-/// vault-repo and filesystem gather paths populate this struct
+/// mem-repo and filesystem gather paths populate this struct
 /// with the same shape so the rendering / JSON-envelope code below
 /// runs once.
 struct GatheredHealth {
@@ -418,8 +418,8 @@ struct GatheredHealth {
     stub_pairs: Vec<(EntityId, Vec<EntityId>)>,
     community_count: usize,
     /// #49: orphan/community counts attributed per pinned schema, so a
-    /// blended headline isn't read as uniform debt (ingest-vault isolates
-    /// are orphans by design; code-vault orphans are debt). Filled by the
+    /// blended headline isn't read as uniform debt (ingest-mem isolates
+    /// are orphans by design; code-mem orphans are debt). Filled by the
     /// engine-aware gather wrappers — `gather_from_store` leaves them empty.
     orphans_by_schema: std::collections::BTreeMap<String, usize>,
     communities_by_schema: std::collections::BTreeMap<String, usize>,
@@ -442,8 +442,8 @@ struct GatheredHealth {
     dangling_links: Vec<DanglingLink>,
 }
 
-/// Conformance/integrity findings across every mounted vault, in
-/// sorted vault order. Engine-shaped (needs schema resolution), so it
+/// Conformance/integrity findings across every mounted mem, in
+/// sorted mem order. Engine-shaped (needs schema resolution), so it
 /// runs beside `gather_from_store`, not inside it. `target_schema`
 /// parse and resolution failures surface as typed CLI errors — the
 /// same codes the MCP surface refuses with.
@@ -465,10 +465,10 @@ fn gather_findings(
                 .map_err(|reason| anyhow::anyhow!("invalid --target-schema {raw:?}: {reason}"))?,
         ),
     };
-    let mut vaults: Vec<String> = engine.schemas().keys().cloned().collect();
-    vaults.sort();
+    let mut mems: Vec<String> = engine.schemas().keys().cloned().collect();
+    mems.sort();
     let mut findings = Vec::new();
-    for v in &vaults {
+    for v in &mems {
         findings.extend(
             engine
                 .conformance_findings(v, target.as_ref())
@@ -485,8 +485,8 @@ fn gather_findings(
     Ok(findings)
 }
 
-#[cfg(feature = "vault-repo")]
-fn gather_vault_repo(
+#[cfg(feature = "mem-repo")]
+fn gather_mem_repo(
     engine: &mut memstead_base::Engine,
     limit: usize,
     include: &[String],
@@ -497,7 +497,7 @@ fn gather_vault_repo(
         engine.communities().count,
         limit,
         include,
-        |limit| engine_most_connected_vault_repo(engine, limit),
+        |limit| engine_most_connected_mem_repo(engine, limit),
         || engine.missing_required_outgoing(None),
     );
     fill_schema_breakdowns(engine, &mut g);
@@ -525,9 +525,9 @@ fn gather_filesystem(
 /// #49: attribute the orphan / community headlines per pinned schema (the
 /// engine-aware step `gather_from_store` can't do off a bare `&Store`).
 fn fill_schema_breakdowns(engine: &memstead_base::Engine, g: &mut GatheredHealth) {
-    let vaults: Vec<String> = engine.mounts().iter().map(|m| m.vault.clone()).collect();
+    let mems: Vec<String> = engine.mounts().iter().map(|m| m.mem.clone()).collect();
     g.orphans_by_schema = engine.orphans_by_schema(&engine.orphans());
-    g.communities_by_schema = engine.communities_by_schema(&vaults);
+    g.communities_by_schema = engine.communities_by_schema(&mems);
 }
 
 /// Engine-agnostic gather pipeline. The two engine-shaped callbacks
@@ -585,7 +585,7 @@ fn gather_from_store(
         stub_pairs,
         community_count,
         // Engine-agnostic path can't resolve schema pins; the engine-aware
-        // wrappers (`gather_vault_repo` / `gather_filesystem`) fill these.
+        // wrappers (`gather_mem_repo` / `gather_filesystem`) fill these.
         orphans_by_schema: std::collections::BTreeMap::new(),
         communities_by_schema: std::collections::BTreeMap::new(),
         most_connected_with_titles,
@@ -595,8 +595,8 @@ fn gather_from_store(
     }
 }
 
-#[cfg(feature = "vault-repo")]
-fn engine_most_connected_vault_repo(
+#[cfg(feature = "mem-repo")]
+fn engine_most_connected_mem_repo(
     engine: &memstead_base::Engine,
     limit: usize,
 ) -> Vec<MostConnectedRow> {

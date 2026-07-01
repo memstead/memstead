@@ -8,8 +8,8 @@
 ///
 /// The structural blinding is that [`super::Judge::score`] has no arm-label
 /// parameter — it physically cannot read a label. This scrub closes the *content*
-/// channel: an answer that says "according to the mounted vault…" or names a
-/// `memstead_*` tool would leak the arm through its prose. The vault-on arm's
+/// channel: an answer that says "according to the mounted mem…" or names a
+/// `memstead_*` tool would leak the arm through its prose. The mem-on arm's
 /// system prompt also forbids citing its sources; this is the defence in depth.
 ///
 /// The scrub is intentionally answer-content-only — it never touches the
@@ -17,19 +17,19 @@
 /// itself become a tell (a lone double-space where a phrase was removed).
 pub fn strip_tells(text: &str) -> String {
     // Case-insensitive removal of arm-identifying phrases and tool tokens. Order
-    // matters: longer phrases first so "the mounted vault" is removed whole
-    // rather than leaving a dangling "the … vault".
+    // matters: longer phrases first so "the mounted mem" is removed whole
+    // rather than leaving a dangling "the … mem".
     const TELLS: &[&str] = &[
-        "according to the mounted vault",
-        "from the mounted vault",
-        "the mounted vault",
+        "according to the mounted mem",
+        "from the mounted mem",
+        "the mounted mem",
         "the mounted graph",
-        "mounted vault",
-        "the memstead vault",
-        "the knowledge vault",
-        "the vault tells",
-        "querying the vault",
-        "the vault",
+        "mounted mem",
+        "the memstead mem",
+        "the knowledge mem",
+        "the mem tells",
+        "querying the mem",
+        "the mem",
     ];
     let mut out = text.to_string();
     for tell in TELLS {
@@ -130,10 +130,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn strip_removes_vault_citation() {
-        let leaked = "According to the mounted vault, X happened in commit abc.";
+    fn strip_removes_mem_citation() {
+        let leaked = "According to the mounted mem, X happened in commit abc.";
         let clean = strip_tells(leaked);
-        assert!(!clean.to_lowercase().contains("vault"), "{clean}");
+        assert!(!clean.to_lowercase().contains("mem"), "{clean}");
         assert!(!clean.to_lowercase().contains("mounted"), "{clean}");
         assert!(clean.contains("X happened in commit abc."), "{clean}");
     }
@@ -154,14 +154,14 @@ mod tests {
 
     #[test]
     fn strip_leaves_no_double_spaces_after_redaction() {
-        let leaked = "The answer is the vault here.";
+        let leaked = "The answer is the mem here.";
         let clean = strip_tells(leaked);
         assert!(!clean.contains("  "), "double space remained: {clean:?}");
     }
 
     #[test]
     fn delta_is_signed_not_floored() {
-        // vault-off strictly better → negative delta, reported plainly.
+        // mem-off strictly better → negative delta, reported plainly.
         let r = TaskResult::new("t".into(), vec![0.2, 0.2], vec![0.8, 0.8]);
         assert!((r.delta + 0.6).abs() < 1e-9, "{}", r.delta);
     }

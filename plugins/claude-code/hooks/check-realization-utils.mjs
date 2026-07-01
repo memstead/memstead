@@ -35,17 +35,17 @@ export function extractRealizationPaths(specifies, schema) {
 }
 
 /**
- * Convert an entity file path (relative to vaultRoot) to an entity ID.
+ * Convert an entity file path (relative to memRoot) to an entity ID.
  * E.g. "test-engine/markdown-parser.md" → "test-engine--markdown-parser"
  * Defensive: takes the last path segment as slug, so a stray nested
- * file from a pre-flat-layout vault still maps to a usable ID.
+ * file from a pre-flat-layout mem still maps to a usable ID.
  */
 export function fileToId(relPath) {
   const parts = relPath.replace(/\\/g, '/').replace(/\.md$/, '').split('/');
   if (parts.length < 2) return null;
-  const vault = parts[0];
+  const mem = parts[0];
   const name = parts[parts.length - 1];
-  return `${vault}--${name}`;
+  return `${mem}--${name}`;
 }
 
 /**

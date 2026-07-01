@@ -1,11 +1,11 @@
 //! Entity → markdown projection writer for the export paths.
 //!
 //! [`write_entity`] renders an entity to its `{slug}.md` file under a
-//! vault directory. It is used by the disk-export and working-tree
+//! mem directory. It is used by the disk-export and working-tree
 //! export paths (`Engine`'s archive export and the git-branch
 //! `ops::export`), not by the store-mutation pipeline — live mutations
 //! persist through the storage backend's `write_entity`, and entities
-//! live flat at `{vault}/{slug}.md` (no PART_OF-hierarchy path
+//! live flat at `{mem}/{slug}.md` (no PART_OF-hierarchy path
 //! computation or file moves).
 
 use std::fs;
@@ -16,28 +16,28 @@ use memstead_schema::TypeDefinition;
 use super::Entity;
 use super::generator::generate_markdown;
 
-/// Write an entity to its file path under the vault directory.
+/// Write an entity to its file path under the mem directory.
 /// Creates parent directories as needed.
 /// Returns the absolute path where the file was written.
 pub fn write_entity(
     entity: &Entity,
-    vault_dir: &Path,
+    mem_dir: &Path,
     schema: &TypeDefinition,
 ) -> Result<PathBuf, WriteError> {
     if entity.file_path.is_empty() {
         return Err(WriteError::NoFilePath(entity.id.to_string()));
     }
 
-    let full_path = vault_dir.join(&entity.file_path);
+    let full_path = mem_dir.join(&entity.file_path);
 
-    // Verify path doesn't escape vault dir
+    // Verify path doesn't escape mem dir
     let resolved = full_path
         .canonicalize()
         .unwrap_or_else(|_| full_path.clone());
-    let resolved_root = vault_dir
+    let resolved_root = mem_dir
         .canonicalize()
-        .unwrap_or_else(|_| vault_dir.to_path_buf());
-    if !resolved.starts_with(&resolved_root) && full_path != vault_dir.join(&entity.file_path) {
+        .unwrap_or_else(|_| mem_dir.to_path_buf());
+    if !resolved.starts_with(&resolved_root) && full_path != mem_dir.join(&entity.file_path) {
         return Err(WriteError::PathTraversal(entity.file_path.clone()));
     }
 
@@ -95,7 +95,7 @@ mod tests {
             id: EntityId::new("specs", name),
             title: name.to_string(),
             entity_type: "spec".to_string(),
-            vault: "specs".to_string(),
+            mem: "specs".to_string(),
             file_path: format!("{name}.md"),
             metadata,
             sections,
@@ -149,7 +149,7 @@ mod tests {
             id: EntityId::new("concepts", name),
             title: name.to_string(),
             entity_type: "concept".to_string(),
-            vault: "concepts".to_string(),
+            mem: "concepts".to_string(),
             file_path: format!("{name}.md"),
             metadata,
             sections,

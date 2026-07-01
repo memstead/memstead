@@ -7,7 +7,7 @@
 //! is thrown away at the registry boundary: the published archive ships
 //! current entity state with no record of *why* any entity says what it
 //! says. This payload makes the per-entity rationale **portable** so a
-//! consumer who installs a third-party vault can judge "why should I
+//! consumer who installs a third-party mem can judge "why should I
 //! believe this?" without the original repository.
 //!
 //! ## Wire shape (the archive contract)
@@ -22,7 +22,7 @@
 //!   "format": 1,
 //!   "history": "summarised",
 //!   "entities": {
-//!     "vault:slug": { "rationale": "why this entity exists", "kind": "create", "timestamp": "2026-06-24T11:32:02Z", "actor": "agent" }
+//!     "mem:slug": { "rationale": "why this entity exists", "kind": "create", "timestamp": "2026-06-24T11:32:02Z", "actor": "agent" }
 //!   }
 //! }
 //! ```
@@ -95,7 +95,7 @@ pub struct EntityProvenance {
 }
 
 /// The archive-borne provenance payload. Keyed by entity id (the
-/// `vault:slug` form the changelog/commit trailers record). An entity not
+/// `mem:slug` form the changelog/commit trailers record). An entity not
 /// present in `entities` has provenance reported as absent.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ArchiveProvenance {

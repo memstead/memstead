@@ -10,17 +10,17 @@ What this skill must achieve. Use this as the reference when tuning `SKILL.md` a
 
 ## Workspace file layout
 
-The plugin operates on the **externalised workspace layout**. Plugin-owned files live at the workspace root; per-vault state (schema pin, write guidance, snapshot tokens, vault inventory) is the engine's concern and reaches the plugin only through `memstead workspace dump`:
+The plugin operates on the **externalised workspace layout**. Plugin-owned files live at the workspace root; per-mem state (schema pin, write guidance, snapshot tokens, mem inventory) is the engine's concern and reaches the plugin only through `memstead workspace dump`:
 
 ```
 <workspace>/
   .memstead.toml                       # plugin-side config: format + dir names
-  scopes/<vault>/<name>.json       # source-side definitions (codebase tree, filesystem, graph)
-  projections/<vault>/<name>.json  # source-to-destination wiring + rules (rules.routing for lenses)
+  scopes/<mem>/<name>.json       # source-side definitions (codebase tree, filesystem, graph)
+  projections/<mem>/<name>.json  # source-to-destination wiring + rules (rules.routing for lenses)
   ingests/<name>.json              # operational unit: mode + trigger + batch_size + projection_ref
 ```
 
-`.memstead.toml` declares `scopes_dir`, `projections_dir`, `ingests_dir` (defaults: `scopes`, `projections`, `ingests`). The `workspace-loader.mjs` reads these and walks the trees, then invokes `memstead workspace dump` to fetch the engine's view of the workspace — which vaults exist, each vault's schema pin, write guidance, description, and an opaque snapshot token used for backoff. Every per-vault fact the plugin consumes flows through that JSON document; the plugin does not read `.memstead/config.json`, walk vault `**.md`, or open vault gitdirs.
+`.memstead.toml` declares `scopes_dir`, `projections_dir`, `ingests_dir` (defaults: `scopes`, `projections`, `ingests`). The `workspace-loader.mjs` reads these and walks the trees, then invokes `memstead workspace dump` to fetch the engine's view of the workspace — which mems exist, each mem's schema pin, write guidance, description, and an opaque snapshot token used for backoff. Every per-mem fact the plugin consumes flows through that JSON document; the plugin does not read `.memstead/config.json`, walk mem `**.md`, or open mem gitdirs.
 
 ## Engine binary dependency
 
@@ -35,13 +35,13 @@ When neither resolves, `inject.mjs` exits with a one-line agent-visible message 
 
 - **discovery** (default) — minimal context, no scout/writer cycle
 - **refinement** — scout reviews source files against destination entities in batches; writer fixes findings on the next fire
-- **one-shot** — runs exactly once per trigger; not re-picked on the next round. Used for lenses that lift content across vaults
+- **one-shot** — runs exactly once per trigger; not re-picked on the next round. Used for lenses that lift content across mems
 
 ## One-shot lens enrichment
 
-When a one-shot ingest has multiple destinations (a cross-vault lens), the assembled prompt includes four parseable sections:
+When a one-shot ingest has multiple destinations (a cross-mem lens), the assembled prompt includes four parseable sections:
 
-- **Destination set** — table of vault, schema, purpose per destination
+- **Destination set** — table of mem, schema, purpose per destination
 - **Routing rule** — verbatim from `projection.rules.routing`; agent decides per-entity which destinations to target
 - **Idempotency** — re-runs use `memstead_update` (or skip-if-exists), never duplicate
 - **End-of-run report** — per-destination created/updated/skipped/failed counts
@@ -51,7 +51,7 @@ Optional **Archive after run** section appears when the ingest carries `post_act
 ## Operational rules
 
 - **Plugin assembles, agent acts.** No MCP-client code path inside `inject.mjs`. The agent owns destination iteration, `memstead_create` / `memstead_update` calls, and end-of-run reporting via Claude Code's tool-use loop.
-- **Partial success is the accepted failure mode.** Each destination vault is an independent commit target. No cross-vault rollback exists.
+- **Partial success is the accepted failure mode.** Each destination mem is an independent commit target. No cross-mem rollback exists.
 - **Round-robin keyed by ingest filename.** `<workspace>/.memstead.cache/ingest/ingest-cursor.json` tracks the last picked ingest. One-shot ingests are filtered out of the eligible set after their marker lands in `ingest-one-shot-runs.json`.
 - **Backoff suppresses idle ingests.** Refinement ingests escape backoff while batches remain in the current rotation.
 

@@ -1,7 +1,7 @@
-#![cfg(feature = "vault-repo")]
+#![cfg(feature = "mem-repo")]
 //! Integration tests for `memstead` read subcommands.
 //!
-//! Each test sets up a fresh temp vault with one or two entities and runs the
+//! Each test sets up a fresh temp mem with one or two entities and runs the
 //! binary as a subprocess. Tests cover: default markdown output, `--json`
 //! output, and typed exit codes.
 
@@ -9,29 +9,29 @@ use std::fs;
 use std::path::Path;
 
 use assert_cmd::Command;
-use memstead_git_branch::test_support::init_real_vault_repo_from_disk;
+use memstead_git_branch::test_support::init_real_mem_repo_from_disk;
 use predicates::prelude::*;
 use predicates::str::contains;
 use tempfile::TempDir;
 
-/// Seed a canonical `cli-test/` vault dir under `root`. Returns the
-/// vault's absolute path. The dir basename equals the declared
+/// Seed a canonical `cli-test/` mem dir under `root`. Returns the
+/// mem's absolute path. The dir basename equals the declared
 /// `name: "cli-test"` so the engine's basename-invariant holds.
 ///
-/// Also lays down `<root>/vault-repo/.git/` so the engine's
-/// `vault-repo/.git/` fail-fast accepts the workspace and so
+/// Also lays down `<root>/mem-repo/.git/` so the engine's
+/// `mem-repo/.git/` fail-fast accepts the workspace and so
 /// `find_workspace_root` (the CLI's walk-up) resolves `<root>` as the
 /// workspace.
-fn seed_cli_test_vault(root: &Path) -> std::path::PathBuf {
+fn seed_cli_test_mem(root: &Path) -> std::path::PathBuf {
     let dir = root.join("cli-test");
     fs::create_dir_all(&dir).unwrap();
-    make_test_vault(&dir);
-    init_real_vault_repo_from_disk(root, &[(&dir, "cli-test")]);
+    make_test_mem(&dir);
+    init_real_mem_repo_from_disk(root, &[(&dir, "cli-test")]);
     dir
 }
 
-/// Write a minimal single-type vault with one basic entity into `dir`.
-fn make_test_vault(dir: &Path) {
+/// Write a minimal single-type mem with one basic entity into `dir`.
+fn make_test_mem(dir: &Path) {
     let store = dir.join(".memstead");
     fs::create_dir_all(&store).unwrap();
     fs::write(
@@ -94,7 +94,7 @@ fn memstead() -> Command {
 #[test]
 fn stats_markdown() {
     let tmp = TempDir::new().unwrap();
-    let _vault = seed_cli_test_vault(tmp.path());
+    let _mem = seed_cli_test_mem(tmp.path());
 
     memstead()
         .current_dir(tmp.path())
@@ -105,14 +105,14 @@ fn stats_markdown() {
         .stdout(contains("Nodes: 2"));
 }
 
-/// Smoke-test Bug 2 closure for `memstead stats` on a filesystem-vault
+/// Smoke-test Bug 2 closure for `memstead stats` on a filesystem-mem
 /// workspace. Pre-CLI-parity, this command would error out with the
-/// "No vaults found. Run `memstead vault-repo init`" message; post the
+/// "No mems found. Run `memstead mem-repo init`" message; post the
 /// `CliEngine` foundation the command dispatches into the unified
 /// `memstead_base::Engine` (basis path) and emits the same shape the
-/// vault-repo path produces.
+/// mem-repo path produces.
 #[test]
-fn stats_works_on_filesystem_vault_workspace() {
+fn stats_works_on_filesystem_mem_workspace() {
     let tmp = TempDir::new().unwrap();
     // `memstead init --name demo --schema default@1.0.0` lays down
     // `.memstead/config.json` plus the empty cache / memstead-io subdirs.
@@ -122,7 +122,7 @@ fn stats_works_on_filesystem_vault_workspace() {
         .assert()
         .success();
 
-    // Empty filesystem-vault has zero entities — the command must
+    // Empty filesystem-mem has zero entities — the command must
     // still produce the canonical markdown layout, not bail.
     memstead()
         .current_dir(tmp.path())
@@ -136,7 +136,7 @@ fn stats_works_on_filesystem_vault_workspace() {
 #[test]
 fn stats_json() {
     let tmp = TempDir::new().unwrap();
-    let _vault = seed_cli_test_vault(tmp.path());
+    let _mem = seed_cli_test_mem(tmp.path());
 
     let output = memstead()
         .current_dir(tmp.path())
@@ -154,7 +154,7 @@ fn stats_json() {
 #[test]
 fn entity_markdown() {
     let tmp = TempDir::new().unwrap();
-    let _vault = seed_cli_test_vault(tmp.path());
+    let _mem = seed_cli_test_mem(tmp.path());
 
     memstead()
         .current_dir(tmp.path())
@@ -166,11 +166,11 @@ fn entity_markdown() {
         .stdout(contains("_hash:"));
 }
 
-/// Helper: lay down a filesystem-vault workspace at `tmp` with one
+/// Helper: lay down a filesystem-mem workspace at `tmp` with one
 /// entity hand-shaped as `demo--alpha`. Returns the path to the
-/// workspace root. Used by the suite of filesystem-vault dispatch
+/// workspace root. Used by the suite of filesystem-mem dispatch
 /// tests for read-side subcommands.
-fn seed_filesystem_vault(tmp: &TempDir) {
+fn seed_filesystem_mem(tmp: &TempDir) {
     memstead()
         .current_dir(tmp.path())
         .args(["init", "--name", "demo", "--schema", "default@1.0.0"])
@@ -188,20 +188,20 @@ level: M0
 
 ## Identity
 
-A filesystem-vault entity exercising CLI parity.
+A filesystem-mem entity exercising CLI parity.
 
 ## Purpose
 
-Lets the read-side CLI commands round-trip without the vault-repo path.
+Lets the read-side CLI commands round-trip without the mem-repo path.
 "#,
     )
     .unwrap();
 }
 
 #[test]
-fn list_works_on_filesystem_vault_workspace() {
+fn list_works_on_filesystem_mem_workspace() {
     let tmp = TempDir::new().unwrap();
-    seed_filesystem_vault(&tmp);
+    seed_filesystem_mem(&tmp);
 
     memstead()
         .current_dir(tmp.path())
@@ -212,9 +212,9 @@ fn list_works_on_filesystem_vault_workspace() {
 }
 
 #[test]
-fn search_works_on_filesystem_vault_workspace() {
+fn search_works_on_filesystem_mem_workspace() {
     let tmp = TempDir::new().unwrap();
-    seed_filesystem_vault(&tmp);
+    seed_filesystem_mem(&tmp);
 
     memstead()
         .current_dir(tmp.path())
@@ -225,9 +225,9 @@ fn search_works_on_filesystem_vault_workspace() {
 }
 
 #[test]
-fn relations_works_on_filesystem_vault_workspace() {
+fn relations_works_on_filesystem_mem_workspace() {
     let tmp = TempDir::new().unwrap();
-    seed_filesystem_vault(&tmp);
+    seed_filesystem_mem(&tmp);
 
     memstead()
         .current_dir(tmp.path())
@@ -238,9 +238,9 @@ fn relations_works_on_filesystem_vault_workspace() {
 }
 
 #[test]
-fn overview_works_on_filesystem_vault_workspace() {
+fn overview_works_on_filesystem_mem_workspace() {
     let tmp = TempDir::new().unwrap();
-    seed_filesystem_vault(&tmp);
+    seed_filesystem_mem(&tmp);
 
     memstead()
         .current_dir(tmp.path())
@@ -257,7 +257,7 @@ fn overview_works_on_filesystem_vault_workspace() {
 #[test]
 fn overview_json_promotes_mode_chunks_and_hints_as_siblings() {
     let tmp = TempDir::new().unwrap();
-    seed_filesystem_vault(&tmp);
+    seed_filesystem_mem(&tmp);
 
     let output = memstead()
         .current_dir(tmp.path())
@@ -292,9 +292,9 @@ fn overview_json_promotes_mode_chunks_and_hints_as_siblings() {
 }
 
 #[test]
-fn context_works_on_filesystem_vault_workspace() {
+fn context_works_on_filesystem_mem_workspace() {
     let tmp = TempDir::new().unwrap();
-    seed_filesystem_vault(&tmp);
+    seed_filesystem_mem(&tmp);
 
     memstead()
         .current_dir(tmp.path())
@@ -304,9 +304,9 @@ fn context_works_on_filesystem_vault_workspace() {
 }
 
 #[test]
-fn health_works_on_filesystem_vault_workspace() {
+fn health_works_on_filesystem_mem_workspace() {
     let tmp = TempDir::new().unwrap();
-    seed_filesystem_vault(&tmp);
+    seed_filesystem_mem(&tmp);
 
     memstead()
         .current_dir(tmp.path())
@@ -316,12 +316,12 @@ fn health_works_on_filesystem_vault_workspace() {
         .stdout(contains("# Graph health"));
 }
 
-/// `memstead entity <id>` on a filesystem-vault workspace dispatches via
+/// `memstead entity <id>` on a filesystem-mem workspace dispatches via
 /// the `CliEngine::Filesystem` arm and reads the entity from the
 /// directory walk. Pre-CLI-parity this errored with the
-/// "No vaults found" bail; post the foundation it round-trips.
+/// "No mems found" bail; post the foundation it round-trips.
 #[test]
-fn entity_works_on_filesystem_vault_workspace() {
+fn entity_works_on_filesystem_mem_workspace() {
     let tmp = TempDir::new().unwrap();
     memstead()
         .current_dir(tmp.path())
@@ -344,11 +344,11 @@ level: M0
 
 ## Identity
 
-A filesystem-vault entity exercising CLI parity.
+A filesystem-mem entity exercising CLI parity.
 
 ## Purpose
 
-Lets `memstead entity` round-trip without the vault-repo path.
+Lets `memstead entity` round-trip without the mem-repo path.
 "#,
     )
     .unwrap();
@@ -366,7 +366,7 @@ Lets `memstead entity` round-trip without the vault-repo path.
 #[test]
 fn entity_not_found_exit_code_3() {
     let tmp = TempDir::new().unwrap();
-    let _vault = seed_cli_test_vault(tmp.path());
+    let _mem = seed_cli_test_mem(tmp.path());
 
     memstead()
         .current_dir(tmp.path())
@@ -377,22 +377,22 @@ fn entity_not_found_exit_code_3() {
         .stderr(contains("Entity not found"));
 }
 
-/// A missing/unmatched `--vault` is a not-found condition — exit 3 on
+/// A missing/unmatched `--mem` is a not-found condition — exit 3 on
 /// every command, the same bucket as the `entity <missing>` precedent
-/// above. Locks the uniform `UNKNOWN_VAULT` → `NotFound` mapping across
+/// above. Locks the uniform `UNKNOWN_MEM` → `NotFound` mapping across
 /// the read-scoped read path (`search`/`list`), `changes`, and the
 /// engine-error path (`reload`). Measured standalone, not through a
 /// pipe — a pipe would mask the exit through the last process.
 #[test]
-fn unknown_vault_exit_code_3() {
+fn unknown_mem_exit_code_3() {
     let tmp = TempDir::new().unwrap();
-    let _vault = seed_cli_test_vault(tmp.path());
+    let _mem = seed_cli_test_mem(tmp.path());
 
     for args in [
-        vec!["search", "x", "--vault", "nope"],
-        vec!["list", "--vault", "nope"],
-        vec!["reload", "--vault", "nope"],
-        vec!["changes", "--since", "HEAD", "--vault", "nope"],
+        vec!["search", "x", "--mem", "nope"],
+        vec!["list", "--mem", "nope"],
+        vec!["reload", "--mem", "nope"],
+        vec!["changes", "--since", "HEAD", "--mem", "nope"],
     ] {
         memstead()
             .current_dir(tmp.path())
@@ -406,7 +406,7 @@ fn unknown_vault_exit_code_3() {
 #[test]
 fn entity_not_found_json_envelope() {
     let tmp = TempDir::new().unwrap();
-    let _vault = seed_cli_test_vault(tmp.path());
+    let _mem = seed_cli_test_mem(tmp.path());
 
     let assert = memstead()
         .current_dir(tmp.path())
@@ -433,7 +433,7 @@ fn entity_not_found_json_envelope() {
 #[test]
 fn relations_markdown() {
     let tmp = TempDir::new().unwrap();
-    let _vault = seed_cli_test_vault(tmp.path());
+    let _mem = seed_cli_test_mem(tmp.path());
 
     memstead()
         .current_dir(tmp.path())
@@ -447,7 +447,7 @@ fn relations_markdown() {
 #[test]
 fn search_finds_entity() {
     let tmp = TempDir::new().unwrap();
-    let _vault = seed_cli_test_vault(tmp.path());
+    let _mem = seed_cli_test_mem(tmp.path());
 
     memstead()
         .current_dir(tmp.path())
@@ -460,7 +460,7 @@ fn search_finds_entity() {
 #[test]
 fn list_all() {
     let tmp = TempDir::new().unwrap();
-    let _vault = seed_cli_test_vault(tmp.path());
+    let _mem = seed_cli_test_mem(tmp.path());
 
     memstead()
         .current_dir(tmp.path())
@@ -474,7 +474,7 @@ fn list_all() {
 #[test]
 fn overview_runs() {
     let tmp = TempDir::new().unwrap();
-    let _vault = seed_cli_test_vault(tmp.path());
+    let _mem = seed_cli_test_mem(tmp.path());
 
     memstead()
         .current_dir(tmp.path())
@@ -484,7 +484,7 @@ fn overview_runs() {
 }
 
 /// Pro CLI's overview command renders the rich content (community
-/// bridges, vault distribution, dangling links) via the shared
+/// bridges, mem distribution, dangling links) via the shared
 /// `memstead-engine::overview::compose_overview` composer. The pro CLI
 /// renders the content directly: when `--include` is passed the
 /// `OVERVIEW_RICH_CONTENT_PRO_ONLY` (formerly `mcp_only_notice`)
@@ -492,19 +492,19 @@ fn overview_runs() {
 #[test]
 fn overview_with_include_renders_rich_content_without_pro_only_warning() {
     let tmp = TempDir::new().unwrap();
-    let _vault = seed_cli_test_vault(tmp.path());
+    let _mem = seed_cli_test_mem(tmp.path());
 
     memstead()
         .current_dir(tmp.path())
         .args([
             "overview",
             "--include",
-            "vault_distribution,community_bridges,dangling_links",
+            "mem_distribution,community_bridges,dangling_links",
         ])
         .assert()
         .success()
         .stdout(contains("## Schemas"))
-        .stdout(contains("## Vaults"))
+        .stdout(contains("## Mems"))
         // The basis CLI's pre-lift output would have included this
         // warning code; the pro CLI's shared-composer path does NOT.
         .stdout(predicates::str::contains("OVERVIEW_RICH_CONTENT_PRO_ONLY").not())
@@ -516,7 +516,7 @@ fn overview_with_include_renders_rich_content_without_pro_only_warning() {
 #[test]
 fn type_named() {
     let tmp = TempDir::new().unwrap();
-    let _vault = seed_cli_test_vault(tmp.path());
+    let _mem = seed_cli_test_mem(tmp.path());
 
     memstead()
         .current_dir(tmp.path())
@@ -530,7 +530,7 @@ fn type_named() {
 #[test]
 fn health_summary() {
     let tmp = TempDir::new().unwrap();
-    let _vault = seed_cli_test_vault(tmp.path());
+    let _mem = seed_cli_test_mem(tmp.path());
 
     memstead()
         .current_dir(tmp.path())
@@ -541,12 +541,12 @@ fn health_summary() {
         .stdout(contains("Entities: 2"));
 }
 
-/// Seed a workspace whose vault uses a custom schema with one
+/// Seed a workspace whose mem uses a custom schema with one
 /// `required_outgoing` block (decision needs CHOSEN). When
 /// `with_violation` is true, a single decision entity is authored
 /// without any CHOSEN edge so `memstead_health
 /// include=missing_required_outgoing` reports one violator;
-/// otherwise the vault has no entities and the report is empty.
+/// otherwise the mem has no entities and the report is empty.
 fn seed_strict_health_workspace(root: &Path, with_violation: bool) {
     // Authored schema at the fixed folder-backend location
     // (`<workspace>/.memstead/schemas/`); the `schemas_dir` key is retired.
@@ -617,17 +617,17 @@ required_outgoing:
     )
     .unwrap();
 
-    let vault_dir = root.join("strictvault");
-    fs::create_dir_all(vault_dir.join(".memstead")).unwrap();
+    let mem_dir = root.join("strictmem");
+    fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
     fs::write(
-        vault_dir.join(".memstead").join("config.json"),
+        mem_dir.join(".memstead").join("config.json"),
         r#"{ "schema": "strictdecision@0.1.0" }"#,
     )
     .unwrap();
 
     if with_violation {
         fs::write(
-            vault_dir.join("violator.md"),
+            mem_dir.join("violator.md"),
             r#"---
 type: decision
 created_date: 2026-01-01
@@ -644,7 +644,7 @@ A decision entity authored without any CHOSEN edge — exercises the
         .unwrap();
     }
 
-    init_real_vault_repo_from_disk(root, &[(&vault_dir, "strictvault")]);
+    init_real_mem_repo_from_disk(root, &[(&mem_dir, "strictmem")]);
 }
 
 #[test]

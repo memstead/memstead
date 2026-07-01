@@ -335,7 +335,7 @@ fn check_wiki_links(body: &str, path: &str) -> Result<(), ValidationError> {
             return Err(ValidationError::InvalidWikiLink {
                 path: path.to_string(),
                 link: format!("[[{inner}]]"),
-                reason: "reserved `::` cross-vault syntax is not accepted".to_string(),
+                reason: "reserved `::` cross-mem syntax is not accepted".to_string(),
             });
         }
         let target = match inner.find('|') {
@@ -350,11 +350,11 @@ fn check_wiki_links(body: &str, path: &str) -> Result<(), ValidationError> {
             });
         }
 
-        // Delegate the slug / vault grammar checks to the shared
+        // Delegate the slug / mem grammar checks to the shared
         // strict resolver. The validator passes an empty current
-        // vault — the strict resolver's self-prefix-strip step is
+        // mem — the strict resolver's self-prefix-strip step is
         // skipped (it's a Tier-1 convenience; the grammar gate fires
-        // before it), so the grammar outcome is vault-independent.
+        // before it), so the grammar outcome is mem-independent.
         if let Err(e) = wiki_link_to_id(inner, "") {
             return Err(ValidationError::InvalidWikiLink {
                 path: path.to_string(),
@@ -597,7 +597,7 @@ Design notes.
     }
 
     #[test]
-    fn accepts_tier_two_cross_vault_link() {
+    fn accepts_tier_two_cross_mem_link() {
         let content = format!(
             "{MINIMAL_SPEC}\nSee [[engine:health]] and [[engine:architecture/result]] for more.\n"
         );
@@ -605,7 +605,7 @@ Design notes.
         validate(&content, &entity).unwrap();
     }
 
-    /// Hierarchical vault paths are first-class. The install-side check
+    /// Hierarchical mem paths are first-class. The install-side check
     /// converges onto `wiki_link_to_id`, which already accepts
     /// hierarchical Tier-2 prefixes — install no longer rejects what
     /// create produces.
@@ -651,9 +651,9 @@ Design notes.
     }
 
     #[test]
-    fn rejects_reserved_cross_vault_syntax() {
+    fn rejects_reserved_cross_mem_syntax() {
         let content = format!(
-            "{MINIMAL_SPEC}\nSee [[other-vault::entity]] for details.\n"
+            "{MINIMAL_SPEC}\nSee [[other-mem::entity]] for details.\n"
         );
         let entity = parse(&content);
         let err = validate(&content, &entity).unwrap_err();

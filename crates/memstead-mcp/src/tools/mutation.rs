@@ -9,7 +9,7 @@ use rmcp::schemars;
 /// what outer-repo session-bundling hooks aggregate per session.
 pub(crate) const NOTE_PARAM_DESCRIPTION: &str =
     "Agent-authored provenance note (≤280 chars, one sentence describing \
-     why this mutation happened). Lands in the per-vault commit body between \
+     why this mutation happened). Lands in the per-mem commit body between \
      the mechanical subject line and the provenance trailers (`Tool:`, \
      `Actor:`, `Client:`), and is surfaced by the outer-repo Stop hook when \
      aggregating session activity. Omit for pure-housekeeping edits; when \
@@ -21,14 +21,14 @@ pub(crate) const NOTE_PARAM_DESCRIPTION: &str =
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CreateParams {
-    #[schemars(description = "Entity title (ID is derived automatically as vault--slug(title))")]
+    #[schemars(description = "Entity title (ID is derived automatically as mem--slug(title))")]
     pub title: String,
     #[schemars(
-        description = "Entity type. Required. Allowed values are pinned by the target vault's schema — fetch them via `memstead_schema(name=<vault.schema_ref>)` (cached per session). Unknown types refuse with `UNKNOWN_ENTITY_TYPE`."
+        description = "Entity type. Required. Allowed values are pinned by the target mem's schema — fetch them via `memstead_schema(name=<mem.schema_ref>)` (cached per session). Unknown types refuse with `UNKNOWN_ENTITY_TYPE`."
     )]
     pub entity_type: String,
-    #[schemars(description = "Vault name (directory name of the write vault)")]
-    pub vault: Option<String>,
+    #[schemars(description = "Mem name (directory name of the write mem)")]
+    pub mem: Option<String>,
     #[schemars(description = "Section contents: { \"identity\": \"...\", \"purpose\": \"...\" }")]
     pub sections: Option<IndexMap<String, String>>,
     #[schemars(description = "Metadata overrides: { \"level\": \"M1\", \"tags\": \"a, b\" }")]
@@ -84,7 +84,7 @@ pub struct UpdateParams {
     #[schemars(description = "Metadata fields to set: { \"level\": \"M1\" }")]
     pub metadata: Option<IndexMap<String, String>>,
     #[schemars(
-        description = "Metadata keys to remove. Silent no-op if absent. Errors on read-only fields (vault, id, type, plus the engine-stamped created_date / last_modified) and on schema-required fields. Cannot overlap with `metadata` keys — pass one or the other per key."
+        description = "Metadata keys to remove. Silent no-op if absent. Errors on read-only fields (mem, id, type, plus the engine-stamped created_date / last_modified) and on schema-required fields. Cannot overlap with `metadata` keys — pass one or the other per key."
     )]
     pub metadata_unset: Option<Vec<String>>,
     #[schemars(
@@ -92,7 +92,7 @@ pub struct UpdateParams {
     )]
     pub dry_run: Option<bool>,
     #[schemars(
-        description = "Atomic batched relation declarations applied before the section/metadata changes land. Each `{ to, type }` is validated like a `memstead_relate` call (schema-shape, cross-vault policy, target-id grammar) and appended to the entity's relations; absent Write-vault targets are auto-stubbed identically to the relate path. The strict wiki-link/relation validator then runs against the post-mutation state with the freshly-declared relations in place — so adding a `[[target]]` body wiki-link + declaring the backing `REFERENCES` relation can land in a single `memstead_update` call (without `declare_relations`, the post-migration strict validator would refuse the body link). Each successful entry is echoed in `relations_declared` on the response with `target_was_stubbed` flagging whether the target was absent at call time. Omit for mutations that don't introduce new relations."
+        description = "Atomic batched relation declarations applied before the section/metadata changes land. Each `{ to, type }` is validated like a `memstead_relate` call (schema-shape, cross-mem policy, target-id grammar) and appended to the entity's relations; absent Write-mem targets are auto-stubbed identically to the relate path. The strict wiki-link/relation validator then runs against the post-mutation state with the freshly-declared relations in place — so adding a `[[target]]` body wiki-link + declaring the backing `REFERENCES` relation can land in a single `memstead_update` call (without `declare_relations`, the post-migration strict validator would refuse the body link). Each successful entry is echoed in `relations_declared` on the response with `target_was_stubbed` flagging whether the target was absent at call time. Omit for mutations that don't introduce new relations."
     )]
     pub declare_relations: Option<Vec<RelationInput>>,
     #[schemars(
