@@ -43,4 +43,4 @@ This project accepts external contributions, with a few guardrails — see [CONT
 
 ## Questions
 
-For licensing questions, including commercial licensing of the macOS application or the registry server, or alternative-license requests for the engine, contact dasboe@me.com.
+For licensing questions, including commercial licensing of the macOS application or the registry server, or alternative-license requests for the engine, contact hello@memstead.com.

@@ -16,7 +16,7 @@ If you believe you have found a security issue in Memstead — the engine, the C
 
 Instead, send the report by email to:
 
-**dasboe@me.com**
+**security@memstead.com**
 
 Subject line: `[Memstead security] <short description>`
 
