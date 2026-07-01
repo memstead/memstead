@@ -213,8 +213,7 @@ pub enum MountLifecycle {
 /// the macOS app's in-memory builder construct `Workspace` directly.
 ///
 /// V1 carries the mount list and operator policy. Plugin hooks and
-/// pipeline-config handles attach as subsequent sessions move them
-/// out of the legacy `.mdgv.toml` shape — additive fields, no breaking
+/// pipeline-config handles attach as additive fields — no breaking
 /// changes expected.
 #[derive(Debug, Clone, Default)]
 pub struct Workspace {

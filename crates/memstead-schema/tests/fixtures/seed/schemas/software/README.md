@@ -1,6 +1,6 @@
 # `software` — schema for software-project vaults
 
-Workspace-level schema for every vault that pins `"schema": "software"` in its `.mdgv/config.json`. Nine types organized around four questions a software-project graph must answer:
+Workspace-level schema for every vault that pins `"schema": "software"` in its `.memstead/config.json`. Nine types organized around four questions a software-project graph must answer:
 
 | Pillar | Types |
 |---|---|
@@ -14,7 +14,7 @@ The graph's value comes from type diversity. A graph dominated by any one type �
 
 ## Location
 
-This schema lives at the workspace level and is shared by every vault that pins it. The workspace's `.mdgv.toml` declares `schemas_dir = "schemas"`, and every `schemas/<name>/` directory is discovered at load time. No per-vault copying is required — a vault's `.mdgv/config.json` just references the schema by name.
+This schema lives at the workspace level and is shared by every vault that pins it. The workspace's `.memstead/workspace.toml` declares `schemas_dir = "schemas"`, and every `schemas/<name>/` directory is discovered at load time. No per-vault copying is required — a vault's `.memstead/config.json` just references the schema by name.
 
 Local usage is **unversioned**: a vault simply writes `"schema": "software"` and the engine resolves against this directory. The `version:` field in `schema.yaml` is metadata preserved for publish/archive workflows; it is not a pin.
 

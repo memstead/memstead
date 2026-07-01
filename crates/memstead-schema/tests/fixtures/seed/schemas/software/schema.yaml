@@ -13,8 +13,9 @@
 # Strict relationship vocabulary: 37 default edges + 5 software-specific
 # (REALIZES, OWNS, MAINTAINS, VIOLATES, DEPRECATES).
 #
-# Copy this directory into <vault>/.mdgv/schemas/software/ and pin
-# "schema": "software@0.1.0" in the vault's .mdgv/config.json.
+# Copy this directory into the workspace-level schemas dir (schemas_dir
+# in .memstead/workspace.toml, conventionally <workspace>/schemas/software/)
+# and pin "schema": "software@0.1.0" in the vault's .memstead/config.json.
 # ─────────────────────────────────────────────────────────────────────────────
 
 name: software

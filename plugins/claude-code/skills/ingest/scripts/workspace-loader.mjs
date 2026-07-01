@@ -15,10 +15,9 @@
  * Per-vault config (`schema`, `writeGuidance`, `description`), per-vault
  * `snapshot_token`, and per-schema `default_writing_guidance` come from
  * `memstead workspace dump --json` — invoked once per `loadWorkspace` call.
- * The plugin no longer reads `<vault>/.mdgv/config.json`, no longer
+ * The plugin no longer reads `<vault>/.memstead/config.json`, no longer
  * walks vault `**.md` for backoff hashes, and no longer reads schema
- * YAML from disk. The engine's storage backend (vault-db-git or
- * legacy disk-flat) is private to it.
+ * YAML from disk. The engine's storage backend is private to it.
  *
  * Exports:
  *   loadWorkspace(workspaceRoot, opts?) → workspace bundle

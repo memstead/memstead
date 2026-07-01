@@ -21,8 +21,7 @@
 pub use memstead_base::workspace::MutationsSection;
 
 /// Default token budget when the workspace's `[mcp].token_budget` is
-/// unset. Mirrors the pre-rebuild constant that lived alongside the
-/// `.mdgv.toml` parser.
+/// unset. Read from `.memstead/workspace.toml`.
 pub const DEFAULT_TOKEN_BUDGET: usize = 10_000;
 
 /// Partition `requested` into (effective disabled-set, unknown names)

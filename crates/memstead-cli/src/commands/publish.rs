@@ -39,8 +39,7 @@ use crate::setup::{CliContext, CliEngine};
 
 #[derive(Parser, Debug)]
 pub struct Args {
-    /// Path to a `.mem` archive on disk (a legacy `.mstd`/`.mdgv` file is
-    /// accepted during the rename window). Omit to assemble the
+    /// Path to a `.mem` archive on disk. Omit to assemble the
     /// archive from the surrounding filesystem-vault workspace
     /// (walks up from cwd looking for `.memstead/config.json`).
     #[arg(value_name = "PATH")]

@@ -33,13 +33,11 @@ pub const VAULT_META_DIR: &str = ".memstead";
 //
 // A sealed archive is a zip whose engine-internal members live under one
 // meta directory: `.memstead/config.json` plus the embedded schema tree
-// `.memstead/schema/…` — the sole member layout. The canonical file
-// extension is `.mem`; readers also tolerate the prior `.mstd`
-// extension, falling back and surfacing a `LEGACY_ARCHIVE_FORMAT`
-// warning. Every writer emits the new spelling only. Defined here
-// because this is the lowest crate every archive reader/writer
-// (memstead-base, memstead-git-branch, memstead-registry,
-// memstead-wasm, the CLIs) already depends on.
+// `.memstead/schema/…` — the sole member layout. The file extension is
+// `.mem` — the sole spelling, read and written. Defined here because
+// this is the lowest crate every archive reader/writer (memstead-base,
+// memstead-git-branch, memstead-registry, memstead-wasm, the CLIs)
+// already depends on.
 
 /// In-zip meta directory of a sealed archive — the only spelling.
 pub const ARCHIVE_META_DIR: &str = ".memstead";
@@ -53,18 +51,10 @@ pub const ARCHIVE_SCHEMA_PREFIX: &str = ".memstead/schema/";
 /// predating provenance omit it, and an engine that does not recognise it
 /// tolerates it as an unknown meta member.
 pub const ARCHIVE_PROVENANCE_PATH: &str = ".memstead/provenance.json";
-/// File extension (without dot) of a sealed archive (current spelling).
+/// File extension (without dot) of a sealed archive — the sole spelling.
 /// The one deliberately-distinct token in a project that is otherwise
 /// "memstead" everywhere — short, and derived from the project name.
 pub const ARCHIVE_EXTENSION: &str = "mem";
-/// Pre-canonical file extensions (without dot), read-tolerated and
-/// never written. Holds `mstd`, the immediately preceding extension —
-/// a `.mstd` archive still reads (its member layout was already the
-/// current `.memstead/` spelling) and surfaces a `LEGACY_ARCHIVE_FORMAT`
-/// warning naming re-export to `.mem`; writers emit `ARCHIVE_EXTENSION`
-/// only. The original `.mdgv` extension and `.mdgv/` member layout are
-/// no longer tolerated.
-pub const LEGACY_ARCHIVE_EXTENSIONS: &[&str] = &["mstd"];
 
 // ---------------------------------------------------------------------------
 // Error types
@@ -136,9 +126,7 @@ pub struct CommunityOverride {
 /// The engine resolves each entry to a cache file: when `cache_key` is
 /// present, `<vault_cache_dir>/<name>-<cache_key>.mem` (content-addressed
 /// — see [`ReadVaultSpec::cache_key`]); otherwise the legacy
-/// `<vault_cache_dir>/<name>.mem`. Cache files written before the
-/// extension rename carry a `.mstd` extension; the loader falls back to
-/// that spelling.
+/// `<vault_cache_dir>/<name>.mem`.
 ///
 /// Kept as a struct (rather than collapsing to a bare `ReadVaultSource`)
 /// so forward-compatible fields can be added without another schema break.
@@ -373,7 +361,7 @@ pub struct VaultConfig {
     pub language: Option<String>,
     /// Read-only sealed-archive vaults attached to this vault as reference
     /// material. Key is the vault name (matches the archive's
-    /// `mdgv.json.name`). Engine resolves each entry to
+    /// config name). Engine resolves each entry to
     /// `<vault_cache_dir>/<name>.mem` at init time. An empty or omitted
     /// map means no attached vaults — a graph with no reference material.
     ///
@@ -490,10 +478,9 @@ pub struct PublishedVaultConfig {
 
 /// Archive format integer written to the archive config's `format`
 /// field. Bumped to `3` for the schema-path relocation (embedded schema
-/// moved from top-level `schema/` to the meta-dir schema tree). `format: 1` (V1,
-/// legacy `mdgv.json`) and `format: 2` (V2, top-level `schema/` tree)
-/// archives are rejected cleanly (pre-release, no external users to
-/// migrate).
+/// moved from top-level `schema/` to the meta-dir schema tree). `format: 1` (V1)
+/// and `format: 2` (V2, top-level `schema/` tree) archives are rejected
+/// cleanly (pre-release, no external users to migrate).
 pub const PUBLISHED_VAULT_FORMAT: u32 = 3;
 
 /// Errors returned by `published_config_from`. Actionable messages —
@@ -667,8 +654,8 @@ pub fn check_config(config: &Value) -> ConfigCheckResult {
     // 4. Read-vaults map — source presence and shape.
     //    Cache-file existence is checked at engine init (`Engine::init`
     //    via `vault_cache`), not here, so isolated schema tests don't
-    //    need real archive fixture files. The cached archive's `mdgv.json`
-    //    is authoritative for the version; no `version` or `path` is
+    //    need real archive fixture files. The cached archive's config is
+    //    authoritative for the version; no `version` or `path` is
     //    recorded in the config entry.
     if let Some(Value::Object(vaults)) = obj.get("readVaults") {
         for (name, spec) in vaults {
@@ -1423,7 +1410,7 @@ mod tests {
     }
 
     // --- readVaults: `{ source: { type, … } }` entries — no path or
-    //     version fields (the cached archive's mdgv.json is authoritative) ---
+    //     version fields (the cached archive's config is authoritative) ---
 
     #[test]
     fn parse_accepts_read_vaults_with_local_source() {

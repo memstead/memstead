@@ -74,8 +74,7 @@ pub fn load_vault(
     )
 }
 
-/// Load all entities from a sealed `.mem` vault archive (legacy
-/// `.mdgv`-layout archives are read-tolerated).
+/// Load all entities from a sealed `.mem` vault archive.
 ///
 /// Shape-identical to `load_vault` — opens the zip, yields one
 /// `ParseResult` per `.md` entry, collects per-file errors. The

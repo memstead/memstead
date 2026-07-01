@@ -1819,7 +1819,7 @@ mod tests {
         .unwrap();
         <GitTreeVaultWriter as VaultWriter>::write_entity(
             &writer,
-            Path::new(".mdgv/notes.md"),
+            Path::new(".other/notes.md"),
             b"# no longer special, walked like any non-meta dir",
         )
         .unwrap();
@@ -1833,11 +1833,11 @@ mod tests {
             .map(|p| p.to_string_lossy().into_owned())
             .collect();
         paths.sort();
-        // `.memstead/` stays skipped; `.mdgv/` is now an ordinary dir.
+        // `.memstead/` stays skipped; an ordinary dot-dir is walked.
         assert_eq!(
             paths,
             vec![
-                ".mdgv/notes.md".to_string(),
+                ".other/notes.md".to_string(),
                 "a.md".to_string(),
                 "nested/b.md".to_string(),
             ]

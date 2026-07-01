@@ -20,7 +20,7 @@ What this skill must achieve. Use this as the reference when tuning SKILL.md.
 
 Same as the Stop hook. Subject `memstead: session changes (N entities, M
 vaults)`; body carries `Agent notes:` and `External edits captured:`
-subsections; trailer block includes `Vaults:` and one `Memstead-cursor: (legacy Mdgv-cursor: read-tolerated)`
+subsections; trailer block includes `Vaults:` and one `Memstead-cursor:`
 entry per writable vault. The `Session:` trailer is present on hook
 commits and omitted on skill commits — that is the only difference
 between the two paths.

@@ -291,7 +291,7 @@ describe('renderResolvedGuidance', () => {
 // ── End-to-end against representative schema YAML ───────────────────────
 //
 // Before the engine-owns-vault-repo rule these tests read shipping
-// schema YAML directly from `mdgv/vault-repo/schemas/...` and asserted
+// schema YAML directly from the vault-repo `schemas/...` tree and asserted
 // properties of the ON-DISK content. Two concerns conflated: extractor
 // behaviour, and "is the shipping schema's prose correct." The plan
 // migrates the plugin off direct vault-repo file reads — so this block

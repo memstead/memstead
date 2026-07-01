@@ -27,7 +27,7 @@ pub use archive_provenance::{
 pub use config::{
     ARCHIVE_CONFIG_PATH, ARCHIVE_EXTENSION, ARCHIVE_META_DIR, ARCHIVE_PROVENANCE_PATH,
     ARCHIVE_SCHEMA_PREFIX,
-    CommunityOverride, ConfigCheckResult, ConfigError, LEGACY_ARCHIVE_EXTENSIONS,
+    CommunityOverride, ConfigCheckResult, ConfigError,
     PUBLISHED_VAULT_FORMAT, PublishConfig, PublishConversionError, PublishedVaultConfig,
     ReadVaultSource, ReadVaultSpec, RoleConfig, SchemaRef, VAULT_META_DIR, VaultConfig,
     VcsConfig, check_config, load_and_validate, load_config, parse_vault_config,

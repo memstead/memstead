@@ -179,17 +179,6 @@ pub fn extract_entries(
             && !path_string.ends_with(".md")
             && !path_string.starts_with(ARCHIVE_SCHEMA_PREFIX);
         if !is_config && !is_markdown && !is_schema && !is_provenance && !is_ignored_meta {
-            // `mdgv.json` at the root is the V1-format manifest that V2
-            // replaced with a whitelisted meta-dir config. Surface
-            // the actionable re-export hint here so the caller sees
-            // "legacy vault format" instead of a generic "unknown file
-            // type", which would point them at a removed feature.
-            if path_string == "mdgv.json" {
-                return Err(ValidationError::InvalidConfig {
-                    reason: "legacy vault format — re-export via `memstead export`"
-                        .to_string(),
-                });
-            }
             return Err(ValidationError::UnknownFile(path_string));
         }
 
@@ -406,42 +395,22 @@ mod tests {
         );
     }
 
-    /// The legacy `.mdgv/` member layout is no longer tolerated: a
-    /// pre-rename archive whose meta members live under `.mdgv/` no
-    /// longer extracts — the members fall outside the `.memstead/`
-    /// whitelist and the archive is rejected as containing unknown
-    /// files. (`.mstd`-extension archives still read because their
-    /// members already used `.memstead/`.)
-    #[test]
-    fn rejects_legacy_mdgv_layout() {
-        let zip = build_archive(&[
-            (".mdgv/config.json", ok_config()),
-            ("foo.md", b"# Foo\n"),
-            (".mdgv/schema/schema.yaml", b"name: default\n"),
-        ]);
-        let err = extract_entries(&zip, &ValidatorLimits::DEFAULT).unwrap_err();
-        assert!(
-            matches!(err, ValidationError::UnknownFile(_) | ValidationError::MissingConfig),
-            "legacy `.mdgv/` layout must be rejected, got {err:?}"
-        );
-    }
-
-    /// A meta member under the no-longer-tolerated `.mdgv/` spelling
-    /// alongside a current `.memstead/` config is rejected — the
-    /// `.mdgv/` member falls outside the whitelist.
+    /// A meta member under a foreign (non-`.memstead/`) dir alongside a
+    /// current `.memstead/` config is rejected — it falls outside the
+    /// whitelist. Guards that only `.memstead/` is the tolerated layout.
     #[test]
     fn rejects_mixed_meta_dir_layout() {
         let zip = build_archive(&[
             (".memstead/config.json", ok_config()),
-            (".mdgv/schema/schema.yaml", b"name: default\n"),
+            (".other/schema/schema.yaml", b"name: default\n"),
             ("foo.md", b"# Foo\n"),
         ]);
         let err = extract_entries(&zip, &ValidatorLimits::DEFAULT).unwrap_err();
         match err {
             ValidationError::UnknownFile(path) => {
-                assert!(path.starts_with(".mdgv/"), "path={path}");
+                assert!(path.starts_with(".other/"), "path={path}");
             }
-            other => panic!("expected UnknownFile for the `.mdgv/` member, got {other:?}"),
+            other => panic!("expected UnknownFile for the foreign meta member, got {other:?}"),
         }
     }
 
@@ -544,23 +513,19 @@ mod tests {
         assert!(matches!(err, ValidationError::UnknownFile(_)));
     }
 
+    /// An unknown root-level file (not part of the whitelist) is
+    /// rejected as an unknown file — no special-casing survives.
     #[test]
-    fn rejects_legacy_memstead_json_with_actionable_message() {
-        // V1 archives shipped a `mdgv.json` manifest alongside the
-        // config. V2 dropped it. Surface the re-export hint here so
-        // callers don't hit "unknown file type" for a historically
-        // first-class manifest name.
+    fn rejects_unknown_root_file() {
         let zip = build_archive(&[
             (".memstead/config.json", ok_config()),
-            ("mdgv.json", br#"{"format":3,"name":"v","version":"0.1.0"}"#),
+            ("some-root.json", br#"{"format":3,"name":"v","version":"0.1.0"}"#),
         ]);
         let err = extract_entries(&zip, &ValidatorLimits::DEFAULT).unwrap_err();
-        match err {
-            ValidationError::InvalidConfig { reason } => {
-                assert!(reason.contains("legacy vault format"), "reason={reason}");
-            }
-            other => panic!("expected legacy InvalidConfig, got {other:?}"),
-        }
+        assert!(
+            matches!(err, ValidationError::UnknownFile(ref p) if p == "some-root.json"),
+            "unknown root file must be rejected as UnknownFile, got {err:?}"
+        );
     }
 
     #[test]

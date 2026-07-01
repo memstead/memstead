@@ -78,7 +78,7 @@ describe('findVaultDir', () => {
   });
 
   it('returns empty string when no --vault found', () => {
-    const config = { mcpServers: { memstead: { args: ['--read-vault', 'file.mdgv'] } } };
+    const config = { mcpServers: { memstead: { args: ['--read-vault', 'file.mem'] } } };
     assert.equal(findVaultDir(config), '');
   });
 
@@ -127,7 +127,7 @@ describe('findAllVaultDirs', () => {
   });
 
   it('returns empty array when no --vault found', () => {
-    const config = { mcpServers: { memstead: { args: ['--read-vault', 'file.mdgv'] } } };
+    const config = { mcpServers: { memstead: { args: ['--read-vault', 'file.mem'] } } };
     assert.deepEqual(findAllVaultDirs(config), []);
   });
 

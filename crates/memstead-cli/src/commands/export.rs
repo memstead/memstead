@@ -337,9 +337,9 @@ fn default_output_path(
 ) -> anyhow::Result<PathBuf> {
     let version = config.version.as_ref().ok_or_else(|| {
         // F1: typed envelope replaces the pre-fix INTERNAL-collapse
-        // path that named `.mdgv/config.json` (wrong layout for the
-        // vault-repo backend — config lives at
-        // `__MEMSTEAD:vaults/<name>/config.json`). The recovery hint
+        // path (config lives at
+        // `__MEMSTEAD:vaults/<name>/config.json` for the vault-repo
+        // backend). The recovery hint
         // names the engine-owned setter that mutates the right
         // surface for whichever backend serves the vault.
         CliError::from_engine_op(memstead_base::EngineError::VaultConfigIncomplete {

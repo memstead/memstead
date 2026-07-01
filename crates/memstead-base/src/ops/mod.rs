@@ -750,15 +750,6 @@ pub enum WarningHint {
         rel_type: String,
         target: EntityId,
     },
-    /// An install / read path accepted a sealed archive that carries
-    /// the prior `.mstd` file extension. The operation succeeded — the
-    /// `.mstd` extension is read-tolerated during the rename window —
-    /// but the producer should re-export to get a `.mem` archive.
-    LegacyArchiveFormat {
-        /// Path (or other display handle) of the archive that
-        /// exercised the legacy path.
-        archive: String,
-    },
     /// A vault's `Mount.schema` expectation (the pin recorded in the
     /// workspace `mounts.json`) disagreed with the authoritative pin in
     /// the vault's own per-vault config. Boot resolves the effective
@@ -916,10 +907,6 @@ impl fmt::Display for WarningHint {
                 "vault '{vault}': the workspace mount expects schema '{mount_pin}' but the \
                  vault's own config pins '{config_pin}' — the config pin is authoritative and \
                  was used; align the mounts.json entry or the vault config to clear this"
-            ),
-            WarningHint::LegacyArchiveFormat { archive } => write!(
-                f,
-                "archive '{archive}' uses the prior `.mstd` extension — the operation succeeded, but re-export the vault to produce a `.mem` archive; legacy support is a transition window"
             ),
             WarningHint::MissingRequiredSection {
                 key,
@@ -1451,7 +1438,6 @@ impl WarningHint {
             Self::MissingRequiredOutgoing { .. } => "MISSING_REQUIRED_OUTGOING",
             Self::DuplicateSectionHeading { .. } => "DUPLICATE_SECTION_HEADING",
             Self::VaultReloaded { .. } => "VAULT_RELOADED",
-            Self::LegacyArchiveFormat { .. } => "LEGACY_ARCHIVE_FORMAT",
             Self::SchemaPinMismatch { .. } => "SCHEMA_PIN_MISMATCH",
             Self::AutoStubCreated { .. } => "AUTO_STUB_CREATED",
             Self::SelfLinkIgnored { .. } => "SELF_LINK_IGNORED",
@@ -1562,9 +1548,6 @@ impl WarningHint {
             WarningHint::SearchResultsTruncated {
                 kept: 12,
                 budget: 12_000,
-            },
-            WarningHint::LegacyArchiveFormat {
-                archive: "example.mstd".into(),
             },
             WarningHint::TitleNormalizedToSlugNoop {
                 requested_title: "Hello World!".into(),
@@ -1752,9 +1735,6 @@ impl WarningHint {
             Self::UnknownIncludeKey { key, allowed } => {
                 serde_json::json!({ "key": key, "allowed": allowed })
             }
-            Self::LegacyArchiveFormat { archive } => serde_json::json!({
-                "archive": archive,
-            }),
             Self::LimitClamped { requested, actual } => {
                 serde_json::json!({ "requested": requested, "actual": actual })
             }

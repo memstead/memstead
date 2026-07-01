@@ -1,6 +1,5 @@
 //! Tier 3 wiki-link resolution against cached
-//! `.memstead/memstead-io/<scope>/<name>.mem` archives (prior `.mstd`
-//! caches stay readable).
+//! `.memstead/memstead-io/<scope>/<name>.mem` archives.
 //!
 //! ## What Tier 3 means in filesystem-vault context
 //!
@@ -52,9 +51,7 @@ pub struct Tier3Ref {
 
 impl Tier3Ref {
     /// On-disk path of the cached archive for this dep, given the
-    /// workspace root. This is the *write* path (`.mem`); resolution
-    /// additionally falls back to a prior `.mstd` cache file via
-    /// [`Tier3Ref::resolve`].
+    /// workspace root — the `.mem` cache file.
     pub fn cache_path(&self, workspace_root: &Path) -> PathBuf {
         self.cache_dir(workspace_root)
             .join(format!("{}.{}", self.name, memstead_schema::ARCHIVE_EXTENSION))
@@ -76,25 +73,14 @@ impl Tier3Ref {
     /// Returns [`Tier3ResolveError`] when the cache file is missing,
     /// the archive cannot be read, or the slug is not present.
     pub fn resolve(&self, workspace_root: &Path) -> Result<EntityId, Tier3ResolveError> {
-        // `.mem` is what `memstead link` writes today; a `.mstd` sibling
-        // is a prior cache file — keep loading it during the legacy
-        // window.
+        // `.mem` is what `memstead link` writes — the sole cache spelling.
         let cache_path = self.cache_path(workspace_root);
-        let cache_dir = self.cache_dir(workspace_root);
-        let cache_path = if cache_path.is_file() {
-            cache_path
-        } else if let Some(legacy_path) = memstead_schema::LEGACY_ARCHIVE_EXTENSIONS
-            .iter()
-            .map(|ext| cache_dir.join(format!("{}.{ext}", self.name)))
-            .find(|p| p.is_file())
-        {
-            legacy_path
-        } else {
+        if !cache_path.is_file() {
             return Err(Tier3ResolveError::CacheMissing {
                 cache_path,
                 tier3: self.as_display(),
             });
-        };
+        }
 
         let source = EntitySource::ZipArchive(cache_path.clone());
         let (entries, _) = source.read_all().map_err(|e| Tier3ResolveError::ArchiveRead {
@@ -369,24 +355,5 @@ mod tests {
             path,
             PathBuf::from("/ws/.memstead/memstead-io/anthropic/core.mem")
         );
-    }
-
-    /// Legacy window: a prior `.mstd` cache file (written by an older
-    /// `memstead link`) still resolves when no `.mem` sibling exists.
-    /// `.mstd` is the sole surviving tolerated legacy — the original
-    /// `.mdgv` cache spelling is no longer resolved.
-    #[test]
-    fn resolve_falls_back_to_legacy_memstead_cache_file() {
-        let ws = TempDir::new().unwrap();
-        let dir = ws.path().join(".memstead").join("memstead-io").join("anthropic");
-        std::fs::create_dir_all(&dir).unwrap();
-        write_archive(&dir.join("core.mstd"), &[("agents.md", "# Agents\n")]);
-        let r = Tier3Ref {
-            scope: "anthropic".into(),
-            name: "core".into(),
-            slug: "agents".into(),
-        };
-        let id = r.resolve(ws.path()).unwrap();
-        assert_eq!(id, EntityId::new("core", "agents"));
     }
 }

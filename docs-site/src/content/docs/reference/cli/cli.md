@@ -373,7 +373,7 @@ Install a sealed `.mem` vault — either a local file, or `<scope>/<name>` from 
 
 ###### **Arguments:**
 
-* `<PATH or SCOPE/NAME>` — Either a path to a `.mem` file (legacy `.mstd`/`.mdgv` accepted), or `<scope>/<name>` for registry installs (no `@` prefix)
+* `<PATH or SCOPE/NAME>` — Either a path to a `.mem` file, or `<scope>/<name>` for registry installs (no `@` prefix)
 
 ###### **Options:**
 
@@ -409,7 +409,7 @@ Publish a `.mem` archive to the registry. Triggers GitHub Device Flow on first u
 
 ###### **Arguments:**
 
-* `<PATH>` — Path to a `.mem` archive on disk (a legacy `.mstd`/`.mdgv` file is accepted during the rename window). Omit to assemble the archive from the surrounding filesystem-vault workspace (walks up from cwd looking for `.memstead/config.json`)
+* `<PATH>` — Path to a `.mem` archive on disk. Omit to assemble the archive from the surrounding filesystem-vault workspace (walks up from cwd looking for `.memstead/config.json`)
 
 ###### **Options:**
 

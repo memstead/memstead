@@ -72,8 +72,7 @@ fn check_format(config: &PublishedVaultConfig) -> Result<(), ValidationError> {
         return Ok(());
     }
     // `format: 2` archives (top-level `schema/` tree, pre-relocation)
-    // are rejected with an actionable re-export hint — mirrors the V1
-    // `mdgv.json` branch in `archive::extract_entries`. Any other
+    // are rejected with an actionable re-export hint. Any other
     // mismatch falls through to the generic `UnsupportedFormat`.
     if config.format == 2 {
         return Err(ValidationError::InvalidConfig {

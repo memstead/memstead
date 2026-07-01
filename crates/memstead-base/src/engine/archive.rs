@@ -61,8 +61,7 @@ pub enum FromArchiveBytesError {
 }
 
 impl Engine {
-    /// Hydrate an engine from sealed archive bytes (`.mem`; legacy
-    /// `.mdgv`-layout bytes are read-tolerated).
+    /// Hydrate an engine from sealed archive bytes (`.mem`).
     ///
     /// Validates the bytes through the archive ingress validator
     /// (`extract_entries`), reads the embedded `.memstead/config.json` for

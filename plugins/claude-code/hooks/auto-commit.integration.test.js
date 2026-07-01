@@ -86,7 +86,7 @@ function parseTestCommit(sha, body) {
   const trimmed = (body ?? '').trimEnd();
   const lines = trimmed.split('\n');
   const subject = lines[0] ?? '';
-  const subjectMatch = subject.match(/^(?:memstead|mdgv):\s+(\S+)\s*(.*)$/);
+  const subjectMatch = subject.match(/^memstead:\s+(\S+)\s*(.*)$/);
   const tool_verb = subjectMatch ? subjectMatch[1] : null;
   const entity_id = subjectMatch ? (subjectMatch[2] || null) : null;
   const trailerIdx = lines.findIndex((l) => /^[A-Z][A-Za-z-]+:\s\S/.test(l));

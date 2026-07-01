@@ -237,8 +237,7 @@ mod tests {
     #[test]
     fn directory_skips_engine_internal_dirs_and_non_md() {
         // `.git/` and `.memstead/` are always skipped (engine-internal).
-        // Other dot-prefixed dirs (e.g. `.obsidian/`, and `.mdgv/` which
-        // is no longer special) walk normally.
+        // Other dot-prefixed dirs (e.g. `.obsidian/`) walk normally.
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join("keep.md"), "k").unwrap();
         fs::write(dir.path().join("ignore.txt"), "i").unwrap();
@@ -246,8 +245,6 @@ mod tests {
         fs::write(dir.path().join(".git/secret.md"), "s").unwrap();
         fs::create_dir_all(dir.path().join(".memstead")).unwrap();
         fs::write(dir.path().join(".memstead/note.md"), "n").unwrap();
-        fs::create_dir_all(dir.path().join(".mdgv")).unwrap();
-        fs::write(dir.path().join(".mdgv/note.md"), "n").unwrap();
         fs::create_dir_all(dir.path().join(".obsidian")).unwrap();
         fs::write(dir.path().join(".obsidian/vis.md"), "v").unwrap();
 
@@ -269,10 +266,6 @@ mod tests {
         assert!(
             !paths.iter().any(|p| p.contains(".memstead")),
             ".memstead/* must be skipped: {paths:?}"
-        );
-        assert!(
-            paths.iter().any(|p| p.ends_with("note.md") && p.contains(".mdgv")),
-            ".mdgv/note.md must load now that .mdgv is an ordinary dir: {paths:?}"
         );
     }
 
@@ -314,7 +307,7 @@ mod tests {
             &[
                 ("b.md", "b"),
                 ("a.md", "a"),
-                ("mdgv.json", "{\"name\":\"pkg\"}"),
+                ("meta.json", "{\"name\":\"pkg\"}"),
                 (".memstead/config.json", "{}"),
                 ("readme.txt", "ignored"),
                 ("nested/c.md", "c"),

@@ -245,16 +245,16 @@ mod tests {
 
     #[test]
     fn git_tree_skips_engine_internal_dirs() {
-        // `.memstead/note.md` is always skipped (engine-internal).
-        // `.mdgv/note.md` is no longer special — it walks like any
-        // ordinary nested dir. `.git/` cannot exist inside a git tree
-        // object so we don't seed it.
+        // `.memstead/note.md` is always skipped (engine-internal). An
+        // ordinary dot-dir (`.other/note.md`) is not special — it walks
+        // like any ordinary nested dir. `.git/` cannot exist inside a
+        // git tree object so we don't seed it.
         let dir = TempDir::new().unwrap();
         let git_dir = dir.path().join("git");
         let entries = [
             ("keep.md", "k"),
             (".memstead/note.md", "n"),
-            (".mdgv/note.md", "n"),
+            (".other/note.md", "n"),
             ("docs/deep.md", "d"),
         ];
         let repo = seed_git_tree(&git_dir, "refs/heads/main", &entries);
@@ -276,8 +276,8 @@ mod tests {
             ".memstead/* must be skipped: {paths:?}"
         );
         assert!(
-            paths.iter().any(|p| p.starts_with(".mdgv/")),
-            ".mdgv/* must load now that .mdgv is an ordinary dir: {paths:?}"
+            paths.iter().any(|p| p.starts_with(".other/")),
+            "an ordinary dot-dir must load, only `.memstead/` is skipped: {paths:?}"
         );
     }
 

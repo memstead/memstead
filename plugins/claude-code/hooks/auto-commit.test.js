@@ -92,9 +92,7 @@ describe('classifyVaultNotes', () => {
       },
       {
         sha: 'sha-ext',
-        // Deliberately the legacy `mdgv:` spelling — proves the summary
-        // prefix-stripper stays read-tolerant of pre-rename history.
-        subject: 'mdgv: external edits (2 files)',
+        subject: 'memstead: external edits (2 files)',
         tool_verb: 'external',
         entity_id: 'edits',
         note: '',
@@ -184,18 +182,6 @@ describe('parseCursorTrailers', () => {
     assert.strictEqual(cursors.size, 2);
     assert.strictEqual(cursors.get('engine'), 'a1b2c3d4');
     assert.strictEqual(cursors.get('plugin'), 'e5f6a7b8');
-  });
-
-  it('accepts the legacy Mdgv-cursor spelling (pre-rename history)', () => {
-    const body = [
-      'mdgv: session changes (1 entities, 1 vaults)',
-      '',
-      'Vaults: engine',
-      'Mdgv-cursor: engine@a1b2c3d4',
-    ].join('\n');
-    const cursors = parseCursorTrailers(body);
-    assert.strictEqual(cursors.size, 1);
-    assert.strictEqual(cursors.get('engine'), 'a1b2c3d4');
   });
 
   it('returns empty map when no trailers', () => {

@@ -9,9 +9,8 @@ allowed-tools: Bash, Read, mcp__memstead__memstead_health
 
 Manually fires the same commit pipeline the Stop hook uses. Both paths
 produce `memstead: session changes (...)` commits with `Memstead-cursor:`
-trailers (legacy `mdgv:` / `Mdgv-cursor:` commits are still read-tolerated);
-only the `Session:` trailer differs (present on the hook, absent on
-manual invocations).
+trailers; only the `Session:` trailer differs (present on the hook, absent
+on manual invocations).
 
 Works in both auto-commit-enabled and auto-commit-disabled workspaces —
 the skill bypasses the `outer_vcs.enabled` gate.

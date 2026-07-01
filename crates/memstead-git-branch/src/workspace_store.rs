@@ -45,16 +45,12 @@ fn hydrate_read_vaults(
             // Content-addressed cache file:
             // `<name>-<cacheKey>.mem` when the registration carries a
             // `cacheKey`, else the bare `<name>.mem` for registrations
-            // written before content-addressing. Cache files written
-            // before the extension rename carry a legacy `.mstd`/`.mdgv`
-            // extension — resolve `.mem` first, then fall back to the
-            // legacy spellings so existing installs keep loading.
+            // written before content-addressing.
             let stem = match spec.cache_key.as_deref() {
                 Some(key) => format!("{vault_name}-{key}"),
                 None => vault_name.clone(),
             };
             let archive_path = std::iter::once(memstead_schema::ARCHIVE_EXTENSION)
-                .chain(memstead_schema::LEGACY_ARCHIVE_EXTENSIONS.iter().copied())
                 .map(|ext| cache_dir.join(format!("{stem}.{ext}")))
                 .find(|p| p.is_file());
             let Some(archive_path) = archive_path else {

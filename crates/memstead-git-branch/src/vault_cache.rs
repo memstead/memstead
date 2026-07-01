@@ -22,7 +22,7 @@ use std::path::{Path, PathBuf};
 
 use memstead_base::ops::WarningHint;
 use memstead_schema::{
-    ARCHIVE_CONFIG_PATH, ARCHIVE_EXTENSION, ARCHIVE_SCHEMA_PREFIX, LEGACY_ARCHIVE_EXTENSIONS,
+    ARCHIVE_CONFIG_PATH, ARCHIVE_EXTENSION, ARCHIVE_SCHEMA_PREFIX,
     PublishedVaultConfig, SchemaRef,
     SchemaRegistry,
 };
@@ -137,11 +137,7 @@ pub struct InstallOutcome {
     /// `true` if a new `readVaults` entry was added to the vault config
     /// on this call; `false` if the name was already declared.
     pub registered_in_config: bool,
-    /// Typed non-fatal issues. Today: `LEGACY_ARCHIVE_FORMAT` when the
-    /// submitted archive carried the prior `.mstd` extension — the
-    /// install succeeded (the cache always receives canonical
-    /// `.mem`-extension bytes), the warning tells the operator to
-    /// re-export upstream.
+    /// Typed non-fatal issues surfaced by the install.
     pub warnings: Vec<WarningHint>,
 }
 
@@ -200,10 +196,7 @@ fn content_cache_key(canonical_bytes: &[u8]) -> String {
 }
 
 /// Install a sealed vault archive into the global cache and register
-/// it in a writable vault's config. Accepts both the current `.mem`
-/// format and the prior `.mstd` extension; exercising the legacy path
-/// succeeds and lands a `LEGACY_ARCHIVE_FORMAT` warning on the returned
-/// [`InstallOutcome`].
+/// it in a writable vault's config. Accepts the `.mem` archive format.
 ///
 /// Two independent side effects, both idempotent:
 ///
@@ -247,25 +240,7 @@ pub fn install_read_vault(
     let bytes = std::fs::read(archive_path)?;
     let validated = validate_and_normalize_archive(&bytes).map_err(InstallError::Validation)?;
 
-    // Legacy-window deprecation signal: the prior `.mstd` file
-    // extension still installs, but the outcome carries a typed warning
-    // so callers (CLI output, MCP boot log) surface it without
-    // re-deriving. (A `.mdgv`-extension/`.mdgv/`-layout archive no
-    // longer reaches here — the validator rejects it.)
-    let legacy_extension = archive_path
-        .extension()
-        .and_then(|e| e.to_str())
-        .is_some_and(|e| {
-            LEGACY_ARCHIVE_EXTENSIONS
-                .iter()
-                .any(|legacy| e.eq_ignore_ascii_case(legacy))
-        });
-    let mut warnings: Vec<WarningHint> = Vec::new();
-    if legacy_extension {
-        warnings.push(WarningHint::LegacyArchiveFormat {
-            archive: archive_path.display().to_string(),
-        });
-    }
+    let warnings: Vec<WarningHint> = Vec::new();
 
     // Refuse up-front
     // when the archive's authoritative name shadows a writable mount
@@ -1035,10 +1010,9 @@ mod tests {
         );
     }
 
-    /// Rewrite a current-layout archive into the pre-rename legacy
-    /// layout: every `.memstead/` member moves to `.mdgv/`. Test-only —
-    /// production writers never emit the legacy spelling.
-    fn repack_as_legacy(src: &Path, dest: &Path) {
+    /// Rewrite a current-layout archive so its meta members live under a
+    /// non-whitelisted dir (`.other/` instead of `.memstead/`). Test-only.
+    fn repack_with_foreign_meta_dir(src: &Path, dest: &Path) {
         use std::io::{Read as _, Write as _};
         let file = std::fs::File::open(src).unwrap();
         let mut archive = zip::ZipArchive::new(file).unwrap();
@@ -1049,7 +1023,7 @@ mod tests {
             let mut entry = archive.by_index(i).unwrap();
             let name = entry.name().to_string();
             let name = match name.strip_prefix(".memstead/") {
-                Some(rest) => format!(".mdgv/{rest}"),
+                Some(rest) => format!(".other/{rest}"),
                 None => name,
             };
             let mut bytes = Vec::new();
@@ -1060,13 +1034,11 @@ mod tests {
         writer.finish().unwrap();
     }
 
-    /// The legacy `.mdgv` extension + `.mdgv/` in-zip layout is no
-    /// longer tolerated: installing a genuine pre-rename archive now
-    /// fails at validation — its `.mdgv/` members fall outside the
-    /// `.memstead/` whitelist. (Closes the archive half of the `.mdgv`
-    /// migration window.)
+    /// Only the `.memstead/` meta layout is tolerated: an archive whose
+    /// meta members live under any other dir fails at validation — its
+    /// members fall outside the `.memstead/` whitelist.
     #[test]
-    fn install_legacy_mdgv_archive_is_rejected() {
+    fn install_foreign_meta_layout_is_rejected() {
         let tmp = TempDir::new().unwrap();
         let cache = tmp.path().join("cache");
         let project = tmp.path().join("project");
@@ -1074,76 +1046,15 @@ mod tests {
         let modern = tmp.path().join("modern.mem");
         std::fs::create_dir_all(&project).unwrap();
         write_minimal_vault_config(&project, "specs");
-        build_valid_archive(&src_dir, &modern, "legacy-vault");
+        build_valid_archive(&src_dir, &modern, "foreign-vault");
 
-        let legacy = tmp.path().join("legacy-vault.mdgv");
-        repack_as_legacy(&modern, &legacy);
+        let foreign = tmp.path().join("foreign-vault.mem");
+        repack_with_foreign_meta_dir(&modern, &foreign);
 
         let _g = CacheGuard::install(&cache);
-        let err = install_to_disk(&legacy, &project)
-            .expect_err("a `.mdgv/`-layout archive must no longer install");
+        let err = install_to_disk(&foreign, &project)
+            .expect_err("a foreign meta-layout archive must not install");
         assert!(matches!(err, InstallError::Validation(_)), "got {err:?}");
-    }
-
-    /// The prior-canonical `.mstd` extension is still read-tolerated: a
-    /// `.mstd` archive (current `.memstead/` members) installs and
-    /// carries the `LEGACY_ARCHIVE_FORMAT` warning whose remedy names
-    /// re-export to `.mem`. This is the AC2 surface for the `.mstd → .mem`
-    /// rename and the sole surviving tolerated legacy after the `.mdgv`
-    /// window closed.
-    #[test]
-    fn install_mstd_extension_warns_and_names_mem_reexport() {
-        let tmp = TempDir::new().unwrap();
-        let cache = tmp.path().join("cache");
-        let project = tmp.path().join("project");
-        let src_dir = tmp.path().join("src");
-        let src = tmp.path().join("legacy-mstd.mstd");
-        std::fs::create_dir_all(&project).unwrap();
-        write_minimal_vault_config(&project, "specs");
-        build_valid_archive(&src_dir, &src, "legacy-mstd");
-
-        let _g = CacheGuard::install(&cache);
-        let outcome = install_to_disk(&src, &project).unwrap();
-        match outcome.warnings.as_slice() {
-            [w @ WarningHint::LegacyArchiveFormat { .. }] => {
-                let msg = format!("{w}");
-                assert!(
-                    msg.contains(".mstd"),
-                    "warning should name the `.mstd` extension: {msg}"
-                );
-                assert!(
-                    msg.contains("`.mem` archive"),
-                    "remedy must name re-export to `.mem`: {msg}"
-                );
-            }
-            other => panic!("expected exactly one LegacyArchiveFormat warning, got {other:?}"),
-        }
-    }
-
-    /// Refusal complement: a canonical `.mem` archive (current extension,
-    /// current layout) installs with NO `LEGACY_ARCHIVE_FORMAT` warning —
-    /// the deprecation signal fires only for the tolerated-prior spellings.
-    #[test]
-    fn install_canonical_mem_extension_has_no_legacy_warning() {
-        let tmp = TempDir::new().unwrap();
-        let cache = tmp.path().join("cache");
-        let project = tmp.path().join("project");
-        let src_dir = tmp.path().join("src");
-        let src = tmp.path().join("canonical.mem");
-        std::fs::create_dir_all(&project).unwrap();
-        write_minimal_vault_config(&project, "specs");
-        build_valid_archive(&src_dir, &src, "canonical");
-
-        let _g = CacheGuard::install(&cache);
-        let outcome = install_to_disk(&src, &project).unwrap();
-        assert!(
-            !outcome
-                .warnings
-                .iter()
-                .any(|w| w.code() == "LEGACY_ARCHIVE_FORMAT"),
-            "a `.mem` archive must not carry the legacy warning: {:?}",
-            outcome.warnings
-        );
     }
 
     #[test]

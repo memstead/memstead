@@ -152,13 +152,8 @@ pub fn parse_commit_message(body: &str) -> ParsedCommit {
 }
 
 fn parse_subject(subject: &str) -> (Option<String>, Option<String>) {
-    // Promotion pattern: the engine writes `memstead:` subjects, but old
-    // history carries the legacy `mdgv:` spelling — both stay parseable
-    // forever so provenance over pre-rename commits keeps working.
-    let rest = match subject
-        .strip_prefix("memstead:")
-        .or_else(|| subject.strip_prefix("mdgv:"))
-    {
+    // The engine writes `memstead:` subjects.
+    let rest = match subject.strip_prefix("memstead:") {
         Some(r) => r.trim_start(),
         None => return (None, None),
     };
@@ -483,16 +478,6 @@ mod tests {
     }
 
     #[test]
-    fn parser_accepts_legacy_memstead_subject_prefix() {
-        // Pre-rename history carries `mdgv:` subjects — the parser must
-        // keep accepting them forever (promotion pattern, read-tolerated).
-        let parsed = parse_commit_message("mdgv: update specs--legacy\n");
-        assert_eq!(parsed.subject, "mdgv: update specs--legacy");
-        assert_eq!(parsed.tool_verb.as_deref(), Some("update"));
-        assert_eq!(parsed.entity_id.as_deref(), Some("specs--legacy"));
-    }
-
-    #[test]
     fn parser_handles_unrecognized_subject() {
         let parsed = parse_commit_message("hand-typed external drift\n");
         assert_eq!(parsed.subject, "hand-typed external drift");
@@ -533,7 +518,6 @@ Client: claude-code@2.1.0
 
     #[test]
     fn parser_treats_lowercase_keys_as_body() {
-        // Plugin convention writes `Mdgv-cursor:` (passes; capital M).
         // A line starting `tool:` (lowercase) must not be confused for a
         // trailer — keeps the parser robust against prose that happens to
         // contain colon-bearing lines.

@@ -23,11 +23,9 @@ const MCP_TIMEOUT_MS = 15000;
 const CLAUDE_AUTHOR_NAME = 'Claude';
 const CLAUDE_AUTHOR_EMAIL = 'noreply@anthropic.com';
 const CURSOR_WALK_LIMIT = 1000;
-// READ pattern — matches the current `memstead:` spelling and the legacy
-// `mdgv:` spelling (promotion pattern: pre-rename outer-repo history must
-// stay discoverable; new commits are written with `memstead:` only).
+// READ pattern — matches the `memstead:` cursor-commit subjects.
 const CURSOR_SUBJECT_GREP =
-  '^memstead: session changes\\|^memstead: initialize cursor\\|^mdgv: session changes\\|^mdgv: initialize cursor';
+  '^memstead: session changes\\|^memstead: initialize cursor';
 const COMMIT_BLOCK_MARKER = '--EOC--';
 
 /**
@@ -137,9 +135,8 @@ export function classifyVaultNotes({ vaultName, notes, logger = console }) {
       const subject = typeof n.subject === 'string' ? n.subject : '';
       externalNotes.push({
         vault: vaultName,
-        // Strips the current `memstead:` prefix and the legacy `mdgv:`
-        // spelling (read-tolerated for pre-rename history).
-        summary: subject.replace(/^(?:memstead|mdgv):\s+/, ''),
+        // Strips the `memstead:` prefix.
+        summary: subject.replace(/^memstead:\s+/, ''),
       });
     } else {
       logger.error?.(
@@ -177,16 +174,14 @@ export function formatCursorTrailers(layouts, perVaultHeads, registryRefs = []) 
 
 /**
  * Parse the `Memstead-cursor:` trailers out of a commit body into a Map
- * of `vaultName -> sha`. The legacy `Mdgv-cursor:` spelling is accepted
- * on read — pre-rename outer-repo history stays parseable. Trailers not
- * matching the `<name>@<sha>` shape are skipped. Returns an empty map
- * when no trailers are present.
+ * of `vaultName -> sha`. Trailers not matching the `<name>@<sha>` shape
+ * are skipped. Returns an empty map when no trailers are present.
  */
 export function parseCursorTrailers(body) {
   const out = new Map();
   if (!body) return out;
   for (const line of body.split(/\r?\n/)) {
-    const m = line.match(/^(?:Memstead|Mdgv)-cursor:\s*(\S+)@([0-9a-f]+)\s*$/i);
+    const m = line.match(/^Memstead-cursor:\s*(\S+)@([0-9a-f]+)\s*$/i);
     if (!m) continue;
     out.set(m[1], m[2].toLowerCase());
   }
@@ -324,11 +319,9 @@ export function readPriorCursor({ workspaceRoot, logger = console, git = runGit 
     const cursors = parseCursorTrailers(block.body);
     if (cursors.size === 0) continue;
     const subject = (block.body.split(/\r?\n/)[0] ?? '').trim();
-    const source =
-      subject.startsWith('memstead: initialize cursor') ||
-      subject.startsWith('mdgv: initialize cursor') // legacy, read-tolerated
-        ? 'initialize-cursor'
-        : 'session-changes';
+    const source = subject.startsWith('memstead: initialize cursor')
+      ? 'initialize-cursor'
+      : 'session-changes';
     return { commitSha: block.sha, cursors, source };
   }
   return null;

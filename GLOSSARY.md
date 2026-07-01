@@ -85,7 +85,7 @@ The definition separates "workspace" from three concepts historical code conflat
 - **Workspace ≠ git repository.** A workspace mounts vaults; each mount references a storage backend (folder, git-branch, or archive). A vault-repo is one possible target for git-branch mounts — the same workspace may carry folder-backed mounts alongside it.
 - **Workspace ≠ vault.** A vault exists independent of any workspace; any workspace may mount it under its own capability and policy. The single-vault case where workspace and vault collapse to the same folder is a degenerate configuration, not the definition.
 
-**Status:** largely realized. The single canonical marker (`.memstead/workspace.toml`) plus the engine-managed `.memstead/state/mounts.json` replaced the historical `.mdgv.toml` / `.mdgv/config.json` split, and `memstead-base` carries `Workspace`, `Mount`, and `FileWorkspaceStore` as first-class types. The residual rename of `memstead-git-branch` (which now hosts the git-branch storage backend, not the workspace concept) is tracked separately.
+**Status:** largely realized. The single canonical marker (`.memstead/workspace.toml`) plus the engine-managed `.memstead/state/mounts.json` and per-vault `.memstead/config.json` define the workspace, and `memstead-base` carries `Workspace`, `Mount`, and `FileWorkspaceStore` as first-class types. The residual rename of `memstead-git-branch` (which now hosts the git-branch storage backend, not the workspace concept) is tracked separately.
 
 ---
 

@@ -16,13 +16,13 @@ The graph grows as planning unfolds — it is written during conversation, not b
 
 ## Location
 
-This schema lives at the workspace level and is shared by every planning vault that pins it. The workspace's `.mdgv.toml` declares `schemas_dir = "schemas"`, and every `schemas/<name>/` directory is discovered at load time. No per-vault copying is required — a planning vault's `.mdgv/config.json` just references the schema by name.
+This schema lives at the workspace level and is shared by every planning vault that pins it. The workspace's `.memstead/workspace.toml` declares `schemas_dir = "schemas"`, and every `schemas/<name>/` directory is discovered at load time. No per-vault copying is required — a planning vault's `.memstead/config.json` just references the schema by name.
 
 Local usage is **unversioned**: a vault simply writes `"schema": "planning"` and the engine resolves against this directory. The `version:` field in `schema.yaml` is metadata preserved for publish/archive workflows; it is not a pin.
 
 ## Lifecycle and vault placement
 
-Per-phase vaults live under `exec_vaults/<plan-name>/` (controlled by `allowed_create_paths` in `.mdgv.toml`). Each planning vault declares `belongs_to: [<project-vault>, …]` — the project vaults it intends to lens into — and carries a lens projection at `projections/<plan-name>/lens.json` that writes into each destination vault.
+Per-phase vaults live under `exec_vaults/<plan-name>/` (controlled by `allowed_create_paths` in `.memstead/workspace.toml`). Each planning vault declares `belongs_to: [<project-vault>, …]` — the project vaults it intends to lens into — and carries a lens projection at `projections/<plan-name>/lens.json` that writes into each destination vault.
 
 ```
 brief / directive                    ┐

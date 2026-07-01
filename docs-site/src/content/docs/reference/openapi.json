@@ -282,7 +282,7 @@
           "content": {
             "application/octet-stream": {}
           },
-          "description": "Strict `.mem` archive bytes — 2 MB cap (legacy `.mstd`/`.mdgv`-layout archives accepted during the rename window). Must include `manifest.json` and `graph.json` at the root."
+          "description": "Strict `.mem` archive bytes — 2 MB cap. Must include `manifest.json` and `graph.json` at the root."
         },
         "responses": {
           "200": {
@@ -401,7 +401,7 @@
             }
           },
           {
-            "description": "`<name>.mem` for the archive (legacy `<name>.mstd` / `<name>.mdgv` accepted), `<name>.graph.json` for the graph, `<name>.manifest.json` for the manifest. Resolves the current version.",
+            "description": "`<name>.mem` for the archive, `<name>.graph.json` for the graph, `<name>.manifest.json` for the manifest. Resolves the current version.",
             "in": "path",
             "name": "name_ext",
             "required": true,

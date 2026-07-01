@@ -20,7 +20,7 @@ The plugin operates on the **externalised workspace layout**. Plugin-owned files
   ingests/<name>.json              # operational unit: mode + trigger + batch_size + projection_ref
 ```
 
-`.memstead.toml` declares `scopes_dir`, `projections_dir`, `ingests_dir` (defaults: `scopes`, `projections`, `ingests`). The `workspace-loader.mjs` reads these and walks the trees, then invokes `memstead workspace dump` to fetch the engine's view of the workspace — which vaults exist, each vault's schema pin, write guidance, description, and an opaque snapshot token used for backoff. Every per-vault fact the plugin consumes flows through that JSON document; the plugin does not read `.mdgv/config.json`, walk vault `**.md`, or open vault gitdirs.
+`.memstead.toml` declares `scopes_dir`, `projections_dir`, `ingests_dir` (defaults: `scopes`, `projections`, `ingests`). The `workspace-loader.mjs` reads these and walks the trees, then invokes `memstead workspace dump` to fetch the engine's view of the workspace — which vaults exist, each vault's schema pin, write guidance, description, and an opaque snapshot token used for backoff. Every per-vault fact the plugin consumes flows through that JSON document; the plugin does not read `.memstead/config.json`, walk vault `**.md`, or open vault gitdirs.
 
 ## Engine binary dependency
 

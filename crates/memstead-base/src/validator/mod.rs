@@ -87,8 +87,7 @@ pub struct ValidatedVault {
     pub stats: VaultStats,
     pub canonical_bytes: Vec<u8>,
     /// Schema source files found under `.memstead/schema/` in the
-    /// archive (legacy `.mdgv/schema/` member paths are normalized to
-    /// the current prefix at extract time).
+    /// archive.
     /// Empty only if the archive was never meant to carry a schema
     /// (callers typically short-circuit before reaching here).
     /// `format: 2` archives (top-level `schema/` tree) are rejected

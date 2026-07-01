@@ -26,9 +26,7 @@ use clap::ArgAction;
 #[derive(Parser, Debug)]
 #[command(name = "memstead-mcp", version, about, long_about = None)]
 struct Args {
-    /// Attach a sealed `.mem` vault as a read-only reference (legacy
-    /// `.mstd`/`.mdgv` archives attach too, with a `LEGACY_ARCHIVE_FORMAT`
-    /// warning). Repeatable —
+    /// Attach a sealed `.mem` vault as a read-only reference. Repeatable —
     /// `--read-vault a.mem --read-vault b.mem` attaches both. Each path
     /// is installed into the global vault cache (if the cached file is
     /// missing) and registered in the first writable vault's `readVaults`
@@ -215,10 +213,9 @@ async fn run(args: Args, workspace_root: PathBuf) -> anyhow::Result<()> {
                         outcome.copied_to_cache,
                         outcome.registered_in_config,
                     );
-                    // Deprecation signals (`LEGACY_ARCHIVE_FORMAT`, …)
-                    // surface on the boot log — the install happens
-                    // before the MCP transport exists, so the log is
-                    // the response channel here.
+                    // Install warnings surface on the boot log — the
+                    // install happens before the MCP transport exists, so
+                    // the log is the response channel here.
                     for warning in &outcome.warnings {
                         tracing::warn!(
                             "read-vault {}: [{}] {}",

@@ -352,22 +352,22 @@ mod tests {
         assert_eq!(paths, vec!["a.md".to_string(), "nested/b.md".to_string()]);
     }
 
-    /// The legacy `.mdgv/` member layout is no longer read: a config
-    /// at `.mdgv/config.json` is not served (only `.memstead/config.json`
-    /// is), and `.mdgv/` members are no longer skipped as meta.
+    /// Only the `.memstead/` meta layout is read: a config under any
+    /// other dir (`.other/config.json`) is not served — the sole config
+    /// member path is `.memstead/config.json`.
     #[test]
-    fn legacy_mdgv_layout_config_is_not_read() {
+    fn foreign_layout_config_is_not_read() {
         let tmp = TempDir::new().unwrap();
         let archive = build_archive(
             tmp.path(),
-            "legacy",
-            &[("a.md", b"# a"), (".mdgv/config.json", b"{\"legacy\":true}")],
+            "foreign",
+            &[("a.md", b"# a"), (".other/config.json", b"{\"foreign\":true}")],
         );
         let backend = ArchiveBackend::new(archive);
         assert_eq!(
             backend.read_vault_config().unwrap(),
             None,
-            "a `.mdgv/config.json` archive must no longer serve config"
+            "a `.other/config.json` archive must not serve config"
         );
     }
 

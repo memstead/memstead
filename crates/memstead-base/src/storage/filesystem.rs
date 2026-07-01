@@ -780,13 +780,13 @@ mod tests {
         <FilesystemVaultWriter as VaultWriter>::write_entity(&writer, Path::new("notes.json"), b"{}").unwrap();
         <FilesystemVaultWriter as VaultWriter>::commit(&writer, "seed", &ctx_for_test()).unwrap();
         // The current `.memstead/` meta dir is skipped by the walker.
-        // `.mdgv/` is no longer special — it is an ordinary dot-dir, so
-        // markdown under it is walked like any other non-meta path.
+        // An ordinary dot-dir (`.other/`) is not special, so markdown
+        // under it is walked like any other non-meta path.
         std::fs::create_dir_all(tmp.path().join(".memstead")).unwrap();
         std::fs::write(tmp.path().join(".memstead/config.json"), b"{}").unwrap();
         std::fs::write(tmp.path().join(".memstead/notes.md"), b"#").unwrap();
-        std::fs::create_dir_all(tmp.path().join(".mdgv")).unwrap();
-        std::fs::write(tmp.path().join(".mdgv/notes.md"), b"#").unwrap();
+        std::fs::create_dir_all(tmp.path().join(".other")).unwrap();
+        std::fs::write(tmp.path().join(".other/notes.md"), b"#").unwrap();
 
         let backend: &dyn VaultBackend = &writer;
         let mut paths: Vec<String> = backend
@@ -799,7 +799,7 @@ mod tests {
         assert_eq!(
             paths,
             vec![
-                ".mdgv/notes.md".to_string(),
+                ".other/notes.md".to_string(),
                 "a.md".to_string(),
                 "nested/b.md".to_string(),
             ]

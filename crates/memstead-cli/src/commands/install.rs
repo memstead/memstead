@@ -1,8 +1,6 @@
 //! `memstead install` — two accepted input shapes:
 //!
-//! * `memstead install <path/to/file.mem>` — local-file install
-//!   (a legacy `.mstd`/`.mdgv` file installs too and the response carries
-//!   a `LEGACY_ARCHIVE_FORMAT` warning).
+//! * `memstead install <path/to/file.mem>` — local-file install.
 //! * `memstead install <scope>/<name>` — registry install.
 //!   Downloads the archive from `<registry>/api/vault/<scope>/<name>.mem`
 //!   into a tempfile, then funnels through the same
@@ -38,7 +36,7 @@ use crate::setup::cli_ctx;
 /// search-and-replace before installing.
 #[derive(Parser, Debug)]
 pub struct Args {
-    /// Either a path to a `.mem` file (legacy `.mstd`/`.mdgv` accepted), or
+    /// Either a path to a `.mem` file, or
     /// `<scope>/<name>` for registry installs (no `@` prefix).
     #[arg(value_name = "PATH or SCOPE/NAME")]
     pub source: String,
@@ -389,9 +387,7 @@ fn emit_outcome(
             "target_vault": target_vault,
             "source_url": source_url,
             // `{ code, message, details }` envelopes — same shape every
-            // warning-carrying surface uses (`LEGACY_ARCHIVE_FORMAT`
-            // rides here when the submitted archive used the pre-rename
-            // extension or in-zip layout).
+            // warning-carrying surface uses.
             "warnings": outcome.warnings,
         }))?;
     } else {
@@ -551,8 +547,6 @@ mod tests {
         assert!(parse_ref("/tmp/foo.mem").is_none());
         assert!(parse_ref("./foo.mem").is_none());
         assert!(parse_ref("foo.mem").is_none());
-        // Legacy extension is still a local path, never a registry ref.
-        assert!(parse_ref("foo.mdgv").is_none());
     }
 
     #[test]
