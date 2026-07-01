@@ -4,6 +4,7 @@ use rmcp::schemars;
 
 /// Parameters for memstead_health.
 #[derive(Debug, Default, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct HealthParams {
     #[schemars(
         description = "Detail sections to include (default: none — summary counts only). Allowed keys: orphans, stubs, most_connected, missing_fields, stale, dangling_links, tags, missing_required_outgoing, conformance, integrity. `conformance` lints every entity against the effective schema and returns per-entity `findings` (`{id, axis, code, detail}` with write-time typed codes); `integrity` additionally projects the consistency axis (dangling links, stubs) into the same findings list. Unknown keys surface as UNKNOWN_INCLUDE_KEY on warnings."
@@ -36,6 +37,7 @@ pub struct HealthParams {
 
 /// Parameters for memstead_reload.
 #[derive(Debug, Default, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ReloadParams {
     #[schemars(
         description = "Writable mem name to reload. Omit to reload every writable mem. Use the per-mem form for cheap, targeted refreshes when you know which mem drifted; use the workspace-wide form (omit `mem`) when an out-of-band `git pull` may have advanced multiple branches at once, or to pick up CLI-driven workspace-policy edits (allowlist / cross-link / mutation policy) — per-mem reload skips that workspace-level settings refresh."
@@ -47,6 +49,7 @@ pub struct ReloadParams {
 /// granularity; the response wire shape is `Diff` / `EntityDiff` from
 /// `memstead_base::ops::diff`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct DiffParams {
     #[schemars(
         description = "Mem that selects the storage context (the gitdir, for git-branch mounts). `ref_a` / `ref_b` are arbitrary refs resolved inside that gitdir; cross-mem diffs work via fully-qualified refs (`refs/heads/<other-mem>`). Folder / archive mounts refuse the call with `INVALID_INPUT` — they carry no git refs to diff."
@@ -82,6 +85,7 @@ fn default_true() -> bool {
 
 /// Parameters for memstead_changes_since.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ChangesSinceParams {
     #[schemars(description = "Writable mem name. Call memstead_health for the list.")]
     pub mem: String,

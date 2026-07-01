@@ -5,6 +5,7 @@ use rmcp::schemars;
 
 /// Parameters for memstead_entity.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct EntityParams {
     #[schemars(
         description = "Full entity ID as returned by search/list (e.g. \"specs--my-entity\")"
@@ -34,6 +35,7 @@ pub struct EntityParams {
 
 /// Parameters for memstead_search.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct SearchParams {
     #[schemars(
         description = "Structured flat query. Fields: `any: [terms]` (OR, ranks entities matching more terms higher — no explicit AND needed), `not: [terms]` (exclusion), `phrase: \"exact adjacency\"`, `field: \"title\"|section-key` (narrow all three). Omit (or pass `{}`) to use search as a pure structural/metadata filter — hits come back in title-ascending order. No stemming: include morphological variants explicitly (run, running, runs)."
@@ -81,6 +83,7 @@ pub struct SearchParams {
 
 /// Parameters for memstead_overview.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct OverviewParams {
     #[schemars(
         description = "Re-run community detection before returning overview (default: false). Detection is workspace-global: `rebuild` recomputes the Louvain partition over the *whole* workspace graph — it never scopes to `mem`, even when `mem` is also passed."
@@ -107,6 +110,7 @@ pub struct OverviewParams {
 /// Parameters for memstead_schema. Exactly one of `name` or `mem`
 /// must be supplied; passing both is an `INVALID_INPUT` error.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct SchemaParams {
     #[schemars(
         description = "Schema name as listed in memstead_overview's `## Schemas` section (e.g. \"default\" or \"default@1.0.0\"). Schemas are workspace-globally unique by name; the workspace registry resolves a bare name to the pinned version. Mutually exclusive with `mem`."

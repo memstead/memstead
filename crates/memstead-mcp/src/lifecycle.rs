@@ -14,6 +14,7 @@ use rmcp::schemars;
 /// match 1:1 — see `memstead_schema::VcsConfig` for the canonical
 /// documentation.
 #[derive(Debug, Clone, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct VcsConfigInput {
     #[schemars(description = "Path to the gitdir relative to the new mem's root.")]
@@ -46,6 +47,7 @@ impl From<VcsConfigInput> for memstead_schema::VcsConfig {
 /// MCP serde shape and the CLI flag bridge converge on a single
 /// engine-side enum.
 #[derive(Debug, Clone, Copy, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 #[serde(rename_all = "snake_case")]
 pub enum RecoveryActionInput {
     /// Adopt the residual entities; skip the seed commit. Default
@@ -82,6 +84,7 @@ impl From<RecoveryActionInput> for memstead_engine::RecoveryAction {
 
 /// Parameters for `memstead_mem_create`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct MemCreateParams {
     #[schemars(
         description = "Unique name for the new mem — the full hierarchical identifier (e.g. `\"sub-mem\"` for flat layouts or `\"team/sub-mem\"` for hierarchical layouts); the value flows through verbatim. Grammar: lowercase ASCII letters, digits, hyphens; segments separated by `/`; no leading, trailing, or double slashes. Must not collide with any currently-registered mem."
@@ -142,6 +145,7 @@ pub struct MemSetSchemaParams {
 
 /// Parameters for `memstead_mem_set_version`. F1.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct MemSetVersionParams {
     #[schemars(description = "Name of the mem whose `version` field is being updated.")]
     pub name: String,
@@ -167,6 +171,7 @@ pub struct MemSetVersionParams {
 /// `MEM_HAS_INCOMING_REFS`) and the policy scrub on success always
 /// fire.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct MemDeleteParams {
     #[schemars(description = "Name of the mem to destroy.")]
     pub name: String,
@@ -189,6 +194,7 @@ pub struct MemDeleteParams {
 
 /// Parameters for `memstead_workspace_grant_cross_link`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct WorkspaceGrantCrossLinkParams {
     #[schemars(
         description = "Source mem. The grantee — the mem permitted to author cross-mem edges into `to`."
@@ -202,6 +208,7 @@ pub struct WorkspaceGrantCrossLinkParams {
 
 /// Parameters for `memstead_workspace_revoke_cross_link`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct WorkspaceRevokeCrossLinkParams {
     #[schemars(
         description = "Source mem. The grantee whose existing grant is being revoked."
@@ -215,6 +222,7 @@ pub struct WorkspaceRevokeCrossLinkParams {
 
 /// Parameters for `memstead_workspace_allow_create`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct WorkspaceAllowCreateParams {
     #[schemars(
         description = "Glob pattern matched against composed mem candidates (`<mem_path>/<name>` for hierarchical, bare `<name>` for flat). First-match-wins; lower index = higher priority."
@@ -236,6 +244,7 @@ pub struct WorkspaceAllowCreateParams {
 
 /// Parameters for `memstead_workspace_revoke_create`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct WorkspaceRevokeCreateParams {
     #[schemars(
         description = "Glob pattern of the `[[mem_management.create]]` rule to drop. Matched exactly against the rule's `pattern` field."
@@ -245,6 +254,7 @@ pub struct WorkspaceRevokeCreateParams {
 
 /// Parameters for `memstead_workspace_allow_delete`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct WorkspaceAllowDeleteParams {
     #[schemars(
         description = "Glob pattern matched against composed mem candidates. Appended to `[[mem_management.delete]]` — the symmetric allowlist for `memstead_mem_delete`. Agent-creatable equals agent-deletable in spirit; mirror the create-side `pattern` to keep parity."
@@ -254,6 +264,7 @@ pub struct WorkspaceAllowDeleteParams {
 
 /// Parameters for `memstead_workspace_revoke_delete`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct WorkspaceRevokeDeleteParams {
     #[schemars(
         description = "Glob pattern of the `[[mem_management.delete]]` rule to drop. Matched exactly against the rule's `pattern` field."

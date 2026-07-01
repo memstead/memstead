@@ -2476,7 +2476,7 @@ fn pro_f7_dynamic_mem_lifecycle_completes_via_mcp_only() {
     //    because the cross-link grant was revoked in step 3.
     let delete = harness.call_tool(
         "memstead_mem_delete",
-        json!({ "name": "target", "delete_files": true }),
+        json!({ "name": "target" }),
     );
     let _ = assert_success_envelope(&delete);
 }
