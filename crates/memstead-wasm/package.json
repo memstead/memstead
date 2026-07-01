@@ -1,20 +1,8 @@
 {
   "name": "@memstead/wasm",
   "version": "0.1.0",
-  "description": "WebAssembly bindings for the Memstead engine — hydrate a knowledge-graph snapshot in the browser and apply commits over the bridge wire.",
+  "description": "WebAssembly bindings.",
   "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/memstead/memstead",
-    "directory": "engine/crates/memstead-wasm"
-  },
-  "homepage": "https://memstead.io",
-  "keywords": [
-    "memstead",
-    "wasm",
-    "knowledge-graph",
-    "rust"
-  ],
   "files": [
     "memstead_wasm_bg.wasm",
     "memstead_wasm.js",
@@ -27,5 +15,7 @@
   "sideEffects": [
     "./snippets/*"
   ],
-  "private": true
+  "publishConfig": {
+    "access": "public"
+  }
 }
