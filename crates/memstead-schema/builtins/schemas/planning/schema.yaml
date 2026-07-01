@@ -1,0 +1,301 @@
+# yaml-language-server: $schema=../../../generated/schema-manifest.schema.json
+
+# ─────────────────────────────────────────────────────────────────────────────
+# planning@0.1.0 — knowledge-graph schema for planning phases.
+#
+# A planning vault captures the deliberation of one planning phase —
+# its goal, the options considered, the decisions made, the execution
+# steps, the risks, and the open questions. The vault grows as the
+# planning unfolds. Once execution completes, a lens projection lifts
+# the durable artifacts into the main graph; the planning vault is
+# archived.
+#
+# Seven types model the phases of planning:
+#   goal          — what is being planned (root of the graph)
+#   option        — a considered alternative
+#   decision      — a chosen path after weighing options
+#   step          — an action in the execution plan
+#   risk          — something that could go wrong
+#   open_question — something unclear that blocks or guides progress
+#   note          — free discussion anchor (observation, constraint, session log)
+#
+# Strict relationship vocabulary: 37 default edges + 8 planning-specific
+# (ALTERNATIVES_TO, CHOSEN, REJECTED, EXECUTES, MITIGATES, THREATENS,
+# ANSWERS, RAISES).
+#
+# Pair with a main graph (usually under software@0.1.0) that this
+# planning vault references via cross-vault links and eventually
+# projects into.
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: planning
+version: 0.1.0
+
+description: |
+  Planning-phase knowledge-graph schema. Seven types capture the
+  deliberation between stating a goal and having a plan executed.
+  After execution, a lens projection lifts the durable parts (accepted
+  decisions, spec updates, validated risks) into the main project
+  graph; the planning vault is archived as historical record.
+
+when_to_use: |
+  Use for the duration of one planning phase — a vault dedicated to
+  working through one concrete question or scope. Create a new
+  planning vault per phase. Pair with a main graph (usually under
+  software@0.1.0) that this planning vault references via cross-vault
+  links and eventually projects into. Prefer the main graph's
+  vocabulary (spec, decision, requirement, …) for durable current-
+  state artifacts; use this schema only for the deliberation itself.
+
+system_message: |
+  A planning knowledge graph captures deliberation. Seven types model
+  the phases of thought:
+
+    goal          — what is being planned (root of the graph)
+    option        — a considered alternative
+    decision      — a chosen path after weighing options
+    step          — an action in the execution plan
+    risk          — something that could go wrong
+    open_question — something unclear that blocks or guides progress
+    note          — free discussion anchor (observation, constraint,
+                    session log, idea)
+
+  The graph answers: what are we planning (goal), what did we consider
+  (option), what did we choose and why (decision), how will we execute
+  (step, with REQUIRES precedence), what could go wrong (risk), what
+  is still unclear (open_question). Everything else that needs
+  capturing goes into note, differentiated by `kind`.
+
+  Edges carry the deliberation:
+    option --ALTERNATIVES_TO--> option       (frames a choice)
+    decision --CHOSEN--> option              (the selected path)
+    decision --REJECTED--> option            (paths ruled out)
+    step --EXECUTES--> decision              (step carries out decision)
+    step --MITIGATES--> risk                 (step addresses risk)
+    risk --THREATENS--> goal/decision/step   (what the risk endangers)
+    decision/note --ANSWERS--> open_question (how it was resolved)
+    note/option/step --RAISES--> open_question (where it arose)
+
+  A decision without CHOSEN/REJECTED is opinion, not deliberation. A
+  step without EXECUTES points nowhere. A risk without a MITIGATES
+  incoming edge or an accepted `mitigation_status` is unaddressed. An
+  open_question without BLOCKS is just a note.
+
+  Relationships are UPPER_SNAKE_CASE, strict mode — unknown edges are
+  rejected.
+
+types:
+  - goal
+  - option
+  - decision
+  - step
+  - risk
+  - open_question
+  - note
+
+# Relationship vocabulary. 37 default edges + 8 planning-specific.
+relationships:
+  mode: strict
+  definitions:
+    # ── Structural / reference ──────────────────────────────────────────
+    - name: PART_OF
+      description: Hierarchical containment — the source is structurally part of the target and meaningless without it.
+      when_to_use: Taxonomy. Parent owns the child as a structural part. Pure graph edge — files stay flat at the vault root. Not for logical dependency (use DEPENDS_ON).
+      default_weight: 3.0
+      acyclic: true
+    - name: REFERENCES
+      description: Soft reference without ownership or dependency.
+      when_to_use: Emitted automatically from inline wiki-links — do not author manually.
+      default_weight: 0.5
+    - name: DEPENDS_ON
+      description: The source requires the target to exist or complete first.
+      when_to_use: Logical dependency where removing the target breaks the source.
+      default_weight: 2.0
+      acyclic: true
+    - name: IMPLEMENTS
+      description: The source realizes or fulfills the target specification.
+      default_weight: 2.0
+      acyclic: true
+    - name: DEFINES
+      description: The source defines the target concept or term.
+      default_weight: 1.5
+      acyclic: true
+    - name: DEFINED_BY
+      description: The source is defined by the target (inverse of DEFINES).
+      default_weight: 1.5
+      acyclic: true
+    - name: USES
+      description: The source makes use of the target without depending on it.
+      default_weight: 1.0
+    - name: CLASSIFIES
+      description: The source classifies or categorizes the target.
+      default_weight: 1.0
+      acyclic: true
+    - name: STORES
+      description: The source stores the target data or content.
+      default_weight: 1.0
+    - name: DERIVED_FROM
+      description: The source is derived from, or based upon, the target.
+      when_to_use: Prior art, source material, inspiration that concretely shaped the source.
+      default_weight: 1.5
+      acyclic: true
+    - name: MOTIVATED_BY
+      description: The target motivated the creation or change described by the source.
+      when_to_use: Use from goal or decision back to the external trigger (a directive, incident, commitment) that set this planning in motion.
+      default_weight: 2.0
+      acyclic: true
+    - name: SUPERSEDES
+      description: The source replaces the target — the target is no longer current.
+      when_to_use: Versioning and replacement. Keep the old entity for history; link the new one via SUPERSEDES.
+      default_weight: 1.5
+      acyclic: true
+    - name: ENABLES
+      description: The source enables the target to happen or exist.
+      default_weight: 1.0
+      acyclic: true
+    - name: BLOCKS
+      description: The source blocks the target from happening or progressing.
+      when_to_use: Use from open_question → decision/step to mark a blocker; from risk → step when the risk is actively halting work.
+      default_weight: 1.0
+
+    # ── Claim / evidence ────────────────────────────────────────────────
+    - name: SUPPORTS
+      description: The source provides evidence or reasoning that supports the target claim.
+      default_weight: 2.5
+    - name: CONTRADICTS
+      description: The source contradicts or disputes the target claim.
+      default_weight: 2.5
+    - name: GENERALIZES
+      description: The source is a broader, more abstract form of the target.
+      default_weight: 2.0
+      acyclic: true
+    - name: SPECIALIZES
+      description: The source is a narrower, more concrete form of the target.
+      default_weight: 2.0
+      acyclic: true
+    - name: CONTRASTS_WITH
+      description: The source is defined partly by its contrast with the target — easily confused neighbors.
+      default_weight: 1.5
+
+    # ── Reasoning / causation ───────────────────────────────────────────
+    - name: MOTIVATES
+      description: The source motivates or drives the target.
+      default_weight: 1.5
+      acyclic: true
+    - name: INFORMED_BY
+      description: The source is informed by the target — partial input, not a hard dependency.
+      default_weight: 1.0
+    - name: EXPLAINS
+      description: The source explains the phenomenon or behavior of the target.
+      default_weight: 2.0
+    - name: PREDICTS
+      description: The source predicts the behavior of the target.
+      default_weight: 1.5
+    - name: PRECEDED_BY
+      description: The source is preceded in time by the target.
+      default_weight: 2.0
+      acyclic: true
+    - name: FOLLOWED_BY
+      description: The source is followed in time by the target.
+      default_weight: 2.0
+      acyclic: true
+    - name: CAUSED
+      description: The source caused the target (causal, not merely temporal).
+      default_weight: 1.5
+      acyclic: true
+    - name: VALIDATES
+      description: The source validates the target claim, pattern, or principle.
+      default_weight: 1.5
+    - name: AGREES_WITH
+      description: The source perspective agrees with the target perspective.
+      default_weight: 2.0
+    - name: DISAGREES_WITH
+      description: The source perspective disagrees with the target perspective.
+      default_weight: 2.5
+    - name: INTERPRETS
+      description: The source interprets or analyzes the target.
+      default_weight: 2.0
+    - name: EXTENDS
+      description: The source extends the target with additional reasoning or scope.
+      default_weight: 1.5
+
+    # ── Principles / process ────────────────────────────────────────────
+    - name: GOVERNS
+      description: The source principle governs or constrains the target.
+      default_weight: 2.5
+      acyclic: true
+    - name: CONSTRAINS
+      description: The source constrains the permissible states of the target.
+      when_to_use: Use from a constraint-note or risk to the decision/step whose options the constraint narrows.
+      default_weight: 2.0
+      acyclic: true
+    - name: OVERRIDES
+      description: The source overrides the target principle in overlapping scope.
+      default_weight: 1.5
+      acyclic: true
+    - name: REQUIRES
+      description: The source process requires the target to have happened first.
+      when_to_use: step → step. Precedence in the execution plan — removing the target breaks the source's prerequisite chain.
+      default_weight: 2.5
+      acyclic: true
+    - name: PRODUCES
+      description: The source process produces the target as an output.
+      when_to_use: step → any. Captures the concrete artifact or state change a step yields.
+      default_weight: 2.0
+      acyclic: true
+    - name: TRIGGERS
+      description: Completing the source triggers the target.
+      default_weight: 2.0
+      acyclic: true
+
+    # ── Planning-specific ───────────────────────────────────────────────
+    - name: ALTERNATIVES_TO
+      description: The source option is a mutually exclusive alternative to the target option.
+      when_to_use: option ↔ option. Frames the choice — a decision's CHOSEN and REJECTED paths should be ALTERNATIVES_TO each other. Without this edge, options are unframed and the decision is undeliberated.
+      default_weight: 2.0
+    - name: CHOSEN
+      description: The source decision selected the target option.
+      when_to_use: decision → option. Typically exactly one CHOSEN per decision. Paired with REJECTED, it documents the deliberation.
+      default_weight: 3.0
+      acyclic: true
+    - name: REJECTED
+      description: The source decision explicitly ruled out the target option.
+      when_to_use: decision → option. Every serious decision has at least one REJECTED — negative knowledge is the highest-value output of planning.
+      default_weight: 2.0
+      acyclic: true
+    - name: EXECUTES
+      description: The source step carries out the target decision.
+      when_to_use: step → decision. A step that executes nothing is suspect — either the decision is missing or the entity isn't really a step.
+      default_weight: 2.5
+      acyclic: true
+    - name: MITIGATES
+      description: The source step addresses the target risk.
+      when_to_use: step → risk. A risk without a MITIGATES incoming edge has `mitigation_status` = unmitigated or accepted.
+      default_weight: 2.5
+      acyclic: true
+    - name: THREATENS
+      description: The source risk endangers the target goal, decision, or step.
+      when_to_use: risk → goal / decision / step. A risk without THREATENS is a free-floating worry.
+      default_weight: 2.0
+    - name: ANSWERS
+      description: The source decision or note resolves the target open_question.
+      when_to_use: decision / note → open_question. Flip the question's `status` to `answered` when this edge is created.
+      default_weight: 2.0
+      acyclic: true
+    - name: RAISES
+      description: The source entity raised the target open_question.
+      when_to_use: note / option / step → open_question. Tracks where in the deliberation a question arose.
+      default_weight: 1.5
+      acyclic: true
+
+    - name: _default
+      description: Fallback weight for any relationship not otherwise specified. Required by the engine.
+      default_weight: 1.0
+
+# Body wiki-links `[[target]]` auto-emit as REFERENCES relations via the
+# alias-synthesis pass.
+alias_target_rel_type: REFERENCES
+
+community:
+  resolution: 1.0
+  seed: 42

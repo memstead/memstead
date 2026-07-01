@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.astro/
+.env
+.env.production
+.env.development
+.DS_Store
+
+# Generated from src/content/docs/reference/openapi.json by
+# scripts/copy-openapi.mjs (runs as `prebuild`).
+public/openapi.json

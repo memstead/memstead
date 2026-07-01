@@ -1,0 +1,90 @@
+# yaml-language-server: $schema=../../../../engine/crates/memstead-schema/generated/type-definition.schema.json
+
+name: constraint
+description: |
+  A rule the agent must obey while executing a program or a single
+  node. Declares the rule, the enforcement mode (advisory or
+  blocking), and the rationale. Attaches to a program (whole-program
+  rule) or a node (node-local rule) via the governed_by edge.
+when_to_use: |
+  Use for every rule the agent must follow that is not implied by the
+  node's intent or the tool's signature. Hard rules ("never delete
+  without confirmation"), domain rules ("always speak in formal
+  German"), safety rules ("escalate to a human after two failed
+  authentication attempts"), or guardrails ("max one mutation per
+  user turn") all author as constraints.
+boundaries:
+  - Not a node — a constraint is a rule that applies during execution;
+    the node does the work the rule constrains.
+  - Not a tool — a tool is a capability; a constraint can forbid using
+    it under certain conditions.
+  - Not part of a node's intent — if the rule is specific to one
+    node's success, write it into the node's intent. Constraints
+    capture rules that span nodes or hold throughout the program.
+  - Not a free-form principle — a constraint is concrete enough that
+    the agent can evaluate compliance at runtime.
+system_message: |
+  A constraint declares one rule. Enforcement is advisory (agent
+  should obey, may deviate with explicit reasoning) or blocking
+  (agent must obey, deviation aborts the program). Severity gradates
+  the consequence of violation. Detection describes how compliance is
+  observed — by whom (the agent itself, the user, an external system)
+  and when (per node, per turn, on exit).
+
+  Constraints with no incoming governed_by edges are unattached and
+  do nothing. Constraints attached to a program apply to every node;
+  constraints attached to a node apply only to that node.
+sections:
+  - key: rule
+    heading: Rule
+    required: true
+    search_weight: 40.0
+    write_rules:
+      - "One to two sentences. The rule itself. Imperative voice — 'Never disclose customer payment information to callers.', 'Always confirm before deleting an entity.' Standalone-readable in a search snippet."
+  - key: enforcement
+    heading: Enforcement
+    required: true
+    search_weight: 15.0
+    write_rules:
+      - "advisory or blocking. State which, and explain the consequence of violation. Blocking constraints abort the program when violated; advisory constraints log and continue."
+  - key: rationale
+    heading: Rationale
+    required: false
+    search_weight: 10.0
+    write_rules:
+      - "Why the rule exists. A reader should understand the rule's purpose, not just its surface. Without rationale, future maintainers may relax the rule without realising what it protected."
+  - key: detection
+    heading: Detection
+    required: false
+    search_weight: 10.0
+    write_rules:
+      - "How the agent (or another system) detects violation. Examples: 'agent self-checks after each tool call', 'output filter scans for PII before reply', 'human reviewer in the audit log'. A constraint without detection is unenforceable."
+  - key: notes
+    heading: Notes
+    required: false
+    search_weight: 3.0
+    catch_all: true
+metadata_fields:
+  - key: severity
+    description: How serious a violation is. Influences how the agent and downstream auditors weight the rule.
+    field_type: string
+    default_value: error
+    enum_values: [info, warn, error, critical]
+    filterable: equality
+  - key: scope
+    description: Whether the constraint is meant to apply program-wide or only to the nodes that explicitly attach it.
+    field_type: string
+    default_value: local
+    enum_values: [local, program, global]
+    filterable: equality
+title_weight: 100.0
+text_fields: [rule, enforcement, rationale, detection, notes]
+hierarchy_relationship: PART_OF
+propagating_relationships: []
+updatable_fields: [title, rule, enforcement, rationale, detection, notes, severity, scope, tags]
+health_required_fields: [rule, enforcement]
+staleness_threshold_days: 365
+write_rules:
+  - "A blocking constraint at severity=critical aborts the program on violation. A blocking constraint at severity=error escalates to falls_back_to. Advisory constraints log and continue regardless of severity."
+  - "Constraints with scope=global are intended for cross-program reuse. Author once, reference across program vaults; don't duplicate."
+  - "Detection is the difference between a rule and a wish. If you can't say how a violation is observed, the constraint is not yet authored."

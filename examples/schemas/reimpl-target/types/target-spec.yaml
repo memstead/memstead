@@ -1,0 +1,89 @@
+# yaml-language-server: $schema=../../../../engine/crates/memstead-schema/generated/type-definition.schema.json
+
+name: target-spec
+description: |
+  Design of a new component in the Target system, realizing one or more
+  legacy capabilities from the paired Legacy vault. Grows across its
+  lifecycle from intent (planned) through design (in-progress) to
+  implementation (built) and verification (validated). After the
+  reimplementation completes, target-specs are migrated to regular `spec`
+  entities in a software@0.1.0 vault.
+when_to_use: |
+  Use for any new component, module, service, endpoint, screen, or
+  subsystem that will exist in the new system. One target-spec per
+  concept. Prefer aggregating related capabilities into one target-spec
+  over splitting a single design across many — the graph shows
+  relationships through REALIZES_CAPABILITY, it does not need spec
+  fragmentation to do so.
+boundaries:
+  - Not a description of the old system — those are `capability` entities in the Legacy vault.
+  - Not a deviation decision — use `divergence` for conscious departures from legacy behavior.
+  - Not a spec of a living system — use `spec` (software@0.1.0) after the target is shipped and the schema is swapped.
+system_message: |
+  A target-spec is an intent-to-design-to-build artifact. It starts
+  before any code exists (status=planned) and grows as the design
+  solidifies and implementation lands. Link every target-spec to the
+  capabilities it realizes via REALIZES_CAPABILITY — the coverage query
+  depends on it.
+
+  Keep the design technology-aware but not technology-obsessed. The
+  `tech` metadata field names the stack; the Design section should
+  describe the new component's behavior, structure, and interfaces, not
+  rehash framework idioms. The Realization section fills in file paths
+  once code exists.
+sections:
+  - key: purpose
+    heading: Purpose
+    required: true
+    search_weight: 30.0
+    write_rules:
+      - "One or two sentences. Why this component exists and what role it plays in the new system."
+  - key: design
+    heading: Design
+    required: true
+    search_weight: 20.0
+    write_rules:
+      - "How the component is built: structure, interfaces, responsibilities, data flow. Technology-aware but not framework-specific — a peer engineer on the same stack can follow."
+      - "Reference the capabilities this component realizes by wiki-link to the Legacy vault, plus explicit REALIZES_CAPABILITY edges."
+  - key: realization
+    heading: Realization
+    required: false
+    search_weight: 10.0
+    write_rules:
+      - "Bullet list of file paths or module identifiers in the new codebase that implement this spec. Filled in as code lands; empty while status is planned."
+  - key: open_points
+    heading: Open points
+    required: false
+    search_weight: 5.0
+    catch_all: true
+    write_rules:
+      - "Things still undecided, risks, questions for review. Clears as the spec matures; should be empty when status reaches validated."
+metadata_fields:
+  - key: status
+    description: Lifecycle state of the target-spec.
+    field_type: string
+    default_value: planned
+    enum_values: [planned, in_progress, built, validated]
+    filterable: equality
+  - key: tech
+    description: Technology stack for this component — free-form string (e.g. "rust-axum", "typescript-nextjs", "python-fastapi").
+    field_type: string
+  - key: owner
+    description: Person or team responsible for this target-spec. Free-form handle.
+    field_type: string
+title_weight: 100.0
+text_fields: [purpose, design, realization, open_points]
+hierarchy_relationship: PART_OF
+edge_weight_overrides:
+  REALIZES_CAPABILITY: 4.0
+  EVOLVES_INTO: 2.5
+propagating_relationships: [PART_OF, REALIZES_CAPABILITY, DEPENDS_ON]
+updatable_fields: [title, purpose, design, realization, open_points, status, tech, owner, tags]
+health_required_fields: [purpose, design]
+staleness_threshold_days: 90
+write_rules:
+  - "Every target-spec links REALIZES_CAPABILITY to at least one capability in the paired Legacy vault, unless the spec realizes a target-only feature (no legacy equivalent — author a divergence of kind=add alongside)."
+  - "Status transitions: planned → in_progress when design is solidifying, in_progress → built when code lands, built → validated when behavior is verified against the realized capabilities."
+  - "Realization section stays empty while status is planned; fill it in as files land."
+  - "Open points should shrink over the lifecycle; an entity with open points at status=validated is a signal something was skipped."
+  - "Relationships: REALIZES_CAPABILITY (cross-vault, required), PART_OF for hierarchy, DEPENDS_ON for components this one needs, EVOLVES_INTO for planned iterations, MANIFESTS_IN from divergences."

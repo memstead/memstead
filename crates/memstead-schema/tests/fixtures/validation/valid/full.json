@@ -1,0 +1,32 @@
+{
+  "version": "0.1.0",
+  "schema": "default@1.0.0",
+  "writeGuidance": {
+    "context": "Full fixture for validator coverage",
+    "style": "Structured"
+  },
+  "rules": { "extract": "Pattern-level extraction" },
+  "mediums": {
+    "codebase": {
+      "type": "codebase",
+      "scope": {
+        "tree": [{ "path": "**/*.md", "mode": "allow" }]
+      }
+    },
+    "upstream": {
+      "type": "graph",
+      "scope": { "domains": ["other-vault"] }
+    }
+  },
+  "projections": {
+    "extract": {
+      "intent": "Extract specs from markdown",
+      "sources": [
+        { "medium_ref": "codebase", "role": "primary" },
+        { "medium_ref": "upstream", "role": "reference" }
+      ],
+      "destination": { "medium_ref": "graph" }
+    }
+  },
+  "vcs": "system"
+}

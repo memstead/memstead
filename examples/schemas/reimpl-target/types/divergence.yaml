@@ -1,0 +1,104 @@
+# yaml-language-server: $schema=../../../../engine/crates/memstead-schema/generated/type-definition.schema.json
+
+name: divergence
+description: |
+  An authorized deviation from legacy behavior in the new system. Every
+  deliberate drop, simplification, antipattern-removal, technology swap,
+  or added capability is captured as one divergence entity with rationale
+  and tradeoffs. Divergences are the scarce and valuable artifacts of a
+  reimplementation — silence means "port as-is", so each divergence
+  represents a conscious decision that must be remembered.
+when_to_use: |
+  Use whenever the new system will not replicate a legacy capability's
+  behavior — whether that is dropping it entirely, simplifying it,
+  rejecting an antipattern, swapping technology at a behavior-changing
+  level, or adding a capability the legacy did not have. If the new
+  system will just port the capability, no divergence is needed.
+boundaries:
+  - Not a technology choice without behavioral impact — "we use Postgres instead of MySQL" is usually not a divergence unless behavior genuinely changes. Capture purely-technical decisions as `decision` entities in a software@0.1.0 vault if at all.
+  - Not a design note for a target-spec — use the Design section of the target-spec.
+  - Not a speculative idea — proposed divergences may exist while being discussed, but accept or reject them; do not let them accumulate indefinitely.
+system_message: |
+  A divergence is mandatory whenever the new system deliberately deviates
+  from legacy behavior. It links DIVERGES_FROM to the affected capability
+  in the paired Legacy vault, and — unless the kind is "drop" —
+  MANIFESTS_IN the target-spec that carries the new behavior.
+
+  Kinds:
+    drop              — the capability is removed from the new system
+    simplify          — fewer options, cases, or surface area
+    antipattern_out   — a legacy mistake is explicitly rejected
+    tech_swap         — technology change that affects behavior
+    add               — the new system has a capability the old lacked
+
+  Keep divergences short. If you find yourself writing an essay, the
+  divergence is actually two, or it is a target-spec design section in
+  disguise.
+sections:
+  - key: rationale
+    heading: Rationale
+    required: true
+    search_weight: 30.0
+    write_rules:
+      - "Why the new system deviates. One paragraph. State the concrete problem with the legacy behavior and why the new approach is better."
+  - key: original_behavior
+    heading: Original behavior
+    required: true
+    search_weight: 20.0
+    write_rules:
+      - "One to three sentences summarizing what the legacy system did for the affected capability. Keep it short — the full capability description lives in the Legacy vault; this is the at-a-glance summary."
+  - key: new_behavior
+    heading: New behavior
+    required: false
+    search_weight: 20.0
+    write_rules:
+      - "One to three sentences summarizing what the new system does instead. Omit when kind=drop — there is no new behavior."
+  - key: tradeoffs
+    heading: Tradeoffs
+    required: false
+    search_weight: 10.0
+    write_rules:
+      - "What the deviation costs. Users who relied on the legacy behavior lose something — name it. Divergences without tradeoffs are usually underexamined."
+  - key: notes
+    heading: Notes
+    required: false
+    search_weight: 3.0
+    catch_all: true
+metadata_fields:
+  - key: kind
+    description: The kind of deviation — the primary discriminator for queries like "what antipatterns did we reject?".
+    field_type: string
+    default_value: simplify
+    enum_values: [drop, simplify, antipattern_out, tech_swap, add]
+    filterable: equality
+  - key: status
+    description: Lifecycle state — proposed while under review, accepted when the team commits, rejected if abandoned.
+    field_type: string
+    default_value: proposed
+    enum_values: [proposed, accepted, rejected]
+    filterable: equality
+  - key: decided_on
+    description: Date the divergence was accepted (or rejected). ISO YYYY-MM-DD.
+    field_type: date
+    filterable: range
+  - key: deciders
+    description: Who made the call. Comma-separated names or team handles.
+    field_type: string
+    serialization: csv_array
+title_weight: 100.0
+text_fields: [rationale, original_behavior, new_behavior, tradeoffs, notes]
+hierarchy_relationship: PART_OF
+edge_weight_overrides:
+  DIVERGES_FROM: 4.0
+  MANIFESTS_IN: 3.0
+propagating_relationships: [DIVERGES_FROM, MANIFESTS_IN]
+updatable_fields: [title, rationale, original_behavior, new_behavior, tradeoffs, notes, kind, status, decided_on, deciders, tags]
+health_required_fields: [rationale, original_behavior, kind]
+staleness_threshold_days: 365
+write_rules:
+  - "Every divergence MUST link DIVERGES_FROM to a capability in the paired Legacy vault. A divergence without an anchor in legacy is not a divergence."
+  - "Every divergence except kind=drop MUST link MANIFESTS_IN to a target-spec. Kind=drop has no successor and is the one exception."
+  - "Kind=add is for capabilities the legacy did not have. DIVERGES_FROM is still required — link to a sibling capability in the same area to establish context, or create a placeholder legacy capability with empty evidence and the reasoning explained there."
+  - "Title should name the deviation concisely ('Drop manual price override', 'Simplify role model to three roles'). Avoid technology names in titles — those belong in tradeoffs or new_behavior."
+  - "Status proposed → accepted once the team commits; proposed → rejected if the idea is dropped. Do not delete rejected divergences — keeping them recorded prevents the idea from being re-proposed without reference to the prior rejection."
+  - "Relationships: DIVERGES_FROM (cross-vault, required), MANIFESTS_IN (intra-vault, required unless kind=drop), REFERENCES for wiki-links."

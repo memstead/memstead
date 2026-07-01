@@ -1,0 +1,86 @@
+# yaml-language-server: $schema=../../../../engine/crates/memstead-schema/generated/type-definition.schema.json
+
+name: principle
+description: |
+  A project-wide rule that holds across many entities and whose
+  violations should be visible everywhere. The engineering-policy
+  layer of the graph — "all public APIs MUST return typed errors",
+  "all monetary amounts are integer cents".
+when_to_use: |
+  Use when a rule is expected to hold across multiple entities or
+  subsystems and its violation would be noticeable project-wide. The
+  defining test: would a violation of this rule be visible in many
+  places? If yes, `principle`. If the rule is scoped to one capability
+  and carries a verification status, use `requirement`. If it's a
+  single design choice with alternatives, use `decision`.
+boundaries:
+  - Not a capability-specific commitment — use `requirement`.
+  - Not a single design decision with alternatives — use `decision`.
+  - Not a current-state description — use `spec`.
+  - Not a term definition — use `concept`.
+  - Not a lightweight observation — use `memo`.
+system_message: |
+  Principles are rules that hold across their scope. Each entity has
+  Statement, Scope, and optional Justification/Exceptions/Consequences.
+  Scope is required — a principle without scope implies universality
+  and must say so explicitly. Link GOVERNS to the entities this
+  principle constrains. Link OVERRIDES when principles conflict in
+  overlapping scope.
+sections:
+  - key: statement
+    heading: Statement
+    required: true
+    search_weight: 40.0
+    write_rules:
+      - "One or two sentences. The rule, law, or constraint. Must be testable — a reader can check whether something violates it."
+  - key: scope
+    heading: Scope
+    required: true
+    search_weight: 20.0
+    write_rules:
+      - "Where this principle applies. Domain, context, conditions. A principle without scope implies universality — state it explicitly."
+  - key: justification
+    heading: Justification
+    required: false
+    search_weight: 5.0
+    write_rules:
+      - "Why this principle holds. Evidence, reasoning, authority. Link supporting entities via wiki-links."
+  - key: exceptions
+    heading: Exceptions
+    required: false
+    search_weight: 5.0
+    catch_all: true
+    write_rules:
+      - "Known cases where the principle does not apply. Bullet list: exception, then why. A principle with no stated exceptions is either truly universal or underexamined."
+  - key: consequences
+    heading: Consequences
+    required: false
+    search_weight: 3.0
+    write_rules:
+      - "What follows from this principle. Implications, downstream effects, design decisions it forces."
+metadata_fields:
+  - key: authority
+    description: How settled the principle is in practice.
+    field_type: string
+    default_value: proposed
+    enum_values: [proposed, accepted, established, deprecated]
+    filterable: equality
+  - key: universality
+    description: The breadth of the principle's applicability.
+    field_type: string
+    default_value: contextual
+    enum_values: [contextual, domain-wide, universal]
+    filterable: equality
+title_weight: 100.0
+text_fields: [statement, scope, justification, exceptions, consequences]
+hierarchy_relationship: PART_OF
+propagating_relationships: [GOVERNS, CONSTRAINS]
+updatable_fields: [title, statement, scope, justification, exceptions, consequences, authority, universality, tags]
+health_required_fields: [statement, scope]
+staleness_threshold_days: 120
+write_rules:
+  - "Principles are rules that hold consistently within their scope. Each must be testable — you can check whether something violates it."
+  - "Scope is mandatory. A principle without scope implies universality — state it explicitly."
+  - "Before authoring, confirm the rule applies across many entities. A rule for one capability is a `requirement`, not a principle."
+  - "Link GOVERNS to every entity this principle constrains. Link OVERRIDES when this principle supersedes another in overlapping scope."
+  - "Exceptions is high-value — a principle with no stated exceptions is either truly universal or underexamined."

@@ -1,0 +1,17 @@
+{
+  "name": "memstead-marketplace",
+  "owner": {
+    "name": "dasboe"
+  },
+  "metadata": {
+    "description": "Memstead — AI agent adapter for Claude Code"
+  },
+  "plugins": [
+    {
+      "name": "memstead",
+      "source": "./",
+      "description": "Memstead — AI agent adapter for Claude Code",
+      "version": "0.1.0"
+    }
+  ]
+}

@@ -1,0 +1,89 @@
+# yaml-language-server: $schema=../../../../engine/crates/memstead-schema/generated/type-definition.schema.json
+
+name: spec
+description: |
+  Current-state description of a component, module, or subsystem. Answers
+  WHAT a piece of the system is today. Prescriptive — describes what IS,
+  never what WAS or how we got here.
+when_to_use: |
+  Use for internal subsystem documentation someone would read to understand
+  or rebuild current behaviour. `spec` is the catch-all in this schema —
+  before choosing it, rule out the five more specific types (contract,
+  decision, requirement, principle, concept). Prefer them whenever they fit.
+boundaries:
+  - Not an external wire-level surface (request/response shape, protocol, CLI command, file format) — use `contract`.
+  - Not a design choice with alternatives and consequences — use `decision`.
+  - Not a normative commitment (MUST / SHOULD / MAY) — use `requirement`.
+  - Not a project-wide rule that governs many entities — use `principle`.
+  - Not a term definition (idempotency, blast radius) — use `concept`.
+  - Not a post-mortem or incident record — use `incident`.
+system_message: |
+  Specs describe current state. Keep each spec bounded to one concept —
+  a subsystem spanning many files is one spec, not many. Fill Realization
+  with the files that implement it when known; that turns the graph into
+  a map from concept to concrete code. Link REALIZES to fulfilled
+  requirements, IMPLEMENTS to any more abstract spec.
+sections:
+  - key: identity
+    heading: Identity
+    required: true
+    search_weight: 40.0
+    write_rules:
+      - "One sentence. WHAT this is, not WHY. Must stand alone in a search snippet — no pronouns, no forward references."
+  - key: purpose
+    heading: Purpose
+    required: true
+    search_weight: 20.0
+    write_rules:
+      - "One sentence. WHY this exists — the problem it solves or the role it fills."
+  - key: realization
+    heading: Realization
+    required: false
+    search_weight: 10.0
+    write_rules:
+      - "Bullet list of file paths or module identifiers that implement this spec. Paths relative to the repository root."
+      - "Update on refactor so the concept→code map stays accurate. Omit for purely conceptual specs with no realizing code."
+  - key: specifies
+    heading: Specifies
+    required: false
+    search_weight: 5.0
+    catch_all: true
+    write_rules:
+      - "Bullet list of concrete details this entity defines — fields, subcomponents, invariants, internal interfaces."
+  - key: constraints
+    heading: Constraints
+    required: false
+    search_weight: 5.0
+    write_rules:
+      - "Bullet list of rules, limits, or invariants this subsystem enforces. Omit if none apply."
+  - key: rationale
+    heading: Rationale
+    required: false
+    search_weight: 1.0
+    write_rules:
+      - "Short design justification. For the full decision trail, author a `decision` entity and link MOTIVATED_BY."
+metadata_fields:
+  - key: level
+    description: Abstraction level — M0 concrete, M1 pattern, M2 structural rule, M3 meta.
+    field_type: string
+    default_value: M0
+    enum_values: [M0, M1, M2, M3]
+    filterable: equality
+  - key: stability
+    description: How volatile this spec is expected to be.
+    field_type: string
+    default_value: stable
+    enum_values: [experimental, evolving, stable, frozen]
+    filterable: equality
+title_weight: 100.0
+text_fields: [identity, purpose, realization, specifies, constraints, rationale]
+hierarchy_relationship: PART_OF
+propagating_relationships: [DEPENDS_ON, USES, REALIZES]
+updatable_fields: [title, identity, purpose, realization, specifies, constraints, rationale, level, stability, tags]
+health_required_fields: [identity, purpose]
+staleness_threshold_days: 90
+write_rules:
+  - "Describe current state only — no changelogs, no migration prose, no past-tense historical claims."
+  - "One spec = one concept. Describing two things? Author two specs with a PART_OF edge."
+  - "Before writing, confirm the content is not a contract, decision, requirement, principle, or concept. `spec` is the last resort, not the default."
+  - "Link REALIZES to requirements this spec fulfils. Link IMPLEMENTS to any more abstract spec. Link DEPRECATES when replacing a predecessor with active migration."

@@ -1,0 +1,88 @@
+# yaml-language-server: $schema=../../../../generated/type-definition.schema.json
+
+name: evidence
+description: |
+  An empirical anchor that supports or weakens a strategic claim.
+  Carries kind (self-use, external-pilot, customer-interview,
+  benchmark, internal-test) and validation status (anecdotal,
+  repeatable, proven). Evidence with no outgoing STRENGTHENS or
+  WEAKENS is a free-floating note — `required_outgoing` enforces
+  this at tier 2 (warns).
+when_to_use: |
+  Use to record one observable measurement, anecdote, or pilot
+  outcome that bears on a `bet`, `positioning`, or `principle`. The
+  defining test: does this observation move the project's posture
+  on a specific claim? If yes, `evidence`. If no, it is project
+  noise and does not belong in the graph.
+boundaries:
+  - Not a `market_signal` — signals are external trends; evidence is a specific measurement or anecdote, often produced by the project itself.
+  - Not a `competitor` — competitors are entities with persistent identity; evidence is a snapshot observation.
+  - Not a `bet` — a bet is the wager; evidence is what moves the wager.
+system_message: |
+  Evidence is the empirical anchor of a strategic claim. The Claim
+  section names what claim this evidence speaks to (often a
+  paraphrase of a `bet`'s thesis). Observation records what was
+  actually seen. Source records where the observation lives — a path,
+  a transcript, a benchmark log, a customer name. Without a source
+  the evidence is unreproducible and degrades to belief. Validation
+  status records how strong the observation is: anecdotal (one data
+  point), repeatable (seen more than once), proven (third-party
+  reproduced).
+sections:
+  - key: claim
+    heading: Claim
+    required: true
+    search_weight: 30.0
+    write_rules:
+      - "One sentence naming the claim this evidence speaks to. Standalone-readable. Should usually paraphrase the title of a `bet`, `positioning`, or `principle` this evidence STRENGTHENS or WEAKENS."
+  - key: observation
+    heading: Observation
+    required: true
+    search_weight: 20.0
+    write_rules:
+      - "What was actually seen — the data point, the anecdote, the pilot outcome. Concrete enough that an observer could check the source and agree the observation happened."
+  - key: source
+    heading: Source
+    required: true
+    search_weight: 10.0
+    write_rules:
+      - "Where the observation lives. Path, link, transcript reference, customer name, benchmark log. Without a source the evidence is unreproducible."
+  - key: notes
+    heading: Notes
+    required: false
+    search_weight: 3.0
+    catch_all: true
+metadata_fields:
+  - key: kind
+    description: What shape of evidence this is.
+    field_type: string
+    enum_values: [self-use, external-pilot, customer-interview, benchmark, internal-test, third-party-report, other]
+    filterable: equality
+  - key: validation
+    description: How strong the observation is.
+    field_type: string
+    default_value: anecdotal
+    enum_values: [anecdotal, repeatable, proven]
+    filterable: equality
+  - key: observed_on
+    description: Date the observation was made. ISO YYYY-MM-DD.
+    field_type: date
+    filterable: range
+title_weight: 100.0
+text_fields: [claim, observation, source, notes]
+hierarchy_relationship: PART_OF
+required_outgoing:
+  - relationships: [STRENGTHENS, WEAKENS, VALIDATES, CONTRADICTS]
+    cardinality: at_least_one
+edge_weight_overrides:
+  STRENGTHENS: 3.0
+  WEAKENS: 3.0
+propagating_relationships: [STRENGTHENS, WEAKENS, VALIDATES, CONTRADICTS]
+updatable_fields: [title, claim, observation, source, notes, kind, validation, observed_on, tags]
+health_required_fields: [claim, observation, source]
+staleness_threshold_days: 180
+write_rules:
+  - "Evidence must STRENGTHEN, WEAKEN, VALIDATE, or CONTRADICT something — without one of those edges it is a free-floating note. The engine warns."
+  - "Observation is one data point or a tightly-bounded set; not a synthesized narrative. Synthesis belongs in the `bet` or `positioning` it supports."
+  - "Source must be reachable. A bare 'we saw this in a meeting' without a name or transcript is unreproducible — the evidence collapses to belief."
+  - "Validation status reflects the observation, not the agent's confidence in the claim. One anecdote stays anecdotal even if the claim is obvious."

@@ -1,0 +1,4 @@
+{
+  "format": "memstead-plugin/v0",
+  "vaults": ["project_vaults/sample"]
+}

@@ -1,0 +1,4 @@
+[
+  {"id":"t1","prompt":"In the Zephyrine Relay Mesh, how long does the Marrow Cache store packets, and what eviction policy does it use?","reference":"The Marrow Cache stores packets for up to 47 seconds and evicts them using a coral-tree eviction policy."},
+  {"id":"t2","prompt":"In the Zephyrine Relay Mesh, which component depends on the Marrow Cache for replay, and what port does it expose?","reference":"The Verdant Gateway depends on the Marrow Cache for replay and exposes a single read-only port named loom-7."}
+]

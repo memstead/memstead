@@ -1,0 +1,95 @@
+# yaml-language-server: $schema=../../../../generated/type-definition.schema.json
+
+name: step
+description: |
+  An action in the execution plan. Each step carries one concrete
+  piece of the plan forward, linked via EXECUTES to the decision it
+  realizes and via REQUIRES to prerequisite steps. Status tracks
+  planned → in_progress → done as execution unfolds.
+when_to_use: |
+  Use for each concrete action the plan will execute. The defining
+  test: does this step EXECUTES some decision? If no decision has been
+  made yet, you don't have a step — you have an `option` or a `note`.
+  Steps are atomic; milestones that span many actions should be
+  composed from steps via REQUIRES.
+boundaries:
+  - Not a decision — the choice lives in the decision; the step is the action.
+  - Not a task without a decision behind it — every step should EXECUTES one.
+  - Not a milestone — compose milestones from steps via REQUIRES rather than writing a single large step.
+  - Not a risk mitigation generically — use MITIGATES to attach a mitigating step to a specific risk.
+system_message: |
+  Steps are the plan's concrete moves. Each step realizes a decision
+  (EXECUTES), has prerequisites (REQUIRES), and produces outputs
+  (PRODUCES). Validation is non-optional — a step is incomplete until
+  success is checkable. As execution progresses, flip `status` forward
+  and record `actual_effort` so the next planning phase has data.
+sections:
+  - key: what
+    heading: What
+    required: true
+    search_weight: 30.0
+    write_rules:
+      - "One or two sentences. What the step does. Standalone-readable in a search snippet."
+  - key: how
+    heading: How
+    required: false
+    search_weight: 15.0
+    write_rules:
+      - "The approach — tools, techniques, files, commands. Specific enough that another agent could pick it up mid-flight."
+  - key: expected_outcome
+    heading: Expected Outcome
+    required: true
+    search_weight: 15.0
+    write_rules:
+      - "What success looks like. Concrete artifacts, state changes, or observable behaviors."
+  - key: validation
+    heading: Validation
+    required: true
+    search_weight: 10.0
+    write_rules:
+      - "How success is verified — a test, a check, a metric, a manual observation. A step without validation is a wish."
+  - key: rollback
+    heading: Rollback
+    required: false
+    search_weight: 5.0
+    write_rules:
+      - "How to undo if the step fails or produces unexpected results. Omit only if the step is truly idempotent or read-only."
+  - key: notes
+    heading: Notes
+    required: false
+    search_weight: 3.0
+    catch_all: true
+metadata_fields:
+  - key: status
+    description: Execution lifecycle of the step.
+    field_type: string
+    default_value: planned
+    enum_values: [planned, in_progress, done, skipped, blocked]
+    filterable: equality
+  - key: order
+    description: Numeric ordering within a plan for display purposes. Actual precedence is carried by REQUIRES edges.
+    field_type: number
+    filterable: range
+  - key: estimated_effort
+    description: Rough effort estimate — free-form (e.g. 'half-day', '2h', 'S/M/L').
+    field_type: string
+  - key: actual_effort
+    description: Actual effort recorded after completion, for calibration of future estimates.
+    field_type: string
+title_weight: 100.0
+text_fields: [what, how, expected_outcome, validation, rollback, notes]
+hierarchy_relationship: PART_OF
+edge_weight_overrides:
+  EXECUTES: 3.0
+  REQUIRES: 2.5
+  MITIGATES: 2.5
+propagating_relationships: [EXECUTES, REQUIRES, PRODUCES, MITIGATES]
+updatable_fields: [title, what, how, expected_outcome, validation, rollback, notes, status, order, estimated_effort, actual_effort, tags]
+health_required_fields: [what, expected_outcome, validation]
+staleness_threshold_days: 30
+write_rules:
+  - "Every step EXECUTES exactly one decision. If it doesn't, either the decision is missing or the entity isn't really a step."
+  - "Precedence lives in REQUIRES edges, not in the `order` field. `order` is display-only; REQUIRES is the semantic truth."
+  - "Validation is non-optional — no step without a checkable success condition."
+  - "Flip status forward as execution progresses. On completion, record `actual_effort` so future planning benefits from calibration."
+  - "When a step mitigates an identified risk, link MITIGATES to the risk entity — this makes 'what's still unmitigated' a trivial query."

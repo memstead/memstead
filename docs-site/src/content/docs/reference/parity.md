@@ -1,0 +1,101 @@
+---
+title: "Surface Parity Matrix"
+---
+
+# Surface Parity Matrix
+
+Every public engine operation across the four programmatic surfaces (MCP, CLI, UniFFI, WASM). Rows are aligned by the hand-maintained `xtask/operations.toml` registry; cells render the surface-specific name when present and `—` when the surface doesn't expose the operation. The Registry HTTP surface is its own publication layer and not in this matrix.
+
+## Matrix
+
+| Operation | MCP | CLI | UniFFI | WASM |
+|-----------|-----|-----|--------|------|
+| `entity-read` | `memstead_entity` *(lean + full)* | `entity` *(lean + full)* | `get_entity` | `getEntity` |
+| `search` | `memstead_search` *(lean + full)* | `search` *(lean + full)* | `search` | `search` |
+| `list` | — | `list` *(lean + full)* | `list_entities` | — |
+| `relations-read` | — | `relations` *(lean + full)* | `get_relations` | — |
+| `context` | — | `context` *(lean + full)* | — | — |
+| `overview` | `memstead_overview` *(lean + full)* | `overview` *(lean + full)* | `get_overview` | — |
+| `stats` | — | `stats` *(lean + full)* | `get_stats` | — |
+| `schema-describe` | `memstead_schema` *(lean + full)* | `type` *(lean + full)* | — | — |
+| `health` | `memstead_health` *(lean + full)* | `health` *(lean + full)* | `get_health` | `health` |
+| `changes-since` | `memstead_changes_since` *(lean + full)* | `changes` *(lean + full)* | `changes_since` | — |
+| `reload` | `memstead_reload` *(full only)* | `reload` *(lean + full)* | `reload` | — |
+| `create` | `memstead_create` *(lean + full)* | `create` *(lean + full)* | — | — |
+| `update` | `memstead_update` *(lean + full)* | `update` *(lean + full)* | — | — |
+| `relate` | `memstead_relate` *(lean + full)* | `relate` *(lean + full)* | — | — |
+| `delete` | `memstead_delete` *(lean + full)* | `delete` *(lean + full)* | — | — |
+| `rename` | `memstead_rename` *(lean + full)* | `rename` *(lean + full)* | — | — |
+| `vault-create` | `memstead_vault_create` *(full only)* | `vault` *(full only)* | — | — |
+| `vault-delete` | `memstead_vault_delete` *(full only)* | `vault` *(full only)* | — | — |
+| `vault-set-version` | `memstead_vault_set_version` *(full only)* | `vault` *(full only)* | — | — |
+| `workspace-allow-create` | `memstead_workspace_allow_create` *(full only)* | `workspace` *(full only)* | — | — |
+| `workspace-revoke-create` | `memstead_workspace_revoke_create` *(full only)* | `workspace` *(full only)* | — | — |
+| `workspace-allow-delete` | `memstead_workspace_allow_delete` *(full only)* | `workspace` *(full only)* | — | — |
+| `workspace-revoke-delete` | `memstead_workspace_revoke_delete` *(full only)* | `workspace` *(full only)* | — | — |
+| `workspace-grant-cross-link` | `memstead_workspace_grant_cross_link` *(full only)* | `workspace` *(full only)* | — | — |
+| `workspace-revoke-cross-link` | `memstead_workspace_revoke_cross_link` *(full only)* | `workspace` *(full only)* | — | — |
+| `parse-recovery` | — | `recover` *(full only)* | `apply_parse_recovery` | — |
+| `fetch` | — | — | — | — |
+| `pull` | — | — | — | — |
+| `push` | — | — | — | — |
+| `branch-reset` | — | — | — | — |
+| `agent-notes` | — | — | `agent_notes` | — |
+| `vault-head-sha` | — | — | `vault_head_sha` | — |
+| `from-snapshot` | — | — | — | `fromSnapshot` |
+| `apply-commit` | — | — | — | `applyCommit` |
+| `vault-names` | — | — | — | `vaultNames` |
+| `set-panic-hook` | — | — | — | `setPanicHook` |
+
+## Unaligned
+
+Surface entries the registry does not pin to a logical operation. Either add a row to `xtask/operations.toml` or, if the entry is intentionally surface-local (e.g. CLI-only registry / setup commands), leave it here as a deliberate gap.
+
+### Unaligned — MCP
+
+- `memstead_diff`
+- `memstead_vault_set_schema`
+
+### Unaligned — CLI
+
+- `admin`
+- `batch-update`
+- `domain`
+- `export`
+- `init`
+- `install`
+- `link`
+- `login`
+- `logout`
+- `pipeline`
+- `publish`
+- `schema`
+- `unpublish`
+- `vault-repo`
+
+### Unaligned — UniFFI
+
+- `add_facet`
+- `add_ingest`
+- `add_medium`
+- `add_projection`
+- `create_vault`
+- `delete_facet`
+- `delete_ingest`
+- `delete_medium`
+- `delete_projection`
+- `delete_vault`
+- `export_vault`
+- `pipeline_configs_json`
+- `rename_facet`
+- `rename_ingest`
+- `rename_medium`
+- `rename_projection`
+- `set_vault_schema`
+- `set_vault_version`
+- `update_facet`
+- `update_ingest`
+- `update_medium`
+- `update_projection`
+- `vault_roster`
+

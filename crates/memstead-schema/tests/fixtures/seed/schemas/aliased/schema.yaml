@@ -1,0 +1,58 @@
+# yaml-language-server: $schema=../../../../engine/crates/memstead-schema/generated/schema-manifest.schema.json
+
+# ─────────────────────────────────────────────────────────────────────────────
+# aliased@0.1.0 — fixture schema proving the engine does not hard-code
+# REFERENCES as the alias-synthesis rel-type.
+#
+# The schema-level pointer `alias_target_rel_type: CITES` directs the
+# alias-synthesis pass to emit CITES relations from body wiki-links;
+# explicit `memstead_relate type=CITES` is auto-coupled to
+# `manual_authoring: forbidden` at schema load (see
+# probe-followups-2026-05-18 / 01-references-alias-synthesis, Option C).
+#
+# One type (`document`) with a single text section keeps the fixture
+# minimal — its only purpose is to be mounted in tests that verify
+# pointer-name agnosticism end-to-end.
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: aliased
+version: 0.1.0
+
+description: |
+  Alias-synthesis fixture using CITES as the pointer rel-type rather
+  than REFERENCES. Engine tests mount this schema to confirm body
+  wiki-links auto-emit the named rel-type — not a hard-coded
+  "REFERENCES" string.
+
+when_to_use: |
+  Test fixture only. Engine tests mount this schema via
+  `Engine::from_mounts_with_schemas_dir` to verify the alias-synthesis
+  pass uses `Schema::alias_target_rel_type()` rather than the literal
+  name "REFERENCES".
+
+types:
+  - document
+
+relationships:
+  mode: strict
+  definitions:
+    - name: CITES
+      description: Citation — auto-emitted from body wiki-links.
+      when_to_use: Body wiki-links `[[target]]` produce engine-emitted CITES relations; explicit author is refused under `manual_authoring: forbidden` (auto-coupled from the schema-level pointer).
+      default_weight: 0.5
+    - name: PART_OF
+      description: Hierarchy containment.
+      default_weight: 3.0
+      acyclic: true
+    - name: USES
+      description: Source uses target without depending on it.
+      default_weight: 1.0
+    - name: _default
+      description: Fallback weight for any relationship not otherwise specified. Required by the engine.
+      default_weight: 1.0
+
+alias_target_rel_type: CITES
+
+community:
+  resolution: 1.0
+  seed: 42

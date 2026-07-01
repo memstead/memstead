@@ -1,0 +1,27 @@
+[workspace]
+members = ["cargo:."]
+
+# Config for 'dist'
+[dist]
+# The preferred dist version to use in CI (Cargo.toml SemVer syntax)
+cargo-dist-version = "0.31.0"
+# CI backends to support
+ci = "github"
+# The installers to generate for each app:
+#   * `shell`    — `curl -sSf https://github.com/memstead/memstead/releases/latest/download/memstead-installer.sh | sh`
+#   * `homebrew` — auto-PRs the formula into the tap repo on tag push.
+installers = ["shell", "homebrew"]
+# Homebrew tap repository. cargo-dist opens a PR against this repo on
+# every tagged release with the rendered formula. Requires a Personal
+# Access Token with `contents:write` on the tap repo, exposed to the
+# release workflow as the `HOMEBREW_TAP_TOKEN` secret. The tap repo
+# itself must exist before the first release — operator-side one-time
+# setup.
+tap = "memstead/homebrew-memstead"
+# Target platforms to build apps for (Rust target-triple syntax)
+targets = ["aarch64-apple-darwin", "aarch64-unknown-linux-gnu", "x86_64-apple-darwin", "x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc"]
+# Where to host releases
+hosting = "github"
+# Publish jobs that run after the binary release lands. `homebrew`
+# opens a PR to the tap repo above with the rendered formula.
+publish-jobs = ["homebrew"]

@@ -1,0 +1,77 @@
+# yaml-language-server: $schema=../../../../generated/type-definition.schema.json
+
+name: brand
+description: |
+  A name plus identity layer attached to one surface of the project
+  (e.g. an umbrella brand, an app brand, a CLI brand, a file-format
+  brand, a domain). The same project may run several brand entities
+  concurrently — each surface gets its own — and may supersede across
+  rebrands.
+when_to_use: |
+  Use to record a name the project uses with a deliberate identity
+  behind it, scoped to one surface. The defining test: does this
+  identity have a separate visual, verbal, or audience expectation
+  from the project's other surfaces? If yes, `brand`. If no, the
+  name is just a string and does not need a graph entity.
+boundaries:
+  - Not a vision — a brand is the identity layer; a vision is the long-arc destination.
+  - Not a positioning — a brand is the name and visual layer; positioning is the audience-specific pitch.
+  - Not a `competitor` — competitors are external; brands are project surfaces.
+system_message: |
+  A brand records the deliberate identity of one project surface. The
+  Identity section captures the name, tagline if any, and the verbal
+  or visual register the brand commits to. Rationale records why this
+  brand exists separately from the others — what audience or surface
+  it carves out. Pairs With names the other brand entities this one
+  is meant to coexist with on the same project. Across rebrands,
+  supersede rather than edit; the lineage is high-value when reading
+  back why the project's naming evolved.
+sections:
+  - key: identity
+    heading: Identity
+    required: true
+    search_weight: 40.0
+    write_rules:
+      - "Name, tagline if any, and the verbal/visual register this brand commits to. Standalone-readable in a search snippet."
+  - key: rationale
+    heading: Rationale
+    required: true
+    search_weight: 15.0
+    write_rules:
+      - "Why this brand exists as its own surface — what audience, surface, or role it carves out separately from the project's other brands."
+  - key: pairs_with
+    heading: Pairs With
+    required: false
+    search_weight: 5.0
+    write_rules:
+      - "Wiki-link to other `brand` entities this one is meant to coexist with. Captures the brand architecture explicitly."
+  - key: notes
+    heading: Notes
+    required: false
+    search_weight: 3.0
+    catch_all: true
+metadata_fields:
+  - key: status
+    description: Lifecycle state. Active brands are in current use; superseded brands are kept for lineage.
+    field_type: string
+    default_value: active
+    enum_values: [proposed, active, superseded, retired]
+    filterable: equality
+  - key: surface
+    description: Which surface of the project this brand attaches to.
+    field_type: string
+    enum_values: [umbrella, app, cli, format, library, domain, other]
+    filterable: equality
+title_weight: 100.0
+text_fields: [identity, rationale, pairs_with, notes]
+hierarchy_relationship: PART_OF
+edge_weight_overrides:
+  SUPERSEDES: 2.0
+propagating_relationships: [SUPERSEDES]
+updatable_fields: [title, identity, rationale, pairs_with, notes, status, surface, tags]
+health_required_fields: [identity, rationale]
+staleness_threshold_days: 365
+write_rules:
+  - "Across rebrands, author a new brand with SUPERSEDES — never edit the body of an active brand to reflect a rename."
+  - "One active brand per surface. Two active `app` brands at the same time means one of them is the right name and the other is residue."
+  - "Rationale names what this brand carves out separately. 'Sounds nice' is not a rationale; 'addresses the operator audience that the substrate name does not reach' is."

@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>@memstead/client demo</title>
+<style>
+  body { font-family: ui-sans-serif, system-ui, sans-serif;
+         margin: 2rem; max-width: 60rem; line-height: 1.4; }
+  h1 { margin-top: 0; }
+  pre { background: #f5f5f5; padding: 0.75rem 1rem; border-radius: 0.4rem;
+        overflow: auto; }
+  .row { display: flex; gap: 0.75rem; align-items: center; margin-bottom: 1rem; }
+  input { padding: 0.4rem 0.6rem; font: inherit; flex: 1; }
+  button { padding: 0.4rem 0.9rem; font: inherit; cursor: pointer; }
+  .state { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+           background: #fafafa; padding: 0.6rem 1rem; border-radius: 0.4rem;
+           border: 1px solid #e7e7e7; }
+  ul { margin: 0.4rem 0; padding-left: 1.2rem; }
+  small { color: #666; }
+</style>
+</head>
+<body>
+<h1>@memstead/client demo</h1>
+<p>Hydrates a vault snapshot, subscribes to the SSE stream, applies
+incoming commit envelopes, and routes searches to the bridge —
+all through a single <code>VaultSyncClient</code> instance.</p>
+
+<div class="state" id="status">disconnected</div>
+
+<h2>Search</h2>
+<div class="row">
+  <input id="q" placeholder="search query…" />
+  <button id="go">Search</button>
+</div>
+<div id="results"></div>
+
+<h2>Live state</h2>
+<div class="state" id="head">head: —</div>
+<div class="state" id="counts">entities: —</div>
+
+<small>Reproduce locally: build the WASM package
+(<code>cd ../memstead-wasm && wasm-pack build --target web --release</code>),
+build this package (<code>npm run build</code>), then serve the repo
+root via <code>python3 -m http.server</code> and open this page.
+Configure <code>BASE_URL</code> and <code>VAULT</code> below to point
+at your running <code>memstead-bridge</code> embedder.</small>
+
+<script type="module">
+import init, { Engine, setPanicHook } from "../../pkg/memstead_wasm.js";
+import { VaultSyncClient } from "../dist/index.js";
+
+const BASE_URL = "http://localhost:8000/api";
+const VAULT = "specs";
+
+const statusEl = document.getElementById("status");
+const headEl = document.getElementById("head");
+const countsEl = document.getElementById("counts");
+const resultsEl = document.getElementById("results");
+
+function setStatus(s) { statusEl.textContent = s; }
+
+async function main() {
+  await init();
+  setPanicHook?.();
+
+  const client = new VaultSyncClient({
+    baseUrl: BASE_URL,
+    vault: VAULT,
+    engineFactory: (bytes) => Engine.fromSnapshot(bytes),
+    onUpdate: () => {
+      const h = client.health();
+      headEl.textContent = `head: ${client.head || "—"}`;
+      countsEl.textContent = `entities: ${h?.total_entities ?? "—"}`;
+    },
+    onError: (err) => {
+      console.warn("[memstead]", err.code, err.message);
+      setStatus(`recovering after ${err.code}…`);
+    },
+  });
+
+  setStatus("opening…");
+  try {
+    await client.open();
+    setStatus("open");
+  } catch (err) {
+    setStatus(`open failed: ${err.code || err.message}`);
+    return;
+  }
+
+  document.getElementById("go").addEventListener("click", async () => {
+    const q = document.getElementById("q").value.trim();
+    if (!q) return;
+    resultsEl.textContent = "searching…";
+    try {
+      const result = await client.search({ q, limit: 20 });
+      if (result.hits.length === 0) {
+        resultsEl.innerHTML = "<em>no hits</em>";
+        return;
+      }
+      const items = result.hits
+        .map((h) => `<li><code>${h.id}</code> — <strong>${h.title}</strong> <small>(score ${h.score.toFixed(2)})</small></li>`)
+        .join("");
+      resultsEl.innerHTML = `<p>${result.total_matched} matches${result.truncated ? " (truncated)" : ""}</p><ul>${items}</ul>`;
+    } catch (err) {
+      resultsEl.textContent = `search refused (${err.code}): ${err.message}`;
+    }
+  });
+
+  window.addEventListener("beforeunload", () => client.close());
+}
+
+main();
+</script>
+</body>
+</html>

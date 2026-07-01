@@ -1,0 +1,83 @@
+# yaml-language-server: $schema=../../../../engine/crates/memstead-schema/generated/type-definition.schema.json
+
+name: evidence
+description: |
+  A single sourced observation about the old system. The atomic unit of
+  belief — every capability claim ultimately reduces to one or more
+  evidence entities. Sources include code snippets, test cases, data
+  samples, interview quotes, log patterns, and direct observations from
+  running the system.
+when_to_use: |
+  Use whenever you want to assert something about the old system. If the
+  claim is not backed by evidence, either collect the evidence first or
+  do not make the claim. Prefer multiple small evidences over one big
+  "I think the system does X" observation — smaller evidences combine.
+boundaries:
+  - Not a behavioral claim — use `capability` for that. Evidence backs claims; it does not make them.
+  - Not a design intent — design belongs in the Target vault.
+  - Not a personal opinion without source — opinions are not evidence unless captured as an attributed interview quote.
+system_message: |
+  Evidence is small and sourced. Each entity captures one observation,
+  one quote, one snippet, one data point. The Content section is the
+  observation itself — code, quote, table row, log line. The Context
+  section explains what it means and when it was captured.
+
+  Link SUPPORTS to every capability this evidence backs. One evidence
+  can support many capabilities. When an evidence contradicts a
+  capability, use CONTRADICTS — that flags the capability for review.
+sections:
+  - key: content
+    heading: Content
+    required: true
+    search_weight: 30.0
+    write_rules:
+      - "The raw observation: code block, test fixture, data sample, interview quote, log line. Verbatim when possible."
+      - "Keep it minimal — the smallest excerpt that makes the point. Large blobs make evidence hard to reason about."
+  - key: context
+    heading: Context
+    required: true
+    search_weight: 20.0
+    write_rules:
+      - "What this evidence shows and why it matters. One short paragraph."
+      - "If the evidence is ambiguous or partial, say so here — better to flag uncertainty than to overclaim."
+  - key: notes
+    heading: Notes
+    required: false
+    search_weight: 3.0
+    catch_all: true
+metadata_fields:
+  - key: kind
+    description: What kind of evidence this is.
+    field_type: string
+    default_value: code
+    enum_values: [code, test, data, interview, observation, doc, log]
+    filterable: equality
+  - key: source_ref
+    description: Where the evidence comes from — file path, URL, interview handle, dataset name.
+    field_type: string
+  - key: captured_on
+    description: Date the evidence was captured. ISO YYYY-MM-DD.
+    field_type: date
+    filterable: range
+  - key: confidence
+    description: How strongly the source backs the claim. High = direct, primary source. Low = inferred or second-hand.
+    field_type: string
+    default_value: medium
+    enum_values: [high, medium, low]
+    filterable: equality
+title_weight: 100.0
+text_fields: [content, context, notes]
+hierarchy_relationship: PART_OF
+edge_weight_overrides:
+  SUPPORTS: 4.0
+  CONTRADICTS: 3.0
+propagating_relationships: [SUPPORTS, CONTRADICTS]
+updatable_fields: [title, content, context, notes, kind, source_ref, captured_on, confidence, tags]
+health_required_fields: [content, context, kind, source_ref]
+staleness_threshold_days: 365
+write_rules:
+  - "Evidence is small and specific. If one evidence entity covers multiple distinct observations, split it."
+  - "source_ref is required for non-observation kinds — unattributed evidence is just opinion."
+  - "Link SUPPORTS to every capability this evidence backs. A capability without SUPPORTS in-edges is unsupported and will be flagged."
+  - "When evidence undermines a capability, use CONTRADICTS — this is valuable negative knowledge, not a bug to hide."
+  - "Relationships: SUPPORTS, CONTRADICTS, REFERENCES for wiki-links. Keep it narrow — evidence is mostly consumed through its edges, not its edges between each other."

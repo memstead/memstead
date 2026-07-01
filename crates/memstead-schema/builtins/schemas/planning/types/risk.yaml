@@ -1,0 +1,95 @@
+# yaml-language-server: $schema=../../../../generated/type-definition.schema.json
+
+name: risk
+description: |
+  Something that could go wrong. Specific, actionable, weighted by
+  severity × likelihood. Linked via THREATENS to the goal, decision,
+  or step it endangers, and via incoming MITIGATES to any step
+  designed to address it.
+when_to_use: |
+  Use when a concrete risk has been identified during planning. The
+  defining test: is it specific and actionable? 'Things might break'
+  is not a risk; 'the migration script fails when column X is null
+  because we don't seed it' is.
+boundaries:
+  - Not an open question — a risk is something that might go wrong; an `open_question` is something unknown.
+  - Not a decision or tradeoff — use `decision`.
+  - Not a general concern or worry — risks are specific. Use `note` for vague concerns.
+  - Not a constraint — constraints are hard rules, risks are probabilistic.
+system_message: |
+  Risks are specific and linked. Every risk THREATENS at least one
+  target (goal/decision/step); unlinked risks are free-floating
+  worries. `mitigation_status` tracks how addressed the risk is — flip
+  it as mitigating steps land via MITIGATES. Severity × likelihood
+  drives attention; 'critical × high' risks surface before anything
+  else in planning review.
+sections:
+  - key: description
+    heading: Description
+    required: true
+    search_weight: 30.0
+    write_rules:
+      - "One or two sentences. What could go wrong, specifically. Standalone-readable in a search snippet."
+  - key: impact_if
+    heading: Impact If
+    required: true
+    search_weight: 15.0
+    write_rules:
+      - "What happens if the risk materializes — concrete consequences, scope, recoverability."
+  - key: probability
+    heading: Probability
+    required: false
+    search_weight: 5.0
+    write_rules:
+      - "Prose commentary on likelihood — why we rate it that way. The enum field gives a coarse bucket; this section explains."
+  - key: mitigations
+    heading: Mitigations
+    required: false
+    search_weight: 10.0
+    write_rules:
+      - "Bullet list of mitigation strategies, including any that are already in place or planned. Each mitigation that becomes a concrete step should be authored as a `step` with MITIGATES → this risk."
+  - key: triggers
+    heading: Triggers
+    required: false
+    search_weight: 5.0
+    write_rules:
+      - "Early signals that the risk is materializing — what to watch for."
+  - key: notes
+    heading: Notes
+    required: false
+    search_weight: 3.0
+    catch_all: true
+metadata_fields:
+  - key: severity
+    description: How bad it is if the risk materializes.
+    field_type: string
+    default_value: medium
+    enum_values: [critical, high, medium, low]
+    filterable: equality
+  - key: likelihood
+    description: How likely the risk is to materialize.
+    field_type: string
+    default_value: medium
+    enum_values: [high, medium, low]
+    filterable: equality
+  - key: mitigation_status
+    description: How addressed the risk currently is.
+    field_type: string
+    default_value: unmitigated
+    enum_values: [unmitigated, partial, mitigated, accepted]
+    filterable: equality
+title_weight: 100.0
+text_fields: [description, impact_if, probability, mitigations, triggers, notes]
+hierarchy_relationship: PART_OF
+edge_weight_overrides:
+  THREATENS: 2.5
+  MITIGATES: 2.5
+propagating_relationships: [THREATENS]
+updatable_fields: [title, description, impact_if, probability, mitigations, triggers, notes, severity, likelihood, mitigation_status, tags]
+health_required_fields: [description, impact_if]
+staleness_threshold_days: 60
+write_rules:
+  - "Risks are specific. 'Things might break' is not a risk; name the mechanism, the trigger, the affected surface."
+  - "Every risk THREATENS at least one goal, decision, or step. A risk without a target is a free-floating worry — either link it or delete it."
+  - "mitigation_status is a lifecycle: unmitigated → partial → mitigated, or → accepted when the risk is knowingly tolerated. Flip as mitigating steps land."
+  - "When a step is authored to address this risk, ensure the step links MITIGATES → this risk. This makes 'what's unmitigated' a trivial query."

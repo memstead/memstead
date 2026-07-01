@@ -1,0 +1,7 @@
+{
+  "description": "<ONE_SENTENCE: what this project is, at the level a fresh agent would need>",
+  "language": "English",
+  "writeGuidance": {
+    "scope": "<REQUIRED: one paragraph describing what this project is, the surfaces it covers, the audiences it addresses, and the code-side vaults this project vault references via cross-vault links. If this placeholder is still present when the agent runs, stop and ask the operator — do not invent project facts.>"
+  }
+}

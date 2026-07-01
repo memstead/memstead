@@ -1,0 +1,113 @@
+# yaml-language-server: $schema=../../../../generated/type-definition.schema.json
+
+name: incident
+description: |
+  A production failure with timeline, blast radius, and post-mortem
+  analysis. Records what broke, when, who was affected, and what the
+  team learned. Every incident should link VIOLATES to any requirement,
+  spec, or contract it broke.
+when_to_use: |
+  Use for user-visible or SLA-impacting failures: outages, data loss,
+  data corruption, security breaches, significant performance
+  regressions. The defining test: is there a real post-mortem source
+  (retro doc, incident channel log, stakeholder report)? If not, don't
+  synthesize one. Prefer `memo` for near-misses or lessons without a
+  concrete incident.
+boundaries:
+  - Not a follow-up design decision — use `decision` and link MOTIVATED_BY to the incident.
+  - Not a requirement violation without an incident — flip the requirement's `verification_status` directly.
+  - Not a routine bug — reserve incidents for failures that warrant a post-mortem.
+system_message: |
+  Incidents are structured post-mortems. Keep Timeline chronological
+  and factual — interpretation goes in Analysis. Use the three timeline
+  metadata fields (detected_at, mitigated_at, resolved_at) for
+  queryable lifecycle; the prose Timeline section holds the narrative.
+  For every requirement/spec/contract the incident broke, add VIOLATES.
+  Blameless: describe systems and decisions, never people's mistakes.
+sections:
+  - key: summary
+    heading: Summary
+    required: true
+    search_weight: 30.0
+    write_rules:
+      - "Two or three sentences. What broke, who was affected, how it was resolved. Standalone-readable in a search snippet."
+  - key: timeline
+    heading: Timeline
+    required: true
+    search_weight: 15.0
+    write_rules:
+      - "Chronological log with timestamps. Detection, first responder, key investigation steps, mitigation, resolution."
+      - "Factual only — one thing happened at one time. Interpretation belongs in Analysis."
+  - key: impact
+    heading: Impact
+    required: true
+    search_weight: 20.0
+    write_rules:
+      - "Who and what was affected: customer counts, data loss scope, downtime duration, financial cost if known."
+  - key: root_cause
+    heading: Root Cause
+    required: false
+    search_weight: 15.0
+    write_rules:
+      - "The underlying cause, not the symptom. Go at least two 'why's deep."
+  - key: remediation
+    heading: Remediation
+    required: false
+    search_weight: 10.0
+    write_rules:
+      - "What stopped the incident and what prevents recurrence. Distinguish short-term mitigation from long-term prevention."
+  - key: analysis
+    heading: Analysis
+    required: false
+    search_weight: 8.0
+    catch_all: true
+    write_rules:
+      - "Post-mortem: what went well, what went poorly, what surprised us, lessons learned. Blameless."
+metadata_fields:
+  - key: severity
+    description: Incident severity level.
+    field_type: string
+    default_value: sev3
+    enum_values: [sev1, sev2, sev3, sev4]
+    filterable: equality
+  - key: status
+    description: Lifecycle state of the incident response.
+    field_type: string
+    default_value: open
+    enum_values: [open, mitigated, resolved, post_mortem_complete]
+    filterable: equality
+  - key: detected_at
+    description: When the incident was first detected. ISO YYYY-MM-DD (or datetime).
+    field_type: date
+    filterable: range
+  - key: mitigated_at
+    description: When user impact ended (workaround, rollback, failover).
+    field_type: date
+    filterable: range
+  - key: resolved_at
+    description: When the underlying cause was fully addressed.
+    field_type: date
+    filterable: range
+  - key: blast_radius
+    description: Affected components / services / regions. Comma-separated.
+    field_type: string
+    serialization: csv_array
+  - key: on_call
+    description: Who was on call when the incident began.
+    field_type: string
+title_weight: 100.0
+text_fields: [summary, timeline, impact, root_cause, remediation, analysis]
+hierarchy_relationship: PART_OF
+edge_weight_overrides:
+  VIOLATES: 3.0
+  CAUSED: 2.5
+propagating_relationships: [VIOLATES, CAUSED, MOTIVATED_BY]
+updatable_fields: [title, summary, timeline, impact, root_cause, remediation, analysis, severity, status, detected_at, mitigated_at, resolved_at, blast_radius, on_call, tags]
+health_required_fields: [summary, timeline, impact]
+staleness_threshold_days: 180
+write_rules:
+  - "Blameless: describe systems and decisions, not people's mistakes. Actors belong in Timeline only for role (on-call, incident commander), never for blame."
+  - "Timeline is factual; Analysis holds interpretation. Do not mix."
+  - "Flip status forward as response progresses: open → mitigated → resolved → post_mortem_complete."
+  - "For every requirement, spec, or contract the incident violated, add a VIOLATES edge. This makes 'which commitments broke this quarter' trivial."
+  - "When a follow-up design decision results from the incident, author a `decision` and link MOTIVATED_BY from the decision to this incident."

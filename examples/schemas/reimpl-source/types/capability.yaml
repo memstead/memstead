@@ -1,0 +1,103 @@
+# yaml-language-server: $schema=../../../../engine/crates/memstead-schema/generated/type-definition.schema.json
+
+name: capability
+description: |
+  A behavioral unit the old system exhibits — a thing the system does,
+  testable as an acceptance criterion. Each capability is backed by one
+  or more evidence entities via SUPPORTS and carries inputs, outputs,
+  invariants, and edge cases in structured form. Capabilities are
+  technology-neutral: they describe behavior, not implementation.
+when_to_use: |
+  Use when naming a thing the old system does that should survive (or
+  be consciously diverged from) in the new system. Prefer one capability
+  per behavior expressible as "given these inputs and this state, the
+  system produces these outputs". Finer than a domain area, coarser than
+  a method call.
+boundaries:
+  - Not a structural unit — do not model classes, tables, or modules as capabilities.
+  - Not a design intent for the new system — target entities live in the Target vault.
+  - Not an unsupported claim — every capability needs evidence or it is a guess.
+system_message: |
+  Capabilities are behavioral and testable. The acceptance test: "I can
+  describe this capability as a pass/fail check given a concrete input
+  and state." If you cannot, the capability is at the wrong abstraction
+  level — split it or drop it.
+
+  Fill inputs, outputs, invariants, edge_cases in structured form
+  (tables or bullet lists), not prose. Prose invites capabilities that
+  sound right but are not testable.
+
+  Every capability links SUPPORTS in-edges from evidence. A capability
+  without evidence is flagged by the health query as unsupported.
+
+  Keep the graph broad rather than deep: prefer 100 capabilities at the
+  right level over 20 coarse capabilities each with 5 children.
+sections:
+  - key: behavior
+    heading: Behavior
+    required: true
+    search_weight: 40.0
+    write_rules:
+      - "One sentence. What the system does — behavioral, not structural. Starts with a verb: 'computes', 'routes', 'validates', 'emits'."
+      - "Must be expressible as an acceptance criterion: given inputs X and state Y, the system produces Z."
+  - key: inputs
+    heading: Inputs
+    required: true
+    search_weight: 15.0
+    write_rules:
+      - "Structured: bullet list or markdown table. Name, type, constraints."
+      - "Include the pre-state of the system when it matters (e.g. 'user is authenticated', 'order is in draft')."
+  - key: outputs
+    heading: Outputs
+    required: true
+    search_weight: 15.0
+    write_rules:
+      - "Structured: bullet list or markdown table. What the system returns, writes, or emits."
+      - "Include side effects that a caller would observe — emails sent, events published, state changed."
+  - key: invariants
+    heading: Invariants
+    required: false
+    search_weight: 10.0
+    write_rules:
+      - "Bullet list of properties that must always hold. Useful for reimplementation — these are the claims the new system must also satisfy."
+  - key: edge_cases
+    heading: Edge cases
+    required: false
+    search_weight: 10.0
+    write_rules:
+      - "Bullet list of unusual inputs, boundary conditions, or behaviors you have observed. Each should reference an evidence entity — unreported edge cases are silent migration bugs."
+  - key: notes
+    heading: Notes
+    required: false
+    search_weight: 3.0
+    catch_all: true
+metadata_fields:
+  - key: area
+    description: Domain cluster this capability belongs to — free-form tag (e.g. "auth", "payments", "reporting").
+    field_type: string
+  - key: verified
+    description: Has the capability been cross-checked against its evidence and declared accurate.
+    field_type: boolean
+    default_value: "false"
+    filterable: equality
+  - key: last_reviewed
+    description: Date of the most recent verification pass. ISO YYYY-MM-DD.
+    field_type: date
+    filterable: range
+title_weight: 100.0
+text_fields: [behavior, inputs, outputs, invariants, edge_cases, notes]
+hierarchy_relationship: PART_OF
+edge_weight_overrides:
+  SUPPORTS: 4.0
+  CONTRADICTS: 3.0
+propagating_relationships: [PART_OF, SUPPORTS, CONTRADICTS]
+updatable_fields: [title, behavior, inputs, outputs, invariants, edge_cases, notes, area, verified, last_reviewed, tags]
+health_required_fields: [behavior, inputs, outputs]
+staleness_threshold_days: 180
+write_rules:
+  - "Capabilities are behavioral and testable. If the description is not expressible as an acceptance criterion, you are at the wrong level — split or drop."
+  - "Every capability must have at least one SUPPORTS in-edge from an evidence entity. Unsupported capabilities are flagged in health."
+  - "Inputs and outputs are structured — tables or lists, not prose. Prose invites untestable capabilities."
+  - "Edge cases should cite evidence. A listed edge case without backing evidence is a guess and should be marked as such in notes."
+  - "Prefer breadth over depth. Nest via PART_OF only when the children are genuinely sub-behaviors, not implementation details."
+  - "Relationships: PART_OF for hierarchy, REFERENCES for wiki-links. Inbound: SUPPORTS from evidence (required); REALIZES_CAPABILITY and DIVERGES_FROM from paired Target vaults (cross-vault)."

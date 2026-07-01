@@ -1,0 +1,154 @@
+# yaml-language-server: $schema=../../../engine/crates/memstead-schema/generated/schema-manifest.schema.json
+
+# ─────────────────────────────────────────────────────────────────────────────
+# agent-program@0.1.0 — knowledge-graph schema for executable agent programs.
+#
+# An agent-program vault holds programs an LLM agent reads as instructions
+# and runs over autonomously. The graph IS the program text. The agent IS
+# the runtime. Tools are declared as first-class entities in the catalog.
+# Constraints are declared as first-class entities the agent must obey.
+#
+# Four types model the executable surface:
+#   program    — a runnable agent program (entry point + exit criteria)
+#   node       — a unit of work: an intent the agent satisfies before
+#                choosing a transition
+#   tool       — a callable tool declared in the program's catalog
+#                (MCP tool, CLI command, or other agent capability)
+#   constraint — a rule the agent must obey while executing
+#
+# Strict relationship vocabulary: 37 default edges + 5 program-specific
+# (entry, branches_to, falls_back_to, uses, governed_by). PART_OF from
+# the default vocabulary carries hierarchical containment of nodes
+# inside a program.
+#
+# Pair with a planning vault when the program was deliberated (link
+# planning.decision via cross-vault reference) and with a software or
+# main vault for the things the program operates over.
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: agent-program
+version: 0.1.0
+
+description: |
+  Executable agent-program knowledge-graph schema. Four types model the
+  surface an agent runs over: program (top-level), node (unit of work),
+  tool (catalog entry), constraint (guardrail). The agent reads the
+  graph, picks transitions autonomously, and calls declared tools.
+  No external orchestration framework — the agent loop is the runtime.
+
+when_to_use: |
+  Use to model agent programs that today live as prompt-based skill
+  bodies, hand-coded orchestration scripts, or untracked institutional
+  procedures (SOPs, runbooks, hotline scripts). Author one vault per
+  program, or one vault per program family with PART_OF hierarchy.
+  Cross-link to planning vaults (decisions that motivated the program)
+  and to main vaults (entities the program operates over) via the
+  references field, never via copy.
+
+system_message: |
+  An agent-program graph is content the agent reads as instructions —
+  not control flow imposed on the agent. Four types model the surface:
+
+    program    — what runs, when it runs, what counts as done
+    node       — a unit of work: an intent + success check + transition
+                 narrative. The agent reads one node at a time and
+                 chooses what to do next from declared transitions.
+    tool       — a callable capability the program may use
+                 (mcp_tool, shell_command, or other), with declared
+                 inputs, outputs, error codes, and cost
+    constraint — a rule the agent must obey while executing
+                 (advisory or blocking, with severity)
+
+  Edges carry the program's structure:
+    program --entry--> node              (single starting node)
+    program --PART_OF (inverse)-- node   (node belongs to program)
+    node --branches_to--> node           (possible next steps; loops allowed)
+    node --falls_back_to--> node         (error / escalation path; acyclic)
+    node --uses--> tool                  (declares an available tool)
+    program --governed_by--> constraint  (rule applies whole program)
+    node --governed_by--> constraint     (rule applies to this node only)
+
+  A node without success_check is a wish. A node without at least one
+  branches_to or kind=terminal is a dead end. A program without entry
+  cannot run. A constraint without enforcement is a comment.
+
+  The agent is autonomous. The graph constrains the action space — it
+  does not dictate exact actions. Nodes describe intent; the agent
+  chooses words and tool calls. Tools declare signatures; the agent
+  picks parameters. Constraints declare rules; the agent obeys them
+  without needing a runtime to enforce.
+
+  Relationships are UPPER_SNAKE_CASE, strict mode — unknown edges are
+  rejected.
+
+types:
+  - program
+  - node
+  - tool
+  - constraint
+
+# Relationship vocabulary. 37 default edges + 5 program-specific.
+relationships:
+  mode: strict
+  definitions:
+    # ── Structural / reference (carried over from default) ──────────────
+    - name: PART_OF
+      description: Hierarchical containment — the source node is structurally part of the target program.
+      when_to_use: node → program. The canonical "this node belongs to that program" edge. Pure graph edge — files stay flat at the vault root.
+      default_weight: 3.0
+      acyclic: true
+    - name: REFERENCES
+      description: Soft reference without ownership or dependency.
+      when_to_use: Emitted automatically from inline wiki-links — do not author manually.
+      default_weight: 0.5
+    - name: DEPENDS_ON
+      description: The source requires the target to exist or complete first.
+      default_weight: 2.0
+      acyclic: true
+    - name: SUPERSEDES
+      description: The source replaces the target — the target is no longer current.
+      when_to_use: Versioning. A new program version SUPERSEDES the old; both stay in the graph.
+      default_weight: 1.5
+      acyclic: true
+    - name: MOTIVATED_BY
+      description: The target motivated the creation of the source.
+      when_to_use: program → planning.decision (cross-vault) — the program realizes a planning decision.
+      default_weight: 2.0
+      acyclic: true
+    - name: IMPLEMENTS
+      description: The source program realizes the target specification.
+      when_to_use: program → spec (cross-vault) — the program implements a documented behaviour.
+      default_weight: 2.0
+      acyclic: true
+
+    # ── Program-specific ────────────────────────────────────────────────
+    - name: entry
+      description: The source program enters execution at the target node.
+      when_to_use: program → node. Exactly one entry per program. Defines where the agent starts.
+      default_weight: 3.0
+      acyclic: true
+    - name: branches_to
+      description: From the source node the agent may transition to the target node.
+      when_to_use: node → node. The set of branches_to from a node enumerates the possible next states. Loops are allowed (refinement, retry, polling). The transitions section in the source node's body describes when to take which branch.
+      default_weight: 2.5
+    - name: falls_back_to
+      description: On error or unrecoverable failure at the source node, the agent escalates to the target node.
+      when_to_use: node → node. Escalation / error path. Acyclic — fallback chains terminate. Use for bounded retry, escalation to human, abort flow.
+      default_weight: 2.0
+      acyclic: true
+    - name: uses
+      description: The source node declares the target tool as available for its work.
+      when_to_use: node → tool. Enumerates the agent's capability surface at this node. Not a prescription that the tool must be called — the agent chooses.
+      default_weight: 1.5
+    - name: governed_by
+      description: The source is governed by the target constraint.
+      when_to_use: program → constraint (program-wide rule) or node → constraint (rule applies only at this node). A constraint with no incoming governed_by edges is unattached.
+      default_weight: 2.5
+
+    - name: _default
+      description: Fallback weight for any relationship not otherwise specified. Required by the engine.
+      default_weight: 1.0
+
+community:
+  resolution: 1.0
+  seed: 42

@@ -1,0 +1,559 @@
+{
+  "components": {
+    "schemas": {
+      "DenylistRequest": {
+        "properties": {
+          "content_sha256": {
+            "description": "Canonical-bytes SHA-256, 64 hex chars (case-insensitive on input;\nstored lowercase to match the publish-time hash).",
+            "type": "string"
+          },
+          "reason": {
+            "description": "Free-text reason recorded on the deny-list row. Optional.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "content_sha256"
+        ],
+        "type": "object"
+      },
+      "DenylistResponse": {
+        "properties": {
+          "content_sha256": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok",
+          "content_sha256"
+        ],
+        "type": "object"
+      },
+      "HealthResponse": {
+        "properties": {
+          "status": {
+            "description": "`\"ok\"` when SQLite responded within the probe budget;\n`\"db_error\"` when the timeout fired or the query failed.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "type": "object"
+      },
+      "IndexEntry": {
+        "properties": {
+          "authors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "communities": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "edges": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "entities": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "extension": {
+            "description": "Opaque forward-compat metadata, projected through verbatim. Absent\nwhen the current version carried no `extension`."
+          },
+          "name": {
+            "type": "string"
+          },
+          "published_at": {
+            "description": "When the current version landed (ISO 8601).",
+            "type": "string"
+          },
+          "schema": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "size_bytes": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "uploader_login": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "scope",
+          "name",
+          "version",
+          "authors",
+          "schema",
+          "entities",
+          "edges",
+          "communities",
+          "size_bytes",
+          "uploader_login",
+          "published_at"
+        ],
+        "type": "object"
+      },
+      "IndexResponse": {
+        "properties": {
+          "count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "vaults": {
+            "items": {
+              "$ref": "#/components/schemas/IndexEntry"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "vaults",
+          "count"
+        ],
+        "type": "object"
+      },
+      "PublishResponse": {
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok",
+          "scope",
+          "name",
+          "version",
+          "url"
+        ],
+        "type": "object"
+      },
+      "UnpublishResponse": {
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "scope": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok",
+          "scope",
+          "name"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "Auto-generated from handlers carrying `#[utoipa::path]` annotations in `memstead-registry`.",
+    "license": {
+      "identifier": "MIT OR Apache-2.0",
+      "name": "MIT OR Apache-2.0"
+    },
+    "title": "memstead Registry HTTP",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/": {
+      "get": {
+        "operationId": "get_root",
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {}
+            },
+            "description": "Landing page (HTML)"
+          }
+        },
+        "summary": "`GET /` — serve the landing page. Astro writes `index.html` at the\ndist root, so we just look it up and return it.",
+        "tags": [
+          "handlers::static_assets"
+        ]
+      }
+    },
+    "/api/admin/denylist": {
+      "post": {
+        "operationId": "post_denylist",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DenylistRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DenylistResponse"
+                }
+              }
+            },
+            "description": "Hash added to the deny-list (idempotent)"
+          },
+          "400": {
+            "description": "content_sha256 is not a 64-char hex SHA-256"
+          },
+          "401": {
+            "description": "Bearer token missing or rejected by GitHub"
+          },
+          "403": {
+            "description": "Caller is not an admin"
+          },
+          "500": {
+            "description": "Database write failed"
+          }
+        },
+        "tags": [
+          "handlers::admin"
+        ]
+      }
+    },
+    "/api/index": {
+      "get": {
+        "operationId": "get_index",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IndexResponse"
+                }
+              }
+            },
+            "description": "Ranked vault index"
+          },
+          "500": {
+            "description": "internal error: database read failed"
+          }
+        },
+        "tags": [
+          "handlers::index"
+        ]
+      }
+    },
+    "/api/publish": {
+      "post": {
+        "operationId": "post_publish",
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {}
+          },
+          "description": "Strict `.mem` archive bytes — 2 MB cap (legacy `.mstd`/`.mdgv`-layout archives accepted during the rename window). Must include `manifest.json` and `graph.json` at the root."
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublishResponse"
+                }
+              }
+            },
+            "description": "Vault accepted and stored"
+          },
+          "400": {
+            "description": "Validation refused the archive, or the request body was empty"
+          },
+          "401": {
+            "description": "Bearer token missing or rejected by GitHub"
+          },
+          "403": {
+            "description": "Scope not owned by the authenticated user, or reserved scope without admin token"
+          },
+          "408": {
+            "description": "Validator timed out"
+          },
+          "410": {
+            "description": "Vault tombstoned (admin take-down), or archive content blocked by the deny-list"
+          },
+          "413": {
+            "description": "Request body exceeded the 2 MB cap"
+          },
+          "429": {
+            "description": "Per-user rate limit exhausted"
+          },
+          "500": {
+            "description": "Database write, filesystem write, or validator-join failed"
+          }
+        },
+        "tags": [
+          "handlers::publish"
+        ]
+      }
+    },
+    "/api/vault/{scope}/{name_ext}": {
+      "delete": {
+        "operationId": "delete_unpublish",
+        "parameters": [
+          {
+            "description": "Publisher scope — `github:<handle>`, `<domain>:<handle>`, or a bare `<handle>` (no `@` prefix).",
+            "in": "path",
+            "name": "scope",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Bare vault name (the DELETE handler treats the segment as `<name>` even though the GET handler treats it as `<name>.<ext>`).",
+            "in": "path",
+            "name": "name_ext",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Admin abuse-response takedown: when present and non-empty, its value is the DSA Art. 17 statement-of-reasons reference. Selects the admin-only takedown path (deny-list the content hashes, tombstone, burn the name) instead of ordinary hard-delete unpublish.",
+            "in": "header",
+            "name": "x-memstead-takedown",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnpublishResponse"
+                }
+              }
+            },
+            "description": "Vault removed. Ordinary unpublish hard-deletes the row + 3 artifacts so the `<scope>/<name>` is immediately re-publishable; an admin takedown deny-lists the bytes, tombstones the rows, and burns the name so neither the bytes nor the name can be re-published"
+          },
+          "401": {
+            "description": "Bearer token missing or rejected by GitHub"
+          },
+          "403": {
+            "description": "Ordinary unpublish: caller is neither the original uploader nor an admin. Takedown: caller is not an admin"
+          },
+          "404": {
+            "description": "Unknown scope/name"
+          },
+          "500": {
+            "description": "Database write or filesystem write failed"
+          }
+        },
+        "tags": [
+          "handlers::unpublish"
+        ]
+      },
+      "get": {
+        "operationId": "get_artifact",
+        "parameters": [
+          {
+            "description": "Publisher scope in one of the three forms — `github:<handle>`, `<domain>:<handle>`, or a bare `<handle>` (no `@` prefix).",
+            "in": "path",
+            "name": "scope",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "`<name>.mem` for the archive (legacy `<name>.mstd` / `<name>.mdgv` accepted), `<name>.graph.json` for the graph, `<name>.manifest.json` for the manifest. Resolves the current version.",
+            "in": "path",
+            "name": "name_ext",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Artifact bytes — `application/octet-stream` for the archive; `application/json` for graph / manifest"
+          },
+          "404": {
+            "description": "Unknown scope/name, no current version, malformed `name_ext`, or artifact file missing on disk"
+          },
+          "410": {
+            "description": "Vault was unpublished (tombstoned)"
+          },
+          "500": {
+            "description": "Database read or filesystem read failed"
+          }
+        },
+        "tags": [
+          "handlers::artifacts"
+        ]
+      }
+    },
+    "/api/vault/{scope}/{name}/{version_ext}": {
+      "get": {
+        "operationId": "get_artifact_versioned",
+        "parameters": [
+          {
+            "description": "Publisher scope in one of the three forms — `github:<handle>`, `<domain>:<handle>`, or a bare `<handle>` (no `@` prefix).",
+            "in": "path",
+            "name": "scope",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Vault name.",
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "`<version>.mem` / `<version>.graph.json` / `<version>.manifest.json` — resolves the exact retained version.",
+            "in": "path",
+            "name": "version_ext",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Artifact bytes for the exact version"
+          },
+          "404": {
+            "description": "Unknown scope/name/version, malformed `version_ext`, or artifact file missing on disk"
+          },
+          "410": {
+            "description": "That version was unpublished (tombstoned)"
+          },
+          "500": {
+            "description": "Database read or filesystem read failed"
+          }
+        },
+        "tags": [
+          "handlers::artifacts"
+        ]
+      }
+    },
+    "/healthz": {
+      "get": {
+        "operationId": "get_healthz",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            },
+            "description": "Liveness probe — SQLite reachable"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            },
+            "description": "Database unreachable or probe timed out"
+          }
+        },
+        "tags": [
+          "handlers::health"
+        ]
+      }
+    },
+    "/v/{scope}/{name}": {
+      "get": {
+        "operationId": "get_vault_page",
+        "parameters": [
+          {
+            "description": "Publisher scope — `github:<handle>`, `<domain>:<handle>`, or a bare `<handle>` (no `@` prefix).",
+            "in": "path",
+            "name": "scope",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Vault name.",
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {}
+            },
+            "description": "Vault detail page (HTML)"
+          },
+          "404": {
+            "content": {
+              "text/html": {}
+            },
+            "description": "Vault not found, or tombstoned — both render the same branded 404 HTML page"
+          },
+          "500": {
+            "description": "Database read or filesystem read failed"
+          }
+        },
+        "tags": [
+          "handlers::vault_page"
+        ]
+      }
+    }
+  }
+}

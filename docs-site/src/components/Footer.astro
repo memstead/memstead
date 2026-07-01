@@ -1,0 +1,38 @@
+---
+// Custom Footer override. Composes Starlight's default footer
+// (pagination, LastUpdated, EditLink) and appends a generation block
+// that the deploy build templates with the commit SHA and date via
+// `PUBLIC_GENERATION_SHA` / `PUBLIC_GENERATION_DATE` environment
+// variables. Local `npm run build` runs without those vars set; the
+// fallback labels are visible and the deploy sanity-check (`grep -q
+// data-generation-sha`) still passes.
+import Default from "@astrojs/starlight/components/Footer.astro";
+
+const sha = import.meta.env.PUBLIC_GENERATION_SHA ?? "dev";
+const date = import.meta.env.PUBLIC_GENERATION_DATE ?? "unbuilt";
+---
+
+<Default><slot /></Default>
+
+<p class="generation-footer" data-generation-sha={sha} data-generation-date={date}>
+  Generated from
+  <code>{sha}</code>
+  on
+  <code>{date}</code>
+</p>
+
+<style>
+  .generation-footer {
+    margin-top: 2rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--sl-color-hairline);
+    color: var(--sl-color-gray-3);
+    font-size: var(--sl-text-sm);
+  }
+  .generation-footer code {
+    font-size: inherit;
+    background: var(--sl-color-gray-6);
+    padding: 0.1em 0.4em;
+    border-radius: 0.2em;
+  }
+</style>

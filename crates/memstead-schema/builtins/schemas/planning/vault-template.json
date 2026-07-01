@@ -1,0 +1,7 @@
+{
+  "description": "<ONE_SENTENCE: what this planning phase is about>",
+  "language": "English",
+  "writeGuidance": {
+    "phase_context": "<REQUIRED: one paragraph describing this planning phase. What triggered it (a directive, an incident, a new commitment). What is in scope and what is explicitly not. Which main vault this planning feeds into and how. If this placeholder is still present when the agent runs, stop and ask the operator.>"
+  }
+}

@@ -1,0 +1,75 @@
+# yaml-language-server: $schema=../../../../generated/type-definition.schema.json
+name: narrative
+description: |
+  An account of what happened — case study or experience report — capturing
+  setting, sequence, significance, and consequences.
+when_to_use: |
+  Use when a temporal sequence of events is worth preserving for future
+  learning, especially decisions and their effects. Prefer over memo when
+  the content is a story rather than a single reasoning artifact.
+boundaries:
+  - Not a recurring pattern — use model.
+  - Not a single decision with alternatives — use memo.
+  - Not an executable workflow — use process.
+system_message: |
+  Narratives are accounts of what happened — case studies, experience
+  reports. Each entity has Setting, Sequence, and optional
+  Significance/Consequences/Sources. PRECEDED_BY/FOLLOWED_BY build
+  timelines. VALIDATES links to confirmed patterns. Reliability:
+  firsthand/reported/reconstructed/speculative.
+sections:
+  - key: setting
+    heading: Setting
+    required: true
+    search_weight: 40.0
+    write_rules:
+      - "Who, where, when, and what was the starting situation. Enough context to understand the sequence that follows."
+  - key: sequence
+    heading: Sequence
+    required: true
+    search_weight: 20.0
+    write_rules:
+      - "What happened, in order. Numbered or chronological list. Include turning points, decisions, and their immediate effects."
+  - key: significance
+    heading: Significance
+    required: false
+    search_weight: 5.0
+    write_rules:
+      - "Why this narrative matters. What it demonstrates, proves, or illustrates. Link to concepts, principles, or models it validates."
+  - key: consequences
+    heading: Consequences
+    required: false
+    search_weight: 5.0
+    catch_all: true
+    write_rules:
+      - "What resulted from these events. Outcomes, side effects, lasting changes. Append-friendly — add later discoveries."
+  - key: sources
+    heading: Sources
+    required: false
+    search_weight: 3.0
+    write_rules:
+      - "Where this account comes from. Direct observation, documents, interviews, logs. Indicates reliability."
+metadata_fields:
+  - key: temporal_range
+    description: Human-readable description of the time window the narrative covers.
+    field_type: string
+    optional: true
+  - key: reliability
+    description: How reliably the account reflects what actually happened.
+    field_type: string
+    default_value: reported
+    enum_values: [firsthand, reported, reconstructed, speculative]
+    filterable: equality
+title_weight: 100.0
+text_fields: [setting, sequence, significance, consequences, sources]
+hierarchy_relationship: PART_OF
+propagating_relationships: [CAUSED, VALIDATES]
+updatable_fields: [title, setting, sequence, significance, consequences, sources, temporal_range, reliability, tags]
+health_required_fields: [setting, sequence]
+staleness_threshold_days: 180
+write_rules:
+  - "Narratives are accounts of what happened — each must describe events that actually occurred (or are believed to have occurred)."
+  - "Reliability: firsthand (author witnessed it), reported (from a source), reconstructed (pieced together from evidence), speculative (hypothesized sequence)."
+  - "Relationships: UPPER_SNAKE_CASE, open vocabulary. PRECEDED_BY/FOLLOWED_BY establish temporal chains. CAUSED links to effects. VALIDATES links to models/principles this narrative confirms. Never declare REFERENCES manually."
+  - "Sequence should be chronological. Include decision points and their consequences — these are the highest-value parts of a narrative."
+  - "Sources section establishes trustworthiness — a narrative without sources is unverifiable."

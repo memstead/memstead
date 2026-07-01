@@ -1,0 +1,83 @@
+# yaml-language-server: $schema=../../../../generated/type-definition.schema.json
+name: assertion
+description: |
+  A testable claim about reality, paired with evidence, conditions, and
+  counterevidence. Tracks confidence and verification status so agents can
+  judge how much to trust the claim.
+when_to_use: |
+  Use when a statement is falsifiable and backed (or contradicted) by
+  concrete evidence. Prefer over memo whenever the content is a factual
+  claim rather than a reasoning artifact, and over concept whenever the
+  content is a proposition rather than a definition.
+boundaries:
+  - Not a definition — use concept.
+  - Not a decision rationale — use memo.
+  - Not an open question — use inquiry.
+system_message: |
+  Assertions are testable claims about reality with evidence and
+  confidence levels. Each entity has Claim, Evidence, and optional
+  Conditions/Counterevidence. Confidence: low/medium/high/verified.
+  Verification status tracks whether the claim has been tested.
+sections:
+  - key: claim
+    heading: Claim
+    required: true
+    search_weight: 40.0
+    write_rules:
+      - "One sentence. A testable statement about reality. Must be falsifiable — if nothing could disprove it, it is not an assertion."
+  - key: evidence
+    heading: Evidence
+    required: true
+    search_weight: 20.0
+    write_rules:
+      - "Bullet list of supporting evidence. Each item: source, observation, or reasoning that supports the claim. Link sources via wiki-links where possible."
+  - key: conditions
+    heading: Conditions
+    required: false
+    search_weight: 5.0
+    write_rules:
+      - "Under what circumstances does the claim hold? Scope, context, prerequisites. Omit if the claim is unconditional."
+  - key: counterevidence
+    heading: Counterevidence
+    required: false
+    search_weight: 5.0
+    catch_all: true
+    write_rules:
+      - "Evidence or arguments against the claim. Observations that weaken confidence. Omit if none known — but actively seek counterevidence before omitting."
+metadata_fields:
+  - key: confidence
+    description: How much weight to place on the claim given current evidence.
+    field_type: string
+    default_value: medium
+    enum_values: [low, medium, high, verified]
+    filterable: equality
+  - key: verification_status
+    description: Whether the claim has been empirically tested.
+    field_type: string
+    default_value: unverified
+    enum_values: [unverified, partially_verified, verified, falsified]
+    filterable: equality
+  - key: source_quality
+    description: Quality of the evidence source — anecdotal through formal.
+    field_type: string
+    enum_values: [anecdotal, observational, experimental, formal]
+    optional: true
+  - key: last_verified
+    description: Date of the most recent verification check.
+    field_type: date
+    optional: true
+title_weight: 100.0
+text_fields: [claim, evidence, conditions, counterevidence]
+hierarchy_relationship: PART_OF
+edge_weight_overrides:
+  DERIVED_FROM: 1.5
+propagating_relationships: [DEPENDS_ON, SUPPORTS]
+updatable_fields: [title, claim, evidence, conditions, counterevidence, confidence, verification_status, source_quality, last_verified, tags]
+health_required_fields: [claim, evidence]
+staleness_threshold_days: 90
+write_rules:
+  - "Assertions are testable claims — every assertion must have a conceivable falsification path."
+  - "Confidence: low (hunch/hypothesis), medium (supported by evidence), high (strong evidence, no known counterevidence), verified (formally or empirically confirmed)."
+  - "Verification status: unverified (not yet tested), partially_verified (some evidence checked), verified (claim confirmed), falsified (claim disproven)."
+  - "Relationships: UPPER_SNAKE_CASE, open vocabulary. SUPPORTS/CONTRADICTS link assertions to each other. DERIVED_FROM links to source material. Never declare REFERENCES manually."
+  - "When counterevidence exists, record it honestly — an assertion with known counterevidence and accurate confidence is more valuable than one that hides doubts."

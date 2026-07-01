@@ -1,0 +1,89 @@
+# yaml-language-server: $schema=../../../../generated/type-definition.schema.json
+
+name: decision
+description: |
+  A chosen path after weighing options. The deliberative core of a
+  planning graph. During planning a decision lives through proposed →
+  deliberating → accepted; once accepted and the plan has executed, a
+  lens projection can lift it into the main graph as a durable record.
+when_to_use: |
+  Use when one path has been chosen over explicit alternatives. The
+  defining test: can you name what was rejected and why? If yes,
+  `decision`. If there are no rejected alternatives yet, keep it as
+  `option` family or `note` until the choice is framed.
+boundaries:
+  - Not a step — a decision is the choice; `step` executes it.
+  - Not an option — an `option` is considered; a decision is chosen.
+  - Not a raw discussion — use `note` with `kind=session_log` or `kind=idea`.
+  - Not a goal — goals are the target, decisions are the chosen path.
+system_message: |
+  A decision records one choice made during planning. Link CHOSEN to
+  the selected option and REJECTED to every explicitly ruled-out
+  option — a decision without both is opinion, not deliberation. The
+  lifecycle proposed → deliberating → accepted tracks how settled the
+  choice is. When lens-projected into the main graph later, only
+  `accepted` decisions are carried over; `abandoned` and `deferred`
+  stay in the archive.
+sections:
+  - key: decision
+    heading: Decision
+    required: true
+    search_weight: 40.0
+    write_rules:
+      - "One paragraph. The chosen option and its essential properties. Starts with 'We will …' or 'We chose …'."
+  - key: context
+    heading: Context
+    required: true
+    search_weight: 20.0
+    write_rules:
+      - "What forced this choice — the goal it addresses, the constraints it respects, the trigger. Enough that a future reader can judge whether the reasoning still holds."
+  - key: consequences
+    heading: Consequences
+    required: true
+    search_weight: 15.0
+    write_rules:
+      - "Bullet list. What this enables, what it blocks, what it costs, what follow-up it triggers."
+      - "Include the tradeoff accepted — not the benefits alone. A one-sided decision is under-examined."
+  - key: revisit_if
+    heading: Revisit If
+    required: false
+    search_weight: 5.0
+    write_rules:
+      - "Conditions that would reopen the question. Concrete signals, not vague 'if things change'."
+  - key: notes
+    heading: Notes
+    required: false
+    search_weight: 3.0
+    catch_all: true
+metadata_fields:
+  - key: status
+    description: Lifecycle state during planning. Only `accepted` decisions are lens-projected to the main graph.
+    field_type: string
+    default_value: proposed
+    enum_values: [proposed, deliberating, accepted, abandoned, deferred]
+    filterable: equality
+  - key: decided_on
+    description: Date the decision was accepted. ISO YYYY-MM-DD.
+    field_type: date
+    filterable: range
+  - key: deciders
+    description: Who made the call. Comma-separated handles.
+    field_type: string
+    serialization: csv_array
+title_weight: 100.0
+text_fields: [decision, context, consequences, revisit_if, notes]
+hierarchy_relationship: PART_OF
+edge_weight_overrides:
+  CHOSEN: 3.0
+  REJECTED: 2.5
+  MOTIVATED_BY: 2.5
+propagating_relationships: [CHOSEN, REJECTED, MOTIVATED_BY, ANSWERS]
+updatable_fields: [title, decision, context, consequences, revisit_if, notes, status, decided_on, deciders, tags]
+health_required_fields: [decision, context, consequences]
+staleness_threshold_days: 180
+write_rules:
+  - "A decision without CHOSEN and at least one REJECTED is opinion, not deliberation. Frame the choice before recording it."
+  - "Status transitions: proposed → deliberating (under active discussion) → accepted (committed) / abandoned (ruled out) / deferred (revisit later)."
+  - "Never edit the body of an accepted decision to reflect a later change. Author a new decision with SUPERSEDES instead."
+  - "Link MOTIVATED_BY to the goal, open_question, or risk that precipitated the choice. Link ANSWERS to any open_question this decision resolves."
+  - "Title states the decision imperatively ('Use event sourcing for audit trails' beats 'Audit-trail decision')."

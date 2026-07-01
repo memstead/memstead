@@ -1,0 +1,388 @@
+//! `Engine::branch_reset` implementation for git-branch mounts.
+//!
+//! The single engine-level history-rewrite op. Sets a vault's branch
+//! pointer to `target_sha` and refuses if any commit that would be
+//! discarded by the reset is already pushed to a remote-tracking ref.
+//! Replay workflows that operate over un-pushed commit segments
+//! consume this op; nothing else in the engine moves a branch pointer
+//! over existing commits.
+//!
+//! ## Safety contract
+//!
+//! "Pushed" is defined as: reachable from at least one `refs/remotes/*`
+//! ref. The engine reads remote-tracking refs only; it does not
+//! contact the remote during the safety probe. Operators who skirt
+//! that convention (manual `refs/remotes/*` edits) can fool the
+//! check, but the policy is git-standard.
+//!
+//! ## Atomicity
+//!
+//! The actual ref update goes through `gix`'s `edit_references`
+//! transaction with `PreviousValue::MustExistAndMatch(current)`. A
+//! sibling writer that advances the branch between our snapshot and
+//! the commit phase trips the precondition and surfaces as a
+//! `RefTransaction` error — the operator-recoverable case the
+//! `vault_repo_config::commit_refs` machinery already documents.
+
+use std::collections::HashSet;
+use std::path::Path;
+
+use gix::ObjectId;
+use gix::refs::transaction::{Change, LogChange, PreviousValue, RefEdit, RefLog};
+use gix::refs::{FullName, Target};
+
+use memstead_base::backend::BackendError;
+use memstead_base::ops::BranchResetOutcome;
+
+/// Resolve `<gitdir>/refs/heads/<branch>` to its current tip SHA. The
+/// branch is required to exist — a missing branch surfaces as
+/// `UNKNOWN_REF:refs/heads/<branch>` so the engine layer maps it to
+/// `EngineError::UnknownRef`.
+fn current_head(repo: &gix::Repository, branch: &str) -> Result<ObjectId, BackendError> {
+    let ref_name = format!("refs/heads/{branch}");
+    let id = repo
+        .rev_parse_single(ref_name.as_str())
+        .map_err(|_| BackendError::Other(format!("UNKNOWN_REF: {ref_name}")))?;
+    Ok(id.detach())
+}
+
+/// Resolve a caller-supplied target ref. Accepts any input
+/// `gix::rev_parse_single` understands — branch names, short SHAs,
+/// full SHAs. Unknown inputs flag via the `UNKNOWN_REF` marker.
+fn resolve_target(repo: &gix::Repository, target: &str) -> Result<ObjectId, BackendError> {
+    let id = repo
+        .rev_parse_single(target)
+        .map_err(|_| BackendError::Other(format!("UNKNOWN_REF: {target}")))?;
+    Ok(id.detach())
+}
+
+/// Walk every `refs/remotes/*` ref and collect the set of all commit
+/// SHAs reachable from any of them. The set is the engine's
+/// definition of "pushed" for the safety probe.
+fn pushed_commit_set(repo: &gix::Repository) -> Result<HashSet<ObjectId>, BackendError> {
+    let platform = repo
+        .references()
+        .map_err(|e| BackendError::Other(format!("references(): {e}")))?;
+    let iter = platform
+        .remote_branches()
+        .map_err(|e| BackendError::Other(format!("remote_branches(): {e}")))?;
+
+    let mut tips: Vec<ObjectId> = Vec::new();
+    for r in iter {
+        let mut reference = match r {
+            Ok(rf) => rf,
+            Err(_) => continue,
+        };
+        if let Ok(commit) = reference.peel_to_id() {
+            tips.push(commit.detach());
+        }
+    }
+
+    let mut reachable: HashSet<ObjectId> = HashSet::new();
+    if tips.is_empty() {
+        return Ok(reachable);
+    }
+
+    let walk = repo
+        .rev_walk(tips)
+        .all()
+        .map_err(|e| BackendError::Other(format!("rev-walk(remotes): {e}")))?;
+    for info in walk {
+        let info = match info {
+            Ok(i) => i,
+            Err(_) => continue,
+        };
+        reachable.insert(info.id);
+    }
+    Ok(reachable)
+}
+
+/// Walk commits reachable from `head` with `target` as the boundary
+/// (target itself and its ancestors are excluded). Every commit
+/// visited would be discarded if the branch pointer moved to
+/// `target`. When `head == target` the set is empty (no-op reset).
+fn discarded_commits(
+    repo: &gix::Repository,
+    head: ObjectId,
+    target: ObjectId,
+) -> Result<Vec<ObjectId>, BackendError> {
+    if head == target {
+        return Ok(Vec::new());
+    }
+    let walk = repo
+        .rev_walk([head])
+        .with_hidden([target])
+        .all()
+        .map_err(|e| BackendError::Other(format!("rev-walk(discard): {e}")))?;
+    let mut out = Vec::new();
+    for info in walk {
+        let info = info.map_err(|e| BackendError::Other(format!("rev-walk-step: {e}")))?;
+        out.push(info.id);
+    }
+    Ok(out)
+}
+
+/// Apply the branch_reset operation. See module-level docs for the
+/// safety contract; fetch / pull / push / branch_reset form one
+/// transport surface.
+pub fn branch_reset_in_gitdir(
+    gitdir: &Path,
+    branch: &str,
+    target_sha: &str,
+) -> Result<BranchResetOutcome, BackendError> {
+    if !gitdir.is_dir() {
+        return Err(BackendError::Other(format!(
+            "gitdir not found: {}",
+            gitdir.display()
+        )));
+    }
+    let repo = gix::open(gitdir).map_err(|e| BackendError::Other(format!("gix open: {e}")))?;
+
+    let current = current_head(&repo, branch)?;
+    let target = resolve_target(&repo, target_sha)?;
+    let branch_ref = format!("refs/heads/{branch}");
+
+    // Fast-path: target equals current head — no-op reset. Return an
+    // outcome with empty `discarded` so callers can branch on
+    // emptiness if they want to skip downstream side effects.
+    if current == target {
+        return Ok(BranchResetOutcome {
+            vault: branch.to_string(),
+            branch_ref,
+            previous_sha: current.to_string(),
+            new_sha: target.to_string(),
+            discarded_commits: Vec::new(),
+        });
+    }
+
+    let discarded = discarded_commits(&repo, current, target)?;
+
+    let pushed = pushed_commit_set(&repo)?;
+    let blocked: Vec<String> = discarded
+        .iter()
+        .filter(|c| pushed.contains(*c))
+        .map(|c| c.to_string())
+        .collect();
+    if !blocked.is_empty() {
+        return Err(BackendError::Other(format!(
+            "PUSHED_COMMITS_PROTECTED: {}",
+            blocked.join(",")
+        )));
+    }
+
+    // Atomic ref update. PreviousValue::MustExistAndMatch refuses if
+    // a sibling writer advanced the branch between our snapshot and
+    // here — surfaces as a RefTransaction error rather than silently
+    // overwriting their commit.
+    let name: FullName = branch_ref.as_str().try_into().map_err(|e| {
+        BackendError::Other(format!("invalid ref name {branch_ref:?}: {e}"))
+    })?;
+    let edit = RefEdit {
+        change: Change::Update {
+            log: LogChange {
+                mode: RefLog::AndReference,
+                force_create_reflog: false,
+                message: format!("memstead_branch_reset {} -> {target_sha}", branch).into(),
+            },
+            expected: PreviousValue::MustExistAndMatch(Target::Object(current)),
+            new: Target::Object(target),
+        },
+        name,
+        deref: false,
+    };
+    repo.edit_references([edit])
+        .map_err(|e| BackendError::Other(format!("edit_references: {e}")))?;
+
+    Ok(BranchResetOutcome {
+        vault: branch.to_string(),
+        branch_ref,
+        previous_sha: current.to_string(),
+        new_sha: target.to_string(),
+        discarded_commits: discarded.into_iter().map(|c| c.to_string()).collect(),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::VaultWriter;
+    use crate::storage::git_tree::GitTreeVaultWriter;
+    use crate::vcs::CommitContext;
+    use std::path::PathBuf;
+    use tempfile::TempDir;
+
+    fn init_gitdir(tmp: &TempDir) -> PathBuf {
+        let gitdir = tmp.path().join("vault-repo").join(".git");
+        std::fs::create_dir_all(&gitdir).unwrap();
+        gix::init_bare(&gitdir).unwrap();
+        gitdir
+    }
+
+    fn body(title: &str) -> String {
+        format!(
+            "---\ntype: spec\ncreated_date: 2026-01-01\nlast_modified: 2026-01-01\nlevel: M0\n---\n# {title}\n\n## Identity\n\n{title}\n"
+        )
+    }
+
+    fn commit(gitdir: &PathBuf, branch: &str, file: &str, content: &str, subject: &str) -> String {
+        let writer =
+            GitTreeVaultWriter::new(gitdir.clone(), format!("refs/heads/{branch}"));
+        writer.write_entity(Path::new(file), content.as_bytes()).unwrap();
+        writer.commit(subject, &CommitContext::internal()).unwrap()
+    }
+
+    /// Create a `refs/remotes/<remote>/<branch>` pointing at the given
+    /// SHA so the pushed-status probe sees it as "pushed".
+    fn set_remote_tracking(gitdir: &PathBuf, remote: &str, branch: &str, sha: &str) {
+        let repo = gix::open(gitdir).unwrap();
+        let name: FullName = format!("refs/remotes/{remote}/{branch}")
+            .as_str()
+            .try_into()
+            .unwrap();
+        let oid: ObjectId = sha.parse().unwrap();
+        repo.edit_references([RefEdit {
+            change: Change::Update {
+                log: LogChange {
+                    mode: RefLog::AndReference,
+                    force_create_reflog: false,
+                    message: "test-remote".into(),
+                    },
+                expected: PreviousValue::Any,
+                new: Target::Object(oid),
+            },
+            name,
+            deref: false,
+        }])
+        .unwrap();
+    }
+
+    #[test]
+    fn branch_reset_unknown_branch_returns_unknown_ref_marker() {
+        let tmp = TempDir::new().unwrap();
+        let gitdir = init_gitdir(&tmp);
+        let err = branch_reset_in_gitdir(&gitdir, "nope", "abc").unwrap_err();
+        match err {
+            BackendError::Other(msg) => assert!(msg.starts_with("UNKNOWN_REF:"), "got: {msg}"),
+            other => panic!("expected Other(UNKNOWN_REF), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn branch_reset_no_op_when_target_equals_head() {
+        let tmp = TempDir::new().unwrap();
+        let gitdir = init_gitdir(&tmp);
+        let sha = commit(&gitdir, "specs", "a.md", &body("A"), "seed");
+        let outcome = branch_reset_in_gitdir(&gitdir, "specs", &sha).unwrap();
+        assert!(outcome.discarded_commits.is_empty());
+        assert_eq!(outcome.previous_sha, outcome.new_sha);
+    }
+
+    #[test]
+    fn branch_reset_unpushed_commits_succeeds() {
+        let tmp = TempDir::new().unwrap();
+        let gitdir = init_gitdir(&tmp);
+        let sha_a = commit(&gitdir, "specs", "a.md", &body("A"), "A");
+        let _sha_b = commit(&gitdir, "specs", "b.md", &body("B"), "B");
+        let sha_c = commit(&gitdir, "specs", "c.md", &body("C"), "C");
+
+        // Reset back to A; B and C are unpushed (no remote-tracking ref
+        // exists), so the reset is allowed.
+        let outcome = branch_reset_in_gitdir(&gitdir, "specs", &sha_a).unwrap();
+        assert_eq!(outcome.new_sha, sha_a);
+        assert_eq!(outcome.previous_sha, sha_c);
+        assert_eq!(outcome.discarded_commits.len(), 2);
+
+        // Branch now points to A.
+        let repo = gix::open(&gitdir).unwrap();
+        let head = repo
+            .rev_parse_single("refs/heads/specs")
+            .unwrap()
+            .detach()
+            .to_string();
+        assert_eq!(head, sha_a);
+    }
+
+    #[test]
+    fn engine_branch_reset_routes_git_branch_mount_and_surfaces_typed_error() {
+        // End-to-end: build an engine with a git-branch mount, install
+        // the pro ops bundle, then assert the typed surfacing:
+        // `PUSHED_COMMITS_PROTECTED` un-marshals into the typed
+        // `EngineError::PushedCommitsProtected` variant.
+        let tmp = TempDir::new().unwrap();
+        let gitdir = init_gitdir(&tmp);
+        let _sha_a = commit(&gitdir, "specs", "a.md", &body("A"), "A");
+        let sha_b = commit(&gitdir, "specs", "b.md", &body("B"), "B");
+        set_remote_tracking(&gitdir, "origin", "specs", &sha_b);
+        let _sha_c = commit(&gitdir, "specs", "c.md", &body("C"), "C");
+
+        let mount = memstead_base::Mount {
+            vault: "specs".to_string(),
+            schema: Some(memstead_schema::SchemaRef::new(
+                "default",
+                semver::Version::new(1, 0, 0),
+            )),
+            storage: memstead_base::MountStorage::GitBranch {
+                gitdir: gitdir.clone(),
+                branch: "specs".to_string(),
+            },
+            capability: memstead_base::MountCapability::Write,
+            lifecycle: memstead_base::MountLifecycle::Eager,
+            cross_linkable: true,
+            migration_target: None,
+        };
+        let backend = crate::storage::instantiate_pro_backend(&mount).unwrap();
+        let mut engine =
+            memstead_base::Engine::from_mounts(vec![(mount, backend)]).unwrap();
+        engine.set_git_branch_ops(crate::storage::PRO_GIT_BRANCH_OPS);
+
+        let err = engine
+            .branch_reset("specs", &_sha_a)
+            .unwrap_err();
+        match err {
+            memstead_base::EngineError::PushedCommitsProtected {
+                vault,
+                target_sha,
+                pushed_shas,
+            } => {
+                assert_eq!(vault, "specs");
+                assert_eq!(target_sha, _sha_a);
+                assert!(pushed_shas.contains(&sha_b));
+            }
+            other => panic!("expected PushedCommitsProtected, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn branch_reset_refuses_when_discarded_commits_are_pushed() {
+        let tmp = TempDir::new().unwrap();
+        let gitdir = init_gitdir(&tmp);
+        let sha_a = commit(&gitdir, "specs", "a.md", &body("A"), "A");
+        let sha_b = commit(&gitdir, "specs", "b.md", &body("B"), "B");
+        let _sha_c = commit(&gitdir, "specs", "c.md", &body("C"), "C");
+
+        // Pretend B was pushed to origin.
+        set_remote_tracking(&gitdir, "origin", "specs", &sha_b);
+
+        // Try to reset back to A — B is pushed and would be discarded.
+        let err = branch_reset_in_gitdir(&gitdir, "specs", &sha_a).unwrap_err();
+        match err {
+            BackendError::Other(msg) => {
+                assert!(
+                    msg.starts_with("PUSHED_COMMITS_PROTECTED:"),
+                    "unexpected refusal: {msg}",
+                );
+                assert!(msg.contains(&sha_b), "must name the pushed commit: {msg}");
+            }
+            other => panic!("expected Other(PUSHED_COMMITS_PROTECTED), got {other:?}"),
+        }
+
+        // Branch pointer unchanged.
+        let repo = gix::open(&gitdir).unwrap();
+        let head = repo
+            .rev_parse_single("refs/heads/specs")
+            .unwrap()
+            .detach()
+            .to_string();
+        assert_eq!(head, _sha_c);
+    }
+}

@@ -1,0 +1,53 @@
+[package]
+name = "memstead-swift"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "UniFFI bindings exposing the Memstead engine to the macOS app as an in-process Rust library."
+publish = false
+
+[lib]
+name = "memstead_swift"
+crate-type = ["staticlib", "cdylib", "lib"]
+
+# Per-crate bindgen binary — avoids a globally installed `uniffi-bindgen`.
+# Invoke via `cargo run -p memstead-swift --bin uniffi-bindgen -- ...`.
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+
+[dependencies]
+memstead-base.workspace = true
+# Vault-lifecycle orchestrators (`create_vault` / `delete_vault`) live here;
+# the in-process binding mirrors the `memstead_vault_*` MCP contract onto
+# UniFFI so the macOS app manages the roster through the engine, never via
+# raw vault-repo writes.
+memstead-engine.workspace = true
+memstead-git-branch.workspace = true
+memstead-schema.workspace = true
+semver.workspace = true
+thiserror.workspace = true
+uniffi = { version = "0.31", features = ["cli"] }
+
+[build-dependencies]
+uniffi = { version = "0.31", features = ["build"] }
+
+[dev-dependencies]
+tempfile.workspace = true
+# Pull in `memstead-git-branch::test_support::init_vault_repo_stub` so integration
+# tests can satisfy the `vault-repo/.git/` fail-fast under the
+# `GitObject` default (Phase 2 Session 6).
+memstead-git-branch = { workspace = true, features = ["test-support"] }
+
+[features]
+# Forwarded from `memstead-git-branch`. Compiles in the git-tree write adapter so
+# `cargo build --workspace --features git-object-storage` propagates
+# correctly across the dependency graph.
+git-object-storage = ["memstead-git-branch/git-object-storage"]
+# Phase 2 Session 6: gates `Engine::new_for_test` so the in-process
+# tests (and any external harness opting in) can construct an engine
+# rooted at a `TempDir` whose `vault-repo/.git/` has been stubbed,
+# satisfying the new fail-fast under the `GitObject` default.
+test-support = ["memstead-git-branch/test-support"]

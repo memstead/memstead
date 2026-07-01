@@ -1,0 +1,78 @@
+# yaml-language-server: $schema=../../../../generated/type-definition.schema.json
+
+name: actor
+description: |
+  A person, team, or service account that owns or maintains entities
+  in the graph. The subject of every OWNS and MAINTAINS edge. Makes
+  "who owns X?" a one-hop graph query instead of a grep through prose.
+when_to_use: |
+  Use when an actor structurally owns or maintains entities in the
+  graph. The defining test: do other entities need an OWNS or
+  MAINTAINS edge pointing at this actor? If yes, `actor`. For one-off
+  mentions (e.g. named individuals in a `decision`'s `deciders`
+  field), use the metadata field — not a full actor entity.
+boundaries:
+  - Not a fine-grained user or account record — org-level only, not identity-provider data.
+  - Not a customer entity — model customers in a separate schema if relevant.
+  - Not an automated bot's runtime metadata — capture as tags or a lightweight service_account entity.
+system_message: |
+  Actors exist to carry OWNS and MAINTAINS edges. Keep them lightweight
+  — Role, Responsibilities, Contact. Prefer teams over individuals:
+  one OWNS edge from `platform-team` is more durable than one from
+  `alice`. Set active=false when actors leave rather than deleting the
+  entity (historical ownership stays queryable).
+sections:
+  - key: role
+    heading: Role
+    required: true
+    search_weight: 30.0
+    write_rules:
+      - "One sentence. What this actor does in the context of the project."
+  - key: responsibilities
+    heading: Responsibilities
+    required: false
+    search_weight: 15.0
+    write_rules:
+      - "Bullet list of the actor's domains. Each bullet should map to entities the actor OWNS or MAINTAINS."
+  - key: contact
+    heading: Contact
+    required: false
+    search_weight: 5.0
+    write_rules:
+      - "How to reach the actor — email, handle, Slack channel, team distribution list. Durable handles, not personal phone numbers."
+  - key: notes
+    heading: Notes
+    required: false
+    search_weight: 3.0
+    catch_all: true
+metadata_fields:
+  - key: kind
+    description: What kind of actor this is.
+    field_type: string
+    default_value: team
+    enum_values: [person, team, service_account, external]
+    filterable: equality
+  - key: active
+    description: Whether the actor is currently active. Inactive actors stay in the graph for history.
+    field_type: boolean
+    default_value: "true"
+    filterable: equality
+  - key: handle
+    description: Short identifier — the canonical handle used in prose or metadata (e.g. `platform-team`, `alice`).
+    field_type: string
+title_weight: 100.0
+text_fields: [role, responsibilities, contact, notes]
+hierarchy_relationship: PART_OF
+edge_weight_overrides:
+  OWNS: 3.0
+  MAINTAINS: 2.0
+propagating_relationships: [OWNS, MAINTAINS]
+updatable_fields: [title, role, responsibilities, contact, notes, kind, active, handle, tags]
+health_required_fields: [role]
+staleness_threshold_days: 365
+write_rules:
+  - "Prefer teams over individuals. One actor per team or distinct person — never one per developer name when a team handle exists."
+  - "Keep actors lightweight. A short Role plus a set of OWNS edges beats a long prose description."
+  - "Set active=false when an actor leaves or a team dissolves. Keep the entity for historical ownership; do not delete."
+  - "Use OWNS for primary accountability and MAINTAINS for shared upkeep. Exactly one OWNS per owned entity is the healthy pattern."
+  - "Handle is stable across the actor's lifetime — do not rename on role changes."

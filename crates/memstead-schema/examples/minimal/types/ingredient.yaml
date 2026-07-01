@@ -1,0 +1,94 @@
+# yaml-language-server: $schema=../../../generated/type-definition.schema.json
+
+# ─────────────────────────────────────────────────────────────────────────────
+# `ingredient` type — a pantry item with substitution rules.
+# Small on purpose: a single purchasable/growable item plus the knowledge
+# needed to swap it out intelligently. Preparation belongs to `recipe`.
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: ingredient
+
+description: |
+  A single cooking ingredient (tomato, olive oil, soy sauce). Captures
+  what it is, how to store it, and which other ingredients can stand in
+  for it in recipes.
+
+when_to_use: |
+  Use for any discrete pantry item a recipe lists. One ingredient per
+  entity — "canned tomatoes" and "fresh tomatoes" are two ingredients
+  if they behave differently in recipes.
+
+boundaries:
+  - Not a finished dish — use `recipe`.
+  - Not a recipe technique (deglazing, emulsifying) — techniques belong
+    in a separate schema or, for now, in the recipe's Notes section.
+  - Not a shopping list — ingredients describe the thing, not a purchase.
+
+examples:
+  - title: "Canned San Marzano Tomatoes"
+    sections:
+      profile: "Whole peeled plum tomatoes in juice, low-acid variety from Campania. Sweet, meaty, gold standard for long-simmered sauces."
+      storage: "Shelf-stable unopened. After opening, transfer to a sealed container and refrigerate; use within 5 days or freeze."
+      substitutions: |
+        - Canned Roma tomatoes: close substitute, slightly more acidic.
+        - Fresh tomatoes: need blanching, peeling, longer cook — not a 1:1 swap.
+
+  - title: "Soy Sauce"
+    sections:
+      profile: "Fermented soybean sauce. Salty, umami-rich. Light soy is saltier; dark soy is sweeter and used for colour."
+      storage: "Shelf-stable before opening. Refrigerate after opening to preserve flavour."
+      substitutions: |
+        - Tamari: gluten-free, slightly less salty — use 1:1.
+        - Coconut aminos: soy-free, noticeably sweeter — reduce other sugar.
+
+system_message: |
+  Ingredients are terse. Profile, storage, substitutions — that is all.
+  Link substitutes via SUBSTITUTES_FOR with the caveat described in the
+  source's substitutions section.
+
+sections:
+  - key: profile
+    heading: Profile
+    required: true
+    search_weight: 30.0
+    write_rules:
+      - "Two to four sentences. What the ingredient IS, key flavour/texture notes, common variants."
+  - key: storage
+    heading: Storage
+    required: false
+    search_weight: 10.0
+    write_rules:
+      - "Shelf-life, best storage method, how long after opening. One short paragraph."
+  - key: substitutions
+    heading: Substitutions
+    required: false
+    search_weight: 15.0
+    catch_all: true
+    write_rules:
+      - "Bullet list: substitute name, then caveat. Also add a SUBSTITUTES_FOR edge to the substitute's entity."
+
+metadata_fields:
+  - key: pantry_category
+    description: Rough shelf category — drives pantry organisation.
+    field_type: string
+    default_value: other
+    enum_values: [produce, dairy, meat, seafood, grain, pantry_dry, pantry_canned, pantry_oils, pantry_sauces, spice, other]
+    filterable: equality
+
+title_weight: 100.0
+text_fields: [profile, storage, substitutions]
+hierarchy_relationship: PART_OF
+
+edge_weight_overrides:
+  SUBSTITUTES_FOR: 2.5
+
+propagating_relationships: [SUBSTITUTES_FOR]
+
+updatable_fields: [title, profile, storage, substitutions, pantry_category, tags]
+health_required_fields: [profile]
+staleness_threshold_days: 720
+
+write_rules:
+  - "One ingredient per entity. Variants that behave differently in recipes (canned vs fresh tomatoes) get separate entities."
+  - "Every substitute listed in prose must also have a SUBSTITUTES_FOR edge."
+  - "Relationships are UPPER_SNAKE_CASE. Strict mode: SUBSTITUTES_FOR, DERIVED_FROM, PART_OF, REFERENCES."

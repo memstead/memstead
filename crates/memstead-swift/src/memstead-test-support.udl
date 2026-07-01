@@ -1,0 +1,29 @@
+// Test-support UDL fragment. Appended to `memstead.udl` by `build.rs`
+// (and by `macos/scripts/build-engine.sh`) ONLY when the crate is built
+// with `--features test-support`. The featureless build never sees this
+// fragment, so the seeding symbols are absent from the shipping (Release)
+// framework.
+//
+// Append-only contract: this fragment declares whole top-level `interface`
+// blocks — never additions to the base `namespace memstead { … }` or
+// `interface Engine { … }` blocks — so it can be concatenated onto
+// `memstead.udl` verbatim without textual injection. UDL allows many
+// interfaces but exactly one namespace, which the base file already owns.
+
+// Hermetic test-workspace seeder. Lays down a real `vault-repo/.git`
+// (the git-branch backend) through the engine's own
+// `memstead_git_branch::test_support` helper — the Swift test harness
+// never shells out to `git` or writes refs itself — and roots an `Engine`
+// at it. This is the FFI entry point the macOS smoke suite uses to build
+// a disposable engine without depending on the developer's `graph/`, the
+// process cwd, or a committed `.git` fixture.
+interface TestSupport {
+    constructor();
+
+    // Seed the canonical two-entity fixture (`specs` vault, entity-a USES
+    // entity-b) into a fresh `vault-repo/.git` under `workspace_root`, then
+    // return an `Engine` rooted there. Mirrors the Rust-side
+    // `setup_test_engine` fixture so a regression shows up on both sides.
+    [Throws=MemsteadError]
+    Engine seeded_engine(string workspace_root);
+};

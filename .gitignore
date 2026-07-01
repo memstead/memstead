@@ -1,0 +1,17 @@
+# Rust build artifacts
+/target/
+**/target/
+
+# Node
+node_modules/
+
+# Astro (docs-site) build output
+docs-site/dist/
+docs-site/.astro/
+
+# OS
+.DS_Store
+
+# Env / logs
+.env
+*.log

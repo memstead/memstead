@@ -1,0 +1,84 @@
+# yaml-language-server: $schema=../../../../generated/type-definition.schema.json
+
+name: milestone
+description: |
+  A project-level checkpoint — a committed deliverable the operator
+  intends to ship. Carries status (planned, active, done, blocked,
+  abandoned) and a target date. Distinct from a planning-schema
+  `step` because a milestone is the operator's commitment level, not
+  the executor's task level.
+when_to_use: |
+  Use when the project has committed to delivering something
+  observable by a target date. The defining test: would shipping
+  this matter at the project level — would it appear in a status
+  report or a public-facing announcement? If yes, `milestone`. If
+  it is internal task-level work, it belongs in the planning schema
+  as `step` or in a paired code vault.
+boundaries:
+  - Not a planning `step` — steps are executor task-level; milestones are operator commitment-level.
+  - Not a `bet` — bets are wagers; milestones are committed deliverables that realize a bet.
+  - Not a `vision` — visions are long-arc destinations; milestones are checkpoints along the way.
+  - Not a planning `goal` — goals frame a planning phase; milestones are checkpoints across the project's life.
+system_message: |
+  A milestone records a commitment the project intends to keep.
+  Definition of Done is concrete enough that an external observer
+  could check whether the milestone is reached. Blockers names what
+  is currently in the way; on a healthy milestone this is empty or
+  has a wiki-link to the blocking entity (a `bet` whose outcome is
+  pending, an upstream `milestone`). Dependencies names what must
+  ship first. Cross-references both `bet` (which milestones realize)
+  and `pillar` (which subsystem they affect).
+sections:
+  - key: definition_of_done
+    heading: Definition of Done
+    required: true
+    search_weight: 30.0
+    write_rules:
+      - "Concrete, checkable conditions for the milestone being reached. If 'done' cannot be checked by an external observer, the milestone is too vague."
+  - key: blockers
+    heading: Blockers
+    required: false
+    search_weight: 10.0
+    write_rules:
+      - "Bullet list of what is currently blocking this milestone. Wiki-link to the blocking entity (a `bet` whose outcome is pending, an upstream `milestone`). On a milestone with `status: planned` or `done`, this section is usually empty."
+  - key: dependencies
+    heading: Dependencies
+    required: false
+    search_weight: 10.0
+    write_rules:
+      - "Bullet list of milestones or pillars that must reach a particular state before this milestone can be reached. Wiki-link them. Distinct from Blockers — dependencies are structural, blockers are current."
+  - key: notes
+    heading: Notes
+    required: false
+    search_weight: 3.0
+    catch_all: true
+metadata_fields:
+  - key: status
+    description: Lifecycle state of the milestone.
+    field_type: string
+    default_value: planned
+    enum_values: [planned, active, done, blocked, abandoned]
+    filterable: equality
+  - key: target_date
+    description: Target date for the milestone. ISO YYYY-MM-DD. Aspirational on `planned`, committed on `active`.
+    field_type: date
+    filterable: range
+  - key: completed_on
+    description: 'Date the milestone was reached. ISO YYYY-MM-DD. Unset until `status: done`.'
+    field_type: date
+    filterable: range
+title_weight: 100.0
+text_fields: [definition_of_done, blockers, dependencies, notes]
+hierarchy_relationship: PART_OF
+edge_weight_overrides:
+  MOTIVATED_BY: 2.5
+  BLOCKS: 2.0
+propagating_relationships: [MOTIVATED_BY, BLOCKS, PART_OF]
+updatable_fields: [title, definition_of_done, blockers, dependencies, notes, status, target_date, completed_on, tags]
+health_required_fields: [definition_of_done]
+staleness_threshold_days: 60
+write_rules:
+  - "Definition of Done is concrete and checkable. 'Improve onboarding' is not a milestone; 'first external pilot ships and writes a usage report' is."
+  - "Link MOTIVATED_BY to the `bet` this milestone realizes. A milestone with no upstream bet may be busywork; check whether it earns its slot."
+  - "Sub-milestones connect via PART_OF. Keep the hierarchy shallow — a milestone tree more than two levels deep is probably planning-level detail that belongs in the planning schema."
+  - "Status transitions: planned → active (committed) → done (shipped) / blocked (waiting on a blocker) / abandoned (dropped without shipping). Blocked is temporary; if it persists, demote to abandoned or split into a smaller milestone that can ship."

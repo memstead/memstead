@@ -1,0 +1,234 @@
+# yaml-language-server: $schema=../../../engine/crates/memstead-schema/generated/schema-manifest.schema.json
+
+# ─────────────────────────────────────────────────────────────────────────────
+# reimpl-target@0.1.0 — Target-design schema, paired with reimpl-source.
+#
+# Two types: target-spec (design of a new component) and divergence
+# (authorized deviation from legacy behavior). The Target vault is
+# authored, not extracted — it is where design decisions happen.
+#
+# Cross-vault edges target capabilities in the paired Legacy vault on
+# reimpl-source@0.1.0. The engine validates both endpoints.
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: reimpl-target
+version: 0.1.0
+
+description: |
+  Schema for a Target vault in a reimplementation project. Paired with a
+  Legacy vault on reimpl-source@0.1.0. Captures the design of the new
+  system as target-spec entities linking back to legacy capabilities, and
+  authorized deviations as first-class divergence entities with rationale.
+
+when_to_use: |
+  Use in the Target vault of a reimplementation project, paired with a
+  Legacy vault on reimpl-source@0.1.0. One Legacy vault can feed multiple
+  Target vaults — e.g. two different apps reimplemented from the same
+  source — each with its own divergences. After the reimpl completes,
+  swap the schema to software@0.1.0 and continue as a regular
+  specification vault.
+
+system_message: |
+  You are in a Target vault of a reimplementation project. Two types:
+
+    target-spec — design of a new component, realizing legacy capabilities
+    divergence  — an authorized deviation from legacy behavior
+
+  Every target-spec should link REALIZES_CAPABILITY to the capabilities
+  in the paired Legacy vault it realizes. Unrealized capabilities are
+  surfaced by the coverage query and drive build prioritization.
+
+  Deviations from legacy behavior are NEVER silent. Whenever you
+  deliberately change, drop, or skip a capability, author a divergence
+  with kind (drop / simplify / antipattern_out / tech_swap / add) and a
+  rationale. A reader six months later should be able to answer "why is
+  this different from the old system?" from the graph alone.
+
+  The default assumption is conservative: if no divergence exists for a
+  capability, the new system replicates the legacy behavior. Silence
+  means "port as-is". That makes divergences the scarce and valuable
+  artifacts — think before you write one.
+
+  Relationships are UPPER_SNAKE_CASE, strict vocabulary.
+
+types:
+  - target-spec
+  - divergence
+
+# Inherits the default schema's 37 edges plus four target-specific ones.
+# REALIZES_CAPABILITY and DIVERGES_FROM are cross-vault edges into the
+# paired Legacy vault on reimpl-source@0.1.0.
+relationships:
+  mode: strict
+  definitions:
+    # ── Structural / reference ──────────────────────────────────────────
+    - name: PART_OF
+      description: Hierarchical containment — the source is structurally part of the target and meaningless without it.
+      default_weight: 3.0
+      acyclic: true
+    - name: REFERENCES
+      description: Soft reference from the source to the target without ownership or dependency.
+      when_to_use: Mentioning, pointing at, citing. Emitted automatically from inline wiki-links.
+      default_weight: 0.5
+    - name: DEPENDS_ON
+      description: The source requires the target to exist or complete first.
+      default_weight: 2.0
+      acyclic: true
+    - name: IMPLEMENTS
+      description: The source realizes or fulfills the target specification.
+      default_weight: 2.0
+      acyclic: true
+    - name: DEFINES
+      description: The source defines the target concept or term.
+      default_weight: 1.5
+      acyclic: true
+    - name: DEFINED_BY
+      description: The source is defined by the target (inverse of DEFINES).
+      default_weight: 1.5
+      acyclic: true
+    - name: USES
+      description: The source makes use of the target without depending on it.
+      default_weight: 1.0
+    - name: CLASSIFIES
+      description: The source classifies or categorizes the target.
+      default_weight: 1.0
+      acyclic: true
+    - name: STORES
+      description: The source stores the target data or content.
+      default_weight: 1.0
+    - name: DERIVED_FROM
+      description: The source is derived from, or based upon, the target.
+      default_weight: 1.5
+      acyclic: true
+    - name: MOTIVATED_BY
+      description: The target motivated the creation or change described by the source.
+      default_weight: 2.0
+      acyclic: true
+    - name: SUPERSEDES
+      description: The source replaces the target — the target is no longer current.
+      default_weight: 1.5
+      acyclic: true
+    - name: ENABLES
+      description: The source enables the target to happen or exist.
+      default_weight: 1.0
+      acyclic: true
+    - name: BLOCKS
+      description: The source blocks the target from happening or progressing.
+      default_weight: 1.0
+      acyclic: true
+
+    # ── Claim / evidence ────────────────────────────────────────────────
+    - name: SUPPORTS
+      description: The source provides evidence or reasoning that supports the target claim.
+      default_weight: 2.5
+    - name: CONTRADICTS
+      description: The source contradicts or disputes the target claim.
+      default_weight: 2.5
+    - name: GENERALIZES
+      description: The source is a broader, more abstract form of the target.
+      default_weight: 2.0
+      acyclic: true
+    - name: SPECIALIZES
+      description: The source is a narrower, more concrete form of the target.
+      default_weight: 2.0
+      acyclic: true
+    - name: CONTRASTS_WITH
+      description: The source is defined partly by its contrast with the target — easily confused neighbors.
+      default_weight: 1.5
+
+    # ── Reasoning / causation ───────────────────────────────────────────
+    - name: MOTIVATES
+      description: The source motivates or drives the target.
+      default_weight: 1.5
+      acyclic: true
+    - name: INFORMED_BY
+      description: The source is informed by the target — partial input, not a hard dependency.
+      default_weight: 1.0
+    - name: EXPLAINS
+      description: The source explains the phenomenon or behavior of the target.
+      default_weight: 2.0
+    - name: PREDICTS
+      description: The source predicts the behavior of the target.
+      default_weight: 1.5
+    - name: PRECEDED_BY
+      description: The source is preceded in time by the target.
+      default_weight: 2.0
+      acyclic: true
+    - name: FOLLOWED_BY
+      description: The source is followed in time by the target.
+      default_weight: 2.0
+      acyclic: true
+    - name: CAUSED
+      description: The source caused the target (causal, not merely temporal).
+      default_weight: 1.5
+      acyclic: true
+    - name: VALIDATES
+      description: The source validates the target claim, pattern, or principle.
+      default_weight: 1.5
+    - name: AGREES_WITH
+      description: The source perspective agrees with the target perspective.
+      default_weight: 2.0
+    - name: DISAGREES_WITH
+      description: The source perspective disagrees with the target perspective.
+      default_weight: 2.5
+    - name: INTERPRETS
+      description: The source interprets or analyzes the target.
+      default_weight: 2.0
+    - name: EXTENDS
+      description: The source extends the target with additional reasoning or scope.
+      default_weight: 1.5
+
+    # ── Principles / process ────────────────────────────────────────────
+    - name: GOVERNS
+      description: The source principle governs or constrains the target.
+      default_weight: 2.5
+      acyclic: true
+    - name: CONSTRAINS
+      description: The source constrains the permissible states of the target.
+      default_weight: 2.0
+      acyclic: true
+    - name: OVERRIDES
+      description: The source overrides the target principle in overlapping scope.
+      default_weight: 1.5
+      acyclic: true
+    - name: REQUIRES
+      description: The source process requires the target to have happened first.
+      default_weight: 2.5
+      acyclic: true
+    - name: PRODUCES
+      description: The source process produces the target as an output.
+      default_weight: 2.0
+      acyclic: true
+    - name: TRIGGERS
+      description: Completing the source triggers the target.
+      default_weight: 2.0
+      acyclic: true
+
+    # ── Reimpl-specific additions (cross-vault to reimpl-source) ────────
+    - name: REALIZES_CAPABILITY
+      description: A target-spec realizes one or more legacy capabilities. Cross-vault edge into the paired reimpl-source vault.
+      when_to_use: target-spec → capability. The primary coverage driver — every realized capability is a capability ticked off the build list. One target-spec may realize many capabilities; one capability may be split across several target-specs.
+      default_weight: 3.0
+      acyclic: true
+    - name: DIVERGES_FROM
+      description: A divergence attaches to the legacy capability it modifies, drops, or replaces. Cross-vault edge into the paired reimpl-source vault.
+      when_to_use: divergence → capability. Mandatory on every divergence entity. The edge plus the divergence's kind field make "what are we changing?" queryable in one pass.
+      default_weight: 3.0
+      acyclic: true
+    - name: MANIFESTS_IN
+      description: A divergence that is kept (not dropped) shows up in a target-spec — link to the spec where the new behavior lives.
+      when_to_use: divergence → target-spec. Required unless the divergence's kind is "drop" (in which case no target-spec realizes the original). Lets a reader of a target-spec see all divergences that shaped its design.
+      default_weight: 2.5
+    - name: EVOLVES_INTO
+      description: Planned iteration between target-specs — an earlier design is succeeded by a later one inside the same target build.
+      when_to_use: target-spec → target-spec. Optional; useful when the target build is phased (e.g. v1 ships without feature X, v2 adds it). Do not use for historic SUPERSEDES-style replacements — EVOLVES_INTO is forward-looking design intent.
+      default_weight: 2.0
+      acyclic: true
+
+    - name: _default
+      description: Fallback weight for any relationship not otherwise specified. Required by the engine.
+      default_weight: 1.0
+
+community:
+  resolution: 1.0
+  seed: 42

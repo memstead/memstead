@@ -1,0 +1,187 @@
+# yaml-language-server: $schema=../../../generated/type-definition.schema.json
+
+# ─────────────────────────────────────────────────────────────────────────────
+# `recipe` type — a single dish with ingredient list, steps, and metadata.
+# The filename (recipe.yaml) and the `name:` below must match the entry in
+# schema.yaml's `types:` list. The loader enforces all three.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Identity — the name the agent passes as entity_type on create/update.
+name: recipe
+
+# description — required. One paragraph. What IS this type.
+description: |
+  A cooking recipe: one finished dish with ingredients, step-by-step
+  instructions, and light metadata (yield, total time, tags).
+
+# when_to_use — required. Teaches the agent to pick this over neighbours.
+when_to_use: |
+  Use for any recipe a cook would follow start-to-finish. Prefer
+  `ingredient` for pantry items described in isolation. Prefer `memo`
+  from another schema if the entity is really a tasting note or a
+  decision about a recipe rather than the recipe itself.
+
+# boundaries — encouraged. Explicit anti-patterns with redirects.
+# This is where you prevent the agent from misclassifying.
+boundaries:
+  - Not a single ingredient — use `ingredient`.
+  - Not a tasting note, diet plan, or cooking-technique essay —
+    those belong in a separate schema (e.g. `cooking-notes`).
+  - Not a shopping list — recipes describe dishes, not purchases.
+
+# examples — encouraged. Few-shot material injected into MCP tool context.
+# 2–3 concrete examples are enough; more adds cost without adding clarity.
+examples:
+  - title: "Classic Bolognese"
+    sections:
+      summary: "Slow-simmered Italian meat sauce over fresh pasta."
+      ingredients: |
+        | Item | Amount |
+        |---|---|
+        | Ground beef | 500 g |
+        | Onion | 1 medium |
+        | Carrot | 1 |
+        | Celery stalk | 1 |
+        | Canned tomatoes | 400 g |
+      steps: |
+        1. Dice onion, carrot, celery. Sweat in olive oil until soft.
+        2. Add beef, brown completely.
+        3. Add tomatoes. Simmer 90 minutes on low.
+        4. Serve over fresh tagliatelle.
+      notes: "Can be made a day ahead; flavour deepens overnight."
+  - title: "Weeknight Pesto Pasta"
+    sections:
+      summary: "Fast green-sauce pasta for a 15-minute dinner."
+      ingredients: |
+        | Item | Amount |
+        |---|---|
+        | Spaghetti | 200 g |
+        | Fresh basil | 50 g |
+        | Pine nuts | 30 g |
+        | Parmesan | 40 g |
+        | Garlic | 1 clove |
+        | Olive oil | 60 ml |
+      steps: |
+        1. Cook spaghetti in salted water until al dente.
+        2. Blend basil, pine nuts, garlic, parmesan, oil smooth.
+        3. Toss hot pasta with pesto. Reserve pasta water to thin.
+
+# system_message — encouraged. Injected when the agent works with this
+# type. Keep it tight: invariants + common mistakes.
+system_message: |
+  A recipe has Summary, Ingredients, Steps, and optional Notes. The
+  Ingredients section MUST use a markdown table with item + amount
+  columns. Link every distinct ingredient to an `ingredient` entity
+  via the CONTAINS relationship — do not rely on wiki-links alone.
+  Use DERIVED_FROM for variants ("vegan bolognese DERIVED_FROM classic
+  bolognese"). Steps are numbered; keep each step under two sentences.
+
+# sections — the structural body of the entity.
+# - `key` is what appears in frontmatter and code.
+# - `heading` is the `## Heading` rendered in markdown.
+# - `required: true` means health/save validation rejects empty sections.
+# - `search_weight` biases full-text search scoring.
+# - `catch_all: true` on at most one section = "if the agent adds an
+#    unknown heading, append it here". Useful for notes / misc.
+# - `write_rules` are shown to the agent at write-time.
+sections:
+  - key: summary
+    heading: Summary
+    required: true
+    search_weight: 30.0
+    write_rules:
+      - "One or two sentences. What the finished dish is and the defining technique."
+  - key: ingredients
+    heading: Ingredients
+    required: true
+    search_weight: 25.0
+    write_rules:
+      - "Markdown table, two columns: Item and Amount. One ingredient per row."
+      - "Each distinct ingredient must also have a CONTAINS edge to its `ingredient` entity."
+  - key: steps
+    heading: Steps
+    required: true
+    search_weight: 25.0
+    write_rules:
+      - "Numbered list. One action per step. Under two sentences each."
+  - key: notes
+    heading: Notes
+    required: false
+    search_weight: 5.0
+    catch_all: true
+    write_rules:
+      - "Free-form notes: variations, make-ahead tips, serving ideas. Append-friendly."
+
+# metadata_fields — typed frontmatter keys declared by THIS type.
+# Every value is rendered to YAML frontmatter in the entity's .md file.
+# - `field_type`: string | number | boolean | date
+# - `enum_values`: if present, value must be one of these literals
+# - `filterable`: equality | range — agents can filter entity lists by this
+# - `serialization: csv_array` stores list-valued fields as "a, b, c"
+#
+# The engine injects four base fields automatically — never declare them here:
+#   type, created_date, last_modified, tags
+# See `base_metadata` in memstead-schema. The canonical on-disk order is
+# `type, created_date, last_modified, <declared>, tags`.
+metadata_fields:
+  - key: cuisine
+    description: Broad cuisine family — helps filter ("show me Italian").
+    field_type: string
+    default_value: other
+    enum_values: [italian, french, asian, mexican, indian, mediterranean, american, other]
+    filterable: equality
+  - key: total_minutes
+    description: Total time from start to plate, in minutes.
+    field_type: number
+    default_value: "30"
+    filterable: range
+  - key: servings
+    description: Number of portions the recipe yields.
+    field_type: number
+    default_value: "4"
+
+# title_weight — search-ranking multiplier for the entity title.
+# 100 matches the default schema's convention; titles matter a lot.
+title_weight: 100.0
+
+# text_fields — section keys that contribute to full-text search bodies.
+# Must be section keys only. Metadata is indexed separately for filtering.
+text_fields: [summary, ingredients, steps, notes]
+
+# hierarchy_relationship — the edge type that defines parent/child.
+# Pure graph edge: drives ancestry/descendant traversal, projection
+# tree rendering, and community boundaries. File paths are unaffected.
+hierarchy_relationship: PART_OF
+
+# edge_weight_overrides — override the schema's default_weight for THIS
+# type's outgoing edges of the listed kinds. Sparse: only list what
+# differs. The loader merges schema defaults + these into a dense map.
+edge_weight_overrides:
+  CONTAINS: 4.0        # recipes weight CONTAINS higher than the default
+  DERIVED_FROM: 2.5    # variant relationships matter for browsing
+
+# propagating_relationships — health / staleness propagates along these
+# edges so a stale ingredient flags recipes that use it.
+propagating_relationships: [CONTAINS, DERIVED_FROM]
+
+# updatable_fields — which fields the agent may modify via memstead_update.
+# "title" is always updatable; the rest must be section keys or metadata
+# field names declared above.
+updatable_fields: [title, summary, ingredients, steps, notes, cuisine, total_minutes, servings, tags]
+
+# health_required_fields — if any of these is missing the entity shows
+# up in the health report. Pick only the truly essential fields.
+health_required_fields: [summary, ingredients, steps]
+
+# staleness_threshold_days — entity is flagged stale after this many
+# days without edits. Recipes rarely go stale; 365 is fine.
+staleness_threshold_days: 365
+
+# write_rules — schema-level rules surfaced whenever the agent writes
+# an entity of this type. Think: the 3–6 things you wish every new
+# entity got right.
+write_rules:
+  - "Every ingredient mentioned in the Ingredients section must also have a CONTAINS edge to its ingredient entity."
+  - "Steps are numbered, one action per step, under two sentences."
+  - "Use DERIVED_FROM for variants so lineage is queryable — don't encode it in prose."
+  - "Relationships are UPPER_SNAKE_CASE. Strict mode: only CONTAINS, DERIVED_FROM, PART_OF, REFERENCES, SUBSTITUTES_FOR."

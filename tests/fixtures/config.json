@@ -1,0 +1,26 @@
+{
+  "name": "test-domain",
+  "types": ["spec"],
+  "mediums": {
+    "codebase": {
+      "type": "codebase",
+      "scope": {
+        "tree": [{ "path": "src/", "mode": "allow" }]
+      }
+    },
+    "graph": {
+      "type": "graph",
+      "scope": {
+        "domains": ["test-domain"]
+      }
+    }
+  },
+  "projections": {
+    "code-to-spec": {
+      "intent": "Keep specs synced with code",
+      "sources": [{ "medium_ref": "codebase" }],
+      "destination": { "medium_ref": "graph" }
+    }
+  },
+  "language": "en"
+}

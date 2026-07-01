@@ -1,0 +1,100 @@
+# yaml-language-server: $schema=../../../../generated/type-definition.schema.json
+
+name: bet
+description: |
+  A strategic choice carrying risk. Carries conviction (low, mid,
+  high), a time horizon, and lifecycle status (active, winning,
+  losing, abandoned). Distinct from a planning-schema `decision`
+  because a bet is durable strategic posture — the wager that
+  survives many decisions — not a phase-scoped choice.
+when_to_use: |
+  Use when the project has committed to a strategic direction whose
+  outcome is not yet settled. The defining test: would a different
+  reasonable operator have made a different choice, and could
+  observable evidence make us regret this one? If yes, `bet`. If no
+  alternative was meaningfully considered, it is a `principle` or a
+  description of what is. If the choice was phase-scoped (one
+  planning round), it belongs in the planning schema as `decision`.
+boundaries:
+  - Not a `vision` — a vision is the long-arc destination; a bet is the wager about how to get there.
+  - Not a `principle` — a principle is a rule that holds across choices; a bet is one specific choice.
+  - Not a planning `decision` — planning decisions are phase-scoped; bets are durable posture.
+  - Not a `milestone` — milestones are committed deliverables that realize a bet.
+system_message: |
+  A bet records a strategic wager. Claim states the wager imperatively
+  ("We will X"). Why Now records the temporal context — what about
+  the present moment makes this the right wager. Falsification
+  Criteria are load-bearing — they name what observation would force
+  the project to flip the bet to `losing` or abandon it. Without
+  falsification criteria a bet is unfalsifiable belief, not a wager.
+  Alternatives Rejected captures what other paths were considered and
+  why they were not taken — negative knowledge is high-value.
+  Lifecycle: a bet starts `active`, moves to `winning` as evidence
+  accumulates, `losing` if disconfirming evidence dominates, and
+  `abandoned` if the project drops the wager without resolving it.
+sections:
+  - key: claim
+    heading: Claim
+    required: true
+    search_weight: 40.0
+    write_rules:
+      - "One sentence stating the wager imperatively. 'We will X' or 'We are betting that X'. Standalone-readable in a search snippet."
+  - key: why_now
+    heading: Why Now
+    required: true
+    search_weight: 15.0
+    write_rules:
+      - "What about the present moment makes this the right wager — a market window, a technical break-through, an external pressure. A bet without temporal context is timeless and likely vague."
+  - key: falsification_criteria
+    heading: Falsification Criteria
+    required: true
+    search_weight: 15.0
+    write_rules:
+      - "Bullet list. What observation would force this bet to `losing` or `abandoned`. A bet without falsification criteria is unfalsifiable belief."
+  - key: alternatives_rejected
+    heading: Alternatives Rejected
+    required: false
+    search_weight: 10.0
+    write_rules:
+      - "Bullet list of paths considered and not taken, with a sentence each on why. Negative knowledge is high-value — a bet that names no rejected alternatives is under-examined."
+  - key: notes
+    heading: Notes
+    required: false
+    search_weight: 3.0
+    catch_all: true
+metadata_fields:
+  - key: status
+    description: Lifecycle state. A bet that flips from `winning` to `losing` should have `evidence` WEAKENS-edges supporting the move.
+    field_type: string
+    default_value: active
+    enum_values: [active, winning, losing, abandoned]
+    filterable: equality
+  - key: conviction
+    description: How strongly the project is committed to this wager.
+    field_type: string
+    default_value: mid
+    enum_values: [low, mid, high]
+    filterable: equality
+  - key: horizon
+    description: Time horizon over which the bet plays out (e.g. "Q3-Q4 2026", "12 months", "2-3 years").
+    field_type: string
+    filterable: equality
+title_weight: 100.0
+text_fields: [claim, why_now, falsification_criteria, alternatives_rejected, notes]
+hierarchy_relationship: PART_OF
+required_outgoing:
+  - relationships: [MOTIVATED_BY]
+    cardinality: at_least_one
+edge_weight_overrides:
+  MOTIVATED_BY: 2.5
+  WEAKENS: 3.0
+  STRENGTHENS: 3.0
+propagating_relationships: [MOTIVATED_BY, INFORMED_BY, BLOCKS]
+updatable_fields: [title, claim, why_now, falsification_criteria, alternatives_rejected, notes, status, conviction, horizon, tags]
+health_required_fields: [claim, why_now, falsification_criteria]
+staleness_threshold_days: 90
+write_rules:
+  - "A bet must MOTIVATED_BY at least one `vision` or external trigger — without it, the wager is unsourced posture. The engine warns."
+  - "Falsification Criteria are not optional. A bet without them is unfalsifiable belief; the project cannot tell when to abandon it."
+  - "Status transitions are evidence-driven. Flipping a bet to `winning` or `losing` should be supported by `evidence` STRENGTHENS or WEAKENS edges; otherwise the move is opinion, not posture update."
+  - "Title states the bet imperatively ('Build the engine first, apps second' beats 'Engine-first bet')."

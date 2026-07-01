@@ -1,0 +1,82 @@
+# yaml-language-server: $schema=../../../../generated/type-definition.schema.json
+
+name: open_question
+description: |
+  Something unclear that blocks or guides planning. Has its own
+  lifecycle — open → investigating → answered (or deferred /
+  won't-answer) — and links BLOCKS to decisions or steps that cannot
+  proceed until the answer arrives.
+when_to_use: |
+  Use when a decision or step cannot proceed until something is
+  clarified. The defining test: is it phrased as a question? 'Which
+  database to use' is a decision in disguise (the answer is a
+  decision); 'What is option X's max throughput under our load?' is
+  an open_question.
+boundaries:
+  - Not a decision waiting to be made — that's a decision in `proposed` status.
+  - Not a risk — a risk is something that could go wrong; a question is something unknown.
+  - Not a note — notes don't carry a lifecycle; open_questions are actively tracked.
+  - Not a goal — goals are directional, questions are factual.
+system_message: |
+  Open questions are tracked unknowns. Phrase them as questions. Link
+  BLOCKS to what depends on the answer — a question blocking nothing
+  is a note, not a question. On resolution, fill the `answer` section,
+  flip `status` to `answered`, and link ANSWERED_BY (incoming) from
+  the decision or note that resolved it. Urgency separates 'must
+  resolve now' from 'can wait'.
+sections:
+  - key: question
+    heading: Question
+    required: true
+    search_weight: 40.0
+    write_rules:
+      - "Phrased as a question — ends with '?'. If it doesn't end with a question mark, it probably isn't one."
+      - "Specific enough that a definite answer is possible. 'How should we design X?' is too open; 'What's the p99 latency of option X at current load?' is answerable."
+  - key: context
+    heading: Context
+    required: true
+    search_weight: 15.0
+    write_rules:
+      - "Why this matters now. What decision or step depends on the answer. Enough that a future reader understands the stakes."
+  - key: answer_approach
+    heading: Answer Approach
+    required: false
+    search_weight: 10.0
+    write_rules:
+      - "How we intend to answer — a test, a measurement, an interview, a literature review, an experiment. Without an approach, the question isn't actionable."
+  - key: answer
+    heading: Answer
+    required: false
+    search_weight: 10.0
+    write_rules:
+      - "Filled when status flips to `answered`. The concrete finding, not a discussion — details go in Notes or in the ANSWERED_BY source entity."
+  - key: notes
+    heading: Notes
+    required: false
+    search_weight: 3.0
+    catch_all: true
+metadata_fields:
+  - key: status
+    description: Lifecycle state of the question.
+    field_type: string
+    default_value: open
+    enum_values: [open, investigating, answered, deferred, wont_answer]
+    filterable: equality
+  - key: urgency
+    description: How pressing the question is to the planning flow.
+    field_type: string
+    default_value: blocks_soon
+    enum_values: [blocks_now, blocks_soon, can_wait]
+    filterable: equality
+title_weight: 100.0
+text_fields: [question, context, answer_approach, answer, notes]
+hierarchy_relationship: PART_OF
+propagating_relationships: [BLOCKS]
+updatable_fields: [title, question, context, answer_approach, answer, notes, status, urgency, tags]
+health_required_fields: [question, context]
+staleness_threshold_days: 14
+write_rules:
+  - "Phrase as a question. Ends with '?'. If it doesn't, it's either a decision in disguise or a note."
+  - "Link BLOCKS to every decision or step that cannot proceed until this is answered. A question blocking nothing is a note."
+  - "On answering: fill the Answer section, flip status to `answered`, and ensure the answering entity links ANSWERS → this question."
+  - "Urgency gates attention: `blocks_now` questions must resolve before the planning phase can conclude."

@@ -1,0 +1,199 @@
+# Hand-maintained operation registry powering the Surface Parity Matrix.
+#
+# Each entry is a logical engine operation; the per-surface name slots
+# resolve to the matching MCP tool, top-level CLI subcommand, UniFFI
+# `Engine` method, and WASM JS-visible entry. A blank slot means the
+# operation is not exposed on that surface. Surface entries the registry
+# doesn't reference land in the matrix's "unaligned" sub-table — the
+# matrix never silently drops a row when an extractor emits a name this
+# file doesn't pin.
+
+[[operation]]
+name = "entity-read"
+mcp = "memstead_entity"
+cli = "entity"
+uniffi = "get_entity"
+wasm = "getEntity"
+
+[[operation]]
+name = "search"
+mcp = "memstead_search"
+cli = "search"
+uniffi = "search"
+wasm = "search"
+
+[[operation]]
+name = "list"
+cli = "list"
+uniffi = "list_entities"
+
+[[operation]]
+name = "relations-read"
+cli = "relations"
+uniffi = "get_relations"
+
+[[operation]]
+name = "context"
+cli = "context"
+
+[[operation]]
+name = "overview"
+mcp = "memstead_overview"
+cli = "overview"
+uniffi = "get_overview"
+
+[[operation]]
+name = "stats"
+cli = "stats"
+uniffi = "get_stats"
+
+[[operation]]
+name = "schema-describe"
+mcp = "memstead_schema"
+cli = "type"
+
+[[operation]]
+name = "health"
+mcp = "memstead_health"
+cli = "health"
+uniffi = "get_health"
+wasm = "health"
+
+[[operation]]
+name = "changes-since"
+mcp = "memstead_changes_since"
+cli = "changes"
+uniffi = "changes_since"
+
+[[operation]]
+name = "reload"
+mcp = "memstead_reload"
+cli = "reload"
+uniffi = "reload"
+
+[[operation]]
+name = "create"
+mcp = "memstead_create"
+cli = "create"
+
+[[operation]]
+name = "update"
+mcp = "memstead_update"
+cli = "update"
+
+[[operation]]
+name = "relate"
+mcp = "memstead_relate"
+cli = "relate"
+
+[[operation]]
+name = "delete"
+mcp = "memstead_delete"
+cli = "delete"
+
+[[operation]]
+name = "rename"
+mcp = "memstead_rename"
+cli = "rename"
+
+[[operation]]
+name = "vault-create"
+mcp = "memstead_vault_create"
+cli = "vault"
+
+[[operation]]
+name = "vault-delete"
+mcp = "memstead_vault_delete"
+cli = "vault"
+
+[[operation]]
+name = "vault-set-version"
+mcp = "memstead_vault_set_version"
+cli = "vault"
+
+[[operation]]
+name = "workspace-allow-create"
+mcp = "memstead_workspace_allow_create"
+cli = "workspace"
+
+[[operation]]
+name = "workspace-revoke-create"
+mcp = "memstead_workspace_revoke_create"
+cli = "workspace"
+
+[[operation]]
+name = "workspace-allow-delete"
+mcp = "memstead_workspace_allow_delete"
+cli = "workspace"
+
+[[operation]]
+name = "workspace-revoke-delete"
+mcp = "memstead_workspace_revoke_delete"
+cli = "workspace"
+
+[[operation]]
+name = "workspace-grant-cross-link"
+mcp = "memstead_workspace_grant_cross_link"
+cli = "workspace"
+
+[[operation]]
+name = "workspace-revoke-cross-link"
+mcp = "memstead_workspace_revoke_cross_link"
+cli = "workspace"
+
+# Parse-time-drift recovery. Reaches both the CLI (`memstead recover`)
+# and UniFFI (`Engine.apply_parse_recovery`, the first disk-mutating
+# UniFFI method); no MCP tool (operator-initiated maintenance sweep).
+[[operation]]
+name = "parse-recovery"
+cli = "recover"
+uniffi = "apply_parse_recovery"
+
+# Git-transport + branch-reset engine operations — public methods on
+# `Engine` (`fetch`/`pull`/`push`/`branch_reset` in `engine/drift.rs`)
+# that reach no programmatic surface yet: no MCP tool (deliberate), no
+# wired CLI subcommand, no UniFFI binding. Pinned here so the matrix
+# renders the gap as an all-`—` row rather than omitting the operations
+# entirely (the `every-engine-operation-reaches-uniffi-and-cli`
+# principle's witness must see them to flag the asymmetry).
+[[operation]]
+name = "fetch"
+
+[[operation]]
+name = "pull"
+
+[[operation]]
+name = "push"
+
+[[operation]]
+name = "branch-reset"
+
+[[operation]]
+name = "agent-notes"
+uniffi = "agent_notes"
+
+[[operation]]
+name = "vault-head-sha"
+uniffi = "vault_head_sha"
+
+# WASM-specific operations. Browser thin-clients hydrate from a `.mem`
+# snapshot, then receive incremental updates as `applyCommit` envelopes
+# produced by the bridge's `/commits` endpoint. `vault-names` is a cheap
+# diagnostic accessor on the WASM side; the other surfaces expose
+# equivalent information via overview/health, so no parity entry there.
+
+[[operation]]
+name = "from-snapshot"
+wasm = "fromSnapshot"
+
+[[operation]]
+name = "apply-commit"
+wasm = "applyCommit"
+
+[[operation]]
+name = "vault-names"
+wasm = "vaultNames"
+
+[[operation]]
+name = "set-panic-hook"
+wasm = "setPanicHook"

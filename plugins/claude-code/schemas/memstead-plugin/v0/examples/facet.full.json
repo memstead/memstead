@@ -1,0 +1,1 @@
+{ "name": "source-files", "medium": "source-tree", "scope": [ { "path": "../engine/**/*.rs", "mode": "allow" }, { "path": "../engine/target/**", "mode": "deny" } ], "engagement": { "readVerb": "Read source code" } }

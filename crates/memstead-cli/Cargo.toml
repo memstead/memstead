@@ -1,0 +1,58 @@
+[package]
+name = "memstead-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Command-line interface for Memstead — query and mutate typed entity graphs from the shell. Default build produces the full `memstead` binary (multi-vault, git-backed); `--no-default-features` builds the lean folder-only surface."
+
+[[bin]]
+name = "memstead"
+path = "src/main.rs"
+
+[dependencies]
+memstead-base.workspace = true
+memstead-engine = { workspace = true, optional = true }
+memstead-git-branch = { workspace = true, optional = true }
+memstead-schema.workspace = true
+clap.workspace = true
+gix = { workspace = true, optional = true }
+indexmap.workspace = true
+semver.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+dirs.workspace = true
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+tempfile.workspace = true
+toml = "0.8"
+toml_edit.workspace = true
+time = { version = "0.3", features = ["formatting", "parsing", "serde-well-known", "serde"] }
+# Domain-authority publishing: generate a signing keypair and sign a publish.
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+rand_core = { version = "0.6", features = ["getrandom"] }
+base64 = "0.22"
+sha2.workspace = true
+
+[dev-dependencies]
+assert_cmd.workspace = true
+axum = "0.8"
+memstead-git-branch = { workspace = true, features = ["test-support"] }
+predicates.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[features]
+# `vault-repo` is the default: it pulls in the git-branch backend
+# (`memstead-git-branch` + `gix`) and the full engine extension
+# (`memstead-engine`), compiling the cfg-gated `CliEngine::VaultRepo`
+# variant plus the multi-vault / vault-repo lifecycle subcommands —
+# yielding the full `memstead` binary. `--no-default-features` drops all
+# of that, producing the lean folder-only surface whose `cli_engine()`
+# rejects vault-repo workspaces with an actionable error. The lean build
+# is a CI / wasm-adjacent config and dependency-hygiene guard, not a
+# shipped product.
+default = ["vault-repo"]
+vault-repo = ["dep:memstead-git-branch", "dep:gix", "dep:memstead-engine"]

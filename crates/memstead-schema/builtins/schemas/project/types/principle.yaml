@@ -1,0 +1,90 @@
+# yaml-language-server: $schema=../../../../generated/type-definition.schema.json
+
+name: principle
+description: |
+  A project-level rule that constrains design or strategy. Distinct
+  from a `software@` `principle` because here the scope is project
+  operations, not code (e.g. "Engine and apps stay separate",
+  "Speed of moving inside the Karpathy window beats polish"). Both
+  schemas may carry a `principle` type — they live in different
+  vaults under different schemas, so there is no name collision.
+when_to_use: |
+  Use to record a project-level rule that holds across many choices
+  and shapes how future choices are made. The defining test: would
+  the operator cite this rule when explaining why a particular `bet`
+  was chosen over its alternatives, or why a particular `milestone`
+  was scoped the way it was? If yes, `principle`. If the rule
+  constrains only one choice, it is content of that choice's body,
+  not a principle.
+boundaries:
+  - Not a `bet` — bets are choices; principles are rules that constrain choices.
+  - Not a `vision` — visions are destinations; principles are rules that govern how the project moves toward the destination.
+  - Not a code-side principle — code-side rules ("the macOS app does not open an in-process MCP client") live in the paired code vault.
+system_message: |
+  A principle records a project-level rule. Statement names the rule
+  imperatively. Scope names where the rule applies — the surfaces,
+  pillars, or kinds of choice it governs. Exceptions name where the
+  rule deliberately does not apply; an exception-free principle is
+  often vague enough to be unfalsifiable. Consequences names what
+  this rule produces and what it costs — every rule has a downside,
+  and a one-sided principle is under-examined. Link GOVERNS or
+  CONSTRAINS to the `bet` or `milestone` entities the rule actively
+  shapes; a principle with no GOVERNS edges is a maxim, not an
+  active rule.
+sections:
+  - key: statement
+    heading: Statement
+    required: true
+    search_weight: 40.0
+    write_rules:
+      - "One sentence stating the rule imperatively. Standalone-readable in a search snippet — no pronouns, no forward references."
+  - key: scope
+    heading: Scope
+    required: true
+    search_weight: 15.0
+    write_rules:
+      - "Where the rule applies — surfaces, pillars, or kinds of choice it governs. A principle without scope is unbounded and likely vague."
+  - key: exceptions
+    heading: Exceptions
+    required: false
+    search_weight: 10.0
+    write_rules:
+      - "Where the rule deliberately does not apply. An exception-free principle is often vague enough to be unfalsifiable. Naming the exception sharpens the rule."
+  - key: consequences
+    heading: Consequences
+    required: true
+    search_weight: 10.0
+    write_rules:
+      - "Bullet list. What this rule enables, what it blocks, what it costs, what it forces. Include the tradeoff accepted — a one-sided principle is under-examined."
+  - key: notes
+    heading: Notes
+    required: false
+    search_weight: 3.0
+    catch_all: true
+metadata_fields:
+  - key: status
+    description: Lifecycle state. `active` means the rule is currently held; `superseded` means a newer principle replaces it.
+    field_type: string
+    default_value: active
+    enum_values: [proposed, active, superseded, retired]
+    filterable: equality
+  - key: category
+    description: What kind of project rule this is.
+    field_type: string
+    enum_values: [strategy, operations, architecture, audience, brand, other]
+    filterable: equality
+title_weight: 100.0
+text_fields: [statement, scope, exceptions, consequences, notes]
+hierarchy_relationship: PART_OF
+edge_weight_overrides:
+  GOVERNS: 3.0
+  CONSTRAINS: 2.5
+propagating_relationships: [GOVERNS, CONSTRAINS, SUPERSEDES]
+updatable_fields: [title, statement, scope, exceptions, consequences, notes, status, category, tags]
+health_required_fields: [statement, scope, consequences]
+staleness_threshold_days: 365
+write_rules:
+  - "Link GOVERNS or CONSTRAINS to the `bet` or `milestone` entities the rule actively shapes. A principle with no GOVERNS edges is a maxim, not an active rule."
+  - "Consequences include the cost. A principle that lists only what it enables is one-sided and under-examined."
+  - "When the rule changes, author a new principle with SUPERSEDES — never edit a `active` principle's body in place. The lineage of project rules is high-value."
+  - "Title states the rule imperatively ('Engine and apps stay separate' beats 'Engine-app separation principle')."

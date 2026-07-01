@@ -1,0 +1,300 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "TypeDefinition",
+  "description": "Complete type definition — serde/schemars-based, authored in YAML.",
+  "type": "object",
+  "properties": {
+    "boundaries": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "string"
+      }
+    },
+    "description": {
+      "type": "string"
+    },
+    "edge_weight_overrides": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "number",
+        "format": "float"
+      },
+      "default": {}
+    },
+    "examples": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/TypeExample"
+      }
+    },
+    "health_required_fields": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "hierarchy_relationship": {
+      "type": "string"
+    },
+    "metadata_fields": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/MetadataFieldDef"
+      }
+    },
+    "name": {
+      "type": "string"
+    },
+    "propagating_relationships": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "required_outgoing": {
+      "description": "Outgoing-edge invariants the schema asserts for this type.\nEach entry names a list of relationship names plus a cardinality\nconstraint. The engine evaluates these on every `memstead_create` /\n`memstead_update` (post-application of inline `relations:` / patches)\nand surfaces unsatisfied blocks as a single\n`MISSING_REQUIRED_OUTGOING` warning per entity. Tier-2 (warn,\nnever block). Empty default — types without `required_outgoing`\nkeep current behaviour.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/RequiredOutgoing"
+      }
+    },
+    "sections": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/SectionDef"
+      }
+    },
+    "staleness_threshold_days": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "system_message": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
+    },
+    "text_fields": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "title_weight": {
+      "type": "number",
+      "format": "float"
+    },
+    "updatable_fields": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "when_to_use": {
+      "type": "string"
+    },
+    "write_rules": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "name",
+    "description",
+    "when_to_use",
+    "sections",
+    "metadata_fields",
+    "title_weight",
+    "text_fields",
+    "hierarchy_relationship",
+    "propagating_relationships",
+    "updatable_fields",
+    "health_required_fields",
+    "staleness_threshold_days",
+    "write_rules"
+  ],
+  "$defs": {
+    "FieldType": {
+      "type": "string",
+      "enum": [
+        "string",
+        "number",
+        "date",
+        "boolean"
+      ]
+    },
+    "Filterable": {
+      "type": "string",
+      "enum": [
+        "none",
+        "equality",
+        "range"
+      ]
+    },
+    "MetadataFieldDef": {
+      "description": "A metadata (frontmatter) field.",
+      "type": "object",
+      "properties": {
+        "auto_timestamp": {
+          "type": "boolean",
+          "default": false
+        },
+        "default_value": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "description": {
+          "type": "string"
+        },
+        "enum_values": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "default": null,
+          "items": {
+            "type": "string"
+          }
+        },
+        "field_type": {
+          "$ref": "#/$defs/FieldType"
+        },
+        "filterable": {
+          "$ref": "#/$defs/Filterable",
+          "default": "none"
+        },
+        "init_timestamp": {
+          "type": "boolean",
+          "default": false
+        },
+        "key": {
+          "type": "string"
+        },
+        "optional": {
+          "type": "boolean",
+          "default": false
+        },
+        "serialization": {
+          "$ref": "#/$defs/Serialization",
+          "default": "default"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "description",
+        "field_type"
+      ]
+    },
+    "RequiredCardinality": {
+      "description": "Required-cardinality variants. `AtLeastOne` is the only variant\nshipped initially; `ExactlyOne` is the obvious next variant but is\nnot yet wired.",
+      "type": "string",
+      "enum": [
+        "at_least_one"
+      ]
+    },
+    "RequiredOutgoing": {
+      "description": "One outgoing-edge requirement block on a type definition. Lists one\nor more relationship names and a cardinality constraint they must\njointly satisfy. The schema author groups multiple alternative\nrelationships into a single block when \"any of these\" satisfies the\nrule (e.g. `[CHOSEN, REJECTED]` together with `at_least_one` would\nrequire at least one outgoing edge across both names — but the\nplanning schema lists each as its own block instead, so each block\ngets its own warning entry).",
+      "type": "object",
+      "properties": {
+        "cardinality": {
+          "$ref": "#/$defs/RequiredCardinality"
+        },
+        "relationships": {
+          "description": "Edge names the rule applies to. Loader validates each against\nthe schema's declared relationship vocabulary; unknown names\nraise `SchemaLoadError::UndeclaredRelationship`.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "relationships",
+        "cardinality"
+      ]
+    },
+    "SectionDef": {
+      "description": "A section within an entity (e.g. \"Claim\", \"Evidence\").",
+      "type": "object",
+      "properties": {
+        "catch_all": {
+          "type": "boolean",
+          "default": false
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "heading": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "search_weight": {
+          "type": "number",
+          "format": "float"
+        },
+        "write_rules": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "heading",
+        "required",
+        "search_weight"
+      ]
+    },
+    "Serialization": {
+      "type": "string",
+      "enum": [
+        "default",
+        "csv_array",
+        "omit_when_falsy"
+      ]
+    },
+    "TypeExample": {
+      "description": "Inline few-shot example — concrete entity content matching this type.",
+      "type": "object",
+      "properties": {
+        "sections": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "title",
+        "sections"
+      ]
+    }
+  }
+}

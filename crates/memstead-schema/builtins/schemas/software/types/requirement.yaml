@@ -1,0 +1,96 @@
+# yaml-language-server: $schema=../../../../generated/type-definition.schema.json
+
+name: requirement
+description: |
+  A normative statement the system must, should, or may satisfy. Tied
+  to one capability, testable, and tracked through a verification
+  lifecycle (unverified → verified, or → violated when an incident
+  breaks it).
+when_to_use: |
+  Use when recording a specific commitment from an explicit normative
+  source — regulation, SLA, written policy, ticket spec. The defining
+  test: is this a MUST/SHOULD/MAY statement for one capability, and
+  could a test verify it? If yes, `requirement`. If it's a project-wide
+  rule without a capability boundary, use `principle`. Never derive a
+  requirement from observed code shape alone.
+boundaries:
+  - Not a project-wide rule — use `principle`.
+  - Not descriptive documentation — use `spec`.
+  - Not the reasoning behind adopting a requirement — use `decision`.
+  - Not a test case — authored tests reference requirements via TESTS (future type) or are noted in Verification.
+system_message: |
+  Requirements are normative. Each carries a priority (MUST/SHOULD/MAY),
+  a category (functional / non-functional / security / legal / process),
+  and a verification status. Flip verification_status as evidence
+  accrues: unverified → verified (test/review confirms), → violated
+  (incident/audit finds it broken), → waived (explicit exception). Every
+  requirement should be linked back from at least one spec or contract
+  via REALIZES — orphans are coverage gaps worth surfacing.
+sections:
+  - key: statement
+    heading: Statement
+    required: true
+    search_weight: 40.0
+    write_rules:
+      - "One sentence. Starts with the subject followed by MUST, SHOULD, MAY, MUST NOT, or SHOULD NOT (RFC 2119)."
+      - "Testable: a reader should be able to judge, given a system state, whether the statement holds."
+  - key: rationale
+    heading: Rationale
+    required: true
+    search_weight: 15.0
+    write_rules:
+      - "Why this requirement exists — what risk, regulation, or goal drives it. Enough context to judge whether the requirement still applies."
+  - key: verification
+    heading: Verification
+    required: false
+    search_weight: 10.0
+    write_rules:
+      - "How the requirement is verified: test suite, manual audit, monitoring alert, external certification. Name the artifact."
+  - key: notes
+    heading: Notes
+    required: false
+    search_weight: 3.0
+    catch_all: true
+metadata_fields:
+  - key: priority
+    description: RFC 2119 priority.
+    field_type: string
+    default_value: must
+    enum_values: [must, should, may, must_not, should_not]
+    filterable: equality
+  - key: category
+    description: Requirement category.
+    field_type: string
+    default_value: functional
+    enum_values: [functional, non_functional, security, legal, process]
+    filterable: equality
+  - key: verification_status
+    description: Current verification state.
+    field_type: string
+    default_value: unverified
+    enum_values: [unverified, verified, violated, waived]
+    filterable: equality
+  - key: verified_on
+    description: Date of most recent verification. ISO YYYY-MM-DD.
+    field_type: date
+    optional: true
+    filterable: range
+  - key: source
+    description: Where this requirement originates — regulation, contract, customer, internal policy.
+    field_type: string
+title_weight: 100.0
+text_fields: [statement, rationale, verification, notes]
+hierarchy_relationship: PART_OF
+edge_weight_overrides:
+  REALIZES: 3.0
+  VIOLATES: 3.0
+propagating_relationships: [REALIZES, VIOLATES, GOVERNS, CONSTRAINS]
+updatable_fields: [title, statement, rationale, verification, notes, priority, category, verification_status, verified_on, source, tags]
+health_required_fields: [statement, rationale]
+staleness_threshold_days: 180
+write_rules:
+  - "Statement uses RFC 2119 verbs: MUST, SHOULD, MAY and their negations. Never 'will', 'can', 'needs to'."
+  - "Only author requirements backed by an explicit normative source. Do not derive requirements from observed code."
+  - "Verification status is a lifecycle — move it forward as evidence accrues. On incident violation, flip to `violated` and add VIOLATES from the incident."
+  - "Every requirement should be linked back from a spec or contract via REALIZES. An unlinked requirement is a coverage gap."
+  - "Link GOVERNS from principles that constrain this requirement. Link CONSTRAINS to specs this requirement limits."

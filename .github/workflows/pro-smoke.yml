@@ -1,0 +1,87 @@
+# Pro-build CI smoke. Builds the pro flavour of `memstead` and `memstead-mcp`
+# (`--features vault-repo`, links `gix` and `memstead-git-branch`) and
+# exercises the full mutation surface against a vault-repo workspace
+# bootstrapped via `memstead vault-repo init` + `memstead vault init`.
+#
+# Sister workflow to `basis-smoke.yml`: same harness
+# (`ci/mcp_client.py`), same shape (build → upload → probe), but
+# the workspace setup uses the gitdir-backed vault-repo path and the
+# probe asserts the 14-tool pro surface (`memstead_vault_create`,
+# `memstead_vault_delete`, `memstead_reload` are pro-only).
+#
+# Why a separate workflow rather than a matrix dimension on
+# `basis-smoke.yml`: the build artefacts are different (basis vs pro
+# binaries link different deps), the workspace setup differs, and a
+# basis-smoke regression should not be hidden by a pro-smoke success
+# (or vice versa). Keeping them as siblings means each failure mode
+# shows up as its own red check.
+name: Pro smoke
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: pro-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-pro:
+    name: Build pro binaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+          # Distinct cache key from `basis-smoke.yml` so the basis
+          # build's cache (no gix, smaller dep graph) doesn't shadow
+          # the pro build's hot path. The two flavours pull different
+          # crate sets so sharing the cache wouldn't help anyway.
+          shared-key: pro-build
+
+      # `memstead-cli` / `memstead-mcp` build the full multi-vault flavour
+      # by default (the `vault-repo` feature is on by default) and produce
+      # the `memstead` / `memstead-mcp` binaries. `--no-default-features`
+      # would yield the lean build (exercised by `basis-smoke.yml`).
+      - name: Build pro
+        run: cargo build -p memstead-cli -p memstead-mcp --release
+
+      - name: Upload pro binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: pro-binaries
+          path: |
+            target/release/memstead
+            target/release/memstead-mcp
+          retention-days: 1
+
+  smoke:
+    name: Pro smoke (vault-repo round-trip)
+    needs: build-pro
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: pro-binaries
+          path: bin
+      - name: Make binaries executable
+        run: chmod +x bin/memstead bin/memstead-mcp
+      - name: Run pro smoke
+        # `memstead vault init` spawns `memstead-mcp`; pass the path through
+        # `MEMSTEAD_MCP_BIN` so the spawn finds the right binary
+        # without a system-wide install. The probe sets this env var
+        # itself, but a sibling test that bypasses it would surface
+        # the same `MEMSTEAD_MCP_BIN` requirement.
+        run: |
+          python3 ci/pro_smoke.py \
+            --memstead "$(pwd)/bin/memstead" \
+            --memstead-mcp "$(pwd)/bin/memstead-mcp"

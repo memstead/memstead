@@ -1,0 +1,75 @@
+# yaml-language-server: $schema=../../../../engine/crates/memstead-schema/generated/type-definition.schema.json
+
+name: note
+description: |
+  A free discussion anchor — the catch-all type for content that
+  doesn't map to goal / option / decision / step / risk /
+  open_question. Kinds (observation, constraint, session_log, idea,
+  reference) differentiate what the note is carrying.
+when_to_use: |
+  Use when the content is reasoning, context, or record-keeping
+  that isn't yet (or won't ever be) one of the six more specific
+  types. If a note accumulates rejected alternatives, migrate it to
+  `decision`. If it hardens into a blocking uncertainty, migrate to
+  `open_question`. If it names something that could go wrong,
+  migrate to `risk`.
+boundaries:
+  - Not a goal — use `goal`.
+  - Not a decision with alternatives — use `decision` (or migrate this note there).
+  - Not a risk — use `risk`.
+  - Not an open question — use `open_question`.
+  - Not an option being weighed — use `option`.
+system_message: |
+  Notes carry the prose, observations, constraints, and session logs
+  that thread through a planning phase. Every note has a `kind` —
+  this is mandatory. When a note outgrows its kind (a constraint
+  becomes a risk, an idea becomes a decision, a session_log yields a
+  concrete open_question), migrate the content into the specific type
+  and supersede the note.
+sections:
+  - key: content
+    heading: Content
+    required: true
+    search_weight: 30.0
+    write_rules:
+      - "The observation, constraint, log, idea, or reference. Standalone-readable in a search snippet — no pronouns, no forward references."
+  - key: context
+    heading: Context
+    required: false
+    search_weight: 10.0
+    write_rules:
+      - "When and why this came up. Enough that a future agent can judge relevance."
+  - key: outcome
+    heading: Outcome
+    required: false
+    search_weight: 5.0
+    catch_all: true
+    write_rules:
+      - "What became of this note — append-friendly. Add entries, don't rewrite. Records the trajectory."
+metadata_fields:
+  - key: kind
+    description: What kind of note this is. Mandatory — every note carries one.
+    field_type: string
+    default_value: observation
+    enum_values: [observation, constraint, session_log, idea, reference]
+    filterable: equality
+  - key: session_id
+    description: For kind=session_log — the session identifier or free-form date+label (e.g. '2026-04-24-scoping').
+    field_type: string
+  - key: session_date
+    description: For kind=session_log or dated observations — ISO YYYY-MM-DD.
+    field_type: date
+    filterable: range
+title_weight: 100.0
+text_fields: [content, context, outcome]
+hierarchy_relationship: PART_OF
+propagating_relationships: [DERIVED_FROM, CONSTRAINS, RAISES, ANSWERS]
+updatable_fields: [title, content, context, outcome, kind, session_id, session_date, tags]
+health_required_fields: [content]
+staleness_threshold_days: 90
+write_rules:
+  - "`kind` is mandatory. Every note is one of: observation, constraint, session_log, idea, reference."
+  - "Notes migrate when they outgrow the catch-all: into `decision` (when alternatives accumulate), `open_question` (when it blocks), `risk` (when it's something that could go wrong), `option` (when it's a path under consideration)."
+  - "For kind=constraint: link CONSTRAINS to the decision or step the constraint narrows."
+  - "For kind=session_log: fill `session_id` and `session_date`. Outcome section is append-friendly and accumulates what the session produced."
+  - "Outcome is append-friendly — add entries, don't rewrite. Records the trajectory over time."

@@ -1,0 +1,90 @@
+# yaml-language-server: $schema=../../../../generated/type-definition.schema.json
+
+name: competitor
+description: |
+  An outside party doing something close to what this project does.
+  Carries category (direct, adjacent, upstream-platform), threat
+  level (low, mid, high), and a last-checked date that drives a
+  staleness signal — competitors not refreshed in months are surfaced
+  via health.
+when_to_use: |
+  Use to model an external party whose existence shapes the
+  project's positioning, bets, or pillar choices. The defining test:
+  has the operator considered this party while making a strategic
+  choice, or would the next reasonable strategic choice be informed
+  by knowing what they do? If yes, `competitor`. If no, the party
+  is project-irrelevant and should not be in the graph.
+boundaries:
+  - Not a `market_signal` — competitors are entities with persistent identity (one party); signals are trends broader than one party.
+  - Not an `evidence` entry — evidence is a snapshot observation; a competitor is a tracked entity whose state is updated over time.
+  - Not a partner or upstream tool — track those as `evidence` (e.g. "we use X, here's how it shaped the architecture") or as a wiki-link from a `pillar`'s Notes.
+system_message: |
+  A competitor records a tracked external party. What They Do is the
+  one-paragraph summary the operator would give an investor.
+  Our Distinction names what this project does that the competitor
+  does not — the load-bearing reason both can exist. Would Eat Our
+  Lunch If is the falsification clause: name the move the competitor
+  could make that would force this project to change posture. Last
+  Checked drives a staleness signal — competitor entities not
+  refreshed in months are stale claims, not tracked rivals.
+sections:
+  - key: what_they_do
+    heading: What They Do
+    required: true
+    search_weight: 30.0
+    write_rules:
+      - "One paragraph summarizing the competitor's offering as the operator would describe it to an investor. Standalone-readable. Cite the source — link or path — so the claim is checkable."
+  - key: our_distinction
+    heading: Our Distinction
+    required: true
+    search_weight: 20.0
+    write_rules:
+      - "What this project does that the competitor does not. The load-bearing reason both can exist. Wiki-link to the relevant `pillar` or `positioning` if the distinction lives in one of them."
+  - key: would_eat_our_lunch_if
+    heading: Would Eat Our Lunch If
+    required: false
+    search_weight: 15.0
+    write_rules:
+      - "Falsification clause. The move the competitor could make that would force this project to change posture. A competitor with no such clause is either irrelevant or under-examined."
+  - key: notes
+    heading: Notes
+    required: false
+    search_weight: 3.0
+    catch_all: true
+metadata_fields:
+  - key: category
+    description: How close to this project's space the competitor sits.
+    field_type: string
+    enum_values: [direct, adjacent, upstream-platform, downstream]
+    filterable: equality
+  - key: threat
+    description: How much weight this competitor's moves carry on this project's strategic choices.
+    field_type: string
+    default_value: mid
+    enum_values: [low, mid, high]
+    filterable: equality
+  - key: last_checked
+    description: Date the competitor's state was last verified. ISO YYYY-MM-DD. Drives staleness — entries unrefreshed for many months are stale claims.
+    field_type: date
+    filterable: range
+  - key: status
+    description: Lifecycle state. `tracked` means actively followed; `dormant` means kept for historical reference but not actively monitored.
+    field_type: string
+    default_value: tracked
+    enum_values: [tracked, dormant, retired]
+    filterable: equality
+title_weight: 100.0
+text_fields: [what_they_do, our_distinction, would_eat_our_lunch_if, notes]
+hierarchy_relationship: PART_OF
+edge_weight_overrides:
+  THREATENS: 2.5
+  CONTRASTS_WITH: 2.0
+propagating_relationships: [THREATENS, INFORMED_BY, CONTRASTS_WITH]
+updatable_fields: [title, what_they_do, our_distinction, would_eat_our_lunch_if, notes, category, threat, last_checked, status, tags]
+health_required_fields: [what_they_do, our_distinction]
+staleness_threshold_days: 90
+write_rules:
+  - "Update last_checked when the competitor's state is verified. An entry months past its last_checked is a stale claim, not a tracked rival."
+  - "Cite the source in What They Do. A competitor description with no link or path is unverifiable."
+  - "Our Distinction names one thing, not a feature inventory. If the distinction needs three bullets, the project may be undifferentiated."
+  - "Wiki-link the `pillar` or `positioning` the distinction lives in. Without that edge, the competitor is unanchored in the project view."

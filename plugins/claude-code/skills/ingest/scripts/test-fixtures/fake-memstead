@@ -1,0 +1,89 @@
+#!/usr/bin/env sh
+# Test fixture: stand-in for `memstead` — covers the three invocations
+# inject.mjs makes:
+#   $0 workspace dump        — emits <cwd>/.fake-dump.json
+#   $0 vault init <name> ... — appends a JSON line to <cwd>/.fake-invocations.log
+#   $0 vault delete <name> ..— same; respects <cwd>/.fake-vault-delete-mode
+#
+# Behaviour overrides for tests:
+#   <cwd>/.fake-vault-init-mode    "fail" → exit 1, "ok" (default) → exit 0
+#   <cwd>/.fake-vault-delete-mode  "absent" → exit 1 with "unknown writable vault"
+#                                  "fail"   → exit 1 with generic error
+#                                  "ok" (default) → exit 0
+
+set -e
+
+LOG=".fake-invocations.log"
+
+log_invocation() {
+  if [ -d "$(dirname "$LOG")" ] || [ "$LOG" = ".fake-invocations.log" ]; then
+    printf '{"argv":[' >> "$LOG"
+    sep=""
+    for a in "$@"; do
+      esc=$(printf '%s' "$a" | sed 's/\\/\\\\/g; s/"/\\"/g')
+      printf '%s"%s"' "$sep" "$esc" >> "$LOG"
+      sep=","
+    done
+    printf ']}\n' >> "$LOG"
+  fi
+}
+
+case "$1 $2" in
+  "workspace dump")
+    if [ -f .fake-dump.json ]; then
+      cat .fake-dump.json
+      exit 0
+    fi
+    printf '{"error":"fake-memstead: no .fake-dump.json in cwd","code":1}\n' >&2
+    exit 1
+    ;;
+  "vault init")
+    log_invocation "$@"
+    mode=$(test -f .fake-vault-init-mode && cat .fake-vault-init-mode || echo ok)
+    if [ "$mode" = "fail" ]; then
+      printf 'fake-memstead: vault init forced to fail\n' >&2
+      exit 1
+    fi
+    printf '{"name":"%s","ok":true}\n' "$3"
+    exit 0
+    ;;
+  "changes "*|"changes")
+    # Graph-source change detection: emit <cwd>/.fake-changes.json verbatim
+    # (a ChangesReport-shaped {changes:[...]}). Absent file → empty delta.
+    if [ -f .fake-changes.json ]; then
+      cat .fake-changes.json
+    else
+      printf '{"changes":[]}\n'
+    fi
+    exit 0
+    ;;
+  "vault set-sync-state")
+    # inject.mjs never calls this itself (the ingest agent does, at the
+    # end of a pass) — but a stand-in keeps any stray invocation from
+    # erroring during tests.
+    log_invocation "$@"
+    printf '{"vault":"%s","ok":true}\n' "$3"
+    exit 0
+    ;;
+  "vault delete")
+    log_invocation "$@"
+    mode=$(test -f .fake-vault-delete-mode && cat .fake-vault-delete-mode || echo ok)
+    case "$mode" in
+      absent)
+        printf 'fake-memstead: ERROR: unknown writable vault %s\n' "$3" >&2
+        exit 1
+        ;;
+      fail)
+        printf 'fake-memstead: vault delete forced to fail\n' >&2
+        exit 1
+        ;;
+      *)
+        printf '{"deleted_from_router":true,"name":"%s"}\n' "$3"
+        exit 0
+        ;;
+    esac
+    ;;
+esac
+
+printf '{"error":"fake-memstead: unsupported invocation","code":1}\n' >&2
+exit 1

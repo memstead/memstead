@@ -1,0 +1,261 @@
+# yaml-language-server: $schema=../../../../engine/crates/memstead-schema/generated/schema-manifest.schema.json
+
+# ─────────────────────────────────────────────────────────────────────────────
+# software@0.1.0 — knowledge-graph schema for software projects.
+#
+# Nine types organized around four questions the graph must answer:
+#   WHAT exists        → spec, contract
+#   WHY it is so       → decision, principle, requirement
+#   WHO is accountable → actor
+#   WHAT has broken    → incident
+#   (support)          → concept, memo
+#
+# Strict relationship vocabulary: 37 default edges + 5 software-specific
+# (REALIZES, OWNS, MAINTAINS, VIOLATES, DEPRECATES).
+#
+# Copy this directory into <vault>/.mdgv/schemas/software/ and pin
+# "schema": "software@0.1.0" in the vault's .mdgv/config.json.
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: software
+version: 0.1.0
+
+description: |
+  Software-project knowledge-graph schema. Nine types, four pillars
+  (WHAT / WHY / WHO / WHAT-BROKE), strict relationship vocabulary.
+  The graph's value comes from type diversity — a graph dominated by
+  one type has lost the structure the schema offers.
+
+when_to_use: |
+  Use when building a graph of a running or planned software system —
+  components, external contracts, design rationale, policies,
+  commitments, ownership, and operational history. Prefer the default
+  schema for general-purpose knowledge capture without these software
+  concerns. Author a narrower schema when the domain carries
+  vocabulary this one does not (compliance, research experiments,
+  customer feedback).
+
+system_message: |
+  A software-project knowledge graph answers four questions, and each
+  type exists to carry one of them:
+
+    WHAT exists         → spec      (components, modules, subsystems)
+                          contract  (external wire-level surfaces)
+    WHY it is so        → decision  (choices with alternatives)
+                          principle (project-wide rules)
+                          requirement (capability-specific MUSTs)
+    WHO is accountable  → actor     (teams, service accounts)
+    WHAT has broken     → incident  (production failures)
+
+  Support types: concept (terms used across 2+ entities), memo
+  (lightweight reasoning that isn't yet a decision).
+
+  Five types are more specific than `spec` — contract, decision,
+  requirement, principle, concept. A graph where `spec` carries the
+  content those types were designed for has collapsed back to flat
+  description and lost the structure the schema offers. Each type's
+  `when_to_use` and `boundaries` fields carry the distinguishing
+  tests.
+
+  Edges are how the graph answers queries. A spec unlinked from the
+  requirements it REALIZES is a prose fragment. An actor without OWNS
+  edges is unreachable. A decision without MOTIVATED_BY is history
+  with no cause. Relationships are UPPER_SNAKE_CASE, strict mode —
+  unknown edges are rejected.
+
+types:
+  - spec
+  - contract
+  - decision
+  - requirement
+  - principle
+  - actor
+  - incident
+  - concept
+  - memo
+
+# Relationship vocabulary. 37 default edges + 5 software-specific.
+relationships:
+  mode: strict
+  definitions:
+    # ── Structural / reference ──────────────────────────────────────────
+    - name: PART_OF
+      description: Hierarchical containment — the source is structurally part of the target and meaningless without it.
+      when_to_use: Taxonomy. Parent owns the child as a structural part. Pure graph edge — files stay flat at the vault root. Not for logical dependency (use DEPENDS_ON) or soft reference (use REFERENCES).
+      default_weight: 3.0
+      acyclic: true
+    - name: REFERENCES
+      description: Soft reference without ownership or dependency.
+      when_to_use: Emitted automatically from inline wiki-links — do not author manually.
+      default_weight: 0.5
+    - name: DEPENDS_ON
+      description: The source requires the target to exist or complete first.
+      when_to_use: Logical dependency where removing the target breaks the source. Not hierarchy (use PART_OF).
+      default_weight: 2.0
+      acyclic: true
+    - name: IMPLEMENTS
+      description: The source realizes or fulfills the target specification.
+      when_to_use: Concrete implementations pointing at the abstract spec they satisfy. For a spec/contract fulfilling a requirement, use REALIZES.
+      default_weight: 2.0
+      acyclic: true
+    - name: DEFINES
+      description: The source defines the target concept or term.
+      default_weight: 1.5
+      acyclic: true
+    - name: DEFINED_BY
+      description: The source is defined by the target (inverse of DEFINES).
+      default_weight: 1.5
+      acyclic: true
+    - name: USES
+      description: The source makes use of the target without depending on it.
+      when_to_use: Consumption without tight coupling — compare DEPENDS_ON for hard requirements.
+      default_weight: 1.0
+    - name: CLASSIFIES
+      description: The source classifies or categorizes the target.
+      default_weight: 1.0
+      acyclic: true
+    - name: STORES
+      description: The source stores the target data or content.
+      default_weight: 1.0
+    - name: DERIVED_FROM
+      description: The source is derived from, or based upon, the target.
+      when_to_use: Prior art, source material, inspiration that concretely shaped the source.
+      default_weight: 1.5
+      acyclic: true
+    - name: MOTIVATED_BY
+      description: The target motivated the creation or change described by the source.
+      default_weight: 2.0
+      acyclic: true
+    - name: SUPERSEDES
+      description: The source replaces the target — the target is no longer current.
+      when_to_use: Versioning and replacement. Keep the old entity for history; link the new one via SUPERSEDES.
+      default_weight: 1.5
+      acyclic: true
+    - name: ENABLES
+      description: The source enables the target to happen or exist.
+      default_weight: 1.0
+      acyclic: true
+    - name: BLOCKS
+      description: The source blocks the target from happening or progressing.
+      default_weight: 1.0
+      acyclic: true
+
+    # ── Claim / evidence ────────────────────────────────────────────────
+    - name: SUPPORTS
+      description: The source provides evidence or reasoning that supports the target claim.
+      default_weight: 2.5
+    - name: CONTRADICTS
+      description: The source contradicts or disputes the target claim.
+      default_weight: 2.5
+    - name: GENERALIZES
+      description: The source is a broader, more abstract form of the target.
+      default_weight: 2.0
+      acyclic: true
+    - name: SPECIALIZES
+      description: The source is a narrower, more concrete form of the target.
+      default_weight: 2.0
+      acyclic: true
+    - name: CONTRASTS_WITH
+      description: The source is defined partly by its contrast with the target — easily confused neighbors.
+      default_weight: 1.5
+
+    # ── Reasoning / causation ───────────────────────────────────────────
+    - name: MOTIVATES
+      description: The source motivates or drives the target.
+      default_weight: 1.5
+      acyclic: true
+    - name: INFORMED_BY
+      description: The source is informed by the target — partial input, not a hard dependency.
+      default_weight: 1.0
+    - name: EXPLAINS
+      description: The source explains the phenomenon or behavior of the target.
+      default_weight: 2.0
+    - name: PREDICTS
+      description: The source predicts the behavior of the target.
+      default_weight: 1.5
+    - name: PRECEDED_BY
+      description: The source is preceded in time by the target.
+      default_weight: 2.0
+      acyclic: true
+    - name: FOLLOWED_BY
+      description: The source is followed in time by the target.
+      default_weight: 2.0
+      acyclic: true
+    - name: CAUSED
+      description: The source caused the target (causal, not merely temporal).
+      default_weight: 1.5
+      acyclic: true
+    - name: VALIDATES
+      description: The source validates the target claim, pattern, or principle.
+      default_weight: 1.5
+    - name: AGREES_WITH
+      description: The source perspective agrees with the target perspective.
+      default_weight: 2.0
+    - name: DISAGREES_WITH
+      description: The source perspective disagrees with the target perspective.
+      default_weight: 2.5
+    - name: INTERPRETS
+      description: The source interprets or analyzes the target.
+      default_weight: 2.0
+    - name: EXTENDS
+      description: The source extends the target with additional reasoning or scope.
+      default_weight: 1.5
+
+    # ── Principles / process ────────────────────────────────────────────
+    - name: GOVERNS
+      description: The source principle governs or constrains the target.
+      default_weight: 2.5
+      acyclic: true
+    - name: CONSTRAINS
+      description: The source constrains the permissible states of the target.
+      default_weight: 2.0
+      acyclic: true
+    - name: OVERRIDES
+      description: The source overrides the target principle in overlapping scope.
+      default_weight: 1.5
+      acyclic: true
+    - name: REQUIRES
+      description: The source process requires the target to have happened first.
+      default_weight: 2.5
+      acyclic: true
+    - name: PRODUCES
+      description: The source process produces the target as an output.
+      default_weight: 2.0
+      acyclic: true
+    - name: TRIGGERS
+      description: Completing the source triggers the target.
+      default_weight: 2.0
+      acyclic: true
+
+    # ── Software-specific ───────────────────────────────────────────────
+    - name: REALIZES
+      description: A concrete artifact (spec or contract) fulfils an abstract requirement.
+      when_to_use: spec → requirement or contract → requirement. For a spec realizing a more abstract spec, use IMPLEMENTS.
+      default_weight: 2.5
+      acyclic: true
+    - name: OWNS
+      description: An actor owns the target — final authority and accountability.
+      when_to_use: actor → any. Exactly one OWNS per entity is the healthy pattern; pair with MAINTAINS for shared upkeep.
+      default_weight: 3.0
+    - name: MAINTAINS
+      description: An actor maintains the target without sole ownership.
+      when_to_use: actor → any. Multiple maintainers per entity is fine.
+      default_weight: 2.0
+    - name: VIOLATES
+      description: The source (typically an incident) violated the target commitment.
+      when_to_use: incident → requirement / spec / contract. Makes "which commitments broke this quarter" a trivial query.
+      default_weight: 2.5
+      acyclic: true
+    - name: DEPRECATES
+      description: The source supersedes the target at a protocol level — old clients should migrate.
+      when_to_use: contract → contract or spec → spec. Stronger than SUPERSEDES — signals active migration, not just replacement.
+      default_weight: 2.0
+      acyclic: true
+
+    - name: _default
+      description: Fallback weight for any relationship not otherwise specified. Required by the engine.
+      default_weight: 1.0
+
+community:
+  resolution: 1.0
+  seed: 42

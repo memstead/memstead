@@ -1,0 +1,34 @@
+[package]
+name = "memstead-bridge"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Read-only HTTP bridge library — wire-format types, envelope builder, change-event SSE adapter, axum handler helpers for Memstead thin clients."
+publish = false
+
+[dependencies]
+memstead-base = { workspace = true, features = ["tokio"] }
+memstead-git-branch.workspace = true
+gix = { workspace = true }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "sync"] }
+axum = { version = "0.7", default-features = false, features = ["json", "tokio", "http1", "query"] }
+tokio-stream = { version = "0.1", default-features = false, features = ["sync"] }
+futures-util = { version = "0.3", default-features = false }
+
+[dev-dependencies]
+tempfile.workspace = true
+semver.workspace = true
+memstead-schema.workspace = true
+tower = { version = "0.4", default-features = false, features = ["util"] }
+http-body-util = "0.1"
+bytes = "1"
+indexmap.workspace = true
+# axum already pulls `serde_urlencoded` transitively for its `Query`
+# extractor; pin the version here so the dev-only wire-parse test
+# can call it directly without depending on a transitive minor-bump.
+serde_urlencoded = "0.7"

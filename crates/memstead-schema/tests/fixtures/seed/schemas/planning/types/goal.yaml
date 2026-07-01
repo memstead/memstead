@@ -1,0 +1,84 @@
+# yaml-language-server: $schema=../../../../engine/crates/memstead-schema/generated/type-definition.schema.json
+
+name: goal
+description: |
+  What the planning phase is set to achieve. The root of a planning
+  graph — everything else (options, decisions, steps, risks, open
+  questions) exists in service of one or more goals.
+when_to_use: |
+  Use to state the purpose of the planning phase. A planning vault
+  typically carries 1-3 goals. If you need more, split the planning
+  into separate vaults — a single vault should have a coherent
+  scope.
+boundaries:
+  - Not a specific decision or action — use `decision` or `step`.
+  - Not a hard constraint — use `note` with `kind=constraint`.
+  - Not a question to answer — use `open_question`.
+  - Not a risk — use `risk`.
+system_message: |
+  Goals are the root. Keep them short, specific, and testable — a
+  reader should be able to judge, given a state of the world, whether
+  the goal has been achieved. Link MOTIVATED_BY to the external
+  trigger (directive, incident, commitment) that set the planning in
+  motion.
+sections:
+  - key: statement
+    heading: Statement
+    required: true
+    search_weight: 40.0
+    write_rules:
+      - "One or two sentences. What should be achieved. Standalone-readable in a search snippet — no pronouns, no forward references."
+  - key: rationale
+    heading: Rationale
+    required: true
+    search_weight: 15.0
+    write_rules:
+      - "Why this goal now. What triggered the planning — a directive, an incident, a commitment, a new requirement."
+  - key: success_criteria
+    heading: Success Criteria
+    required: true
+    search_weight: 15.0
+    write_rules:
+      - "How we know we're done. Concrete, checkable conditions. If success cannot be checked, the goal is too vague."
+  - key: scope_in
+    heading: In Scope
+    required: false
+    search_weight: 5.0
+    write_rules:
+      - "Bullet list of what this planning phase covers."
+  - key: scope_out
+    heading: Out of Scope
+    required: false
+    search_weight: 5.0
+    write_rules:
+      - "Bullet list of what is explicitly excluded. High-value — stating what's out prevents scope creep."
+  - key: notes
+    heading: Notes
+    required: false
+    search_weight: 3.0
+    catch_all: true
+metadata_fields:
+  - key: priority
+    description: How critical this goal is relative to other goals in the same vault.
+    field_type: string
+    default_value: high
+    enum_values: [critical, high, medium, low]
+    filterable: equality
+  - key: status
+    description: Lifecycle state of the goal.
+    field_type: string
+    default_value: active
+    enum_values: [active, paused, achieved, abandoned]
+    filterable: equality
+title_weight: 100.0
+text_fields: [statement, rationale, success_criteria, scope_in, scope_out, notes]
+hierarchy_relationship: PART_OF
+propagating_relationships: [MOTIVATED_BY]
+updatable_fields: [title, statement, rationale, success_criteria, scope_in, scope_out, notes, priority, status, tags]
+health_required_fields: [statement, rationale, success_criteria]
+staleness_threshold_days: 60
+write_rules:
+  - "Success criteria are concrete and checkable. 'Improve X' is not a goal; 'X latency stays under 200ms at p99' is."
+  - "Out-of-scope is high-value — name at least what you explicitly are NOT planning to address."
+  - "Link MOTIVATED_BY to the external trigger that set this planning in motion. A goal without motivation is unsourced."
+  - "Sub-goals connect via PART_OF. Keep the hierarchy shallow — a planning vault with more than two goal levels is likely too broad."

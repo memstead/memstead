@@ -1,0 +1,216 @@
+# yaml-language-server: $schema=../../../engine/crates/memstead-schema/generated/schema-manifest.schema.json
+
+# ─────────────────────────────────────────────────────────────────────────────
+# reimpl-source@0.1.0 — Legacy-extraction schema, paired with reimpl-target.
+#
+# Two types: evidence (atomic sourced observation) and capability
+# (behavioral unit backed by evidence). The Legacy vault is extracted from
+# the old system and remains technology- and target-neutral. One Legacy
+# vault can feed many Target vaults.
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: reimpl-source
+version: 0.1.0
+
+description: |
+  Schema for the Legacy vault in a reimplementation project. Captures
+  what the old system actually does — as behavioral capabilities backed
+  by concrete evidence from code, tests, data, interviews, and
+  observation. The vault is extracted, not authored; every claim traces
+  to a sourced artifact.
+
+when_to_use: |
+  Use in the Legacy vault of a reimplementation project, paired with a
+  Target vault on reimpl-target@0.1.0. Not for ongoing software
+  documentation — use software@0.1.0 for living specs. Not for pure
+  knowledge capture — use the default schema. Reimpl-source is
+  specifically for the extraction phase of replacing an old system.
+
+system_message: |
+  You are in the Legacy vault of a reimplementation project. Two types:
+
+    evidence    — a single sourced observation from the old system
+    capability  — a behavioral unit the old system exhibits
+
+  Every capability MUST be supported by at least one evidence entity via
+  SUPPORTS. A capability without evidence is an unsupported claim and
+  weakens the extraction.
+
+  Extract, do not design. Describe what the old system actually does, not
+  what it should do or what the new system will do. Design decisions
+  belong in the Target vault.
+
+  Capabilities are behavioral and testable. A capability must be
+  expressible as an acceptance criterion: given these inputs and this
+  state, the system produces these outputs. If you cannot write that
+  sentence, you are at the wrong level of abstraction — split the
+  capability or drop it.
+
+  Relationships are UPPER_SNAKE_CASE, strict vocabulary.
+
+types:
+  - evidence
+  - capability
+
+# The default schema's 37 edges are inherited; SUPPORTS is the one
+# source-specific addition. Edges targeting entities in a paired Target
+# vault (cross-vault inbound) are declared in the target schema, not
+# here — a schema only needs to describe relationships originating from
+# its own entities.
+relationships:
+  mode: strict
+  definitions:
+    # ── Structural / reference ──────────────────────────────────────────
+    - name: PART_OF
+      description: Hierarchical containment — the source is structurally part of the target and meaningless without it.
+      when_to_use: Use between capabilities for coarse → fine grouping. Avoid nesting more than two levels; breadth beats depth.
+      default_weight: 3.0
+      acyclic: true
+    - name: REFERENCES
+      description: Soft reference from the source to the target without ownership or dependency.
+      when_to_use: Mentioning, pointing at, citing. Emitted automatically from inline wiki-links — avoid authoring by hand.
+      default_weight: 0.5
+    - name: DEPENDS_ON
+      description: The source requires the target to exist or complete first.
+      when_to_use: Logical dependency where removing the target breaks the source. Not hierarchy (use PART_OF).
+      default_weight: 2.0
+      acyclic: true
+    - name: IMPLEMENTS
+      description: The source realizes or fulfills the target specification.
+      default_weight: 2.0
+      acyclic: true
+    - name: DEFINES
+      description: The source defines the target concept or term.
+      default_weight: 1.5
+      acyclic: true
+    - name: DEFINED_BY
+      description: The source is defined by the target (inverse of DEFINES).
+      default_weight: 1.5
+      acyclic: true
+    - name: USES
+      description: The source makes use of the target without depending on it.
+      default_weight: 1.0
+    - name: CLASSIFIES
+      description: The source classifies or categorizes the target.
+      default_weight: 1.0
+      acyclic: true
+    - name: STORES
+      description: The source stores the target data or content.
+      default_weight: 1.0
+    - name: DERIVED_FROM
+      description: The source is derived from, or based upon, the target.
+      default_weight: 1.5
+      acyclic: true
+    - name: MOTIVATED_BY
+      description: The target motivated the creation or change described by the source.
+      default_weight: 2.0
+      acyclic: true
+    - name: SUPERSEDES
+      description: The source replaces the target — the target is no longer current.
+      default_weight: 1.5
+      acyclic: true
+    - name: ENABLES
+      description: The source enables the target to happen or exist.
+      default_weight: 1.0
+      acyclic: true
+    - name: BLOCKS
+      description: The source blocks the target from happening or progressing.
+      default_weight: 1.0
+      acyclic: true
+
+    # ── Claim / evidence ────────────────────────────────────────────────
+    - name: SUPPORTS
+      description: The source provides evidence or reasoning that supports the target claim.
+      when_to_use: Primary edge in this schema — evidence → capability. Every capability needs at least one SUPPORTS in-edge. Also valid evidence → evidence when one observation corroborates another.
+      default_weight: 3.0
+    - name: CONTRADICTS
+      description: The source contradicts or disputes the target claim.
+      when_to_use: evidence → capability when an observation weakens or rules out a claim. Flag the capability for review.
+      default_weight: 2.5
+    - name: GENERALIZES
+      description: The source is a broader, more abstract form of the target.
+      default_weight: 2.0
+      acyclic: true
+    - name: SPECIALIZES
+      description: The source is a narrower, more concrete form of the target.
+      default_weight: 2.0
+      acyclic: true
+    - name: CONTRASTS_WITH
+      description: The source is defined partly by its contrast with the target — easily confused neighbors.
+      default_weight: 1.5
+
+    # ── Reasoning / causation ───────────────────────────────────────────
+    - name: MOTIVATES
+      description: The source motivates or drives the target.
+      default_weight: 1.5
+      acyclic: true
+    - name: INFORMED_BY
+      description: The source is informed by the target — partial input, not a hard dependency.
+      default_weight: 1.0
+    - name: EXPLAINS
+      description: The source explains the phenomenon or behavior of the target.
+      default_weight: 2.0
+    - name: PREDICTS
+      description: The source predicts the behavior of the target.
+      default_weight: 1.5
+    - name: PRECEDED_BY
+      description: The source is preceded in time by the target.
+      default_weight: 2.0
+      acyclic: true
+    - name: FOLLOWED_BY
+      description: The source is followed in time by the target.
+      default_weight: 2.0
+      acyclic: true
+    - name: CAUSED
+      description: The source caused the target (causal, not merely temporal).
+      default_weight: 1.5
+      acyclic: true
+    - name: VALIDATES
+      description: The source validates the target claim, pattern, or principle.
+      default_weight: 1.5
+    - name: AGREES_WITH
+      description: The source perspective agrees with the target perspective.
+      default_weight: 2.0
+    - name: DISAGREES_WITH
+      description: The source perspective disagrees with the target perspective.
+      default_weight: 2.5
+    - name: INTERPRETS
+      description: The source interprets or analyzes the target.
+      default_weight: 2.0
+    - name: EXTENDS
+      description: The source extends the target with additional reasoning or scope.
+      default_weight: 1.5
+
+    # ── Principles / process ────────────────────────────────────────────
+    - name: GOVERNS
+      description: The source principle governs or constrains the target.
+      default_weight: 2.5
+      acyclic: true
+    - name: CONSTRAINS
+      description: The source constrains the permissible states of the target.
+      default_weight: 2.0
+      acyclic: true
+    - name: OVERRIDES
+      description: The source overrides the target principle in overlapping scope.
+      default_weight: 1.5
+      acyclic: true
+    - name: REQUIRES
+      description: The source process requires the target to have happened first.
+      default_weight: 2.5
+      acyclic: true
+    - name: PRODUCES
+      description: The source process produces the target as an output.
+      default_weight: 2.0
+      acyclic: true
+    - name: TRIGGERS
+      description: Completing the source triggers the target.
+      default_weight: 2.0
+      acyclic: true
+
+    - name: _default
+      description: Fallback weight for any relationship not otherwise specified. Required by the engine.
+      default_weight: 1.0
+
+community:
+  resolution: 1.0
+  seed: 42

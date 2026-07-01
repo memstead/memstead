@@ -1,0 +1,79 @@
+# yaml-language-server: $schema=../../../../generated/type-definition.schema.json
+name: principle
+description: |
+  A rule, law, or constraint that holds consistently within a stated
+  scope, with justification, exceptions, and downstream consequences.
+when_to_use: |
+  Use when a rule is expected to hold across multiple situations and
+  violations should be noticeable. Prefer over spec when the content is
+  a rule that governs other entities rather than a structural
+  description.
+boundaries:
+  - Not a one-time decision — use memo.
+  - Not a pattern observed across instances — use model.
+  - Not a descriptive specification — use spec.
+system_message: |
+  Principles are rules, laws, and constraints that hold across their
+  scope. Each entity has Statement, Scope, and optional
+  Justification/Exceptions/Consequences. GOVERNS links principles to what
+  they constrain. OVERRIDES resolves conflicts. Authority:
+  proposed/accepted/established/deprecated. Universality:
+  contextual/domain-wide/universal.
+sections:
+  - key: statement
+    heading: Statement
+    required: true
+    search_weight: 40.0
+    write_rules:
+      - "One or two sentences. The rule, law, or constraint. Must be testable: can you check whether something violates it?"
+  - key: scope
+    heading: Scope
+    required: true
+    search_weight: 20.0
+    write_rules:
+      - "Where this principle applies. Domain, context, conditions. A principle without scope implies universality — state it explicitly if so."
+  - key: justification
+    heading: Justification
+    required: false
+    search_weight: 5.0
+    write_rules:
+      - "Why this principle holds. Evidence, reasoning, authority. Link supporting entities via wiki-links."
+  - key: exceptions
+    heading: Exceptions
+    required: false
+    search_weight: 5.0
+    catch_all: true
+    write_rules:
+      - "Known cases where the principle does not apply. Edge cases, overrides, documented violations. Bullet list: exception, then why."
+  - key: consequences
+    heading: Consequences
+    required: false
+    search_weight: 3.0
+    write_rules:
+      - "What follows from this principle. Implications, downstream effects, design decisions it forces. Link affected entities via wiki-links."
+metadata_fields:
+  - key: authority
+    description: How settled the principle is in practice.
+    field_type: string
+    default_value: proposed
+    enum_values: [proposed, accepted, established, deprecated]
+    filterable: equality
+  - key: universality
+    description: The breadth of the principle's applicability.
+    field_type: string
+    default_value: contextual
+    enum_values: [contextual, domain-wide, universal]
+    filterable: equality
+title_weight: 100.0
+text_fields: [statement, scope, justification, exceptions, consequences]
+hierarchy_relationship: PART_OF
+propagating_relationships: [GOVERNS, CONSTRAINS]
+updatable_fields: [title, statement, scope, justification, exceptions, consequences, authority, universality, tags]
+health_required_fields: [statement, scope]
+staleness_threshold_days: 120
+write_rules:
+  - "Principles are rules that hold consistently — each must be testable within its scope."
+  - "Authority: proposed (under discussion), accepted (agreed upon), established (long-standing), deprecated (no longer applicable)."
+  - "Universality: contextual (specific situation), domain-wide (entire domain), universal (all domains)."
+  - "Relationships: UPPER_SNAKE_CASE, open vocabulary. GOVERNS = this principle constrains the target. OVERRIDES = this principle supersedes another. Never declare REFERENCES manually."
+  - "Exceptions section is high-value — a principle with no stated exceptions is either truly universal or underexamined."

@@ -1,0 +1,77 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/memstead-schema",
+    "crates/memstead-base",
+    "crates/memstead-engine",
+    "crates/memstead-git-branch",
+    "crates/memstead-mcp",
+    "crates/memstead-cli",
+    "crates/memstead-swift",
+    "crates/memstead-bridge",
+    "crates/memstead-wasm",
+    "crates/memstead-serve",
+    "xtask",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+# Required by cargo-dist for the GitHub Releases hosting backend.
+# Inherited by every crate via `repository.workspace = true`; the
+# `[publish = false]` registry crates inherit the same value harmlessly.
+repository = "https://github.com/memstead/memstead"
+homepage = "https://memstead.io"
+
+[workspace.dependencies]
+memstead-schema = { path = "crates/memstead-schema" }
+memstead-base = { path = "crates/memstead-base" }
+memstead-engine = { path = "crates/memstead-engine" }
+memstead-mcp = { path = "crates/memstead-mcp" }
+memstead-cli = { path = "crates/memstead-cli" }
+memstead-git-branch = { path = "crates/memstead-git-branch" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tempfile = "3"
+regex = "1"
+unicode-normalization = "0.1"
+sha2 = "0.10"
+indexmap = { version = "2", features = ["serde"] }
+schemars = { version = "1.0", features = ["derive", "indexmap2", "semver1"] }
+rmcp = { version = "1.4", features = ["server", "transport-io", "macros", "schemars"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-std"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+assert_cmd = "2"
+predicates = "3"
+zip = { version = "8", default-features = false, features = ["deflate-flate2-zlib-rs", "time"] }
+semver = { version = "1", features = ["serde"] }
+dirs = "5"
+toml = "0.8"
+toml_edit = "0.22"
+gix = { version = "0.81", default-features = false, features = ["revision", "tree-editor", "blob-diff", "max-performance-safe", "sha1"] }
+tantivy = "0.22"
+globset = "0.4"
+
+# Faster dev/test compiles. Trade: slightly less debug info than the
+# default, but stack traces and line numbers stay intact. Smaller debug
+# binaries also shorten macOS code-signing verification per cold start.
+[profile.dev]
+debug = "line-tables-only"
+split-debuginfo = "unpacked"
+
+# Compile dependencies with light optimisation. Drastically reduces the
+# runtime cost of test fixtures (gix tree walks, tantivy index builds)
+# at the price of one-time slower dep compile. Once compiled, deps are
+# cached and benefit every subsequent run.
+[profile.dev.package."*"]
+opt-level = 1
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"

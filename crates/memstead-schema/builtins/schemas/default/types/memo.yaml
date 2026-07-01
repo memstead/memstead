@@ -1,0 +1,75 @@
+# yaml-language-server: $schema=../../../../generated/type-definition.schema.json
+name: memo
+description: |
+  A reasoning artifact — a decision, observation, lesson, plan, goal, or
+  constraint. Captures WHY choices were made, what alternatives existed,
+  and what was learned.
+when_to_use: |
+  Use when recording reasoning that should persist for future agents —
+  e.g. architectural decisions with trade-offs, observations from
+  experiments, post-mortem lessons. Prefer over spec when the content is
+  about a single decision rather than durable current-state documentation.
+boundaries:
+  - Not current-state documentation — use spec for that.
+  - Not a testable claim with evidence — use assertion.
+  - Not an open question — use inquiry.
+system_message: |
+  Memos capture reasoning — WHY decisions were made, what was considered,
+  what was learned. Each entity has Claim, Context, and optional
+  Substance/Alternatives/Outcome. Status is binary (active/closed); use
+  SUPERSEDES for replacement rather than encoding it in status.
+sections:
+  - key: claim
+    heading: Claim
+    required: true
+    search_weight: 40.0
+    write_rules:
+      - "One sentence. Core assertion, goal, proposal, or finding. Must work standalone in search results."
+  - key: context
+    heading: Context
+    required: true
+    search_weight: 20.0
+    write_rules:
+      - "Bullet points. Situation, forces, trigger. Enough for a future agent to judge relevance."
+  - key: substance
+    heading: Substance
+    required: false
+    search_weight: 5.0
+    catch_all: true
+    write_rules:
+      - "Full reasoning, evidence, analysis. Structured: bullet lists, tables over prose."
+  - key: alternatives
+    heading: Alternatives
+    required: false
+    search_weight: 5.0
+    write_rules:
+      - "What else was considered, why rejected. Bullet format: option, then rejection reason. Most valuable section — negative knowledge prevents repeated mistakes."
+  - key: outcome
+    heading: Outcome
+    required: false
+    search_weight: 3.0
+    write_rules:
+      - "Results, consequences, lessons. Append-friendly — add entries, don't rewrite existing ones."
+metadata_fields:
+  - key: status
+    description: Lifecycle state — active (still live) or closed (resolved).
+    field_type: string
+    default_value: active
+    enum_values: [active, closed]
+    filterable: equality
+title_weight: 100.0
+text_fields: [claim, context, substance, alternatives, outcome]
+hierarchy_relationship: PART_OF
+edge_weight_overrides:
+  DERIVED_FROM: 2.0
+propagating_relationships: [DERIVED_FROM, MOTIVATED_BY]
+updatable_fields: [title, claim, context, substance, alternatives, outcome, status, tags]
+health_required_fields: [claim, context]
+staleness_threshold_days: 90
+write_rules:
+  - "Memos capture reasoning — WHY decisions were made, what was considered, what was learned. Not current state documentation."
+  - "Status: binary. active = still live, closed = resolved. Closure reason belongs in Outcome section, not status."
+  - "Supersession: express via SUPERSEDES relationship, not status. \"Closed\" means resolved, not replaced."
+  - "Tags: every memo MUST include at least one of: decision, observation, lesson, plan, goal, constraint. Free vocabulary beyond that."
+  - "Relationships: UPPER_SNAKE_CASE, open vocabulary. DERIVED_FROM, MOTIVATED_BY, SUPERSEDES, BLOCKS, ENABLES are the common types."
+  - "Outcome is append-friendly — add entries, don't rewrite. Records what happened over time."

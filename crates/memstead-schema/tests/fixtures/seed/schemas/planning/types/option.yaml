@@ -1,0 +1,81 @@
+# yaml-language-server: $schema=../../../../engine/crates/memstead-schema/generated/type-definition.schema.json
+
+name: option
+description: |
+  A considered alternative for addressing a goal or resolving a
+  sub-question. Options exist in families — a single option without
+  ALTERNATIVES_TO siblings is an undeliberated claim, not an option.
+when_to_use: |
+  Use when deliberately considering alternatives. Before writing an
+  option, assume there will be at least one sibling via
+  ALTERNATIVES_TO. An option is neutral — it documents a path under
+  consideration, not a preferred one.
+boundaries:
+  - Not a chosen path — that's a `decision`.
+  - Not a preferred opinion — options are neutral alternatives.
+  - Not a free-form idea — use `note` with `kind=idea`.
+  - Not a risk — risks are what could go wrong, not paths forward.
+system_message: |
+  Options are neutral alternatives under consideration. Each option
+  should link ALTERNATIVES_TO at least one sibling — otherwise the
+  choice isn't framed. Pros and cons are symmetric: for every pro,
+  look for the corresponding con. Status flips to `chosen` or
+  `rejected` when a decision references this option via CHOSEN or
+  REJECTED.
+sections:
+  - key: description
+    heading: Description
+    required: true
+    search_weight: 30.0
+    write_rules:
+      - "One or two sentences. What this option is — enough that a reader can compare it to siblings without reading further sections."
+  - key: pros
+    heading: Pros
+    required: true
+    search_weight: 15.0
+    write_rules:
+      - "Bullet list. What this option enables or makes easier. Specific, not generic."
+  - key: cons
+    heading: Cons
+    required: true
+    search_weight: 15.0
+    write_rules:
+      - "Bullet list. What this option blocks, complicates, or costs. An option without cons is under-examined."
+  - key: impact
+    heading: Impact
+    required: false
+    search_weight: 10.0
+    write_rules:
+      - "What changes if this option is chosen — surfaces, contracts, subsystems, team load."
+  - key: effort
+    heading: Effort
+    required: false
+    search_weight: 5.0
+    write_rules:
+      - "Rough estimate — person-days, complexity level, or coarse bucket. Enough to compare against siblings."
+  - key: notes
+    heading: Notes
+    required: false
+    search_weight: 3.0
+    catch_all: true
+metadata_fields:
+  - key: status
+    description: Lifecycle state — moves to chosen / rejected when a decision references the option.
+    field_type: string
+    default_value: considered
+    enum_values: [considered, chosen, rejected, deferred]
+    filterable: equality
+title_weight: 100.0
+text_fields: [description, pros, cons, impact, effort, notes]
+hierarchy_relationship: PART_OF
+edge_weight_overrides:
+  ALTERNATIVES_TO: 2.5
+propagating_relationships: [ALTERNATIVES_TO]
+updatable_fields: [title, description, pros, cons, impact, effort, notes, status, tags]
+health_required_fields: [description, pros, cons]
+staleness_threshold_days: 30
+write_rules:
+  - "Options exist in families — before finalizing, link ALTERNATIVES_TO at least one sibling. A lone option is not an option."
+  - "Pros and cons are symmetric. An option with no cons is under-examined; an option with no pros shouldn't have been written."
+  - "Status is a lifecycle — flip to `chosen` or `rejected` when a decision references this option via CHOSEN or REJECTED."
+  - "Link RAISES to any open_question this option introduces (uncertainty the option creates)."

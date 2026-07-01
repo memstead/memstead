@@ -1,0 +1,69 @@
+# yaml-language-server: $schema=../../../../generated/type-definition.schema.json
+name: perspective
+description: |
+  A viewpoint or interpretive position on a subject, held by a person,
+  school of thought, or tradition, with grounds and contrasts.
+when_to_use: |
+  Use when multiple interpretations of the same subject matter and it
+  helps to record them as first-class entities that link to each other.
+  Prefer over memo when the content is a stance or reading rather than a
+  decision.
+boundaries:
+  - Not an assertion with evidence — use assertion.
+  - Not a rule with authority — use principle.
+  - Not a definition — use concept.
+system_message: |
+  Perspectives are viewpoints, interpretations, and argumentative
+  positions. Each entity has Viewpoint, Subject, and optional
+  Interpretation/Grounds/Contrasts. AGREES_WITH/DISAGREES_WITH link
+  related viewpoints. INTERPRETS links to analyzed subjects.
+sections:
+  - key: viewpoint
+    heading: Viewpoint
+    required: true
+    search_weight: 40.0
+    write_rules:
+      - "One or two sentences. The core position or interpretive lens. Must identify whose perspective this is (a person, school of thought, tradition, or role)."
+  - key: subject
+    heading: Subject
+    required: true
+    search_weight: 20.0
+    write_rules:
+      - "What this perspective is about. The topic, phenomenon, or question being interpreted. Link the subject via wiki-links."
+  - key: interpretation
+    heading: Interpretation
+    required: false
+    search_weight: 5.0
+    write_rules:
+      - "The full argument or analysis. How the subject looks from this viewpoint. Structure as reasoning chain, not assertion list."
+  - key: grounds
+    heading: Grounds
+    required: false
+    search_weight: 5.0
+    catch_all: true
+    write_rules:
+      - "Evidence, reasoning, and authority supporting this perspective. What makes someone hold this view. Link supporting evidence via wiki-links."
+  - key: contrasts
+    heading: Contrasts
+    required: false
+    search_weight: 3.0
+    write_rules:
+      - "How this perspective differs from others on the same subject. Bullet list: other perspective, then key difference. Link via wiki-links."
+metadata_fields:
+  - key: tradition
+    description: School of thought, tradition, or role this perspective belongs to.
+    field_type: string
+    optional: true
+title_weight: 100.0
+text_fields: [viewpoint, subject, interpretation, grounds, contrasts]
+hierarchy_relationship: PART_OF
+propagating_relationships: [AGREES_WITH, DISAGREES_WITH]
+updatable_fields: [title, viewpoint, subject, interpretation, grounds, contrasts, tradition, tags]
+health_required_fields: [viewpoint, subject]
+staleness_threshold_days: 120
+write_rules:
+  - "Perspectives are viewpoints — each must identify whose perspective it is and what it is about."
+  - "Faithfully represent the viewpoint as its holder would express it, even when you disagree."
+  - "Relationships: UPPER_SNAKE_CASE, open vocabulary. AGREES_WITH/DISAGREES_WITH link related perspectives. INTERPRETS links to the subject being analyzed. Never declare REFERENCES manually."
+  - "Contrasts section is high-value — perspectives gain meaning through comparison. A perspective without contrasts is isolated."
+  - "Multiple perspectives on the same subject should link to each other via AGREES_WITH or DISAGREES_WITH."

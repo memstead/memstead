@@ -1,0 +1,86 @@
+{
+  "source": {
+    "codebase": {
+      "framing": "reading source files",
+      "artifact": "source file",
+      "artifacts": "source files",
+      "readVerb": "Read source code",
+      "readTools": "`Read`, `Glob`, `Grep`, `Bash` — read files, search for patterns, follow imports",
+      "readInstruction": "Pick an area — a directory, a cluster of related files, whatever looks important or uncovered. Read 3-8 files together. Follow imports and callers. Understand the area, don't just skim.",
+      "deepReadInstruction": "Open a file, read it line by line, compare it to the destination artifact that claims to cover it. You will find missing details, wrong claims, or oversimplified descriptions. Spot-checking file names against artifact titles is not reading.",
+      "tip": "Read related files together — a module without its imports is half the picture."
+    },
+    "filesystem": {
+      "framing": "reading files",
+      "artifact": "file",
+      "artifacts": "files",
+      "readVerb": "Read files",
+      "readTools": "`Read`, `Glob`, `Grep`, `Bash` — read files, search for patterns",
+      "readInstruction": "Pick a cluster of related files. Read them together for context.",
+      "deepReadInstruction": "Open a file, read it fully, compare it to the destination artifact that claims to cover it.",
+      "tip": "Read related files together for context."
+    },
+    "graph": {
+      "framing": "reading existing graph entities",
+      "artifact": "entity",
+      "artifacts": "entities",
+      "readVerb": "Read entities",
+      "readTools": "`memstead_entity` (pass `include_relations:true` to follow typed edges, `include_context:true` for cluster context), `memstead_search` (omit `query` for pure structural/metadata filtering) — read entity content, follow relationships",
+      "readInstruction": "Pick a cluster of related entities. Read their content and relationships. Understand what each entity actually says, not just its title.",
+      "deepReadInstruction": "Read an entity's full content section by section. Compare it to the destination artifact that claims to represent it. Check every claim.",
+      "tip": "Read entity content, not just titles — understand what each entity actually says."
+    },
+    "git": {
+      "framing": "reading commit history",
+      "artifact": "commit",
+      "artifacts": "commits",
+      "readVerb": "Read commit history",
+      "readTools": "`Bash` — `git log`, `git show`, `git diff`",
+      "readInstruction": "Read commit messages and diffs together. Group related commits by topic — a feature or fix often spans multiple commits. Follow the reasoning trail: why was this change made, what was the alternative?",
+      "deepReadInstruction": "Run `git show` on the commit. Read the full diff. Compare it to the destination artifact that claims to capture this decision. Check whether the reasoning and consequences are accurately described.",
+      "tip": "Commit messages capture intent. Diffs capture what actually changed. Read both — the message alone is often incomplete."
+    },
+    "web": {
+      "framing": "researching web sources",
+      "artifact": "web page",
+      "artifacts": "web pages",
+      "readVerb": "Research web sources",
+      "readTools": "`WebSearch`, `WebFetch`, `Read` — search the web, fetch pages, read content",
+      "readInstruction": "Research the topic from multiple angles. Triangulate across sources — no single page tells the full story.",
+      "deepReadInstruction": "Re-read the source page carefully. Compare it to the destination artifact that claims to cover it.",
+      "tip": "Triangulate across multiple sources — no single page tells the full story."
+    }
+  },
+  "destination": {
+    "graph": {
+      "framing": "building a knowledge graph",
+      "artifact": "entity",
+      "artifacts": "entities",
+      "writeVerb": "Write entities",
+      "writeTools": "`memstead_create`, `memstead_update`, `memstead_delete`, `memstead_relate` — modify the graph (loop `memstead_update` for multi-entity edits)",
+      "exploreTools": "`memstead_search` (omit `query` for pure structural/metadata filtering), `memstead_entity` (with `include_relations:true` / `include_context:true` for edges and cluster context), `memstead_overview` (token-budget-driven cold-start — schema catalogue lists `{ref, description}` only), `memstead_schema(name=<ref>)` (full per-type bodies — sections, fields, write_rules, relationship vocabulary; cache per session) — explore the graph",
+      "writeInstruction": "One entity per concept — not per source artifact, not per code layer. Search the graph before creating — update existing entities, don't duplicate. Wire relationships as you go.",
+      "tip": "The graph is your memory from previous runs. Understand it before changing it."
+    },
+    "codebase": {
+      "framing": "generating code",
+      "artifact": "file",
+      "artifacts": "files",
+      "writeVerb": "Write files",
+      "writeTools": "`Write`, `Edit`, `Bash` — create and modify files",
+      "exploreTools": "`Read`, `Glob`, `Grep` — read existing files",
+      "writeInstruction": "Read existing files before overwriting — preserve what still applies.",
+      "tip": "Read existing files before overwriting — preserve what still applies."
+    },
+    "filesystem": {
+      "framing": "generating files",
+      "artifact": "file",
+      "artifacts": "files",
+      "writeVerb": "Write files",
+      "writeTools": "`Write`, `Edit`, `Bash` — create and modify files",
+      "exploreTools": "`Read`, `Glob`, `Grep` — read existing files",
+      "writeInstruction": "Read existing files before overwriting — preserve what still applies.",
+      "tip": "Read existing files before overwriting — preserve what still applies."
+    }
+  }
+}

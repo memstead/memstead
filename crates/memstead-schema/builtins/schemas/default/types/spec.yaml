@@ -1,0 +1,73 @@
+# yaml-language-server: $schema=../../../../generated/type-definition.schema.json
+name: spec
+description: |
+  Prescriptive specification of an entity, component, process, or concept.
+  Describes the current design — what a thing IS and WHY it exists — not a
+  history of how it got there.
+when_to_use: |
+  Use for reference documentation of architecture, conventions, product
+  areas, or anything you want agents and humans to read as authoritative.
+  Prefer over memo when the content should persist as current state rather
+  than as a captured decision point.
+boundaries:
+  - Not for open questions — use inquiry.
+  - Not for reasoning about a specific decision — use memo.
+  - Not for testable claims — use assertion.
+system_message: |
+  Specs are prescriptive, not descriptive. Each entity has Identity,
+  Purpose, and optional Specifies/Constraints/Rationale. PART_OF drives
+  the structural hierarchy as a graph edge; files live flat at the
+  vault root. Levels: M0 concrete (vast majority), M1 patterns, M2
+  structural rules.
+sections:
+  - key: identity
+    heading: Identity
+    required: true
+    search_weight: 40.0
+    write_rules:
+      - "One sentence. Defines WHAT this is, not WHY."
+  - key: purpose
+    heading: Purpose
+    required: true
+    search_weight: 20.0
+    write_rules:
+      - "One sentence. Explains WHY this exists — the problem it solves or the role it fills."
+  - key: specifies
+    heading: Specifies
+    required: false
+    search_weight: 5.0
+    catch_all: true
+    write_rules:
+      - "Bullet list of concrete details this entity defines. Omit if the entity is purely conceptual."
+  - key: constraints
+    heading: Constraints
+    required: false
+    search_weight: 5.0
+    write_rules:
+      - "Bullet list of rules, limits, or invariants. Omit if none apply."
+  - key: rationale
+    heading: Rationale
+    required: false
+    search_weight: 1.0
+    write_rules:
+      - "Record WHY a decision was made — alternatives considered, trade-offs weighed, constraints that forced the choice. Not a changelog. Append-friendly — add entries, don't rewrite existing ones."
+metadata_fields:
+  - key: level
+    description: Abstraction level — M0 concrete, M1 pattern, M2 structural rule, M3 meta.
+    field_type: string
+    default_value: M0
+    enum_values: [M0, M1, M2, M3]
+    filterable: equality
+title_weight: 100.0
+text_fields: [identity, purpose, specifies, constraints, rationale]
+hierarchy_relationship: PART_OF
+propagating_relationships: [DEPENDS_ON, USES]
+updatable_fields: [title, identity, level, purpose, specifies, constraints, rationale, tags]
+health_required_fields: [identity, purpose]
+staleness_threshold_days: 90
+write_rules:
+  - "Every section describes the current state. Never reference past states, what changed, or migration history — specs are reference documentation, not changelogs."
+  - "Level: M0 for concrete things (vast majority), M1 for patterns/categories, M2 for structural rules, M3 almost never. When in doubt, M0."
+  - "Relationships: UPPER_SNAKE_CASE, open vocabulary. PART_OF = child meaningless without parent (use USES/DEPENDS_ON instead for independent concepts). Never declare REFERENCES manually. No automatic inverses."
+  - "Granularity: one spec = one concept, not a chapter."
+  - "Tags: comma-separated labels for categorization (e.g. \"backend, api\"). Free vocabulary, no predefined set. Updates replace all tags — merge with existing values when adding."

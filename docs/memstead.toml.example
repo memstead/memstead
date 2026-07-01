@@ -1,0 +1,57 @@
+# Example `.memstead.toml` — workspace-level memstead-mcp configuration.
+#
+# Drop this file at the workspace root as `.memstead.toml` and edit in
+# place. Every section is optional; minimal configs work. Typos in
+# keys surface as loud errors (`deny_unknown_fields`).
+#
+# Precedence: explicit CLI flags > this file > environment variables
+# > compiled defaults. See `engine/crates/memstead-mcp/src/config.rs`
+# for the full resolution order.
+
+# ---------------------------------------------------------------------
+# Core vault roster
+# ---------------------------------------------------------------------
+
+# vaults = ["memstead/engine", "memstead/macos", "memstead/plugin"]
+# read_vaults = []
+# auto_discover = false
+
+# ---------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------
+
+# [log]
+# filter = "memstead_git_branch=debug,memstead_mcp=info"
+
+# ---------------------------------------------------------------------
+# MCP server tuning
+# ---------------------------------------------------------------------
+
+# [mcp]
+# token_budget = 10000
+
+# ---------------------------------------------------------------------
+# Vault lifecycle authorization
+# ---------------------------------------------------------------------
+#
+# Enables `memstead_vault_create` and `memstead_vault_delete` at runtime. The
+# default posture is conservative: when `[vault_management]` is absent
+# or either glob list is empty, the corresponding lifecycle tool
+# rejects every input with `VAULT_PATH_NOT_ALLOWED`. Opt in
+# explicitly by listing allowed paths here.
+#
+# Globs use gitignore semantics (`*` does not cross `/`; `**` matches
+# zero-or-more path segments). Matching runs against each candidate's
+# canonical path relative to the workspace root. Agents discover the
+# compiled patterns at runtime via
+# `memstead_health { include_config: true }`.
+
+# [vault_management]
+# allowed_create_paths = [
+#   "memstead/*",          # top-level under /memstead/
+#   "*/.plans/*",      # plan subvaults anywhere
+#   "*/.subvaults/*",  # general subvaults anywhere
+# ]
+# allowed_delete_paths = [
+#   "*/.plans/*",      # only plan subvaults are delete-eligible
+# ]

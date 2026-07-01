@@ -1,0 +1,77 @@
+# yaml-language-server: $schema=../../../../generated/type-definition.schema.json
+name: model
+description: |
+  A recurring pattern abstracted across multiple instances, with a stated
+  mechanism, known limits, and applications.
+when_to_use: |
+  Use when the same structure shows up across distinct instances and the
+  abstraction itself is worth naming. Prefer over concept when the
+  content is a recurring pattern rather than a definition.
+boundaries:
+  - Not a definition of a single concept — use concept.
+  - Not a single-case narrative — use narrative.
+  - Not a rule with authority — use principle.
+system_message: |
+  Models are recurring patterns abstracted across multiple instances.
+  Each entity has Pattern, Mechanism, and optional
+  Instances/Limits/Application. GENERALIZES/SPECIALIZES build model
+  hierarchies. EXPLAINS links models to phenomena. Abstraction:
+  concrete/abstract/meta. Predictive power: low/moderate/high.
+sections:
+  - key: pattern
+    heading: Pattern
+    required: true
+    search_weight: 40.0
+    write_rules:
+      - "One or two sentences. The recurring structure or regularity. Must be stated abstractly enough to apply across instances."
+  - key: mechanism
+    heading: Mechanism
+    required: true
+    search_weight: 20.0
+    write_rules:
+      - "How the pattern works. Causal or structural explanation of why this recurrence exists. Tables or diagrams welcome."
+  - key: instances
+    heading: Instances
+    required: false
+    search_weight: 5.0
+    write_rules:
+      - "Concrete examples where this pattern appears. Bullet list: instance, then how the pattern manifests. Link via wiki-links where possible."
+  - key: limits
+    heading: Limits
+    required: false
+    search_weight: 5.0
+    catch_all: true
+    write_rules:
+      - "Where the pattern breaks down. Boundary conditions, exceptions, domains where it does not apply. Without limits, models overfit."
+  - key: application
+    heading: Application
+    required: false
+    search_weight: 3.0
+    write_rules:
+      - "How to use this model in practice. Predictions it enables, decisions it informs. Link dependent entities via wiki-links."
+metadata_fields:
+  - key: abstraction_level
+    description: Abstraction tier of the model — concrete, abstract, or meta.
+    field_type: string
+    default_value: concrete
+    enum_values: [concrete, abstract, meta]
+    filterable: equality
+  - key: predictive_power
+    description: How reliably the model predicts new instances.
+    field_type: string
+    default_value: moderate
+    enum_values: [low, moderate, high]
+    filterable: equality
+title_weight: 100.0
+text_fields: [pattern, mechanism, instances, limits, application]
+hierarchy_relationship: PART_OF
+propagating_relationships: [GENERALIZES, EXPLAINS]
+updatable_fields: [title, pattern, mechanism, instances, limits, application, abstraction_level, predictive_power, tags]
+health_required_fields: [pattern, mechanism]
+staleness_threshold_days: 90
+write_rules:
+  - "Models are recurring patterns — each must apply across at least two distinct instances."
+  - "Abstraction level: concrete (directly observable pattern), abstract (requires reasoning), meta (pattern about patterns)."
+  - "Predictive power: low (descriptive only), moderate (some predictive value), high (reliably predicts new instances)."
+  - "Relationships: UPPER_SNAKE_CASE, open vocabulary. GENERALIZES/SPECIALIZES link broader/narrower models. EXPLAINS links to phenomena the model accounts for. Never declare REFERENCES manually."
+  - "Limits section is critical — a model without stated limits implies universal applicability, which is almost never true."

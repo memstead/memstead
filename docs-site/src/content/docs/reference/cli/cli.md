@@ -1,0 +1,1129 @@
+---
+title: "CLI (`memstead`)"
+---
+
+# Command-Line Help for `memstead`
+
+This document contains the help content for the `memstead` command-line program.
+
+**Command Overview:**
+
+* [`memstead`↴](#memstead)
+* [`memstead stats`↴](#memstead-stats)
+* [`memstead entity`↴](#memstead-entity)
+* [`memstead relations`↴](#memstead-relations)
+* [`memstead search`↴](#memstead-search)
+* [`memstead list`↴](#memstead-list)
+* [`memstead context`↴](#memstead-context)
+* [`memstead overview`↴](#memstead-overview)
+* [`memstead type`↴](#memstead-type)
+* [`memstead health`↴](#memstead-health)
+* [`memstead export`↴](#memstead-export)
+* [`memstead init`↴](#memstead-init)
+* [`memstead install`↴](#memstead-install)
+* [`memstead link`↴](#memstead-link)
+* [`memstead publish`↴](#memstead-publish)
+* [`memstead unpublish`↴](#memstead-unpublish)
+* [`memstead domain`↴](#memstead-domain)
+* [`memstead domain keygen`↴](#memstead-domain-keygen)
+* [`memstead domain manifest`↴](#memstead-domain-manifest)
+* [`memstead admin`↴](#memstead-admin)
+* [`memstead admin takedown`↴](#memstead-admin-takedown)
+* [`memstead admin denylist`↴](#memstead-admin-denylist)
+* [`memstead login`↴](#memstead-login)
+* [`memstead logout`↴](#memstead-logout)
+* [`memstead create`↴](#memstead-create)
+* [`memstead update`↴](#memstead-update)
+* [`memstead relate`↴](#memstead-relate)
+* [`memstead delete`↴](#memstead-delete)
+* [`memstead rename`↴](#memstead-rename)
+* [`memstead batch-update`↴](#memstead-batch-update)
+* [`memstead recover`↴](#memstead-recover)
+* [`memstead changes`↴](#memstead-changes)
+* [`memstead reload`↴](#memstead-reload)
+* [`memstead vault`↴](#memstead-vault)
+* [`memstead vault init`↴](#memstead-vault-init)
+* [`memstead vault unregister`↴](#memstead-vault-unregister)
+* [`memstead vault delete`↴](#memstead-vault-delete)
+* [`memstead vault set-version`↴](#memstead-vault-set-version)
+* [`memstead vault set-schema`↴](#memstead-vault-set-schema)
+* [`memstead vault set-sync-state`↴](#memstead-vault-set-sync-state)
+* [`memstead vault list`↴](#memstead-vault-list)
+* [`memstead vault-repo`↴](#memstead-vault-repo)
+* [`memstead vault-repo init`↴](#memstead-vault-repo-init)
+* [`memstead workspace`↴](#memstead-workspace)
+* [`memstead workspace dump`↴](#memstead-workspace-dump)
+* [`memstead workspace show`↴](#memstead-workspace-show)
+* [`memstead workspace allow-create`↴](#memstead-workspace-allow-create)
+* [`memstead workspace revoke-create`↴](#memstead-workspace-revoke-create)
+* [`memstead workspace allow-delete`↴](#memstead-workspace-allow-delete)
+* [`memstead workspace revoke-delete`↴](#memstead-workspace-revoke-delete)
+* [`memstead workspace grant-cross-link`↴](#memstead-workspace-grant-cross-link)
+* [`memstead workspace revoke-cross-link`↴](#memstead-workspace-revoke-cross-link)
+* [`memstead workspace set-mutations`↴](#memstead-workspace-set-mutations)
+* [`memstead schema`↴](#memstead-schema)
+* [`memstead schema validate`↴](#memstead-schema-validate)
+* [`memstead schema install`↴](#memstead-schema-install)
+* [`memstead pipeline`↴](#memstead-pipeline)
+* [`memstead pipeline migrate`↴](#memstead-pipeline-migrate)
+
+## `memstead`
+
+Command-line interface for Memstead — query and mutate typed entity graphs from the shell. Default build produces the full `memstead` binary (multi-vault, git-backed); `--no-default-features` builds the lean folder-only surface.
+
+**Usage:** `memstead [OPTIONS] <COMMAND>`
+
+Exit codes:
+  0  success
+  1  generic failure (catch-all for non-classified errors)
+  2  usage error (clap argument-parse failure — unknown flag, bad value)
+  3  not found (entity / vault / resource missing)
+  4  hash mismatch (optimistic-locking failure on a mutation)
+  5  validation / schema / policy refusal
+
+  For programmatic branching, prefer `--json` over the exit code:
+    memstead <subcommand> ... --json | jq -r .code
+  The JSON envelope's `code` field carries the typed token
+  (e.g. INVALID_TITLE, HAS_INCOMING_REFS, CROSS_VAULT_LINK_NOT_ALLOWED)
+  with structured recovery details under `.details`.
+
+###### **Subcommands:**
+
+* `stats` — Node / edge counts and schema distribution
+* `entity` — Read one entity as markdown
+* `relations` — List typed edges for an entity
+* `search` — Find entities by text or graph proximity
+* `list` — Filter entities by metadata (no text match — use `search` for that)
+* `context` — Read an entity's community cluster
+* `overview` — All clusters with summaries and member lists. The full build renders the same rich content the MCP `memstead_overview` tool emits — both surfaces share the engine composer in `memstead-engine`
+* `type` — Describe one type, or list all types when no name given
+* `health` — Health summary (orphans, stubs, stale entities, missing fields)
+* `export` — Export the write vault as markdown (in place) or as a portable `.mem` archive
+* `init` — Initialise a filesystem vault in the current (or named) folder. Strict: errors out when the target is not empty
+* `install` — Install a sealed `.mem` vault — either a local file, or `<scope>/<name>` from the memstead.io registry
+* `link` — Link a filesystem vault to a registry-published dependency. `memstead link <scope/name>` fetches the archive into `.memstead/memstead-io/` and records the dep in `.memstead/config.json`
+* `publish` — Publish a `.mem` archive to the registry. Triggers GitHub Device Flow on first use; subsequent runs are silent
+* `unpublish` — Unpublish (hard-delete) `<scope>/<name>` from the registry. Permitted to the original uploader and to admins. The same `<scope>/<name>` becomes immediately re-publishable
+* `domain` — Domain-authority publishing: generate the signing key for a domain you control and print the `.well-known` manifest to host. `publish --scope <domain>:<handle>` then signs with that key — no GitHub account needed
+* `admin` — Admin-only registry moderation: take a vault down or deny-list bytes. Gated server-side by the `MEMSTEAD_ADMINS` allowlist; every action is recorded in the registry's append-only audit log
+* `login` — Authenticate with a registry via GitHub Device Flow. Optional — `publish` auto-triggers the same flow on first use
+* `logout` — Remove stored credentials for a registry
+* `create` — Create a new entity. Provide `--title`, `--type`, and the required section fields, or pass `--from <file.json>` with the full payload
+* `update` — Modify an existing entity. `--expected-hash` is required unless `--auto-hash` (refetch before write) or `--force` (skip check) is given
+* `relate` — Add or remove a typed relationship between two entities
+* `delete` — Delete an entity. Use `--dry-run` to preview impact first. Delete is hashless by design (no post-state to race on); race protection comes from `HAS_INCOMING_REFS` — and `RESIDUAL_STUB_FOR_READONLY_REFERRERS` for read-only-referrer cases
+* `rename` — Rename an entity (changes ID, file path, and every incoming wiki-link)
+* `batch-update` — Update many entities in one atomic call. Input is a JSON file with a top-level `updates: [...]` array (one entry per entity, each with its own hash mode and mutation fields). All-or-nothing: if any entry fails (validation, hash mismatch, missing entity) the whole batch is refused and NOTHING is committed — fix the named entry and resubmit. On success the batch lands as one commit. Mirrors `memstead update` per entry
+* `recover` — Apply parse-time-drift recovery across writable vaults. Walks `PARSED_RELATION_INVALID` warnings, re-renders affected source entities to drop the stale rows, and reports per-entry outcomes. Read-only-origin drops surface as skipped
+* `changes` — Diff a vault's HEAD against a commit SHA. Pass `--since` = a prior `commit_sha` from a mutation, or the canonical empty-tree hash `4b825dc642cb6eb9a060e54bf8d69288fbee4904` for a first sync
+* `reload` — Reload one writable vault's slice of the in-memory store from its on-disk branch tip — or every writable vault when `--vault` is omitted. CLI parity with the MCP `memstead_reload` tool
+* `vault` — Vault lifecycle commands
+* `vault-repo` — Vault-repo-git lifecycle commands
+* `workspace` — Introspect and configure workspace policy — `dump` reads the effective config; `allow-create`/`revoke-create`/`allow-delete`/ `revoke-delete`/`grant-cross-link`/`revoke-cross-link`/`set-mutations` write the vault-lifecycle allowlist, cross-vault link grants, and mutation policy
+* `schema` — Author-time schema tooling. `memstead schema validate <path>` checks a schema package directory against the engine's loader without touching a workspace
+* `pipeline` — Pipeline-config tooling. `memstead pipeline migrate` converts the legacy `scopes|projections|ingests/` JSON folders into the `.memstead/` workspace store's four-primitive shape
+
+###### **Options:**
+
+* `--json` — Emit JSON instead of markdown. Matches MCP `structured_content` shape
+* `--quiet` — Suppress engine startup logs on stderr
+
+
+
+## `memstead stats`
+
+Node / edge counts and schema distribution
+
+**Usage:** `memstead stats`
+
+
+
+## `memstead entity`
+
+Read one entity as markdown
+
+**Usage:** `memstead entity [OPTIONS] <ID>`
+
+###### **Arguments:**
+
+* `<ID>` — Entity ID (e.g. `specs--my-entity`)
+
+###### **Options:**
+
+* `--section <KEY>` — Restrict output to specific section keys (repeatable)
+* `--include-relations` — Append relations as a trailing JSON code block
+* `--token-budget <TOKEN_BUDGET>` — Token budget for chunking. Omit for no chunking
+* `--chunk <CHUNK>` — 1-based chunk index to return (requires `--token-budget`)
+
+
+
+## `memstead relations`
+
+List typed edges for an entity
+
+**Usage:** `memstead relations <ID>`
+
+###### **Arguments:**
+
+* `<ID>` — Entity ID
+
+
+
+## `memstead search`
+
+Find entities by text or graph proximity
+
+**Usage:** `memstead search [OPTIONS] [TEXT]`
+
+Filter surface:
+  Named-flag shortcuts (frozen — no new ones are added; use --filter
+  for any other schema-declared filterable field):
+    --type <T>          Filter by entity_type (engine first-class axis).
+    --level <L>         Filter by level (e.g. M0, M1).
+    --status <S>        Filter by status (e.g. active, closed).
+    --edge-type <E>     Filter by edge type (engine first-class axis).
+
+  Generic equality filter:
+    --filter KEY=VALUE  Filter by any schema-declared `filterable: equality`
+                        field. Repeatable. Examples:
+                          --filter tags=auth
+                          --filter scope=subsystem
+                          --filter confidence=high
+                          --filter tags=auth --filter level=M0
+  Unknown keys are silently dropped by the engine and surface as a
+  warning. Named-flag shortcuts and `--filter` populate the same
+  underlying filter map; if both set the same key, `--filter` wins
+  (declared last in the iteration order).
+
+###### **Arguments:**
+
+* `<TEXT>` — Free-text query. Omit for a pure structural filter
+
+###### **Options:**
+
+* `--vault <VAULT>`
+* `--type <ENTITY_TYPE>`
+* `--field <FIELD>` — Restrict text matching to a single field (title or section key). Maps to `Query.field` — narrows `any`, `not`, and `phrase` for the query. Replaces the former repeatable plural form, which was orphaned at the engine level
+* `--exclude <TOKEN>` — Exclude entities whose text matches this token. Repeatable — `--exclude OAuth --exclude SAML` drops every hit driven by either. Maps to `Query.not`. When combined with `--field`, the exclude scopes to that field via the engine's existing `Query.field` semantics.
+
+   Example: `memstead search auth --exclude OAuth` returns "auth"-matching entities that are not driven by an `OAuth` match.
+* `--phrase <TEXT>` — Restrict hits to entities containing this exact phrase (adjacency-sensitive). Maps to `Query.phrase`. Composable with `--field` (narrows the phrase match to one field) and `--exclude` (drops phrase-matching hits that also match the excluded token). Shell quoting is stripped before the binary sees the positional text argument — use this flag rather than quoting in the positional to express adjacency
+* `--edge-type <EDGE_TYPE>` — Filter by edge type (e.g. USES, IMPLEMENTS)
+* `--related-to <RELATED_TO>` — Only entities within `--depth` hops of this ID
+* `--depth <DEPTH>`
+* `--limit <LIMIT>`
+* `--offset <OFFSET>`
+* `--level <LEVEL>`
+* `--status <STATUS>`
+* `--filter <KEY=VALUE>` — Equality filter on any schema-declared filterable field: repeatable `--filter KEY=VALUE`. The four named-flag shortcuts (`--type` / `--level` / `--status` / `--edge-type`) handle their common cases; every other `filterable: equality` field (e.g. `tags`, `scope`) is reachable via this generic flag. Unknown keys are dropped and surface as engine warnings. There is no `--confidence` shortcut: a field reached only when a schema declares it goes through `--filter <field>=<value>` rather than a dedicated flag
+* `--stub` — Return only stub entities (conflicts with --no-stub)
+* `--no-stub` — Return only real (non-stub) entities (conflicts with --stub)
+
+
+
+## `memstead list`
+
+Filter entities by metadata (no text match — use `search` for that)
+
+**Usage:** `memstead list [OPTIONS]`
+
+Filter surface:
+  Named-flag shortcuts (frozen — no new ones are added; use --filter
+  for any other schema-declared filterable field):
+    --type <T>          Filter by entity_type (engine first-class axis).
+    --level <L>         Filter by level (e.g. M0, M1).
+    --status <S>        Filter by status (e.g. active, closed).
+    --edge-type <E>     Filter by edge type (engine first-class axis).
+
+  Generic equality filter:
+    --filter KEY=VALUE  Filter by any schema-declared `filterable: equality`
+                        field. Repeatable. Examples:
+                          --filter tags=auth
+                          --filter scope=subsystem
+                          --filter confidence=high
+                          --filter tags=auth --filter level=M0
+  Unknown keys are silently dropped by the engine and surface as a
+  warning. Named-flag shortcuts and `--filter` populate the same
+  underlying filter map; if both set the same key, `--filter` wins
+  (declared last in the iteration order).
+
+###### **Options:**
+
+* `--vault <VAULT>`
+* `--type <ENTITY_TYPE>`
+* `--level <LEVEL>`
+* `--status <STATUS>`
+* `--edge-type <EDGE_TYPE>`
+* `--filter <KEY=VALUE>` — Equality filter on any schema-declared filterable field: repeatable `--filter KEY=VALUE`. The four named-flag shortcuts (`--type` / `--level` / `--status` / `--edge-type`) handle their common cases; every other `filterable: equality` field (e.g. `tags`, `scope`) is reachable via this generic flag. Unknown keys are dropped and surface as engine warnings. There is no `--confidence` shortcut: a field reached only when a schema declares it goes through `--filter <field>=<value>` rather than a dedicated flag
+* `--limit <LIMIT>`
+* `--offset <OFFSET>`
+
+
+
+## `memstead context`
+
+Read an entity's community cluster
+
+**Usage:** `memstead context [OPTIONS] <ID_OR_QUERY>`
+
+###### **Arguments:**
+
+* `<ID_OR_QUERY>` — Entity ID (exact match preferred) or search text (fallback)
+
+###### **Options:**
+
+* `--chunk <CHUNK>` — 1-based chunk index for large contexts
+
+
+
+## `memstead overview`
+
+All clusters with summaries and member lists. The full build renders the same rich content the MCP `memstead_overview` tool emits — both surfaces share the engine composer in `memstead-engine`
+
+**Usage:** `memstead overview [OPTIONS]`
+
+###### **Options:**
+
+* `--rebuild` — Re-run Louvain community detection before rendering
+* `--chunk <CHUNK>` — 1-based chunk index for large overviews
+* `--vault <VAULT>` — Scope schemas + vault inventory to a single writable vault
+* `--include <KEY>` — Opt heavy content into the response: `community_members`, `community_bridges`, `vault_distribution`, `dangling_links`. Keys listed here are always included even past `token_budget`; keys omitted may surface in the `Hints` section instead. Repeatable (`--include K --include K`) AND comma-string (`--include K1,K2`) forms both parse — uniform with `memstead health --include`. Unknown keys emit `UNKNOWN_INCLUDE_KEY` warnings
+* `--token-budget <N>` — Token budget for heavy content only (`community_members`, `community_bridges`, `vault_distribution`, `dangling_links`). Hard-required content (vault roster, schema refs, community titles, workspace policy) always ships in addition — total response size will exceed this budget. Default 8000 (matches the MCP tool). Budgets below ~10 tokens are safe but unproductive — the response still arrives as a structured envelope (`_overview_mode: overbudget`), but no useful chunking happens and the full body ships as one chunk
+
+
+
+## `memstead type`
+
+Describe one type, or list all types when no name given
+
+**Usage:** `memstead type [OPTIONS] [NAME]`
+
+###### **Arguments:**
+
+* `<NAME>`
+
+###### **Options:**
+
+* `--vault <VAULT>` — Resolve the schema from this writable vault's pin. Required when the workspace has more than one writable vault; defaults to the lone writable vault otherwise
+
+
+
+## `memstead health`
+
+Health summary (orphans, stubs, stale entities, missing fields)
+
+**Usage:** `memstead health [OPTIONS]`
+
+###### **Options:**
+
+* `--include <INCLUDE>` — Opt heavy content into the response: orphans, stubs, most_connected, missing_fields, stale, dangling_links, tags, missing_required_outgoing, conformance, integrity. `conformance` lints every entity against the effective schema into a `findings` array (write-time typed codes); `integrity` adds the consistency axis (dangling links, stubs) to the same list. Repeatable (`--include K --include K`) AND comma-string (`--include K1,K2`) forms both parse — uniform with `memstead overview --include`
+* `--target-schema <TARGET_SCHEMA>` — Schema ref (`name@x.y.z`) the conformance/integrity includes lint against instead of each vault's current pin
+* `--limit <LIMIT>` — Max rows for `most_connected` and `tag_distribution` (default: 10)
+
+  Default value: `10`
+* `--strict` — Exit non-zero (1) when any included Tier-2 warning kind has present violations. The output is rendered first, then the non-zero exit fires. Today only `missing_required_outgoing` participates; new Tier-2 codes opt in additively without breaking the flag's semantics. With no Tier-2 `--include` token, `--strict` is a no-op
+
+
+
+## `memstead export`
+
+Export the write vault as markdown (in place) or as a portable `.mem` archive
+
+**Usage:** `memstead export [OPTIONS]`
+
+###### **Options:**
+
+* `--format <FORMAT>` — Output format. `markdown` regenerates the vault directory in place (folder-backed vaults only); `vault` writes a portable `.mem` zip suitable for sharing (every backend)
+
+  Default value: `markdown`
+
+  Possible values:
+  - `markdown`:
+    Regenerate markdown files in place
+  - `vault`:
+    Write a `.mem` zip archive to `--output`
+
+* `-o`, `--output <PATH>` — Output path for `--format vault`. Defaults to `./<name>-<version>.mem` in the current directory, matching the "external vs cache filename" convention for portable vault archives. Ignored for `--format markdown`
+* `--vault <NAME>` — Which vault to export (by name). For `--format markdown`, omitting this argument runs a workspace-wide export and reports any declined mounts under `skipped_mounts`. For `--format vault`, required when more than one write vault is loaded; defaults to the first writable vault otherwise
+
+
+
+## `memstead init`
+
+Initialise a filesystem vault in the current (or named) folder. Strict: errors out when the target is not empty
+
+**Usage:** `memstead init --name <NAME> --schema <SCHEMA> [PATH]`
+
+###### **Arguments:**
+
+* `<PATH>` — Target folder. Defaults to the current working directory
+
+###### **Options:**
+
+* `--name <NAME>` — Vault name. Slug-shaped: `^[a-z0-9][a-z0-9-]{0,62}[a-z0-9]$`
+* `--schema <SCHEMA>` — Schema pin in exact `<name>@<version>` form (e.g. `default@1.0.0`). Bare-name pins are rejected. filesystem-vault v1 resolves against the engine's builtin schema set; registry-resolved schemas land in a follow-up
+
+
+
+## `memstead install`
+
+Install a sealed `.mem` vault — either a local file, or `<scope>/<name>` from the memstead.io registry
+
+**Usage:** `memstead install [OPTIONS] <PATH or SCOPE/NAME>`
+
+###### **Arguments:**
+
+* `<PATH or SCOPE/NAME>` — Either a path to a `.mem` file (legacy `.mstd`/`.mdgv` accepted), or `<scope>/<name>` for registry installs (no `@` prefix)
+
+###### **Options:**
+
+* `--vault <NAME>` — Which writable vault to register this read-vault into (by name). Defaults to the first writable vault when omitted.
+
+   This flag selects the *host* vault — the writable workspace vault that will list the archive in its read-vaults set. It does NOT rename the archive's internal vault; the archive's internal name is the canonical identity used by all cross-vault references and shadow checks.
+* `--registry <URL>` — Registry URL for `<scope>/<name>` installs. Ignored for local paths. Overrides `MEMSTEAD_REGISTRY`; defaults to https://memstead.io
+
+
+
+## `memstead link`
+
+Link a filesystem vault to a registry-published dependency. `memstead link <scope/name>` fetches the archive into `.memstead/memstead-io/` and records the dep in `.memstead/config.json`
+
+**Usage:** `memstead link [OPTIONS] <SCOPE/NAME>`
+
+###### **Arguments:**
+
+* `<SCOPE/NAME>` — Cross-vault dependency in `scope/name` form (no `@` prefix — that is the `memstead install` shape). Tier 3 wiki-links use the same form, so the input here matches what users will type inside `[[scope/name:slug]]`
+
+###### **Options:**
+
+* `--registry <URL>` — Override the registry URL. Falls back to `MEMSTEAD_REGISTRY` then the default `https://memstead.io`
+* `--workspace <PATH>` — Override the workspace root (the folder containing `.memstead/config.json`). When omitted, the command walks up from the current working directory
+
+
+
+## `memstead publish`
+
+Publish a `.mem` archive to the registry. Triggers GitHub Device Flow on first use; subsequent runs are silent
+
+**Usage:** `memstead publish [OPTIONS] [PATH]`
+
+###### **Arguments:**
+
+* `<PATH>` — Path to a `.mem` archive on disk (a legacy `.mstd`/`.mdgv` file is accepted during the rename window). Omit to assemble the archive from the surrounding filesystem-vault workspace (walks up from cwd looking for `.memstead/config.json`)
+
+###### **Options:**
+
+* `--workspace <PATH>` — Override the workspace root for the no-arg / `--vault` shapes. Ignored when an archive PATH is provided. Defaults to walking up from cwd
+* `--vault <NAME>` — Export-and-publish a named vault from the current workspace in one step — the path for vault-repo (multi-vault, git-branch) workspaces, which have no folder to wrap up. Ignored when an archive PATH is provided. A single-vault folder workspace can omit this and just run `memstead publish`
+* `--scope <NAME>` — Override the auto-derived scope — admin-only, reserved scopes only (currently just `memstead`). Without this flag the registry stores the vault under your GitHub username
+* `--token <TOKEN>` — Explicit token override. Takes precedence over `MEMSTEAD_TOKEN` and stored credentials
+* `--registry <URL>` — Registry URL (overrides `MEMSTEAD_REGISTRY`; defaults to https://memstead.io)
+* `--version <SEMVER>` — Set the vault's version to this semver and publish in one step, persisting the bump to the vault config (like `npm version` + `npm publish`). Requires `--vault <name>`; not valid with a pre-built archive PATH, whose version is already baked in. Omit to publish whatever version the vault config currently carries
+* `--dry-run` — Assemble and resolve everything, print exactly what would be published (vault, version, scope, archive size), but POST nothing and mutate nothing — including no version bump. The safe way to confirm a publish before it goes out
+
+
+
+## `memstead unpublish`
+
+Unpublish (hard-delete) `<scope>/<name>` from the registry. Permitted to the original uploader and to admins. The same `<scope>/<name>` becomes immediately re-publishable
+
+**Usage:** `memstead unpublish [OPTIONS] <SCOPE/NAME>`
+
+###### **Arguments:**
+
+* `<SCOPE/NAME>` — `<scope>/<name>` of the vault to unpublish
+
+###### **Options:**
+
+* `--token <TOKEN>` — Explicit token override. Takes precedence over `MEMSTEAD_TOKEN` and stored credentials
+* `--registry <URL>` — Registry URL (overrides `MEMSTEAD_REGISTRY`; defaults to https://memstead.io)
+
+
+
+## `memstead domain`
+
+Domain-authority publishing: generate the signing key for a domain you control and print the `.well-known` manifest to host. `publish --scope <domain>:<handle>` then signs with that key — no GitHub account needed
+
+**Usage:** `memstead domain <COMMAND>`
+
+###### **Subcommands:**
+
+* `keygen` — Generate a signing keypair for a domain and print the manifest to host
+* `manifest` — Re-print the `.well-known` manifest for a domain's existing key
+
+
+
+## `memstead domain keygen`
+
+Generate a signing keypair for a domain and print the manifest to host
+
+**Usage:** `memstead domain keygen [OPTIONS] --domain <DOMAIN> --contact <EMAIL_OR_URI>`
+
+###### **Options:**
+
+* `--domain <DOMAIN>` — The domain you control, e.g. `acme.com`. Vaults publish under `<domain>:<handle>`
+* `--contact <EMAIL_OR_URI>` — Abuse / ownership contact (email or URI). Repeatable; at least one is required — a takedown notice must be able to reach you
+* `--force` — Replace an existing key for this domain (rotation). The hosted manifest must then be updated to the new public key
+
+
+
+## `memstead domain manifest`
+
+Re-print the `.well-known` manifest for a domain's existing key
+
+**Usage:** `memstead domain manifest --domain <DOMAIN> --contact <EMAIL_OR_URI>`
+
+###### **Options:**
+
+* `--domain <DOMAIN>` — The domain whose stored key to render a manifest for
+* `--contact <EMAIL_OR_URI>` — Abuse / ownership contact (email or URI). Repeatable; at least one is required
+
+
+
+## `memstead admin`
+
+Admin-only registry moderation: take a vault down or deny-list bytes. Gated server-side by the `MEMSTEAD_ADMINS` allowlist; every action is recorded in the registry's append-only audit log
+
+**Usage:** `memstead admin <COMMAND>`
+
+###### **Subcommands:**
+
+* `takedown` — Take down a published vault (admin-only): deny-list its bytes, tombstone every version, and burn the `<scope>/<name>` so neither the bytes nor the name can be re-published. The notice reference is recorded as the DSA statement-of-reasons in the audit log
+* `denylist` — Add a canonical-bytes SHA-256 to the content deny-list (admin-only) so a publish of exactly those bytes is refused — even before they are ever uploaded
+
+
+
+## `memstead admin takedown`
+
+Take down a published vault (admin-only): deny-list its bytes, tombstone every version, and burn the `<scope>/<name>` so neither the bytes nor the name can be re-published. The notice reference is recorded as the DSA statement-of-reasons in the audit log
+
+**Usage:** `memstead admin takedown [OPTIONS] --notice <REF> <SCOPE/NAME>`
+
+###### **Arguments:**
+
+* `<SCOPE/NAME>` — `<scope>/<name>` of the vault to take down (e.g. `github:alice/my-vault`)
+
+###### **Options:**
+
+* `--notice <REF>` — Statement-of-reasons / notice reference recorded with the action (e.g. an abuse-ticket id or legal-notice ref). Required so the audit log can justify the takedown
+* `--token <TOKEN>` — Explicit token override. Takes precedence over `MEMSTEAD_TOKEN` and stored credentials
+* `--registry <URL>` — Registry URL (overrides `MEMSTEAD_REGISTRY`; defaults to https://memstead.io)
+
+
+
+## `memstead admin denylist`
+
+Add a canonical-bytes SHA-256 to the content deny-list (admin-only) so a publish of exactly those bytes is refused — even before they are ever uploaded
+
+**Usage:** `memstead admin denylist [OPTIONS] <SHA256>`
+
+###### **Arguments:**
+
+* `<SHA256>` — Canonical-bytes SHA-256 (64 hex chars) to block
+
+###### **Options:**
+
+* `--reason <TEXT>` — Free-text reason recorded on the deny-list row
+* `--token <TOKEN>` — Explicit token override. Takes precedence over `MEMSTEAD_TOKEN` and stored credentials
+* `--registry <URL>` — Registry URL (overrides `MEMSTEAD_REGISTRY`; defaults to https://memstead.io)
+
+
+
+## `memstead login`
+
+Authenticate with a registry via GitHub Device Flow. Optional — `publish` auto-triggers the same flow on first use
+
+**Usage:** `memstead login [OPTIONS]`
+
+###### **Options:**
+
+* `--registry <URL>` — Registry URL (overrides `MEMSTEAD_REGISTRY`; defaults to https://memstead.io)
+
+
+
+## `memstead logout`
+
+Remove stored credentials for a registry
+
+**Usage:** `memstead logout [OPTIONS]`
+
+###### **Options:**
+
+* `--registry <URL>` — Registry URL (overrides `MEMSTEAD_REGISTRY`; defaults to https://memstead.io)
+
+
+
+## `memstead create`
+
+Create a new entity. Provide `--title`, `--type`, and the required section fields, or pass `--from <file.json>` with the full payload
+
+**Usage:** `memstead create [OPTIONS]`
+
+Section / append / patch flag values:
+  `--section KEY=VALUE`, `--append KEY=VALUE`, and `--patch KEY=OLD=>NEW`
+  store the right-hand side as bytes verbatim. The CLI does NOT
+  interpret backslash escapes — `--section purpose="line1\nline2"`
+  writes the literal two-character sequence `\n` into the section
+  body, not a newline.
+
+  For multi-line section content, use `--from <FILE>` where FILE is a
+  JSON payload matching the MCP `memstead_create` / `memstead_update` shape.
+  The JSON parser de-escapes `\n`, `\t`, etc. before the engine
+  sees the value, so a JSON-quoted `"line1\nline2"` round-trips as
+  two lines on disk.
+
+Slug derivation:
+  The entity slug derives from the title in five steps:
+    1. NFC-normalize (combining sequences fold to precomposed form);
+    2. Unicode case-fold to lowercase;
+    3. rewrite each whitespace character to '-';
+    4. drop every character that is not Unicode alphanumeric and not '-';
+    5. collapse hyphen runs, trim leading/trailing hyphens.
+
+  The mutation entry refuses titles where step 4 would drop any
+  character, or where the pipeline output is empty (whitespace- or
+  hyphen-only input). Errors carry a `proposed_slug` recovery hint
+  so a sanitised retry is mechanical.
+
+  The title body is stored as-sent (byte-form preserved); slug bytes
+  derive from the NFC-normalised form. An NFD-spelled title therefore
+  produces an NFC-spelled slug — the two byte forms are semantically
+  equivalent and compare equal under NFC normalization.
+
+  Pre-gate entities (created before this stricter rule landed) remain
+  readable. The gate runs at mutation entry only — it does not
+  retroactively reject entities loaded from disk.
+
+###### **Options:**
+
+* `--title <TITLE>` — Entity title. Required unless `--from` is given
+* `--type <ENTITY_TYPE>` — Entity type (e.g. `spec`, `memo`, `concept`). Required unless `--from` is given
+* `--vault <VAULT>` — Vault name. Defaults to the first writable vault
+* `--section <KEY=VALUE>` — Section content: repeatable `--section key=value`. Body wiki-links must take slug-form (`[[idempotency]]`, not the title-case `[[Idempotency]]`) — a non-slug target refuses with `INVALID_WIKI_LINK_TARGET` carrying a `proposed_slug` to retry with
+* `--metadata <KEY=VALUE>` — Metadata override: repeatable `--metadata key=value`
+* `--relation <TYPE:TARGET>` — Initial relationship: repeatable `--relation TYPE:target-id`
+* `--from <FILE>` — JSON file matching the MCP `memstead_create` args shape. If set, all `--title` / `--type` / `--section` / `--metadata` / `--relation` flags are ignored (the file is the single source of truth)
+* `--dry-run` — Preview only — validate and compute the result without writing to disk, mutating the store, or producing a commit. Response carries the prospective id / file_path / content_hash plus any warnings
+* `--note <NOTE>` — Agent-authored provenance note (≤280 chars, one sentence describing why this mutation happened). Lands in the per-vault commit body between the mechanical subject line and the provenance trailers. When `[mutations].require_notes = true` in workspace config a missing note adds a `NOTE_MISSING` warning to the response (the mutation still commits). When `--from` also carries a `note`, this flag takes precedence
+
+
+
+## `memstead update`
+
+Modify an existing entity. `--expected-hash` is required unless `--auto-hash` (refetch before write) or `--force` (skip check) is given
+
+**Usage:** `memstead update [OPTIONS] [ID]`
+
+###### **Arguments:**
+
+* `<ID>` — Full entity ID (e.g. `specs--my-entity`). Required unless `--from` is given
+
+###### **Options:**
+
+* `--expected-hash <HASH>` — Hash from `memstead entity <id>` (the `_hash` field). Required unless `--auto-hash` or `--force` is given
+* `--auto-hash` — Refetch the current hash immediately before writing. Convenient for interactive use; accepts the race window between the refetch and the write
+* `--force` — Skip the hash check entirely (explicit overwrite)
+* `--section <KEY=VALUE>` — Replace section content: repeatable `--section key=value`. Body wiki-links must take slug-form (`[[idempotency]]`, not the title-case `[[Idempotency]]`) — a non-slug target refuses with `INVALID_WIKI_LINK_TARGET` carrying a `proposed_slug` to retry with
+* `--append <KEY=VALUE>` — Append to section content: repeatable `--append key=value`
+* `--patch <KEY=OLD=>NEW>` — Find-and-replace inside a section: repeatable `--patch key=OLD=>NEW`. Use `=>` (two chars) as the separator between old and new. Exact match of the first occurrence; use `--patch-all` to replace every occurrence
+* `--patch-all <KEY=OLD=>NEW>` — Replace every occurrence of OLD in the section — sibling of `--patch`. Repeatable `--patch-all key=OLD=>NEW`
+* `--metadata <KEY=VALUE>` — Metadata field: repeatable `--metadata key=value`
+* `--metadata-unset <KEY>` — Remove a metadata field: repeatable `--metadata-unset KEY`. Silent no-op if the key is absent; errors on read-only fields (vault/id/type plus the engine-stamped created_date/last_modified) or schema-required fields
+* `--declare-relations <REL_TYPE:TARGET_ID>` — Atomic batched relation declaration: repeatable `--declare-relations REL_TYPE:TARGET_ID`. Each entry is validated like an individual `memstead relate` call (schema-shape, cross-vault policy, target-id grammar) and appended to the entity's relations BEFORE the strict wiki-link/relation validator runs. Lets the agent add `[[target]]` body wiki-links AND declare the backing relation in one `memstead update` call without an interleaved `memstead relate`. Absent Write-vault targets are auto-stubbed identically to `memstead relate`'s add path. Each successful declaration is echoed in the response's `relations_declared` (with `target_was_stubbed` flagging the auto-stub case)
+* `--dry-run` — Preview what would change without writing
+* `--from <FILE>` — JSON file matching MCP `memstead_update` args shape. When set, flags above except the hash-mode flags are ignored
+* `--note <NOTE>` — Agent-authored provenance note (≤280 chars). When `[mutations].require_notes = true` a missing note adds a `NOTE_MISSING` warning
+
+
+
+## `memstead relate`
+
+Add or remove a typed relationship between two entities
+
+**Usage:** `memstead relate [OPTIONS] [FROM] [REL_TYPE] [TO]`
+
+###### **Arguments:**
+
+* `<FROM>` — Source entity ID (positional). Flag synonym: `--from`
+* `<REL_TYPE>` — Relationship type (positional). Flag synonym: `--rel-type`. UPPER_SNAKE_CASE, e.g. `USES`, `PART_OF`
+* `<TO>` — Target entity ID (positional). Flag synonym: `--to`. Creates a stub if the target doesn't exist
+
+###### **Options:**
+
+* `--from <ID>` — Source entity ID (named flag form)
+* `--rel-type <REL_TYPE>` — Relationship type (named flag form)
+* `--to <ID>` — Target entity ID (named flag form)
+* `--remove` — Remove the relationship instead of creating it
+* `--description <DESCRIPTION>` — Per-edge description applied on add. Validated against the rel-type's `per_edge_description` posture; rel-types declared `forbidden` reject this flag, `required` reject its absence
+* `--note <NOTE>` — Agent-authored provenance note (≤280 chars). When `[mutations].require_notes = true` a missing note adds a `NOTE_MISSING` warning
+
+
+
+## `memstead delete`
+
+Delete an entity. Use `--dry-run` to preview impact first. Delete is hashless by design (no post-state to race on); race protection comes from `HAS_INCOMING_REFS` — and `RESIDUAL_STUB_FOR_READONLY_REFERRERS` for read-only-referrer cases
+
+**Usage:** `memstead delete [OPTIONS] <ID>`
+
+###### **Arguments:**
+
+* `<ID>` — Entity ID to delete
+
+###### **Options:**
+
+* `--dry-run` — Show what would be removed without deleting anything
+* `--note <NOTE>` — Agent-authored provenance note (≤280 chars). When `[mutations].require_notes = true` a missing note adds a `NOTE_MISSING` warning
+
+
+
+## `memstead rename`
+
+Rename an entity (changes ID, file path, and every incoming wiki-link)
+
+**Usage:** `memstead rename [OPTIONS] <ID> <NEW_TITLE>`
+
+Slug derivation:
+  The entity slug derives from the title in five steps:
+    1. NFC-normalize (combining sequences fold to precomposed form);
+    2. Unicode case-fold to lowercase;
+    3. rewrite each whitespace character to '-';
+    4. drop every character that is not Unicode alphanumeric and not '-';
+    5. collapse hyphen runs, trim leading/trailing hyphens.
+
+  The mutation entry refuses titles where step 4 would drop any
+  character, or where the pipeline output is empty (whitespace- or
+  hyphen-only input). Errors carry a `proposed_slug` recovery hint
+  so a sanitised retry is mechanical.
+
+  The title body is stored as-sent (byte-form preserved); slug bytes
+  derive from the NFC-normalised form. An NFD-spelled title therefore
+  produces an NFC-spelled slug — the two byte forms are semantically
+  equivalent and compare equal under NFC normalization.
+
+  Pre-gate entities (created before this stricter rule landed) remain
+  readable. The gate runs at mutation entry only — it does not
+  retroactively reject entities loaded from disk.
+
+###### **Arguments:**
+
+* `<ID>` — Current entity ID
+* `<NEW_TITLE>` — New title. The ID is re-derived from the title
+
+###### **Options:**
+
+* `--expected-hash <HASH>` — Hash from `memstead entity <id>`. Required unless `--auto-hash` or `--force`
+* `--auto-hash` — Refetch the current hash immediately before writing
+* `--force` — Skip the hash check (explicit overwrite)
+* `--note <NOTE>` — Agent-authored provenance note (≤280 chars). When `[mutations].require_notes = true` a missing note adds a `NOTE_MISSING` warning
+
+
+
+## `memstead batch-update`
+
+Update many entities in one atomic call. Input is a JSON file with a top-level `updates: [...]` array (one entry per entity, each with its own hash mode and mutation fields). All-or-nothing: if any entry fails (validation, hash mismatch, missing entity) the whole batch is refused and NOTHING is committed — fix the named entry and resubmit. On success the batch lands as one commit. Mirrors `memstead update` per entry
+
+**Usage:** `memstead batch-update --from <FILE>`
+
+###### **Options:**
+
+* `--from <FILE>` — JSON file with a top-level `updates: [...]` array
+
+
+
+## `memstead recover`
+
+Apply parse-time-drift recovery across writable vaults. Walks `PARSED_RELATION_INVALID` warnings, re-renders affected source entities to drop the stale rows, and reports per-entry outcomes. Read-only-origin drops surface as skipped
+
+**Usage:** `memstead recover [OPTIONS]`
+
+###### **Options:**
+
+* `--note <NOTE>` — Optional commit-body note recorded on every per-source re-render commit the recovery produces
+
+
+
+## `memstead changes`
+
+Diff a vault's HEAD against a commit SHA. Pass `--since` = a prior `commit_sha` from a mutation, or the canonical empty-tree hash `4b825dc642cb6eb9a060e54bf8d69288fbee4904` for a first sync
+
+**Usage:** `memstead changes [OPTIONS] --since <SINCE>`
+
+###### **Options:**
+
+* `--vault <VAULT>` — Writable vault name. Defaults to the first loaded vault
+* `--since <SINCE>` — Commit SHA to diff against. Pass a prior mutation's `commit_sha`, or the git canonical empty-tree hash `4b825dc642cb6eb9a060e54bf8d69288fbee4904` for a fresh-client first sync
+* `--rename-similarity <RENAME_SIMILARITY>` — Rename detection threshold in [0.1, 1.0]; mirrors the MCP `rename_similarity` parameter. Default 0.6. Engine-authored renames pair via commit-note provenance and bypass this threshold; the value drives the gix-similarity fallback for non-engine renames (external `git mv`, pre-provenance migrations). Lower widens the recall window at the cost of false-positive pairing on that path
+* `--include-notes` — Fold per-commit agent-notes (subject, note, actor, tool, client) and the workspace-level `__MEMSTEAD` ref tip (unified schemas + per-vault configs) into the response. Default off — entity- delta only. Outer-repo auto-commit consumers turn this on so they get notes + the registry-ref sha in one round-trip without re-walking the gitdir
+
+
+
+## `memstead reload`
+
+Reload one writable vault's slice of the in-memory store from its on-disk branch tip — or every writable vault when `--vault` is omitted. CLI parity with the MCP `memstead_reload` tool
+
+**Usage:** `memstead reload [OPTIONS]`
+
+###### **Options:**
+
+* `--vault <VAULT>` — Writable vault name to reload. Omit to reload every writable vault. Mirrors the MCP `memstead_reload` parameter shape and the op's semantics: per-vault form is cheap and skips the workspace-level settings refresh; workspace-wide form (omit `--vault`) reloads every vault and also re-reads `.memstead/workspace.toml` to pick up policy edits
+
+
+
+## `memstead vault`
+
+Vault lifecycle commands
+
+**Usage:** `memstead vault <COMMAND>`
+
+###### **Subcommands:**
+
+* `init` — Register a new vault via the engine's vault-management orchestrator
+* `unregister` — Router-only removal — unregisters the vault from the workspace but leaves its stored content in place for archive workflows. Cross-vault grants pointing at the unregistered vault stay valid (the data they rely on survives); a follow-up `memstead vault init <same name>` re-attaches against the preserved storage. Refuses with `VAULT_HAS_INCOMING_REFS` when entities in other vaults still link into this one — remove those incoming cross-vault references first (mirrors `vault delete`'s precondition)
+* `delete` — Storage-destroying removal — unregisters the vault AND deletes its stored content. Refuses with `VAULT_REFERENCED_BY_POLICY` when any other writable vault has a `cross_vault_links` grant pointing at the target (revoke the grant first). For router-only removal that keeps the storage, use `memstead vault unregister`
+* `set-version` — Update a vault's `version` field. The version is consumed by `memstead export --format vault` to stamp the archive filename and the `.mem` archive's published config. `version` is seeded at init (`0.1.0`); bump via this command before publishing
+* `set-schema` — Set a vault's schema pin — the integrity-driven schema-migration trigger. Already-integral vaults switch immediately; otherwise the vault enters dual-pin migration (writes validate against the target) and the response lists the non-integral entities. Re-issue after repairing to complete the switch
+* `set-sync-state` — Set (or clear) one opaque sync-state token in a vault's config — the ingest layer's durable "last synced source state" baseline. `<KEY>` and `<TOKEN>` are opaque to the engine (the ingest layer keys per `(ingest, facet)` and owns the token's meaning). An empty `<TOKEN>` clears the key. Written into the per-vault config and surfaced verbatim on `memstead workspace dump`
+* `list` — Enumerate every mounted vault in the workspace with its schema pin, version, entity count, and capability (writable vs read-only). Markdown by default; pass `--json` (root flag) for the structured envelope
+
+
+
+## `memstead vault init`
+
+Register a new vault via the engine's vault-management orchestrator
+
+**Usage:** `memstead vault init [OPTIONS] <PATH>`
+
+###### **Arguments:**
+
+* `<PATH>` — Vault name — the full hierarchical identifier (e.g. `foo` for a flat-layout vault, `team/sub-vault` for a hierarchical layout). The value flows through to the engine verbatim with no auto-split or composition step. Grammar: `[a-z0-9-]+(/[a-z0-9-]+)*` — lowercase ASCII letters, digits, hyphens; segments separated by `/`; no leading, trailing, or double slashes (validated engine-side; bad names return `INVALID_INPUT`)
+
+###### **Options:**
+
+* `--schema <SCHEMA>` — Schema pin (`name@x.y.z`) for the new vault. Defaults to `default@1.0.0` so the common case stays one argument
+
+  Default value: `default@1.0.0`
+* `--vcs-shared` — Pass a shared-gitdir `vcs` block to `memstead_vault_create`: `{ "gitdir": "../.git", "worktree": ".." }`. Without this flag the engine uses the default isolated layout
+* `--no-gitignore` — Skip outer-repo `.gitignore` auto-append. Useful when the user intends to track the workspace as a git submodule, or when the detection heuristic would pick the wrong outer repo
+* `--note <NOTE>` — Optional provenance note recorded in the seed commit's body (≤280 chars). Forwarded as the MCP tool's `note` parameter
+* `--reattach` — Adopt residual entities left by a prior `memstead vault unregister` at this vault's path instead of failing on detected residue. Default when the residue carries an `unregistered_at` tombstone (the deliberate unregister signal); pass `--reattach` explicitly to override for crash-residue you have verified is safe to adopt. Mutually exclusive with `--force-overwrite` and `--hard-cleanup-first`
+* `--force-overwrite` — Destroy residual storage at this vault's path and proceed with a fresh create. **Not yet implemented** — currently refuses with `INVALID_INPUT` pointing at `memstead vault delete <name>`. Mutually exclusive with `--reattach` and `--hard-cleanup-first`
+* `--hard-cleanup-first` — Refuse with `VAULT_STORAGE_RESIDUE_DETECTED` instructing the caller to run `memstead vault delete <name>` first — a hard barrier that keeps residue cleanup a separate, named operation rather than destructive auto-recovery. Mutually exclusive with `--reattach` and `--force-overwrite`
+* `--operator-mode` — Bypass the workspace `[[vault_management.create]]` allowlist for this invocation. The CLI honours the allowlist by default (matching the MCP-surface posture); operator-mode is explicit opt-in. Also settable via the `MEMSTEAD_OPERATOR_MODE=1` env var for script convenience; the flag wins when both are set. Use this when the CLI invocation is the operator administering the workspace itself (initial scaffold, recovery flows) rather than scripted/agent usage
+* `--write-guidance <WRITE_GUIDANCE>` — Optional per-instance writing guidance as a JSON object, written verbatim into the new vault's config `writeGuidance` map — e.g. `--write-guidance '{"phase_context":"early design","stack":"Rust"}'`. Opaque to the engine (schema-strictness D8 — the keys are client-owned vocabulary); a wrapper that read the schema package's `vault-template.json` fills the instance keys. Omit to seed no guidance. Must be a JSON object; anything else refuses with `INVALID_INPUT`
+
+
+
+## `memstead vault unregister`
+
+Router-only removal — unregisters the vault from the workspace but leaves its stored content in place for archive workflows. Cross-vault grants pointing at the unregistered vault stay valid (the data they rely on survives); a follow-up `memstead vault init <same name>` re-attaches against the preserved storage. Refuses with `VAULT_HAS_INCOMING_REFS` when entities in other vaults still link into this one — remove those incoming cross-vault references first (mirrors `vault delete`'s precondition)
+
+**Usage:** `memstead vault unregister [OPTIONS] <NAME>`
+
+###### **Arguments:**
+
+* `<NAME>` — Name of the vault to unregister
+
+###### **Options:**
+
+* `--note <NOTE>` — Optional provenance note (≤280 chars). Captured on the engine trace surface; surfaces via the outer-repo Stop hook
+* `--operator-mode` — Bypass the workspace `[[vault_management.delete]]` allowlist for this invocation. See `InitArgs::operator_mode` for the full design rationale. Also settable via `MEMSTEAD_OPERATOR_MODE=1`
+
+
+
+## `memstead vault delete`
+
+Storage-destroying removal — unregisters the vault AND deletes its stored content. Refuses with `VAULT_REFERENCED_BY_POLICY` when any other writable vault has a `cross_vault_links` grant pointing at the target (revoke the grant first). For router-only removal that keeps the storage, use `memstead vault unregister`
+
+**Usage:** `memstead vault delete [OPTIONS] <NAME>`
+
+###### **Arguments:**
+
+* `<NAME>` — Name of the vault to destroy
+
+###### **Options:**
+
+* `--note <NOTE>` — Optional provenance note (≤280 chars). Captured on the engine trace surface; surfaces via the outer-repo Stop hook. No per-vault commit is produced by delete
+* `--operator-mode` — Bypass the workspace `[[vault_management.delete]]` allowlist for this invocation. See `InitArgs::operator_mode` for the full design rationale. Also settable via `MEMSTEAD_OPERATOR_MODE=1`
+
+
+
+## `memstead vault set-version`
+
+Update a vault's `version` field. The version is consumed by `memstead export --format vault` to stamp the archive filename and the `.mem` archive's published config. `version` is seeded at init (`0.1.0`); bump via this command before publishing
+
+**Usage:** `memstead vault set-version [OPTIONS] <NAME> <VERSION>`
+
+###### **Arguments:**
+
+* `<NAME>` — Vault name (the leaf-folder identifier the engine assigned at init time). Must already be registered in the workspace
+* `<VERSION>` — New semver version (e.g. `0.2.0`, `1.0.0-beta.1`). Malformed values refuse with `INVALID_INPUT`. The engine bypasses the vault-create allowlist for this surface — set-version is gate-free
+
+###### **Options:**
+
+* `--note <NOTE>` — Optional provenance note (≤280 chars) recorded on the version-bump commit body, like the other commit-producing vault-lifecycle commands. When the workspace sets `require_notes`, omitting it rides a non-blocking `NOTE_MISSING` warning (the bump still lands)
+
+
+
+## `memstead vault set-schema`
+
+Set a vault's schema pin — the integrity-driven schema-migration trigger. Already-integral vaults switch immediately; otherwise the vault enters dual-pin migration (writes validate against the target) and the response lists the non-integral entities. Re-issue after repairing to complete the switch
+
+**Usage:** `memstead vault set-schema <NAME> <SCHEMA>`
+
+###### **Arguments:**
+
+* `<NAME>` — Vault name (must be registered in the workspace)
+* `<SCHEMA>` — Target schema ref, exact `name@x.y.z`. Must resolve against the loaded schema catalogue; unresolvable refs refuse with `SCHEMA_NOT_FOUND`, malformed refs with `INVALID_INPUT`
+
+
+
+## `memstead vault set-sync-state`
+
+Set (or clear) one opaque sync-state token in a vault's config — the ingest layer's durable "last synced source state" baseline. `<KEY>` and `<TOKEN>` are opaque to the engine (the ingest layer keys per `(ingest, facet)` and owns the token's meaning). An empty `<TOKEN>` clears the key. Written into the per-vault config and surfaced verbatim on `memstead workspace dump`
+
+**Usage:** `memstead vault set-sync-state [OPTIONS] <NAME> <KEY> <TOKEN>`
+
+###### **Arguments:**
+
+* `<NAME>` — Vault name (must be registered in the workspace)
+* `<KEY>` — Opaque sync-state key. The ingest layer keys per `(ingest, facet)`, conventionally `"<ingest>/<facet>"`, but the engine treats it as an arbitrary string
+* `<TOKEN>` — Opaque token recording the source state last synced under `<KEY>` (git → commit id, graph → snapshot token, filesystem → a JSON-stringified stat digest). An **empty** value clears the key. The engine never parses it
+
+###### **Options:**
+
+* `--note <NOTE>` — Optional provenance note (≤280 chars) recorded on the commit body, like the other commit-producing vault-lifecycle commands
+
+
+
+## `memstead vault list`
+
+Enumerate every mounted vault in the workspace with its schema pin, version, entity count, and capability (writable vs read-only). Markdown by default; pass `--json` (root flag) for the structured envelope
+
+**Usage:** `memstead vault list`
+
+
+
+## `memstead vault-repo`
+
+Vault-repo-git lifecycle commands
+
+**Usage:** `memstead vault-repo <COMMAND>`
+
+###### **Subcommands:**
+
+* `init` — Bootstrap a fresh vault-repo-git workspace
+
+
+
+## `memstead vault-repo init`
+
+Bootstrap a fresh vault-repo-git workspace
+
+**Usage:** `memstead vault-repo init [OPTIONS] [PATH]`
+
+###### **Arguments:**
+
+* `<PATH>` — Workspace directory to bootstrap. Created if missing. Defaults to the current directory
+
+  Default value: `.`
+
+###### **Options:**
+
+* `--no-gitignore` — Skip outer-repo `.gitignore` auto-append. Useful when the user intends to track `vault-repo/` as a git submodule, or when the detection heuristic would pick the wrong outer repo
+
+
+
+## `memstead workspace`
+
+Introspect and configure workspace policy — `dump` reads the effective config; `allow-create`/`revoke-create`/`allow-delete`/ `revoke-delete`/`grant-cross-link`/`revoke-cross-link`/`set-mutations` write the vault-lifecycle allowlist, cross-vault link grants, and mutation policy
+
+**Usage:** `memstead workspace <COMMAND>`
+
+###### **Subcommands:**
+
+* `dump` — Emit a JSON document describing the workspace's vaults, the schema each is pinned to, and per-vault opaque snapshot tokens. Output is always JSON (the global `--json` is a no-op here)
+* `show` — Render the active workspace configuration: vault-management allowlists, cross-vault permissions, mutation policy, plugin sections. Markdown by default; `--json` emits a structured document. Counterpart to the `allow-create / grant-cross-link / set-mutations` write surface — read what those commands have composed
+* `allow-create` — Add a `[[vault_management.create]]` allowlist rule. Pattern uses gitignore-style globs (`*` does not cross `/`, `**` matches zero-or-more segments). Schemas pin which schemas the agent may bring into existence under this namespace; `--schema *` allows any schema. Order: appended (lowest priority) by default; `--before <pattern>` lifts it above the named pattern
+* `revoke-create` — Remove a `[[vault_management.create]]` rule by pattern
+* `allow-delete` — Add a `[[vault_management.delete]]` allowlist rule
+* `revoke-delete` — Remove a `[[vault_management.delete]]` rule by pattern
+* `grant-cross-link` — Grant a `[cross_vault_links]` permission: `<from>` may write edges into `<to>`. `<to>` is `*` for the wildcard shape or a vault name for the allowlist shape. Mixing the two for one `from`-vault is rejected
+* `revoke-cross-link` — Revoke a `[cross_vault_links]` permission. Removes the named target from the allowlist; drops the `from`-key entirely when the allowlist becomes empty. `*` revokes the wildcard shape
+* `set-mutations` — Set a `[mutations]` field. Today exposes `--require-notes` only; additional keys land additively
+
+
+
+## `memstead workspace dump`
+
+Emit a JSON document describing the workspace's vaults, the schema each is pinned to, and per-vault opaque snapshot tokens. Output is always JSON (the global `--json` is a no-op here)
+
+**Usage:** `memstead workspace dump`
+
+
+
+## `memstead workspace show`
+
+Render the active workspace configuration: vault-management allowlists, cross-vault permissions, mutation policy, plugin sections. Markdown by default; `--json` emits a structured document. Counterpart to the `allow-create / grant-cross-link / set-mutations` write surface — read what those commands have composed
+
+**Usage:** `memstead workspace show`
+
+
+
+## `memstead workspace allow-create`
+
+Add a `[[vault_management.create]]` allowlist rule. Pattern uses gitignore-style globs (`*` does not cross `/`, `**` matches zero-or-more segments). Schemas pin which schemas the agent may bring into existence under this namespace; `--schema *` allows any schema. Order: appended (lowest priority) by default; `--before <pattern>` lifts it above the named pattern
+
+**Usage:** `memstead workspace allow-create [OPTIONS] --schema <SCHEMA> <PATTERN>`
+
+###### **Arguments:**
+
+* `<PATTERN>` — Glob pattern (gitignore semantics) the rule matches against the lifecycle candidate `<path>/<name>` (or `<name>` for flat-layout vaults)
+
+###### **Options:**
+
+* `--schema <SCHEMA>` — Schema pins the rule permits. Repeat or pass as a single comma-separated value. `*` is the any-schema escape
+* `--cross-link <CROSS_LINK>` — Cross-vault permission conferred on every vault matching this rule. Rule-derived and evaluated lazily at relate time — not written into `[cross_vault_links]`; `workspace show` and `memstead_overview` surface it under the rule. Repeat or pass as a single comma-separated value; `*` for wildcard
+* `--before <BEFORE>` — Insert this rule before the named pattern (lifts it above the target in the first-match-wins order). Omit to append at the lowest priority
+
+
+
+## `memstead workspace revoke-create`
+
+Remove a `[[vault_management.create]]` rule by pattern
+
+**Usage:** `memstead workspace revoke-create <PATTERN>`
+
+###### **Arguments:**
+
+* `<PATTERN>` — Pattern identifying the rule
+
+
+
+## `memstead workspace allow-delete`
+
+Add a `[[vault_management.delete]]` allowlist rule
+
+**Usage:** `memstead workspace allow-delete <PATTERN>`
+
+###### **Arguments:**
+
+* `<PATTERN>` — Pattern identifying the rule
+
+
+
+## `memstead workspace revoke-delete`
+
+Remove a `[[vault_management.delete]]` rule by pattern
+
+**Usage:** `memstead workspace revoke-delete <PATTERN>`
+
+###### **Arguments:**
+
+* `<PATTERN>` — Pattern identifying the rule
+
+
+
+## `memstead workspace grant-cross-link`
+
+Grant a `[cross_vault_links]` permission: `<from>` may write edges into `<to>`. `<to>` is `*` for the wildcard shape or a vault name for the allowlist shape. Mixing the two for one `from`-vault is rejected
+
+**Usage:** `memstead workspace grant-cross-link <FROM> <TO>`
+
+###### **Arguments:**
+
+* `<FROM>` — Source vault (the `from` side of the permission)
+* `<TO>` — Target vault or `*` for the wildcard shape
+
+
+
+## `memstead workspace revoke-cross-link`
+
+Revoke a `[cross_vault_links]` permission. Removes the named target from the allowlist; drops the `from`-key entirely when the allowlist becomes empty. `*` revokes the wildcard shape
+
+**Usage:** `memstead workspace revoke-cross-link <FROM> <TO>`
+
+###### **Arguments:**
+
+* `<FROM>` — Source vault (the `from` side of the permission)
+* `<TO>` — Target vault or `*` for the wildcard shape
+
+
+
+## `memstead workspace set-mutations`
+
+Set a `[mutations]` field. Today exposes `--require-notes` only; additional keys land additively
+
+**Usage:** `memstead workspace set-mutations [OPTIONS]`
+
+###### **Options:**
+
+* `--require-notes <BOOL>` — Toggle `[mutations] require_notes`. When set, mutations without a `note` field surface a `note_missing` warning (the mutation still lands — provenance is best-effort)
+
+  Possible values: `true`, `false`
+
+
+
+
+## `memstead schema`
+
+Author-time schema tooling. `memstead schema validate <path>` checks a schema package directory against the engine's loader without touching a workspace
+
+**Usage:** `memstead schema <COMMAND>`
+
+###### **Subcommands:**
+
+* `validate` — Validate a schema package directory (`schema.yaml` plus an optional `types/*.yaml`) against the engine's schema loader — the same validation the engine runs at load. Exits non-zero (`SCHEMA_VALIDATION_FAILED`) on any conformance error, with the YAML line/column in the message where the parse layer provides it
+* `install` — Install a schema package into the current folder workspace's `.memstead/schemas/<name>@<version>/` so a vault can pin it. `<source>` is a built-in name (`planning`, `planning@0.1.0`) or a path to a package directory. Validates before copying; idempotent
+
+
+
+## `memstead schema validate`
+
+Validate a schema package directory (`schema.yaml` plus an optional `types/*.yaml`) against the engine's schema loader — the same validation the engine runs at load. Exits non-zero (`SCHEMA_VALIDATION_FAILED`) on any conformance error, with the YAML line/column in the message where the parse layer provides it
+
+**Usage:** `memstead schema validate <PATH>`
+
+###### **Arguments:**
+
+* `<PATH>` — Path to the schema package directory (the folder containing `schema.yaml`)
+
+
+
+## `memstead schema install`
+
+Install a schema package into the current folder workspace's `.memstead/schemas/<name>@<version>/` so a vault can pin it. `<source>` is a built-in name (`planning`, `planning@0.1.0`) or a path to a package directory. Validates before copying; idempotent
+
+**Usage:** `memstead schema install <SOURCE>`
+
+###### **Arguments:**
+
+* `<SOURCE>` — Built-in schema name (`planning`, `planning@0.1.0`) or a path to a schema package directory
+
+
+
+## `memstead pipeline`
+
+Pipeline-config tooling. `memstead pipeline migrate` converts the legacy `scopes|projections|ingests/` JSON folders into the `.memstead/` workspace store's four-primitive shape
+
+**Usage:** `memstead pipeline <COMMAND>`
+
+###### **Subcommands:**
+
+* `migrate` — Migrate the legacy `scopes|projections|ingests/` JSON folders at the workspace root into the four-primitive workspace-store shape under `.memstead/`. A legacy scope splits into a Medium (territory) and a Facet (engagement). Idempotent — re-running reproduces identical files. The legacy folders are left in place; remove them when ready
+
+
+
+## `memstead pipeline migrate`
+
+Migrate the legacy `scopes|projections|ingests/` JSON folders at the workspace root into the four-primitive workspace-store shape under `.memstead/`. A legacy scope splits into a Medium (territory) and a Facet (engagement). Idempotent — re-running reproduces identical files. The legacy folders are left in place; remove them when ready
+
+**Usage:** `memstead pipeline migrate`
+
+
+
+<hr/>
+
+<small><i>
+    This document was generated automatically by
+    <a href="https://crates.io/crates/clap-markdown"><code>clap-markdown</code></a>.
+</i></small>

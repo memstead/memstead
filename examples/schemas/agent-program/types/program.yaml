@@ -1,0 +1,94 @@
+# yaml-language-server: $schema=../../../../engine/crates/memstead-schema/generated/type-definition.schema.json
+
+name: program
+description: |
+  A runnable agent program. The top-level entity of an agent-program
+  graph. Declares what triggers the program, what counts as done, and
+  carries the entry edge into the first node. Replaces a prompt-based
+  skill body or a hand-coded orchestration script.
+when_to_use: |
+  Use as the root of every executable program. One program per
+  coherent procedure (one skill replacement, one SOP, one hotline
+  flow). Compose larger programs out of sub-programs via PART_OF when
+  scope grows beyond a few dozen nodes.
+boundaries:
+  - Not a node — a program contains nodes; nodes do the work.
+  - Not a goal — goals belong in a planning vault; the program names
+    its purpose and exit_criteria inline.
+  - Not a tool — tools are catalog entries the program declares as
+    available; the program is the consumer, not the capability.
+  - Not a runtime — the agent loop is the runtime; the program is the
+    program text.
+system_message: |
+  A program is the program text the agent reads as instructions. It
+  declares purpose (why this program exists), entry_signature (what
+  triggers it), exit_criteria (what done looks like), and the operating
+  mode (autonomous, interactive, loop). The first node is reached via
+  the entry edge. Constraints attached via governed_by apply program-
+  wide; node-attached constraints scope to single nodes.
+sections:
+  - key: purpose
+    heading: Purpose
+    required: true
+    search_weight: 40.0
+    write_rules:
+      - "One paragraph. What this program achieves and why it exists. Standalone-readable in a search snippet — no pronouns, no forward references."
+  - key: entry_signature
+    heading: Entry Signature
+    required: true
+    search_weight: 20.0
+    write_rules:
+      - "What triggers the program. Examples: 'invoked via /skill foo', 'fired by /loop 1m', 'started when an inbound call arrives'. Include the input shape the agent receives at start."
+  - key: exit_criteria
+    heading: Exit Criteria
+    required: true
+    search_weight: 20.0
+    write_rules:
+      - "Concrete, checkable conditions for completion. Bullet list. The program ends when an agent reaches a node whose kind=terminal AND its success_check matches one of these criteria."
+  - key: failure_modes
+    heading: Failure Modes
+    required: false
+    search_weight: 10.0
+    write_rules:
+      - "Bullet list of known ways execution can go wrong and the fallback strategy. Maps to falls_back_to edges in the body of nodes most likely to encounter the failure."
+  - key: notes
+    heading: Notes
+    required: false
+    search_weight: 3.0
+    catch_all: true
+metadata_fields:
+  - key: mode
+    description: How the program is invoked and run.
+    field_type: string
+    default_value: autonomous
+    enum_values: [autonomous, interactive, loop]
+    filterable: equality
+  - key: loop_interval
+    description: When mode=loop, the interval between fires (e.g. "1m", "10m"). Empty for autonomous and interactive modes.
+    field_type: string
+  - key: replaces_skill
+    description: Name of the prompt-based skill this program replaces, if any (e.g. "memstead:reconcile"). Empty for net-new programs.
+    field_type: string
+  - key: status
+    description: Lifecycle of the program. Draft programs are not run; deprecated programs have been superseded.
+    field_type: string
+    default_value: draft
+    enum_values: [draft, active, deprecated]
+    filterable: equality
+title_weight: 100.0
+text_fields: [purpose, entry_signature, exit_criteria, failure_modes, notes]
+hierarchy_relationship: PART_OF
+edge_weight_overrides:
+  entry: 3.0
+  governed_by: 2.5
+  MOTIVATED_BY: 2.5
+propagating_relationships: [entry, governed_by, MOTIVATED_BY]
+updatable_fields: [title, purpose, entry_signature, exit_criteria, failure_modes, notes, mode, loop_interval, replaces_skill, status, tags]
+health_required_fields: [purpose, entry_signature, exit_criteria]
+staleness_threshold_days: 90
+write_rules:
+  - "Every program has exactly one entry edge. Zero entries cannot run; multiple entries are ambiguous."
+  - "Exit criteria are concrete and checkable. 'Task complete' is not exit criteria; 'all proposed entities created OR escalation node reached' is."
+  - "When mode=loop, loop_interval must be set. When mode is autonomous or interactive, loop_interval must be empty."
+  - "Replacing an existing skill: set replaces_skill to the slash-command name (e.g. 'memstead:reconcile'). The reconcile skill prompt body becomes the seed for the program's nodes."
+  - "Constraints that apply program-wide attach via governed_by from the program. Constraints that apply only at one node attach via governed_by from that node. Don't duplicate."

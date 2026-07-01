@@ -1,0 +1,6 @@
+{
+  "error_code": "LEGACY_FIELD_PRESENT",
+  "errors_contain": [
+    "Legacy `name` field detected"
+  ]
+}

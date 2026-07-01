@@ -1,0 +1,837 @@
+//! Engine mutation entrypoints — split per mutation kind.
+//!
+//! Each sub-module implements one mutation of `Engine`: `create`,
+//! `update` (with batch), `delete`, `relate`, `rename`. The shared
+//! helpers (`today_iso`, `make_stub`, `gc_orphan_stubs`,
+//! `lookup_title_and_type`, `unknown_type_error`) plus the typed
+//! constants `PATCH_OLD_NOT_FOUND_CONTENT_CAP` and
+//! `RELATIONSHIP_CYCLE_PATH_CAP` live here.
+
+use std::collections::HashMap;
+
+use indexmap::IndexMap;
+
+use crate::entity::{Entity, EntityId};
+use crate::store::Store;
+
+use super::EngineError;
+
+pub mod create;
+pub mod delete;
+pub mod parse_recovery;
+pub mod relate;
+pub mod rename;
+pub mod update;
+
+/// Look up an entity's `(title, entity_type)` pair in `store`. Both
+/// `None` for missing-from-store ids — matches pro's `title_for` /
+/// `type_for` lossy-lookup contract. Used by [`Engine::changes_since`]
+/// to enrich id-only envelopes the backend returned with metadata
+/// from the in-memory store.
+pub(super) fn lookup_title_and_type(
+    store: &Store,
+    id: &EntityId,
+) -> (Option<String>, Option<String>) {
+    match store.get(id) {
+        Some(e) => (Some(e.title.clone()), Some(e.entity_type.clone())),
+        None => (None, None),
+    }
+}
+
+/// Maximum byte length of the truncated `current_content` snapshot
+/// that [`EngineError::PatchOldNotFound`] carries. Keeps the wire
+/// envelope bounded for sections with large bodies. Mirrors pro's
+/// `memstead_git_branch::PATCH_OLD_NOT_FOUND_CONTENT_CAP`.
+pub const PATCH_OLD_NOT_FOUND_CONTENT_CAP: usize = 500;
+
+/// Maximum number of entity IDs retained in
+/// [`EngineError::RelationshipCycle::existing_path`]. Keeps the cycle
+/// envelope bounded for pathologically long chains. Mirrors pro's
+/// `memstead_git_branch::RELATIONSHIP_CYCLE_PATH_CAP`.
+pub const RELATIONSHIP_CYCLE_PATH_CAP: usize = 20;
+
+/// Build an [`EngineError::UnknownType`] populated with the schema's
+/// declared type names (sorted) and a fuzzy suggestion. Mirrors pro's
+/// `UnknownEntityType` recovery payload so MCP envelopes carry the
+/// same `name` / `schema_ref` / `declared` / `suggestion` keys
+/// regardless of which engine served the call.
+pub(crate) fn unknown_type_error(schema: &memstead_schema::Schema, attempted: &str) -> EngineError {
+    let mut declared: Vec<String> = schema.types.keys().cloned().collect();
+    declared.sort();
+    let (sname, sver) = schema.id();
+    EngineError::UnknownType {
+        name: attempted.to_string(),
+        schema_ref: format!("{sname}@{sver}"),
+        declared,
+        suggestion: schema.suggest_type(attempted),
+    }
+}
+
+/// Now as a full ISO-8601 datetime string `YYYY-MM-DDTHH:MM:SSZ`
+/// (UTC). Used by mutation paths that auto-stamp metadata fields
+/// (e.g. `last_modified` on update, `created_date` on create).
+///
+/// This is second-resolution (rather than
+/// date-only `YYYY-MM-DD`) so intra-day
+/// updates produce distinguishable timestamps and drift / staleness
+/// queries become per-update aware. The strict-mode date validator
+/// already accepts both forms (`^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}Z)?$`)
+/// so existing entities written with the date-only form continue to
+/// load; new writes carry the wider form.
+///
+/// Pure function: no allocation outside the `format!` invocation,
+/// no error path (the system-clock fallback to UNIX epoch on a
+/// clock that hasn't been set yet is acceptable for a best-effort
+/// timestamp). Howard-Hinnant civil-from-days for the date half;
+/// trivial modular arithmetic for the time half.
+pub(super) fn today_iso() -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    let secs = now.as_secs();
+    let days = secs / 86400;
+    let secs_of_day = secs % 86400;
+    let hh = secs_of_day / 3600;
+    let mm = (secs_of_day % 3600) / 60;
+    let ss = secs_of_day % 60;
+    let z = days + 719468;
+    let era = z / 146097;
+    let doe = z - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    format!("{y:04}-{m:02}-{d:02}T{hh:02}:{mm:02}:{ss:02}Z")
+}
+
+/// Sweep stubs whose last incoming edge has just disappeared. Returns
+/// the dropped ids so callers can surface them to the agent (e.g. via
+/// [`DeleteEntityOutcome::orphan_stubs_removed`]).
+///
+/// Stubs are auto-created when a relate names an absent target — a
+/// "promise" that a real entity will land there later (see
+/// [`make_stub`]). When the last referrer drops its edge or is itself
+/// deleted, the promise has no holder and becomes pure bloat. Only
+/// stubs are eligible — real entities never count as orphans via this
+/// path.
+pub(super) fn gc_orphan_stubs(store: &mut Store) -> Vec<EntityId> {
+    let stub_ids: Vec<EntityId> = store
+        .all_entities()
+        .filter(|e| e.stub)
+        .map(|e| e.id.clone())
+        .collect();
+    gc_orphan_stubs_among(store, &stub_ids)
+}
+
+/// Scoped orphan-stub sweep: GC only the stubs *among `candidates`*
+/// whose last incoming edge has just disappeared, returning the dropped
+/// ids. This is the single home of the orphan-stub predicate (`stub &&
+/// no incoming`) — the three write paths that can sever a stub's last
+/// referrer all funnel through here so they cannot drift:
+/// [`gc_orphan_stubs`] (delete's full-store sweep) supplies every stub
+/// id; the `memstead_relate(remove)` path supplies the just-severed target;
+/// the `memstead_update` alias-resync path supplies the entity's
+/// pre-mutation body-link targets (the only edges that commit could
+/// have dropped). Scoping to a candidate set rather than walking the
+/// whole store keeps each path from GC'ing pre-existing orphans that
+/// aren't its responsibility. Candidates are de-duplicated; a candidate
+/// that is absent, not a stub, or still has a referrer is left
+/// untouched.
+pub(super) fn gc_orphan_stubs_among<'a>(
+    store: &mut Store,
+    candidates: impl IntoIterator<Item = &'a EntityId>,
+) -> Vec<EntityId> {
+    let mut removed: Vec<EntityId> = Vec::new();
+    let mut seen: std::collections::HashSet<&EntityId> = std::collections::HashSet::new();
+    for id in candidates {
+        if !seen.insert(id) {
+            continue;
+        }
+        if store.get(id).is_some_and(|e| e.stub) && store.incoming(id).is_empty() {
+            store.remove(id);
+            removed.push(id.clone());
+        }
+    }
+    removed
+}
+
+/// Shared target-id grammar validator. The wiki-link grammar gate
+/// runs on every relation-authoring path (`memstead_relate`,
+/// `memstead_create.relations[]`, future inline-relation surfaces) so a
+/// malformed target id (e.g. `bad@chars$here`) cannot land an
+/// auto-stub at the literal id — that stub would later fail every
+/// wiki-link parse that referenced it. Pre-Item-02 the gate lived
+/// only on `memstead_relate`; the create path admitted the same input
+/// silently.
+pub(super) fn validate_relation_target_grammar(
+    target: &EntityId,
+) -> Result<(), EngineError> {
+    if let Err(reason) = crate::entity::id::validate_vault_name_grammar(target.vault()) {
+        return Err(EngineError::InvalidEntityId {
+            id: target.to_string(),
+            reason,
+        });
+    }
+    if let Err(reason) = crate::entity::id::validate_id_path_grammar(target.path()) {
+        return Err(EngineError::InvalidEntityId {
+            id: target.to_string(),
+            reason,
+        });
+    }
+    Ok(())
+}
+
+/// Auto-stamp `auto_timestamp` metadata fields on an entity that's
+/// about to be re-written. Extracted from the update-path hot loop so
+/// the relate-path (add and remove) and the rename-path (the renaming
+/// entity plus every referrer the rewrite cascade touched) can
+/// invoke the same engine-driven stamp.
+///
+/// Walks the type's metadata-field declarations; any field flagged
+/// `auto_timestamp: true` (the default schema declares this on
+/// `last_modified`) is set to the supplied `today` ISO string. The
+/// helper is a no-op on schemas that declare no auto-timestamp
+/// fields. Callers pre-compute `today` via [`today_iso`] so a single
+/// mutation that touches multiple entities (rename's referrer rewrite
+/// cascade) stamps them all with the same value.
+pub(super) fn auto_stamp_timestamps(
+    entity: &mut Entity,
+    type_def: &memstead_schema::TypeDefinition,
+    today: &str,
+) {
+    for field_def in &type_def.metadata_fields {
+        if field_def.auto_timestamp {
+            entity.metadata.insert(
+                field_def.key.clone(),
+                crate::entity::MetadataValue::String(today.to_string()),
+            );
+        }
+    }
+}
+
+/// Build a stub [`Entity`] for an unresolved relate target. Callers
+/// declare the stub's origin via [`crate::entity::StubKind`] —
+/// `ForwardReference` for `memstead_relate` to an absent target,
+/// `Residual { since_commit, readonly_referrers }` for the
+/// delete/rename demote path. The kind persists for the engine
+/// instance's lifetime; a reload reduces every stub to `LoadTime`
+/// — the kind is annotation, not state.
+///
+/// The stub is in-store but unwritten to disk — `entity_type` empty,
+/// `file_path` empty, no metadata, no sections, `stub: true` and
+/// `stub_kind: Some(kind)` set together. A later
+/// [`Engine::create_entity`] at the same id promotes the stub to a
+/// real entity (loader / parse-result merge handles the upgrade
+/// path; `stub_kind` clears to `None`).
+pub(super) fn make_stub(id: &EntityId, kind: crate::entity::StubKind) -> Entity {
+    Entity {
+        id: id.clone(),
+        title: id.name().to_string(),
+        entity_type: String::new(),
+        vault: id.vault().to_string(),
+        file_path: String::new(),
+        metadata: IndexMap::new(),
+        sections: IndexMap::new(),
+        relationships: Vec::new(),
+        content_hash: String::new(),
+        stub: true,
+        stub_kind: Some(kind),
+        heading_spans: HashMap::new(),
+    }
+}
+
+/// Cross-vault add-path policy gate. Same-vault writes bypass; the
+/// `[cross_vault_links]` table only gates writes that cross the
+/// vault boundary. Cross-vault writes consult
+/// [`super::Engine::cross_vault_link_allowed`] in the edge's actual
+/// direction (`source_vault → target_vault`). Disallowed pairings
+/// surface [`EngineError::CrossVaultLinkNotAllowed`] with the
+/// `(from_vault, to_vault)` payload an agent already sees on
+/// `memstead_relate`.
+///
+/// Funnel point for every add-shaped edge write — `memstead_relate`,
+/// `memstead_create.relations[]`, `memstead_update.declare_relations`, and
+/// any future add-path mutation surface route through one gate so
+/// the policy can't drift between sites. Remove-shaped writes
+/// (cleanup) remain permissive and call this helper not at all.
+pub(super) fn validate_cross_vault_add_policy(
+    engine: &super::Engine,
+    source_vault: &str,
+    target_vault: &str,
+) -> Result<(), EngineError> {
+    if source_vault == target_vault {
+        return Ok(());
+    }
+    if !engine.cross_vault_link_allowed(source_vault, target_vault) {
+        return Err(EngineError::CrossVaultLinkNotAllowed {
+            from_vault: source_vault.to_string(),
+            to_vault: target_vault.to_string(),
+        });
+    }
+    Ok(())
+}
+
+/// Outcome of the engine's edge-validation router for a single
+/// inline / explicit relate. Carries the optional open-mode warning
+/// from the intra-vault flow; the cross-vault flow has no
+/// open-mode (cross-vault entries are declared vocabulary).
+pub(super) enum EdgeRouteOutcome {
+    Ok,
+    OpenModeWarning(crate::ops::WarningHint),
+}
+
+/// Run rel-type + shape validation for one edge, routing through
+/// intra-vault vocabulary or the source schema's
+/// `cross_vault_relationships:` section as appropriate.
+///
+/// The routing rule:
+/// when `source_vault != target_vault` AND the target vault's
+/// pinned schema differs from the source schema by name or by
+/// version, the source schema's `cross_vault_relationships:` entry
+/// for the target schema is the sole authority for both the
+/// vocabulary check (`INVALID_REL_TYPE`) and the shape check
+/// (`INVALID_REL_SHAPE`). If no matching entry exists, surface
+/// [`EngineError::CrossVaultEdgeNotDeclared`].
+///
+/// Otherwise (same-vault, same-schema cross-vault, or target vault
+/// unmounted) the call falls through to the existing intra-vault
+/// validators — the same behaviour the intra-vault path always had.
+///
+/// `check_shape` mirrors the relate path's add-only shape posture:
+/// pass `false` to skip the shape check (currently only the
+/// `memstead_relate --remove` path). The vocabulary check still fires
+/// in that case, matching the intra-vault behaviour where
+/// `validate_rel_type` runs on both add and remove.
+pub(super) fn route_edge_validation(
+    engine: &super::Engine,
+    rel_type: &str,
+    from_type: &str,
+    to_type: Option<&str>,
+    source_vault: &str,
+    target_vault: &str,
+    from_id: &EntityId,
+    to_id: &EntityId,
+    check_shape: bool,
+) -> Result<EdgeRouteOutcome, EngineError> {
+    use crate::runtime_validator::{
+        CrossVaultRelCheck, RelationshipCheck, validate_cross_vault_edge, validate_rel_shape,
+        validate_rel_type,
+    };
+    use memstead_schema::SchemaRef;
+
+    let source_schema = engine
+        .schemas
+        .get(source_vault)
+        .expect("schema present for every registered mount");
+
+    let target_schema_arc = if source_vault == target_vault {
+        None
+    } else {
+        engine.schemas.get(target_vault).cloned()
+    };
+    let target_schema_ref: Option<SchemaRef> = target_schema_arc.as_ref().map(|s| {
+        let (name, version) = s.id();
+        SchemaRef::new(name, version)
+    });
+    let cross_vault_different = match (&target_schema_ref, source_schema.id()) {
+        (Some(target), (src_name, _)) => target.name != src_name,
+        (None, _) => false,
+    };
+
+    if cross_vault_different {
+        let target_ref = target_schema_ref
+            .as_ref()
+            .expect("target_schema_ref is Some when cross_vault_different");
+        if !check_shape {
+            // Cleanup posture: cross-vault remove stays permissive so
+            // pre-tightening edges remain droppable without first
+            // re-declaring them. Mirrors the intra-vault shape gate's
+            // add-only stance.
+            return Ok(EdgeRouteOutcome::Ok);
+        }
+        match validate_cross_vault_edge(
+            rel_type,
+            from_type,
+            to_type,
+            source_schema.as_ref(),
+            target_ref,
+        ) {
+            CrossVaultRelCheck::Ok => Ok(EdgeRouteOutcome::Ok),
+            CrossVaultRelCheck::EdgeNotDeclared => {
+                let (src_name, src_version) = source_schema.id();
+                Err(EngineError::CrossVaultEdgeNotDeclared {
+                    source_schema: SchemaRef::new(src_name, src_version).as_display(),
+                    target_schema: target_ref.as_display(),
+                    rel_type: rel_type.to_string(),
+                    from_id: from_id.to_string(),
+                    to_id: to_id.to_string(),
+                })
+            }
+            CrossVaultRelCheck::Invalid(v) => Err(EngineError::Validation(v)),
+        }
+    } else {
+        let warning_hint = match validate_rel_type(rel_type, source_schema.as_ref())? {
+            RelationshipCheck::Ok => None,
+            RelationshipCheck::OpenWarning(message) => {
+                Some(crate::ops::WarningHint::UndeclaredRelationshipOpen {
+                    rel_type: rel_type.to_string(),
+                    message,
+                })
+            }
+        };
+        if check_shape {
+            validate_rel_shape(rel_type, from_type, to_type, source_schema.as_ref())?;
+        }
+        Ok(match warning_hint {
+            Some(w) => EdgeRouteOutcome::OpenModeWarning(w),
+            None => EdgeRouteOutcome::Ok,
+        })
+    }
+}
+
+/// Validate the per-edge description posture declared on the rel-type
+/// in the routing-appropriate definition (intra-vault when source and
+/// target share the schema; cross-vault entry when they don't). Emits
+/// `MissingRequiredDescription` / `DescriptionNotPermitted` on
+/// violations; `optional` and unknown rel-types are no-ops (the
+/// vocabulary / shape gates already catch undeclared names — posture
+/// only fires for declared names).
+///
+/// `description` is the normalised value (empty / whitespace-only
+/// collapses to `None` before reaching this gate). Called from every
+/// add path: `memstead_relate`, `declare_relations` on `memstead_create` and
+/// `memstead_update`.
+pub(super) fn validate_description_posture(
+    engine: &super::Engine,
+    rel_type: &str,
+    description: Option<&str>,
+    source_vault: &str,
+    target_vault: &str,
+    from_id: &EntityId,
+    to_id: &EntityId,
+) -> Result<(), EngineError> {
+    use memstead_schema::{PerEdgeDescription, SchemaRef};
+
+    let source_schema = engine
+        .schemas
+        .get(source_vault)
+        .expect("schema present for every registered mount");
+    let target_schema_arc = if source_vault == target_vault {
+        None
+    } else {
+        engine.schemas.get(target_vault).cloned()
+    };
+    let target_schema_ref: Option<SchemaRef> = target_schema_arc.as_ref().map(|s| {
+        let (name, version) = s.id();
+        SchemaRef::new(name, version)
+    });
+    let cross_vault_different = match (&target_schema_ref, source_schema.id()) {
+        (Some(target), (src_name, _)) => target.name != src_name,
+        (None, _) => false,
+    };
+
+    let posture = if cross_vault_different {
+        // Look up the matching cross-vault entry's definition. If the
+        // entry exists but the rel-type isn't enumerated under it, the
+        // vocabulary gate (route_edge_validation) will surface
+        // `CROSS_VAULT_EDGE_NOT_DECLARED`; posture is a no-op there.
+        let target_ref = target_schema_ref
+            .as_ref()
+            .expect("target_schema_ref is Some when cross_vault_different");
+        source_schema
+            .cross_vault_entry(&target_ref.name)
+            .and_then(|entry| entry.definitions.iter().find(|d| d.name == rel_type))
+            .map(|d| d.per_edge_description)
+    } else {
+        source_schema
+            .relationship_def(rel_type)
+            .map(|d| d.per_edge_description)
+    };
+
+    match posture {
+        Some(PerEdgeDescription::Required) if description.is_none() => {
+            Err(EngineError::MissingRequiredDescription {
+                rel_type: rel_type.to_string(),
+                from_id: from_id.to_string(),
+                to_id: to_id.to_string(),
+            })
+        }
+        Some(PerEdgeDescription::Forbidden) if description.is_some() => {
+            Err(EngineError::DescriptionNotPermitted {
+                rel_type: rel_type.to_string(),
+                from_id: from_id.to_string(),
+                to_id: to_id.to_string(),
+            })
+        }
+        _ => Ok(()),
+    }
+}
+
+/// Validate the manual-authoring posture declared on the rel-type.
+/// Fires only on explicit-author paths (`memstead_relate`, inline
+/// `relations:` on `memstead_create`, `declare_relations` on
+/// `memstead_update`). The body-link → relation alias machinery
+/// synthesises relations from wiki-links — that path bypasses this
+/// gate by construction (it never calls this function), keeping the
+/// alias path for `manual_authoring: forbidden` rel-types (e.g.
+/// REFERENCES) intact.
+pub(super) fn validate_manual_authoring_posture(
+    engine: &super::Engine,
+    rel_type: &str,
+    source_vault: &str,
+    from_id: &EntityId,
+    to_id: &EntityId,
+) -> Result<(), EngineError> {
+    use memstead_schema::ManualAuthoring;
+
+    let source_schema = engine
+        .schemas
+        .get(source_vault)
+        .expect("schema present for every registered mount");
+    let posture = source_schema.relationship_manual_authoring(rel_type);
+    if matches!(posture, ManualAuthoring::Forbidden) {
+        let guidance = source_schema
+            .relationship_when_to_use(rel_type)
+            .unwrap_or_default();
+        return Err(EngineError::RelationManualAuthoringForbidden {
+            rel_type: rel_type.to_string(),
+            from_id: from_id.to_string(),
+            to_id: to_id.to_string(),
+            guidance,
+        });
+    }
+    Ok(())
+}
+
+/// Alias-synthesis pass — populates `next.relationships` with engine-
+/// emitted relations of the source schema's `alias_target_rel_type`
+/// pointer for every body wiki-link not already backed by an
+/// in-section-body explicit relation. Runs before the
+/// `scan_wikilinks_without_relation` validator; after this pass the
+/// validator finds zero missing wiki-links for the pointer rel-type.
+///
+/// Three cases:
+/// 1. Schema has no pointer (`alias_target_rel_type` absent): no-op.
+///    Caller's validator continues to refuse unbacked links exactly as
+///    today.
+/// 2. Schema has a pointer, body wiki-link target is in the same vault
+///    OR cross-vault policy admits it: append `Relationship { rel_type:
+///    pointer, target, description: None }` to `next.relationships` if
+///    no relation of `(pointer, target)` is already present. Dedupe is
+///    `(target, rel_type)` — a USES or DEPENDS_ON edge to the same
+///    target does not suppress synthesis of the pointer rel-type.
+/// 3. Schema has a pointer but a body wiki-link crosses a vault
+///    boundary the workspace doesn't grant: return
+///    `EngineError::CrossVaultLinkNotAllowed` with the source/target
+///    vault pair. The entire mutation aborts — no partial state.
+///
+/// GC: when `prev` is `Some`, the pass also drops pointer-rel-type
+/// relations whose target was a body wiki-link in `prev` but no longer
+/// appears in `next.sections`. The loader forces `manual_authoring:
+/// forbidden` on every schema's `alias_target_rel_type` pointer, so the
+/// only path to a pointer-rel-type edge is the body-link channel; the
+/// GC rule therefore reduces to "drop pointer-rel-type relations whose
+/// target is not in the new body". Targeting prev's wiki-link set
+/// specifically (rather than every pointer-rel-type relation) keeps the
+/// pass correct even for an explicit-author relation that predates the
+/// forbid posture.
+///
+/// Returns the list of relations the pass emitted (in body iteration
+/// order) — `create.rs` / `update.rs` use it to surface
+/// `relations_emitted` on the response envelope.
+/// Returns the synthesised relations (in body iteration order) and a flag
+/// signalling whether a body wiki-link to the entity's own id was dropped
+/// (F11). The caller surfaces that as a `SELF_LINK_IGNORED` warning — the
+/// pass has no warning channel of its own.
+pub(super) fn synthesise_alias_relations(
+    engine: &super::Engine,
+    prev_body_targets: &std::collections::HashSet<EntityId>,
+    next: &mut Entity,
+) -> Result<(Vec<crate::entity::Relationship>, bool), super::EngineError> {
+    let schema = engine
+        .schemas
+        .get(next.vault.as_str())
+        .expect("schema present for every registered mount");
+    let Some(pointer) = schema.alias_target_rel_type().map(str::to_string) else {
+        return Ok((Vec::new(), false));
+    };
+
+    // 1. GC: drop pointer-rel-type relations whose target was a body
+    //    wiki-link in the prev entity state but isn't in next. Targets
+    //    not in prev's wiki-link set are explicit-author relations and
+    //    are never touched — the rule preserves explicit edges even
+    //    while the 5 built-ins still admit explicit REFERENCES.
+    //
+    //    `extract_inline_links` is strict — non-slug-form targets refuse
+    //    here with the typed `InvalidWikiLinkTarget` envelope rather
+    //    than silently flowing into the GC's retain set as malformed
+    //    EntityIds. Section context comes from the iteration key.
+    let mut next_targets: std::collections::HashSet<EntityId> = std::collections::HashSet::new();
+    for (section_key, body) in next.sections.iter() {
+        let ids = crate::entity::parser::extract_inline_links(body, &next.vault)
+            .map_err(|errs| map_wiki_link_errors(section_key, errs))?;
+        next_targets.extend(ids);
+    }
+    next.relationships.retain(|r| {
+        !(r.rel_type == pointer
+            && prev_body_targets.contains(&r.target)
+            && !next_targets.contains(&r.target))
+    });
+
+    // 2. Walk body wiki-links in section iteration order and append
+    //    one relation per `(target, pointer)` pair not already
+    //    present. Cross-vault gate fires on the first refusal.
+    let existing: std::collections::HashSet<(String, EntityId)> = next
+        .relationships
+        .iter()
+        .map(|r| (r.rel_type.clone(), r.target.clone()))
+        .collect();
+    let mut emitted: Vec<crate::entity::Relationship> = Vec::new();
+    let mut already_synthesised: std::collections::HashSet<EntityId> =
+        std::collections::HashSet::new();
+    let mut self_link_ignored = false;
+    for (section_key, body) in next.sections.iter() {
+        let ids = crate::entity::parser::extract_inline_links(body, &next.vault)
+            .map_err(|errs| map_wiki_link_errors(section_key, errs))?;
+        for target in ids {
+            // F11: a body wiki-link to the entity's own id is a vacuous
+            // self-edge (renders as both Outgoing and Incoming, inflates
+            // connectivity). Drop it — but don't refuse: the author may
+            // have written their own slug. The caller surfaces
+            // `SELF_LINK_IGNORED` so the dropped link stays observable.
+            if target == next.id {
+                self_link_ignored = true;
+                continue;
+            }
+            let key = (pointer.clone(), target.clone());
+            if existing.contains(&key) || already_synthesised.contains(&target) {
+                continue;
+            }
+            if target.vault() != next.vault.as_str()
+                && !engine.cross_vault_link_allowed(&next.vault, target.vault())
+            {
+                return Err(super::EngineError::CrossVaultLinkNotAllowed {
+                    from_vault: next.vault.clone(),
+                    to_vault: target.vault().to_string(),
+                });
+            }
+            let rel = crate::entity::Relationship::new(pointer.clone(), target.clone());
+            next.relationships.push(rel.clone());
+            already_synthesised.insert(target);
+            emitted.push(rel);
+        }
+    }
+    Ok((emitted, self_link_ignored))
+}
+
+/// Map the first [`crate::entity::id::WikiLinkError`] from a body
+/// wiki-link extraction into the typed [`EngineError`] envelope,
+/// attaching the offending section's key. Errors after the first are
+/// dropped — the agent reads the error, fixes the link, retries, and
+/// surfaces the next one on the follow-up call. Keeps the envelope
+/// shape stable (single typed payload rather than a list) so MCP /
+/// CLI / UniFFI clients don't need a fan-out renderer.
+pub(super) fn map_wiki_link_errors(
+    section_key: &str,
+    errors: Vec<crate::entity::id::WikiLinkError>,
+) -> EngineError {
+    use crate::entity::id::WikiLinkError;
+    let first = errors
+        .into_iter()
+        .next()
+        .expect("map_wiki_link_errors called with non-empty error list");
+    match first {
+        WikiLinkError::InvalidTarget {
+            raw,
+            suggested,
+            reason,
+        } => EngineError::InvalidWikiLinkTarget {
+            raw,
+            suggested,
+            section: section_key.to_string(),
+            link_source: "body_link".to_string(),
+            reason,
+        },
+        WikiLinkError::InvalidVaultName { raw, reason } => {
+            EngineError::InvalidWikiLinkVault {
+                raw,
+                section: section_key.to_string(),
+                reason,
+            }
+        }
+    }
+}
+
+/// Compute the set of body wiki-link targets in an entity. Used by
+/// callers of `synthesise_alias_relations` to capture the pre-mutation
+/// state once, before any borrow conflicts re-enter the engine's
+/// schemas / store maps. Uses the lenient decoder — this snapshot
+/// must tolerate on-disk drift on pre-strict entities whose bodies
+/// may still contain non-conformant links; the strict gate fires
+/// only on the post-mutation `next` state.
+pub(super) fn collect_body_link_targets(
+    entity: &Entity,
+) -> std::collections::HashSet<EntityId> {
+    entity
+        .sections
+        .iter()
+        .flat_map(|(_, body)| {
+            crate::entity::parser::extract_inline_links_lenient(body, &entity.vault)
+        })
+        .collect()
+}
+
+/// Alias-existence invariant validator. Given the post-mutation entity
+/// state, scan every section body for wiki-links whose target has no
+/// corresponding explicit relation in `entity.relationships`. Returns
+/// the list of `(section_key, target_id)` pairs that violate the
+/// invariant — empty when the post-mutation state is clean.
+///
+/// Used by [`Engine::create_entity`] and [`Engine::update_entity`]
+/// (and `batch_update`). The validator runs unconditionally — under
+/// the alias model body wiki-links are foreign-key references on the
+/// `## Relationships` table and every reference must be backed.
+///
+/// Sections from the auto-managed `## Relationships` heading are
+/// not scanned (the engine generates them from the relations list
+/// at write time; the parser keeps them out of
+/// `entity.sections` so they never reach this function).
+///
+/// Reuses [`crate::entity::parser::extract_inline_links`] so the
+/// lexical discipline (fenced-code masking, inline-code masking,
+/// alias handling, cross-vault forms) matches every other validator
+/// surface in the engine.
+pub(super) fn scan_wikilinks_without_relation(
+    next: &Entity,
+) -> Result<Vec<(String, EntityId)>, EngineError> {
+    let explicit_targets: std::collections::HashSet<EntityId> = next
+        .relationships
+        .iter()
+        .map(|r| r.target.clone())
+        .collect();
+    let mut missing: Vec<(String, EntityId)> = Vec::new();
+    for (section_key, body) in next.sections.iter() {
+        let ids = crate::entity::parser::extract_inline_links(body, &next.vault)
+            .map_err(|errs| map_wiki_link_errors(section_key, errs))?;
+        for target in ids {
+            // A self-targeting body link is intentionally unbacked: the
+            // alias pass drops its (vacuous) self-edge (F11), so it has no
+            // backing relation by design and must not trip the
+            // unbacked-link refusal here.
+            if target == next.id {
+                continue;
+            }
+            if !explicit_targets.contains(&target)
+                && !missing.iter().any(|(k, t)| k == section_key && t == &target)
+            {
+                missing.push((section_key.clone(), target));
+            }
+        }
+    }
+    Ok(missing)
+}
+
+#[cfg(test)]
+mod tests {
+    
+
+    use tempfile::TempDir;
+
+    use crate::backend::VaultBackend;
+    use crate::engine::test_helpers::*;
+    use crate::engine::{
+        CreateEntityArgs, Engine,
+        UpdateEntityArgs,
+    };
+    
+    use crate::storage::FilesystemVaultWriter;
+    use crate::vcs::CommitContext;
+
+    use indexmap::IndexMap;
+
+    #[test]
+    fn with_ctx_wrappers_delegate_to_explicit_forms() {
+        // Each *_with_ctx wrapper bundles a CommitContext and
+        // routes through the corresponding 4-arg method. Verify
+        // create → update → rename → delete via the wrappers
+        // observably mutate the store the same way the explicit
+        // forms would.
+        let tmp = TempDir::new().unwrap();
+        let vault_dir = tmp.path().to_path_buf();
+        let writer = FilesystemVaultWriter::new(vault_dir.clone());
+        let mut engine = Engine::from_mounts(vec![(
+            folder_mount("specs", vault_dir),
+            Box::new(writer) as Box<dyn VaultBackend>,
+        )])
+        .unwrap();
+        let ctx = CommitContext::internal();
+
+        // create_entity_with_ctx
+        let create_args = CreateEntityArgs {
+            vault: "specs".to_string(),
+            title: "Seed".to_string(),
+            entity_type: "spec".to_string(),
+            sections: IndexMap::from_iter([
+                ("identity".to_string(), "seed identity".to_string()),
+                ("purpose".to_string(), "seed purpose".to_string()),
+            ]),
+            metadata: IndexMap::new(),
+            relations: Vec::new(),
+            dry_run: false,
+        };
+        let created = engine.create_entity_with_ctx(create_args, &ctx).unwrap();
+        assert_eq!(created.title, "Seed");
+        assert!(engine.store().get(&created.id).is_some());
+
+        // update_entity_with_ctx
+        let update_args = UpdateEntityArgs {
+            id: created.id.clone(),
+            expected_hash: Some(created.content_hash.clone()),
+            sections: IndexMap::from_iter([(
+                "identity".to_string(),
+                "updated".to_string(),
+            )]),
+            append_sections: IndexMap::new(),
+            patch_sections: IndexMap::new(),
+            metadata: IndexMap::new(),
+            metadata_unset: Vec::new(),
+            dry_run: false,
+            declare_relations: Vec::new(),
+            relations_unset: Vec::new(),
+        };
+        let updated = engine.update_entity_with_ctx(update_args, &ctx).unwrap();
+        assert!(
+            !updated.commit_sha.is_empty()
+                || (updated.modified_sections.replaced.is_empty()
+                    && updated.modified_sections.appended.is_empty()
+                    && updated.modified_sections.patched.is_empty())
+        );
+
+        // rename_entity_with_ctx
+        let renamed = engine
+            .rename_entity_with_ctx(
+                &created.id,
+                "Renamed",
+                &updated.content_hash,
+                &ctx,
+            )
+            .unwrap();
+        assert_ne!(renamed.old_id, renamed.new_id);
+        assert!(engine.store().get(&renamed.new_id).is_some());
+
+        // delete_entity_with_ctx
+        let deleted = engine
+            .delete_entity_with_ctx(
+                &renamed.new_id,
+                &renamed.content_hash,
+                &ctx,
+            )
+            .unwrap();
+        assert_eq!(deleted.id, renamed.new_id);
+        assert!(engine.store().get(&renamed.new_id).is_none());
+    }
+
+}

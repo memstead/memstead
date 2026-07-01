@@ -1,0 +1,87 @@
+# yaml-language-server: $schema=../../../../generated/type-definition.schema.json
+
+name: pillar
+description: |
+  A top-level subsystem of the project — the project-level
+  representative of an external code vault (or other deliverable
+  worth tracking at project scale). Carries kind (engine, app,
+  plugin, service, website, research) and current velocity (hot,
+  warm, cold).
+when_to_use: |
+  Use to model a subsystem whose existence and posture matter at the
+  project level. Typically one pillar per code-side vault, but a
+  pillar may also track a non-code deliverable (a research arm, a
+  community surface). The defining test: would the operator naturally
+  list this as one of the project's "main pieces" in a top-level
+  summary? If yes, `pillar`. If no, it lives inside the code vault
+  alone and does not need a project-level entity.
+boundaries:
+  - Not a code component — fine-grained code structure lives in the paired code vault under software@0.1.0.
+  - Not a milestone — pillars are durable subsystems; milestones are committed checkpoints against them.
+  - Not a bet — pillars are what exists; bets are choices about what to do with them.
+system_message: |
+  A pillar is the project-level handle for one subsystem. Required
+  to wiki-link a primary external entity in the corresponding code
+  vault — this is the bridge between project view and code view.
+  The auto-emitted REFERENCES edge anchors the pillar in the code
+  graph; agents traversing from project posture into code truth
+  follow this edge. Velocity is for queries like "which pillars are
+  hot right now"; revisit on each major posture review.
+sections:
+  - key: scope
+    heading: Scope
+    required: true
+    search_weight: 30.0
+    write_rules:
+      - "One paragraph naming what this pillar covers — its boundary against the project's other pillars. Standalone-readable. Wiki-link to the primary external entity in the paired code vault (e.g. `[[engine:engine-workspace]]`); the auto-emitted REFERENCES is the bridge into the code view."
+  - key: current_shape
+    heading: Current Shape
+    required: true
+    search_weight: 15.0
+    write_rules:
+      - "What this pillar concretely consists of today — major modules, surfaces, or deliverables. Not a changelog; current state only."
+  - key: open_front
+    heading: Open Front
+    required: false
+    search_weight: 10.0
+    write_rules:
+      - "What is in flight on this pillar right now. Wiki-link to the relevant `bet` or `milestone` entities. Omit if the pillar is in steady state."
+  - key: notes
+    heading: Notes
+    required: false
+    search_weight: 3.0
+    catch_all: true
+metadata_fields:
+  - key: kind
+    description: What shape of subsystem this is.
+    field_type: string
+    enum_values: [engine, app, plugin, service, website, research, other]
+    filterable: equality
+  - key: velocity
+    description: How active this pillar is right now. Drives "what's hot" queries.
+    field_type: string
+    default_value: warm
+    enum_values: [hot, warm, cold]
+    filterable: equality
+  - key: status
+    description: Lifecycle state at the project level.
+    field_type: string
+    default_value: active
+    enum_values: [planned, active, paused, retired]
+    filterable: equality
+title_weight: 100.0
+text_fields: [scope, current_shape, open_front, notes]
+hierarchy_relationship: PART_OF
+required_outgoing:
+  - relationships: [REFERENCES]
+    cardinality: at_least_one
+edge_weight_overrides:
+  REFERENCES: 1.5
+propagating_relationships: [PART_OF, REFERENCES]
+updatable_fields: [title, scope, current_shape, open_front, notes, kind, velocity, status, tags]
+health_required_fields: [scope, current_shape]
+staleness_threshold_days: 90
+write_rules:
+  - "Wiki-link the paired code-vault entity in Scope. A pillar that REFERENCES no code-vault entity is a name without realization — the engine warns."
+  - "Sub-pillars connect via PART_OF. Keep the hierarchy shallow; a pillar tree more than two levels deep is probably too fine-grained for the project view."
+  - "Velocity is observed, not aspirational. A pillar marked `hot` because the operator wishes it were hot is wrong; mark it the velocity it actually has."

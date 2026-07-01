@@ -1,0 +1,42 @@
+# yaml-language-server: $schema=../../../../../engine/crates/memstead-schema/generated/type-definition.schema.json
+
+name: document
+description: |
+  Minimal document type — one text section holding body prose. The
+  fixture exists solely to let engine tests mount the `aliased`
+  schema and verify body wiki-links emit CITES (the schema-level
+  alias pointer) rather than a hard-coded REFERENCES.
+when_to_use: |
+  Engine test fixture only. Pair with the schema's `alias_target_rel_type:
+  CITES` pointer to verify the synthesis pass is rel-type-agnostic.
+
+sections:
+  - key: body
+    heading: Body
+    required: true
+    search_weight: 10.0
+    catch_all: true
+    write_rules:
+      - "Free-form body prose. Body wiki-links `[[target]]` auto-emit CITES via the alias-synthesis pass."
+
+metadata_fields: []
+
+title_weight: 100.0
+
+text_fields:
+  - body
+
+hierarchy_relationship: PART_OF
+propagating_relationships: []
+
+updatable_fields:
+  - title
+  - body
+
+health_required_fields:
+  - body
+
+staleness_threshold_days: 90
+
+write_rules:
+  - "Test fixture only. Mounted via Engine::from_mounts_with_schemas_dir in alias-synthesis integration tests."

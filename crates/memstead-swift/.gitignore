@@ -1,0 +1,5 @@
+# Synthesized by build.rs for `--features test-support` builds: base UDL +
+# memstead-test-support.udl concatenated, kept as `memstead.udl` (matching
+# the namespace) one level deep so uniffi finds the crate root and emits
+# `memstead.uniffi.rs`. Regenerated every build; not source.
+/.synth/

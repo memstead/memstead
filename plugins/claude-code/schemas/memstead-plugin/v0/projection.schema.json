@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://memstead.io/schemas/memstead-plugin/v0/projection",
+  "title": "memstead-plugin/v0 projection",
+  "description": "A Projection is the obligation that maps source facets (and optional read-only reference vaults) to a single destination vault. Each projection file lives at `.memstead/projections/<vault>/<name>.json`. `source_facets` reference facets by name under the projection's own vault; `reference_vaults` supply cross-vault context; `destination_vault` is the vault the projection writes into. The optional `rules` block carries free-form prose guidance the agent reads when running this projection. (The legacy `sources`/`destinations` folder shape was retired with the four-primitive migration.)",
+  "type": "object",
+  "required": ["destination_vault"],
+  "properties": {
+    "intent": {
+      "description": "Optional short statement of what this projection produces.",
+      "type": "string",
+      "minLength": 1
+    },
+    "source_facets": {
+      "description": "Facets (by name, resolved under the projection's own vault) the projection reads from.",
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "reference_vaults": {
+      "description": "Read-only reference vaults (by name) that supply cross-vault context.",
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "destination_vault": {
+      "description": "The vault this projection writes into.",
+      "type": "string",
+      "minLength": 1
+    },
+    "rules": {
+      "description": "Optional prose guidance for the agent — free-form object.",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false
+}

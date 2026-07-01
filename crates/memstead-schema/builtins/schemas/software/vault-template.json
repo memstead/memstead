@@ -1,0 +1,7 @@
+{
+  "description": "<ONE_SENTENCE_PROJECT_DESCRIPTION>",
+  "language": "English",
+  "writeGuidance": {
+    "stack": "<REQUIRED: one paragraph naming the runtime stack, datastores, deployment target, team shape, external surfaces, and non-negotiable architectural invariants. If this placeholder is still present when the agent runs, stop and ask the operator — do not invent stack facts.>"
+  }
+}

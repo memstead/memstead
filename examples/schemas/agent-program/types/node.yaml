@@ -1,0 +1,115 @@
+# yaml-language-server: $schema=../../../../engine/crates/memstead-schema/generated/type-definition.schema.json
+
+name: node
+description: |
+  A unit of work in an agent program. The agent reads one node at a
+  time, satisfies its intent, checks success, and chooses a transition.
+  Nodes describe intent, not exact actions — the LLM picks words and
+  tool calls within the action space declared by the node's edges.
+when_to_use: |
+  Use for each unit of work the program performs: read a file, call a
+  tool, ask the user, decide which branch to take, enter a wait state,
+  terminate the program. The defining test: can the agent satisfy this
+  node and choose a single next action without intermediate
+  decomposition? If no, split the node.
+boundaries:
+  - Not a tool — the tool is the capability; the node is the work that
+    may use it via the uses edge.
+  - Not a sequence of actions — one node, one intent. Sequence comes
+    from branches_to chains.
+  - Not a procedure — procedures are programs; nodes are inside them.
+  - Not free-form prose — the intent is concrete enough that the
+    agent's choice is bounded.
+system_message: |
+  A node carries one intent the agent satisfies before transitioning.
+  The body answers four questions for the agent: what to accomplish
+  (intent), how to know it worked (success_check), where to go next
+  (transitions narrative against branches_to / falls_back_to edges),
+  and what tools are likely to apply (uses edges, optionally enriched
+  by suggested_tools prose).
+
+  Node kinds:
+    action     — does work, calls tools, mutates state
+    decision   — branches the program based on observation
+    wait       — pauses until an external condition is met
+    terminal   — program ends here; check terminal_outcome
+
+  Terminal nodes have no outgoing branches_to edges. Action and
+  decision nodes have at least one branches_to edge. Wait nodes have
+  branches_to that the agent takes once the wait condition resolves.
+sections:
+  - key: intent
+    heading: Intent
+    required: true
+    search_weight: 40.0
+    write_rules:
+      - "One to three sentences. What the agent should accomplish at this node. Concrete enough to be checkable, abstract enough that the LLM picks the words. Standalone-readable in a search snippet."
+  - key: success_check
+    heading: Success Check
+    required: true
+    search_weight: 20.0
+    write_rules:
+      - "How the agent verifies the node is done before transitioning. A test, a tool call, an observation, an explicit user confirmation. A node without a success check is a wish."
+  - key: transitions
+    heading: Transitions
+    required: true
+    search_weight: 15.0
+    write_rules:
+      - "Narrative description of when to take which outgoing edge. References branches_to and falls_back_to targets by id. Example: 'On success → [[node--commit]]. On HASH_MISMATCH → [[node--retry-with-dry-run]]. On RELATIONSHIP_CYCLE → [[node--abort-and-report]].'"
+      - "Terminal nodes describe the outcome here ('Program ends; success criteria met') and have no branches_to edges."
+  - key: error_handling
+    heading: Error Handling
+    required: false
+    search_weight: 10.0
+    write_rules:
+      - "Specific typed error codes the agent should expect at this node and the recovery strategy. Pairs with falls_back_to edges. Example: 'HASH_MISMATCH — call the same mutation with dry_run=true to obtain current hash, then retry.'"
+  - key: notes_for_agent
+    heading: Notes for Agent
+    required: false
+    search_weight: 5.0
+    write_rules:
+      - "Gotchas, context, surprising behavior. Things the LLM needs to know to do this node well. Keep brief — long notes are usually a sign the node should be split."
+  - key: notes
+    heading: Notes
+    required: false
+    search_weight: 3.0
+    catch_all: true
+metadata_fields:
+  - key: kind
+    description: What kind of node this is. Affects expected outgoing edges and termination semantics.
+    field_type: string
+    default_value: action
+    enum_values: [action, decision, wait, terminal]
+    filterable: equality
+  - key: terminal_outcome
+    description: When kind=terminal, the outcome the program ends with. Empty for non-terminal nodes.
+    field_type: string
+    enum_values: [success, failure, escalated, partial]
+    filterable: equality
+  - key: idempotent
+    description: Whether re-running this node is safe. True for read-only and idempotent operations; false when the node has irreversible side effects.
+    field_type: boolean
+    default_value: false
+    filterable: equality
+  - key: max_retries
+    description: How many times the agent may retry this node on transient failure before falling back. 0 means no retry — first failure follows falls_back_to.
+    field_type: number
+    filterable: range
+title_weight: 100.0
+text_fields: [intent, success_check, transitions, error_handling, notes_for_agent, notes]
+hierarchy_relationship: PART_OF
+edge_weight_overrides:
+  branches_to: 2.5
+  falls_back_to: 2.0
+  uses: 1.5
+  governed_by: 2.5
+propagating_relationships: [uses, governed_by]
+updatable_fields: [title, intent, success_check, transitions, error_handling, notes_for_agent, notes, kind, terminal_outcome, idempotent, max_retries, tags]
+health_required_fields: [intent, success_check, transitions]
+staleness_threshold_days: 90
+write_rules:
+  - "Every node belongs to exactly one program via PART_OF. Nodes without a program are unrunnable."
+  - "Action and decision nodes have at least one branches_to edge. Terminal nodes have zero. Wait nodes have at least one."
+  - "When kind=terminal, set terminal_outcome. When kind is anything else, leave terminal_outcome empty."
+  - "The transitions section explains the branching logic in prose. The branches_to and falls_back_to edges are the machine-readable surface; the section is the human/agent-readable narrative pointing at them."
+  - "Every tool the agent may call here is declared via a uses edge. Don't reference undeclared tools in the intent or notes — if the tool isn't in the catalog, add it before authoring the node."

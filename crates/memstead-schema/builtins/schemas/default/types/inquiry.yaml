@@ -1,0 +1,79 @@
+# yaml-language-server: $schema=../../../../generated/type-definition.schema.json
+name: inquiry
+description: |
+  An open question whose resolution would unblock decisions or
+  understanding. Tracks approaches, current partial state, and blocking
+  dependencies.
+when_to_use: |
+  Use when a question is genuinely unanswered yet answerable in principle,
+  and resolving it would affect downstream work. Prefer over memo when the
+  focus is the question rather than a decision already made.
+boundaries:
+  - Not a claim you already believe — use assertion.
+  - Not a decision or reasoning trail — use memo.
+  - Not an executable workflow — use process.
+system_message: |
+  Inquiries are open questions with significance, approaches, and
+  resolution status. Each entity has Question, Significance, and optional
+  Current State/Approaches/Dependencies. BLOCKS links inquiries to what
+  they prevent. Status: open/investigating/answered/abandoned.
+sections:
+  - key: question
+    heading: Question
+    required: true
+    search_weight: 40.0
+    write_rules:
+      - "One sentence. The core question. Must be answerable in principle — if no conceivable evidence could resolve it, reframe."
+  - key: significance
+    heading: Significance
+    required: true
+    search_weight: 20.0
+    write_rules:
+      - "Why this question matters. What decisions or understanding depend on the answer. Link dependent entities via wiki-links."
+  - key: current_state
+    heading: Current State
+    required: false
+    search_weight: 5.0
+    write_rules:
+      - "What is currently known. Partial answers, related findings, prior attempts. Append-friendly — add entries as new information arrives."
+  - key: approaches
+    heading: Approaches
+    required: false
+    search_weight: 5.0
+    catch_all: true
+    write_rules:
+      - "How the question could be answered. Methods, experiments, analysis paths. Bullet list: approach, then feasibility and trade-offs."
+  - key: dependencies
+    heading: Dependencies
+    required: false
+    search_weight: 3.0
+    write_rules:
+      - "What must be resolved before this question can be answered. Link blocking inquiries or prerequisites via wiki-links."
+metadata_fields:
+  - key: status
+    description: Lifecycle state of the inquiry.
+    field_type: string
+    default_value: open
+    enum_values: [open, investigating, answered, abandoned]
+    filterable: equality
+  - key: urgency
+    description: How urgently the inquiry should be pursued.
+    field_type: string
+    default_value: normal
+    enum_values: [low, normal, high, critical]
+    filterable: equality
+title_weight: 100.0
+text_fields: [question, significance, current_state, approaches, dependencies]
+hierarchy_relationship: PART_OF
+edge_weight_overrides:
+  BLOCKS: 2.5
+propagating_relationships: [BLOCKS, DEPENDS_ON]
+updatable_fields: [title, question, significance, current_state, approaches, dependencies, status, urgency, tags]
+health_required_fields: [question, significance]
+staleness_threshold_days: 60
+write_rules:
+  - "Inquiries are open questions — each must have a conceivable resolution path."
+  - "Status: open (not yet investigated), investigating (actively being explored), answered (resolution found), abandoned (no longer relevant)."
+  - "Urgency: low (background), normal (should be addressed), high (blocking progress), critical (blocking multiple workstreams)."
+  - "Relationships: UPPER_SNAKE_CASE, open vocabulary. BLOCKS = this inquiry blocks progress on the target. DEPENDS_ON = answer requires another entity first. Never declare REFERENCES manually."
+  - "Current State is append-friendly — add new findings, don't rewrite. When an inquiry is answered, set status to \"answered\" and record the resolution in Current State."

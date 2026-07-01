@@ -1,0 +1,5 @@
+{
+  "errors_contain": [
+    "Config must declare `schema` — exact pin of the form \"<name>@<x.y.z>\" (e.g. \"default@1.0.0\")"
+  ]
+}

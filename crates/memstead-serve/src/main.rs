@@ -1,0 +1,103 @@
+//! `memstead-serve` — a generic read-only HTTP/MCP server over a sealed vault.
+//!
+//! Mounts one vault read-only and serves the read-only HTTP surface. With no
+//! archive configured it serves the embedded curated "what is Memstead"
+//! content vault, so the read tier works zero-setup. Every deployment specific
+//! is an input from the environment:
+//!
+//! - `MEMSTEAD_SERVE_ARCHIVE` — path to a sealed `.mem` archive. When unset,
+//!   the binary serves the embedded curated content vault.
+//! - `MEMSTEAD_SERVE_AUTHORITY` — published authority identity, e.g. the host
+//!   this is served under (default: `memstead`)
+//! - `MEMSTEAD_SERVE_VAULT` — vault name (default: `flagship` for an archive,
+//!   `memstead` for the embedded content)
+//! - `MEMSTEAD_SERVE_SCHEMA` — schema pin `name@x.y.z` (default: `default@1.0.0`)
+//! - `MEMSTEAD_SERVE_BIND` — listen address (default: `0.0.0.0:8080`)
+//!
+//! The optional embedded static site is selected at build time via
+//! `MEMSTEAD_SERVE_SITE_DIST` (see `build.rs`); with none configured the binary
+//! serves a built-in placeholder landing.
+
+use std::net::SocketAddr;
+use std::path::PathBuf;
+
+use memstead_base::MountStorage;
+use memstead_serve::{
+    AppState, EMBEDDED_CONTENT_VAULT, ReadOnlyMcpServer, build_app, materialize_embedded_content,
+    mount_read_only,
+};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let authority =
+        std::env::var("MEMSTEAD_SERVE_AUTHORITY").unwrap_or_else(|_| "memstead".to_string());
+    let schema_pin =
+        std::env::var("MEMSTEAD_SERVE_SCHEMA").unwrap_or_else(|_| "default@1.0.0".to_string());
+    // Explicit bind wins; otherwise honour `PORT` (Railway and most PaaS inject
+    // it) so a container needs no extra wiring, falling back to 8080 locally.
+    let bind = std::env::var("MEMSTEAD_SERVE_BIND").unwrap_or_else(|_| {
+        let port = std::env::var("PORT").unwrap_or_else(|_| "8080".to_string());
+        format!("0.0.0.0:{port}")
+    });
+
+    let schema: memstead_schema::SchemaRef = schema_pin
+        .parse()
+        .map_err(|e| format!("invalid MEMSTEAD_SERVE_SCHEMA {schema_pin:?}: {e}"))?;
+
+    // Vault source: an explicit sealed archive, else the embedded curated
+    // content vault so the read tier serves real content with no setup.
+    let (vault, storage) = if let Ok(archive) = std::env::var("MEMSTEAD_SERVE_ARCHIVE") {
+        let vault = std::env::var("MEMSTEAD_SERVE_VAULT").unwrap_or_else(|_| "flagship".to_string());
+        (vault, MountStorage::Archive { path: PathBuf::from(archive) })
+    } else {
+        let dir = materialize_embedded_content()?;
+        eprintln!(
+            "memstead-serve: no MEMSTEAD_SERVE_ARCHIVE set; serving the embedded curated \
+content vault from {}",
+            dir.display()
+        );
+        let vault =
+            std::env::var("MEMSTEAD_SERVE_VAULT").unwrap_or_else(|_| EMBEDDED_CONTENT_VAULT.to_string());
+        (vault, MountStorage::Folder { path: dir })
+    };
+    // `/api` and `/mcp` each get their own read-only engine over the same
+    // sealed archive — the mount is immutable, so two readers need no
+    // coordination, and it sidesteps the std-vs-tokio mutex split between the
+    // two surfaces.
+    let api_engine = mount_read_only(vault.clone(), schema.clone(), storage.clone())?;
+    let mcp_engine = mount_read_only(vault, schema, storage)?;
+    // This binary serves the authority's own curated content (the embedded
+    // "what is Memstead" vault, or a deliberately-configured archive), so it
+    // vouches for it as first-party. An operator pointing it at arbitrary
+    // content can suppress that with `MEMSTEAD_SERVE_ORIGIN=third-party`.
+    let content_origin = match std::env::var("MEMSTEAD_SERVE_ORIGIN").ok().as_deref() {
+        Some("third-party") => memstead_base::render::OriginClass::ThirdParty,
+        _ => memstead_base::render::OriginClass::FirstParty,
+    };
+    // Soft-launch gate (default ON; the launch flip is one env shared with the
+    // .com/.io surfaces). OFF only on an explicit off-ish value.
+    let soft_launch = !matches!(
+        std::env::var("MEMSTEAD_SOFT_LAUNCH")
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase()
+            .as_str(),
+        "0" | "off" | "false"
+    );
+    let state = AppState::new(api_engine, authority)
+        .with_content_origin(content_origin)
+        .with_soft_launch(soft_launch);
+    let mcp_server = ReadOnlyMcpServer::from_engine(mcp_engine);
+    // 5 req/s steady with a burst of 60 per IP — generous for a read surface,
+    // enough to blunt abuse.
+    let app = build_app(state, mcp_server, 5, 60);
+
+    let listener = tokio::net::TcpListener::bind(&bind).await?;
+    eprintln!("memstead-serve listening on {bind}");
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await?;
+    Ok(())
+}

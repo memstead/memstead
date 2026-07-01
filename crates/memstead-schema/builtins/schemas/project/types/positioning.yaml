@@ -1,0 +1,89 @@
+# yaml-language-server: $schema=../../../../generated/type-definition.schema.json
+
+name: positioning
+description: |
+  A versioned pitch-and-audience package. Multiple may exist;
+  exactly one carries `status: current` per surface. Carries the
+  audience the pitch addresses, lifecycle status, and a free-form
+  generation tag (e.g. "post-pivot-2026-Q2"). When the pitch
+  evolves, supersede rather than edit so the lineage of positioning
+  is queryable.
+when_to_use: |
+  Use to capture how the project introduces itself to one specific
+  audience. Multiple positionings co-exist when the project addresses
+  multiple audiences (developers vs. operators vs. enterprise
+  buyers). The defining test: can you name the audience this pitch
+  speaks to and the differentiator it leans on? If yes, `positioning`.
+  If no, you have a `vision` (long-arc) or a `brand` (identity), not
+  a positioning.
+boundaries:
+  - Not a vision — a positioning is audience-facing; a vision is the long-arc destination.
+  - Not a brand — a positioning is the pitch; a brand is the identity layer.
+  - Not a one-line tagline — taglines belong inside `brand.identity`.
+system_message: |
+  A positioning records how the project introduces itself to one
+  audience at one point in time. The pitch is the elevator paragraph
+  the operator would actually use. The "Against" section is
+  load-bearing — every serious pitch is defined partly by what it
+  contrasts itself with. When the pitch evolves, author a new
+  positioning with SUPERSEDES; the old one moves to `status:
+  superseded` and stays for lineage.
+sections:
+  - key: pitch
+    heading: Pitch
+    required: true
+    search_weight: 40.0
+    write_rules:
+      - "One paragraph. The elevator pitch the operator would use today for this audience. Standalone-readable — no pronouns referring out, no forward references."
+  - key: target_audience
+    heading: Target Audience
+    required: true
+    search_weight: 20.0
+    write_rules:
+      - "Who this pitch is for. Concrete enough that an observer could decide whether a given person belongs in this audience or another."
+  - key: differentiator
+    heading: Differentiator
+    required: true
+    search_weight: 15.0
+    write_rules:
+      - "The single thing this project does that the alternatives do not. If you cannot name it, the positioning is undifferentiated."
+  - key: against
+    heading: Against
+    required: false
+    search_weight: 10.0
+    write_rules:
+      - "What this positioning explicitly contrasts itself with — competing tools, competing approaches, the status quo. Wiki-link to relevant `competitor` entities. A pitch with no 'against' is unframed."
+  - key: notes
+    heading: Notes
+    required: false
+    search_weight: 3.0
+    catch_all: true
+metadata_fields:
+  - key: status
+    description: Lifecycle state. At most one positioning should be `current` per audience.
+    field_type: string
+    default_value: current
+    enum_values: [draft, current, superseded, abandoned]
+    filterable: equality
+  - key: audience
+    description: Short tag for the audience (e.g. `developers`, `operators`, `enterprise`).
+    field_type: string
+    filterable: equality
+  - key: generation
+    description: Free-form generation tag (e.g. `post-pivot-2026-Q2`, `launch`).
+    field_type: string
+title_weight: 100.0
+text_fields: [pitch, target_audience, differentiator, against, notes]
+hierarchy_relationship: PART_OF
+edge_weight_overrides:
+  SUPERSEDES: 2.0
+  CONTRASTS_WITH: 2.0
+propagating_relationships: [SUPERSEDES, INFORMED_BY, CONTRASTS_WITH]
+updatable_fields: [title, pitch, target_audience, differentiator, against, notes, status, audience, generation, tags]
+health_required_fields: [pitch, target_audience, differentiator]
+staleness_threshold_days: 180
+write_rules:
+  - "When the pitch evolves, author a new positioning with SUPERSEDES — never edit a `current` positioning in place. Move the old one to `status: superseded` so the lineage is queryable."
+  - "At most one `current` positioning per audience. If two are simultaneously current and they address the same audience, one of them is wrong."
+  - "Differentiator names one thing. Multi-bullet lists of features are not a differentiator — they are a feature inventory."
+  - "Against is high-value. Wiki-link to the `competitor` entities the pitch defines itself against; the auto-emitted REFERENCES becomes the navigable contrast."

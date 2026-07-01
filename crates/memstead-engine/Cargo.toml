@@ -1,0 +1,22 @@
+[package]
+name = "memstead-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Full engine extension for Memstead — multi-vault policy, vault management, cross-vault-link resolution, lifecycle. Depends on memstead-base."
+publish = false
+
+[dependencies]
+memstead-base.workspace = true
+memstead-schema.workspace = true
+semver.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+toml_edit.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

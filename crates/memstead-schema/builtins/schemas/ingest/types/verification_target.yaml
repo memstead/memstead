@@ -1,0 +1,69 @@
+# yaml-language-server: $schema=../../../../generated/type-definition.schema.json
+
+name: verification_target
+description: |
+  A claim that is *present* in the destination graph but has not
+  been verified against the source it purports to describe. The
+  flag persists until a future run reads the source carefully and
+  either confirms the claim (delete this entry) or replaces it
+  with a corrected destination claim (also delete this entry,
+  optionally creating an `inconsistency` if the discrepancy is
+  worth recording in flight).
+when_to_use: |
+  Use when an agent records a claim from limited evidence (a
+  README summary, a function name, a comment) and another agent
+  should later cross-check the claim against the actual source. The
+  defining test: is the claim concrete and the verification path
+  defined? "The macOS chat agent uses MCP" is too vague; "the
+  macOS in-process MCP-client ban (entity `macos:check-architecture`)
+  was added because of an old prototype — verify the script
+  enforces the documented rule" is verifiable.
+boundaries:
+  - Not a coverage gap — this type flags a *present* but unverified claim. If the claim is missing entirely, use `coverage_gap`.
+  - Not an inconsistency — this type is about uncertainty against source, not contradiction between claims.
+  - Not generic "we should review everything periodically" — verification_targets name a specific claim and a specific source that resolves it.
+system_message: |
+  A verification_target carries three things: which destination
+  claim is on the hook, which source artifact resolves it, and the
+  observable condition under which the verification can be called
+  done. Without all three, the next agent can't act on the entry —
+  they would have to do general re-reading, which is not what
+  this vault is for.
+sections:
+  - key: claim
+    heading: Claim
+    required: true
+    search_weight: 30.0
+    write_rules:
+      - "The destination claim under suspicion, restated in one or two sentences. Wiki-link the destination entity that carries the claim (e.g. `[[entity-id]]`). Standalone-readable in a search snippet."
+  - key: source_to_check
+    heading: Source to check
+    required: true
+    search_weight: 15.0
+    write_rules:
+      - "The concrete source artifact whose reading would resolve the claim — a file path with line range, a contract spec, a documented decision in `dev/archive/`, a test file. Vague pointers ('the codebase') make the entry unactionable."
+  - key: verifiable_when
+    heading: Verifiable when
+    required: true
+    search_weight: 10.0
+    write_rules:
+      - "The observable condition under which the next agent can declare the verification done — confirm or correct. Examples: 'the cited contract still defines field X with type Y', 'the cited test still asserts the documented behavior', 'the source file no longer mentions the removed symbol'. Without this, agents loop on the same target indefinitely."
+  - key: notes
+    heading: Notes
+    required: false
+    search_weight: 3.0
+    catch_all: true
+metadata_fields: []
+title_weight: 100.0
+text_fields: [claim, source_to_check, verifiable_when, notes]
+hierarchy_relationship: PART_OF
+propagating_relationships: []
+updatable_fields: [title, claim, source_to_check, verifiable_when, notes, tags]
+health_required_fields: [claim, source_to_check, verifiable_when]
+staleness_threshold_days: 30
+write_rules:
+  - "The claim must be *present* in the destination. If the claim is missing, the right type is `coverage_gap`."
+  - "Wiki-link the destination entity that carries the claim. Without REFERENCES into the destination, the entry is untethered."
+  - "Source-to-check is concrete — a path, range, contract name, decision record. 'The code' is not a verification path."
+  - "Verifiable-when names the observable condition that ends the verification. Without it, the entry has no exit criterion."
+  - "Re-verify on every run. If the destination claim is now demonstrably correct (or has been corrected), delete the entry."

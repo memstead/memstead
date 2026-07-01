@@ -1,0 +1,80 @@
+# yaml-language-server: $schema=../../../../generated/type-definition.schema.json
+name: process
+description: |
+  An executable workflow with a trigger, preconditions, ordered steps,
+  postconditions, and known variations or error paths.
+when_to_use: |
+  Use when a repeatable sequence of actions can be described concretely
+  enough to follow. Prefer over memo when the content describes how to do
+  something rather than why a decision was made.
+boundaries:
+  - Not a narrative of one-off events — use narrative.
+  - Not a structural description — use spec.
+  - Not a rule or constraint — use principle.
+system_message: |
+  Processes are executable workflows with triggers, steps, and
+  conditions. Each entity has Trigger, Preconditions, and optional
+  Steps/Postconditions/Variations. REQUIRES links to prerequisites.
+  TRIGGERS links to downstream processes. Complexity:
+  trivial/low/moderate/high/extreme. Reversibility:
+  reversible/partially/irreversible.
+sections:
+  - key: trigger
+    heading: Trigger
+    required: true
+    search_weight: 40.0
+    write_rules:
+      - "One or two sentences. What initiates this process. An event, condition, or decision that causes execution to begin."
+  - key: preconditions
+    heading: Preconditions
+    required: true
+    search_weight: 20.0
+    write_rules:
+      - "What must be true before the process can execute. Bullet list: condition, then consequence of its absence."
+  - key: steps
+    heading: Steps
+    required: false
+    search_weight: 5.0
+    write_rules:
+      - "The ordered sequence of actions. Numbered list. Each step should be concrete enough to execute without ambiguity."
+  - key: postconditions
+    heading: Postconditions
+    required: false
+    search_weight: 5.0
+    catch_all: true
+    write_rules:
+      - "What is true after successful execution. Expected state changes, outputs, side effects. How to verify the process succeeded."
+  - key: variations
+    heading: Variations
+    required: false
+    search_weight: 3.0
+    write_rules:
+      - "Alternative paths, error handling, edge cases. Bullet list: condition, then alternative flow. Include what happens when preconditions are partially met."
+metadata_fields:
+  - key: complexity
+    description: Cognitive complexity of following the process.
+    field_type: string
+    default_value: moderate
+    enum_values: [trivial, low, moderate, high, extreme]
+    filterable: equality
+  - key: reversibility
+    description: Whether the process effects can be undone.
+    field_type: string
+    default_value: reversible
+    enum_values: [reversible, partially_reversible, irreversible]
+    filterable: equality
+title_weight: 100.0
+text_fields: [trigger, preconditions, steps, postconditions, variations]
+hierarchy_relationship: PART_OF
+edge_weight_overrides:
+  DEPENDS_ON: 1.5
+propagating_relationships: [REQUIRES, TRIGGERS]
+updatable_fields: [title, trigger, preconditions, steps, postconditions, variations, complexity, reversibility, tags]
+health_required_fields: [trigger, preconditions]
+staleness_threshold_days: 90
+write_rules:
+  - "Processes are executable workflows — each must be concrete enough to follow without ambiguity."
+  - "Complexity: trivial (one step), low (few steps, no branching), moderate (multi-step with some branching), high (many steps, complex branching), extreme (requires expert judgment at multiple points)."
+  - "Reversibility: reversible (can undo completely), partially_reversible (some steps irreversible), irreversible (cannot undo)."
+  - "Relationships: UPPER_SNAKE_CASE, open vocabulary. REQUIRES = this process needs the target to exist/complete first. TRIGGERS = completing this process starts the target. Never declare REFERENCES manually."
+  - "Variations section captures error paths — a process without documented failure modes is incomplete."

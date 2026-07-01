@@ -1,0 +1,84 @@
+# yaml-language-server: $schema=../../../../generated/type-definition.schema.json
+
+name: market_signal
+description: |
+  An external trend with a source. Carries direction (tailwind,
+  headwind, neutral) and a time window. Distinct from `competitor`
+  because a signal is broader than one party (e.g. "MCP adoption
+  growing 873%/yr" is a signal, not a competitor).
+when_to_use: |
+  Use to record an external trend that bears on the project's
+  positioning, bets, or pillar choices. The defining test: does
+  this trend, if it persists or reverses, change what the project
+  should do? If yes, `market_signal`. If no, it is environmental
+  noise and does not belong in the graph.
+boundaries:
+  - Not a `competitor` — a signal is a trend; a competitor is one party.
+  - Not an `evidence` entry — evidence is a project-internal observation; a signal is an external trend the project did not produce.
+  - Not a `vision` — visions are the project's destination; signals are the world's weather around it.
+system_message: |
+  A market_signal records an external trend bounded in time and
+  cited to a source. Signal names the trend. Source is where the
+  trend can be checked — a report, a benchmark, a public dataset, a
+  named announcement. Implication is the operator's read on what
+  this trend means for the project. Direction declares whether the
+  signal helps (tailwind), hurts (headwind), or is contested
+  (neutral). Window bounds the signal in time — a signal without a
+  window is timeless and likely overgeneralized.
+sections:
+  - key: signal
+    heading: Signal
+    required: true
+    search_weight: 30.0
+    write_rules:
+      - "One paragraph naming the trend. Standalone-readable. Concrete enough that an observer could check the source and agree the trend is happening."
+  - key: source
+    heading: Source
+    required: true
+    search_weight: 15.0
+    write_rules:
+      - "Where the trend can be checked. Report title, link, named dataset, named announcement. A signal without a source is anonymous and degrades to belief."
+  - key: implication
+    heading: Implication
+    required: true
+    search_weight: 15.0
+    write_rules:
+      - "What this trend means for the project. Wiki-link to the `bet`, `pillar`, or `positioning` it bears on. A signal with no implication is environmental noise — drop it from the graph."
+  - key: notes
+    heading: Notes
+    required: false
+    search_weight: 3.0
+    catch_all: true
+metadata_fields:
+  - key: direction
+    description: Whether the signal helps, hurts, or is contested for this project.
+    field_type: string
+    default_value: neutral
+    enum_values: [tailwind, headwind, neutral]
+    filterable: equality
+  - key: window
+    description: Time window the signal is bounded to (e.g. "Q2-Q4 2026", "2026-2027", "next 18 months").
+    field_type: string
+    filterable: equality
+  - key: status
+    description: Lifecycle state. `active` means the signal is still in play; `expired` means the window has closed.
+    field_type: string
+    default_value: active
+    enum_values: [active, expired, withdrawn]
+    filterable: equality
+title_weight: 100.0
+text_fields: [signal, source, implication, notes]
+hierarchy_relationship: PART_OF
+edge_weight_overrides:
+  THREATENS: 2.5
+  VALIDATES: 2.5
+  WEAKENS: 2.5
+propagating_relationships: [THREATENS, VALIDATES, WEAKENS, INFORMED_BY]
+updatable_fields: [title, signal, source, implication, notes, direction, window, status, tags]
+health_required_fields: [signal, source, implication]
+staleness_threshold_days: 120
+write_rules:
+  - "Source is mandatory and must be reachable. A signal with 'observed in many places' but no named source is unverifiable."
+  - "Window is mandatory in spirit even when omitted as metadata — Implication should make the time scope concrete. A signal without time scope is timeless and likely overgeneralized."
+  - "Wiki-link the implication to the `bet`, `pillar`, or `positioning` the signal bears on. Without that edge, the signal is unanchored."
+  - "When the window expires, set `status: expired`. The signal stays in the graph for lineage; do not delete it just because the wave passed."

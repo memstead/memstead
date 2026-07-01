@@ -1,0 +1,72 @@
+# yaml-language-server: $schema=../../../../generated/type-definition.schema.json
+name: concept
+description: |
+  A precise definition of an abstract idea, term, or mental model —
+  enough to distinguish instances from non-instances.
+when_to_use: |
+  Use when a term or mental model needs a canonical definition that
+  multiple entities can reference. Prefer over model when the subject is
+  a concept itself rather than a pattern that recurs across instances.
+boundaries:
+  - Not a testable claim — use assertion.
+  - Not a recurring pattern observed across instances — use model.
+  - Not a viewpoint or interpretation — use perspective.
+system_message: |
+  Concepts are precise definitions. Each entity has Definition,
+  Explanation, optional Boundaries/Significance. GENERALIZES/SPECIALIZES
+  build concept hierarchies. CONTRASTS_WITH clarifies boundaries.
+  Maturity: emerging/stable/established. Abstraction: concrete/abstract/meta.
+sections:
+  - key: definition
+    heading: Definition
+    required: true
+    search_weight: 40.0
+    write_rules:
+      - "One or two sentences. What this concept IS — necessary and sufficient conditions. Must enable someone to distinguish instances from non-instances."
+  - key: explanation
+    heading: Explanation
+    required: true
+    search_weight: 20.0
+    write_rules:
+      - "Expand the definition. How the concept works, what it entails, why it matters. Use examples and analogies where helpful."
+  - key: boundaries
+    heading: Boundaries
+    required: false
+    search_weight: 5.0
+    write_rules:
+      - "What this concept is NOT. Neighboring concepts it could be confused with. Edge cases. Bullet list: related concept, then how it differs."
+  - key: significance
+    heading: Significance
+    required: false
+    search_weight: 5.0
+    catch_all: true
+    write_rules:
+      - "Why this concept matters in context. What depends on understanding it. Link dependent entities via wiki-links."
+metadata_fields:
+  - key: maturity
+    description: How settled the definition is — emerging, stable, or established.
+    field_type: string
+    default_value: emerging
+    enum_values: [emerging, stable, established]
+    filterable: equality
+  - key: abstraction_level
+    description: Abstraction tier of the concept — concrete, abstract, or meta.
+    field_type: string
+    default_value: concrete
+    enum_values: [concrete, abstract, meta]
+    filterable: equality
+title_weight: 100.0
+text_fields: [definition, explanation, boundaries, significance]
+hierarchy_relationship: PART_OF
+edge_weight_overrides:
+  DEPENDS_ON: 1.5
+propagating_relationships: [DEPENDS_ON, GENERALIZES]
+updatable_fields: [title, definition, explanation, boundaries, significance, maturity, abstraction_level, tags]
+health_required_fields: [definition, explanation]
+staleness_threshold_days: 90
+write_rules:
+  - "Concepts are precise definitions — each must enable distinguishing instances from non-instances."
+  - "Maturity: emerging (newly identified, definition may shift), stable (well-defined, actively used), established (widely understood, unlikely to change)."
+  - "Abstraction level: concrete (directly observable), abstract (requires reasoning to identify), meta (about other concepts)."
+  - "Relationships: UPPER_SNAKE_CASE, open vocabulary. GENERALIZES/SPECIALIZES link broader/narrower concepts. CONTRASTS_WITH links easily confused neighbors. Never declare REFERENCES manually."
+  - "Boundaries section is high-value — confusion between similar concepts causes more errors than missing definitions."

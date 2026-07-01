@@ -1,0 +1,243 @@
+# yaml-language-server: $schema=../../../generated/schema-manifest.schema.json
+
+# ─────────────────────────────────────────────────────────────────────────────
+# project@0.1.0 — knowledge-graph schema for a running project as a whole.
+#
+# A project vault models the strategic, operational, and competitive view of
+# a project — what it is, what it has, what it does, what's around it, what
+# it holds to. Pairs with one or more code-side vaults (typically under
+# software@0.1.0) that the project vault references via cross-vault links;
+# the code vaults stay autonomous and unaware of the project layer.
+#
+# Ten types in five clusters:
+#   Identity      → vision, positioning, brand
+#   Holdings      → pillar, evidence
+#   Motion        → bet, milestone
+#   Surroundings  → competitor, market_signal
+#   Rules         → principle
+#
+# Strict relationship vocabulary: a curated subset of the default edges
+# plus three project-specific (STRENGTHENS, WEAKENS, THREATENS).
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: project
+version: 0.1.0
+
+description: |
+  Project-level knowledge-graph schema. Ten types model the strategic,
+  operational, and competitive view of a running project — identity
+  (vision, positioning, brand), holdings (pillar, evidence), motion
+  (bet, milestone), surroundings (competitor, market_signal), and
+  rules (principle). The graph's value comes from the interaction
+  between strategic and operational entities — evidence STRENGTHENS
+  bets, competitors THREATEN pillars, signals VALIDATE positioning.
+
+when_to_use: |
+  Use to model a project as a queryable whole when the strategic,
+  operational, and competitive view should be reachable through the
+  graph at the same fidelity as the code view. Pair with one or more
+  code-side vaults (typically under software@0.1.0) that this vault
+  references via cross-vault links. Prefer the software schema for
+  code truth (specs, contracts, decisions about implementation) and
+  the planning schema for phase-scoped deliberation; this schema
+  carries durable project posture, not code state and not
+  phase-scoped plans.
+
+system_message: |
+  A project knowledge graph answers five questions, and each cluster
+  of types exists to carry one of them:
+
+    Identity     → vision      (durable north star)
+                   positioning (versioned pitch and audience)
+                   brand       (name + identity layer per surface)
+    Holdings     → pillar      (top-level subsystem of the project)
+                   evidence    (empirical anchor for a strategic claim)
+    Motion       → bet         (strategic choice carrying risk)
+                   milestone   (project-level checkpoint)
+    Surroundings → competitor  (outside party doing something close)
+                   market_signal (external trend with a source)
+    Rules        → principle   (project-level rule constraining design
+                                or strategy)
+
+  Edges carry the strategic posture:
+    bet --MOTIVATED_BY--> vision           (why the bet)
+    evidence --STRENGTHENS--> bet          (validating wager)
+    evidence --WEAKENS--> bet              (disconfirming evidence)
+    competitor --THREATENS--> pillar       (external pressure)
+    market_signal --THREATENS--> bet       (the wave breaking)
+    market_signal --VALIDATES--> bet       (the wave landing)
+    pillar --REFERENCES--> <code-vault>    (auto-emitted from wiki-links)
+    positioning --SUPERSEDES--> positioning (versioned identity)
+    principle --GOVERNS--> bet             (rules that limit choices)
+    milestone --PART_OF--> milestone       (project hierarchy)
+
+  An evidence entry without STRENGTHENS or WEAKENS is a free-floating
+  note. A bet without MOTIVATED_BY is unsourced posture. A pillar
+  without a REFERENCES edge into a code-vault entity is a name without
+  realization. Relationships are UPPER_SNAKE_CASE, strict mode —
+  unknown edges are rejected.
+
+  Risks are not a separate type. A risk that does not change posture
+  is noise; a risk that changes posture is a `bet` whose status moved
+  from `winning` to `losing`, with `evidence` WEAKENS-edges supporting
+  the move.
+
+types:
+  - vision
+  - positioning
+  - brand
+  - pillar
+  - evidence
+  - bet
+  - milestone
+  - competitor
+  - market_signal
+  - principle
+
+# Relationship vocabulary. Curated subset of the default edges + three
+# project-specific (STRENGTHENS, WEAKENS, THREATENS).
+relationships:
+  mode: strict
+  definitions:
+    # ── Structural / reference ──────────────────────────────────────────
+    - name: PART_OF
+      description: Hierarchical containment — the source is structurally part of the target and meaningless without it.
+      when_to_use: Hierarchy between project elements. pillar → pillar (subsystem under subsystem), milestone → milestone (sub-checkpoint under a larger one). Pure graph edge — files stay flat at the vault root.
+      default_weight: 3.0
+      acyclic: true
+    - name: REFERENCES
+      description: Soft reference without ownership or dependency.
+      when_to_use: Emitted automatically from inline wiki-links — do not author manually. The cross-vault wiki-links from this vault into code-side vaults (e.g. `[[engine:engine-workspace]]`) become REFERENCES edges that anchor pillars and evidence in the code view.
+      default_weight: 0.5
+    - name: SUPERSEDES
+      description: The source replaces the target — the target is no longer current.
+      when_to_use: Versioned identity — never edit, always supersede. positioning → positioning when the pitch evolves, brand → brand across rebrands, vision → vision when the north star is restated. Keep the old entity for lineage; link the new one via SUPERSEDES.
+      default_weight: 1.5
+      acyclic: true
+    - name: BLOCKS
+      description: The source blocks the target from happening or progressing.
+      when_to_use: Forward-blocking dependency. bet → milestone when an unsettled bet stops a checkpoint from being committed. milestone → milestone when one checkpoint must complete before another can start.
+      default_weight: 1.0
+
+    # ── Reasoning / motivation ──────────────────────────────────────────
+    - name: MOTIVATED_BY
+      description: The target motivated the creation or change described by the source.
+      when_to_use: Why-chain. bet → vision (the bet exists to advance the north star), milestone → bet (the checkpoint exists to realize the bet). A bet without MOTIVATED_BY is unsourced posture.
+      default_weight: 2.0
+      acyclic: true
+    - name: MOTIVATES
+      description: The source motivates or drives the target.
+      when_to_use: Inverse of MOTIVATED_BY. Author when the narrative reads better in the forward direction (vision → bet rather than bet → vision).
+      default_weight: 1.5
+      acyclic: true
+    - name: INFORMED_BY
+      description: The source is informed by the target — partial input, not a hard dependency.
+      when_to_use: Soft input. bet → competitor (the bet is informed by what the competitor does without depending on it). positioning → market_signal (the pitch is informed by a trend). For strong evidence claims use VALIDATES / CONTRADICTS / STRENGTHENS / WEAKENS.
+      default_weight: 1.0
+    - name: CONTRASTS_WITH
+      description: The source is defined partly by its contrast with the target — easily confused neighbors.
+      when_to_use: Disambiguating neighbors. competitor → competitor (Tolaria is not Mem0), positioning → positioning (the consumer pitch contrasts with the developer pitch). Use to disambiguate near-identical entities.
+      default_weight: 1.5
+
+    # ── Evidence / claims ───────────────────────────────────────────────
+    - name: STRENGTHENS
+      description: The source provides evidence or a signal that strengthens the target claim or wager.
+      when_to_use: evidence → bet (this validates the wager), evidence → positioning (this validates the pitch). The positive counterpart to WEAKENS — stronger than INFORMED_BY because it makes a directional claim about the target's likelihood of being right.
+      default_weight: 2.5
+    - name: WEAKENS
+      description: The source provides evidence or a signal that weakens the target claim or wager.
+      when_to_use: evidence → bet, market_signal → bet (the wave is breaking the wrong way). Negative evidence is first-class — name it explicitly so disconfirming signals show up in queries about a bet's posture.
+      default_weight: 2.5
+    - name: THREATENS
+      description: The source puts the target at risk — external pressure on a project element.
+      when_to_use: competitor → pillar (this competitor would eat this subsystem's lunch), market_signal → bet (this wave breaks the wager), market_signal → vision (this trend obsoletes the north star). Distinct from WEAKENS — THREATENS is forward-looking pressure, WEAKENS is current disconfirming evidence.
+      default_weight: 2.0
+    - name: VALIDATES
+      description: The source validates the target claim, pattern, or principle.
+      when_to_use: Strong positive evidence. market_signal → bet (the wave landing where the bet predicted), evidence → principle (a measurement confirms the rule holds). Stronger than STRENGTHENS — VALIDATES asserts the target is right; STRENGTHENS adds weight to a still-open claim.
+      default_weight: 1.5
+    - name: CONTRADICTS
+      description: The source contradicts or disputes the target claim.
+      when_to_use: Strong negative evidence. evidence → principle (a measurement falsifies the rule), market_signal → vision (a trend disproves the north star). Stronger than WEAKENS — CONTRADICTS asserts the target is wrong; WEAKENS adds doubt to a still-open claim.
+      default_weight: 2.5
+
+    # ── Principles / process ────────────────────────────────────────────
+    - name: GOVERNS
+      description: The source principle governs or constrains the target.
+      when_to_use: principle → bet, principle → milestone, principle → positioning. Captures how a project rule limits the choices available downstream. A principle without GOVERNS edges is a maxim, not an active rule.
+      default_weight: 2.5
+      acyclic: true
+    - name: CONSTRAINS
+      description: The source constrains the permissible states of the target.
+      when_to_use: Weaker than GOVERNS. principle → milestone when the principle narrows but does not fully determine the target's shape. brand → positioning when the brand identity bounds what a pitch can claim.
+      default_weight: 2.0
+      acyclic: true
+
+    - name: _default
+      description: Fallback weight for any relationship not otherwise specified. Required by the engine.
+      default_weight: 1.0
+
+# Cross-vault relationship vocabulary. Source-owned: this schema declares which
+# rel-types its entities may emit into a differently-schema'd target vault.
+# REFERENCES is re-declared here because the cross-vault path does not consult
+# the intra-vault `relationships.definitions` above. `target_types` is left
+# shape-free so a future pillar/evidence anchor into any code-vault type is
+# admitted rather than silently dropped.
+cross_vault_relationships:
+  - to_schema: software
+    definitions:
+      - name: REFERENCES
+        description: Soft reference from a project entity into a code-side (software) entity — the cross-vault anchor that ties pillars and evidence to their realization in code.
+        when_to_use: Auto-emitted from inline wiki-links into a software-schema vault (engine/macos/plugin/registry). Do not author manually. Anchors a pillar (or evidence) to the code-vault entity that realizes it.
+        default_weight: 0.5
+        source_types: [pillar, evidence]
+
+# Body wiki-links `[[target]]` auto-emit as REFERENCES relations via the
+# alias-synthesis pass.
+alias_target_rel_type: REFERENCES
+
+community:
+  resolution: 1.0
+  seed: 42
+
+default_writing_guidance:
+  goal: |
+    The project graph models the strategic, operational, and competitive
+    view of one running project as a queryable whole. A reader of the
+    project vault alone — without reading the code vaults, without
+    reading the strategy folder — should understand where the project
+    stands and why. Not by reading every entity, but by reading the
+    high-degree ones (the active `vision`, the current `positioning`,
+    the top-tier `bet`s, the current `pillar`s) and traversing edges
+    from there. The graph carries durable posture, not session state
+    and not phase-scoped plans. Compactness and coverage pull against
+    each other — the right balance is the one where a fresh agent
+    could reconstruct the project's strategic situation from the graph
+    alone.
+
+  avoid: |
+    The schema defines the types, their boundaries, and their
+    relationship vocabulary — trust it. The failure modes worth
+    naming explicitly:
+
+    - A `bet` without MOTIVATED_BY. A bet without a motivating vision
+      or external trigger is unsourced posture.
+    - A `pillar` without a REFERENCES edge into a code-vault entity.
+      Pillars exist to bridge the project view to the code view; one
+      that names no realization is a name without realization.
+    - An `evidence` entry without STRENGTHENS or WEAKENS. Evidence
+      that supports nothing and weakens nothing is a free-floating note.
+    - A `risk` type. There is none in this schema by design — a risk
+      that changes posture is a `bet` whose status moved from
+      `winning` to `losing`, with WEAKENS evidence supporting the move.
+    - Edits to an accepted `vision`, `positioning`, or `brand`. Always
+      supersede so the lineage is queryable.
+    - Stale `competitor.last_checked` dates. A competitor unrefreshed
+      for many months is a stale claim, not a tracked rival.
+    - A `market_signal` without a `source`. An anonymous signal cannot
+      be re-checked; it degrades to belief.
+    - Inventing structure the project has not produced. If the
+      operator has not made a wager about a subsystem yet, do not
+      fabricate a `bet` to make the graph look busy.
+    - Conversation transcripts copied verbatim. Entities capture
+      distilled posture, not the dialogue that produced it.

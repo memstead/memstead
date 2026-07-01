@@ -1,0 +1,96 @@
+# Build the API-docs Astro site and deploy it to GitHub Pages.
+#
+# The Astro build is templated at deploy time with the commit SHA and
+# commit-author date of HEAD via the `PUBLIC_GENERATION_SHA` /
+# `PUBLIC_GENERATION_DATE` environment variables — the committed
+# Markdown stays byte-stable; the per-page footer surfaces the
+# substituted metadata. A post-build sanity check refuses to ship if
+# any rendered HTML page is missing the `data-generation-sha`
+# attribute.
+#
+# Drift between the live source and the committed Markdown is caught
+# by `docs-drift.yml`, so this workflow trusts the committed tree.
+
+name: Docs deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: docs-deploy
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build site
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Needed so `git show -s --format='%h %cI' HEAD` resolves the
+          # commit-author date and short SHA inside the runner.
+          fetch-depth: 1
+
+      - name: Read HEAD metadata
+        id: head
+        run: |
+          echo "sha=$(git show -s --format='%h' HEAD)" >> "$GITHUB_OUTPUT"
+          echo "date=$(git show -s --format='%cI' HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: docs-site/package-lock.json
+
+      - name: Install site dependencies
+        working-directory: docs-site
+        run: npm ci
+
+      - name: Build Astro site
+        working-directory: docs-site
+        env:
+          PUBLIC_GENERATION_SHA: ${{ steps.head.outputs.sha }}
+          PUBLIC_GENERATION_DATE: ${{ steps.head.outputs.date }}
+        run: npm run build
+
+      - name: Sanity-check footer on every page
+        working-directory: docs-site
+        run: |
+          missing=()
+          while IFS= read -r html; do
+            if ! grep -q "data-generation-sha" "$html"; then
+              missing+=("$html")
+            fi
+          done < <(find dist -name "*.html")
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Generation footer missing from ${#missing[@]} page(s):"
+            for f in "${missing[@]}"; do
+              echo "  - $f"
+            done
+            exit 1
+          fi
+          echo "Footer present on all $(find dist -name '*.html' | wc -l | tr -d ' ') page(s)."
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs-site/dist
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

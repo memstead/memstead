@@ -1,0 +1,78 @@
+# yaml-language-server: $schema=../../../../generated/type-definition.schema.json
+
+name: vision
+description: |
+  The durable north star of the project. One to three per vault;
+  rarely edited; superseded, not rewritten. Carries the time horizon
+  the vision speaks to and a lifecycle status (active, superseded,
+  abandoned).
+when_to_use: |
+  Use to state the long-arc destination of the project — what
+  "winning" looks like across years, not quarters. A vault typically
+  carries one principal vision plus zero to two secondary visions
+  scoped to a surface (e.g. one for the engine, one for the app). If
+  you find yourself authoring a fourth, the project is probably split
+  across schemas it should not be.
+boundaries:
+  - Not a pitch — use `positioning` for the audience-facing version.
+  - Not a brand — use `brand` for the name + identity layer.
+  - Not a strategic wager — use `bet` for choices that carry risk.
+  - Not a checkpoint — use `milestone` for committed deliverables.
+  - Not a phase-scoped goal — use the planning schema's `goal` for those.
+system_message: |
+  A vision is the long-lived target the project orients toward. Keep
+  the statement short enough to recite. The success image makes the
+  destination concrete enough that an external observer could judge,
+  given a state of the world, whether the vision has been reached.
+  When the north star itself changes, supersede the old vision rather
+  than editing it — the lineage of how the project's long-arc target
+  evolved is high-value.
+sections:
+  - key: statement
+    heading: Statement
+    required: true
+    search_weight: 40.0
+    write_rules:
+      - "One or two sentences naming the long-arc destination. Standalone-readable in a search snippet — no pronouns, no forward references."
+  - key: north_star
+    heading: North Star
+    required: true
+    search_weight: 20.0
+    write_rules:
+      - "The single test by which the project judges its own progress. One sentence. If you cannot name it, the vision is too vague to act on."
+  - key: success_image
+    heading: Success Image
+    required: true
+    search_weight: 15.0
+    write_rules:
+      - "What the world looks like when this vision has landed — concrete enough that an observer could check it. A vision without a success image is a slogan."
+  - key: notes
+    heading: Notes
+    required: false
+    search_weight: 3.0
+    catch_all: true
+metadata_fields:
+  - key: status
+    description: Lifecycle state. Only one vision should be `active` at a time per surface.
+    field_type: string
+    default_value: active
+    enum_values: [active, superseded, abandoned]
+    filterable: equality
+  - key: horizon
+    description: Time horizon the vision speaks to (e.g. "2-3 years", "decade").
+    field_type: string
+    filterable: equality
+title_weight: 100.0
+text_fields: [statement, north_star, success_image, notes]
+hierarchy_relationship: PART_OF
+edge_weight_overrides:
+  SUPERSEDES: 2.0
+propagating_relationships: [SUPERSEDES, MOTIVATES]
+updatable_fields: [title, statement, north_star, success_image, notes, status, horizon, tags]
+health_required_fields: [statement, north_star, success_image]
+staleness_threshold_days: 365
+write_rules:
+  - "When the vision changes, author a new vision with SUPERSEDES — never edit the body of an active or superseded vision in place. The lineage is the point."
+  - "One active vision per surface. If two are simultaneously `active` and they speak to the same surface, one of them is wrong."
+  - "Statement is short enough to recite. If it does not fit on a sticky note, it is a positioning, not a vision."
+  - "North star is a single observable test. 'Be the best' is not a north star; '<measurable observation> happens' is."

@@ -1,0 +1,5 @@
+{
+  "projection": "engine/graph",
+  "mode": "discovery",
+  "trigger": "manual"
+}

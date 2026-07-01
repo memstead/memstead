@@ -1,0 +1,81 @@
+# yaml-language-server: $schema=../../../../engine/crates/memstead-schema/generated/type-definition.schema.json
+
+name: concept
+description: |
+  A precise definition of a term or mental model used across the graph
+  — enough to distinguish instances from non-instances. The glossary
+  layer of a software-project knowledge graph (idempotency, eventual
+  consistency, blast radius).
+when_to_use: |
+  Use when a term or mental model needs a canonical definition that
+  multiple entities can reference. The defining test: has this term
+  appeared with non-obvious meaning in 2+ entities? If not, do not
+  create a concept — a glossary full of single-use terms is clutter.
+  Prefer `spec` for concrete components. Prefer `principle` when the
+  content is a rule rather than a definition.
+boundaries:
+  - Not a current-state component — use `spec`.
+  - Not a normative rule — use `principle`.
+  - Not a single design choice with alternatives — use `decision`.
+  - Not used across multiple entities — do not create a concept entity at all.
+system_message: |
+  Concepts are precise definitions. Each has Definition, Explanation,
+  optional Boundaries and Significance. The Definition must let a
+  reader distinguish instances from non-instances — necessary and
+  sufficient conditions. GENERALIZES/SPECIALIZES build concept
+  hierarchies. CONTRASTS_WITH clarifies boundaries between easily-
+  confused neighbors — the highest-value edge for this type.
+sections:
+  - key: definition
+    heading: Definition
+    required: true
+    search_weight: 40.0
+    write_rules:
+      - "One or two sentences. WHAT this concept IS — necessary and sufficient conditions. Must enable distinguishing instances from non-instances."
+  - key: explanation
+    heading: Explanation
+    required: true
+    search_weight: 20.0
+    write_rules:
+      - "Expand the definition. How the concept works, what it entails, why it matters. Examples and analogies welcome."
+  - key: boundaries
+    heading: Boundaries
+    required: false
+    search_weight: 5.0
+    write_rules:
+      - "What this concept is NOT. Neighboring concepts it could be confused with. Edge cases. Bullet list: related concept, then how it differs."
+  - key: significance
+    heading: Significance
+    required: false
+    search_weight: 5.0
+    catch_all: true
+    write_rules:
+      - "Why this concept matters in context. What depends on understanding it. Link dependent entities via wiki-links."
+metadata_fields:
+  - key: maturity
+    description: How settled the definition is — emerging, stable, or established.
+    field_type: string
+    default_value: emerging
+    enum_values: [emerging, stable, established]
+    filterable: equality
+  - key: abstraction_level
+    description: Abstraction tier — concrete, abstract, or meta.
+    field_type: string
+    default_value: concrete
+    enum_values: [concrete, abstract, meta]
+    filterable: equality
+title_weight: 100.0
+text_fields: [definition, explanation, boundaries, significance]
+hierarchy_relationship: PART_OF
+edge_weight_overrides:
+  DEPENDS_ON: 1.5
+propagating_relationships: [DEPENDS_ON, GENERALIZES]
+updatable_fields: [title, definition, explanation, boundaries, significance, maturity, abstraction_level, tags]
+health_required_fields: [definition, explanation]
+staleness_threshold_days: 90
+write_rules:
+  - "Only create a concept when the term appears with non-obvious meaning in 2+ entities. Single-use terms don't warrant a concept."
+  - "Definitions state necessary and sufficient conditions — a reader must be able to distinguish instances from non-instances."
+  - "Maturity: emerging (definition may shift), stable (well-defined), established (widely understood, unlikely to change)."
+  - "Boundaries section is high-value — confusion between similar concepts causes more errors than missing definitions. Use CONTRASTS_WITH for easily-confused neighbors."
+  - "Never author REFERENCES manually — that edge is auto-emitted from wiki-links in other entities."

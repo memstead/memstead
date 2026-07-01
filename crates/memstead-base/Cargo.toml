@@ -1,0 +1,65 @@
+[package]
+name = "memstead-base"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Engine internals for Memstead — store, parser, validators, filesystem-vault engine."
+publish = false
+
+[dependencies]
+memstead-schema.workspace = true
+globset.workspace = true
+indexmap.workspace = true
+regex.workspace = true
+schemars.workspace = true
+semver.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+strsim = "0.11"
+thiserror.workspace = true
+toml.workspace = true
+tracing.workspace = true
+unicode-normalization.workspace = true
+zip.workspace = true
+
+# Optional — only pulled in when the `tokio` feature is enabled.
+# The Core engine surface (callback-based subscribe) stays
+# runtime-agnostic; tokio is opt-in for axum-resident consumers.
+tokio = { version = "1", default-features = false, features = ["sync"], optional = true }
+# Optional — only pulled in when the `file-watcher` feature is enabled.
+# Used by `watch_vault_repo` to surface `VaultChangedEvent`s for
+# cross-process consumers (bridge HEAD-watcher, macOS live-update,
+# audit-log workers) that don't share the writer's `Engine` instance.
+notify = { version = "7", optional = true }
+
+# Tantivy (full-text search) and its native-only transitive chain
+# (getrandom 0.2.x without the `js` feature, memmap2, rayon, zstd-sys)
+# block wasm32-unknown-unknown builds. Restricting the dependency to
+# non-wasm targets keeps `memstead-base` portable; the `search_index`
+# module and `Engine::search` are gated to match so wasm consumers
+# see a typed `EngineError::SearchUnavailable` refuse instead of a
+# compile error. WASM search lives behind the bridge (see plan 08).
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tantivy.workspace = true
+
+[features]
+default = []
+# Opt-in tokio convenience: `Engine::subscribe_vault_changes_broadcast`
+# wraps the Core callback API in a `tokio::sync::broadcast::Receiver`
+# so axum-style consumers can consume events as a tokio stream without
+# wiring the boilerplate themselves. Adds tokio (broadcast / sync only)
+# to the dependency graph; consumers that don't need it keep tokio out.
+tokio = ["dep:tokio"]
+# Opt-in cross-process change-event surface: `watch_vault_repo` returns
+# a `(handle, mpsc::Receiver<VaultChangedEvent>)` pair that fires on
+# every `refs/heads/<vault>` mutation in a vault-repo gitdir. Adds
+# `notify` to the dependency graph; consumers that only need the
+# in-process `Engine::subscribe_vault_changes` keep it out.
+file-watcher = ["dep:notify"]
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "time"] }

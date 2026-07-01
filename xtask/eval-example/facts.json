@@ -1,0 +1,6 @@
+[
+  {"id":"f1","statement":"The Marrow Cache stores packets for up to 47 seconds."},
+  {"id":"f2","statement":"The Verdant Gateway depends on the Marrow Cache for replay."},
+  {"id":"f3","statement":"The Quill Dispatcher was introduced in ZRM version 3.2."},
+  {"id":"f4","statement":"The Marrow Cache uses a coral-tree eviction policy."}
+]

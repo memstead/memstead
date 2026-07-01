@@ -1,0 +1,115 @@
+# yaml-language-server: $schema=../../../../generated/type-definition.schema.json
+
+name: contract
+description: |
+  An external wire-level surface with a concrete request/response shape —
+  HTTP / gRPC endpoints, message-bus topics, library public APIs, CLI
+  commands, file formats with versioning. The boundary where systems
+  meet and the surface most likely to break consumers on change.
+when_to_use: |
+  Use for any external-facing surface consumers depend on. The defining
+  test: is there a concrete wire shape? If yes, `contract`, not `spec`.
+  Prefer `spec` for internal module documentation with no stable wire
+  form. Prefer `requirement` for the normative rules that constrain the
+  contract (rate limits, auth, SLAs).
+boundaries:
+  - Not internal module documentation — use `spec`.
+  - Not a normative rule about contracts — use `requirement`.
+  - Not a decision about which protocol to adopt — use `decision`.
+  - Not a principle governing all contracts project-wide — use `principle`.
+system_message: |
+  Contracts describe boundaries. Each entity captures request/response
+  shapes, error modes, and lifecycle. Bump `version` on any breaking
+  wire-shape change. When replaced, set `deprecation_status` to
+  deprecated and link DEPRECATES to the successor so consumers can
+  follow the migration target. Link REALIZES to the requirements this
+  contract fulfils.
+sections:
+  - key: summary
+    heading: Summary
+    required: true
+    search_weight: 30.0
+    write_rules:
+      - "One or two sentences. What this contract exposes and who calls it. Standalone-readable in a search snippet."
+  - key: request_shape
+    heading: Request Shape
+    required: false
+    search_weight: 15.0
+    write_rules:
+      - "Schema of the request: path, method, headers, body fields. Prefer a code block with the exact shape; supplement with field explanations."
+      - "Omit for one-way contracts (pub-sub publish-only, file format read-only)."
+  - key: response_shape
+    heading: Response Shape
+    required: false
+    search_weight: 15.0
+    write_rules:
+      - "Schema of the successful response. Include status codes, headers, body fields. Code block for the wire form."
+  - key: errors
+    heading: Errors
+    required: false
+    search_weight: 10.0
+    write_rules:
+      - "Table or bullet list of error modes: code, when it is returned, what the caller should do."
+  - key: versioning
+    heading: Versioning
+    required: false
+    search_weight: 5.0
+    write_rules:
+      - "How versions are identified (URL path, header, media type) and the compatibility policy."
+  - key: deprecation
+    heading: Deprecation
+    required: false
+    search_weight: 5.0
+    write_rules:
+      - "If deprecated: when it was deprecated, when it will be removed, and the migration path. Fill this section when `deprecation_status` is `deprecated` or `removed` so consumers can plan the migration; the engine does not enforce."
+  - key: notes
+    heading: Notes
+    required: false
+    search_weight: 3.0
+    catch_all: true
+metadata_fields:
+  - key: protocol
+    description: Transport or interface family.
+    field_type: string
+    default_value: http
+    enum_values: [http, grpc, websocket, message_bus, library_api, cli, file_format, other]
+    filterable: equality
+  - key: version
+    description: Contract version identifier. Free-form — usually semver or a date.
+    field_type: string
+  - key: stable_since
+    description: Date the contract was first marked stable. ISO YYYY-MM-DD.
+    field_type: date
+    filterable: range
+  - key: deprecation_status
+    description: Lifecycle state of the contract.
+    field_type: string
+    default_value: current
+    enum_values: [draft, current, deprecated, removed]
+    filterable: equality
+  - key: deprecated_on
+    description: Date deprecation was announced. Fill when `deprecation_status` is `deprecated` or `removed`; advisory, not engine-enforced.
+    field_type: date
+    optional: true
+    filterable: range
+  - key: removal_on
+    description: Target date for removal when deprecated.
+    field_type: date
+    optional: true
+    filterable: range
+title_weight: 100.0
+text_fields: [summary, request_shape, response_shape, errors, versioning, deprecation, notes]
+hierarchy_relationship: PART_OF
+edge_weight_overrides:
+  DEPRECATES: 3.0
+  REALIZES: 2.5
+  IMPLEMENTS: 2.5
+propagating_relationships: [DEPENDS_ON, IMPLEMENTS, REALIZES, DEPRECATES]
+updatable_fields: [title, summary, request_shape, response_shape, errors, versioning, deprecation, notes, protocol, version, stable_since, deprecation_status, deprecated_on, removal_on, tags]
+health_required_fields: [summary]
+staleness_threshold_days: 180
+write_rules:
+  - "Request Shape, Response Shape, and Errors are code blocks with concrete examples alongside field definitions. Agents reading the graph need to see the wire form exactly."
+  - "Bump `version` on any breaking wire-shape change. Never mutate a stable contract silently."
+  - "When deprecating: set `deprecation_status`, fill the Deprecation section, and link DEPRECATES to the successor. Consumers follow the edge to the migration target."
+  - "Link REALIZES to the requirements this contract fulfils. Link IMPLEMENTS to any abstract spec or interface it concretizes."

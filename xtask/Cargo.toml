@@ -1,0 +1,29 @@
+[package]
+name = "xtask"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Internal build-tooling commands for the engine workspace. Invoked as `cargo run -p xtask -- <subcommand>`. The `generate-docs` subcommand regenerates the deterministic API-docs Markdown tree from the live MCP / CLI / UniFFI / WASM source."
+publish = false
+
+[[bin]]
+name = "xtask"
+path = "src/main.rs"
+
+[dependencies]
+memstead-cli = { workspace = true, features = ["vault-repo"] }
+memstead-mcp = { workspace = true, features = ["vault-repo"] }
+anyhow.workspace = true
+clap = { workspace = true, features = ["derive"] }
+clap-markdown = "0.1.5"
+regex.workspace = true
+rmcp.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+toml.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+

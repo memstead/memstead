@@ -1,0 +1,66 @@
+# yaml-language-server: $schema=../../../../generated/type-definition.schema.json
+
+name: coverage_gap
+description: |
+  Something that should appear in the destination graph but does
+  not. A specific concept, source artifact, decision, contract,
+  cross-reference, or area of the system that the destination
+  currently fails to model.
+when_to_use: |
+  Use when the current agent run identifies a concrete absence in
+  the destination — a missing entity, a missing edge to an
+  obviously-related neighbor, an un-modeled module the source
+  clearly carries. The defining test: is the absence specific and
+  actionable? "Coverage is uneven" is not a gap; "the registry
+  crate's migrations directory has no spec or memo modeling the
+  schema-versioning approach" is.
+boundaries:
+  - Not an unverified claim — the destination either has a claim that needs checking (use `verification_target`) or has no claim at all (this type).
+  - Not a contradiction — use `inconsistency`.
+  - Not a vague "we should have more" feeling — gaps name the missing thing concretely.
+  - Not a TODO for the agent — gaps describe destination-state debt, not agent task lists.
+system_message: |
+  A coverage_gap names what is *absent*. The area must be specific
+  enough that another agent could open the source, find the
+  uncovered material, and author the missing destination entities
+  without further guidance. Evidence cites the source location
+  (path, doc, contract) where the missing material lives.
+sections:
+  - key: area
+    heading: Area
+    required: true
+    search_weight: 30.0
+    write_rules:
+      - "One or two sentences naming the missing area concretely. Standalone-readable in a search snippet — no pronouns, no forward references."
+      - "Wiki-link to existing destination neighbors that the missing material would attach to (e.g. `[[parent-spec]]`). The auto-emitted REFERENCES edges anchor the gap in the graph."
+  - key: evidence
+    heading: Evidence
+    required: true
+    search_weight: 15.0
+    write_rules:
+      - "Where in the source the uncovered material lives — concrete path, file, doc section, contract name, code symbol. A coverage_gap without a source pointer is unverifiable."
+  - key: notes
+    heading: Notes
+    required: false
+    search_weight: 3.0
+    catch_all: true
+metadata_fields:
+  - key: priority
+    description: How urgent the gap is relative to other coverage_gaps in this vault.
+    field_type: string
+    default_value: mid
+    enum_values: [low, mid, high]
+    filterable: equality
+title_weight: 100.0
+text_fields: [area, evidence, notes]
+hierarchy_relationship: PART_OF
+propagating_relationships: []
+updatable_fields: [title, area, evidence, notes, priority, tags]
+health_required_fields: [area, evidence]
+staleness_threshold_days: 30
+write_rules:
+  - "The gap is about *absence*, not unverified presence. If the destination already carries a claim about this area, the right type is `verification_target`."
+  - "Cite source evidence — path, file, doc section, code symbol. A gap without an evidence pointer cannot be acted on."
+  - "Wiki-link the destination neighbor the missing material attaches to. Without REFERENCES into the destination, the gap is unanchored."
+  - "Re-verify on every run. If the destination now models this area, delete the entry — it served its purpose."
+  - "Priority is relative within this ingest's process vault, not absolute. Use `high` sparingly for gaps that block other authoring; default to `mid`."

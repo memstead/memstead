@@ -1,0 +1,60 @@
+[package]
+name = "memstead-git-branch"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Vault-repo engine for Memstead — multi-vault, git-backed typed entity graphs."
+publish = false
+
+[dependencies]
+memstead-base.workspace = true
+memstead-engine.workspace = true
+memstead-schema.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+thiserror.workspace = true
+regex.workspace = true
+unicode-normalization.workspace = true
+sha2.workspace = true
+indexmap.workspace = true
+schemars.workspace = true
+zip.workspace = true
+dirs.workspace = true
+tracing.workspace = true
+semver.workspace = true
+gix.workspace = true
+tantivy.workspace = true
+globset.workspace = true
+walkdir = "2"
+strsim = "0.11"
+
+[dev-dependencies]
+tempfile.workspace = true
+memstead-schema.workspace = true
+# Self-reference: integration tests under `tests/` link this crate as a
+# normal dependency without `cfg(test)` propagating into the lib build,
+# so they cannot reach `test_support` through the `cfg(test)` gate
+# alone. Pulling the crate back in with the `test-support` feature
+# enabled exposes the helper for those integration tests. The lib's
+# own unit tests (under `cfg(test)` inside `src/`) keep their existing
+# access without this opt-in.
+memstead-git-branch = { path = ".", features = ["test-support"] }
+
+[features]
+# `git-object-storage` is the canonical write path:
+# `storage::git_tree::GitTreeVaultWriter` applies mutations via
+# `gix::object::tree::Editor` against a multi-root `vault-repo-git`
+# repository. No working tree is written for vault content. The
+# feature flag is retained for forward symmetry but is on by default
+# and the only compiled-in adapter post-cutover.
+default = ["git-object-storage"]
+git-object-storage = []
+# `test-support` re-exports `crate::test_support::init_vault_repo_stub`
+# (and any future helpers) for downstream test crates. The module is
+# always compiled under the crate's own `cfg(test)`; this feature
+# unlocks it for `memstead-cli`, `memstead-mcp`, `memstead-swift` integration tests
+# that need to satisfy the `vault-repo/.git/` fail-fast.
+test-support = []
