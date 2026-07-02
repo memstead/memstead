@@ -18,6 +18,12 @@
 //!   `ENTITY_CAP`, `MAX` (live-session ceiling — shed, don't OOM, on a spike),
 //!   `VIEW_BASE`, `RATE_PER_SEC`/`RATE_BURST` (rate limit keyed on the forwarded
 //!   client IP).
+//! - `MEMSTEAD_SOFT_LAUNCH` — the launch gate, one name shared with the
+//!   .com/.io surfaces and the embedded static face's build. Default ON
+//!   (`0`/`off`/`false` to go public): read pages and the sketch `/mcp` mount
+//!   under `/try`, matching the links a gate-ON static face emits. The static
+//!   face and this binary MUST agree — the face is built with the same
+//!   variable, so set it once for both build and runtime.
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -70,7 +76,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some("third-party") => memstead_base::render::OriginClass::ThirdParty,
         _ => memstead_base::render::OriginClass::FirstParty,
     };
-    let state = AppState::new(api_engine, authority).with_content_origin(content_origin);
+    // Soft-launch gate (default ON; one env shared with the .com/.io surfaces
+    // and the embedded static face's build — the face's links and this
+    // binary's routes relocate between `/try/…` and `/…` in lockstep only
+    // when both read the same value). Same parse as memstead-session-serve.
+    let soft_launch = !matches!(
+        std::env::var("MEMSTEAD_SOFT_LAUNCH")
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase()
+            .as_str(),
+        "0" | "off" | "false"
+    );
+    let state = AppState::new(api_engine, authority)
+        .with_content_origin(content_origin)
+        .with_soft_launch(soft_launch);
 
     // ---- sketch side: the writable connection-born `/mcp` + view data ----
     let sketch_pin =
