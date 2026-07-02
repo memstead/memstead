@@ -9,9 +9,9 @@ export default defineConfig({
   base: "/memstead",
   integrations: [
     starlight({
-      title: "Memstead API",
+      title: "Memstead Docs",
       description:
-        "Auto-generated reference for the Memstead engine's MCP, CLI, UniFFI, WASM, and Registry HTTP surfaces.",
+        "Guides plus auto-generated reference for the Memstead engine's MCP, CLI, UniFFI, WASM, and Registry HTTP surfaces.",
       components: {
         Footer: "./src/components/Footer.astro",
       },
@@ -26,6 +26,22 @@ export default defineConfig({
         {
           label: "Overview",
           link: "/",
+        },
+        {
+          label: "Guides",
+          items: [
+            { label: "Getting started", link: "/guides/getting-started/" },
+            { label: "Author a schema", link: "/guides/author-a-schema/" },
+            { label: "Publish a mem", link: "/guides/publish-a-mem/" },
+            { label: "Agent recipes", link: "/guides/agent-recipes/" },
+          ],
+        },
+        {
+          label: "Concepts",
+          items: [
+            // Built from ../GLOSSARY.md at prebuild (scripts/copy-openapi.mjs).
+            { label: "Glossary", link: "/glossary/" },
+          ],
         },
         {
           label: "Reference",

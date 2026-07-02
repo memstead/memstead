@@ -8,8 +8,10 @@ trying to do.
 
 New to Memstead? Start here.
 
-- **[Quickstart](../README.md#quickstart)** — install, create your first mem,
-  and run a `create → search` loop end to end.
+- **[Getting started](../docs-site/src/content/docs/guides/getting-started.md)**
+  — install, `memstead quickstart`, first entities, and connecting an AI
+  agent, end to end. (The [README quickstart](../README.md#quickstart) is
+  the condensed version.)
 
 ## 🔧 How-to guides — *accomplishing a task*
 
@@ -17,13 +19,18 @@ You know what you want; these get you there.
 
 - **[Build & test from source](build.md)** — the build flavours, the test
   suite, output paths, troubleshooting.
-- **Connect an AI agent** — the [Claude Code plugin](../plugins/claude-code/README.md):
-  run `/setup`, then drive the graph with the `memstead_*` MCP tools.
-- **Author a schema** — learn by example from the
-  [worked schemas](../examples/README.md) (`agent-program`; the paired
-  `reimpl-source`/`reimpl-target`), then point a mem at yours.
-- **[Publish & install a mem](publish.md)** — share a mem through a
-  registry and install one into a workspace.
+- **Connect an AI agent** — `memstead quickstart` writes the MCP wiring;
+  for Claude Code the [plugin](../plugins/claude-code/README.md)'s `/setup`
+  skill is the paved path. Then drive the graph with the `memstead_*` MCP
+  tools — the [agent recipes](../docs-site/src/content/docs/guides/agent-recipes.md)
+  show worked tool-call sequences with real payloads.
+- **[Author a schema](../docs-site/src/content/docs/guides/author-a-schema.md)**
+  — scaffold with `memstead schema new`, validate, install, and pin a mem
+  to it; read the [worked schemas](../examples/README.md) (`agent-program`;
+  the paired `reimpl-source`/`reimpl-target`) for full examples.
+- **[Publish a mem](../docs-site/src/content/docs/guides/publish-a-mem.md)**
+  — share a mem through the registry and install one into a workspace
+  ([command cheat-sheet](publish.md)).
 
 ## 📖 Reference — *looking something up*
 

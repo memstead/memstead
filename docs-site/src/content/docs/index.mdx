@@ -1,18 +1,30 @@
 ---
-title: Memstead API reference
-description: Auto-generated reference for the Memstead engine's MCP, CLI, UniFFI, and Registry HTTP surfaces.
+title: Memstead documentation
+description: Guides plus the auto-generated reference for the Memstead engine's MCP, CLI, UniFFI, WASM, and Registry HTTP surfaces.
 ---
 
-This site is generated deterministically from the live source on every push: every MCP tool, every CLI subcommand, every UniFFI method, every typed error code that the engine, the CLI, the MCP servers, and the Registry HTTP envelope produce. The Surface Parity Matrix lines them up so cross-surface gaps are visible by inspection.
+Memstead gives AI agents a durable, typed memory you own — plain markdown in git, validated on every write against a schema you control. New here? Start with the tutorial.
 
-The reference is one click away in the sidebar. The deterministic layer carries structure only — narrative concept pages land later.
+## Guides
+
+- [Getting started](guides/getting-started/) — install, `memstead quickstart`, first entities, agent connect.
+- [Author a schema](guides/author-a-schema/) — scaffold a custom schema and pin a mem to it.
+- [Publish a mem](guides/publish-a-mem/) — share a mem through the memstead.io registry.
+- [Agent recipes](guides/agent-recipes/) — worked MCP tool-call sequences with real payloads.
+
+## Concepts
+
+- [Glossary](glossary/) — normative definitions: mem, schema, workspace, mount, entity, and the rest. Built from the repository's `GLOSSARY.md` on every deploy.
+- [Vision](https://github.com/memstead/memstead/blob/main/VISION.md) — what Memstead is for and the design rationale.
 
 ## Reference
 
-- [MCP tools](/reference/mcp/)
-- [CLI](/reference/cli/cli/)
-- [UniFFI surface](/reference/uniffi/)
-- [WASM surface](/reference/wasm/)
-- [Registry HTTP](/reference/registry/)
-- [Surface Parity Matrix](/reference/parity/)
-- [Error Code Index](/reference/errors/)
+Generated deterministically from the live source on every push: every MCP tool, every CLI subcommand, every UniFFI method, every typed error code that the engine, the CLI, the MCP servers, and the Registry HTTP envelope produce. The Surface Parity Matrix lines them up so cross-surface gaps are visible by inspection.
+
+- [MCP tools](reference/mcp/)
+- [CLI](reference/cli/cli/)
+- [UniFFI surface](reference/uniffi/)
+- [WASM surface](reference/wasm/)
+- [Registry HTTP](reference/registry/)
+- [Surface Parity Matrix](reference/parity/)
+- [Error Code Index](reference/errors/)

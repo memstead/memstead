@@ -9,3 +9,7 @@ dist/
 # Generated from src/content/docs/reference/openapi.json by
 # scripts/copy-openapi.mjs (runs as `prebuild`).
 public/openapi.json
+
+# Built from ../GLOSSARY.md (the normative source) by
+# scripts/copy-openapi.mjs (runs as `prebuild`).
+src/content/docs/glossary.md
