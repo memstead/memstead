@@ -9,11 +9,11 @@ This crate is the server half of the browser thin-client story: wire-format
 types, the snapshot envelope builder, a change-event SSE adapter over the
 engine's mem-change events, and axum handler helpers. A host embeds it to
 serve mem snapshots and live commit streams over plain HTTP; in the
-browser, [`@memstead/wasm`](https://www.npmjs.com/package/@memstead/wasm)
-hydrates the snapshot and
-[`@memstead/client`](https://www.npmjs.com/package/@memstead/client)
+browser, `@memstead/wasm` (built from `crates/memstead-wasm/`) hydrates
+the snapshot and `@memstead/client` (`crates/memstead-wasm/client-js/`)
 orchestrates the snapshot + SSE + commit-apply lifecycle against this
-bridge surface.
+bridge surface. (Both JS packages are prepared for npm but not yet
+published — build them from this repo until the first release lands.)
 
 ## Use
 

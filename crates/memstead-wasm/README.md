@@ -12,6 +12,16 @@ round-trips after the snapshot fetch.
 
 ## Install
 
+> **Status:** not yet published to npm — the package is prepared and the
+> first release will land it. Until then, build the bundle from source:
+>
+> ```bash
+> cd crates/memstead-wasm
+> wasm-pack build --target web --release   # output in pkg/
+> ```
+
+Once published:
+
 ```bash
 npm install @memstead/wasm
 ```
@@ -29,9 +39,9 @@ const engine = Engine.fromSnapshot(bytes);
 ```
 
 For the full snapshot + live-update (SSE) lifecycle against a
-`memstead-bridge` server, use
-[`@memstead/client`](https://www.npmjs.com/package/@memstead/client),
-which wraps this package behind a single `MemSyncClient` class.
+`memstead-bridge` server, use `@memstead/client` (in this repo at
+`crates/memstead-wasm/client-js/`, likewise not yet on npm), which wraps
+this package behind a single `MemSyncClient` class.
 
 Type definitions (`.d.ts`) ship in the package.
 
