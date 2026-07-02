@@ -212,13 +212,19 @@ fn scaffold_new(ctx: &CliContext, args: NewArgs) -> anyhow::Result<()> {
             "schema": format!("{}@{SCAFFOLD_VERSION}", args.name),
             "path": pkg_dir,
             "files": ["schema.yaml", "types/note.yaml"],
-            "next_steps": next_steps,
+            "next_steps": next_steps
+                .iter()
+                .map(|s| json!({ "command": s.command, "note": s.note }))
+                .collect::<Vec<_>>(),
         }))?;
     } else {
         let steps: Vec<String> = next_steps
             .iter()
             .enumerate()
-            .map(|(i, s)| format!("{}. `{s}`", i + 1))
+            .map(|(i, s)| match &s.note {
+                Some(note) => format!("{}. `{}` — {note}", i + 1, s.command),
+                None => format!("{}. `{}`", i + 1, s.command),
+            })
             .collect();
         print_markdown(&format!(
             "# Schema package scaffolded\n\n`{name}@{SCAFFOLD_VERSION}` at `{dir}` \
@@ -236,44 +242,81 @@ fn scaffold_new(ctx: &CliContext, args: NewArgs) -> anyhow::Result<()> {
 /// the custom-schema flow is copy-paste from here. When the command
 /// runs inside a single-writable-mem workspace, the pin step names the
 /// actual mem (from the mount roster — the authoritative name source);
-/// otherwise it keeps a `<mem>` placeholder.
-fn scaffold_next_steps(ctx: &CliContext, name: &str) -> Vec<String> {
+/// otherwise it keeps a `<mem>` placeholder. When the workspace still
+/// carries the `memstead quickstart` seed entity, a delete step for it
+/// precedes the pin: `mem set-schema` switches atomically only when
+/// every entity conforms to the target, and the default-schema seed
+/// never conforms to a fresh custom schema — without the delete the
+/// verbatim flow ends in a dual-pin migration instead of a pinned mem.
+fn scaffold_next_steps(ctx: &CliContext, name: &str) -> Vec<Step> {
     use memstead_base::workspace::MountCapability;
     use memstead_base::workspace_store::{FileWorkspaceStore, WorkspaceStoreAdapter};
-    let mem = ctx
-        .workspace_shape()
-        .and_then(|(shape, root)| match shape {
-            WorkspaceShape::Filesystem => FileWorkspaceStore::new()
-                .load(&root)
-                .ok()
-                .and_then(|ws| {
-                    let mut writable = ws
-                        .mounts
-                        .iter()
-                        .filter(|m| m.capability == MountCapability::Write);
-                    match (writable.next(), writable.next()) {
-                        (Some(only), None) => Some(only.mem.clone()),
-                        _ => None,
-                    }
-                }),
-            WorkspaceShape::MemRepo => None,
-        })
+    let workspace = ctx.workspace_shape().and_then(|(shape, root)| match shape {
+        WorkspaceShape::Filesystem => FileWorkspaceStore::new()
+            .load(&root)
+            .ok()
+            .and_then(|ws| {
+                let mut writable = ws
+                    .mounts
+                    .iter()
+                    .filter(|m| m.capability == MountCapability::Write);
+                match (writable.next(), writable.next()) {
+                    (Some(only), None) => Some((only.mem.clone(), root.clone())),
+                    _ => None,
+                }
+            }),
+        WorkspaceShape::MemRepo => None,
+    });
+    let mem = workspace
+        .as_ref()
+        .map(|(mem, _)| mem.clone())
         .unwrap_or_else(|| "<mem>".to_string());
+    // Filesystem mems live at the workspace root; the quickstart seed
+    // is the fixed-slug `welcome-to-memstead.md`.
+    let quickstart_seed = workspace
+        .as_ref()
+        .filter(|(_, root)| root.join("welcome-to-memstead.md").is_file())
+        .map(|(mem, _)| format!("{mem}--welcome-to-memstead"));
     let mut steps = vec![
-        format!("memstead schema validate {name}"),
-        format!("memstead schema install {name}"),
+        Step::bare(format!("memstead schema validate {name}")),
+        Step::bare(format!("memstead schema install {name}")),
     ];
+    if let Some(seed_id) = quickstart_seed {
+        steps.push(Step {
+            command: format!("memstead delete {seed_id}"),
+            note: Some(
+                "the quickstart seed — the pin below switches atomically only when \
+                 every entity conforms to the new schema"
+                    .to_string(),
+            ),
+        });
+    }
     #[cfg(feature = "mem-repo")]
-    steps.push(format!(
+    steps.push(Step::bare(format!(
         "memstead mem set-schema {mem} {name}@{SCAFFOLD_VERSION}"
-    ));
+    )));
     // The basis binary has no `mem` subcommand group; a fresh init is
     // its schema-pin entry point.
     #[cfg(not(feature = "mem-repo"))]
-    steps.push(format!(
-        "memstead init --name {mem} --schema {name}@{SCAFFOLD_VERSION}  (in a fresh folder)"
-    ));
+    steps.push(Step {
+        command: format!("memstead init --name {mem} --schema {name}@{SCAFFOLD_VERSION}"),
+        note: Some("in a fresh folder".to_string()),
+    });
     steps
+}
+
+/// One printed follow-up step: a verbatim-runnable command plus an
+/// optional explanation rendered outside the command so copy-paste
+/// stays clean.
+struct Step {
+    command: String,
+    note: Option<String>,
+}
+
+impl Step {
+    fn bare(command: String) -> Self {
+        Step { command, note: None }
+    }
 }
 
 /// Best-effort correction for an invalid schema name, offered in the

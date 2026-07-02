@@ -201,6 +201,17 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     // Agent targets: flag > TTY prompt > default (Claude Code, stated).
     let (agents, agents_defaulted) = resolve_agents(&args.agents)?;
 
+    // Preflight every selected agent's existing config file BEFORE any
+    // write lands: a malformed `.mcp.json` must refuse while "re-run
+    // memstead quickstart" is still true — discovering it after the
+    // workspace exists would leave a half-bootstrapped directory and a
+    // printed retry command that can no longer succeed.
+    for agent in &agents {
+        if let Some(rel) = agent.config_file() {
+            read_agent_config(&target.join(rel))?;
+        }
+    }
+
     // Schema pin: the current default builtin, resolved by name so the
     // printed pin tracks the catalogue instead of a hardcoded version.
     let schema_pin = default_schema_pin()?;
@@ -560,6 +571,56 @@ fn resolve_mcp_binary() -> McpBinary {
     }
 }
 
+/// Read and shape-check an agent's existing MCP config file: must be
+/// valid JSON, a top-level object, with `mcpServers` absent or an
+/// object. A missing file is an empty object. Called once as a
+/// preflight before any write lands (so the refusal's "re-run
+/// memstead quickstart" stays true) and again by [`wire_agent`].
+fn read_agent_config(path: &Path) -> anyhow::Result<serde_json::Value> {
+    if !path.is_file() {
+        return Ok(json!({}));
+    }
+    let fix_hint = "fix or remove the file, then re-run: memstead quickstart";
+    let bytes = std::fs::read(path).map_err(|e| {
+        CliError::new(
+            ExitKind::Generic,
+            crate::INTERNAL_CODE,
+            format!("read {}: {e}", path.display()),
+        )
+    })?;
+    let root: serde_json::Value = serde_json::from_slice(&bytes).map_err(|e| {
+        CliError::new(
+            ExitKind::Validation,
+            "INVALID_INPUT",
+            format!("{} exists but is not valid JSON ({e}) — {fix_hint}", path.display()),
+        )
+    })?;
+    if !root.is_object() {
+        return Err(CliError::new(
+            ExitKind::Validation,
+            "INVALID_INPUT",
+            format!(
+                "{} exists but its top level is not a JSON object — {fix_hint}",
+                path.display(),
+            ),
+        )
+        .into());
+    }
+    let servers = &root["mcpServers"];
+    if !servers.is_null() && !servers.is_object() {
+        return Err(CliError::new(
+            ExitKind::Validation,
+            "INVALID_INPUT",
+            format!(
+                "{}'s `mcpServers` is not a JSON object — {fix_hint}",
+                path.display(),
+            ),
+        )
+        .into());
+    }
+    Ok(root)
+}
+
 /// Write (or merge into) the target's MCP config for one agent. JSON
 /// configs get an `mcpServers.memstead` entry added, preserving every
 /// existing key; an existing `memstead` entry is never overwritten.
@@ -572,46 +633,11 @@ fn wire_agent(target: &Path, agent: AgentTarget, mcp_command: &str) -> anyhow::R
         });
     };
     let path = target.join(rel);
-    let mut root: serde_json::Value = if path.is_file() {
-        let bytes = std::fs::read(&path).map_err(|e| {
-            CliError::new(
-                ExitKind::Generic,
-                crate::INTERNAL_CODE,
-                format!("read {}: {e}", path.display()),
-            )
-        })?;
-        serde_json::from_slice(&bytes).map_err(|e| {
-            CliError::new(
-                ExitKind::Validation,
-                "INVALID_INPUT",
-                format!(
-                    "{} exists but is not valid JSON ({e}) — fix or remove it, then re-run \
-                     memstead quickstart --agent {}",
-                    path.display(),
-                    agent
-                        .to_possible_value()
-                        .map(|v| v.get_name().to_string())
-                        .unwrap_or_default(),
-                ),
-            )
-        })?
-    } else {
-        json!({})
-    };
+    let mut root = read_agent_config(&path)?;
 
     let servers = root
         .as_object_mut()
-        .ok_or_else(|| {
-            CliError::new(
-                ExitKind::Validation,
-                "INVALID_INPUT",
-                format!(
-                    "{} exists but its top level is not a JSON object — fix or remove \
-                     it, then re-run memstead quickstart",
-                    path.display(),
-                ),
-            )
-        })?
+        .expect("read_agent_config only returns JSON objects")
         .entry("mcpServers")
         .or_insert_with(|| json!({}));
     let servers = servers.as_object_mut().ok_or_else(|| {
@@ -619,7 +645,8 @@ fn wire_agent(target: &Path, agent: AgentTarget, mcp_command: &str) -> anyhow::R
             ExitKind::Validation,
             "INVALID_INPUT",
             format!(
-                "{}'s `mcpServers` is not a JSON object — fix or remove it first",
+                "{}'s `mcpServers` is not a JSON object — fix or remove the file, then \
+                 re-run: memstead quickstart",
                 path.display(),
             ),
         )

@@ -336,6 +336,10 @@ fn schema_new_follow_up_commands_end_in_pinned_mem_accepting_create() {
         out.contains("memstead mem set-schema myws acme@0.1.0"),
         "pin step names the workspace's mem; got: {out}",
     );
+    assert!(
+        !out.contains("memstead delete"),
+        "no seed in an init workspace, so no delete step; got: {out}",
+    );
 
     // Steps 1-3 verbatim.
     memstead().current_dir(&ws).args(["schema", "validate", "acme"]).assert().success();
@@ -363,6 +367,86 @@ fn schema_new_follow_up_commands_end_in_pinned_mem_accepting_create() {
         ])
         .assert()
         .success();
+}
+
+/// The newcomer path end-to-end: from a *quickstart* workspace (which
+/// carries the seed entity), the printed follow-up includes a delete
+/// step for the seed, and the printed commands executed verbatim end
+/// with the mem atomically pinned (`Switched`, not a dual-pin
+/// migration) and accepting the scaffolded type.
+#[cfg(feature = "mem-repo")]
+#[test]
+fn schema_new_follow_up_from_quickstart_workspace_ends_pinned() {
+    let tmp = TempDir::new().unwrap();
+    let ws = tmp.path().join("my-graph");
+    memstead().arg("quickstart").arg(&ws).assert().success();
+
+    let out = stdout_of(
+        memstead().current_dir(&ws).args(["schema", "new", "acme"]).assert().success(),
+    );
+    let seed_id = "my-graph--welcome-to-memstead";
+    assert!(
+        out.contains(&format!("memstead delete {seed_id}")),
+        "follow-up includes the seed delete step; got: {out}",
+    );
+    assert!(
+        out.contains("memstead mem set-schema my-graph acme@0.1.0"),
+        "pin step names the quickstart mem; got: {out}",
+    );
+
+    // The printed commands, verbatim.
+    memstead().current_dir(&ws).args(["schema", "validate", "acme"]).assert().success();
+    memstead().current_dir(&ws).args(["schema", "install", "acme"]).assert().success();
+    memstead().current_dir(&ws).args(["delete", seed_id]).assert().success();
+    let pin_out = stdout_of(
+        memstead()
+            .current_dir(&ws)
+            .args(["mem", "set-schema", "my-graph", "acme@0.1.0"])
+            .assert()
+            .success(),
+    );
+    assert!(
+        pin_out.contains("Switched"),
+        "seedless mem switches atomically, no migration; got: {pin_out}",
+    );
+    memstead()
+        .current_dir(&ws)
+        .args([
+            "create",
+            "--type",
+            "note",
+            "--title",
+            "First note",
+            "--section",
+            "summary=It works.",
+        ])
+        .assert()
+        .success();
+}
+
+/// Preflight AC: a malformed agent config file refuses BEFORE anything
+/// is created — the printed "re-run memstead quickstart" must still be
+/// able to succeed, so no workspace may exist after the refusal.
+#[test]
+fn quickstart_malformed_agent_config_refuses_before_any_write() {
+    // Invalid JSON.
+    let tmp = TempDir::new().unwrap();
+    std::fs::write(tmp.path().join(".mcp.json"), "{not json").unwrap();
+    let err = stderr_of(memstead().arg("quickstart").arg(tmp.path()).assert().failure());
+    assert!(err.contains("not valid JSON"), "names the defect; got: {err}");
+    assert!(err.contains("re-run: memstead quickstart"), "carries the retry; got: {err}");
+    assert!(!tmp.path().join(".memstead").exists(), "nothing was created");
+    // The printed retry actually works once the file is fixed.
+    std::fs::remove_file(tmp.path().join(".mcp.json")).unwrap();
+    memstead().arg("quickstart").arg(tmp.path()).assert().success();
+
+    // `mcpServers` present but not an object.
+    let tmp = TempDir::new().unwrap();
+    std::fs::write(tmp.path().join(".mcp.json"), r#"{"mcpServers": []}"#).unwrap();
+    let err = stderr_of(memstead().arg("quickstart").arg(tmp.path()).assert().failure());
+    assert!(err.contains("mcpServers"), "names the defect; got: {err}");
+    assert!(err.contains("re-run: memstead quickstart"), "carries the retry; got: {err}");
+    assert!(!tmp.path().join(".memstead").exists(), "nothing was created");
 }
 
 /// `schema install` accepts the scaffolded package on the folder
