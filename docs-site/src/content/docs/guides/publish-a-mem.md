@@ -17,7 +17,7 @@ The registry renders each mem with a one-line description embedded in the archiv
 memstead mem set-description recipes "Worked example: a tiny cookbook mem"
 ```
 
-Versions come from the mem config too — seeded as `0.1.0` at init. Check both with `memstead mem list`.
+Versions come from the mem config too — seeded as `0.1.0` at init. Both setters (`mem set-description`, `mem set-version`) echo the old and new values back as they persist them, and the dry run in the next step shows the version that would ship.
 
 ## 2. Dry-run first
 

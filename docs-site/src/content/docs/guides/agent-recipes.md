@@ -31,6 +31,8 @@ _chunk: 1 of 1
 _total_chunks: 1
 ---
 
+…
+
 ## Schemas
 
 _(call `memstead_schema(name=<ref>)` for the full per-type catalogue, sections, fields, and relationship vocabulary)_
