@@ -3,10 +3,12 @@ import starlight from "@astrojs/starlight";
 
 export default defineConfig({
   // GitHub Pages publishes from `<org>.github.io/memstead/` by default;
-  // a custom domain can override `site` + `base` later without changing
-  // the docs build itself.
-  site: "https://memstead.github.io",
-  base: "/memstead",
+  // DOCS_SITE / DOCS_BASE override both for other hosts (e.g. the
+  // memstead.com image builds this site with DOCS_SITE=https://memstead.com
+  // DOCS_BASE=/dev and serves it under /dev) without changing the docs
+  // build itself.
+  site: process.env.DOCS_SITE ?? "https://memstead.github.io",
+  base: process.env.DOCS_BASE ?? "/memstead",
   integrations: [
     starlight({
       title: "Memstead Docs",
