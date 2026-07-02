@@ -21,14 +21,14 @@ Every typed error code emitted by the engine, the CLI (`memstead-cli`), and the 
 | `CONFLICTING_SECTION_MODES` | engine | `crates/memstead-base/src/engine/error.rs:1015` |
 | `CROSS_MEM_EDGE_NOT_DECLARED` | engine | `crates/memstead-base/src/engine/error.rs:999` |
 | `CROSS_MEM_LINK_NOT_ALLOWED` | engine | `crates/memstead-base/src/engine/error.rs:997` |
-| `CROSS_MEM_TARGET_NOT_FOUND` | engine | `crates/memstead-base/src/engine/error.rs:998` |
 | `CROSS_MEM_TARGET_MEM_UNCREATED` | engine | `crates/memstead-base/src/ops/mod.rs:1392` |
+| `CROSS_MEM_TARGET_NOT_FOUND` | engine | `crates/memstead-base/src/engine/error.rs:998` |
 | `DESCRIPTION_NOT_PERMITTED` | engine | `crates/memstead-base/src/engine/error.rs:1035`<br>`crates/memstead-base/src/ops/mod.rs:1452` |
 | `DOMAIN_KEYGEN_FAILED` | CLI | `crates/memstead-cli/src/commands/domain.rs:73` |
 | `DOMAIN_KEY_NOT_FOUND` | CLI | `crates/memstead-cli/src/commands/domain.rs:81`<br>`crates/memstead-cli/src/commands/publish.rs:296` |
+| `DUPLICATE_MEM` | engine | `crates/memstead-base/src/engine/error.rs:980` |
 | `DUPLICATE_RELATIONSHIP` | engine | `crates/memstead-base/src/ops/mod.rs:1396` |
 | `DUPLICATE_SECTION_HEADING` | engine | `crates/memstead-base/src/ops/mod.rs:1439` |
-| `DUPLICATE_MEM` | engine | `crates/memstead-base/src/engine/error.rs:980` |
 | `EMPTY_UPDATE` | engine | `crates/memstead-base/src/engine/error.rs:1002` |
 | `ENTITY_ALREADY_EXISTS` | engine, MCP | `crates/memstead-base/src/engine/error.rs:992`<br>`crates/memstead-mcp/src/filesystem_server.rs:326` |
 | `ENTITY_NOT_FOUND` | engine, CLI, MCP | `crates/memstead-base/src/engine/error.rs:993`<br>`crates/memstead-cli/src/commands/relations.rs:71`<br>`crates/memstead-mcp/src/filesystem_server.rs:329`<br>`crates/memstead-mcp/src/filesystem_server.rs:946` |
@@ -47,15 +47,22 @@ Every typed error code emitted by the engine, the CLI (`memstead-cli`), and the 
 | `INVALID_ENUM_VALUE` | engine | `crates/memstead-base/src/ops/mod.rs:1420`<br>`crates/memstead-base/src/runtime_validator.rs:197` |
 | `INVALID_FIELD_VALUE` | engine | `crates/memstead-base/src/runtime_validator.rs:204` |
 | `INVALID_INPUT` | engine, CLI, MCP | `crates/memstead-base/src/engine/error.rs:1030`<br>`crates/memstead-base/src/engine/error.rs:1031`<br>`crates/memstead-cli/src/commands/batch_update.rs:462`<br>`crates/memstead-mcp/src/filesystem_server.rs:1633`<br>`crates/memstead-mcp/src/server.rs:380`<br>`crates/memstead-mcp/src/server.rs:1900`<br>`crates/memstead-mcp/src/server.rs:2108` |
+| `INVALID_MEM_NAME` | engine | `crates/memstead-base/src/engine/error.rs:1014` |
 | `INVALID_REL_SHAPE` | engine | `crates/memstead-base/src/runtime_validator.rs:201` |
 | `INVALID_REL_TYPE` | engine | `crates/memstead-base/src/runtime_validator.rs:200` |
 | `INVALID_TITLE` | engine | `crates/memstead-base/src/engine/error.rs:991` |
-| `INVALID_MEM_NAME` | engine | `crates/memstead-base/src/engine/error.rs:1014` |
 | `INVALID_WIKI_LINK_TARGET` | engine | `crates/memstead-base/src/engine/error.rs:1013` |
 | `LIMIT_CLAMPED` | engine | `crates/memstead-base/src/ops/mod.rs:1399` |
 | `LOCAL_DIVERGENCE` | engine | `crates/memstead-base/src/engine/error.rs:984` |
 | `LOCAL_INVALID_STATE` | engine | `crates/memstead-base/src/engine/error.rs:986` |
 | `MARKDOWN_EXPORT_UNSUPPORTED_BACKEND` | engine | `crates/memstead-base/src/engine/error.rs:1041` |
+| `MEM_CONFIG_INCOMPLETE` | engine | `crates/memstead-base/src/engine/error.rs:1033` |
+| `MEM_ERROR` | engine, MCP | `crates/memstead-base/src/engine/error.rs:1025`<br>`crates/memstead-base/src/engine/error.rs:1028`<br>`crates/memstead-mcp/src/filesystem_server.rs:772` |
+| `MEM_FILES_NOT_DELETED` | engine | `crates/memstead-base/src/ops/mod.rs:1448` |
+| `MEM_HAS_INCOMING_REFS` | engine | `crates/memstead-base/src/engine/error.rs:996` |
+| `MEM_NAME_COLLISION` | engine | `crates/memstead-base/src/engine/error.rs:1029` |
+| `MEM_REATTACHED_AFTER_UNREGISTER` | engine | `crates/memstead-base/src/ops/mod.rs:1449` |
+| `MEM_RELOADED` | engine | `crates/memstead-base/src/ops/mod.rs:1440` |
 | `MISSING_REQUIRED_DESCRIPTION` | engine | `crates/memstead-base/src/engine/error.rs:1034`<br>`crates/memstead-base/src/ops/mod.rs:1451` |
 | `MISSING_REQUIRED_FIELD` | engine | `crates/memstead-base/src/ops/mod.rs:1394` |
 | `MISSING_REQUIRED_OUTGOING` | engine | `crates/memstead-base/src/ops/mod.rs:1438` |
@@ -73,9 +80,9 @@ Every typed error code emitted by the engine, the CLI (`memstead-cli`), and the 
 | `PUSHED_COMMITS_PROTECTED` | engine | `crates/memstead-base/src/engine/error.rs:988` |
 | `RANGE_FILTER_KEY_MALFORMED` | engine | `crates/memstead-base/src/ops/mod.rs:1423` |
 | `RANGE_FILTER_TYPE_SCOPED` | engine | `crates/memstead-base/src/ops/mod.rs:1428` |
+| `READ_MEM_SHADOWS_WRITABLE` | CLI | `crates/memstead-cli/src/commands/install.rs:442` |
 | `READ_ONLY_FIELD` | engine | `crates/memstead-base/src/runtime_validator.rs:198` |
 | `READ_ONLY_MOUNT` | engine | `crates/memstead-base/src/engine/error.rs:989` |
-| `READ_MEM_SHADOWS_WRITABLE` | CLI | `crates/memstead-cli/src/commands/install.rs:442` |
 | `RELATIONSHIP_CYCLE` | engine | `crates/memstead-base/src/engine/error.rs:1016` |
 | `RELATION_HAS_BODY_LINKS` | engine | `crates/memstead-base/src/engine/error.rs:1007` |
 | `RELATION_MANUAL_AUTHORING_FORBIDDEN` | engine | `crates/memstead-base/src/engine/error.rs:1037` |
@@ -89,9 +96,9 @@ Every typed error code emitted by the engine, the CLI (`memstead-cli`), and the 
 | `SCHEMA_PIN_MISMATCH` | engine | `crates/memstead-base/src/ops/mod.rs:1441` |
 | `SCHEMA_RESOLVER_INIT_FAILED` | engine | `crates/memstead-base/src/engine/error.rs:1027` |
 | `SCHEMA_VIOLATION_IN_FETCH` | engine | `crates/memstead-base/src/engine/error.rs:987` |
+| `SEARCH_MEM_INDEX_UNAVAILABLE` | engine | `crates/memstead-base/src/ops/mod.rs:1432` |
 | `SEARCH_RESULTS_TRUNCATED` | engine | `crates/memstead-base/src/ops/mod.rs:1422` |
 | `SEARCH_UNAVAILABLE_IN_WASM` | engine | `crates/memstead-base/src/engine/error.rs:1039` |
-| `SEARCH_MEM_INDEX_UNAVAILABLE` | engine | `crates/memstead-base/src/ops/mod.rs:1432` |
 | `SECTION_CONTENT_INVALID` | engine | `crates/memstead-base/src/runtime_validator.rs:202`<br>`crates/memstead-base/src/runtime_validator.rs:203` |
 | `SECTION_NOT_UPDATABLE` | engine | `crates/memstead-base/src/runtime_validator.rs:199` |
 | `SELF_LINK_IGNORED` | engine | `crates/memstead-base/src/ops/mod.rs:1443` |
@@ -108,20 +115,13 @@ Every typed error code emitted by the engine, the CLI (`memstead-cli`), and the 
 | `UNKNOWN_ENTITY_TYPE` | engine | `crates/memstead-base/src/engine/error.rs:990` |
 | `UNKNOWN_FILTER_KEY` | engine | `crates/memstead-base/src/ops/mod.rs:1413` |
 | `UNKNOWN_INCLUDE_KEY` | engine | `crates/memstead-base/src/ops/mod.rs:1398` |
+| `UNKNOWN_MEM` | engine | `crates/memstead-base/src/engine/error.rs:981` |
 | `UNKNOWN_METADATA_FIELD` | engine | `crates/memstead-base/src/runtime_validator.rs:196` |
 | `UNKNOWN_RANGE_FILTER_FIELD` | engine | `crates/memstead-base/src/ops/mod.rs:1426` |
 | `UNKNOWN_REF` | engine | `crates/memstead-base/src/engine/error.rs:982` |
 | `UNKNOWN_REMOTE` | engine | `crates/memstead-base/src/engine/error.rs:983` |
 | `UNKNOWN_SECTION` | engine | `crates/memstead-base/src/runtime_validator.rs:195` |
-| `UNKNOWN_MEM` | engine | `crates/memstead-base/src/engine/error.rs:981` |
 | `UPDATE_NOOP` | engine | `crates/memstead-base/src/ops/mod.rs:1401` |
-| `MEM_CONFIG_INCOMPLETE` | engine | `crates/memstead-base/src/engine/error.rs:1033` |
-| `MEM_ERROR` | engine, MCP | `crates/memstead-base/src/engine/error.rs:1025`<br>`crates/memstead-base/src/engine/error.rs:1028`<br>`crates/memstead-mcp/src/filesystem_server.rs:772` |
-| `MEM_FILES_NOT_DELETED` | engine | `crates/memstead-base/src/ops/mod.rs:1448` |
-| `MEM_HAS_INCOMING_REFS` | engine | `crates/memstead-base/src/engine/error.rs:996` |
-| `MEM_NAME_COLLISION` | engine | `crates/memstead-base/src/engine/error.rs:1029` |
-| `MEM_REATTACHED_AFTER_UNREGISTER` | engine | `crates/memstead-base/src/ops/mod.rs:1449` |
-| `MEM_RELOADED` | engine | `crates/memstead-base/src/ops/mod.rs:1440` |
 | `WIKILINK_WITHOUT_RELATION` | engine | `crates/memstead-base/src/engine/error.rs:1008` |
 | `WORKSPACE_ALREADY_EXISTS_ABOVE` | CLI | `crates/memstead-cli/src/lib.rs:49` |
 | `WORKSPACE_CONFIG_INVALID` | CLI | `crates/memstead-cli/src/commands/install.rs:273`<br>`crates/memstead-cli/src/commands/install.rs:280`<br>`crates/memstead-cli/src/commands/install.rs:322`<br>`crates/memstead-cli/src/commands/install.rs:329` |

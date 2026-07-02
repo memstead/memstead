@@ -67,11 +67,12 @@ Surface entries the registry does not pin to a logical operation. Either add a r
 - `link`
 - `login`
 - `logout`
+- `mem-repo`
 - `pipeline`
 - `publish`
+- `quickstart`
 - `schema`
 - `unpublish`
-- `mem-repo`
 
 ### Unaligned — UniFFI
 
@@ -83,9 +84,10 @@ Surface entries the registry does not pin to a logical operation. Either add a r
 - `delete_facet`
 - `delete_ingest`
 - `delete_medium`
-- `delete_projection`
 - `delete_mem`
+- `delete_projection`
 - `export_mem`
+- `mem_roster`
 - `pipeline_configs_json`
 - `rename_facet`
 - `rename_ingest`
@@ -97,5 +99,4 @@ Surface entries the registry does not pin to a logical operation. Either add a r
 - `update_ingest`
 - `update_medium`
 - `update_projection`
-- `mem_roster`
 

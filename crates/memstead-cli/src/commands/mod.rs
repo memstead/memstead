@@ -234,6 +234,7 @@ pub mod logout;
 pub mod overview;
 pub mod pipeline;
 pub mod publish;
+pub mod quickstart;
 pub mod relate;
 pub mod relations;
 pub mod reload;

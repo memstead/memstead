@@ -44,6 +44,12 @@ pub struct Args {
 
 #[derive(Subcommand, Debug)]
 pub enum SchemaCommand {
+    /// Scaffold a new schema package at `./<name>/` — a manifest plus
+    /// one commented example type — that `memstead schema validate`
+    /// passes unmodified. Prints the follow-up commands that take the
+    /// package from folder to pinned mem.
+    New(NewArgs),
+
     /// Validate a schema package directory (`schema.yaml` plus an
     /// optional `types/*.yaml`) against the engine's schema loader —
     /// the same validation the engine runs at load. Exits non-zero
@@ -57,6 +63,14 @@ pub enum SchemaCommand {
     /// `<source>` is a built-in name (`planning`, `planning@0.1.0`) or a
     /// path to a package directory. Validates before copying; idempotent.
     Install(InstallArgs),
+}
+
+#[derive(ClapArgs, Debug)]
+pub struct NewArgs {
+    /// Schema name. Grammar: starts with a lowercase letter, then
+    /// lowercase letters, digits, and hyphens. The package is written
+    /// to `./<name>/`.
+    pub name: String,
 }
 
 #[derive(ClapArgs, Debug)]
@@ -75,9 +89,345 @@ pub struct InstallArgs {
 
 pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     match args.command {
+        SchemaCommand::New(a) => scaffold_new(ctx, a),
         SchemaCommand::Validate(a) => validate(ctx, a),
         SchemaCommand::Install(a) => install(ctx, a),
     }
+}
+
+/// Version every scaffolded package starts at.
+const SCAFFOLD_VERSION: &str = "0.1.0";
+
+fn scaffold_new(ctx: &CliContext, args: NewArgs) -> anyhow::Result<()> {
+    if let Err(reason) = memstead_schema::loader::validate_schema_name(&args.name) {
+        let suggestion = suggest_schema_name(&args.name);
+        return Err(CliError::new(
+            ExitKind::Validation,
+            "INVALID_INPUT",
+            format!(
+                "invalid schema name {name:?}: {reason} (lowercase letter first, \
+                 then lowercase letters, digits, hyphens). \
+                 Try: memstead schema new {suggestion}",
+                name = args.name,
+            ),
+        )
+        .with_details(json!({
+            "name": args.name,
+            "reason": reason,
+            "suggestion": suggestion,
+        }))
+        .into());
+    }
+
+    let pkg_dir = PathBuf::from(&args.name);
+    if pkg_dir.join("schema.yaml").is_file() {
+        return Err(CliError::new(
+            ExitKind::Validation,
+            "SCHEMA_PACKAGE_EXISTS",
+            format!(
+                "{} already contains a schema package — `memstead schema new` \
+                 never overwrites. Check it with: memstead schema validate {}",
+                pkg_dir.display(),
+                args.name,
+            ),
+        )
+        .with_details(json!({ "path": pkg_dir }))
+        .into());
+    }
+    if pkg_dir.is_dir() {
+        if let Some(entry) = std::fs::read_dir(&pkg_dir)
+            .map_err(|e| {
+                CliError::new(
+                    ExitKind::Generic,
+                    "IO_ERROR",
+                    format!("read {}: {e}", pkg_dir.display()),
+                )
+            })?
+            .next()
+            .transpose()
+            .map_err(|e| {
+                CliError::new(
+                    ExitKind::Generic,
+                    "IO_ERROR",
+                    format!("read {}: {e}", pkg_dir.display()),
+                )
+            })?
+        {
+            let found = entry.file_name().to_string_lossy().to_string();
+            return Err(CliError::new(
+                ExitKind::Validation,
+                "TARGET_NOT_EMPTY",
+                format!(
+                    "{} exists and is not empty (found `{found}`) — clear it or \
+                     pick a different name: memstead schema new {}-schema",
+                    pkg_dir.display(),
+                    args.name,
+                ),
+            )
+            .with_details(json!({ "path": pkg_dir, "found": [found] }))
+            .into());
+        }
+    }
+
+    let manifest = scaffold_manifest(&args.name);
+    let example_type = scaffold_example_type();
+    std::fs::create_dir_all(pkg_dir.join("types")).map_err(|e| {
+        CliError::new(
+            ExitKind::Generic,
+            "IO_ERROR",
+            format!("create {}: {e}", pkg_dir.join("types").display()),
+        )
+    })?;
+    for (rel, content) in [("schema.yaml", &manifest), ("types/note.yaml", &example_type)] {
+        let dest = pkg_dir.join(rel);
+        std::fs::write(&dest, content).map_err(|e| {
+            CliError::new(
+                ExitKind::Generic,
+                "IO_ERROR",
+                format!("write {}: {e}", dest.display()),
+            )
+        })?;
+    }
+
+    // Self-check with the engine loader — the scaffold's contract is
+    // "validates clean as generated"; fail loudly here rather than at
+    // the user's `schema validate` if a template edit ever breaks it.
+    if let Err(e) = memstead_schema::loader::load_schema_from_dir(&pkg_dir) {
+        return Err(CliError::new(
+            ExitKind::Generic,
+            crate::INTERNAL_CODE,
+            format!(
+                "scaffold bug: generated package at {} fails validation: {e} — \
+                 please report this",
+                pkg_dir.display(),
+            ),
+        )
+        .into());
+    }
+
+    let next_steps = scaffold_next_steps(ctx, &args.name);
+    if ctx.json {
+        print_json(&json!({
+            "ok": true,
+            "schema": format!("{}@{SCAFFOLD_VERSION}", args.name),
+            "path": pkg_dir,
+            "files": ["schema.yaml", "types/note.yaml"],
+            "next_steps": next_steps,
+        }))?;
+    } else {
+        let steps: Vec<String> = next_steps
+            .iter()
+            .enumerate()
+            .map(|(i, s)| format!("{}. `{s}`", i + 1))
+            .collect();
+        print_markdown(&format!(
+            "# Schema package scaffolded\n\n`{name}@{SCAFFOLD_VERSION}` at `{dir}` \
+             (schema.yaml + types/note.yaml, one commented example type).\n\n\
+             Edit the package, then:\n\n{steps}\n",
+            name = args.name,
+            dir = pkg_dir.display(),
+            steps = steps.join("\n"),
+        ));
+    }
+    Ok(())
+}
+
+/// The follow-up command sequence printed by `schema new` — the rest of
+/// the custom-schema flow is copy-paste from here. When the command
+/// runs inside a single-writable-mem workspace, the pin step names the
+/// actual mem (from the mount roster — the authoritative name source);
+/// otherwise it keeps a `<mem>` placeholder.
+fn scaffold_next_steps(ctx: &CliContext, name: &str) -> Vec<String> {
+    use memstead_base::workspace::MountCapability;
+    use memstead_base::workspace_store::{FileWorkspaceStore, WorkspaceStoreAdapter};
+    let mem = ctx
+        .workspace_shape()
+        .and_then(|(shape, root)| match shape {
+            WorkspaceShape::Filesystem => FileWorkspaceStore::new()
+                .load(&root)
+                .ok()
+                .and_then(|ws| {
+                    let mut writable = ws
+                        .mounts
+                        .iter()
+                        .filter(|m| m.capability == MountCapability::Write);
+                    match (writable.next(), writable.next()) {
+                        (Some(only), None) => Some(only.mem.clone()),
+                        _ => None,
+                    }
+                }),
+            WorkspaceShape::MemRepo => None,
+        })
+        .unwrap_or_else(|| "<mem>".to_string());
+    let mut steps = vec![
+        format!("memstead schema validate {name}"),
+        format!("memstead schema install {name}"),
+    ];
+    #[cfg(feature = "mem-repo")]
+    steps.push(format!(
+        "memstead mem set-schema {mem} {name}@{SCAFFOLD_VERSION}"
+    ));
+    // The basis binary has no `mem` subcommand group; a fresh init is
+    // its schema-pin entry point.
+    #[cfg(not(feature = "mem-repo"))]
+    steps.push(format!(
+        "memstead init --name {mem} --schema {name}@{SCAFFOLD_VERSION}  (in a fresh folder)"
+    ));
+    steps
+}
+
+/// Best-effort correction for an invalid schema name, offered in the
+/// refusal message: lowercase, non-grammar characters to hyphens,
+/// hyphen runs collapsed, leading non-letters and trailing hyphens
+/// trimmed.
+fn suggest_schema_name(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    for c in raw.to_lowercase().chars() {
+        if c.is_ascii_lowercase() || c.is_ascii_digit() {
+            out.push(c);
+        } else if !out.ends_with('-') && !out.is_empty() {
+            out.push('-');
+        }
+    }
+    let trimmed: String = out
+        .trim_matches('-')
+        .chars()
+        .skip_while(|c| !c.is_ascii_lowercase())
+        .collect();
+    let trimmed = trimmed.trim_matches('-');
+    if trimmed.is_empty() {
+        "my-schema".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+/// The generated `schema.yaml` — a minimal, valid manifest whose
+/// comments teach each knob. Kept in one place with the example type
+/// so the scaffold reads as a coherent package.
+fn scaffold_manifest(name: &str) -> String {
+    format!(
+        r#"# Schema package scaffolded by `memstead schema new`.
+# A schema package is one folder: this manifest plus one YAML file per
+# entity type under types/. Re-check any time with:
+#   memstead schema validate {name}
+
+name: {name}
+version: {SCAFFOLD_VERSION}
+
+# Shown in schema catalogues (memstead_overview, the registry).
+description: |
+  Describe the subject this schema models and the types it declares.
+
+# Read by agents (and humans) choosing a schema for a new mem.
+when_to_use: |
+  Say when this schema fits — and when an author should reach for a
+  different one.
+
+# Optional: served to agents working in a mem pinned to this schema.
+system_message: |
+  You are working in a graph using the {name} schema. Prefer precise
+  types, link generously, and keep sections in their declared shape.
+
+# One entry per file under types/ — `note` matches types/note.yaml.
+# Add a type by adding both the file and its entry here.
+types:
+  - note
+
+relationships:
+  # strict: only the definitions below are legal edge types.
+  # open: any UPPER_SNAKE_CASE name is accepted; definitions add weights.
+  mode: strict
+  definitions:
+    - name: PART_OF
+      description: Hierarchical containment — the source is structurally part of the target.
+      default_weight: 3.0
+      acyclic: true
+    - name: RELATES_TO
+      description: General association between two entities when no sharper type fits.
+      default_weight: 1.0
+    - name: REFERENCES
+      description: Soft reference. Auto-emitted from body wiki-links — never author by hand.
+      default_weight: 0.5
+    # Required entry — the fallback weight for any relationship not
+    # listed above.
+    - name: _default
+      description: Fallback weight for any relationship not otherwise specified.
+      default_weight: 1.0
+
+# Body wiki-links `[[target]]` auto-emit as REFERENCES relations.
+# Remove this key to make unbacked wiki-links a validation error instead.
+alias_target_rel_type: REFERENCES
+
+# Community detection (graph clustering) tuning — the defaults are fine.
+community:
+  resolution: 1.0
+  seed: 42
+"#
+    )
+}
+
+/// The generated example type. One well-commented type teaches the
+/// format; the built-in catalogue (`memstead schema install default`,
+/// then `.memstead/schemas/default@*/types/`) shows ten more.
+fn scaffold_example_type() -> String {
+    r#"# One entity type = one file. `name` must match the filename stem
+# and appear in the manifest's `types:` list.
+
+name: note
+description: |
+  A general-purpose note — replace this with your first real type.
+when_to_use: |
+  Use while sketching the schema; rename or split into sharper types
+  as the domain vocabulary firms up.
+
+# Sections are the entity's markdown body. `required: true` sections
+# must be present on every create.
+sections:
+  - key: summary
+    heading: Summary
+    required: true
+    search_weight: 40.0
+    write_rules:
+      - "One or two sentences. Must stand alone in a search result."
+  - key: details
+    heading: Details
+    required: false
+    search_weight: 10.0
+    # catch_all: content under unmatched headings lands here.
+    catch_all: true
+    write_rules:
+      - "Everything beyond the summary. Bullets over prose."
+
+# Typed, filterable frontmatter fields — beyond the built-in
+# type / created_date / last_modified / tags.
+metadata_fields:
+  - key: status
+    description: Lifecycle state of the note.
+    field_type: string
+    default_value: active
+    enum_values: [active, archived]
+    filterable: equality
+
+# Search ranking: how much a title match weighs.
+title_weight: 100.0
+# Sections included in full-text search.
+text_fields: [summary, details]
+# Which declared relationship expresses hierarchy for this type.
+hierarchy_relationship: PART_OF
+# Edge types whose community signal propagates through this type.
+propagating_relationships: [PART_OF]
+# Fields `memstead update` may touch on this type.
+updatable_fields: [title, summary, details, status, tags]
+# Sections the health report treats as required.
+health_required_fields: [summary]
+# Days without modification before health flags the entity stale.
+staleness_threshold_days: 180
+# Prose guidance served to agents writing entities of this type.
+write_rules:
+  - "Notes are placeholders — split recurring shapes into dedicated types."
+"#
+    .to_string()
 }
 
 fn validate(ctx: &CliContext, args: ValidateArgs) -> anyhow::Result<()> {
@@ -118,7 +468,8 @@ fn install(ctx: &CliContext, args: InstallArgs) -> anyhow::Result<()> {
         CliError::new(
             ExitKind::Generic,
             "NO_WORKSPACE",
-            "not inside a Memstead workspace (no `.memstead/workspace.toml` in any ancestor)"
+            "not inside a Memstead workspace (no `.memstead/workspace.toml` in any \
+             ancestor) — cd into your workspace first, or create one: memstead quickstart"
                 .to_string(),
         )
     })?;

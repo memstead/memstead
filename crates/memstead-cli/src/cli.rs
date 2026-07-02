@@ -84,6 +84,13 @@ pub enum Command {
     /// Strict: errors out when the target is not empty.
     Init(commands::init::InitArgs),
 
+    /// One-command cold start: workspace + default-schema mem + seed
+    /// entity + MCP wiring for your agent(s), in the current (or named)
+    /// folder. Tolerates dotfiles and README-grade files; derives the
+    /// mem name from the folder. For the strict, script-safe variant
+    /// use `memstead init`.
+    Quickstart(commands::quickstart::Args),
+
     /// Install a sealed `.mem` mem — either a local file, or `<scope>/<name>`
     /// from the memstead.io registry.
     #[cfg(feature = "mem-repo")]

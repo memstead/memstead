@@ -535,6 +535,15 @@ fn validate_name(name: &str) -> Result<(), SchemaLoadError> {
     })
 }
 
+/// Author-time access to the schema-name shape rule — the same check
+/// the loader runs on a manifest's `name:`. Exposed so scaffolding
+/// tooling (`memstead schema new`) can refuse a bad name up front with
+/// the loader's own reason string instead of a drifting copy of the
+/// grammar.
+pub fn validate_schema_name(name: &str) -> Result<(), &'static str> {
+    name_shape(name)
+}
+
 /// Shared shape rule for schema names — the manifest's own `name:` and
 /// every `cross_mem_relationships[].to_schema` follow the same
 /// grammar; the two callers wrap violations in their field-specific

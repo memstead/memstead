@@ -20,6 +20,7 @@ This document contains the help content for the `memstead` command-line program.
 * [`memstead health`↴](#memstead-health)
 * [`memstead export`↴](#memstead-export)
 * [`memstead init`↴](#memstead-init)
+* [`memstead quickstart`↴](#memstead-quickstart)
 * [`memstead install`↴](#memstead-install)
 * [`memstead link`↴](#memstead-link)
 * [`memstead publish`↴](#memstead-publish)
@@ -62,6 +63,7 @@ This document contains the help content for the `memstead` command-line program.
 * [`memstead workspace revoke-cross-link`↴](#memstead-workspace-revoke-cross-link)
 * [`memstead workspace set-mutations`↴](#memstead-workspace-set-mutations)
 * [`memstead schema`↴](#memstead-schema)
+* [`memstead schema new`↴](#memstead-schema-new)
 * [`memstead schema validate`↴](#memstead-schema-validate)
 * [`memstead schema install`↴](#memstead-schema-install)
 * [`memstead pipeline`↴](#memstead-pipeline)
@@ -100,6 +102,7 @@ Exit codes:
 * `health` — Health summary (orphans, stubs, stale entities, missing fields)
 * `export` — Export the write mem as markdown (in place) or as a portable `.mem` archive
 * `init` — Initialise a filesystem mem in the current (or named) folder. Strict: errors out when the target is not empty
+* `quickstart` — One-command cold start: workspace + default-schema mem + seed entity + MCP wiring for your agent(s), in the current (or named) folder. Tolerates dotfiles and README-grade files; derives the mem name from the folder. For the strict, script-safe variant use `memstead init`
 * `install` — Install a sealed `.mem` mem — either a local file, or `<scope>/<name>` from the memstead.io registry
 * `link` — Link a filesystem mem to a registry-published dependency. `memstead link <scope/name>` fetches the archive into `.memstead/memstead-io/` and records the dep in `.memstead/config.json`
 * `publish` — Publish a `.mem` archive to the registry. Triggers GitHub Device Flow on first use; subsequent runs are silent
@@ -362,6 +365,34 @@ Initialise a filesystem mem in the current (or named) folder. Strict: errors out
 
 * `--name <NAME>` — Mem name. Slug-shaped: `^[a-z0-9][a-z0-9-]{0,62}[a-z0-9]$`
 * `--schema <SCHEMA>` — Schema pin in exact `<name>@<version>` form (e.g. `default@1.0.0`). Bare-name pins are rejected. filesystem-mem v1 resolves against the engine's builtin schema set; registry-resolved schemas land in a follow-up
+
+
+
+## `memstead quickstart`
+
+One-command cold start: workspace + default-schema mem + seed entity + MCP wiring for your agent(s), in the current (or named) folder. Tolerates dotfiles and README-grade files; derives the mem name from the folder. For the strict, script-safe variant use `memstead init`
+
+**Usage:** `memstead quickstart [OPTIONS] [PATH]`
+
+###### **Arguments:**
+
+* `<PATH>` — Target folder. Defaults to the current working directory
+
+###### **Options:**
+
+* `--name <NAME>` — Mem name. Normally derived from the directory name; pass this when the derivation fails (or to override it). Slug-shaped: `^[a-z0-9][a-z0-9-]{0,62}[a-z0-9]$`
+* `--agent <AGENTS>` — Agent target(s) to write MCP wiring for. Repeatable. Skips the interactive selection prompt. Without a TTY and without this flag, quickstart defaults to `claude-code`
+
+  Possible values:
+  - `claude-code`:
+    Claude Code — project `.mcp.json`
+  - `codex`:
+    OpenAI Codex — prints the `codex mcp add` one-liner (Codex has no project-scoped MCP config file)
+  - `cursor`:
+    Cursor — project `.cursor/mcp.json`
+  - `gemini`:
+    Gemini CLI — project `.gemini/settings.json`
+
 
 
 
@@ -1072,8 +1103,21 @@ Author-time schema tooling. `memstead schema validate <path>` checks a schema pa
 
 ###### **Subcommands:**
 
+* `new` — Scaffold a new schema package at `./<name>/` — a manifest plus one commented example type — that `memstead schema validate` passes unmodified. Prints the follow-up commands that take the package from folder to pinned mem
 * `validate` — Validate a schema package directory (`schema.yaml` plus an optional `types/*.yaml`) against the engine's schema loader — the same validation the engine runs at load. Exits non-zero (`SCHEMA_VALIDATION_FAILED`) on any conformance error, with the YAML line/column in the message where the parse layer provides it
 * `install` — Install a schema package into the current folder workspace's `.memstead/schemas/<name>@<version>/` so a mem can pin it. `<source>` is a built-in name (`planning`, `planning@0.1.0`) or a path to a package directory. Validates before copying; idempotent
+
+
+
+## `memstead schema new`
+
+Scaffold a new schema package at `./<name>/` — a manifest plus one commented example type — that `memstead schema validate` passes unmodified. Prints the follow-up commands that take the package from folder to pinned mem
+
+**Usage:** `memstead schema new <NAME>`
+
+###### **Arguments:**
+
+* `<NAME>` — Schema name. Grammar: starts with a lowercase letter, then lowercase letters, digits, and hyphens. The package is written to `./<name>/`
 
 
 

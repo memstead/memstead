@@ -16,6 +16,10 @@ Generated from the live `tool_router().list_all()` catalogues on `FilesystemMcpS
 - [`memstead_diff`](#memstead-diff)
 - [`memstead_entity`](#memstead-entity)
 - [`memstead_health`](#memstead-health)
+- [`memstead_mem_create`](#memstead-mem-create)
+- [`memstead_mem_delete`](#memstead-mem-delete)
+- [`memstead_mem_set_schema`](#memstead-mem-set-schema)
+- [`memstead_mem_set_version`](#memstead-mem-set-version)
 - [`memstead_overview`](#memstead-overview)
 - [`memstead_relate`](#memstead-relate)
 - [`memstead_reload`](#memstead-reload)
@@ -23,10 +27,6 @@ Generated from the live `tool_router().list_all()` catalogues on `FilesystemMcpS
 - [`memstead_schema`](#memstead-schema)
 - [`memstead_search`](#memstead-search)
 - [`memstead_update`](#memstead-update)
-- [`memstead_mem_create`](#memstead-mem-create)
-- [`memstead_mem_delete`](#memstead-mem-delete)
-- [`memstead_mem_set_schema`](#memstead-mem-set-schema)
-- [`memstead_mem_set_version`](#memstead-mem-set-version)
 - [`memstead_workspace_allow_create`](#memstead-workspace-allow-create)
 - [`memstead_workspace_allow_delete`](#memstead-workspace-allow-delete)
 - [`memstead_workspace_grant_cross_link`](#memstead-workspace-grant-cross-link)
@@ -47,12 +47,17 @@ Per-mem commit-delta feed — reads the mem's own git repo (gitdir via `memstead
 ```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
   "description": "Parameters for memstead_changes_since.",
   "properties": {
     "include_notes": {
       "default": false,
       "description": "Fold per-commit agent-notes into the response. When true, the report carries a `notes[]` array (one entry per commit between `since` and `head`, with `sha`, `subject`, `tool_verb`, `entity_id`, `note`, `actor`, `tool`, `client`, `timestamp`) plus `memstead_ref` — the SHA of the unified schema + per-mem-config registry, absent when the workspace has not been migrated yet. Default false (entity-delta only). Outer-repo auto-commit consumers turn this on to receive notes and the registry-ref sha in one round-trip; agents that just need entity events leave it off.",
       "type": "boolean"
+    },
+    "mem": {
+      "description": "Writable mem name. Call memstead_health for the list.",
+      "type": "string"
     },
     "rename_similarity": {
       "description": "Rename detection threshold for content-similarity, in [0.1, 1.0]. Default (None) → 0.6. Lower values widen the recall window at the cost of false-positive rename pairing; raise it to 0.9+ when you want only near-byte-identical renames collapsed. Out-of-range values refuse with `INVALID_INPUT` naming `details.allowed_range` and `details.requested` — agents recover by reissuing with a value inside `[0.1, 1.0]`.",
@@ -64,10 +69,6 @@ Per-mem commit-delta feed — reads the mem's own git repo (gitdir via `memstead
     },
     "since": {
       "description": "Commit SHA to diff against. Pass the `commit_sha` returned by a prior mutation, or the canonical git empty-tree hash `4b825dc642cb6eb9a060e54bf8d69288fbee4904` to get every entity as `added` (fresh-client first sync).",
-      "type": "string"
-    },
-    "mem": {
-      "description": "Writable mem name. Call memstead_health for the list.",
       "type": "string"
     }
   },
@@ -137,6 +138,13 @@ Create a new entity. Read the target mem's schema first via `memstead_schema(nam
       "description": "Entity type. Required. Allowed values are pinned by the target mem's schema — fetch them via `memstead_schema(name=<mem.schema_ref>)` (cached per session). Unknown types refuse with `UNKNOWN_ENTITY_TYPE`.",
       "type": "string"
     },
+    "mem": {
+      "description": "Mem name (directory name of the write mem)",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "metadata": {
       "additionalProperties": {
         "type": "string"
@@ -177,13 +185,6 @@ Create a new entity. Read the target mem's schema first via `memstead_schema(nam
     "title": {
       "description": "Entity title (ID is derived automatically as mem--slug(title))",
       "type": "string"
-    },
-    "mem": {
-      "description": "Mem name (directory name of the write mem)",
-      "type": [
-        "string",
-        "null"
-      ]
     }
   },
   "required": [
@@ -249,6 +250,7 @@ Return a two-ref structural diff at entity granularity. Walks the tree at `ref_a
 ```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
   "description": "Parameters for memstead_diff. Two-ref structural diff at entity\ngranularity; the response wire shape is `Diff` / `EntityDiff` from\n`memstead_base::ops::diff`.",
   "properties": {
     "include_content": {
@@ -260,6 +262,10 @@ Return a two-ref structural diff at entity granularity. Walks the tree at `ref_a
       "default": true,
       "description": "When true (default), each entry's `ripple` carries per-side `{from_id, side}` entries for entities with inbound wiki-links to the affected entry — `side: \"ref_a\"` lists referrers at the `ref_a` snapshot, `side: \"ref_b\"` at `ref_b` — so a consumer sees what would break if the change were applied or skipped. Pass false to omit the field (e.g. for large mems where the per-side wiki-link scan dominates cost).",
       "type": "boolean"
+    },
+    "mem": {
+      "description": "Mem that selects the storage context (the gitdir, for git-branch mounts). `ref_a` / `ref_b` are arbitrary refs resolved inside that gitdir; cross-mem diffs work via fully-qualified refs (`refs/heads/<other-mem>`). Folder / archive mounts refuse the call with `INVALID_INPUT` — they carry no git refs to diff.",
+      "type": "string"
     },
     "ref_a": {
       "description": "First ref to diff. Branch name (`main`), full ref (`refs/heads/specs`), commit SHA, or tag. Unknown refs refuse with `UNKNOWN_REF` and `details.ref` carrying the raw input.",
@@ -276,10 +282,6 @@ Return a two-ref structural diff at entity granularity. Walks the tree at `ref_a
         "number",
         "null"
       ]
-    },
-    "mem": {
-      "description": "Mem that selects the storage context (the gitdir, for git-branch mounts). `ref_a` / `ref_b` are arbitrary refs resolved inside that gitdir; cross-mem diffs work via fully-qualified refs (`refs/heads/<other-mem>`). Folder / archive mounts refuse the call with `INVALID_INPUT` — they carry no git refs to diff.",
-      "type": "string"
     }
   },
   "required": [
@@ -305,6 +307,7 @@ Read one entity. Dual channel: text carries rendered markdown for direct prose c
 ```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
   "description": "Parameters for memstead_entity.",
   "properties": {
     "chunk": {
@@ -375,6 +378,7 @@ Return graph health metrics. The typed payload is `structured_content` (always w
 ```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
   "description": "Parameters for memstead_health.",
   "properties": {
     "chunk": {
@@ -410,6 +414,13 @@ Return graph health metrics. The typed payload is `structured_content` (always w
         "null"
       ]
     },
+    "mem": {
+      "description": "Scope counts, distributions, and detail lists to a single writable mem. `writable_mems`/`read_mems` still show the full roster so the agent sees the whole workspace. Omit (default) for global aggregates.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "target_schema": {
       "description": "Schema ref (`name@x.y.z`) the `conformance`/`integrity` includes lint against instead of each mem's current pin. Omit (default) to lint against the current pin. Only consulted when `include` requests the conformance axis; an unresolvable ref refuses with SCHEMA_NOT_FOUND.",
       "type": [
@@ -425,16 +436,254 @@ Return graph health metrics. The typed payload is `structured_content` (always w
         "integer",
         "null"
       ]
+    }
+  },
+  "title": "HealthParams",
+  "type": "object"
+}
+```
+
+## `memstead_mem_create`
+
+**Flavour:** full only
+
+Create and register a new writable mem at runtime. Requires workspace opt-in via `[[mem_management.create]]` rules (each `pattern` + `schemas[]`) — discover via `memstead_overview`'s `## Lifecycle Namespaces`. Engine composes the lifecycle candidate, canonicalizes `location`, runs first-match-wins glob over the rule list, then checks `schema` against the matched rule's `schemas[]` (`["*"]` admits any). Two error envelopes: `MEM_PATH_NOT_ALLOWED` carries `details.candidate`, `details.patterns`, `details.reason` (`no_allowlist_configured` / `no_match` / `outside_workspace`); `MEM_SCHEMA_NOT_ALLOWED` carries `details.candidate`, `details.matched_pattern`, `details.requested_schema`, `details.allowed_schemas`. Name-collision check runs only after a path match — out-of-namespace collision surfaces as `MEM_PATH_NOT_ALLOWED`, not `MEM_NAME_COLLISION`. Storage-residue probe catches residue surviving a prior `memstead mem unregister` or a crash; residue left by a deliberate unregister reattaches and emits `MEM_REATTACHED_AFTER_UNREGISTER` (audit signal); residue from a crash refuses with `MEM_STORAGE_RESIDUE_DETECTED` — run `memstead mem delete <name>` first. Cross-mem edge authorization is workspace policy (`[cross_mem_links]`); the matched create-rule may carry `default_cross_links`. Bootstraps the gitdir per `vcs`, loads any pre-existing markdown, and produces a seed commit carrying `note` (≤280 chars). Response carries `location`, `seed_commit_sha` for `memstead_changes_since` polling, and `schema_ref` (gitdir via `memstead_health include_config=true`). Pass `include_schema: true` to additionally inline the full schema body — byte-identical to `memstead_schema(name=<resolved-schema>)`. Default `false`. A mem already present at the location returns `CONFIG_ERROR`. Seed-commit failure leaves partial disk state — no implicit rollback.
+
+**Hints:** `read_only` = false, `destructive` = false, `idempotent` = false, `open_world` = false
+
+**Input schema:**
+
+```json
+{
+  "$defs": {
+    "RecoveryActionInput": {
+      "description": "Wire-shape recovery action for `memstead_mem_create`. The\nstorage-residue refusal path exposes three explicit\nrecovery options the caller picks via this enum. The wire\ntokens (`reattach` / `force_overwrite` / `hard_cleanup_first`)\nmatch `memstead_engine::RecoveryAction::as_wire_str()` so the\nMCP serde shape and the CLI flag bridge converge on a single\nengine-side enum.",
+      "oneOf": [
+        {
+          "const": "reattach",
+          "description": "Adopt the residual entities; skip the seed commit. Default\nwhen the residue was left by a deliberate `memstead mem\nunregister`. Explicit `reattach` overrides the default for\ncrash-residue scenarios where the operator has verified the\ncontent is safe to adopt.",
+          "type": "string"
+        },
+        {
+          "const": "force_overwrite",
+          "description": "Destroy the residue, then proceed with the normal create\npath. Prior entities are gone. **Not yet implemented** — the\norchestrator currently refuses with `INVALID_INPUT` pointing\nat `memstead mem delete <name>`.",
+          "type": "string"
+        },
+        {
+          "const": "hard_cleanup_first",
+          "description": "Refuse with `MEM_STORAGE_RESIDUE_DETECTED`, instructing the\ncaller to run `memstead mem delete <name>` first. Hard barrier\nagainst destructive auto-recovery — for operators who want\nthe cleanup to be a separate, named operation.",
+          "type": "string"
+        }
+      ]
     },
-    "mem": {
-      "description": "Scope counts, distributions, and detail lists to a single writable mem. `writable_mems`/`read_mems` still show the full roster so the agent sees the whole workspace. Omit (default) for global aggregates.",
+    "VcsConfigInput": {
+      "additionalProperties": false,
+      "description": "On-the-wire shape mirroring `memstead_schema::VcsConfig` with a\n`JsonSchema` derivation for rmcp tool routing. Kept separate from the\ncore type so the schema crate does not need a `schemars` dependency\njust to support one MCP-facing parameter. The fields and semantics\nmatch 1:1 — see `memstead_schema::VcsConfig` for the canonical\ndocumentation.",
+      "properties": {
+        "gitdir": {
+          "description": "Path to the gitdir relative to the new mem's root.",
+          "type": "string"
+        },
+        "worktree": {
+          "default": ".",
+          "description": "Path to the worktree relative to the new mem's root. Defaults to `\".\"` (mem root) when omitted.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "gitdir"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Parameters for `memstead_mem_create`.",
+  "properties": {
+    "include_schema": {
+      "default": false,
+      "description": "Inline the full resolved schema body on the response (byte-identical to `memstead_schema(name=<resolved-schema>)`). Default `false` — the response carries only `schema_ref`, `name`, `location`, and `seed_commit_sha`. Set to `true` for first-time-schema callers that want one round-trip instead of two; for the agent's second+ mem on the same schema this opt-in saves ~25 KB of context per call since the schema is workspace-stable and already cached.",
+      "type": "boolean"
+    },
+    "location": {
+      "description": "Target filesystem location. Absolute path, or relative to the workspace root. Canonicalized before the allowlist check — `./a/../b` is reduced to `./b` prior to matching.",
+      "type": "string"
+    },
+    "name": {
+      "description": "Unique name for the new mem — the full hierarchical identifier (e.g. `\"sub-mem\"` for flat layouts or `\"team/sub-mem\"` for hierarchical layouts); the value flows through verbatim. Grammar: lowercase ASCII letters, digits, hyphens; segments separated by `/`; no leading, trailing, or double slashes. Must not collide with any currently-registered mem.",
+      "type": "string"
+    },
+    "note": {
+      "description": "Agent-authored provenance note recorded in the seed commit's body (≤280 chars). One sentence describing why this mem was created.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "recovery": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RecoveryActionInput"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Explicit recovery action when on-disk storage residue is detected at the composed branch path. Three accepted values: `reattach` (adopt the residual entities, skip the seed commit), `force_overwrite` (destroy the residue, currently refuses with `INVALID_INPUT` — implementation pending), `hard_cleanup_first` (refuse with `MEM_STORAGE_RESIDUE_DETECTED`, instructing the caller to run `memstead_mem_delete` first). When omitted, the engine routes by whether the residue was left by a deliberate `memstead mem unregister`: such residue defaults to `reattach` and emits a `MEM_REATTACHED_AFTER_UNREGISTER` warning; residue from a crash refuses with `MEM_STORAGE_RESIDUE_DETECTED`. Bare create against a name with no residue ignores this field."
+    },
+    "schema": {
+      "description": "Schema pin for the new mem. Format: `name@x.y.z` — e.g. `default@1.0.0`. Resolved against the per-mem schema registry at init time.",
+      "type": "string"
+    },
+    "schema_verbosity": {
+      "description": "Verbosity of the inlined schema body when `include_schema: true`. `\"full\"` (default, absent) inlines the complete schema — byte-identical to `memstead_schema(name=<resolved-schema>)`. `\"lite\"` inlines the cheap cold-start skeleton instead (entity-type names + section keys + field shapes, relationship names + endpoints, the alias pointer; prose dropped) — the recommended pairing for a first-mem create that only needs to orient. Ignored when `include_schema` is false. Any value other than `\"full\"`/`\"lite\"` returns `INVALID_INPUT` naming the bad value.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "vcs": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/VcsConfigInput"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Optional VCS layout override. Shape: `{ \"gitdir\": \".git\", \"worktree\": \".\" }` (default isolated) or `{ \"gitdir\": \"../.git\", \"worktree\": \"..\" }` (shared-gitdir idiom). Paths are relative to the new mem's root. When absent, the engine uses the isolated default."
+    },
+    "write_guidance": {
+      "additionalProperties": true,
+      "default": {},
+      "description": "Optional per-instance writing guidance, written verbatim into the new mem's config `writeGuidance` map in the seed commit. An opaque string-keyed JSON object — e.g. `{ \"phase_context\": \"early design\", \"stack\": \"Rust\" }`. The engine never interprets the keys (schema-strictness D8 — `writeGuidance` is client-owned vocabulary); a client that read the resolved schema package's `mem-template.json` fills the instance keys and passes them here. Omit (or pass `{}`) to seed no guidance.",
+      "type": "object"
+    }
+  },
+  "required": [
+    "name",
+    "location",
+    "schema"
+  ],
+  "title": "MemCreateParams",
+  "type": "object"
+}
+```
+
+## `memstead_mem_delete`
+
+**Flavour:** full only
+
+Remove a writable mem at runtime — always destructive: removes the mem and prunes every backend-visible artifact. Requires workspace opt-in via `[[mem_management.delete]]` rules — discover the current policy via `memstead_overview`'s `## Lifecycle Namespaces` section. Engine resolves `name` (`UNKNOWN_MEM` otherwise), composes the lifecycle candidate from the mem's full hierarchical path (or the bare name for flat-layout mems), runs first-match-wins glob lookup over the delete rule list (rejecting `no_allowlist_configured` or `no_match` with `MEM_PATH_NOT_ALLOWED`; `details.candidate` carries the composed string, `details.patterns` lists rules checked, `details.reason` discriminates). Refuses `MEM_REFERENCED_BY_POLICY` when the workspace `cross_mem_links` policy grants this mem as a write target (`details.referring_mems` names them). Refuses `MEM_HAS_INCOMING_REFS` when write-mem graph edges still target it (`details.referrers` lists each `{from_id, rel_types, mem}` — remove via `memstead_relate` / `memstead_update` first). On success the mem is gone — reads no longer see it and its backing storage is removed. The workspace policy is atomically scrubbed of the now-dangling `[cross_mem_links]` grants naming the deleted mem on either side. The `[[mem_management.create]]` / `[[mem_management.delete]]` allowlist rules are PRESERVED (exact-name and wildcard alike) — they are forward-looking permissions for the name, so re-creating a mem of the same name needs no fresh allow-create/allow-delete. No per-mem commit — `note` (≤280 chars) rides on the provenance context. Response: `name`, `deleted_from_router: true`, `files_deleted: true`, and `allowlist_entries_removed[{table, pattern?, from?, to?}]` listing the scrubbed cross-link grants (`table` is always `cross_mem_links`; empty when none named the mem). On partial cleanup failure `files_deleted` ends `false` and `MEM_FILES_NOT_DELETED` warnings name the survivors: `details.reason` is `rmdir_failed` (with `details.path` + `details.error`) or `backend_prune_failed` (with `details.error`).
+
+**Hints:** `read_only` = false, `destructive` = true, `idempotent` = false, `open_world` = false
+
+**Input schema:**
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Parameters for `memstead_mem_delete`.\n\nThe MCP surface collapses to one verb that always means destructive.\nThe earlier `delete_files: bool` parameter retired — agents have no legitimate\nneed to \"preserve storage but unregister\"; the router-only\nunregister-preserve-storage workflow stays reachable via the CLI's\n`memstead mem unregister` verb (operator-only). The MCP wrapper\nhardcodes `delete_files: true` when invoking the engine, so the\npromised refusals (`MEM_REFERENCED_BY_POLICY`,\n`MEM_HAS_INCOMING_REFS`) and the policy scrub on success always\nfire.",
+  "properties": {
+    "name": {
+      "description": "Name of the mem to destroy.",
+      "type": "string"
+    },
+    "note": {
+      "description": "Agent-authored provenance note (≤280 chars). Surfaces in the outer-repo Stop-hook aggregation via the engine's trace surface; no per-mem commit is produced by delete.",
       "type": [
         "string",
         "null"
       ]
     }
   },
-  "title": "HealthParams",
+  "required": [
+    "name"
+  ],
+  "title": "MemDeleteParams",
+  "type": "object"
+}
+```
+
+## `memstead_mem_set_schema`
+
+**Flavour:** full only
+
+Update a mem's schema pin — the integrity-driven schema-migration trigger. Stable response `{mem, schema_pin, migration_target, outcome, findings}`; branch on `outcome`: `noop` (requested == current pin), `switched` (mem already integral against the target — pin moved atomically), `migration_started` (not integral — mem enters dual-pin: writes now validate against the target, `findings` lists the non-integral entities as `{id, axis, code, detail}`), `migration_pending` (same target re-issued while repairs remain — `findings` carries the remaining entities). Migration loop: read `findings`, read both schemas via `memstead_schema`, repair each entity via `memstead_update` (validated strictly against the target; `relations_unset` is available on non-conformant entities), then re-issue this call — once every entity is integral it completes the switch. Reads stay permissive throughout; the dual-pin state survives engine restarts. Unknown mem refuses `UNKNOWN_MEM`; a schema ref that resolves to no loaded schema refuses `SCHEMA_NOT_FOUND`; malformed refs refuse `INVALID_INPUT`. Distinct from `memstead_mem_set_version`, which sets the mem *content* version, never the pin.
+
+**Hints:** `read_only` = false, `destructive` = false, `idempotent` = false, `open_world` = false
+
+**Input schema:**
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Parameters for `memstead_mem_set_schema` — the integrity-driven\nschema-migration trigger.",
+  "properties": {
+    "mem": {
+      "description": "Name of the writable mem whose schema pin is being set.",
+      "type": "string"
+    },
+    "note": {
+      "description": "Optional provenance note (≤280 chars). Reserved: the pin lives in workspace state today (no mem commit is produced), so the note is accepted for wire-compat and recorded once the pin-relocation cut moves the schema pin into mem config.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "schema": {
+      "description": "Target schema ref, exact `name@x.y.z`. Must resolve against the loaded schema catalogue (mem-pinned, workspace, built-in); unresolvable refs refuse with SCHEMA_NOT_FOUND, malformed refs with INVALID_INPUT.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "mem",
+    "schema"
+  ],
+  "title": "MemSetSchemaParams",
+  "type": "object"
+}
+```
+
+## `memstead_mem_set_version`
+
+**Flavour:** full only
+
+Update a registered mem's `version` field. The version is consumed by `memstead_export --format mem` to stamp the archive filename and the `.mem` archive's published config — bump before publishing. Mem-create seeds `0.1.0` automatically, so this tool is the only surface that needs to fire when an agent or operator is ready to ship a new version. Gate-free: no `[[mem_management.*]]` allowlist check, no operator-mode bypass needed. Validates the new version as semver; malformed values refuse with `INVALID_INPUT`. Unknown mem name refuses with `UNKNOWN_MEM`; read-only mem refuses with `READ_ONLY_MOUNT`; a mem whose config failed to load returns `INVALID_INPUT`. Response carries `{mem, old_version, new_version, warnings}`; `MEM_RELOADED` rides on `warnings` when a sibling engine commit landed between the engine's prior snapshot and this write (no extra read needed to learn the drift).
+
+**Hints:** `read_only` = false, `destructive` = false, `idempotent` = false, `open_world` = false
+
+**Input schema:**
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Parameters for `memstead_mem_set_version`. F1.",
+  "properties": {
+    "name": {
+      "description": "Name of the mem whose `version` field is being updated.",
+      "type": "string"
+    },
+    "note": {
+      "description": "Optional provenance note (≤280 chars) recorded on the version-bump commit body. When the workspace sets `require_notes`, omitting it rides a non-blocking `NOTE_MISSING` warning (the bump still lands).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "version": {
+      "description": "New semver version (e.g. `0.2.0`, `1.0.0-beta.1`). Validated as semver; malformed values refuse with `INVALID_INPUT`. The version is consumed by `memstead_export --format mem` to stamp the archive filename and the `.mem` archive's published config — bump before publishing. Initial mem-create seeds `0.1.0` so this surface is the only path that needs to be invoked when an agent or operator is ready to ship.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "name",
+    "version"
+  ],
+  "title": "MemSetVersionParams",
   "type": "object"
 }
 ```
@@ -452,6 +701,7 @@ Start here. Returns the schema catalogue, mem inventory, and community clusters 
 ```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
   "description": "Parameters for memstead_overview.",
   "properties": {
     "chunk": {
@@ -473,6 +723,13 @@ Start here. Returns the schema catalogue, mem inventory, and community clusters 
         "null"
       ]
     },
+    "mem": {
+      "description": "Restrict `mems[]` and `schemas[]` to a single writable mem. `used_by` inside each schema still lists all mems sharing it. Community scope: `mem` filters which clusters are *reported* (and makes `community_bridges` source-in-mem only) — it does NOT re-run detection per mem. Detection is always workspace-global and cluster ids stay the global-pass ids; passing `mem` never renumbers or re-scopes the partition. Because detection is global and disconnected / sparsely-connected nodes collapse into a single catch-all rather than forming their own cluster, a small or isolated mem-local subgraph may surface as no cluster at all under a `mem` filter.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "rebuild": {
       "description": "Re-run community detection before returning overview (default: false). Detection is workspace-global: `rebuild` recomputes the Louvain partition over the *whole* workspace graph — it never scopes to `mem`, even when `mem` is also passed.",
       "type": [
@@ -486,13 +743,6 @@ Start here. Returns the schema catalogue, mem inventory, and community clusters 
       "minimum": 0,
       "type": [
         "integer",
-        "null"
-      ]
-    },
-    "mem": {
-      "description": "Restrict `mems[]` and `schemas[]` to a single writable mem. `used_by` inside each schema still lists all mems sharing it. Community scope: `mem` filters which clusters are *reported* (and makes `community_bridges` source-in-mem only) — it does NOT re-run detection per mem. Detection is always workspace-global and cluster ids stay the global-pass ids; passing `mem` never renumbers or re-scopes the partition. Because detection is global and disconnected / sparsely-connected nodes collapse into a single catch-all rather than forming their own cluster, a small or isolated mem-local subgraph may surface as no cluster at all under a `mem` filter.",
-      "type": [
-        "string",
         "null"
       ]
     }
@@ -577,6 +827,7 @@ Reload one writable mem's slice of the in-memory store from its on-disk branch t
 ```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
   "description": "Parameters for memstead_reload.",
   "properties": {
     "mem": {
@@ -651,17 +902,18 @@ Read one schema's full body — section list (with per-section `write_rules` and
 ```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
   "description": "Parameters for memstead_schema. Exactly one of `name` or `mem`\nmust be supplied; passing both is an `INVALID_INPUT` error.",
   "properties": {
-    "name": {
-      "description": "Schema name as listed in memstead_overview's `## Schemas` section (e.g. \"default\" or \"default@1.0.0\"). Schemas are workspace-globally unique by name; the workspace registry resolves a bare name to the pinned version. Mutually exclusive with `mem`.",
+    "mem": {
+      "description": "Mem name as listed in memstead_overview's `## Mems` section. The engine resolves the mem's pinned `schema_ref` from the workspace's mount roster and proceeds identically to the `name`-driven path. Mutually exclusive with `name`. Returns `UNKNOWN_MEM` when the mem is not mounted.",
       "type": [
         "string",
         "null"
       ]
     },
-    "mem": {
-      "description": "Mem name as listed in memstead_overview's `## Mems` section. The engine resolves the mem's pinned `schema_ref` from the workspace's mount roster and proceeds identically to the `name`-driven path. Mutually exclusive with `name`. Returns `UNKNOWN_MEM` when the mem is not mounted.",
+    "name": {
+      "description": "Schema name as listed in memstead_overview's `## Schemas` section (e.g. \"default\" or \"default@1.0.0\"). Schemas are workspace-globally unique by name; the workspace registry resolves a bare name to the pinned version. Mutually exclusive with `mem`.",
       "type": [
         "string",
         "null"
@@ -729,6 +981,7 @@ Search entities by lexical content + structural filters. Dual channel: text carr
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
   "description": "Parameters for memstead_search.",
   "properties": {
     "depth": {
@@ -792,6 +1045,13 @@ Search entities by lexical content + structural filters. Dual channel: text carr
         "null"
       ]
     },
+    "mem": {
+      "description": "Only entities in this mem",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "offset": {
       "description": "Skip first N results for pagination. Use with limit.",
       "format": "uint",
@@ -842,13 +1102,6 @@ Search entities by lexical content + structural filters. Dual channel: text carr
       "minimum": 0,
       "type": [
         "integer",
-        "null"
-      ]
-    },
-    "mem": {
-      "description": "Only entities in this mem",
-      "type": [
-        "string",
         "null"
       ]
     }
@@ -1051,247 +1304,6 @@ Modify an existing entity. Pre-fetch the target mem's schema via `memstead_schem
 }
 ```
 
-## `memstead_mem_create`
-
-**Flavour:** full only
-
-Create and register a new writable mem at runtime. Requires workspace opt-in via `[[mem_management.create]]` rules (each `pattern` + `schemas[]`) — discover via `memstead_overview`'s `## Lifecycle Namespaces`. Engine composes the lifecycle candidate, canonicalizes `location`, runs first-match-wins glob over the rule list, then checks `schema` against the matched rule's `schemas[]` (`["*"]` admits any). Two error envelopes: `MEM_PATH_NOT_ALLOWED` carries `details.candidate`, `details.patterns`, `details.reason` (`no_allowlist_configured` / `no_match` / `outside_workspace`); `MEM_SCHEMA_NOT_ALLOWED` carries `details.candidate`, `details.matched_pattern`, `details.requested_schema`, `details.allowed_schemas`. Name-collision check runs only after a path match — out-of-namespace collision surfaces as `MEM_PATH_NOT_ALLOWED`, not `MEM_NAME_COLLISION`. Storage-residue probe catches residue surviving a prior `memstead mem unregister` or a crash; residue left by a deliberate unregister reattaches and emits `MEM_REATTACHED_AFTER_UNREGISTER` (audit signal); residue from a crash refuses with `MEM_STORAGE_RESIDUE_DETECTED` — run `memstead mem delete <name>` first. Cross-mem edge authorization is workspace policy (`[cross_mem_links]`); the matched create-rule may carry `default_cross_links`. Bootstraps the gitdir per `vcs`, loads any pre-existing markdown, and produces a seed commit carrying `note` (≤280 chars). Response carries `location`, `seed_commit_sha` for `memstead_changes_since` polling, and `schema_ref` (gitdir via `memstead_health include_config=true`). Pass `include_schema: true` to additionally inline the full schema body — byte-identical to `memstead_schema(name=<resolved-schema>)`. Default `false`. A mem already present at the location returns `CONFIG_ERROR`. Seed-commit failure leaves partial disk state — no implicit rollback.
-
-**Hints:** `read_only` = false, `destructive` = false, `idempotent` = false, `open_world` = false
-
-**Input schema:**
-
-```json
-{
-  "$defs": {
-    "RecoveryActionInput": {
-      "description": "Wire-shape recovery action for `memstead_mem_create`. The\nstorage-residue refusal path exposes three explicit\nrecovery options the caller picks via this enum. The wire\ntokens (`reattach` / `force_overwrite` / `hard_cleanup_first`)\nmatch `memstead_engine::RecoveryAction::as_wire_str()` so the\nMCP serde shape and the CLI flag bridge converge on a single\nengine-side enum.",
-      "oneOf": [
-        {
-          "const": "reattach",
-          "description": "Adopt the residual entities; skip the seed commit. Default\nwhen the residue was left by a deliberate `memstead mem\nunregister`. Explicit `reattach` overrides the default for\ncrash-residue scenarios where the operator has verified the\ncontent is safe to adopt.",
-          "type": "string"
-        },
-        {
-          "const": "force_overwrite",
-          "description": "Destroy the residue, then proceed with the normal create\npath. Prior entities are gone. **Not yet implemented** — the\norchestrator currently refuses with `INVALID_INPUT` pointing\nat `memstead mem delete <name>`.",
-          "type": "string"
-        },
-        {
-          "const": "hard_cleanup_first",
-          "description": "Refuse with `MEM_STORAGE_RESIDUE_DETECTED`, instructing the\ncaller to run `memstead mem delete <name>` first. Hard barrier\nagainst destructive auto-recovery — for operators who want\nthe cleanup to be a separate, named operation.",
-          "type": "string"
-        }
-      ]
-    },
-    "VcsConfigInput": {
-      "description": "On-the-wire shape mirroring `memstead_schema::VcsConfig` with a\n`JsonSchema` derivation for rmcp tool routing. Kept separate from the\ncore type so the schema crate does not need a `schemars` dependency\njust to support one MCP-facing parameter. The fields and semantics\nmatch 1:1 — see `memstead_schema::VcsConfig` for the canonical\ndocumentation.",
-      "properties": {
-        "gitdir": {
-          "description": "Path to the gitdir relative to the new mem's root.",
-          "type": "string"
-        },
-        "worktree": {
-          "default": ".",
-          "description": "Path to the worktree relative to the new mem's root. Defaults to `\".\"` (mem root) when omitted.",
-          "type": "string"
-        }
-      },
-      "required": [
-        "gitdir"
-      ],
-      "type": "object"
-    }
-  },
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "description": "Parameters for `memstead_mem_create`.",
-  "properties": {
-    "include_schema": {
-      "default": false,
-      "description": "Inline the full resolved schema body on the response (byte-identical to `memstead_schema(name=<resolved-schema>)`). Default `false` — the response carries only `schema_ref`, `name`, `location`, and `seed_commit_sha`. Set to `true` for first-time-schema callers that want one round-trip instead of two; for the agent's second+ mem on the same schema this opt-in saves ~25 KB of context per call since the schema is workspace-stable and already cached.",
-      "type": "boolean"
-    },
-    "location": {
-      "description": "Target filesystem location. Absolute path, or relative to the workspace root. Canonicalized before the allowlist check — `./a/../b` is reduced to `./b` prior to matching.",
-      "type": "string"
-    },
-    "name": {
-      "description": "Unique name for the new mem — the full hierarchical identifier (e.g. `\"sub-mem\"` for flat layouts or `\"team/sub-mem\"` for hierarchical layouts); the value flows through verbatim. Grammar: lowercase ASCII letters, digits, hyphens; segments separated by `/`; no leading, trailing, or double slashes. Must not collide with any currently-registered mem.",
-      "type": "string"
-    },
-    "note": {
-      "description": "Agent-authored provenance note recorded in the seed commit's body (≤280 chars). One sentence describing why this mem was created.",
-      "type": [
-        "string",
-        "null"
-      ]
-    },
-    "recovery": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/RecoveryActionInput"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "description": "Explicit recovery action when on-disk storage residue is detected at the composed branch path. Three accepted values: `reattach` (adopt the residual entities, skip the seed commit), `force_overwrite` (destroy the residue, currently refuses with `INVALID_INPUT` — implementation pending), `hard_cleanup_first` (refuse with `MEM_STORAGE_RESIDUE_DETECTED`, instructing the caller to run `memstead_mem_delete` first). When omitted, the engine routes by whether the residue was left by a deliberate `memstead mem unregister`: such residue defaults to `reattach` and emits a `MEM_REATTACHED_AFTER_UNREGISTER` warning; residue from a crash refuses with `MEM_STORAGE_RESIDUE_DETECTED`. Bare create against a name with no residue ignores this field."
-    },
-    "schema": {
-      "description": "Schema pin for the new mem. Format: `name@x.y.z` — e.g. `default@1.0.0`. Resolved against the per-mem schema registry at init time.",
-      "type": "string"
-    },
-    "schema_verbosity": {
-      "description": "Verbosity of the inlined schema body when `include_schema: true`. `\"full\"` (default, absent) inlines the complete schema — byte-identical to `memstead_schema(name=<resolved-schema>)`. `\"lite\"` inlines the cheap cold-start skeleton instead (entity-type names + section keys + field shapes, relationship names + endpoints, the alias pointer; prose dropped) — the recommended pairing for a first-mem create that only needs to orient. Ignored when `include_schema` is false. Any value other than `\"full\"`/`\"lite\"` returns `INVALID_INPUT` naming the bad value.",
-      "type": [
-        "string",
-        "null"
-      ]
-    },
-    "vcs": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/VcsConfigInput"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "description": "Optional VCS layout override. Shape: `{ \"gitdir\": \".git\", \"worktree\": \".\" }` (default isolated) or `{ \"gitdir\": \"../.git\", \"worktree\": \"..\" }` (shared-gitdir idiom). Paths are relative to the new mem's root. When absent, the engine uses the isolated default."
-    },
-    "write_guidance": {
-      "additionalProperties": true,
-      "default": {},
-      "description": "Optional per-instance writing guidance, written verbatim into the new mem's config `writeGuidance` map in the seed commit. An opaque string-keyed JSON object — e.g. `{ \"phase_context\": \"early design\", \"stack\": \"Rust\" }`. The engine never interprets the keys (schema-strictness D8 — `writeGuidance` is client-owned vocabulary); a client that read the resolved schema package's `mem-template.json` fills the instance keys and passes them here. Omit (or pass `{}`) to seed no guidance.",
-      "type": "object"
-    }
-  },
-  "required": [
-    "name",
-    "location",
-    "schema"
-  ],
-  "title": "MemCreateParams",
-  "type": "object"
-}
-```
-
-## `memstead_mem_delete`
-
-**Flavour:** full only
-
-Remove a writable mem at runtime — always destructive: removes the mem and prunes every backend-visible artifact. Requires workspace opt-in via `[[mem_management.delete]]` rules — discover the current policy via `memstead_overview`'s `## Lifecycle Namespaces` section. Engine resolves `name` (`UNKNOWN_MEM` otherwise), composes the lifecycle candidate from the mem's full hierarchical path (or the bare name for flat-layout mems), runs first-match-wins glob lookup over the delete rule list (rejecting `no_allowlist_configured` or `no_match` with `MEM_PATH_NOT_ALLOWED`; `details.candidate` carries the composed string, `details.patterns` lists rules checked, `details.reason` discriminates). Refuses `MEM_REFERENCED_BY_POLICY` when the workspace `cross_mem_links` policy grants this mem as a write target (`details.referring_mems` names them). Refuses `MEM_HAS_INCOMING_REFS` when write-mem graph edges still target it (`details.referrers` lists each `{from_id, rel_types, mem}` — remove via `memstead_relate` / `memstead_update` first). On success the mem is gone — reads no longer see it and its backing storage is removed. The workspace policy is atomically scrubbed of the now-dangling `[cross_mem_links]` grants naming the deleted mem on either side. The `[[mem_management.create]]` / `[[mem_management.delete]]` allowlist rules are PRESERVED (exact-name and wildcard alike) — they are forward-looking permissions for the name, so re-creating a mem of the same name needs no fresh allow-create/allow-delete. No per-mem commit — `note` (≤280 chars) rides on the provenance context. Response: `name`, `deleted_from_router: true`, `files_deleted: true`, and `allowlist_entries_removed[{table, pattern?, from?, to?}]` listing the scrubbed cross-link grants (`table` is always `cross_mem_links`; empty when none named the mem). On partial cleanup failure `files_deleted` ends `false` and `MEM_FILES_NOT_DELETED` warnings name the survivors: `details.reason` is `rmdir_failed` (with `details.path` + `details.error`) or `backend_prune_failed` (with `details.error`).
-
-**Hints:** `read_only` = false, `destructive` = true, `idempotent` = false, `open_world` = false
-
-**Input schema:**
-
-```json
-{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "description": "Parameters for `memstead_mem_delete`.\n\nThe MCP surface collapses to one verb that always means destructive.\nThe earlier `delete_files: bool` parameter retired — agents have no legitimate\nneed to \"preserve storage but unregister\"; the router-only\nunregister-preserve-storage workflow stays reachable via the CLI's\n`memstead mem unregister` verb (operator-only). The MCP wrapper\nhardcodes `delete_files: true` when invoking the engine, so the\npromised refusals (`MEM_REFERENCED_BY_POLICY`,\n`MEM_HAS_INCOMING_REFS`) and the policy scrub on success always\nfire.",
-  "properties": {
-    "name": {
-      "description": "Name of the mem to destroy.",
-      "type": "string"
-    },
-    "note": {
-      "description": "Agent-authored provenance note (≤280 chars). Surfaces in the outer-repo Stop-hook aggregation via the engine's trace surface; no per-mem commit is produced by delete.",
-      "type": [
-        "string",
-        "null"
-      ]
-    }
-  },
-  "required": [
-    "name"
-  ],
-  "title": "MemDeleteParams",
-  "type": "object"
-}
-```
-
-## `memstead_mem_set_schema`
-
-**Flavour:** full only
-
-Update a mem's schema pin — the integrity-driven schema-migration trigger. Stable response `{mem, schema_pin, migration_target, outcome, findings}`; branch on `outcome`: `noop` (requested == current pin), `switched` (mem already integral against the target — pin moved atomically), `migration_started` (not integral — mem enters dual-pin: writes now validate against the target, `findings` lists the non-integral entities as `{id, axis, code, detail}`), `migration_pending` (same target re-issued while repairs remain — `findings` carries the remaining entities). Migration loop: read `findings`, read both schemas via `memstead_schema`, repair each entity via `memstead_update` (validated strictly against the target; `relations_unset` is available on non-conformant entities), then re-issue this call — once every entity is integral it completes the switch. Reads stay permissive throughout; the dual-pin state survives engine restarts. Unknown mem refuses `UNKNOWN_MEM`; a schema ref that resolves to no loaded schema refuses `SCHEMA_NOT_FOUND`; malformed refs refuse `INVALID_INPUT`. Distinct from `memstead_mem_set_version`, which sets the mem *content* version, never the pin.
-
-**Hints:** `read_only` = false, `destructive` = false, `idempotent` = false, `open_world` = false
-
-**Input schema:**
-
-```json
-{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "additionalProperties": false,
-  "description": "Parameters for `memstead_mem_set_schema` — the integrity-driven\nschema-migration trigger.",
-  "properties": {
-    "note": {
-      "description": "Optional provenance note (≤280 chars). Reserved: the pin lives in workspace state today (no mem commit is produced), so the note is accepted for wire-compat and recorded once the pin-relocation cut moves the schema pin into mem config.",
-      "type": [
-        "string",
-        "null"
-      ]
-    },
-    "schema": {
-      "description": "Target schema ref, exact `name@x.y.z`. Must resolve against the loaded schema catalogue (mem-pinned, workspace, built-in); unresolvable refs refuse with SCHEMA_NOT_FOUND, malformed refs with INVALID_INPUT.",
-      "type": "string"
-    },
-    "mem": {
-      "description": "Name of the writable mem whose schema pin is being set.",
-      "type": "string"
-    }
-  },
-  "required": [
-    "mem",
-    "schema"
-  ],
-  "title": "MemSetSchemaParams",
-  "type": "object"
-}
-```
-
-## `memstead_mem_set_version`
-
-**Flavour:** full only
-
-Update a registered mem's `version` field. The version is consumed by `memstead_export --format mem` to stamp the archive filename and the `.mem` archive's published config — bump before publishing. Mem-create seeds `0.1.0` automatically, so this tool is the only surface that needs to fire when an agent or operator is ready to ship a new version. Gate-free: no `[[mem_management.*]]` allowlist check, no operator-mode bypass needed. Validates the new version as semver; malformed values refuse with `INVALID_INPUT`. Unknown mem name refuses with `UNKNOWN_MEM`; read-only mem refuses with `READ_ONLY_MOUNT`; a mem whose config failed to load returns `INVALID_INPUT`. Response carries `{mem, old_version, new_version, warnings}`; `MEM_RELOADED` rides on `warnings` when a sibling engine commit landed between the engine's prior snapshot and this write (no extra read needed to learn the drift).
-
-**Hints:** `read_only` = false, `destructive` = false, `idempotent` = false, `open_world` = false
-
-**Input schema:**
-
-```json
-{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "description": "Parameters for `memstead_mem_set_version`. F1.",
-  "properties": {
-    "name": {
-      "description": "Name of the mem whose `version` field is being updated.",
-      "type": "string"
-    },
-    "note": {
-      "description": "Optional provenance note (≤280 chars) recorded on the version-bump commit body. When the workspace sets `require_notes`, omitting it rides a non-blocking `NOTE_MISSING` warning (the bump still lands).",
-      "type": [
-        "string",
-        "null"
-      ]
-    },
-    "version": {
-      "description": "New semver version (e.g. `0.2.0`, `1.0.0-beta.1`). Validated as semver; malformed values refuse with `INVALID_INPUT`. The version is consumed by `memstead_export --format mem` to stamp the archive filename and the `.mem` archive's published config — bump before publishing. Initial mem-create seeds `0.1.0` so this surface is the only path that needs to be invoked when an agent or operator is ready to ship.",
-      "type": "string"
-    }
-  },
-  "required": [
-    "name",
-    "version"
-  ],
-  "title": "MemSetVersionParams",
-  "type": "object"
-}
-```
-
 ## `memstead_workspace_allow_create`
 
 **Flavour:** full only
@@ -1305,6 +1317,7 @@ Append a `[[mem_management.create]]` rule admitting mem names matching `pattern`
 ```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
   "description": "Parameters for `memstead_workspace_allow_create`.",
   "properties": {
     "before": {
@@ -1358,6 +1371,7 @@ Append a `[[mem_management.delete]]` rule admitting deletes of mem names matchin
 ```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
   "description": "Parameters for `memstead_workspace_allow_delete`.",
   "properties": {
     "pattern": {
@@ -1386,6 +1400,7 @@ Grant mem `from` permission to author cross-mem links into mem `to`. Mutates the
 ```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
   "description": "Parameters for `memstead_workspace_grant_cross_link`.",
   "properties": {
     "from": {
@@ -1419,6 +1434,7 @@ Remove a `[[mem_management.create]]` rule by `pattern`. Counterpart to `memstead
 ```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
   "description": "Parameters for `memstead_workspace_revoke_create`.",
   "properties": {
     "pattern": {
@@ -1447,6 +1463,7 @@ Revoke mem `from`'s permission to author cross-mem links into mem `to`. Mutates 
 ```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
   "description": "Parameters for `memstead_workspace_revoke_cross_link`.",
   "properties": {
     "from": {
@@ -1480,6 +1497,7 @@ Remove a `[[mem_management.delete]]` rule by `pattern`. Counterpart to `memstead
 ```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
   "description": "Parameters for `memstead_workspace_revoke_delete`.",
   "properties": {
     "pattern": {

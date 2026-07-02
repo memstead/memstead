@@ -171,7 +171,9 @@ pub fn run(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
 /// not dereferenced — `ancestors()` operates on the resolved
 /// `canonicalize`d path, which traverses symlinks once at the
 /// boundary and then stays on the resolved filesystem.
-fn find_ancestor_workspace(target: &Path) -> anyhow::Result<Option<PathBuf>> {
+/// Shared with `memstead quickstart`, which enforces the same
+/// no-nested-workspaces rule.
+pub(crate) fn find_ancestor_workspace(target: &Path) -> anyhow::Result<Option<PathBuf>> {
     let abs = std::fs::canonicalize(target).map_err(|e| CliError {
         code: crate::INTERNAL_CODE,
         kind: ExitKind::Generic,

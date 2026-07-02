@@ -56,6 +56,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         Command::Health(args) => commands::health::run(&ctx, args),
         Command::Export(args) => commands::export::run(&ctx, args),
         Command::Init(args) => commands::init::run(&ctx, args),
+        Command::Quickstart(args) => commands::quickstart::run(&ctx, args),
         #[cfg(feature = "mem-repo")]
         Command::Install(args) => commands::install::run(&ctx, args),
         Command::Link(args) => commands::link::run(&ctx, args),
