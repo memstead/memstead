@@ -145,15 +145,21 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     check_no_local_memstead(&target)?;
 
     // Conflict gate 2: never nest inside an existing workspace — same
-    // rule and walker as `memstead init`.
+    // rule and walker as `memstead init`. The alternatives named here
+    // must be viable in the workspaces quickstart itself creates
+    // (filesystem-shaped, no mem-lifecycle allowlist), so the message
+    // points at working in the existing workspace or starting a
+    // separate one — never at `memstead mem init`, which refuses on
+    // both counts there.
     if let Some(found_at) = find_ancestor_workspace(&target)? {
         return Err(CliError::new(
             ExitKind::Validation,
             crate::WORKSPACE_ALREADY_EXISTS_ABOVE_CODE,
             format!(
-                "an existing memstead workspace lives above {} at {}; quickstart \
-                 refuses to nest workspaces. To add a mem inside the existing \
-                 workspace, run: memstead mem init <name>",
+                "{} is already inside the memstead workspace at {} — quickstart \
+                 refuses to nest workspaces. Work in that workspace (memstead \
+                 overview), or start a separate graph outside it: mkdir my-graph && \
+                 cd my-graph && memstead quickstart",
                 target.display(),
                 found_at.display(),
             ),

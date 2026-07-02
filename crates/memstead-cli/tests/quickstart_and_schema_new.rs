@@ -174,7 +174,12 @@ fn quickstart_refuses_foreign_memstead_dir_and_ancestor_workspace() {
     std::fs::create_dir(&inner).unwrap();
     let err = stderr_of(memstead().arg("quickstart").arg(&inner).assert().failure());
     assert!(err.contains("WORKSPACE_ALREADY_EXISTS_ABOVE"), "typed code; got: {err}");
-    assert!(err.contains("memstead mem init"), "carries next command; got: {err}");
+    // The alternatives must be viable in a quickstart-created
+    // (filesystem, no-allowlist) workspace: work there, or start a
+    // separate graph — never `memstead mem init`, which refuses there.
+    assert!(err.contains("memstead overview"), "viable next command; got: {err}");
+    assert!(err.contains("memstead quickstart"), "separate-graph alternative; got: {err}");
+    assert!(!err.contains("mem init"), "no dead-end suggestion; got: {err}");
     assert!(!inner.join(".memstead").exists(), "no half-init in the nested target");
 
     // Re-run on the finished workspace: refuse, point at overview.
