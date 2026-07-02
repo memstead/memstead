@@ -22,15 +22,19 @@ Get from nothing to your own graph in a few minutes. (Pre-built binaries via `cu
 
 This compiles the workspace and installs two binaries to `~/.cargo/bin`: `memstead` (the CLI) and `memstead-mcp` (the MCP server agents connect to). Make sure `~/.cargo/bin` is on your `PATH` (`memstead --version` should work).
 
-**3. Build your own graph.** Anywhere you like:
+**3. Bootstrap a workspace.** In a fresh directory:
 
 ```bash
 mkdir my-graph && cd my-graph
+memstead quickstart
+```
 
-# Create a workspace with one mem, pinned to the built-in schema.
-memstead init --name my-graph --schema default@1.0.0
+One run leaves a working graph: a workspace, a mem pinned to the built-in `default` schema, a seed entity, and the MCP wiring for the agent(s) you pick (Claude Code, Codex, Cursor, Gemini CLI — pass `--agent <target>` to skip the prompt). It prints each artifact it created plus the single next action. Prefer the strict, script-safe variant with no side effects beyond `.memstead/`? That's `memstead init --name my-graph --schema default@1.0.0`.
 
-# Add your first entity (the `concept` type needs a definition + explanation).
+**4. Add knowledge, find it back:**
+
+```bash
+# Add an entity (the `concept` type needs a definition + explanation).
 memstead create --type concept \
   --title "Idempotency" \
   --section definition="An operation is idempotent when applying it twice has the same effect as applying it once." \
@@ -40,9 +44,9 @@ memstead stats              # node / edge counts and type distribution
 memstead search idempotency # find it back
 ```
 
-That's a working graph: a workspace, a schema-pinned mem, and a typed entity in git. The `default` schema ships ten general-purpose types (`concept`, `assertion`, `memo`, `spec`, `inquiry`, …); run `memstead type` to list them, or author your own schema for a specialised domain.
+The `default` schema ships ten general-purpose types (`concept`, `assertion`, `memo`, `spec`, `inquiry`, …); run `memstead type` to list them, or author your own schema for a specialised domain.
 
-**4. (Optional) Let an AI agent read and write it.**
+**5. (Optional) Let an AI agent read and write it.** `quickstart` already wrote the MCP config for the agent targets you selected — restart your agent inside the workspace and it's connected. To wire an agent up later or by hand:
 
 - **Claude Code:** install the plugin in this repo (`plugins/claude-code/`) and run the [`/setup`](plugins/claude-code/skills/setup/SKILL.md) skill — it resolves the binary path, initialises the workspace, writes `.mcp.json`, and tells you to reconnect. This is the paved path.
 - **Any other MCP agent (Codex, Gemini, …):** point it at the `memstead-mcp` binary. Resolve the absolute path with `command -v memstead-mcp`, then add it to your agent's MCP config:
