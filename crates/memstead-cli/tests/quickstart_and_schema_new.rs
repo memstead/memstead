@@ -295,10 +295,13 @@ fn schema_new_scaffold_validates_unmodified() {
             .success(),
     );
     assert!(out.contains("memstead schema validate acme"), "got: {out}");
+    #[cfg(feature = "mem-repo")]
     assert!(out.contains("memstead schema install acme"), "got: {out}");
+    #[cfg(not(feature = "mem-repo"))]
+    assert!(out.contains("memstead schema install ../acme"), "got: {out}");
     assert!(
         out.contains("acme@0.1.0"),
-        "third step names the pin; got: {out}",
+        "pin step names the version; got: {out}",
     );
 
     assert!(tmp.path().join("acme/schema.yaml").is_file());
@@ -452,6 +455,62 @@ fn quickstart_malformed_agent_config_refuses_before_any_write() {
     assert!(err.contains("mcpServers"), "names the defect; got: {err}");
     assert!(err.contains("re-run: memstead quickstart"), "carries the retry; got: {err}");
     assert!(!tmp.path().join(".memstead").exists(), "nothing was created");
+}
+
+/// Basis-flavour follow-up end-to-end: without `mem set-schema`, the
+/// printed sequence routes through a fresh mem — init pins the custom
+/// schema, then `schema install ../<name>` from inside the new folder
+/// makes the workspace boot. Executed as printed, it ends with a
+/// working workspace accepting a `create --type note` (regression: an
+/// earlier sequence pinned without installing, leaving a workspace
+/// where every engine-booting command died with INTERNAL).
+#[cfg(not(feature = "mem-repo"))]
+#[test]
+fn schema_new_basis_follow_up_ends_in_working_fresh_mem() {
+    let tmp = TempDir::new().unwrap();
+    let out = stdout_of(
+        memstead().current_dir(tmp.path()).args(["schema", "new", "acme"]).assert().success(),
+    );
+    assert!(
+        out.contains("memstead init --name acme-mem --schema acme@0.1.0"),
+        "basis follow-up routes through a fresh init; got: {out}",
+    );
+    assert!(
+        out.contains("memstead schema install ../acme"),
+        "install step targets the new workspace; got: {out}",
+    );
+    assert!(
+        !out.contains("mem set-schema"),
+        "basis never prints the pro-only subcommand; got: {out}",
+    );
+
+    // The printed sequence, step by step (`mkdir && cd` become the
+    // test's directory handling).
+    memstead().current_dir(tmp.path()).args(["schema", "validate", "acme"]).assert().success();
+    let fresh = tmp.path().join("acme-mem");
+    std::fs::create_dir(&fresh).unwrap();
+    memstead()
+        .current_dir(&fresh)
+        .args(["init", "--name", "acme-mem", "--schema", "acme@0.1.0"])
+        .assert()
+        .success();
+    memstead().current_dir(&fresh).args(["schema", "install", "../acme"]).assert().success();
+
+    // The workspace boots and the scaffolded type is writable.
+    memstead().current_dir(&fresh).arg("overview").assert().success();
+    memstead()
+        .current_dir(&fresh)
+        .args([
+            "create",
+            "--type",
+            "note",
+            "--title",
+            "First note",
+            "--section",
+            "summary=It works.",
+        ])
+        .assert()
+        .success();
 }
 
 /// `schema install` accepts the scaffolded package on the folder

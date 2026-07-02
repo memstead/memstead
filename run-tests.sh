@@ -36,6 +36,22 @@ fi
 
 echo ""
 echo "══════════════════════════════════"
+echo "  Testing: memstead-cli (true basis build)"
+echo "══════════════════════════════════"
+# The workspace-wide basis run above still compiles memstead-cli WITH
+# mem-repo: xtask depends on it with that feature on, and cargo unifies
+# features across one build graph. Only a targeted -p build exercises
+# the cli's real basis flavour (its cfg(not(mem-repo)) branches — e.g.
+# the schema-new follow-up that routes through a fresh init).
+if (cd "$ROOT" && cargo nextest run -p memstead-cli --no-default-features); then
+  echo "  ✓ memstead-cli (true basis) passed"
+else
+  FAILED+=("memstead-cli-basis")
+  echo "  ✗ memstead-cli (true basis) FAILED"
+fi
+
+echo ""
+echo "══════════════════════════════════"
 echo "  Gate: plugin must not call git against mem-repo"
 echo "══════════════════════════════════"
 # Plugin code must reach mem-repo via memstead-cli (subprocess) or

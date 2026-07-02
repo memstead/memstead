@@ -277,32 +277,60 @@ fn scaffold_next_steps(ctx: &CliContext, name: &str) -> Vec<Step> {
         .as_ref()
         .filter(|(_, root)| root.join("welcome-to-memstead.md").is_file())
         .map(|(mem, _)| format!("{mem}--welcome-to-memstead"));
-    let mut steps = vec![
-        Step::bare(format!("memstead schema validate {name}")),
-        Step::bare(format!("memstead schema install {name}")),
-    ];
-    if let Some(seed_id) = quickstart_seed {
-        steps.push(Step {
-            command: format!("memstead delete {seed_id}"),
-            note: Some(
-                "the quickstart seed — the pin below switches atomically only when \
-                 every entity conforms to the new schema"
-                    .to_string(),
-            ),
-        });
-    }
+    // Pro flavour: install into the current workspace, then re-pin the
+    // mem in place.
     #[cfg(feature = "mem-repo")]
-    steps.push(Step::bare(format!(
-        "memstead mem set-schema {mem} {name}@{SCAFFOLD_VERSION}"
-    )));
-    // The basis binary has no `mem` subcommand group; a fresh init is
-    // its schema-pin entry point.
+    {
+        let mut steps = vec![
+            Step::bare(format!("memstead schema validate {name}")),
+            Step::bare(format!("memstead schema install {name}")),
+        ];
+        if let Some(seed_id) = quickstart_seed {
+            steps.push(Step {
+                command: format!("memstead delete {seed_id}"),
+                note: Some(
+                    "the quickstart seed — the pin below switches atomically only when \
+                     every entity conforms to the new schema"
+                        .to_string(),
+                ),
+            });
+        }
+        steps.push(Step::bare(format!(
+            "memstead mem set-schema {mem} {name}@{SCAFFOLD_VERSION}"
+        )));
+        steps
+    }
+    // Basis flavour: no `mem set-schema`, so the custom schema gets a
+    // fresh mem. Order matters — `init` pins without resolving, and the
+    // engine only boots once the package is installed *inside the new
+    // workspace*, so the install step comes right after init and points
+    // back at the scaffolded package (`../<name>` from the new folder).
     #[cfg(not(feature = "mem-repo"))]
-    steps.push(Step {
-        command: format!("memstead init --name {mem} --schema {name}@{SCAFFOLD_VERSION}"),
-        note: Some("in a fresh folder".to_string()),
-    });
-    steps
+    {
+        let _ = (mem, quickstart_seed); // pro-only context
+        vec![
+            Step::bare(format!("memstead schema validate {name}")),
+            Step {
+                command: format!(
+                    "mkdir {name}-mem && cd {name}-mem && memstead init --name {name}-mem \
+                     --schema {name}@{SCAFFOLD_VERSION}"
+                ),
+                note: Some(
+                    "this binary cannot re-pin an existing mem, so the schema gets a \
+                     fresh one"
+                        .to_string(),
+                ),
+            },
+            Step {
+                command: format!("memstead schema install ../{name}"),
+                note: Some(
+                    "run inside the new folder — the workspace boots once its pinned \
+                     schema is installed"
+                        .to_string(),
+                ),
+            },
+        ]
+    }
 }
 
 /// One printed follow-up step: a verbatim-runnable command plus an
