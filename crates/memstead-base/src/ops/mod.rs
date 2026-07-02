@@ -2648,6 +2648,26 @@ pub struct SetMemVersionOutcome {
     pub warnings: Vec<WarningHint>,
 }
 
+/// Result of `Engine::set_mem_description`. Carries the (mem,
+/// old_description, new_description) triple so callers can surface
+/// the change without an extra read.
+#[derive(Debug, Clone, Serialize)]
+pub struct SetMemDescriptionOutcome {
+    pub mem: String,
+    /// Previous description. `None` when the mem config carried no
+    /// description before this call (the common case — mem creation
+    /// seeds none).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub old_description: Option<String>,
+    /// The description now persisted; `None` when the call cleared it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub new_description: Option<String>,
+    /// Concurrent-drift warnings detected at the pre-write probe.
+    /// Empty on the happy path.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<WarningHint>,
+}
+
 /// Result of `Engine::set_mem_sync_state`. Carries the (mem, key,
 /// previous-token) triple so callers (CLI, MCP) can surface the change
 /// without an extra read. The token values are opaque to the engine —

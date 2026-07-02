@@ -67,6 +67,12 @@ pub enum MemAction {
     /// Re-issue after repairing to complete the switch.
     #[command(name = "set-schema")]
     SetSchema(SetSchemaArgs),
+    /// Set a mem's one-line `description` — embedded in `.mem` archive
+    /// exports and surfaced on the registry card at publish time. An
+    /// empty string clears the field. Set it before `memstead export` /
+    /// `memstead publish` so the shared archive carries its card text.
+    #[command(name = "set-description")]
+    SetDescription(SetDescriptionArgs),
     /// Set (or clear) one opaque sync-state token in a mem's config —
     /// the ingest layer's durable "last synced source state" baseline.
     /// `<KEY>` and `<TOKEN>` are opaque to the engine (the ingest layer
@@ -105,6 +111,23 @@ pub struct SetVersionArgs {
     /// mem-lifecycle commands. When the workspace sets
     /// `require_notes`, omitting it rides a non-blocking `NOTE_MISSING`
     /// warning (the bump still lands).
+    #[arg(long)]
+    pub note: Option<String>,
+}
+
+/// `memstead mem set-description <NAME> <DESCRIPTION>` arguments.
+#[derive(Args, Debug)]
+pub struct SetDescriptionArgs {
+    /// Mem name (must be registered in the workspace).
+    pub name: String,
+
+    /// One-line description of the mem — what a registry visitor (or
+    /// an agent browsing the catalogue) should know before installing.
+    /// An empty string clears the field.
+    pub description: String,
+
+    /// Optional provenance note (≤280 chars) recorded on the commit
+    /// body, like the other commit-producing mem-lifecycle commands.
     #[arg(long)]
     pub note: Option<String>,
 }
@@ -744,6 +767,46 @@ pub fn run_set_version(ctx: &CliContext, args: SetVersionArgs) -> anyhow::Result
         crate::output::print_markdown(&format!(
             "# Mem `{}` version updated\n\n- Old version: {}\n- New version: {}{}",
             outcome.mem, old, outcome.new_version, warnings,
+        ));
+    }
+    Ok(())
+}
+
+/// `memstead mem set-description <NAME> <DESCRIPTION>` — set or clear
+/// the mem's one-line description via the in-process engine,
+/// persisting through the backend's `write_mem_config`. Like
+/// set-version, this surface is gate-free and calls the engine
+/// directly. An empty DESCRIPTION clears the field.
+pub fn run_set_description(ctx: &CliContext, args: SetDescriptionArgs) -> anyhow::Result<()> {
+    let new_description = {
+        let trimmed = args.description.trim();
+        if trimmed.is_empty() { None } else { Some(trimmed.to_string()) }
+    };
+    let note = args.note.as_deref();
+    let outcome = match ctx.cli_engine()? {
+        crate::setup::CliEngine::MemRepo(mut engine) => engine
+            .set_mem_description(&args.name, new_description, note)
+            .map_err(crate::CliError::from_engine_op)?,
+        crate::setup::CliEngine::Filesystem(mut engine) => engine
+            .set_mem_description(&args.name, new_description, note)
+            .map_err(crate::CliError::from_engine_op)?,
+    };
+
+    if ctx.json {
+        crate::output::print_json(&outcome)?;
+    } else {
+        let old = outcome.old_description.as_deref().unwrap_or("<none>");
+        let new = outcome.new_description.as_deref().unwrap_or("<cleared>");
+        let warnings = if outcome.warnings.is_empty() {
+            String::new()
+        } else {
+            let rendered: Vec<String> =
+                outcome.warnings.iter().map(ToString::to_string).collect();
+            format!("\n\n> warnings:\n> - {}", rendered.join("\n> - "))
+        };
+        crate::output::print_markdown(&format!(
+            "# Mem `{}` description updated\n\n- Old: {}\n- New: {}{}",
+            outcome.mem, old, new, warnings,
         ));
     }
     Ok(())

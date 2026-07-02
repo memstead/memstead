@@ -148,11 +148,11 @@ fn branch_read_into_mem_export(e: BranchReadError) -> MemExportError {
 ///
 /// `mem_repo_gitdir` is the multi-root repo (`<workspace>/mem-repo/.git/`).
 /// The function reads mem content from `refs/heads/<mem_name>` and
-/// (for now) resolves the schema via [`collect_schema_source`] using
-/// `workspace_root` + `workspace_schemas_dir` — the same chain used by
-/// the disk path. Reading schemas from `refs/heads/__MEMSTEAD:schemas/<name>/`
-/// is a follow-up; the current chain still satisfies the wire-format
-/// contract because schemas are workspace-tracked alongside the cache.
+/// resolves the schema from `__MEMSTEAD:schemas/<name>@<version>/`
+/// first — the tree `memstead schema install` writes on this backend —
+/// falling back to the disk/builtin chain ([`collect_schema_source`]
+/// over `workspace_root` + `workspace_schemas_dir`) for builtins and
+/// pre-ref layouts.
 #[cfg(feature = "git-object-storage")]
 pub fn export_mem_from_branch(
     mem_repo_gitdir: &Path,
@@ -190,6 +190,36 @@ pub fn export_mem_from_branch(
     })
 }
 
+/// Resolve the pinned schema's source files from the workspace's
+/// `__MEMSTEAD:schemas/<name>@<version>/` tree — the location
+/// `memstead schema install` writes on the git-branch backend. Returns
+/// `None` when the branch, the package subtree, or its `schema.yaml`
+/// is absent, so the caller falls through to the disk/builtin chain.
+#[cfg(feature = "git-object-storage")]
+fn schema_files_from_memstead_ref(
+    mem_repo_gitdir: &Path,
+    schema_ref: &memstead_schema::SchemaRef,
+) -> Option<Vec<memstead_schema::SchemaSourceFile>> {
+    let blobs = read_branch_blobs(mem_repo_gitdir, "refs/heads/__MEMSTEAD").ok()?;
+    let prefix = format!("schemas/{}@{}/", schema_ref.name, schema_ref.version);
+    let mut files: Vec<memstead_schema::SchemaSourceFile> = blobs
+        .into_iter()
+        .filter_map(|b| {
+            b.path
+                .strip_prefix(&prefix)
+                .map(|rel| memstead_schema::SchemaSourceFile {
+                    archive_path: rel.to_string(),
+                    bytes: b.bytes,
+                })
+        })
+        .collect();
+    if !files.iter().any(|f| f.archive_path == "schema.yaml") {
+        return None;
+    }
+    files.sort_by(|a, b| a.archive_path.cmp(&b.archive_path));
+    Some(files)
+}
+
 /// Byte-shaped counterpart to [`export_mem_from_branch`]. Same wire
 /// format, same determinism contract, no on-disk artifact — the bytes
 /// are the output. The engine's `export_mem_to_bytes` dispatches to
@@ -210,8 +240,17 @@ pub fn export_mem_from_branch_to_bytes(
         .map_err(|e| MemExportError::Canonical(e.to_string()))?
         .into_bytes();
 
+    // Engine-canonical location first: `memstead schema install` on the
+    // git-branch backend writes the package onto the `__MEMSTEAD` branch,
+    // not the workspace disk. Builtins and pre-ref disk layouts fall
+    // through to the shared chain.
     let schema_files =
-        collect_schema_source(workspace_root, workspace_schemas_dir, &published.schema)?;
+        match schema_files_from_memstead_ref(mem_repo_gitdir, &published.schema) {
+            Some(files) => files,
+            None => {
+                collect_schema_source(workspace_root, workspace_schemas_dir, &published.schema)?
+            }
+        };
 
     let ref_name = match workspace_root {
         Some(root) => crate::mem_repo_config::branch_ref_for_mem(root, mem_name),

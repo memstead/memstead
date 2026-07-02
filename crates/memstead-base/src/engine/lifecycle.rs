@@ -920,6 +920,68 @@ impl Engine {
         })
     }
 
+    /// Update a mem's `description` field in its per-mem config and
+    /// persist it through the backend — the one-line text mem-archive
+    /// export embeds and the registry card surfaces. `None` clears the
+    /// field. Same backend symmetry, drift probe, and provenance-note
+    /// posture as [`Self::set_mem_version`]; archive mounts reject with
+    /// `BackendError::Sealed`.
+    pub fn set_mem_description(
+        &mut self,
+        mem_name: &str,
+        new_description: Option<String>,
+        note: Option<&str>,
+    ) -> Result<crate::ops::SetMemDescriptionOutcome, EngineError> {
+        let mount_idx = self
+            .mounts
+            .iter()
+            .position(|m| m.mount.mem == mem_name)
+            .ok_or_else(|| EngineError::UnknownMem(mem_name.to_string()))?;
+        if self.mounts[mount_idx].mount.capability != crate::workspace::MountCapability::Write {
+            return Err(EngineError::ReadOnlyMount(mem_name.to_string()));
+        }
+
+        let mut warnings = self.reload_if_stale(Some(mem_name));
+        if let Some(w) = self.note_missing_warning("set_mem_description", note) {
+            warnings.push(w);
+        }
+
+        let mounted = &mut self.mounts[mount_idx];
+        let mut config = mounted
+            .mem_config
+            .clone()
+            .ok_or_else(|| {
+                EngineError::InvalidInput(format!(
+                    "mem '{mem_name}' has no loaded MemConfig — \
+                     cannot set description (initialize the mem via `memstead init` \
+                     or `memstead mem create` first)"
+                ))
+            })?;
+        let old_description = config.description.clone();
+        config.description = new_description.clone();
+
+        let mut bytes = serde_json::to_vec_pretty(&config).map_err(|e| {
+            EngineError::InvalidInput(format!(
+                "could not serialize mem config: {e}"
+            ))
+        })?;
+        bytes.push(b'\n');
+        mounted.backend.write_mem_config_with_note(&bytes, note)?;
+        mounted.mem_config = Some(config);
+
+        let new_head = mounted.backend.current_head().ok().flatten();
+        if let Some(sha) = new_head {
+            mounted.last_known_head = Some(sha);
+        }
+
+        Ok(crate::ops::SetMemDescriptionOutcome {
+            mem: mem_name.to_string(),
+            old_description,
+            new_description,
+            warnings,
+        })
+    }
+
     /// Set (or clear) one opaque sync-state token in a mem's per-mem
     /// config and persist it through the backend. The ingest layer calls
     /// this after a successful pass over a source's changed slice to

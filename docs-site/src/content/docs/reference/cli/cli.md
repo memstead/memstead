@@ -48,6 +48,7 @@ This document contains the help content for the `memstead` command-line program.
 * [`memstead mem delete`↴](#memstead-mem-delete)
 * [`memstead mem set-version`↴](#memstead-mem-set-version)
 * [`memstead mem set-schema`↴](#memstead-mem-set-schema)
+* [`memstead mem set-description`↴](#memstead-mem-set-description)
 * [`memstead mem set-sync-state`↴](#memstead-mem-set-sync-state)
 * [`memstead mem list`↴](#memstead-mem-list)
 * [`memstead mem-repo`↴](#memstead-mem-repo)
@@ -813,6 +814,7 @@ Mem lifecycle commands
 * `delete` — Storage-destroying removal — unregisters the mem AND deletes its stored content. Refuses with `MEM_REFERENCED_BY_POLICY` when any other writable mem has a `cross_mem_links` grant pointing at the target (revoke the grant first). For router-only removal that keeps the storage, use `memstead mem unregister`
 * `set-version` — Update a mem's `version` field. The version is consumed by `memstead export --format mem` to stamp the archive filename and the `.mem` archive's published config. `version` is seeded at init (`0.1.0`); bump via this command before publishing
 * `set-schema` — Set a mem's schema pin — the integrity-driven schema-migration trigger. Already-integral mems switch immediately; otherwise the mem enters dual-pin migration (writes validate against the target) and the response lists the non-integral entities. Re-issue after repairing to complete the switch
+* `set-description` — Set a mem's one-line `description` — embedded in `.mem` archive exports and surfaced on the registry card at publish time. An empty string clears the field. Set it before `memstead export` / `memstead publish` so the shared archive carries its card text
 * `set-sync-state` — Set (or clear) one opaque sync-state token in a mem's config — the ingest layer's durable "last synced source state" baseline. `<KEY>` and `<TOKEN>` are opaque to the engine (the ingest layer keys per `(ingest, facet)` and owns the token's meaning). An empty `<TOKEN>` clears the key. Written into the per-mem config and surfaced verbatim on `memstead workspace dump`
 * `list` — Enumerate every mounted mem in the workspace with its schema pin, version, entity count, and capability (writable vs read-only). Markdown by default; pass `--json` (root flag) for the structured envelope
 
@@ -905,6 +907,23 @@ Set a mem's schema pin — the integrity-driven schema-migration trigger. Alread
 
 * `<NAME>` — Mem name (must be registered in the workspace)
 * `<SCHEMA>` — Target schema ref, exact `name@x.y.z`. Must resolve against the loaded schema catalogue; unresolvable refs refuse with `SCHEMA_NOT_FOUND`, malformed refs with `INVALID_INPUT`
+
+
+
+## `memstead mem set-description`
+
+Set a mem's one-line `description` — embedded in `.mem` archive exports and surfaced on the registry card at publish time. An empty string clears the field. Set it before `memstead export` / `memstead publish` so the shared archive carries its card text
+
+**Usage:** `memstead mem set-description [OPTIONS] <NAME> <DESCRIPTION>`
+
+###### **Arguments:**
+
+* `<NAME>` — Mem name (must be registered in the workspace)
+* `<DESCRIPTION>` — One-line description of the mem — what a registry visitor (or an agent browsing the catalogue) should know before installing. An empty string clears the field
+
+###### **Options:**
+
+* `--note <NOTE>` — Optional provenance note (≤280 chars) recorded on the commit body, like the other commit-producing mem-lifecycle commands
 
 
 

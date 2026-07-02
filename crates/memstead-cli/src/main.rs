@@ -97,6 +97,9 @@ fn run(cli: Cli) -> anyhow::Result<()> {
             commands::mem::MemAction::SetSchema(args) => {
                 commands::mem::run_set_schema(&ctx, args)
             }
+            commands::mem::MemAction::SetDescription(args) => {
+                commands::mem::run_set_description(&ctx, args)
+            }
             commands::mem::MemAction::SetSyncState(args) => {
                 commands::mem::run_set_sync_state(&ctx, args)
             }

@@ -364,6 +364,41 @@ fn mem_set_version_persists_through_mem_repo_backend() {
         .failure();
 }
 
+/// `memstead mem set-description` persists the one-line card text the
+/// archive export embeds, survives a process boundary (the second
+/// call's `Old:` line reads the persisted config), and an empty string
+/// clears the field. Same backend path as set-version
+/// (`write_mem_config` onto `__MEMSTEAD:mems/<name>/config.json`).
+#[test]
+fn mem_set_description_persists_and_clears() {
+    let tmp = TempDir::new().unwrap();
+    let _mem = make_sender_mem(tmp.path());
+
+    memstead()
+        .current_dir(tmp.path())
+        .args(["mem", "set-description", "sender-mem", "Typed knowledge about senders."])
+        .assert()
+        .success()
+        .stdout(contains("New: Typed knowledge about senders."));
+
+    // Fresh process: the old value can only come from the persisted config.
+    memstead()
+        .current_dir(tmp.path())
+        .args(["mem", "set-description", "sender-mem", "Sharper card text."])
+        .assert()
+        .success()
+        .stdout(contains("Old: Typed knowledge about senders."))
+        .stdout(contains("New: Sharper card text."));
+
+    // Empty string clears.
+    memstead()
+        .current_dir(tmp.path())
+        .args(["mem", "set-description", "sender-mem", ""])
+        .assert()
+        .success()
+        .stdout(contains("New: <cleared>"));
+}
+
 /// `set-version`
 /// accepts `--note` like the other commit-producing mem-lifecycle
 /// commands, and the note rides the `__MEMSTEAD` version-bump commit body.

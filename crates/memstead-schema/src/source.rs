@@ -110,6 +110,16 @@ pub fn collect_schema_source(
     let mut candidates: Vec<PathBuf> = Vec::new();
 
     if let Some(ws_dir) = workspace_schemas_dir {
+        // Two directory shapes: `<name>@<version>/` is what `memstead
+        // schema install` writes; the bare `<name>/` form predates the
+        // versioned layout and stays supported for hand-authored dirs.
+        let versioned_dir = ws_dir.join(format!("{}@{}", schema_ref.name, schema_ref.version));
+        candidates.push(versioned_dir.clone());
+        if versioned_dir.is_dir()
+            && let Some(files) = try_collect_dir(&versioned_dir, schema_ref)?
+        {
+            return Ok(files);
+        }
         let ws_schema_dir = ws_dir.join(&schema_ref.name);
         candidates.push(ws_schema_dir.clone());
         if ws_schema_dir.is_dir()
@@ -464,11 +474,13 @@ write_rules: []
                 candidates,
             } => {
                 assert_eq!(name, "missing@2.3.4");
-                // Both filesystem candidates listed in resolution order:
-                // workspace schemas dir, then workspace cache dir.
-                assert_eq!(candidates.len(), 2);
-                assert!(candidates[0].ends_with("schemas/missing"));
-                assert!(candidates[1]
+                // Every filesystem candidate listed in resolution order:
+                // the versioned install shape first, then the bare
+                // workspace schemas dir, then the workspace cache dir.
+                assert_eq!(candidates.len(), 3);
+                assert!(candidates[0].ends_with("schemas/missing@2.3.4"));
+                assert!(candidates[1].ends_with("schemas/missing"));
+                assert!(candidates[2]
                     .to_string_lossy()
                     .contains(".memstead.cache/schemas/missing-2.3.4"));
             }
