@@ -106,13 +106,14 @@ pub fn assemble_archive(workspace_root: &Path) -> Result<Vec<u8>, AssembleError>
     // the schema-source resolver.
     let schema_ref: SchemaRef = published.schema.clone();
 
-    // 2. Resolve the schema source files. v1 is built-in-only — pass
-    //    `None` for both the workspace-schemas-dir and the
-    //    workspace-root cache hint so the resolver falls through to
-    //    the embedded set. When workspace-defined schemas land, plumb
-    //    the workspace_root + a future schemas_dir override through
-    //    here.
-    let schema_files = collect_schema_source(None, None, &schema_ref)?;
+    // 2. Resolve the schema source files. Installed packages live under
+    //    `.memstead/schemas/` (the fixed `memstead schema install`
+    //    destination — same wiring as `Engine::export_mem_to_bytes`);
+    //    the workspace root also enables the `.memstead.cache/schemas/`
+    //    layer. Builtins remain the final fallback.
+    let schemas_dir = workspace_root.join(".memstead").join("schemas");
+    let schema_files =
+        collect_schema_source(Some(workspace_root), Some(&schemas_dir), &schema_ref)?;
 
     // 3. Walk every entity `.md` under the workspace.
     let source = EntitySource::Directory {
@@ -258,6 +259,60 @@ mod tests {
             .collect();
         assert!(md_paths.contains(&"first.md"));
         assert!(md_paths.contains(&"second.md"));
+    }
+
+    #[test]
+    fn assemble_archive_resolves_installed_workspace_schema() {
+        // Regression: bare `memstead publish` / `memstead export --format
+        // mem` on a folder workspace pinned to an INSTALLED custom schema
+        // used to fail with "schema <ref> not found — candidate paths
+        // tried: []" because the resolver ran built-in-only. The archive
+        // assembler must consult `.memstead/schemas/<name>@<version>/` —
+        // the `memstead schema install` destination.
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().join("demo");
+        std::fs::create_dir_all(&root).unwrap();
+        let mut cfg = WorkspaceConfig::new("demo", versioned("cookbook", "0.1.0"));
+        cfg.description = Some("custom-schema mem".into());
+        write_workspace_config(&root, &cfg).unwrap();
+
+        // Install-shaped package dir, as `memstead schema install` writes it.
+        let schema_dir = root.join(".memstead").join("schemas").join("cookbook@0.1.0");
+        std::fs::create_dir_all(schema_dir.join("types")).unwrap();
+        std::fs::write(
+            schema_dir.join("schema.yaml"),
+            "name: cookbook\nversion: 0.1.0\ndescription: installed-cookbook-manifest\ntypes:\n  - note\n",
+        )
+        .unwrap();
+        std::fs::write(
+            schema_dir.join("types").join("note.yaml"),
+            "name: note\ndescription: test\n",
+        )
+        .unwrap();
+
+        write_spec(&root, "only", "Only");
+
+        let bytes = assemble_archive(&root).expect("installed schema must resolve");
+        let limits = ValidatorLimits::default();
+        let entries = extract_entries(&bytes, &limits).expect("validator must accept");
+
+        // The embedded schema is the *installed* package, not a builtin.
+        let manifest = entries
+            .schema_files
+            .iter()
+            .find(|s| s.archive_path == ".memstead/schema/schema.yaml")
+            .expect("manifest must embed");
+        assert!(
+            manifest.content.contains("installed-cookbook-manifest"),
+            "embedded manifest must come from .memstead/schemas/cookbook@0.1.0"
+        );
+        assert!(
+            entries
+                .schema_files
+                .iter()
+                .any(|s| s.archive_path == ".memstead/schema/types/note.yaml"),
+            "installed type definitions must embed too"
+        );
     }
 
     #[test]
