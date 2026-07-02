@@ -32,6 +32,19 @@ use crate::CliError;
 use crate::output::{ExitKind, print_json, print_markdown};
 use crate::setup::CliContext;
 
+/// Recovery hint for the nested-workspace refusal. Every printed
+/// alternative must exist and be able to succeed in the binary that
+/// prints it: `memstead mem init` is the pro (mem-repo) verb; the
+/// basis binary has no `mem` subcommand group, so it points outside
+/// the existing workspace instead.
+#[cfg(feature = "mem-repo")]
+const NESTED_WORKSPACE_HINT: &str = "If you meant to add a mem inside the existing \
+     workspace, run `memstead mem init` instead; for a separate graph, initialise in a \
+     folder outside the existing workspace.";
+#[cfg(not(feature = "mem-repo"))]
+const NESTED_WORKSPACE_HINT: &str = "Initialise in a folder outside the existing \
+     workspace instead.";
+
 /// `memstead init` arguments.
 #[derive(Args, Debug)]
 pub struct InitArgs {
@@ -111,14 +124,14 @@ pub fn run(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
             kind: ExitKind::Validation,
             message: format!(
                 "an existing memstead workspace lives above {} at {}; \
-                 `memstead init` refuses to nest workspaces. If you meant to add a mem \
-                 inside the existing workspace, run `memstead mem init` instead.",
+                 `memstead init` refuses to nest workspaces. {}",
                 target.display(),
                 found_at.display(),
+                NESTED_WORKSPACE_HINT,
             ),
             details: Some(serde_json::json!({
                 "found_at": found_at.display().to_string(),
-                "hint": "use `memstead mem init` to add a mem inside an existing workspace",
+                "hint": NESTED_WORKSPACE_HINT,
             })),
         }
         .into());

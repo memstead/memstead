@@ -304,15 +304,30 @@ fn scaffold_next_steps(ctx: &CliContext, name: &str) -> Vec<Step> {
     // fresh mem. Order matters — `init` pins without resolving, and the
     // engine only boots once the package is installed *inside the new
     // workspace*, so the install step comes right after init and points
-    // back at the scaffolded package (`../<name>` from the new folder).
+    // back at the scaffolded package. When `schema new` ran inside an
+    // existing workspace, the fresh mem must land OUTSIDE it (workspaces
+    // don't nest, and `init`'s refusal there is a dead end on this
+    // binary) — the printed paths anchor at the workspace root's parent,
+    // absolute and quoted so the sequence stays verbatim-runnable.
     #[cfg(not(feature = "mem-repo"))]
     {
         let _ = (mem, quickstart_seed); // pro-only context
+        let (fresh_dir, install_source) = match ctx.workspace_shape() {
+            Some((_, root)) => {
+                let parent = root.parent().unwrap_or(&root).to_path_buf();
+                let pkg = std::env::current_dir().unwrap_or_default().join(name);
+                (
+                    format!("\"{}\"", parent.join(format!("{name}-mem")).display()),
+                    format!("\"{}\"", pkg.display()),
+                )
+            }
+            None => (format!("{name}-mem"), format!("../{name}")),
+        };
         vec![
             Step::bare(format!("memstead schema validate {name}")),
             Step {
                 command: format!(
-                    "mkdir {name}-mem && cd {name}-mem && memstead init --name {name}-mem \
+                    "mkdir {fresh_dir} && cd {fresh_dir} && memstead init --name {name}-mem \
                      --schema {name}@{SCAFFOLD_VERSION}"
                 ),
                 note: Some(
@@ -322,7 +337,7 @@ fn scaffold_next_steps(ctx: &CliContext, name: &str) -> Vec<Step> {
                 ),
             },
             Step {
-                command: format!("memstead schema install ../{name}"),
+                command: format!("memstead schema install {install_source}"),
                 note: Some(
                     "run inside the new folder — the workspace boots once its pinned \
                      schema is installed"

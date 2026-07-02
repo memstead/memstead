@@ -513,6 +513,77 @@ fn schema_new_basis_follow_up_ends_in_working_fresh_mem() {
         .success();
 }
 
+/// Basis follow-up scaffolded from INSIDE an existing workspace: the
+/// printed fresh-mem path must land outside it (workspaces don't nest,
+/// and the basis binary has no `memstead mem init` to fall back on).
+/// The test executes the paths exactly as printed and ends in a
+/// working mem.
+#[cfg(not(feature = "mem-repo"))]
+#[test]
+fn schema_new_basis_follow_up_from_inside_workspace_lands_outside() {
+    let tmp = TempDir::new().unwrap();
+    let ws = tmp.path().join("my-graph");
+    memstead().arg("quickstart").arg(&ws).assert().success();
+
+    let out = stdout_of(
+        memstead().current_dir(&ws).args(["schema", "new", "acme"]).assert().success(),
+    );
+
+    // Pull the two printed paths: the fresh-mem dir from the init step,
+    // the package path from the install step. Both are quoted absolute
+    // paths in the in-workspace variant.
+    let quoted = |line_marker: &str| -> std::path::PathBuf {
+        let line = out
+            .lines()
+            .find(|l| l.contains(line_marker))
+            .unwrap_or_else(|| panic!("no step containing `{line_marker}`; got: {out}"));
+        let start = line.find('"').unwrap_or_else(|| panic!("no quoted path in: {line}"));
+        let rest = &line[start + 1..];
+        let end = rest.find('"').unwrap_or_else(|| panic!("unterminated quote in: {line}"));
+        std::path::PathBuf::from(&rest[..end])
+    };
+    let fresh = quoted("memstead init --name acme-mem");
+    let pkg = quoted("memstead schema install");
+
+    // The fresh mem lands outside the workspace.
+    let ws_canon = std::fs::canonicalize(&ws).unwrap();
+    assert!(
+        !fresh.starts_with(&ws_canon) && !fresh.starts_with(&ws),
+        "fresh-mem dir {} must not nest inside the workspace {}",
+        fresh.display(),
+        ws.display(),
+    );
+
+    // Execute as printed: mkdir + init in the fresh dir, install the
+    // package by its printed path, and the workspace works.
+    std::fs::create_dir_all(&fresh).unwrap();
+    memstead()
+        .current_dir(&fresh)
+        .args(["init", "--name", "acme-mem", "--schema", "acme@0.1.0"])
+        .assert()
+        .success();
+    memstead()
+        .current_dir(&fresh)
+        .args(["schema", "install"])
+        .arg(&pkg)
+        .assert()
+        .success();
+    memstead().current_dir(&fresh).arg("overview").assert().success();
+    memstead()
+        .current_dir(&fresh)
+        .args([
+            "create",
+            "--type",
+            "note",
+            "--title",
+            "First note",
+            "--section",
+            "summary=It works.",
+        ])
+        .assert()
+        .success();
+}
+
 /// `schema install` accepts the scaffolded package on the folder
 /// backend regardless of binary flavour (the basis prefix of the
 /// follow-up flow).
