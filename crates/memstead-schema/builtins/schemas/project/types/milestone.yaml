@@ -66,6 +66,7 @@ metadata_fields:
   - key: completed_on
     description: 'Date the milestone was reached. ISO YYYY-MM-DD. Unset until `status: done`.'
     field_type: date
+    optional: true
     filterable: range
 title_weight: 100.0
 text_fields: [definition_of_done, blockers, dependencies, notes]
