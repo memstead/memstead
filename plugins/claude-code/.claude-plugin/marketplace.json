@@ -4,13 +4,13 @@
     "name": "dasboe"
   },
   "metadata": {
-    "description": "Memstead — AI agent adapter for Claude Code"
+    "description": "Memstead — installable expertise for AI agents: typed, versioned knowledge graphs in markdown + git"
   },
   "plugins": [
     {
       "name": "memstead",
       "source": "./",
-      "description": "Memstead — AI agent adapter for Claude Code",
+      "description": "Work with Memstead knowledge graphs from Claude Code — typed, schema-validated markdown graphs your agent reads and grows over MCP. Skills for setup, ingest, interview, reconcile, and everyday graph work.",
       "version": "0.1.0"
     }
   ]
