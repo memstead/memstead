@@ -2,7 +2,7 @@
   "name": "@memstead/client",
   "version": "0.1.0",
   "description": "Browser client wrapping @memstead/wasm + the memstead-bridge HTTP/SSE surface as a single MemSyncClient class.",
-  "license": "MIT",
+  "license": "(MIT OR Apache-2.0)",
   "type": "module",
   "main": "dist/index.js",
   "module": "dist/index.js",
@@ -24,9 +24,14 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {},
-  "_peerDependencies_pending_publish": {
-    "@memstead/wasm": "*",
-    "_note": "Lifted to a proper `peerDependencies` entry once @memstead/wasm is published to the registry. Today the WASM crate is built locally via wasm-pack and consumers wire it through `engineFactory`. The client's TS surface only references the WasmEngineLike interface (src/types.ts) — no module-level import of @memstead/wasm exists, so this gap does not affect compilation or tests."
+  "peerDependencies": {
+    "@memstead/wasm": "^0.1.0"
+  },
+  "peerDependenciesMeta": {
+    "@memstead/wasm": {
+      "optional": true,
+      "_note": "Optional and truthfully so: the TS surface only references the WasmEngineLike interface (src/types.ts) — consumers inject the engine via `engineFactory`, typically but not necessarily from @memstead/wasm. Optional also keeps local `npm install` green until @memstead/wasm is live on the registry."
+    }
   },
   "devDependencies": {
     "typescript": "^5.6.0",
@@ -46,8 +51,10 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/memstead/memstead",
-    "directory": "engine/crates/memstead-wasm/client-js"
+    "directory": "crates/memstead-wasm/client-js"
   },
   "homepage": "https://memstead.io",
-  "private": true
+  "publishConfig": {
+    "access": "public"
+  }
 }

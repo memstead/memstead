@@ -6,6 +6,10 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 description = "Generic read-only HTTP/MCP server over a sealed Memstead mem — plain-HTTP read API, native MCP endpoint, self-describing runbook, discovery manifest, and an optional embedded static site. Deployment-agnostic: the mem, authority identity, and site are inputs."
+# Not on crates.io: deployment binary. `site/` is a build-time artifact
+# mirrored by build.rs (gitignored), so the packaged crate would embed
+# whatever happens to be on the builder's disk — a deployment image, not
+# a reusable library unit. Ship it as a container/binary instead.
 publish = false
 
 [[bin]]

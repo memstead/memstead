@@ -25,12 +25,16 @@ repository = "https://github.com/memstead/memstead"
 homepage = "https://memstead.io"
 
 [workspace.dependencies]
-memstead-schema = { path = "crates/memstead-schema" }
-memstead-base = { path = "crates/memstead-base" }
-memstead-engine = { path = "crates/memstead-engine" }
-memstead-mcp = { path = "crates/memstead-mcp" }
-memstead-cli = { path = "crates/memstead-cli" }
-memstead-git-branch = { path = "crates/memstead-git-branch" }
+# Internal crates carry both `path` (local resolution) and `version`
+# (what ends up in the published manifest after `cargo package` strips
+# the path) — required for crates.io. Keep `version` in lockstep with
+# `workspace.package.version`.
+memstead-schema = { path = "crates/memstead-schema", version = "0.1.0" }
+memstead-base = { path = "crates/memstead-base", version = "0.1.0" }
+memstead-engine = { path = "crates/memstead-engine", version = "0.1.0" }
+memstead-mcp = { path = "crates/memstead-mcp", version = "0.1.0" }
+memstead-cli = { path = "crates/memstead-cli", version = "0.1.0" }
+memstead-git-branch = { path = "crates/memstead-git-branch", version = "0.1.0" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"

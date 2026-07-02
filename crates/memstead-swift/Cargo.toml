@@ -6,6 +6,8 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 description = "UniFFI bindings exposing the Memstead engine to the macOS app as an in-process Rust library."
+# Not on crates.io: bindings artifact. Consumed as a compiled xcframework
+# by the macOS app, never as a Rust dependency — no docs.rs audience.
 publish = false
 
 [lib]

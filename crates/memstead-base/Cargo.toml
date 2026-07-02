@@ -6,7 +6,14 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 description = "Engine internals for Memstead — store, parser, validators, filesystem-mem engine."
-publish = false
+readme = "README.md"
+keywords = ["memstead", "knowledge-graph", "markdown", "graph", "agents"]
+categories = ["database-implementations"]
+
+# docs.rs: build with all features so the opt-in `tokio` broadcast surface
+# and the `file-watcher` cross-process event surface are documented.
+[package.metadata.docs.rs]
+all-features = true
 
 [dependencies]
 memstead-schema.workspace = true

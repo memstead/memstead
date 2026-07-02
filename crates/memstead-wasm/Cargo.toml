@@ -6,6 +6,9 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 description = "WebAssembly bindings exposing the Memstead engine to browser thin clients via wasm-bindgen."
+# Not on crates.io: bindings artifact. Its distribution channel is npm
+# (`@memstead/wasm`, assembled by scripts/publish-npm.sh); no native Rust
+# consumer exists for the rlib today.
 publish = false
 
 [lib]

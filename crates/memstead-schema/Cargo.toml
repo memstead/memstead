@@ -6,7 +6,9 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 description = "Schema types for Memstead — entity definitions, vocabulary, and validation rules."
-publish = false
+readme = "README.md"
+keywords = ["memstead", "knowledge-graph", "schema", "markdown", "validation"]
+categories = ["data-structures"]
 
 [dependencies]
 serde.workspace = true

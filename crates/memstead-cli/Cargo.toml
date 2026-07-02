@@ -6,6 +6,9 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 description = "Command-line interface for Memstead — query and mutate typed entity graphs from the shell. Default build produces the full `memstead` binary (multi-mem, git-backed); `--no-default-features` builds the lean folder-only surface."
+readme = "README.md"
+keywords = ["memstead", "cli", "knowledge-graph", "markdown", "agents"]
+categories = ["command-line-utilities"]
 
 [[bin]]
 name = "memstead"

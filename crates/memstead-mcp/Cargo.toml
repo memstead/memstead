@@ -6,6 +6,9 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 description = "MCP server for Memstead — exposes the typed entity-graph engine over JSON-RPC stdio. Default build produces the full `memstead-mcp` binary (multi-mem, git-backed); `--no-default-features` builds the lean folder + archive surface."
+readme = "README.md"
+keywords = ["memstead", "mcp", "knowledge-graph", "agents", "llm"]
+categories = ["command-line-utilities"]
 
 [[bin]]
 name = "memstead-mcp"

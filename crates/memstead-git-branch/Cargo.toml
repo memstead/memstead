@@ -6,7 +6,9 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 description = "Mem-repo engine for Memstead — multi-mem, git-backed typed entity graphs."
-publish = false
+readme = "README.md"
+keywords = ["memstead", "knowledge-graph", "git", "markdown", "graph"]
+categories = ["database-implementations"]
 
 [dependencies]
 memstead-base.workspace = true

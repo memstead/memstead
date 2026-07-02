@@ -1,8 +1,20 @@
 {
   "name": "@memstead/wasm",
   "version": "0.1.0",
-  "description": "WebAssembly bindings.",
-  "license": "MIT",
+  "description": "WebAssembly bindings for the Memstead engine — hydrate a knowledge-graph snapshot in the browser and read it with the same typed engine that runs natively.",
+  "license": "(MIT OR Apache-2.0)",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/memstead/memstead",
+    "directory": "crates/memstead-wasm"
+  },
+  "homepage": "https://memstead.io",
+  "keywords": [
+    "memstead",
+    "wasm",
+    "knowledge-graph",
+    "rust"
+  ],
   "files": [
     "memstead_wasm_bg.wasm",
     "memstead_wasm.js",
@@ -10,7 +22,9 @@
     "memstead_wasm_bg.wasm.d.ts",
     "README.md"
   ],
+  "type": "module",
   "main": "memstead_wasm.js",
+  "module": "memstead_wasm.js",
   "types": "memstead_wasm.d.ts",
   "sideEffects": [
     "./snippets/*"
