@@ -74,11 +74,14 @@ function writeFakeDump(root, { mems, schemas = {} }) {
   const dump = {
     format: 'workspace-dump/v0',
     workspace_root: root,
+    // Real dump wire is snake_case (`schema_ref` / `write_guidance`) — the
+    // helper's *input* keys stay short for test ergonomics; the emitted
+    // fixture names the wire keys the actual CLI produces.
     mems: mems.map((v, i) => ({
       name: v.name,
-      schema: v.schema ?? null,
+      schema_ref: v.schema ?? null,
       description: v.description ?? null,
-      writeGuidance: v.writeGuidance ?? {},
+      write_guidance: v.writeGuidance ?? {},
       snapshot_token: v.snapshot_token ?? `token-${i}`,
     })),
     schemas: Object.fromEntries(

@@ -1,120 +1,92 @@
 ---
 name: setup
-description: First-time setup for a filesystem-mem Memstead workspace — resolves the memstead-mcp binary path, prompts for mem name + schema, runs `memstead init`, writes `.mcp.json`, and instructs the user to restart Claude Code so the MCP server registers.
+description: First-time setup for a filesystem-mem Memstead workspace — resolves the memstead binaries (installing them if needed), then delegates workspace + mem + MCP wiring to `memstead quickstart` and instructs the user to restart Claude Code so the MCP server registers.
 disable-model-invocation: true
 allowed-tools: AskUserQuestion, Bash, Read, Write
 ---
 
 # Memstead — First-time setup
 
-Walk a first-time user through bootstrapping a filesystem-mem Memstead workspace in the current directory. End state: a `.memstead/` directory (carrying `workspace.toml`, the per-mem `config.json`, and engine-managed `state/mounts.json`) plus `.mcp.json` are written, and the user has been told to restart Claude Code.
+Walk a first-time user through bootstrapping a filesystem-mem Memstead workspace in the current directory. End state: a `.memstead/` workspace store plus `.mcp.json` are written (both by `memstead quickstart`), and the user has been told to restart Claude Code.
 
-This is the basis-product onboarding flow — the binary is `memstead` (CLI) plus `memstead-mcp` (MCP server), both expected on `PATH` via `brew install` / cargo-dist install / a local `cargo build`. There is no mem-repo, no multi-mem, no git history layer — that surface is the pro variant and is not reached from this skill.
+This is the basis-product onboarding flow — the binaries are `memstead` (CLI) plus `memstead-mcp` (MCP server). There is no mem-repo, no multi-mem, no git history layer — that surface is the pro variant and is not reached from this skill.
 
 ## Step 1 — Resolve the binaries
 
-Both `memstead` and `memstead-mcp` must be on `PATH`. Resolve them once and use the absolute paths from here on, so the `.mcp.json` we write does not depend on the parent shell's `PATH` at MCP-spawn time.
+Both `memstead` and `memstead-mcp` must be on `PATH`:
 
 ```bash
-command -v memstead     # → /usr/local/bin/memstead (or wherever)
-command -v memstead-mcp # → /usr/local/bin/memstead-mcp
+command -v memstead
+command -v memstead-mcp
 ```
 
-If either lookup fails (non-zero exit), stop and tell the user how to install:
+If **both** resolve, skip to step 2.
 
-> Install on macOS / Linux:
->
-> ```
-> curl -sSf https://memstead.io/install.sh | sh
-> ```
->
-> Or via Homebrew:
->
-> ```
-> brew install memstead/homebrew-memstead/memstead
-> ```
->
-> Then re-run `/setup`.
->
-> _The unified `install.sh` and umbrella `memstead` Homebrew formula
-> wrap cargo-dist's per-crate artefacts (`memstead-cli` + `memstead-mcp`).
-> If `https://memstead.io/install.sh` is not yet wired, build the binaries
-> from source (`cargo build --release`) per the project README._
+If either lookup fails (non-zero exit), install them. Work through these options **in order** — try option 1 first, and move to the next option only when its stated fallback condition applies:
 
-Capture both absolute paths — call them `MEMSTEAD_BIN` and `MEMSTEAD_MCP_BIN` for the rest of the run.
+1. **Installer script** (preferred — no package manager needed):
 
-## Step 2 — Verify the workspace is empty
+   ```bash
+   curl -sSf https://memstead.io/install.sh | sh
+   ```
 
-`memstead init` errors out on a non-empty target. Before prompting the user for mem details, check the cwd:
+   *Fall through to option 2 when:* the download fails (network error, non-200), the script errors out, or `curl` is not available.
+
+2. **Homebrew** (macOS / Linux with `brew` installed):
+
+   ```bash
+   brew install memstead/homebrew-memstead/memstead
+   ```
+
+   *Fall through to option 3 when:* `brew` is not installed, or the tap/formula cannot be found.
+
+3. **Build from source** (needs a Rust toolchain — `rustup` provides one):
+
+   ```bash
+   git clone https://github.com/memstead/memstead
+   cd memstead && cargo build --release
+   ```
+
+   The binaries land at `target/release/memstead` and `target/release/memstead-mcp`. Either add that directory to `PATH` or capture both absolute paths for the rest of this run.
+
+   *If this also fails:* stop and report the build error verbatim to the user, with the pointer that a Rust toolchain (`curl https://sh.rustup.rs -sSf | sh`) is the usual missing piece. Do not continue to step 2 without working binaries.
+
+After whichever option succeeded, re-run the two `command -v` checks (or use the absolute source-build paths). Only proceed once both binaries resolve.
+
+> **Why `command -v` over `which`:** `command -v` is POSIX, doesn't shell out, and returns absolute paths reliably across `bash`, `zsh`, `dash`, and `sh`. `which` is non-standard and varies by distro.
+
+## Step 2 — Bootstrap the workspace with `memstead quickstart`
+
+All workspace creation is delegated to the CLI — do not hand-write any `.memstead/` file or `.mcp.json`:
 
 ```bash
-ls -A .
+memstead quickstart --agent claude-code
 ```
 
-If the directory contains any files (especially `.memstead/`, `.mcp.json`, or unrelated content), stop and ask the user how to proceed:
+One command does everything: workspace store, a default-schema mem named after the folder, a seed entity, and the Claude Code MCP wiring (`.mcp.json` pointing at `memstead-mcp`). It tolerates dotfiles and README-grade files in the target folder.
 
-- If `.memstead/workspace.toml` exists, the workspace is already initialised — skip to step 4 (write `.mcp.json`). Read the mem `name` and `schema` from `.memstead/config.json` (the per-mem config that `memstead init` writes alongside `workspace.toml`).
-- If unrelated files are present, surface the list and ask the user to either move to an empty folder or confirm they want to abort. Do not silently overwrite.
+Handle its outcomes:
 
-## Step 3 — Prompt for mem name and schema
+- **Success** — the summary names the workspace, mem, schema pin (`default@1.0.0`), and seed entity. Go to step 3.
+- **`WORKSPACE_ALREADY_INITIALISED`** — the folder is already a Memstead workspace; nothing to bootstrap. Tell the user, suggest `memstead overview` to inspect it, and go to step 3 (a restart may still be needed if `.mcp.json` is new to this Claude Code project).
+- **`TARGET_NOT_EMPTY`** — the folder has content quickstart won't touch. Surface the error verbatim (it names the offending files) and ask the user whether to move the content out or start in a fresh folder (`mkdir my-graph && cd my-graph`). Do not delete or move anything without confirmation.
+- **Mem-name derivation failure** (folder name is not slug-shaped `^[a-z0-9][a-z0-9-]{0,62}[a-z0-9]$`) — re-run with an explicit name: `memstead quickstart --agent claude-code --name <slug>`. Ask the user for the name; suggest a slugified form of the folder name.
+- **Any other error** — surface the message verbatim and stop.
 
-Ask the user two questions. Use `AskUserQuestion` for the schema choice (a fixed list); ask for the mem name in plain text in the same response.
+If the user wants a schema other than the default, point them at `memstead link <scope/name>` (registry-published schemas) after setup — quickstart always pins `default@1.0.0`, the built-in 10-type schema.
 
-**Mem name.** Slug-shaped (`^[a-z0-9][a-z0-9-]{0,62}[a-z0-9]$`). If the cwd basename matches the slug pattern, suggest it as the default — that's the lowest-friction path.
+For scripted / CI use the strict variant is `memstead init` — this skill never needs it; quickstart is the interactive path.
 
-**Schema.** Two options for v1:
-
-- `default@1.0.0` (recommended) — the built-in 10-type schema (`spec`, `memo`, `concept`, `inquiry`, `model`, `narrative`, `perspective`, `principle`, `process`, `assertion`).
-- Custom — direct the user to run `memstead link <scope/name>` after setup to attach a registry-published schema; for now, fall back to `default@1.0.0`.
-
-Recommend `default@1.0.0` unless the user explicitly wants something else.
-
-## Step 4 — Run `memstead init`
-
-Once both inputs are confirmed:
-
-```bash
-"$MEMSTEAD_BIN" init --name "<mem-name>" --schema "<schema-pin>"
-```
-
-The command exits 0 on success and writes:
-
-- `.memstead/workspace.toml` — the marker `memstead-mcp` walks for when discovering a workspace.
-- `.memstead/config.json` — per-mem config (`{format, name, schema}`).
-- `.memstead/state/mounts.json` — engine-managed mount records.
-- `.memstead/cache/` (empty).
-- `.memstead/memstead-io/` (empty).
-
-If it errors (non-empty target, invalid name, invalid schema), surface the message verbatim and stop.
-
-## Step 5 — Write `.mcp.json`
-
-Write `.mcp.json` in the workspace root pointing at the resolved `MEMSTEAD_MCP_BIN`. Use the absolute path so the spawned MCP server does not need `memstead-mcp` on the parent shell's `PATH` at agent-spawn time:
-
-```json
-{
-  "mcpServers": {
-    "memstead": {
-      "command": "<MEMSTEAD_MCP_BIN>"
-    }
-  }
-}
-```
-
-No `args` field — `memstead-mcp` walks up from its working directory looking for `.memstead/workspace.toml`, which `memstead init` just wrote.
-
-If `.mcp.json` already exists, do not overwrite without confirmation. If the existing file already has an `mcpServers.memstead` entry, leave it alone and tell the user — that's the more-common case (workspace re-init under an existing Claude Code project).
-
-## Step 6 — Tell the user to restart Claude Code
+## Step 3 — Tell the user to restart Claude Code
 
 The MCP server only registers on Claude Code startup. Tell the user explicitly:
 
-> Setup complete. **Restart Claude Code** for the `memstead` MCP server to register. Once you're back, run `/start` to see your (empty) graph, then `/interview <topic>` to capture knowledge into entities, or just chat — the agent can call `memstead_search` / `memstead_create` / etc. directly.
+> Setup complete. **Restart Claude Code** for the `memstead` MCP server to register. Once you're back, run `/start` to see your graph, then `/interview <topic>` to capture knowledge into entities, or just chat — the agent can call `memstead_search` / `memstead_create` / etc. directly.
 
 Do not try to verify the MCP server is reachable from inside this run — the new server only spawns on the next Claude Code session.
 
 ## Notes
 
-- **Why `command -v` over `which`.** `command -v` is POSIX, doesn't shell out, and returns absolute paths reliably across `bash`, `zsh`, `dash`, and `sh`. `which` is non-standard and varies by distro.
-- **Why no `args: ["--config", ...]`.** That arg is mem-repo-only; the basis `memstead-mcp` walks for `.memstead/workspace.toml` automatically. Passing it would error on the basis binary (the flag is gated out at the clap layer).
-- **No drift handling needed.** Filesystem-mem has no git layer, so there's no `mem-repo/.git/` to verify, no schema-pin negotiation against `__SYSTEM`, no multi-mem routing. The setup flow is genuinely just: install → init → register.
+- **No hand-written config.** `memstead quickstart` owns the workspace store layout (`.memstead/workspace.toml`, `.memstead/config.json`, `.memstead/state/mounts.json`) and `.mcp.json`. The skill never writes or edits these — duplicated init logic drifts from the CLI. In particular, `.memstead/config.json` carries no mem name: the engine derives the mem name from the folder and rejects a stray `name` key (`LEGACY_FIELD_PRESENT`).
+- **`.mcp.json` conflicts.** quickstart handles the existing-file case itself; if the user reports a pre-existing hand-authored `.mcp.json` with a different `memstead` entry, inspect it with the user rather than overwriting.
+- **No drift handling needed.** Filesystem-mem has no git layer, so there's no `mem-repo/.git/` to verify, no schema-pin negotiation against `__MEMSTEAD`, no multi-mem routing. The setup flow is genuinely just: install → quickstart → restart.

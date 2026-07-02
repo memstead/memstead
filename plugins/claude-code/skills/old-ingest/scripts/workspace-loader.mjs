@@ -221,9 +221,12 @@ export function loadWorkspace(workspaceRoot, opts = {}) {
   for (const v of (dump.mems || [])) {
     if (typeof v?.name !== 'string') continue;
     memMeta[v.name] = {
-      schema: v.schema ?? null,
+      // Real dump wire is snake_case: `schema_ref` / `write_guidance`
+      // (see `DumpMem` in memstead-cli's workspace.rs). Internal shape
+      // stays camelCase.
+      schema: v.schema_ref ?? null,
       description: v.description ?? null,
-      writeGuidance: (v.writeGuidance && typeof v.writeGuidance === 'object') ? v.writeGuidance : {},
+      writeGuidance: (v.write_guidance && typeof v.write_guidance === 'object') ? v.write_guidance : {},
       snapshotToken: typeof v.snapshot_token === 'string' ? v.snapshot_token : null,
     };
   }

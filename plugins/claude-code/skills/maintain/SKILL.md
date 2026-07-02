@@ -14,18 +14,18 @@ Single-pass graph health check. Fixes what's auto-fixable, flags the rest, refre
 
 ## Step 1: Health check
 
-Call `memstead_health` with `include: ["orphans", "stubs", "most_connected"]`.
+Call `memstead_health` with `include: ["orphans", "stubs", "missing_fields", "stale", "most_connected"]`.
 
 If `total_nodes` is 0 (no real entities) → report "graph is empty, nothing to maintain" and stop.
 
-Collect all issues from the response:
+Collect all issues from the response (each `include` key lands as a top-level field; the `summary` object carries the counts):
 
 | Source field | Issue type |
 |-------------|------------|
-| `structural.orphans` | Disconnected entities (no relationships) |
-| `structural.stubs` | Unresolved wiki-link targets |
-| `structural.missing_fields` | Entities missing identity or purpose |
-| `freshness.stale` | Entities not modified in a long time |
+| `orphans` | Disconnected entities (no relationships) |
+| `stubs` | Unresolved wiki-link targets |
+| `missing_fields` | Entities missing schema-required health fields |
+| `stale` | Entities not modified past their type's staleness threshold |
 
 ## Step 2: Fix auto-fixable issues
 

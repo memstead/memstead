@@ -12,10 +12,11 @@ Capture knowledge from a conversation into Memstead entities. The user is the ex
 
 ## Step 1: Activate interview mode
 
-Create the state file so the UserPromptSubmit hook re-injects interview rules on every turn:
+Create the state file so the UserPromptSubmit hook re-injects interview rules on every turn. The hook reads `<mem-dir>/.memstead/interview-active`, where the mem dir comes from the engine mount list — for the standard single-mem workspace that is the **workspace root** (the directory carrying `.memstead/workspace.toml`). Resolve it first so writer and reader name the same file even when the session cwd is a subdirectory:
 
 ```bash
-mkdir -p .memstead && cat > .memstead/interview-active << 'RULES'
+WS_ROOT="$(pwd)"; while [ ! -f "$WS_ROOT/.memstead/workspace.toml" ] && [ "$WS_ROOT" != "/" ]; do WS_ROOT="$(dirname "$WS_ROOT")"; done
+mkdir -p "$WS_ROOT/.memstead" && cat > "$WS_ROOT/.memstead/interview-active" << 'RULES'
 You are in INTERVIEW MODE — capturing knowledge into Memstead entities.
 
 RULES (apply to every response):
@@ -60,10 +61,11 @@ Adapt your language to the user's language.
 
 ## Step 5: Close
 
-When the user is done:
+When the user is done, remove the state file from the same resolved location step 1 wrote it to (re-resolve — shell state does not persist between bash calls):
 
 ```bash
-rm -f .memstead/interview-active
+WS_ROOT="$(pwd)"; while [ ! -f "$WS_ROOT/.memstead/workspace.toml" ] && [ "$WS_ROOT" != "/" ]; do WS_ROOT="$(dirname "$WS_ROOT")"; done
+rm -f "$WS_ROOT/.memstead/interview-active"
 ```
 
 Show a summary: entities created, relationships established, open questions for next time.

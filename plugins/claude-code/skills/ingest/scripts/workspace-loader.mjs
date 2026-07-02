@@ -219,9 +219,13 @@ export function loadWorkspace(workspaceRoot, opts = {}) {
   for (const v of (dump.mems || [])) {
     if (typeof v?.name !== 'string') continue;
     memMeta[v.name] = {
-      schema: v.schema ?? null,
+      // The dump wire is uniformly snake_case: the schema pin ships as
+      // `schema_ref`, writing guidance as `write_guidance` (see `DumpMem`
+      // in memstead-cli's workspace.rs). The loader's *internal* shape
+      // stays camelCase — only the wire read below names the wire keys.
+      schema: v.schema_ref ?? null,
       description: v.description ?? null,
-      writeGuidance: (v.writeGuidance && typeof v.writeGuidance === 'object') ? v.writeGuidance : {},
+      writeGuidance: (v.write_guidance && typeof v.write_guidance === 'object') ? v.write_guidance : {},
       snapshotToken: typeof v.snapshot_token === 'string' ? v.snapshot_token : null,
       // Engine-held source-change baseline, keyed per `<ingest>/<facet>`.
       // The dump emits opaque string tokens; the ingest loop diffs the

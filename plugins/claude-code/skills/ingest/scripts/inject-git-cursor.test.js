@@ -50,9 +50,9 @@ function writeDump(root, syncState, { name = 'engine-dest' } = {}) {
     workspace_root: root,
     mems: [{
       name,
-      schema: 'sample@0.1.0',
+      schema_ref: 'sample@0.1.0',
       description: null,
-      writeGuidance: {},
+      write_guidance: {},
       snapshot_token: 'snap-fixed',
       ...(syncState ? { sync_state: syncState } : {}),
     }],

@@ -82,6 +82,16 @@ describe('readFolderMemDirs', () => {
     assert.deepEqual(readFolderMemDirs(root), [resolve(root, 'engine')]);
   });
 
+  it('resolves path: "" to the workspace root (the shape `memstead init`/`quickstart` write)', () => {
+    // The engine's single root-level mem is recorded with an EMPTY path —
+    // the mem's entity files live at the workspace root itself. A
+    // truthiness check on the path used to drop this mount, leaving every
+    // quickstart workspace unguarded and the interview state file unread.
+    const root = makeWorkspace([{ mem: 'probe', storage: { type: 'folder', path: '' } }]);
+    fixtures.push(root);
+    assert.deepEqual(readFolderMemDirs(root), [resolve(root)]);
+  });
+
   it('returns [] when mounts.json is absent', () => {
     const root = mkdtempSync(join(tmpdir(), 'memstead-nomounts-'));
     mkdirSync(join(root, '.memstead'), { recursive: true });

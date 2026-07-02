@@ -47,9 +47,9 @@ function writeDump(root, syncState) {
     mems: [
       {
         name: 'engine-dest',
-        schema: 'sample@0.1.0',
+        schema_ref: 'sample@0.1.0',
         description: null,
-        writeGuidance: {},
+        write_guidance: {},
         snapshot_token: 'snap-0',
         ...(syncState ? { sync_state: syncState } : {}),
       },

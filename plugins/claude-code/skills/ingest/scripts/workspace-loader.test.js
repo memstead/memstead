@@ -16,11 +16,31 @@ import { join } from 'node:path';
 
 import { loadWorkspace } from './workspace-loader.mjs';
 
+// Fixture mirrors the REAL `memstead workspace dump --json` wire — uniformly
+// snake_case (`schema_ref`, `write_guidance`), captured from an actual CLI
+// run. Do NOT "simplify" the keys to the loader's internal camelCase shape:
+// a fixture emitting the loader's own casing masked a live bug where every
+// mem's schema silently resolved to null against the real CLI.
 const DUMP = {
   format: 'workspace-dump/v0',
   mems: [
-    { name: 'macos', schema: 'software@0.1.0' },
-    { name: 'engine', schema: 'software@0.1.0' },
+    {
+      name: 'macos',
+      capability: 'writable',
+      schema_ref: 'software@0.1.0',
+      description: null,
+      write_guidance: { granularity: 'one entity per subsystem' },
+      snapshot_token: '14d738d9b0d9852c8e9b1ac67692f6a118c90d1a',
+      sync_state: { 'macos-graph/source-tree': '1ddc4bf5c5b251ab613af323cfa90d4b8bdae5db' },
+    },
+    {
+      name: 'engine',
+      capability: 'writable',
+      schema_ref: 'software@0.1.0',
+      description: null,
+      write_guidance: {},
+      // `snapshot_token` / `sync_state` are omitted-when-empty on the wire.
+    },
   ],
   schemas: {},
 };
@@ -84,6 +104,19 @@ describe('workspace-loader — four-primitive store', () => {
       // Single destination from destination_mem.
       assert.equal(ing.destinations.length, 1);
       assert.equal(ing.destinations[0].mem, 'macos');
+
+      // Per-mem metadata resolved off the real snake_case wire. These
+      // assertions are the regression net for the casing bug: reading
+      // `v.schema` / `v.writeGuidance` off a `schema_ref` / `write_guidance`
+      // wire made schema null and guidance {} for every mem.
+      assert.equal(ws.memMeta.macos.schema, 'software@0.1.0');
+      assert.deepEqual(ws.memMeta.macos.writeGuidance, { granularity: 'one entity per subsystem' });
+      assert.equal(ws.memMeta.macos.snapshotToken, '14d738d9b0d9852c8e9b1ac67692f6a118c90d1a');
+      assert.deepEqual(ws.memMeta.macos.syncState, { 'macos-graph/source-tree': '1ddc4bf5c5b251ab613af323cfa90d4b8bdae5db' });
+      assert.equal(ws.memMeta.engine.schema, 'software@0.1.0');
+      assert.deepEqual(ws.memMeta.engine.writeGuidance, {});
+      assert.equal(ws.memMeta.engine.snapshotToken, null);
+      assert.deepEqual(ws.memMeta.engine.syncState, {});
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

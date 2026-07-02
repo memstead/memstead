@@ -32,13 +32,13 @@ function writeFiles(root, files) {
 // destination mem (`engine-dest`, carrying the sync_state baseline).
 function writeDump(root, { srcSnapshot, baseline }) {
   const dest = {
-    name: 'engine-dest', schema: 'sample@0.1.0', description: null,
-    writeGuidance: {}, snapshot_token: 'dest-snap',
+    name: 'engine-dest', schema_ref: 'sample@0.1.0', description: null,
+    write_guidance: {}, snapshot_token: 'dest-snap',
     ...(baseline ? { sync_state: { 'graph-run/graphsrc': baseline } } : {}),
   };
   const src = {
-    name: 'engine', schema: 'sample@0.1.0', description: null,
-    writeGuidance: {}, snapshot_token: srcSnapshot,
+    name: 'engine', schema_ref: 'sample@0.1.0', description: null,
+    write_guidance: {}, snapshot_token: srcSnapshot,
   };
   const dump = {
     format: 'workspace-dump/v0',

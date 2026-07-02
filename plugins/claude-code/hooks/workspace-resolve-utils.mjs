@@ -72,7 +72,12 @@ export function readFolderMemDirs(workspaceRoot) {
   for (const m of Array.isArray(mounts) ? mounts : []) {
     if (m?.storage?.type !== 'folder') continue;
     const rel = m.storage.path ?? m.storage.dir ?? m.mem;
-    if (!rel) continue;
+    // `""` is the shape `memstead init` / `memstead quickstart` actually
+    // write for the single root-level mem: the mem lives AT the workspace
+    // root. A truthiness check here made every quickstart workspace
+    // resolve to zero mem dirs — guards fail-open, interview state file
+    // never read. Only skip when no string path resolves at all.
+    if (typeof rel !== 'string') continue;
     dirs.push(resolve(workspaceRoot, rel));
   }
   return dirs;
