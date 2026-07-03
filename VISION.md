@@ -130,7 +130,9 @@ The project itself is the test case. Memstead must keep its own specs synchronis
 
 ## Competitive positioning
 
-Not Obsidian — a writing tool with graph visualisation. Not Notion — a collaboration tool with AI bolted on. Memstead is a **graph engine with a markdown storage layer**. The surface similarity to Obsidian (markdown plus links plus graph) is a communication challenge, not a product overlap.
+Memstead's category is agent memory: the systems that give AI agents durable state — mem0, Zep/Graphiti, Letta, basic-memory, and the memory built into coding agents themselves. Most of the category *derives* memory: an extraction pipeline distils conversations into a vector or graph store and optimises recall. Memstead sits at the *authored* end: agents and humans deliberately write typed entities into a schema-validated graph, stored as markdown in a git repository the user owns. Derived memory optimises what an agent recalls; an authored mem is a model of a subject — reviewable in diffs, portable as a versioned package, and correct by construction rather than by extraction. [PRIOR_ART.md](PRIOR_ART.md#the-2026-agent-memory-category) carries the tool-by-tool comparison.
+
+Obsidian and Notion are adjacent tools with a different job, not competitors. Obsidian shares the substrate — markdown, wikilinks, a graph view — but is a thinking-and-writing environment for humans; the shared substrate is why an Obsidian user's mental model transfers to Memstead in minutes, not a sign of product overlap. Notion demonstrated typed structured records for human teams inside a closed SaaS; Memstead takes the typed-record idea and moves it to open files, write-time schema validation, and an agent-first MCP surface. Both are excellent at what they do; neither validates writes, types relationships, or offers agents the graph as a first-class query surface — because that was never their job.
 
 Differentiators: schema-driven structure, typed and validated relationships, MCP-native AI access, drift detection at the data layer, community clustering for navigation, git-native versioning with structured provenance.
 

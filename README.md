@@ -10,6 +10,8 @@ Under the hood: each **mem** is a typed graph of interconnected entities. A **sc
 
 Use it for software specs, ADRs, decision logs, ontologies, research notes, or any domain you define. New here? [CONCEPTS.md](CONCEPTS.md) is the three-minute tour of the fourteen terms everything else assumes — each links into the normative [glossary](GLOSSARY.md).
 
+Memstead is part of the 2026 agent-memory wave — alongside mem0, Zep/Graphiti, Letta, and basic-memory — but sits at the authored end of it: agents write schema-validated, typed entities into markdown files in a git repository you own, rather than an extraction pipeline distilling conversations into a retrieval store. Where neighbours share the markdown substrate (basic-memory, Letta's MemFS), Memstead adds the layer they leave to convention: writes validated against a pinned schema, a typed relationship vocabulary, and git provenance on every mutation. The honest tool-by-tool comparison is in [PRIOR_ART.md](PRIOR_ART.md#the-2026-agent-memory-category).
+
 > **Status: pre-1.0.** APIs, schemas, file formats, CLI flags, and the wire shape of MCP tools and HTTP endpoints may change without notice. Not yet stable. Back up your data before exercising mutation operations. See [LICENSING.md](LICENSING.md) for per-folder licenses and [SECURITY.md](SECURITY.md) for vulnerability disclosure.
 
 ## Quickstart
