@@ -186,25 +186,46 @@ pub fn parse_entries(
             continue;
         }
 
-        let resolved_type = resolve_type_for_entry(mem_schema, &entry.content);
+        // Panic boundary: one poisoned file must never abort the whole
+        // mem's load. A parser panic degrades to a per-file error like
+        // any other parse failure; the remaining entities still load.
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let resolved_type = resolve_type_for_entry(mem_schema, &entry.content);
+            parser::parse_markdown(
+                &entry.content,
+                &entry.relative_path,
+                resolved_type.as_ref(),
+                mem,
+            )
+        }));
 
-        match parser::parse_markdown(
-            &entry.content,
-            &entry.relative_path,
-            resolved_type.as_ref(),
-            mem,
-        ) {
-            Ok(mut result) => {
+        match outcome {
+            Ok(Ok(mut result)) => {
                 result.entity.file_path = entry.relative_path;
                 entities.push(result);
             }
-            Err(e) => {
+            Ok(Err(e)) => {
                 errors.push((entry.source_path, e.to_string()));
+            }
+            Err(panic) => {
+                errors.push((
+                    entry.source_path,
+                    format!("parser panicked: {}", panic_message(panic)),
+                ));
             }
         }
     }
 
     LoadResult { entities, errors }
+}
+
+/// Extract a human-readable message from a caught panic payload.
+fn panic_message(panic: Box<dyn std::any::Any + Send>) -> String {
+    panic
+        .downcast_ref::<&str>()
+        .map(|s| (*s).to_string())
+        .or_else(|| panic.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "unknown panic payload".to_string())
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -543,6 +564,42 @@ mod tests {
 
         assert_eq!(results[0].entity.relationships.len(), 1);
         assert!(results[1].entity.relationships.is_empty());
+    }
+
+    #[test]
+    fn load_isolates_poisoned_file_and_keeps_the_rest() {
+        // The regression shape from the audit: a frontmatter value of a
+        // single quote character used to panic strip_quotes and abort
+        // the whole mem's load. It must now parse (the fix) — and even
+        // a genuine parser panic must surface as a per-file error, not
+        // take down the load (the catch_unwind boundary).
+        let dir = setup_mem(&[
+            (
+                "good.md",
+                "---\ntype: spec\n---\n# Good\n\n## Identity\n\nGood.\n",
+            ),
+            ("poisoned.md", "---\ntype: spec\nvalue: \"\n---\n# Poisoned\n\n## Identity\n\nStill parses.\n"),
+        ]);
+        let schema = Schema::builtin_default();
+        let result = load_mem(dir.path(), "specs", &schema).unwrap();
+        assert_eq!(
+            result.entities.len(),
+            2,
+            "lone-quote frontmatter must parse; errors: {:?}",
+            result.errors
+        );
+    }
+
+    #[test]
+    fn panic_message_extracts_str_and_string_payloads() {
+        // No content shape is currently known that makes the parser
+        // panic (that's the point of the strip_quotes fix), so the
+        // boundary's message plumbing is exercised with real panics
+        // directly.
+        let p = std::panic::catch_unwind(|| panic!("boom")).unwrap_err();
+        assert_eq!(panic_message(p), "boom");
+        let p = std::panic::catch_unwind(|| panic!("{}", String::from("owned boom"))).unwrap_err();
+        assert_eq!(panic_message(p), "owned boom");
     }
 
     #[test]
