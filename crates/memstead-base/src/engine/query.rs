@@ -186,7 +186,7 @@ impl Engine {
 
     /// Overwrite the in-memory pipeline configs. The workspace-root boot
     /// paths call this after [`crate::pipeline_store::load_pipeline_configs`];
-    /// exposed so the pro boot helper (a separate crate) can populate the
+    /// exposed so the full boot helper (a separate crate) can populate the
     /// same surface.
     pub fn set_pipeline_configs(&mut self, configs: crate::pipeline_store::PipelineConfigs) {
         self.pipeline_configs = configs;
@@ -231,7 +231,7 @@ impl Engine {
     }
 
     /// Git-branch ops bundle currently installed on this engine.
-    /// `None` on basis-flavor engines that don't see mem-repo
+    /// `None` on lean-flavor engines that don't see mem-repo
     /// mounts. Returned by value because [`super::GitBranchOps`] is
     /// `Copy`. `create_mem` reaches for
     /// the bundle to drive `prune_residue` against an unmounted
@@ -265,7 +265,7 @@ impl Engine {
     /// [`crate::workspace::MountStorage`] when they need accessors
     /// that don't make sense on every backend (e.g. gitdir / branch
     /// for `memstead_health { include_config: true }`'s git-class
-    /// payload). Backends that want the equivalent of pro's
+    /// payload). Backends that want the equivalent of full's
     /// `engine.gitdir_for(mem)` match
     /// `engine.mount(mem).map(|m| &m.storage)` against
     /// `MountStorage::GitBranch { gitdir, branch }` and walk
@@ -589,7 +589,7 @@ impl Engine {
     /// Workspace root the engine booted from, when one is known.
     /// `None` for engines built directly from a mount list (tests,
     /// ad-hoc consumers). Set by [`Self::from_workspace_root`] and
-    /// the pro counterpart.
+    /// the full counterpart.
     pub fn workspace_root(&self) -> Option<&Path> {
         self.workspace_root.as_deref()
     }
@@ -801,7 +801,7 @@ impl Engine {
         // sees the SuspiciousNestedPrefix / DuplicateSectionHeading
         // findings without reaching into private engine state. The
         // MCP handler further appends request-scoped warnings on
-        // top. Mirrors pro's merge.
+        // top. Mirrors full's merge.
         if !self.load_warnings.is_empty() {
             let mut merged = self.load_warnings.clone();
             merged.append(&mut summary.warnings);
@@ -1010,7 +1010,7 @@ impl Engine {
     /// permitted under the current [`crate::WorkspaceSettings`]
     /// cross-mem link policy.
     ///
-    /// Resolution rules (matches pro's `mem_router` semantics):
+    /// Resolution rules (matches full's `mem_router` semantics):
     /// 1. Same-mem edge (`from_mem == to_mem`) → always
     ///    allowed; the policy gates *cross*-mem edges only.
     /// 2. Explicit `cross_mem_links[from_mem]`:
@@ -1990,7 +1990,7 @@ community:
     /// Reverse declaration order to prove the default tracks declaration
     /// order rather than a fixed name: with `other` declared first it
     /// becomes the default. Together with the test above this pins the
-    /// basis as mount order, not name sort.
+    /// lean as mount order, not name sort.
     #[test]
     fn default_writable_mem_follows_declaration_order() {
         let tmp = TempDir::new().unwrap();
@@ -2063,7 +2063,7 @@ community:
         // Build a heterogeneous engine and verify Engine::mount /
         // Engine::mounts surface the operator-facing Mount records.
         // Handlers branch on MountStorage variants through this
-        // accessor (replacing pro's gitdir_for / worktree_for /
+        // accessor (replacing full's gitdir_for / worktree_for /
         // mem_head_sha / mem_config_for direct-engine
         // accessors).
         let tmp = TempDir::new().unwrap();
@@ -2433,7 +2433,7 @@ community:
 
     #[test]
     fn gitdir_for_folder_mount_returns_no_gitdir_error() {
-        // Folder mounts do not have a gitdir — pro's contract surfaces
+        // Folder mounts do not have a gitdir — full's contract surfaces
         // a mem-level error, not UnknownMem. Mirror that here.
         let tmp = TempDir::new().unwrap();
         let mem_dir = tmp.path().to_path_buf();
@@ -2949,6 +2949,6 @@ community:
         );
     }
 
-    // ---- Engine::from_workspace_root (basis boot path) --------------
+    // ---- Engine::from_workspace_root (lean boot path) --------------
 
 }

@@ -1,4 +1,4 @@
-//! Pro MCP-binary configuration helpers.
+//! Full MCP-binary configuration helpers.
 //!
 //! Post-rebuild, the MCP server's operator-edited settings live in
 //! `<workspace>/.memstead/workspace.toml` and are parsed once by

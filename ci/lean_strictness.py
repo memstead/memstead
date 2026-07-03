@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Basis-build smoke: schema-strictness probes.
+"""Lean-build smoke: schema-strictness probes.
 
 Pre-strictness-axis-fix the filesystem-mem write path silently
 accepted unknown sections, missing required sections, and out-of-enum
@@ -97,16 +97,16 @@ def run(memstead: Path, memstead_mcp: Path) -> int:
             code = (missing.structured_content or {}).get("code")
             assert_eq(code, "MISSING_REQUIRED_SECTION", "MISSING_REQUIRED_SECTION code")
 
-        sys.stderr.write("basis_strictness: OK\n")
+        sys.stderr.write("lean_strictness: OK\n")
         return 0
     finally:
         cleanup_workspace(workspace)
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Basis MCP strictness probe.")
-    parser.add_argument("--memstead", required=True, type=Path, help="Path to the basis `memstead-basis` binary.")
-    parser.add_argument("--memstead-mcp", required=True, type=Path, help="Path to the basis `memstead-mcp` binary.")
+    parser = argparse.ArgumentParser(description="Lean MCP strictness probe.")
+    parser.add_argument("--memstead", required=True, type=Path, help="Path to the lean `memstead` binary.")
+    parser.add_argument("--memstead-mcp", required=True, type=Path, help="Path to the lean `memstead-mcp` binary.")
     args = parser.parse_args()
     sys.exit(run(args.memstead, args.memstead_mcp))
 

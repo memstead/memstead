@@ -60,7 +60,7 @@ pub struct FilesystemMcpServer {
 
 impl FilesystemMcpServer {
     /// Construct from a workspace root. Boots the unified
-    /// [`Engine`] via [`Engine::from_workspace_root`] (basis path —
+    /// [`Engine`] via [`Engine::from_workspace_root`] (lean path —
     /// folder + archive backends only). The error envelope wraps
     /// every layer (layout dispatch, store load, backend
     /// instantiation, engine construction) under one [`BootError`].
@@ -143,7 +143,7 @@ impl FilesystemMcpServer {
 /// branching on the structured shape get the typed code without parsing
 /// text. Mirror of `crate::error_envelope::tool_error_with_payload`'s
 /// payload-less shape — the per-flavour symmetry is what makes the
-/// wire-byte contract uniform across basis and pro. Pre-fix the text
+/// wire-byte contract uniform across lean and full. Pre-fix the text
 /// channel emitted a JSON-stringified `{code, message}` payload; that
 /// form parsed for machine consumers but missed the documented
 /// prefix-form contract.
@@ -385,8 +385,8 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
         EngineError::MemHasIncomingRefs { mem, referrers } => {
             // Single-mem filesystem boot path never produces
             // MemHasIncomingRefs in practice — mem-delete is a
-            // pro-only operation. The arm is here for exhaustiveness;
-            // the envelope shape matches the pro-side mapping so
+            // full-only operation. The arm is here for exhaustiveness;
+            // the envelope shape matches the full-side mapping so
             // wire-byte parity holds if the filesystem flavour ever
             // gains a mem-delete surface.
             let referrers_json: Vec<_> = referrers
@@ -765,9 +765,9 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
             )
         }
         // Codes follow `EngineError::code()` — the single wire-code
-        // source every surface (pro MCP, CLI, wasm) shares. These two
+        // source every surface (full MCP, CLI, wasm) shares. These two
         // historically drifted (`MEM_WRITER_ERROR` / `PARSE_AFTER_WRITE`);
-        // `basis_backend_and_parse_after_write_codes_follow_code_contract`
+        // `lean_backend_and_parse_after_write_codes_follow_code_contract`
         // pins them to `code()` so a re-divergence fails the build.
         EngineError::Backend(e) => tool_error("MEM_ERROR", &e.to_string()),
         EngineError::ParseAfterWrite(e) => {
@@ -778,7 +778,7 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
         // Schema-resolution, boot-path, and lifecycle variants surface
         // as their own typed codes so the wire contract matches the
         // mem-repo server. Pre-fix this set collapsed to `INTERNAL`
-        // — a basis-fireable variant (multi-folder workspaces can trip
+        // — a lean-fireable variant (multi-folder workspaces can trip
         // DuplicateMem / UnknownMem; cross_mem_links policy can
         // trip ReadOnlyMount; generic input validation produces
         // InvalidInput) shipped as INTERNAL instead of its typed code,
@@ -1258,8 +1258,8 @@ impl FilesystemMcpServer {
                 // 03). WarningHint's Serialize impl produces the
                 // `{ code, message, details }` envelope shared with
                 // the mem-repo `RelateResult`.
-                // Surface `orphan_stubs_removed` so the basis surface
-                // matches pro on the relate response shape.
+                // Surface `orphan_stubs_removed` so the lean surface
+                // matches full on the relate response shape.
                 let durable = mem_is_durable(&engine, outcome.from.mem());
                 let body = serde_json::json!({
                     "from": outcome.from.to_string(),
@@ -1319,7 +1319,7 @@ impl FilesystemMcpServer {
         let md = render_search_markdown(&result, offset);
         // Structured envelope
         // on `structured_content`, rendered markdown on the text
-        // channel; basis MCP mirrors pro's split so cross-flavour
+        // channel; lean MCP mirrors full's split so cross-flavour
         // agents see the same wire contract.
         let envelope = memstead_base::render::build_search_envelope(&result, offset);
         let structured =
@@ -1329,7 +1329,7 @@ impl FilesystemMcpServer {
 
     #[tool(
         name = "memstead_health",
-        description = "Health summary for the filesystem-mem workspace: orphans, stubs, missing required fields, stale entities. Returns the same JSON shape as the mem-repo `memstead_health` (single-mem, so `writable_mems` carries one entry). Detail sections are produced via the kernel's `compute_health`. `include` accepts the shared health key set — today the basis surface dispatches `dangling_links` (matching the mem-repo response shape: `{from, target_id, target_path, section}`) and validates every key against the allowed set, emitting `UNKNOWN_INCLUDE_KEY` on the response's `warnings[]` for typos. `conformance` / `integrity` are dispatched too: `conformance` lints every entity against the effective schema (the pin, or `target_schema` when given) into a `findings` array of `{id, axis, code, detail}` with write-time typed codes; `integrity` adds the consistency axis (DANGLING_LINK, ORPHAN_STUB) to the same list. Other detail keys (`orphans`, `stubs`, …) are accepted but the v1 surface returns the full report regardless — narrowing is a follow-up.",
+        description = "Health summary for the filesystem-mem workspace: orphans, stubs, missing required fields, stale entities. Returns the same JSON shape as the mem-repo `memstead_health` (single-mem, so `writable_mems` carries one entry). Detail sections are produced via the kernel's `compute_health`. `include` accepts the shared health key set — today the lean surface dispatches `dangling_links` (matching the mem-repo response shape: `{from, target_id, target_path, section}`) and validates every key against the allowed set, emitting `UNKNOWN_INCLUDE_KEY` on the response's `warnings[]` for typos. `conformance` / `integrity` are dispatched too: `conformance` lints every entity against the effective schema (the pin, or `target_schema` when given) into a `findings` array of `{id, axis, code, detail}` with write-time typed codes; `integrity` adds the consistency axis (DANGLING_LINK, ORPHAN_STUB) to the same list. Other detail keys (`orphans`, `stubs`, …) are accepted but the v1 surface returns the full report regardless — narrowing is a follow-up.",
         annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false)
     )]
     fn memstead_health(&self, Parameters(p): Parameters<HealthParams>) -> CallToolResult {
@@ -1339,7 +1339,7 @@ impl FilesystemMcpServer {
 
         // Validate include keys against the shared catalogue. Unknown
         // keys surface as a typed `UNKNOWN_INCLUDE_KEY` warning — the
-        // same shape pro emits and the same shape the CLI consumes.
+        // same shape full emits and the same shape the CLI consumes.
         for key in &include {
             if !memstead_base::ops::health::HEALTH_INCLUDE_KEYS.contains(&key.as_str()) {
                 health.warnings.push(memstead_base::WarningHint::UnknownIncludeKey {
@@ -1355,8 +1355,8 @@ impl FilesystemMcpServer {
         // `dangling_links` opt-in: the engine's `HealthSummary` carries
         // a `dangling_links: Option<...>` slot that handlers populate
         // (the kernel's `compute_health` leaves it `None`). Populating
-        // it from the basis surface gives agents the documented
-        // include-key without forcing them through the pro engine.
+        // it from the lean surface gives agents the documented
+        // include-key without forcing them through the full engine.
         if include.iter().any(|s| s == "dangling_links") {
             let dangling = memstead_base::ops::health::collect_dangling_links(engine.store(), None);
             health.dangling_links = Some(dangling);
@@ -2104,14 +2104,14 @@ mod tests {
     use rmcp::handler::server::wrapper::Parameters;
     use tempfile::TempDir;
 
-    /// The basis MCP error map must emit the same wire code as
-    /// `EngineError::code()` — the single source every surface (pro MCP,
+    /// The lean MCP error map must emit the same wire code as
+    /// `EngineError::code()` — the single source every surface (full MCP,
     /// CLI, wasm) follows. `Backend` and `ParseAfterWrite` historically
     /// shipped `MEM_WRITER_ERROR` / `PARSE_AFTER_WRITE` here, diverging
     /// from `code()`'s `MEM_ERROR` / `PARSE_ERROR`. Pin them so a
     /// re-divergence fails the build.
     #[test]
-    fn basis_backend_and_parse_after_write_codes_follow_code_contract() {
+    fn lean_backend_and_parse_after_write_codes_follow_code_contract() {
         let cases: Vec<EngineError> = vec![
             EngineError::Backend(memstead_base::backend::BackendError::Other("disk".into())),
             EngineError::ParseAfterWrite("boom".into()),
@@ -2128,23 +2128,23 @@ mod tests {
                 .to_string();
             assert_eq!(
                 code, expected,
-                "basis error-map code drifted from EngineError::code()"
+                "lean error-map code drifted from EngineError::code()"
             );
         }
     }
 
-    /// `memstead_relate` is idempotent on the basis surface, matching the
+    /// `memstead_relate` is idempotent on the lean surface, matching the
     /// mem-repo server: duplicate-add and remove-nonexistent are
-    /// typed-warning no-ops, so a retry converges. The pro-side
-    /// annotation meta-test is `mem-repo`-gated; this basis-side test
+    /// typed-warning no-ops, so a retry converges. The full-side
+    /// annotation meta-test is `mem-repo`-gated; this lean-side test
     /// pins the parity so the two flavours cannot silently re-diverge.
     #[test]
-    fn relate_annotation_is_idempotent_on_basis() {
+    fn relate_annotation_is_idempotent_on_lean() {
         let tools = FilesystemMcpServer::tool_router().list_all();
         let relate = tools
             .iter()
             .find(|t| t.name == "memstead_relate")
-            .expect("memstead_relate is on the basis surface");
+            .expect("memstead_relate is on the lean surface");
         let ann = relate
             .annotations
             .as_ref()
@@ -2152,7 +2152,7 @@ mod tests {
         assert_eq!(
             ann.idempotent_hint,
             Some(true),
-            "basis memstead_relate idempotent_hint must match the mem-repo server's `true`"
+            "lean memstead_relate idempotent_hint must match the mem-repo server's `true`"
         );
     }
 
@@ -3684,7 +3684,7 @@ mod tests {
 
     /// `memstead_overview include=["dangling_links"]` lists every non-stub
     /// entity whose section body wiki-links resolve to a stub or
-    /// missing target. Pre-fix the basis overview surface hardcoded
+    /// missing target. Pre-fix the lean overview surface hardcoded
     /// `[]` here and the `## Dangling Links` block never rendered,
     /// even when the health surface populated the same
     /// view. The test fails against that state.

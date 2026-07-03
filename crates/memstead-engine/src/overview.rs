@@ -1,5 +1,5 @@
 //! Shared overview composer used by both the `memstead_overview` MCP tool
-//! and the pro CLI overview command.
+//! and the full CLI overview command.
 //!
 //! Lifted from `memstead-mcp/src/server.rs::memstead_overview_unified`.
 //! The function produces structurally identical markdown for both
@@ -8,7 +8,7 @@
 //! and equivalent pairs for `memstead_mem_create` / `memstead_mem_delete`).
 //!
 //! The MCP wrapper handles drift-warning collection, response-cap
-//! chunking, and envelope wrapping — none of that lives here. The pro
+//! chunking, and envelope wrapping — none of that lives here. The full
 //! CLI command applies its own chunking + markdown/JSON output mode.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -59,7 +59,7 @@ pub struct OverviewArgs<'a> {
 
 /// Typed input failures the composer surfaces. The MCP wrapper maps
 /// each variant to its existing envelope (`INVALID_INPUT`,
-/// `UNKNOWN_MEM`); the pro CLI does the same to its CLI error codes.
+/// `UNKNOWN_MEM`); the full CLI does the same to its CLI error codes.
 #[derive(Debug, thiserror::Error)]
 pub enum ComposeOverviewError {
     /// The include set carries `schema_types`, a removed key. The

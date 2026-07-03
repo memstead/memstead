@@ -872,7 +872,7 @@ impl memstead_base::backend::MemBackend for GitTreeMemWriter {
 /// in the tree. Errors propagate as `BackendError::Other`.
 ///
 /// Used by `read_mem_config` to read per-mem configs from
-/// `__MEMSTEAD` without needing a full pro `MemConfig` parser path —
+/// `__MEMSTEAD` without needing a full full `MemConfig` parser path —
 /// the engine parses bytes uniformly across backends.
 fn read_blob_from_ref(
     gitdir: &Path,
@@ -2029,8 +2029,8 @@ mod tests {
     }
 
     #[test]
-    fn instantiate_pro_backend_constructs_git_branch_writer() {
-        // Smoke test: instantiate_pro_backend on a GitBranch mount
+    fn instantiate_full_backend_constructs_git_branch_writer() {
+        // Smoke test: instantiate_full_backend on a GitBranch mount
         // produces a backend that can list against an empty branch
         // without erroring (proves the writer is wired with the
         // right gitdir + ref shape).
@@ -2053,7 +2053,7 @@ mod tests {
             migration_target: None,
         };
         let backend: Box<dyn MemBackend> =
-            crate::storage::instantiate_pro_backend(&mount).unwrap();
+            crate::storage::instantiate_full_backend(&mount).unwrap();
         // Empty branch → empty list, no error.
         assert!(backend.list_entities().unwrap().is_empty());
         // Provenance log on a fresh branch → empty.
@@ -2061,8 +2061,8 @@ mod tests {
     }
 
     #[test]
-    fn instantiate_pro_backend_accepts_branch_with_or_without_refs_prefix() {
-        // The pro instantiator normalises a bare branch name
+    fn instantiate_full_backend_accepts_branch_with_or_without_refs_prefix() {
+        // The full instantiator normalises a bare branch name
         // ("engine") to its fully-qualified ref ("refs/heads/engine").
         // Mounts may carry either shape; the writer must end up keyed
         // on the same per-branch mutex regardless.
@@ -2086,7 +2086,7 @@ mod tests {
             migration_target: None,
         };
             let backend: Box<dyn MemBackend> =
-                crate::storage::instantiate_pro_backend(&mount).unwrap();
+                crate::storage::instantiate_full_backend(&mount).unwrap();
             // Both shapes resolve cleanly (no panic, no error).
             assert!(backend.list_entities().unwrap().is_empty());
         }
@@ -2182,8 +2182,8 @@ mod tests {
 
     // ---- git-branch changes_since dispatch --------------------------
     //
-    // Tests the `PRO_GIT_BRANCH_OPS.changes_since` dispatcher that
-    // pro boot installs on `memstead_base::Engine`. The dispatcher wraps
+    // Tests the `FULL_GIT_BRANCH_OPS.changes_since` dispatcher that
+    // full boot installs on `memstead_base::Engine`. The dispatcher wraps
     // `crate::ops::changes::changes_since` and presents it through the
     // `memstead_base::GitBranchChangesSinceFn` signature.
 
@@ -2193,7 +2193,7 @@ mod tests {
         mem: &str,
         since: &str,
     ) -> Result<memstead_base::ops::BackendChanges, memstead_base::backend::BackendError> {
-        (crate::storage::PRO_GIT_BRANCH_OPS.changes_since)(
+        (crate::storage::FULL_GIT_BRANCH_OPS.changes_since)(
             gitdir,
             branch,
             mem,

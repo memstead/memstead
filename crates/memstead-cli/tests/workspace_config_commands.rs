@@ -1,10 +1,10 @@
 #![cfg(feature = "mem-repo")]
-// `memstead workspace ...` config commands ship only in the pro build.
+// `memstead workspace ...` config commands ship only in the full build.
 
 //! Integration tests for the `memstead workspace` write-side subcommand
 //! family.
 //!
-//! Pro flavour only — basis CLIs don't expose `memstead workspace`. Each
+//! Full flavour only — lean CLIs don't expose `memstead workspace`. Each
 //! test seeds a fresh workspace (the minimum-viable `workspace.toml`
 //! that `memstead mem-repo init` materialises), runs one or more
 //! subcommands, and asserts on the resulting TOML and the engine's

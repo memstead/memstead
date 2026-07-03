@@ -109,7 +109,7 @@ impl Engine {
 
         if new_id == *id {
             // Title-with-same-slug: surface a Tier-2 warning rather
-            // than touching disk for nothing. Matches pro's
+            // than touching disk for nothing. Matches full's
             // RenameResult slug-noop shape so autonomous skills
             // can distinguish the silent no-op from a successful
             // cosmetic rewrite via the typed warning code.
@@ -727,7 +727,7 @@ mod tests {
                 None,
             )
             .unwrap();
-        // Wire-shape parity with pro: slug-noop is Ok+warning, not
+        // Wire-shape parity with full: slug-noop is Ok+warning, not
         // an error. Old/new IDs are equal; old/new paths are equal;
         // commit_sha is empty (no disk write); warnings carries the
         // typed TitleNormalizedToSlugNoop hint.

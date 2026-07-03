@@ -1,6 +1,6 @@
 #![cfg(feature = "mem-repo")]
 // `memstead mem init` is part of the mem-repo subcommand surface; the
-// basis build does not ship it.
+// lean build does not ship it.
 
 //! Integration test for `memstead mem init`.
 //!

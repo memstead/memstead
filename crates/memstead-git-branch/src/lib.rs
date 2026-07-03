@@ -20,15 +20,15 @@
 //!   [`memstead_base::backend::MemBackend`] implementation that buffers
 //!   mutations and applies them via `gix::object::tree::Editor`
 //!   against the per-mem branch.
-//! - [`storage::instantiate_pro_backend`] — the [`memstead_base::BackendFactory`]
-//!   pro consumers install on the unified `Engine` at boot
+//! - [`storage::instantiate_full_backend`] — the [`memstead_base::BackendFactory`]
+//!   full consumers install on the unified `Engine` at boot
 //!   ([`workspace_store::engine_from_workspace_root`]) so the
 //!   factory can materialise git-branch backends in addition to
 //!   folder + archive.
-//! - [`workspace_store::engine_from_workspace_root`] — pro-flavour
+//! - [`workspace_store::engine_from_workspace_root`] — full-flavour
 //!   workspace boot path that loads the two-layer file adapter
 //!   (`.memstead/workspace.toml` + `.memstead/state/mounts.json`).
-//! - Pro-side helpers consumed by the unified surface:
+//! - Full-side helpers consumed by the unified surface:
 //!   `mem_repo_config::commit_config_at_gitdir` (per-mem config
 //!   writes into `__MEMSTEAD` for git-branch mounts),
 //!   `ops::agent_notes::agent_notes_since`,
@@ -37,7 +37,7 @@
 //!
 //! Built only with the `mem-repo` Cargo feature on `memstead-mcp` /
 //! `memstead-cli` (or via the workspace-level `--features mem-repo`).
-//! Basis builds skip this crate entirely; the basis MCP / CLI
+//! Lean builds skip this crate entirely; the lean MCP / CLI
 //! binaries link only `memstead-base`.
 
 pub use memstead_base::chunking;

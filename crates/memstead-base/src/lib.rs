@@ -88,7 +88,7 @@ pub use workspace::{
 };
 pub use workspace_store::{
     FileWorkspaceStore, InstantiateError, Layout, StoreError, WORKSPACE_STORE_DIR,
-    WorkspaceStoreAdapter, detect_layout, instantiate_basis_backend, is_workspace_root,
+    WorkspaceStoreAdapter, detect_layout, instantiate_lean_backend, is_workspace_root,
     standalone_workspace,
 };
 

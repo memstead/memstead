@@ -38,9 +38,9 @@
 //! The adapter produces a [`Workspace`] (mount list + operator
 //! policy). Turning each [`Mount`]'s [`MountStorage`] into a
 //! `Box<dyn MemBackend>` is a separate concern — handled by
-//! [`instantiate_basis_backend`] for folder + archive variants. The
+//! [`instantiate_lean_backend`] for folder + archive variants. The
 //! git-branch backend lives in the `memstead-git-branch` crate behind the
-//! `mem-repo` Cargo feature; consumers in the basis flavour cannot
+//! `mem-repo` Cargo feature; consumers in the lean flavour cannot
 //! materialise a `MountStorage::GitBranch` mount and surface
 //! [`InstantiateError::GitBranchRequiresMemRepoFeature`].
 
@@ -387,7 +387,7 @@ struct WorkspaceTomlDoc {
     persistence_adapter: PersistenceAdapterDecl,
     /// `[mem_management]` rule lists. Both arrays default to empty
     /// — an empty list means "no agent-driven mem create / delete
-    /// allowed" (mirrors pro). Operators add `[[mem_management.create]]`
+    /// allowed" (mirrors full). Operators add `[[mem_management.create]]`
     /// / `[[mem_management.delete]]` entries to opt in.
     #[serde(default)]
     mem_management: MemManagementWire,
@@ -437,7 +437,7 @@ struct MemManagementWire {
 /// Wire shape for one `[[mem_management.create]]` entry. Mirrors
 /// [`crate::workspace::CreateRuleSetting`] with serde defaults so
 /// `schemas` may be omitted (treated as the empty allowlist —
-/// effectively a deny rule, surfaced for parity with pro).
+/// effectively a deny rule, surfaced for parity with full).
 ///
 /// `default_cross_links` is decoded as a raw `toml::Value` and lifted
 /// to `CrossLinkValue` post-decode via the same parser as the
@@ -746,32 +746,32 @@ impl MountWire {
     }
 }
 
-/// Errors surfaced by [`instantiate_basis_backend`].
+/// Errors surfaced by [`instantiate_lean_backend`].
 #[derive(Debug, thiserror::Error)]
 pub enum InstantiateError {
     /// Mount declares a `MountStorage::GitBranch` storage variant
-    /// but the basis flavour cannot construct a git-branch backend
+    /// but the lean flavour cannot construct a git-branch backend
     /// (the implementation lives in `memstead-git-branch` behind the
-    /// `mem-repo` Cargo feature). Pro consumers expose a
-    /// feature-gated `instantiate_pro_backend` that handles all
+    /// `mem-repo` Cargo feature). Full consumers expose a
+    /// feature-gated `instantiate_full_backend` that handles all
     /// three variants.
     #[error(
         "mem {mem}: git-branch backend requires the `mem-repo` feature; \
-         use `instantiate_pro_backend` from memstead-git-branch, or rebuild with --features mem-repo"
+         use `instantiate_full_backend` from memstead-git-branch, or rebuild with --features mem-repo"
     )]
     GitBranchRequiresMemRepoFeature { mem: String },
 }
 
-/// Materialise a [`MemBackend`] for `mount` using the basis-flavour
+/// Materialise a [`MemBackend`] for `mount` using the lean-flavour
 /// backends (folder + archive). Returns an error for the git-branch
-/// variant — pro consumers handle that with a feature-gated
+/// variant — full consumers handle that with a feature-gated
 /// counterpart in `memstead-git-branch`.
 ///
 /// Lives in `memstead-base` because both folder and archive backends are
 /// always-on; the function shape (one mount in, one boxed backend
 /// out) stays uniform for both flavours so the engine's
-/// `from_mounts` glue is identical between basis and pro.
-pub fn instantiate_basis_backend(
+/// `from_mounts` glue is identical between lean and full.
+pub fn instantiate_lean_backend(
     mount: &Mount,
 ) -> Result<Box<dyn MemBackend>, InstantiateError> {
     match &mount.storage {
@@ -1012,7 +1012,7 @@ name = "file-two-layer"
     #[test]
     fn load_with_no_mem_management_yields_empty_settings() {
         // Workspace.toml without a `[mem_management]` section
-        // produces the default empty settings — mirrors pro's
+        // produces the default empty settings — mirrors full's
         // behaviour where missing rules mean "no agent-driven
         // mem create / delete allowed".
         let tmp = TempDir::new().unwrap();
@@ -1698,7 +1698,7 @@ name = "file-two-layer"
     }
 
     #[test]
-    fn instantiate_basis_backend_handles_folder_archive_and_in_memory() {
+    fn instantiate_lean_backend_handles_folder_archive_and_in_memory() {
         let tmp = TempDir::new().unwrap();
         let folder = folder_mount("local", tmp.path().to_path_buf());
         let archive_path = tmp.path().join("ext.mem");
@@ -1729,11 +1729,11 @@ name = "file-two-layer"
             migration_target: None,
         };
 
-        let _: Box<dyn MemBackend> = instantiate_basis_backend(&folder).unwrap();
-        let _: Box<dyn MemBackend> = instantiate_basis_backend(&archive).unwrap();
-        // The in-memory variant is a basis backend — no feature gate,
+        let _: Box<dyn MemBackend> = instantiate_lean_backend(&folder).unwrap();
+        let _: Box<dyn MemBackend> = instantiate_lean_backend(&archive).unwrap();
+        // The in-memory variant is a lean backend — no feature gate,
         // no path, materialises directly.
-        let _: Box<dyn MemBackend> = instantiate_basis_backend(&in_memory).unwrap();
+        let _: Box<dyn MemBackend> = instantiate_lean_backend(&in_memory).unwrap();
     }
 
     /// AC3 (plan 01): the in-memory storage variant round-trips through
@@ -1792,7 +1792,7 @@ name = "file-two-layer"
     }
 
     #[test]
-    fn instantiate_basis_backend_rejects_git_branch_with_typed_error() {
+    fn instantiate_lean_backend_rejects_git_branch_with_typed_error() {
         let mount = Mount {
             mem: "engine".to_string(),
             schema: Some(pin("default@1.0.0")),
@@ -1808,7 +1808,7 @@ name = "file-two-layer"
         // `unwrap_err()` requires Box<dyn MemBackend> to be Debug;
         // matching on the Result keeps the test gix-free of that
         // bound while still asserting the typed error.
-        match instantiate_basis_backend(&mount) {
+        match instantiate_lean_backend(&mount) {
             Err(InstantiateError::GitBranchRequiresMemRepoFeature { mem }) => {
                 assert_eq!(mem, "engine");
             }

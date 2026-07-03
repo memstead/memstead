@@ -179,7 +179,7 @@ impl Engine {
             MountStorage::GitBranch { gitdir, branch } => {
                 let hook = self.git_branch_ops.as_ref().ok_or_else(|| {
                     EngineError::Backend(crate::backend::BackendError::Other(
-                        "git-branch export hook not installed (pro flavour not loaded)"
+                        "git-branch export hook not installed (full flavour not loaded)"
                             .to_string(),
                     ))
                 })?;

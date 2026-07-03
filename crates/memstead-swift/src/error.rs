@@ -280,15 +280,15 @@ impl From<PipelineEditError> for MemsteadError {
     }
 }
 
-impl From<memstead_engine::ProEngineError> for MemsteadError {
-    fn from(err: memstead_engine::ProEngineError) -> Self {
-        use memstead_engine::ProEngineError as P;
+impl From<memstead_engine::FullEngineError> for MemsteadError {
+    fn from(err: memstead_engine::FullEngineError) -> Self {
+        use memstead_engine::FullEngineError as P;
         match err {
-            // A basis-side failure surfaced through the pro orchestrator
+            // A lean-side failure surfaced through the full orchestrator
             // (`UnknownMem`, `ReadOnlyMount`, `SchemaNotFound`, …)
             // delegates to the canonical `EngineError` mapping so typed
             // Swift variants (`UnknownMem`) survive the lift.
-            P::Basis(e) => e.into(),
+            P::Lean(e) => e.into(),
             // Every remaining variant is a caller-actionable lifecycle
             // refusal — workspace-policy gates, a malformed name, an
             // occupied location, or detected storage residue. They carry

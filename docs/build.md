@@ -44,12 +44,12 @@ The plugin runs without compilation. Everything else needs a build step. `./buil
 
 On macOS, before running the test suite the first time, follow [docs/macos-dev-setup.md](macos-dev-setup.md) — the Developer Tools exemption is required or `cargo nextest run` deadlocks. Not relevant for `build-engine.sh` itself, only for tests.
 
-## Two flavours: basis and pro
+## Two flavours: lean and full
 
 The engine has two build flavours:
 
-- **basis** — default features, folder backend only, no `gix`. `cargo build --no-default-features`.
-- **pro** — adds the git-branch storage backend. `cargo build --features mem-repo`. This is the local-dev default.
+- **lean** — folder backend only, no `gix`. `cargo build --no-default-features`.
+- **full** — adds the git-branch storage backend. This is the default build (the `mem-repo` feature is on by default): plain `cargo build`, or explicitly `cargo build --features mem-repo`.
 
 Both must stay green. `./run-tests.sh` runs both flavours plus the plugin gates; CI runs them as separate smoke jobs.
 

@@ -12,42 +12,42 @@ FAILED=()
 
 echo ""
 echo "══════════════════════════════════"
-echo "  Testing: engine (Rust, pro flavour)"
+echo "  Testing: engine (Rust, full flavour)"
 echo "══════════════════════════════════"
 if (cd "$ROOT" && cargo nextest run --workspace --features mem-repo); then
-  echo "  ✓ engine (pro) passed"
+  echo "  ✓ engine (full) passed"
 else
-  FAILED+=("engine-pro")
-  echo "  ✗ engine (pro) FAILED"
+  FAILED+=("engine-full")
+  echo "  ✗ engine (full) FAILED"
 fi
 
 echo ""
 echo "══════════════════════════════════"
-echo "  Testing: engine (Rust, basis flavour)"
+echo "  Testing: engine (Rust, lean flavour)"
 echo "══════════════════════════════════"
-# basis is the default-features, folder-backend-only build (no gix). Both
-# flavours must stay green — public CI runs basis-smoke and pro-smoke.
+# lean is the --no-default-features, folder-backend-only build (no gix). Both
+# flavours must stay green — public CI runs lean-smoke and full-smoke.
 if (cd "$ROOT" && cargo nextest run --workspace --no-default-features); then
-  echo "  ✓ engine (basis) passed"
+  echo "  ✓ engine (lean) passed"
 else
-  FAILED+=("engine-basis")
-  echo "  ✗ engine (basis) FAILED"
+  FAILED+=("engine-lean")
+  echo "  ✗ engine (lean) FAILED"
 fi
 
 echo ""
 echo "══════════════════════════════════"
-echo "  Testing: memstead-cli (true basis build)"
+echo "  Testing: memstead-cli (true lean build)"
 echo "══════════════════════════════════"
-# The workspace-wide basis run above still compiles memstead-cli WITH
+# The workspace-wide lean run above still compiles memstead-cli WITH
 # mem-repo: xtask depends on it with that feature on, and cargo unifies
 # features across one build graph. Only a targeted -p build exercises
-# the cli's real basis flavour (its cfg(not(mem-repo)) branches — e.g.
+# the cli's real lean flavour (its cfg(not(mem-repo)) branches — e.g.
 # the schema-new follow-up that routes through a fresh init).
 if (cd "$ROOT" && cargo nextest run -p memstead-cli --no-default-features); then
-  echo "  ✓ memstead-cli (true basis) passed"
+  echo "  ✓ memstead-cli (true lean) passed"
 else
-  FAILED+=("memstead-cli-basis")
-  echo "  ✗ memstead-cli (true basis) FAILED"
+  FAILED+=("memstead-cli-lean")
+  echo "  ✗ memstead-cli (true lean) FAILED"
 fi
 
 echo ""

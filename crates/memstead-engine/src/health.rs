@@ -267,7 +267,7 @@ pub fn compose_health(
 
     // Per-mem schema pins. Source from `engine.mount(name).schema` which
     // carries the pinned `SchemaRef`; render via `as_display()` to get the
-    // same `name@version` form pro emits.
+    // same `name@version` form full emits.
     //
     // Every *visible* mem appears — writable and read-only alike — each
     // carrying an explicit `writable` attribute. A read-only mount's pinned

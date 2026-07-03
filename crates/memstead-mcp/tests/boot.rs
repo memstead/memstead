@@ -1,5 +1,5 @@
 #![cfg(feature = "mem-repo")]
-//! Boot smoke test for the pro MCP binary (`memstead-mcp`).
+//! Boot smoke test for the full MCP binary (`memstead-mcp`).
 //!
 //! Spawns the binary as a subprocess against a tempdir workspace
 //! carrying the post-rebuild markers (`.memstead/workspace.toml`
@@ -105,7 +105,7 @@ fn pro_binary_boots_against_new_layout_workspace() {
     let tmp = TempDir::new().unwrap();
     seed_workspace(tmp.path());
 
-    // The pro binary checks `<workspace>/mem-repo/.git` shape on
+    // The full binary checks `<workspace>/mem-repo/.git` shape on
     // boot — `init_real_mem_repo` lays down a real bare repo with
     // `main` + `__MEMSTEAD` refs so the engine accepts it.
     memstead_git_branch::test_support::init_real_mem_repo(tmp.path(), &[]);
@@ -116,7 +116,7 @@ fn pro_binary_boots_against_new_layout_workspace() {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .expect("spawn memstead-mcp (pro) — confirm the binary built before running tests");
+        .expect("spawn memstead-mcp (full) — confirm the binary built before running tests");
 
     let mut stdin = child.stdin.take().expect("child stdin");
     writeln!(stdin, "{}", initialize_request()).expect("write initialize");

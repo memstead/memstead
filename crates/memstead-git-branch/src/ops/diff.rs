@@ -1248,7 +1248,7 @@ mod tests {
     #[test]
     fn engine_diff_routes_git_branch_mount_through_hook() {
         // End-to-end: build an engine with a git-branch mount that
-        // points at our seeded gitdir, install the pro ops bundle so
+        // points at our seeded gitdir, install the full ops bundle so
         // the engine's `diff` dispatcher reaches our `diff_two_refs`
         // implementation, and assert the returned `Diff` is the same
         // one calling the function directly would produce.
@@ -1284,10 +1284,10 @@ mod tests {
             cross_linkable: true,
             migration_target: None,
         };
-        let backend = crate::storage::instantiate_pro_backend(&mount).unwrap();
+        let backend = crate::storage::instantiate_full_backend(&mount).unwrap();
         let mut engine =
             memstead_base::Engine::from_mounts(vec![(mount, backend)]).unwrap();
-        engine.set_git_branch_ops(crate::storage::PRO_GIT_BRANCH_OPS);
+        engine.set_git_branch_ops(crate::storage::FULL_GIT_BRANCH_OPS);
 
         let diff = engine
             .diff(
@@ -1328,10 +1328,10 @@ mod tests {
             cross_linkable: true,
             migration_target: None,
         };
-        let backend = crate::storage::instantiate_pro_backend(&mount).unwrap();
+        let backend = crate::storage::instantiate_full_backend(&mount).unwrap();
         let mut engine =
             memstead_base::Engine::from_mounts(vec![(mount, backend)]).unwrap();
-        engine.set_git_branch_ops(crate::storage::PRO_GIT_BRANCH_OPS);
+        engine.set_git_branch_ops(crate::storage::FULL_GIT_BRANCH_OPS);
 
         let err = engine
             .diff("specs", "nope-a", "nope-b", None)

@@ -324,7 +324,7 @@ mod tests {
     #[test]
     fn engine_branch_reset_routes_git_branch_mount_and_surfaces_typed_error() {
         // End-to-end: build an engine with a git-branch mount, install
-        // the pro ops bundle, then assert the typed surfacing:
+        // the full ops bundle, then assert the typed surfacing:
         // `PUSHED_COMMITS_PROTECTED` un-marshals into the typed
         // `EngineError::PushedCommitsProtected` variant.
         let tmp = TempDir::new().unwrap();
@@ -349,10 +349,10 @@ mod tests {
             cross_linkable: true,
             migration_target: None,
         };
-        let backend = crate::storage::instantiate_pro_backend(&mount).unwrap();
+        let backend = crate::storage::instantiate_full_backend(&mount).unwrap();
         let mut engine =
             memstead_base::Engine::from_mounts(vec![(mount, backend)]).unwrap();
-        engine.set_git_branch_ops(crate::storage::PRO_GIT_BRANCH_OPS);
+        engine.set_git_branch_ops(crate::storage::FULL_GIT_BRANCH_OPS);
 
         let err = engine
             .branch_reset("specs", &_sha_a)

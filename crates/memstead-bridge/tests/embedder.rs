@@ -70,10 +70,10 @@ fn engine_with_specs(gitdir: &Path) -> memstead_base::Engine {
         cross_linkable: true,
             migration_target: None,
         };
-    let backend = memstead_git_branch::storage::instantiate_pro_backend(&mount).unwrap();
+    let backend = memstead_git_branch::storage::instantiate_full_backend(&mount).unwrap();
     let mut engine =
         memstead_base::Engine::from_mounts(vec![(mount, backend)]).unwrap();
-    engine.set_git_branch_ops(memstead_git_branch::storage::PRO_GIT_BRANCH_OPS);
+    engine.set_git_branch_ops(memstead_git_branch::storage::FULL_GIT_BRANCH_OPS);
     engine
 }
 

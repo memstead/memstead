@@ -650,10 +650,10 @@ mod tests {
             cross_linkable: true,
             migration_target: None,
         };
-        let backend = crate::storage::instantiate_pro_backend(&mount).unwrap();
+        let backend = crate::storage::instantiate_full_backend(&mount).unwrap();
         let mut engine =
             memstead_base::Engine::from_mounts(vec![(mount, backend)]).unwrap();
-        engine.set_git_branch_ops(crate::storage::PRO_GIT_BRANCH_OPS);
+        engine.set_git_branch_ops(crate::storage::FULL_GIT_BRANCH_OPS);
 
         let err = engine.pull("specs", "origin").unwrap_err();
         match err {
@@ -708,10 +708,10 @@ mod tests {
             cross_linkable: true,
             migration_target: None,
         };
-        let backend = crate::storage::instantiate_pro_backend(&mount).unwrap();
+        let backend = crate::storage::instantiate_full_backend(&mount).unwrap();
         let mut engine =
             memstead_base::Engine::from_mounts(vec![(mount, backend)]).unwrap();
-        engine.set_git_branch_ops(crate::storage::PRO_GIT_BRANCH_OPS);
+        engine.set_git_branch_ops(crate::storage::FULL_GIT_BRANCH_OPS);
 
         let err = engine.push("specs", "origin", false).unwrap_err();
         match err {

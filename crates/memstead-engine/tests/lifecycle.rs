@@ -1,4 +1,4 @@
-//! Integration tests for the pro mem-lifecycle orchestrators
+//! Integration tests for the full mem-lifecycle orchestrators
 //! (`create_mem`, `delete_mem`). These tests construct an
 //! `memstead_base::Engine` directly from folder mounts and exercise the
 //! orchestrators against it — no MCP, no CLI, no workspace store.
@@ -6,7 +6,7 @@
 //! Imported wholesale from `memstead-base/src/engine/lifecycle.rs` when the
 //! orchestrators moved to this crate. The test bodies are unchanged
 //! beyond the import-path rewrites; the on-disk shapes and assertion
-//! invariants are exactly what basis ran before the lift.
+//! invariants are exactly what lean ran before the lift.
 
 use std::path::PathBuf;
 
@@ -17,7 +17,7 @@ use memstead_base::workspace::{
     WorkspaceSettings,
 };
 use memstead_base::{Engine, EngineError};
-use memstead_engine::{ProEngineError, mem_management};
+use memstead_engine::{FullEngineError, mem_management};
 use memstead_schema::SchemaRef;
 use tempfile::TempDir;
 
@@ -68,7 +68,7 @@ fn create_mem_rejects_overlong_note() {
     )
     .unwrap_err();
     match err {
-        ProEngineError::Basis(EngineError::InvalidInput(msg)) => {
+        FullEngineError::Lean(EngineError::InvalidInput(msg)) => {
             assert!(msg.contains("note exceeds"))
         }
         other => panic!("expected InvalidInput, got {other:?}"),
@@ -102,7 +102,7 @@ fn create_mem_rejects_when_no_allowlist_configured() {
     )
     .unwrap_err();
     match err {
-        ProEngineError::MemPathNotAllowed { reason, .. } => {
+        FullEngineError::MemPathNotAllowed { reason, .. } => {
             assert_eq!(reason, "no_allowlist_configured");
         }
         other => panic!("expected MemPathNotAllowed, got {other:?}"),
@@ -149,7 +149,7 @@ fn create_mem_rejects_name_collision() {
     )
     .unwrap_err();
     match err {
-        ProEngineError::Basis(EngineError::MemNameCollision { name, .. }) => {
+        FullEngineError::Lean(EngineError::MemNameCollision { name, .. }) => {
             assert_eq!(name, "alpha")
         }
         other => panic!("expected MemNameCollision, got {other:?}"),
@@ -363,7 +363,7 @@ fn create_mem_rejects_double_underscore_segment() {
         // Reserved-prefix names route through the typed
         // `InvalidMemName` variant with the `reserved_prefix` reason
         // discriminator, not the `InvalidInput` catch-all.
-        ProEngineError::InvalidMemName { name, reason } => {
+        FullEngineError::InvalidMemName { name, reason } => {
             assert_eq!(name, "__reserved/alpha");
             assert_eq!(reason, "reserved_prefix");
         }
@@ -424,7 +424,7 @@ fn create_mem_structural_invalid_name_matrix() {
         )
         .unwrap_err();
         match err {
-            ProEngineError::InvalidMemName { name: got_name, reason } => {
+            FullEngineError::InvalidMemName { name: got_name, reason } => {
                 assert_eq!(got_name, *name, "name echoes the offending input");
                 assert_eq!(
                     reason, *expected_reason,
@@ -476,7 +476,7 @@ fn create_mem_rejects_basename_mismatch() {
     )
     .unwrap_err();
     match err {
-        ProEngineError::Basis(EngineError::InvalidInput(msg)) => {
+        FullEngineError::Lean(EngineError::InvalidInput(msg)) => {
             assert!(msg.contains("does not match the basename"));
         }
         other => panic!("expected InvalidInput, got {other:?}"),
@@ -487,7 +487,7 @@ fn create_mem_rejects_basename_mismatch() {
 fn delete_mem_rejects_when_no_allowlist_configured() {
     // Engine with no [[mem_management.delete]] rules → V1
     // unified always errors with MemPathNotAllowed.
-    // Mirrors pro's agent-mode contract; operator_mode bypass
+    // Mirrors full's agent-mode contract; operator_mode bypass
     // lifts later.
     let tmp = TempDir::new().unwrap();
     let mem_dir = tmp.path().join("specs");
@@ -510,7 +510,7 @@ fn delete_mem_rejects_when_no_allowlist_configured() {
     )
     .unwrap_err();
     match err {
-        ProEngineError::MemPathNotAllowed { reason, candidate, .. } => {
+        FullEngineError::MemPathNotAllowed { reason, candidate, .. } => {
             assert_eq!(reason, "no_allowlist_configured");
             assert_eq!(candidate, "specs");
         }
@@ -544,7 +544,7 @@ fn delete_mem_rejects_unknown_name() {
     .unwrap_err();
     assert!(matches!(
         err,
-        ProEngineError::Basis(EngineError::UnknownMem(v)) if v == "missing"
+        FullEngineError::Lean(EngineError::UnknownMem(v)) if v == "missing"
     ));
 }
 
@@ -572,7 +572,7 @@ fn delete_mem_rejects_overlong_note() {
     )
     .unwrap_err();
     match err {
-        ProEngineError::Basis(EngineError::InvalidInput(msg)) => {
+        FullEngineError::Lean(EngineError::InvalidInput(msg)) => {
             assert!(msg.contains("note exceeds"))
         }
         other => panic!("expected InvalidInput, got {other:?}"),
@@ -801,7 +801,7 @@ fn delete_mem_hierarchical_name_in_path_not_allowed_envelope() {
     )
     .unwrap_err();
     match err {
-        ProEngineError::MemPathNotAllowed { reason, candidate, .. } => {
+        FullEngineError::MemPathNotAllowed { reason, candidate, .. } => {
             assert_eq!(reason, "no_match");
             // The candidate IS the mem name verbatim — no
             // composition step.
@@ -887,7 +887,7 @@ fn create_mem_operator_mode_bypasses_empty_allowlist() {
     )
     .unwrap_err();
     match agent_err {
-        ProEngineError::MemPathNotAllowed { reason, .. } => {
+        FullEngineError::MemPathNotAllowed { reason, .. } => {
             assert_eq!(reason, "no_allowlist_configured");
         }
         other => panic!("expected MemPathNotAllowed, got {other:?}"),
@@ -943,7 +943,7 @@ fn create_mem_operator_mode_still_enforces_input_validation() {
     )
     .unwrap_err();
     match err {
-        ProEngineError::Basis(EngineError::InvalidInput(msg)) => {
+        FullEngineError::Lean(EngineError::InvalidInput(msg)) => {
             assert!(msg.contains("note exceeds"));
         }
         other => panic!("expected InvalidInput from operator-mode, got {other:?}"),
@@ -980,7 +980,7 @@ fn delete_mem_operator_mode_bypasses_empty_allowlist() {
     )
     .unwrap_err();
     match agent_err {
-        ProEngineError::MemPathNotAllowed { reason, .. } => {
+        FullEngineError::MemPathNotAllowed { reason, .. } => {
             assert_eq!(reason, "no_allowlist_configured");
         }
         other => panic!("expected MemPathNotAllowed, got {other:?}"),
@@ -1060,7 +1060,7 @@ fn delete_mem_policy_check_gates_on_delete_files() {
     )
     .unwrap_err();
     match agent_destroy_err {
-        ProEngineError::MemReferencedByPolicy { name, referring_mems } => {
+        FullEngineError::MemReferencedByPolicy { name, referring_mems } => {
             assert_eq!(name, "target");
             assert_eq!(referring_mems, vec!["referrer".to_string()]);
         }
@@ -1084,7 +1084,7 @@ fn delete_mem_policy_check_gates_on_delete_files() {
     )
     .unwrap_err();
     match operator_destroy_err {
-        ProEngineError::MemReferencedByPolicy { name, .. } => {
+        FullEngineError::MemReferencedByPolicy { name, .. } => {
             assert_eq!(name, "target");
         }
         other => panic!(
@@ -1242,7 +1242,7 @@ fn delete_mem_refuses_when_cross_mem_incoming_edges_remain() {
     )
     .unwrap_err();
     match err {
-        ProEngineError::Basis(EngineError::MemHasIncomingRefs { mem, referrers }) => {
+        FullEngineError::Lean(EngineError::MemHasIncomingRefs { mem, referrers }) => {
             assert_eq!(mem, "b");
             assert_eq!(referrers.len(), 1, "exactly one Write-Mem referrer");
             assert_eq!(referrers[0].from_id, "a--source");
@@ -1426,7 +1426,7 @@ fn delete_mem_router_only_refuses_when_cross_mem_incoming_edges_remain() {
     )
     .unwrap_err();
     match err {
-        ProEngineError::Basis(EngineError::MemHasIncomingRefs { mem, referrers }) => {
+        FullEngineError::Lean(EngineError::MemHasIncomingRefs { mem, referrers }) => {
             assert_eq!(mem, "b");
             assert_eq!(referrers.len(), 1);
             assert_eq!(referrers[0].from_id, "a--source");

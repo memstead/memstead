@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Pro-build smoke: mem-repo round-trip.
+"""Full-build smoke: mem-repo round-trip.
 
-Mirrors `basis_smoke.py` for the pro flavour. Bootstraps a mem-repo
-workspace (`memstead mem-repo init` + `memstead mem init`), boots the pro
+Mirrors `lean_smoke.py` for the full flavour. Bootstraps a mem-repo
+workspace (`memstead mem-repo init` + `memstead mem init`), boots the full
 `memstead-mcp`, exercises the full mutation surface end-to-end:
 
 * `memstead_create` a source + a target
@@ -15,12 +15,12 @@ workspace (`memstead mem-repo init` + `memstead mem init`), boots the pro
 
 The mem-repo path's surface differs from filesystem in subtle ways
 (14-tool surface, gitdir-backed commits, different changelog
-mechanism), so this probe runs the same shape as basis-mutation
+mechanism), so this probe runs the same shape as lean-mutation
 without the JSONL changelog inspection.
 
 Invocation::
 
-    python3 ci/pro_smoke.py \\
+    python3 ci/full_smoke.py \\
         --memstead path/to/target/release/memstead \\
         --memstead-mcp path/to/target/release/memstead-mcp
 """
@@ -55,7 +55,7 @@ def run(memstead: Path, memstead_mcp: Path) -> int:
 
         with McpServer(memstead_mcp, workspace) as server:
             tools = server.list_tools()
-            # Pro surface is 14 tools — read-only + mutation +
+            # Full surface is 14 tools — read-only + mutation +
             # mem-lifecycle (`memstead_mem_create`, `memstead_mem_delete`)
             # + `memstead_reload`. The probe exercises the entity-surface
             # subset; the lifecycle tools are covered in
@@ -71,7 +71,7 @@ def run(memstead: Path, memstead_mcp: Path) -> int:
                 "memstead_mem_delete",
                 "memstead_reload",
             ):
-                assert_true(required in tools, f"pro tool surface missing {required}")
+                assert_true(required in tools, f"full tool surface missing {required}")
 
             # ---- create source + target ------------------------------------
             source_create = server.call(
@@ -81,7 +81,7 @@ def run(memstead: Path, memstead_mcp: Path) -> int:
                     "entity_type": "spec",
                     "mem": "mymem",
                     "sections": {
-                        "identity": "Source entity for pro smoke.",
+                        "identity": "Source entity for full smoke.",
                         "purpose": "Drives update / relate / search checks.",
                     },
                 },
@@ -98,7 +98,7 @@ def run(memstead: Path, memstead_mcp: Path) -> int:
                     "entity_type": "spec",
                     "mem": "mymem",
                     "sections": {
-                        "identity": "Target entity for pro smoke.",
+                        "identity": "Target entity for full smoke.",
                         "purpose": "Lives at the receiving end of the USES edge.",
                     },
                 },
@@ -136,7 +136,7 @@ def run(memstead: Path, memstead_mcp: Path) -> int:
             assert_true(target_id in with_rel.text, "target id missing from entity body")
 
             # ---- search round-trip -----------------------------------------
-            # The pro `memstead_search` returns markdown only (no
+            # The full `memstead_search` returns markdown only (no
             # structuredContent on hits); inspect the body for the
             # source id rather than walking a JSON envelope.
             search = server.call("memstead_search", {"query": {"any": ["source"]}})
@@ -158,16 +158,16 @@ def run(memstead: Path, memstead_mcp: Path) -> int:
                     f"changes_since missing {required_id}",
                 )
 
-        sys.stderr.write("pro_smoke: OK\n")
+        sys.stderr.write("full_smoke: OK\n")
         return 0
     finally:
         cleanup_workspace(workspace)
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Pro MCP smoke probe.")
-    parser.add_argument("--memstead", required=True, type=Path, help="Path to the pro `memstead` binary.")
-    parser.add_argument("--memstead-mcp", required=True, type=Path, help="Path to the pro `memstead-mcp` binary.")
+    parser = argparse.ArgumentParser(description="Full MCP smoke probe.")
+    parser.add_argument("--memstead", required=True, type=Path, help="Path to the full `memstead` binary.")
+    parser.add_argument("--memstead-mcp", required=True, type=Path, help="Path to the full `memstead-mcp` binary.")
     args = parser.parse_args()
     sys.exit(run(args.memstead, args.memstead_mcp))
 

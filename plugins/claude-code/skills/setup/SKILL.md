@@ -9,7 +9,7 @@ allowed-tools: AskUserQuestion, Bash, Read, Write
 
 Walk a first-time user through bootstrapping a filesystem-mem Memstead workspace in the current directory. End state: a `.memstead/` workspace store plus `.mcp.json` are written (both by `memstead quickstart`), and the user has been told to restart Claude Code.
 
-This is the basis-product onboarding flow — the binaries are `memstead` (CLI) plus `memstead-mcp` (MCP server). There is no mem-repo, no multi-mem, no git history layer — that surface is the pro variant and is not reached from this skill.
+This is the lean-product onboarding flow — the binaries are `memstead` (CLI) plus `memstead-mcp` (MCP server). There is no mem-repo, no multi-mem, no git history layer — that surface is the full variant and is not reached from this skill.
 
 ## Step 1 — Resolve the binaries
 

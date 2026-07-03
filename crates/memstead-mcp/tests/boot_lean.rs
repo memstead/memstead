@@ -7,7 +7,7 @@
 //! request over stdin, reads the reply over stdout, asserts the
 //! envelope is well-formed.
 //!
-//! The pro equivalent (testing `memstead-mcp`) lives in
+//! The full equivalent (testing `memstead-mcp`) lives in
 //! `boot.rs` (gated to the full build).
 
 use std::io::{BufRead, BufReader, Write};
@@ -101,7 +101,7 @@ fn assert_initialize_envelope(response: &serde_json::Value) {
 }
 
 #[test]
-fn basis_binary_boots_against_new_layout_workspace() {
+fn lean_binary_boots_against_new_layout_workspace() {
     let tmp = TempDir::new().unwrap();
     seed_workspace(tmp.path());
 

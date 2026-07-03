@@ -1102,7 +1102,7 @@ fn export_markdown_on_filesystem_rejects() {
 /// "mem-repo-only" message so the operator knows to either move
 /// flavours or replay the updates one by one through `memstead update`.
 ///
-/// Only meaningful in the pro build — under `--no-default-features`
+/// Only meaningful in the full build — under `--no-default-features`
 /// the `batch-update` subcommand is gated out at the clap layer, so
 /// the bail-on-filesystem behaviour can't be exercised.
 #[test]
@@ -1132,7 +1132,7 @@ fn batch_update_on_filesystem_surfaces_mem_repo_only() {
 /// "mem-repo-only" message that the legacy `engine()` fallback
 /// produces.
 ///
-/// Only meaningful in the pro build — see the `batch_update_on_filesystem_*`
+/// Only meaningful in the full build — see the `batch_update_on_filesystem_*`
 /// twin for the rationale.
 #[test]
 fn workspace_dump_on_filesystem_surfaces_mem_repo_only() {

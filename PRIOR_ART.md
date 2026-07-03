@@ -15,7 +15,7 @@ Listing prior art is also a defensive measure: similarities to other tools in th
 
 - **[Jekyll](https://jekyllrb.com)** / **[Hugo](https://gohugo.io)** / **[Astro](https://astro.build)** — static-site generators popularised YAML frontmatter for per-page metadata in Markdown. Memstead's frontmatter shape (key-value metadata, type discriminator at the top of each file) follows the same convention.
 - **[Pollen](https://docs.racket-lang.org/pollen/)** — structured documents as code, but in Racket. Showed the value of treating document files as compileable artefacts.
-- **[Logseq](https://logseq.com)**, **[Foam](https://foambubble.github.io)**, **[Quartz](https://quartz.jzhao.xyz)** — all use git as the persistence layer for personal Markdown knowledge bases. Memstead extends this with first-class git-branch storage (the pro mem-repo) for mem-level versioning beyond outer-repo commits.
+- **[Logseq](https://logseq.com)**, **[Foam](https://foambubble.github.io)**, **[Quartz](https://quartz.jzhao.xyz)** — all use git as the persistence layer for personal Markdown knowledge bases. Memstead extends this with first-class git-branch storage (the full mem-repo) for mem-level versioning beyond outer-repo commits.
 - **[git-annex](https://git-annex.branchable.com)** — the precedent for using git's content-addressed model for non-source data. Memstead's optimistic-locking model (the `_hash` field on entities) borrows the spirit of content addressing.
 
 ## Schema validation
@@ -50,7 +50,7 @@ The following components were originally written for Memstead without reference 
 
 - The schema vocabulary (`software`, `default`, plus the `alias_target_rel_type` mechanism for body wiki-link auto-relations)
 - The MCP tool naming convention (`memstead_*`)
-- The basis/pro architecture split and the engine-as-only-git-consumer principle
+- The lean/full architecture split and the engine-as-only-git-consumer principle
 - The probe skill (exploratory engine testing via agent reasoning, with protocol files)
 - The Surface Parity Matrix as a first-class documentation artefact
 - The mem-repo branch-per-mem layout

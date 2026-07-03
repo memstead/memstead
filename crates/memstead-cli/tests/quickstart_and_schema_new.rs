@@ -316,7 +316,7 @@ fn schema_new_scaffold_validates_unmodified() {
 /// Follow-up AC: the printed three-command sequence, executed verbatim
 /// from a workspace, ends with the mem pinned to `acme@0.1.0` and
 /// accepting a `memstead create --type note`. (`mem set-schema` lives
-/// in the mem-repo-featured binary; the basis flavour covers the
+/// in the mem-repo-featured binary; the lean flavour covers the
 /// scaffold/validate/install prefix in the test above and below.)
 #[cfg(feature = "mem-repo")]
 #[test]
@@ -457,7 +457,7 @@ fn quickstart_malformed_agent_config_refuses_before_any_write() {
     assert!(!tmp.path().join(".memstead").exists(), "nothing was created");
 }
 
-/// Basis-flavour follow-up end-to-end: without `mem set-schema`, the
+/// Lean-flavour follow-up end-to-end: without `mem set-schema`, the
 /// printed sequence routes through a fresh mem — init pins the custom
 /// schema, then `schema install ../<name>` from inside the new folder
 /// makes the workspace boot. Executed as printed, it ends with a
@@ -466,14 +466,14 @@ fn quickstart_malformed_agent_config_refuses_before_any_write() {
 /// where every engine-booting command died with INTERNAL).
 #[cfg(not(feature = "mem-repo"))]
 #[test]
-fn schema_new_basis_follow_up_ends_in_working_fresh_mem() {
+fn schema_new_lean_follow_up_ends_in_working_fresh_mem() {
     let tmp = TempDir::new().unwrap();
     let out = stdout_of(
         memstead().current_dir(tmp.path()).args(["schema", "new", "acme"]).assert().success(),
     );
     assert!(
         out.contains("memstead init --name acme-mem --schema acme@0.1.0"),
-        "basis follow-up routes through a fresh init; got: {out}",
+        "lean follow-up routes through a fresh init; got: {out}",
     );
     assert!(
         out.contains("memstead schema install ../acme"),
@@ -481,7 +481,7 @@ fn schema_new_basis_follow_up_ends_in_working_fresh_mem() {
     );
     assert!(
         !out.contains("mem set-schema"),
-        "basis never prints the pro-only subcommand; got: {out}",
+        "lean never prints the full-only subcommand; got: {out}",
     );
 
     // The printed sequence, step by step (`mkdir && cd` become the
@@ -513,14 +513,14 @@ fn schema_new_basis_follow_up_ends_in_working_fresh_mem() {
         .success();
 }
 
-/// Basis follow-up scaffolded from INSIDE an existing workspace: the
+/// Lean follow-up scaffolded from INSIDE an existing workspace: the
 /// printed fresh-mem path must land outside it (workspaces don't nest,
-/// and the basis binary has no `memstead mem init` to fall back on).
+/// and the lean binary has no `memstead mem init` to fall back on).
 /// The test executes the paths exactly as printed and ends in a
 /// working mem.
 #[cfg(not(feature = "mem-repo"))]
 #[test]
-fn schema_new_basis_follow_up_from_inside_workspace_lands_outside() {
+fn schema_new_lean_follow_up_from_inside_workspace_lands_outside() {
     let tmp = TempDir::new().unwrap();
     let ws = tmp.path().join("my-graph");
     memstead().arg("quickstart").arg(&ws).assert().success();
@@ -585,7 +585,7 @@ fn schema_new_basis_follow_up_from_inside_workspace_lands_outside() {
 }
 
 /// `schema install` accepts the scaffolded package on the folder
-/// backend regardless of binary flavour (the basis prefix of the
+/// backend regardless of binary flavour (the lean prefix of the
 /// follow-up flow).
 #[test]
 fn schema_new_package_installs_into_folder_workspace() {

@@ -2,8 +2,8 @@
 //!
 //! `from_mounts` is the in-process constructor every test, the macOS
 //! UniFFI consumer, and the MCP filesystem server reach through.
-//! `from_workspace_root` is the basis boot helper that produces the
-//! same engine from a workspace root; the pro counterpart lives in
+//! `from_workspace_root` is the lean boot helper that produces the
+//! same engine from a workspace root; the full counterpart lives in
 //! `memstead_git_branch::engine_from_workspace_root` and follows the same
 //! shape with the git-branch backend added to the factory.
 //!
@@ -54,7 +54,7 @@ impl Engine {
     /// as a workspace-authored schema and combines with the builtin
     /// catalogue for per-mem schema-pin resolution. Workspace
     /// schemas take precedence on (name, version) collision —
-    /// matches pro's behaviour.
+    /// matches full's behaviour.
     ///
     /// `schemas_dir = None` is equivalent to [`Self::from_mounts`].
     /// Used by `engine_from_workspace_root` to thread the
@@ -276,7 +276,7 @@ impl Engine {
         crate::entity::store_builder::remap_alias_target_edge_sources(&mut store, &schemas);
 
         // Derive the runtime mem router from the mount list.
-        // Mirrors pro's `Engine::from_init` step that registers every
+        // Mirrors full's `Engine::from_init` step that registers every
         // mount with `MemRouterSnapshot` so handlers reach a
         // consistent writable/visible roster regardless of which
         // backend serves the mem.
@@ -298,7 +298,7 @@ impl Engine {
             load_warnings,
             pipeline_configs: crate::pipeline_store::PipelineConfigs::default(),
             mem_router: Arc::new(mem_router),
-            backend_factory: crate::workspace_store::instantiate_basis_backend,
+            backend_factory: crate::workspace_store::instantiate_lean_backend,
             git_branch_ops: None,
             event_subscribers: Arc::new(std::sync::Mutex::new(
                 crate::engine::events::SubscriberRegistry::new(),
@@ -307,15 +307,15 @@ impl Engine {
         })
     }
 
-    /// Boot an engine from a workspace root using only basis-flavour
+    /// Boot an engine from a workspace root using only lean-flavour
     /// backends (folder + archive). The MCP filesystem server, the
-    /// CLI's basis dispatcher, and the macOS UniFFI consumer all reach
+    /// CLI's lean dispatcher, and the macOS UniFFI consumer all reach
     /// the new engine through this entry point — replacing per-flavour
     /// init code with one call.
     ///
     /// Loads the workspace through [`crate::FileWorkspaceStore`],
     /// instantiates each mount's backend via
-    /// [`crate::instantiate_basis_backend`], and constructs the
+    /// [`crate::instantiate_lean_backend`], and constructs the
     /// engine via [`Engine::from_mounts`].
     ///
     /// Errors:
@@ -328,7 +328,7 @@ impl Engine {
     pub fn from_workspace_root(workspace_root: &Path) -> Result<Self, BootError> {
         use crate::workspace_store::{
             FileWorkspaceStore, Layout, WorkspaceStoreAdapter, detect_layout,
-            instantiate_basis_backend,
+            instantiate_lean_backend,
         };
 
         let workspace = match detect_layout(workspace_root) {
@@ -348,7 +348,7 @@ impl Engine {
         let mut mounts: Vec<(Mount, Box<dyn MemBackend>)> =
             Vec::with_capacity(workspace.mounts.len());
         for mount in workspace.mounts {
-            let backend = instantiate_basis_backend(&mount)?;
+            let backend = instantiate_lean_backend(&mount)?;
             mounts.push((mount, backend));
         }
         // Folder-backend authoring path: authored schema packages live
@@ -357,7 +357,7 @@ impl Engine {
         // `__MEMSTEAD:schemas/` ref. Read them through the folder
         // `SchemaSource` (which no-ops when the directory is absent, so a
         // workspace that authored no schemas resolves exactly as before —
-        // built-ins only). This is the basis flavour's schema-authoring
+        // built-ins only). This is the lean flavour's schema-authoring
         // path, which it lacked.
         use crate::schema_source::SchemaSource as _;
         let local = crate::schema_source::FolderSchemaSource::for_workspace(workspace_root)
@@ -389,7 +389,7 @@ impl Engine {
 }
 
 /// Derive a [`MemRouterSnapshot`] from the engine's resolved mount
-/// list. Mirrors pro's `Engine::from_init` mount-register loop so the
+/// list. Mirrors full's `Engine::from_init` mount-register loop so the
 /// runtime router carries the same writable/visible roster regardless
 /// of which backend serves each mem.
 ///
@@ -463,7 +463,7 @@ fn build_mem_router_from_mounts(mounts: &[MountedBackend]) -> MemRouterSnapshot 
 }
 
 /// Public re-export of [`resolve_builtin_schema_pin`] for lifecycle
-/// orchestrators in `memstead-engine`. Mirrors pro's
+/// orchestrators in `memstead-engine`. Mirrors full's
 /// `resolve_mem_schema` against the built-in catalogue;
 /// workspace-schema-registry resolution lifts later.
 pub fn resolve_builtin_schema_pin_pub(
@@ -1472,7 +1472,7 @@ community:
         );
     }
 
-    /// The basis folder authoring path: a schema package authored at the
+    /// The lean folder authoring path: a schema package authored at the
     /// fixed `<workspace>/.memstead/schemas/<name>@<version>/` location
     /// is resolved at boot, so a folder mem can pin a non-built-in
     /// schema. Before this wiring `from_workspace_root` loaded only
@@ -1688,7 +1688,7 @@ pattern = "exec-*"
         )
         .unwrap();
         // Hand-craft a state/mounts.json carrying a git-branch mount —
-        // the basis boot path can't instantiate that backend.
+        // the lean boot path can't instantiate that backend.
         let state_dir = memstead.join("state");
         std::fs::create_dir_all(&state_dir).unwrap();
         std::fs::write(

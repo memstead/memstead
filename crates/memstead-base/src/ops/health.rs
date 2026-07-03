@@ -25,8 +25,8 @@ use crate::graph::query;
 use crate::store::Store;
 
 /// Allowed `include` keys for `memstead_health` — the single source of
-/// truth shared across the basis MCP server, pro MCP server, and the
-/// basis CLI's `health` command. Adding a new include key here lights
+/// truth shared across the lean MCP server, full MCP server, and the
+/// lean CLI's `health` command. Adding a new include key here lights
 /// it up uniformly; agents see the same `UNKNOWN_INCLUDE_KEY` warning
 /// shape whether they reach health via MCP or CLI.
 pub const HEALTH_INCLUDE_KEYS: &[&str] = &[

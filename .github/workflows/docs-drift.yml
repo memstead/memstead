@@ -8,7 +8,7 @@
 # is byte-stable on identical source, so a non-empty diff is always a
 # surface change that the contributor forgot to regenerate.
 #
-# The job runs independently of `basis-smoke` and `pro-smoke` so a broken
+# The job runs independently of `lean-smoke` and `full-smoke` so a broken
 # extractor does not gate engine-only PRs that touched no surface.
 
 name: Docs drift check

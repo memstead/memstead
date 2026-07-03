@@ -48,13 +48,13 @@ fn seed_empty_workspace(root: &Path) {
 }
 
 /// Seed a single-mem folder workspace at `root` pinned to the
-/// `default@1.0.0` builtin schema. **Basis-only fixture.** The mount is
+/// `default@1.0.0` builtin schema. **Lean-only fixture.** The mount is
 /// `Write`/`Eager` and stores entities in `root` itself.
 ///
-/// Pro flavor cannot use this — the pro binary discovers mems from
+/// Full flavor cannot use this — the full binary discovers mems from
 /// `mem-repo/.git/` branches (not from the folder-mount state file)
 /// and would boot with zero writable mems against a folder-seeded
-/// workspace. Pro tests use [`seed_pro_workspace`] instead.
+/// workspace. Full tests use [`seed_full_workspace`] instead.
 fn seed_folder_workspace(root: &Path, mem_name: &str) {
     use memstead_base::WorkspaceStoreAdapter;
     use memstead_base::filesystem::config::{WorkspaceConfig, write_workspace_config};
@@ -230,7 +230,7 @@ impl Drop for WireHarness {
 }
 
 // ---------------------------------------------------------------------------
-// Basis-flavor pins (FilesystemMcpServer)
+// Lean-flavor pins (FilesystemMcpServer)
 // ---------------------------------------------------------------------------
 //
 // Run with `cargo nextest run --no-default-features -p memstead-mcp wire_shape`.
@@ -240,7 +240,7 @@ impl Drop for WireHarness {
 /// pinned text. Pre-extraction the two server files own independent
 /// mappers (`FilesystemMcpServer::engine_op_error` vs
 /// `McpServer::engine_err_unified`) — message text DRIFTS between them
-/// today (see `basis_memstead_entity_*` vs `pro_memstead_entity_*`). The plan's
+/// today (see `lean_memstead_entity_*` vs `pro_memstead_entity_*`). The plan's
 /// wire-byte-identity contract is *per-flavor*, not inter-flavor, so
 /// each pin records its own server's current bytes.
 fn assert_error_envelope(result: &Value, expected_code: &str, expected_message: &str) {
@@ -268,13 +268,13 @@ fn assert_error_envelope(result: &Value, expected_code: &str, expected_message: 
     );
 }
 
-/// Basis pin: `memstead_entity` against a missing id on an empty-mounts
+/// Lean pin: `memstead_entity` against a missing id on an empty-mounts
 /// workspace flows through `FilesystemMcpServer::engine_op_error`'s
 /// `ENTITY_NOT_FOUND` arm. The exact message bytes are pinned — they
-/// MUST stay unchanged across the lift (the basis server file moves
+/// MUST stay unchanged across the lift (the lean server file moves
 /// crates but its emit semantics do not).
 #[test]
-fn basis_memstead_entity_emits_typed_envelope_for_missing_id() {
+fn lean_memstead_entity_emits_typed_envelope_for_missing_id() {
     let tmp = TempDir::new().unwrap();
     seed_empty_workspace(tmp.path());
 
@@ -283,9 +283,9 @@ fn basis_memstead_entity_emits_typed_envelope_for_missing_id() {
         "memstead_entity",
         json!({ "id": "specs--does-not-exist" }),
     );
-    // Basis mapper formats with lowercase "entity not found" — the
+    // Lean mapper formats with lowercase "entity not found" — the
     // engine's Display string ("entity not found: {id}") passed through
-    // verbatim. Diverges from the pro mapper's "Entity not found"
+    // verbatim. Diverges from the full mapper's "Entity not found"
     // (which capitalises the leading word); inter-flavor drift
     // recorded.
     assert_error_envelope(
@@ -296,7 +296,7 @@ fn basis_memstead_entity_emits_typed_envelope_for_missing_id() {
 }
 
 // ---------------------------------------------------------------------------
-// Pro-flavor pins (McpServer)
+// Full-flavor pins (McpServer)
 // ---------------------------------------------------------------------------
 
 
@@ -330,12 +330,12 @@ fn assert_success_envelope(result: &Value) -> String {
         .to_string()
 }
 
-/// Basis pin: `memstead_search` with no filter on an empty workspace
+/// Lean pin: `memstead_search` with no filter on an empty workspace
 /// emits a frontmatter-only response carrying `_total: 0`, `_returned:
 /// 0`, `_offset: 0`. No `# Search results` heading is emitted because
 /// the result set is empty.
 #[test]
-fn basis_memstead_search_succeeds_on_empty_seeded_workspace() {
+fn lean_memstead_search_succeeds_on_empty_seeded_workspace() {
     let tmp = TempDir::new().unwrap();
     seed_folder_workspace(tmp.path(), "demo");
 
@@ -354,11 +354,11 @@ fn basis_memstead_search_succeeds_on_empty_seeded_workspace() {
 }
 
 
-/// Basis pin: `memstead_overview` on a seeded folder workspace produces
+/// Lean pin: `memstead_overview` on a seeded folder workspace produces
 /// the cold-start markdown with the `## Mems` and `## Schemas`
 /// anchors. Empty graph → no community section.
 #[test]
-fn basis_memstead_overview_succeeds_on_empty_seeded_workspace() {
+fn lean_memstead_overview_succeeds_on_empty_seeded_workspace() {
     let tmp = TempDir::new().unwrap();
     seed_folder_workspace(tmp.path(), "demo");
 
@@ -387,11 +387,11 @@ fn basis_memstead_overview_succeeds_on_empty_seeded_workspace() {
 // across tools, not just `memstead_entity`.
 // ---------------------------------------------------------------------------
 
-/// Basis pin: `memstead_schema(name="unknown")` against the default-pinned
+/// Lean pin: `memstead_schema(name="unknown")` against the default-pinned
 /// workspace must emit `ENTITY_NOT_FOUND` with a message that names the
 /// requested schema and what the workspace actually pins.
 #[test]
-fn basis_memstead_schema_unknown_name_emits_entity_not_found() {
+fn lean_memstead_schema_unknown_name_emits_entity_not_found() {
     let tmp = TempDir::new().unwrap();
     seed_folder_workspace(tmp.path(), "demo");
 
@@ -442,11 +442,11 @@ fn assert_create_success_shape(result: &Value, expected_id: &str, expected_mem: 
     );
 }
 
-/// Basis pin: `memstead_create` against a seeded folder workspace creates a
+/// Lean pin: `memstead_create` against a seeded folder workspace creates a
 /// `default@1.0.0` spec and returns a success envelope. Pins the shape
 /// of the response body, not the content-derived hashes.
 #[test]
-fn basis_memstead_create_returns_typed_success_envelope() {
+fn lean_memstead_create_returns_typed_success_envelope() {
     let tmp = TempDir::new().unwrap();
     seed_folder_workspace(tmp.path(), "demo");
 
@@ -463,13 +463,13 @@ fn basis_memstead_create_returns_typed_success_envelope() {
 }
 
 
-/// Basis pin: `memstead_create` with an unknown `entity_type` rejects with
+/// Lean pin: `memstead_create` with an unknown `entity_type` rejects with
 /// `code=UNKNOWN_ENTITY_TYPE`. The message names the rejected type and
 /// lists the declared types; an exact-string pin is too brittle for the
 /// declared list (schema-version-dependent), so the assertion checks
 /// `code` plus message substrings.
 #[test]
-fn basis_memstead_create_unknown_type_emits_typed_envelope() {
+fn lean_memstead_create_unknown_type_emits_typed_envelope() {
     let tmp = TempDir::new().unwrap();
     seed_folder_workspace(tmp.path(), "demo");
 
@@ -508,19 +508,19 @@ fn basis_memstead_create_unknown_type_emits_typed_envelope() {
 // `memstead_health` success pins
 // ---------------------------------------------------------------------------
 
-/// Basis pin: `memstead_health` returns the engine's `HealthSummary`
+/// Lean pin: `memstead_health` returns the engine's `HealthSummary`
 /// serialised directly — `{missing_fields, orphan_count, stale_entities,
-/// stub_count}`. There is **no** `writable_mems` field on the basis
-/// response shape, even though the pro flavor (and the agent-facing
+/// stub_count}`. There is **no** `writable_mems` field on the lean
+/// response shape, even though the full flavor (and the agent-facing
 /// contract documented in the tool description) does carry one.
 ///
-/// **Drift discovered:** basis `memstead_health` ships a strict subset of
-/// the pro response shape. The pro server returns a richer
-/// `HealthReport` envelope with mem-level detail; basis returns only
+/// **Drift discovered:** lean `memstead_health` ships a strict subset of
+/// the full response shape. The full server returns a richer
+/// `HealthReport` envelope with mem-level detail; lean returns only
 /// the workspace-wide scalars from `compute_health`. The pin records
-/// today's basis truth so the lift cannot regress it.
+/// today's lean truth so the lift cannot regress it.
 #[test]
-fn basis_memstead_health_succeeds_on_seeded_workspace() {
+fn lean_memstead_health_succeeds_on_seeded_workspace() {
     let tmp = TempDir::new().unwrap();
     seed_folder_workspace(tmp.path(), "demo");
 
@@ -533,14 +533,14 @@ fn basis_memstead_health_succeeds_on_seeded_workspace() {
     for field in ["missing_fields", "orphan_count", "stale_entities", "stub_count"] {
         assert!(
             body.get(field).is_some(),
-            "basis health response missing {field:?}: {body}"
+            "lean health response missing {field:?}: {body}"
         );
     }
-    // Today the basis surface does NOT include `writable_mems`; pro
+    // Today the lean surface does NOT include `writable_mems`; full
     // does. The pin trips if the field appears (or disappears).
     assert!(
         body.get("writable_mems").is_none(),
-        "basis health unexpectedly carries writable_mems — \
+        "lean health unexpectedly carries writable_mems — \
          if this is intended, update the pin: {body}"
     );
 }
@@ -626,11 +626,11 @@ fn assert_hash_mismatch_envelope(result: &Value, expected_id: &str, expected_cur
     );
 }
 
-/// Basis pin: create then update with a deliberately-stale hash trips
+/// Lean pin: create then update with a deliberately-stale hash trips
 /// HASH_MISMATCH; `details.current` carries the actual on-disk hash so
 /// the caller can recover without re-reading.
 #[test]
-fn basis_memstead_update_stale_hash_emits_typed_envelope() {
+fn lean_memstead_update_stale_hash_emits_typed_envelope() {
     let tmp = TempDir::new().unwrap();
     seed_folder_workspace(tmp.path(), "demo");
 
@@ -650,11 +650,11 @@ fn basis_memstead_update_stale_hash_emits_typed_envelope() {
 }
 
 
-/// Basis pin: `memstead_update` with the right expected_hash and a section
+/// Lean pin: `memstead_update` with the right expected_hash and a section
 /// body returns a success envelope. Pins the new content_hash field
 /// presence + that the hash actually changed (modulo serialization).
 #[test]
-fn basis_memstead_update_succeeds_and_rotates_hash() {
+fn lean_memstead_update_succeeds_and_rotates_hash() {
     let tmp = TempDir::new().unwrap();
     seed_folder_workspace(tmp.path(), "demo");
 
@@ -684,11 +684,11 @@ fn basis_memstead_update_succeeds_and_rotates_hash() {
 }
 
 
-/// Basis pin: `memstead_delete` with the right expected_hash succeeds. The
+/// Lean pin: `memstead_delete` with the right expected_hash succeeds. The
 /// post-delete envelope's exact shape is engine-derived; the pin
 /// checks success + reading the entity back returns ENTITY_NOT_FOUND.
 #[test]
-fn basis_memstead_delete_succeeds_and_entity_becomes_unreadable() {
+fn lean_memstead_delete_succeeds_and_entity_becomes_unreadable() {
     let tmp = TempDir::new().unwrap();
     seed_folder_workspace(tmp.path(), "demo");
 
@@ -715,16 +715,16 @@ fn basis_memstead_delete_succeeds_and_entity_becomes_unreadable() {
 // `memstead_relate` success pins
 // ---------------------------------------------------------------------------
 
-/// Basis pin: create two entities, then relate them with `USES`.
-/// Basis emits a response with `from`, `to`, `type` (yes — the literal
+/// Lean pin: create two entities, then relate them with `USES`.
+/// Lean emits a response with `from`, `to`, `type` (yes — the literal
 /// field name is `type`, not `rel_type`), `action: "added"`, plus
 /// `content_hash`. (REFERENCES would be refused under the default
 /// schema's `alias_target_rel_type` pointer; this test pins the
-/// wire shape, not the rel-type specifically.) The pro flavor uses different field names — see
+/// wire shape, not the rel-type specifically.) The full flavor uses different field names — see
 /// `pro_memstead_relate_returns_typed_success_envelope` for the
 /// inter-flavor drift recorded below.
 #[test]
-fn basis_memstead_relate_returns_typed_success_envelope() {
+fn lean_memstead_relate_returns_typed_success_envelope() {
     let tmp = TempDir::new().unwrap();
     seed_folder_workspace(tmp.path(), "demo");
 
@@ -750,20 +750,20 @@ fn basis_memstead_relate_returns_typed_success_envelope() {
         Some(to.as_str()),
         "relate `to` drifted: {body}"
     );
-    // **Drift recorded:** basis names the field `type`; pro names it `rel_type`.
+    // **Drift recorded:** lean names the field `type`; full names it `rel_type`.
     assert_eq!(
         body.get("type").and_then(Value::as_str),
         Some("USES"),
-        "basis relate `type` drifted: {body}"
+        "lean relate `type` drifted: {body}"
     );
     assert!(
         body.get("rel_type").is_none(),
-        "basis must not carry `rel_type` (pro field name): {body}"
+        "lean must not carry `rel_type` (full field name): {body}"
     );
     assert_eq!(
         body.get("action").and_then(Value::as_str),
         Some("added"),
-        "basis relate `action` drifted: {body}"
+        "lean relate `action` drifted: {body}"
     );
 }
 
@@ -772,12 +772,12 @@ fn basis_memstead_relate_returns_typed_success_envelope() {
 // `memstead_rename` pins — success + RENAME_NO_OP
 // ---------------------------------------------------------------------------
 
-/// Basis pin: rename an entity to a new title. The response carries
+/// Lean pin: rename an entity to a new title. The response carries
 /// `old_id`, `new_id`, plus rotated `content_hash`. The slug rule
 /// (`<mem>--<lower-kebab>`) is engine-internal so the expected new_id
 /// is computable from the new title.
 #[test]
-fn basis_memstead_rename_returns_typed_success_envelope() {
+fn lean_memstead_rename_returns_typed_success_envelope() {
     let tmp = TempDir::new().unwrap();
     seed_folder_workspace(tmp.path(), "demo");
 
@@ -805,20 +805,20 @@ fn basis_memstead_rename_returns_typed_success_envelope() {
 }
 
 
-/// Basis pin: renaming to a title that slugs to the same id is a
-/// SILENT NO-OP on basis today — the response is a plain success with
+/// Lean pin: renaming to a title that slugs to the same id is a
+/// SILENT NO-OP on lean today — the response is a plain success with
 /// `old_id == new_id` and no warning hint. The `RENAME_NO_OP` typed
-/// EngineError variant exists but the basis handler does not surface
+/// EngineError variant exists but the lean handler does not surface
 /// it for the same-slug case.
 ///
-/// **Drift recorded:** pro emits the same success but additionally
+/// **Drift recorded:** full emits the same success but additionally
 /// rides a `TITLE_NORMALIZED_TO_SLUG_NOOP` warning hint on the
-/// response's `warnings[]` array (see the pro pin below). Basis emits
+/// response's `warnings[]` array (see the full pin below). Lean emits
 /// no such hint — same wire envelope shape minus the typed-warning
 /// payload. Pending reconciliation on whichever flavor becomes the
 /// canonical surface.
 #[test]
-fn basis_memstead_rename_same_slug_silent_noop() {
+fn lean_memstead_rename_same_slug_silent_noop() {
     let tmp = TempDir::new().unwrap();
     seed_folder_workspace(tmp.path(), "demo");
 
@@ -843,7 +843,7 @@ fn basis_memstead_rename_same_slug_silent_noop() {
         Some(id.as_str()),
         "new_id should equal old_id for same-slug rename: {body}"
     );
-    // Basis now surfaces `outcome.warnings` on the rename response (the
+    // Lean now surfaces `outcome.warnings` on the rename response (the
     // `require_notes` reconciliation lifted `NOTE_MISSING` into the
     // engine and routed every mutation's warnings to the wire). A
     // same-slug rename carries the typed slug-noop warning; pin its
@@ -851,7 +851,7 @@ fn basis_memstead_rename_same_slug_silent_noop() {
     let warnings = body
         .get("warnings")
         .and_then(Value::as_array)
-        .expect("basis rename must now carry a warnings array");
+        .expect("lean rename must now carry a warnings array");
     assert!(
         warnings
             .iter()
@@ -862,12 +862,12 @@ fn basis_memstead_rename_same_slug_silent_noop() {
 
 
 // ---------------------------------------------------------------------------
-// `memstead_reload` (pro-only) success pin
+// `memstead_reload` (full-only) success pin
 // ---------------------------------------------------------------------------
 //
-// The basis filesystem-mem server doesn't expose memstead_reload —
+// The lean filesystem-mem server doesn't expose memstead_reload —
 // drift-reload is a mem-repo concept (sibling writer commits a new
-// HEAD; engine re-derives memo state). Pinning is pro-only.
+// HEAD; engine re-derives memo state). Pinning is full-only.
 
 
 // ---------------------------------------------------------------------------
@@ -935,11 +935,11 @@ fn assert_has_incoming_refs_envelope(
     );
 }
 
-/// Basis pin: create two entities, relate them, then try to delete the
+/// Lean pin: create two entities, relate them, then try to delete the
 /// referenced target. Expect HAS_INCOMING_REFS with the recovery payload
 /// (`details.referrers[]` listing the source as the offending referrer).
 #[test]
-fn basis_memstead_delete_with_incoming_refs_emits_typed_envelope() {
+fn lean_memstead_delete_with_incoming_refs_emits_typed_envelope() {
     let tmp = TempDir::new().unwrap();
     seed_folder_workspace(tmp.path(), "demo");
 
@@ -965,18 +965,18 @@ fn basis_memstead_delete_with_incoming_refs_emits_typed_envelope() {
 // `memstead_changes_since` success pins
 // ---------------------------------------------------------------------------
 //
-// Basis and pro use STRUCTURALLY different change-feeds: basis reads
-// timestamp-keyed entries from `.memstead/changes.jsonl`; pro reads git
+// Lean and full use STRUCTURALLY different change-feeds: lean reads
+// timestamp-keyed entries from `.memstead/changes.jsonl`; full reads git
 // commits between `since` and HEAD. The two response envelopes
 // diverge — each pin records its flavor's shape per-flavor.
 
-/// Basis pin: `memstead_changes_since` reads `.memstead/changes.jsonl` and emits
+/// Lean pin: `memstead_changes_since` reads `.memstead/changes.jsonl` and emits
 /// `{since, count, entries[]}`. Passing `since: ""` returns every
-/// recorded change (basis filters with `ts > since`; empty since
-/// admits all). The basis flavor IGNORES the `mem` param (the
+/// recorded change (lean filters with `ts > since`; empty since
+/// admits all). The lean flavor IGNORES the `mem` param (the
 /// JSONL changelog is workspace-global, not per-mem).
 #[test]
-fn basis_memstead_changes_since_returns_typed_success_envelope() {
+fn lean_memstead_changes_since_returns_typed_success_envelope() {
     let tmp = TempDir::new().unwrap();
     seed_folder_workspace(tmp.path(), "demo");
 
@@ -994,7 +994,7 @@ fn basis_memstead_changes_since_returns_typed_success_envelope() {
     for field in ["since", "count", "entries"] {
         assert!(
             body.get(field).is_some(),
-            "basis changes_since response missing {field:?}: {body}"
+            "lean changes_since response missing {field:?}: {body}"
         );
     }
     let count = body.get("count").and_then(Value::as_u64).unwrap_or(0);
@@ -1017,12 +1017,12 @@ fn basis_memstead_changes_since_returns_typed_success_envelope() {
 // `memstead_create` before mutating. The auto-stub side rides a
 // `AUTO_STUB_CREATED` warning on the relate response.
 
-/// Basis pin: `memstead_relate` against an absent same-mem target
+/// Lean pin: `memstead_relate` against an absent same-mem target
 /// auto-stubs the target and emits a `AUTO_STUB_CREATED` warning on
 /// the response's `warnings[]`. Try-then-update the stub trips
 /// `STUB_NOT_UPDATABLE`.
 #[test]
-fn basis_auto_stub_then_update_emits_typed_envelope() {
+fn lean_auto_stub_then_update_emits_typed_envelope() {
     let tmp = TempDir::new().unwrap();
     seed_folder_workspace(tmp.path(), "demo");
 
@@ -1075,12 +1075,12 @@ fn basis_auto_stub_then_update_emits_typed_envelope() {
 }
 
 
-/// Basis pin: trying to rename a stub trips `STUB_NOT_RENAMABLE`. Uses
+/// Lean pin: trying to rename a stub trips `STUB_NOT_RENAMABLE`. Uses
 /// the same auto-stub bootstrap (relate to absent target) and then
 /// asks for a rename. The agent's recovery is `memstead_create` to promote
 /// the stub before renaming.
 #[test]
-fn basis_rename_stub_emits_typed_envelope() {
+fn lean_rename_stub_emits_typed_envelope() {
     let tmp = TempDir::new().unwrap();
     seed_folder_workspace(tmp.path(), "demo");
 
@@ -1119,9 +1119,9 @@ fn basis_rename_stub_emits_typed_envelope() {
 // relate FROM the stub → STUB_CANNOT_RELATE. The agent's recovery is
 // `memstead_create` to promote the stub.
 
-/// Basis pin.
+/// Lean pin.
 #[test]
-fn basis_relate_from_stub_emits_typed_envelope() {
+fn lean_relate_from_stub_emits_typed_envelope() {
     let tmp = TempDir::new().unwrap();
     seed_folder_workspace(tmp.path(), "demo");
 
@@ -1152,7 +1152,7 @@ fn basis_relate_from_stub_emits_typed_envelope() {
 
 
 // ---------------------------------------------------------------------------
-// Pro-only mem-lifecycle pin — `memstead_mem_create` success
+// Full-only mem-lifecycle pin — `memstead_mem_create` success
 // ---------------------------------------------------------------------------
 
 

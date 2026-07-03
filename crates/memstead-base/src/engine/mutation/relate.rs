@@ -483,7 +483,7 @@ impl Engine {
         // record a non-event. Return the live `content_hash` so callers
         // can chain follow-ups without refetching. Surface the no-op as
         // a typed warning so an agent re-running a pipeline can tell the
-        // call didn't change the graph (mirrors pro's wire shape).
+        // call didn't change the graph (mirrors full's wire shape).
         if matches!(
             action,
             RelateAction::NoOpAlreadyPresent | RelateAction::NoOpAbsent
@@ -667,7 +667,7 @@ mod tests {
 
     #[test]
     fn relate_alias_delegates_to_relate_entity() {
-        // Positional-args alias mirrors pro's signature
+        // Positional-args alias mirrors full's signature
         // `engine.relate(from, to, rel_type, remove, ctx)`. Add an
         // edge via the alias and via `relate_entity` and assert
         // they reach the same observable post-state.
@@ -838,7 +838,7 @@ mod tests {
             )
             .unwrap();
         // Folder backend returns a synthetic CommitId — non-empty string.
-        // Wire-equivalent to pro's commit SHA: agents reading the field
+        // Wire-equivalent to full's commit SHA: agents reading the field
         // get a usable cursor regardless of which backend served the write.
         assert!(
             !outcome.commit_sha.is_empty(),

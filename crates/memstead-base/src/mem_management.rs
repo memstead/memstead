@@ -20,9 +20,9 @@
 //! `delete_mem`, their params/responses, the shared `NOTE_MAX_LEN`
 //! cap, the `validate_mem_path` helper) live in
 //! [`memstead_engine::mem_management`]. The matcher primitives stay
-//! here because the basis engine's
+//! here because the lean engine's
 //! [`crate::Engine::cross_mem_link_allowed`] synthesises a
-//! [`CreateRuleSet`] on multi-folder workspaces — they are a basis
+//! [`CreateRuleSet`] on multi-folder workspaces — they are a lean
 //! policy primitive shared by both flavors.
 
 use std::path::Path;

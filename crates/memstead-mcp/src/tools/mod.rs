@@ -1,9 +1,9 @@
 //! Tool parameter structs for the agent-facing MCP tools.
 //!
 //! Parameter structs derive `Deserialize` + `JsonSchema` for rmcp tool routing.
-//! These structs are shared between the basis `FilesystemMcpServer`
-//! (here in `memstead-mcp`) and the pro `McpServer`
-//! ([`crate::server::McpServer`]). Pro-only tool parameters
+//! These structs are shared between the lean `FilesystemMcpServer`
+//! (here in `memstead-mcp`) and the full `McpServer`
+//! ([`crate::server::McpServer`]). Full-only tool parameters
 //! (mem-lifecycle family) live in [`crate::lifecycle`].
 //!
 //! Workspace-policy mutation **is** an MCP surface: the

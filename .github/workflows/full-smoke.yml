@@ -1,21 +1,21 @@
-# Pro-build CI smoke. Builds the pro flavour of `memstead` and `memstead-mcp`
+# Full-build CI smoke. Builds the full flavour of `memstead` and `memstead-mcp`
 # (`--features mem-repo`, links `gix` and `memstead-git-branch`) and
 # exercises the full mutation surface against a mem-repo workspace
 # bootstrapped via `memstead mem-repo init` + `memstead mem init`.
 #
-# Sister workflow to `basis-smoke.yml`: same harness
+# Sister workflow to `lean-smoke.yml`: same harness
 # (`ci/mcp_client.py`), same shape (build → upload → probe), but
 # the workspace setup uses the gitdir-backed mem-repo path and the
-# probe asserts the 14-tool pro surface (`memstead_mem_create`,
-# `memstead_mem_delete`, `memstead_reload` are pro-only).
+# probe asserts the 14-tool full surface (`memstead_mem_create`,
+# `memstead_mem_delete`, `memstead_reload` are full-only).
 #
 # Why a separate workflow rather than a matrix dimension on
-# `basis-smoke.yml`: the build artefacts are different (basis vs pro
+# `lean-smoke.yml`: the build artefacts are different (lean vs full
 # binaries link different deps), the workspace setup differs, and a
-# basis-smoke regression should not be hidden by a pro-smoke success
+# lean-smoke regression should not be hidden by a full-smoke success
 # (or vice versa). Keeping them as siblings means each failure mode
 # shows up as its own red check.
-name: Pro smoke
+name: Full smoke
 
 on:
   push:
@@ -25,12 +25,12 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: pro-smoke-${{ github.ref }}
+  group: full-smoke-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  build-pro:
-    name: Build pro binaries
+  build-full:
+    name: Build full binaries
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -41,47 +41,47 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: . -> target
-          # Distinct cache key from `basis-smoke.yml` so the basis
+          # Distinct cache key from `lean-smoke.yml` so the lean
           # build's cache (no gix, smaller dep graph) doesn't shadow
-          # the pro build's hot path. The two flavours pull different
+          # the full build's hot path. The two flavours pull different
           # crate sets so sharing the cache wouldn't help anyway.
-          shared-key: pro-build
+          shared-key: full-build
 
       # `memstead-cli` / `memstead-mcp` build the full multi-mem flavour
       # by default (the `mem-repo` feature is on by default) and produce
       # the `memstead` / `memstead-mcp` binaries. `--no-default-features`
-      # would yield the lean build (exercised by `basis-smoke.yml`).
-      - name: Build pro
+      # would yield the lean build (exercised by `lean-smoke.yml`).
+      - name: Build full
         run: cargo build -p memstead-cli -p memstead-mcp --release
 
-      - name: Upload pro binaries
+      - name: Upload full binaries
         uses: actions/upload-artifact@v4
         with:
-          name: pro-binaries
+          name: full-binaries
           path: |
             target/release/memstead
             target/release/memstead-mcp
           retention-days: 1
 
   smoke:
-    name: Pro smoke (mem-repo round-trip)
-    needs: build-pro
+    name: Full smoke (mem-repo round-trip)
+    needs: build-full
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: pro-binaries
+          name: full-binaries
           path: bin
       - name: Make binaries executable
         run: chmod +x bin/memstead bin/memstead-mcp
-      - name: Run pro smoke
+      - name: Run full smoke
         # `memstead mem init` spawns `memstead-mcp`; pass the path through
         # `MEMSTEAD_MCP_BIN` so the spawn finds the right binary
         # without a system-wide install. The probe sets this env var
         # itself, but a sibling test that bypasses it would surface
         # the same `MEMSTEAD_MCP_BIN` requirement.
         run: |
-          python3 ci/pro_smoke.py \
+          python3 ci/full_smoke.py \
             --memstead "$(pwd)/bin/memstead" \
             --memstead-mcp "$(pwd)/bin/memstead-mcp"

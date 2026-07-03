@@ -1,4 +1,4 @@
-"""Shared JSON-RPC-over-stdio client for the basis-build smoke tests.
+"""Shared JSON-RPC-over-stdio client for the lean-build smoke tests.
 
 Spawns `memstead-mcp` as a subprocess with the given working directory,
 performs the MCP `initialize` handshake, then exposes a `call` method
@@ -10,7 +10,7 @@ general-purpose MCP client. Three tradeoffs to keep in mind:
 * **No notifications.** We send `initialized` as a notification (no
   response), but every subsequent message is a request that the script
   blocks on. Tools that emit progress notifications would deadlock
-  here; the basis surface does not.
+  here; the lean surface does not.
 * **Synchronous, single-threaded.** The transport is one writer thread
   pumping JSON-RPC frames into stdin and one reader thread that yields
   responses by id. Each `call` waits for its own response.
@@ -39,7 +39,7 @@ class ToolResponse:
     """Decoded `tools/call` response.
 
     `is_error` mirrors the wire-level `isError`. `text` is the
-    concatenated `text` content blocks (the markdown body the basis
+    concatenated `text` content blocks (the markdown body the lean
     server returns on read tools and on success of write tools).
     `structured_content` is the `structuredContent` envelope —
     `{ code, message, details }` on errors, tool-specific shape on
@@ -64,8 +64,8 @@ class McpServer:
     def __enter__(self) -> "McpServer":
         full_env = os.environ.copy()
         full_env.update(self.env)
-        # No `--config` flag: the basis binary doesn't have one, and
-        # the pro binary auto-discovers `.memstead/config.json` when no
+        # No `--config` flag: the lean binary doesn't have one, and
+        # the full binary auto-discovers `.memstead/config.json` when no
         # `.memstead.toml` resolves. Either way the dispatcher boots
         # `FilesystemMcpServer` here.
         self.proc = subprocess.Popen(
@@ -82,7 +82,7 @@ class McpServer:
             {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {},
-                "clientInfo": {"name": "basis-smoke", "version": "0"},
+                "clientInfo": {"name": "lean-smoke", "version": "0"},
             },
         )
         assert "result" in init_resp, f"initialize failed: {init_resp}"
@@ -269,7 +269,7 @@ def assert_true(cond: bool, label: str) -> None:
 def fresh_workspace() -> Path:
     """Return a freshly-created temp dir. Caller is responsible for
     cleanup; on CI the runner reaps the dir on job teardown."""
-    return Path(tempfile.mkdtemp(prefix="memstead-basis-smoke-"))
+    return Path(tempfile.mkdtemp(prefix="memstead-lean-smoke-"))
 
 
 def cleanup_workspace(path: Path) -> None:

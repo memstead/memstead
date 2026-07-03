@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Basis-build smoke: mutation surface beyond `memstead_create`.
+"""Lean-build smoke: mutation surface beyond `memstead_create`.
 
 The manual smoke test in `dev/smoke-test-2026-05-09.md` deliberately
 did not exercise `memstead_update` (hash round-trip), `memstead_delete`
 (tombstone changelog row + entity removal), or `memstead_relate` (typed
 edge surfacing through `memstead_entity`). This probe pins all three so
-the basis ships with verified mutation tools.
+the lean ships with verified mutation tools.
 
 Steps:
 
@@ -157,16 +157,16 @@ def run(memstead: Path, memstead_mcp: Path) -> int:
         delete_row = next(r for r in rows if r.get("kind") == "delete")
         assert_eq(delete_row.get("entity"), source_id, "delete row entity")
 
-        sys.stderr.write("basis_mutation: OK\n")
+        sys.stderr.write("lean_mutation: OK\n")
         return 0
     finally:
         cleanup_workspace(workspace)
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Basis MCP mutation probe.")
-    parser.add_argument("--memstead", required=True, type=Path, help="Path to the basis `memstead-basis` binary.")
-    parser.add_argument("--memstead-mcp", required=True, type=Path, help="Path to the basis `memstead-mcp` binary.")
+    parser = argparse.ArgumentParser(description="Lean MCP mutation probe.")
+    parser.add_argument("--memstead", required=True, type=Path, help="Path to the lean `memstead` binary.")
+    parser.add_argument("--memstead-mcp", required=True, type=Path, help="Path to the lean `memstead-mcp` binary.")
     args = parser.parse_args()
     sys.exit(run(args.memstead, args.memstead_mcp))
 

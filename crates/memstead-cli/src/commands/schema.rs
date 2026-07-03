@@ -277,7 +277,7 @@ fn scaffold_next_steps(ctx: &CliContext, name: &str) -> Vec<Step> {
         .as_ref()
         .filter(|(_, root)| root.join("welcome-to-memstead.md").is_file())
         .map(|(mem, _)| format!("{mem}--welcome-to-memstead"));
-    // Pro flavour: install into the current workspace, then re-pin the
+    // Full flavour: install into the current workspace, then re-pin the
     // mem in place.
     #[cfg(feature = "mem-repo")]
     {
@@ -300,7 +300,7 @@ fn scaffold_next_steps(ctx: &CliContext, name: &str) -> Vec<Step> {
         )));
         steps
     }
-    // Basis flavour: no `mem set-schema`, so the custom schema gets a
+    // Lean flavour: no `mem set-schema`, so the custom schema gets a
     // fresh mem. Order matters — `init` pins without resolving, and the
     // engine only boots once the package is installed *inside the new
     // workspace*, so the install step comes right after init and points
@@ -311,7 +311,7 @@ fn scaffold_next_steps(ctx: &CliContext, name: &str) -> Vec<Step> {
     // absolute and quoted so the sequence stays verbatim-runnable.
     #[cfg(not(feature = "mem-repo"))]
     {
-        let _ = (mem, quickstart_seed); // pro-only context
+        let _ = (mem, quickstart_seed); // full-only context
         let (fresh_dir, install_source) = match ctx.workspace_shape() {
             Some((_, root)) => {
                 let parent = root.parent().unwrap_or(&root).to_path_buf();
@@ -595,7 +595,7 @@ fn install(ctx: &CliContext, args: InstallArgs) -> anyhow::Result<()> {
 /// Install onto the git-branch backend — write the package onto the
 /// workspace's `__MEMSTEAD:schemas/` ref through the engine (which owns
 /// mem-repo state). Only present in the `mem-repo`-featured build;
-/// the basis binary refuses (it has no git-branch engine).
+/// the lean binary refuses (it has no git-branch engine).
 #[cfg(feature = "mem-repo")]
 fn install_to_git_branch(
     ctx: &CliContext,

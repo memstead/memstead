@@ -602,7 +602,7 @@ fn prepend_drift_warnings_md(md: String, drift_warnings: &[WarningHint]) -> Stri
 ///
 // Per-mem schema pin / workspace policy / cross-catalogue schema
 // lookup helpers live in `memstead_engine::overview` so the shared
-// composer (this MCP tool + the pro CLI) and the rest of this server
+// composer (this MCP tool + the full CLI) and the rest of this server
 // reach the same canonical implementation. The wrappers below stay so
 // the existing ~14 call sites in this file continue to compile
 // unchanged; their bodies just forward.
@@ -695,7 +695,7 @@ fn with_mem_schema_anchor(mut res: CallToolResult, schema_ref: &str) -> CallTool
 /// Typed-envelope translator for the unified `memstead_base::EngineError`.
 /// Mutation handlers' unified branches return this when the engine
 /// surfaces an error so the wire shape carries a stable `code` and
-/// (where applicable) the recovery `details` payload pro callers
+/// (where applicable) the recovery `details` payload full callers
 /// already branch on.
 ///
 /// The match is exhaustive — no wildcard arm. Every `EngineError`
@@ -1558,8 +1558,8 @@ fn engine_err_unified(
     }
 }
 
-/// Typed-envelope translator for `ProEngineError`. Delegates wrapped
-/// basis errors to [`engine_err_unified`]; constructs the lifecycle-
+/// Typed-envelope translator for `FullEngineError`. Delegates wrapped
+/// lean errors to [`engine_err_unified`]; constructs the lifecycle-
 /// specific envelopes (`MEM_PATH_NOT_ALLOWED`,
 /// `MEM_REFERENCED_BY_POLICY`, `MEM_SCHEMA_NOT_ALLOWED`,
 /// `CONFIG_ERROR`) here. The wire shape is
@@ -1567,10 +1567,10 @@ fn engine_err_unified(
 /// variants before the lifecycle variants moved off
 /// `memstead_base::EngineError`; the move is pure plumbing.
 fn pro_engine_err_unified(
-    e: memstead_engine::ProEngineError,
+    e: memstead_engine::FullEngineError,
     engine: &memstead_base::Engine,
 ) -> CallToolResult {
-    use memstead_engine::ProEngineError as PE;
+    use memstead_engine::FullEngineError as PE;
     // The text-channel message uses the rich-prose renderer so lifecycle
     // refusals (MEM_PATH_NOT_ALLOWED, MEM_SCHEMA_NOT_ALLOWED,
     // MEM_REFERENCED_BY_POLICY) inline their full recovery payload
@@ -1578,9 +1578,9 @@ fn pro_engine_err_unified(
     // recovery context.
     let message = e.prose_render();
     match e {
-        // #55: thread the engine so the wrapped-basis path enriches
+        // #55: thread the engine so the wrapped-lean path enriches
         // not-found envelopes the same as every other call site.
-        PE::Basis(inner) => engine_err_unified(inner, engine),
+        PE::Lean(inner) => engine_err_unified(inner, engine),
         PE::MemPathNotAllowed {
             attempted,
             candidate,
@@ -1684,7 +1684,7 @@ fn pro_engine_err_unified(
 /// Map a runtime [`memstead_base::runtime_validator::ValidationError`] to
 /// the MCP wire envelope. Thin delegation to the shared
 /// [`crate::error_envelopes::validation_envelope`] so the unified
-/// engine's mutation handlers emit the same wire shape pro's
+/// engine's mutation handlers emit the same wire shape full's
 /// filesystem-server already does.
 fn unified_validation_envelope(
     err: memstead_base::runtime_validator::ValidationError,
@@ -1721,7 +1721,7 @@ fn suggest_similar(store: &memstead_base::Store, input: &str) -> Vec<String> {
 /// carries the `ERROR [ENTITY_NOT_FOUND]: …` prefix and
 /// `structured_content` carries the `{ code, message, details }`
 /// envelope — matching every other not-found return on the surface.
-/// Takes `&Store` so the helper works for both pro and unified engines.
+/// Takes `&Store` so the helper works for both full and unified engines.
 fn not_found_error(store: &memstead_base::Store, id: &EntityId) -> CallToolResult {
     let suggestions = suggest_similar(store, id.as_ref());
     let msg = if suggestions.is_empty() {
@@ -2027,7 +2027,7 @@ impl McpServer {
 
 
     /// Unified-engine path for [`Self::memstead_overview`]. Body lifted to
-    /// [`memstead_engine::overview::compose_overview`] so the pro CLI
+    /// [`memstead_engine::overview::compose_overview`] so the full CLI
     /// surfaces the same rich-content output via the same composer.
     /// This wrapper handles drift-warning collection, error-envelope
     /// mapping, and response-cap chunking; the composer produces the
@@ -2338,7 +2338,7 @@ impl McpServer {
         ) {
             Ok(outcome) => {
                 // Skip empty `incoming` / `None` `incoming_count`
-                // manually to match pro's
+                // manually to match full's
                 // `#[serde(skip_serializing_if=...)]`.
                 let mut body = serde_json::json!({
                     "id": outcome.id.to_string(),
@@ -2462,7 +2462,7 @@ impl McpServer {
             Ok(outcome) => {
                 // ModifiedSections / ModifiedMetadata serialise
                 // with `#[serde(skip_serializing_if = "Vec::is_empty")]`
-                // on each inner vec — matching pro's UpdateResult
+                // on each inner vec — matching full's UpdateResult
                 // wire shape.
                 let mut body = serde_json::json!({
                     "id": outcome.id.to_string(),
@@ -2486,7 +2486,7 @@ impl McpServer {
                         .collect::<Vec<_>>(),
                 });
                 // Add `prospective_hash` only on the dry_run path
-                // (matches pro's `#[serde(skip_serializing_if = "Option::is_none")]`).
+                // (matches full's `#[serde(skip_serializing_if = "Option::is_none")]`).
                 if let Some(hash) = outcome.prospective_hash {
                     body["prospective_hash"] = serde_json::json!(hash);
                 }
@@ -2538,7 +2538,7 @@ impl McpServer {
         let mem_for_anchor = from.mem().to_string();
         let remove = p.remove.unwrap_or(false);
 
-        // Wire JSON mirrors pro's `RelateResult` shape — the unified
+        // Wire JSON mirrors full's `RelateResult` shape — the unified
         // outcome's `action` field is intentionally not in the wire
         // body; consumers branch on `commit_sha.is_empty()`.
         // `orphan_stubs_removed` is wired through from the engine outcome onto
@@ -2663,7 +2663,7 @@ impl McpServer {
                     "relations_removed": outcome.relations_removed,
                     "commit_sha": outcome.commit_sha,
                 });
-                // Pro skip-serialises empty `orphan_stubs_removed`;
+                // Full skip-serialises empty `orphan_stubs_removed`;
                 // mirror by only adding the field when populated.
                 if !outcome.orphan_stubs_removed.is_empty() {
                     body["orphan_stubs_removed"] = serde_json::json!(
@@ -2720,7 +2720,7 @@ impl McpServer {
         let mem_for_anchor = id.mem().to_string();
 
         // Unified outcome exposes `old_path` / `new_path` directly
-        // (matching pro's `RenameResult` shape).
+        // (matching full's `RenameResult` shape).
         let unified = self.unified_engine();
         let mut engine = unified.lock().unwrap();
         let args = memstead_base::RenameEntityArgs {
@@ -3202,7 +3202,7 @@ impl McpServer {
 
         match memstead_engine::mem_management::create_mem(&mut engine, params) {
             Ok(response) => {
-                // Build wire response with the same shape pro emits.
+                // Build wire response with the same shape full emits.
                 let body = serde_json::json!({
                     "name": response.name,
                     "location": response.location,
@@ -3785,19 +3785,19 @@ mod tests {
                 cross_linkable: true,
             migration_target: None,
         };
-            let backend = memstead_base::instantiate_basis_backend(&mount).unwrap();
+            let backend = memstead_base::instantiate_lean_backend(&mount).unwrap();
             mounts.push((mount, backend));
         }
         let mut engine = memstead_base::Engine::from_mounts(mounts).unwrap();
-        // Install the pro backend factory so
+        // Install the full backend factory so
         // `mem_management::create_mem` can materialise
         // git-branch backends when its workspace-shape heuristic
         // fires. Test fixtures auto-seed a mem-repo
         // (`auto_seeded_settings`) so the heuristic always picks
         // `MountStorage::GitBranch` for runtime-created mems — the
-        // basis default factory would reject with
+        // lean default factory would reject with
         // `GitBranchRequiresMemRepoFeature`.
-        engine.set_backend_factory(memstead_git_branch::storage::instantiate_pro_backend);
+        engine.set_backend_factory(memstead_git_branch::storage::instantiate_full_backend);
         engine
     }
 
@@ -3816,8 +3816,8 @@ mod tests {
             Mount, MountCapability, MountLifecycle, MountStorage,
         };
         // Canonicalise the gitdir so `engine.gitdir_for(name)` matches
-        // pro's canonical paths (TempDir on macOS returns a symlink
-        // to /private/var/...; pro canonicalizes at init).
+        // full's canonical paths (TempDir on macOS returns a symlink
+        // to /private/var/...; full canonicalizes at init).
         let gitdir = workspace_root.join("mem-repo").join(".git");
         let gitdir = gitdir.canonicalize().unwrap_or(gitdir);
         let mut mounts: Vec<(Mount, Box<dyn memstead_base::backend::MemBackend>)> = Vec::new();
@@ -3855,19 +3855,19 @@ mod tests {
                 lifecycle: MountLifecycle::Eager,
                 cross_linkable: true,
             };
-            let backend = memstead_git_branch::storage::instantiate_pro_backend(&mount).unwrap();
+            let backend = memstead_git_branch::storage::instantiate_full_backend(&mount).unwrap();
             mounts.push((mount, backend));
         }
         let mut engine = memstead_base::Engine::from_mounts(mounts).unwrap();
-        // Install the pro backend factory so create_mem's
+        // Install the full backend factory so create_mem's
         // git-branch path can materialise a backend when the
         // workspace-shape heuristic fires.
-        engine.set_backend_factory(memstead_git_branch::storage::instantiate_pro_backend);
+        engine.set_backend_factory(memstead_git_branch::storage::instantiate_full_backend);
         engine
     }
 
     /// Alias for [`setup_test_engine`]. Kept for callsite compatibility;
-    /// pre-rebuild this materialised an additional pro engine alongside
+    /// pre-rebuild this materialised an additional full engine alongside
     /// the unified one.
     fn setup_dual_test_engine() -> (McpServer, TempDir) {
         setup_test_engine()
@@ -5439,7 +5439,7 @@ community:
             cross_linkable: true,
             migration_target: None,
         };
-        let backend = memstead_base::instantiate_basis_backend(&mount).unwrap();
+        let backend = memstead_base::instantiate_lean_backend(&mount).unwrap();
         let mut unified = memstead_base::Engine::from_mounts_with_schemas_dir(
             vec![(mount, backend)],
             Some(&schemas_dir),
@@ -5858,12 +5858,12 @@ community:
         let mounts: Vec<(Mount, Box<dyn memstead_base::backend::MemBackend>)> = vec![
             {
                 let m = mk("local", writable_dir, MountCapability::Write);
-                let b = memstead_base::instantiate_basis_backend(&m).unwrap();
+                let b = memstead_base::instantiate_lean_backend(&m).unwrap();
                 (m, b)
             },
             {
                 let m = mk("external", readonly_dir, MountCapability::ReadOnly);
-                let b = memstead_base::instantiate_basis_backend(&m).unwrap();
+                let b = memstead_base::instantiate_lean_backend(&m).unwrap();
                 (m, b)
             },
         ];
@@ -5960,12 +5960,12 @@ community:
         let mounts: Vec<(Mount, Box<dyn memstead_base::backend::MemBackend>)> = vec![
             {
                 let m = mk("local", writable_dir, MountCapability::Write);
-                let b = memstead_base::instantiate_basis_backend(&m).unwrap();
+                let b = memstead_base::instantiate_lean_backend(&m).unwrap();
                 (m, b)
             },
             {
                 let m = mk("external", readonly_dir, MountCapability::ReadOnly);
-                let b = memstead_base::instantiate_basis_backend(&m).unwrap();
+                let b = memstead_base::instantiate_lean_backend(&m).unwrap();
                 (m, b)
             },
         ];
@@ -6023,10 +6023,10 @@ community:
             Box::new(writer) as Box<dyn memstead_base::backend::MemBackend>,
         )])
         .unwrap();
-        // Install the pro backend factory so create_mem's
+        // Install the full backend factory so create_mem's
         // git-branch path can materialise a writer when the
         // workspace-shape heuristic fires.
-        unified.set_backend_factory(memstead_git_branch::storage::instantiate_pro_backend);
+        unified.set_backend_factory(memstead_git_branch::storage::instantiate_full_backend);
         // Canonicalise the workspace_root so the outside_workspace
         // check inside create_mem compares canonical paths
         // consistently (macOS resolves `/var/...` → `/private/var/...`).
@@ -7614,7 +7614,7 @@ community:
         }));
         assert!(!result.is_error.unwrap_or(false), "{}", extract_text(&result));
         let text = extract_text(&result);
-        // Pro-shape wire fields: from/to/rel_type/source/content_hash/commit_sha.
+        // Full-shape wire fields: from/to/rel_type/source/content_hash/commit_sha.
         assert!(text.contains("\"from\""));
         assert!(text.contains("\"to\""));
         assert!(text.contains("\"rel_type\""));
@@ -7704,7 +7704,7 @@ community:
         }));
         assert!(!result.is_error.unwrap_or(false), "{}", extract_text(&result));
         let text = extract_text(&result);
-        // Pro-shape wire fields: id, title, nested
+        // Full-shape wire fields: id, title, nested
         // modified_sections/modified_metadata, content_hash,
         // commit_sha, _mem_schema.
         assert!(text.contains("\"id\""));
@@ -7716,7 +7716,7 @@ community:
         assert!(text.contains("\"_hash\""));
         assert!(text.contains("\"commit_sha\""));
         assert!(text.contains("\"_mem_schema\""));
-        // Empty append/patch slots stripped to match pro's
+        // Empty append/patch slots stripped to match full's
         // skip_serializing_if convention.
         assert!(
             !text.contains("\"appended\""),
@@ -7771,7 +7771,7 @@ community:
         }));
         assert!(!result.is_error.unwrap_or(false), "{}", extract_text(&result));
         let text = extract_text(&result);
-        // Pro-shape wire fields: id, title, mem, file_path,
+        // Full-shape wire fields: id, title, mem, file_path,
         // created_date, content_hash, commit_sha, _mem_schema.
         assert!(text.contains("\"id\""));
         assert!(text.contains("\"title\": \"Brand New Spec\""));
@@ -7787,12 +7787,12 @@ community:
             "greenfield create must skip-empty incoming_count",
         );
 
-        // dry_run path falls back to the pro engine — verified by
-        // observing the response carries the same pro shape but the
+        // dry_run path falls back to the full engine — verified by
+        // observing the response carries the same full shape but the
         // unified engine wasn't touched (we'd see two entities if
-        // it had been). With no pro mem wired, dry_run on the
+        // it had been). With no full mem wired, dry_run on the
         // unified branch is unreachable in this test fixture; we
-        // skip exercising it here (covered by pro-side tests).
+        // skip exercising it here (covered by full-side tests).
 
         // Stub-adoption path: pre-existing stub created via
         // memstead_relate, then memstead_create at the same id promotes it.
@@ -7874,14 +7874,14 @@ community:
         }));
         assert!(!result.is_error.unwrap_or(false), "{}", extract_text(&result));
         let text = extract_text(&result);
-        // Pro-shape wire fields: id + relations_removed + commit_sha.
+        // Full-shape wire fields: id + relations_removed + commit_sha.
         assert!(text.contains("\"id\""));
         assert!(text.contains("\"relations_removed\""));
         assert!(text.contains("\"commit_sha\""));
         // Unified-only fields stay engine-side, not wire.
         assert!(
             !text.contains("\"file_path\""),
-            "wire shape must skip file_path (pro DeleteResult omits)",
+            "wire shape must skip file_path (full DeleteResult omits)",
         );
         assert!(
             !text.contains("\"removed_incoming\""),
@@ -7946,7 +7946,7 @@ community:
         }));
         assert!(!result.is_error.unwrap_or(false), "{}", extract_text(&result));
         let text = extract_text(&result);
-        // Pro-shape wire fields: old_id/new_id/old_path/new_path/
+        // Full-shape wire fields: old_id/new_id/old_path/new_path/
         // content_hash/commit_sha. Schema anchor present.
         assert!(text.contains("\"old_id\""));
         assert!(text.contains("\"new_id\""));
@@ -8285,9 +8285,9 @@ community:
         let tmp = setup_test_workspace();
 
         // Construct a unified engine reading the same mem directory
-        // the pro engine reads. The folder backend trait impl on
+        // the full engine reads. The folder backend trait impl on
         // FilesystemMemWriter walks the mem tree on `from_mounts`,
-        // populating the unified store with the same entities pro
+        // populating the unified store with the same entities full
         // already loaded.
         let mem_dir = tmp.path().join("specs");
         let writer = memstead_base::storage::FilesystemMemWriter::new(mem_dir.clone());
@@ -9094,7 +9094,7 @@ community:
     /// Cross-mem dangling resolution: a link from mem A to a real
     /// target in mem B is NOT dangling (the unified engine resolves
     /// targets across all mounts); a link from mem A to a non-
-    /// existent target in mem B IS dangling. This pins pro's
+    /// existent target in mem B IS dangling. This pins full's
     /// multi-mount semantics — naïvely scanning each mount in
     /// isolation would mis-flag the cross-mem hit.
     #[test]
@@ -12010,11 +12010,11 @@ community:
                 lifecycle: memstead_base::MountLifecycle::Eager,
                 cross_linkable: true,
             };
-            let backend = memstead_git_branch::storage::instantiate_pro_backend(&mount).unwrap();
+            let backend = memstead_git_branch::storage::instantiate_full_backend(&mount).unwrap();
             mounts.push((mount, backend));
         }
         let mut unified = memstead_base::Engine::from_mounts(mounts).unwrap();
-        unified.set_backend_factory(memstead_git_branch::storage::instantiate_pro_backend);
+        unified.set_backend_factory(memstead_git_branch::storage::instantiate_full_backend);
         unified.set_settings(settings.clone());
         let canonical_root = std::fs::canonicalize(tmp.path())
             .unwrap_or_else(|_| tmp.path().to_path_buf());
@@ -12159,7 +12159,7 @@ community:
     #[test]
     fn memstead_mem_delete_with_delete_files_true_on_folder_mount_removes_dir() {
         let tmp = TempDir::new().unwrap();
-        // Build a basis-flavour engine: folder backend only, no
+        // Build a lean-flavour engine: folder backend only, no
         // mem-repo seeded. The create orchestrator's heuristic then
         // picks `MountStorage::Folder { path }` so `dir_for_mem`
         // returns Some on the registered mem.

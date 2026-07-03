@@ -1,8 +1,8 @@
 //! Parameter structs for the runtime mem-lifecycle tools —
 //! `memstead_mem_create` and `memstead_mem_delete`.
 //!
-//! These are the on-the-wire shapes agents send; the pro MCP handlers
-//! translate them before calling the orchestrators. Pro-only — basis
+//! These are the on-the-wire shapes agents send; the full MCP handlers
+//! translate them before calling the orchestrators. Full-only — lean
 //! `FilesystemMcpServer` does not expose mem lifecycle.
 
 use rmcp::schemars;

@@ -588,7 +588,7 @@ mod tests {
     fn change_envelope_serializes_action_tag() {
         // Confirms the `action: "added" | "updated" | "removed" |
         // "renamed"` discriminator is emitted as the wire shape MCP
-        // callers expect — same as pro's existing ChangeEnvelope.
+        // callers expect — same as full's existing ChangeEnvelope.
         let env = ChangeEnvelope::Added {
             id: EntityId::new("specs", "hello"),
             title: Some("Hello".to_string()),

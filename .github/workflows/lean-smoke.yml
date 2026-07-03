@@ -1,13 +1,13 @@
-# Basis-build CI smoke. Builds the basis flavour of `memstead` and
+# Lean-build CI smoke. Builds the lean flavour of `memstead` and
 # `memstead-mcp` (no `mem-repo` feature, no `gix`, no `memstead-git-branch`)
 # and exercises three end-to-end probes against the binaries:
 #
-#   * `basis_smoke`        — happy-path round-trip (create → search →
+#   * `lean_smoke`        — happy-path round-trip (create → search →
 #                            entity read; changelog row inspected).
-#   * `basis_strictness`   — schema-strictness probes (UNKNOWN_SECTION,
+#   * `lean_strictness`   — schema-strictness probes (UNKNOWN_SECTION,
 #                            INVALID_ENUM_VALUE, MISSING_REQUIRED_SECTION
 #                            warning).
-#   * `basis_mutation`     — update / relate / delete with hash
+#   * `lean_mutation`     — update / relate / delete with hash
 #                            round-trip and HASH_MISMATCH rejection.
 #
 # All three jobs share a `cargo build --release --no-default-features`
@@ -16,9 +16,9 @@
 #
 # The `cargo` step is wired with sccache through the
 # `Swatinem/rust-cache` action so warm CI runs reuse the prior crate
-# graph; the basis build is intentionally smaller than the pro one
+# graph; the lean build is intentionally smaller than the full one
 # (no `gix`) so the cold-start cost is bounded.
-name: Basis smoke
+name: Lean smoke
 
 on:
   push:
@@ -30,7 +30,7 @@ on:
 # Avoid stacking concurrent runs on the same ref. New pushes cancel
 # in-flight runs of the same ref.
 concurrency:
-  group: basis-smoke-${{ github.ref }}
+  group: lean-smoke-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -39,8 +39,8 @@ jobs:
   # without re-paying the build cost. This also makes a build break
   # observable as a single failed job rather than triplicated across
   # the probes.
-  build-basis:
-    name: Build basis binaries
+  build-lean:
+    name: Build lean binaries
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -52,7 +52,7 @@ jobs:
         with:
           workspaces: . -> target
 
-      - name: Build basis (no-default-features)
+      - name: Build lean (no-default-features)
         run: cargo build -p memstead-cli -p memstead-mcp --release --no-default-features
 
       - name: Verify dep tree carries no gix or memstead-git-branch
@@ -60,73 +60,73 @@ jobs:
           # `cargo tree -e normal` excludes dev-deps, so the assertion
           # is on the actual link-time graph for the binaries.
           if cargo tree -p memstead-cli --no-default-features -e normal | grep -E "^[└├]── (gix|memstead-git-branch) "; then
-            echo "::error::basis memstead-cli unexpectedly carries gix or memstead-git-branch as a normal dep"
+            echo "::error::lean memstead-cli unexpectedly carries gix or memstead-git-branch as a normal dep"
             exit 1
           fi
           if cargo tree -p memstead-mcp --no-default-features -e normal | grep -E "^[└├]── (gix|memstead-git-branch) "; then
-            echo "::error::basis memstead-mcp unexpectedly carries gix or memstead-git-branch as a normal dep"
+            echo "::error::lean memstead-mcp unexpectedly carries gix or memstead-git-branch as a normal dep"
             exit 1
           fi
 
-      - name: Upload basis binaries
+      - name: Upload lean binaries
         uses: actions/upload-artifact@v4
         with:
-          name: basis-binaries
+          name: lean-binaries
           path: |
             target/release/memstead
             target/release/memstead-mcp
           retention-days: 1
 
   smoke:
-    name: Basis smoke (happy path)
-    needs: build-basis
+    name: Lean smoke (happy path)
+    needs: build-lean
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: basis-binaries
+          name: lean-binaries
           path: bin
       - name: Make binaries executable
         run: chmod +x bin/memstead bin/memstead-mcp
-      - name: Run basis smoke
+      - name: Run lean smoke
         run: |
-          python3 ci/basis_smoke.py \
+          python3 ci/lean_smoke.py \
             --memstead "$(pwd)/bin/memstead" \
             --memstead-mcp "$(pwd)/bin/memstead-mcp"
 
   strictness:
-    name: Basis strictness probes
-    needs: build-basis
+    name: Lean strictness probes
+    needs: build-lean
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: basis-binaries
+          name: lean-binaries
           path: bin
       - name: Make binaries executable
         run: chmod +x bin/memstead bin/memstead-mcp
-      - name: Run basis strictness probes
+      - name: Run lean strictness probes
         run: |
-          python3 ci/basis_strictness.py \
+          python3 ci/lean_strictness.py \
             --memstead "$(pwd)/bin/memstead" \
             --memstead-mcp "$(pwd)/bin/memstead-mcp"
 
   mutation:
-    name: Basis mutation surface
-    needs: build-basis
+    name: Lean mutation surface
+    needs: build-lean
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: basis-binaries
+          name: lean-binaries
           path: bin
       - name: Make binaries executable
         run: chmod +x bin/memstead bin/memstead-mcp
-      - name: Run basis mutation probes
+      - name: Run lean mutation probes
         run: |
-          python3 ci/basis_mutation.py \
+          python3 ci/lean_mutation.py \
             --memstead "$(pwd)/bin/memstead" \
             --memstead-mcp "$(pwd)/bin/memstead-mcp"

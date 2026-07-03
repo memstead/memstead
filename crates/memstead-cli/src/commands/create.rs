@@ -312,7 +312,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
 
             if ctx.json {
                 // WarningHint's Serialize impl produces the
-                // `{code, message, details}` envelope that pro
+                // `{code, message, details}` envelope that full
                 // already used, so the wire shape is unchanged.
                 print_json(&serde_json::json!({
                     "id": outcome.id.as_ref(),

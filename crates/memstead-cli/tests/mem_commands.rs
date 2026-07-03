@@ -1,7 +1,7 @@
 #![cfg(feature = "mem-repo")]
 // `memstead export --format mem` round-trips through `memstead install` here,
 // and `install` is a mem-repo-only subcommand. Skip the whole binary
-// under `--no-default-features` rather than try to project the basis
+// under `--no-default-features` rather than try to project the lean
 // half (which has no `install` to round-trip into).
 
 //! Integration tests for `memstead export` and `memstead install`.

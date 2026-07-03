@@ -3,17 +3,17 @@
 //!
 //! Post-rebuild there is one workspace marker: `.memstead/workspace.toml`
 //! at the workspace root. The `mem-repo` Cargo feature decides
-//! which engine factory consumes it — pro routes through
+//! which engine factory consumes it — full routes through
 //! [`memstead_git_branch::workspace_store::engine_from_workspace_root`]
-//! (git-branch backends plus folder + archive), basis routes through
+//! (git-branch backends plus folder + archive), lean routes through
 //! [`memstead_base::Engine::from_workspace_root`] (folder + archive
 //! only).
 //!
 //! [`CliEngine`] wraps either flavour; subcommands match-dispatch on
-//! it. The `WorkspaceShape` variant is retained so the basis build
-//! can still surface an actionable "this is the basis binary, your
+//! it. The `WorkspaceShape` variant is retained so the lean build
+//! can still surface an actionable "this is the lean binary, your
 //! workspace has git-branch mounts" error when the operator points a
-//! basis binary at a pro workspace — the shape tag is derived from
+//! lean binary at a full workspace — the shape tag is derived from
 //! `mem-repo/.git` co-existing with the marker rather than the
 //! marker itself.
 
@@ -40,8 +40,8 @@ use crate::output::ExitKind;
 pub const WORKSPACE_NOT_INITIALISED_CODE: &str = "WORKSPACE_NOT_INITIALISED";
 
 /// Recovery command suggested when no `.memstead/workspace.toml` is
-/// reachable from cwd. `memstead mem-repo init` in the pro build (this
-/// binary speaks mem-repo); `memstead init` in the basis build. The
+/// reachable from cwd. `memstead mem-repo init` in the full build (this
+/// binary speaks mem-repo); `memstead init` in the lean build. The
 /// structured `hint.recovery_command` field carries this token
 /// verbatim so an agent can re-exec it.
 #[cfg(feature = "mem-repo")]
@@ -90,7 +90,7 @@ pub enum WorkspaceShape {
 /// read commands can share most of their bodies.
 ///
 /// The `MemRepo` variant is only present under the `mem-repo`
-/// feature. In the basis build (`--no-default-features`) the enum
+/// feature. In the lean build (`--no-default-features`) the enum
 /// collapses to a single `Filesystem` arm — every subcommand's
 /// dispatch elides the missing arm via `cfg`.
 pub enum CliEngine {
@@ -108,8 +108,8 @@ impl CliContext {
     /// `.memstead/workspace.toml` carries both folder-only workspaces and
     /// mem-repo workspaces. The flavour tag comes from whether the
     /// workspace root also carries `mem-repo/.git/` (mem-repo
-    /// flavour) or not (folder-only flavour). The basis CLI uses this
-    /// distinction to surface "this is the basis binary" when the
+    /// flavour) or not (folder-only flavour). The lean CLI uses this
+    /// distinction to surface "this is the lean binary" when the
     /// operator points it at a workspace with git-branch mounts.
     pub fn workspace_shape(&self) -> Option<(WorkspaceShape, PathBuf)> {
         let cwd = std::env::current_dir().ok()?;
@@ -126,9 +126,9 @@ impl CliContext {
     /// marker `.memstead/workspace.toml` resolves either flavour; the
     /// presence of `mem-repo/.git/` switches the engine factory.
     ///
-    /// On the basis build (`--no-default-features`) the mem-repo
+    /// On the lean build (`--no-default-features`) the mem-repo
     /// branch surfaces a clear "not built into this binary" error so
-    /// a user pointing the basis build at a mem-repo workspace
+    /// a user pointing the lean build at a mem-repo workspace
     /// gets an actionable signal rather than a confusing "no
     /// workspace" bail.
     pub fn cli_engine(&self) -> anyhow::Result<CliEngine> {
@@ -161,7 +161,7 @@ impl CliContext {
                     kind: ExitKind::Generic,
                     code: "UNSUPPORTED_WORKSPACE_SHAPE",
                     message:
-                        "this is the basis build of memstead (folder-mount only); the workspace is mem-repo-shaped (`mem-repo/.git/` present). Install the pro build (`cargo build --features mem-repo`) or run from a workspace whose mounts are all folder-backed."
+                        "this is the lean build of memstead (folder-mount only); the workspace is mem-repo-shaped (`mem-repo/.git/` present). Install the full build (`cargo build --features mem-repo`) or run from a workspace whose mounts are all folder-backed."
                             .to_string(),
                     details: None,
                 }
@@ -178,7 +178,7 @@ impl CliContext {
     /// handles layout detection, mount enumeration, schema resolution,
     /// and readMems hydration in one pass.
     ///
-    /// Only compiled into the pro build — the basis build never sees a
+    /// Only compiled into the full build — the lean build never sees a
     /// mem-repo workspace because `cli_engine()` rejects it before
     /// reaching here.
     #[cfg(feature = "mem-repo")]
@@ -255,7 +255,7 @@ pub fn find_workspace_root(start: &Path) -> Option<PathBuf> {
 
 /// Compatibility alias for `find_workspace_root` — kept so existing
 /// CLI subcommands (export, changes, …) that historically routed
-/// through the basis-flavour walker continue to compile. Both walkers
+/// through the lean-flavour walker continue to compile. Both walkers
 /// now find the same marker; the alias is intentional for
 /// call-site clarity (`find_workspace_root` reads as the canonical
 /// surface; `find_filesystem_workspace_root` documents the

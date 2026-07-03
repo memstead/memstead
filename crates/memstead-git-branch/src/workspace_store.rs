@@ -1,10 +1,10 @@
-//! Pro-flavour workspace boot helper.
+//! Full-flavour workspace boot helper.
 //!
-//! Provides [`engine_from_workspace_root`] — the pro counterpart to
+//! Provides [`engine_from_workspace_root`] — the full counterpart to
 //! [`memstead_base::Engine::from_workspace_root`]. Loads the workspace via
 //! [`memstead_base::FileWorkspaceStore`], hydrates read-only archive mounts
 //! from each writable mem's `readMems` field, instantiates each
-//! mount via [`crate::storage::instantiate_pro_backend`] (which knows
+//! mount via [`crate::storage::instantiate_full_backend`] (which knows
 //! how to materialise [`memstead_base::MountStorage::GitBranch`]), and
 //! constructs the engine.
 
@@ -99,8 +99,8 @@ pub fn engine_from_workspace_root(workspace_root: &Path) -> Result<Engine, BootE
     let workspace = match detect_layout(workspace_root) {
         // Standalone collapse: a bare folder mem (`.memstead/config.json`,
         // no `workspace.toml`) roots as a one-mount workspace. The macOS app
-        // boots through this pro entry, so the unified lone-mem experience
-        // must hold here too, not only in the basis boot path.
+        // boots through this full entry, so the unified lone-mem experience
+        // must hold here too, not only in the lean boot path.
         memstead_base::Layout::Empty => {
             match memstead_base::standalone_workspace(workspace_root) {
                 Some(ws) => ws,
@@ -121,7 +121,7 @@ pub fn engine_from_workspace_root(workspace_root: &Path) -> Result<Engine, BootE
     let mut mounts: Vec<(Mount, Box<dyn MemBackend>)> =
         Vec::with_capacity(workspace.mounts.len());
     for mount in workspace.mounts {
-        let backend = crate::storage::instantiate_pro_backend(&mount)?;
+        let backend = crate::storage::instantiate_full_backend(&mount)?;
         mounts.push((mount, backend));
     }
     // Read-mem hydration. For each writable mount, read its
@@ -152,7 +152,7 @@ pub fn engine_from_workspace_root(workspace_root: &Path) -> Result<Engine, BootE
                 Vec::new()
             }
         };
-    // Folder mounts in a pro workspace read authored schemas from the
+    // Folder mounts in a full workspace read authored schemas from the
     // fixed `<workspace>/.memstead/schemas/` location (the `schemas_dir`
     // key is retired). Git-branch mounts get their schemas from the
     // `__MEMSTEAD:schemas/` ref (`ref_schemas` above); the folder dir is
@@ -165,11 +165,11 @@ pub fn engine_from_workspace_root(workspace_root: &Path) -> Result<Engine, BootE
     )?;
     engine.set_settings(settings);
     engine.set_workspace_root(workspace_root.to_path_buf());
-    engine.set_backend_factory(crate::storage::instantiate_pro_backend);
-    engine.set_git_branch_ops(crate::storage::PRO_GIT_BRANCH_OPS);
+    engine.set_backend_factory(crate::storage::instantiate_full_backend);
+    engine.set_git_branch_ops(crate::storage::FULL_GIT_BRANCH_OPS);
     // Load the workspace store's pipeline configs (Medium / Facet /
     // Projection / Ingest) into the read-only queryable surface, matching
-    // the basis boot path. A malformed config surfaces a typed parse error.
+    // the lean boot path. A malformed config surfaces a typed parse error.
     // Pipeline configs from the workspace store — the legacy folders are no
     // longer read at boot (the compat shim retired with the 2026-06-14 bundled
     // migration; `memstead pipeline migrate` is the only path from old-shape
@@ -197,7 +197,7 @@ mod tests {
     /// A schema installed onto the `__MEMSTEAD:schemas/` ref overlays
     /// into the engine's resolution catalogue at boot — so a mem can
     /// pin a git-branch-installed (non-built-in) schema. Regression for
-    /// the gap where the pro boot read folder schemas only and never the
+    /// the gap where the full boot read folder schemas only and never the
     /// ref, leaving ref-installed schemas unresolvable.
     #[test]
     fn engine_from_workspace_root_overlays_ref_schemas() {

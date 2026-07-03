@@ -31,7 +31,7 @@ use super::{BackendFactory, Engine, EngineError, GitBranchOps, MountedBackend};
 impl Engine {
 
     /// Replace the workspace-level settings. Called by
-    /// [`Self::from_workspace_root`] (and the pro counterpart) after
+    /// [`Self::from_workspace_root`] (and the full counterpart) after
     /// reading `.memstead/workspace.toml`. Tests / direct callers leave
     /// the default empty value in place. Cheap clone — settings
     /// carry only data shapes (raw rule lists, link policy map),
@@ -43,20 +43,20 @@ impl Engine {
         self.create_rule_set_memo = OnceCell::new();
     }
 
-    /// Replace the backend factory. Pro consumers call this once at boot
+    /// Replace the backend factory. Full consumers call this once at boot
     /// (`engine_from_workspace_root`) to install
-    /// `memstead_git_branch::storage::instantiate_pro_backend` so the engine
+    /// `memstead_git_branch::storage::instantiate_full_backend` so the engine
     /// can materialise git-branch backends on top of folder + archive.
-    /// Basis consumers leave the default in place.
+    /// Lean consumers leave the default in place.
     pub fn set_backend_factory(&mut self, factory: BackendFactory) {
         self.backend_factory = factory;
     }
 
-    /// Install the git-branch ops bundle. Pro boot
+    /// Install the git-branch ops bundle. Full boot
     /// (`memstead_git_branch::engine_from_workspace_root`) calls this once
-    /// at construction. Basis consumers leave it unset and the
+    /// at construction. Lean consumers leave it unset and the
     /// git-branch dispatch branches collapse to typed errors / empty
-    /// reports — basis has no git-branch mounts.
+    /// reports — lean has no git-branch mounts.
     pub fn set_git_branch_ops(&mut self, ops: GitBranchOps) {
         self.git_branch_ops = Some(ops);
     }
@@ -71,7 +71,7 @@ impl Engine {
     /// Folder workspaces install schemas by writing under
     /// `<workspace>/.memstead/schemas/` directly; this is the git-branch
     /// path, where the engine owns the mem-repo and the write must
-    /// route through it. Errors when no git-branch ops are wired (basis
+    /// route through it. Errors when no git-branch ops are wired (lean
     /// flavour) or no git-branch mount exists to resolve the shared
     /// mem-repo gitdir from. The caller reloads (or restarts) to pick
     /// the new schema into the resolution catalogue.
@@ -194,7 +194,7 @@ impl Engine {
     /// 7. COW snapshot swap on [`Self::mem_router`] via
     ///    `Arc::make_mut` + `add_writable(name, dir, origin, mem_path)`.
     ///    Folder mounts surface their on-disk path; other backends
-    ///    register with `dir: None` (matches pro's contract).
+    ///    register with `dir: None` (matches full's contract).
     ///    `mem_path` carries the create-time organisational `path`
     ///    component (mirrors `MemCreateParams.path`) — the
     ///    delete-side lifecycle composer reads it back to rebuild the
@@ -392,10 +392,10 @@ impl Engine {
         Ok(())
     }
 
-    /// Override the workspace root after construction. The pro
+    /// Override the workspace root after construction. The full
     /// boot helper `memstead_git_branch::engine_from_workspace_root`
     /// calls this so the engine knows the path even when the boot
-    /// route runs through the pro adapter rather than
+    /// route runs through the full adapter rather than
     /// [`Self::from_workspace_root`].
     pub fn set_workspace_root(&mut self, root: PathBuf) {
         self.workspace_root = Some(root);
@@ -415,7 +415,7 @@ impl Engine {
     /// No-op when `workspace_root` is unset (tests / ad-hoc
     /// consumers that build the engine directly from a mount list).
     /// Production boot paths (`Engine::from_workspace_root` and the
-    /// pro counterpart) always set the root, so the engine-side
+    /// full counterpart) always set the root, so the engine-side
     /// fix covers every caller — including the future UniFFI binding
     /// — by construction.
     ///
@@ -790,7 +790,7 @@ impl Engine {
             MountStorage::GitBranch { gitdir, branch } => {
                 let hook = self.git_branch_ops.as_ref().ok_or_else(|| {
                     EngineError::Backend(BackendError::Other(
-                        "git-branch export hook not installed (pro flavour not loaded)"
+                        "git-branch export hook not installed (full flavour not loaded)"
                             .to_string(),
                     ))
                 })?;
@@ -1086,7 +1086,7 @@ impl Engine {
     /// `content_hash`).
     ///
     /// Operator-triggered: useful when an external writer modified
-    /// disk while this engine instance was alive (the basis flavour
+    /// disk while this engine instance was alive (the lean flavour
     /// assumes single-writer; this primitive is the escape hatch when
     /// that assumption breaks). On the happy path the diff is empty.
     ///
@@ -1095,7 +1095,7 @@ impl Engine {
     /// changed" must compare `added.is_empty() && changed.is_empty()
     /// && removed.is_empty()` against the result. Backend-specific
     /// drift signals (git HEAD comparison, mtime check) live in the
-    /// pro-flavour engine where they have meaning.
+    /// full-flavour engine where they have meaning.
     ///
     /// Invalidates community + search-index memos on success.
     pub fn reload_one_mem(
@@ -1103,7 +1103,7 @@ impl Engine {
         mem: &str,
     ) -> Result<crate::ops::ReloadResult, EngineError> {
         // Per-mem reload is intentionally silent on the engine-
-        // wide `load_warnings` accumulator — matches pro's
+        // wide `load_warnings` accumulator — matches full's
         // `reload_one_mem`. A LOCAL sink absorbs any warnings
         // the parser emits during this reload and is discarded.
         // Drift events still surface as `MemReloaded` warnings
@@ -1273,12 +1273,12 @@ impl Engine {
     /// back to [`crate::ops::EMPTY_TREE_SHA`] for wire-shape stability.
     ///
     /// `entities_loaded` is the post-reload non-stub count for the
-    /// mem — same semantic as pro's report.
+    /// mem — same semantic as full's report.
     ///
     /// `changed_entity_ids` is the union of `added ∪ changed ∪
     /// removed` from the underlying [`crate::ops::ReloadResult`]
     /// so callers don't have to merge three lists themselves —
-    /// matches pro's bundled wire shape.
+    /// matches full's bundled wire shape.
     pub fn reload_one_mem_report(
         &mut self,
         mem: &str,
@@ -1335,7 +1335,7 @@ impl Engine {
             .count();
 
         // Union of added + changed + removed, sorted lexicographically
-        // for deterministic wire output. Matches pro's "single
+        // for deterministic wire output. Matches full's "single
         // changed_entity_ids list" contract — saves callers from
         // merging three slices themselves.
         let mut changed_entity_ids: Vec<EntityId> = result
@@ -1583,7 +1583,7 @@ mod tests {
     fn reload_one_mem_keeps_engine_load_warnings_pristine() {
         // Boot with a duplicate-heading file so the accumulator
         // starts non-empty. Single-mem reload should NOT clear
-        // or repopulate the engine-wide accumulator (mirrors pro's
+        // or repopulate the engine-wide accumulator (mirrors full's
         // contract: per-mem reload is silent on the engine-wide
         // sink). The engine field stays as the boot-time snapshot.
         let tmp = TempDir::new().unwrap();
@@ -2484,7 +2484,7 @@ mod tests {
     fn reload_one_mem_report_unions_added_changed_removed_into_one_list() {
         // Mutate disk: add one, remove one, change one. The report's
         // changed_entity_ids unions the slim ReloadResult's three
-        // diff lists into a single sorted vec — matches pro's
+        // diff lists into a single sorted vec — matches full's
         // wire contract.
         let tmp = TempDir::new().unwrap();
         let mut engine = build_demo_engine(&tmp);

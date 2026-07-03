@@ -4,7 +4,7 @@ What this skill must achieve. Use this as the reference when tuning SKILL.md.
 
 ## Core purpose
 
-First-time onboarding for a filesystem-mem Memstead workspace. The user just installed `memstead` and `memstead-mcp` (basis flavour); they need a one-shot path from "empty folder" to "MCP server registered, ready to use".
+First-time onboarding for a filesystem-mem Memstead workspace. The user just installed `memstead` and `memstead-mcp` (lean flavour); they need a one-shot path from "empty folder" to "MCP server registered, ready to use".
 
 ## Acceptance shape
 
@@ -23,5 +23,5 @@ The setup flow:
 ## Out of scope
 
 - Resolving custom schemas via `memstead link` (that's its own command — the user runs it after `setup` if they want a non-default schema).
-- Bootstrapping mem-repo workspaces (`memstead mem-repo init` is a separate, pro-only path).
+- Bootstrapping mem-repo workspaces (`memstead mem-repo init` is a separate, full-only path).
 - Verifying the MCP server is wired correctly post-setup (only runs at next session start).

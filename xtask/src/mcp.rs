@@ -14,38 +14,38 @@ use memstead_mcp::filesystem_server::FilesystemMcpServer;
 use memstead_mcp::server::McpServer;
 
 pub fn render() -> String {
-    let basis = FilesystemMcpServer::tool_router().list_all();
-    let pro = McpServer::tool_router().list_all();
-    render_tools(&basis, &pro)
+    let lean = FilesystemMcpServer::tool_router().list_all();
+    let full = McpServer::tool_router().list_all();
+    render_tools(&lean, &full)
 }
 
-/// Sorted basis / pro tool-name lists. Sourced from the same routers as
+/// Sorted lean / full tool-name lists. Sourced from the same routers as
 /// [`render`]; consumed by the parity matrix.
 pub fn tool_names() -> (Vec<String>, Vec<String>) {
-    let mut basis: Vec<String> = FilesystemMcpServer::tool_router()
+    let mut lean: Vec<String> = FilesystemMcpServer::tool_router()
         .list_all()
         .iter()
         .map(|t| t.name.to_string())
         .collect();
-    basis.sort();
-    let mut pro: Vec<String> = McpServer::tool_router()
+    lean.sort();
+    let mut full: Vec<String> = McpServer::tool_router()
         .list_all()
         .iter()
         .map(|t| t.name.to_string())
         .collect();
-    pro.sort();
-    (basis, pro)
+    full.sort();
+    (lean, full)
 }
 
-fn render_tools(basis: &[Tool], pro: &[Tool]) -> String {
-    let basis_names: BTreeSet<String> =
-        basis.iter().map(|t| t.name.to_string()).collect();
+fn render_tools(lean: &[Tool], full: &[Tool]) -> String {
+    let lean_names: BTreeSet<String> =
+        lean.iter().map(|t| t.name.to_string()).collect();
     let pro_names: BTreeSet<String> =
-        pro.iter().map(|t| t.name.to_string()).collect();
-    let basis_by_name: BTreeMap<&str, &Tool> =
-        basis.iter().map(|t| (t.name.as_ref(), t)).collect();
+        full.iter().map(|t| t.name.to_string()).collect();
+    let lean_by_name: BTreeMap<&str, &Tool> =
+        lean.iter().map(|t| (t.name.as_ref(), t)).collect();
     let pro_by_name: BTreeMap<&str, &Tool> =
-        pro.iter().map(|t| (t.name.as_ref(), t)).collect();
+        full.iter().map(|t| (t.name.as_ref(), t)).collect();
 
     let mut out = String::new();
     out.push_str("# MCP tools\n\n");
@@ -59,12 +59,12 @@ fn render_tools(basis: &[Tool], pro: &[Tool]) -> String {
 
     out.push_str(&format!(
         "**Counts:** the lean build exposes {} tools; the full build exposes {} (a strict superset on shared names).\n\n",
-        basis.len(),
-        pro.len(),
+        lean.len(),
+        full.len(),
     ));
 
     let mut all_names: BTreeSet<&str> = BTreeSet::new();
-    for n in basis_names.iter().chain(pro_names.iter()) {
+    for n in lean_names.iter().chain(pro_names.iter()) {
         all_names.insert(n.as_str());
     }
 
@@ -75,9 +75,9 @@ fn render_tools(basis: &[Tool], pro: &[Tool]) -> String {
     out.push('\n');
 
     for name in &all_names {
-        let in_basis = basis_names.contains(*name);
+        let in_lean = lean_names.contains(*name);
         let in_pro = pro_names.contains(*name);
-        let flavour = match (in_basis, in_pro) {
+        let flavour = match (in_lean, in_pro) {
             (true, true) => "lean + full",
             (true, false) => "lean only",
             (false, true) => "full only",
@@ -86,7 +86,7 @@ fn render_tools(basis: &[Tool], pro: &[Tool]) -> String {
         let tool = pro_by_name
             .get(*name)
             .copied()
-            .or_else(|| basis_by_name.get(*name).copied())
+            .or_else(|| lean_by_name.get(*name).copied())
             .expect("tool must exist in at least one server");
         emit_section(&mut out, name, flavour, tool);
     }

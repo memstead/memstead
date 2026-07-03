@@ -1,7 +1,7 @@
-//! Mem-lifecycle orchestrator — pro home for the multi-mem create
+//! Mem-lifecycle orchestrator — full home for the multi-mem create
 //! and delete pipelines. The matcher primitives
 //! ([`memstead_base::CreateRuleSet`], [`memstead_base::DeleteRuleSet`],
-//! [`memstead_base::MatcherSet`]) stay in basis because the basis engine's
+//! [`memstead_base::MatcherSet`]) stay in lean because the lean engine's
 //! `cross_mem_link_allowed` synthesises a [`memstead_base::CreateRuleSet`]
 //! on multi-folder workspaces. Only the lifecycle orchestrators —
 //! `create_mem`, `delete_mem`, their param/response types, the
@@ -9,29 +9,29 @@
 //! live here.
 //!
 //! Functions take `&mut memstead_base::Engine` directly rather than going
-//! through a `ProEngine` wrapper struct: the basis engine is a single
+//! through a `FullEngine` wrapper struct: the lean engine is a single
 //! polymorphic `Engine` parameterised by `Box<dyn MemBackend>` and
 //! already carries every state field the orchestrators need
 //! (`mem_router`, `settings`, `backend_factory`, `workspace_root`,
-//! `git_branch_ops`). Pro contributes lifecycle as free functions over
+//! `git_branch_ops`). Full contributes lifecycle as free functions over
 //! that engine; no separate engine type, no policy-provider trait.
 //!
-//! Return type is `Result<_, crate::ProEngineError>`. Basis-side
+//! Return type is `Result<_, crate::FullEngineError>`. Lean-side
 //! failures (`InvalidInput`, `UnknownMem`, `SchemaResolverInit`,
 //! `SchemaNotFound`, `MemNameCollision`, `Mem(_)`, `Backend(_)`)
-//! propagate verbatim through `ProEngineError::Basis(_)` via the
+//! propagate verbatim through `FullEngineError::Lean(_)` via the
 //! `#[from] memstead_base::EngineError` conversion — the `?` operator on
-//! `engine.persist_state()?` and similar basis calls does the wrap
+//! `engine.persist_state()?` and similar lean calls does the wrap
 //! automatically. The four lifecycle-only variants
 //! (`MemPathNotAllowed`, `MemReferencedByPolicy`, `MemSchemaNotAllowed`,
-//! `ConfigAlreadyExists`) are constructed as `ProEngineError::*`
+//! `ConfigAlreadyExists`) are constructed as `FullEngineError::*`
 //! directly; they no longer live in `memstead_base::EngineError`.
 
 use memstead_base::mem_management::{CreateRuleSet, DeleteRuleSet};
 
-use crate::ProEngineError;
+use crate::FullEngineError;
 
-/// Note-length cap shared with `memstead_create` / `memstead_update` / pro's
+/// Note-length cap shared with `memstead_create` / `memstead_update` / full's
 /// lifecycle orchestrators. Mirrors `memstead_git_branch::NOTE_MAX_LEN`.
 pub const NOTE_MAX_LEN: usize = 280;
 
@@ -139,7 +139,7 @@ fn residue_probe_for_workspace(
 /// http://howardhinnant.github.io/date_algorithms.html — same one
 /// `memstead_base::entity::generator::days_to_ymd` uses; replicated here
 /// to keep the function private to the orchestrator without
-/// re-exporting from basis.
+/// re-exporting from lean.
 fn days_to_ymd(days: u64) -> (u64, u64, u64) {
     let z = days + 719_468;
     let era = z / 146_097;
@@ -247,9 +247,9 @@ pub struct AllowlistEntryRemoved {
 }
 
 /// Unregister a writable mem at runtime. The unified-engine
-/// counterpart to pro's `memstead_git_branch::mem_management::delete_mem`.
+/// counterpart to full's `memstead_git_branch::mem_management::delete_mem`.
 ///
-/// Ordering guarantees mirror pro's:
+/// Ordering guarantees mirror full's:
 /// 1. Pre-mutation checks (input validation, name resolution,
 ///    allowlist match). Any failure here leaves the engine untouched
 ///    and performs zero filesystem writes.
@@ -304,7 +304,7 @@ pub struct AllowlistEntryRemoved {
 pub fn delete_mem(
     engine: &mut memstead_base::Engine,
     params: MemDeleteParams,
-) -> Result<MemDeleteResponse, ProEngineError> {
+) -> Result<MemDeleteResponse, FullEngineError> {
     // ---- Step 0: input validation ----
     if let Some(note) = params.note.as_deref()
         && note.chars().count() > NOTE_MAX_LEN
@@ -356,7 +356,7 @@ pub fn delete_mem(
         let patterns_for_errors: Vec<String> = delete_rule_set.patterns();
 
         if delete_rule_set.is_empty() {
-            return Err(ProEngineError::MemPathNotAllowed {
+            return Err(FullEngineError::MemPathNotAllowed {
                 attempted,
                 candidate,
                 patterns: patterns_for_errors,
@@ -368,7 +368,7 @@ pub fn delete_mem(
             .first_match(std::path::Path::new(&candidate))
             .is_none()
         {
-            return Err(ProEngineError::MemPathNotAllowed {
+            return Err(FullEngineError::MemPathNotAllowed {
                 attempted,
                 candidate,
                 patterns: patterns_for_errors,
@@ -424,7 +424,7 @@ pub fn delete_mem(
         referring_mems.sort();
         referring_mems.dedup();
         if !referring_mems.is_empty() {
-            return Err(ProEngineError::MemReferencedByPolicy {
+            return Err(FullEngineError::MemReferencedByPolicy {
                 name: params.name,
                 referring_mems,
             });
@@ -776,7 +776,7 @@ pub struct MemCreateParams {
     /// Optional vcs config override (signing keys, identity hints).
     /// Persisted into the per-mem config blob alongside `schema`
     /// and `name`. Most callers pass `None` — defaults come from
-    /// the workspace's `.memstead/workspace.toml`. Mirrors pro's
+    /// the workspace's `.memstead/workspace.toml`. Mirrors full's
     /// `memstead_git_branch::MemCreateParams.vcs`.
     pub vcs: Option<memstead_schema::VcsConfig>,
     /// Agent-authored provenance note (≤[`NOTE_MAX_LEN`] chars).
@@ -839,11 +839,11 @@ pub struct MemCreateResponse {
 }
 
 /// Create a new writable mem at runtime. Unified counterpart to
-/// pro's `memstead_git_branch::mem_management::create_mem`. Routes
+/// full's `memstead_git_branch::mem_management::create_mem`. Routes
 /// through the engine's installed [`memstead_base::BackendFactory`] so the
 /// same call site materialises folder, archive, or git-branch
-/// backends transparently — production pro consumers install
-/// `memstead_git_branch::storage::instantiate_pro_backend` at boot via
+/// backends transparently — production full consumers install
+/// `memstead_git_branch::storage::instantiate_full_backend` at boot via
 /// `engine_from_workspace_root`.
 ///
 /// Pipeline:
@@ -861,7 +861,7 @@ pub struct MemCreateResponse {
 ///     location's basename.
 /// 2. Name collision probe against the current mem_router
 ///    snapshot. The rich tree-walk collision detector (with
-///    `colliding_paths` envelope payload) is pro-only; unified
+///    `colliding_paths` envelope payload) is full-only; unified
 ///    surfaces collisions through the snapshot probe with the
 ///    same `EngineError::MemNameCollision` discriminant.
 /// 3. Build [`memstead_schema::config::MemConfig`] bytes.
@@ -869,7 +869,7 @@ pub struct MemCreateResponse {
 ///     when `<workspace_root>/mem-repo/.git/` exists; folder
 ///     otherwise. The branch leaf composes as `<path>/<name>`.
 /// Classify a structurally-invalid mem name into the typed
-/// `ProEngineError::InvalidMemName.reason` discriminator. Returns
+/// `FullEngineError::InvalidMemName.reason` discriminator. Returns
 /// `None` when the name passes the structural check and the caller
 /// should proceed to the regex-level grammar check + allowlist gate.
 ///
@@ -908,7 +908,7 @@ fn classify_invalid_mem_name(name: &str) -> Option<&'static str> {
 pub fn create_mem(
     engine: &mut memstead_base::Engine,
     mut params: MemCreateParams,
-) -> Result<MemCreateResponse, ProEngineError> {
+) -> Result<MemCreateResponse, FullEngineError> {
     use std::path::Path;
 
     // ---- Step 0: input validation ----
@@ -932,7 +932,7 @@ pub fn create_mem(
     // legitimate authorisation refusal rather than collapsing into the
     // post-allowlist `MEM_PATH_NOT_ALLOWED (no_match)` envelope.
     if let Some(reason) = classify_invalid_mem_name(&params.name) {
-        return Err(ProEngineError::InvalidMemName {
+        return Err(FullEngineError::InvalidMemName {
             name: params.name.clone(),
             reason,
         });
@@ -944,7 +944,7 @@ pub fn create_mem(
     // depth in case the grammar tightens later; route through the
     // typed `invalid_char` reason so the wire shape stays consistent.
     if memstead_base::entity::id::validate_mem_name_grammar(&params.name).is_err() {
-        return Err(ProEngineError::InvalidMemName {
+        return Err(FullEngineError::InvalidMemName {
             name: params.name.clone(),
             reason: "invalid_char",
         });
@@ -1013,7 +1013,7 @@ pub fn create_mem(
         let patterns_for_errors: Vec<String> = create_rule_set.patterns();
 
         if create_rule_set.is_empty() {
-            return Err(ProEngineError::MemPathNotAllowed {
+            return Err(FullEngineError::MemPathNotAllowed {
                 attempted: canonical.clone(),
                 candidate,
                 patterns: patterns_for_errors,
@@ -1024,7 +1024,7 @@ pub fn create_mem(
         let matched_rule = match create_rule_set.first_match(Path::new(&candidate)) {
             Some(r) => r.clone(),
             None => {
-                return Err(ProEngineError::MemPathNotAllowed {
+                return Err(FullEngineError::MemPathNotAllowed {
                     attempted: canonical.clone(),
                     candidate,
                     patterns: patterns_for_errors,
@@ -1038,7 +1038,7 @@ pub fn create_mem(
         // set — tests / ad-hoc).
         if let Some(root) = workspace_root.as_ref() {
             if canonical.strip_prefix(root).is_err() {
-                return Err(ProEngineError::MemPathNotAllowed {
+                return Err(FullEngineError::MemPathNotAllowed {
                     attempted: canonical.clone(),
                     candidate,
                     patterns: patterns_for_errors,
@@ -1086,7 +1086,7 @@ pub fn create_mem(
                 allowed_canonical.push(canon_str);
             }
             if !allowed {
-                return Err(ProEngineError::MemSchemaNotAllowed {
+                return Err(FullEngineError::MemSchemaNotAllowed {
                     candidate,
                     matched_pattern: matched_rule.pattern.clone(),
                     requested_schema: requested_canonical,
@@ -1209,14 +1209,14 @@ pub fn create_mem(
                 .or_else(|| tombstone.as_ref().map(|_| crate::RecoveryAction::Reattach));
             match effective_action {
                 None => {
-                    return Err(ProEngineError::MemStorageResidueDetected {
+                    return Err(FullEngineError::MemStorageResidueDetected {
                         branch_ref,
                         config_blob,
                         entity_count: 0,
                     });
                 }
                 Some(crate::RecoveryAction::HardCleanupFirst) => {
-                    return Err(ProEngineError::MemStorageResidueDetected {
+                    return Err(FullEngineError::MemStorageResidueDetected {
                         branch_ref,
                         config_blob,
                         entity_count: 0,
@@ -1245,7 +1245,7 @@ pub fn create_mem(
                     let ops = engine.git_branch_ops().ok_or_else(|| {
                         memstead_base::EngineError::InvalidInput(
                             "force_overwrite requires the git-branch ops \
-                             bundle (pro boot only) — folder workspaces \
+                             bundle (full boot only) — folder workspaces \
                              have no branch residue to prune"
                                 .to_string(),
                         )
@@ -1394,12 +1394,12 @@ pub fn create_mem(
     // Workspace-shape heuristic. When
     // `<workspace_root>/mem-repo/.git/` exists, the new mem gets
     // a git-branch mount; otherwise folder. The probe is gix-free so
-    // the heuristic works in basis builds (basis builds never have a
+    // the heuristic works in lean builds (lean builds never have a
     // mem-repo, so the probe always returns false there).
     //
-    // The git-branch storage requires the engine to have the pro
+    // The git-branch storage requires the engine to have the full
     // backend factory installed (`engine_from_workspace_root` does
-    // this at boot). When the factory is the default basis one, the
+    // this at boot). When the factory is the default lean one, the
     // factory call below returns
     // [`memstead_base::workspace_store::InstantiateError::GitBranchRequiresMemRepoFeature`]
     // — wrapped as `EngineError::Mem` in the seed-commit step.
@@ -1445,7 +1445,7 @@ pub fn create_mem(
         })?;
         let config_path = memstead_dir.join("config.json");
         if config_path.exists() {
-            return Err(ProEngineError::ConfigAlreadyExists { path: config_path });
+            return Err(FullEngineError::ConfigAlreadyExists { path: config_path });
         }
         std::fs::write(&config_path, &config_bytes).map_err(|e| {
             memstead_base::EngineError::Mem(format!("write {}: {e}", config_path.display()))
@@ -1454,8 +1454,8 @@ pub fn create_mem(
 
     // ---- Step 5: instantiate backend + seed commit + register ----
     // Backend instantiation routes through `engine.backend_factory()`.
-    // Pro consumers install
-    // `memstead_git_branch::storage::instantiate_pro_backend` at boot so
+    // Full consumers install
+    // `memstead_git_branch::storage::instantiate_full_backend` at boot so
     // the same call site produces git-branch backends when the mount
     // declares one (Step 3b above picks the variant by workspace
     // shape).
@@ -1539,7 +1539,7 @@ pub fn create_mem(
 /// appends the tail — preserving the original segment order. Falls
 /// back to the input when every ancestor is unavailable.
 ///
-/// Mirrors pro's `canonicalize_maybe_missing` in
+/// Mirrors full's `canonicalize_maybe_missing` in
 /// `memstead_git_branch::mem_management::create`. Lifted into memstead-engine
 /// so the unified create orchestrator doesn't reach back to
 /// memstead-git-branch.

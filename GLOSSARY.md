@@ -47,7 +47,7 @@ For larger corpora the model is **many small mems, federated** rather than one g
 
 ### Rationale
 
-The definition separates four things the codebase historically conflated: the *logical collection* (mem), the *storage form* (folder / branch / archive), the *modal flavour* (knowledge / planning / spec / …), and the *mount granularity* (a pro-flavour mem-repo gitdir contains N mems).
+The definition separates four things the codebase historically conflated: the *logical collection* (mem), the *storage form* (folder / branch / archive), the *modal flavour* (knowledge / planning / spec / …), and the *mount granularity* (a full-flavour mem-repo gitdir contains N mems).
 
 Three constraints earn their place in the definition by code-verification:
 
@@ -239,7 +239,7 @@ Each backend carries its own [schemas](#schema) and per-mem configs in a paralle
 | **Git-branch** | `refs/heads/<mem>` tree | `__MEMSTEAD:mems/<mem>/config.json` | `__MEMSTEAD:schemas/<name>@<version>/` |
 | **Archive** | inside `.mem` zip | inside `.mem` zip | inside `.mem` zip |
 
-The git-branch backend's `__MEMSTEAD` ref unifies what today's pro flavour splits into two orphan refs (`__SCHEMAS` for schema YAMLs, `__SYSTEM` for per-mem configs). One ref, parallel structure with the folder backend's `.memstead/` directory.
+The git-branch backend's `__MEMSTEAD` ref unifies what today's full flavour splits into two orphan refs (`__SCHEMAS` for schema YAMLs, `__SYSTEM` for per-mem configs). One ref, parallel structure with the folder backend's `.memstead/` directory.
 
 The folder backend supports two operator layouts: **multi-mem** (the workspace root is a container; each mem is a subfolder) and **collapsed single-mem** (the workspace IS the one mem; config at root, no `mems/` subfolder). The collapsed form is detected by `.memstead/config.json` at workspace root instead of `.memstead/mems/<name>/config.json` entries.
 
@@ -276,7 +276,7 @@ Two pitfalls this avoids:
 - **Conflating "storage backend" with "the workspace itself".** Today's `memstead-git-branch` Rust crate hosts the git-branch backend; the crate name suggests it owns the workspace concept, but it does not. After convergence, that crate is renamed for what it actually implements: a git-branch backend, sibling to a folder backend and an archive backend.
 - **Conflating capability-by-mount with capability-by-backend.** A folder backend can be mounted read-only (a workspace's choice); an archive can only be read (an intrinsic property of content-addressed sealed bytes). Splitting *kind* from *capability* keeps error envelopes and mount semantics consistent — a write attempt against an archive fails at a different layer than a write attempt against a read-only-mounted folder.
 
-**Status:** largely realized. `MemBackend` lives in `memstead-base::backend` and the engine talks to every storage kind through it: the folder backend (`memstead-base::storage::filesystem`) and the archive read path (`memstead-base::storage::archive`) are linked unconditionally, the git-branch backend (`memstead-git-branch`) is added by the pro flavour via a registered backend factory. The residual cleanup is the `memstead-git-branch` crate rename and the migration of a handful of ops-level methods (`read_agent_notes`, `export_to_archive`, `changes_since` with rename detection) off the trait into backend-specific helpers, both tracked separately.
+**Status:** largely realized. `MemBackend` lives in `memstead-base::backend` and the engine talks to every storage kind through it: the folder backend (`memstead-base::storage::filesystem`) and the archive read path (`memstead-base::storage::archive`) are linked unconditionally, the git-branch backend (`memstead-git-branch`) is added by the full flavour via a registered backend factory. The residual cleanup is the `memstead-git-branch` crate rename and the migration of a handful of ops-level methods (`read_agent_notes`, `export_to_archive`, `changes_since` with rename detection) off the trait into backend-specific helpers, both tracked separately.
 
 ---
 
@@ -388,7 +388,7 @@ Two distinctions worth preserving:
 
 A mem has exactly one subject. The subject is editorial — not enforced by code. The mem's name and entity content together imply it; convention keeps the entities on-subject.
 
-**Examples.** The Memstead project's own pro mem-repo carries five mems with the `software@0.1.0` schema; each has a different subject — *the engine codebase*, *the macOS app*, *the Claude Code plugin*, *the registry server*, *the project as a whole*. Same schema, five distinct mems, because five distinct subjects.
+**Examples.** The Memstead project's own full mem-repo carries five mems with the `software@0.1.0` schema; each has a different subject — *the engine codebase*, *the macOS app*, *the Claude Code plugin*, *the registry server*, *the project as a whole*. Same schema, five distinct mems, because five distinct subjects.
 
 **Boundary.**
 

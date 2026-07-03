@@ -1178,7 +1178,7 @@ mod tests {
         let err = engine
             .set_mem_schema("no-such-mem".to_string(), "default@1.0.0".to_string())
             .expect_err("unknown mem must refuse");
-        // `UnknownMem` survives the `ProEngineError::Basis` → `EngineError`
+        // `UnknownMem` survives the `FullEngineError::Lean` → `EngineError`
         // lift into the typed Swift variant.
         assert!(matches!(err, MemsteadError::UnknownMem { .. }), "got {err:?}");
     }

@@ -109,7 +109,7 @@ fn stats_markdown() {
 /// workspace. Pre-CLI-parity, this command would error out with the
 /// "No mems found. Run `memstead mem-repo init`" message; post the
 /// `CliEngine` foundation the command dispatches into the unified
-/// `memstead_base::Engine` (basis path) and emits the same shape the
+/// `memstead_base::Engine` (lean path) and emits the same shape the
 /// mem-repo path produces.
 #[test]
 fn stats_works_on_filesystem_mem_workspace() {
@@ -483,9 +483,9 @@ fn overview_runs() {
         .success();
 }
 
-/// Pro CLI's overview command renders the rich content (community
+/// Full CLI's overview command renders the rich content (community
 /// bridges, mem distribution, dangling links) via the shared
-/// `memstead-engine::overview::compose_overview` composer. The pro CLI
+/// `memstead-engine::overview::compose_overview` composer. The full CLI
 /// renders the content directly: when `--include` is passed the
 /// `OVERVIEW_RICH_CONTENT_PRO_ONLY` (formerly `mcp_only_notice`)
 /// warning string must not appear in the response.
@@ -505,10 +505,10 @@ fn overview_with_include_renders_rich_content_without_pro_only_warning() {
         .success()
         .stdout(contains("## Schemas"))
         .stdout(contains("## Mems"))
-        // The basis CLI's pre-lift output would have included this
-        // warning code; the pro CLI's shared-composer path does NOT.
+        // The lean CLI's pre-lift output would have included this
+        // warning code; the full CLI's shared-composer path does NOT.
         .stdout(predicates::str::contains("OVERVIEW_RICH_CONTENT_PRO_ONLY").not())
-        // Pro CLI uses `memstead type <name>` for the schema-lookup hint,
+        // Full CLI uses `memstead type <name>` for the schema-lookup hint,
         // not the MCP-flavour `memstead_schema(name=...)`.
         .stdout(contains("`memstead type <name>`"));
 }

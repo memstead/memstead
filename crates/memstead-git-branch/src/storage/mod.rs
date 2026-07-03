@@ -22,25 +22,25 @@ pub fn git_tree_mem_writer(gitdir: PathBuf, ref_name: String) -> Box<dyn MemWrit
     Box::new(git_tree::GitTreeMemWriter::new(gitdir, ref_name))
 }
 
-/// Pro counterpart of [`memstead_base::instantiate_basis_backend`]: turns
+/// Full counterpart of [`memstead_base::instantiate_lean_backend`]: turns
 /// any [`memstead_base::Mount`] into a `Box<dyn MemBackend>`, including
-/// the git-branch variant that the basis flavour cannot construct.
+/// the git-branch variant that the lean flavour cannot construct.
 ///
-/// Folder and Archive variants delegate to the basis function so the
+/// Folder and Archive variants delegate to the lean function so the
 /// instantiation paths share one implementation. The git-branch
 /// variant constructs a [`git_tree::GitTreeMemWriter`] using the
 /// mount's `gitdir` + `branch`, fully-qualifying the ref-name as
 /// `refs/heads/<branch>` so the per-branch mutex inside the writer
 /// keys consistently with what `agent_notes_since` and
 /// `read_branch_blobs` expect.
-pub fn instantiate_pro_backend(
+pub fn instantiate_full_backend(
     mount: &memstead_base::Mount,
 ) -> Result<Box<dyn memstead_base::MemBackend>, memstead_base::InstantiateError> {
     use memstead_base::MountStorage;
     match &mount.storage {
         MountStorage::Folder { .. }
         | MountStorage::Archive { .. }
-        | MountStorage::InMemory => memstead_base::instantiate_basis_backend(mount),
+        | MountStorage::InMemory => memstead_base::instantiate_lean_backend(mount),
         MountStorage::GitBranch { gitdir, branch } => {
             let ref_name = if branch.starts_with("refs/") {
                 branch.clone()
@@ -55,12 +55,12 @@ pub fn instantiate_pro_backend(
     }
 }
 
-/// The git-branch ops bundle installed on `memstead_base::Engine` by pro
+/// The git-branch ops bundle installed on `memstead_base::Engine` by full
 /// boot. Wraps `crate::ops::changes::changes_since` and
 /// `crate::ops::export::export_mem_from_branch` so the engine can
 /// dispatch from a [`MountStorage::GitBranch`] mount without an extra
 /// trait or downcast.
-pub const PRO_GIT_BRANCH_OPS: memstead_base::GitBranchOps = memstead_base::GitBranchOps {
+pub const FULL_GIT_BRANCH_OPS: memstead_base::GitBranchOps = memstead_base::GitBranchOps {
     changes_since: changes_since_dispatch,
     diff: diff_dispatch,
     branch_reset: branch_reset_dispatch,

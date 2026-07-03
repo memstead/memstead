@@ -166,7 +166,7 @@ pub fn render_type_guidance_block(
 /// body. No-op when no reload happened during the operation or the
 /// body is not a JSON object. Mirrors the MCP server's
 /// `attach_mem_changed` so the two surfaces emit the same key.
-/// (Always compiled; on basis the engine never stashes a notice, so
+/// (Always compiled; on lean the engine never stashes a notice, so
 /// `notices` is empty and this no-ops.)
 pub fn merge_mem_changed_json(
     body: &mut serde_json::Value,
@@ -186,7 +186,7 @@ pub fn merge_mem_changed_json(
 /// Render a human-readable `mem_changed` block for markdown CLI
 /// output. Empty when no reload happened. Names `memstead changes-since`
 /// (never `memstead diff`) for the follow-up, matching the cross-surface
-/// recovery contract. (Always compiled; on basis `notices` is always
+/// recovery contract. (Always compiled; on lean `notices` is always
 /// empty, so this returns the empty string.)
 pub fn render_mem_changed_block(notices: &[memstead_base::ops::MemChangedNotice]) -> String {
     use memstead_base::ops::NoticeChanges;

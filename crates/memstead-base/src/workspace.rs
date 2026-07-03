@@ -82,8 +82,8 @@ impl Mount {
     /// `branch` field. Tolerates both fully-qualified
     /// `refs/heads/<mem_path>/<mem>` (the shape `create_mem`
     /// produces) and bare `<mem_path>/<mem>` (the shape
-    /// `mounts.json` operator-edited entries carry) — pro's
-    /// `instantiate_pro_backend` already normalises both forms. Strip
+    /// `mounts.json` operator-edited entries carry) — full's
+    /// `instantiate_full_backend` already normalises both forms. Strip
     /// the optional `refs/heads/` prefix and the trailing `<mem>`
     /// leaf. `Folder` / `Archive` carry no hierarchical path on the
     /// storage variant — runtime callers that know the create-time

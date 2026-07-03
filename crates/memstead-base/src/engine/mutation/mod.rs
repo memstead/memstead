@@ -24,7 +24,7 @@ pub mod rename;
 pub mod update;
 
 /// Look up an entity's `(title, entity_type)` pair in `store`. Both
-/// `None` for missing-from-store ids — matches pro's `title_for` /
+/// `None` for missing-from-store ids — matches full's `title_for` /
 /// `type_for` lossy-lookup contract. Used by [`Engine::changes_since`]
 /// to enrich id-only envelopes the backend returned with metadata
 /// from the in-memory store.
@@ -40,18 +40,18 @@ pub(super) fn lookup_title_and_type(
 
 /// Maximum byte length of the truncated `current_content` snapshot
 /// that [`EngineError::PatchOldNotFound`] carries. Keeps the wire
-/// envelope bounded for sections with large bodies. Mirrors pro's
+/// envelope bounded for sections with large bodies. Mirrors full's
 /// `memstead_git_branch::PATCH_OLD_NOT_FOUND_CONTENT_CAP`.
 pub const PATCH_OLD_NOT_FOUND_CONTENT_CAP: usize = 500;
 
 /// Maximum number of entity IDs retained in
 /// [`EngineError::RelationshipCycle::existing_path`]. Keeps the cycle
-/// envelope bounded for pathologically long chains. Mirrors pro's
+/// envelope bounded for pathologically long chains. Mirrors full's
 /// `memstead_git_branch::RELATIONSHIP_CYCLE_PATH_CAP`.
 pub const RELATIONSHIP_CYCLE_PATH_CAP: usize = 20;
 
 /// Build an [`EngineError::UnknownType`] populated with the schema's
-/// declared type names (sorted) and a fuzzy suggestion. Mirrors pro's
+/// declared type names (sorted) and a fuzzy suggestion. Mirrors full's
 /// `UnknownEntityType` recovery payload so MCP envelopes carry the
 /// same `name` / `schema_ref` / `declared` / `suggestion` keys
 /// regardless of which engine served the call.

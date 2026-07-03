@@ -1,41 +1,41 @@
-//! Pro-flavor engine error envelope.
+//! Full-flavor engine error envelope.
 //!
-//! Mirrors the wrap-not-embed pattern: pro errors **wrap** basis
-//! errors via `From<memstead_base::EngineError>`, so pro code paths can
-//! transparently propagate a basis failure without re-wrapping at each
-//! call site. The pro MCP render layer reads the wrapped chain to
-//! produce the typed `code`; the basis render layer only ever sees
-//! basis errors.
+//! Mirrors the wrap-not-embed pattern: full errors **wrap** lean
+//! errors via `From<memstead_base::EngineError>`, so full code paths can
+//! transparently propagate a lean failure without re-wrapping at each
+//! call site. The full MCP render layer reads the wrapped chain to
+//! produce the typed `code`; the lean render layer only ever sees
+//! lean errors.
 //!
 //! The four lifecycle-only variants live here rather than on
 //! `memstead_base::EngineError`: they are produced by this crate's
 //! mem-management orchestrator (`create_mem` / `delete_mem`),
-//! which returns `Result<_, ProEngineError>`, so the basis crate
-//! carries no pro-specific lifecycle types.
+//! which returns `Result<_, FullEngineError>`, so the lean crate
+//! carries no full-specific lifecycle types.
 
 use std::path::PathBuf;
 
 use memstead_base::EngineError;
 
-/// Errors surfaced by the pro engine extension.
+/// Errors surfaced by the full engine extension.
 ///
-/// `Basis(EngineError)` wraps any failure that originates in the
-/// underlying basis engine — pro orchestrators that delegate to
-/// `memstead_base::Engine` propagate basis errors verbatim through this
-/// variant (`#[from]`), so the wire-rendering layer at the pro MCP
-/// surface can recover the basis `code()` for any wrapped variant.
+/// `Lean(EngineError)` wraps any failure that originates in the
+/// underlying lean engine — full orchestrators that delegate to
+/// `memstead_base::Engine` propagate lean errors verbatim through this
+/// variant (`#[from]`), so the wire-rendering layer at the full MCP
+/// surface can recover the lean `code()` for any wrapped variant.
 ///
 /// The remaining variants are **lifecycle-only**: they fire from the
-/// pro mem management orchestrator (`create_mem` / `delete_mem`)
-/// and have no basis-side fire conditions. They live in this crate
+/// full mem management orchestrator (`create_mem` / `delete_mem`)
+/// and have no lean-side fire conditions. They live in this crate
 /// alongside their orchestrator.
 #[derive(Debug, thiserror::Error)]
-pub enum ProEngineError {
-    /// Wrapped basis-engine error. Use this variant whenever a pro
-    /// code path delegates to `memstead_base::Engine` and a basis-side
+pub enum FullEngineError {
+    /// Wrapped lean-engine error. Use this variant whenever a full
+    /// code path delegates to `memstead_base::Engine` and a lean-side
     /// failure should surface unchanged.
     #[error(transparent)]
-    Basis(#[from] EngineError),
+    Lean(#[from] EngineError),
 
     /// `create_mem` / `delete_mem` rejected because the mem
     /// path is not covered by an allowlist rule. `reason` is one of
@@ -176,18 +176,18 @@ impl RecoveryAction {
     }
 }
 
-impl ProEngineError {
+impl FullEngineError {
     /// Render rich, fully-inlined recovery prose for the agent-visible
     /// text channel. Closes the asymmetry where structured `details.X`
     /// fields stayed off the agent's text channel. Each lifecycle
     /// variant with a structured list (`patterns`, `referring_mems`,
-    /// `allowed_schemas`) inlines the full payload; basis wraps
+    /// `allowed_schemas`) inlines the full payload; lean wraps
     /// delegate to [`EngineError::prose_render`]; trivial variants
     /// fall back to `Display`.
     pub fn prose_render(&self) -> String {
         match self {
-            ProEngineError::Basis(inner) => inner.prose_render(),
-            ProEngineError::MemPathNotAllowed {
+            FullEngineError::Lean(inner) => inner.prose_render(),
+            FullEngineError::MemPathNotAllowed {
                 attempted,
                 candidate,
                 patterns,
@@ -204,7 +204,7 @@ impl ProEngineError {
                     attempted.display()
                 )
             }
-            ProEngineError::MemSchemaNotAllowed {
+            FullEngineError::MemSchemaNotAllowed {
                 candidate,
                 matched_pattern,
                 requested_schema,
@@ -219,7 +219,7 @@ impl ProEngineError {
                     "schema '{requested_schema}' not allowed by create-rule '{matched_pattern}' for candidate '{candidate}' — allowed schemas: {allowed_inline}. Pick a schema from this list or add a new `[[mem_management.create]]` rule covering this candidate."
                 )
             }
-            ProEngineError::MemReferencedByPolicy {
+            FullEngineError::MemReferencedByPolicy {
                 name,
                 referring_mems,
             } => {
@@ -247,14 +247,14 @@ impl ProEngineError {
     /// `err.details()` directly without hand-maintaining each per-
     /// variant payload at the CLI surface.
     ///
-    /// `Basis(inner)` delegates to `EngineError::details()`. Lifecycle
+    /// `Lean(inner)` delegates to `EngineError::details()`. Lifecycle
     /// variants return the same JSON object shape `pro_engine_err_unified`
     /// builds on the MCP wire — both surfaces share the payload here
     /// so they cannot drift.
     pub fn details(&self) -> serde_json::Value {
         match self {
-            ProEngineError::Basis(inner) => inner.details(),
-            ProEngineError::MemPathNotAllowed {
+            FullEngineError::Lean(inner) => inner.details(),
+            FullEngineError::MemPathNotAllowed {
                 attempted,
                 candidate,
                 patterns,
@@ -267,17 +267,17 @@ impl ProEngineError {
                 "reason": reason,
                 "policy_table": policy_table,
             }),
-            ProEngineError::InvalidMemName { name, reason } => {
+            FullEngineError::InvalidMemName { name, reason } => {
                 serde_json::json!({ "name": name, "reason": reason })
             }
-            ProEngineError::MemReferencedByPolicy {
+            FullEngineError::MemReferencedByPolicy {
                 name,
                 referring_mems,
             } => serde_json::json!({
                 "name": name,
                 "referring_mems": referring_mems,
             }),
-            ProEngineError::MemSchemaNotAllowed {
+            FullEngineError::MemSchemaNotAllowed {
                 candidate,
                 matched_pattern,
                 requested_schema,
@@ -288,11 +288,11 @@ impl ProEngineError {
                 "requested_schema": requested_schema,
                 "allowed_schemas": allowed_schemas,
             }),
-            ProEngineError::ConfigAlreadyExists { path } => serde_json::json!({
+            FullEngineError::ConfigAlreadyExists { path } => serde_json::json!({
                 "path": path.display().to_string(),
                 "reason": "config_already_exists",
             }),
-            ProEngineError::MemStorageResidueDetected {
+            FullEngineError::MemStorageResidueDetected {
                 branch_ref,
                 config_blob,
                 entity_count,
@@ -308,19 +308,19 @@ impl ProEngineError {
     /// Stable, surface-independent error code token.
     ///
     /// Matches `memstead_base::EngineError::code()` for every variant —
-    /// wrapped basis errors delegate to the basis mapping, lifecycle
-    /// variants return the exact strings the basis enum returned for
+    /// wrapped lean errors delegate to the lean mapping, lifecycle
+    /// variants return the exact strings the lean enum returned for
     /// them today. This is load-bearing: the wire-shape pins in
     /// `memstead-mcp/tests/wire_shape.rs` assert these exact code strings.
     pub fn code(&self) -> &'static str {
         match self {
-            ProEngineError::Basis(e) => e.code(),
-            ProEngineError::MemPathNotAllowed { .. } => "MEM_PATH_NOT_ALLOWED",
-            ProEngineError::InvalidMemName { .. } => "INVALID_MEM_NAME",
-            ProEngineError::MemReferencedByPolicy { .. } => "MEM_REFERENCED_BY_POLICY",
-            ProEngineError::MemSchemaNotAllowed { .. } => "MEM_SCHEMA_NOT_ALLOWED",
-            ProEngineError::ConfigAlreadyExists { .. } => "CONFIG_ERROR",
-            ProEngineError::MemStorageResidueDetected { .. } => "MEM_STORAGE_RESIDUE_DETECTED",
+            FullEngineError::Lean(e) => e.code(),
+            FullEngineError::MemPathNotAllowed { .. } => "MEM_PATH_NOT_ALLOWED",
+            FullEngineError::InvalidMemName { .. } => "INVALID_MEM_NAME",
+            FullEngineError::MemReferencedByPolicy { .. } => "MEM_REFERENCED_BY_POLICY",
+            FullEngineError::MemSchemaNotAllowed { .. } => "MEM_SCHEMA_NOT_ALLOWED",
+            FullEngineError::ConfigAlreadyExists { .. } => "CONFIG_ERROR",
+            FullEngineError::MemStorageResidueDetected { .. } => "MEM_STORAGE_RESIDUE_DETECTED",
         }
     }
 }
@@ -329,7 +329,7 @@ impl ProEngineError {
 mod tests {
     use super::*;
 
-    /// Code strings track the wire vocabulary the pro MCP surface
+    /// Code strings track the wire vocabulary the full MCP surface
     /// publishes. `MEM_REFERENCED_BY_POLICY` was renamed from the
     /// pre-04 `MEM_HAS_REFERENCES` so the typed code matches the
     /// actual fire condition (a workspace `[cross_mem_links]` grant,
@@ -338,7 +338,7 @@ mod tests {
     /// `memstead_base::EngineError`.
     #[test]
     fn lifecycle_codes_pin_wire_vocabulary() {
-        let e = ProEngineError::MemPathNotAllowed {
+        let e = FullEngineError::MemPathNotAllowed {
             attempted: PathBuf::from("/x"),
             candidate: "x".into(),
             patterns: vec![],
@@ -347,13 +347,13 @@ mod tests {
         };
         assert_eq!(e.code(), "MEM_PATH_NOT_ALLOWED");
 
-        let e = ProEngineError::MemReferencedByPolicy {
+        let e = FullEngineError::MemReferencedByPolicy {
             name: "x".into(),
             referring_mems: vec![],
         };
         assert_eq!(e.code(), "MEM_REFERENCED_BY_POLICY");
 
-        let e = ProEngineError::MemSchemaNotAllowed {
+        let e = FullEngineError::MemSchemaNotAllowed {
             candidate: "x".into(),
             matched_pattern: "p".into(),
             requested_schema: "s".into(),
@@ -361,18 +361,18 @@ mod tests {
         };
         assert_eq!(e.code(), "MEM_SCHEMA_NOT_ALLOWED");
 
-        let e = ProEngineError::ConfigAlreadyExists {
+        let e = FullEngineError::ConfigAlreadyExists {
             path: PathBuf::from("/x"),
         };
         assert_eq!(e.code(), "CONFIG_ERROR");
     }
 
-    /// Wrapped basis errors delegate `code()` to the basis mapping.
-    /// Any drift in the basis enum's code strings rolls through this
-    /// path automatically — the pro layer never re-stringifies.
+    /// Wrapped lean errors delegate `code()` to the lean mapping.
+    /// Any drift in the lean enum's code strings rolls through this
+    /// path automatically — the full layer never re-stringifies.
     #[test]
-    fn wrapped_basis_error_delegates_code() {
-        let e: ProEngineError = EngineError::UnknownMem("specs".into()).into();
+    fn wrapped_lean_error_delegates_code() {
+        let e: FullEngineError = EngineError::UnknownMem("specs".into()).into();
         assert_eq!(e.code(), "UNKNOWN_MEM");
     }
 
@@ -382,7 +382,7 @@ mod tests {
     /// `prose_render` text both surface the table name.
     #[test]
     fn mem_path_not_allowed_carries_policy_table_in_details_and_prose() {
-        let create_err = ProEngineError::MemPathNotAllowed {
+        let create_err = FullEngineError::MemPathNotAllowed {
             attempted: PathBuf::from("/ws/scratch-2"),
             candidate: "scratch-2".into(),
             patterns: vec!["specs".into()],
@@ -399,7 +399,7 @@ mod tests {
         );
 
         // Delete-path symmetric — policy_table flips to the delete table.
-        let delete_err = ProEngineError::MemPathNotAllowed {
+        let delete_err = FullEngineError::MemPathNotAllowed {
             attempted: PathBuf::from("/ws/archive-src"),
             candidate: "archive-src".into(),
             patterns: vec!["specs".into()],

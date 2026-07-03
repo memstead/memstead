@@ -34,8 +34,8 @@ use crate::setup::CliContext;
 
 /// Recovery hint for the nested-workspace refusal. Every printed
 /// alternative must exist and be able to succeed in the binary that
-/// prints it: `memstead mem init` is the pro (mem-repo) verb; the
-/// basis binary has no `mem` subcommand group, so it points outside
+/// prints it: `memstead mem init` is the full (mem-repo) verb; the
+/// lean binary has no `mem` subcommand group, so it points outside
 /// the existing workspace instead.
 #[cfg(feature = "mem-repo")]
 const NESTED_WORKSPACE_HINT: &str = "If you meant to add a mem inside the existing \

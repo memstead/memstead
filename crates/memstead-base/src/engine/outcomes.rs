@@ -24,7 +24,7 @@ pub struct CreateEntityArgs {
     pub metadata: IndexMap<String, String>,
     /// Inline relationships to wire as outgoing edges from the new
     /// entity. Each entry's `to` may name an absent target — the
-    /// engine auto-stubs it (mirrors pro's create + stub
+    /// engine auto-stubs it (mirrors full's create + stub
     /// creation on relate). Open-mode admissions surface as
     /// [`WarningHint::UndeclaredRelationshipOpen`] in the outcome's
     /// `warnings`. Empty default — callers omit when no inline
@@ -33,7 +33,7 @@ pub struct CreateEntityArgs {
     /// When `true`, validate and compute the prospective hash but
     /// do not write to disk, mutate the store, create edges, or
     /// commit. Outcome carries `content_hash` = the prospective
-    /// hash and `commit_sha` empty — wire-equivalent to pro's
+    /// hash and `commit_sha` empty — wire-equivalent to full's
     /// `CreateArgs.dry_run` semantics.
     pub dry_run: bool,
 }
@@ -42,13 +42,13 @@ pub struct CreateEntityArgs {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct CreateEntityOutcome {
     pub id: EntityId,
-    /// Echoed from the request — pro's `CreateResult.title` carries
+    /// Echoed from the request — full's `CreateResult.title` carries
     /// the same value so wire callers don't need to derive it from
     /// the id.
     pub title: String,
-    /// Echoed from the request — pro's `CreateResult.mem`. The
+    /// Echoed from the request — full's `CreateResult.mem`. The
     /// `EntityId.mem()` accessor projects the same value, but
-    /// surfacing it explicitly mirrors pro's wire shape.
+    /// surfacing it explicitly mirrors full's wire shape.
     pub mem: String,
     /// Mem-relative path of the freshly-written `.md` file.
     pub file_path: String,
@@ -64,19 +64,19 @@ pub struct CreateEntityOutcome {
     pub content_hash: String,
     /// Per-mem commit identifier returned by the backend's
     /// [`crate::backend::MemBackend::commit`]. Wire-equivalent to
-    /// pro's `CreateResult.commit_sha`.
+    /// full's `CreateResult.commit_sha`.
     pub commit_sha: String,
     /// ISO date string from the parsed entity's `created_date`
     /// metadata. Today's date when the schema's auto-stamp filled
     /// it in; the existing value when re-materialising a stub with
-    /// `init_timestamp` semantics. Wire-equivalent to pro's
+    /// `init_timestamp` semantics. Wire-equivalent to full's
     /// `CreateResult.created_date`.
     pub created_date: String,
     /// Typed Tier-2 warnings — today
     /// [`WarningHint::MissingRequiredSection`] for empty / absent
     /// required sections. Populated even when the create succeeded
     /// so callers see the same self-correction prompts the existing
-    /// engines emit. Wire-equivalent to pro's
+    /// engines emit. Wire-equivalent to full's
     /// `CreateResult.warnings`.
     pub warnings: Vec<WarningHint>,
     /// Type-level `write_rules` keyed by `entity_type` — the
@@ -91,13 +91,13 @@ pub struct CreateEntityOutcome {
     /// at this id. `None` when no stub adoption happened (no
     /// pre-existing entity, or a real entity at the id — but that
     /// path errors with `AlreadyExists` before this field is
-    /// computed). Wire-equivalent to pro's
+    /// computed). Wire-equivalent to full's
     /// `CreateResult.incoming_count`.
     pub incoming_count: Option<usize>,
     /// Incoming edges present at this id post-create — populated
     /// from `store.incoming(id)` after the parse + upsert. Empty
     /// when no pre-existing stub had referrers. Wire-equivalent to
-    /// pro's `CreateResult.incoming`.
+    /// full's `CreateResult.incoming`.
     pub incoming: Vec<IncomingRef>,
     /// Batched relation declarations from the request's existing
     /// `relations[]` parameter. Mirrors
@@ -122,7 +122,7 @@ pub struct UpdateEntityArgs {
     /// Section keys whose body should be appended to. Existing body
     /// gets a `\n` separator before the append; empty/absent body
     /// is replaced wholesale with the append value (parity with
-    /// pro's append-on-empty behaviour). The same key may not
+    /// full's append-on-empty behaviour). The same key may not
     /// appear in both `sections` and `append_sections`; conflict
     /// is rejected with [`EngineError::ConflictingSectionModes`].
     pub append_sections: IndexMap<String, String>,
@@ -144,7 +144,7 @@ pub struct UpdateEntityArgs {
     /// carries `content_hash` = the unchanged on-disk hash (so the
     /// caller can use it as `expected_hash` on the follow-up real
     /// call) and `prospective_hash` = the hash the entity would
-    /// have after the proposed write. Wire-equivalent to pro's
+    /// have after the proposed write. Wire-equivalent to full's
     /// `UpdateArgs.dry_run`. Optimistic-lock check is skipped on
     /// the dry_run path so an agent can preview a change without
     /// holding a fresh hash — designated stale-hash recovery path.
@@ -180,7 +180,7 @@ pub struct UpdateEntityArgs {
 pub struct UpdateEntityOutcome {
     pub id: EntityId,
     /// Title from the parsed entity after the write — wire-equivalent
-    /// to pro's `UpdateResult.title`. Reflects post-write state in
+    /// to full's `UpdateResult.title`. Reflects post-write state in
     /// case a future update path touches the title (today the update
     /// surface doesn't, but reading from the parsed entity rather
     /// than echoing `args` keeps the field correct as the surface
@@ -192,27 +192,27 @@ pub struct UpdateEntityOutcome {
     pub content_hash: String,
     /// Per-mem commit identifier returned by the backend's
     /// [`crate::backend::MemBackend::commit`]. Wire-equivalent to
-    /// pro's `UpdateResult.commit_sha`.
+    /// full's `UpdateResult.commit_sha`.
     pub commit_sha: String,
     /// ISO date string from the parsed entity's `modified_date`
     /// metadata. Populated when the schema auto-stamps the field
     /// on update; empty when the schema doesn't declare it. Wire-
-    /// equivalent to pro's `UpdateResult.modified_date`.
+    /// equivalent to full's `UpdateResult.modified_date`.
     pub modified_date: String,
     /// Section-level mutations grouped by mode (replaced / appended /
-    /// patched). Wire-equivalent to pro's
+    /// patched). Wire-equivalent to full's
     /// `UpdateResult.modified_sections`. Empty inner vecs serde-omit
     /// per `ModifiedSections`'s field attributes; the outer key is
     /// always present.
     pub modified_sections: ModifiedSections,
     /// Metadata-level mutations grouped by direction (set / unset).
-    /// Wire-equivalent to pro's `UpdateResult.modified_metadata`.
+    /// Wire-equivalent to full's `UpdateResult.modified_metadata`.
     /// Same empty-vec-omit convention as `modified_sections`.
     pub modified_metadata: ModifiedMetadata,
     /// `Some(hash)` on the dry_run path — the hash the entity
     /// would have after the proposed write. `None` on real
     /// updates (the post-write hash is in `content_hash`).
-    /// Wire-equivalent to pro's `UpdateResult.prospective_hash`.
+    /// Wire-equivalent to full's `UpdateResult.prospective_hash`.
     pub prospective_hash: Option<String>,
     /// Stub entities whose last incoming edge was severed by this
     /// update — when a body wiki-link was removed, the alias-resync
@@ -227,7 +227,7 @@ pub struct UpdateEntityOutcome {
     pub orphan_stubs_removed: Vec<EntityId>,
     /// Typed non-fatal issues — empty on the unified path today
     /// (update doesn't surface InlineWikiLinkAutoStubbed or
-    /// MissingRequiredOutgoing yet). Wire-equivalent to pro's
+    /// MissingRequiredOutgoing yet). Wire-equivalent to full's
     /// `UpdateResult.warnings`; the field shape parity matters for
     /// the upcoming handler migration so callers see the same
     /// `warnings: []` envelope position across flavours.
@@ -281,19 +281,19 @@ pub struct DeleteEntityOutcome {
     /// ReadOnly-mount referrers are listed here for diagnostic
     /// continuity with the warning payload).
     pub removed_incoming: Vec<String>,
-    /// Total edges removed across incoming + outgoing — pro
+    /// Total edges removed across incoming + outgoing — full
     /// `DeleteResult.relations_removed`. Counted from the store
     /// pre-delete; both directions sum into one number for callers
     /// that need a single "how much did this delete cascade" signal.
     pub relations_removed: usize,
     /// Per-mem commit identifier returned by the backend's
     /// [`crate::backend::MemBackend::commit`]. Wire-equivalent to
-    /// pro's `DeleteResult.commit_sha`.
+    /// full's `DeleteResult.commit_sha`.
     pub commit_sha: String,
     /// Stub entities that became orphaned by this delete (their last
     /// incoming edge disappeared with this entity) and were
     /// garbage-collected. Empty on deletes that didn't sever a
-    /// stub's last referrer. Wire-equivalent to pro's
+    /// stub's last referrer. Wire-equivalent to full's
     /// `DeleteResult.orphan_stubs_removed`.
     pub orphan_stubs_removed: Vec<EntityId>,
     /// Typed non-fatal issues — populated on the residual-stub
@@ -348,11 +348,11 @@ pub struct RelateEntityOutcome {
     /// [`crate::backend::MemBackend::commit`]. Empty on the no-op
     /// paths ([`RelateAction::NoOpAlreadyPresent`],
     /// [`RelateAction::NoOpAbsent`]) — those branches skip the disk
-    /// write so no commit happens. Wire-equivalent to the pro
+    /// write so no commit happens. Wire-equivalent to the full
     /// `RelateResult.commit_sha`.
     pub commit_sha: String,
     /// Edge provenance label — always `"explicit"` for relate-call
-    /// outcomes. Wire-equivalent to pro's `RelateResult.source` field;
+    /// outcomes. Wire-equivalent to full's `RelateResult.source` field;
     /// reserved for future inline-link-derived edge surfacing.
     pub source: String,
     /// Typed non-fatal issues — open-mode schema admissions
@@ -393,10 +393,10 @@ pub struct RenameEntityOutcome {
     pub old_id: EntityId,
     pub new_id: EntityId,
     /// Mem-relative path of the renamed entity before the rewrite.
-    /// Wire-equivalent to pro's `RenameResult.old_path`.
+    /// Wire-equivalent to full's `RenameResult.old_path`.
     pub old_path: String,
     /// Mem-relative path of the renamed entity after the rewrite.
-    /// Wire-equivalent to pro's `RenameResult.new_path`.
+    /// Wire-equivalent to full's `RenameResult.new_path`.
     pub new_path: String,
     /// Wire key `_hash`.
     #[serde(rename = "_hash")]
@@ -404,7 +404,7 @@ pub struct RenameEntityOutcome {
     /// Per-mem commit identifier returned by the backend's
     /// [`crate::backend::MemBackend::commit`]. Empty on the
     /// slug-noop short-circuit (no disk write happened).
-    /// Wire-equivalent to pro's `RenameResult.commit_sha`.
+    /// Wire-equivalent to full's `RenameResult.commit_sha`.
     pub commit_sha: String,
     /// Typed non-fatal issues. The slug-noop short-circuit
     /// ([`WarningHint::TitleNormalizedToSlugNoop`]) surfaces here
@@ -412,7 +412,7 @@ pub struct RenameEntityOutcome {
     /// op stays a silent no-op on disk, but the warning tells
     /// autonomous skills not to trust `old_id == new_id` as
     /// "cosmetic rewrite landed". Empty on the real-rename happy
-    /// path. Wire-equivalent to pro's `RenameResult.warnings`.
+    /// path. Wire-equivalent to full's `RenameResult.warnings`.
     pub warnings: Vec<WarningHint>,
 }
 
@@ -493,7 +493,7 @@ mod tests {
             warnings: Vec::new(),
         };
         let rename_json = serde_json::to_string(&rename).unwrap();
-        // Field names match pro's RenameResult wire shape directly.
+        // Field names match full's RenameResult wire shape directly.
         assert!(
             rename_json.contains("\"old_path\""),
             "RenameEntityOutcome must serialize old_path: {rename_json}",

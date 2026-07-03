@@ -35,9 +35,9 @@ struct Operation {
 }
 
 pub struct Inputs {
-    pub mcp_basis: Vec<String>,
+    pub mcp_lean: Vec<String>,
     pub mcp_pro: Vec<String>,
-    pub cli_basis: Vec<String>,
+    pub cli_lean: Vec<String>,
     pub cli_pro: Vec<String>,
     pub uniffi_methods: Vec<String>,
     pub wasm_methods: Vec<String>,
@@ -63,12 +63,12 @@ const CLI_MEM_REPO_ONLY: &[&str] = &[
 ];
 
 pub fn collect_inputs(udl_source: &str, wasm_methods: Vec<String>) -> Inputs {
-    let (mcp_basis, mcp_pro) = mcp::tool_names();
+    let (mcp_lean, mcp_pro) = mcp::tool_names();
     // One CLI crate now. `xtask` links it with `mem-repo` on, so
     // `Cli::command()` is the full surface; the lean surface drops the
     // mem-repo-only subcommands.
     let cli_pro = subcommand_names(&memstead_cli::cli::Cli::command());
-    let cli_basis: Vec<String> = cli_pro
+    let cli_lean: Vec<String> = cli_pro
         .iter()
         .filter(|n| !CLI_MEM_REPO_ONLY.contains(&n.as_str()))
         .cloned()
@@ -78,9 +78,9 @@ pub fn collect_inputs(udl_source: &str, wasm_methods: Vec<String>) -> Inputs {
         .filter(|m| m != "constructor")
         .collect();
     Inputs {
-        mcp_basis,
+        mcp_lean,
         mcp_pro,
-        cli_basis,
+        cli_lean,
         cli_pro,
         uniffi_methods,
         wasm_methods,
@@ -105,12 +105,12 @@ fn render_parsed(ops: &Operations, inputs: &Inputs) -> String {
          own publication layer and not in this matrix.\n\n",
     );
 
-    let mcp_basis_set: BTreeSet<&str> =
-        inputs.mcp_basis.iter().map(String::as_str).collect();
+    let mcp_lean_set: BTreeSet<&str> =
+        inputs.mcp_lean.iter().map(String::as_str).collect();
     let mcp_pro_set: BTreeSet<&str> =
         inputs.mcp_pro.iter().map(String::as_str).collect();
-    let cli_basis_set: BTreeSet<&str> =
-        inputs.cli_basis.iter().map(String::as_str).collect();
+    let cli_lean_set: BTreeSet<&str> =
+        inputs.cli_lean.iter().map(String::as_str).collect();
     let cli_pro_set: BTreeSet<&str> =
         inputs.cli_pro.iter().map(String::as_str).collect();
     let uniffi_set: BTreeSet<&str> =
@@ -127,7 +127,7 @@ fn render_parsed(ops: &Operations, inputs: &Inputs) -> String {
                 "`{}`{}",
                 name,
                 flavour_suffix(
-                    mcp_basis_set.contains(name.as_str()),
+                    mcp_lean_set.contains(name.as_str()),
                     mcp_pro_set.contains(name.as_str()),
                 ),
             ),
@@ -138,7 +138,7 @@ fn render_parsed(ops: &Operations, inputs: &Inputs) -> String {
                 "`{}`{}",
                 name,
                 flavour_suffix(
-                    cli_basis_set.contains(name.as_str()),
+                    cli_lean_set.contains(name.as_str()),
                     cli_pro_set.contains(name.as_str()),
                 ),
             ),
@@ -182,7 +182,7 @@ fn render_parsed(ops: &Operations, inputs: &Inputs) -> String {
 
     let unaligned_mcp: Vec<&str> = mcp_pro_set
         .iter()
-        .chain(mcp_basis_set.iter())
+        .chain(mcp_lean_set.iter())
         .copied()
         .filter(|name| !claimed_mcp.contains(name))
         .collect::<BTreeSet<&str>>()
@@ -190,7 +190,7 @@ fn render_parsed(ops: &Operations, inputs: &Inputs) -> String {
         .collect();
     let unaligned_cli: Vec<&str> = cli_pro_set
         .iter()
-        .chain(cli_basis_set.iter())
+        .chain(cli_lean_set.iter())
         .copied()
         .filter(|name| !claimed_cli.contains(name))
         .collect::<BTreeSet<&str>>()
@@ -232,8 +232,8 @@ fn render_parsed(ops: &Operations, inputs: &Inputs) -> String {
     out
 }
 
-fn flavour_suffix(in_basis: bool, in_pro: bool) -> &'static str {
-    match (in_basis, in_pro) {
+fn flavour_suffix(in_lean: bool, in_pro: bool) -> &'static str {
+    match (in_lean, in_pro) {
         (true, true) => " *(lean + full)*",
         (true, false) => " *(lean only)*",
         (false, true) => " *(full only)*",

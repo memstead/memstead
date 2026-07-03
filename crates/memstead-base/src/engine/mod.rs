@@ -4,10 +4,10 @@
 //! above [`MemBackend`] and routes reads / writes to the backend
 //! named by each mount's mem. The MCP filesystem-mem server
 //! (`memstead_mcp::filesystem_server::FilesystemMcpServer`), every CLI
-//! basis subcommand, and the macOS UniFFI consumer all reach the
-//! engine through [`Engine::from_workspace_root`] (basis: folder +
+//! lean subcommand, and the macOS UniFFI consumer all reach the
+//! engine through [`Engine::from_workspace_root`] (lean: folder +
 //! archive backends) or `memstead_git_branch::engine_from_workspace_root`
-//! (pro: adds git-branch).
+//! (full: adds git-branch).
 //!
 //! ## Routing
 //!
@@ -167,7 +167,7 @@ pub struct Engine {
     /// Workspace-level operator policy — mem create/delete rules,
     /// cross-mem link permissions. Defaults to empty; populated via
     /// [`Self::set_settings`] when [`Self::from_workspace_root`] (or
-    /// the pro counterpart) reads `.memstead/workspace.toml`. Surfaced
+    /// the full counterpart) reads `.memstead/workspace.toml`. Surfaced
     /// read-only via [`Self::settings`] for MCP handlers and other
     /// consumers.
     settings: WorkspaceSettings,
@@ -183,7 +183,7 @@ pub struct Engine {
     /// settings.
     create_rule_set_memo: OnceCell<crate::mem_management::CreateRuleSet>,
     /// Workspace root path — set when the engine boots from a
-    /// workspace store ([`Self::from_workspace_root`] or the pro
+    /// workspace store ([`Self::from_workspace_root`] or the full
     /// counterpart). `None` for tests + ad-hoc consumers that build
     /// the engine directly from a mount list. Surfaced via
     /// [`Self::workspace_root`] for handlers that need filesystem
@@ -202,7 +202,7 @@ pub struct Engine {
     /// from the workspace store at boot. Empty for engines built via
     /// `from_mounts*` (tests, in-memory consumers) and for any workspace
     /// that declares no pipelines; the workspace-root boot paths
-    /// (`from_workspace_root` and the pro counterpart) populate it via
+    /// (`from_workspace_root` and the full counterpart) populate it via
     /// [`crate::pipeline_store::load_pipeline_configs`]. Read-only
     /// runtime surface — exposed through [`Self::pipeline_configs`]; the
     /// engine neither runs nor schedules pipelines (the ingest skill and
@@ -228,9 +228,9 @@ pub struct Engine {
     /// [`crate::mem_management::create_mem`] (and future runtime
     /// mount-add paths) to materialise a [`MemBackend`] from a
     /// [`Mount`] declaration. Defaults to
-    /// [`crate::workspace_store::instantiate_basis_backend`] so basis
-    /// (folder + archive only) consumers work out of the box. Pro
-    /// consumers swap in `memstead_git_branch::storage::instantiate_pro_backend`
+    /// [`crate::workspace_store::instantiate_lean_backend`] so lean
+    /// (folder + archive only) consumers work out of the box. Full
+    /// consumers swap in `memstead_git_branch::storage::instantiate_full_backend`
     /// via [`Self::set_backend_factory`] after constructing the engine —
     /// `engine_from_workspace_root` does this once at boot. Function
     /// pointer (not `Box<dyn Fn>`) because the backend factory is
@@ -241,9 +241,9 @@ pub struct Engine {
     /// Git-branch ops bundle — function pointers for the per-mount
     /// operations whose implementations live in `memstead-git-branch`
     /// (and therefore can't sit on the `MemBackend` trait without
-    /// inverting the crate dependency). Pro boot
+    /// inverting the crate dependency). Full boot
     /// (`memstead_git_branch::engine_from_workspace_root`) installs the
-    /// bundle via [`Self::set_git_branch_ops`]; basis consumers leave
+    /// bundle via [`Self::set_git_branch_ops`]; lean consumers leave
     /// it `None` and `Engine::changes_since` / `Engine::export_mem`
     /// fall through to the folder/archive-only branches.
     git_branch_ops: Option<GitBranchOps>,
@@ -422,7 +422,7 @@ pub type GitBranchWriteSchemaFn = fn(
 ) -> Result<String, BackendError>;
 
 /// Bundle of git-branch-specific op dispatchers. Installed on the
-/// engine at pro boot. Each field is one ops-method that previously
+/// engine at full boot. Each field is one ops-method that previously
 /// lived on the `MemBackend` trait; moving them off the trait keeps
 /// the bytes-level primitive surface clean.
 #[derive(Clone, Copy)]

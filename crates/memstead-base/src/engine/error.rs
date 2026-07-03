@@ -4,7 +4,7 @@
 //! on (`BackendError` via `#[from]`, `ValidationError` from the runtime
 //! validator, `SlugError` from the slug helper, `ParseError` from the
 //! markdown parser). `BootError` is the smaller envelope produced by
-//! `Engine::from_workspace_root` and its pro counterpart — the failure
+//! `Engine::from_workspace_root` and its full counterpart — the failure
 //! modes specific to layout detection, workspace-store load, per-mount
 //! backend instantiation, and engine construction.
 
@@ -1066,7 +1066,7 @@ impl EngineError {
             EngineError::RepairNotNeeded { id, recovery } => {
                 serde_json::json!({ "id": id, "recovery": recovery })
             }
-            // Same shape the pro MCP singleton envelope ships for
+            // Same shape the full MCP singleton envelope ships for
             // UNKNOWN_ENTITY_TYPE — keeps the centralised helper (and
             // every consumer: batch envelopes, the integrity linter)
             // aligned with the wire payload agents already decode.
@@ -1563,8 +1563,8 @@ fn _hash_mismatch_msg(id: &str, current: &str, is_stub: bool) -> String {
     }
 }
 
-/// Errors surfaced by [`Engine::from_workspace_root`] (basis) and its
-/// pro counterpart (`memstead_git_branch::engine_from_workspace_root`).
+/// Errors surfaced by [`Engine::from_workspace_root`] (lean) and its
+/// full counterpart (`memstead_git_branch::engine_from_workspace_root`).
 ///
 /// The boot path layers three error sources: layout detection,
 /// workspace-store load failures, per-mount backend instantiation
@@ -1584,7 +1584,7 @@ pub enum BootError {
     #[error(transparent)]
     Store(#[from] crate::workspace_store::StoreError),
     /// Per-mount backend instantiation failed. Today: a mount
-    /// declared `MountStorage::GitBranch` while the basis boot path
+    /// declared `MountStorage::GitBranch` while the lean boot path
     /// only knows folder + archive.
     #[error(transparent)]
     Instantiate(#[from] crate::workspace_store::InstantiateError),

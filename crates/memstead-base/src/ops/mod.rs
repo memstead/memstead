@@ -45,8 +45,8 @@ use std::collections::HashMap;
 use std::fmt;
 
 /// Allowed `include` keys for `memstead_overview` — single source of
-/// truth shared across the basis MCP server, pro MCP server, and the
-/// basis CLI's `overview` command. Mirrors `HEALTH_INCLUDE_KEYS` for
+/// truth shared across the lean MCP server, full MCP server, and the
+/// lean CLI's `overview` command. Mirrors `HEALTH_INCLUDE_KEYS` for
 /// the `health` surface. The CLI `--include` flag validates against
 /// this list and surfaces `UNKNOWN_INCLUDE_KEY` warnings, matching the
 /// MCP tool's behaviour.

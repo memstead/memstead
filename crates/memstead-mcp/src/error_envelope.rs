@@ -1,10 +1,10 @@
-//! Tool-error envelope helpers used by the pro `ServerHandler` to
+//! Tool-error envelope helpers used by the full `ServerHandler` to
 //! construct `CallToolResult` responses with the engine's typed wire
 //! shape: text channel prefixed `ERROR [<CODE>]: <message>`,
 //! `structured_content` carrying the full payload (or absent on the
 //! prose-only path), `is_error` set so MCP clients render the response
 //! as a failure. Both helpers live in `memstead-mcp` because the
-//! pro server is their only consumer; the basis filesystem server
+//! full server is their only consumer; the lean filesystem server
 //! builds its envelopes through the parallel helpers inline in
 //! `memstead-mcp::filesystem_server`.
 //!

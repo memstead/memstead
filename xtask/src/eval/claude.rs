@@ -55,7 +55,7 @@ impl Runner for ClaudeRunner {
             // Run from the empty sandbox so built-in file tools find no codebase.
             .current_dir(&self.sandbox_dir)
             // Give the MCP server room to finish its handshake before the agent's
-            // first turn. The pro server is ready in well under a second, but
+            // first turn. The full server is ready in well under a second, but
             // claude's default connect window is tight enough that a `pending`
             // server occasionally leaves the agent tool-less for that turn.
             .env("MCP_TIMEOUT", "60000")

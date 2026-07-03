@@ -70,7 +70,7 @@ use rmcp::{ErrorData as McpError, RoleServer};
 
 /// The exact tool allowlist for a session endpoint — the five read
 /// operations and the five mutations, and nothing else. Every lifecycle,
-/// workspace-policy, and admin tool the basis handler carries is absent
+/// workspace-policy, and admin tool the lean handler carries is absent
 /// from this set and refused on call. This is the public writable
 /// surface's security boundary; treat changes to it as interface changes.
 pub const SESSION_ENTITY_TOOLS: &[&str] = &[
@@ -186,7 +186,7 @@ pub fn mount_session_engine(
         MountStorage::InMemory => {
             Box::new(in_memory_backend_with_config(&content_schema, "content")?)
         }
-        _ => memstead_base::workspace_store::instantiate_basis_backend(&content_mount)
+        _ => memstead_base::workspace_store::instantiate_lean_backend(&content_mount)
             .map_err(|e| memstead_base::EngineError::Mem(e.to_string()))?,
     };
 
@@ -196,7 +196,7 @@ pub fn mount_session_engine(
     ])
 }
 
-/// The withheld tools: every tool the basis router carries that is **not**
+/// The withheld tools: every tool the lean router carries that is **not**
 /// in [`SESSION_ENTITY_TOOLS`]. Derived from the live router so a
 /// newly-added engine tool lands here automatically (fail-safe), rather
 /// than silently reaching the public endpoint. Returned sorted for stable
@@ -233,9 +233,9 @@ mem is empty and yours alone; it is reclaimed when the session expires.",
     )
 }
 
-/// A writable MCP `ServerHandler` that wraps the basis
+/// A writable MCP `ServerHandler` that wraps the lean
 /// [`FilesystemMcpServer`] — so each tool's schema and output bytes are
-/// identical to the basis server — but scopes the advertised tool list to
+/// identical to the lean server — but scopes the advertised tool list to
 /// [`SESSION_ENTITY_TOOLS`] and refuses any call outside that set.
 /// Tool-list scoping (not backend capability alone) is the security
 /// boundary: the backend is writable on purpose; the scoping is what keeps
@@ -352,7 +352,7 @@ impl SessionMcpServer {
         }
     }
 
-    /// The scoped tool list: the basis router's tools filtered to the 10
+    /// The scoped tool list: the lean router's tools filtered to the 10
     /// entity tools, so each `Tool`'s schema/description is byte-identical.
     pub fn session_tools() -> Vec<Tool> {
         FilesystemMcpServer::tool_router()
@@ -453,7 +453,7 @@ private, read-only live-view link to hand to a human. The graph builds there as 
     ) -> Result<InitializeResult, McpError> {
         // Let the inner server do its client/peer bookkeeping, then return
         // *this* server's session self-description — the inner `initialize`
-        // echoes the basis `get_info()`, which would defeat the override.
+        // echoes the lean `get_info()`, which would defeat the override.
         self.inner.initialize(request, context).await?;
         Ok(self.get_info())
     }
@@ -1338,7 +1338,7 @@ Each mem keeps a typed model of a chosen subject.\n",
         let union: std::collections::BTreeSet<String> =
             allowed.union(&withheld).cloned().collect();
         assert_eq!(union, all, "allowed ∪ withheld must equal the full tool surface");
-        // The session server is hosted on the *basis* FilesystemMcpServer,
+        // The session server is hosted on the *lean* FilesystemMcpServer,
         // whose universe is the 10 entity tools plus two admin tools
         // (changes_since, diff). The mem-lifecycle and workspace-policy
         // tools are mem-repo-only and not present on this host at all —
@@ -1364,7 +1364,7 @@ Each mem keeps a typed model of a chosen subject.\n",
         let info = server.get_info();
         assert_eq!(
             info.server_info.name, "memstead-session",
-            "identity must not delegate to the basis server name"
+            "identity must not delegate to the lean server name"
         );
         let instr = info.instructions.expect("session handshake carries instructions");
         for available in SESSION_ENTITY_TOOLS {

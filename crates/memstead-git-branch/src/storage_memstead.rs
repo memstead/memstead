@@ -1213,7 +1213,7 @@ mod tests {
         let gitdir = fresh_repo_dir(tmp.path());
         let files = vec![("schema.yaml".to_string(), b"name: h\nversion: 1.0.0\n".to_vec())];
         let commit =
-            (crate::storage::PRO_GIT_BRANCH_OPS.write_schema)(&gitdir, "h", "1.0.0", &files)
+            (crate::storage::FULL_GIT_BRANCH_OPS.write_schema)(&gitdir, "h", "1.0.0", &files)
                 .expect("hook writes the package");
         assert!(!commit.is_empty());
         let entries = list_memstead_entries(&gitdir);

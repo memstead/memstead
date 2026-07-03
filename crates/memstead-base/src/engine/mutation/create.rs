@@ -161,7 +161,7 @@ impl Engine {
         //    Stub adoption: a pre-existing stub at the same id is
         //    *not* a duplicate — the create promotes the stub to a
         //    real entity while preserving its incoming edges (store.
-        //    upsert leaves in_edges in place). Mirrors pro's
+        //    upsert leaves in_edges in place). Mirrors full's
         //    `if let Some(existing) = store.get(&id) && !existing.stub`.
         let slug = validate_and_derive_slug(&args.title)?;
         let id = EntityId::new(&args.mem, &slug);
@@ -505,7 +505,7 @@ impl Engine {
 
         // 7b. Dry-run: compute prospective hash from the in-memory
         //     entity and return without touching disk, store, or
-        //     edges. Mirrors pro's `CreateArgs.dry_run` semantics —
+        //     edges. Mirrors full's `CreateArgs.dry_run` semantics —
         //     `content_hash` carries the prospective hash since
         //     there's no current to differentiate from. `commit_sha`
         //     is empty. Stub creation is also skipped (no
@@ -521,7 +521,7 @@ impl Engine {
                 .get("created_date")
                 .map(|v| v.to_frontmatter_string())
                 .unwrap_or_default();
-            // Pro's dry_run computes incoming from the existing
+            // Full's dry_run computes incoming from the existing
             // store state (the refs that *would* be adopted if a
             // stub exists at this id). Read before any mutation.
             let incoming = project_incoming(self.store.incoming(&id));
@@ -609,7 +609,7 @@ impl Engine {
 
         // Materialise stubs for any inline-relation targets that
         // weren't already in the store. Mirrors the relate path's
-        // ensure_target — pro's create relies on the
+        // ensure_target — full's create relies on the
         // loader stubbing unresolved targets, but the unified
         // store doesn't auto-stub on push, so the engine does it
         // explicitly. Skipped when no relations were declared
@@ -813,12 +813,12 @@ mod tests {
             .unwrap();
 
         // Folder backend produces a synthetic CommitId — wire-equiv
-        // to pro's commit SHA.
+        // to full's commit SHA.
         assert!(
             !outcome.commit_sha.is_empty(),
             "commit_sha must be populated on a real create"
         );
-        // title + mem echoed from args (pro CreateResult parity).
+        // title + mem echoed from args (full CreateResult parity).
         assert_eq!(outcome.title, "Rich Shape");
         assert_eq!(outcome.mem, "specs");
         // The create path refuses on missing required sections, so
@@ -1040,7 +1040,7 @@ mod tests {
             )
             .unwrap();
         // No pre-existing stub → incoming_count is None, incoming vec
-        // is empty. Pro's wire shape skip-serialises both.
+        // is empty. Full's wire shape skip-serialises both.
         assert!(outcome.incoming_count.is_none());
         assert!(outcome.incoming.is_empty());
     }

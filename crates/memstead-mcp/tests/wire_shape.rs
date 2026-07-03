@@ -48,12 +48,12 @@ fn seed_empty_workspace(root: &Path) {
 }
 
 
-/// Seed a pro-flavor workspace at `root` with git-branch backed mems.
+/// Seed a full-flavor workspace at `root` with git-branch backed mems.
 /// Each `(mem_name, schema_pin)` produces:
 /// - a branch `refs/heads/<name>` and a config blob on `__SYSTEM` (via
 ///   `init_real_mem_repo`)
 /// - a corresponding `MountStorage::GitBranch` entry in `mounts.json`
-///   so the pro boot path's persistence adapter sees the mem as a
+///   so the full boot path's persistence adapter sees the mem as a
 ///   writable mount.
 ///
 /// Without the mounts.json entries the engine boots with zero mounts
@@ -61,14 +61,14 @@ fn seed_empty_workspace(root: &Path) {
 /// mem branches; the materialisation runs out-of-band via
 /// `memstead mem-repo init`. The seed shortcuts that by writing the
 /// state file directly.
-fn seed_pro_workspace(root: &Path, mems: &[(&str, &str)]) {
-    seed_pro_workspace_with_toml(root, mems, WORKSPACE_TOML_BODY);
+fn seed_full_workspace(root: &Path, mems: &[(&str, &str)]) {
+    seed_full_workspace_with_toml(root, mems, WORKSPACE_TOML_BODY);
 }
 
-/// Variant of [`seed_pro_workspace`] that accepts a custom
+/// Variant of [`seed_full_workspace`] that accepts a custom
 /// `workspace.toml` body. Used by tests that need `[[mem_management.*]]`
 /// rules (those rules live in workspace.toml and are not state-managed).
-fn seed_pro_workspace_with_toml(root: &Path, mems: &[(&str, &str)], workspace_toml: &str) {
+fn seed_full_workspace_with_toml(root: &Path, mems: &[(&str, &str)], workspace_toml: &str) {
     use memstead_base::WorkspaceStoreAdapter;
     use memstead_schema::SchemaRef;
 
@@ -256,7 +256,7 @@ impl Drop for WireHarness {
 }
 
 // ---------------------------------------------------------------------------
-// Basis-flavor pins (FilesystemMcpServer)
+// Lean-flavor pins (FilesystemMcpServer)
 // ---------------------------------------------------------------------------
 //
 // Run with `cargo nextest run --no-default-features -p memstead-mcp wire_shape`.
@@ -266,7 +266,7 @@ impl Drop for WireHarness {
 /// pinned text. Pre-extraction the two server files own independent
 /// mappers (`FilesystemMcpServer::engine_op_error` vs
 /// `McpServer::engine_err_unified`) — message text DRIFTS between them
-/// today (see `basis_memstead_entity_*` vs `pro_memstead_entity_*`). The
+/// today (see `lean_memstead_entity_*` vs `pro_memstead_entity_*`). The
 /// wire-byte-identity contract is *per-flavor*, not inter-flavor, so
 /// each pin records its own server's current bytes.
 fn assert_error_envelope(result: &Value, expected_code: &str, expected_message: &str) {
@@ -296,19 +296,19 @@ fn assert_error_envelope(result: &Value, expected_code: &str, expected_message: 
 
 
 // ---------------------------------------------------------------------------
-// Pro-flavor pins (McpServer)
+// Full-flavor pins (McpServer)
 // ---------------------------------------------------------------------------
 
-/// Pro pin: same input as the basis test, intentionally separate
-/// assertion because the pro mapper (`engine_err_unified` in
-/// `server.rs`) emits a different message string than the basis mapper
+/// Full pin: same input as the lean test, intentionally separate
+/// assertion because the full mapper (`engine_err_unified` in
+/// `server.rs`) emits a different message string than the lean mapper
 /// for `ENTITY_NOT_FOUND`. These strings DIVERGE — the snapshot suite
 /// captures both as today's truth until the casing is reconciled.
 #[test]
 fn pro_memstead_entity_emits_typed_envelope_for_missing_id() {
     let tmp = TempDir::new().unwrap();
     seed_empty_workspace(tmp.path());
-    // Pro boot checks `<workspace>/mem-repo/.git` shape on startup —
+    // Full boot checks `<workspace>/mem-repo/.git` shape on startup —
     // seed a real bare repo with `main` + `__MEMSTEAD` refs.
     memstead_git_branch::test_support::init_real_mem_repo(tmp.path(), &[]);
 
@@ -317,8 +317,8 @@ fn pro_memstead_entity_emits_typed_envelope_for_missing_id() {
         "memstead_entity",
         json!({ "id": "specs--does-not-exist" }),
     );
-    // Pro mapper formats with capital "Entity not found" — diverges
-    // from basis's "entity not found" (engine Display verbatim).
+    // Full mapper formats with capital "Entity not found" — diverges
+    // from lean's "entity not found" (engine Display verbatim).
     // Recorded as inter-flavor drift; not fixed here.
     assert_error_envelope(
         &result,
@@ -358,13 +358,13 @@ fn assert_success_envelope(result: &Value) -> String {
 }
 
 
-/// Pro pin: same input through the pro server. Pro discovers mems
+/// Full pin: same input through the full server. Full discovers mems
 /// via the git-branch refs in `mem-repo/.git/`, so the seed seeds a
 /// `demo` branch with the default schema pinned in `__SYSTEM`.
 #[test]
 fn pro_memstead_search_succeeds_on_empty_seeded_workspace() {
     let tmp = TempDir::new().unwrap();
-    seed_pro_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
+    seed_full_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
 
     let mut harness = WireHarness::start(tmp.path());
     let result = harness.call_tool("memstead_search", json!({}));
@@ -378,16 +378,16 @@ fn pro_memstead_search_succeeds_on_empty_seeded_workspace() {
 }
 
 
-/// Pro pin: pro flavor's `memstead_overview` against the proper pro seed
+/// Full pin: full flavor's `memstead_overview` against the proper full seed
 /// (git-branch refs + matching `mounts.json` entries) emits the
-/// canonical anchors AND lists the seeded mem. Adding the pro-only
-/// `## Lifecycle Namespaces` anchor (the basis overview omits it
-/// entirely — basis has no mem-creation rules) is part of the pin so
-/// the test trips if pro accidentally drops that section.
+/// canonical anchors AND lists the seeded mem. Adding the full-only
+/// `## Lifecycle Namespaces` anchor (the lean overview omits it
+/// entirely — lean has no mem-creation rules) is part of the pin so
+/// the test trips if full accidentally drops that section.
 #[test]
 fn pro_memstead_overview_succeeds_on_empty_seeded_workspace() {
     let tmp = TempDir::new().unwrap();
-    seed_pro_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
+    seed_full_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
 
     let mut harness = WireHarness::start(tmp.path());
     let result = harness.call_tool("memstead_overview", json!({}));
@@ -395,12 +395,12 @@ fn pro_memstead_overview_succeeds_on_empty_seeded_workspace() {
     for anchor in ["## Mems", "## Schemas", "## Communities", "## Lifecycle Namespaces"] {
         assert!(
             text.contains(anchor),
-            "pro overview missing {anchor:?}: {text:?}"
+            "full overview missing {anchor:?}: {text:?}"
         );
     }
     assert!(
         text.contains("demo"),
-        "pro overview missing mem name: {text:?}"
+        "full overview missing mem name: {text:?}"
     );
 }
 
@@ -412,15 +412,15 @@ fn pro_memstead_overview_succeeds_on_empty_seeded_workspace() {
 // ---------------------------------------------------------------------------
 
 
-/// Pro pin: same input on a pro-seeded single-mem workspace. Per-flavor
-/// message bytes are recorded independently; the basis flavor appends
-/// `" — workspace pins default@1.0.0"` to the message, the pro flavor
+/// Full pin: same input on a full-seeded single-mem workspace. Per-flavor
+/// message bytes are recorded independently; the lean flavor appends
+/// `" — workspace pins default@1.0.0"` to the message, the full flavor
 /// emits only `"schema not found: \"<name>\""`. Recorded drift, pending
 /// reconciliation.
 #[test]
 fn pro_memstead_schema_unknown_name_emits_entity_not_found() {
     let tmp = TempDir::new().unwrap();
-    seed_pro_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
+    seed_full_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
 
     let mut harness = WireHarness::start(tmp.path());
     let result = harness.call_tool(
@@ -469,12 +469,12 @@ fn assert_create_success_shape(result: &Value, expected_id: &str, expected_mem: 
 }
 
 
-/// Pro pin: same as basis. The slug rule (`<mem>--<lower-kebab>`) is
-/// engine-internal so the expected id matches the basis pin.
+/// Full pin: same as lean. The slug rule (`<mem>--<lower-kebab>`) is
+/// engine-internal so the expected id matches the lean pin.
 #[test]
 fn pro_memstead_create_returns_typed_success_envelope() {
     let tmp = TempDir::new().unwrap();
-    seed_pro_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
+    seed_full_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
 
     let mut harness = WireHarness::start(tmp.path());
     let result = harness.call_tool(
@@ -489,13 +489,13 @@ fn pro_memstead_create_returns_typed_success_envelope() {
 }
 
 
-/// Pro pin: same input. Pre-extraction the pro mapper
+/// Full pin: same input. Pre-extraction the full mapper
 /// (`engine_err_unified`) also wraps `UNKNOWN_ENTITY_TYPE`; this pin
-/// trips if pro drops the recovery payload during the lift.
+/// trips if full drops the recovery payload during the lift.
 #[test]
 fn pro_memstead_create_unknown_type_emits_typed_envelope() {
     let tmp = TempDir::new().unwrap();
-    seed_pro_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
+    seed_full_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
 
     let mut harness = WireHarness::start(tmp.path());
     let result = harness.call_tool(
@@ -532,12 +532,12 @@ fn pro_memstead_create_unknown_type_emits_typed_envelope() {
 // ---------------------------------------------------------------------------
 
 
-/// Pro pin: pro `memstead_health` returns a richer envelope with
+/// Full pin: full `memstead_health` returns a richer envelope with
 /// `writable_mems` populated when the engine sees writable mounts.
 #[test]
 fn pro_memstead_health_succeeds_on_seeded_workspace() {
     let tmp = TempDir::new().unwrap();
-    seed_pro_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
+    seed_full_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
 
     let mut harness = WireHarness::start(tmp.path());
     let result = harness.call_tool("memstead_health", json!({}));
@@ -547,7 +547,7 @@ fn pro_memstead_health_succeeds_on_seeded_workspace() {
         .expect("structuredContent missing on health success");
     assert!(
         body.get("writable_mems").is_some(),
-        "pro health response missing writable_mems: {body}"
+        "full health response missing writable_mems: {body}"
     );
 }
 
@@ -558,7 +558,7 @@ fn pro_memstead_health_succeeds_on_seeded_workspace() {
 #[test]
 fn pro_memstead_changes_since_bad_cursor_returns_invalid_cursor() {
     let tmp = TempDir::new().unwrap();
-    seed_pro_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
+    seed_full_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
     let mut harness = WireHarness::start(tmp.path());
 
     let bad = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
@@ -605,7 +605,7 @@ pattern = \"*\"\n\
 schemas = [\"default@1.0.0\"]\n\
 ";
     let tmp = TempDir::new().unwrap();
-    seed_pro_workspace_with_toml(tmp.path(), &[("demo", "default@1.0.0")], TOML);
+    seed_full_workspace_with_toml(tmp.path(), &[("demo", "default@1.0.0")], TOML);
     let mut harness = WireHarness::start(tmp.path());
 
     let sections = json!({ "identity": "the identity", "purpose": "the purpose" });
@@ -731,11 +731,11 @@ fn assert_hash_mismatch_envelope(result: &Value, expected_id: &str, expected_cur
 }
 
 
-/// Pro pin: same multi-step flow exercises pro's mapper.
+/// Full pin: same multi-step flow exercises full's mapper.
 #[test]
 fn pro_memstead_update_stale_hash_emits_typed_envelope() {
     let tmp = TempDir::new().unwrap();
-    seed_pro_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
+    seed_full_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
 
     let mut harness = WireHarness::start(tmp.path());
     let (id, real_hash) = create_and_get_id_hash(&mut harness, "Locked");
@@ -753,12 +753,12 @@ fn pro_memstead_update_stale_hash_emits_typed_envelope() {
 }
 
 
-/// Pro pin: same. Pro response shape may differ subtly (extra fields
+/// Full pin: same. Full response shape may differ subtly (extra fields
 /// like commit_sha) — the pin only requires the rotated hash.
 #[test]
 fn pro_memstead_update_succeeds_and_rotates_hash() {
     let tmp = TempDir::new().unwrap();
-    seed_pro_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
+    seed_full_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
 
     let mut harness = WireHarness::start(tmp.path());
     let (id, original_hash) = create_and_get_id_hash(&mut harness, "Updatable");
@@ -786,12 +786,12 @@ fn pro_memstead_update_succeeds_and_rotates_hash() {
 }
 
 
-/// Pro pin: same flow; pro's ENTITY_NOT_FOUND message text uses
+/// Full pin: same flow; full's ENTITY_NOT_FOUND message text uses
 /// capital "Entity" per the previously-recorded inter-flavor drift.
 #[test]
 fn pro_memstead_delete_succeeds_and_entity_becomes_unreadable() {
     let tmp = TempDir::new().unwrap();
-    seed_pro_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
+    seed_full_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
 
     let mut harness = WireHarness::start(tmp.path());
     let (id, hash) = create_and_get_id_hash(&mut harness, "Doomed");
@@ -815,16 +815,16 @@ fn pro_memstead_delete_succeeds_and_entity_becomes_unreadable() {
 // ---------------------------------------------------------------------------
 
 
-/// Pro pin: same flow, but the response field names differ from basis:
-/// pro emits `rel_type` (not `type`), `source: "explicit"` (carries the
+/// Full pin: same flow, but the response field names differ from lean:
+/// full emits `rel_type` (not `type`), `source: "explicit"` (carries the
 /// edge source), `_mem_schema`, and `commit_sha` — but **omits**
-/// `action`. The basis surface has `type` and `action` instead. Both
+/// `action`. The lean surface has `type` and `action` instead. Both
 /// shapes are pinned per-flavor, pending reconciliation of which schema
 /// wins.
 #[test]
 fn pro_memstead_relate_returns_typed_success_envelope() {
     let tmp = TempDir::new().unwrap();
-    seed_pro_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
+    seed_full_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
 
     let mut harness = WireHarness::start(tmp.path());
     let (from, _) = create_and_get_id_hash(&mut harness, "Source");
@@ -848,23 +848,23 @@ fn pro_memstead_relate_returns_typed_success_envelope() {
         Some(to.as_str()),
         "relate `to` drifted: {body}"
     );
-    // Pro uses `rel_type` (not `type`). USES (not REFERENCES) — explicit
+    // Full uses `rel_type` (not `type`). USES (not REFERENCES) — explicit
     // author of REFERENCES is refused under the default schema's
     // `alias_target_rel_type` pointer; this test pins the envelope
     // shape, not the rel-type specifically.
     assert_eq!(
         body.get("rel_type").and_then(Value::as_str),
         Some("USES"),
-        "pro relate `rel_type` drifted: {body}"
+        "full relate `rel_type` drifted: {body}"
     );
     assert!(
         body.get("type").is_none(),
-        "pro must not carry `type` (basis field name): {body}"
+        "full must not carry `type` (lean field name): {body}"
     );
-    // Pro omits `action` — the basis surface carries it.
+    // Full omits `action` — the lean surface carries it.
     assert!(
         body.get("action").is_none(),
-        "pro unexpectedly carries `action`: {body}"
+        "full unexpectedly carries `action`: {body}"
     );
 }
 
@@ -873,11 +873,11 @@ fn pro_memstead_relate_returns_typed_success_envelope() {
 // ---------------------------------------------------------------------------
 
 
-/// Pro pin: same flow.
+/// Full pin: same flow.
 #[test]
 fn pro_memstead_rename_returns_typed_success_envelope() {
     let tmp = TempDir::new().unwrap();
-    seed_pro_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
+    seed_full_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
 
     let mut harness = WireHarness::start(tmp.path());
     let (id, hash) = create_and_get_id_hash(&mut harness, "Old Title");
@@ -903,14 +903,14 @@ fn pro_memstead_rename_returns_typed_success_envelope() {
 }
 
 
-/// Pro pin: pro renames-to-same-slug succeed but ride a typed
+/// Full pin: full renames-to-same-slug succeed but ride a typed
 /// `TITLE_NORMALIZED_TO_SLUG_NOOP` warning on the response so an agent
-/// can detect the degenerate case from `details.warnings[]`. The basis
-/// surface omits the warning entirely (see the basis pin above).
+/// can detect the degenerate case from `details.warnings[]`. The lean
+/// surface omits the warning entirely (see the lean pin above).
 #[test]
 fn pro_memstead_rename_same_slug_emits_typed_warning() {
     let tmp = TempDir::new().unwrap();
-    seed_pro_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
+    seed_full_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
 
     let mut harness = WireHarness::start(tmp.path());
     let (id, hash) = create_and_get_id_hash(&mut harness, "First");
@@ -934,7 +934,7 @@ fn pro_memstead_rename_same_slug_emits_typed_warning() {
     let warnings = body
         .get("warnings")
         .and_then(Value::as_array)
-        .expect("pro rename success must carry warnings[]");
+        .expect("full rename success must carry warnings[]");
     let codes: Vec<&str> = warnings
         .iter()
         .filter_map(|w| w.get("code").and_then(Value::as_str))
@@ -946,21 +946,21 @@ fn pro_memstead_rename_same_slug_emits_typed_warning() {
 }
 
 // ---------------------------------------------------------------------------
-// `memstead_reload` (pro-only) success pin
+// `memstead_reload` (full-only) success pin
 // ---------------------------------------------------------------------------
 //
-// The basis filesystem-mem server doesn't expose memstead_reload —
+// The lean filesystem-mem server doesn't expose memstead_reload —
 // drift-reload is a mem-repo concept (sibling writer commits a new
-// HEAD; engine re-derives memo state). Pinning is pro-only.
+// HEAD; engine re-derives memo state). Pinning is full-only.
 
-/// Pro pin: `memstead_reload` on a quiescent workspace returns a success
+/// Full pin: `memstead_reload` on a quiescent workspace returns a success
 /// envelope. The detailed report shape (changes count, etc.) is
 /// engine-state-dependent; the pin is on the envelope's success flag
 /// and presence of the report on `structured_content`.
 #[test]
 fn pro_memstead_reload_returns_typed_success_envelope() {
     let tmp = TempDir::new().unwrap();
-    seed_pro_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
+    seed_full_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
 
     let mut harness = WireHarness::start(tmp.path());
     let result = harness.call_tool("memstead_reload", json!({}));
@@ -1037,11 +1037,11 @@ fn assert_has_incoming_refs_envelope(
 }
 
 
-/// Pro pin: same multi-step flow.
+/// Full pin: same multi-step flow.
 #[test]
 fn pro_memstead_delete_with_incoming_refs_emits_typed_envelope() {
     let tmp = TempDir::new().unwrap();
-    seed_pro_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
+    seed_full_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
 
     let mut harness = WireHarness::start(tmp.path());
     let (source, _) = create_and_get_id_hash(&mut harness, "Referrer");
@@ -1064,22 +1064,22 @@ fn pro_memstead_delete_with_incoming_refs_emits_typed_envelope() {
 // `memstead_changes_since` success pins
 // ---------------------------------------------------------------------------
 //
-// Basis and pro use STRUCTURALLY different change-feeds: basis reads
-// timestamp-keyed entries from `.memstead/changes.jsonl`; pro reads git
+// Lean and full use STRUCTURALLY different change-feeds: lean reads
+// timestamp-keyed entries from `.memstead/changes.jsonl`; full reads git
 // commits between `since` and HEAD. The two response envelopes
 // diverge — each pin records its flavor's shape per-flavor.
 
 
-/// Pro pin: `memstead_changes_since` reads git history. Passing the
+/// Full pin: `memstead_changes_since` reads git history. Passing the
 /// canonical empty-tree SHA returns every entity as `added`. The
 /// response carries a richer envelope (`changes[]`, head_sha,
-/// changed_files counts) compared to basis's flat `{since, count,
+/// changed_files counts) compared to lean's flat `{since, count,
 /// entries}` shape. **Drift recorded** — neither shape is canonical
 /// yet.
 #[test]
 fn pro_memstead_changes_since_returns_typed_success_envelope() {
     let tmp = TempDir::new().unwrap();
-    seed_pro_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
+    seed_full_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
 
     let mut harness = WireHarness::start(tmp.path());
     let _ = create_and_get_id_hash(&mut harness, "First");
@@ -1094,21 +1094,21 @@ fn pro_memstead_changes_since_returns_typed_success_envelope() {
     let body = result
         .get("structuredContent")
         .expect("structuredContent missing on changes_since success");
-    // Pro's response shape is distinct from basis — pin presence of
-    // `changes` (the per-entity event list on pro) rather than basis's
+    // Full's response shape is distinct from lean — pin presence of
+    // `changes` (the per-entity event list on full) rather than lean's
     // `entries`. The exact richer fields (head_sha, etc.) are not
     // pinned here so the envelope can evolve under non-extraction
     // plans without tripping this test; the lift cannot drop
     // `changes[]` though.
     assert!(
         body.get("changes").is_some(),
-        "pro changes_since response missing `changes[]`: {body}"
+        "full changes_since response missing `changes[]`: {body}"
     );
-    // Basis-style `entries[]` must NOT appear on pro — these are
+    // Lean-style `entries[]` must NOT appear on full — these are
     // distinct envelopes today.
     assert!(
         body.get("entries").is_none(),
-        "pro response unexpectedly carries basis's `entries[]`: {body}"
+        "full response unexpectedly carries lean's `entries[]`: {body}"
     );
 }
 
@@ -1129,7 +1129,7 @@ fn pro_memstead_changes_since_returns_typed_success_envelope() {
 #[test]
 fn pro_memstead_changes_since_wide_window_uses_authoritative_rename_map() {
     let tmp = TempDir::new().unwrap();
-    seed_pro_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
+    seed_full_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
 
     let mut harness = WireHarness::start(tmp.path());
 
@@ -1299,7 +1299,7 @@ fn pro_memstead_changes_since_wide_window_uses_authoritative_rename_map() {
 #[test]
 fn pro_memstead_changes_since_include_notes_false_strips_notes_and_memstead_ref() {
     let tmp = TempDir::new().unwrap();
-    seed_pro_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
+    seed_full_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
 
     let mut harness = WireHarness::start(tmp.path());
     let _ = create_and_get_id_hash(&mut harness, "Noteless");
@@ -1331,7 +1331,7 @@ fn pro_memstead_changes_since_include_notes_false_strips_notes_and_memstead_ref(
 #[test]
 fn pro_memstead_entity_returns_structured_envelope_alongside_markdown() {
     let tmp = TempDir::new().unwrap();
-    seed_pro_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
+    seed_full_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
 
     let mut harness = WireHarness::start(tmp.path());
     let (id, hash) = create_and_get_id_hash(&mut harness, "Structured Subject");
@@ -1398,7 +1398,7 @@ fn pro_memstead_entity_returns_structured_envelope_alongside_markdown() {
 #[test]
 fn pro_memstead_search_returns_structured_envelope_alongside_markdown() {
     let tmp = TempDir::new().unwrap();
-    seed_pro_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
+    seed_full_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
 
     let mut harness = WireHarness::start(tmp.path());
     let _ = create_and_get_id_hash(&mut harness, "Authorization Flow");
@@ -1466,7 +1466,7 @@ fn pro_memstead_search_returns_structured_envelope_alongside_markdown() {
 #[test]
 fn pro_memstead_entity_structured_relationships_carry_typed_shape() {
     let tmp = TempDir::new().unwrap();
-    seed_pro_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
+    seed_full_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
 
     let mut harness = WireHarness::start(tmp.path());
     let (from, _) = create_and_get_id_hash(&mut harness, "Rel Source");
@@ -1510,7 +1510,7 @@ fn pro_memstead_entity_structured_relationships_carry_typed_shape() {
 #[test]
 fn pro_memstead_changes_since_include_notes_true_carries_notes_and_rename_note() {
     let tmp = TempDir::new().unwrap();
-    seed_pro_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
+    seed_full_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
 
     let mut harness = WireHarness::start(tmp.path());
     let (id, hash) = create_and_get_id_hash(&mut harness, "Renaming Subject");
@@ -1558,11 +1558,11 @@ fn pro_memstead_changes_since_include_notes_true_carries_notes_and_rename_note()
 // `AUTO_STUB_CREATED` warning on the relate response.
 
 
-/// Pro pin: same multi-step flow.
+/// Full pin: same multi-step flow.
 #[test]
 fn pro_auto_stub_then_update_emits_typed_envelope() {
     let tmp = TempDir::new().unwrap();
-    seed_pro_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
+    seed_full_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
 
     let mut harness = WireHarness::start(tmp.path());
     let (source, _) = create_and_get_id_hash(&mut harness, "Source");
@@ -1610,11 +1610,11 @@ fn pro_auto_stub_then_update_emits_typed_envelope() {
 }
 
 
-/// Pro pin: same.
+/// Full pin: same.
 #[test]
 fn pro_rename_stub_emits_typed_envelope() {
     let tmp = TempDir::new().unwrap();
-    seed_pro_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
+    seed_full_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
 
     let mut harness = WireHarness::start(tmp.path());
     let (source, _) = create_and_get_id_hash(&mut harness, "Source");
@@ -1651,11 +1651,11 @@ fn pro_rename_stub_emits_typed_envelope() {
 // `memstead_create` to promote the stub.
 
 
-/// Pro pin.
+/// Full pin.
 #[test]
 fn pro_relate_from_stub_emits_typed_envelope() {
     let tmp = TempDir::new().unwrap();
-    seed_pro_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
+    seed_full_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
 
     let mut harness = WireHarness::start(tmp.path());
     let (source, _) = create_and_get_id_hash(&mut harness, "Real");
@@ -1683,10 +1683,10 @@ fn pro_relate_from_stub_emits_typed_envelope() {
 }
 
 // ---------------------------------------------------------------------------
-// Pro-only mem-lifecycle pin — `memstead_mem_create` success
+// Full-only mem-lifecycle pin — `memstead_mem_create` success
 // ---------------------------------------------------------------------------
 
-/// Pro pin: with a permissive `[[mem_management.create]]` rule in
+/// Full pin: with a permissive `[[mem_management.create]]` rule in
 /// `workspace.toml`, `memstead_mem_create` succeeds and registers a new
 /// mem. Response shape carries the new mem's identity so the agent
 /// can chain follow-up mutations.
@@ -1708,7 +1708,7 @@ schemas = [\"default@1.0.0\"]\n\
 ";
 
     let tmp = TempDir::new().unwrap();
-    seed_pro_workspace_with_toml(
+    seed_full_workspace_with_toml(
         tmp.path(),
         &[("demo", "default@1.0.0")],
         WORKSPACE_TOML_WITH_CREATE_RULE,
@@ -1736,7 +1736,7 @@ schemas = [\"default@1.0.0\"]\n\
     );
 }
 
-/// Pro pin: with permissive `[[mem_management.create]]` and `.delete]]`
+/// Full pin: with permissive `[[mem_management.create]]` and `.delete]]`
 /// rules, `memstead_mem_delete` against an existing mem returns a success
 /// envelope. The pin checks the success flag and presence of
 /// `structured_content` — exact response fields are engine-derived.
@@ -1757,7 +1757,7 @@ pattern = \"*\"\n\
 ";
 
     let tmp = TempDir::new().unwrap();
-    seed_pro_workspace_with_toml(
+    seed_full_workspace_with_toml(
         tmp.path(),
         &[("demo", "default@1.0.0")],
         WORKSPACE_TOML_WITH_LIFECYCLE_RULES,
@@ -1821,7 +1821,7 @@ pattern = \"ephemeral\"\n\
 ";
 
     let tmp = TempDir::new().unwrap();
-    seed_pro_workspace_with_toml(
+    seed_full_workspace_with_toml(
         tmp.path(),
         &[("demo", "default@1.0.0")],
         WORKSPACE_TOML,
@@ -1893,7 +1893,7 @@ name = \"file-two-layer\"\n\
 ";
 
     let tmp = TempDir::new().unwrap();
-    seed_pro_workspace_with_toml(
+    seed_full_workspace_with_toml(
         tmp.path(),
         &[("demo", "default@1.0.0")],
         WORKSPACE_TOML_NO_RULES,
@@ -1973,7 +1973,7 @@ name = \"file-two-layer\"\n\
 ";
 
     let tmp = TempDir::new().unwrap();
-    seed_pro_workspace_with_toml(
+    seed_full_workspace_with_toml(
         tmp.path(),
         &[("demo", "default@1.0.0")],
         WORKSPACE_TOML,
@@ -2033,7 +2033,7 @@ schemas = [\"default@1.0.0\"]\n\
 ";
 
     let tmp = TempDir::new().unwrap();
-    seed_pro_workspace_with_toml(
+    seed_full_workspace_with_toml(
         tmp.path(),
         &[("demo", "default@1.0.0")],
         WORKSPACE_TOML_WITH_CREATE_RULE,
@@ -2097,7 +2097,7 @@ schemas = [\"default@1.0.0\"]\n\
 #[test]
 fn pro_memstead_relate_with_forbidden_description_emits_typed_envelope() {
     let tmp = TempDir::new().unwrap();
-    seed_pro_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
+    seed_full_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
 
     let mut harness = WireHarness::start(tmp.path());
     let (from, _) = create_and_get_id_hash(&mut harness, "Forbid Source");
@@ -2163,7 +2163,7 @@ fn pro_memstead_update_body_wikilink_auto_synthesises_alias_relation() {
     // the typed `WIKILINK_WITHOUT_RELATION` envelope — that path is
     // covered by a fixture-schema test in the engine crate.
     let tmp = TempDir::new().unwrap();
-    seed_pro_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
+    seed_full_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
 
     let mut harness = WireHarness::start(tmp.path());
     let (source, source_hash) = create_and_get_id_hash(&mut harness, "WikiSource");
@@ -2233,7 +2233,7 @@ pattern = \"*\"\n\
 #[test]
 fn pro_memstead_workspace_grant_cross_link_round_trip() {
     let tmp = TempDir::new().unwrap();
-    seed_pro_workspace_with_toml(
+    seed_full_workspace_with_toml(
         tmp.path(),
         &[("source", "default@1.0.0"), ("target", "default@1.0.0")],
         TIER_C_WORKSPACE_TOML,
@@ -2263,7 +2263,7 @@ fn pro_memstead_workspace_grant_cross_link_round_trip() {
 #[test]
 fn pro_memstead_workspace_grant_cross_link_idempotent_with_warning() {
     let tmp = TempDir::new().unwrap();
-    seed_pro_workspace_with_toml(
+    seed_full_workspace_with_toml(
         tmp.path(),
         &[("source", "default@1.0.0"), ("target", "default@1.0.0")],
         TIER_C_WORKSPACE_TOML,
@@ -2305,7 +2305,7 @@ fn pro_memstead_workspace_grant_cross_link_idempotent_with_warning() {
 #[test]
 fn pro_memstead_workspace_revoke_cross_link_idempotent_when_absent() {
     let tmp = TempDir::new().unwrap();
-    seed_pro_workspace_with_toml(
+    seed_full_workspace_with_toml(
         tmp.path(),
         &[("source", "default@1.0.0"), ("target", "default@1.0.0")],
         TIER_C_WORKSPACE_TOML,
@@ -2343,7 +2343,7 @@ format = \"memstead-git-branch-2\"\n\
 name = \"file-two-layer\"\n\
 ";
     let tmp = TempDir::new().unwrap();
-    seed_pro_workspace_with_toml(tmp.path(), &[("seed", "default@1.0.0")], EMPTY_TOML);
+    seed_full_workspace_with_toml(tmp.path(), &[("seed", "default@1.0.0")], EMPTY_TOML);
 
     let mut harness = WireHarness::start(tmp.path());
     let result = harness.call_tool(
@@ -2379,7 +2379,7 @@ format = \"memstead-git-branch-2\"\n\
 name = \"file-two-layer\"\n\
 ";
     let tmp = TempDir::new().unwrap();
-    seed_pro_workspace_with_toml(tmp.path(), &[("seed", "default@1.0.0")], EMPTY_TOML);
+    seed_full_workspace_with_toml(tmp.path(), &[("seed", "default@1.0.0")], EMPTY_TOML);
 
     let mut harness = WireHarness::start(tmp.path());
 
@@ -2437,7 +2437,7 @@ name = \"file-two-layer\"\n\
 #[test]
 fn pro_f7_dynamic_mem_lifecycle_completes_via_mcp_only() {
     let tmp = TempDir::new().unwrap();
-    seed_pro_workspace_with_toml(
+    seed_full_workspace_with_toml(
         tmp.path(),
         &[("source", "default@1.0.0")],
         TIER_C_WORKSPACE_TOML,

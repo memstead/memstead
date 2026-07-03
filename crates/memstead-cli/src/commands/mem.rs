@@ -1,4 +1,4 @@
-//! `memstead mem init` / `memstead mem delete` — pro-only mem-lifecycle
+//! `memstead mem init` / `memstead mem delete` — full-only mem-lifecycle
 //! CLI front-ends.
 //!
 //! Both subcommands call the
@@ -687,10 +687,10 @@ fn render_mem_delete_markdown(r: &MemDeleteResponse, verb: &str) -> String {
     out
 }
 
-/// Lift a `ProEngineError` into a typed `CliError`. The lift sources
+/// Lift a `FullEngineError` into a typed `CliError`. The lift sources
 /// every field from the engine error directly — `err.code()` for the
 /// wire token, `err.details()` for the structured payload,
-/// `err.prose_render()` for the text message. Wrapped basis errors
+/// `err.prose_render()` for the text message. Wrapped lean errors
 /// delegate to [`crate::CliError::from_engine_op`] so the per-variant
 /// exit-kind mapping (`NotFound` → exit 3, `HashMismatch` → exit 4,
 /// validation → exit 5, generic → exit 1) is consumed in one place;
@@ -702,9 +702,9 @@ fn render_mem_delete_markdown(r: &MemDeleteResponse, verb: &str) -> String {
 /// Sourcing from the engine error directly means any new engine code
 /// automatically reaches the CLI envelope without a hand-maintained
 /// translation table to update.
-fn pro_engine_err_to_cli(err: memstead_engine::ProEngineError) -> anyhow::Error {
+fn pro_engine_err_to_cli(err: memstead_engine::FullEngineError) -> anyhow::Error {
     match err {
-        memstead_engine::ProEngineError::Basis(inner) => {
+        memstead_engine::FullEngineError::Lean(inner) => {
             CliError::from_engine_op(inner).into()
         }
         lifecycle => {
@@ -1001,10 +1001,10 @@ mod tests {
     use super::*;
     use memstead_base::EngineError;
     use memstead_base::ReferrerInfo;
-    use memstead_engine::ProEngineError;
+    use memstead_engine::FullEngineError;
     use std::path::PathBuf;
 
-    fn lifted_cli_error(err: ProEngineError) -> CliError {
+    fn lifted_cli_error(err: FullEngineError) -> CliError {
         let any = pro_engine_err_to_cli(err);
         any.downcast::<CliError>()
             .expect("pro_engine_err_to_cli must lift to a CliError")
@@ -1036,7 +1036,7 @@ mod tests {
     /// `VALIDATION_FAILED`.
     #[test]
     fn mem_has_incoming_refs_keeps_typed_code_and_carries_details() {
-        let err = ProEngineError::Basis(EngineError::MemHasIncomingRefs {
+        let err = FullEngineError::Lean(EngineError::MemHasIncomingRefs {
             mem: "other".to_string(),
             referrers: vec![ReferrerInfo {
                 from_id: "test--source".to_string(),
@@ -1055,13 +1055,13 @@ mod tests {
         assert_eq!(referrers[0]["mem"], "test");
     }
 
-    /// Lifecycle refusal (a pro-only variant) is
+    /// Lifecycle refusal (a full-only variant) is
     /// promoted through with the same code + structured details the
     /// MCP wire ships. `MEM_PATH_NOT_ALLOWED` carries the candidate,
     /// the patterns list, and the typed reason discriminator.
     #[test]
     fn mem_path_not_allowed_carries_structured_details() {
-        let err = ProEngineError::MemPathNotAllowed {
+        let err = FullEngineError::MemPathNotAllowed {
             attempted: PathBuf::from("/ws/bogus"),
             candidate: "bogus".to_string(),
             patterns: vec!["specs".to_string(), "team/*".to_string()],
@@ -1086,24 +1086,24 @@ mod tests {
     #[test]
     fn lifecycle_refusal_never_degrades_to_validation_failed_token() {
         let cases = [
-            ProEngineError::MemPathNotAllowed {
+            FullEngineError::MemPathNotAllowed {
                 attempted: PathBuf::from("/x"),
                 candidate: "x".to_string(),
                 patterns: vec![],
                 reason: "no_allowlist_configured",
                 policy_table: "mem_management.create",
             },
-            ProEngineError::MemReferencedByPolicy {
+            FullEngineError::MemReferencedByPolicy {
                 name: "x".to_string(),
                 referring_mems: vec!["y".to_string()],
             },
-            ProEngineError::MemSchemaNotAllowed {
+            FullEngineError::MemSchemaNotAllowed {
                 candidate: "x".to_string(),
                 matched_pattern: "p".to_string(),
                 requested_schema: "default@1.0.0".to_string(),
                 allowed_schemas: vec!["other@1.0.0".to_string()],
             },
-            ProEngineError::InvalidMemName {
+            FullEngineError::InvalidMemName {
                 name: "BadName".to_string(),
                 reason: "invalid_char",
             },
@@ -1118,14 +1118,14 @@ mod tests {
         }
     }
 
-    /// Wrapped basis errors keep the
+    /// Wrapped lean errors keep the
     /// per-variant exit-kind mapping (`NotFound` → exit 3,
     /// `HashMismatch` → exit 4, etc.) by delegating to
     /// `CliError::from_engine_op`. The lift doesn't flatten every
-    /// basis variant to `Validation`.
+    /// lean variant to `Validation`.
     #[test]
-    fn wrapped_basis_error_preserves_per_variant_exit_kind() {
-        let err = ProEngineError::Basis(EngineError::NotFound {
+    fn wrapped_lean_error_preserves_per_variant_exit_kind() {
+        let err = FullEngineError::Lean(EngineError::NotFound {
             id: "specs--missing".to_string(),
         });
         let cli = lifted_cli_error(err);

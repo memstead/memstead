@@ -25,7 +25,7 @@ use memstead_base::runtime_validator::ValidationError;
 /// Codes emitted: `UNKNOWN_SECTION`, `UNKNOWN_METADATA_FIELD`,
 /// `INVALID_ENUM_VALUE`, `READ_ONLY_FIELD`, `SECTION_NOT_UPDATABLE`,
 /// `INVALID_REL_TYPE`, `INVALID_REL_SHAPE`. Each carries the recovery
-/// payload pro-flavour callers already branch on (declared list,
+/// payload full-flavour callers already branch on (declared list,
 /// suggestion, allowed enum values, etc.). The code-string set lives on
 /// [`ValidationError::code()`]; this helper composes the wire envelope
 /// around it (text-mirror summary, inline-list overflow for the message)

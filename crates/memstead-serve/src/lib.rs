@@ -131,7 +131,7 @@ pub fn mount_read_only(
         cross_linkable: true,
         migration_target: None,
     };
-    let backend = memstead_base::workspace_store::instantiate_basis_backend(&mount)
+    let backend = memstead_base::workspace_store::instantiate_lean_backend(&mount)
         .map_err(|e| memstead_base::EngineError::Mem(e.to_string()))?;
     Engine::from_mounts(vec![(mount, backend)])
 }
@@ -1208,7 +1208,7 @@ use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, Stream
 use rmcp::{ErrorData as McpError, RoleServer};
 
 /// The exact tool allowlist for `/mcp` — the five read operations and nothing
-/// else. Every mutation, lifecycle, and workspace tool the basis handler
+/// else. Every mutation, lifecycle, and workspace tool the lean handler
 /// carries is absent from this set and refused on call.
 pub const MCP_READ_TOOLS: &[&str] = &[
     "memstead_overview",
@@ -1218,8 +1218,8 @@ pub const MCP_READ_TOOLS: &[&str] = &[
     "memstead_health",
 ];
 
-/// A read-only MCP `ServerHandler` that wraps the basis [`FilesystemMcpServer`]
-/// — so each tool's schema and output bytes are identical to the basis server
+/// A read-only MCP `ServerHandler` that wraps the lean [`FilesystemMcpServer`]
+/// — so each tool's schema and output bytes are identical to the lean server
 /// — but scopes the advertised tool list to [`MCP_READ_TOOLS`] and refuses any
 /// call outside that set. Tool-list scoping (not just a Sealed backend) is what
 /// makes the surface write-free.
@@ -1238,7 +1238,7 @@ impl ReadOnlyMcpServer {
         Self::new(FilesystemMcpServer::from_engine(engine, std::path::PathBuf::new()))
     }
 
-    /// The scoped tool list: the basis router's tools filtered to the five
+    /// The scoped tool list: the lean router's tools filtered to the five
     /// read tools, so each `Tool`'s schema/description is byte-identical.
     pub fn read_tools() -> Vec<Tool> {
         FilesystemMcpServer::tool_router()
@@ -1255,9 +1255,9 @@ impl ReadOnlyMcpServer {
 
 /// The read-only handshake instructions. Names the surface as read-only, lists
 /// the five available read tools, and states that every mutation, lifecycle,
-/// and workspace tool the basis server carries is unavailable here — so a cold
+/// and workspace tool the lean server carries is unavailable here — so a cold
 /// MCP client learns the surface cannot mutate *from the handshake*, before it
-/// ever calls a tool and gets a `TOOL_NOT_FOUND` refusal. The basis server's
+/// ever calls a tool and gets a `TOOL_NOT_FOUND` refusal. The lean server's
 /// own (read-write) instructions are deliberately not delegated to.
 pub fn read_only_instructions() -> String {
     format!(
@@ -1280,7 +1280,7 @@ impl ServerHandler for ReadOnlyMcpServer {
     /// capabilities (the tool surface is real, just scoped), but overrides the
     /// server identity and instructions so the handshake itself tells a cold
     /// client this endpoint cannot mutate and which tool classes are absent —
-    /// rather than delegating the basis server's read-write self-description.
+    /// rather than delegating the lean server's read-write self-description.
     fn get_info(&self) -> ServerInfo {
         let mut info = self.inner.get_info();
         info.server_info.name = "memstead-serve".to_string();
@@ -1300,7 +1300,7 @@ impl ServerHandler for ReadOnlyMcpServer {
     ) -> Result<InitializeResult, McpError> {
         // Let the inner server do its client/peer bookkeeping, then return *this*
         // server's read-only self-description — the inner `initialize` echoes the
-        // basis (read-write) `get_info()`, which would defeat the override.
+        // lean (read-write) `get_info()`, which would defeat the override.
         self.inner.initialize(request, context).await?;
         Ok(self.get_info())
     }
@@ -2157,7 +2157,7 @@ Widgets compose into larger systems; modularity is why they matter.\n",
     }
 
     /// Polarity: the `/mcp` tool list is exactly the five read tools, and the
-    /// mutation tools the basis handler carries are absent from the list and
+    /// mutation tools the lean handler carries are absent from the list and
     /// refused on call. Tool-list scoping — not just a Sealed backend — is what
     /// the criterion demands.
     #[test]
@@ -2186,7 +2186,7 @@ Widgets compose into larger systems; modularity is why they matter.\n",
         ] {
             assert!(
                 full.contains(&mutating.to_string()),
-                "basis handler must carry {mutating} (so filtering it is meaningful)"
+                "lean handler must carry {mutating} (so filtering it is meaningful)"
             );
             assert!(
                 !scoped.contains(&mutating.to_string()),
@@ -2226,7 +2226,7 @@ Widgets compose into larger systems; modularity is why they matter.\n",
     }
 
     /// The `/mcp` handshake self-describes as read-only: the server identity is
-    /// not the basis name, and the instructions state read-only, name the five
+    /// not the lean name, and the instructions state read-only, name the five
     /// available read tools, and name the unavailable mutation/lifecycle tool
     /// classes — so a cold client learns the surface cannot mutate from the
     /// handshake, before any tool call.
@@ -2236,7 +2236,7 @@ Widgets compose into larger systems; modularity is why they matter.\n",
         let info = mcp.get_info();
         assert_eq!(
             info.server_info.name, "memstead-serve",
-            "identity must not delegate to the basis (read-write) server name"
+            "identity must not delegate to the lean (read-write) server name"
         );
         let instr = info
             .instructions

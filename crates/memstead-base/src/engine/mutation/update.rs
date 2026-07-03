@@ -252,7 +252,7 @@ impl Engine {
             });
         }
 
-        // Skip the hash check on dry_run — pro's dry_run is the
+        // Skip the hash check on dry_run — full's dry_run is the
         // designated stale-hash recovery path. Agents preview a
         // change without holding a fresh hash, get back the current
         // `content_hash` and a `prospective_hash`, then call the
@@ -303,7 +303,7 @@ impl Engine {
 
         // Mode-conflict: the same section key may not appear in
         // more than one of `sections`, `append_sections`,
-        // `patch_sections`. Mirrors pro's
+        // `patch_sections`. Mirrors full's
         // `EngineError::ConflictingSectionModes`. Three-way check:
         // build the conflict list per key and reject when ≥2 modes
         // claim it.
@@ -462,7 +462,7 @@ impl Engine {
 
         // Apply append_sections after replace. Empty/absent body
         // is replaced wholesale with the append value; otherwise
-        // a `\n` separator joins the two. Mirrors pro.
+        // a `\n` separator joins the two. Mirrors full.
         let mut modified_sections_appended: Vec<String> = Vec::new();
         for (key, value) in args.append_sections {
             let existing = next.sections.get(&key).cloned().unwrap_or_default();
@@ -481,7 +481,7 @@ impl Engine {
         // (replace). Empty/absent section is rejected with
         // PatchSectionEmpty; missing-`old` rejected with
         // PatchOldNotFound carrying a UTF-8-safe truncated snapshot
-        // of the current body. Mirrors pro.
+        // of the current body. Mirrors full.
         let mut modified_sections_patched: Vec<String> = Vec::new();
         for (key, patch) in args.patch_sections {
             let existing = next
@@ -719,7 +719,7 @@ impl Engine {
 
         // Dry-run: compute prospective hash from the in-memory
         // entity and return without touching disk, store, or
-        // commits. Mirrors pro's `UpdateArgs.dry_run` semantics —
+        // commits. Mirrors full's `UpdateArgs.dry_run` semantics —
         // `content_hash` carries the unchanged on-disk hash so the
         // caller can use it as `expected_hash` on the follow-up
         // real call (designated stale-hash recovery path).
@@ -763,7 +763,7 @@ impl Engine {
             }));
         }
 
-        // Real change prepared. Compute `modified_date` (mirrors pro's
+        // Real change prepared. Compute `modified_date` (mirrors full's
         // UpdateResult.modified_date — the `today` the auto-stamp loop
         // used; empty when the schema has no auto_timestamp field), then
         // hand the staged write to the caller to commit. The single
@@ -2516,14 +2516,14 @@ mod tests {
         // The default `spec` schema declares `modified_date` with
         // `auto_timestamp: true`; the unified update path
         // auto-stamps it. Asserting non-empty pins the
-        // wire-shape parity with pro's UpdateResult.modified_date.
+        // wire-shape parity with full's UpdateResult.modified_date.
         assert!(
             !outcome.modified_date.is_empty(),
             "modified_date must be auto-stamped on update for the default spec schema",
         );
         // V1: warnings always empty (typed warning surfaces are
         // separate session work). The vec is present on the outcome
-        // so the wire shape parity with pro's UpdateResult holds.
+        // so the wire shape parity with full's UpdateResult holds.
         assert!(outcome.warnings.is_empty());
         // Section was modified (existing behaviour, sanity check).
         assert_eq!(outcome.modified_sections.replaced, vec!["identity".to_string()]);

@@ -260,7 +260,7 @@ impl Engine {
     ///      [`crate::ops::folder_changes_since`].
     ///    - Git-branch mounts call the registered
     ///      [`GitBranchOps::changes_since`] hook (real tree-diff with
-    ///      rename detection); missing hook = pro flavour not loaded
+    ///      rename detection); missing hook = full flavour not loaded
     ///      and the report comes back empty.
     ///    - Archive mounts return an empty report.
     /// 4. Enriches each envelope's `title` / `entity_type` from the
@@ -443,7 +443,7 @@ impl Engine {
                     other => EngineError::Backend(other),
                 }),
                 None => Err(EngineError::Backend(BackendError::Other(
-                    "git-branch fetch hook not installed (pro flavour not loaded)"
+                    "git-branch fetch hook not installed (full flavour not loaded)"
                         .to_string(),
                 ))),
             },
@@ -487,7 +487,7 @@ impl Engine {
         };
         let hook = self.git_branch_ops.ok_or_else(|| {
             EngineError::Backend(BackendError::Other(
-                "git-branch pull hook not installed (pro flavour not loaded)".to_string(),
+                "git-branch pull hook not installed (full flavour not loaded)".to_string(),
             ))
         })?;
         (hook.fetch)(&gitdir, remote, &[]).map_err(|e| match e {
@@ -568,7 +568,7 @@ impl Engine {
         };
         let hook = self.git_branch_ops.ok_or_else(|| {
             EngineError::Backend(BackendError::Other(
-                "git-branch push hook not installed (pro flavour not loaded)".to_string(),
+                "git-branch push hook not installed (full flavour not loaded)".to_string(),
             ))
         })?;
 
@@ -647,7 +647,7 @@ impl Engine {
             })?;
         let hook = self.git_branch_ops.ok_or_else(|| {
             EngineError::Backend(BackendError::Other(
-                "git-branch remote_add hook not installed (pro flavour not loaded)".to_string(),
+                "git-branch remote_add hook not installed (full flavour not loaded)".to_string(),
             ))
         })?;
         (hook.remote_add)(&gitdir, name, url).map_err(EngineError::Backend)
@@ -840,7 +840,7 @@ impl Engine {
                 })?,
                 None => {
                     return Err(EngineError::Backend(BackendError::Other(
-                        "git-branch branch_reset hook not installed (pro flavour not loaded)"
+                        "git-branch branch_reset hook not installed (full flavour not loaded)"
                             .to_string(),
                     )));
                 }
@@ -878,7 +878,7 @@ impl Engine {
     /// mem's storage. Folder and archive backends carry no git
     /// refs and refuse via [`EngineError::InvalidInput`]; the
     /// git-branch backend routes through [`GitBranchOps::diff`] when
-    /// the pro flavour is loaded.
+    /// the full flavour is loaded.
     ///
     /// `mem` selects the storage context (the gitdir, for
     /// git-branch mounts). `ref_a` / `ref_b` are arbitrary refs the
@@ -938,7 +938,7 @@ impl Engine {
                         other => EngineError::Backend(other),
                     }),
                 None => Err(EngineError::Backend(BackendError::Other(
-                    "git-branch diff hook not installed (pro flavour not loaded)"
+                    "git-branch diff hook not installed (full flavour not loaded)"
                         .to_string(),
                 ))),
             },

@@ -63,7 +63,7 @@ fn mem_repo_init_json_stdout_is_single_document() {
 }
 
 /// Round-trip: `mem-repo init` produces a workspace `memstead stats`
-/// can boot against. Pro-only — `memstead mem-repo` is gated behind
+/// can boot against. Full-only — `memstead mem-repo` is gated behind
 /// the `mem-repo` feature.
 #[test]
 fn mem_repo_init_followed_by_stats_succeeds() {
@@ -111,7 +111,7 @@ fn missing_workspace_emits_typed_envelope_json() {
         "envelope must carry the symbolic workspace-not-init code, got: {parsed}",
     );
 
-    // Pro CLI binary: recovery hint is always `memstead mem-repo init`.
+    // Full CLI binary: recovery hint is always `memstead mem-repo init`.
     // Now lives under `details.hint.recovery_command` — the uniform
     // `{code, message, details}` envelope nests recovery payloads
     // under `details` rather than merging flat at top level.
