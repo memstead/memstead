@@ -7,6 +7,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
+use std::sync::OnceLock;
 
 use indexmap::IndexMap;
 use regex::Regex;
@@ -466,7 +467,9 @@ pub(super) fn split_sections(
 ) -> (HashMap<String, String>, Vec<DuplicateSection>) {
     let mut sections = HashMap::new();
     let mut duplicates: HashMap<String, DuplicateSection> = HashMap::new();
-    let section_re = Regex::new(r"(?m)^## (.+)$").unwrap();
+    static SECTION_RE: OnceLock<Regex> = OnceLock::new();
+    let section_re =
+        SECTION_RE.get_or_init(|| Regex::new(r"(?m)^## (.+)$").unwrap());
 
     let matches: Vec<_> = section_re.find_iter(masked_body).collect();
 
@@ -549,8 +552,9 @@ fn extract_title(body: &str) -> Option<String> {
 fn extract_heading_spans(
     sections: &IndexMap<String, String>,
 ) -> HashMap<String, Vec<HeadingSpan>> {
-    // Compile once; the regex is shape-constrained so it can't fail at runtime.
-    let re = Regex::new(r"(?m)^(#{3,6})[ \t]+(.+)$").unwrap();
+    // Compiled once per process; shape-constrained so it can't fail at runtime.
+    static RE: OnceLock<Regex> = OnceLock::new();
+    let re = RE.get_or_init(|| Regex::new(r"(?m)^(#{3,6})[ \t]+(.+)$").unwrap());
     let mut out: HashMap<String, Vec<HeadingSpan>> = HashMap::new();
 
     for (key, content) in sections {
@@ -673,7 +677,10 @@ pub(crate) fn parse_relationships_with_warnings(
     // Anchor on the canonical row prefix `- **TYPE**: [[<target>]]` and
     // capture everything that follows on the same line so the trailing
     // segment can be classified (simple, em-dash, or AMBIGUOUS).
-    let re = Regex::new(r"(?m)^\s*-\s*\*\*(\w+)\*\*:\s*\[\[([^\]]+)\]\](?P<tail>[^\n]*)").unwrap();
+    static RE: OnceLock<Regex> = OnceLock::new();
+    let re = RE.get_or_init(|| {
+        Regex::new(r"(?m)^\s*-\s*\*\*(\w+)\*\*:\s*\[\[([^\]]+)\]\](?P<tail>[^\n]*)").unwrap()
+    });
     let mut relationships = Vec::new();
     let mut warnings = Vec::new();
     for cap in re.captures_iter(text) {
@@ -769,9 +776,21 @@ pub struct WikiLink {
     pub label: Option<String>,
 }
 
+/// The `[[target]]` / `[[target|label]]` wiki-link pattern, compiled once.
+fn wiki_link_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"\[\[([^\]]+)\]\]").unwrap())
+}
+
+/// Inline code spans (masked out before link extraction), compiled once.
+fn inline_code_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"`[^`]+`").unwrap())
+}
+
 /// Extract all wiki-links from markdown content.
 pub fn extract_wiki_links(content: &str) -> Vec<WikiLink> {
-    let re = Regex::new(r"\[\[([^\]]+)\]\]").unwrap();
+    let re = wiki_link_re();
     re.captures_iter(content)
         .map(|cap| {
             let raw = &cap[1];
@@ -801,10 +820,9 @@ pub(crate) fn extract_inline_links(
     mem: &str,
 ) -> Result<Vec<EntityId>, Vec<WikiLinkError>> {
     let stripped = mask_code_blocks(text);
-    let inline_re = Regex::new(r"`[^`]+`").unwrap();
-    let stripped = inline_re.replace_all(&stripped, "");
+    let stripped = inline_code_re().replace_all(&stripped, "");
 
-    let link_re = Regex::new(r"\[\[([^\]]+)\]\]").unwrap();
+    let link_re = wiki_link_re();
     let mut seen = HashSet::new();
     let mut links = Vec::new();
     let mut errors = Vec::new();
@@ -835,10 +853,9 @@ pub(crate) fn extract_inline_links(
 /// helper — see [`extract_inline_links`] for the strict variant.
 pub fn extract_inline_links_lenient(text: &str, mem: &str) -> Vec<EntityId> {
     let stripped = mask_code_blocks(text);
-    let inline_re = Regex::new(r"`[^`]+`").unwrap();
-    let stripped = inline_re.replace_all(&stripped, "");
+    let stripped = inline_code_re().replace_all(&stripped, "");
 
-    let link_re = Regex::new(r"\[\[([^\]]+)\]\]").unwrap();
+    let link_re = wiki_link_re();
     let mut seen = HashSet::new();
     let mut links = Vec::new();
 
