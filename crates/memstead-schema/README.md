@@ -18,8 +18,8 @@ MCP server) depends on it.
 ## Use
 
 Most users never depend on this crate directly — install the
-[`memstead-cli`](https://crates.io/crates/memstead-cli) binary or the
-[`memstead-mcp`](https://crates.io/crates/memstead-mcp) server instead.
+[`memstead-cli`](../memstead-cli/) binary or the
+[`memstead-mcp`](../memstead-mcp/) server instead.
 Depend on `memstead-schema` when you are building your own engine
 integration and need to parse, validate, or author schema files
 programmatically.

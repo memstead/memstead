@@ -1,6 +1,6 @@
 # Memstead
 
-> **Status: pre-release.** APIs, schemas, file formats, CLI flags, and the wire shape of MCP tools and HTTP endpoints may change without notice. Not yet stable. Back up your data before exercising mutation operations. See [LICENSING.md](LICENSING.md) for per-folder licenses and [SECURITY.md](SECURITY.md) for vulnerability disclosure.
+> **Status: pre-1.0.** APIs, schemas, file formats, CLI flags, and the wire shape of MCP tools and HTTP endpoints may change without notice. Not yet stable. Back up your data before exercising mutation operations. See [LICENSING.md](LICENSING.md) for per-folder licenses and [SECURITY.md](SECURITY.md) for vulnerability disclosure.
 
 **Memstead gives AI agents a durable, typed memory you own.** Your agent's knowledge lives as plain markdown in a git repository — readable by you, diffable in review, with no database and no vendor lock-in. Any MCP-capable agent (Claude Code, Codex, Gemini, …) or the `memstead` CLI reads and writes it through a schema *you* control, and the engine enforces that schema on every write so the graph never drifts into mush.
 
@@ -10,28 +10,32 @@ Use it for software specs, ADRs, decision logs, ontologies, research notes, or a
 
 ## Quickstart
 
-Get from nothing to your own graph in a few minutes. (Pre-built binaries via `curl | sh` / Homebrew are coming once the first release is cut; until then, build from source — it's two commands.)
+Get from nothing to your own graph in a few minutes.
 
-**1. Prerequisite: the Rust toolchain.** Install via [rustup](https://rustup.rs) if you don't have it (`rustc --version` should print a version).
-
-**2. Build and install the binaries.** From a clone of this repo:
+**1. Install the binaries.** The install script fetches the latest [release](https://github.com/memstead/memstead/releases) binaries — `memstead` (the CLI) and `memstead-mcp` (the MCP server agents connect to):
 
 ```bash
-./build-engine.sh
+curl -sSf https://memstead.io/install.sh | sh
 ```
 
-This compiles the workspace and installs two binaries to `~/.cargo/bin`: `memstead` (the CLI) and `memstead-mcp` (the MCP server agents connect to). Make sure `~/.cargo/bin` is on your `PATH` (`memstead --version` should work).
+Or via Homebrew (macOS / Linux):
 
-**3. Bootstrap a workspace.** In a fresh directory:
+```bash
+brew install memstead/memstead/memstead-cli memstead/memstead/memstead-mcp
+```
+
+Or build from source: with the [Rust toolchain](https://rustup.rs) installed, run `./build-engine.sh` from a clone of this repo — it compiles the workspace and installs both binaries to `~/.cargo/bin`. Whichever path you took, `memstead --version` should now work.
+
+**2. Bootstrap a workspace.** In a fresh directory:
 
 ```bash
 mkdir my-graph && cd my-graph
 memstead quickstart
 ```
 
-One run leaves a working graph: a workspace, a mem pinned to the built-in `default` schema, a seed entity, and the MCP wiring for the agent(s) you pick (Claude Code, Codex, Cursor, Gemini CLI — pass `--agent <target>` to skip the prompt). It prints each artifact it created plus the single next action. Prefer the strict, script-safe variant with no side effects beyond `.memstead/`? That's `memstead init --name my-graph --schema default@1.0.0`.
+One run leaves a working graph: a workspace, a mem pinned to the built-in `default` schema, a seed entity, and the MCP wiring for the agent(s) you pick (Claude Code, Codex, Cursor, Gemini CLI — pass `--agent <target>` to skip the prompt). It prints each artifact it created plus the single next action. Prefer the strict, script-safe variant with no side effects beyond `.memstead/`? That's `memstead init --name my-graph --schema default@1.0.0` — also the path on the v0.1.0 release binaries, which predate `quickstart`.
 
-**4. Add knowledge, find it back:**
+**3. Add knowledge, find it back:**
 
 ```bash
 # Add an entity (the `concept` type needs a definition + explanation).
@@ -46,7 +50,7 @@ memstead search idempotency # find it back
 
 The `default` schema ships ten general-purpose types (`concept`, `assertion`, `memo`, `spec`, `inquiry`, …); run `memstead type` to list them, or author your own schema for a specialised domain.
 
-**5. (Optional) Let an AI agent read and write it.** `quickstart` already wrote the MCP config for the agent targets you selected — restart your agent inside the workspace and it's connected. To wire an agent up later or by hand:
+**4. (Optional) Let an AI agent read and write it.** `quickstart` already wrote the MCP config for the agent targets you selected — restart your agent inside the workspace and it's connected. To wire an agent up later or by hand:
 
 - **Claude Code:** install the plugin in this repo (`plugins/claude-code/`) and run the [`/setup`](plugins/claude-code/skills/setup/SKILL.md) skill — it resolves the binary path, initialises the workspace, writes `.mcp.json`, and tells you to reconnect. This is the paved path.
 - **Any other MCP agent (Codex, Gemini, …):** point it at the `memstead-mcp` binary. Resolve the absolute path with `command -v memstead-mcp`, then add it to your agent's MCP config:

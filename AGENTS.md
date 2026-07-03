@@ -32,7 +32,7 @@ The engine surfaces the graph to LLM agents through MCP (`memstead-mcp`) and to 
 
 ## Project context
 
-Pre-release. Breaking changes are fine — prioritize getting the design right over backwards compatibility.
+Pre-1.0. Breaking changes are fine — prioritize getting the design right over backwards compatibility.
 
 When working on a high-priority task, bundle low-effort items into the same session — don't defer cheap wins just because they're lower priority.
 

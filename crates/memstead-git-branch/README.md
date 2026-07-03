@@ -17,8 +17,8 @@ compile in by default (their `mem-repo` feature).
 
 ## Use
 
-Most users want the [`memstead-cli`](https://crates.io/crates/memstead-cli)
-binary or the [`memstead-mcp`](https://crates.io/crates/memstead-mcp)
+Most users want the [`memstead-cli`](../memstead-cli/)
+binary or the [`memstead-mcp`](../memstead-mcp/)
 server rather than this library. Depend on `memstead-git-branch` to embed
 the git-backed engine in your own process.
 

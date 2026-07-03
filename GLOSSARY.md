@@ -1,7 +1,5 @@
 # Glossary
 
-**Status:** in progress (2026-05-10) — definitions land as they get discussed and agreed.
-
 This glossary uses Memstead's **technical register** — the vocabulary that appears in code, MCP tools, schemas, and engine documentation. For the **conceptual register** that frames what Memstead does for end users ("knowledge graph", "planning graph", and similar modal slices), see [VISION.md](VISION.md).
 
 Definitions are normative. Where existing code or docs use different words, they should converge on this file, not the other way around.
@@ -9,11 +7,7 @@ Definitions are normative. Where existing code or docs use different words, they
 Each entry has two parts:
 
 - **Definition** — what the term is, with key properties.
-- **Rationale** — why these exact words, what previous misuse this corrects. Includes a *status* token (open / in-progress / done) for any convergence work the entry implies.
-
-**Terms remaining.** None at present — the conceptual surface this glossary covers is closed. New terms will land as new architectural questions surface; today's set is the reframing target.
-
-**Doc convergence.** Definitions here are normative. VISION.md, AGENTS.md, and README.md converged at the 2026-06 rename; some companion docs still pre-date this glossary and use different vocabulary in places; they converge to this file at their next revision. Where a current concept doc contradicts a glossary entry directly, the entry calls it out under *status* in its rationale.
+- **Rationale** — why these exact words, what previous misuse this corrects.
 
 ---
 
@@ -73,7 +67,7 @@ The workspace is persisted in a single configuration file at the workspace root.
 - **Mem mounts** — which mems the workspace mounts, where each is sourced from (folder path, branch reference inside a mem-repo, `.mem` archive), and how each is attached (read / write, eager / lazy, cross-linkable / isolated).
 - **Cross-mem permissions** — the directed allowlist for wikilinks between mounted mems.
 - **Workspace-level policy** — mutation requirements (mandatory notes, expected-hash discipline), drift behaviour, mem lifecycle allowlists, plugin hooks.
-- **Pipeline configuration** — scopes, projections, ingests; persisted centrally.
+- **Pipeline configuration** — mediums, facets, projections, ingests; persisted centrally.
 
 Schema definitions and per-mem configs are **not** workspace-level — they live with each mount's [storage backend](#storage-backend). The workspace just mounts backends and dispatches schema resolution through them in a fixed order (local → built-in → registry). See [Schema](#schema).
 
@@ -86,8 +80,6 @@ The definition separates "workspace" from three concepts historical code conflat
 - **Workspace ≠ folder.** A workspace may carry zero, one, or many mem mounts. The single-mem collapsed-folder layout is one configuration of the workspace store, not its definition.
 - **Workspace ≠ git repository.** A workspace mounts mems; each mount references a storage backend (folder, git-branch, or archive). A mem-repo is one possible target for git-branch mounts — the same workspace may carry folder-backed mounts alongside it.
 - **Workspace ≠ mem.** A mem exists independent of any workspace; any workspace may mount it under its own capability and policy. The single-mem case where workspace and mem collapse to the same folder is a degenerate configuration, not the definition.
-
-**Status:** largely realized. The single canonical marker (`.memstead/workspace.toml`) plus the engine-managed `.memstead/state/mounts.json` and per-mem `.memstead/config.json` define the workspace, and `memstead-base` carries `Workspace`, `Mount`, and `FileWorkspaceStore` as first-class types. The residual rename of `memstead-git-branch` (which now hosts the git-branch storage backend, not the workspace concept) is tracked separately.
 
 ---
 
@@ -115,8 +107,6 @@ Three things this entry keeps clear:
 - **Recursion is a feature, not a problem.** A union of typed sub-graphs with cross-edges is itself a graph — that is the mathematical definition, not a fudge. *"Graph"* therefore works at the mem-level and the workspace-level without needing different words. The same recursion is why *graph* cannot be the unit's name: the workspace-level composite is also a graph, so "graph" as a proper noun would be ambiguous exactly where the unit noun must be countable.
 - **Graph is descriptive; mem is the noun.** *"My project graph"* is fine prose — it describes the structure the project's mems compose. The moment the sentence counts, mounts, seals, publishes, or installs the thing, the word is *mem*.
 - **"Sub-graph", "area", or "part" disambiguate when needed.** *"My project graph has three sub-graphs: engine, macOS, plugin"* works in technical writing; *"three areas"* often reads more naturally in casual speech. Both refer to mem-graphs from the user's prose perspective.
-
-**Status:** done — settled by the unit-noun cut. "Mem-graph" remains the technical term for the graph inside one mem; "graph" alone stays descriptive prose.
 
 ---
 
@@ -148,10 +138,8 @@ The definition is operations-first. Mount is the verb of making a mem available;
 
 Two pitfalls this avoids:
 
-- **"Mount = storage container" is structurally wrong.** Today's `memstead-git-branch::mem_repo_mounts` defines `Mount` as a Rust type that wraps a gitdir handle — one such type per mem-repo, surfacing N mems. That is an implementation helper for sharing a gitdir connection across multiple per-mem mounts; it is not the conceptual mount. The user-facing operation is *"mount this mem with these capabilities"*, not *"mount this gitdir and hope each branch inherits sensible defaults"*.
+- **"Mount = storage container" is structurally wrong.** An earlier `mem_repo_mounts` helper defined a `Mount` Rust type that wrapped a gitdir handle — one such type per mem-repo, surfacing N mems. That was an implementation helper for sharing a gitdir connection across multiple per-mem mounts, not the conceptual mount; it has since been deleted, with shared gitdir reuse handled inside the git-branch backend itself. The user-facing operation is *"mount this mem with these capabilities"*, not *"mount this gitdir and hope each branch inherits sensible defaults"*.
 - **Per-mem capabilities don't need a nested override layer.** If five mems sit in one mem-repo and one of them is read-only while the rest are write, the per-mem mount record is the natural place. A storage-container-level mount would need a sub-property *mem-overrides* — which is just per-mem mounts pretending to be subordinate config.
-
-**Status:** realized. `memstead-base::workspace::Mount` is the per-mem conceptual mount, carrying `storage: MountStorage::{Folder, GitBranch, Archive}` uniformly. The engine accepts `Vec<Mount>` directly via the workspace store; the legacy `mem_repo_mounts` shared-gitdir-handle helper has been deleted, with shared gitdir reuse now handled inside the git-branch backend itself.
 
 ---
 
@@ -169,7 +157,7 @@ The workspace store is logical, not physical. Its content is fixed; the form on 
 - **Mount list** — one entry per mounted mem, each carrying the mem's storage reference and attachment properties (capability, lifecycle, cross-linkable). The schema pin lives in per-mem config in the storage backend, not in the mount entry.
 - **Cross-mem permissions** — directed allowlist for wikilinks between mounted mems.
 - **Workspace-level policy** — mutation requirements (mandatory notes, expected-hash discipline), drift behaviour, mem lifecycle allowlists, plugin hooks.
-- **Pipeline configuration** — scopes, projections, ingests. Per-mem primitives, persisted centrally because they change with workspace lifecycle, not with mem content.
+- **Pipeline configuration** — mediums, facets, projections, ingests. Per-mem primitives, persisted centrally because they change with workspace lifecycle, not with mem content.
 
 **Role.**
 
@@ -178,14 +166,15 @@ The workspace store is logical, not physical. Its content is fixed; the form on 
 
 **Persistence adapters.**
 
-- **File adapter** (target default) — distributes the store across files under a single `.memstead/` umbrella at the workspace root:
+- **File adapter** (the default) — distributes the store across files under a single `.memstead/` umbrella at the workspace root:
 
   ```
   <workspace>/
   ├── .memstead/
   │   ├── workspace.toml        ← operator config (rules, permissions, policy, plugin hooks)
   │   ├── state/mounts.json     ← engine-managed mount records
-  │   ├── scopes/               ← pipeline configs (workspace-level)
+  │   ├── mediums/              ← pipeline configs (workspace-level)
+  │   ├── facets/
   │   ├── projections/
   │   └── ingests/
   ├── <mem folders or storage containers like mem-repo/>
@@ -207,8 +196,6 @@ Three reasons to define the workspace store as logical content with a swappable 
 - **"Store" not "database".** Database implies SQL, indexes, joins, transactions — none of which the concept needs. Store carries the same logical-vs-physical split without that semantic baggage.
 
 **Schemas and per-mem configs are not in the workspace store.** They live with the storage backend that holds each mem's content. This is what keeps a mem-repo (or a folder mem, or an archive) self-contained — clone or copy it, get the mems *and* their schemas and configs. The workspace store is the layer that mounts storage backends; the storage backends own their own per-mem metadata.
-
-**Status:** partially realized. The store schema and the file adapter are landed: `WorkspaceStoreAdapter` lives in `memstead-base`, `FileWorkspaceStore` is the default implementation, and the `.memstead/workspace.toml` + `.memstead/state/mounts.json` split that the file adapter writes is the canonical on-disk shape. The remaining work is alternative adapters (SQLite, in-memory, remote-service) — none implemented today; only the file adapter exists — and the pipeline-folder migration into the unified `.memstead/` layout. **Doc convergence:** a refined vocabulary (Medium / Facet / Projection) is planned for what today's code calls scope / projection / ingest; reconciling it with the glossary is future work.
 
 ---
 
@@ -239,7 +226,7 @@ Each backend carries its own [schemas](#schema) and per-mem configs in a paralle
 | **Git-branch** | `refs/heads/<mem>` tree | `__MEMSTEAD:mems/<mem>/config.json` | `__MEMSTEAD:schemas/<name>@<version>/` |
 | **Archive** | inside `.mem` zip | inside `.mem` zip | inside `.mem` zip |
 
-The git-branch backend's `__MEMSTEAD` ref unifies what today's full flavour splits into two orphan refs (`__SCHEMAS` for schema YAMLs, `__SYSTEM` for per-mem configs). One ref, parallel structure with the folder backend's `.memstead/` directory.
+The git-branch backend's single `__MEMSTEAD` ref carries both schema YAMLs and per-mem configs — one ref, parallel structure with the folder backend's `.memstead/` directory. (It replaced an earlier split into two orphan refs, `__SCHEMAS` for schema YAMLs and `__SYSTEM` for per-mem configs; legacy repos are migrated onto the unified ref.)
 
 The folder backend supports two operator layouts: **multi-mem** (the workspace root is a container; each mem is a subfolder) and **collapsed single-mem** (the workspace IS the one mem; config at root, no `mems/` subfolder). The collapsed form is detected by `.memstead/config.json` at workspace root instead of `.memstead/mems/<name>/config.json` entries.
 
@@ -263,7 +250,7 @@ Default convention: one git-repo per workspace, multi-repo only when the operato
 The folder backend is intentionally simple: it carries entity files and per-mem config, nothing more. Two capabilities that the git-branch backend offers and the folder backend deliberately does not:
 
 - **Drift detection.** Git-branch tracks each mem's HEAD SHA; when a sibling writer advances it, the engine emits `MEM_RELOADED` and auto-reloads. Folder has no equivalent signal — `MemBackend::current_head` returns `None`. Multi-process workflows (two CLIs on the same workspace, macOS app + Claude Code plugin, iCloud/Dropbox sync) need git-branch.
-- *(Open: change history / mutation provenance — see [Provenance](#provenance--mutation-log) for the current shape and the trade-off.)*
+- **Change history.** Git-branch carries the full git log per mem; the folder backend keeps only an append-only sidecar log — see [Provenance](#provenance--mutation-log) for the per-backend shapes and the trade-off.
 
 The product position: **folder = simple, single-context notes. Git-branch = multi-actor, history-bearing knowledge.** Anyone who needs drift detection, audit trails, or multi-process safety chooses git-branch. The folder backend is not "git-branch lite" — it is a distinct affordance for users who want their mem to be a plain directory of markdown.
 
@@ -273,10 +260,8 @@ The three kinds map directly to a [mem's](#mem) two lifeforms: folder and git-br
 
 Two pitfalls this avoids:
 
-- **Conflating "storage backend" with "the workspace itself".** Today's `memstead-git-branch` Rust crate hosts the git-branch backend; the crate name suggests it owns the workspace concept, but it does not. After convergence, that crate is renamed for what it actually implements: a git-branch backend, sibling to a folder backend and an archive backend.
+- **Conflating "storage backend" with "the workspace itself".** The `memstead-git-branch` crate hosts the git-branch backend and nothing more — a sibling to the folder backend and the archive backend. The workspace concept lives above the backends, not inside any one of them.
 - **Conflating capability-by-mount with capability-by-backend.** A folder backend can be mounted read-only (a workspace's choice); an archive can only be read (an intrinsic property of content-addressed sealed bytes). Splitting *kind* from *capability* keeps error envelopes and mount semantics consistent — a write attempt against an archive fails at a different layer than a write attempt against a read-only-mounted folder.
-
-**Status:** largely realized. `MemBackend` lives in `memstead-base::backend` and the engine talks to every storage kind through it: the folder backend (`memstead-base::storage::filesystem`) and the archive read path (`memstead-base::storage::archive`) are linked unconditionally, the git-branch backend (`memstead-git-branch`) is added by the full flavour via a registered backend factory. The residual cleanup is the `memstead-git-branch` crate rename and the migration of a handful of ops-level methods (`read_agent_notes`, `export_to_archive`, `changes_since` with rename detection) off the trait into backend-specific helpers, both tracked separately.
 
 ---
 
@@ -290,7 +275,7 @@ A schema is the contract that makes a mem a *typed* model rather than a raw mark
 
 **Three roles the term plays.**
 
-- **Schema definition** — the actual type vocabulary, expressed as YAML files (today: `manifest.yaml` plus per-type files). Declares types, their sections, metadata fields, relationship vocabulary, write rules. Versioned. The distributable folder form is a **schema package**: the YAML files plus README, optionally carrying a `mem-template.json` (a per-mem config starter consumed client-side at mem creation).
+- **Schema definition** — the actual type vocabulary, expressed as YAML files (today: `schema.yaml` plus per-type files). Declares types, their sections, metadata fields, relationship vocabulary, write rules. Versioned. The distributable folder form is a **schema package**: the YAML files plus README, optionally carrying a `mem-template.json` (a per-mem config starter consumed client-side at mem creation).
 - **Schema pin** — a [mem's](#mem) reference to one specific schema definition: a `name@version` string (e.g. `software@0.1.0`). Stored in the mem's per-mem config inside its [storage backend](#storage-backend).
 - **Schema registry** — the resolution mechanism that turns a pin into a definition at engine startup. Consults three sources in order — local storage, built-in, registry — and returns the first match.
 
@@ -301,7 +286,7 @@ A schema is the contract that makes a mem a *typed* model rather than a raw mark
    - **Folder backend** — `<workspace>/.memstead/schemas/<name>@<version>/` (or `<mem>/.memstead/schemas/<name>@<version>/` for the collapsed single-mem form).
    - **Archive backend** — `schemas/<name>@<version>/` inside the `.mem` zip.
 2. **Built-in** — schemas compiled into the engine binary, available on every install (today: `default@1.0.0` plus the bundled schema packages `software`, `planning`, `project`, `ingest`). Used when no local match. Works offline by definition.
-3. **Registry** — schemas served by memstead.io, fetched on demand and cached locally. Reserved slot; not implemented in the current rebuild.
+3. **Registry** — schemas served by memstead.io, fetched on demand and cached locally. Reserved slot; not implemented yet — the third source is diagnostic-only today, with no download path.
 
 **Authoring.**
 
@@ -316,8 +301,6 @@ Three confusions this entry resolves:
 - **"Schema" without qualifier is ambiguous.** Code, docs, and conversation use the bare word for whichever role is contextually relevant — often without distinguishing definition (the YAML), pin (the reference), and registry (the resolver). Naming the roles separately fixes that.
 - **Schemas live with their storage.** A mem's schema travels with the storage backend that holds the mem. A cloned mem-repo carries its schemas in the same gitdir; a folder workspace copied to a USB stick carries them under its own `.memstead/`; an archive embeds them in the zip. The workspace store does not host schemas — the workspace is the layer that mounts storage backends, not the layer that owns schema definitions.
 - **Resolution-order is fixed and not arbitrary.** Local storage wins so a mem is self-resolvable from its own backend. Built-in is the fallback for shipping defaults (`default@1.0.0` works without network or local authoring). Registry is the third-source fallback for pins neither local nor built-in carries. The order is hard-coded; workspaces do not customise it.
-
-**Status:** in-progress — substantially converged (re-baselined 2026-06-13). Done: the unified `__MEMSTEAD` ref on the git-branch backend (landed with the workspace-store rebuild, replacing `__SCHEMAS` and `__SYSTEM`); a uniform schema registry with the fixed three-source order in `memstead-base`/`memstead-schema`; `SCHEMA_NOT_FOUND` carries a `details.sources` payload naming which sources were consulted (local storage / built-in / remote-reserved) and the versions each held; authoring paths on both flavours — authored packages resolve at boot from `<workspace>/.memstead/schemas/<name>@<version>/` (folder) and the `__MEMSTEAD:schemas/` ref (git-branch); `memstead schema validate <path>` and `memstead schema install <name|path>` for both backend destinations; the folder-backend schema location is fixed at `.memstead/schemas/` and the `schemas_dir` workspace.toml key is retired (a legacy key is warned and ignored, never honoured); the schema-pin relocation is complete — `MemConfig.schema` (the mem's per-mem backend config) is the authoritative pin and `Mount.schema` is now an optional expectation assertion (`Option<SchemaRef>`), so a copied mem resolves without consulting any workspace's `mounts.json`; built-in packages ship a `mem-template.json` consumed by `memstead mem create`/`init` (which accept an opaque `write_guidance` map persisted into the seed config); and the JSON meta-schemas are published under `.memstead/meta-schemas/` with the `# yaml-language-server` directive on bundled packages for IDE-side validation. Still open: the remote/registry resolution step — fetching a pinned schema from memstead.io is reserved (the third source slot is diagnostic-only; no download path yet).
 
 ---
 
@@ -345,9 +328,7 @@ Within-mem wikilinks (`[[slug]]`) resolve inside the source mem and are **not** 
 Two pitfalls this avoids:
 
 - **Cross-mem edges live at the workspace layer, not the mem layer.** A mem has no knowledge of other mems — it carries entities and within-mem wikilinks only. The workspace is the layer that mounts multiple mems, knows their names, and resolves edges between them. This is why the cross-mem permission table belongs in the [workspace store](#workspace-store), not in any single mem's metadata.
-- **The Tier-1 / Tier-2 / Tier-3 framing was misleading.** Today's docs distinguish three tiers of wikilinks (same-mem, cross-mem-same-mem-repo, cross-repo-via-registry). In the reframed model only two distinctions exist: within-mem (resolves inside the mem) and cross-mem (resolves through the workspace). The "cross-repo-via-registry" tier collapses into "cross-mem edge to an archive-backed mount" — once the archive is mounted, it is another mem in the workspace.
-
-**Status:** open. The convergence work this implies: collapse the three-tier wikilink framing in engine docs and code comments into the within-mem / cross-mem binary; treat the registry-published case as a mount choice (archive backend, fetched from memstead.io), not as a wikilink tier of its own; the cross-mem permission table in the [workspace store](#workspace-store) is the single authorisation point for any edge crossing a mem boundary, regardless of the target's storage backend.
+- **The Tier-1 / Tier-2 / Tier-3 framing was misleading.** Some docs distinguish three tiers of wikilinks (same-mem, cross-mem-same-mem-repo, cross-repo-via-registry). Only two distinctions exist: within-mem (resolves inside the mem) and cross-mem (resolves through the workspace). The "cross-repo-via-registry" tier collapses into "cross-mem edge to an archive-backed mount" — once the archive is mounted, it is another mem in the workspace. The cross-mem permission table in the [workspace store](#workspace-store) is the single authorisation point for any edge crossing a mem boundary, regardless of the target's storage backend.
 
 ---
 
@@ -376,8 +357,6 @@ Two distinctions worth preserving:
 - **Entity ≠ file.** Calling an entity a "file" leaks one encoding (folder backend) into the conceptual model. The same entity has different physical forms across the three storage backends; the entity itself is its content plus identity.
 - **Entity ≠ raw markdown.** An entity is markdown *constrained by a schema* — its sections, metadata, and relationships all conform to its mem's schema pin. Without that constraint, the markdown is just text; with it, it is a typed entry in a typed model.
 
-**Status:** n/a — no convergence work. The term has been stable throughout the codebase; the entry exists to document the boundary, not to redirect implementation.
-
 ---
 
 ## Subject
@@ -399,8 +378,6 @@ A mem has exactly one subject. The subject is editorial — not enforced by code
 ### Rationale
 
 Subject earns its own entry because it is the criterion that distinguishes mems *logically* once Schema and Storage are equal. Without it, "why is this its own mem rather than entities in some other mem?" has no principled answer.
-
-**Status:** n/a — definitional, not implementation work.
 
 ---
 
@@ -431,8 +408,6 @@ Why the entry: in user-facing language, modal flavour is the *concrete name* a p
 
 Why it is not its own enforcement axis: every schema design implies a flavour by what types it includes. Adding a flavour-as-attribute to the engine would be redundant — the schema already encodes it.
 
-**Status:** n/a — derived from [Schema](#schema). Convergence work for adoption in user-facing prose is tracked under [Graph](#graph).
-
 ---
 
 ## Wikilink
@@ -448,16 +423,14 @@ Two kinds, distinguished by whether the link crosses a mem boundary:
 
 Wikilinks may be *typed* (`[[REL_TYPE: target]]`, e.g. `[[DEPENDS_ON: foo]]`) or *untyped* (default `REFERENCES` edge). The schema's relationship vocabulary constrains which `REL_TYPE` values are valid.
 
-**Cross-workspace references** — pointing at mems published by other workspaces (today's `[[scope/name:slug]]` form for registry-published mems) — are not a separate wikilink kind in the reframed model. They are cross-mem wikilinks targeting a [mount](#mount) whose [storage backend](#storage-backend) is an archive, downloaded from memstead.io. Once mounted, they resolve like any other cross-mem wikilink.
+**Cross-workspace references** — pointing at mems published by other workspaces (today's `[[scope/name:slug]]` form for registry-published mems) — are not a separate wikilink kind. They are cross-mem wikilinks targeting a [mount](#mount) whose [storage backend](#storage-backend) is an archive, downloaded from memstead.io. Once mounted, they resolve like any other cross-mem wikilink.
 
 ### Rationale
 
 Two clarifications this entry locks in:
 
-- **Two kinds, not three.** Today's docs distinguish three "tiers" (same-mem, cross-mem-same-mem-repo, cross-repo-via-registry). The reframed model collapses Tier-2 and Tier-3 — both are cross-mem wikilinks; the difference is which storage backend the target uses.
+- **Two kinds, not three.** Some docs distinguish three "tiers" (same-mem, cross-mem-same-mem-repo, cross-repo-via-registry). Tier-2 and Tier-3 collapse — both are cross-mem wikilinks; the difference is which storage backend the target uses.
 - **Wikilinks are entity content, not workspace state.** A wikilink lives in the source entity's markdown bytes. Resolution and permission-check happen at the workspace layer at read or write time, but the link itself travels with the entity.
-
-**Status:** open — engine docs and code comments still use Tier-1 / Tier-2 / Tier-3 vocabulary. Convergence is folded into [Cross-mem edge](#cross-mem-edge).
 
 ---
 
@@ -492,8 +465,6 @@ Why "append-only" matters: it makes auditing tractable, it makes incremental syn
 
 Why two realizations look so different on disk: git already has commit-message provenance with rich semantics; folder backend has no equivalent, so a sidecar log is the closest analog. Both are append-only; both round-trip through the same engine API.
 
-**Status:** open. The underlying mechanisms work today (Phase 1 verified the JSONL changelog round-trips through `FilesystemMcpServer`). Convergence work: define a uniform `Provenance` type in `memstead-base` so both backends produce structurally identical records regardless of persistence form.
-
 ---
 
 ## Pipeline (medium · facet · projection · ingest)
@@ -509,18 +480,11 @@ Four primitives compose the pipeline:
 - **Projection** — a declared mapping from sources (one or more facets over mediums, plus optional reference mems) into a destination mem. Defines *what* the projection produces.
 - **Ingest** — operational configuration for running a projection: mode (`discovery` / `refinement` / `one-shot`), trigger (`loop` / `manual` / `on-event`), batch size, deny-path overrides. Defines *how and when* the projection runs.
 
-The pipeline is **per-mem** (each mem declares its own mediums, facets, projections, ingests — different mems have different territory) but **persisted centrally in the [workspace store](#workspace-store)** because the configuration changes with workspace lifecycle, not with mem content.
+The pipeline is **per-mem** (each mem declares its own mediums, facets, projections, ingests — different mems have different territory) but **persisted centrally in the [workspace store](#workspace-store)** because the configuration changes with workspace lifecycle, not with mem content. The engine persists the four primitives under `.memstead/{mediums,facets,projections,ingests}/`.
 
-**Today's vocabulary vs the refined model.**
+**History.** An earlier single `Scope` primitive conflated territory-selection and engagement; the four-primitive model separates territory (medium), engagement (facet), and obligation (projection). The legacy `scopes|projections|ingests/` folders are retired (`memstead pipeline migrate` converts them).
 
-| Refined (Medium / Facet / Projection) | Today's code (`scopes/`, `projections/`, `ingests/`) |
-|---|---|
-| Medium | implicit — the source target a scope filters over |
-| Facet | Scope (filter only; engagement contract not modelled) |
-| Projection | Projection |
-| Ingest | Ingest |
-
-The refined model **separates** territory (medium), engagement (facet), and obligation (projection); today's `Scope` conflates engagement and selection. The convergence target is the four-primitive model.
+The `Facet.preparation` slot is reserved for non-text mediums (PDF, DOCX, audio); no preparation implementation ships today — an ingest whose facet declares one is reported unsupported rather than run.
 
 ### Rationale
 
@@ -529,10 +493,3 @@ Why the pipeline lives at workspace level even though its declarations are per-m
 Why mediums are passive: a medium can be reused across facets without inheriting any one engagement's preparation logic. The medium is "the engine codebase here" or "the filesystem there"; how a particular projection engages with it is the facet's job.
 
 Why ingest is separate from projection: a projection declares what feeds what; the same projection may be run in different modes (full discovery vs incremental refinement) at different times. Ingest carries the mode / trigger / batch — the operational layer over the declarative projection.
-
-**Status:** done (2026-06-14). The four-primitive refactor landed:
-
-- The old `Scope` JSON shape is split into Medium (territory) + Facet (engagement: selection + optional engagement contract + optional `preparation` step), with Projection and Ingest reshaped to reference facets. Engine-side types, the workspace-store persistence (`.memstead/{mediums,facets,projections,ingests}/`), a boot-time read-only loader, and the plugin ingest skill all speak the four-primitive model; no code identifier uses `Scope`/`scope` for the engagement concern.
-- The pipeline configs live in the workspace store's persistence adapter (the JSON-folder layout was migrated by `memstead pipeline migrate`; the legacy `scopes|projections|ingests/` folders are retired and unreadable).
-- The `Facet.preparation` slot is reserved for non-text mediums (PDF, DOCX, audio); no preparation implementation ships — an ingest whose facet declares one is reported unsupported rather than run. Each non-text medium is a follow-up plan triggered by a real corpus.
-- One consolidation remains as a follow-up: moving the ingest skill's `mediums.json` engagement metadata into per-facet `engagement` records (the skill still reads `mediums.json` keyed by medium type; facets carry the *optional* slot).

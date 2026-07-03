@@ -13,7 +13,7 @@ browser, `@memstead/wasm` (built from `crates/memstead-wasm/`) hydrates
 the snapshot and `@memstead/client` (`crates/memstead-wasm/client-js/`)
 orchestrates the snapshot + SSE + commit-apply lifecycle against this
 bridge surface. (Both JS packages are prepared for npm but not yet
-published — build them from this repo until the first release lands.)
+published — build them from this repo until they land on npm.)
 
 ## Use
 

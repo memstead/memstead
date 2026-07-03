@@ -11,7 +11,19 @@ Terms like *mem*, *schema*, *workspace*, and *entity* have precise meanings — 
 
 ## 1. Install the binaries
 
-Pre-release, Memstead builds from source (pre-built binaries land with the first release). You need the [Rust toolchain](https://rustup.rs) — `rustc --version` should print a version. Then, from a clone of the repository:
+The install script fetches the latest [release](https://github.com/memstead/memstead/releases) binaries — `memstead` (the CLI) and `memstead-mcp` (the MCP server agents connect to):
+
+```bash
+curl -sSf https://memstead.io/install.sh | sh
+```
+
+Or via Homebrew (macOS / Linux):
+
+```bash
+brew install memstead/memstead/memstead-cli memstead/memstead/memstead-mcp
+```
+
+Or build from source. You need the [Rust toolchain](https://rustup.rs) — `rustc --version` should print a version. Then, from a clone of the repository:
 
 ```bash
 git clone https://github.com/memstead/memstead
@@ -19,7 +31,7 @@ cd memstead
 ./build-engine.sh
 ```
 
-This installs two binaries to `~/.cargo/bin`: `memstead` (the CLI) and `memstead-mcp` (the MCP server agents connect to). Check the install:
+The source build installs both binaries to `~/.cargo/bin`. Whichever path you took, check the install:
 
 ```bash
 memstead --version
@@ -47,7 +59,7 @@ memstead quickstart
 Next: Restart Claude Code so the `memstead` MCP server registers — then try: memstead overview
 ```
 
-Prefer the strict, script-safe variant with no side effects beyond `.memstead/`? That's `memstead init --name my-graph --schema default@1.0.0`.
+Prefer the strict, script-safe variant with no side effects beyond `.memstead/`? That's `memstead init --name my-graph --schema default@1.0.0` — also the path on the v0.1.0 release binaries, which predate `quickstart`.
 
 ## 3. Create your first entities
 

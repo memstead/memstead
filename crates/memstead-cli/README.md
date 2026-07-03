@@ -13,11 +13,15 @@ mems.
 
 ## Install
 
+From the GitHub release (installer script or Homebrew — see the
+[repo README](../../README.md#quickstart)), or from this repo:
+
 ```bash
-cargo install memstead-cli
+cargo install --path crates/memstead-cli
 ```
 
-This installs the `memstead` binary. The default build is the full
+Once the crate is published to crates.io, `cargo install memstead-cli`
+will work too. Either way this installs the `memstead` binary. The default build is the full
 surface (multi-mem, git-backed via the `mem-repo` feature);
 `--no-default-features` builds the lean folder-only surface.
 

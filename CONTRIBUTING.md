@@ -28,8 +28,9 @@ maintainable:
 ## Getting set up
 
 You need a stable Rust toolchain (edition 2024) and — for the plugin tests —
-Node.js. There is no published release yet, so the install path is
-build-from-source:
+Node.js. Pre-built release binaries exist for end users (see the
+[README quickstart](README.md#quickstart)), but development works against a
+source build:
 
 ```bash
 ./build-engine.sh          # builds the workspace, installs the `memstead` CLI,

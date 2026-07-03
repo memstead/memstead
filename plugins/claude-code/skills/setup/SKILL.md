@@ -35,7 +35,7 @@ If either lookup fails (non-zero exit), install them. Work through these options
 2. **Homebrew** (macOS / Linux with `brew` installed):
 
    ```bash
-   brew install memstead/homebrew-memstead/memstead
+   brew install memstead/memstead/memstead-cli memstead/memstead/memstead-mcp
    ```
 
    *Fall through to option 3 when:* `brew` is not installed, or the tap/formula cannot be found.
