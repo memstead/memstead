@@ -69,7 +69,7 @@ dirs = "5"
 toml = "0.8"
 toml_edit = "0.22"
 gix = { version = "0.85", default-features = false, features = ["revision", "tree-editor", "blob-diff", "max-performance-safe", "sha1"] }
-tantivy = "0.22"
+tantivy = "0.26"
 globset = "0.4"
 
 # Faster dev/test compiles. Trade: slightly less debug info than the
