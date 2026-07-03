@@ -138,6 +138,11 @@ pub fn branch_reset_in_gitdir(
     }
     let repo = gix::open(gitdir).map_err(|e| BackendError::Other(format!("gix open: {e}")))?;
 
+    // Mounts may carry the branch as a full ref (`refs/heads/<mem>`) or
+    // short form — the same dual shape git_tree.rs normalizes at its
+    // seams. Strip here so `refs/heads/` is prepended exactly once.
+    let branch = branch.strip_prefix("refs/heads/").unwrap_or(branch);
+
     let current = current_head(&repo, branch)?;
     let target = resolve_target(&repo, target_sha)?;
     let branch_ref = format!("refs/heads/{branch}");
@@ -265,6 +270,20 @@ mod tests {
             BackendError::Other(msg) => assert!(msg.starts_with("UNKNOWN_REF:"), "got: {msg}"),
             other => panic!("expected Other(UNKNOWN_REF), got {other:?}"),
         }
+    }
+
+    #[test]
+    fn branch_reset_accepts_full_ref_branch_form() {
+        // Mounts carry `branch` as either `specs` or `refs/heads/specs`;
+        // the long form used to double-prefix into
+        // `refs/heads/refs/heads/specs` and refuse with UNKNOWN_REF.
+        let tmp = TempDir::new().unwrap();
+        let gitdir = init_gitdir(&tmp);
+        let sha_a = commit(&gitdir, "specs", "a.md", &body("A"), "A");
+        let _sha_b = commit(&gitdir, "specs", "b.md", &body("B"), "B");
+        let outcome = branch_reset_in_gitdir(&gitdir, "refs/heads/specs", &sha_a).unwrap();
+        assert_eq!(outcome.new_sha, sha_a);
+        assert_eq!(outcome.branch_ref, "refs/heads/specs");
     }
 
     #[test]
