@@ -32,10 +32,10 @@ memstead-git-branch.workspace = true
 memstead-schema.workspace = true
 semver.workspace = true
 thiserror.workspace = true
-uniffi = { version = "0.31", features = ["cli"] }
+uniffi = { version = "0.32", features = ["cli"] }
 
 [build-dependencies]
-uniffi = { version = "0.31", features = ["build"] }
+uniffi = { version = "0.32", features = ["build"] }
 
 [dev-dependencies]
 tempfile.workspace = true
