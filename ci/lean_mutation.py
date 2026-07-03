@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Lean-build smoke: mutation surface beyond `memstead_create`.
 
-The manual smoke test in `dev/smoke-test-2026-05-09.md` deliberately
+The original manual smoke test deliberately
 did not exercise `memstead_update` (hash round-trip), `memstead_delete`
 (tombstone changelog row + entity removal), or `memstead_relate` (typed
 edge surfacing through `memstead_entity`). This probe pins all three so

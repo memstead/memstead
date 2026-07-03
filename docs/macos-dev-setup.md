@@ -58,13 +58,13 @@ Expected wallclock after the steps in this document: **under 10 seconds** for ~1
 Reduces compile-and-test cycles by another ~10–20% by stopping `mdimport` from indexing every freshly built test binary.
 
 1. **System Settings → Spotlight → Search Privacy** (older macOS: Spotlight → Privacy)
-2. Click **`+`** and add `engine/target` (drag the folder in or browse to it)
+2. Click **`+`** and add the repo's `target/` directory (drag the folder in or browse to it)
 
 No restart needed; the exclusion takes effect immediately for new files.
 
 ## Already in the repo: Cargo profile tuning
 
-For reference — you don't need to do anything for these; they're committed in `engine/Cargo.toml`:
+For reference — you don't need to do anything for these; they're committed in the root `Cargo.toml`:
 
 - `[profile.dev] debug = "line-tables-only"` — keeps stack traces and line numbers but trims debug-info bloat. Smaller debug binaries shorten code-signing verification per cold start.
 - `[profile.dev.package."*"] opt-level = 1` — compiles dependencies (gix, tantivy, tokio, …) with light optimisation. Workspace crates stay unoptimised so incremental rebuilds remain fast. Tests that exercise those dependencies (gix tree walks, tantivy index builds) run substantially faster at runtime.

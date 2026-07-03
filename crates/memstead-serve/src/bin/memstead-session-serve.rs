@@ -73,7 +73,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Base for the live view URL handed to the agent through the MCP
     // handshake. Absent → a relative `/v/<id>` (the deployment's own origin);
-    // set to e.g. `https://memstead.ai` to emit an absolute URL.
+    // set to the deployment's public origin to emit an absolute URL.
     let view_base = std::env::var("MEMSTEAD_SESSION_VIEW_BASE").unwrap_or_default();
 
     // The curated read-only content mem the agent reads to orient itself.

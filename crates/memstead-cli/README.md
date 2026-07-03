@@ -32,6 +32,9 @@ mkdir my-graph && cd my-graph
 memstead quickstart
 ```
 
+(On the v0.1.0 release binaries, which predate `quickstart`, use
+`memstead init --name my-graph --schema default@1.0.0` instead.)
+
 One run leaves a working graph: a workspace, a mem pinned to the built-in
 `default` schema, a seed entity, and MCP wiring for the agent targets you
 pick. Full documentation lives at the

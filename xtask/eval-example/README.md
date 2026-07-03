@@ -1,7 +1,7 @@
 # Substrate-quality eval — runnable example
 
 A self-contained corpus + task + fact set for the substrate-quality harness
-(`engine/xtask/src/eval/`). The corpus is **fictional** (the "Zephyrine Relay
+(`xtask/src/eval/`). The corpus is **fictional** (the "Zephyrine Relay
 Mesh") so the contamination guard's no-substrate (A) arm cannot answer the tasks
 from prior knowledge — every task survives the screen, and the B-vs-C delta speaks
 only to substrate quality.
@@ -21,12 +21,12 @@ arm — no manual setup. Run from the repo root:
 ROOT=$(pwd)
 cargo run -p xtask -- eval \
   --subject zrm \
-  --tasks   "$ROOT/engine/xtask/eval-example/tasks.json" \
-  --facts   "$ROOT/engine/xtask/eval-example/facts.json" \
-  --capture-corpus "$ROOT/engine/xtask/eval-example/corpus.md" \
+  --tasks   "$ROOT/xtask/eval-example/tasks.json" \
+  --facts   "$ROOT/xtask/eval-example/facts.json" \
+  --capture-corpus "$ROOT/xtask/eval-example/corpus.md" \
   --capture-workspace /tmp/eval-capture-mem \
-  --cli-binary  "$ROOT/engine/target/debug/memstead" \
-  --mcp-binary  "$ROOT/engine/target/debug/memstead-mcp" \
+  --cli-binary  "$ROOT/target/debug/memstead" \
+  --mcp-binary  "$ROOT/target/debug/memstead-mcp" \
   --model claude-sonnet-4-6 \
   --trials 1 \
   --contamination-threshold 0 \

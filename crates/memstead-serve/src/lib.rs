@@ -64,7 +64,7 @@ pub struct AppState {
     /// Trust origin this deployment vouches for its read-only served
     /// content. Defaults to [`OriginClass::ThirdParty`] — an arbitrary
     /// served mem is untrusted data until the operator declares
-    /// otherwise. The curated memstead.ai read tier sets
+    /// otherwise. The curated hosted read tier sets
     /// [`OriginClass::FirstParty`] via [`Self::with_content_origin`].
     /// Surfaced per read-only mem on the discovery manifest; a publisher
     /// cannot forge it (it is operator config, not content).
@@ -614,7 +614,7 @@ async fn authority_handler(State(state): State<AppState>) -> Response {
             // (session sketch) mem is first-party — the user's own work.
             // A read-only served mem's origin is a *deployment fact* the
             // serving authority declares (`content_origin`): the curated
-            // memstead.ai read tier vouches for its content as first-party;
+            // hosted read tier vouches for its content as first-party;
             // an arbitrary served mem defaults to third-party (untrusted)
             // until the deployment opts in. A publisher cannot forge this —
             // it is set by the operator running the server, not by content.

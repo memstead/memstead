@@ -3,7 +3,7 @@
 
 Pre-strictness-axis-fix the filesystem-mem write path silently
 accepted unknown sections, missing required sections, and out-of-enum
-metadata values (Bug 1 in `dev/smoke-test-2026-05-09.md`). This probe
+metadata values (Bug 1 in the original manual smoke test). This probe
 locks the wire-format error codes the agent sees on each violation.
 
 Three probes — each one expects `isError=true` with a specific stable

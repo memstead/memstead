@@ -15,7 +15,7 @@
 //!
 //! Device Flow is a public-client protocol — no client secret exists.
 //! The client ID is the one registered for the registry's GitHub OAuth
-//! App (operator prerequisites: `dev/registry-operations.md`).
+//! App.
 
 use std::io::Write;
 use std::time::{Duration, Instant};

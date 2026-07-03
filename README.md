@@ -80,7 +80,14 @@ The `default` schema ships ten general-purpose types (`concept`, `assertion`, `m
 
 **4. (Optional) Let an AI agent read and write it.** `quickstart` already wrote the MCP config for the agent targets you selected — restart your agent inside the workspace and it's connected. To wire an agent up later or by hand:
 
-- **Claude Code:** install the plugin in this repo (`plugins/claude-code/`) and run the [`/setup`](plugins/claude-code/skills/setup/SKILL.md) skill — it resolves the binary path, initialises the workspace, writes `.mcp.json`, and tells you to reconnect. This is the paved path.
+- **Claude Code:** install the [plugin](plugins/claude-code/) and run its `/setup` skill — it resolves the binary path, initialises the workspace, writes `.mcp.json`, and tells you to reconnect. This is the paved path:
+
+  ```bash
+  claude plugin marketplace add memstead/memstead
+  claude plugin install memstead@memstead
+  ```
+
+  (or `/plugin marketplace add memstead/memstead` + `/plugin install memstead@memstead` inside a session), then `/setup`.
 - **Any other MCP agent (Codex, Gemini, …):** point it at the `memstead-mcp` binary. Resolve the absolute path with `command -v memstead-mcp`, then add it to your agent's MCP config:
 
   ```json
@@ -125,7 +132,7 @@ Engine (parse ↔ in-memory store ↔ generate, write-through to markdown in git
   ↓
 MCP server (memstead_* + workspace_* tools over STDIO)  ─┐
                                                      ├─→  AI agent or shell
-CLI (`memstead` subcommands mirror every MCP tool)  ─┘
+CLI (`memstead` mirrors nearly every MCP tool; parity matrix has the map)  ─┘
 ```
 
 The schema drives all engine behaviour — there are no hardcoded field names. Any schema that conforms to the contract plugs in without code changes, and every mutation is validated against it before it touches disk.

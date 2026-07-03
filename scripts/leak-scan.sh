@@ -64,6 +64,8 @@ scan "excluded-private-dirs" '(^|[[:space:]"'"'"'`(:,])(macos|websites|graph|ins
   --include='*.sh' --include='*.md' --include='*.toml' --include='*.rs' --include='*.mdx' --include='*.yml' \
   --include='*.mjs' --include='*.js' --include='*.json' --include='*.udl' --include='*.swift' --include='*.py'
 scan "legacy-domain"       '(mdgv\.io|dasboe/mdgv|dasboe\.github\.io)'
+# The sketch product's domain stays out of the public repo until launch.
+scan "prelaunch-domain"    'memstead\.ai'
 
 echo
 if [ "$HITS" -eq 0 ]; then

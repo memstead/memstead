@@ -104,7 +104,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let sketch_schema: memstead_schema::SchemaRef = sketch_pin
         .parse()
         .map_err(|e| format!("invalid MEMSTEAD_SESSION_SCHEMA {sketch_pin:?}: {e}"))?;
-    // Absent → relative `/v/<id>`; set to e.g. `https://memstead.ai` for an
+    // Absent → relative `/v/<id>`; set to the deployment's public origin for an
     // absolute view URL in the MCP handshake.
     let view_base = std::env::var("MEMSTEAD_SESSION_VIEW_BASE").unwrap_or_default();
     let content_storage = if let Ok(dir) = std::env::var("MEMSTEAD_SESSION_CONTENT_DIR") {

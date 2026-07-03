@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Lean-build smoke: happy-path round-trip.
 
-Runs the equivalent of `dev/smoke-test-2026-05-09.md`'s manual probe.
+Automates the original manual smoke probe.
 Boots the lean `memstead-mcp` against a fresh `memstead init`'d tempdir,
 creates one entity, searches for it, and verifies the JSONL changelog
 has one row. Fails the build on any divergence.

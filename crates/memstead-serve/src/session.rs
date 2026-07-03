@@ -264,7 +264,7 @@ struct ViewBinding {
     /// Deliberately NOT the rmcp transport session id, which is a bearer
     /// credential for the MCP session and must never appear in a shareable URL.
     id: String,
-    /// Origin the link is composed against (e.g. `https://memstead.ai`); empty
+    /// Origin the link is composed against (e.g. the sketch service's public origin); empty
     /// → a relative `/v/{id}`.
     base: String,
     /// The registry this session self-registers into on first tool call. The
@@ -517,7 +517,7 @@ delete entities to free space",
         // refused here, because an unregistered session has no resolvable view.
         if !self.ensure_view_registered() {
             return Ok(CallToolResult::error(vec![Content::text(
-                "ERROR [RESOURCE_CAP_EXCEEDED]: memstead.ai is at capacity (too many live \
+                "ERROR [RESOURCE_CAP_EXCEEDED]: the sketch service is at capacity (too many live \
 sketch sessions right now). Reconnect and try again in a few minutes."
                     .to_string(),
             )]));
@@ -1100,7 +1100,7 @@ pub fn build_sketch_mcp_service(
 /// export (`GET /v/{id}/export`). The view handlers are shared with the
 /// page-first `/s/{id}/...` routes — same registry, same id resolution.
 ///
-/// The human face that renders `/v/{id}` lives in the Astro `memstead.ai`
+/// The human face that renders `/v/{id}` lives in the deployment's Astro
 /// build, not here: `view_base` flows into the MCP service so the `initialize`
 /// handshake hands the agent an absolute `/v/{id}` view URL, and the page that
 /// URL opens is served by Astro.

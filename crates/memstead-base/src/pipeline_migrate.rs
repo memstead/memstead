@@ -305,21 +305,21 @@ mod tests {
     fn common_dir_prefix_stops_at_first_glob() {
         let tree = vec![
             PatternEntry {
-                path: "../engine/**/*.rs".into(),
+                path: "../legacy-project/**/*.rs".into(),
                 mode: PatternMode::Allow,
             },
             PatternEntry {
-                path: "../engine/Cargo.lock".into(),
+                path: "../legacy-project/Cargo.lock".into(),
                 mode: PatternMode::Allow,
             },
             PatternEntry {
-                path: "../engine/target/**".into(),
+                path: "../legacy-project/target/**".into(),
                 mode: PatternMode::Deny,
             },
         ];
-        // `..`,`engine` agree; the third allow component diverges (`**` vs
-        // `Cargo.lock`), so the prefix is `../engine`. The deny path is ignored.
-        assert_eq!(common_dir_prefix(&tree), "../engine");
+        // `..`,`legacy-project` agree; the third allow component diverges (`**` vs
+        // `Cargo.lock`), so the prefix is `../legacy-project`. The deny path is ignored.
+        assert_eq!(common_dir_prefix(&tree), "../legacy-project");
     }
 
     #[test]
@@ -351,11 +351,11 @@ mod tests {
             scope: LegacyScopeBody {
                 tree: vec![
                     PatternEntry {
-                        path: "../engine/**/*.rs".into(),
+                        path: "../legacy-project/**/*.rs".into(),
                         mode: PatternMode::Allow,
                     },
                     PatternEntry {
-                        path: "../engine/target/**".into(),
+                        path: "../legacy-project/target/**".into(),
                         mode: PatternMode::Deny,
                     },
                 ],
@@ -364,7 +364,7 @@ mod tests {
         let (medium, facet) = convert_scope("source-tree", scope);
         assert_eq!(medium.name, "source-tree");
         assert_eq!(medium.medium_type, MediumType::Codebase);
-        assert_eq!(medium.pointer, "../engine");
+        assert_eq!(medium.pointer, "../legacy-project");
         assert_eq!(facet.name, "source-tree");
         assert_eq!(facet.medium, "source-tree");
         assert_eq!(facet.scope.len(), 2);
