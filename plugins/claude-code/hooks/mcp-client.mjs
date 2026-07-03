@@ -29,8 +29,8 @@ export function resolveEngineCommand(workspaceRoot) {
   }
   const entry = raw.mcpServers?.memstead;
   if (!entry?.command) return null;
-  // `command` in `.mcp.json` may be workspace-relative (e.g. `engine/
-  // target/release/memstead-mcp`). Resolve against the workspace root so the
+  // `command` in `.mcp.json` may be workspace-relative (e.g.
+  // `target/release/memstead-mcp`). Resolve against the workspace root so the
   // hook doesn't care what the hook's cwd happens to be.
   const cmd = resolve(workspaceRoot, entry.command);
   const args = Array.isArray(entry.args) ? entry.args.slice() : [];

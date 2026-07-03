@@ -1,6 +1,6 @@
 //! Emit JSON Schemas for schema-author IDE validation.
 //!
-//! Run from `engine/`:
+//! Run from the repo root:
 //!
 //! ```text
 //! cargo run --bin emit_json_schemas
