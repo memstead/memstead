@@ -391,8 +391,13 @@ fn strip_inline_comment(s: &str) -> &str {
 }
 
 /// Strip surrounding quotes: `"value"` or `'value'` → `value`.
+/// A lone quote character is not a quoted value — `len >= 2` keeps the
+/// slice in bounds (a 1-char `"` satisfies both starts_with and ends_with).
 fn strip_quotes(s: &str) -> String {
-    if (s.starts_with('"') && s.ends_with('"')) || (s.starts_with('\'') && s.ends_with('\'')) {
+    if s.len() >= 2
+        && ((s.starts_with('"') && s.ends_with('"'))
+            || (s.starts_with('\'') && s.ends_with('\'')))
+    {
         s[1..s.len() - 1].to_string()
     } else {
         s.to_string()
@@ -913,6 +918,32 @@ mod tests {
             MetadataValue::String("quoted value".to_string())
         );
         assert_eq!(meta["key2"], MetadataValue::String("single".to_string()));
+    }
+
+    #[test]
+    fn parse_metadata_survives_malformed_values() {
+        // A lone quote character satisfies both starts_with and ends_with —
+        // the old unguarded slice `s[1..s.len()-1]` panicked on it.
+        let meta = parse_metadata("key: \"\nkey2: '\nkey3: \"\"\nkey4: ''\nkey5: \"unterminated\nkey6: mixed'\"");
+        assert_eq!(meta["key"], MetadataValue::String("\"".to_string()));
+        assert_eq!(meta["key2"], MetadataValue::String("'".to_string()));
+        assert_eq!(meta["key3"], MetadataValue::String(String::new()));
+        assert_eq!(meta["key4"], MetadataValue::String(String::new()));
+        assert_eq!(
+            meta["key5"],
+            MetadataValue::String("\"unterminated".to_string())
+        );
+        assert_eq!(meta["key6"], MetadataValue::String("mixed'\"".to_string()));
+
+        // More frontmatter shapes that must parse to a value, never panic:
+        // colon-only lines, multi-byte values, keyless colons, huge digits.
+        let meta = parse_metadata(":\n: value\nkey7: ✓\"\nkey8: 99999999999999999999999999\nkey9: -");
+        assert_eq!(meta["key7"], MetadataValue::String("✓\"".to_string()));
+        assert_eq!(
+            meta["key8"],
+            MetadataValue::String("99999999999999999999999999".to_string())
+        );
+        assert_eq!(meta["key9"], MetadataValue::String("-".to_string()));
     }
 
     #[test]
