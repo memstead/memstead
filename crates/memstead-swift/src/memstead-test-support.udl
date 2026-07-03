@@ -1,6 +1,6 @@
 // Test-support UDL fragment. Appended to `memstead.udl` by `build.rs`
-// (and by `macos/scripts/build-engine.sh`) ONLY when the crate is built
-// with `--features test-support`. The featureless build never sees this
+// (and by the macOS app's engine build script) ONLY when the crate is
+// built with `--features test-support`. The featureless build never sees this
 // fragment, so the seeding symbols are absent from the shipping (Release)
 // framework.
 //
@@ -15,7 +15,7 @@
 // `memstead_git_branch::test_support` helper — the Swift test harness
 // never shells out to `git` or writes refs itself — and roots an `Engine`
 // at it. This is the FFI entry point the macOS smoke suite uses to build
-// a disposable engine without depending on the developer's `graph/`, the
+// a disposable engine without depending on any developer workspace, the
 // process cwd, or a committed `.git` fixture.
 interface TestSupport {
     constructor();

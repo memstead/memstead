@@ -62,7 +62,7 @@ scan "stale-product-name"  '\b[Mm]emgno\b'
 # hyphenated words.
 scan "excluded-private-dirs" '(^|[[:space:]"'"'"'`(:,])(macos|websites|graph|inspector|local-ai)/' \
   --include='*.sh' --include='*.md' --include='*.toml' --include='*.rs' --include='*.mdx' --include='*.yml' \
-  --include='*.mjs' --include='*.js' --include='*.json'
+  --include='*.mjs' --include='*.js' --include='*.json' --include='*.udl' --include='*.swift' --include='*.py'
 scan "legacy-domain"       '(mdgv\.io|dasboe/mdgv|dasboe\.github\.io)'
 
 echo
