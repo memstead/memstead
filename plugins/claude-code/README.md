@@ -7,16 +7,31 @@ graph, plus a handful of slash commands that drive the common workflows.
 A Memstead mem is a typed graph of interconnected Markdown entities, stored as
 Markdown + git. This plugin is how a Claude Code session reads and grows one.
 
+## Install the plugin
+
+The repo doubles as a Claude Code plugin marketplace (marketplace name:
+`memstead`). From a terminal:
+
+```bash
+claude plugin marketplace add memstead/memstead
+claude plugin install memstead@memstead
+```
+
+Or from inside a Claude Code session: `/plugin marketplace add
+memstead/memstead`, then `/plugin install memstead@memstead`. Restart Claude
+Code (or run `/reload-plugins`) and the skills below are available.
+
 ## Start here: `/setup`
 
-Run **`/setup`** once per workspace. It resolves the `memstead-mcp` binary,
-prompts for a mem name and schema, runs `memstead init`, writes `.mcp.json`,
-and tells you to restart Claude Code so the MCP server registers. After the
-restart, the `memstead_*` tools and the slash commands below are available.
-
-> Prerequisite: the `memstead` / `memstead-mcp` binaries must be built and on
-> your `PATH` (`./build-engine.sh` from the repo root). See the repo's
-> [docs/build.md](../../docs/build.md).
+Run **`/setup`** once per workspace. It resolves the `memstead` and
+`memstead-mcp` binaries — installing them for you if they aren't on `PATH`
+(release installer, Homebrew, or source build, in that order) — then runs
+`memstead quickstart`, which creates the workspace, registers a mem named
+after the folder, pins it to the built-in `default@1.0.0` schema, seeds one
+entity, and writes `.mcp.json`. Finally it tells you to restart Claude Code
+so the MCP server registers. After the restart, the `memstead_*` tools and
+the slash commands below are available. (Want a different schema? Pins can
+be changed after setup — the skill points the way.)
 
 ## The slash commands
 

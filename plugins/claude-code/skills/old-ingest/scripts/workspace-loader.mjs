@@ -261,8 +261,9 @@ export function loadWorkspace(workspaceRoot, opts = {}) {
       for (const f of scopeFiles) {
         const name = f.slice(0, -5);
         const fileAbs = join(scopesDirAbs, memDir, f);
+        // Scope files are intentionally not schema-validated — see the
+        // note in loadSchemas(). JSON parse errors still hard-fail here.
         const content = readJson(fileAbs);
-        validateOrThrow(schemasLoaded.scope, content, `scope ${dirs.scopes}/${memDir}/${f}`);
         scopes[memDir][name] = content;
       }
     }
@@ -348,10 +349,14 @@ export function loadWorkspace(workspaceRoot, opts = {}) {
 // ── Schema loading + validation helpers ─────────────────────────────────────
 
 function loadSchemas() {
-  const out = { memsteadToml: null, scope: null, projection: null, ingest: null };
+  // No `scope` entry: the old scope-file JSON-schema was retired when the
+  // ingest rebuild renamed the primitive to `facet` (facet.schema.json is a
+  // different shape and does not describe old scope files). This frozen
+  // skill loads scope files shape-unchecked — malformed JSON still fails in
+  // readJson, and a wrong shape surfaces at run time in the per-ingest path.
+  const out = { memsteadToml: null, projection: null, ingest: null };
   const map = {
     memsteadToml: 'memstead-toml.schema.json',
-    scope: 'scope.schema.json',
     projection: 'projection.schema.json',
     ingest: 'ingest.schema.json',
   };

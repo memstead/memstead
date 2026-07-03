@@ -32,7 +32,12 @@ fn main() -> ExitCode {
             let kind = cli_err.map(|c| c.kind).unwrap_or(ExitKind::Generic);
             let code = cli_err.map(|c| c.effective_code()).unwrap_or("INTERNAL");
             let details = cli_err.and_then(|c| c.details.as_ref());
-            print_cli_error(code, &e.to_string(), kind, json_mode, details);
+            // `{e:#}` renders the whole anyhow chain (`context: cause`),
+            // not just the outermost context line — an engine refusal
+            // like `SchemaNotFound` stays visible through a
+            // `.with_context(...)` wrapper instead of degrading to a
+            // bare "init filesystem-mem engine at <path>".
+            print_cli_error(code, &format!("{e:#}"), kind, json_mode, details);
             ExitCode::from(kind as u8)
         }
     }

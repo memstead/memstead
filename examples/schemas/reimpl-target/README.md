@@ -29,17 +29,16 @@ inventory of the new app.
 
 ```
 memstead schema install examples/schemas/reimpl-target
-memstead mem init <target-mem> --schema reimpl-target@0.1.0
+memstead mem init <target-mem> --schema reimpl-target@0.1.0 --operator-mode
 ```
 
-In the Target mem's `.memstead/config.json`:
-
-```json
-{
-  "name": "<project>-target-<variant>",
-  "schema": "reimpl-target@0.1.0"
-}
-```
+Run from the workspace root; `<target-mem>` is a mem name (grammar
+`[a-z0-9-]+(/[a-z0-9-]+)*`, e.g. `billing-target-rust`), and
+`--operator-mode` bypasses the mem-creation allowlist (a fresh workspace
+has no rules yet, so `mem init` refuses without it). Install must
+come first — `mem init` resolves the pin at create time and refuses an
+unknown schema (`SCHEMA_NOT_FOUND`). Verify with `memstead mem list`,
+which shows each mem's schema pin.
 
 ## Cross-mem edges
 

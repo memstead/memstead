@@ -22,13 +22,35 @@ two-mem model where one mem references entities in another.
 
 ## Using one
 
-A schema is pinned to a mem when the mem is created. With the CLI:
+A schema must be **installed into the workspace before a mem can use it** —
+example schemas aren't built into the engine (`memstead mem init` refuses an
+uninstalled pin with `SCHEMA_NOT_FOUND`; `memstead init` accepts it but warns
+loudly that nothing boots until the package is installed). In a fresh folder,
+bootstrap with a built-in pin, install the example package, then move the pin:
 
 ```bash
-memstead init --name my-mem --schema agent-program@0.1.0
+mkdir my-mem && cd my-mem
+memstead init --name my-mem --schema default@1.0.0
+memstead schema install <path-to-this-repo>/examples/schemas/agent-program
+memstead mem set-schema my-mem agent-program@0.1.0
 ```
 
-or, for an existing workspace, register it as the mem's schema through the
-engine. Each schema's own `README.md` explains its types, relationships, and the
+`memstead type` now lists the schema's types under
+`**Schema:** agent-program@0.1.0` — you're on the example schema.
+
+In a multi-mem (mem-repo) workspace, install first and the pin resolves at
+create time — no re-pin step:
+
+```bash
+memstead schema install <path-to-this-repo>/examples/schemas/agent-program
+memstead mem init my-mem --schema agent-program@0.1.0 --operator-mode
+```
+
+(`--operator-mode` bypasses the workspace's mem-creation allowlist — the
+right posture when you, the operator, are scaffolding the workspace; a
+fresh workspace has no allowlist rules yet, so `mem init` refuses without
+it. Verify with `memstead mem list`.)
+
+Each schema's own `README.md` explains its types, relationships, and the
 workflow it is built for. For the vocabulary these examples use (mem, schema,
 type, relationship), see the repo [GLOSSARY](../GLOSSARY.md).

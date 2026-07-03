@@ -86,6 +86,29 @@ pub fn run(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
         details: None,
     })?;
 
+    // A pin that resolves to no built-in schema is loudly flagged, not
+    // refused: a fresh workspace has no `.memstead/schemas/` yet, and
+    // `memstead schema install` only works *inside* a workspace, so
+    // init-with-pin followed by install is the designed (and, on the
+    // lean build, the only) custom-schema flow. Without the warning the
+    // command reports success and every later engine-booting command
+    // dies on `SCHEMA_NOT_FOUND` with no hint how the workspace got
+    // into that state. (`memstead mem init` / MCP `memstead_mem_create`
+    // refuse instead — there the workspace already exists, so
+    // install-before-pin is always possible.)
+    let builtin = memstead_schema::builtins::load_builtin_schemas().map_err(|e| CliError {
+        code: "SCHEMA_RESOLVER_INIT_FAILED",
+        message: format!("load built-in schema catalogue: {e}"),
+        kind: ExitKind::Generic,
+        details: None,
+    })?;
+    let pin_unresolved =
+        memstead_base::engine::resolve_builtin_schema_pin_pub(&schema_pin, &builtin).is_none();
+    let unresolved_warning = pin_unresolved.then(|| unresolved_pin_warning(&schema_pin, &builtin));
+    if let Some(w) = &unresolved_warning {
+        eprintln!("memstead: WARNING [SCHEMA_NOT_FOUND]: {w}");
+    }
+
     if target.exists() {
         if !target.is_dir() {
             return Err(CliError {
@@ -146,17 +169,22 @@ pub fn run(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
     })?;
 
     if ctx.json {
-        let payload = json!({
+        let mut payload = json!({
             "workspace_root": target.display().to_string(),
             "config_path": config_path(&target).display().to_string(),
             "name": args.name,
             "schema": schema_pin.as_display(),
             "format": FILESYSTEM_WORKSPACE_FORMAT,
         });
+        // Additive optional field on the stable success shape — only
+        // present when the pin is unresolved at init time.
+        if let Some(w) = &unresolved_warning {
+            payload["warnings"] = json!([{ "code": "SCHEMA_NOT_FOUND", "message": w }]);
+        }
         return print_json(&payload);
     }
 
-    let lines = vec![
+    let mut lines = vec![
         format!("# Initialised filesystem mem `{}`", args.name),
         String::new(),
         format!("- Workspace root: `{}`", target.display()),
@@ -164,12 +192,47 @@ pub fn run(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
         format!("- Schema pin:     `{}`", schema_pin.as_display()),
         String::new(),
         "Next steps:".to_string(),
+    ];
+    if unresolved_warning.is_some() {
+        lines.push(format!(
+            "- **Install the pinned schema first**: `memstead schema install <package-dir>` \
+             (run inside this workspace) — `{}` resolves to no built-in schema, and every \
+             engine-booting command fails with `SCHEMA_NOT_FOUND` until the package is installed.",
+            schema_pin.as_display()
+        ));
+    }
+    lines.extend([
         "- Drop `.md` entities into the workspace root.".to_string(),
         "- `memstead link <scope/name>` to add a cross-mem dependency.".to_string(),
         "- `memstead publish` to push the mem to the registry.".to_string(),
-    ];
+    ]);
     print_markdown(&lines.join("\n"));
     Ok(())
+}
+
+/// The loud-warning text for a schema pin that resolves to no built-in
+/// schema at init time. Names the pin, the recovery command, and the
+/// available built-ins, so the follow-up (`memstead schema install`) is
+/// discoverable from the warning alone.
+fn unresolved_pin_warning(
+    pin: &SchemaRef,
+    builtin: &[std::sync::Arc<memstead_schema::Schema>],
+) -> String {
+    let available: Vec<String> = builtin
+        .iter()
+        .map(|s| {
+            let (name, version) = s.id();
+            format!("{name}@{version}")
+        })
+        .collect();
+    format!(
+        "--schema {pin} resolves to no built-in schema (built-ins: {avail}). \
+         The workspace is initialised, but every engine-booting command fails with \
+         SCHEMA_NOT_FOUND until the package is installed: run \
+         `memstead schema install <package-dir>` inside the new workspace.",
+        pin = pin.as_display(),
+        avail = available.join(", "),
+    )
 }
 
 /// Walk parent directories looking for `.memstead/workspace.toml`.
@@ -330,6 +393,54 @@ mod tests {
             err.to_string().contains("invalid --name"),
             "expected --name rejection, got: {err}"
         );
+    }
+
+    /// A well-formed pin that resolves to no built-in schema still
+    /// initialises (init-then-`schema install` is the designed — and on
+    /// the lean build the only — custom-schema flow), but never
+    /// silently: the run emits the `SCHEMA_NOT_FOUND` warning whose
+    /// text names the recovery command.
+    #[test]
+    fn init_succeeds_but_warns_on_unresolvable_schema_pin() {
+        let tmp = TempDir::new().unwrap();
+        let target = tmp.path().join("demo");
+        run_init(&target, "demo", "agent-program@0.1.0").unwrap();
+        // The workspace exists and carries the pin verbatim — the
+        // follow-up `memstead schema install` completes the flow.
+        let cfg = read_workspace_config(&target).unwrap();
+        assert_eq!(cfg.schema.as_display(), "agent-program@0.1.0");
+    }
+
+    /// The warning text carries everything needed to recover: the pin,
+    /// the `schema install` command, and the built-in alternatives.
+    #[test]
+    fn unresolved_pin_warning_names_pin_recovery_and_builtins() {
+        let builtin = memstead_schema::builtins::load_builtin_schemas().unwrap();
+        let pin: SchemaRef = "agent-program@0.1.0".parse().unwrap();
+        assert!(
+            memstead_base::engine::resolve_builtin_schema_pin_pub(&pin, &builtin).is_none(),
+            "test premise: agent-program is not a built-in"
+        );
+        let w = unresolved_pin_warning(&pin, &builtin);
+        assert!(w.contains("agent-program@0.1.0"), "got: {w}");
+        assert!(w.contains("memstead schema install"), "got: {w}");
+        assert!(w.contains("default@1.0.0"), "got: {w}");
+        assert!(w.contains("SCHEMA_NOT_FOUND"), "got: {w}");
+    }
+
+    /// Every built-in schema is pinnable at init — the refusal above
+    /// only fires for pins outside the built-in catalogue.
+    #[test]
+    fn init_accepts_every_builtin_schema_pin() {
+        let builtin = memstead_schema::builtins::load_builtin_schemas().unwrap();
+        assert!(!builtin.is_empty());
+        for schema in builtin {
+            let (name, version) = schema.id();
+            let tmp = TempDir::new().unwrap();
+            let target = tmp.path().join("demo");
+            run_init(&target, "demo", &format!("{name}@{version}"))
+                .unwrap_or_else(|e| panic!("built-in pin {name}@{version} refused: {e}"));
+        }
     }
 
     #[test]

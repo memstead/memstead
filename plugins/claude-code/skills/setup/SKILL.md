@@ -57,7 +57,7 @@ After whichever option succeeded, re-run the two `command -v` checks (or use the
 
 ## Step 2 — Bootstrap the workspace with `memstead quickstart`
 
-All workspace creation is delegated to the CLI — do not hand-write any `.memstead/` file or `.mcp.json`:
+All workspace creation is delegated to the CLI — do not hand-write any `.memstead/` file or `.mcp.json` (single exception: the pre-`quickstart` fallback below):
 
 ```bash
 memstead quickstart --agent claude-code
@@ -68,6 +68,21 @@ One command does everything: workspace store, a default-schema mem named after t
 Handle its outcomes:
 
 - **Success** — the summary names the workspace, mem, schema pin (`default@1.0.0`), and seed entity. Go to step 3.
+- **Unknown / unrecognized subcommand** (`quickstart` not found) — the installed binary predates `quickstart` (the v0.1.0 release binaries only have `memstead init`). Don't parse versions; just fall back to the manual path, which does the same two things quickstart automates:
+  1. `memstead init --name <slug> --schema default@1.0.0` — `<slug>` is the folder name, slugified to `^[a-z0-9][a-z0-9-]{0,62}[a-z0-9]$` (ask the user if the derivation is ambiguous). Surface any error verbatim (same outcomes as below: non-empty folder, existing workspace).
+  2. Write the MCP wiring by hand — this is the one case where the skill writes `.mcp.json` itself, because the old binary can't. If `.mcp.json` doesn't exist, write exactly:
+
+     ```json
+     {
+       "mcpServers": {
+         "memstead": { "command": "<absolute path to memstead-mcp>" }
+       }
+     }
+     ```
+
+     If it exists, add the `mcpServers.memstead` entry preserving every other key; never overwrite an existing `memstead` entry.
+
+  No seed entity in this path — that's fine, the graph just starts empty. Then go to step 3. (Mention to the user that a newer `memstead` release adds `memstead quickstart`, which automates this.)
 - **`WORKSPACE_ALREADY_INITIALISED`** — the folder is already a Memstead workspace; nothing to bootstrap. Tell the user, suggest `memstead overview` to inspect it, and go to step 3 (a restart may still be needed if `.mcp.json` is new to this Claude Code project).
 - **`TARGET_NOT_EMPTY`** — the folder has content quickstart won't touch. Surface the error verbatim (it names the offending files) and ask the user whether to move the content out or start in a fresh folder (`mkdir my-graph && cd my-graph`). Do not delete or move anything without confirmation.
 - **Mem-name derivation failure** (folder name is not slug-shaped `^[a-z0-9][a-z0-9-]{0,62}[a-z0-9]$`) — re-run with an explicit name: `memstead quickstart --agent claude-code --name <slug>`. Ask the user for the name; suggest a slugified form of the folder name.
@@ -75,7 +90,7 @@ Handle its outcomes:
 
 If the user wants a schema other than the default, point them at `memstead link <scope/name>` (registry-published schemas) after setup — quickstart always pins `default@1.0.0`, the built-in 10-type schema.
 
-For scripted / CI use the strict variant is `memstead init` — this skill never needs it; quickstart is the interactive path.
+For scripted / CI use the strict variant is `memstead init` — this skill only reaches for it in the pre-`quickstart` fallback above; quickstart is the interactive path.
 
 ## Step 3 — Tell the user to restart Claude Code
 
@@ -87,6 +102,6 @@ Do not try to verify the MCP server is reachable from inside this run — the ne
 
 ## Notes
 
-- **No hand-written config.** `memstead quickstart` owns the workspace store layout (`.memstead/workspace.toml`, `.memstead/config.json`, `.memstead/state/mounts.json`) and `.mcp.json`. The skill never writes or edits these — duplicated init logic drifts from the CLI. In particular, `.memstead/config.json` carries no mem name: the engine derives the mem name from the folder and rejects a stray `name` key (`LEGACY_FIELD_PRESENT`).
+- **No hand-written config.** `memstead quickstart` owns the workspace store layout (`.memstead/workspace.toml`, `.memstead/config.json`, `.memstead/state/mounts.json`) and `.mcp.json`. The skill never writes or edits these — duplicated init logic drifts from the CLI. In particular, `.memstead/config.json` carries no mem name: the engine derives the mem name from the folder and rejects a stray `name` key (`LEGACY_FIELD_PRESENT`). Single exception: the pre-`quickstart` fallback in step 2, where the skill writes the minimal `.mcp.json` because the old binary has no command that can.
 - **`.mcp.json` conflicts.** quickstart handles the existing-file case itself; if the user reports a pre-existing hand-authored `.mcp.json` with a different `memstead` entry, inspect it with the user rather than overwriting.
 - **No drift handling needed.** Filesystem-mem has no git layer, so there's no `mem-repo/.git/` to verify, no schema-pin negotiation against `__MEMSTEAD`, no multi-mem routing. The setup flow is genuinely just: install → quickstart → restart.

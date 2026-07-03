@@ -38,11 +38,16 @@ related programs):
 
    ```
    memstead schema install examples/schemas/agent-program
-   memstead mem init <workspace>/programs/<program-name> --schema agent-program@0.1.0
+   memstead mem init programs/<program-name> --schema agent-program@0.1.0 --operator-mode
    ```
 
-   `install` copies the package under `<workspace>/.memstead/schemas/agent-program@0.1.0/`;
-   the next engine boot resolves the pin.
+   `install` copies the package into the workspace's schema storage;
+   `mem init` takes a mem *name* (grammar `[a-z0-9-]+(/[a-z0-9-]+)*`,
+   run from the workspace root — a hierarchical name like
+   `programs/<program-name>` creates the mem at that path) and resolves
+   the pin at create time, which is why install must come first.
+   `--operator-mode` bypasses the mem-creation allowlist — a fresh
+   workspace has no rules yet, so `mem init` refuses without it.
 
 2. Author. Start with a `program` entity. Author its `tool` catalog
    (one tool per MCP tool / shell command the program calls). Author
