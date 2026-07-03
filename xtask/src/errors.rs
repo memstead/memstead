@@ -192,10 +192,15 @@ fn render_index(codes: &BTreeMap<String, Vec<Occurrence>>) -> String {
     let mut out = String::new();
     out.push_str("# Error Code Index\n\n");
     out.push_str(
-        "Every typed error code emitted by the engine, the CLI \
+        "Typed error codes the static scan finds in the engine, the CLI \
          (`memstead-cli`), and the MCP server (`memstead-mcp`). Each \
          row lists the code, the surfaces that emit it, and the source \
-         locations the static scan found.\n\n",
+         locations. Not indexed here: the registry-relayed codes the CLI \
+         maps from memstead.io HTTP statuses during publish/install \
+         (`REGISTRY_VALIDATION_FAILED`, `NOT_AUTHENTICATED`, `FORBIDDEN`, \
+         `REGISTRY_NOT_FOUND`, `GONE`, `ARCHIVE_TOO_LARGE`, \
+         `RATE_LIMITED`, `REGISTRY_ERROR` — see the publish guide and \
+         `memstead-cli/src/commands/publish.rs`).\n\n",
     );
     out.push_str(&format!("**Distinct codes:** {}\n\n", codes.len()));
     out.push_str("| Code | Surfaces | Source locations |\n");
