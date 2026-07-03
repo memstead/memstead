@@ -40,6 +40,7 @@ use std::path::{Path, PathBuf};
 use crate::backend::BackendError;
 use crate::provenance::Provenance;
 use crate::storage::CommitId;
+use crate::validator::{BoundedZipRead, ValidatorLimits, read_zip_entry_bounded};
 use crate::vcs::CommitContext;
 
 /// Source of the archive bytes. Either an on-disk `.mem` file or an
@@ -203,16 +204,16 @@ impl crate::backend::MemBackend for ArchiveBackend {
             if archive.index_for_name(config_name).is_none() {
                 return Ok(None);
             }
-            let entry = archive
+            let mut entry = archive
                 .by_name(config_name)
                 .map_err(|e| BackendError::Other(format!("zip lookup: {e}")))?;
-            let mut bytes = Vec::with_capacity(entry.size() as usize);
-            let mut reader = entry;
-            use std::io::Read;
-            reader
-                .read_to_end(&mut bytes)
-                .map_err(BackendError::Io)?;
-            Ok(Some(bytes))
+            let cap = ValidatorLimits::DEFAULT.max_config_file;
+            match read_zip_entry_bounded(&mut entry, cap).map_err(BackendError::Io)? {
+                BoundedZipRead::Within(bytes) => Ok(Some(bytes)),
+                BoundedZipRead::ExceedsCap => Err(BackendError::Other(format!(
+                    "archive config '{config_name}' exceeds the {cap}-byte cap"
+                ))),
+            }
         })
     }
 
@@ -233,16 +234,16 @@ impl crate::backend::MemBackend for ArchiveBackend {
             if archive.index_for_name(prov_name).is_none() {
                 return Ok(None);
             }
-            let entry = archive
+            let mut entry = archive
                 .by_name(prov_name)
                 .map_err(|e| BackendError::Other(format!("zip lookup: {e}")))?;
-            let mut bytes = Vec::with_capacity(entry.size() as usize);
-            let mut reader = entry;
-            use std::io::Read;
-            reader
-                .read_to_end(&mut bytes)
-                .map_err(BackendError::Io)?;
-            Ok(Some(bytes))
+            let cap = ValidatorLimits::DEFAULT.max_uncompressed_entry;
+            match read_zip_entry_bounded(&mut entry, cap).map_err(BackendError::Io)? {
+                BoundedZipRead::Within(bytes) => Ok(Some(bytes)),
+                BoundedZipRead::ExceedsCap => Err(BackendError::Other(format!(
+                    "archive provenance '{prov_name}' exceeds the {cap}-byte cap"
+                ))),
+            }
         })
     }
 }
@@ -258,6 +259,15 @@ where
 {
     let mut archive = zip::ZipArchive::new(reader)
         .map_err(|e| BackendError::Other(format!("open archive: {e}")))?;
+    let limits = ValidatorLimits::DEFAULT;
+    if archive.len() as u32 > limits.max_file_count {
+        return Err(BackendError::Other(format!(
+            "archive contains {} entries, exceeding the {}-entry cap",
+            archive.len(),
+            limits.max_file_count
+        )));
+    }
+    let mut uncompressed_total: u64 = 0;
     for i in 0..archive.len() {
         let mut entry = archive
             .by_index(i)
@@ -291,10 +301,24 @@ where
         if relative_path.starts_with(".memstead/") {
             continue;
         }
-        let mut bytes = Vec::with_capacity(entry.size() as usize);
-        entry
-            .read_to_end(&mut bytes)
-            .map_err(BackendError::Io)?;
+        let bytes = match read_zip_entry_bounded(&mut entry, limits.max_uncompressed_entry)
+            .map_err(BackendError::Io)?
+        {
+            BoundedZipRead::Within(bytes) => bytes,
+            BoundedZipRead::ExceedsCap => {
+                return Err(BackendError::Other(format!(
+                    "entry '{relative_path}' exceeds the {}-byte uncompressed cap",
+                    limits.max_uncompressed_entry
+                )));
+            }
+        };
+        uncompressed_total = uncompressed_total.saturating_add(bytes.len() as u64);
+        if uncompressed_total > limits.max_uncompressed_archive {
+            return Err(BackendError::Other(format!(
+                "archive exceeds the {}-byte total uncompressed cap",
+                limits.max_uncompressed_archive
+            )));
+        }
         visit(&relative_path, &bytes)?;
     }
     Ok(())
@@ -388,6 +412,20 @@ mod tests {
             backend.read_entity(Path::new("b/c.md")).unwrap(),
             Some(b"# nested".to_vec())
         );
+    }
+
+    #[test]
+    fn read_entity_refuses_oversized_entry() {
+        // Deflate bomb one byte past the per-entry uncompressed cap:
+        // the read stops at the cap and refuses with a typed error
+        // instead of decompressing the whole entry into memory.
+        let tmp = TempDir::new().unwrap();
+        let big = vec![b'a'; (ValidatorLimits::DEFAULT.max_uncompressed_entry + 1) as usize];
+        let archive = build_archive(tmp.path(), "bomb", &[("bomb.md", big.as_slice())]);
+        let backend = ArchiveBackend::new(archive);
+        let err = backend.read_entity(Path::new("bomb.md")).unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("cap"), "error should name the cap: {msg}");
     }
 
     #[test]

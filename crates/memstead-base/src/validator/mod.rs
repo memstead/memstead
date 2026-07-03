@@ -56,6 +56,34 @@ impl Default for ValidatorLimits {
     }
 }
 
+/// Outcome of a bounded zip-entry read.
+pub(crate) enum BoundedZipRead {
+    Within(Vec<u8>),
+    /// The entry's decompressed content exceeds the cap. The actual
+    /// size is unknowable without reading it all — which is the attack —
+    /// so only the cap is reported.
+    ExceedsCap,
+}
+
+/// Read a zip entry with a hard cap on decompressed bytes.
+///
+/// Every direct archive read path shares this so decompression is never
+/// sized by an attacker-declared header: the buffer grows only with
+/// bytes actually decompressed, and reading stops at `cap + 1`. The same
+/// idiom `archive::extract_entries` uses for the ingress validator.
+pub(crate) fn read_zip_entry_bounded(
+    reader: &mut impl std::io::Read,
+    cap: u64,
+) -> std::io::Result<BoundedZipRead> {
+    use std::io::Read as _;
+    let mut buf = Vec::new();
+    reader.take(cap + 1).read_to_end(&mut buf)?;
+    if buf.len() as u64 > cap {
+        return Ok(BoundedZipRead::ExceedsCap);
+    }
+    Ok(BoundedZipRead::Within(buf))
+}
+
 /// Which size cap a given `SizeCapExceeded` refers to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SizeCapKind {

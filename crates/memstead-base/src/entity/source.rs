@@ -10,6 +10,7 @@ use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
 use super::loader::LoadError;
+use crate::validator::{BoundedZipRead, ValidatorLimits, read_zip_entry_bounded};
 
 /// A backend-agnostic source of markdown entities.
 pub enum EntitySource {
@@ -112,8 +113,18 @@ fn read_zip_archive(
     let file = std::fs::File::open(archive_path)?;
     let mut archive = zip::ZipArchive::new(file)?;
 
+    let limits = ValidatorLimits::DEFAULT;
+    if archive.len() as u32 > limits.max_file_count {
+        return Err(LoadError::InvalidArchive(format!(
+            "archive contains {} entries, exceeding the {}-entry cap",
+            archive.len(),
+            limits.max_file_count
+        )));
+    }
+
     let mut entries = Vec::new();
     let mut errors = Vec::new();
+    let mut uncompressed_total: u64 = 0;
 
     for i in 0..archive.len() {
         let mut entry = archive.by_index(i)?;
@@ -155,16 +166,34 @@ fn read_zip_archive(
             continue;
         }
 
-        let mut content = String::new();
-        match entry.read_to_string(&mut content) {
-            Ok(_) => entries.push(SourceEntry {
+        // Bounded read: decompression is never sized by the entry's
+        // declared header, and a bomb refuses with a typed error —
+        // the same caps the ingress validator enforces.
+        let bytes = match read_zip_entry_bounded(&mut entry, limits.max_uncompressed_entry)? {
+            BoundedZipRead::Within(bytes) => bytes,
+            BoundedZipRead::ExceedsCap => {
+                return Err(LoadError::InvalidArchive(format!(
+                    "entry '{relative_path}' exceeds the {}-byte uncompressed cap",
+                    limits.max_uncompressed_entry
+                )));
+            }
+        };
+        uncompressed_total = uncompressed_total.saturating_add(bytes.len() as u64);
+        if uncompressed_total > limits.max_uncompressed_archive {
+            return Err(LoadError::InvalidArchive(format!(
+                "archive exceeds the {}-byte total uncompressed cap",
+                limits.max_uncompressed_archive
+            )));
+        }
+        match String::from_utf8(bytes) {
+            Ok(content) => entries.push(SourceEntry {
                 relative_path: relative_path.clone(),
                 source_path: PathBuf::from(&relative_path),
                 content,
             }),
             Err(error) => errors.push(SourceReadError {
                 source_path: PathBuf::from(&relative_path),
-                error,
+                error: std::io::Error::new(std::io::ErrorKind::InvalidData, error),
             }),
         }
     }
@@ -370,6 +399,27 @@ mod tests {
 
         let err = EntitySource::ZipArchive(archive).read_all().unwrap_err();
         assert!(matches!(err, LoadError::InvalidArchive(_)));
+    }
+
+    #[test]
+    fn zip_archive_rejects_oversized_entry() {
+        // A deflate bomb: highly compressible content one byte past the
+        // per-entry uncompressed cap. Must refuse with a typed error —
+        // and the read must stop at the cap, not decompress it all.
+        let dir = TempDir::new().unwrap();
+        let archive = dir.path().join("bomb.mem");
+        let big = "a".repeat((ValidatorLimits::DEFAULT.max_uncompressed_entry + 1) as usize);
+        let file = fs::File::create(&archive).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        let opts = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
+        zip.start_file("bomb.md", opts).unwrap();
+        zip.write_all(big.as_bytes()).unwrap();
+        zip.finish().unwrap();
+
+        let err = EntitySource::ZipArchive(archive).read_all().unwrap_err();
+        let msg = format!("{err}");
+        assert!(matches!(err, LoadError::InvalidArchive(_)), "got {err:?}");
+        assert!(msg.contains("cap"), "error should name the cap: {msg}");
     }
 
     // Note on absolute entry paths: the standard `zip::ZipWriter::start_file`
