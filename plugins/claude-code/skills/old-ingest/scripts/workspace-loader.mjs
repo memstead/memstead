@@ -109,7 +109,7 @@ function parseString(s) {
 /**
  * Spawn `memstead workspace dump` against `workspaceRoot` and return the
  * parsed dump document. The binary is discovered via `MEMSTEAD_BIN` first
- * (set by tests, by `engine/target/debug/memstead` during dev, or by
+ * (set by tests, by `target/debug/memstead` during dev, or by
  * the operator), `memstead` on `PATH` second. Either failure mode raises
  * an error that names the override mechanism.
  */

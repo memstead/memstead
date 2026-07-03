@@ -169,25 +169,6 @@ name = "parse-recovery"
 cli = "recover"
 uniffi = "apply_parse_recovery"
 
-# Git-transport + branch-reset engine operations — public methods on
-# `Engine` (`fetch`/`pull`/`push`/`branch_reset` in `engine/drift.rs`)
-# that reach no programmatic surface yet: no MCP tool (deliberate), no
-# wired CLI subcommand, no UniFFI binding. Pinned here so the matrix
-# renders the gap as an all-`—` row rather than omitting the operations
-# entirely (the `every-engine-operation-reaches-uniffi-and-cli`
-# principle's witness must see them to flag the asymmetry).
-[[operation]]
-name = "fetch"
-
-[[operation]]
-name = "pull"
-
-[[operation]]
-name = "push"
-
-[[operation]]
-name = "branch-reset"
-
 [[operation]]
 name = "agent-notes"
 uniffi = "agent_notes"

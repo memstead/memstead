@@ -40,10 +40,6 @@ Every public engine operation across the four programmatic surfaces (MCP, CLI, U
 | `workspace-grant-cross-link` | `memstead_workspace_grant_cross_link` *(full only)* | `workspace` *(full only)* | — | — |
 | `workspace-revoke-cross-link` | `memstead_workspace_revoke_cross_link` *(full only)* | `workspace` *(full only)* | — | — |
 | `parse-recovery` | — | `recover` *(full only)* | `apply_parse_recovery` | — |
-| `fetch` | — | — | — | — |
-| `pull` | — | — | — | — |
-| `push` | — | — | — | — |
-| `branch-reset` | — | — | — | — |
 | `agent-notes` | — | — | `agent_notes` | — |
 | `mem-head-sha` | — | — | `mem_head_sha` | — |
 | `from-snapshot` | — | — | — | `fromSnapshot` |
