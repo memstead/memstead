@@ -7,7 +7,11 @@ This folder is the source for the claim on Memstead's public surfaces:
 > authored that knowledge had consumed.
 
 It is **one observed measurement, not a benchmark**. Everything needed to
-audit it — and to rerun the reconstruction side yourself — is in this folder.
+rerun the reconstruction side yourself — the measured mem, the counting
+script, and the task prompt — is in this folder. The raw evidence bundle
+(per-session token accounting, the reconstruction transcript, the brief the
+agent produced) is retained privately and available on request; it embeds
+full session transcripts and local paths that we do not republish.
 
 ## What was measured
 
@@ -53,10 +57,12 @@ so the reconstruction side is rerunnable byte-for-byte.
 | File | What it is |
 |---|---|
 | `count_tokens.py` | The counting script (Python 3, needs `tiktoken`). Applied identically to both sides. |
-| `authoring-sessions.json` | The denominator: per-transcript sha256, time span, turn count, content tokens, and API usage for all 22 authoring conversations, plus totals. |
-| `reconstruction-transcript.jsonl` | The numerator, in full: the fresh agent's complete session transcript — task prompt, every CLI read, every reply. |
-| `reconstruction-brief.md` | The understanding demonstration the fresh agent produced: the domain's principles, per-cluster practices/pitfalls with the mem's concrete figures, source provenance, and three defended recommendations — every claim cited by entity ID. |
 | `landing-page-design-0.1.0.mem` | The measured mem, exported as a portable archive (`memstead install ./landing-page-design-0.1.0.mem`). |
+
+Retained privately (available on request): the per-transcript accounting for
+all 22 authoring conversations (sha256, time span, turn count, content tokens,
+API usage), the fresh agent's complete reconstruction transcript, and the
+domain brief it produced.
 
 ## How the run worked
 
@@ -68,22 +74,23 @@ so the reconstruction side is rerunnable byte-for-byte.
    session — the mem's entire git history, 458 commits, falls inside their
    time windows) and counted with `count_tokens.py`.
 2. **Numerator.** A fresh-context agent was spawned with the task prompt
-   recorded at the top of `reconstruction-transcript.jsonl`: read the mem
-   through the `memstead` CLI only (overview / list / entity / relations /
-   context — no files, no git, no web, no training-knowledge shortcuts:
-   every claim in the deliverable must cite an entity it read), then write
-   the brief. It read the cluster overview, full type listings, and ~30
-   entities in full, and produced `reconstruction-brief.md`. Its transcript
-   was counted with the same script: 65,161 content tokens (52,895 of that
-   is the task prompt plus CLI output the agent read; 12,266 is the agent's
-   own reasoning, tool calls, and the brief).
+   quoted below under "Rerun it": read the mem through the `memstead` CLI
+   only (overview / list / entity / relations / context — no files, no git,
+   no web, no training-knowledge shortcuts: every claim in the deliverable
+   must cite an entity it read), then write a domain brief. It read the
+   cluster overview, full type listings, and ~30 entities in full, and
+   produced the brief. Its transcript was counted with the same script:
+   65,161 content tokens (52,895 of that is the task prompt plus CLI output
+   the agent read; 12,266 is the agent's own reasoning, tool calls, and the
+   brief).
 3. **Ratio.** 852,773 / 65,161 ≈ 13.1.
 
 ## Rerun it
 
-The denominator is a fixed historical record — you can audit it
-(`authoring-sessions.json` carries hashes and per-file counts) but not
-re-produce it. The reconstruction side is fully rerunnable:
+The denominator is a fixed historical record — its per-session accounting
+(sha256 hashes, time spans, per-file counts) is retained privately and
+available on request, but it cannot be re-produced. The reconstruction side
+is fully rerunnable:
 
 ```sh
 # 1. Get the engine (https://memstead.com), then mount the measured mem
@@ -99,13 +106,37 @@ memstead schema install ./unpack/.memstead/schema
 memstead install ./landing-page-design-0.1.0.mem
 memstead stats     # expect: 287 nodes, 681 edges
 
-# 2. Give a fresh agent (no prior context) the task prompt quoted at the
-#    top of reconstruction-transcript.jsonl, scoped to CLI reads only.
+# 2. Give a fresh agent (no prior context) the task prompt below,
+#    scoped to CLI reads only.
 
 # 3. Count its transcript
 pip install tiktoken
 python3 count_tokens.py <fresh-agent-transcript>.jsonl
 ```
+
+The task prompt, verbatim except two local paths replaced by placeholders
+(`<workspace>` — the directory prepared in step 1; `<output-path>` — where
+the agent should write its brief):
+
+> You are a fresh-context agent taking part in a measured reconstruction run. You have NO prior briefing about the knowledge you are about to acquire, and you must acquire it ONLY through the Memstead CLI reads described below — that is the point of the measurement.
+>
+> Setting: the directory `<workspace>` is a Memstead workspace. One of its mems is named `landing-page-design`. Your job is to build a genuine working understanding of the domain expertise that mem holds, and then demonstrate that understanding in writing.
+>
+> Hard rules:
+> - Read ONLY via the `memstead` CLI (it is on PATH; run it with cwd `<workspace>`). Allowed subcommands: overview, stats, search, list, entity, relations, context, type, health — plus `--help` on any of them. Scope your reads to the mem `landing-page-design` where the command supports it.
+> - Do NOT read files under mem-repo/ or anywhere else on disk, do NOT run git, do NOT use WebSearch/WebFetch, do NOT spawn subagents. No mutations of any kind (no create/update/relate/delete/rename).
+> - Work from what the graph tells you, not from your training knowledge. Every substantive claim in your deliverable must be traceable to an entity you actually read — cite entity IDs. Prefer specifics that could only come from the mem: named studies and sources, concrete figures, dates, scoped conditions.
+>
+> Approach: orient first (communities/summaries), then read selectively — the entities you need to genuinely cover the whole domain picture as this mem presents it, across all its communities. Read as much as you need for real understanding; don't skim to save tokens and don't exhaustively dump every entity either. Behave like an agent that actually needs this expertise for upcoming work.
+>
+> Deliverable: write a working domain brief to `<output-path>` containing:
+> 1. What this domain is and how the mem organizes it (its communities/clusters).
+> 2. The core principles (the "why" layer) — each with entity ID citations.
+> 3. For each major cluster: the key practices and the key pitfalls, with the concrete specifics the mem records (figures, named sources, years, applicability conditions), citing entity IDs.
+> 4. Where the knowledge comes from: the kinds of sources the mem cites, with several named examples.
+> 5. Three concrete, non-obvious recommendations you could now defend in a design review, each traced to entities.
+>
+> Then reply with a 5-line summary of what you read (roughly how many entities, which commands) and confirm the brief is written.
 
 A rerun will not reproduce 65,161 exactly — agents read differently — but
 it should land in the same order of magnitude, and that is the claim.
@@ -117,7 +148,8 @@ it should land in the same order of magnitude, and that is the claim.
 - **Not a benchmark.** One mem, one topic, first-party. No comparison with
   any other tool is made or implied.
 - **"Understanding" is demonstrated, not scored.** The evidence is the
-  brief itself — judge it. There is no formal eval; the task required every
+  brief itself (retained privately, available on request) — judge it. There
+  is no formal eval; the task required every
   claim to be entity-cited and to carry specifics (named studies, figures,
   dates) that exist only in the mem, which bounds how much the agent could
   fake from training knowledge, but does not eliminate topic familiarity.
@@ -138,10 +170,11 @@ it should land in the same order of magnitude, and that is the claim.
   engine after the run (684 → 681 edges) so the archive is self-contained
   and passes strict install validation. Entity content is otherwise
   identical; the 108,034 serialized-token figure was measured pre-removal.
-- **Raw authoring transcripts are retained privately** (they embed bulk
-  fetched third-party web content that we do not republish);
-  `authoring-sessions.json` publishes their sha256 hashes, time spans, and
-  token accounting instead.
+- **The raw evidence is retained privately.** The authoring transcripts
+  embed bulk fetched third-party web content that we do not republish; the
+  reconstruction transcript and the per-session accounting (sha256 hashes,
+  time spans, token counts) embed local paths and full session records. All
+  of it is available on request for audit.
 - **Prior number, replaced.** An earlier informal observation from April
   2026 reported roughly the same ~13:1 ratio on a hand-built, pre-engine
   graph. That experiment was retired from any public citation on

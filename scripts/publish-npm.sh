@@ -30,7 +30,7 @@
 # first is the natural order.
 #
 # After the real publish, flip the memstead.io site to the published
-# package (private repo): websites/memstead.io/scripts/activate-published-wasm.sh
+# package (the site's activate-published-wasm script, maintained with the site).
 
 set -euo pipefail
 
@@ -106,5 +106,5 @@ if [[ "$DRY_RUN" == 1 ]]; then
     echo "publish-npm: dry-run OK — both packages assemble and pass npm publish --dry-run"
 else
     echo "publish-npm: done — @memstead/wasm and @memstead/client published"
-    echo "publish-npm: next, flip the .io site: websites/memstead.io/scripts/activate-published-wasm.sh (private repo)"
+    echo "publish-npm: next, flip the .io site to the published package (its activate-published-wasm script)"
 fi

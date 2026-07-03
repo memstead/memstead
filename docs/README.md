@@ -29,8 +29,9 @@ You know what you want; these get you there.
   to it; read the [worked schemas](../examples/README.md) (`agent-program`;
   the paired `reimpl-source`/`reimpl-target`) for full examples.
 - **[Publish a mem](../docs-site/src/content/docs/guides/publish-a-mem.md)**
-  — share a mem through the registry and install one into a workspace
-  ([command cheat-sheet](publish.md)).
+  — share a mem through the registry and install one into a workspace.
+- **[macOS dev setup](macos-dev-setup.md)** — one-time Gatekeeper
+  configuration that makes the test suite run in seconds on Apple Silicon.
 
 ## 📖 Reference — *looking something up*
 
@@ -40,6 +41,8 @@ check fails the build if the committed copy lags).
 - **[CLI / MCP / UniFFI / WASM reference + parity matrix](../docs-site/src/content/docs/reference/)**
   — every command, tool, and binding, plus the cross-surface parity matrix and
   the error-code index.
+- **[Workspace config example](memstead.toml.example)** — annotated
+  workspace-level configuration file.
 
 ## 💡 Explanation — *understanding why*
 
@@ -49,6 +52,9 @@ The ideas and rationale behind Memstead.
 - **[Glossary](../GLOSSARY.md)** — precise definitions (mem, schema,
   workspace, mount, storage backend, …).
 - **[Prior art](../PRIOR_ART.md)** — how Memstead relates to adjacent tools.
+- **[Reconstruction measurement](proof/reconstruction/README.md)** — the
+  observed run behind the "one-thirteenth of the tokens" claim, with the
+  rerun recipe.
 
 ---
 
