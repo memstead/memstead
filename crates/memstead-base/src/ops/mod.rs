@@ -30,7 +30,7 @@ pub use commit_envelope::{CommitEnvelope, EntityChange};
 pub use diff::{Diff, DiffConfig, EntityDiff, IncomingRipple};
 pub use branch_reset::BranchResetOutcome;
 pub use export::{MemExportBytes, MemExportError};
-pub use transport::{FetchOutcome, PullOutcome, PushOutcome, UpdatedRef};
+pub use transport::{FetchOutcome, PullOutcome, PushOutcome, RemoteAddOutcome, UpdatedRef};
 pub use changes::{
     BackendChanges, ChangeEnvelope, ChangesReport, EMPTY_TREE_SHA, NoticeByChange,
     NoticeChanges, RENAME_SIMILARITY_DEFAULT, RENAME_SIMILARITY_MAX, RENAME_SIMILARITY_MIN,

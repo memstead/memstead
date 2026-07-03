@@ -85,6 +85,14 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         Command::Changes(args) => commands::changes::run(&ctx, args),
         Command::Reload(args) => commands::reload::run(&ctx, args),
         #[cfg(feature = "mem-repo")]
+        Command::Fetch(args) => commands::transport::run_fetch(&ctx, args),
+        #[cfg(feature = "mem-repo")]
+        Command::Pull(args) => commands::transport::run_pull(&ctx, args),
+        #[cfg(feature = "mem-repo")]
+        Command::Push(args) => commands::transport::run_push(&ctx, args),
+        #[cfg(feature = "mem-repo")]
+        Command::BranchReset(args) => commands::branch_reset::run(&ctx, args),
+        #[cfg(feature = "mem-repo")]
         Command::Mem { action } => match action {
             commands::mem::MemAction::Init(args) => commands::mem::run(&ctx, args),
             commands::mem::MemAction::Unregister(args) => {

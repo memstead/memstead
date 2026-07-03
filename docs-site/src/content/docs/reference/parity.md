@@ -21,6 +21,10 @@ Every public engine operation across the four programmatic surfaces (MCP, CLI, U
 | `health` | `memstead_health` *(lean + full)* | `health` *(lean + full)* | `get_health` | `health` |
 | `changes-since` | `memstead_changes_since` *(lean + full)* | `changes` *(lean + full)* | `changes_since` | — |
 | `reload` | `memstead_reload` *(full only)* | `reload` *(lean + full)* | `reload` | — |
+| `fetch` | — | `fetch` *(full only)* | — | — |
+| `pull` | — | `pull` *(full only)* | — | — |
+| `push` | — | `push` *(full only)* | — | — |
+| `branch-reset` | — | `branch-reset` *(full only)* | — | — |
 | `create` | `memstead_create` *(lean + full)* | `create` *(lean + full)* | — | — |
 | `update` | `memstead_update` *(lean + full)* | `update` *(lean + full)* | — | — |
 | `relate` | `memstead_relate` *(lean + full)* | `relate` *(lean + full)* | — | — |

@@ -36,6 +36,22 @@ name = \"file-two-layer\"\n";
 pub enum MemRepoAction {
     /// Bootstrap a fresh mem-repo-git workspace.
     Init(InitArgs),
+
+    /// Configure (or re-point) a named git remote on the mem-repo, so
+    /// `memstead fetch` / `pull` / `push` have somewhere to go. Upsert:
+    /// re-running with a new URL re-points the remote.
+    #[command(name = "remote-add")]
+    RemoteAdd(RemoteAddArgs),
+}
+
+/// `memstead mem-repo remote-add <name> <url>` arguments.
+#[derive(Args, Debug)]
+pub struct RemoteAddArgs {
+    /// Remote name (e.g. `origin`).
+    pub name: String,
+    /// Remote URL (e.g. `git@github.com:you/mem-backup.git` or a local
+    /// bare-repo path).
+    pub url: String,
 }
 
 /// `memstead mem-repo init [<path>]` arguments.
@@ -56,7 +72,37 @@ pub struct InitArgs {
 pub fn run(ctx: &CliContext, action: MemRepoAction) -> anyhow::Result<()> {
     match action {
         MemRepoAction::Init(args) => init(ctx, args),
+        MemRepoAction::RemoteAdd(args) => remote_add(ctx, args),
     }
+}
+
+fn remote_add(ctx: &CliContext, args: RemoteAddArgs) -> anyhow::Result<()> {
+    let outcome = match ctx.cli_engine()? {
+        crate::setup::CliEngine::MemRepo(engine) => engine
+            .remote_add(&args.name, &args.url)
+            .map_err(CliError::from_engine_op)?,
+        crate::setup::CliEngine::Filesystem(_) => {
+            return Err(CliError {
+                code: "INVALID_INPUT",
+                kind: ExitKind::Validation,
+                message: "this workspace is not git-backed — `memstead mem-repo remote-add` \
+                          requires a mem-repo workspace"
+                    .to_string(),
+                details: None,
+            }
+            .into());
+        }
+    };
+    if ctx.json {
+        crate::output::print_json(&outcome)?;
+    } else {
+        let verb = if outcome.updated { "Re-pointed" } else { "Added" };
+        crate::output::print_markdown(&format!(
+            "# {verb} remote `{}`\n\n- URL: `{}`",
+            outcome.remote, outcome.url,
+        ));
+    }
+    Ok(())
 }
 
 fn init(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {

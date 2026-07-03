@@ -73,3 +73,18 @@ pub struct PushOutcome {
     /// fast-forward). Consumers warn on this in their UI.
     pub forced: bool,
 }
+
+/// Outcome of `Engine::remote_add`. Configures a named remote on the
+/// workspace's mem-repo so `fetch` / `pull` / `push` have somewhere to
+/// go — upsert semantics (re-pointing an existing remote is not an
+/// error; `updated` says which happened).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RemoteAddOutcome {
+    /// Remote name (verbatim from input).
+    pub remote: String,
+    /// URL the remote now points at.
+    pub url: String,
+    /// `true` when the remote already existed and its URL was
+    /// re-pointed; `false` when it was newly added.
+    pub updated: bool,
+}

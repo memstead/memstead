@@ -56,6 +56,10 @@ const CLI_MEM_REPO_ONLY: &[&str] = &[
     "mem",
     "mem-repo",
     "workspace",
+    "fetch",
+    "pull",
+    "push",
+    "branch-reset",
 ];
 
 pub fn collect_inputs(udl_source: &str, wasm_methods: Vec<String>) -> Inputs {

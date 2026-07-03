@@ -182,6 +182,34 @@ pub enum Command {
     /// tool.
     Reload(commands::reload::Args),
 
+    /// Fetch a mem's branch refs from a git remote into the mem-repo
+    /// (no local branch moves — inspect first, then `pull`). Requires a
+    /// git-branch-backed mem (`INVALID_INPUT` on folder mounts);
+    /// refuses `UNKNOWN_REMOTE` when the remote is not configured.
+    #[cfg(feature = "mem-repo")]
+    Fetch(commands::transport::FetchArgs),
+
+    /// Fast-forward a mem's branch to its fetched remote counterpart
+    /// and reload the in-memory store. Refuses `LOCAL_DIVERGENCE` when
+    /// the local branch is not an ancestor of the remote — reconcile
+    /// via `branch-reset`, or resolve on another clone and push.
+    #[cfg(feature = "mem-repo")]
+    Pull(commands::transport::PullArgs),
+
+    /// Push a mem's branch to a git remote. `--force` uses
+    /// force-with-lease semantics; without it, non-fast-forward pushes
+    /// refuse (`NON_FAST_FORWARD`). Refuses `UNKNOWN_REMOTE` when the
+    /// remote is not configured.
+    #[cfg(feature = "mem-repo")]
+    Push(commands::transport::PushArgs),
+
+    /// Reset a mem's branch pointer to a target ref/SHA. Refuses to
+    /// discard commits reachable from any remote ref
+    /// (`PUSHED_COMMITS_PROTECTED`).
+    #[cfg(feature = "mem-repo")]
+    #[command(name = "branch-reset")]
+    BranchReset(commands::branch_reset::BranchResetArgs),
+
     /// Mem lifecycle commands.
     #[cfg(feature = "mem-repo")]
     Mem {

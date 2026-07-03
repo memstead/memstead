@@ -67,6 +67,7 @@ pub const PRO_GIT_BRANCH_OPS: memstead_base::GitBranchOps = memstead_base::GitBr
     fetch: fetch_dispatch,
     pull: pull_dispatch,
     push: push_dispatch,
+    remote_add: remote_add_dispatch,
     read_tree: read_tree_dispatch,
     export: export_dispatch,
     export_to_bytes: export_to_bytes_dispatch,
@@ -265,6 +266,24 @@ fn push_dispatch(
         let _ = (gitdir, remote, mem, force);
         Err(memstead_base::backend::BackendError::Other(
             "push: git-object-storage feature not enabled".to_string(),
+        ))
+    }
+}
+
+fn remote_add_dispatch(
+    gitdir: &std::path::Path,
+    name: &str,
+    url: &str,
+) -> Result<memstead_base::ops::RemoteAddOutcome, memstead_base::backend::BackendError> {
+    #[cfg(feature = "git-object-storage")]
+    {
+        crate::ops::transport::remote_add_in_gitdir(gitdir, name, url)
+    }
+    #[cfg(not(feature = "git-object-storage"))]
+    {
+        let _ = (gitdir, name, url);
+        Err(memstead_base::backend::BackendError::Other(
+            "remote_add: git-object-storage feature not enabled".to_string(),
         ))
     }
 }

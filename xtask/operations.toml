@@ -71,6 +71,26 @@ mcp = "memstead_reload"
 cli = "reload"
 uniffi = "reload"
 
+# Transport: deliberately CLI-only. Agents get no push/fetch primitive
+# (security posture — moving a mem-repo off-machine is an owner
+# decision), so the MCP slots stay blank on purpose.
+
+[[operation]]
+name = "fetch"
+cli = "fetch"
+
+[[operation]]
+name = "pull"
+cli = "pull"
+
+[[operation]]
+name = "push"
+cli = "push"
+
+[[operation]]
+name = "branch-reset"
+cli = "branch-reset"
+
 [[operation]]
 name = "create"
 mcp = "memstead_create"

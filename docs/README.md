@@ -30,6 +30,9 @@ You know what you want; these get you there.
   the paired `reimpl-source`/`reimpl-target`) for full examples.
 - **[Publish a mem](../docs-site/src/content/docs/guides/publish-a-mem.md)**
   — share a mem through the registry and install one into a workspace.
+- **[Back up a mem-repo](../docs-site/src/content/docs/guides/back-up-a-mem-repo.md)**
+  — push a workspace's mems to any git remote and recover them on
+  another machine (`remote-add`, `push`, `fetch`, `pull`, `branch-reset`).
 - **[macOS dev setup](macos-dev-setup.md)** — one-time Gatekeeper
   configuration that makes the test suite run in seconds on Apple Silicon.
 

@@ -212,6 +212,35 @@ pub fn push_in_gitdir(
     })
 }
 
+/// `memstead mem-repo remote-add` implementation: configures (or
+/// re-points) the named remote on the mem-repo gitdir. Upsert
+/// semantics — an existing remote gets `git remote set-url`, a new one
+/// `git remote add` — so the command is safe to re-run.
+pub fn remote_add_in_gitdir(
+    gitdir: &Path,
+    name: &str,
+    url: &str,
+) -> Result<memstead_base::ops::RemoteAddOutcome, BackendError> {
+    let existing = run_git(gitdir, &["remote"], |stderr| {
+        format!("git remote failed: {stderr}")
+    })?;
+    let exists = existing.lines().any(|l| l.trim() == name);
+    let args: &[&str] = if exists {
+        &["remote", "set-url", name, url]
+    } else {
+        &["remote", "add", name, url]
+    };
+    let name_owned = name.to_string();
+    run_git(gitdir, args, move |stderr| {
+        format!("configuring remote `{name_owned}` failed: {stderr}")
+    })?;
+    Ok(memstead_base::ops::RemoteAddOutcome {
+        remote: name.to_string(),
+        url: url.to_string(),
+        updated: exists,
+    })
+}
+
 /// Walk the tree at `ref_name`, returning `(relative_path,
 /// utf8_content)` pairs for every `.md` blob outside the `.memstead/`
 /// engine-internal namespace. Engine layer uses this to run a
@@ -433,6 +462,29 @@ mod tests {
         writer
             .commit("seed", &CommitContext::internal())
             .unwrap()
+    }
+
+    #[test]
+    fn remote_add_adds_then_upserts() {
+        let tmp = TempDir::new().unwrap();
+        let gitdir = init_local(&tmp, "local");
+        let remote_a = init_bare_remote(&tmp, "backup-a.git");
+        let remote_b = init_bare_remote(&tmp, "backup-b.git");
+
+        let added =
+            remote_add_in_gitdir(&gitdir, "origin", remote_a.to_str().unwrap()).unwrap();
+        assert!(!added.updated, "first add is not an update");
+        assert_eq!(added.remote, "origin");
+
+        // Re-running with a different URL re-points instead of erroring.
+        let updated =
+            remote_add_in_gitdir(&gitdir, "origin", remote_b.to_str().unwrap()).unwrap();
+        assert!(updated.updated, "second add must report the upsert");
+        assert_eq!(updated.url, remote_b.to_str().unwrap());
+
+        // The configured URL is the second one.
+        let url = run_git(&gitdir, &["remote", "get-url", "origin"], |s| s.to_string()).unwrap();
+        assert_eq!(url.trim(), remote_b.to_str().unwrap());
     }
 
     #[test]

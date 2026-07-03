@@ -375,6 +375,14 @@ pub type GitBranchPushFn = fn(
     force: bool,
 ) -> Result<crate::ops::PushOutcome, BackendError>;
 
+/// `Engine::remote_add` dispatch — configures a named remote on the
+/// mem-repo gitdir (upsert: add, or set-url when it already exists).
+pub type GitBranchRemoteAddFn = fn(
+    gitdir: &Path,
+    name: &str,
+    url: &str,
+) -> Result<crate::ops::RemoteAddOutcome, BackendError>;
+
 /// `Engine::branch_reset` dispatch for git-branch mounts. Returns the
 /// outcome on success; surfaces `BackendError::Other` carrying an
 /// in-band marker (`UNKNOWN_REF:<raw>` or
@@ -425,6 +433,7 @@ pub struct GitBranchOps {
     pub fetch: GitBranchFetchFn,
     pub pull: GitBranchPullFn,
     pub push: GitBranchPushFn,
+    pub remote_add: GitBranchRemoteAddFn,
     pub read_tree: GitBranchReadTreeFn,
     pub export: GitBranchExportFn,
     pub export_to_bytes: GitBranchExportToBytesFn,

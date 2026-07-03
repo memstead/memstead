@@ -705,8 +705,8 @@ pub enum EngineError {
     InvalidInput(String),
     /// `memstead_fetch` / `memstead_pull` / `memstead_push` named a remote that is
     /// not configured on the workspace's mem-repo. Typed code
-    /// `UNKNOWN_REMOTE`. Recovery: configure the remote via `git
-    /// remote add` or pick a remote `git remote -v` already lists.
+    /// `UNKNOWN_REMOTE`. Recovery: configure the remote via
+    /// `memstead mem-repo remote-add <name> <url>`.
     #[error("unknown remote: {0}")]
     UnknownRemote(String),
     /// `memstead_pull` refused because the local branch has diverged from

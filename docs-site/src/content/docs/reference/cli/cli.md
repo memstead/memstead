@@ -42,6 +42,10 @@ This document contains the help content for the `memstead` command-line program.
 * [`memstead recover`↴](#memstead-recover)
 * [`memstead changes`↴](#memstead-changes)
 * [`memstead reload`↴](#memstead-reload)
+* [`memstead fetch`↴](#memstead-fetch)
+* [`memstead pull`↴](#memstead-pull)
+* [`memstead push`↴](#memstead-push)
+* [`memstead branch-reset`↴](#memstead-branch-reset)
 * [`memstead mem`↴](#memstead-mem)
 * [`memstead mem init`↴](#memstead-mem-init)
 * [`memstead mem unregister`↴](#memstead-mem-unregister)
@@ -53,6 +57,7 @@ This document contains the help content for the `memstead` command-line program.
 * [`memstead mem list`↴](#memstead-mem-list)
 * [`memstead mem-repo`↴](#memstead-mem-repo)
 * [`memstead mem-repo init`↴](#memstead-mem-repo-init)
+* [`memstead mem-repo remote-add`↴](#memstead-mem-repo-remote-add)
 * [`memstead workspace`↴](#memstead-workspace)
 * [`memstead workspace dump`↴](#memstead-workspace-dump)
 * [`memstead workspace show`↴](#memstead-workspace-show)
@@ -121,6 +126,10 @@ Exit codes:
 * `recover` — Apply parse-time-drift recovery across writable mems. Walks `PARSED_RELATION_INVALID` warnings, re-renders affected source entities to drop the stale rows, and reports per-entry outcomes. Read-only-origin drops surface as skipped
 * `changes` — Diff a mem's HEAD against a commit SHA. Pass `--since` = a prior `commit_sha` from a mutation, or the canonical empty-tree hash `4b825dc642cb6eb9a060e54bf8d69288fbee4904` for a first sync
 * `reload` — Reload one writable mem's slice of the in-memory store from its on-disk branch tip — or every writable mem when `--mem` is omitted. CLI parity with the MCP `memstead_reload` tool
+* `fetch` — Fetch a mem's branch refs from a git remote into the mem-repo (no local branch moves — inspect first, then `pull`). Requires a git-branch-backed mem (`INVALID_INPUT` on folder mounts); refuses `UNKNOWN_REMOTE` when the remote is not configured
+* `pull` — Fast-forward a mem's branch to its fetched remote counterpart and reload the in-memory store. Refuses `LOCAL_DIVERGENCE` when the local branch is not an ancestor of the remote — reconcile via `branch-reset`, or resolve on another clone and push
+* `push` — Push a mem's branch to a git remote. `--force` uses force-with-lease semantics; without it, non-fast-forward pushes refuse (`NON_FAST_FORWARD`). Refuses `UNKNOWN_REMOTE` when the remote is not configured
+* `branch-reset` — Reset a mem's branch pointer to a target ref/SHA. Refuses to discard commits reachable from any remote ref (`PUSHED_COMMITS_PROTECTED`)
 * `mem` — Mem lifecycle commands
 * `mem-repo` — Mem-repo-git lifecycle commands
 * `workspace` — Introspect and configure workspace policy — `dump` reads the effective config; `allow-create`/`revoke-create`/`allow-delete`/ `revoke-delete`/`grant-cross-link`/`revoke-cross-link`/`set-mutations` write the mem-lifecycle allowlist, cross-mem link grants, and mutation policy
@@ -801,6 +810,77 @@ Reload one writable mem's slice of the in-memory store from its on-disk branch t
 
 
 
+## `memstead fetch`
+
+Fetch a mem's branch refs from a git remote into the mem-repo (no local branch moves — inspect first, then `pull`). Requires a git-branch-backed mem (`INVALID_INPUT` on folder mounts); refuses `UNKNOWN_REMOTE` when the remote is not configured
+
+**Usage:** `memstead fetch [OPTIONS] <MEM> [REFSPECS]...`
+
+###### **Arguments:**
+
+* `<MEM>`
+* `<REFSPECS>` — Optional refspecs forwarded to the underlying `git fetch`. Empty list uses the remote's configured defaults
+
+###### **Options:**
+
+* `--remote <REMOTE>`
+
+  Default value: `origin`
+
+
+
+## `memstead pull`
+
+Fast-forward a mem's branch to its fetched remote counterpart and reload the in-memory store. Refuses `LOCAL_DIVERGENCE` when the local branch is not an ancestor of the remote — reconcile via `branch-reset`, or resolve on another clone and push
+
+**Usage:** `memstead pull [OPTIONS] <MEM>`
+
+###### **Arguments:**
+
+* `<MEM>`
+
+###### **Options:**
+
+* `--remote <REMOTE>`
+
+  Default value: `origin`
+
+
+
+## `memstead push`
+
+Push a mem's branch to a git remote. `--force` uses force-with-lease semantics; without it, non-fast-forward pushes refuse (`NON_FAST_FORWARD`). Refuses `UNKNOWN_REMOTE` when the remote is not configured
+
+**Usage:** `memstead push [OPTIONS] <MEM>`
+
+###### **Arguments:**
+
+* `<MEM>`
+
+###### **Options:**
+
+* `--remote <REMOTE>`
+
+  Default value: `origin`
+* `--force` — Force-push (`--force-with-lease` under the hood). Refused non-fast-forward pushes only happen here. Use with care — the remote's view of the branch is overwritten
+
+  Default value: `false`
+
+
+
+## `memstead branch-reset`
+
+Reset a mem's branch pointer to a target ref/SHA. Refuses to discard commits reachable from any remote ref (`PUSHED_COMMITS_PROTECTED`)
+
+**Usage:** `memstead branch-reset <MEM> <TARGET_SHA>`
+
+###### **Arguments:**
+
+* `<MEM>` — Mem whose branch pointer to reset. Must be git-branch-backed
+* `<TARGET_SHA>` — Target ref or SHA. Accepts anything `git rev-parse` admits — branch names, abbreviated SHAs, full SHAs, tags
+
+
+
 ## `memstead mem`
 
 Mem lifecycle commands
@@ -962,6 +1042,7 @@ Mem-repo-git lifecycle commands
 ###### **Subcommands:**
 
 * `init` — Bootstrap a fresh mem-repo-git workspace
+* `remote-add` — Configure (or re-point) a named git remote on the mem-repo, so `memstead fetch` / `pull` / `push` have somewhere to go. Upsert: re-running with a new URL re-points the remote
 
 
 
@@ -980,6 +1061,19 @@ Bootstrap a fresh mem-repo-git workspace
 ###### **Options:**
 
 * `--no-gitignore` — Skip outer-repo `.gitignore` auto-append. Useful when the user intends to track `mem-repo/` as a git submodule, or when the detection heuristic would pick the wrong outer repo
+
+
+
+## `memstead mem-repo remote-add`
+
+Configure (or re-point) a named git remote on the mem-repo, so `memstead fetch` / `pull` / `push` have somewhere to go. Upsert: re-running with a new URL re-points the remote
+
+**Usage:** `memstead mem-repo remote-add <NAME> <URL>`
+
+###### **Arguments:**
+
+* `<NAME>` — Remote name (e.g. `origin`)
+* `<URL>` — Remote URL (e.g. `git@github.com:you/mem-backup.git` or a local bare-repo path)
 
 
 

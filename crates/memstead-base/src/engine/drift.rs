@@ -613,6 +613,46 @@ impl Engine {
         })
     }
 
+    /// Configure (or re-point) a named remote on the workspace's
+    /// mem-repo, so `fetch` / `pull` / `push` have somewhere to go.
+    /// Upsert semantics — safe to re-run with a new URL. The mem-repo
+    /// is shared by every git-branch mount, so the op is
+    /// workspace-level: any git-branch mount locates it; refuses
+    /// `INVALID_INPUT` when the workspace has none.
+    pub fn remote_add(
+        &self,
+        name: &str,
+        url: &str,
+    ) -> Result<crate::ops::RemoteAddOutcome, EngineError> {
+        // Both values become git subprocess arguments — refuse shapes
+        // that would parse as flags.
+        if name.is_empty() || name.starts_with('-') || url.is_empty() || url.starts_with('-') {
+            return Err(EngineError::InvalidInput(format!(
+                "remote name and url must be non-empty and must not start with '-' \
+                 (got name '{name}', url '{url}')",
+            )));
+        }
+        let gitdir = self
+            .mounts
+            .iter()
+            .find_map(|m| match &m.mount.storage {
+                MountStorage::GitBranch { gitdir, .. } => Some(gitdir.clone()),
+                _ => None,
+            })
+            .ok_or_else(|| {
+                EngineError::InvalidInput(
+                    "no git-branch mounts — `remote-add` requires a mem-repo workspace"
+                        .to_string(),
+                )
+            })?;
+        let hook = self.git_branch_ops.ok_or_else(|| {
+            EngineError::Backend(BackendError::Other(
+                "git-branch remote_add hook not installed (pro flavour not loaded)".to_string(),
+            ))
+        })?;
+        (hook.remote_add)(&gitdir, name, url).map_err(EngineError::Backend)
+    }
+
     /// Pre-merge schema validation pass: walks every `.md` blob at
     /// `ref_name` and runs `parse_entries` with the mem's pinned
     /// schema. Returns `Ok(())` when the tree is schema-clean;
