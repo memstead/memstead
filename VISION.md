@@ -150,6 +150,11 @@ Open-source serves three purposes:
 
 ## Long-term vision: Memstead as a web standard
 
+> **Horizon note:** everything from here to [Known risks](#known-risks)
+> is speculative long-horizon direction, not roadmap. Nothing below is
+> implemented, scheduled, or promised; it exists to show where the
+> design bets *could* lead.
+
 Today, website knowledge is trapped in unstructured HTML. A university has hundreds of pages about research projects, curricula, and faculty expertise — but no AI agent can navigate it systematically. A company documents its APIs, processes, and architecture across wikis and docs — all opaque to AI.
 
 Memstead's authority model opens a path: any domain registers as an authority on memstead.io and publishes structured knowledge graphs under its own scope. The natural extension is that domains *host their own mems* while memstead.io serves as a federated index — the same relationship GitHub repos have with npm, or websites with search engines.
