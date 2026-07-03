@@ -29,7 +29,7 @@ This is the fix for the parallel-binary discovery hang. Without it, `cargo nexte
 5. After relaunch, drop any cached binaries that were built under the previous regime:
 
    ```bash
-   cd engine && cargo clean
+   cargo clean
    ```
 
 The first build after `cargo clean` re-compiles everything (~2–3 minutes on M1 Pro). All subsequent test cycles use the new binaries and run within Gatekeeper's exemption.
@@ -48,7 +48,7 @@ cargo nextest --version    # sanity check
 Run the suite:
 
 ```bash
-cd engine && cargo nextest run --workspace
+cargo nextest run --workspace
 ```
 
 Expected wallclock after the steps in this document: **under 10 seconds** for ~1300 tests on M1 Pro. If you see anything in the multi-minute range, the Developer Tools exemption above is not active — re-check step 3.
@@ -74,7 +74,6 @@ Trade: a one-time fresh dependency rebuild after pulling these settings is ~2–
 ## Verifying everything works
 
 ```bash
-cd engine
 cargo nextest run --workspace
 ```
 
@@ -94,4 +93,4 @@ If any test binary still hangs at the discovery phase, see the troubleshooting b
 
 **Symptom: a specific test hangs indefinitely (not the discovery phase).**
 
-→ Check for stale `memstead-mcp` processes holding gitdir locks: `ps aux | grep memstead-mcp`. Kill any that have been running for hours: `pkill -9 -f 'memstead-mcp --config'`. These can accumulate from previous Claude Code sessions or aborted runs.
+→ Check for stale `memstead-mcp` processes holding gitdir locks: `ps aux | grep memstead-mcp`. Kill any that have been running for hours: `pkill -9 -f memstead-mcp`. These can accumulate from previous Claude Code sessions or aborted runs.
