@@ -34,7 +34,7 @@
 //! before reaching the backend, so a `Sealed` here signals an upstream
 //! bug.
 
-use std::io::{Cursor, Read as _, Seek};
+use std::io::{Cursor, Seek};
 use std::path::{Path, PathBuf};
 
 use crate::backend::BackendError;

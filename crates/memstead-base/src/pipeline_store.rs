@@ -79,16 +79,48 @@ fn primitive_dir(workspace_root: &Path, primitive: &str) -> PathBuf {
     workspace_root.join(WORKSPACE_STORE_DIR).join(primitive)
 }
 
+/// Refuse a `mem`/`name` value that is not a single, plain path
+/// component: separators, traversal segments, drive/stream colons, NULs,
+/// and empty values would let a caller-supplied name write or delete
+/// outside the workspace's own metadata directory. Validated here — the
+/// one place every mutation's path is built — so no surface above
+/// (CLI, UniFFI, engine) can bypass it.
+fn validate_component(kind: &str, value: &str) -> Result<(), StoreError> {
+    let invalid = value.is_empty()
+        || value == "."
+        || value == ".."
+        || value.contains('/')
+        || value.contains('\\')
+        || value.contains(':')
+        || value.contains('\0');
+    if invalid {
+        return Err(StoreError::Other(format!(
+            "invalid {kind} '{}': must be a single path component \
+             (no separators, traversal segments, ':' or NUL)",
+            value.escape_default()
+        )));
+    }
+    Ok(())
+}
+
 /// File path of a per-mem record: `<root>/.memstead/<primitive>/<mem>/<name>.json`.
-fn mem_scoped_path(workspace_root: &Path, primitive: &str, mem: &str, name: &str) -> PathBuf {
-    primitive_dir(workspace_root, primitive)
+fn mem_scoped_path(
+    workspace_root: &Path,
+    primitive: &str,
+    mem: &str,
+    name: &str,
+) -> Result<PathBuf, StoreError> {
+    validate_component("mem", mem)?;
+    validate_component("name", name)?;
+    Ok(primitive_dir(workspace_root, primitive)
         .join(mem)
-        .join(format!("{name}.json"))
+        .join(format!("{name}.json")))
 }
 
 /// File path of a flat (non-per-mem) record: `<root>/.memstead/<primitive>/<name>.json`.
-fn flat_path(workspace_root: &Path, primitive: &str, name: &str) -> PathBuf {
-    primitive_dir(workspace_root, primitive).join(format!("{name}.json"))
+fn flat_path(workspace_root: &Path, primitive: &str, name: &str) -> Result<PathBuf, StoreError> {
+    validate_component("name", name)?;
+    Ok(primitive_dir(workspace_root, primitive).join(format!("{name}.json")))
 }
 
 /// Remove the file at `path`, mapping IO failures (including a missing
@@ -235,7 +267,7 @@ pub fn write_medium(
     name: &str,
     medium: &Medium,
 ) -> Result<(), StoreError> {
-    write_json(&mem_scoped_path(workspace_root, MEDIUMS_DIR, mem, name), medium)
+    write_json(&mem_scoped_path(workspace_root, MEDIUMS_DIR, mem, name)?, medium)
 }
 
 /// Write a facet to `<root>/.memstead/facets/<mem>/<name>.json`.
@@ -245,7 +277,7 @@ pub fn write_facet(
     name: &str,
     facet: &Facet,
 ) -> Result<(), StoreError> {
-    write_json(&mem_scoped_path(workspace_root, FACETS_DIR, mem, name), facet)
+    write_json(&mem_scoped_path(workspace_root, FACETS_DIR, mem, name)?, facet)
 }
 
 /// Write a projection to `<root>/.memstead/projections/<mem>/<name>.json`.
@@ -256,7 +288,7 @@ pub fn write_projection(
     projection: &Projection,
 ) -> Result<(), StoreError> {
     write_json(
-        &mem_scoped_path(workspace_root, PROJECTIONS_DIR, mem, name),
+        &mem_scoped_path(workspace_root, PROJECTIONS_DIR, mem, name)?,
         projection,
     )
 }
@@ -267,28 +299,28 @@ pub fn write_ingest(
     name: &str,
     ingest: &Ingest,
 ) -> Result<(), StoreError> {
-    write_json(&flat_path(workspace_root, INGESTS_DIR, name), ingest)
+    write_json(&flat_path(workspace_root, INGESTS_DIR, name)?, ingest)
 }
 
 /// Delete a medium file. Missing → [`StoreError::Io`]; callers that want a
 /// friendly "no such medium" pre-check existence via [`load_pipeline_configs`].
 pub fn delete_medium(workspace_root: &Path, mem: &str, name: &str) -> Result<(), StoreError> {
-    remove_file(&mem_scoped_path(workspace_root, MEDIUMS_DIR, mem, name))
+    remove_file(&mem_scoped_path(workspace_root, MEDIUMS_DIR, mem, name)?)
 }
 
 /// Delete a facet file. See [`delete_medium`] for missing-file semantics.
 pub fn delete_facet(workspace_root: &Path, mem: &str, name: &str) -> Result<(), StoreError> {
-    remove_file(&mem_scoped_path(workspace_root, FACETS_DIR, mem, name))
+    remove_file(&mem_scoped_path(workspace_root, FACETS_DIR, mem, name)?)
 }
 
 /// Delete a projection file. See [`delete_medium`] for missing-file semantics.
 pub fn delete_projection(workspace_root: &Path, mem: &str, name: &str) -> Result<(), StoreError> {
-    remove_file(&mem_scoped_path(workspace_root, PROJECTIONS_DIR, mem, name))
+    remove_file(&mem_scoped_path(workspace_root, PROJECTIONS_DIR, mem, name)?)
 }
 
 /// Delete an ingest file (flat). See [`delete_medium`] for missing-file semantics.
 pub fn delete_ingest(workspace_root: &Path, name: &str) -> Result<(), StoreError> {
-    remove_file(&flat_path(workspace_root, INGESTS_DIR, name))
+    remove_file(&flat_path(workspace_root, INGESTS_DIR, name)?)
 }
 
 // Rename is exposed only for the *nameless* records (projection, ingest),
@@ -309,8 +341,8 @@ pub fn rename_projection(
     new: &str,
 ) -> Result<(), StoreError> {
     rename_file(
-        &mem_scoped_path(workspace_root, PROJECTIONS_DIR, mem, old),
-        &mem_scoped_path(workspace_root, PROJECTIONS_DIR, mem, new),
+        &mem_scoped_path(workspace_root, PROJECTIONS_DIR, mem, old)?,
+        &mem_scoped_path(workspace_root, PROJECTIONS_DIR, mem, new)?,
     )
 }
 
@@ -319,8 +351,8 @@ pub fn rename_projection(
 /// rename.
 pub fn rename_ingest(workspace_root: &Path, old: &str, new: &str) -> Result<(), StoreError> {
     rename_file(
-        &flat_path(workspace_root, INGESTS_DIR, old),
-        &flat_path(workspace_root, INGESTS_DIR, new),
+        &flat_path(workspace_root, INGESTS_DIR, old)?,
+        &flat_path(workspace_root, INGESTS_DIR, new)?,
     )
 }
 
@@ -373,6 +405,63 @@ mod tests {
             deny_paths: vec!["VISION.md".to_string()],
         };
         (medium, facet, projection, ingest)
+    }
+
+    #[test]
+    fn mutations_refuse_traversal_in_mem_and_name() {
+        // Every mutation path-builds from caller-supplied mem/name; a
+        // separator or traversal segment must refuse with a typed error
+        // and leave nothing on disk outside the store.
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let (medium, _, _, ingest) = sample();
+
+        let evil_values = [
+            "..",
+            ".",
+            "",
+            "../escape",
+            "a/b",
+            "a\\b",
+            "..\\up",
+            "c:evil",
+            "nul\0byte",
+        ];
+        for evil in evil_values {
+            assert!(
+                write_medium(root, evil, "ok", &medium).is_err(),
+                "mem '{}' must refuse",
+                evil.escape_default()
+            );
+            assert!(
+                write_medium(root, "ok", evil, &medium).is_err(),
+                "name '{}' must refuse",
+                evil.escape_default()
+            );
+            assert!(write_ingest(root, evil, &ingest).is_err());
+            assert!(delete_medium(root, evil, "ok").is_err());
+            assert!(delete_ingest(root, evil).is_err());
+            assert!(rename_projection(root, evil, "a", "b").is_err());
+            assert!(rename_projection(root, "ok", evil, "b").is_err());
+            assert!(rename_projection(root, "ok", "a", evil).is_err());
+            assert!(rename_ingest(root, evil, "b").is_err());
+            assert!(rename_ingest(root, "a", evil).is_err());
+        }
+
+        // A traversal write must not have escaped: the only thing under
+        // the temp root may be the (empty) store dir, and the parent of
+        // the temp root gained no `escape.json`.
+        assert!(
+            !root.parent().unwrap().join("escape.json").exists(),
+            "no write may land outside the workspace"
+        );
+
+        // Existing valid names keep working.
+        write_medium(root, "macos", "source-tree", &medium).unwrap();
+        assert!(
+            root.join(".memstead/mediums/macos/source-tree.json")
+                .is_file()
+        );
     }
 
     #[test]

@@ -6,7 +6,6 @@
 //! `memstead-git-branch::entity::git_tree_source`. All shapes feed the
 //! same parse pipeline via the helper [`crate::entity::loader::parse_entries`].
 
-use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
 use super::loader::LoadError;
