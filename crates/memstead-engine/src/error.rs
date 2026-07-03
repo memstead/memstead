@@ -65,10 +65,7 @@ pub enum FullEngineError {
     /// (no_match)` catch-all so the structural failure modes are
     /// visible.
     #[error("mem name `{name}` is invalid ({reason})")]
-    InvalidMemName {
-        name: String,
-        reason: &'static str,
-    },
+    InvalidMemName { name: String, reason: &'static str },
 
     /// `delete_mem` rejected because the workspace
     /// `[cross_mem_links]` policy grants one or more other mems
@@ -197,7 +194,11 @@ impl FullEngineError {
                 let patterns_inline = if patterns.is_empty() {
                     "(no rules configured)".to_string()
                 } else {
-                    patterns.iter().map(|p| format!("'{p}'")).collect::<Vec<_>>().join(", ")
+                    patterns
+                        .iter()
+                        .map(|p| format!("'{p}'"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 };
                 format!(
                     "mem path not allowed by `[[{policy_table}]]`: candidate '{candidate}' (resolved location '{}') did not match any allowlist rule (reason: {reason}). Configured patterns: {patterns_inline}.",

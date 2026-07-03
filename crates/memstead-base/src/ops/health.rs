@@ -17,8 +17,8 @@ use std::sync::Arc;
 use memstead_schema::{Schema, TypeDefinition, type_by_name};
 
 use super::{
-    DanglingLink, FoldedTag, HealthIssue, HealthReport, HealthSummary, StaleEntity, TagDistribution,
-    TagVariant, UntaggedStats,
+    DanglingLink, FoldedTag, HealthIssue, HealthReport, HealthSummary, StaleEntity,
+    TagDistribution, TagVariant, UntaggedStats,
 };
 use crate::entity::MetadataValue;
 use crate::graph::query;
@@ -234,7 +234,7 @@ pub fn compute_health(
     }
 
     // Sort stale entities by days_since_modified descending
-    stale_entities.sort_by(|a, b| b.days_since_modified.cmp(&a.days_since_modified));
+    stale_entities.sort_by_key(|e| std::cmp::Reverse(e.days_since_modified));
 
     // Structural counts
     let orphan_count = query::find_orphans(store).len();
@@ -355,7 +355,11 @@ pub fn collect_tag_distribution(
             }
         })
         .collect();
-    folded.sort_by(|a, b| b.total.cmp(&a.total).then_with(|| a.canonical.cmp(&b.canonical)));
+    folded.sort_by(|a, b| {
+        b.total
+            .cmp(&a.total)
+            .then_with(|| a.canonical.cmp(&b.canonical))
+    });
 
     (entries, folded, untagged)
 }
@@ -379,10 +383,7 @@ pub fn collect_tag_distribution(
 /// `mem_filter` narrows *scanning* to entities in that mem; resolution
 /// stays global so cross-mem links whose target is a real entity
 /// elsewhere are not flagged as missing.
-pub fn collect_dangling_links(
-    store: &Store,
-    mem_filter: Option<&str>,
-) -> Vec<DanglingLink> {
+pub fn collect_dangling_links(store: &Store, mem_filter: Option<&str>) -> Vec<DanglingLink> {
     use crate::entity::parser::extract_inline_links_lenient;
     use std::collections::HashSet;
 
@@ -403,10 +404,7 @@ pub fn collect_dangling_links(
             .collect();
         for (section_key, section_body) in &entity.sections {
             for target_id in extract_inline_links_lenient(section_body, &entity.mem) {
-                let target_missing = store
-                    .get(&target_id)
-                    .map(|e| e.stub)
-                    .unwrap_or(true);
+                let target_missing = store.get(&target_id).map(|e| e.stub).unwrap_or(true);
                 let alias_orphan = !target_missing && !explicit_targets.contains(&target_id);
                 if target_missing || alias_orphan {
                     out.push(DanglingLink {
@@ -496,12 +494,7 @@ pub fn collect_missing_required_outgoing(
                 let count = entity
                     .relationships
                     .iter()
-                    .filter(|rel| {
-                        block
-                            .relationships
-                            .iter()
-                            .any(|name| name == &rel.rel_type)
-                    })
+                    .filter(|rel| block.relationships.iter().any(|name| name == &rel.rel_type))
                     .count();
                 !block.admits(count)
             })
@@ -817,9 +810,7 @@ mod tests {
         let issue = report
             .issues
             .iter()
-            .find(|i| {
-                i.field == "relationships" && i.message.contains("INVALID_REL_SHAPE")
-            })
+            .find(|i| i.field == "relationships" && i.message.contains("INVALID_REL_SHAPE"))
             .expect("shape violation must produce an INVALID_REL_SHAPE issue");
         assert!(
             issue.message.contains("OWNS"),
@@ -859,11 +850,14 @@ mod tests {
         let mut store = Store::new();
         let mut owner = make_entity("owner", true);
         owner.entity_type = "actor".into();
-        owner.metadata
+        owner
+            .metadata
             .insert("kind".into(), MetadataValue::String("team".into()));
-        owner.metadata
+        owner
+            .metadata
             .insert("active".into(), MetadataValue::Bool(true));
-        owner.metadata
+        owner
+            .metadata
             .insert("handle".into(), MetadataValue::String("owner".into()));
         owner.relationships.push(Relationship {
             rel_type: "OWNS".into(),
@@ -945,9 +939,7 @@ mod tests {
     /// inline wiki-links at will. Mem defaults to `specs`.
     fn make_entity_with_body(name: &str, section_key: &str, body: &str) -> Entity {
         let mut entity = make_entity(name, true);
-        entity
-            .sections
-            .insert(section_key.into(), body.to_string());
+        entity.sections.insert(section_key.into(), body.to_string());
         entity
     }
 
@@ -956,11 +948,7 @@ mod tests {
         use crate::entity::store_builder::make_stub;
 
         let mut store = Store::new();
-        let a = make_entity_with_body(
-            "a",
-            "purpose",
-            "Refers to [[b]] in prose.",
-        );
+        let a = make_entity_with_body("a", "purpose", "Refers to [[b]] in prose.");
         store.upsert(a.id.clone(), a.clone());
 
         // Seed b as a stub — the signal that its markdown file is gone
@@ -1009,11 +997,7 @@ mod tests {
         use crate::entity::Relationship;
 
         let mut store = Store::new();
-        let mut a = make_entity_with_body(
-            "a",
-            "purpose",
-            "Refers to [[b]] in prose.",
-        );
+        let mut a = make_entity_with_body("a", "purpose", "Refers to [[b]] in prose.");
         // Backing relation makes the body link a valid alias.
         a.relationships.push(Relationship {
             rel_type: "REFERENCES".into(),
@@ -1051,7 +1035,11 @@ mod tests {
         store.upsert(a.id.clone(), a.clone());
 
         let dangling = super::collect_dangling_links(&store, None);
-        assert_eq!(dangling.len(), 1, "exactly one relationship-section dangler");
+        assert_eq!(
+            dangling.len(),
+            1,
+            "exactly one relationship-section dangler"
+        );
         let d = &dangling[0];
         assert_eq!(d.from, a.id);
         assert_eq!(d.target_id, EntityId::new("specs", "gone"));
@@ -1101,11 +1089,7 @@ mod tests {
         use crate::entity::store_builder::make_stub;
 
         let mut store = Store::new();
-        let mut a = make_entity_with_body(
-            "a",
-            "purpose",
-            "Refers to [[b]] in prose.",
-        );
+        let mut a = make_entity_with_body("a", "purpose", "Refers to [[b]] in prose.");
         let b_id = EntityId::new("specs", "b");
         a.relationships.push(Relationship {
             rel_type: "REFERENCES".into(),
@@ -1133,11 +1117,7 @@ mod tests {
         let mut store = Store::new();
 
         // specs--a with body [[gone]] → dangling in specs.
-        let a = make_entity_with_body(
-            "a",
-            "purpose",
-            "Refers to [[gone]] in prose.",
-        );
+        let a = make_entity_with_body("a", "purpose", "Refers to [[gone]] in prose.");
         store.upsert(a.id.clone(), a);
         let gone_specs = EntityId::new("specs", "gone");
         store.upsert(gone_specs.clone(), make_stub(gone_specs));
@@ -1336,9 +1316,7 @@ community:
         let decision_yaml = format!(
             "name: decision\ndescription: t\nwhen_to_use: Here\n{body_section}required_outgoing:\n  - relationships: [CHOSEN]\n    cardinality: at_least_one\n  - relationships: [REJECTED]\n    cardinality: at_least_one\n",
         );
-        let note_yaml = format!(
-            "name: note\ndescription: t\nwhen_to_use: Here\n{body_section}",
-        );
+        let note_yaml = format!("name: note\ndescription: t\nwhen_to_use: Here\n{body_section}",);
         std::sync::Arc::new(
             memstead_schema::load_schema_from_memory(
                 manifest,
@@ -1354,10 +1332,7 @@ community:
     fn make_typed_entity(mem: &str, slug: &str, entity_type: &str) -> crate::entity::Entity {
         use crate::entity::MetadataValue;
         let mut metadata = IndexMap::new();
-        metadata.insert(
-            "type".into(),
-            MetadataValue::String(entity_type.into()),
-        );
+        metadata.insert("type".into(), MetadataValue::String(entity_type.into()));
         let mut sections = IndexMap::new();
         sections.insert("body".into(), "Body.".into());
         crate::entity::Entity {
@@ -1404,8 +1379,7 @@ community:
         let mut mem_schemas = HashMap::new();
         mem_schemas.insert("plan".to_string(), schema);
 
-        let reports =
-            collect_missing_required_outgoing(&store, None, &mem_schemas);
+        let reports = collect_missing_required_outgoing(&store, None, &mem_schemas);
         assert_eq!(
             reports.len(),
             1,
@@ -1447,13 +1421,11 @@ community:
         mem_schemas.insert("alpha".to_string(), schema.clone());
         mem_schemas.insert("beta".to_string(), schema);
 
-        let alpha_only =
-            collect_missing_required_outgoing(&store, Some("alpha"), &mem_schemas);
+        let alpha_only = collect_missing_required_outgoing(&store, Some("alpha"), &mem_schemas);
         assert_eq!(alpha_only.len(), 1);
         assert_eq!(alpha_only[0].mem, "alpha");
 
-        let both =
-            collect_missing_required_outgoing(&store, None, &mem_schemas);
+        let both = collect_missing_required_outgoing(&store, None, &mem_schemas);
         assert_eq!(both.len(), 2);
     }
 

@@ -60,10 +60,10 @@
 //! acquisition; ad-hoc multi-mutex code in debug builds is caught by
 //! the assertion inside [`acquire_branch_mutex`].
 
+use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
-use std::collections::HashMap;
 
 use gix::objs::tree::EntryKind;
 
@@ -180,7 +180,7 @@ impl Drop for BranchMutexGuard {
 /// of input order.
 #[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn acquire_branch_mutexes_in_order(refs: &[&str]) -> Vec<BranchMutexGuard> {
-    let mut sorted: Vec<&str> = refs.iter().copied().collect();
+    let mut sorted: Vec<&str> = refs.to_vec();
     sorted.sort_unstable();
     sorted.dedup();
     let mut guards: Vec<BranchMutexGuard> = Vec::with_capacity(sorted.len());
@@ -221,7 +221,6 @@ pub(crate) fn head_branch_ref(repo: &gix::Repository) -> String {
         _ => "HEAD".to_string(),
     }
 }
-
 
 /// Deterministic committer identity — bypasses per-repo and global git
 /// config and doubles as the author fallback when no actor is known.
@@ -304,10 +303,7 @@ impl From<gix::object::write::Error> for VcsError {
 /// `commit.gpgsign = false` is re-applied on every re-open so that a
 /// user edit to the per-repo config cannot silently enable signing and
 /// hang every memstead mutation waiting for a passphrase.
-pub fn create_vcs(
-    git_dir: &Path,
-    work_tree: &Path,
-) -> Result<Arc<dyn Vcs>, VcsError> {
+pub fn create_vcs(git_dir: &Path, work_tree: &Path) -> Result<Arc<dyn Vcs>, VcsError> {
     let is_new = !git_dir.join("HEAD").exists();
 
     if is_new {
@@ -420,11 +416,9 @@ fn relative_path(from: &Path, to: &Path) -> Option<String> {
 fn write_per_repo_config(git_dir: &Path, kvs: &[(&str, &str, &str)]) -> Result<(), VcsError> {
     use gix::bstr::BStr;
     let config_path = git_dir.join("config");
-    let mut file = gix::config::File::from_path_no_includes(
-        config_path.clone(),
-        gix::config::Source::Local,
-    )
-    .map_err(|e| VcsError::Git(format!("config parse: {e}")))?;
+    let mut file =
+        gix::config::File::from_path_no_includes(config_path.clone(), gix::config::Source::Local)
+            .map_err(|e| VcsError::Git(format!("config parse: {e}")))?;
     for (section, key, value) in kvs {
         let key_owned = String::from(*key);
         let value_bytes: &BStr = (*value).as_bytes().into();
@@ -491,17 +485,13 @@ impl Vcs for GixVcs {
             .map(|p| mem_subpath(&self.work_tree, p))
             .collect::<Result<_, _>>()?;
         debug_assert!(
-            subpaths.iter().all(|s| s.is_empty())
-                || subpaths.iter().all(|s| !s.is_empty()),
+            subpaths.iter().all(|s| s.is_empty()) || subpaths.iter().all(|s| !s.is_empty()),
             "commit() paths must not mix isolated and shared subpaths",
         );
         let any_empty_subpath = subpaths.iter().any(|s| s.is_empty());
 
         let head_commit = repo.head_commit().ok();
-        let parents = head_commit
-            .as_ref()
-            .map(|c| vec![c.id])
-            .unwrap_or_default();
+        let parents = head_commit.as_ref().map(|c| vec![c.id]).unwrap_or_default();
         let mut editor = if any_empty_subpath {
             repo.empty_tree()
                 .edit()
@@ -583,8 +573,7 @@ impl Vcs for GixVcs {
 /// in shared-gitdir mode: a misconfigured mem would commit at the
 /// tree root and wipe every sibling's subtree.
 pub(crate) fn mem_subpath(work_tree: &Path, mem_path: &Path) -> Result<String, VcsError> {
-    let canon_mem =
-        std::fs::canonicalize(mem_path).unwrap_or_else(|_| mem_path.to_path_buf());
+    let canon_mem = std::fs::canonicalize(mem_path).unwrap_or_else(|_| mem_path.to_path_buf());
     let rel = canon_mem.strip_prefix(work_tree).map_err(|_| {
         VcsError::Git(format!(
             "mem path {} is not under worktree {}",
@@ -784,7 +773,9 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let (mem, git_dir) = make_mem_paths(dir.path());
         let vcs = create_vcs(&git_dir, &mem).unwrap();
-        let sha = vcs.commit(&[&mem], "initial", &CommitContext::internal()).unwrap();
+        let sha = vcs
+            .commit(&[&mem], "initial", &CommitContext::internal())
+            .unwrap();
         assert_eq!(sha.len(), 40, "commit sha must be 40-char hex");
     }
 
@@ -865,7 +856,8 @@ mod tests {
         fs::write(mem.join(".memstead/cache/prompts/p.txt"), "noise").unwrap();
 
         let vcs = create_vcs(&git_dir, &mem).unwrap();
-        vcs.commit(&[&mem], "initial", &CommitContext::internal()).unwrap();
+        vcs.commit(&[&mem], "initial", &CommitContext::internal())
+            .unwrap();
 
         let repo = gix::open(&git_dir).unwrap();
         let tree = repo.head_commit().unwrap().tree().unwrap();
@@ -878,8 +870,7 @@ mod tests {
         // `cache/`. `.git/` is skipped one level up by the walk filter,
         // not by this check.
         if let Some(memstead_entry) = tree.find_entry(".memstead") {
-            let memstead_tree =
-                memstead_entry.object().unwrap().try_into_tree().unwrap();
+            let memstead_tree = memstead_entry.object().unwrap().try_into_tree().unwrap();
             for entry in memstead_tree.iter() {
                 let entry = entry.unwrap();
                 let name = entry.filename().to_string();
@@ -896,7 +887,8 @@ mod tests {
         fs::write(mem.join("drop.md"), "drop").unwrap();
 
         let vcs = create_vcs(&git_dir, &mem).unwrap();
-        vcs.commit(&[&mem], "initial", &CommitContext::internal()).unwrap();
+        vcs.commit(&[&mem], "initial", &CommitContext::internal())
+            .unwrap();
 
         fs::remove_file(mem.join("drop.md")).unwrap();
         vcs.commit(&[&mem], "drop one", &CommitContext::internal())
@@ -945,11 +937,7 @@ mod tests {
         let commit = repo.head_commit().unwrap();
         let author = commit.author().unwrap();
         let message = commit.message_raw().unwrap().to_string();
-        (
-            author.name.to_string(),
-            author.email.to_string(),
-            message,
-        )
+        (author.name.to_string(), author.email.to_string(), message)
     }
 
     #[test]
@@ -970,15 +958,14 @@ mod tests {
             logical_operation_id: None,
             entity_ids: None,
         };
-        vcs.commit(&[&mem], "memstead: update specs--a", &ctx).unwrap();
+        vcs.commit(&[&mem], "memstead: update specs--a", &ctx)
+            .unwrap();
 
         let (name, email, message) = head_commit_parts(&git_dir);
         assert_eq!(name, "claude-code");
         assert_eq!(email, "claude-code@memstead.io");
         assert!(
-            message.ends_with(
-                "\n\nTool: memstead_update\nActor: agent\nClient: claude-code@2.1.0"
-            ),
+            message.ends_with("\n\nTool: memstead_update\nActor: agent\nClient: claude-code@2.1.0"),
             "got message: {message:?}"
         );
     }
@@ -998,7 +985,8 @@ mod tests {
             logical_operation_id: None,
             entity_ids: None,
         };
-        vcs.commit(&[&mem], "external edits (1 files)", &ctx).unwrap();
+        vcs.commit(&[&mem], "external edits (1 files)", &ctx)
+            .unwrap();
 
         let (name, email, message) = head_commit_parts(&git_dir);
         assert_eq!(name, "external");
@@ -1114,8 +1102,7 @@ mod tests {
         };
         let msg = format_commit_message("memstead: update specs--a", &ctx);
         // Find the last paragraph — everything after the final `\n\n`.
-        let (_prose, trailer_block) =
-            msg.rsplit_once("\n\n").expect("blank line before trailers");
+        let (_prose, trailer_block) = msg.rsplit_once("\n\n").expect("blank line before trailers");
         for line in trailer_block.lines() {
             let (key, value) = line
                 .split_once(": ")
@@ -1211,8 +1198,7 @@ mod tests {
     /// tests. Uses a static atomic counter — sufficient for in-test
     /// uniqueness without bringing in `uuid`.
     fn unique_ref(prefix: &str) -> String {
-        static COUNTER: std::sync::atomic::AtomicU64 =
-            std::sync::atomic::AtomicU64::new(0);
+        static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         format!("refs/heads/{prefix}-{n}")
     }

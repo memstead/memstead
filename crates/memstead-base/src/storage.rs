@@ -61,11 +61,7 @@ pub trait MemWriter: Send + Sync {
     /// picks up the actor / committer / trailer information from `ctx`.
     /// Returns the resulting [`CommitId`] (opaque; the git-tree adapter
     /// formats it as a hex object id).
-    fn commit(
-        &self,
-        message: &str,
-        ctx: &CommitContext<'_>,
-    ) -> Result<CommitId, MemWriterError>;
+    fn commit(&self, message: &str, ctx: &CommitContext<'_>) -> Result<CommitId, MemWriterError>;
 }
 
 /// Errors surfaced by [`MemWriter`].

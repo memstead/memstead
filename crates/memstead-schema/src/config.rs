@@ -488,9 +488,7 @@ pub const PUBLISHED_MEM_FORMAT: u32 = 3;
 /// directly to the user without wrapping a raw serde error.
 #[derive(Debug, thiserror::Error)]
 pub enum PublishConversionError {
-    #[error(
-        "config.version is required for mem publish — set it in .memstead/config.json"
-    )]
+    #[error("config.version is required for mem publish — set it in .memstead/config.json")]
     MissingVersion,
     #[error(
         "config must declare `schema` (e.g. \"default@1.0.0\") — set it in .memstead/config.json"
@@ -713,7 +711,9 @@ pub fn check_config(config: &Value) -> ConfigCheckResult {
     //    the hard error.
     for key in obj.keys() {
         if KNOWN_TOP_LEVEL_KEYS.contains(&key.as_str())
-            || LEGACY_TOMBSTONE_KEYS.iter().any(|(k, _)| *k == key.as_str())
+            || LEGACY_TOMBSTONE_KEYS
+                .iter()
+                .any(|(k, _)| *k == key.as_str())
         {
             continue;
         }
@@ -990,7 +990,12 @@ mod tests {
 
     #[test]
     fn check_schema_range_syntax_rejected() {
-        for s in ["default@^1.0.0", "default@~1.0.0", "default@latest", "default@>=1.0.0"] {
+        for s in [
+            "default@^1.0.0",
+            "default@~1.0.0",
+            "default@latest",
+            "default@>=1.0.0",
+        ] {
             let config = json!({"schema": s});
             let result = check_config(&config);
             assert!(!result.valid, "expected '{s}' to be rejected");
@@ -1027,8 +1032,7 @@ mod tests {
 
     #[test]
     fn schema_pin_serde_round_trip() {
-        let versioned: SchemaRef =
-            serde_json::from_str(r#""software@1.0.0""#).unwrap();
+        let versioned: SchemaRef = serde_json::from_str(r#""software@1.0.0""#).unwrap();
         assert_eq!(versioned.as_display(), "software@1.0.0");
         let as_json = serde_json::to_string(&versioned).unwrap();
         assert_eq!(as_json, r#""software@1.0.0""#);
@@ -1282,7 +1286,10 @@ mod tests {
         let mut guidance = HashMap::new();
         guidance.insert("style".to_string(), json!("structured"));
         let mut sync_state = BTreeMap::new();
-        sync_state.insert("engine-graph/source-files".to_string(), "deadbeef".to_string());
+        sync_state.insert(
+            "engine-graph/source-files".to_string(),
+            "deadbeef".to_string(),
+        );
         let cfg = MemConfig {
             name: Some("demo".to_string()),
             version: Some(semver::Version::new(0, 1, 0)),
@@ -1446,10 +1453,7 @@ mod tests {
         let check = check_config(&cfg);
         assert!(check.valid, "errors: {:?}", check.errors);
         let parsed = parse_mem_config(&cfg).expect("valid readMems must parse");
-        let spec = parsed
-            .read_mems
-            .get("aws-patterns")
-            .expect("entry present");
+        let spec = parsed.read_mems.get("aws-patterns").expect("entry present");
         match &spec.source {
             ReadMemSource::Url { url } => {
                 assert_eq!(url, "https://example.com/aws-patterns.mem")
@@ -1626,7 +1630,10 @@ mod tests {
             "vcs": "system"
         });
         let parsed = parse_mem_config(&cfg).expect("legacy vcs string must parse");
-        assert!(parsed.vcs.is_none(), "legacy string must deserialize to None");
+        assert!(
+            parsed.vcs.is_none(),
+            "legacy string must deserialize to None"
+        );
     }
 
     #[test]
@@ -1682,11 +1689,12 @@ mod tests {
         assert!(!result.valid, "belongsTo presence must fail validation");
         assert_eq!(result.error_code.as_deref(), Some("LEGACY_FIELD_PRESENT"));
         assert!(
-            result.errors.iter().any(|e| e.contains("belongsTo")
-                && e.contains("cross_mem_links")),
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("belongsTo") && e.contains("cross_mem_links")),
             "tombstone error must name the field and the replacement section: {:?}",
             result.errors
         );
     }
-
 }

@@ -84,9 +84,7 @@ fn load_store() -> Result<Store> {
         Ok(s) => toml::from_str(&s)
             .with_context(|| format!("parsing credentials file at {}", path.display())),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Store::default()),
-        Err(e) => {
-            Err(e).with_context(|| format!("reading credentials file at {}", path.display()))
-        }
+        Err(e) => Err(e).with_context(|| format!("reading credentials file at {}", path.display())),
     }
 }
 
@@ -96,8 +94,7 @@ fn save_store(store: &Store) -> Result<()> {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("creating credentials dir at {}", parent.display()))?;
     }
-    let body = toml::to_string(store)
-        .context("serializing credentials TOML")?;
+    let body = toml::to_string(store).context("serializing credentials TOML")?;
     std::fs::write(&path, body)
         .with_context(|| format!("writing credentials file at {}", path.display()))?;
     tighten_permissions(&path)?;
@@ -129,9 +126,7 @@ pub fn load_for(host: &str) -> Result<Option<Entry>> {
 /// existing entry for that host.
 pub fn save_for(host: &str, entry: Entry) -> Result<()> {
     let mut store = load_store()?;
-    store
-        .registries
-        .insert(host.to_ascii_lowercase(), entry);
+    store.registries.insert(host.to_ascii_lowercase(), entry);
     save_store(&store)
 }
 
@@ -139,7 +134,10 @@ pub fn save_for(host: &str, entry: Entry) -> Result<()> {
 /// Non-existent host is a silent no-op (returns false).
 pub fn remove_for(host: &str) -> Result<bool> {
     let mut store = load_store()?;
-    let removed = store.registries.remove(&host.to_ascii_lowercase()).is_some();
+    let removed = store
+        .registries
+        .remove(&host.to_ascii_lowercase())
+        .is_some();
     if removed {
         save_store(&store)?;
     }

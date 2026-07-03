@@ -36,7 +36,7 @@ use std::sync::Mutex;
 use gix::objs::tree::EntryKind;
 
 use super::{CommitId, MemWriter, MemWriterError};
-use crate::vcs::{acquire_branch_mutex, author_identity, format_commit_message, CommitContext};
+use crate::vcs::{CommitContext, acquire_branch_mutex, author_identity, format_commit_message};
 
 /// Per-path final state for the buffered op log. Move operations
 /// resolve at call time into a `Delete(from)` + `Upsert(to, bytes)`
@@ -120,14 +120,12 @@ impl GitTreeMemWriter {
             return Ok(());
         }
         let repo = self.open_repo()?;
-        let mut reference = match repo
-            .try_find_reference(&self.ref_name)
-            .map_err(|e| {
-                MemWriterError::Path(format!(
-                    "git-tree writer: resolve ref {}: {e}",
-                    self.ref_name
-                ))
-            })? {
+        let mut reference = match repo.try_find_reference(&self.ref_name).map_err(|e| {
+            MemWriterError::Path(format!(
+                "git-tree writer: resolve ref {}: {e}",
+                self.ref_name
+            ))
+        })? {
             Some(r) => r,
             None => return Ok(()),
         };
@@ -178,9 +176,7 @@ impl GitTreeMemWriter {
         let repo = self.open_repo()?;
         let commit = repo
             .find_object(parent)
-            .map_err(|e| {
-                MemWriterError::Path(format!("git-tree writer: open parent commit: {e}"))
-            })?
+            .map_err(|e| MemWriterError::Path(format!("git-tree writer: open parent commit: {e}")))?
             .into_commit();
         let tree = commit.tree().map_err(|e| {
             MemWriterError::Path(format!("git-tree writer: peel commit to tree: {e}"))
@@ -196,9 +192,9 @@ impl GitTreeMemWriter {
         if !entry.mode().is_blob() {
             return Ok(None);
         }
-        let object = repo.find_object(entry.id()).map_err(|e| {
-            MemWriterError::Path(format!("git-tree writer: read blob {path}: {e}"))
-        })?;
+        let object = repo
+            .find_object(entry.id())
+            .map_err(|e| MemWriterError::Path(format!("git-tree writer: read blob {path}: {e}")))?;
         Ok(Some(object.data.clone()))
     }
 }
@@ -223,7 +219,7 @@ fn normalise_rel_path(rel_path: &Path) -> Result<String, MemWriterError> {
                     return Err(MemWriterError::Path(format!(
                         "non-utf-8 or empty path component in {}",
                         rel_path.display()
-                    )))
+                    )));
                 }
             },
             Component::CurDir => continue,
@@ -250,7 +246,9 @@ impl MemWriter for GitTreeMemWriter {
             MemWriterError::Path("git-tree writer pending state poisoned".to_string())
         })?;
         self.ensure_snapshot(&mut pending)?;
-        pending.ops.insert(key, PendingState::Upsert(content.to_vec()));
+        pending
+            .ops
+            .insert(key, PendingState::Upsert(content.to_vec()));
         Ok(())
     }
 
@@ -314,11 +312,7 @@ impl MemWriter for GitTreeMemWriter {
         Ok(())
     }
 
-    fn commit(
-        &self,
-        message: &str,
-        ctx: &CommitContext<'_>,
-    ) -> Result<CommitId, MemWriterError> {
+    fn commit(&self, message: &str, ctx: &CommitContext<'_>) -> Result<CommitId, MemWriterError> {
         // Serialise commits against the same target ref at process
         // scope. Different refs under the same gitdir proceed in
         // parallel — that is the whole point of the per-branch key.
@@ -388,9 +382,7 @@ impl MemWriter for GitTreeMemWriter {
                 }
                 PendingState::Delete => {
                     editor.remove(path.as_str()).map_err(|e| {
-                        MemWriterError::Path(format!(
-                            "git-tree writer: tree remove {path}: {e}"
-                        ))
+                        MemWriterError::Path(format!("git-tree writer: tree remove {path}: {e}"))
                     })?;
                 }
             }
@@ -458,14 +450,14 @@ impl MemWriter for GitTreeMemWriter {
                             "git-tree writer: re-resolve ref after CAS: {e}"
                         ))
                     })?
-                    .ok_or_else(|| MemWriterError::Path(format!(
-                        "git-tree writer: ref {} vanished during CAS recovery",
-                        self.ref_name
-                    )))?;
+                    .ok_or_else(|| {
+                        MemWriterError::Path(format!(
+                            "git-tree writer: ref {} vanished during CAS recovery",
+                            self.ref_name
+                        ))
+                    })?;
                 let live_id = reference.peel_to_id().map_err(|e| {
-                    MemWriterError::Path(format!(
-                        "git-tree writer: peel live tip after CAS: {e}"
-                    ))
+                    MemWriterError::Path(format!("git-tree writer: peel live tip after CAS: {e}"))
                 })?;
                 return Err(MemWriterError::HashMismatch {
                     current: live_id.to_hex().to_string(),
@@ -576,10 +568,7 @@ impl memstead_base::backend::MemBackend for GitTreeMemWriter {
         <Self as MemWriter>::write_entity(self, rel_path, content).map_err(Into::into)
     }
 
-    fn delete_entity(
-        &self,
-        rel_path: &Path,
-    ) -> Result<(), memstead_base::backend::BackendError> {
+    fn delete_entity(&self, rel_path: &Path) -> Result<(), memstead_base::backend::BackendError> {
         <Self as MemWriter>::delete_entity(self, rel_path).map_err(Into::into)
     }
 
@@ -723,9 +712,7 @@ impl memstead_base::backend::MemBackend for GitTreeMemWriter {
         Ok(out)
     }
 
-    fn current_head(
-        &self,
-    ) -> Result<Option<String>, memstead_base::backend::BackendError> {
+    fn current_head(&self) -> Result<Option<String>, memstead_base::backend::BackendError> {
         // Open the gitdir and peel the per-mem branch ref to its
         // commit object id. Missing ref / missing repo / peel failure
         // collapse to `Ok(None)` — the engine treats them as "no
@@ -761,9 +748,7 @@ impl memstead_base::backend::MemBackend for GitTreeMemWriter {
             .map(|id| id.detach().to_hex().to_string()))
     }
 
-    fn read_mem_config(
-        &self,
-    ) -> Result<Option<Vec<u8>>, memstead_base::backend::BackendError> {
+    fn read_mem_config(&self) -> Result<Option<Vec<u8>>, memstead_base::backend::BackendError> {
         // Resolve the mem leaf from `self.ref_name`. V1 unified
         // mounts are flat (`refs/heads/<leaf>`); hierarchical
         // layouts are not yet supported on the unified path.
@@ -776,16 +761,14 @@ impl memstead_base::backend::MemBackend for GitTreeMemWriter {
         // Every workspace the engine touches has `__MEMSTEAD` populated
         // by boot — the legacy registry-class refs are no longer
         // read at runtime.
-        Ok(read_blob_from_ref(
+        read_blob_from_ref(
             &self.gitdir,
             "refs/heads/__MEMSTEAD",
             &format!("mems/{leaf}/config.json"),
-        )?)
+        )
     }
 
-    fn delete_artifacts(
-        &self,
-    ) -> Result<(), memstead_base::backend::BackendError> {
+    fn delete_artifacts(&self) -> Result<(), memstead_base::backend::BackendError> {
         // The branch leaf is the per-mem ref minus the
         // `refs/heads/` prefix — symmetric with the resolution done
         // by `read_mem_config` / `write_mem_config` above.
@@ -803,18 +786,11 @@ impl memstead_base::backend::MemBackend for GitTreeMemWriter {
             logical_operation_id: None,
             entity_ids: None,
         };
-        crate::storage_memstead::delete_mem_artifacts_at_gitdir(
-            &self.gitdir,
-            branch_leaf,
-            &ctx,
-        )
-        .map_err(|e| memstead_base::backend::BackendError::Other(e.to_string()))
+        crate::storage_memstead::delete_mem_artifacts_at_gitdir(&self.gitdir, branch_leaf, &ctx)
+            .map_err(|e| memstead_base::backend::BackendError::Other(e.to_string()))
     }
 
-    fn write_mem_config(
-        &self,
-        bytes: &[u8],
-    ) -> Result<(), memstead_base::backend::BackendError> {
+    fn write_mem_config(&self, bytes: &[u8]) -> Result<(), memstead_base::backend::BackendError> {
         self.write_mem_config_with_note(bytes, None)
     }
 
@@ -864,7 +840,6 @@ impl memstead_base::backend::MemBackend for GitTreeMemWriter {
         )
         .map_err(|e| memstead_base::backend::BackendError::Other(e.to_string()))
     }
-
 }
 
 /// Read a blob from `ref_name:path` in the gitdir. Returns
@@ -895,16 +870,16 @@ fn read_blob_from_ref(
     let id = reference.into_fully_peeled_id().map_err(|e| {
         memstead_base::backend::BackendError::Other(format!("peel {ref_name}: {e}"))
     })?;
-    let object = id
-        .object()
-        .map_err(|e| memstead_base::backend::BackendError::Other(format!("read obj {ref_name}: {e}")))?;
+    let object = id.object().map_err(|e| {
+        memstead_base::backend::BackendError::Other(format!("read obj {ref_name}: {e}"))
+    })?;
     let commit = match object.try_into_commit() {
         Ok(c) => c,
         Err(_) => return Ok(None),
     };
-    let tree = commit
-        .tree()
-        .map_err(|e| memstead_base::backend::BackendError::Other(format!("read tree {ref_name}: {e}")))?;
+    let tree = commit.tree().map_err(|e| {
+        memstead_base::backend::BackendError::Other(format!("read tree {ref_name}: {e}"))
+    })?;
     let entry = match tree.lookup_entry_by_path(path) {
         Ok(Some(e)) => e,
         Ok(None) => return Ok(None),
@@ -914,9 +889,9 @@ fn read_blob_from_ref(
             )));
         }
     };
-    let blob = entry
-        .object()
-        .map_err(|e| memstead_base::backend::BackendError::Other(format!("read blob {ref_name}:{path}: {e}")))?;
+    let blob = entry.object().map_err(|e| {
+        memstead_base::backend::BackendError::Other(format!("read blob {ref_name}:{path}: {e}"))
+    })?;
     Ok(Some(blob.data.clone()))
 }
 
@@ -924,26 +899,28 @@ fn read_blob_from_ref(
 /// effort: unrecognised verbs map to `Update`, missing actors to
 /// `Unknown`, malformed client trailers drop the field. Matches the
 /// folder backend's tolerant-reader stance.
-fn commit_note_to_provenance(
-    n: crate::ops::agent_notes::CommitNote,
-) -> memstead_base::Provenance {
+fn commit_note_to_provenance(n: crate::ops::agent_notes::CommitNote) -> memstead_base::Provenance {
     let kind = n
         .tool_verb
         .as_deref()
-        .and_then(memstead_base::ProvenanceKind::from_str)
+        .and_then(memstead_base::ProvenanceKind::parse)
         .unwrap_or(memstead_base::ProvenanceKind::Update);
     let actor = n
         .actor
         .as_deref()
         .and_then(memstead_base::vcs::Actor::from_trailer)
         .unwrap_or(memstead_base::vcs::Actor::Unknown);
-    let client = n.client.as_deref().and_then(memstead_base::vcs::parse_client_id);
+    let client = n
+        .client
+        .as_deref()
+        .and_then(memstead_base::vcs::parse_client_id);
     let timestamp = if n.timestamp >= 0 {
         std::time::UNIX_EPOCH + std::time::Duration::from_secs(n.timestamp as u64)
     } else {
         std::time::UNIX_EPOCH
     };
-    let mut record = memstead_base::Provenance::new(timestamp, kind, n.entity_id, actor, client, n.note);
+    let mut record =
+        memstead_base::Provenance::new(timestamp, kind, n.entity_id, actor, client, n.note);
     if let Some(id) = n.logical_operation_id {
         record = record.with_logical_operation_id(id);
     }
@@ -988,10 +965,7 @@ fn commit_note_to_provenance(
 /// to whoever's `read-tree` ran last; intermediate readers may see a
 /// mix. Single-process engines today; the open seam is documented in
 /// `mem-repo-write-cutover`'s "Open seams" section.
-fn sync_index_and_worktree(
-    repo: &gix::Repository,
-    ref_name: &str,
-) -> Result<(), MemWriterError> {
+fn sync_index_and_worktree(repo: &gix::Repository, ref_name: &str) -> Result<(), MemWriterError> {
     let Some(workdir) = repo.workdir() else {
         return Ok(());
     };
@@ -1103,23 +1077,26 @@ pub fn read_branch_blobs(
         path: gitdir.display().to_string(),
         source: e,
     })?;
-    let mut reference = match repo.try_find_reference(ref_name).map_err(|e| {
-        BranchReadError::Resolve {
+    let mut reference =
+        match repo
+            .try_find_reference(ref_name)
+            .map_err(|e| BranchReadError::Resolve {
+                ref_name: ref_name.to_string(),
+                message: e.to_string(),
+            })? {
+            Some(r) => r,
+            None => {
+                return Err(BranchReadError::BranchMissing {
+                    ref_name: ref_name.to_string(),
+                });
+            }
+        };
+    let id = reference
+        .peel_to_id()
+        .map_err(|e| BranchReadError::Resolve {
             ref_name: ref_name.to_string(),
             message: e.to_string(),
-        }
-    })? {
-        Some(r) => r,
-        None => {
-            return Err(BranchReadError::BranchMissing {
-                ref_name: ref_name.to_string(),
-            });
-        }
-    };
-    let id = reference.peel_to_id().map_err(|e| BranchReadError::Resolve {
-        ref_name: ref_name.to_string(),
-        message: e.to_string(),
-    })?;
+        })?;
     let commit = repo
         .find_object(id)
         .map_err(|e| BranchReadError::Read {
@@ -1156,11 +1133,11 @@ fn walk_tree(
         };
         match entry.mode().kind() {
             EntryKind::Blob | EntryKind::BlobExecutable => {
-                let object = repo.find_object(entry.oid()).map_err(|e| {
-                    BranchReadError::Read {
+                let object = repo
+                    .find_object(entry.oid())
+                    .map_err(|e| BranchReadError::Read {
                         message: format!("read blob {full}: {e}"),
-                    }
-                })?;
+                    })?;
                 out.push(BranchBlob {
                     path: full,
                     bytes: object.data.clone(),
@@ -1268,7 +1245,9 @@ mod tests {
         let gitdir = fresh_repo_dir(tmp.path());
         let writer = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/test".to_string());
 
-        writer.write_entity(Path::new("from.md"), b"payload").unwrap();
+        writer
+            .write_entity(Path::new("from.md"), b"payload")
+            .unwrap();
         writer.commit("seed", &ctx_for_test()).unwrap();
 
         writer
@@ -1293,7 +1272,9 @@ mod tests {
         writer.commit("seed", &ctx_for_test()).unwrap();
 
         writer.write_entity(Path::new("a.md"), b"alpha").unwrap();
-        writer.write_entity(Path::new("nested/b.md"), b"beta").unwrap();
+        writer
+            .write_entity(Path::new("nested/b.md"), b"beta")
+            .unwrap();
         writer.delete_entity(Path::new("doomed.md")).unwrap();
         writer.commit("multi-op", &ctx_for_test()).unwrap();
 
@@ -1325,11 +1306,23 @@ mod tests {
         a.write_entity(Path::new("a.md"), b"a").unwrap();
         b.write_entity(Path::new("b.md"), b"b").unwrap();
         assert_eq!(
-            a.pending.lock().unwrap().parent.unwrap().to_hex().to_string(),
+            a.pending
+                .lock()
+                .unwrap()
+                .parent
+                .unwrap()
+                .to_hex()
+                .to_string(),
             seed_sha
         );
         assert_eq!(
-            b.pending.lock().unwrap().parent.unwrap().to_hex().to_string(),
+            b.pending
+                .lock()
+                .unwrap()
+                .parent
+                .unwrap()
+                .to_hex()
+                .to_string(),
             seed_sha
         );
 
@@ -1369,8 +1362,10 @@ mod tests {
 
         // Both snapshot the same parent, then stage conflicting updates to
         // the SAME entity.
-        a.write_entity(Path::new("shared.md"), b"A-committed").unwrap();
-        b.write_entity(Path::new("shared.md"), b"B-phantom").unwrap();
+        a.write_entity(Path::new("shared.md"), b"A-committed")
+            .unwrap();
+        b.write_entity(Path::new("shared.md"), b"B-phantom")
+            .unwrap();
 
         // A wins the race; B's commit hits the typed CAS conflict.
         a.commit("a wins", &ctx_for_test()).unwrap();
@@ -1409,14 +1404,9 @@ mod tests {
         let gitdir = fresh_repo_dir(tmp.path());
 
         let seeder = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/test".to_string());
-        <GitTreeMemWriter as MemWriter>::write_entity(&seeder, Path::new("seed.md"), b"x")
-            .unwrap();
-        let seed_sha = <GitTreeMemWriter as MemWriter>::commit(
-            &seeder,
-            "seed",
-            &ctx_for_test(),
-        )
-        .unwrap();
+        <GitTreeMemWriter as MemWriter>::write_entity(&seeder, Path::new("seed.md"), b"x").unwrap();
+        let seed_sha =
+            <GitTreeMemWriter as MemWriter>::commit(&seeder, "seed", &ctx_for_test()).unwrap();
 
         // Engine-style flow: snapshot head, mutate, then commit pinned.
         let writer = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/test".to_string());
@@ -1451,14 +1441,9 @@ mod tests {
 
         // Seed so both writers start from the same commit.
         let seeder = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/test".to_string());
-        <GitTreeMemWriter as MemWriter>::write_entity(&seeder, Path::new("seed.md"), b"x")
-            .unwrap();
-        let seed_sha = <GitTreeMemWriter as MemWriter>::commit(
-            &seeder,
-            "seed",
-            &ctx_for_test(),
-        )
-        .unwrap();
+        <GitTreeMemWriter as MemWriter>::write_entity(&seeder, Path::new("seed.md"), b"x").unwrap();
+        let seed_sha =
+            <GitTreeMemWriter as MemWriter>::commit(&seeder, "seed", &ctx_for_test()).unwrap();
 
         // Engine A snapshots head — this is the pin it will retain
         // through any number of intermediate writes.
@@ -1472,18 +1457,11 @@ mod tests {
         // out-of-band CLI invocation, …) advances the ref between A's
         // snapshot and A's commit attempt.
         let sibling = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/test".to_string());
-        <GitTreeMemWriter as MemWriter>::write_entity(
-            &sibling,
-            Path::new("drift.md"),
-            b"drift",
-        )
-        .unwrap();
-        let new_tip = <GitTreeMemWriter as MemWriter>::commit(
-            &sibling,
-            "sibling advance",
-            &ctx_for_test(),
-        )
-        .unwrap();
+        <GitTreeMemWriter as MemWriter>::write_entity(&sibling, Path::new("drift.md"), b"drift")
+            .unwrap();
+        let new_tip =
+            <GitTreeMemWriter as MemWriter>::commit(&sibling, "sibling advance", &ctx_for_test())
+                .unwrap();
         assert_ne!(new_tip, seed_sha);
 
         // A now tries to land a pinned commit. The pin no longer
@@ -1658,12 +1636,13 @@ mod tests {
         // Write to refs/heads/feature; HEAD still points at
         // refs/heads/main. The worktree must NOT receive the feature
         // branch's content.
-        let writer =
-            GitTreeMemWriter::new(gitdir.clone(), "refs/heads/feature".to_string());
+        let writer = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/feature".to_string());
         writer
             .write_entity(Path::new("only-on-feature.md"), b"feature-only\n")
             .unwrap();
-        writer.commit("first commit on feature", &ctx_for_test()).unwrap();
+        writer
+            .commit("first commit on feature", &ctx_for_test())
+            .unwrap();
 
         // Object store has the blob on the feature branch...
         assert!(tree_path_exists(
@@ -1699,10 +1678,7 @@ mod tests {
             untracked.exists(),
             "sync must leave untracked files in place"
         );
-        assert_eq!(
-            std::fs::read(&untracked).unwrap(),
-            b"operator notes\n"
-        );
+        assert_eq!(std::fs::read(&untracked).unwrap(), b"operator notes\n");
         // The tracked entity is also materialised.
         assert_eq!(std::fs::read(workdir.join("seed.md")).unwrap(), b"seed\n");
     }
@@ -1715,14 +1691,9 @@ mod tests {
 
         writer.write_entity(Path::new("a.md"), b"first\n").unwrap();
         writer.commit("create a", &ctx_for_test()).unwrap();
-        assert_eq!(
-            std::fs::read(workdir.join("a.md")).unwrap(),
-            b"first\n"
-        );
+        assert_eq!(std::fs::read(workdir.join("a.md")).unwrap(), b"first\n");
 
-        writer
-            .write_entity(Path::new("a.md"), b"second\n")
-            .unwrap();
+        writer.write_entity(Path::new("a.md"), b"second\n").unwrap();
         writer.commit("overwrite a", &ctx_for_test()).unwrap();
         assert_eq!(
             std::fs::read(workdir.join("a.md")).unwrap(),
@@ -1786,25 +1757,15 @@ mod tests {
 
         let tmp = TempDir::new().unwrap();
         let gitdir = fresh_repo_dir(tmp.path());
-        let writer =
-            GitTreeMemWriter::new(gitdir.clone(), "refs/heads/test".to_string());
+        let writer = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/test".to_string());
 
         // Seed via MemWriter (fully-qualified to avoid trait
         // ambiguity once MemBackend enters scope below).
-        <GitTreeMemWriter as MemWriter>::write_entity(&writer, Path::new("a.md"), b"# a")
+        <GitTreeMemWriter as MemWriter>::write_entity(&writer, Path::new("a.md"), b"# a").unwrap();
+        <GitTreeMemWriter as MemWriter>::write_entity(&writer, Path::new("nested/b.md"), b"# b")
             .unwrap();
-        <GitTreeMemWriter as MemWriter>::write_entity(
-            &writer,
-            Path::new("nested/b.md"),
-            b"# b",
-        )
-        .unwrap();
-        <GitTreeMemWriter as MemWriter>::write_entity(
-            &writer,
-            Path::new("notes.json"),
-            b"{}",
-        )
-        .unwrap();
+        <GitTreeMemWriter as MemWriter>::write_entity(&writer, Path::new("notes.json"), b"{}")
+            .unwrap();
         <GitTreeMemWriter as MemWriter>::write_entity(
             &writer,
             Path::new(".memstead/config.json"),
@@ -1862,8 +1823,7 @@ mod tests {
 
         let tmp = TempDir::new().unwrap();
         let gitdir = fresh_repo_dir(tmp.path());
-        let writer =
-            GitTreeMemWriter::new(gitdir.clone(), "refs/heads/test".to_string());
+        let writer = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/test".to_string());
 
         // Seed a committed entry.
         <GitTreeMemWriter as MemWriter>::write_entity(
@@ -1890,7 +1850,10 @@ mod tests {
         );
         // Buffered delete masks the branch.
         backend.delete_entity(Path::new("on_branch.md")).unwrap();
-        assert_eq!(backend.read_entity(Path::new("on_branch.md")).unwrap(), None);
+        assert_eq!(
+            backend.read_entity(Path::new("on_branch.md")).unwrap(),
+            None
+        );
         // Unknown path → None.
         assert_eq!(backend.read_entity(Path::new("never.md")).unwrap(), None);
     }
@@ -1901,18 +1864,15 @@ mod tests {
 
         let tmp = TempDir::new().unwrap();
         let gitdir = fresh_repo_dir(tmp.path());
-        let writer =
-            GitTreeMemWriter::new(gitdir.clone(), "refs/heads/test".to_string());
+        let writer = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/test".to_string());
 
         // Two commits with memstead: subjects so the verb maps back to a
         // ProvenanceKind. The first carries an agent note, the second
         // does not.
-        <GitTreeMemWriter as MemWriter>::write_entity(&writer, Path::new("a.md"), b"a")
-            .unwrap();
+        <GitTreeMemWriter as MemWriter>::write_entity(&writer, Path::new("a.md"), b"a").unwrap();
         commit_with_verb(&writer, "create", "v:a", &ctx_with_note("first draft"));
 
-        <GitTreeMemWriter as MemWriter>::write_entity(&writer, Path::new("a.md"), b"a2")
-            .unwrap();
+        <GitTreeMemWriter as MemWriter>::write_entity(&writer, Path::new("a.md"), b"a2").unwrap();
         commit_with_verb(
             &writer,
             "update",
@@ -1967,28 +1927,31 @@ mod tests {
 
         let tmp = TempDir::new().unwrap();
         let gitdir = fresh_repo_dir(tmp.path());
-        let writer =
-            GitTreeMemWriter::new(gitdir.clone(), "refs/heads/test".to_string());
+        let writer = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/test".to_string());
 
         // Seed three commits; the cursor will be the SHA of the first.
-        <GitTreeMemWriter as MemWriter>::write_entity(&writer, Path::new("a.md"), b"a")
-            .unwrap();
-        let first_sha =
-            <GitTreeMemWriter as MemWriter>::commit(&writer, "memstead: create v:a", &ctx_for_test())
-                .unwrap();
-        <GitTreeMemWriter as MemWriter>::write_entity(&writer, Path::new("a.md"), b"a2")
-            .unwrap();
+        <GitTreeMemWriter as MemWriter>::write_entity(&writer, Path::new("a.md"), b"a").unwrap();
+        let first_sha = <GitTreeMemWriter as MemWriter>::commit(
+            &writer,
+            "memstead: create v:a",
+            &ctx_for_test(),
+        )
+        .unwrap();
+        <GitTreeMemWriter as MemWriter>::write_entity(&writer, Path::new("a.md"), b"a2").unwrap();
         <GitTreeMemWriter as MemWriter>::commit(&writer, "memstead: update v:a", &ctx_for_test())
             .unwrap();
-        <GitTreeMemWriter as MemWriter>::write_entity(&writer, Path::new("a.md"), b"a3")
-            .unwrap();
+        <GitTreeMemWriter as MemWriter>::write_entity(&writer, Path::new("a.md"), b"a3").unwrap();
         <GitTreeMemWriter as MemWriter>::commit(&writer, "memstead: update v:a", &ctx_for_test())
             .unwrap();
 
         let backend: &dyn MemBackend = &writer;
         // Cursor at the first SHA → returns only the two newer commits.
         let after = backend.read_provenance(Some(&first_sha)).unwrap();
-        assert_eq!(after.len(), 2, "expected commits after cursor, got {after:?}");
+        assert_eq!(
+            after.len(),
+            2,
+            "expected commits after cursor, got {after:?}"
+        );
         for r in &after {
             assert_eq!(r.kind, memstead_base::ProvenanceKind::Update);
         }
@@ -2012,11 +1975,9 @@ mod tests {
 
         let tmp = TempDir::new().unwrap();
         let gitdir = fresh_repo_dir(tmp.path());
-        let writer =
-            GitTreeMemWriter::new(gitdir.clone(), "refs/heads/test".to_string());
+        let writer = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/test".to_string());
 
-        <GitTreeMemWriter as MemWriter>::write_entity(&writer, Path::new("a.md"), b"a")
-            .unwrap();
+        <GitTreeMemWriter as MemWriter>::write_entity(&writer, Path::new("a.md"), b"a").unwrap();
         // Verb that isn't in the ProvenanceKind enum (e.g. lifecycle
         // verbs like `mem_create`) — round-trips as Update under the
         // tolerant-reader convention shared with the folder backend.
@@ -2034,9 +1995,7 @@ mod tests {
         // produces a backend that can list against an empty branch
         // without erroring (proves the writer is wired with the
         // right gitdir + ref shape).
-        use memstead_base::{
-            Mount, MountCapability, MountLifecycle, MountStorage, MemBackend,
-        };
+        use memstead_base::{MemBackend, Mount, MountCapability, MountLifecycle, MountStorage};
 
         let tmp = TempDir::new().unwrap();
         let gitdir = fresh_repo_dir(tmp.path());
@@ -2066,9 +2025,7 @@ mod tests {
         // ("engine") to its fully-qualified ref ("refs/heads/engine").
         // Mounts may carry either shape; the writer must end up keyed
         // on the same per-branch mutex regardless.
-        use memstead_base::{
-            Mount, MountCapability, MountLifecycle, MountStorage, MemBackend,
-        };
+        use memstead_base::{MemBackend, Mount, MountCapability, MountLifecycle, MountStorage};
 
         let tmp = TempDir::new().unwrap();
         let gitdir = fresh_repo_dir(tmp.path());
@@ -2083,8 +2040,8 @@ mod tests {
                 capability: MountCapability::Write,
                 lifecycle: MountLifecycle::Eager,
                 cross_linkable: true,
-            migration_target: None,
-        };
+                migration_target: None,
+            };
             let backend: Box<dyn MemBackend> =
                 crate::storage::instantiate_full_backend(&mount).unwrap();
             // Both shapes resolve cleanly (no panic, no error).
@@ -2102,9 +2059,9 @@ mod tests {
         // an unborn mem is a clean no-op.
         let tmp = TempDir::new().unwrap();
         let gitdir = fresh_repo_dir(tmp.path());
-        let writer =
-            GitTreeMemWriter::new(gitdir, "refs/heads/specs".to_string());
-        let head = <GitTreeMemWriter as memstead_base::backend::MemBackend>::current_head(&writer).unwrap();
+        let writer = GitTreeMemWriter::new(gitdir, "refs/heads/specs".to_string());
+        let head = <GitTreeMemWriter as memstead_base::backend::MemBackend>::current_head(&writer)
+            .unwrap();
         assert!(head.is_none());
     }
 
@@ -2117,19 +2074,15 @@ mod tests {
         // and peels the ref) so equality proves end-to-end consistency.
         let tmp = TempDir::new().unwrap();
         let gitdir = fresh_repo_dir(tmp.path());
-        let writer = GitTreeMemWriter::new(
-            gitdir.clone(),
-            "refs/heads/specs".to_string(),
-        );
+        let writer = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/specs".to_string());
 
         writer.write_entity(Path::new("a.md"), b"a").unwrap();
         let sha = writer.commit("first", &ctx_for_test()).unwrap();
         assert_eq!(sha.len(), 40);
 
-        let head =
-            <GitTreeMemWriter as memstead_base::backend::MemBackend>::current_head(&writer)
-                .unwrap()
-                .expect("head present after commit");
+        let head = <GitTreeMemWriter as memstead_base::backend::MemBackend>::current_head(&writer)
+            .unwrap()
+            .expect("head present after commit");
         assert_eq!(head, sha);
     }
 
@@ -2141,10 +2094,7 @@ mod tests {
         // cached last_known_head to detect a sibling writer.
         let tmp = TempDir::new().unwrap();
         let gitdir = fresh_repo_dir(tmp.path());
-        let writer = GitTreeMemWriter::new(
-            gitdir.clone(),
-            "refs/heads/specs".to_string(),
-        );
+        let writer = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/specs".to_string());
 
         writer.write_entity(Path::new("a.md"), b"a").unwrap();
         let first = writer.commit("first", &ctx_for_test()).unwrap();
@@ -2176,7 +2126,8 @@ mod tests {
             tmp.path().join("does-not-exist.git"),
             "refs/heads/specs".to_string(),
         );
-        let head = <GitTreeMemWriter as memstead_base::backend::MemBackend>::current_head(&writer).unwrap();
+        let head = <GitTreeMemWriter as memstead_base::backend::MemBackend>::current_head(&writer)
+            .unwrap();
         assert!(head.is_none());
     }
 
@@ -2229,10 +2180,7 @@ mod tests {
         use memstead_base::ops::ChangeEnvelope;
         let tmp = TempDir::new().unwrap();
         let gitdir = fresh_repo_dir(tmp.path());
-        let writer = GitTreeMemWriter::new(
-            gitdir.clone(),
-            "refs/heads/specs".to_string(),
-        );
+        let writer = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/specs".to_string());
 
         writer
             .write_entity(Path::new("alpha.md"), b"# Alpha")
@@ -2280,10 +2228,7 @@ mod tests {
         use memstead_base::ops::ChangeEnvelope;
         let tmp = TempDir::new().unwrap();
         let gitdir = fresh_repo_dir(tmp.path());
-        let writer = GitTreeMemWriter::new(
-            gitdir.clone(),
-            "refs/heads/specs".to_string(),
-        );
+        let writer = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/specs".to_string());
 
         writer
             .write_entity(Path::new("alpha.md"), b"# Alpha v1")
@@ -2301,7 +2246,11 @@ mod tests {
         assert_eq!(result.head, sha_v2);
         assert_eq!(result.changes.len(), 1);
         match &result.changes[0] {
-            ChangeEnvelope::Updated { id, title, entity_type } => {
+            ChangeEnvelope::Updated {
+                id,
+                title,
+                entity_type,
+            } => {
                 assert!(id.0.starts_with("specs--"));
                 assert!(title.is_none());
                 assert!(entity_type.is_none());
@@ -2321,10 +2270,7 @@ mod tests {
         // wrapper used for real backend faults.
         let tmp = TempDir::new().unwrap();
         let gitdir = fresh_repo_dir(tmp.path());
-        let writer = GitTreeMemWriter::new(
-            gitdir.clone(),
-            "refs/heads/specs".to_string(),
-        );
+        let writer = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/specs".to_string());
         // Seed one commit so the gitdir is not empty.
         writer.write_entity(Path::new("a.md"), b"a").unwrap();
         writer.commit("seed", &ctx_for_test()).unwrap();

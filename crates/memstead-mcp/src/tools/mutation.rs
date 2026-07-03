@@ -7,8 +7,7 @@ use rmcp::schemars;
 /// parameter. One sentence, ≤280 chars, agent-authored — it lands in the
 /// commit body between the subject and the provenance trailers, and is
 /// what outer-repo session-bundling hooks aggregate per session.
-pub(crate) const NOTE_PARAM_DESCRIPTION: &str =
-    "Agent-authored provenance note (≤280 chars, one sentence describing \
+pub(crate) const NOTE_PARAM_DESCRIPTION: &str = "Agent-authored provenance note (≤280 chars, one sentence describing \
      why this mutation happened). Lands in the per-mem commit body between \
      the mechanical subject line and the provenance trailers (`Tool:`, \
      `Actor:`, `Client:`), and is surfaced by the outer-repo Stop hook when \
@@ -107,7 +106,9 @@ pub struct UpdateParams {
 #[derive(Debug, Clone, serde::Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RelationUnsetInput {
-    #[schemars(description = "Relationship type of the edge to remove (canonical UPPER_SNAKE_CASE; case-insensitive input accepted)")]
+    #[schemars(
+        description = "Relationship type of the edge to remove (canonical UPPER_SNAKE_CASE; case-insensitive input accepted)"
+    )]
     pub rel_type: String,
     #[schemars(description = "Full target entity ID of the edge to remove")]
     pub target: String,
@@ -180,4 +181,3 @@ pub struct RenameParams {
     #[schemars(description = NOTE_PARAM_DESCRIPTION)]
     pub note: Option<String>,
 }
-

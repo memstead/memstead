@@ -152,11 +152,7 @@ pub fn compose_health(
         .orphans()
         .into_iter()
         .filter(|id| match vf {
-            Some(v) => engine
-                .store()
-                .get(id)
-                .map(|e| e.mem == v)
-                .unwrap_or(false),
+            Some(v) => engine.store().get(id).map(|e| e.mem == v).unwrap_or(false),
             None => true,
         })
         .collect();
@@ -164,11 +160,7 @@ pub fn compose_health(
         .stubs()
         .into_iter()
         .filter(|(id, _)| match vf {
-            Some(v) => engine
-                .store()
-                .get(id)
-                .map(|e| e.mem == v)
-                .unwrap_or(false),
+            Some(v) => engine.store().get(id).map(|e| e.mem == v).unwrap_or(false),
             None => true,
         })
         .collect();
@@ -179,10 +171,12 @@ pub fn compose_health(
     // empty mem reports 0 entities and 0 communities. Mirrors
     // `memstead_overview` via the shared helper.
     let community_count = match vf {
-        Some(v) => {
-            memstead_base::graph::community::clusters_in_mem(engine.store(), engine.communities(), v)
-                .len()
-        }
+        Some(v) => memstead_base::graph::community::clusters_in_mem(
+            engine.store(),
+            engine.communities(),
+            v,
+        )
+        .len(),
         None => engine.communities().count,
     };
 
@@ -205,7 +199,7 @@ pub fn compose_health(
                 }
             }
             let mut pairs: Vec<_> = counts.into_iter().collect();
-            pairs.sort_by(|a, b| b.1.cmp(&a.1));
+            pairs.sort_by_key(|p| std::cmp::Reverse(p.1));
             let arr: Vec<serde_json::Value> = pairs
                 .into_iter()
                 .map(|(t, c)| serde_json::json!({"type": t, "count": c}))
@@ -224,11 +218,15 @@ pub fn compose_health(
 
     let type_distribution: Vec<serde_json::Value> = {
         let mut counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
-        for e in engine.store().all_entities().filter(|e| !e.stub && in_mem(e)) {
+        for e in engine
+            .store()
+            .all_entities()
+            .filter(|e| !e.stub && in_mem(e))
+        {
             *counts.entry(&e.entity_type).or_default() += 1;
         }
         let mut pairs: Vec<_> = counts.into_iter().collect();
-        pairs.sort_by(|a, b| b.1.cmp(&a.1));
+        pairs.sort_by_key(|p| std::cmp::Reverse(p.1));
         pairs
             .into_iter()
             .map(|(s, c)| serde_json::json!({"type": s, "count": c}))
@@ -249,8 +247,7 @@ pub fn compose_health(
     // writable mount in declaration order, not `writable_mems[0]` of this
     // alphabetically-sorted roster. Surfaced so an omitted-`mem` write is
     // predictable.
-    let default_writable_mem: Option<String> =
-        engine.default_writable_mem().map(|s| s.to_string());
+    let default_writable_mem: Option<String> = engine.default_writable_mem().map(|s| s.to_string());
     let read_mems: Vec<String> = {
         let writable_set: std::collections::HashSet<&String> =
             engine.mem_router().writable_mems().iter().collect();
@@ -394,7 +391,7 @@ pub fn compose_health(
         obj.insert("stubs".into(), serde_json::json!(stubs_list));
     }
     if include.iter().any(|s| s == "most_connected") {
-        use memstead_base::graph::query::{cmp_by_dependency, connectivity_for, Connectivity};
+        use memstead_base::graph::query::{Connectivity, cmp_by_dependency, connectivity_for};
         // `typed_*` is the dependency degree (excludes auto-emitted mention
         // edges); the list is ranked by it so a co-mention hub doesn't
         // outrank a real dependency hub. `total`/`incoming`/`outgoing` keep
@@ -425,15 +422,17 @@ pub fn compose_health(
                 .store()
                 .all_entities()
                 .filter(|e| !e.stub && e.mem == v)
-                .map(|e| {
-                    connectivity_for(engine.store(), &e.id, |in_edge| in_edge.from.mem() == v)
-                })
+                .map(|e| connectivity_for(engine.store(), &e.id, |in_edge| in_edge.from.mem() == v))
                 .collect();
             entries.sort_by(cmp_by_dependency);
             entries.truncate(limit);
             entries.into_iter().map(to_json).collect()
         } else {
-            engine.most_connected(limit).into_iter().map(to_json).collect()
+            engine
+                .most_connected(limit)
+                .into_iter()
+                .map(to_json)
+                .collect()
         };
         obj.insert("most_connected".into(), serde_json::json!(connected));
     }
@@ -603,7 +602,9 @@ pub fn compose_health(
                 }
                 if let Some(cfg) = engine.mem_config_for(name) {
                     let guidance = serde_json::Map::from_iter(
-                        cfg.write_guidance.iter().map(|(k, v)| (k.clone(), v.clone())),
+                        cfg.write_guidance
+                            .iter()
+                            .map(|(k, v)| (k.clone(), v.clone())),
                     );
                     entry.insert("write_guidance".into(), serde_json::Value::Object(guidance));
                     let extra = serde_json::Map::from_iter(
@@ -712,7 +713,11 @@ fn render_count_map(s: &mut String, val: Option<&serde_json::Value>, title: &str
     }
     let _ = writeln!(s, "- {title}:");
     for (k, n) in map {
-        let label = if k.is_empty() { "(unpinned)" } else { k.as_str() };
+        let label = if k.is_empty() {
+            "(unpinned)"
+        } else {
+            k.as_str()
+        };
         let _ = writeln!(s, "  - {label}: {}", n.as_u64().unwrap_or(0));
     }
 }

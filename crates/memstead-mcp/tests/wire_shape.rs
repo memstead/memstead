@@ -44,9 +44,12 @@ fn seed_empty_workspace(root: &Path) {
     let memstead = root.join(".memstead");
     std::fs::create_dir_all(memstead.join("state")).unwrap();
     std::fs::write(memstead.join("workspace.toml"), WORKSPACE_TOML_BODY).unwrap();
-    std::fs::write(memstead.join("state").join("mounts.json"), MOUNTS_JSON_BODY_EMPTY).unwrap();
+    std::fs::write(
+        memstead.join("state").join("mounts.json"),
+        MOUNTS_JSON_BODY_EMPTY,
+    )
+    .unwrap();
 }
-
 
 /// Seed a full-flavor workspace at `root` with git-branch backed mems.
 /// Each `(mem_name, schema_pin)` produces:
@@ -93,8 +96,8 @@ fn seed_full_workspace_with_toml(root: &Path, mems: &[(&str, &str)], workspace_t
                 capability: memstead_base::MountCapability::Write,
                 lifecycle: memstead_base::MountLifecycle::Eager,
                 cross_linkable: true,
-            migration_target: None,
-        }
+                migration_target: None,
+            }
         })
         .collect();
 
@@ -161,10 +164,7 @@ impl WireHarness {
         let _ = self.read_response(id, Duration::from_secs(10));
         // Spec: the client signals it's ready with this notification.
         // The server's tool surface is only legally callable after.
-        self.send_notification(
-            "notifications/initialized",
-            json!({}),
-        );
+        self.send_notification("notifications/initialized", json!({}));
     }
 
     fn send_request(&mut self, method: &str, params: Value) -> i64 {
@@ -270,7 +270,10 @@ impl Drop for WireHarness {
 /// wire-byte-identity contract is *per-flavor*, not inter-flavor, so
 /// each pin records its own server's current bytes.
 fn assert_error_envelope(result: &Value, expected_code: &str, expected_message: &str) {
-    let is_error = result.get("isError").and_then(Value::as_bool).unwrap_or(false);
+    let is_error = result
+        .get("isError")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     assert!(is_error, "expected isError=true on error path: {result}");
 
     let structured = result
@@ -294,7 +297,6 @@ fn assert_error_envelope(result: &Value, expected_code: &str, expected_message: 
     );
 }
 
-
 // ---------------------------------------------------------------------------
 // Full-flavor pins (McpServer)
 // ---------------------------------------------------------------------------
@@ -313,10 +315,7 @@ fn pro_memstead_entity_emits_typed_envelope_for_missing_id() {
     memstead_git_branch::test_support::init_real_mem_repo(tmp.path(), &[]);
 
     let mut harness = WireHarness::start(tmp.path());
-    let result = harness.call_tool(
-        "memstead_entity",
-        json!({ "id": "specs--does-not-exist" }),
-    );
+    let result = harness.call_tool("memstead_entity", json!({ "id": "specs--does-not-exist" }));
     // Full mapper formats with capital "Entity not found" — diverges
     // from lean's "entity not found" (engine Display verbatim).
     // Recorded as inter-flavor drift; not fixed here.
@@ -340,15 +339,24 @@ fn pro_memstead_entity_emits_typed_envelope_for_missing_id() {
 // in the wrong place) trips loudly; cosmetic prose changes do not.
 
 fn assert_success_envelope(result: &Value) -> String {
-    let is_error = result.get("isError").and_then(Value::as_bool).unwrap_or(false);
+    let is_error = result
+        .get("isError")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     assert!(!is_error, "expected success but got isError=true: {result}");
     let content = result
         .get("content")
         .and_then(Value::as_array)
         .expect("content[] missing — wire envelope drifted");
-    assert!(!content.is_empty(), "content[] empty — wire envelope drifted");
+    assert!(
+        !content.is_empty(),
+        "content[] empty — wire envelope drifted"
+    );
     let first = &content[0];
-    let kind = first.get("type").and_then(Value::as_str).unwrap_or_default();
+    let kind = first
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
     assert_eq!(kind, "text", "content[0].type drifted: {first}");
     first
         .get("text")
@@ -356,7 +364,6 @@ fn assert_success_envelope(result: &Value) -> String {
         .unwrap_or_default()
         .to_string()
 }
-
 
 /// Full pin: same input through the full server. Full discovers mems
 /// via the git-branch refs in `mem-repo/.git/`, so the seed seeds a
@@ -377,7 +384,6 @@ fn pro_memstead_search_succeeds_on_empty_seeded_workspace() {
     }
 }
 
-
 /// Full pin: full flavor's `memstead_overview` against the proper full seed
 /// (git-branch refs + matching `mounts.json` entries) emits the
 /// canonical anchors AND lists the seeded mem. Adding the full-only
@@ -392,7 +398,12 @@ fn pro_memstead_overview_succeeds_on_empty_seeded_workspace() {
     let mut harness = WireHarness::start(tmp.path());
     let result = harness.call_tool("memstead_overview", json!({}));
     let text = assert_success_envelope(&result);
-    for anchor in ["## Mems", "## Schemas", "## Communities", "## Lifecycle Namespaces"] {
+    for anchor in [
+        "## Mems",
+        "## Schemas",
+        "## Communities",
+        "## Lifecycle Namespaces",
+    ] {
         assert!(
             text.contains(anchor),
             "full overview missing {anchor:?}: {text:?}"
@@ -411,7 +422,6 @@ fn pro_memstead_overview_succeeds_on_empty_seeded_workspace() {
 // across tools, not just `memstead_entity`.
 // ---------------------------------------------------------------------------
 
-
 /// Full pin: same input on a full-seeded single-mem workspace. Per-flavor
 /// message bytes are recorded independently; the lean flavor appends
 /// `" — workspace pins default@1.0.0"` to the message, the full flavor
@@ -423,10 +433,7 @@ fn pro_memstead_schema_unknown_name_emits_entity_not_found() {
     seed_full_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
 
     let mut harness = WireHarness::start(tmp.path());
-    let result = harness.call_tool(
-        "memstead_schema",
-        json!({ "name": "not-a-schema" }),
-    );
+    let result = harness.call_tool("memstead_schema", json!({ "name": "not-a-schema" }));
     assert_error_envelope(
         &result,
         "ENTITY_NOT_FOUND",
@@ -468,7 +475,6 @@ fn assert_create_success_shape(result: &Value, expected_id: &str, expected_mem: 
     );
 }
 
-
 /// Full pin: same as lean. The slug rule (`<mem>--<lower-kebab>`) is
 /// engine-internal so the expected id matches the lean pin.
 #[test]
@@ -488,7 +494,6 @@ fn pro_memstead_create_returns_typed_success_envelope() {
     assert_create_success_shape(&result, "demo--first", "demo");
 }
 
-
 /// Full pin: same input. Pre-extraction the full mapper
 /// (`engine_err_unified`) also wraps `UNKNOWN_ENTITY_TYPE`; this pin
 /// trips if full drops the recovery payload during the lift.
@@ -503,7 +508,10 @@ fn pro_memstead_create_unknown_type_emits_typed_envelope() {
         json!({ "title": "X", "entity_type": "totally-not-a-type" }),
     );
 
-    let is_error = result.get("isError").and_then(Value::as_bool).unwrap_or(false);
+    let is_error = result
+        .get("isError")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     assert!(is_error, "expected isError on unknown type: {result}");
     let structured = result
         .get("structuredContent")
@@ -530,7 +538,6 @@ fn pro_memstead_create_unknown_type_emits_typed_envelope() {
 // ---------------------------------------------------------------------------
 // `memstead_health` success pins
 // ---------------------------------------------------------------------------
-
 
 /// Full pin: full `memstead_health` returns a richer envelope with
 /// `writable_mems` populated when the engine sees writable mounts.
@@ -566,7 +573,10 @@ fn pro_memstead_changes_since_bad_cursor_returns_invalid_cursor() {
         "memstead_changes_since",
         json!({ "mem": "demo", "since": bad }),
     );
-    let is_error = result.get("isError").and_then(Value::as_bool).unwrap_or(false);
+    let is_error = result
+        .get("isError")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     assert!(is_error, "a bad since cursor must error: {result}");
     let sc = result
         .get("structuredContent")
@@ -577,7 +587,9 @@ fn pro_memstead_changes_since_bad_cursor_returns_invalid_cursor() {
         "bad since must carry the typed INVALID_CURSOR code, not MEM_ERROR: {sc}",
     );
     assert_eq!(
-        sc.get("details").and_then(|d| d.get("since")).and_then(Value::as_str),
+        sc.get("details")
+            .and_then(|d| d.get("since"))
+            .and_then(Value::as_str),
         Some(bad),
         "the offending SHA must ride untruncated in details.since: {sc}",
     );
@@ -701,7 +713,10 @@ fn create_and_get_id_hash(harness: &mut WireHarness, title: &str) -> (String, St
 /// `details.is_stub` indicates whether the entity is a stub (no body) —
 /// pinned so callers know to branch on it for stub-aware recovery.
 fn assert_hash_mismatch_envelope(result: &Value, expected_id: &str, expected_current: &str) {
-    let is_error = result.get("isError").and_then(Value::as_bool).unwrap_or(false);
+    let is_error = result
+        .get("isError")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     assert!(is_error, "expected isError=true on stale hash: {result}");
     let structured = result
         .get("structuredContent")
@@ -730,7 +745,6 @@ fn assert_hash_mismatch_envelope(result: &Value, expected_id: &str, expected_cur
     );
 }
 
-
 /// Full pin: same multi-step flow exercises full's mapper.
 #[test]
 fn pro_memstead_update_stale_hash_emits_typed_envelope() {
@@ -751,7 +765,6 @@ fn pro_memstead_update_stale_hash_emits_typed_envelope() {
     );
     assert_hash_mismatch_envelope(&result, &id, &real_hash);
 }
-
 
 /// Full pin: same. Full response shape may differ subtly (extra fields
 /// like commit_sha) — the pin only requires the rotated hash.
@@ -785,7 +798,6 @@ fn pro_memstead_update_succeeds_and_rotates_hash() {
     );
 }
 
-
 /// Full pin: same flow; full's ENTITY_NOT_FOUND message text uses
 /// capital "Entity" per the previously-recorded inter-flavor drift.
 #[test]
@@ -813,7 +825,6 @@ fn pro_memstead_delete_succeeds_and_entity_becomes_unreadable() {
 // ---------------------------------------------------------------------------
 // `memstead_relate` success pins
 // ---------------------------------------------------------------------------
-
 
 /// Full pin: same flow, but the response field names differ from lean:
 /// full emits `rel_type` (not `type`), `source: "explicit"` (carries the
@@ -872,7 +883,6 @@ fn pro_memstead_relate_returns_typed_success_envelope() {
 // `memstead_rename` pins — success + RENAME_NO_OP
 // ---------------------------------------------------------------------------
 
-
 /// Full pin: same flow.
 #[test]
 fn pro_memstead_rename_returns_typed_success_envelope() {
@@ -901,7 +911,6 @@ fn pro_memstead_rename_returns_typed_success_envelope() {
         "new_id drifted from slug rule: {body}"
     );
 }
-
 
 /// Full pin: full renames-to-same-slug succeed but ride a typed
 /// `TITLE_NORMALIZED_TO_SLUG_NOOP` warning on the response so an agent
@@ -980,13 +989,15 @@ fn pro_memstead_reload_returns_typed_success_envelope() {
 // referrer so the agent can rewrite the offending references without a
 // follow-up `memstead_entity` call. Both flavors emit this shape today.
 
-fn assert_has_incoming_refs_envelope(
-    result: &Value,
-    expected_target: &str,
-    expected_source: &str,
-) {
-    let is_error = result.get("isError").and_then(Value::as_bool).unwrap_or(false);
-    assert!(is_error, "expected isError on delete with referrers: {result}");
+fn assert_has_incoming_refs_envelope(result: &Value, expected_target: &str, expected_source: &str) {
+    let is_error = result
+        .get("isError")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    assert!(
+        is_error,
+        "expected isError on delete with referrers: {result}"
+    );
     let structured = result
         .get("structuredContent")
         .expect("structuredContent missing");
@@ -1036,7 +1047,6 @@ fn assert_has_incoming_refs_envelope(
     );
 }
 
-
 /// Full pin: same multi-step flow.
 #[test]
 fn pro_memstead_delete_with_incoming_refs_emits_typed_envelope() {
@@ -1068,7 +1078,6 @@ fn pro_memstead_delete_with_incoming_refs_emits_typed_envelope() {
 // timestamp-keyed entries from `.memstead/changes.jsonl`; full reads git
 // commits between `since` and HEAD. The two response envelopes
 // diverge — each pin records its flavor's shape per-flavor.
-
 
 /// Full pin: `memstead_changes_since` reads git history. Passing the
 /// canonical empty-tree SHA returns every entity as `added`. The
@@ -1137,8 +1146,7 @@ fn pro_memstead_changes_since_wide_window_uses_authoritative_rename_map() {
     // BEFORE the cursor — pre-rename adjacent entities and the
     // rename target. Then capture the cursor SHA. Anything that
     // happens after this is "inside the polling window".
-    let (rename_id, _) =
-        create_and_get_id_hash(&mut harness, "Leading And Trailing Whitespace");
+    let (rename_id, _) = create_and_get_id_hash(&mut harness, "Leading And Trailing Whitespace");
     // Adjacent unrelated entities — bodies share enough lexical
     // mass with the rename target that gix's similarity scorer can
     // mispair them over the wide window (the F16 trip).
@@ -1148,10 +1156,7 @@ fn pro_memstead_changes_since_wide_window_uses_authoritative_rename_map() {
     // Re-read the rename target so we have a fresh hash for the
     // rename call (the post-create hash, which is still current
     // because nothing has touched the target since).
-    let entity_read = harness.call_tool(
-        "memstead_entity",
-        json!({ "id": rename_id }),
-    );
+    let entity_read = harness.call_tool("memstead_entity", json!({ "id": rename_id }));
     let entity_text = assert_success_envelope(&entity_read);
     // Extract `_hash` from the markdown frontmatter — wire-shape
     // helper isn't worth threading; a substring sniff is enough.
@@ -1167,10 +1172,7 @@ fn pro_memstead_changes_since_wide_window_uses_authoritative_rename_map() {
     // "pre-window" and "in-window" commits. The agent contract
     // is to keep `commit_sha` from every mutation response and pass
     // it back as `since` for the next poll.
-    let last_seed_create = harness.call_tool(
-        "memstead_entity",
-        json!({ "id": other_b }),
-    );
+    let last_seed_create = harness.call_tool("memstead_entity", json!({ "id": other_b }));
     let _ = assert_success_envelope(&last_seed_create);
     // Use memstead_changes_since with empty-tree to find the latest
     // commit's SHA at the current HEAD — the response carries `head`.
@@ -1191,10 +1193,7 @@ fn pro_memstead_changes_since_wide_window_uses_authoritative_rename_map() {
 
     // Step 3: inside the polling window — touch unrelated entities
     // (so the diff has Update events) and rename the target.
-    let entity_a_read = harness.call_tool(
-        "memstead_entity",
-        json!({ "id": other_a }),
-    );
+    let entity_a_read = harness.call_tool("memstead_entity", json!({ "id": other_a }));
     let a_text = assert_success_envelope(&entity_a_read);
     let other_a_hash = a_text
         .lines()
@@ -1250,9 +1249,7 @@ fn pro_memstead_changes_since_wide_window_uses_authoritative_rename_map() {
     // false-positive renames coming from gix-similarity scoring".
     let renames: Vec<&Value> = changes
         .iter()
-        .filter(|ev| {
-            ev.get("action").and_then(Value::as_str) == Some("renamed")
-        })
+        .filter(|ev| ev.get("action").and_then(Value::as_str) == Some("renamed"))
         .collect();
     assert_eq!(
         renames.len(),
@@ -1284,7 +1281,10 @@ fn pro_memstead_changes_since_wide_window_uses_authoritative_rename_map() {
             continue;
         }
         let id = ev.get("id").and_then(Value::as_str).unwrap_or_default();
-        let from_id = ev.get("from_id").and_then(Value::as_str).unwrap_or_default();
+        let from_id = ev
+            .get("from_id")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
         let to_id = ev.get("to_id").and_then(Value::as_str).unwrap_or_default();
         assert_ne!(id, other_b.as_str(), "other_b mispaired: {ev}");
         assert_ne!(from_id, other_b.as_str(), "other_b as rename source: {ev}");
@@ -1363,14 +1363,8 @@ fn pro_memstead_entity_returns_structured_envelope_alongside_markdown() {
         Some(hash.as_str()),
         "structured._hash must match the create response's content_hash: {body}",
     );
-    assert_eq!(
-        body.get("id").and_then(Value::as_str),
-        Some(id.as_str()),
-    );
-    assert_eq!(
-        body.get("mem").and_then(Value::as_str),
-        Some("demo"),
-    );
+    assert_eq!(body.get("id").and_then(Value::as_str), Some(id.as_str()),);
+    assert_eq!(body.get("mem").and_then(Value::as_str), Some("demo"),);
     assert_eq!(
         body.get("type").and_then(Value::as_str),
         Some("spec"),
@@ -1381,7 +1375,9 @@ fn pro_memstead_entity_returns_structured_envelope_alongside_markdown() {
         "structured.sections must be a JSON object: {body}",
     );
     assert!(
-        body.get("relationships").and_then(Value::as_array).is_some(),
+        body.get("relationships")
+            .and_then(Value::as_array)
+            .is_some(),
         "structured.relationships must be a JSON array: {body}",
     );
     assert!(
@@ -1404,10 +1400,7 @@ fn pro_memstead_search_returns_structured_envelope_alongside_markdown() {
     let _ = create_and_get_id_hash(&mut harness, "Authorization Flow");
     let _ = create_and_get_id_hash(&mut harness, "Anchor Memo");
 
-    let result = harness.call_tool(
-        "memstead_search",
-        json!({ "query": { "any": ["Anchor"] } }),
-    );
+    let result = harness.call_tool("memstead_search", json!({ "query": { "any": ["Anchor"] } }));
     let _ = assert_success_envelope(&result);
 
     // Text channel — rendered markdown (rendered prose with scores,
@@ -1489,14 +1482,8 @@ fn pro_memstead_entity_structured_relationships_carry_typed_shape() {
         "expected ≥1 relationship after relate: {body}",
     );
     let rel = &relationships[0];
-    assert_eq!(
-        rel.get("rel_type").and_then(Value::as_str),
-        Some("PART_OF"),
-    );
-    assert_eq!(
-        rel.get("target").and_then(Value::as_str),
-        Some(to.as_str()),
-    );
+    assert_eq!(rel.get("rel_type").and_then(Value::as_str), Some("PART_OF"),);
+    assert_eq!(rel.get("target").and_then(Value::as_str), Some(to.as_str()),);
     assert_eq!(
         rel.get("source").and_then(Value::as_str),
         Some("explicit"),
@@ -1538,9 +1525,9 @@ fn pro_memstead_changes_since_include_notes_true_carries_notes_and_rename_note()
         .and_then(Value::as_array)
         .expect("include_notes: true must surface notes[]");
     assert!(
-        notes.iter().any(|n| {
-            n.get("tool_verb").and_then(Value::as_str) == Some("rename")
-        }),
+        notes
+            .iter()
+            .any(|n| { n.get("tool_verb").and_then(Value::as_str) == Some("rename") }),
         "rename note missing from notes[]: {body}",
     );
 }
@@ -1556,7 +1543,6 @@ fn pro_memstead_changes_since_include_notes_true_carries_notes_and_rename_note()
 // `STUB_CANNOT_RELATE`) tell the agent to promote the stub via
 // `memstead_create` before mutating. The auto-stub side rides a
 // `AUTO_STUB_CREATED` warning on the relate response.
-
 
 /// Full pin: same multi-step flow.
 #[test]
@@ -1597,7 +1583,10 @@ fn pro_auto_stub_then_update_emits_typed_envelope() {
             "sections": { "identity": "promotion-attempt" },
         }),
     );
-    let is_error = update.get("isError").and_then(Value::as_bool).unwrap_or(false);
+    let is_error = update
+        .get("isError")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     assert!(is_error, "expected isError on stub update: {update}");
     let structured = update
         .get("structuredContent")
@@ -1608,7 +1597,6 @@ fn pro_auto_stub_then_update_emits_typed_envelope() {
         "code drifted: {structured}"
     );
 }
-
 
 /// Full pin: same.
 #[test]
@@ -1629,7 +1617,10 @@ fn pro_rename_stub_emits_typed_envelope() {
         "memstead_rename",
         json!({ "id": stub_id, "new_title": "Promoted", "expected_hash": "" }),
     );
-    let is_error = rename.get("isError").and_then(Value::as_bool).unwrap_or(false);
+    let is_error = rename
+        .get("isError")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     assert!(is_error, "expected isError on stub rename: {rename}");
     let structured = rename
         .get("structuredContent")
@@ -1650,7 +1641,6 @@ fn pro_rename_stub_emits_typed_envelope() {
 // relate FROM the stub → STUB_CANNOT_RELATE. The agent's recovery is
 // `memstead_create` to promote the stub.
 
-
 /// Full pin.
 #[test]
 fn pro_relate_from_stub_emits_typed_envelope() {
@@ -1670,7 +1660,10 @@ fn pro_relate_from_stub_emits_typed_envelope() {
         "memstead_relate",
         json!({ "from": stub_id, "to": source, "type": "USES" }),
     );
-    let is_error = result.get("isError").and_then(Value::as_bool).unwrap_or(false);
+    let is_error = result
+        .get("isError")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     assert!(is_error, "expected isError on relate-from-stub: {result}");
     let structured = result
         .get("structuredContent")
@@ -1779,10 +1772,7 @@ pattern = \"*\"\n\
 
     // Now delete it. The MCP wrapper hardcodes `delete_files: true`,
     // so this is always destructive.
-    let del = harness.call_tool(
-        "memstead_mem_delete",
-        json!({ "name": "ephemeral" }),
-    );
+    let del = harness.call_tool("memstead_mem_delete", json!({ "name": "ephemeral" }));
     let _ = assert_success_envelope(&del);
     assert!(
         del.get("structuredContent").is_some(),
@@ -1821,11 +1811,7 @@ pattern = \"ephemeral\"\n\
 ";
 
     let tmp = TempDir::new().unwrap();
-    seed_full_workspace_with_toml(
-        tmp.path(),
-        &[("demo", "default@1.0.0")],
-        WORKSPACE_TOML,
-    );
+    seed_full_workspace_with_toml(tmp.path(), &[("demo", "default@1.0.0")], WORKSPACE_TOML);
 
     let mut harness = WireHarness::start(tmp.path());
 
@@ -1841,10 +1827,7 @@ pattern = \"ephemeral\"\n\
     let _ = assert_success_envelope(&create);
 
     // Destructive delete — admitted by the exact-name delete rule.
-    let del = harness.call_tool(
-        "memstead_mem_delete",
-        json!({ "name": "ephemeral" }),
-    );
+    let del = harness.call_tool("memstead_mem_delete", json!({ "name": "ephemeral" }));
     let _ = assert_success_envelope(&del);
 
     // The exact-name create + delete allowlist rules survive the delete.
@@ -1950,10 +1933,7 @@ name = \"file-two-layer\"\n\
         let _ = assert_success_envelope(&create);
 
         // And the matching delete also succeeds — both gates are bypassed.
-        let del = harness.call_tool(
-            "memstead_mem_delete",
-            json!({ "name": "fresh" }),
-        );
+        let del = harness.call_tool("memstead_mem_delete", json!({ "name": "fresh" }));
         let _ = assert_success_envelope(&del);
     }
 }
@@ -1973,11 +1953,7 @@ name = \"file-two-layer\"\n\
 ";
 
     let tmp = TempDir::new().unwrap();
-    seed_full_workspace_with_toml(
-        tmp.path(),
-        &[("demo", "default@1.0.0")],
-        WORKSPACE_TOML,
-    );
+    seed_full_workspace_with_toml(tmp.path(), &[("demo", "default@1.0.0")], WORKSPACE_TOML);
 
     // Agent-mode overview omits the bypass disclosure.
     {
@@ -2064,7 +2040,11 @@ schemas = [\"default@1.0.0\"]\n\
     );
     let _ = assert_success_envelope(&hier);
 
-    let mounts_json_path = tmp.path().join(".memstead").join("state").join("mounts.json");
+    let mounts_json_path = tmp
+        .path()
+        .join(".memstead")
+        .join("state")
+        .join("mounts.json");
     let on_disk = std::fs::read_to_string(&mounts_json_path)
         .expect("mounts.json must exist after mem_create");
     assert!(
@@ -2246,7 +2226,8 @@ fn pro_memstead_workspace_grant_cross_link_round_trip() {
     );
     let _ = assert_success_envelope(&result);
 
-    let body = std::fs::read_to_string(tmp.path().join(".memstead").join("workspace.toml")).unwrap();
+    let body =
+        std::fs::read_to_string(tmp.path().join(".memstead").join("workspace.toml")).unwrap();
     assert!(
         body.contains("[cross_mem_links]"),
         "grant must write the cross_mem_links section; got:\n{body}",
@@ -2286,16 +2267,17 @@ fn pro_memstead_workspace_grant_cross_link_idempotent_with_warning() {
         body_before, body_after,
         "duplicate grant must not rewrite the file",
     );
-    let structured = result.get("structuredContent").expect("structuredContent missing");
+    let structured = result
+        .get("structuredContent")
+        .expect("structuredContent missing");
     let warnings = structured
         .get("warnings")
         .and_then(Value::as_array)
         .expect("warnings array missing");
     assert!(
-        warnings.iter().any(|w| w
-            .get("code")
-            .and_then(Value::as_str)
-            == Some("GRANT_ALREADY_PRESENT")),
+        warnings
+            .iter()
+            .any(|w| w.get("code").and_then(Value::as_str) == Some("GRANT_ALREADY_PRESENT")),
         "duplicate grant must emit GRANT_ALREADY_PRESENT in the warnings array; got:\n{structured}\n(text: {text})",
     );
 }
@@ -2316,16 +2298,17 @@ fn pro_memstead_workspace_revoke_cross_link_idempotent_when_absent() {
         json!({ "from": "source", "to": "target" }),
     );
     let _ = assert_success_envelope(&result);
-    let structured = result.get("structuredContent").expect("structuredContent missing");
+    let structured = result
+        .get("structuredContent")
+        .expect("structuredContent missing");
     let warnings = structured
         .get("warnings")
         .and_then(Value::as_array)
         .expect("warnings array missing");
     assert!(
-        warnings.iter().any(|w| w
-            .get("code")
-            .and_then(Value::as_str)
-            == Some("GRANT_NOT_FOUND")),
+        warnings
+            .iter()
+            .any(|w| w.get("code").and_then(Value::as_str) == Some("GRANT_NOT_FOUND")),
         "no-op revoke must emit GRANT_NOT_FOUND in the warnings array; got:\n{structured}",
     );
 }
@@ -2355,7 +2338,8 @@ name = \"file-two-layer\"\n\
     );
     let _ = assert_success_envelope(&result);
 
-    let body = std::fs::read_to_string(tmp.path().join(".memstead").join("workspace.toml")).unwrap();
+    let body =
+        std::fs::read_to_string(tmp.path().join(".memstead").join("workspace.toml")).unwrap();
     assert!(
         body.contains("[[mem_management.create]]"),
         "allow_create must write the section header; got:\n{body}",
@@ -2396,11 +2380,19 @@ name = \"file-two-layer\"\n\
         json!({ "pattern": "scratch", "schemas": ["nonexistent@9.9.9"] }),
     );
     assert!(
-        differ.get("isError").and_then(Value::as_bool).unwrap_or(false),
+        differ
+            .get("isError")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
         "differing-schemas re-add must be an error envelope: {differ}",
     );
-    let structured = differ.get("structuredContent").expect("structured payload present");
-    assert_eq!(structured["code"], "RULE_EXISTS_SCHEMAS_DIFFER", "payload: {structured}");
+    let structured = differ
+        .get("structuredContent")
+        .expect("structured payload present");
+    assert_eq!(
+        structured["code"], "RULE_EXISTS_SCHEMAS_DIFFER",
+        "payload: {structured}"
+    );
     assert_eq!(
         structured["details"]["stored_schemas"],
         json!(["software@0.1.0"]),
@@ -2412,14 +2404,23 @@ name = \"file-two-layer\"\n\
         "refusal names the requested schemas: {structured}",
     );
     assert!(
-        structured["details"]["recovery"].as_str().is_some_and(|s| s.contains("revoke")),
+        structured["details"]["recovery"]
+            .as_str()
+            .is_some_and(|s| s.contains("revoke")),
         "refusal points at the revoke-then-readd recovery: {structured}",
     );
 
     // The stored rule is unchanged — still software@0.1.0.
-    let body = std::fs::read_to_string(tmp.path().join(".memstead").join("workspace.toml")).unwrap();
-    assert!(body.contains("software@0.1.0"), "stored pins stay put; got:\n{body}");
-    assert!(!body.contains("nonexistent@9.9.9"), "rejected pins not written; got:\n{body}");
+    let body =
+        std::fs::read_to_string(tmp.path().join(".memstead").join("workspace.toml")).unwrap();
+    assert!(
+        body.contains("software@0.1.0"),
+        "stored pins stay put; got:\n{body}"
+    );
+    assert!(
+        !body.contains("nonexistent@9.9.9"),
+        "rejected pins not written; got:\n{body}"
+    );
 
     // An identical re-add is still the idempotent no-op (success).
     let same = harness.call_tool(
@@ -2474,9 +2475,6 @@ fn pro_f7_dynamic_mem_lifecycle_completes_via_mcp_only() {
 
     // 4. Delete the target mem. delete_files=true now succeeds
     //    because the cross-link grant was revoked in step 3.
-    let delete = harness.call_tool(
-        "memstead_mem_delete",
-        json!({ "name": "target" }),
-    );
+    let delete = harness.call_tool("memstead_mem_delete", json!({ "name": "target" }));
     let _ = assert_success_envelope(&delete);
 }

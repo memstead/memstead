@@ -90,10 +90,7 @@ pub fn run(ctx: &CliContext, args: LinkArgs) -> anyhow::Result<()> {
         .join(&dep.scope);
     std::fs::create_dir_all(&cache_dir).map_err(|e| CliError {
         code: crate::INTERNAL_CODE,
-        message: format!(
-            "create cache dir {}: {e}",
-            cache_dir.display()
-        ),
+        message: format!("create cache dir {}: {e}", cache_dir.display()),
         kind: ExitKind::Generic,
         details: None,
     })?;
@@ -160,7 +157,7 @@ pub fn run(ctx: &CliContext, args: LinkArgs) -> anyhow::Result<()> {
     }
 
     let action = if added { "Linked" } else { "Re-fetched" };
-    let lines = vec![
+    let lines = [
         format!("# {} `{}`", action, dep.as_display()),
         String::new(),
         format!("- Cached:   `{}`", cache_path.display()),
@@ -252,7 +249,7 @@ mod tests {
                 move |AxumPath((scope_at, name_memstead)): AxumPath<(String, String)>| {
                     let body = body.clone();
                     async move {
-                        let want_scope = format!("{scope}");
+                        let want_scope = scope.to_string();
                         let want_name = format!("{name}.mem");
                         if scope_at == want_scope && name_memstead == want_name {
                             (StatusCode::OK, (*body).clone())
@@ -285,7 +282,10 @@ mod tests {
         let workspace = tmp.path().to_path_buf();
         let base_clone = base.clone();
         let result = tokio::task::spawn_blocking(move || {
-            let ctx = CliContext { json: false, quiet: false };
+            let ctx = CliContext {
+                json: false,
+                quiet: false,
+            };
             run(
                 &ctx,
                 LinkArgs {
@@ -307,7 +307,11 @@ mod tests {
             .join("memstead-io")
             .join("anthropic")
             .join("core.mem");
-        assert!(cache.is_file(), "cached archive must exist at {}", cache.display());
+        assert!(
+            cache.is_file(),
+            "cached archive must exist at {}",
+            cache.display()
+        );
         assert_eq!(std::fs::read(&cache).unwrap(), archive_bytes);
 
         // Workspace config records the dep.
@@ -332,7 +336,10 @@ mod tests {
             let workspace = workspace.clone();
             let base_clone = base_clone.clone();
             tokio::task::spawn_blocking(move || {
-                let ctx = CliContext { json: false, quiet: false };
+                let ctx = CliContext {
+                    json: false,
+                    quiet: false,
+                };
                 run(
                     &ctx,
                     LinkArgs {
@@ -367,7 +374,10 @@ mod tests {
         let workspace = tmp.path().to_path_buf();
         let base_clone = base.clone();
         let err = tokio::task::spawn_blocking(move || {
-            let ctx = CliContext { json: false, quiet: false };
+            let ctx = CliContext {
+                json: false,
+                quiet: false,
+            };
             run(
                 &ctx,
                 LinkArgs {
@@ -392,7 +402,10 @@ mod tests {
     fn link_rejects_invalid_dep_ref() {
         let tmp = TempDir::new().unwrap();
         write_minimal_workspace(&tmp);
-        let ctx = CliContext { json: false, quiet: false };
+        let ctx = CliContext {
+            json: false,
+            quiet: false,
+        };
         let err = run(
             &ctx,
             LinkArgs {
@@ -409,7 +422,10 @@ mod tests {
     fn link_rejects_missing_workspace() {
         let tmp = TempDir::new().unwrap();
         // No .memstead/workspace.toml under tmp.
-        let ctx = CliContext { json: false, quiet: false };
+        let ctx = CliContext {
+            json: false,
+            quiet: false,
+        };
         let err = run(
             &ctx,
             LinkArgs {

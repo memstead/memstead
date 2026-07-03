@@ -25,13 +25,13 @@ mod types;
 
 pub use error::MemsteadError;
 pub use types::{
-    AgentNotesReport, ChangeEnvelope, ChangesReport, ClusterInfo, CommitNote, EdgeSource,
-    EdgeTypeCount, Entity, HealthIssue, HealthOptions, ListResult, MetadataEntry, MetadataValue,
+    AgentNotesReport, ChangeEnvelope, ChangesReport, ClusterInfo, CommitNote, DanglingCrossMemEdge,
+    EdgeSource, EdgeTypeCount, Entity, HealthIssue, HealthOptions, HealthSummary, ListResult,
+    MemBackendKind, MemCreateOutcome, MemCreateRequest, MemDeleteOutcome, MemExportOutcome,
+    MemInit, MemRosterEntry, MemSchemaOutcome, MemVersionOutcome, MetadataEntry, MetadataValue,
     MissingField, ParseRecoveryEntry, ParseRecoveryReport, Query, RelationDirection, RelationEdge,
-    Relations, ReloadResult, Relationship, SearchHit, SearchResult, SearchScope, Section,
-    StaleEntity, Stats, MemBackendKind, MemCreateOutcome, MemCreateRequest,
-    MemDeleteOutcome, DanglingCrossMemEdge, MemExportOutcome, MemInit, MemRosterEntry,
-    MemSchemaOutcome, MemVersionOutcome, HealthSummary,
+    Relations, Relationship, ReloadResult, SearchHit, SearchResult, SearchScope, Section,
+    StaleEntity, Stats,
 };
 
 uniffi::include_scaffolding!("memstead");
@@ -101,11 +101,11 @@ pub fn init_filesystem_mem(
     name: String,
     schema: String,
 ) -> Result<(), MemsteadError> {
-    let schema_ref = schema
-        .parse::<memstead_schema::SchemaRef>()
-        .map_err(|e| MemsteadError::ValidationFailed {
+    let schema_ref = schema.parse::<memstead_schema::SchemaRef>().map_err(|e| {
+        MemsteadError::ValidationFailed {
             message: format!("invalid schema ref {schema:?}: {e}"),
-        })?;
+        }
+    })?;
     memstead_base::filesystem::config::init_filesystem_mem(Path::new(&root), &name, &schema_ref)
         .map_err(|e| MemsteadError::IoError {
             message: e.to_string(),
@@ -126,27 +126,30 @@ impl Engine {
     /// ignored — mounts come from `.memstead/state/mounts.json` via the
     /// workspace-store loader.
     pub fn new(_mems: Vec<MemInit>) -> Result<Self, MemsteadError> {
-        let workspace_root =
-            std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let workspace_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         Self::from_workspace_root(&workspace_root)
     }
 
     fn from_workspace_root(workspace_root: &Path) -> Result<Self, MemsteadError> {
-        let engine = memstead_git_branch::workspace_store::engine_from_workspace_root(workspace_root)
-            .map_err(|e| MemsteadError::Internal {
-                message: format!(
-                    "failed to load workspace at {}: {}",
-                    workspace_root.display(),
-                    e
-                ),
-            })?;
+        let engine =
+            memstead_git_branch::workspace_store::engine_from_workspace_root(workspace_root)
+                .map_err(|e| MemsteadError::Internal {
+                    message: format!(
+                        "failed to load workspace at {}: {}",
+                        workspace_root.display(),
+                        e
+                    ),
+                })?;
         Ok(Self {
             inner: Mutex::new(engine),
         })
     }
 
     pub fn get_stats(&self) -> Stats {
-        let engine = self.inner.lock().expect("memstead-swift engine mutex poisoned");
+        let engine = self
+            .inner
+            .lock()
+            .expect("memstead-swift engine mutex poisoned");
         convert::stats_to_ffi(engine.stats(), engine.store(), engine.mem_router())
     }
 
@@ -154,19 +157,28 @@ impl Engine {
         // `HealthOptions` is reserved for future knobs (most-connected limit
         // etc.). The engine's `health()` has no options today; once it grows
         // any, route them here without changing the FFI signature.
-        let engine = self.inner.lock().expect("memstead-swift engine mutex poisoned");
+        let engine = self
+            .inner
+            .lock()
+            .expect("memstead-swift engine mutex poisoned");
         convert::health_summary_to_ffi(engine.health())
     }
 
     pub fn list_entities(&self, scope: SearchScope) -> ListResult {
         let core_scope = convert::search_scope_from_ffi(scope);
-        let engine = self.inner.lock().expect("memstead-swift engine mutex poisoned");
+        let engine = self
+            .inner
+            .lock()
+            .expect("memstead-swift engine mutex poisoned");
         convert::list_result_to_ffi(engine.list(&core_scope))
     }
 
     pub fn search(&self, scope: SearchScope) -> SearchResult {
         let core_scope = convert::search_scope_from_ffi(scope);
-        let engine = self.inner.lock().expect("memstead-swift engine mutex poisoned");
+        let engine = self
+            .inner
+            .lock()
+            .expect("memstead-swift engine mutex poisoned");
         // `Engine::search` returns `Err(SearchUnavailable)` only on wasm32
         // — the UniFFI binding compiles for native targets where the
         // tantivy backend is present, so the `Ok` path is total here.
@@ -178,13 +190,19 @@ impl Engine {
 
     pub fn get_entity(&self, id: String) -> Option<Entity> {
         let eid = EntityId(id);
-        let engine = self.inner.lock().expect("memstead-swift engine mutex poisoned");
+        let engine = self
+            .inner
+            .lock()
+            .expect("memstead-swift engine mutex poisoned");
         engine.get_entity(&eid).map(convert::entity_to_ffi)
     }
 
     pub fn get_relations(&self, id: String) -> Result<Relations, MemsteadError> {
         let eid = EntityId(id.clone());
-        let engine = self.inner.lock().expect("memstead-swift engine mutex poisoned");
+        let engine = self
+            .inner
+            .lock()
+            .expect("memstead-swift engine mutex poisoned");
         if engine.get_entity(&eid).is_none() {
             return Err(MemsteadError::NotFound { message: id });
         }
@@ -192,7 +210,10 @@ impl Engine {
     }
 
     pub fn get_overview(&self, rebuild: bool) -> Vec<ClusterInfo> {
-        let mut engine = self.inner.lock().expect("memstead-swift engine mutex poisoned");
+        let mut engine = self
+            .inner
+            .lock()
+            .expect("memstead-swift engine mutex poisoned");
         if rebuild {
             engine.invalidate_communities();
         }
@@ -208,7 +229,10 @@ impl Engine {
     /// writable.
     pub fn mem_roster(&self) -> Vec<MemRosterEntry> {
         use memstead_base::workspace::{MountCapability, MountStorage};
-        let engine = self.inner.lock().expect("memstead-swift engine mutex poisoned");
+        let engine = self
+            .inner
+            .lock()
+            .expect("memstead-swift engine mutex poisoned");
 
         // Live non-stub entity count per mem, in one pass over the store.
         let mut counts: std::collections::HashMap<&str, u64> = std::collections::HashMap::new();
@@ -249,7 +273,10 @@ impl Engine {
     /// Workspace-wide reload. Aggregates per-mem reload diffs from
     /// `reload_each_writable_mem` into a single `ReloadResult`.
     pub fn reload(&self) -> Result<ReloadResult, MemsteadError> {
-        let mut engine = self.inner.lock().expect("memstead-swift engine mutex poisoned");
+        let mut engine = self
+            .inner
+            .lock()
+            .expect("memstead-swift engine mutex poisoned");
         let per_mem = engine.reload_each_writable_mem()?;
         let mut added = Vec::new();
         let mut changed = Vec::new();
@@ -259,15 +286,20 @@ impl Engine {
             changed.extend(r.changed);
             removed.extend(r.removed);
         }
-        Ok(convert::reload_result_to_ffi(memstead_base::ops::ReloadResult {
-            added,
-            changed,
-            removed,
-        }))
+        Ok(convert::reload_result_to_ffi(
+            memstead_base::ops::ReloadResult {
+                added,
+                changed,
+                removed,
+            },
+        ))
     }
 
     pub fn mem_head_sha(&self, mem: String) -> Result<Option<String>, MemsteadError> {
-        let engine = self.inner.lock().expect("memstead-swift engine mutex poisoned");
+        let engine = self
+            .inner
+            .lock()
+            .expect("memstead-swift engine mutex poisoned");
         Ok(engine.mem_head_sha(&mem)?)
     }
 
@@ -277,7 +309,10 @@ impl Engine {
         since: String,
         rename_similarity: Option<f32>,
     ) -> Result<ChangesReport, MemsteadError> {
-        let engine = self.inner.lock().expect("memstead-swift engine mutex poisoned");
+        let engine = self
+            .inner
+            .lock()
+            .expect("memstead-swift engine mutex poisoned");
         let report = engine.changes_since(&mem, &since, rename_similarity)?;
         Ok(convert::changes_report_to_ffi(report))
     }
@@ -287,7 +322,10 @@ impl Engine {
         mem: String,
         since: String,
     ) -> Result<AgentNotesReport, MemsteadError> {
-        let engine = self.inner.lock().expect("memstead-swift engine mutex poisoned");
+        let engine = self
+            .inner
+            .lock()
+            .expect("memstead-swift engine mutex poisoned");
         let report = match engine.mount(&mem) {
             Some(m) => match &m.storage {
                 memstead_base::MountStorage::GitBranch { gitdir, branch } => {
@@ -343,12 +381,12 @@ impl Engine {
         &self,
         note: Option<String>,
     ) -> Result<ParseRecoveryReport, MemsteadError> {
-        let mut engine = self.inner.lock().expect("memstead-swift engine mutex poisoned");
-        let report = engine.apply_parse_recovery(
-            memstead_base::vcs::Actor::Cli,
-            None,
-            note.as_deref(),
-        )?;
+        let mut engine = self
+            .inner
+            .lock()
+            .expect("memstead-swift engine mutex poisoned");
+        let report =
+            engine.apply_parse_recovery(memstead_base::vcs::Actor::Cli, None, note.as_deref())?;
         Ok(convert::parse_recovery_report_to_ffi(report))
     }
 
@@ -369,7 +407,10 @@ impl Engine {
         name: String,
         medium_json: String,
     ) -> Result<(), MemsteadError> {
-        let mut engine = self.inner.lock().expect("memstead-swift engine mutex poisoned");
+        let mut engine = self
+            .inner
+            .lock()
+            .expect("memstead-swift engine mutex poisoned");
         engine.add_medium_json(&mem, &name, &medium_json)?;
         Ok(())
     }
@@ -381,14 +422,20 @@ impl Engine {
         name: String,
         medium_json: String,
     ) -> Result<(), MemsteadError> {
-        let mut engine = self.inner.lock().expect("memstead-swift engine mutex poisoned");
+        let mut engine = self
+            .inner
+            .lock()
+            .expect("memstead-swift engine mutex poisoned");
         engine.update_medium_json(&mem, &name, &medium_json)?;
         Ok(())
     }
 
     /// Delete a medium (refused while a facet references it). See `Engine::delete_medium`.
     pub fn delete_medium(&self, mem: String, name: String) -> Result<(), MemsteadError> {
-        let mut engine = self.inner.lock().expect("memstead-swift engine mutex poisoned");
+        let mut engine = self
+            .inner
+            .lock()
+            .expect("memstead-swift engine mutex poisoned");
         engine.delete_medium(&mem, &name)?;
         Ok(())
     }
@@ -400,7 +447,10 @@ impl Engine {
         old_name: String,
         new_name: String,
     ) -> Result<(), MemsteadError> {
-        let mut engine = self.inner.lock().expect("memstead-swift engine mutex poisoned");
+        let mut engine = self
+            .inner
+            .lock()
+            .expect("memstead-swift engine mutex poisoned");
         engine.rename_medium(&mem, &old_name, &new_name)?;
         Ok(())
     }
@@ -412,7 +462,10 @@ impl Engine {
         name: String,
         facet_json: String,
     ) -> Result<(), MemsteadError> {
-        let mut engine = self.inner.lock().expect("memstead-swift engine mutex poisoned");
+        let mut engine = self
+            .inner
+            .lock()
+            .expect("memstead-swift engine mutex poisoned");
         engine.add_facet_json(&mem, &name, &facet_json)?;
         Ok(())
     }
@@ -424,14 +477,20 @@ impl Engine {
         name: String,
         facet_json: String,
     ) -> Result<(), MemsteadError> {
-        let mut engine = self.inner.lock().expect("memstead-swift engine mutex poisoned");
+        let mut engine = self
+            .inner
+            .lock()
+            .expect("memstead-swift engine mutex poisoned");
         engine.update_facet_json(&mem, &name, &facet_json)?;
         Ok(())
     }
 
     /// Delete a facet (refused while a projection references it). See `Engine::delete_facet`.
     pub fn delete_facet(&self, mem: String, name: String) -> Result<(), MemsteadError> {
-        let mut engine = self.inner.lock().expect("memstead-swift engine mutex poisoned");
+        let mut engine = self
+            .inner
+            .lock()
+            .expect("memstead-swift engine mutex poisoned");
         engine.delete_facet(&mem, &name)?;
         Ok(())
     }
@@ -443,7 +502,10 @@ impl Engine {
         old_name: String,
         new_name: String,
     ) -> Result<(), MemsteadError> {
-        let mut engine = self.inner.lock().expect("memstead-swift engine mutex poisoned");
+        let mut engine = self
+            .inner
+            .lock()
+            .expect("memstead-swift engine mutex poisoned");
         engine.rename_facet(&mem, &old_name, &new_name)?;
         Ok(())
     }
@@ -455,7 +517,10 @@ impl Engine {
         name: String,
         projection_json: String,
     ) -> Result<(), MemsteadError> {
-        let mut engine = self.inner.lock().expect("memstead-swift engine mutex poisoned");
+        let mut engine = self
+            .inner
+            .lock()
+            .expect("memstead-swift engine mutex poisoned");
         engine.add_projection_json(&mem, &name, &projection_json)?;
         Ok(())
     }
@@ -467,14 +532,20 @@ impl Engine {
         name: String,
         projection_json: String,
     ) -> Result<(), MemsteadError> {
-        let mut engine = self.inner.lock().expect("memstead-swift engine mutex poisoned");
+        let mut engine = self
+            .inner
+            .lock()
+            .expect("memstead-swift engine mutex poisoned");
         engine.update_projection_json(&mem, &name, &projection_json)?;
         Ok(())
     }
 
     /// Delete a projection (refused while an ingest runs it). See `Engine::delete_projection`.
     pub fn delete_projection(&self, mem: String, name: String) -> Result<(), MemsteadError> {
-        let mut engine = self.inner.lock().expect("memstead-swift engine mutex poisoned");
+        let mut engine = self
+            .inner
+            .lock()
+            .expect("memstead-swift engine mutex poisoned");
         engine.delete_projection(&mem, &name)?;
         Ok(())
     }
@@ -486,7 +557,10 @@ impl Engine {
         old_name: String,
         new_name: String,
     ) -> Result<(), MemsteadError> {
-        let mut engine = self.inner.lock().expect("memstead-swift engine mutex poisoned");
+        let mut engine = self
+            .inner
+            .lock()
+            .expect("memstead-swift engine mutex poisoned");
         engine.rename_projection(&mem, &old_name, &new_name)?;
         Ok(())
     }
@@ -494,28 +568,40 @@ impl Engine {
     /// Create an ingest from a JSON-encoded `Ingest`. Ingests are flat
     /// (workspace-level). See `Engine::add_ingest`.
     pub fn add_ingest(&self, name: String, ingest_json: String) -> Result<(), MemsteadError> {
-        let mut engine = self.inner.lock().expect("memstead-swift engine mutex poisoned");
+        let mut engine = self
+            .inner
+            .lock()
+            .expect("memstead-swift engine mutex poisoned");
         engine.add_ingest_json(&name, &ingest_json)?;
         Ok(())
     }
 
     /// Overwrite an ingest from a JSON-encoded `Ingest`. See `Engine::update_ingest`.
     pub fn update_ingest(&self, name: String, ingest_json: String) -> Result<(), MemsteadError> {
-        let mut engine = self.inner.lock().expect("memstead-swift engine mutex poisoned");
+        let mut engine = self
+            .inner
+            .lock()
+            .expect("memstead-swift engine mutex poisoned");
         engine.update_ingest_json(&name, &ingest_json)?;
         Ok(())
     }
 
     /// Delete an ingest (nothing references it). See `Engine::delete_ingest`.
     pub fn delete_ingest(&self, name: String) -> Result<(), MemsteadError> {
-        let mut engine = self.inner.lock().expect("memstead-swift engine mutex poisoned");
+        let mut engine = self
+            .inner
+            .lock()
+            .expect("memstead-swift engine mutex poisoned");
         engine.delete_ingest(&name)?;
         Ok(())
     }
 
     /// Rename an ingest. See `Engine::rename_ingest`.
     pub fn rename_ingest(&self, old_name: String, new_name: String) -> Result<(), MemsteadError> {
-        let mut engine = self.inner.lock().expect("memstead-swift engine mutex poisoned");
+        let mut engine = self
+            .inner
+            .lock()
+            .expect("memstead-swift engine mutex poisoned");
         engine.rename_ingest(&old_name, &new_name)?;
         Ok(())
     }
@@ -525,7 +611,10 @@ impl Engine {
     /// deserializes to display the store. See
     /// `memstead_base::Engine::pipeline_configs_json`.
     pub fn pipeline_configs_json(&self) -> String {
-        let engine = self.inner.lock().expect("memstead-swift engine mutex poisoned");
+        let engine = self
+            .inner
+            .lock()
+            .expect("memstead-swift engine mutex poisoned");
         engine.pipeline_configs_json()
     }
 
@@ -542,10 +631,7 @@ impl Engine {
 
     /// Create and register a writable mem. Mirrors `memstead_mem_create`.
     /// See `memstead_engine::mem_management::create_mem`.
-    pub fn create_mem(
-        &self,
-        request: MemCreateRequest,
-    ) -> Result<MemCreateOutcome, MemsteadError> {
+    pub fn create_mem(&self, request: MemCreateRequest) -> Result<MemCreateOutcome, MemsteadError> {
         let schema_ref = request
             .schema
             .parse::<memstead_schema::SchemaRef>()
@@ -570,7 +656,10 @@ impl Engine {
             recovery: None,
             write_guidance: std::collections::HashMap::new(),
         };
-        let mut engine = self.inner.lock().expect("memstead-swift engine mutex poisoned");
+        let mut engine = self
+            .inner
+            .lock()
+            .expect("memstead-swift engine mutex poisoned");
         let response = memstead_engine::mem_management::create_mem(&mut engine, params)?;
         Ok(MemCreateOutcome {
             name: response.name,
@@ -596,7 +685,10 @@ impl Engine {
             note,
             operator_mode,
         };
-        let mut engine = self.inner.lock().expect("memstead-swift engine mutex poisoned");
+        let mut engine = self
+            .inner
+            .lock()
+            .expect("memstead-swift engine mutex poisoned");
         let response = memstead_engine::mem_management::delete_mem(&mut engine, params)?;
         Ok(MemDeleteOutcome {
             name: response.name,
@@ -614,12 +706,15 @@ impl Engine {
         mem: String,
         schema: String,
     ) -> Result<MemSchemaOutcome, MemsteadError> {
-        let target = schema
-            .parse::<memstead_schema::SchemaRef>()
-            .map_err(|e| MemsteadError::ValidationFailed {
+        let target = schema.parse::<memstead_schema::SchemaRef>().map_err(|e| {
+            MemsteadError::ValidationFailed {
                 message: format!("invalid schema ref {schema:?}: {e}"),
-            })?;
-        let mut engine = self.inner.lock().expect("memstead-swift engine mutex poisoned");
+            }
+        })?;
+        let mut engine = self
+            .inner
+            .lock()
+            .expect("memstead-swift engine mutex poisoned");
         let outcome = engine.set_mem_schema(&mem, &target)?;
         Ok(convert::set_schema_outcome_to_ffi(outcome))
     }
@@ -637,7 +732,10 @@ impl Engine {
             semver::Version::parse(&version).map_err(|e| MemsteadError::ValidationFailed {
                 message: format!("version {version:?} is not a valid semver: {e}"),
             })?;
-        let mut engine = self.inner.lock().expect("memstead-swift engine mutex poisoned");
+        let mut engine = self
+            .inner
+            .lock()
+            .expect("memstead-swift engine mutex poisoned");
         let outcome = engine.set_mem_version(&mem, new_version, note.as_deref())?;
         Ok(MemVersionOutcome {
             mem: outcome.mem,
@@ -656,7 +754,10 @@ impl Engine {
         mem: String,
         output_path: String,
     ) -> Result<MemExportOutcome, MemsteadError> {
-        let engine = self.inner.lock().expect("memstead-swift engine mutex poisoned");
+        let engine = self
+            .inner
+            .lock()
+            .expect("memstead-swift engine mutex poisoned");
         let result = engine.export_mem(&mem, Path::new(&output_path))?;
         Ok(MemExportOutcome {
             archive_path: result.archive_path,
@@ -790,7 +891,11 @@ mod tests {
     fn get_stats_counts_fixture_entities() {
         let (engine, _tmp) = setup_test_engine();
         let stats = engine.get_stats();
-        assert!(stats.entity_count >= 2, "entity_count: {}", stats.entity_count);
+        assert!(
+            stats.entity_count >= 2,
+            "entity_count: {}",
+            stats.entity_count
+        );
         assert!(stats.edge_count >= 1, "edge_count: {}", stats.edge_count);
         assert_eq!(stats.mem_count, 1);
         assert!(stats.types_in_use.iter().any(|t| t == "spec"));
@@ -810,7 +915,11 @@ mod tests {
         let engine = engine_open(tmp.path().to_string_lossy().to_string())
             .expect("engine_open on a seeded workspace");
         let stats = engine.get_stats();
-        assert!(stats.entity_count >= 2, "entity_count: {}", stats.entity_count);
+        assert!(
+            stats.entity_count >= 2,
+            "entity_count: {}",
+            stats.entity_count
+        );
         assert_eq!(stats.writable_mems, vec!["specs".to_string()]);
     }
 
@@ -847,7 +956,11 @@ mod tests {
             .expect("folder workspace opens through engine_open");
         let stats = engine.get_stats();
         assert_eq!(stats.writable_mems, vec!["notes".to_string()]);
-        assert!(stats.entity_count >= 1, "entity_count: {}", stats.entity_count);
+        assert!(
+            stats.entity_count >= 1,
+            "entity_count: {}",
+            stats.entity_count
+        );
     }
 
     #[test]
@@ -980,9 +1093,7 @@ mod tests {
     #[test]
     fn get_relations_missing_entity_is_not_found() {
         let (engine, _tmp) = setup_test_engine();
-        let err = engine
-            .get_relations("specs--nope".to_string())
-            .unwrap_err();
+        let err = engine.get_relations("specs--nope".to_string()).unwrap_err();
         match err {
             MemsteadError::NotFound { message } => assert!(message.contains("nope")),
             other => panic!("expected NotFound, got {other:?}"),
@@ -1026,9 +1137,7 @@ mod tests {
     #[test]
     fn mem_head_sha_unknown_mem_errors() {
         let (engine, _tmp) = setup_test_engine();
-        let err = engine
-            .mem_head_sha("no-such".to_string())
-            .unwrap_err();
+        let err = engine.mem_head_sha("no-such".to_string()).unwrap_err();
         match err {
             MemsteadError::UnknownMem { name, .. } => assert_eq!(name, "no-such"),
             other => panic!("expected UnknownMem, got {other:?}"),
@@ -1062,13 +1171,19 @@ mod tests {
     fn agent_notes_returns_memstead_ref_shape() {
         let (engine, _tmp) = setup_test_engine();
         let report = engine
-            .agent_notes("specs".to_string(), memstead_base::EMPTY_TREE_SHA.to_string())
+            .agent_notes(
+                "specs".to_string(),
+                memstead_base::EMPTY_TREE_SHA.to_string(),
+            )
             .expect("agent_notes");
         assert_eq!(report.mem, "specs");
         // Fixture seeds `__MEMSTEAD` via the migrator; the FFI contract
         // being locked here is that `memstead_ref` round-trips without
         // crashing.
-        let sha = report.memstead_ref.as_ref().expect("memstead_ref must be populated by fixture");
+        let sha = report
+            .memstead_ref
+            .as_ref()
+            .expect("memstead_ref must be populated by fixture");
         assert_eq!(sha.len(), 40);
     }
 
@@ -1106,14 +1221,23 @@ mod tests {
         assert_eq!(report.entries[0].outcome, "removed");
         assert_eq!(report.entries[0].rel_type, "MADE_UP_TYPE_A");
         assert!(report.entries[0].reason.is_none());
-        assert!(report.commit_sha.is_some(), "a recovery that wrote must report its commit sha");
+        assert!(
+            report.commit_sha.is_some(),
+            "a recovery that wrote must report its commit sha"
+        );
 
         // Idempotent: re-running on the now-clean workspace is a no-op.
         let again = engine
             .apply_parse_recovery(None)
             .expect("second recovery call succeeds");
-        assert!(again.entries.is_empty(), "clean workspace yields no entries");
-        assert!(again.commit_sha.is_none(), "nothing rewritten → no commit sha");
+        assert!(
+            again.entries.is_empty(),
+            "clean workspace yields no entries"
+        );
+        assert!(
+            again.commit_sha.is_none(),
+            "nothing rewritten → no commit sha"
+        );
     }
 
     #[test]
@@ -1124,7 +1248,12 @@ mod tests {
         // empty — the keys must still be present.
         let (engine, _tmp) = setup_test_engine();
         let json = engine.pipeline_configs_json();
-        for key in ["\"mediums\"", "\"facets\"", "\"projections\"", "\"ingests\""] {
+        for key in [
+            "\"mediums\"",
+            "\"facets\"",
+            "\"projections\"",
+            "\"ingests\"",
+        ] {
             assert!(json.contains(key), "missing {key} in: {json}");
         }
     }
@@ -1137,7 +1266,11 @@ mod tests {
         // and confirm the outcome reflects the new version through the FFI.
         let (engine, _tmp) = setup_test_engine();
         let outcome = engine
-            .set_mem_version("specs".to_string(), "0.2.0".to_string(), Some("ship".into()))
+            .set_mem_version(
+                "specs".to_string(),
+                "0.2.0".to_string(),
+                Some("ship".into()),
+            )
             .expect("version bump succeeds through the FFI surface");
         assert_eq!(outcome.mem, "specs");
         assert_eq!(outcome.new_version, "0.2.0");
@@ -1155,7 +1288,10 @@ mod tests {
         let err = engine
             .set_mem_version("specs".to_string(), "not-semver".to_string(), None)
             .expect_err("malformed semver must refuse");
-        assert!(matches!(err, MemsteadError::ValidationFailed { .. }), "got {err:?}");
+        assert!(
+            matches!(err, MemsteadError::ValidationFailed { .. }),
+            "got {err:?}"
+        );
     }
 
     #[test]
@@ -1180,7 +1316,10 @@ mod tests {
             .expect_err("unknown mem must refuse");
         // `UnknownMem` survives the `FullEngineError::Lean` → `EngineError`
         // lift into the typed Swift variant.
-        assert!(matches!(err, MemsteadError::UnknownMem { .. }), "got {err:?}");
+        assert!(
+            matches!(err, MemsteadError::UnknownMem { .. }),
+            "got {err:?}"
+        );
     }
 
     #[test]
@@ -1206,7 +1345,12 @@ mod tests {
         assert_eq!(created.name, "fresh");
         assert_eq!(created.schema_ref, "default@1.0.0");
         // Git-branch backends produce a real 40-char hex seed sha.
-        assert_eq!(created.seed_commit_sha.len(), 40, "sha: {}", created.seed_commit_sha);
+        assert_eq!(
+            created.seed_commit_sha.len(),
+            40,
+            "sha: {}",
+            created.seed_commit_sha
+        );
 
         // The engine now lists the created mem without a restart.
         let stats = engine.get_stats();
@@ -1262,7 +1406,10 @@ mod tests {
             "not a ref".to_string(),
         )
         .expect_err("malformed schema must refuse");
-        assert!(matches!(err, MemsteadError::ValidationFailed { .. }), "got {err:?}");
+        assert!(
+            matches!(err, MemsteadError::ValidationFailed { .. }),
+            "got {err:?}"
+        );
     }
 
     #[test]
@@ -1289,7 +1436,11 @@ mod tests {
         let engine = engine_open(root.to_string_lossy().to_string())
             .expect("a standalone mem opens through engine_open");
         let roster = engine.mem_roster();
-        assert_eq!(roster.len(), 1, "one mount for the standalone mem: {roster:?}");
+        assert_eq!(
+            roster.len(),
+            1,
+            "one mount for the standalone mem: {roster:?}"
+        );
         assert_eq!(roster[0].backend, MemBackendKind::Folder);
         assert!(engine.get_stats().entity_count >= 1);
     }
@@ -1338,8 +1489,8 @@ mod tests {
         )
         .expect("mounts.json");
 
-        let engine = engine_open(root.to_string_lossy().to_string())
-            .expect("folder workspace opens");
+        let engine =
+            engine_open(root.to_string_lossy().to_string()).expect("folder workspace opens");
         let roster = engine.mem_roster();
         assert_eq!(roster.len(), 1, "roster: {roster:?}");
         assert_eq!(roster[0].mem, "notes");
@@ -1366,10 +1517,17 @@ mod tests {
             .expect("export succeeds through the FFI");
         assert_eq!(outcome.name, "specs");
         assert_eq!(outcome.version, "1.0.0");
-        assert!(outcome.entity_count >= 2, "entity_count: {}", outcome.entity_count);
+        assert!(
+            outcome.entity_count >= 2,
+            "entity_count: {}",
+            outcome.entity_count
+        );
         assert!(outcome.size_bytes > 0);
         assert!(outcome.dangling_cross_mem_edges.is_empty());
-        assert!(out_path.is_file(), "archive must land at the requested path");
+        assert!(
+            out_path.is_file(),
+            "archive must land at the requested path"
+        );
 
         // The engine can mount the produced archive read-only.
         let bytes = std::fs::read(&out_path).expect("read exported archive");
@@ -1386,9 +1544,15 @@ mod tests {
         let (engine, tmp) = setup_test_engine();
         let out_path = tmp.path().join("nope.mem");
         let err = engine
-            .export_mem("no-such-mem".to_string(), out_path.to_string_lossy().into_owned())
+            .export_mem(
+                "no-such-mem".to_string(),
+                out_path.to_string_lossy().into_owned(),
+            )
             .expect_err("unknown mem must refuse");
-        assert!(matches!(err, MemsteadError::UnknownMem { .. }), "got {err:?}");
+        assert!(
+            matches!(err, MemsteadError::UnknownMem { .. }),
+            "got {err:?}"
+        );
     }
 
     #[test]
@@ -1406,6 +1570,9 @@ mod tests {
                 operator_mode: true,
             })
             .expect_err("malformed schema ref must refuse");
-        assert!(matches!(err, MemsteadError::ValidationFailed { .. }), "got {err:?}");
+        assert!(
+            matches!(err, MemsteadError::ValidationFailed { .. }),
+            "got {err:?}"
+        );
     }
 }

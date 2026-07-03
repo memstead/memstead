@@ -26,6 +26,9 @@ struct Cli {
     command: Command,
 }
 
+// Boxing `EvalArgs` would break the clap derive (`Box<T>` doesn't
+// implement `Args`), and exactly one Command exists per process anyway.
+#[allow(clippy::large_enum_variant)]
 #[derive(Subcommand, Debug)]
 enum Command {
     /// Regenerate the deterministic API-docs Markdown tree from the live
@@ -181,7 +184,10 @@ fn run_eval(args: EvalArgs) -> Result<()> {
         let mcp_binary = args
             .mcp_binary
             .context("--replay-branch needs --mcp-binary <path to memstead-mcp>")?;
-        eprintln!("preparing {} historical states of {branch}…", args.replay_count);
+        eprintln!(
+            "preparing {} historical states of {branch}…",
+            args.replay_count
+        );
         eval::replay::prepare_history(
             &workspace,
             &args.replay_dir,
@@ -240,7 +246,9 @@ fn run_eval(args: EvalArgs) -> Result<()> {
 
 /// Source the two substrates: either capture them from a corpus (the full
 /// write-side run) or read pre-built capture files.
-fn obtain_substrates(args: &EvalArgs) -> Result<(eval::substrate::Substrate, eval::substrate::Substrate)> {
+fn obtain_substrates(
+    args: &EvalArgs,
+) -> Result<(eval::substrate::Substrate, eval::substrate::Substrate)> {
     if let Some(corpus_path) = args.capture_corpus.as_ref() {
         let corpus = std::fs::read_to_string(corpus_path)
             .with_context(|| format!("reading capture corpus {}", corpus_path.display()))?;
@@ -261,7 +269,10 @@ fn obtain_substrates(args: &EvalArgs) -> Result<(eval::substrate::Substrate, eva
                 let mcp = args.mcp_binary.as_ref().context(
                     "self-provisioning the capture mem needs --mcp-binary <memstead-mcp>",
                 )?;
-                eprintln!("provisioning empty capture mem at {}…", args.capture_workspace.display());
+                eprintln!(
+                    "provisioning empty capture mem at {}…",
+                    args.capture_workspace.display()
+                );
                 let (cfg, dir) = eval::capture::provision_capture_mem(
                     cli,
                     mcp,
@@ -329,7 +340,10 @@ fn run_substrate_eval(args: &EvalArgs, subject: &str, tasks: &[eval::TaskSpec]) 
     // comparison, so the C−B delta speaks only to substrate value, not prior
     // knowledge. A zero threshold disables the screen.
     let (kept, report) = if args.contamination_threshold > 0.0 {
-        eprintln!("contamination screen: A arm (no substrate) over {} tasks…", tasks.len());
+        eprintln!(
+            "contamination screen: A arm (no substrate) over {} tasks…",
+            tasks.len()
+        );
         let (kept, report) = eval::contamination::screen_tasks(
             &runner,
             &judge,
@@ -339,7 +353,10 @@ fn run_substrate_eval(args: &EvalArgs, subject: &str, tasks: &[eval::TaskSpec]) 
             args.trials,
         )?;
         for ex in &report.excluded {
-            eprintln!("  excluded (guessable): {} bare_score={:.3}", ex.task_id, ex.bare_score);
+            eprintln!(
+                "  excluded (guessable): {} bare_score={:.3}",
+                ex.task_id, ex.bare_score
+            );
         }
         (kept, report.excluded)
     } else {
@@ -370,7 +387,10 @@ fn run_substrate_eval(args: &EvalArgs, subject: &str, tasks: &[eval::TaskSpec]) 
     if let Some(facts_path) = args.facts.as_ref() {
         let facts = eval::coverage::load_facts(facts_path)?;
         let checker = eval::coverage::ClaudeCoverageChecker::new(args.model.clone());
-        eprintln!("coverage: measuring C and B against {} source facts…", facts.len());
+        eprintln!(
+            "coverage: measuring C and B against {} source facts…",
+            facts.len()
+        );
         for substrate in [&c, &b] {
             let cov = eval::coverage::measure_coverage(
                 &checker,
@@ -425,9 +445,8 @@ fn write_mcp_reference(output: &Path) -> Result<()> {
 
 fn write_parity_matrix(output: &Path) -> Result<()> {
     let workspace_root = workspace_root();
-    let udl_text = std::fs::read_to_string(
-        workspace_root.join("crates/memstead-swift/src/memstead.udl"),
-    )?;
+    let udl_text =
+        std::fs::read_to_string(workspace_root.join("crates/memstead-swift/src/memstead.udl"))?;
     let wasm_path = workspace_root.join("crates/memstead-wasm/src/lib.rs");
     let wasm_methods = wasm::method_names_from_file(&wasm_path)?;
     let operations_toml = include_str!("../operations.toml");
@@ -471,14 +490,11 @@ fn workspace_root() -> PathBuf {
 
 fn write_cli_reference(output: &Path) -> Result<()> {
     let cli_dir = output.join("cli");
-    fs::create_dir_all(&cli_dir)
-        .with_context(|| format!("creating {}", cli_dir.display()))?;
+    fs::create_dir_all(&cli_dir).with_context(|| format!("creating {}", cli_dir.display()))?;
 
     // One CLI crate, one reference. `xtask` links `memstead-cli` with
     // `mem-repo` on, so this renders the full `memstead` surface.
-    let cli = clap_markdown::help_markdown_command(
-        &memstead_cli::cli::Cli::command(),
-    );
+    let cli = clap_markdown::help_markdown_command(&memstead_cli::cli::Cli::command());
     write_if_changed(
         &cli_dir.join("cli.md"),
         &with_frontmatter("CLI (`memstead`)", &cli),
@@ -521,12 +537,11 @@ fn yaml_double_quote(s: &str) -> String {
 /// the drift-check workflow rely on `git diff --exit-code` to flag real
 /// surface changes.
 fn write_if_changed(path: &Path, contents: &str) -> Result<()> {
-    if let Ok(existing) = fs::read_to_string(path) {
-        if existing == contents {
-            return Ok(());
-        }
+    if let Ok(existing) = fs::read_to_string(path)
+        && existing == contents
+    {
+        return Ok(());
     }
-    fs::write(path, contents)
-        .with_context(|| format!("writing {}", path.display()))?;
+    fs::write(path, contents).with_context(|| format!("writing {}", path.display()))?;
     Ok(())
 }

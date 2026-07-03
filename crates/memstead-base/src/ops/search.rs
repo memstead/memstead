@@ -11,8 +11,8 @@ use std::sync::Arc;
 use memstead_schema::{Filterable, Schema, Serialization, TypeDefinition, type_by_name};
 
 use super::{
-    ExpansionInfo, Facets, ListResult, Query, ScoreBreakdown, SearchHit, SearchResult,
-    SearchScope, SubsectionFacet, SummaryPair, WarningHint,
+    ExpansionInfo, Facets, ListResult, Query, ScoreBreakdown, SearchHit, SearchResult, SearchScope,
+    SubsectionFacet, SummaryPair, WarningHint,
 };
 use crate::entity::EntityId;
 use crate::entity::generator::generate_markdown;
@@ -84,8 +84,7 @@ pub fn search(
     let mut warnings: Vec<WarningHint> = Vec::new();
     let scoped_type = scope.entity_type.as_deref();
     let scope_mem = scope.mem.as_deref();
-    let filter_type = scoped_type
-        .and_then(|t| resolve_type(t, scope_mem, mem_schemas));
+    let filter_type = scoped_type.and_then(|t| resolve_type(t, scope_mem, mem_schemas));
     let filter_schema: &TypeDefinition = filter_type.as_deref().unwrap_or(default_schema);
     collect_equality_filter_warnings(
         &scope.filters,
@@ -317,7 +316,14 @@ pub fn search(
     if let Some(ref edge_types) = scope.expand_via
         && !edge_types.is_empty()
     {
-        expand_hits(&mut hits, store, edge_types, scope, default_schema, mem_schemas);
+        expand_hits(
+            &mut hits,
+            store,
+            edge_types,
+            scope,
+            default_schema,
+            mem_schemas,
+        );
     }
 
     // Sort: a `related_to` neighbourhood ranks by proximity — nearer hops
@@ -393,10 +399,7 @@ pub fn search(
     }
     if keep < pre_budget {
         paginated.truncate(keep);
-        warnings.push(WarningHint::SearchResultsTruncated {
-            kept: keep,
-            budget,
-        });
+        warnings.push(WarningHint::SearchResultsTruncated { kept: keep, budget });
     }
     let returned = paginated.len();
 
@@ -423,8 +426,7 @@ pub fn list(
     let mut warnings: Vec<WarningHint> = Vec::new();
     let scoped_type = scope.entity_type.as_deref();
     let scope_mem = scope.mem.as_deref();
-    let filter_type = scoped_type
-        .and_then(|t| resolve_type(t, scope_mem, mem_schemas));
+    let filter_type = scoped_type.and_then(|t| resolve_type(t, scope_mem, mem_schemas));
     let filter_schema: &TypeDefinition = filter_type.as_deref().unwrap_or(default_schema);
     collect_equality_filter_warnings(
         &scope.filters,
@@ -597,7 +599,11 @@ fn compute_facets(hits: &[SearchHit], store: &Store) -> Facets {
             }
         }
 
-        let tag = if hit.expansion.is_some() { "expanded" } else { "primary" };
+        let tag = if hit.expansion.is_some() {
+            "expanded"
+        } else {
+            "primary"
+        };
         *by_expansion.entry(tag.into()).or_insert(0) += 1;
 
         if let Some(matched) = &hit.matched_terms {
@@ -683,10 +689,7 @@ fn expand_hits(
                 None => true,
             };
             if better {
-                expanded.insert(
-                    neighbor_id,
-                    (score, via_edge, depth, primary.id.clone()),
-                );
+                expanded.insert(neighbor_id, (score, via_edge, depth, primary.id.clone()));
             }
         }
     }
@@ -809,11 +812,7 @@ fn snippet_for(
     schema: &TypeDefinition,
 ) -> Option<String> {
     let lower_term = term.to_lowercase();
-    if entity
-        .title
-        .to_lowercase()
-        .contains(&lower_term)
-    {
+    if entity.title.to_lowercase().contains(&lower_term) {
         return Some(build_snippet(&entity.title, term));
     }
     let mut best: Option<(f32, String)> = None;
@@ -822,9 +821,7 @@ fn snippet_for(
             continue;
         }
         if let Some(content) = entity.sections.get(section_def.key.as_str())
-            && content
-                .to_lowercase()
-                .contains(&lower_term)
+            && content.to_lowercase().contains(&lower_term)
         {
             let snippet = build_snippet(content, term);
             let pick = match &best {
@@ -1482,7 +1479,8 @@ mod tests {
         );
         assert_eq!(result.warnings.len(), 1);
         assert!(
-            result.warnings[0].to_string().contains("stauts") && result.warnings[0].to_string().contains("unknown"),
+            result.warnings[0].to_string().contains("stauts")
+                && result.warnings[0].to_string().contains("unknown"),
             "warning mentions unknown key: {:?}",
             result.warnings
         );
@@ -1609,9 +1607,14 @@ mod tests {
 
         let result = run_search(&store, &scope);
         assert_eq!(
-            result.total, 1,
+            result.total,
+            1,
             "strict filter must keep only the matching spec entity; got {:?}",
-            result.hits.iter().map(|h| h.id.to_string()).collect::<Vec<_>>(),
+            result
+                .hits
+                .iter()
+                .map(|h| h.id.to_string())
+                .collect::<Vec<_>>(),
         );
         assert_eq!(result.hits[0].id, spec_match.id);
     }
@@ -1634,12 +1637,20 @@ mod tests {
 
         let result = run_search(&store, &scope);
         assert_eq!(
-            result.total, 1,
+            result.total,
+            1,
             "unknown-anywhere filter key must not collapse the result set; got {:?}",
-            result.hits.iter().map(|h| h.id.to_string()).collect::<Vec<_>>(),
+            result
+                .hits
+                .iter()
+                .map(|h| h.id.to_string())
+                .collect::<Vec<_>>(),
         );
         assert!(
-            result.warnings.iter().any(|w| w.to_string().contains("definitely-not-a-real-field")),
+            result
+                .warnings
+                .iter()
+                .any(|w| w.to_string().contains("definitely-not-a-real-field")),
             "unknown-key warning must still surface: {:?}",
             result.warnings,
         );
@@ -1711,7 +1722,10 @@ mod tests {
         );
         assert_eq!(filtered.total, 2);
         assert!(
-            filtered.warnings.iter().any(|w| w.code() == "FIELD_NOT_FILTERABLE"),
+            filtered
+                .warnings
+                .iter()
+                .any(|w| w.code() == "FIELD_NOT_FILTERABLE"),
             "scoped non-filterable filter must warn FIELD_NOT_FILTERABLE: {:?}",
             filtered.warnings,
         );
@@ -1729,10 +1743,14 @@ mod tests {
         // Two concept entities, one matching the filter value.
         let mut c_match = make_entity("c-emerging", "specs");
         c_match.entity_type = "concept".into();
-        c_match.metadata.insert("maturity".into(), MetadataValue::String("emerging".into()));
+        c_match
+            .metadata
+            .insert("maturity".into(), MetadataValue::String("emerging".into()));
         let mut c_other = make_entity("c-stable", "specs");
         c_other.entity_type = "concept".into();
-        c_other.metadata.insert("maturity".into(), MetadataValue::String("stable".into()));
+        c_other
+            .metadata
+            .insert("maturity".into(), MetadataValue::String("stable".into()));
         // A spec entity that doesn't declare `maturity` — narrowed away.
         let spec = make_entity("s", "specs");
         store.upsert(c_match.id.clone(), c_match.clone());
@@ -1746,7 +1764,10 @@ mod tests {
                 ..Default::default()
             },
         );
-        assert_eq!(result.total, 1, "only the matching concept survives the narrowing");
+        assert_eq!(
+            result.total, 1,
+            "only the matching concept survives the narrowing"
+        );
         assert_eq!(result.hits[0].id, c_match.id);
         assert_eq!(result.warnings.len(), 1, "{:?}", result.warnings);
         assert_eq!(
@@ -1771,9 +1792,10 @@ mod tests {
         let mut store = Store::new();
         let mut assertion = make_entity("a-claim", "specs");
         assertion.entity_type = "assertion".into();
-        assertion
-            .metadata
-            .insert("source_quality".into(), MetadataValue::String("experimental".into()));
+        assertion.metadata.insert(
+            "source_quality".into(),
+            MetadataValue::String("experimental".into()),
+        );
         store.upsert(assertion.id.clone(), assertion);
         store.upsert(EntityId::new("specs", "s1"), make_entity("s1", "specs"));
         store.upsert(EntityId::new("specs", "s2"), make_entity("s2", "specs"));
@@ -1831,12 +1853,20 @@ mod tests {
             },
         );
         assert_eq!(
-            result.total, 2,
+            result.total,
+            2,
             "non-range-filterable range filter must not drop the memo lacking the field; got {:?}",
-            result.hits.iter().map(|h| h.id.to_string()).collect::<Vec<_>>(),
+            result
+                .hits
+                .iter()
+                .map(|h| h.id.to_string())
+                .collect::<Vec<_>>(),
         );
         assert!(
-            result.warnings.iter().any(|w| w.code() == "FIELD_NOT_RANGE_FILTERABLE"),
+            result
+                .warnings
+                .iter()
+                .any(|w| w.code() == "FIELD_NOT_RANGE_FILTERABLE"),
             "must warn FIELD_NOT_RANGE_FILTERABLE: {:?}",
             result.warnings,
         );
@@ -1854,7 +1884,9 @@ mod tests {
         let mut store = Store::new();
         let mut concept = make_entity("c1", "specs");
         concept.entity_type = "concept".into();
-        concept.metadata.insert("maturity".into(), MetadataValue::String("stable".into()));
+        concept
+            .metadata
+            .insert("maturity".into(), MetadataValue::String("stable".into()));
         store.upsert(concept.id.clone(), concept);
         store.upsert(EntityId::new("specs", "s1"), make_entity("s1", "specs"));
 
@@ -1870,7 +1902,10 @@ mod tests {
             "non-range-filterable field range filter must leave the set unfiltered",
         );
         assert!(
-            result.warnings.iter().any(|w| w.code() == "FIELD_NOT_RANGE_FILTERABLE"),
+            result
+                .warnings
+                .iter()
+                .any(|w| w.code() == "FIELD_NOT_RANGE_FILTERABLE"),
             "must warn FIELD_NOT_RANGE_FILTERABLE (not RANGE_FILTER_TYPE_SCOPED): {:?}",
             result.warnings,
         );
@@ -1893,7 +1928,10 @@ mod tests {
                 ..Default::default()
             },
         );
-        assert_eq!(result.total, 2, "truly-unknown key must leave the result set unfiltered");
+        assert_eq!(
+            result.total, 2,
+            "truly-unknown key must leave the result set unfiltered"
+        );
         assert_eq!(result.warnings.len(), 1);
         assert_eq!(
             result.warnings[0].code(),
@@ -1927,7 +1965,10 @@ mod tests {
             "non-range-filterable field range filter must be ignored, not empty the set",
         );
         assert!(
-            result.warnings.iter().any(|w| w.code() == "FIELD_NOT_RANGE_FILTERABLE"),
+            result
+                .warnings
+                .iter()
+                .any(|w| w.code() == "FIELD_NOT_RANGE_FILTERABLE"),
             "must warn FIELD_NOT_RANGE_FILTERABLE: {:?}",
             result.warnings,
         );
@@ -2136,11 +2177,14 @@ mod tests {
     fn query_any_or_semantics() {
         let mut store = Store::new();
         let mut a = make_entity("a", "specs");
-        a.sections.insert("identity".into(), "authentication flow".into());
+        a.sections
+            .insert("identity".into(), "authentication flow".into());
         let mut b = make_entity("b", "specs");
-        b.sections.insert("identity".into(), "login pipeline".into());
+        b.sections
+            .insert("identity".into(), "login pipeline".into());
         let mut c = make_entity("c", "specs");
-        c.sections.insert("identity".into(), "unrelated subject".into());
+        c.sections
+            .insert("identity".into(), "unrelated subject".into());
         store.upsert(a.id.clone(), a);
         store.upsert(b.id.clone(), b);
         store.upsert(c.id.clone(), c);
@@ -2167,7 +2211,8 @@ mod tests {
     fn query_not_excludes() {
         let mut store = Store::new();
         let mut a = make_entity("a", "specs");
-        a.sections.insert("identity".into(), "uses authentication".into());
+        a.sections
+            .insert("identity".into(), "uses authentication".into());
         let mut b = make_entity("b", "specs");
         b.sections
             .insert("identity".into(), "uses authentication mock".into());
@@ -2191,8 +2236,10 @@ mod tests {
     fn query_phrase_match() {
         let mut store = Store::new();
         let mut a = make_entity("a", "specs");
-        a.sections
-            .insert("identity".into(), "the client side agent runs locally".into());
+        a.sections.insert(
+            "identity".into(),
+            "the client side agent runs locally".into(),
+        );
         let mut b = make_entity("b", "specs");
         b.sections.insert(
             "identity".into(),
@@ -2251,15 +2298,17 @@ mod tests {
             ..Default::default()
         };
         let result = run_search(&store, &scope);
-        assert_eq!(result.total, 2, "empty query ⇒ metadata filter over entity_type");
+        assert_eq!(
+            result.total, 2,
+            "empty query ⇒ metadata filter over entity_type"
+        );
     }
 
     #[test]
     fn query_diacritic_folding() {
         let mut store = Store::new();
         let mut a = make_entity("a", "specs");
-        a.sections
-            .insert("identity".into(), "schöne Häuser".into());
+        a.sections.insert("identity".into(), "schöne Häuser".into());
         store.upsert(a.id.clone(), a);
 
         let scope = SearchScope {
@@ -2348,8 +2397,10 @@ mod tests {
     fn matched_terms_per_field() {
         let mut store = Store::new();
         let mut a = make_entity("graph-engine", "specs");
-        a.sections
-            .insert("identity".into(), "graph-engine uses graph primitives".into());
+        a.sections.insert(
+            "identity".into(),
+            "graph-engine uses graph primitives".into(),
+        );
         store.upsert(a.id.clone(), a);
 
         let scope = SearchScope {
@@ -2462,8 +2513,7 @@ mod tests {
         let mut e = make_entity(name, "specs");
         e.sections
             .insert(section_key.to_string(), content.to_string());
-        e.heading_spans
-            .insert(section_key.to_string(), spans);
+        e.heading_spans.insert(section_key.to_string(), spans);
         e
     }
 
@@ -2710,15 +2760,13 @@ mod tests {
         // 3 specs in 'specs', 2 memos in 'memos'.
         for i in 0..3 {
             let mut e = make_entity(&format!("s-{i}"), "specs");
-            e.sections
-                .insert("identity".into(), "shared anchor".into());
+            e.sections.insert("identity".into(), "shared anchor".into());
             store.upsert(e.id.clone(), e);
         }
         for i in 0..2 {
             let mut e = make_entity(&format!("m-{i}"), "memos");
             e.entity_type = "memo".into();
-            e.sections
-                .insert("identity".into(), "shared anchor".into());
+            e.sections.insert("identity".into(), "shared anchor".into());
             store.upsert(e.id.clone(), e);
         }
 
@@ -2887,15 +2935,18 @@ mod tests {
         let mut e1 = make_entity("a", "specs");
         e1.metadata
             .insert("level".into(), MetadataValue::String("M0".into()));
-        e1.sections.insert("identity".into(), "shared anchor".into());
+        e1.sections
+            .insert("identity".into(), "shared anchor".into());
         let mut e2 = make_entity("b", "specs");
         e2.metadata
             .insert("level".into(), MetadataValue::String("M1".into()));
-        e2.sections.insert("identity".into(), "shared anchor".into());
+        e2.sections
+            .insert("identity".into(), "shared anchor".into());
         let mut e3 = make_entity("c", "specs");
         e3.metadata
             .insert("level".into(), MetadataValue::String("M1".into()));
-        e3.sections.insert("identity".into(), "shared anchor".into());
+        e3.sections
+            .insert("identity".into(), "shared anchor".into());
         store.upsert(e1.id.clone(), e1);
         store.upsert(e2.id.clone(), e2);
         store.upsert(e3.id.clone(), e3);
@@ -2955,7 +3006,12 @@ mod tests {
         let hub = EntityId::new("specs", "hub");
         // hub —USES→ dep1 (typed, dist 1); hub —REFERENCES(mention)→ men1
         // (dist 1); dep1 —USES→ far1 (dist 2 from hub).
-        add_edge(&mut store, hub.clone(), EntityId::new("specs", "dep1"), "USES");
+        add_edge(
+            &mut store,
+            hub.clone(),
+            EntityId::new("specs", "dep1"),
+            "USES",
+        );
         add_body_edge(&mut store, hub.clone(), EntityId::new("specs", "men1"));
         add_edge(
             &mut store,
@@ -2972,10 +3028,19 @@ mod tests {
         let result = run_search(&store, &scope);
         // Membership unchanged: hub(0) + dep1,men1(1) + far1(2) — all 4.
         let order: Vec<&str> = result.hits.iter().map(|h| h.id.name()).collect();
-        assert_eq!(result.total, 4, "small neighbourhood keeps full membership: {order:?}");
+        assert_eq!(
+            result.total, 4,
+            "small neighbourhood keeps full membership: {order:?}"
+        );
         let pos = |n: &str| order.iter().position(|x| *x == n).unwrap();
-        assert!(pos("dep1") < pos("far1"), "nearer before farther: {order:?}");
-        assert!(pos("men1") < pos("far1"), "nearer before farther: {order:?}");
+        assert!(
+            pos("dep1") < pos("far1"),
+            "nearer before farther: {order:?}"
+        );
+        assert!(
+            pos("men1") < pos("far1"),
+            "nearer before farther: {order:?}"
+        );
         assert!(
             pos("dep1") < pos("men1"),
             "typed link before co-mention at the same hop: {order:?}"
@@ -3029,8 +3094,18 @@ mod tests {
         store.upsert(primary_id.clone(), primary);
         store.upsert(n1.id.clone(), n1);
         store.upsert(n2.id.clone(), n2);
-        add_edge(&mut store, primary_id.clone(), EntityId::new("specs", "n1"), "REFERENCES");
-        add_edge(&mut store, primary_id.clone(), EntityId::new("specs", "n2"), "REFERENCES");
+        add_edge(
+            &mut store,
+            primary_id.clone(),
+            EntityId::new("specs", "n1"),
+            "REFERENCES",
+        );
+        add_edge(
+            &mut store,
+            primary_id.clone(),
+            EntityId::new("specs", "n2"),
+            "REFERENCES",
+        );
 
         let scope = SearchScope {
             query: Some(Query {
@@ -3098,7 +3173,10 @@ mod tests {
             ..Default::default()
         };
         let result = run_search(&store, &scope);
-        assert_eq!(result.total, 1, "only the primary — memo neighbour dropped by entity_type");
+        assert_eq!(
+            result.total, 1,
+            "only the primary — memo neighbour dropped by entity_type"
+        );
         assert!(result.hits[0].expansion.is_none());
     }
 
@@ -3226,20 +3304,18 @@ mod tests {
         let primary_score = primary_hit.score;
         assert!(primary_score > 0.0, "primary must have BM25 score");
 
-        let a_hit = result
-            .hits
-            .iter()
-            .find(|h| h.id.name() == "a")
-            .unwrap();
-        let b_hit = result
-            .hits
-            .iter()
-            .find(|h| h.id.name() == "b")
-            .unwrap();
+        let a_hit = result.hits.iter().find(|h| h.id.name() == "a").unwrap();
+        let b_hit = result.hits.iter().find(|h| h.id.name() == "b").unwrap();
         assert!((a_hit.score - primary_score * 0.5).abs() < 0.0001);
         assert!((b_hit.score - primary_score * 0.25).abs() < 0.0001);
-        assert_eq!(a_hit.score_breakdown.as_ref().unwrap().expansion_decay, Some(0.5));
-        assert_eq!(b_hit.score_breakdown.as_ref().unwrap().expansion_decay, Some(0.25));
+        assert_eq!(
+            a_hit.score_breakdown.as_ref().unwrap().expansion_decay,
+            Some(0.5)
+        );
+        assert_eq!(
+            b_hit.score_breakdown.as_ref().unwrap().expansion_decay,
+            Some(0.25)
+        );
     }
 
     #[test]
@@ -3313,7 +3389,10 @@ mod tests {
             .iter()
             .find(|h| h.id.name() == "stub-b")
             .expect("stub must appear in default results");
-        assert!(stub_hit.stub, "hit.stub reflects entity.stub (regression guard)");
+        assert!(
+            stub_hit.stub,
+            "hit.stub reflects entity.stub (regression guard)"
+        );
         let real_hit = result
             .hits
             .iter()
@@ -3457,7 +3536,13 @@ mod tests {
         schemas.insert("reqs".to_string(), software.clone());
 
         // Metadata-only scan returns the requirement.
-        let result = search(&store, &SearchScope::default(), &req_type, &indexes, &schemas);
+        let result = search(
+            &store,
+            &SearchScope::default(),
+            &req_type,
+            &indexes,
+            &schemas,
+        );
         assert_eq!(result.total, 1);
         let summary = result.hits[0]
             .summary
@@ -3473,7 +3558,11 @@ mod tests {
         // The envelope projects the anchor section, not the `—` fallback.
         let envelope = crate::render::build_search_envelope(&result, 0);
         assert_eq!(envelope.hits[0].summary_heading, "Statement");
-        assert!(envelope.hits[0].summary_value.contains("encrypt tokens at rest"));
+        assert!(
+            envelope.hits[0]
+                .summary_value
+                .contains("encrypt tokens at rest")
+        );
     }
 
     /// The engine-stamped `created_date` is range-filterable, so the
@@ -3484,12 +3573,15 @@ mod tests {
     fn range_filter_on_created_date_works() {
         let mut store = Store::new();
         let mut old = make_entity("old", "specs");
-        old.metadata
-            .insert("created_date".into(), MetadataValue::String("2020-01-01".into()));
+        old.metadata.insert(
+            "created_date".into(),
+            MetadataValue::String("2020-01-01".into()),
+        );
         let mut recent = make_entity("recent", "specs");
-        recent
-            .metadata
-            .insert("created_date".into(), MetadataValue::String("2026-06-01".into()));
+        recent.metadata.insert(
+            "created_date".into(),
+            MetadataValue::String("2026-06-01".into()),
+        );
         store.upsert(old.id.clone(), old);
         store.upsert(recent.id.clone(), recent);
 
@@ -3498,7 +3590,10 @@ mod tests {
             ..Default::default()
         };
         let result = run_search(&store, &scope);
-        assert_eq!(result.total, 1, "only the entity created after the bound matches");
+        assert_eq!(
+            result.total, 1,
+            "only the entity created after the bound matches"
+        );
         assert_eq!(result.hits[0].id.name(), "recent");
         assert!(
             result.warnings.is_empty(),

@@ -171,9 +171,11 @@ fn map_admin_error(err: PublishError) -> CliError {
         PublishError::Io(e) => {
             CliError::new(ExitKind::Generic, crate::INTERNAL_CODE, format!("io: {e}"))
         }
-        PublishError::Network(e) => {
-            CliError::new(ExitKind::Generic, "NETWORK_ERROR", format!("network error: {e}"))
-        }
+        PublishError::Network(e) => CliError::new(
+            ExitKind::Generic,
+            "NETWORK_ERROR",
+            format!("network error: {e}"),
+        ),
         PublishError::Malformed(e) => CliError::new(
             ExitKind::Generic,
             "REGISTRY_MALFORMED_RESPONSE",
@@ -196,8 +198,13 @@ fn map_admin_api_error(status: reqwest::StatusCode, envelope: ApiErrorBody) -> C
         _ => (ExitKind::Generic, "REGISTRY_ERROR"),
     };
     let mut msg = match status.as_u16() {
-        401 => "unauthorized — set MEMSTEAD_TOKEN, run `memstead login`, or pass --token".to_string(),
-        403 => "forbidden — this is an admin-only action; your GitHub login is not in MEMSTEAD_ADMINS".to_string(),
+        401 => {
+            "unauthorized — set MEMSTEAD_TOKEN, run `memstead login`, or pass --token".to_string()
+        }
+        403 => {
+            "forbidden — this is an admin-only action; your GitHub login is not in MEMSTEAD_ADMINS"
+                .to_string()
+        }
         404 => "no such mem on the registry".to_string(),
         _ => envelope
             .detail

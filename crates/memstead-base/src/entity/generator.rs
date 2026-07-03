@@ -7,7 +7,7 @@
 //! 4. Relationships section (if any explicit relations)
 //! 5. Optional sections (schema order)
 
-use memstead_schema::{FieldType, TypeDefinition, Serialization};
+use memstead_schema::{FieldType, Serialization, TypeDefinition};
 
 use super::Entity;
 
@@ -34,7 +34,11 @@ pub fn generate_markdown(entity: &Entity, schema: &TypeDefinition) -> String {
 
     // Required sections (schema order)
     for s in schema.sections.iter().filter(|s| s.required) {
-        let content = entity.sections.get(s.key.as_str()).map(|v| v.as_str()).unwrap_or("");
+        let content = entity
+            .sections
+            .get(s.key.as_str())
+            .map(|v| v.as_str())
+            .unwrap_or("");
         parts.push(format!("## {}\n{content}", s.heading));
     }
 
@@ -63,7 +67,12 @@ pub fn generate_markdown(entity: &Entity, schema: &TypeDefinition) -> String {
                 // mutation entry, so `Some("")` should never reach the
                 // renderer — if it does we still avoid emitting a bare
                 // em-dash by treating empty-after-trim as the simple form.
-                match r.description.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+                match r
+                    .description
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                {
                     Some(text) => format!("- **{}**: [[{link}]] \u{2014} {text}", r.rel_type),
                     None => format!("- **{}**: [[{link}]]", r.rel_type),
                 }
@@ -74,7 +83,11 @@ pub fn generate_markdown(entity: &Entity, schema: &TypeDefinition) -> String {
 
     // Optional sections (schema order)
     for s in schema.sections.iter().filter(|s| !s.required) {
-        let content = entity.sections.get(s.key.as_str()).map(|v| v.as_str()).unwrap_or("");
+        let content = entity
+            .sections
+            .get(s.key.as_str())
+            .map(|v| v.as_str())
+            .unwrap_or("");
         // All sections get the same spacing for roundtrip stability
         parts.push(format!("## {}\n\n{content}", s.heading));
     }
@@ -119,27 +132,33 @@ fn build_metadata(entity: &Entity, schema: &TypeDefinition) -> String {
                 // immediately. Schema-declared `default_value` (when
                 // set) wins over the sentinel — the schema's choice
                 // is authoritative.
-                let val = value
-                    .map(|v| v.to_frontmatter_string())
-                    .unwrap_or_else(|| {
-                        field_def
-                            .default_value
-                            .as_deref()
-                            .unwrap_or(MISSING_DATE_SENTINEL)
-                            .to_string()
-                    });
+                let val = value.map(|v| v.to_frontmatter_string()).unwrap_or_else(|| {
+                    field_def
+                        .default_value
+                        .as_deref()
+                        .unwrap_or(MISSING_DATE_SENTINEL)
+                        .to_string()
+                });
                 format!("{}: {val}", field_def.key)
             }
             FieldType::Boolean => {
-                let val = value
-                    .map(|v| v.to_frontmatter_string())
-                    .unwrap_or_else(|| field_def.default_value.as_deref().unwrap_or("false").to_string());
+                let val = value.map(|v| v.to_frontmatter_string()).unwrap_or_else(|| {
+                    field_def
+                        .default_value
+                        .as_deref()
+                        .unwrap_or("false")
+                        .to_string()
+                });
                 format!("{}: {val}", field_def.key)
             }
             FieldType::Number => {
-                let val = value
-                    .map(|v| v.to_frontmatter_string())
-                    .unwrap_or_else(|| field_def.default_value.as_deref().unwrap_or("0").to_string());
+                let val = value.map(|v| v.to_frontmatter_string()).unwrap_or_else(|| {
+                    field_def
+                        .default_value
+                        .as_deref()
+                        .unwrap_or("0")
+                        .to_string()
+                });
                 format!("{}: {val}", field_def.key)
             }
             FieldType::String => {
@@ -148,9 +167,9 @@ fn build_metadata(entity: &Entity, schema: &TypeDefinition) -> String {
                     let val = value.map(|v| v.to_frontmatter_string()).unwrap_or_default();
                     format!("{}: {}", field_def.key, quote_if_ambiguous(&val))
                 } else {
-                    let val = value
-                        .map(|v| v.to_frontmatter_string())
-                        .unwrap_or_else(|| field_def.default_value.as_deref().unwrap_or("").to_string());
+                    let val = value.map(|v| v.to_frontmatter_string()).unwrap_or_else(|| {
+                        field_def.default_value.as_deref().unwrap_or("").to_string()
+                    });
                     format!("{}: {}", field_def.key, quote_if_ambiguous(&val))
                 }
             }
@@ -373,7 +392,10 @@ mod tests {
         // Trailing whitespace, em-dash, or stray content must not
         // appear after the closing `]]` when description is None.
         assert!(md.contains("- **USES**: [[child-entity]]\n"));
-        assert!(!md.contains("\u{2014}"), "no em-dash should be emitted when description is None");
+        assert!(
+            !md.contains("\u{2014}"),
+            "no em-dash should be emitted when description is None"
+        );
     }
 
     #[test]
@@ -497,9 +519,13 @@ Some content with [[inline-link]].
         let generated = generate_markdown(&result1.entity, &schema);
 
         // Second parse
-        let result2 =
-            crate::entity::parser::parse_markdown(&generated, "roundtrip-test.md", &schema, "specs")
-                .unwrap();
+        let result2 = crate::entity::parser::parse_markdown(
+            &generated,
+            "roundtrip-test.md",
+            &schema,
+            "specs",
+        )
+        .unwrap();
 
         // Compare: parse(generate(parse(md))) == parse(md)
         assert_eq!(result1.entity.title, result2.entity.title);

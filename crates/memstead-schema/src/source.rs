@@ -395,8 +395,7 @@ write_rules: []
         // must return this, not the 10-type builtin.
         write_schema(&schema_dir, "default", "1.0.0", &["spec"]);
         let schema_ref = SchemaRef::new("default", semver::Version::new(1, 0, 0));
-        let files =
-            collect_schema_source(Some(tmp.path()), Some(&ws_dir), &schema_ref).unwrap();
+        let files = collect_schema_source(Some(tmp.path()), Some(&ws_dir), &schema_ref).unwrap();
         let type_count = files
             .iter()
             .filter(|f| f.archive_path.starts_with("types/"))
@@ -412,8 +411,7 @@ write_rules: []
         std::fs::create_dir_all(schema_dir.join("types")).unwrap();
         write_schema(&schema_dir, "recipe", "1.0.0", &["spec"]);
         let schema_ref = SchemaRef::new("recipe", semver::Version::new(2, 0, 0));
-        let err =
-            collect_schema_source(Some(tmp.path()), Some(&ws_dir), &schema_ref).unwrap_err();
+        let err = collect_schema_source(Some(tmp.path()), Some(&ws_dir), &schema_ref).unwrap_err();
         assert!(matches!(err, SchemaSourceError::VersionMismatch { .. }));
     }
 
@@ -450,8 +448,7 @@ write_rules: []
         write_schema(&ws_schema, "software", "1.0.0", &["spec"]);
 
         let schema_ref = SchemaRef::new("software", semver::Version::new(1, 0, 0));
-        let files =
-            collect_schema_source(Some(tmp.path()), Some(&ws_dir), &schema_ref).unwrap();
+        let files = collect_schema_source(Some(tmp.path()), Some(&ws_dir), &schema_ref).unwrap();
         let type_count = files
             .iter()
             .filter(|f| f.archive_path.starts_with("types/"))
@@ -466,8 +463,7 @@ write_rules: []
         std::fs::create_dir_all(&ws_dir).unwrap();
 
         let schema_ref = SchemaRef::new("missing", semver::Version::new(2, 3, 4));
-        let err = collect_schema_source(Some(tmp.path()), Some(&ws_dir), &schema_ref)
-            .unwrap_err();
+        let err = collect_schema_source(Some(tmp.path()), Some(&ws_dir), &schema_ref).unwrap_err();
         match err {
             SchemaSourceError::NotFound {
                 schema_ref: name,
@@ -480,9 +476,11 @@ write_rules: []
                 assert_eq!(candidates.len(), 3);
                 assert!(candidates[0].ends_with("schemas/missing@2.3.4"));
                 assert!(candidates[1].ends_with("schemas/missing"));
-                assert!(candidates[2]
-                    .to_string_lossy()
-                    .contains(".memstead.cache/schemas/missing-2.3.4"));
+                assert!(
+                    candidates[2]
+                        .to_string_lossy()
+                        .contains(".memstead.cache/schemas/missing-2.3.4")
+                );
             }
             other => panic!("expected NotFound, got {other:?}"),
         }

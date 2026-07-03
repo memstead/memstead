@@ -621,12 +621,7 @@ where
         for id in &node_ids {
             entity_cluster_map.insert(id.clone(), "0".to_string());
         }
-        clusters.insert(
-            "0".to_string(),
-            ClusterInfo {
-                entities: node_ids,
-            },
-        );
+        clusters.insert("0".to_string(), ClusterInfo { entities: node_ids });
         return LouvainOutput {
             modularity: 0.0,
             count: 1,
@@ -739,8 +734,12 @@ pub fn aggregate_bridges(
     let mut bridges: Vec<CommunityBridge> = by_pair
         .into_iter()
         .map(|((from_cluster, to_cluster), mut acc)| {
-            acc.samples
-                .sort_by(|a, b| a.rel_type.cmp(&b.rel_type).then_with(|| a.from.cmp(&b.from)).then_with(|| a.to.cmp(&b.to)));
+            acc.samples.sort_by(|a, b| {
+                a.rel_type
+                    .cmp(&b.rel_type)
+                    .then_with(|| a.from.cmp(&b.from))
+                    .then_with(|| a.to.cmp(&b.to))
+            });
             acc.samples.truncate(BRIDGE_SAMPLE_CAP);
             CommunityBridge {
                 from_cluster,
@@ -773,11 +772,7 @@ pub fn aggregate_bridges(
 /// scoped entity-count definition.
 ///
 /// Returned as a sorted set so callers iterate deterministically.
-pub fn clusters_in_mem(
-    store: &Store,
-    louvain: &LouvainOutput,
-    mem: &str,
-) -> BTreeSet<String> {
+pub fn clusters_in_mem(store: &Store, louvain: &LouvainOutput, mem: &str) -> BTreeSet<String> {
     // Entity-id strings (the `.0` form used as cluster members) for the
     // non-stub entities that live in `mem`.
     let in_mem: HashSet<&str> = store

@@ -67,11 +67,13 @@ fn relations_from_store(
     store: &Store,
 ) -> anyhow::Result<(Vec<memstead_base::Edge>, Vec<memstead_base::InEdge>)> {
     if store.get(id).is_none() {
-        return Err(
-            CliError::new(ExitKind::NotFound, "ENTITY_NOT_FOUND", format!("Entity not found: {id_for_err}"))
-                .with_details(serde_json::json!({ "id": id_for_err }))
-                .into(),
-        );
+        return Err(CliError::new(
+            ExitKind::NotFound,
+            "ENTITY_NOT_FOUND",
+            format!("Entity not found: {id_for_err}"),
+        )
+        .with_details(serde_json::json!({ "id": id_for_err }))
+        .into());
     }
     Ok((store.outgoing(id).to_vec(), store.incoming(id).to_vec()))
 }

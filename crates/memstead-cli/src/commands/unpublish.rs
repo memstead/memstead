@@ -82,7 +82,9 @@ fn emit_success(ctx: &CliContext, resp: &UnpublishResponse) -> anyhow::Result<()
 
 fn map_unpublish_error(err: PublishError) -> CliError {
     match err {
-        PublishError::Io(e) => CliError::new(ExitKind::Generic, crate::INTERNAL_CODE, format!("io: {e}")),
+        PublishError::Io(e) => {
+            CliError::new(ExitKind::Generic, crate::INTERNAL_CODE, format!("io: {e}"))
+        }
         PublishError::Network(e) => CliError::new(
             ExitKind::Generic,
             "NETWORK_ERROR",
@@ -116,7 +118,9 @@ fn map_api_error(status: reqwest::StatusCode, envelope: ApiErrorBody) -> CliErro
     };
 
     let mut msg = match status.as_u16() {
-        401 => "unauthorized — set MEMSTEAD_TOKEN, run `memstead login`, or pass --token".to_string(),
+        401 => {
+            "unauthorized — set MEMSTEAD_TOKEN, run `memstead login`, or pass --token".to_string()
+        }
         403 => envelope
             .detail
             .clone()

@@ -57,8 +57,8 @@ fn update_purpose_args(id: EntityId, expected_hash: String, body: &str) -> Updat
         metadata_unset: Vec::new(),
         dry_run: false,
         declare_relations: Vec::new(),
-            relations_unset: Vec::new(),
-        }
+        relations_unset: Vec::new(),
+    }
 }
 
 #[test]
@@ -72,14 +72,24 @@ fn second_engine_reloads_and_surfaces_mem_changed_on_create() {
     let mut b = engine_from_workspace_root(tmp.path()).expect("engine B boots");
 
     // A creates E_a, advancing the shared mem ref.
-    a.create_entity(create_args("specs", "Entity A"), Actor::Cli, Some(&client()), None)
-        .expect("A create succeeds");
+    a.create_entity(
+        create_args("specs", "Entity A"),
+        Actor::Cli,
+        Some(&client()),
+        None,
+    )
+    .expect("A create succeeds");
 
     // B, still cached at the pre-A head, creates a distinct entity. The
     // reload-before-operation check must pull A's commit in first (so
     // B's graph holds E_a) and stash a `mem_changed` notice.
-    b.create_entity(create_args("specs", "Entity B"), Actor::Cli, Some(&client()), None)
-        .expect("B create succeeds (distinct id, no collision)");
+    b.create_entity(
+        create_args("specs", "Entity B"),
+        Actor::Cli,
+        Some(&client()),
+        None,
+    )
+    .expect("B create succeeds (distinct id, no collision)");
 
     assert!(
         b.get_entity(&EntityId::new("specs", "entity-a")).is_some(),
@@ -97,8 +107,9 @@ fn second_engine_reloads_and_surfaces_mem_changed_on_create() {
     match &n.changes {
         NoticeChanges::Detailed { entries } => {
             assert!(
-                entries.iter().any(|e| e.primary_id() == "specs--entity-a"
-                    && e.action() == "added"),
+                entries
+                    .iter()
+                    .any(|e| e.primary_id() == "specs--entity-a" && e.action() == "added"),
                 "notice lists E_a as added: {entries:?}",
             );
             // The notice describes only the sibling's change — never
@@ -129,8 +140,13 @@ fn single_engine_no_sibling_attaches_no_notice() {
     init_real_mem_repo(tmp.path(), &[("specs", "default@1.0.0")]);
     let mut a = engine_from_workspace_root(tmp.path()).expect("engine boots");
 
-    a.create_entity(create_args("specs", "Entity One"), Actor::Cli, Some(&client()), None)
-        .expect("create one");
+    a.create_entity(
+        create_args("specs", "Entity One"),
+        Actor::Cli,
+        Some(&client()),
+        None,
+    )
+    .expect("create one");
     assert!(
         a.take_mem_changed_notices().is_empty(),
         "first op has nothing to reload past",
@@ -139,8 +155,13 @@ fn single_engine_no_sibling_attaches_no_notice() {
     // A second op by the same engine: its own prior commit advanced the
     // cached head via record_self_write, so reload-before-op sees
     // cached == live and does not reload.
-    a.create_entity(create_args("specs", "Entity Two"), Actor::Cli, Some(&client()), None)
-        .expect("create two");
+    a.create_entity(
+        create_args("specs", "Entity Two"),
+        Actor::Cli,
+        Some(&client()),
+        None,
+    )
+    .expect("create two");
     assert!(
         a.take_mem_changed_notices().is_empty(),
         "no sibling moved the ref — no notice on the engine's own follow-on write",
@@ -157,8 +178,13 @@ fn read_after_sibling_modify_returns_fresh_content_with_mem_changed() {
     init_real_mem_repo(tmp.path(), &[("specs", "default@1.0.0")]);
 
     let mut a = engine_from_workspace_root(tmp.path()).expect("engine A boots");
-    a.create_entity(create_args("specs", "Shared X"), Actor::Cli, Some(&client()), None)
-        .expect("A create X");
+    a.create_entity(
+        create_args("specs", "Shared X"),
+        Actor::Cli,
+        Some(&client()),
+        None,
+    )
+    .expect("A create X");
     let mut b = engine_from_workspace_root(tmp.path()).expect("engine B boots");
 
     let x = EntityId::new("specs", "shared-x");
@@ -175,14 +201,22 @@ fn read_after_sibling_modify_returns_fresh_content_with_mem_changed() {
 
     // B's read path: reload-before-op, then read X.
     b.reload_if_stale(Some("specs"));
-    let fresh_hash = b.get_entity(&x).expect("B still knows X").content_hash.clone();
+    let fresh_hash = b
+        .get_entity(&x)
+        .expect("B still knows X")
+        .content_hash
+        .clone();
     assert_ne!(
         fresh_hash, stale_hash,
         "B's read sees A's fresh content, not the stale boot snapshot",
     );
 
     let notices = b.take_mem_changed_notices();
-    assert_eq!(notices.len(), 1, "the read-triggered reload stashed one notice");
+    assert_eq!(
+        notices.len(),
+        1,
+        "the read-triggered reload stashed one notice"
+    );
     match &notices[0].changes {
         NoticeChanges::Detailed { entries } => assert!(
             entries
@@ -202,8 +236,13 @@ fn write_collision_surfaces_hash_mismatch_with_mem_changed() {
     // A creates the shared entity X first; B boots afterwards so B's
     // graph already holds X (cached at X's create head).
     let mut a = engine_from_workspace_root(tmp.path()).expect("engine A boots");
-    a.create_entity(create_args("specs", "Shared X"), Actor::Cli, Some(&client()), None)
-        .expect("A create X");
+    a.create_entity(
+        create_args("specs", "Shared X"),
+        Actor::Cli,
+        Some(&client()),
+        None,
+    )
+    .expect("A create X");
     let mut b = engine_from_workspace_root(tmp.path()).expect("engine B boots");
 
     let x = EntityId::new("specs", "shared-x");
@@ -255,10 +294,20 @@ fn unrelated_concurrent_write_proceeds_with_mem_changed() {
     init_real_mem_repo(tmp.path(), &[("specs", "default@1.0.0")]);
 
     let mut a = engine_from_workspace_root(tmp.path()).expect("engine A boots");
-    a.create_entity(create_args("specs", "Entity X"), Actor::Cli, Some(&client()), None)
-        .expect("A create X");
-    a.create_entity(create_args("specs", "Entity Y"), Actor::Cli, Some(&client()), None)
-        .expect("A create Y");
+    a.create_entity(
+        create_args("specs", "Entity X"),
+        Actor::Cli,
+        Some(&client()),
+        None,
+    )
+    .expect("A create X");
+    a.create_entity(
+        create_args("specs", "Entity Y"),
+        Actor::Cli,
+        Some(&client()),
+        None,
+    )
+    .expect("A create Y");
     let mut b = engine_from_workspace_root(tmp.path()).expect("engine B boots");
 
     let x = EntityId::new("specs", "entity-x");

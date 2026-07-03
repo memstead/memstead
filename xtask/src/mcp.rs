@@ -38,14 +38,10 @@ pub fn tool_names() -> (Vec<String>, Vec<String>) {
 }
 
 fn render_tools(lean: &[Tool], full: &[Tool]) -> String {
-    let lean_names: BTreeSet<String> =
-        lean.iter().map(|t| t.name.to_string()).collect();
-    let pro_names: BTreeSet<String> =
-        full.iter().map(|t| t.name.to_string()).collect();
-    let lean_by_name: BTreeMap<&str, &Tool> =
-        lean.iter().map(|t| (t.name.as_ref(), t)).collect();
-    let pro_by_name: BTreeMap<&str, &Tool> =
-        full.iter().map(|t| (t.name.as_ref(), t)).collect();
+    let lean_names: BTreeSet<String> = lean.iter().map(|t| t.name.to_string()).collect();
+    let pro_names: BTreeSet<String> = full.iter().map(|t| t.name.to_string()).collect();
+    let lean_by_name: BTreeMap<&str, &Tool> = lean.iter().map(|t| (t.name.as_ref(), t)).collect();
+    let pro_by_name: BTreeMap<&str, &Tool> = full.iter().map(|t| (t.name.as_ref(), t)).collect();
 
     let mut out = String::new();
     out.push_str("# MCP tools\n\n");
@@ -119,8 +115,7 @@ fn emit_section(out: &mut String, name: &str, flavour: &str, tool: &Tool) {
     }
     out.push_str("**Input schema:**\n\n```json\n");
     let schema_value = serde_json::Value::Object((*tool.input_schema).clone());
-    let pretty = serde_json::to_string_pretty(&schema_value)
-        .unwrap_or_else(|_| "{}".to_string());
+    let pretty = serde_json::to_string_pretty(&schema_value).unwrap_or_else(|_| "{}".to_string());
     out.push_str(&pretty);
     out.push_str("\n```\n\n");
 }

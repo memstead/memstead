@@ -17,10 +17,10 @@
 use clap::{Parser, Subcommand};
 use serde_json::json;
 
+use crate::CliError;
 use crate::auth::domain_key;
 use crate::output::{ExitKind, print_json, print_markdown};
 use crate::setup::CliContext;
-use crate::CliError;
 
 #[derive(Subcommand, Debug)]
 pub enum DomainAction {
@@ -69,9 +69,8 @@ pub fn run(ctx: &CliContext, action: DomainAction) -> anyhow::Result<()> {
 
 fn keygen(ctx: &CliContext, args: KeygenArgs) -> anyhow::Result<()> {
     let domain = normalize_domain(&args.domain)?;
-    let public_key = domain_key::generate(&domain, args.force).map_err(|e| {
-        CliError::new(ExitKind::Generic, "DOMAIN_KEYGEN_FAILED", e.to_string())
-    })?;
+    let public_key = domain_key::generate(&domain, args.force)
+        .map_err(|e| CliError::new(ExitKind::Generic, "DOMAIN_KEYGEN_FAILED", e.to_string()))?;
     emit_manifest(ctx, &domain, &public_key, &args.contacts, true)
 }
 
@@ -92,10 +91,8 @@ fn emit_manifest(
     contacts: &[String],
     generated: bool,
 ) -> anyhow::Result<()> {
-    let manifest = domain_key::manifest_json(
-        std::slice::from_ref(&public_key.to_string()),
-        contacts,
-    );
+    let manifest =
+        domain_key::manifest_json(std::slice::from_ref(&public_key.to_string()), contacts);
     let url = format!("https://{domain}/.well-known/memstead-publishing.json");
     if ctx.json {
         print_json(&json!({
@@ -108,7 +105,9 @@ fn emit_manifest(
     } else {
         let pretty = serde_json::to_string_pretty(&manifest).unwrap_or_default();
         let lead = if generated {
-            format!("# Domain signing key for `{domain}`\n\nA new keypair was generated and the private key stored locally.")
+            format!(
+                "# Domain signing key for `{domain}`\n\nA new keypair was generated and the private key stored locally."
+            )
         } else {
             format!("# Manifest for `{domain}`")
         };
@@ -139,7 +138,9 @@ fn normalize_domain(raw: &str) -> anyhow::Result<String> {
                 && label.len() <= 63
                 && !label.starts_with('-')
                 && !label.ends_with('-')
-                && label.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+                && label
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-')
         });
     if !looks_like_domain {
         return Err(CliError::new(
@@ -159,8 +160,17 @@ mod tests {
     #[test]
     fn normalizes_and_validates_domains() {
         assert_eq!(normalize_domain("Acme.COM").unwrap(), "acme.com");
-        assert_eq!(normalize_domain(" sub.acme.co.uk ").unwrap(), "sub.acme.co.uk");
-        for bad in ["nodot", "has space.com", "https://acme.com", "acme.com:demo", "acme.com/x"] {
+        assert_eq!(
+            normalize_domain(" sub.acme.co.uk ").unwrap(),
+            "sub.acme.co.uk"
+        );
+        for bad in [
+            "nodot",
+            "has space.com",
+            "https://acme.com",
+            "acme.com:demo",
+            "acme.com/x",
+        ] {
             assert!(normalize_domain(bad).is_err(), "{bad} should be rejected");
         }
     }

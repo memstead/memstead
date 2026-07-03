@@ -52,11 +52,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
 }
 
 #[cfg(feature = "mem-repo")]
-fn run_mem_repo(
-    ctx: &CliContext,
-    engine: memstead_base::Engine,
-    args: Args,
-) -> anyhow::Result<()> {
+fn run_mem_repo(ctx: &CliContext, engine: memstead_base::Engine, args: Args) -> anyhow::Result<()> {
     let mem = match args.mem {
         Some(v) => v,
         None => engine
@@ -171,7 +167,12 @@ fn run_mem_repo(
                 } else {
                     n.subject.as_str()
                 };
-                lines.push(format!("- `{}` [{}] {}", &n.sha[..n.sha.len().min(12)], actor, subject));
+                lines.push(format!(
+                    "- `{}` [{}] {}",
+                    &n.sha[..n.sha.len().min(12)],
+                    actor,
+                    subject
+                ));
                 // Multi-entity commits (batch-update) collapse their
                 // subject to `(N entities)`; name the entities so the note
                 // is self-describing here, not only in the JSON envelope.
@@ -216,9 +217,10 @@ fn run_filesystem(
         .next()
         .map(String::from)
         .unwrap_or_default();
-    if let Some(name) = args.mem.as_deref() {
-        if name != workspace_mem {
-            return Err(CliError::new(
+    if let Some(name) = args.mem.as_deref()
+        && name != workspace_mem
+    {
+        return Err(CliError::new(
                 ExitKind::NotFound,
                 "UNKNOWN_MEM",
                 format!(
@@ -226,23 +228,25 @@ fn run_filesystem(
                 ),
             )
             .into());
-        }
     }
 
     // Unified engine doesn't expose workspace_root (mounts can be
     // heterogeneous); discover from cwd.
-    let workspace_root = crate::setup::find_filesystem_workspace_root(
-        &std::env::current_dir().map_err(|e| {
-            CliError::new(ExitKind::Generic, crate::INTERNAL_CODE, format!("current_dir: {e}"))
-        })?,
-    )
-    .ok_or_else(|| {
-        CliError::new(
-            ExitKind::NotFound,
-            "WORKSPACE_NOT_INITIALISED",
-            "no filesystem-mem workspace found from cwd",
-        )
-    })?;
+    let workspace_root =
+        crate::setup::find_filesystem_workspace_root(&std::env::current_dir().map_err(|e| {
+            CliError::new(
+                ExitKind::Generic,
+                crate::INTERNAL_CODE,
+                format!("current_dir: {e}"),
+            )
+        })?)
+        .ok_or_else(|| {
+            CliError::new(
+                ExitKind::NotFound,
+                "WORKSPACE_NOT_INITIALISED",
+                "no filesystem-mem workspace found from cwd",
+            )
+        })?;
     let log_path = workspace_root
         .join(memstead_base::MEM_META_DIR)
         .join("changes.jsonl");
@@ -293,8 +297,7 @@ fn run_filesystem(
     let mut lines: Vec<String> = Vec::new();
     lines.push(format!(
         "# Changes in `{}` since `{}`",
-        workspace_mem,
-        since
+        workspace_mem, since
     ));
     lines.push(String::new());
     lines.push(format!("- Entries: {}", entries.len()));

@@ -112,8 +112,7 @@ impl MatcherSet {
 
 impl Default for MatcherSet {
     fn default() -> Self {
-        Self::new::<_, &str>(std::iter::empty::<&str>())
-            .expect("empty MatcherSet is always valid")
+        Self::new::<_, &str>(std::iter::empty::<&str>()).expect("empty MatcherSet is always valid")
     }
 }
 
@@ -345,11 +344,7 @@ mod tests {
 
     #[test]
     fn hierarchical_candidate_requires_path_prefix() {
-        let cs = CreateRuleSet::new(vec![cr(
-            "planning/plan-*",
-            &["default@1.0.0"],
-        )])
-        .unwrap();
+        let cs = CreateRuleSet::new(vec![cr("planning/plan-*", &["default@1.0.0"])]).unwrap();
         assert!(cs.first_match(Path::new("planning/plan-q4")).is_some());
         // Same leaf without the path prefix does not match.
         assert!(cs.first_match(Path::new("plan-q4")).is_none());
@@ -387,11 +382,7 @@ mod tests {
 
     #[test]
     fn delete_rule_set_resolves_by_pattern_only() {
-        let ds = DeleteRuleSet::new(vec![
-            dr("planning/plan-*"),
-            dr("exec-*"),
-        ])
-        .unwrap();
+        let ds = DeleteRuleSet::new(vec![dr("planning/plan-*"), dr("exec-*")]).unwrap();
         assert!(ds.first_match(Path::new("planning/plan-foo")).is_some());
         assert!(ds.first_match(Path::new("exec-bar")).is_some());
         assert!(ds.first_match(Path::new("engine")).is_none());

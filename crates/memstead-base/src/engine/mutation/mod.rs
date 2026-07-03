@@ -166,9 +166,7 @@ pub(super) fn gc_orphan_stubs_among<'a>(
 /// wiki-link parse that referenced it. Pre-Item-02 the gate lived
 /// only on `memstead_relate`; the create path admitted the same input
 /// silently.
-pub(super) fn validate_relation_target_grammar(
-    target: &EntityId,
-) -> Result<(), EngineError> {
+pub(super) fn validate_relation_target_grammar(target: &EntityId) -> Result<(), EngineError> {
     if let Err(reason) = crate::entity::id::validate_mem_name_grammar(target.mem()) {
         return Err(EngineError::InvalidEntityId {
             id: target.to_string(),
@@ -280,7 +278,7 @@ pub(super) fn validate_cross_mem_add_policy(
 /// open-mode (cross-mem entries are declared vocabulary).
 pub(super) enum EdgeRouteOutcome {
     Ok,
-    OpenModeWarning(crate::ops::WarningHint),
+    OpenModeWarning(Box<crate::ops::WarningHint>),
 }
 
 /// Run rel-type + shape validation for one edge, routing through
@@ -305,6 +303,10 @@ pub(super) enum EdgeRouteOutcome {
 /// `memstead_relate --remove` path). The vocabulary check still fires
 /// in that case, matching the intra-mem behaviour where
 /// `validate_rel_type` runs on both add and remove.
+// The nine parameters are one edge's full coordinates; a params struct
+// would restate the same fields at every call site without grouping
+// anything that travels together elsewhere.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn route_edge_validation(
     engine: &super::Engine,
     rel_type: &str,
@@ -386,7 +388,7 @@ pub(super) fn route_edge_validation(
             validate_rel_shape(rel_type, from_type, to_type, source_schema.as_ref())?;
         }
         Ok(match warning_hint {
-            Some(w) => EdgeRouteOutcome::OpenModeWarning(w),
+            Some(w) => EdgeRouteOutcome::OpenModeWarning(Box::new(w)),
             None => EdgeRouteOutcome::Ok,
         })
     }
@@ -655,13 +657,11 @@ pub(super) fn map_wiki_link_errors(
             link_source: "body_link".to_string(),
             reason,
         },
-        WikiLinkError::InvalidMemName { raw, reason } => {
-            EngineError::InvalidWikiLinkMem {
-                raw,
-                section: section_key.to_string(),
-                reason,
-            }
-        }
+        WikiLinkError::InvalidMemName { raw, reason } => EngineError::InvalidWikiLinkMem {
+            raw,
+            section: section_key.to_string(),
+            reason,
+        },
     }
 }
 
@@ -672,9 +672,7 @@ pub(super) fn map_wiki_link_errors(
 /// must tolerate on-disk drift on pre-strict entities whose bodies
 /// may still contain non-conformant links; the strict gate fires
 /// only on the post-mutation `next` state.
-pub(super) fn collect_body_link_targets(
-    entity: &Entity,
-) -> std::collections::HashSet<EntityId> {
+pub(super) fn collect_body_link_targets(entity: &Entity) -> std::collections::HashSet<EntityId> {
     entity
         .sections
         .iter()
@@ -725,7 +723,9 @@ pub(super) fn scan_wikilinks_without_relation(
                 continue;
             }
             if !explicit_targets.contains(&target)
-                && !missing.iter().any(|(k, t)| k == section_key && t == &target)
+                && !missing
+                    .iter()
+                    .any(|(k, t)| k == section_key && t == &target)
             {
                 missing.push((section_key.clone(), target));
             }
@@ -736,17 +736,13 @@ pub(super) fn scan_wikilinks_without_relation(
 
 #[cfg(test)]
 mod tests {
-    
 
     use tempfile::TempDir;
 
     use crate::backend::MemBackend;
     use crate::engine::test_helpers::*;
-    use crate::engine::{
-        CreateEntityArgs, Engine,
-        UpdateEntityArgs,
-    };
-    
+    use crate::engine::{CreateEntityArgs, Engine, UpdateEntityArgs};
+
     use crate::storage::FilesystemMemWriter;
     use crate::vcs::CommitContext;
 
@@ -790,10 +786,7 @@ mod tests {
         let update_args = UpdateEntityArgs {
             id: created.id.clone(),
             expected_hash: Some(created.content_hash.clone()),
-            sections: IndexMap::from_iter([(
-                "identity".to_string(),
-                "updated".to_string(),
-            )]),
+            sections: IndexMap::from_iter([("identity".to_string(), "updated".to_string())]),
             append_sections: IndexMap::new(),
             patch_sections: IndexMap::new(),
             metadata: IndexMap::new(),
@@ -812,26 +805,16 @@ mod tests {
 
         // rename_entity_with_ctx
         let renamed = engine
-            .rename_entity_with_ctx(
-                &created.id,
-                "Renamed",
-                &updated.content_hash,
-                &ctx,
-            )
+            .rename_entity_with_ctx(&created.id, "Renamed", &updated.content_hash, &ctx)
             .unwrap();
         assert_ne!(renamed.old_id, renamed.new_id);
         assert!(engine.store().get(&renamed.new_id).is_some());
 
         // delete_entity_with_ctx
         let deleted = engine
-            .delete_entity_with_ctx(
-                &renamed.new_id,
-                &renamed.content_hash,
-                &ctx,
-            )
+            .delete_entity_with_ctx(&renamed.new_id, &renamed.content_hash, &ctx)
             .unwrap();
         assert_eq!(deleted.id, renamed.new_id);
         assert!(engine.store().get(&renamed.new_id).is_none());
     }
-
 }

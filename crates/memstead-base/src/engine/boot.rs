@@ -24,9 +24,9 @@ use crate::engine_fallback_type;
 use crate::entity::loader::parse_entries;
 use crate::entity::source::{SourceEntry, SourceReadError};
 use crate::entity::store_builder::push_entities_into_store;
+use crate::mem::{MemOrigin, MemRouterSnapshot};
 use crate::ops::WarningHint;
 use crate::store::Store;
-use crate::mem::{MemOrigin, MemRouterSnapshot};
 use crate::workspace::{Mount, MountCapability, MountStorage, WorkspaceSettings};
 
 use super::{BootError, Engine, EngineError, MountedBackend};
@@ -43,9 +43,7 @@ impl Engine {
     /// `UnknownMem` on every read) — useful for tests; production
     /// callers will reject empty inputs at the persistence-adapter
     /// layer.
-    pub fn from_mounts(
-        mounts: Vec<(Mount, Box<dyn MemBackend>)>,
-    ) -> Result<Self, EngineError> {
+    pub fn from_mounts(mounts: Vec<(Mount, Box<dyn MemBackend>)>) -> Result<Self, EngineError> {
         Self::from_mounts_inner(mounts, Vec::new())
     }
 
@@ -110,25 +108,22 @@ impl Engine {
             // or missing files surface as
             // `None` — `memstead_health` accommodates the missing-config
             // case (handler emits empty `writeGuidance` + `extra`).
-            let mem_config = backend
-                .read_mem_config()
-                .ok()
-                .flatten()
-                .and_then(|bytes| {
-                    let value: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
-                    memstead_schema::config::parse_mem_config(&value).ok()
-                });
+            let mem_config = backend.read_mem_config().ok().flatten().and_then(|bytes| {
+                let value: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+                memstead_schema::config::parse_mem_config(&value).ok()
+            });
             // Read the optional authoring-provenance payload the archive
             // carries (`.memstead/provenance.json`). A malformed payload is
             // downgraded to `None` (the member is additive — a parse
             // failure means "provenance absent", not "mount failed").
-            let archive_provenance = backend
-                .read_archive_provenance()
-                .ok()
-                .flatten()
-                .and_then(|bytes| {
-                    memstead_schema::ArchiveProvenance::from_archive_bytes(&bytes).ok()
-                });
+            let archive_provenance =
+                backend
+                    .read_archive_provenance()
+                    .ok()
+                    .flatten()
+                    .and_then(|bytes| {
+                        memstead_schema::ArchiveProvenance::from_archive_bytes(&bytes).ok()
+                    });
             mounted.push(MountedBackend {
                 mount,
                 backend,
@@ -152,16 +147,14 @@ impl Engine {
         // Workspace-authored schemas resolve first (override builtins
         // on (name, version) collision); builtins fill the rest.
         let workspace_schemas = extra_schemas.clone();
-        let mut catalogue: Vec<Arc<memstead_schema::Schema>> = Vec::with_capacity(
-            extra_schemas.len() + builtin_schemas_only.len(),
-        );
+        let mut catalogue: Vec<Arc<memstead_schema::Schema>> =
+            Vec::with_capacity(extra_schemas.len() + builtin_schemas_only.len());
         catalogue.extend(extra_schemas);
         catalogue.extend(builtin_schemas_only.clone());
         let builtin_schemas = catalogue;
         let mut store = Store::new();
         let mut load_errors: Vec<(PathBuf, String)> = Vec::new();
-        let mut schemas: HashMap<String, Arc<Schema>> =
-            HashMap::with_capacity(mounted.len());
+        let mut schemas: HashMap<String, Arc<Schema>> = HashMap::with_capacity(mounted.len());
         let fallback = engine_fallback_type();
 
         // Derive the mem roster + last-segment suffixes ONCE so the
@@ -170,10 +163,7 @@ impl Engine {
         // nested-prefix detector compares against; the full
         // `mem_names` list feeds the two-pass cross-mem resolver
         // in `push_entities_into_store`.
-        let mem_names: Vec<String> = mounted
-            .iter()
-            .map(|m| m.mount.mem.clone())
-            .collect();
+        let mem_names: Vec<String> = mounted.iter().map(|m| m.mount.mem.clone()).collect();
         let known_suffixes: Vec<String> = mem_names
             .iter()
             .map(|n| crate::entity::store_builder::last_segment_suffix(n).to_string())
@@ -189,10 +179,7 @@ impl Engine {
             // schema, and an expectation assertion when it does — a
             // disagreement surfaces a `SchemaPinMismatch` warning rather
             // than silently preferring either.
-            let config_pin = m
-                .mem_config
-                .as_ref()
-                .and_then(|c| c.schema.as_ref());
+            let config_pin = m.mem_config.as_ref().and_then(|c| c.schema.as_ref());
             let mount_pin = m.mount.schema.as_ref();
             // `Mount.schema` is an optional expectation assertion: warn
             // only when it is set *and* disagrees with the authoritative
@@ -230,8 +217,7 @@ impl Engine {
             schemas.insert(m.mount.mem.clone(), schema.clone());
 
             let (entries, read_errors) = collect_source_entries(m.backend.as_ref())?;
-            let load_result =
-                parse_entries(entries, read_errors, &m.mount.mem, schema.as_ref());
+            let load_result = parse_entries(entries, read_errors, &m.mount.mem, schema.as_ref());
             // Wire the LoadCollector so the parser/store-builder
             // pipeline forwards typed drift warnings
             // (`SuspiciousNestedPrefix`, `DuplicateSectionHeading`,
@@ -378,7 +364,9 @@ impl Engine {
         // (2026-06-14). `memstead pipeline migrate` is the only path from
         // old-shape configs into the store. A malformed config surfaces a
         // typed `StoreError::Parse` naming the file.
-        engine.set_pipeline_configs(crate::pipeline_store::load_pipeline_configs(workspace_root)?);
+        engine.set_pipeline_configs(crate::pipeline_store::load_pipeline_configs(
+            workspace_root,
+        )?);
         // Publish the authoring meta-schemas into `.memstead/meta-schemas/`
         // so an editor validates authored schema YAML against them
         // (resolved by each package's `# yaml-language-server:` directive).
@@ -434,11 +422,7 @@ fn build_mem_router_from_mounts(mounts: &[MountedBackend]) -> MemRouterSnapshot 
                     // shape mem-repo-backed mounts use.
                     MountStorage::InMemory => None,
                 };
-                router.add_writable(
-                    m.mount.mem.clone(),
-                    dir,
-                    MemOrigin::ExplicitToml,
-                );
+                router.add_writable(m.mount.mem.clone(), dir, MemOrigin::ExplicitToml);
             }
             MountCapability::ReadOnly => match &m.mount.storage {
                 MountStorage::Archive { path } => {
@@ -596,7 +580,7 @@ pub(super) fn collect_source_entries(
 
 #[cfg(test)]
 mod tests {
-    
+
     use std::path::Path;
 
     use memstead_schema::SchemaRef;
@@ -662,7 +646,8 @@ mod tests {
         // `engine.load_warnings()`.
         let tmp = TempDir::new().unwrap();
         let mem_dir = tmp.path().to_path_buf();
-        let body = "---\ntype: spec\n---\n# Dup\n\n## Identity\n\nfirst.\n\n## Identity\n\nsecond.\n";
+        let body =
+            "---\ntype: spec\n---\n# Dup\n\n## Identity\n\nfirst.\n\n## Identity\n\nsecond.\n";
         std::fs::write(mem_dir.join("dup.md"), body).unwrap();
 
         let writer = FilesystemMemWriter::new(mem_dir.clone());
@@ -748,7 +733,11 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(parsed_invalid.len(), 1, "expected one warning, got {parsed_invalid:?}");
+        assert_eq!(
+            parsed_invalid.len(),
+            1,
+            "expected one warning, got {parsed_invalid:?}"
+        );
         assert_eq!(parsed_invalid[0].0, source_id);
         assert_eq!(parsed_invalid[0].1, "MADE_UP_TYPE");
         assert_eq!(parsed_invalid[0].2, target_id);
@@ -849,10 +838,8 @@ mod tests {
         // The dropped edge is one of the two PART_OF entries.
         let (dropped_from, dropped_rel_type, dropped_to) = &cycle_drops[0];
         assert_eq!(dropped_rel_type, "PART_OF");
-        let is_alpha_to_beta =
-            dropped_from == &alpha_id && dropped_to == &beta_id;
-        let is_beta_to_alpha =
-            dropped_from == &beta_id && dropped_to == &alpha_id;
+        let is_alpha_to_beta = dropped_from == &alpha_id && dropped_to == &beta_id;
+        let is_beta_to_alpha = dropped_from == &beta_id && dropped_to == &alpha_id;
         assert!(
             is_alpha_to_beta || is_beta_to_alpha,
             "dropped edge must be one of the mutual PART_OF pair, got ({dropped_from} -> {dropped_to})",
@@ -906,7 +893,12 @@ community:
   resolution: 1.0
   seed: 42
 "#;
-        write_schema_files_with_default_type(&schemas_dir, "shape-test", manifest, &["doc", "actor"]);
+        write_schema_files_with_default_type(
+            &schemas_dir,
+            "shape-test",
+            manifest,
+            &["doc", "actor"],
+        );
 
         let mem_dir = tmp.path().join("mem");
         std::fs::create_dir_all(&mem_dir).unwrap();
@@ -1083,10 +1075,12 @@ community:
 
     #[test]
     fn load_on_init_populates_store_from_archive_mount() {
-        let body = "---\ntype: spec\n---\n# From Archive\n\n## Identity\n\nLives in a .memstead zip.\n";
+        let body =
+            "---\ntype: spec\n---\n# From Archive\n\n## Identity\n\nLives in a .memstead zip.\n";
 
         let tmp = TempDir::new().unwrap();
-        let archive_path = build_archive(tmp.path(), "ext", &[("from-archive.md", body.as_bytes())]);
+        let archive_path =
+            build_archive(tmp.path(), "ext", &[("from-archive.md", body.as_bytes())]);
 
         let engine = Engine::from_mounts(vec![(
             archive_mount("external", archive_path.clone()),
@@ -1102,10 +1096,8 @@ community:
 
     #[test]
     fn load_on_init_populates_store_from_heterogeneous_mounts() {
-        let folder_body =
-            "---\ntype: spec\n---\n# Local\n\n## Identity\n\nLocal entity.\n";
-        let archive_body =
-            "---\ntype: spec\n---\n# External\n\n## Identity\n\nArchive entity.\n";
+        let folder_body = "---\ntype: spec\n---\n# Local\n\n## Identity\n\nLocal entity.\n";
+        let archive_body = "---\ntype: spec\n---\n# External\n\n## Identity\n\nArchive entity.\n";
 
         let tmp = TempDir::new().unwrap();
 
@@ -1429,7 +1421,10 @@ community:
         // Deleting a referenced medium is refused through the engine surface.
         let err = engine.delete_medium("specs", "src").unwrap_err();
         assert!(
-            matches!(err, crate::pipeline_edit::PipelineEditError::Referenced { .. }),
+            matches!(
+                err,
+                crate::pipeline_edit::PipelineEditError::Referenced { .. }
+            ),
             "got {err:?}"
         );
         assert_eq!(
@@ -1440,7 +1435,11 @@ community:
 
         // The JSON entry point (the FFI-facing shape) deserializes and lands.
         engine
-            .add_medium_json("specs", "docs", r#"{"name":"docs","type":"filesystem","pointer":"./docs"}"#)
+            .add_medium_json(
+                "specs",
+                "docs",
+                r#"{"name":"docs","type":"filesystem","pointer":"./docs"}"#,
+            )
             .unwrap();
         assert!(
             engine
@@ -1455,7 +1454,10 @@ community:
             .add_medium_json("specs", "bad", "{ not json")
             .unwrap_err();
         assert!(
-            matches!(err, crate::pipeline_edit::PipelineEditError::InvalidJson { .. }),
+            matches!(
+                err,
+                crate::pipeline_edit::PipelineEditError::InvalidJson { .. }
+            ),
             "got {err:?}"
         );
 
@@ -1598,7 +1600,10 @@ pattern = "exec-*"
         let writer = FilesystemMemWriter::new(tmp.path().to_path_buf());
         let mount = Mount {
             mem: "specs".to_string(),
-            schema: Some(SchemaRef::new("totally-not-a-schema", semver::Version::new(1, 0, 0))),
+            schema: Some(SchemaRef::new(
+                "totally-not-a-schema",
+                semver::Version::new(1, 0, 0),
+            )),
             storage: MountStorage::Folder {
                 path: tmp.path().to_path_buf(),
             },
@@ -1607,11 +1612,8 @@ pattern = "exec-*"
             cross_linkable: true,
             migration_target: None,
         };
-        let err = Engine::from_mounts(vec![(
-            mount,
-            Box::new(writer) as Box<dyn MemBackend>,
-        )])
-        .unwrap_err();
+        let err = Engine::from_mounts(vec![(mount, Box::new(writer) as Box<dyn MemBackend>)])
+            .unwrap_err();
         match err {
             EngineError::SchemaNotFound { mem, pin, sources } => {
                 assert_eq!(mem, "specs");
@@ -1622,7 +1624,11 @@ pattern = "exec-*"
                 assert_eq!(labels, ["local_storage", "builtin", "remote"]);
                 assert!(sources.iter().all(|s| !s.pinned_version_match));
                 assert_eq!(
-                    sources.iter().find(|s| s.source == "remote").unwrap().status,
+                    sources
+                        .iter()
+                        .find(|s| s.source == "remote")
+                        .unwrap()
+                        .status,
                     Some("not_configured"),
                 );
             }
@@ -1649,7 +1655,10 @@ pattern = "exec-*"
         let writer = FilesystemMemWriter::new(mem_dir.clone());
         let mount = Mount {
             mem: "specs".to_string(),
-            schema: Some(SchemaRef::new("totally-not-a-schema", semver::Version::new(9, 9, 9))),
+            schema: Some(SchemaRef::new(
+                "totally-not-a-schema",
+                semver::Version::new(9, 9, 9),
+            )),
             storage: MountStorage::Folder { path: mem_dir },
             capability: MountCapability::Write,
             lifecycle: MountLifecycle::Eager,
@@ -1666,9 +1675,11 @@ pattern = "exec-*"
             .load_warnings()
             .iter()
             .find_map(|w| match w {
-                WarningHint::SchemaPinMismatch { mem, config_pin, mount_pin } => {
-                    Some((mem.clone(), config_pin.clone(), mount_pin.clone()))
-                }
+                WarningHint::SchemaPinMismatch {
+                    mem,
+                    config_pin,
+                    mount_pin,
+                } => Some((mem.clone(), config_pin.clone(), mount_pin.clone())),
                 _ => None,
             })
             .expect("SchemaPinMismatch warning must surface naming both pins");
@@ -1711,15 +1722,11 @@ pattern = "exec-*"
         let err = Engine::from_workspace_root(tmp.path()).unwrap_err();
         match err {
             crate::BootError::Instantiate(
-                crate::workspace_store::InstantiateError::GitBranchRequiresMemRepoFeature {
-                    mem,
-                },
+                crate::workspace_store::InstantiateError::GitBranchRequiresMemRepoFeature { mem },
             ) => {
                 assert_eq!(mem, "specs");
             }
-            other => panic!(
-                "expected Instantiate(GitBranchRequiresMemRepoFeature), got {other:?}"
-            ),
+            other => panic!("expected Instantiate(GitBranchRequiresMemRepoFeature), got {other:?}"),
         }
     }
 
@@ -1766,5 +1773,4 @@ pattern = "exec-*"
     }
 
     // ---- Engine::reload_one_mem -----------------------------------
-
 }

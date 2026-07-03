@@ -23,8 +23,8 @@ use http_body_util::BodyExt;
 use memstead_base::storage::MemWriter;
 use memstead_base::vcs::CommitContext;
 use memstead_bridge::{
-    BridgeState, BuildConfig, CommitEnvelope, commits_handler, events_handler, head_handler,
-    search_handler, snapshot_handler, SearchResult,
+    BridgeState, BuildConfig, CommitEnvelope, SearchResult, commits_handler, events_handler,
+    head_handler, search_handler, snapshot_handler,
 };
 use memstead_git_branch::storage::git_tree::GitTreeMemWriter;
 use tempfile::TempDir;
@@ -45,22 +45,20 @@ fn body(title: &str) -> String {
 }
 
 fn commit(gitdir: &Path, branch: &str, file: &str, content: &str, subject: &str) -> String {
-    let writer = GitTreeMemWriter::new(
-        gitdir.to_path_buf(),
-        format!("refs/heads/{branch}"),
-    );
+    let writer = GitTreeMemWriter::new(gitdir.to_path_buf(), format!("refs/heads/{branch}"));
     writer
         .write_entity(Path::new(file), content.as_bytes())
         .unwrap();
-    writer
-        .commit(subject, &CommitContext::internal())
-        .unwrap()
+    writer.commit(subject, &CommitContext::internal()).unwrap()
 }
 
 fn engine_with_specs(gitdir: &Path) -> memstead_base::Engine {
     let mount = memstead_base::Mount {
         mem: "specs".to_string(),
-        schema: Some(memstead_schema::SchemaRef::new("default", semver::Version::new(1, 0, 0))),
+        schema: Some(memstead_schema::SchemaRef::new(
+            "default",
+            semver::Version::new(1, 0, 0),
+        )),
         storage: memstead_base::MountStorage::GitBranch {
             gitdir: gitdir.to_path_buf(),
             branch: "specs".to_string(),
@@ -68,11 +66,10 @@ fn engine_with_specs(gitdir: &Path) -> memstead_base::Engine {
         capability: memstead_base::MountCapability::Write,
         lifecycle: memstead_base::MountLifecycle::Eager,
         cross_linkable: true,
-            migration_target: None,
-        };
+        migration_target: None,
+    };
     let backend = memstead_git_branch::storage::instantiate_full_backend(&mount).unwrap();
-    let mut engine =
-        memstead_base::Engine::from_mounts(vec![(mount, backend)]).unwrap();
+    let mut engine = memstead_base::Engine::from_mounts(vec![(mount, backend)]).unwrap();
     engine.set_git_branch_ops(memstead_git_branch::storage::FULL_GIT_BRANCH_OPS);
     engine
 }
@@ -81,10 +78,7 @@ fn engine_with_specs(gitdir: &Path) -> memstead_base::Engine {
 /// can resolve a `MemConfig` for the mem. Without this the snapshot
 /// path refuses with `MEM_CONFIG_INCOMPLETE`.
 fn seed_mem_config(gitdir: &Path) {
-    let writer = GitTreeMemWriter::new(
-        gitdir.to_path_buf(),
-        "refs/heads/__MEMSTEAD".to_string(),
-    );
+    let writer = GitTreeMemWriter::new(gitdir.to_path_buf(), "refs/heads/__MEMSTEAD".to_string());
     writer
         .write_entity(
             Path::new("mems/specs/config.json"),
@@ -100,16 +94,8 @@ fn seed_mem_config(gitdir: &Path) {
 /// specific header. Demonstrates that the embedder layers auth in
 /// front of the bridge handlers and the bridge itself does not
 /// know about credentials.
-async fn mock_auth(
-    req: Request<Body>,
-    next: axum::middleware::Next,
-) -> axum::response::Response {
-    if req
-        .headers()
-        .get("x-mock-auth")
-        .map(|v| v.as_bytes())
-        != Some(b"yes")
-    {
+async fn mock_auth(req: Request<Body>, next: axum::middleware::Next) -> axum::response::Response {
+    if req.headers().get("x-mock-auth").map(|v| v.as_bytes()) != Some(b"yes") {
         return (StatusCode::UNAUTHORIZED, "forbidden").into_response();
     }
     next.run(req).await
@@ -375,8 +361,14 @@ async fn events_endpoint_emits_mem_changed_within_window() {
             },
         );
         let mut sections = indexmap::IndexMap::new();
-        sections.insert("identity".to_string(), "Live entity for SSE test.".to_string());
-        sections.insert("purpose".to_string(), "Trigger a mem_changed event.".to_string());
+        sections.insert(
+            "identity".to_string(),
+            "Live entity for SSE test.".to_string(),
+        );
+        sections.insert(
+            "purpose".to_string(),
+            "Trigger a mem_changed event.".to_string(),
+        );
         e.create_entity(
             memstead_base::CreateEntityArgs {
                 mem: "specs".to_string(),
@@ -401,12 +393,15 @@ async fn events_endpoint_emits_mem_changed_within_window() {
     let deadline = std::time::Instant::now() + Duration::from_secs(2);
     while std::time::Instant::now() < deadline {
         let remaining = deadline.saturating_duration_since(std::time::Instant::now());
-        let chunk = match tokio::time::timeout(remaining, futures_util::StreamExt::next(&mut body_stream)).await {
-            Ok(Some(Ok(bytes))) => bytes,
-            Ok(Some(Err(_))) => break,
-            Ok(None) => break,
-            Err(_) => break,
-        };
+        let chunk =
+            match tokio::time::timeout(remaining, futures_util::StreamExt::next(&mut body_stream))
+                .await
+            {
+                Ok(Some(Ok(bytes))) => bytes,
+                Ok(Some(Err(_))) => break,
+                Ok(None) => break,
+                Err(_) => break,
+            };
         accumulated.extend_from_slice(&chunk);
         if String::from_utf8_lossy(&accumulated).contains("event: mem_changed") {
             break;
@@ -570,7 +565,10 @@ async fn search_endpoint_hit_shape_matches_engine_search_hit_shape() {
     let body = read_body(response).await;
     let parsed: serde_json::Value = serde_json::from_slice(&body).unwrap();
     let bridge_hit = &parsed["hits"][0];
-    assert!(!bridge_hit.is_null(), "bridge search must return at least one hit");
+    assert!(
+        !bridge_hit.is_null(),
+        "bridge search must return at least one hit"
+    );
 
     // Drive Engine::search with the same scope `run_search`
     // synthesises so the engine's per-hit JSON is comparable.

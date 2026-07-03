@@ -55,7 +55,6 @@ use super::{
 };
 
 impl Engine {
-
     /// Create a new entity in `args.mem`. Six concerns wired here
     /// in one shape regardless of which backend serves the mount:
     ///
@@ -145,17 +144,12 @@ impl Engine {
             .ok_or_else(|| unknown_type_error(schema, &args.entity_type))?;
 
         // 3. Pre-write validators: section keys and metadata values.
-        validate_section_keys(
-            args.sections.keys().map(String::as_str),
-            type_def.as_ref(),
-        )?;
+        validate_section_keys(args.sections.keys().map(String::as_str), type_def.as_ref())?;
         // Refuse section content with embedded `^## ` headings — the
         // compose-then-reparse pipeline would split the value at the
         // heading and silently move the trailing content into another
         // section.
-        validate_section_content(
-            args.sections.iter().map(|(k, v)| (k.as_str(), v.as_str())),
-        )?;
+        validate_section_content(args.sections.iter().map(|(k, v)| (k.as_str(), v.as_str())))?;
 
         // 4. Slug + id; reject duplicates against the in-memory store.
         //    Stub adoption: a pre-existing stub at the same id is
@@ -169,9 +163,7 @@ impl Engine {
         if let Some(existing) = self.store.get(&id)
             && !existing.stub
         {
-            return Err(EngineError::AlreadyExists {
-                id: id.to_string(),
-            });
+            return Err(EngineError::AlreadyExists { id: id.to_string() });
         }
         let file_path = format!("{slug}.md");
 
@@ -212,10 +204,7 @@ impl Engine {
                         supplied: supplied.clone(),
                     });
                 }
-                metadata.insert(
-                    field_def.key.clone(),
-                    MetadataValue::String(today.clone()),
-                );
+                metadata.insert(field_def.key.clone(), MetadataValue::String(today.clone()));
             }
         }
 
@@ -232,16 +221,14 @@ impl Engine {
         //    sections they have, then fills in the rest via
         //    `memstead_update` (which retains its permissive posture on
         //    `MISSING_REQUIRED_SECTION`).
-        let missing_sections =
-            missing_required_sections(type_def.as_ref(), &args.sections);
+        let missing_sections = missing_required_sections(type_def.as_ref(), &args.sections);
         if !missing_sections.is_empty() {
             let mut type_guidance: BTreeMap<String, Vec<String>> = BTreeMap::new();
             if missing_sections
                 .iter()
                 .any(|m| m.entity_type == type_def.name)
             {
-                type_guidance
-                    .insert(type_def.name.clone(), type_def.write_rules.clone());
+                type_guidance.insert(type_def.name.clone(), type_def.write_rules.clone());
             }
             return Err(EngineError::MissingRequiredSection {
                 entity_type: type_def.name.clone(),
@@ -260,8 +247,7 @@ impl Engine {
         //     (schema-declaration order); the recovery shape mirrors
         //     the existing `RequiredFieldUnset` envelope on the update
         //     path so a single decoder handles both surfaces.
-        let missing_fields =
-            missing_required_fields(type_def.as_ref(), &args.metadata);
+        let missing_fields = missing_required_fields(type_def.as_ref(), &args.metadata);
         if !missing_fields.is_empty() {
             // Surface the
             // full accumulator (`details.missing[]`) so the agent
@@ -333,11 +319,7 @@ impl Engine {
             // sits ahead of the rel-type / shape checks so the policy
             // refusal is identical in shape and ordering to
             // `memstead_relate` and `memstead_update.declare_relations`.
-            super::validate_cross_mem_add_policy(
-                self,
-                &args.mem,
-                &target_mem,
-            )?;
+            super::validate_cross_mem_add_policy(self, &args.mem, &target_mem)?;
             // Target-type lookup mirrors the relate path: `None` for
             // not-yet-present targets so the target gate admits the
             // stub-bound case. The cross-mem router below consults
@@ -360,7 +342,7 @@ impl Engine {
                 /* check_shape = */ true,
             )? {
                 EdgeRouteOutcome::Ok => {}
-                EdgeRouteOutcome::OpenModeWarning(w) => warnings.push(w),
+                EdgeRouteOutcome::OpenModeWarning(w) => warnings.push(*w),
             }
             // Per-edge description posture. Normalise first so empty
             // strings collapse to `None` before the gate.
@@ -377,13 +359,7 @@ impl Engine {
             // Explicit inline-relations path is an
             // explicit-author boundary — gate on the rel-type's
             // `manual_authoring` posture.
-            super::validate_manual_authoring_posture(
-                self,
-                &rel.rel_type,
-                &args.mem,
-                &id,
-                &rel.to,
-            )?;
+            super::validate_manual_authoring_posture(self, &rel.rel_type, &args.mem, &id, &rel.to)?;
         }
 
         // 7. Synthesise the in-memory entity for the generator. The
@@ -511,8 +487,7 @@ impl Engine {
         //     is empty. Stub creation is also skipped (no
         //     in-memory side effects).
         if args.dry_run {
-            let prospective_hash =
-                crate::entity::parser::compute_hash(&markdown);
+            let prospective_hash = crate::entity::parser::compute_hash(&markdown);
             // `created_date` from the in-memory entity (the
             // metadata-construction loop already set the
             // init_timestamp default to `today_iso`-equivalent).
@@ -596,12 +571,7 @@ impl Engine {
             .unwrap_or_default();
 
         let fallback = engine_fallback_type();
-        push_entities_into_store(
-            &mut self.store,
-            vec![parse_result],
-            fallback.as_ref(),
-            None,
-        );
+        push_entities_into_store(&mut self.store, vec![parse_result], fallback.as_ref(), None);
         crate::entity::store_builder::remap_alias_target_edge_sources(
             &mut self.store,
             &self.schemas,
@@ -670,7 +640,6 @@ impl Engine {
 
 #[cfg(test)]
 mod tests {
-    
 
     use indexmap::IndexMap;
     use tempfile::TempDir;
@@ -761,7 +730,11 @@ mod tests {
                 && matches!(w, WarningHint::IgnoredReadonlyField { field, supplied }
                     if field == "created_date" && supplied == "2020-01-01")
         });
-        assert!(warned, "expected IGNORED_READONLY_FIELD; got {:?}", outcome.warnings);
+        assert!(
+            warned,
+            "expected IGNORED_READONLY_FIELD; got {:?}",
+            outcome.warnings
+        );
 
         // The engine value was stamped, not the supplied 2020 date.
         assert_ne!(outcome.created_date, "2020-01-01");
@@ -782,10 +755,18 @@ mod tests {
         let (actor, client) = cli_actor();
 
         let outcome = engine
-            .create_entity(empty_create_args("specs", "Plain Entity"), actor, Some(&client), None)
+            .create_entity(
+                empty_create_args("specs", "Plain Entity"),
+                actor,
+                Some(&client),
+                None,
+            )
             .unwrap();
         assert!(
-            !outcome.warnings.iter().any(|w| w.code() == "IGNORED_READONLY_FIELD"),
+            !outcome
+                .warnings
+                .iter()
+                .any(|w| w.code() == "IGNORED_READONLY_FIELD"),
             "no auto-managed field supplied — no warning expected; got {:?}",
             outcome.warnings
         );
@@ -874,10 +855,19 @@ mod tests {
             } => {
                 assert_eq!(entity_type, "spec");
                 assert_eq!(missing_count, sections.len());
-                assert!(missing_count >= 2, "expected ≥2 missing sections, got {missing_count}");
+                assert!(
+                    missing_count >= 2,
+                    "expected ≥2 missing sections, got {missing_count}"
+                );
                 let keys: Vec<String> = sections.iter().map(|s| s.key.clone()).collect();
-                assert!(keys.contains(&"identity".to_string()), "missing keys: {keys:?}");
-                assert!(keys.contains(&"purpose".to_string()), "missing keys: {keys:?}");
+                assert!(
+                    keys.contains(&"identity".to_string()),
+                    "missing keys: {keys:?}"
+                );
+                assert!(
+                    keys.contains(&"purpose".to_string()),
+                    "missing keys: {keys:?}"
+                );
                 assert!(
                     type_guidance.contains_key("spec"),
                     "type_guidance must include `spec` entry, got: {type_guidance:?}",
@@ -1101,11 +1091,13 @@ mod tests {
         // and the auto_timestamp field. The engine ignores both on
         // create.
         let mut args = empty_create_args("specs", "Stamped Today");
-        args.metadata.insert("created_date".to_string(), "2020-01-01".to_string());
-        args.metadata.insert("last_modified".to_string(), "2020-01-01".to_string());
+        args.metadata
+            .insert("created_date".to_string(), "2020-01-01".to_string());
+        args.metadata
+            .insert("last_modified".to_string(), "2020-01-01".to_string());
 
         let outcome = engine
-            .create_entity(args, actor.clone(), Some(&client), None)
+            .create_entity(args, actor, Some(&client), None)
             .unwrap();
 
         // Both timestamps should reflect the engine's `today_iso()`,
@@ -1116,12 +1108,20 @@ mod tests {
             .get_entity(&outcome.id)
             .expect("entity must be in store after create");
         assert_eq!(
-            entity.metadata.get("created_date").and_then(|v| v.as_str()).unwrap_or_default(),
+            entity
+                .metadata
+                .get("created_date")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default(),
             today,
             "init_timestamp field must be engine-determined on create, not user-supplied"
         );
         assert_eq!(
-            entity.metadata.get("last_modified").and_then(|v| v.as_str()).unwrap_or_default(),
+            entity
+                .metadata
+                .get("last_modified")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default(),
             today,
             "auto_timestamp field must be engine-determined on create, not user-supplied"
         );
@@ -1142,12 +1142,17 @@ mod tests {
                 expected_hash: Some(outcome.content_hash.clone()),
                 dry_run: false,
                 declare_relations: Vec::new(),
-            relations_unset: Vec::new(),
-        }
+                relations_unset: Vec::new(),
+            }
         };
         for key in ["created_date", "last_modified"] {
             let err = engine
-                .update_entity(attempt_update(key, "2019-12-31"), actor.clone(), Some(&client), None)
+                .update_entity(
+                    attempt_update(key, "2019-12-31"),
+                    actor,
+                    Some(&client),
+                    None,
+                )
                 .expect_err("schema-managed timestamp must be rejected on update");
             assert_eq!(err.code(), "READ_ONLY_FIELD", "got: {err:?}");
         }
@@ -1156,7 +1161,11 @@ mod tests {
             .get_entity(&outcome.id)
             .expect("entity must remain in store after rejected update");
         assert_eq!(
-            entity.metadata.get("last_modified").and_then(|v| v.as_str()).unwrap_or_default(),
+            entity
+                .metadata
+                .get("last_modified")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default(),
             today,
             "rejected update must not mutate the auto_timestamp field"
         );
@@ -1224,13 +1233,16 @@ mod tests {
     /// required, no default / no init_timestamp) — without inventing a
     /// synthetic schema.
     fn engine_with_planning_schema(tmp: &TempDir) -> Engine {
-        use crate::workspace::{MountCapability, MountLifecycle, MountStorage};
         use crate::workspace::Mount;
+        use crate::workspace::{MountCapability, MountLifecycle, MountStorage};
         let mem_dir = tmp.path().to_path_buf();
         let writer = FilesystemMemWriter::new(mem_dir.clone());
         let mount = Mount {
             mem: "planning".to_string(),
-            schema: Some(memstead_schema::SchemaRef::new("planning", semver::Version::new(0, 1, 0))),
+            schema: Some(memstead_schema::SchemaRef::new(
+                "planning",
+                semver::Version::new(0, 1, 0),
+            )),
             storage: MountStorage::Folder { path: mem_dir },
             capability: MountCapability::Write,
             lifecycle: MountLifecycle::Eager,
@@ -1277,7 +1289,9 @@ mod tests {
             .create_entity(args.clone(), actor, Some(&client), None)
             .unwrap_err();
         match err {
-            EngineError::RequiredFieldUnset { field, entity_type, .. } => {
+            EngineError::RequiredFieldUnset {
+                field, entity_type, ..
+            } => {
                 assert!(
                     field == "decided_on" || field == "deciders",
                     "expected first missing field, got {field:?}"
@@ -1394,18 +1408,18 @@ mod tests {
         let writer = FilesystemMemWriter::new(mem_dir.clone());
         let mount = Mount {
             mem: "code".to_string(),
-            schema: Some(memstead_schema::SchemaRef::new("software", semver::Version::new(0, 1, 0))),
+            schema: Some(memstead_schema::SchemaRef::new(
+                "software",
+                semver::Version::new(0, 1, 0),
+            )),
             storage: MountStorage::Folder { path: mem_dir },
             capability: MountCapability::Write,
             lifecycle: MountLifecycle::Eager,
             cross_linkable: true,
             migration_target: None,
         };
-        let mut engine = Engine::from_mounts(vec![(
-            mount,
-            Box::new(writer) as Box<dyn MemBackend>,
-        )])
-        .unwrap();
+        let mut engine =
+            Engine::from_mounts(vec![(mount, Box::new(writer) as Box<dyn MemBackend>)]).unwrap();
         let (actor, client) = cli_actor();
 
         // Seed an existing target so the shape gate evaluates the
@@ -1449,7 +1463,10 @@ mod tests {
             entity_type: "spec".to_string(),
             sections: IndexMap::from_iter([
                 ("identity".to_string(), "this spec".to_string()),
-                ("purpose".to_string(), "exercising the shape gate".to_string()),
+                (
+                    "purpose".to_string(),
+                    "exercising the shape gate".to_string(),
+                ),
             ]),
             metadata: IndexMap::new(),
             relations: vec![crate::ops::RelateArg {
@@ -1520,7 +1537,10 @@ mod tests {
 
         // Wire shape: content_hash = prospective hash; commit_sha empty.
         assert_eq!(outcome.id.to_string(), "specs--preview-only");
-        assert!(!outcome.content_hash.is_empty(), "prospective hash populated");
+        assert!(
+            !outcome.content_hash.is_empty(),
+            "prospective hash populated"
+        );
         assert!(outcome.commit_sha.is_empty(), "no commit on dry_run");
         // No store entry — the engine didn't push.
         assert!(
@@ -1535,7 +1555,10 @@ mod tests {
         // No provenance line.
         let log = mem_dir.join(".memstead").join("changes.jsonl");
         assert!(
-            !log.exists() || !std::fs::read_to_string(&log).unwrap().contains("preview-only"),
+            !log.exists()
+                || !std::fs::read_to_string(&log)
+                    .unwrap()
+                    .contains("preview-only"),
             "dry_run must not append provenance",
         );
     }
@@ -1778,10 +1801,7 @@ mod tests {
     /// Returns the engine + the created outcome so tests have the
     /// id and current hash to use as `expected_hash` for the next
     /// mutation.
-    fn engine_with_seed(
-        tmp: &TempDir,
-        title: &str,
-    ) -> (Engine, CreateEntityOutcome) {
+    fn engine_with_seed(tmp: &TempDir, title: &str) -> (Engine, CreateEntityOutcome) {
         let mem_dir = tmp.path().to_path_buf();
         let writer = FilesystemMemWriter::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
@@ -1791,7 +1811,12 @@ mod tests {
         .unwrap();
         let (actor, client) = cli_actor();
         let outcome = engine
-            .create_entity(empty_create_args("specs", title), actor, Some(&client), None)
+            .create_entity(
+                empty_create_args("specs", title),
+                actor,
+                Some(&client),
+                None,
+            )
             .unwrap();
         (engine, outcome)
     }
@@ -1837,12 +1862,15 @@ mod tests {
             .flatten()
             .collect();
         assert!(
-            stubbed.iter().any(|t| *t == &ghost),
+            stubbed.contains(&&ghost),
             "INLINE_WIKI_LINK_AUTO_STUBBED warning must name the ghost target; got: {:?}",
             outcome.warnings,
         );
         // The stub also lands in the store and the REFERENCES edge exists.
-        assert!(engine.store().contains(&ghost), "ghost stub must materialise");
+        assert!(
+            engine.store().contains(&ghost),
+            "ghost stub must materialise"
+        );
     }
 
     /// CLI F11: a body wiki-link to the entity's own slug is dropped (no
@@ -1892,11 +1920,19 @@ mod tests {
             ent.relationships,
         );
         assert!(
-            engine.store().outgoing(&self_id).iter().all(|e| e.target != self_id),
+            engine
+                .store()
+                .outgoing(&self_id)
+                .iter()
+                .all(|e| e.target != self_id),
             "self must not be its own Outgoing neighbour",
         );
         assert!(
-            engine.store().incoming(&self_id).iter().all(|e| e.from != self_id),
+            engine
+                .store()
+                .incoming(&self_id)
+                .iter()
+                .all(|e| e.from != self_id),
             "self must not be its own Incoming neighbour",
         );
 
@@ -1926,20 +1962,24 @@ mod tests {
 
         let mut args = empty_create_args("specs", "Dry Run Body Link");
         args.dry_run = true;
-        args.sections.insert(
-            "identity".to_string(),
-            "see [[dry-run-ghost]]".to_string(),
-        );
+        args.sections
+            .insert("identity".to_string(), "see [[dry-run-ghost]]".to_string());
 
         let outcome = engine
             .create_entity(args, actor, Some(&client), None)
             .unwrap();
-        let has_warning = outcome.warnings.iter().any(|w| matches!(
-            w,
-            WarningHint::InlineWikiLinkAutoStubbed { stubs, .. }
-                if stubs.iter().any(|t| t.to_string() == "specs--dry-run-ghost")
-        ));
-        assert!(has_warning, "dry_run must emit the same warning as real write: {:?}", outcome.warnings);
+        let has_warning = outcome.warnings.iter().any(|w| {
+            matches!(
+                w,
+                WarningHint::InlineWikiLinkAutoStubbed { stubs, .. }
+                    if stubs.iter().any(|t| t.to_string() == "specs--dry-run-ghost")
+            )
+        });
+        assert!(
+            has_warning,
+            "dry_run must emit the same warning as real write: {:?}",
+            outcome.warnings
+        );
     }
 
     /// Body wiki-link to a target that already exists
@@ -1957,9 +1997,10 @@ mod tests {
         let outcome = engine
             .create_entity(args, actor, Some(&client), None)
             .unwrap();
-        let has_warning = outcome.warnings.iter().any(|w| matches!(
-            w, WarningHint::InlineWikiLinkAutoStubbed { .. }
-        ));
+        let has_warning = outcome
+            .warnings
+            .iter()
+            .any(|w| matches!(w, WarningHint::InlineWikiLinkAutoStubbed { .. }));
         assert!(
             !has_warning,
             "no auto-stub warning when target pre-exists; got: {:?}",
@@ -1998,8 +2039,8 @@ mod tests {
     /// as `NotFound`.
     #[test]
     fn create_entity_refuses_inline_cross_mem_relation_when_policy_denies() {
-        use crate::ops::RelateArg;
         use crate::entity::EntityId;
+        use crate::ops::RelateArg;
         use memstead_schema::workspace_config::CrossLinkValue;
 
         let (_tmp_test, _tmp_other, mut engine) = engine_with_two_default_mems();
@@ -2019,7 +2060,12 @@ mod tests {
         // resolution regardless, but a real target removes any
         // ambiguity from the assertion).
         let target = engine
-            .create_entity(empty_create_args("test", "Target"), actor, Some(&client), None)
+            .create_entity(
+                empty_create_args("test", "Target"),
+                actor,
+                Some(&client),
+                None,
+            )
             .unwrap();
 
         let mut args = empty_create_args("other", "Source");
@@ -2036,9 +2082,7 @@ mod tests {
                 assert_eq!(from_mem, "other");
                 assert_eq!(to_mem, "test");
             }
-            other => panic!(
-                "expected CROSS_MEM_LINK_NOT_ALLOWED, got {other:?}"
-            ),
+            other => panic!("expected CROSS_MEM_LINK_NOT_ALLOWED, got {other:?}"),
         }
 
         // No entity landed: the would-be id is absent.
@@ -2067,7 +2111,12 @@ mod tests {
         engine.set_settings(settings);
 
         let target = engine
-            .create_entity(empty_create_args("test", "Target"), actor, Some(&client), None)
+            .create_entity(
+                empty_create_args("test", "Target"),
+                actor,
+                Some(&client),
+                None,
+            )
             .unwrap();
 
         let mut args = empty_create_args("other", "Source");
@@ -2101,7 +2150,12 @@ mod tests {
         // No cross_mem_links set; same-mem writes must still work.
 
         let target = engine
-            .create_entity(empty_create_args("test", "Target"), actor, Some(&client), None)
+            .create_entity(
+                empty_create_args("test", "Target"),
+                actor,
+                Some(&client),
+                None,
+            )
             .unwrap();
         let mut args = empty_create_args("test", "Source");
         args.relations = vec![RelateArg {
@@ -2142,10 +2196,20 @@ mod tests {
         engine.set_settings(settings);
 
         let target = engine
-            .create_entity(empty_create_args("test", "Target"), actor, Some(&client), None)
+            .create_entity(
+                empty_create_args("test", "Target"),
+                actor,
+                Some(&client),
+                None,
+            )
             .unwrap();
         let src = engine
-            .create_entity(empty_create_args("other", "Source"), actor, Some(&client), None)
+            .create_entity(
+                empty_create_args("other", "Source"),
+                actor,
+                Some(&client),
+                None,
+            )
             .unwrap();
 
         // memstead_relate refusal.
@@ -2308,9 +2372,7 @@ mod tests {
                 assert_eq!(from_mem, "test");
                 assert_eq!(to_mem, "other");
             }
-            other => panic!(
-                "expected CROSS_MEM_LINK_NOT_ALLOWED, got {other:?}"
-            ),
+            other => panic!("expected CROSS_MEM_LINK_NOT_ALLOWED, got {other:?}"),
         }
     }
 
@@ -2352,7 +2414,12 @@ mod tests {
 
         // --- create, no note: exactly one NOTE_MISSING, commit landed ---
         let created = engine
-            .create_entity(empty_create_args("specs", "Noteless"), actor, Some(&client), None)
+            .create_entity(
+                empty_create_args("specs", "Noteless"),
+                actor,
+                Some(&client),
+                None,
+            )
             .unwrap();
         assert_eq!(
             note_missing(&created.warnings),
@@ -2367,7 +2434,10 @@ mod tests {
             ),
             "the warning names the engine-level verb",
         );
-        assert!(!created.commit_sha.is_empty(), "create still commits (nudge, not block)");
+        assert!(
+            !created.commit_sha.is_empty(),
+            "create still commits (nudge, not block)"
+        );
 
         // --- update, no note: NOTE_MISSING + commit landed ---
         let mut edit: IndexMap<String, String> = IndexMap::new();
@@ -2384,19 +2454,28 @@ mod tests {
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
                     dry_run: false,
-            relations_unset: Vec::new(),
-        },
+                    relations_unset: Vec::new(),
+                },
                 actor,
                 Some(&client),
                 None,
             )
             .unwrap();
-        assert_eq!(note_missing(&updated.warnings), 1, "update emits NOTE_MISSING");
+        assert_eq!(
+            note_missing(&updated.warnings),
+            1,
+            "update emits NOTE_MISSING"
+        );
         assert!(!updated.commit_sha.is_empty(), "update still commits");
 
         // --- relate, no note: NOTE_MISSING + commit landed ---
         let target = engine
-            .create_entity(empty_create_args("specs", "Target"), actor, Some(&client), Some("seed"))
+            .create_entity(
+                empty_create_args("specs", "Target"),
+                actor,
+                Some(&client),
+                Some("seed"),
+            )
             .unwrap();
         let related = engine
             .relate_entity(
@@ -2413,7 +2492,11 @@ mod tests {
                 None,
             )
             .unwrap();
-        assert_eq!(note_missing(&related.warnings), 1, "relate emits NOTE_MISSING");
+        assert_eq!(
+            note_missing(&related.warnings),
+            1,
+            "relate emits NOTE_MISSING"
+        );
         assert!(!related.commit_sha.is_empty(), "relate still commits");
 
         // --- with a note: suppressed ---
@@ -2434,7 +2517,12 @@ mod tests {
         // --- policy off: silent even without a note ---
         engine.set_settings(WorkspaceSettings::default());
         let after_off = engine
-            .create_entity(empty_create_args("specs", "Quiet"), actor, Some(&client), None)
+            .create_entity(
+                empty_create_args("specs", "Quiet"),
+                actor,
+                Some(&client),
+                None,
+            )
             .unwrap();
         assert_eq!(
             note_missing(&after_off.warnings),

@@ -64,10 +64,7 @@ impl Engine {
     /// happens. Lets replay drivers signal "we saw a commit, here is
     /// its SHA, no entity-level changes" — useful for empty commits
     /// (e.g. tag-only or merge commits without tree changes).
-    pub fn apply_external_commit(
-        &mut self,
-        envelope: &CommitEnvelope,
-    ) -> Result<(), EngineError> {
+    pub fn apply_external_commit(&mut self, envelope: &CommitEnvelope) -> Result<(), EngineError> {
         let mem = envelope.mem.as_str();
 
         // 1. Resolve mount + schema. Unknown mem refuses before any
@@ -204,12 +201,7 @@ mod tests {
         .unwrap()
     }
 
-    fn envelope(
-        mem: &str,
-        sha: &str,
-        parent: &str,
-        changes: Vec<EntityChange>,
-    ) -> CommitEnvelope {
+    fn envelope(mem: &str, sha: &str, parent: &str, changes: Vec<EntityChange>) -> CommitEnvelope {
         CommitEnvelope {
             sha: sha.to_string(),
             parent: parent.to_string(),
@@ -489,11 +481,7 @@ mod tests {
             .apply_external_commit(&envelope("specs", "empty-commit-sha", "", vec![]))
             .unwrap();
         let events = observed.lock().unwrap();
-        assert_eq!(
-            events.len(),
-            1,
-            "empty envelope must still emit one event"
-        );
+        assert_eq!(events.len(), 1, "empty envelope must still emit one event");
         assert_eq!(events[0].head, "empty-commit-sha");
     }
 }

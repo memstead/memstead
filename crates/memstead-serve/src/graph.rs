@@ -91,7 +91,11 @@ pub fn graph_projection(engine: &Engine, mem: &str) -> GraphSnapshot {
         for edge in store.outgoing(&e.id) {
             // Keep edges between nodes that travel in this snapshot — guards
             // against a dangling target (e.g. a hypothetical cross-mem edge).
-            if store.get(&edge.target).map(|t| t.mem == mem).unwrap_or(false) {
+            if store
+                .get(&edge.target)
+                .map(|t| t.mem == mem)
+                .unwrap_or(false)
+            {
                 edges.push(GraphEdge {
                     source: id_str.clone(),
                     target: edge.target.to_string(),
@@ -136,7 +140,13 @@ mod tests {
     }
 
     fn cli() -> (Actor, ClientId) {
-        (Actor::Cli, ClientId { name: "test".to_string(), version: "0".to_string() })
+        (
+            Actor::Cli,
+            ClientId {
+                name: "test".to_string(),
+                version: "0".to_string(),
+            },
+        )
     }
 
     fn spec_args(title: &str, identity: &str, purpose: &str) -> CreateEntityArgs {
@@ -160,8 +170,13 @@ mod tests {
     /// entity never lingers (not an append-only log).
     #[test]
     fn projection_tracks_create_relate_delete_and_recomputes() {
-        let mut engine =
-            mount_session_engine(MountStorage::InMemory, schema(), CONTENT_MEM_NAME.to_string(), schema()).unwrap();
+        let mut engine = mount_session_engine(
+            MountStorage::InMemory,
+            schema(),
+            CONTENT_MEM_NAME.to_string(),
+            schema(),
+        )
+        .unwrap();
         let (actor, client) = cli();
 
         // Empty mem → empty projection.
@@ -170,7 +185,12 @@ mod tests {
 
         // create Target → one node.
         let target = engine
-            .create_entity(spec_args("Target Spec", "ti", "tp"), actor, Some(&client), None)
+            .create_entity(
+                spec_args("Target Spec", "ti", "tp"),
+                actor,
+                Some(&client),
+                None,
+            )
             .unwrap();
         let snap = graph_projection(&engine, "sketch");
         assert_eq!(snap.nodes.len(), 1, "create adds a node");
@@ -188,9 +208,11 @@ mod tests {
         let snap = graph_projection(&engine, "sketch");
         assert_eq!(snap.nodes.len(), 2);
         assert!(
-            snap.edges.iter().any(|e| e.source == "sketch--referrer-spec"
-                && e.target == "sketch--target-spec"
-                && e.rel_type == "REFERENCES"),
+            snap.edges
+                .iter()
+                .any(|e| e.source == "sketch--referrer-spec"
+                    && e.target == "sketch--target-spec"
+                    && e.rel_type == "REFERENCES"),
             "body wiki-link adds a REFERENCES edge: {:?}",
             snap.edges
         );
@@ -212,14 +234,25 @@ mod tests {
             )
             .unwrap();
         let snap = graph_projection(&engine, "sketch");
-        assert!(snap.edges.iter().any(|e| e.rel_type == "USES"), "relate adds an edge: {:?}", snap.edges);
+        assert!(
+            snap.edges.iter().any(|e| e.rel_type == "USES"),
+            "relate adds an edge: {:?}",
+            snap.edges
+        );
 
         // delete Referrer → its node AND incident edges vanish from the next
         // recomputed frame; Target stays.
-        let cur = engine.get_entity(&referrer.id).unwrap().content_hash.clone();
+        let cur = engine
+            .get_entity(&referrer.id)
+            .unwrap()
+            .content_hash
+            .clone();
         engine
             .delete_entity(
-                DeleteEntityArgs { id: referrer.id.clone(), expected_hash: Some(cur) },
+                DeleteEntityArgs {
+                    id: referrer.id.clone(),
+                    expected_hash: Some(cur),
+                },
                 actor,
                 Some(&client),
                 None,
@@ -246,8 +279,13 @@ mod tests {
     /// The payload carries no layout coordinates.
     #[test]
     fn projection_carries_no_layout_coordinates() {
-        let mut engine =
-            mount_session_engine(MountStorage::InMemory, schema(), CONTENT_MEM_NAME.to_string(), schema()).unwrap();
+        let mut engine = mount_session_engine(
+            MountStorage::InMemory,
+            schema(),
+            CONTENT_MEM_NAME.to_string(),
+            schema(),
+        )
+        .unwrap();
         let (actor, client) = cli();
         engine
             .create_entity(spec_args("A Node", "i", "p"), actor, Some(&client), None)

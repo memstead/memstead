@@ -45,7 +45,12 @@ fn update_missing_entity_returns_typed_code() {
     let tmp = TempDir::new().unwrap();
     let workspace = tmp.path().join("ws");
     memstead()
-        .args(["mem-repo", "init", workspace.to_str().unwrap(), "--no-gitignore"])
+        .args([
+            "mem-repo",
+            "init",
+            workspace.to_str().unwrap(),
+            "--no-gitignore",
+        ])
         .assert()
         .success();
 
@@ -74,19 +79,18 @@ fn update_missing_hash_flag_returns_typed_code() {
     let tmp = TempDir::new().unwrap();
     let workspace = tmp.path().join("ws");
     memstead()
-        .args(["mem-repo", "init", workspace.to_str().unwrap(), "--no-gitignore"])
+        .args([
+            "mem-repo",
+            "init",
+            workspace.to_str().unwrap(),
+            "--no-gitignore",
+        ])
         .assert()
         .success();
 
     let output = memstead()
         .current_dir(&workspace)
-        .args([
-            "--json",
-            "update",
-            "anything--here",
-            "--section",
-            "Body=hi",
-        ])
+        .args(["--json", "update", "anything--here", "--section", "Body=hi"])
         .assert()
         .failure()
         .get_output()
@@ -106,7 +110,12 @@ fn overview_chunk_past_end_returns_typed_code() {
     let tmp = TempDir::new().unwrap();
     let workspace = tmp.path().join("ws");
     memstead()
-        .args(["mem-repo", "init", workspace.to_str().unwrap(), "--no-gitignore"])
+        .args([
+            "mem-repo",
+            "init",
+            workspace.to_str().unwrap(),
+            "--no-gitignore",
+        ])
         .assert()
         .success();
 
@@ -162,7 +171,12 @@ fn type_unknown_returns_typed_code() {
     let tmp = TempDir::new().unwrap();
     let workspace = tmp.path().join("ws");
     memstead()
-        .args(["mem-repo", "init", workspace.to_str().unwrap(), "--no-gitignore"])
+        .args([
+            "mem-repo",
+            "init",
+            workspace.to_str().unwrap(),
+            "--no-gitignore",
+        ])
         .assert()
         .success();
 

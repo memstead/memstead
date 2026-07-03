@@ -11,7 +11,7 @@ use std::path::Path;
 
 use anyhow::Result;
 
-use super::{AgentAnswer, ArmConfig, Condition, Judge, Runner, TaskSpec, MemState, run_series};
+use super::{AgentAnswer, ArmConfig, Condition, Judge, MemState, Runner, TaskSpec, run_series};
 
 /// A stub agent: the mem-on arm reaches a quality that climbs with how rich the
 /// named state is; the mem-off arm holds a fixed baseline. Mirrors the real
@@ -28,7 +28,11 @@ impl Runner for StubRunner {
                 tool_calls: vec![],
             }),
             Condition::MemOn => {
-                let q = match arm.mcp_config.as_ref().map(|p| p.to_string_lossy().to_string()) {
+                let q = match arm
+                    .mcp_config
+                    .as_ref()
+                    .map(|p| p.to_string_lossy().to_string())
+                {
                     None => baseline, // empty/absent state — no lift
                     Some(label) if label.contains("mature") => 0.88,
                     Some(label) if label.contains("growing") => 0.66,
@@ -74,7 +78,10 @@ pub fn run(output: &Path) -> Result<()> {
         },
     ];
     let states = vec![
-        MemState { label: "empty".into(), mcp_config: None },
+        MemState {
+            label: "empty".into(),
+            mcp_config: None,
+        },
         MemState {
             label: "growing".into(),
             mcp_config: Some("/tmp/eval/growing.json".into()),

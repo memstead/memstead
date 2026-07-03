@@ -101,7 +101,10 @@ pub fn load(domain: &str) -> Result<SigningKey> {
 /// `ed25519:<base64>` public-key string for a signing key — the form listed in
 /// the manifest and presented on a publish.
 pub fn public_key_string(signing: &SigningKey) -> String {
-    format!("{ALG}:{}", BASE64.encode(signing.verifying_key().to_bytes()))
+    format!(
+        "{ALG}:{}",
+        BASE64.encode(signing.verifying_key().to_bytes())
+    )
 }
 
 /// Sign `payload`, returning the `ed25519:<base64>` signature string.
@@ -172,7 +175,10 @@ mod tests {
     fn generate_refuses_to_clobber_without_force() {
         with_keys_dir(|| {
             let pk1 = generate("acme.com", false).unwrap();
-            assert!(generate("acme.com", false).is_err(), "must not clobber silently");
+            assert!(
+                generate("acme.com", false).is_err(),
+                "must not clobber silently"
+            );
             // Force rotates to a new key.
             let pk2 = generate("acme.com", true).unwrap();
             assert_ne!(pk1, pk2, "force must produce a new key");

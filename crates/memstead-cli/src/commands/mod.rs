@@ -152,9 +152,7 @@ pub fn render_type_guidance_block(
         if rules.is_empty() {
             continue;
         }
-        out.push_str(&format!(
-            "\n>\n> Type-level guidance for `{entity_type}`:",
-        ));
+        out.push_str(&format!("\n>\n> Type-level guidance for `{entity_type}`:",));
         for rule in rules {
             out.push_str(&format!("\n> - {rule}"));
         }
@@ -220,6 +218,7 @@ pub fn render_mem_changed_block(notices: &[memstead_base::ops::MemChangedNotice]
     out
 }
 
+pub mod admin;
 pub mod delete;
 pub mod domain;
 pub mod entity;
@@ -228,7 +227,6 @@ pub mod health;
 pub mod init;
 pub mod link;
 pub mod list;
-pub mod admin;
 pub mod login;
 pub mod logout;
 pub mod overview;
@@ -240,9 +238,9 @@ pub mod relations;
 pub mod reload;
 pub mod rename;
 pub mod schema;
-pub mod type_cmd;
 pub mod search;
 pub mod stats;
+pub mod type_cmd;
 pub mod unpublish;
 pub mod update;
 
@@ -256,12 +254,12 @@ pub mod branch_reset;
 #[cfg(feature = "mem-repo")]
 pub mod install;
 #[cfg(feature = "mem-repo")]
-pub mod recover;
-#[cfg(feature = "mem-repo")]
-pub mod transport;
-#[cfg(feature = "mem-repo")]
 pub mod mem;
 #[cfg(feature = "mem-repo")]
 pub mod mem_repo;
+#[cfg(feature = "mem-repo")]
+pub mod recover;
+#[cfg(feature = "mem-repo")]
+pub mod transport;
 #[cfg(feature = "mem-repo")]
 pub mod workspace;

@@ -208,7 +208,8 @@ fn mcp_does_not_expose_list_or_phantom_entities() {
 #[test]
 fn mcp_does_not_expose_path() {
     let names = current_tool_names();
-    for removed in ["memstead_path"] {
+    {
+        let removed = "memstead_path";
         assert!(
             !names.iter().any(|n| n == removed),
             "{removed} must not be re-exposed."
@@ -449,8 +450,13 @@ fn expected_hints(tool_name: &str) -> HintTriple {
         // read tools: repeat calls with the same args return equivalent
         // output (modulo in-flight mutations from other callers), so a
         // client that caches or retries transparently is safe.
-        "memstead_entity" | "memstead_search" | "memstead_overview" | "memstead_schema" | "memstead_health"
-        | "memstead_changes_since" | "memstead_diff" => HintTriple {
+        "memstead_entity"
+        | "memstead_search"
+        | "memstead_overview"
+        | "memstead_schema"
+        | "memstead_health"
+        | "memstead_changes_since"
+        | "memstead_diff" => HintTriple {
             read_only: Some(true),
             destructive: Some(false),
             idempotent: Some(true),
@@ -646,12 +652,27 @@ fn descriptions_start_with_verb() {
     // Curated — extend deliberately. "Per-mem" is permanent for
     // `memstead_changes_since`; "Search" is permanent for `memstead_search`.
     const ALLOWED_LEADS: &[&str] = &[
-        "Read", "Find", "Search", "Create", "Modify", "Remove", "Rename",
-        "Connect", "Return", "Start", "Per-mem", "List", "Check",
-        "Unregister", "Reload", "Update",
+        "Read",
+        "Find",
+        "Search",
+        "Create",
+        "Modify",
+        "Remove",
+        "Rename",
+        "Connect",
+        "Return",
+        "Start",
+        "Per-mem",
+        "List",
+        "Check",
+        "Unregister",
+        "Reload",
+        "Update",
         // The six `memstead_workspace_*` tools lead with operation
         // verbs.
-        "Grant", "Revoke", "Append",
+        "Grant",
+        "Revoke",
+        "Append",
     ];
     const BANNED_LEADS: &[&str] = &["This", "Allows", "A", "An", "The"];
 
@@ -688,7 +709,9 @@ fn descriptions_have_no_todo_markers() {
     for (name, desc) in descriptions() {
         for marker in FORBIDDEN {
             if desc.contains(marker) {
-                violations.push(format!("{name}: description contains forbidden marker '{marker}'"));
+                violations.push(format!(
+                    "{name}: description contains forbidden marker '{marker}'"
+                ));
             }
         }
     }
@@ -865,7 +888,14 @@ fn is_allowed_reference(tool_name: &str, token: &str, schema: &str) -> bool {
 /// response fields. Keep this list short; prefer extending a tool-level
 /// allowlist when a reference is actually structural.
 const GENERIC_REFS: &[&str] = &[
-    "true", "false", "null", "markdown", "JSON", "chunk", "mem", "sections",
+    "true",
+    "false",
+    "null",
+    "markdown",
+    "JSON",
+    "chunk",
+    "mem",
+    "sections",
     "structured_content",
 ];
 
@@ -876,75 +906,132 @@ const GENERIC_REFS: &[&str] = &[
 fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
     match tool_name {
         "memstead_entity" => &[
-            "_hash", "_chunk", "_truncated", "_tokens_unfiltered_body", "_tokens",
-            "_total_chunks", "_stub_kind", "relationships",
+            "_hash",
+            "_chunk",
+            "_truncated",
+            "_tokens_unfiltered_body",
+            "_tokens",
+            "_total_chunks",
+            "_stub_kind",
+            "relationships",
             // Hash-after-relate clarification — memstead_entity's docstring
             // names the relate response's `content_hash` field and points
             // at the `expected_hash` parameter on follow-up mutations so
             // agents know the relate response carries the new valid hash.
-            "memstead_relate", "_hash", "expected_hash",
+            "memstead_relate",
+            "_hash",
+            "expected_hash",
             // Structured envelope alongside the markdown text channel.
-            "structured_content", "sections",
-            "id", "mem", "type", "level", "stability",
-            "created_date", "last_modified",
+            "structured_content",
+            "sections",
+            "id",
+            "mem",
+            "type",
+            "level",
+            "stability",
+            "created_date",
+            "last_modified",
             // `metadata` is the single home for frontmatter keys; the
             // description names the map and dotted reads
             // (`metadata.level`, …).
             "metadata",
             // Data-origin trust label on the envelope + its two values.
-            "origin", "first-party", "third-party",
+            "origin",
+            "first-party",
+            "third-party",
         ],
         "memstead_search" => &[
             // Response envelope fields
-            "facets", "matched_terms", "score_breakdown", "expansion",
+            "facets",
+            "matched_terms",
+            "score_breakdown",
+            "expansion",
             // Per-hit data-origin trust label + its two values.
-            "origin", "first-party", "third-party",
-            "heading_path", "by_subsection", "by_type", "by_mem", "by_level",
-            "by_status", "by_confidence", "by_expansion",
+            "origin",
+            "first-party",
+            "third-party",
+            "heading_path",
+            "by_subsection",
+            "by_type",
+            "by_mem",
+            "by_level",
+            "by_status",
+            "by_confidence",
+            "by_expansion",
             // Dotted forms from the input `query` struct — allowed as
             // full tokens so `query.any`, `query.not`, etc. resolve even
             // when schemars doesn't surface the sub-field at the top level.
-            "query.any", "query.not", "query.phrase", "query.field",
+            "query.any",
+            "query.not",
+            "query.phrase",
+            "query.field",
             // Warning codes referenced literally in the description for
             // the search filter family.
             "STUB_FILTER_EXCLUDES_ALL",
-            "UNKNOWN_FILTER_KEY", "FIELD_NOT_FILTERABLE",
+            "UNKNOWN_FILTER_KEY",
+            "FIELD_NOT_FILTERABLE",
             // #52 enum-value filter warning + #54 neighbourhood cap.
-            "INVALID_ENUM_VALUE", "enum_values", "details.allowed",
+            "INVALID_ENUM_VALUE",
+            "enum_values",
+            "details.allowed",
             "NEIGHBOURHOOD_CAPPED",
             // Applied-with-type-narrowing carries its own code, distinct
             // from the truly-unknown-key code, so a consumer branches on
             // `code`.
-            "FILTER_TYPE_SCOPED", "RANGE_FILTER_TYPE_SCOPED",
-            "RANGE_FILTER_KEY_MALFORMED", "UNKNOWN_RANGE_FILTER_FIELD",
-            "FIELD_NOT_RANGE_FILTERABLE", "SEARCH_MEM_INDEX_UNAVAILABLE",
+            "FILTER_TYPE_SCOPED",
+            "RANGE_FILTER_TYPE_SCOPED",
+            "RANGE_FILTER_KEY_MALFORMED",
+            "UNKNOWN_RANGE_FILTER_FIELD",
+            "FIELD_NOT_RANGE_FILTERABLE",
+            "SEARCH_MEM_INDEX_UNAVAILABLE",
             // Token-budget guard: an overflowing page is trimmed with a
             // `SEARCH_RESULTS_TRUNCATED` warning carrying `kept`/`budget`.
-            "SEARCH_RESULTS_TRUNCATED", "kept", "budget",
+            "SEARCH_RESULTS_TRUNCATED",
+            "kept",
+            "budget",
             // Range-filter param + key-shape mnemonics named in the
             // description so agents know how to construct the keys.
-            "range_filters", "min_<field>", "max_<field>",
-            "<field>_before", "<field>_after",
+            "range_filters",
+            "min_<field>",
+            "max_<field>",
+            "<field>_before",
+            "<field>_after",
             // Warning-envelope shape — every search warning ships
             // `code`, `details`, `message`; `details.mem` /
             // `details.reason` are named on the `SEARCH_MEM_INDEX_UNAVAILABLE`
             // recovery prose.
-            "code", "details.mem", "details.reason",
+            "code",
+            "details.mem",
+            "details.reason",
             // Structured envelope top-level fields surfaced in the
             // description so agents know to branch on `structured_content`.
-            "structured_content", "SearchResultEnvelope",
-            "_total", "_returned", "_offset", "_total_tokens",
-            "hits", "warnings",
+            "structured_content",
+            "SearchResultEnvelope",
+            "_total",
+            "_returned",
+            "_offset",
+            "_total_tokens",
+            "hits",
+            "warnings",
             // Per-hit shape fields the structured envelope ships.
-            "score", "snippet", "sections",
+            "score",
+            "snippet",
+            "sections",
         ],
         "memstead_overview" => &[
-            "mems", "schemas",
-            "overview_mode", "_overview_mode", "budget", "total_entities", "hints",
-            "community_bridges", "dangling_links",
+            "mems",
+            "schemas",
+            "overview_mode",
+            "_overview_mode",
+            "budget",
+            "total_entities",
+            "hints",
+            "community_bridges",
+            "dangling_links",
             "estimated_tokens",
             // `include` allowed-keys — named literally in the description
-            "community_members", "mem_distribution",
+            "community_members",
+            "mem_distribution",
             // response-shape fields referenced in prose
             "key",
             // Warning envelope `code` field — errors and warnings ride on
@@ -952,88 +1039,148 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             // names it.
             "code",
             // Sibling-tool reference to the new schema-body reader.
-            "memstead_schema", "ref", "description",
+            "memstead_schema",
+            "ref",
+            "description",
             // Cross-tool references in the trailing usage line.
-            "memstead_create", "memstead_update", "memstead_relate",
+            "memstead_create",
+            "memstead_update",
+            "memstead_relate",
             // Workspace-policy surface — frontmatter slot + the
             // policy fields named in the description.
-            "_policy", "require_notes", "cross_mem_links",
+            "_policy",
+            "require_notes",
+            "cross_mem_links",
         ],
         "memstead_schema" => &[
             // Response-shape fields shipped by build_schema_payload.
-            "ref", "description", "when_to_use", "relationship_mode",
-            "relationships", "used_by", "default_writing_guidance",
+            "ref",
+            "description",
+            "when_to_use",
+            "relationship_mode",
+            "relationships",
+            "used_by",
+            "default_writing_guidance",
             "alias_target_rel_type",
             // Trust origin: the wire field + its two values.
-            "origin", "first-party", "third-party",
-            "system_context", "writing_guidance", "write_rules",
-            "community.resolution", "community.seed",
+            "origin",
+            "first-party",
+            "third-party",
+            "system_context",
+            "writing_guidance",
+            "write_rules",
+            "community.resolution",
+            "community.seed",
             // Field shapes named in prose.
-            "enum", "default_weight", "default", "required",
+            "enum",
+            "default_weight",
+            "default",
+            "required",
             // Sibling-tool references named in the workflow imperative.
-            "memstead_create", "memstead_update", "memstead_relate", "memstead_overview",
+            "memstead_create",
+            "memstead_update",
+            "memstead_relate",
+            "memstead_overview",
             // Per-mem schema pin reference embedded in the imperative.
             "mem.schema_ref",
             // Recovery-payload error codes named literally.
-            "UNKNOWN_SECTION", "UNKNOWN_METADATA_FIELD", "INVALID_ENUM_VALUE",
-            "REQUIRED_FIELD_UNSET", "INVALID_REL_TYPE", "ENTITY_NOT_FOUND",
+            "UNKNOWN_SECTION",
+            "UNKNOWN_METADATA_FIELD",
+            "INVALID_ENUM_VALUE",
+            "REQUIRED_FIELD_UNSET",
+            "INVALID_REL_TYPE",
+            "ENTITY_NOT_FOUND",
             // Validator-refusal code named when describing the
             // alias-synthesis opt-out posture in the response prose.
             "WIKILINK_WITHOUT_RELATION",
             // Item E codes — `mem`-shortcut input validation.
-            "INVALID_INPUT", "UNKNOWN_MEM",
-            "details.id", "details.suggestions", "details",
+            "INVALID_INPUT",
+            "UNKNOWN_MEM",
+            "details.id",
+            "details.suggestions",
+            "details",
             "details.known_mems",
         ],
         "memstead_create" => &[
-            "warnings", "commit_sha",
-            "id", "file_path", "_hash",
-            "incoming", "incoming_count",
+            "warnings",
+            "commit_sha",
+            "id",
+            "file_path",
+            "_hash",
+            "incoming",
+            "incoming_count",
             // Warning codes referenced literally in the description.
-            "MISSING_REQUIRED_SECTION", "UNDECLARED_RELATIONSHIP_OPEN",
-            "NOTE_MISSING", "INLINE_WIKI_LINK_AUTO_STUBBED",
+            "MISSING_REQUIRED_SECTION",
+            "UNDECLARED_RELATIONSHIP_OPEN",
+            "NOTE_MISSING",
+            "INLINE_WIKI_LINK_AUTO_STUBBED",
             // Required-metadata-field warning surfaced on create when the
             // schema does not auto-fill an unsupplied required field.
             "MISSING_REQUIRED_FIELD",
             // required_outgoing warning.
             "MISSING_REQUIRED_OUTGOING",
-            "details.entity_id", "details.entity_type",
-            "details.missing", "required_outgoing", "memstead_relate",
+            "details.entity_id",
+            "details.entity_type",
+            "details.missing",
+            "required_outgoing",
+            "memstead_relate",
             // Typed error codes + envelope fields.
-            "UNKNOWN_SECTION", "UNKNOWN_METADATA_FIELD",
-            "INVALID_ENUM_VALUE", "REQUIRED_FIELD_UNSET", "INVALID_REL_TYPE",
-            "details.declared", "details.allowed", "details.field_description",
-            "details.enum_values", "details.type_write_rules", "details.stubs",
+            "UNKNOWN_SECTION",
+            "UNKNOWN_METADATA_FIELD",
+            "INVALID_ENUM_VALUE",
+            "REQUIRED_FIELD_UNSET",
+            "INVALID_REL_TYPE",
+            "details.declared",
+            "details.allowed",
+            "details.field_description",
+            "details.enum_values",
+            "details.type_write_rules",
+            "details.stubs",
             "suggestion",
             // Title-slug refusal (create slug-refusal docs): INVALID_TITLE
             // names the refusal, proposed_slug its recovery field.
-            "INVALID_TITLE", "proposed_slug",
+            "INVALID_TITLE",
+            "proposed_slug",
             // Schema-payload field references. `write_rules` ships per
             // MISSING_REQUIRED_SECTION warning (section-axis); type-axis
             // guidance moved to the response's top-level `type_guidance`
             // map (F9). `type_write_rules` is still cited for the error
             // path (INVALID_ENUM_VALUE / REQUIRED_FIELD_UNSET). `decision`
             // is the example type the description names.
-            "write_rules", "type_write_rules", "type_guidance", "decision",
+            "write_rules",
+            "type_write_rules",
+            "type_guidance",
+            "decision",
             // Agent-authored provenance field — optional on every mutation
             // and shared across the surface.
             "note",
         ],
         "memstead_update" => &[
-            "prospective_hash", "_hash", "commit_sha",
+            "prospective_hash",
+            "_hash",
+            "commit_sha",
             // Error-envelope code + details field referenced literally.
-            "HASH_MISMATCH", "details.current",
+            "HASH_MISMATCH",
+            "details.current",
             // Typed error codes + envelope fields.
-            "UNKNOWN_SECTION", "UNKNOWN_METADATA_FIELD",
-            "INVALID_ENUM_VALUE", "REQUIRED_FIELD_UNSET",
-            "details.declared", "details.allowed", "details.field_description",
-            "details.enum_values", "details.type_write_rules", "details.stubs",
+            "UNKNOWN_SECTION",
+            "UNKNOWN_METADATA_FIELD",
+            "INVALID_ENUM_VALUE",
+            "REQUIRED_FIELD_UNSET",
+            "details.declared",
+            "details.allowed",
+            "details.field_description",
+            "details.enum_values",
+            "details.type_write_rules",
+            "details.stubs",
             "suggestion",
             // Bug 4 (engine-bugs-from-planning-session.md): inline-wiki-link
             // auto-stub warning surfaces alongside the existing typed warnings.
             "INLINE_WIKI_LINK_AUTO_STUBBED",
             // required_outgoing warning.
-            "MISSING_REQUIRED_OUTGOING", "required_outgoing", "memstead_relate",
+            "MISSING_REQUIRED_OUTGOING",
+            "required_outgoing",
+            "memstead_relate",
             // Bytes-identical no-op short-circuit — empty commit_sha,
             // unchanged content_hash, UPDATE_NOOP warning. Anchors the
             // `expected_hash` caching contract probe campaigns expose.
@@ -1044,17 +1191,25 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "orphan_stubs_removed",
             // Read-only field list: error code + the engine-stamped
             // metadata fields named alongside mem/id/type.
-            "READ_ONLY_FIELD", "created_date", "last_modified",
+            "READ_ONLY_FIELD",
+            "created_date",
+            "last_modified",
             // Shared note/require_notes surface.
-            "NOTE_MISSING", "note",
+            "NOTE_MISSING",
+            "note",
         ],
         "memstead_delete" => &[
-            "relations_removed", "commit_sha", "warnings",
+            "relations_removed",
+            "commit_sha",
+            "warnings",
             // Error-envelope code + details field referenced literally.
-            "HASH_MISMATCH", "details.current",
+            "HASH_MISMATCH",
+            "details.current",
             // Refuse-on-write-mem-referrers contract.
-            "HAS_INCOMING_REFS", "details.referrers",
-            "memstead_relate", "memstead_update",
+            "HAS_INCOMING_REFS",
+            "details.referrers",
+            "memstead_relate",
+            "memstead_update",
             // Residual-stub demotion path (only-ReadOnly referrers).
             "RESIDUAL_STUB_FOR_READONLY_REFERRERS",
             // memstead_entity frontmatter field referenced to describe the stub-
@@ -1066,16 +1221,23 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "note",
         ],
         "memstead_rename" => &[
-            "old_id", "new_id", "commit_sha", "warnings",
+            "old_id",
+            "new_id",
+            "commit_sha",
+            "warnings",
             // Warning code referenced literally in the description.
             "TITLE_NORMALIZED_TO_SLUG_NOOP",
             // Error-envelope code + details field referenced literally.
-            "HASH_MISMATCH", "details.current",
+            "HASH_MISMATCH",
+            "details.current",
             // Post-rename response now carries `content_hash` mirroring
             // `memstead_relate`'s contract so agents can chain the next
             // hash-protected op without a fresh memstead_entity read.
-            "_hash", "expected_hash",
-            "memstead_relate", "memstead_health", "memstead_changes_since",
+            "_hash",
+            "expected_hash",
+            "memstead_relate",
+            "memstead_health",
+            "memstead_changes_since",
             // Atomic referrer-rewrite contract (
             // the delete/rename reference-coherence contract). Rename now
             // walks Write-Mem referrers in one per-mem commit;
@@ -1086,9 +1248,11 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "relationships",
             "cross_mem_links",
             "RENAME_BLOCKED_BY_CROSS_MEM_POLICY",
-            "details.from_mem", "details.blocked_referrers",
+            "details.from_mem",
+            "details.blocked_referrers",
             "RENAME_PARTIAL_FAILURE",
-            "details.committed_mems", "details.failed_mem",
+            "details.committed_mems",
+            "details.failed_mem",
             "details.failure_cause",
             "logical_operation_id",
             "RESIDUAL_STUB_FOR_READONLY_REFERRERS",
@@ -1096,50 +1260,70 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "note",
         ],
         "memstead_relate" => &[
-            "warnings", "commit_sha",
+            "warnings",
+            "commit_sha",
             // Warning codes referenced literally in the description.
-            "DUPLICATE_RELATIONSHIP", "NO_SUCH_RELATIONSHIP",
+            "DUPLICATE_RELATIONSHIP",
+            "NO_SUCH_RELATIONSHIP",
             // Structured error code for acyclic-typed cycle rejection + its
             // details payload fields.
             "RELATIONSHIP_CYCLE",
-            "details.rel_type", "details.from", "details.to",
-            "details.existing_path", "details.path_truncated",
+            "details.rel_type",
+            "details.from",
+            "details.to",
+            "details.existing_path",
+            "details.path_truncated",
             // INVALID_REL_TYPE recovery payload: allowed[] + nearest-match
             // suggestion ship inside the error envelope.
-            "INVALID_REL_TYPE", "details.allowed", "suggestion",
+            "INVALID_REL_TYPE",
+            "details.allowed",
+            "suggestion",
             "memstead_overview",
             // Edge shape on RelationshipDef: INVALID_REL_SHAPE ships
             // recovery payloads. `memstead_health` is named as the
             // migration surface that exposes pre-constraint shape
             // violations so an agent can run `remove=true` cleanup.
-            "source_types", "target_types",
-            "INVALID_REL_SHAPE", "details.rel_type",
-            "details.from_type", "details.to_type",
-            "details.allowed_source_types", "details.allowed_target_types",
+            "source_types",
+            "target_types",
+            "INVALID_REL_SHAPE",
+            "details.rel_type",
+            "details.from_type",
+            "details.to_type",
+            "details.allowed_source_types",
+            "details.allowed_target_types",
             "memstead_health",
             // Item 04 sub-case 1: relate-target id-grammar gate.
             // Malformed targets return INVALID_ENTITY_ID with
             // `details.id` + `details.reason`; the gate prevents an
             // auto-stub from being created at the bad id.
-            "INVALID_ENTITY_ID", "details.id", "details.reason",
+            "INVALID_ENTITY_ID",
+            "details.id",
+            "details.reason",
             // Relate-remove refused because source body still wiki-links target.
-            "RELATION_HAS_BODY_LINKS", "details.body_links",
+            "RELATION_HAS_BODY_LINKS",
+            "details.body_links",
             // memstead_entity response field referenced as the post-relate invariant.
             "_hash",
             // Post-relate response now carries `content_hash`; the description
             // points at the downstream mutation tools that consume it via
             // `expected_hash`.
-            "_hash", "expected_hash",
-            "memstead_update", "memstead_rename", "memstead_delete",
+            "_hash",
+            "expected_hash",
+            "memstead_update",
+            "memstead_rename",
+            "memstead_delete",
             // Stub-GC response field — stubs whose last incoming edge was
             // dropped by this relate(remove) are GC'd in the same op.
             "orphan_stubs_removed",
             // Cross-mem relate is policy-gated.
-            "cross_mem_links", "default_cross_links",
+            "cross_mem_links",
+            "default_cross_links",
             "CROSS_MEM_LINK_NOT_ALLOWED",
-            "details.from_mem", "details.to_mem",
+            "details.from_mem",
+            "details.to_mem",
             "CROSS_MEM_TARGET_NOT_FOUND",
-            "details.target_id", "details.target_mem",
+            "details.target_id",
+            "details.target_mem",
             // Cross-mem relate to an uncreated target mem — auto-stub
             // still lands; warning surfaces so typos vs. forward
             // references are distinguishable.
@@ -1147,36 +1331,72 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             // Cross-mem edge to a different schema gated on the
             // source schema's `cross_mem_relationships:` section.
             "CROSS_MEM_EDGE_NOT_DECLARED",
-            "source_schema", "target_schema",
-            "rel_type", "from_id", "to_id",
-            "details.source_schema", "details.target_schema",
-            "details.rel_type", "details.from_id", "details.to_id",
+            "source_schema",
+            "target_schema",
+            "rel_type",
+            "from_id",
+            "to_id",
+            "details.source_schema",
+            "details.target_schema",
+            "details.rel_type",
+            "details.from_id",
+            "details.to_id",
             "cross_mem_relationships",
             // Shared note/require_notes surface.
             "note",
         ],
         "memstead_health" => &[
-            "writable_mems", "default_writable_mem", "read_mems", "orphans", "stubs",
-            "most_connected", "missing_fields", "stale", "warnings",
-            "community_count", "mem_schemas",
-            "dangling_links", "from", "target_id", "target_path", "section",
-            "total", "incoming", "outgoing",
-            "typed_total", "typed_incoming", "typed_outgoing",
-            "orphans_by_schema", "communities_by_schema",
-            "tags", "tag_distribution", "tag_distribution_folded",
+            "writable_mems",
+            "default_writable_mem",
+            "read_mems",
+            "orphans",
+            "stubs",
+            "most_connected",
+            "missing_fields",
+            "stale",
+            "warnings",
+            "community_count",
+            "mem_schemas",
+            "dangling_links",
+            "from",
+            "target_id",
+            "target_path",
+            "section",
+            "total",
+            "incoming",
+            "outgoing",
+            "typed_total",
+            "typed_incoming",
+            "typed_outgoing",
+            "orphans_by_schema",
+            "communities_by_schema",
+            "tags",
+            "tag_distribution",
+            "tag_distribution_folded",
             "untagged_entities",
             // Warning codes referenced literally in the description.
-            "UNKNOWN_INCLUDE_KEY", "LIMIT_CLAMPED", "details",
+            "UNKNOWN_INCLUDE_KEY",
+            "LIMIT_CLAMPED",
+            "details",
             // Integrity-linter surface: the `conformance` / `integrity` include
             // keys, the `findings` response array, its field names,
             // and the two consistency-axis codes.
-            "conformance", "integrity", "findings", "axis", "code", "detail",
-            "DANGLING_LINK", "ORPHAN_STUB", "SCHEMA_NOT_FOUND",
+            "conformance",
+            "integrity",
+            "findings",
+            "axis",
+            "code",
+            "detail",
+            "DANGLING_LINK",
+            "ORPHAN_STUB",
+            "SCHEMA_NOT_FOUND",
             // Load-time drift warning emitted by `push_entities_into_store`
             // at init/reload/attach.
             "SUSPICIOUS_NESTED_PREFIX",
-            "details.from", "details.resolved_id",
-            "details.candidate_target", "details.section",
+            "details.from",
+            "details.resolved_id",
+            "details.candidate_target",
+            "details.section",
             // Load-time parse warning — the parser emits when a markdown
             // file declared the same `## Heading` more than once for a
             // schema-declared section key.
@@ -1189,16 +1409,25 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             // `memstead_overview` (mem-lifecycle-policy plan) — the two
             // related identifiers stay on the description so agents
             // following the cross-reference still parse cleanly.
-            "mems", "origin",
-            "explicit", "runtime_created",
-            "memstead_overview", "mem_management.create", "mem_management.delete",
+            "mems",
+            "origin",
+            "explicit",
+            "runtime_created",
+            "memstead_overview",
+            "mem_management.create",
+            "mem_management.delete",
             // `[mutations]`,
             // `[plugin.*]`, and per-mem `vcs: { gitdir, worktree }` all
             // surface under `include_config: true` so the Stop hook can
             // resolve gitdirs and plugins can read their opaque config
             // sub-tables in one round-trip.
-            "mutations", "require_notes", "plugin",
-            "vcs", "gitdir", "worktree", "head",
+            "mutations",
+            "require_notes",
+            "plugin",
+            "vcs",
+            "gitdir",
+            "worktree",
+            "head",
             // Per-mem
             // `write_guidance` (opaque string map) and `extra` (unknown
             // top-level config keys) now ride on the `mems` detail
@@ -1207,14 +1436,17 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             // snake_case `write_guidance` for parity with the rest of
             // the surface; the on-disk JSON key (`.memstead/config.json`)
             // stays `writeGuidance`.
-            "write_guidance", "extra",
+            "write_guidance",
+            "extra",
             // Outer-repo gitignore guard. The
             // description names the warning code, the directory, the
             // outer-repo `.gitignore`, and the structured fields on
             // the warning envelope.
             "OUTER_REPO_NOT_IGNORING_MEM_REPO",
-            "mem-repo", ".gitignore",
-            "details.outer_repo_root", "details.workspace_root",
+            "mem-repo",
+            ".gitignore",
+            "details.outer_repo_root",
+            "details.workspace_root",
             // Multi-engine coherence (engine-multi-engine-coherence.md):
             // MEM_RELOADED auto-reload warning fires on any read
             // response when a sibling writer advanced the on-disk HEAD
@@ -1224,23 +1456,47 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             // include surfaces a per-entity report list with the same
             // payload shape as the per-write warning, plus a mem
             // qualifier (entities are scanned cross-mem by default).
-            "missing_required_outgoing", "required_outgoing",
-            "entity_type", "id", "mem",
-            "missing", "relationships", "cardinality", "title",
+            "missing_required_outgoing",
+            "required_outgoing",
+            "entity_type",
+            "id",
+            "mem",
+            "missing",
+            "relationships",
+            "cardinality",
+            "title",
         ],
         "memstead_diff" => &[
             // Response-shape fields the description names.
-            "ref_a", "ref_b", "resolved_a_sha", "resolved_b_sha", "config", "entries",
-            "id", "title", "entity_type", "status",
-            "content_before", "content_after", "ripple",
+            "ref_a",
+            "ref_b",
+            "resolved_a_sha",
+            "resolved_b_sha",
+            "config",
+            "entries",
+            "id",
+            "title",
+            "entity_type",
+            "status",
+            "content_before",
+            "content_after",
+            "ripple",
             // Ripple-entry shape — the docstring describes the populated
             // ripple shape.
-            "from_id", "side",
+            "from_id",
+            "side",
             // EntityDiff `status` discriminator values surfaced in prose.
-            "added", "modified", "deleted", "renamed", "invalid_entity",
+            "added",
+            "modified",
+            "deleted",
+            "renamed",
+            "invalid_entity",
             // Refusal codes named literally.
-            "UNKNOWN_MEM", "UNKNOWN_REF", "INVALID_INPUT",
-            "details.name", "details.ref",
+            "UNKNOWN_MEM",
+            "UNKNOWN_REF",
+            "INVALID_INPUT",
+            "details.name",
+            "details.ref",
             // Ref-handling conventions named in the docstring.
             // Sibling tool reference (alignment claim).
             "memstead_changes_since",
@@ -1249,22 +1505,39 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "HEAD",
         ],
         "memstead_changes_since" => &[
-            "commit_sha", "renamed", "from_id", "to_id", "head", "action",
-            "added", "updated", "removed", "title", "entity_type",
+            "commit_sha",
+            "renamed",
+            "from_id",
+            "to_id",
+            "head",
+            "action",
+            "added",
+            "updated",
+            "removed",
+            "title",
+            "entity_type",
             "warnings",
             // Out-of-range `rename_similarity` refusal envelope
             // (promoted from the prior clamp+warn shape).
-            "INVALID_INPUT", "details.allowed_range", "details.requested",
+            "INVALID_INPUT",
+            "details.allowed_range",
+            "details.requested",
             // Unknown / malformed `since` SHA returns a typed envelope.
-            "INVALID_CURSOR", "details.mem", "details.since",
+            "INVALID_CURSOR",
+            "details.mem",
+            "details.since",
             // `include_notes: true` ride-along — `memstead_ref` is the SHA
             // of the workspace `__MEMSTEAD` ref (unified schemas + per-mem
             // configs).
-            "memstead_ref", "__MEMSTEAD",
+            "memstead_ref",
+            "__MEMSTEAD",
         ],
         "memstead_reload" => &[
             // Response-shape fields surfaced by the per-mem `ReloadReport`.
-            "reports", "head_before", "head_after", "entities_loaded",
+            "reports",
+            "head_before",
+            "head_after",
+            "entities_loaded",
             "changed_entity_ids",
             // Auto-reload-on-read warning the description points at.
             "MEM_RELOADED",
@@ -1273,7 +1546,8 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             // Membership-fixed-at-boot clause cites the lifecycle tools that
             // *do* mutate the in-memory router atomically (mem-lifecycle-audit
             // Item 02), so an agent reading the warning knows where to go.
-            "memstead_mem_create", "memstead_mem_delete",
+            "memstead_mem_create",
+            "memstead_mem_delete",
             // Workspace-config-reload pairing (Item 03 of
             // workspace-config-via-cli.md): the workspace-wide form re-reads
             // `.memstead/workspace.toml`. The slashed-token allowlist rule
@@ -1281,20 +1555,28 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             // listed here. The CLI surface (`memstead workspace allow-create`
             // etc.) contains a space, so it's filtered out at extraction
             // time and doesn't need an allowlist entry.
-            ".memstead", "workspace.toml",
+            ".memstead",
+            "workspace.toml",
         ],
         "memstead_mem_create" => &[
             // Response-shape fields.
-            "seed_commit_sha", "commit_sha", "schema_ref",
+            "seed_commit_sha",
+            "commit_sha",
+            "schema_ref",
             // Schema-payload fields — the full schema catalogue ships
             // under `schema`, gated behind `include_schema: true`. The
             // catalogue references remain valid because the description
             // still names the shape when the caller opts in.
-            "schema", "write_rules", "writing_guidance", "system_context",
+            "schema",
+            "write_rules",
+            "writing_guidance",
+            "system_context",
             "when_to_use",
             // Error codes named literally in the description.
-            "MEM_PATH_NOT_ALLOWED", "MEM_SCHEMA_NOT_ALLOWED",
-            "MEM_NAME_COLLISION", "CONFIG_ERROR",
+            "MEM_PATH_NOT_ALLOWED",
+            "MEM_SCHEMA_NOT_ALLOWED",
+            "MEM_NAME_COLLISION",
+            "CONFIG_ERROR",
             // The description names
             // the storage-residue refusal envelope, the
             // reattach-after-unregister warning, the `__MEMSTEAD`
@@ -1303,47 +1585,70 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             // config.
             "MEM_STORAGE_RESIDUE_DETECTED",
             "MEM_REATTACHED_AFTER_UNREGISTER",
-            "__MEMSTEAD", "unregistered_at",
+            "__MEMSTEAD",
+            "unregistered_at",
             // Error-envelope `details` field references — both
             // envelopes (path + schema) carry these.
-            "details.source", "details.missing_targets",
-            "details.candidate", "details.patterns", "details.reason",
-            "details.matched_pattern", "details.requested_schema",
+            "details.source",
+            "details.missing_targets",
+            "details.candidate",
+            "details.patterns",
+            "details.reason",
+            "details.matched_pattern",
+            "details.requested_schema",
             "details.allowed_schemas",
             // Cross-tool references the description points agents at.
-            "memstead_health", "memstead_changes_since", "memstead_overview",
+            "memstead_health",
+            "memstead_changes_since",
+            "memstead_overview",
             // Config-discovery tokens embedded in the description.
-            "outside_workspace", "no_allowlist_configured", "no_match",
+            "outside_workspace",
+            "no_allowlist_configured",
+            "no_match",
             // Composed-candidate vocabulary (lifecycle-policy plan).
             "pattern",
             // Workspace-config tokens referenced verbatim.
-            "mem_management.create", "schemas",
+            "mem_management.create",
+            "schemas",
             // Cross-link policy tokens (workspace-cross-link-policy plan).
-            "cross_mem_links", "default_cross_links",
+            "cross_mem_links",
+            "default_cross_links",
             // `.memstead/workspace.toml` is named literally in the description;
             // the slashed-token check resolves each half against this list.
-            ".memstead", "workspace.toml",
+            ".memstead",
+            "workspace.toml",
         ],
         "memstead_mem_delete" => &[
             // Response-shape fields.
-            "deleted_from_router", "files_deleted",
+            "deleted_from_router",
+            "files_deleted",
             // Scrubbed-entry audit field surfaces the policy
             // side-effects in one round-trip.
-            "allowlist_entries_removed", "table", "pattern", "from", "to",
+            "allowlist_entries_removed",
+            "table",
+            "pattern",
+            "from",
+            "to",
             // Allowlist tables named verbatim — `mem_management.*`
             // is two tables; the slashed-token check resolves each
             // half independently.
-            "mem_management.create", "mem_management.delete",
-            "mem_management", "create", "delete",
+            "mem_management.create",
+            "mem_management.delete",
+            "mem_management",
+            "create",
+            "delete",
             // Error codes named literally in the description.
-            "UNKNOWN_MEM", "MEM_PATH_NOT_ALLOWED",
-            "MEM_REFERENCED_BY_POLICY", "MEM_HAS_INCOMING_REFS",
+            "UNKNOWN_MEM",
+            "MEM_PATH_NOT_ALLOWED",
+            "MEM_REFERENCED_BY_POLICY",
+            "MEM_HAS_INCOMING_REFS",
             // `.memstead/workspace.toml` is named literally in the
             // MEM_REFERENCED_BY_POLICY recovery guidance — point
             // operators at the cross-link grant they have to revoke.
             // The slashed-token check resolves each half against
             // this list.
-            ".memstead", "workspace.toml",
+            ".memstead",
+            "workspace.toml",
             // Workspace-policy token referenced verbatim in the
             // policy-grant description.
             "cross_mem_links",
@@ -1353,20 +1658,29 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             // transaction failed.
             "MEM_FILES_NOT_DELETED",
             // Error-envelope `details` field references.
-            "details.referring_mems", "details.referrers",
-            "details.candidate", "details.patterns",
+            "details.referring_mems",
+            "details.referrers",
+            "details.candidate",
+            "details.patterns",
             // `details` fields named in the MEM_FILES_NOT_DELETED
             // warning's payload.
-            "details.reason", "details.path", "details.error",
+            "details.reason",
+            "details.path",
+            "details.error",
             // Reason discriminator literals carried in the warning's
             // `details.reason`.
-            "rmdir_failed", "backend_prune_failed",
+            "rmdir_failed",
+            "backend_prune_failed",
             // Cross-tool references — `memstead_relate` / `memstead_update`
             // appear in the `MEM_HAS_INCOMING_REFS` recovery guidance
             // (remove the offending edges before retrying).
-            "memstead_health", "memstead_overview", "memstead_relate", "memstead_update",
+            "memstead_health",
+            "memstead_overview",
+            "memstead_relate",
+            "memstead_update",
             // Config-discovery tokens embedded in the description.
-            "no_allowlist_configured", "no_match",
+            "no_allowlist_configured",
+            "no_match",
             // Workspace-config tokens referenced verbatim.
             "mem_management.delete",
         ],
@@ -1375,23 +1689,44 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
         // and the cross-referenced tools/params named in the
         // description.
         "memstead_mem_set_schema" => &[
-            "outcome", "noop", "switched", "migration_started", "migration_pending",
-            "findings", "schema_pin", "migration_target",
-            "relations_unset", "memstead_schema", "memstead_update", "memstead_mem_set_version",
-            "UNKNOWN_MEM", "SCHEMA_NOT_FOUND", "INVALID_INPUT",
+            "outcome",
+            "noop",
+            "switched",
+            "migration_started",
+            "migration_pending",
+            "findings",
+            "schema_pin",
+            "migration_target",
+            "relations_unset",
+            "memstead_schema",
+            "memstead_update",
+            "memstead_mem_set_version",
+            "UNKNOWN_MEM",
+            "SCHEMA_NOT_FOUND",
+            "INVALID_INPUT",
         ],
         "memstead_mem_set_version" => &[
             // Response-shape fields.
-            "mem", "old_version", "new_version", "warnings",
+            "mem",
+            "old_version",
+            "new_version",
+            "warnings",
             // Error codes named literally in the description.
-            "INVALID_INPUT", "UNKNOWN_MEM", "READ_ONLY_MOUNT",
+            "INVALID_INPUT",
+            "UNKNOWN_MEM",
+            "READ_ONLY_MOUNT",
             // Warning code emitted on concurrent-drift detection.
             "MEM_RELOADED",
             // Other named codes / types the description cites.
-            "MemConfig", "write_mem_config",
+            "MemConfig",
+            "write_mem_config",
             // Config-blob layout strings the description names.
             // `.mem` is the sealed-archive extension.
-            ".memstead", ".mem", "config.json", "__MEMSTEAD", "mems",
+            ".memstead",
+            ".mem",
+            "config.json",
+            "__MEMSTEAD",
+            "mems",
             // Cross-tool reference.
             "memstead_export",
             // Allowlist token (description disclaims operator-mode bypass).
@@ -1402,63 +1737,103 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
         // Workspace-policy mutation tools.
         "memstead_workspace_grant_cross_link" => &[
             // Response-shape + section-name refs.
-            "from", "to", "warnings", "cross_mem_links",
+            "from",
+            "to",
+            "warnings",
+            "cross_mem_links",
             // Idempotency warning + conflict error codes.
-            "GRANT_ALREADY_PRESENT", "CROSS_LINK_CONFLICT",
-            "WORKSPACE_NOT_INITIALISED", "INVALID_TOML", "IO_ERROR",
+            "GRANT_ALREADY_PRESENT",
+            "CROSS_LINK_CONFLICT",
+            "WORKSPACE_NOT_INITIALISED",
+            "INVALID_TOML",
+            "IO_ERROR",
             // F7 workflow cross-tool references.
-            "memstead_mem_create", "memstead_mem_delete", "memstead_relate",
+            "memstead_mem_create",
+            "memstead_mem_delete",
+            "memstead_relate",
             "memstead_workspace_revoke_cross_link",
             // Workspace config path tokens.
-            ".memstead", "workspace.toml",
+            ".memstead",
+            "workspace.toml",
         ],
         "memstead_workspace_revoke_cross_link" => &[
-            "from", "to", "warnings", "cross_mem_links",
-            "GRANT_NOT_FOUND", "MEM_REFERENCED_BY_POLICY",
-            "WORKSPACE_NOT_INITIALISED", "INVALID_TOML", "IO_ERROR",
+            "from",
+            "to",
+            "warnings",
+            "cross_mem_links",
+            "GRANT_NOT_FOUND",
+            "MEM_REFERENCED_BY_POLICY",
+            "WORKSPACE_NOT_INITIALISED",
+            "INVALID_TOML",
+            "IO_ERROR",
             "memstead_mem_delete",
-            ".memstead", "workspace.toml",
+            ".memstead",
+            "workspace.toml",
         ],
         "memstead_workspace_allow_create" => &[
-            "pattern", "schemas", "before", "default_cross_links", "warnings",
+            "pattern",
+            "schemas",
+            "before",
+            "default_cross_links",
+            "warnings",
             // Section names cited in the description.
-            "mem_management.create", "cross_mem_links",
+            "mem_management.create",
+            "cross_mem_links",
             // Idempotency warning + related error codes.
-            "RULE_ALREADY_PRESENT", "BEFORE_PATTERN_NOT_FOUND",
-            "WORKSPACE_NOT_INITIALISED", "MEM_PATH_NOT_ALLOWED",
+            "RULE_ALREADY_PRESENT",
+            "BEFORE_PATTERN_NOT_FOUND",
+            "WORKSPACE_NOT_INITIALISED",
+            "MEM_PATH_NOT_ALLOWED",
             // Schema-differ refusal code + its structured recovery payload.
             "RULE_EXISTS_SCHEMAS_DIFFER",
-            "details.stored_schemas", "details.requested_schemas", "details.recovery",
+            "details.stored_schemas",
+            "details.requested_schemas",
+            "details.recovery",
             // Cross-tool refs.
-            "memstead_mem_create", "memstead_workspace_grant_cross_link", "memstead_overview",
+            "memstead_mem_create",
+            "memstead_workspace_grant_cross_link",
+            "memstead_overview",
             "memstead_workspace_revoke_create",
             // Rule-derived cross-link grant is surfaced under this
             // workspace-policy posture key.
             "cross_mem_links_from_rules",
             // `.memstead/workspace.toml` slashed token.
-            ".memstead", "workspace.toml",
+            ".memstead",
+            "workspace.toml",
         ],
         "memstead_workspace_revoke_create" => &[
-            "pattern", "warnings",
+            "pattern",
+            "warnings",
             "RULE_NOT_FOUND_NOOP",
-            "WORKSPACE_NOT_INITIALISED", "INVALID_TOML", "IO_ERROR",
+            "WORKSPACE_NOT_INITIALISED",
+            "INVALID_TOML",
+            "IO_ERROR",
             "memstead_workspace_allow_create",
-            ".memstead", "workspace.toml",
+            ".memstead",
+            "workspace.toml",
         ],
         "memstead_workspace_allow_delete" => &[
-            "pattern", "warnings",
+            "pattern",
+            "warnings",
             "mem_management.delete",
             "RULE_ALREADY_PRESENT",
-            "WORKSPACE_NOT_INITIALISED", "MEM_PATH_NOT_ALLOWED",
-            "memstead_mem_delete", "memstead_workspace_allow_create",
-            ".memstead", "workspace.toml",
+            "WORKSPACE_NOT_INITIALISED",
+            "MEM_PATH_NOT_ALLOWED",
+            "memstead_mem_delete",
+            "memstead_workspace_allow_create",
+            ".memstead",
+            "workspace.toml",
         ],
         "memstead_workspace_revoke_delete" => &[
-            "pattern", "warnings",
+            "pattern",
+            "warnings",
             "RULE_NOT_FOUND_NOOP",
-            "WORKSPACE_NOT_INITIALISED", "INVALID_TOML", "IO_ERROR",
+            "WORKSPACE_NOT_INITIALISED",
+            "INVALID_TOML",
+            "IO_ERROR",
             "memstead_workspace_allow_delete",
-            ".memstead", "workspace.toml",
+            ".memstead",
+            "workspace.toml",
         ],
         _ => &[],
     }
@@ -1699,8 +2074,7 @@ fn every_mutation_description_clarifies_commit_sha_origin() {
             continue; // tool doesn't mention it — not a violation
         }
         let has_per_mem = desc.contains("per-mem git");
-        let has_discovery = desc.contains("memstead_health")
-            && desc.contains("include_config");
+        let has_discovery = desc.contains("memstead_health") && desc.contains("include_config");
         if !(has_per_mem && has_discovery) {
             violations.push(format!(
                 "{name}: description mentions `commit_sha` but omits the \
@@ -1980,11 +2354,17 @@ fn print_description_sizes() {
         println!("{:<22} {:>6} {:>6}", name, words, bytes);
     }
     println!("{}", "-".repeat(40));
-    println!("{:<22} {:>6} {:>6}", "TOOLS_SUBTOTAL", total_words, total_bytes);
+    println!(
+        "{:<22} {:>6} {:>6}",
+        "TOOLS_SUBTOTAL", total_words, total_bytes
+    );
     let instr = SERVER_INSTRUCTIONS_COPY;
     let instr_words = instr.split_whitespace().count();
     let instr_bytes = instr.len();
-    println!("{:<22} {:>6} {:>6}", "instructions", instr_words, instr_bytes);
+    println!(
+        "{:<22} {:>6} {:>6}",
+        "instructions", instr_words, instr_bytes
+    );
     println!(
         "{:<22} {:>6} {:>6}",
         "GRAND_TOTAL",

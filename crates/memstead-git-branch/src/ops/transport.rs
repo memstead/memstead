@@ -99,11 +99,7 @@ pub fn fetch_in_gitdir(
 /// local branch can fast-forward to the remote-tracking ref. Refuses
 /// with `LOCAL_DIVERGENCE:<branch>:<remote_ref>` when the local branch
 /// has committed locally beyond the merge-base.
-pub fn pull_in_gitdir(
-    gitdir: &Path,
-    remote: &str,
-    mem: &str,
-) -> Result<PullOutcome, BackendError> {
+pub fn pull_in_gitdir(gitdir: &Path, remote: &str, mem: &str) -> Result<PullOutcome, BackendError> {
     let fetched = fetch_in_gitdir(gitdir, remote, &[])?;
 
     let branch_ref = format!("refs/heads/{mem}");
@@ -165,9 +161,8 @@ pub fn push_in_gitdir(
     force: bool,
 ) -> Result<PushOutcome, BackendError> {
     let branch_ref = format!("refs/heads/{mem}");
-    let local_sha = resolve_ref(gitdir, &branch_ref).ok_or_else(|| {
-        BackendError::Other(format!("UNKNOWN_REF: {branch_ref}"))
-    })?;
+    let local_sha = resolve_ref(gitdir, &branch_ref)
+        .ok_or_else(|| BackendError::Other(format!("UNKNOWN_REF: {branch_ref}")))?;
 
     let mut args: Vec<String> = vec!["push".to_string()];
     if force {
@@ -290,15 +285,12 @@ pub fn read_md_blobs_at_ref(
             Ok(b) => b,
             Err(_) => continue,
         };
-        let content = match String::from_utf8(blob.data.clone()) {
-            Ok(s) => s,
-            // Non-UTF-8 blobs surface as parse-failures downstream;
-            // skipping silently here means the validator would not
-            // know about them. Instead include the path with an
-            // empty content so `parse_entries` emits a parse error
-            // pointing at the file.
-            Err(_) => String::new(),
-        };
+        // Non-UTF-8 blobs surface as parse-failures downstream;
+        // skipping silently here means the validator would not
+        // know about them. Instead include the path with an
+        // empty content so `parse_entries` emits a parse error
+        // pointing at the file.
+        let content = String::from_utf8(blob.data.clone()).unwrap_or_default();
         out.push((path, content));
     }
     out.sort_by(|a, b| a.0.cmp(&b.0));
@@ -355,12 +347,7 @@ fn is_ancestor(gitdir: &Path, ancestor_sha: &str, descendant_sha: &str) -> bool 
     let status = Command::new("git")
         .arg("-C")
         .arg(gitdir)
-        .args([
-            "merge-base",
-            "--is-ancestor",
-            ancestor_sha,
-            descendant_sha,
-        ])
+        .args(["merge-base", "--is-ancestor", ancestor_sha, descendant_sha])
         .env("GIT_TERMINAL_PROMPT", "0")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -415,10 +402,10 @@ fn diff_ref_snapshots(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
     use crate::storage::MemWriter;
     use crate::storage::git_tree::GitTreeMemWriter;
     use crate::vcs::CommitContext;
+    use std::path::PathBuf;
     use tempfile::TempDir;
 
     fn body(title: &str) -> String {
@@ -452,16 +439,11 @@ mod tests {
     }
 
     fn commit(gitdir: &Path, branch: &str, file: &str, content: &str) -> String {
-        let writer = GitTreeMemWriter::new(
-            gitdir.to_path_buf(),
-            format!("refs/heads/{branch}"),
-        );
+        let writer = GitTreeMemWriter::new(gitdir.to_path_buf(), format!("refs/heads/{branch}"));
         writer
             .write_entity(Path::new(file), content.as_bytes())
             .unwrap();
-        writer
-            .commit("seed", &CommitContext::internal())
-            .unwrap()
+        writer.commit("seed", &CommitContext::internal()).unwrap()
     }
 
     #[test]
@@ -471,14 +453,12 @@ mod tests {
         let remote_a = init_bare_remote(&tmp, "backup-a.git");
         let remote_b = init_bare_remote(&tmp, "backup-b.git");
 
-        let added =
-            remote_add_in_gitdir(&gitdir, "origin", remote_a.to_str().unwrap()).unwrap();
+        let added = remote_add_in_gitdir(&gitdir, "origin", remote_a.to_str().unwrap()).unwrap();
         assert!(!added.updated, "first add is not an update");
         assert_eq!(added.remote, "origin");
 
         // Re-running with a different URL re-points instead of erroring.
-        let updated =
-            remote_add_in_gitdir(&gitdir, "origin", remote_b.to_str().unwrap()).unwrap();
+        let updated = remote_add_in_gitdir(&gitdir, "origin", remote_b.to_str().unwrap()).unwrap();
         assert!(updated.updated, "second add must report the upsert");
         assert_eq!(updated.url, remote_b.to_str().unwrap());
 
@@ -596,9 +576,15 @@ mod tests {
         let blobs = read_md_blobs_at_ref(&gitdir, "refs/heads/specs").unwrap();
         let mut paths: Vec<String> = blobs.iter().map(|(p, _)| p.clone()).collect();
         paths.sort();
-        assert_eq!(paths, vec!["alpha.md".to_string(), "nested/beta.md".to_string()]);
+        assert_eq!(
+            paths,
+            vec!["alpha.md".to_string(), "nested/beta.md".to_string()]
+        );
         for (_, content) in &blobs {
-            assert!(content.contains("type: spec"), "blob content must round-trip");
+            assert!(
+                content.contains("type: spec"),
+                "blob content must round-trip"
+            );
         }
     }
 
@@ -619,12 +605,12 @@ mod tests {
         // Land a malformed entity on the upstream and push it. The
         // body has no frontmatter at all — the strict validator's
         // `split_frontmatter_strict` refuses with `MissingFrontmatter`.
-        let writer = GitTreeMemWriter::new(
-            local_upstream.clone(),
-            "refs/heads/specs".to_string(),
-        );
+        let writer = GitTreeMemWriter::new(local_upstream.clone(), "refs/heads/specs".to_string());
         writer
-            .write_entity(Path::new("broken.md"), b"# Broken\n\nbody without frontmatter.\n")
+            .write_entity(
+                Path::new("broken.md"),
+                b"# Broken\n\nbody without frontmatter.\n",
+            )
             .unwrap();
         writer.commit("oops", &CommitContext::internal()).unwrap();
         push_in_gitdir(&local_upstream, "origin", "specs", false).unwrap();
@@ -651,8 +637,7 @@ mod tests {
             migration_target: None,
         };
         let backend = crate::storage::instantiate_full_backend(&mount).unwrap();
-        let mut engine =
-            memstead_base::Engine::from_mounts(vec![(mount, backend)]).unwrap();
+        let mut engine = memstead_base::Engine::from_mounts(vec![(mount, backend)]).unwrap();
         engine.set_git_branch_ops(crate::storage::FULL_GIT_BRANCH_OPS);
 
         let err = engine.pull("specs", "origin").unwrap_err();
@@ -664,7 +649,10 @@ mod tests {
             } => {
                 assert_eq!(mem, "specs");
                 assert!(ref_name.starts_with("refs/remotes/origin/specs"));
-                assert!(!violations.is_empty(), "violations must list the broken entity");
+                assert!(
+                    !violations.is_empty(),
+                    "violations must list the broken entity"
+                );
                 assert!(
                     violations.iter().any(|v| v.contains("broken.md")),
                     "violation must name the offending file: {violations:?}",
@@ -689,7 +677,10 @@ mod tests {
         add_remote(&local, "origin", &remote);
         let writer = GitTreeMemWriter::new(local.clone(), "refs/heads/specs".to_string());
         writer
-            .write_entity(Path::new("broken.md"), b"# Bad\n\nbody without frontmatter.\n")
+            .write_entity(
+                Path::new("broken.md"),
+                b"# Bad\n\nbody without frontmatter.\n",
+            )
             .unwrap();
         writer.commit("seed", &CommitContext::internal()).unwrap();
 
@@ -709,8 +700,7 @@ mod tests {
             migration_target: None,
         };
         let backend = crate::storage::instantiate_full_backend(&mount).unwrap();
-        let mut engine =
-            memstead_base::Engine::from_mounts(vec![(mount, backend)]).unwrap();
+        let mut engine = memstead_base::Engine::from_mounts(vec![(mount, backend)]).unwrap();
         engine.set_git_branch_ops(crate::storage::FULL_GIT_BRANCH_OPS);
 
         let err = engine.push("specs", "origin", false).unwrap_err();
@@ -722,7 +712,10 @@ mod tests {
             } => {
                 assert_eq!(mem, "specs");
                 assert_eq!(r, "origin");
-                assert!(detail.contains("broken.md") || detail.contains("violation"), "detail = {detail}");
+                assert!(
+                    detail.contains("broken.md") || detail.contains("violation"),
+                    "detail = {detail}"
+                );
             }
             other => panic!("expected LocalInvalidState, got {other:?}"),
         }
@@ -748,7 +741,10 @@ mod tests {
         let err = push_in_gitdir(&second, "origin", "specs", false).unwrap_err();
         match err {
             BackendError::Other(msg) => {
-                assert!(msg.contains("NON_FAST_FORWARD") || msg.contains("non-fast"), "got: {msg}");
+                assert!(
+                    msg.contains("NON_FAST_FORWARD") || msg.contains("non-fast"),
+                    "got: {msg}"
+                );
             }
             other => panic!("expected Other, got {other:?}"),
         }

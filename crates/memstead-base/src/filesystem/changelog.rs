@@ -144,10 +144,7 @@ pub enum ChangelogError {
 
 /// Append a single change to `<workspace_root>/.memstead/changes.jsonl`.
 /// Creates the `.memstead/` parent directory and the file if absent.
-pub fn append_change(
-    workspace_root: &Path,
-    entry: &ChangeEntry<'_>,
-) -> Result<(), ChangelogError> {
+pub fn append_change(workspace_root: &Path, entry: &ChangeEntry<'_>) -> Result<(), ChangelogError> {
     let now = std::time::SystemTime::now();
     append_change_at(workspace_root, entry, now)
 }
@@ -209,10 +206,11 @@ pub fn append_change_at(
             path: target.clone(),
             source: e,
         })?;
-    file.write_all(line.as_bytes()).map_err(|e| ChangelogError::Io {
-        path: target,
-        source: e,
-    })?;
+    file.write_all(line.as_bytes())
+        .map_err(|e| ChangelogError::Io {
+            path: target,
+            source: e,
+        })?;
     Ok(())
 }
 
@@ -241,10 +239,13 @@ pub fn format_rfc3339_utc(now: std::time::SystemTime) -> String {
 /// from on-disk JSONL lines.
 pub fn parse_rfc3339_utc(s: &str) -> Option<std::time::SystemTime> {
     let bytes = s.as_bytes();
-    if bytes.len() != 24 || bytes[23] != b'Z'
-        || bytes[4] != b'-' || bytes[7] != b'-'
+    if bytes.len() != 24
+        || bytes[23] != b'Z'
+        || bytes[4] != b'-'
+        || bytes[7] != b'-'
         || bytes[10] != b'T'
-        || bytes[13] != b':' || bytes[16] != b':'
+        || bytes[13] != b':'
+        || bytes[16] != b':'
         || bytes[19] != b'.'
     {
         return None;
@@ -256,7 +257,15 @@ pub fn parse_rfc3339_utc(s: &str) -> Option<std::time::SystemTime> {
     let minute: u32 = s.get(14..16)?.parse().ok()?;
     let second: u32 = s.get(17..19)?.parse().ok()?;
     let millis: u32 = s.get(20..23)?.parse().ok()?;
-    if month == 0 || month > 12 || day == 0 || day > 31 || hour > 23 || minute > 59 || second > 60 || millis > 999 {
+    if month == 0
+        || month > 12
+        || day == 0
+        || day > 31
+        || hour > 23
+        || minute > 59
+        || second > 60
+        || millis > 999
+    {
         return None;
     }
     let days = ymd_to_days(year, month, day)?;
@@ -268,16 +277,17 @@ pub fn parse_rfc3339_utc(s: &str) -> Option<std::time::SystemTime> {
     if total_secs < 0 {
         return None;
     }
-    Some(
-        std::time::UNIX_EPOCH
-            + std::time::Duration::new(total_secs as u64, millis * 1_000_000),
-    )
+    Some(std::time::UNIX_EPOCH + std::time::Duration::new(total_secs as u64, millis * 1_000_000))
 }
 
 /// Civil-to-days inverse of the algorithm in [`decompose_unix_seconds`].
 /// Returns days since 1970-01-01. Hinnant's algorithm.
 fn ymd_to_days(year: i32, month: u32, day: u32) -> Option<i64> {
-    let y = if month <= 2 { year as i64 - 1 } else { year as i64 };
+    let y = if month <= 2 {
+        year as i64 - 1
+    } else {
+        year as i64
+    };
     let m = month as i64;
     let era = if y >= 0 { y } else { y - 399 } / 400;
     let yoe = y - era * 400;
@@ -309,13 +319,17 @@ fn decompose_unix_seconds(total_secs: u64) -> (i32, u32, u32, u32, u32, u32) {
     // Civil-from-days.
     let z = days + 719_468;
     let era = z.div_euclid(146_097);
-    let doe = (z - era * 146_097) as i64;
+    let doe = z - era * 146_097;
     let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
     let y = (yoe + era * 400) as i32;
     let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
     let mp = (5 * doy + 2) / 153;
     let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
-    let m = if mp < 10 { (mp + 3) as u32 } else { (mp - 9) as u32 };
+    let m = if mp < 10 {
+        (mp + 3) as u32
+    } else {
+        (mp - 9) as u32
+    };
     let y = if m <= 2 { y + 1 } else { y };
     (y, m, d, hh, mm, ss)
 }

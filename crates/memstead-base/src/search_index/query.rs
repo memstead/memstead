@@ -52,10 +52,7 @@ pub fn execute_on_mem(
     let tantivy_query = build_tantivy_query(mem_idx, mem_schema, query)?;
     let reader = mem_idx.index.reader()?;
     let searcher = reader.searcher();
-    let top_docs = searcher.search(
-        tantivy_query.as_ref(),
-        &TopDocs::with_limit(top_n.max(1)),
-    )?;
+    let top_docs = searcher.search(tantivy_query.as_ref(), &TopDocs::with_limit(top_n.max(1)))?;
 
     let mut out = Vec::with_capacity(top_docs.len());
     for (score, addr) in top_docs {

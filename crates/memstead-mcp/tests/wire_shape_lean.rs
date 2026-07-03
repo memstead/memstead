@@ -44,7 +44,11 @@ fn seed_empty_workspace(root: &Path) {
     let memstead = root.join(".memstead");
     std::fs::create_dir_all(memstead.join("state")).unwrap();
     std::fs::write(memstead.join("workspace.toml"), WORKSPACE_TOML_BODY).unwrap();
-    std::fs::write(memstead.join("state").join("mounts.json"), MOUNTS_JSON_BODY_EMPTY).unwrap();
+    std::fs::write(
+        memstead.join("state").join("mounts.json"),
+        MOUNTS_JSON_BODY_EMPTY,
+    )
+    .unwrap();
 }
 
 /// Seed a single-mem folder workspace at `root` pinned to the
@@ -86,8 +90,6 @@ fn seed_folder_workspace(root: &Path, mem_name: &str) {
         .save_state(root, &workspace)
         .unwrap();
 }
-
-
 
 /// JSON-RPC harness over a spawned `memstead-mcp` child. Construct with
 /// [`WireHarness::start`], drive with [`WireHarness::call_tool`], drop
@@ -135,10 +137,7 @@ impl WireHarness {
         let _ = self.read_response(id, Duration::from_secs(10));
         // Spec: the client signals it's ready with this notification.
         // The server's tool surface is only legally callable after.
-        self.send_notification(
-            "notifications/initialized",
-            json!({}),
-        );
+        self.send_notification("notifications/initialized", json!({}));
     }
 
     fn send_request(&mut self, method: &str, params: Value) -> i64 {
@@ -244,7 +243,10 @@ impl Drop for WireHarness {
 /// wire-byte-identity contract is *per-flavor*, not inter-flavor, so
 /// each pin records its own server's current bytes.
 fn assert_error_envelope(result: &Value, expected_code: &str, expected_message: &str) {
-    let is_error = result.get("isError").and_then(Value::as_bool).unwrap_or(false);
+    let is_error = result
+        .get("isError")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     assert!(is_error, "expected isError=true on error path: {result}");
 
     let structured = result
@@ -279,10 +281,7 @@ fn lean_memstead_entity_emits_typed_envelope_for_missing_id() {
     seed_empty_workspace(tmp.path());
 
     let mut harness = WireHarness::start(tmp.path());
-    let result = harness.call_tool(
-        "memstead_entity",
-        json!({ "id": "specs--does-not-exist" }),
-    );
+    let result = harness.call_tool("memstead_entity", json!({ "id": "specs--does-not-exist" }));
     // Lean mapper formats with lowercase "entity not found" — the
     // engine's Display string ("entity not found: {id}") passed through
     // verbatim. Diverges from the full mapper's "Entity not found"
@@ -299,7 +298,6 @@ fn lean_memstead_entity_emits_typed_envelope_for_missing_id() {
 // Full-flavor pins (McpServer)
 // ---------------------------------------------------------------------------
 
-
 // ---------------------------------------------------------------------------
 // Success-path pins — pin envelope SHAPE, not exact content
 // ---------------------------------------------------------------------------
@@ -313,15 +311,24 @@ fn lean_memstead_entity_emits_typed_envelope_for_missing_id() {
 // in the wrong place) trips loudly; cosmetic prose changes do not.
 
 fn assert_success_envelope(result: &Value) -> String {
-    let is_error = result.get("isError").and_then(Value::as_bool).unwrap_or(false);
+    let is_error = result
+        .get("isError")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     assert!(!is_error, "expected success but got isError=true: {result}");
     let content = result
         .get("content")
         .and_then(Value::as_array)
         .expect("content[] missing — wire envelope drifted");
-    assert!(!content.is_empty(), "content[] empty — wire envelope drifted");
+    assert!(
+        !content.is_empty(),
+        "content[] empty — wire envelope drifted"
+    );
     let first = &content[0];
-    let kind = first.get("type").and_then(Value::as_str).unwrap_or_default();
+    let kind = first
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
     assert_eq!(kind, "text", "content[0].type drifted: {first}");
     first
         .get("text")
@@ -353,7 +360,6 @@ fn lean_memstead_search_succeeds_on_empty_seeded_workspace() {
     }
 }
 
-
 /// Lean pin: `memstead_overview` on a seeded folder workspace produces
 /// the cold-start markdown with the `## Mems` and `## Schemas`
 /// anchors. Empty graph → no community section.
@@ -373,12 +379,8 @@ fn lean_memstead_overview_succeeds_on_empty_seeded_workspace() {
         text.contains("## Schemas"),
         "overview missing ## Schemas anchor: {text:?}"
     );
-    assert!(
-        text.contains("demo"),
-        "overview missing mem name: {text:?}"
-    );
+    assert!(text.contains("demo"), "overview missing mem name: {text:?}");
 }
-
 
 // ---------------------------------------------------------------------------
 // `memstead_schema` error pin — both flavors emit `ENTITY_NOT_FOUND` for
@@ -396,17 +398,13 @@ fn lean_memstead_schema_unknown_name_emits_entity_not_found() {
     seed_folder_workspace(tmp.path(), "demo");
 
     let mut harness = WireHarness::start(tmp.path());
-    let result = harness.call_tool(
-        "memstead_schema",
-        json!({ "name": "not-a-schema" }),
-    );
+    let result = harness.call_tool("memstead_schema", json!({ "name": "not-a-schema" }));
     assert_error_envelope(
         &result,
         "ENTITY_NOT_FOUND",
         "schema not found: \"not-a-schema\" — workspace pins default@1.0.0",
     );
 }
-
 
 // ---------------------------------------------------------------------------
 // Mutation pins — `memstead_create` success + UNKNOWN_ENTITY_TYPE error
@@ -462,7 +460,6 @@ fn lean_memstead_create_returns_typed_success_envelope() {
     assert_create_success_shape(&result, "demo--first", "demo");
 }
 
-
 /// Lean pin: `memstead_create` with an unknown `entity_type` rejects with
 /// `code=UNKNOWN_ENTITY_TYPE`. The message names the rejected type and
 /// lists the declared types; an exact-string pin is too brittle for the
@@ -479,7 +476,10 @@ fn lean_memstead_create_unknown_type_emits_typed_envelope() {
         json!({ "title": "X", "entity_type": "totally-not-a-type" }),
     );
 
-    let is_error = result.get("isError").and_then(Value::as_bool).unwrap_or(false);
+    let is_error = result
+        .get("isError")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     assert!(is_error, "expected isError on unknown type: {result}");
     let structured = result
         .get("structuredContent")
@@ -502,7 +502,6 @@ fn lean_memstead_create_unknown_type_emits_typed_envelope() {
         "message missing declared-types prefix: {msg:?}"
     );
 }
-
 
 // ---------------------------------------------------------------------------
 // `memstead_health` success pins
@@ -530,7 +529,12 @@ fn lean_memstead_health_succeeds_on_seeded_workspace() {
     let body = result
         .get("structuredContent")
         .expect("structuredContent missing on health success");
-    for field in ["missing_fields", "orphan_count", "stale_entities", "stub_count"] {
+    for field in [
+        "missing_fields",
+        "orphan_count",
+        "stale_entities",
+        "stub_count",
+    ] {
         assert!(
             body.get(field).is_some(),
             "lean health response missing {field:?}: {body}"
@@ -544,7 +548,6 @@ fn lean_memstead_health_succeeds_on_seeded_workspace() {
          if this is intended, update the pin: {body}"
     );
 }
-
 
 // ---------------------------------------------------------------------------
 // Multi-step mutation pins — exercise the read-then-write contract
@@ -597,7 +600,10 @@ fn create_and_get_id_hash(harness: &mut WireHarness, title: &str) -> (String, St
 /// `details.is_stub` indicates whether the entity is a stub (no body) —
 /// pinned so callers know to branch on it for stub-aware recovery.
 fn assert_hash_mismatch_envelope(result: &Value, expected_id: &str, expected_current: &str) {
-    let is_error = result.get("isError").and_then(Value::as_bool).unwrap_or(false);
+    let is_error = result
+        .get("isError")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     assert!(is_error, "expected isError=true on stale hash: {result}");
     let structured = result
         .get("structuredContent")
@@ -649,7 +655,6 @@ fn lean_memstead_update_stale_hash_emits_typed_envelope() {
     assert_hash_mismatch_envelope(&result, &id, &real_hash);
 }
 
-
 /// Lean pin: `memstead_update` with the right expected_hash and a section
 /// body returns a success envelope. Pins the new content_hash field
 /// presence + that the hash actually changed (modulo serialization).
@@ -683,7 +688,6 @@ fn lean_memstead_update_succeeds_and_rotates_hash() {
     );
 }
 
-
 /// Lean pin: `memstead_delete` with the right expected_hash succeeds. The
 /// post-delete envelope's exact shape is engine-derived; the pin
 /// checks success + reading the entity back returns ENTITY_NOT_FOUND.
@@ -709,7 +713,6 @@ fn lean_memstead_delete_succeeds_and_entity_becomes_unreadable() {
         &format!("entity not found: {id}"),
     );
 }
-
 
 // ---------------------------------------------------------------------------
 // `memstead_relate` success pins
@@ -767,7 +770,6 @@ fn lean_memstead_relate_returns_typed_success_envelope() {
     );
 }
 
-
 // ---------------------------------------------------------------------------
 // `memstead_rename` pins — success + RENAME_NO_OP
 // ---------------------------------------------------------------------------
@@ -803,7 +805,6 @@ fn lean_memstead_rename_returns_typed_success_envelope() {
         "new_id drifted from slug rule: {body}"
     );
 }
-
 
 /// Lean pin: renaming to a title that slugs to the same id is a
 /// SILENT NO-OP on lean today — the response is a plain success with
@@ -860,7 +861,6 @@ fn lean_memstead_rename_same_slug_silent_noop() {
     );
 }
 
-
 // ---------------------------------------------------------------------------
 // `memstead_reload` (full-only) success pin
 // ---------------------------------------------------------------------------
@@ -868,7 +868,6 @@ fn lean_memstead_rename_same_slug_silent_noop() {
 // The lean filesystem-mem server doesn't expose memstead_reload —
 // drift-reload is a mem-repo concept (sibling writer commits a new
 // HEAD; engine re-derives memo state). Pinning is full-only.
-
 
 // ---------------------------------------------------------------------------
 // `memstead_delete` HAS_INCOMING_REFS pin — multi-step (create×2 → relate → delete)
@@ -879,13 +878,15 @@ fn lean_memstead_rename_same_slug_silent_noop() {
 // referrer so the agent can rewrite the offending references without a
 // follow-up `memstead_entity` call. Both flavors emit this shape today.
 
-fn assert_has_incoming_refs_envelope(
-    result: &Value,
-    expected_target: &str,
-    expected_source: &str,
-) {
-    let is_error = result.get("isError").and_then(Value::as_bool).unwrap_or(false);
-    assert!(is_error, "expected isError on delete with referrers: {result}");
+fn assert_has_incoming_refs_envelope(result: &Value, expected_target: &str, expected_source: &str) {
+    let is_error = result
+        .get("isError")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    assert!(
+        is_error,
+        "expected isError on delete with referrers: {result}"
+    );
     let structured = result
         .get("structuredContent")
         .expect("structuredContent missing");
@@ -960,7 +961,6 @@ fn lean_memstead_delete_with_incoming_refs_emits_typed_envelope() {
     assert_has_incoming_refs_envelope(&del, &target, &source);
 }
 
-
 // ---------------------------------------------------------------------------
 // `memstead_changes_since` success pins
 // ---------------------------------------------------------------------------
@@ -1003,7 +1003,6 @@ fn lean_memstead_changes_since_returns_typed_success_envelope() {
         "expected at least one changelog entry after create: {body}"
     );
 }
-
 
 // ---------------------------------------------------------------------------
 // Stub-family pins — auto-stub create + STUB_NOT_UPDATABLE / STUB_NOT_RENAMABLE
@@ -1062,7 +1061,10 @@ fn lean_auto_stub_then_update_emits_typed_envelope() {
             "sections": { "identity": "promotion-attempt" },
         }),
     );
-    let is_error = update.get("isError").and_then(Value::as_bool).unwrap_or(false);
+    let is_error = update
+        .get("isError")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     assert!(is_error, "expected isError on stub update: {update}");
     let structured = update
         .get("structuredContent")
@@ -1073,7 +1075,6 @@ fn lean_auto_stub_then_update_emits_typed_envelope() {
         "code drifted: {structured}"
     );
 }
-
 
 /// Lean pin: trying to rename a stub trips `STUB_NOT_RENAMABLE`. Uses
 /// the same auto-stub bootstrap (relate to absent target) and then
@@ -1097,7 +1098,10 @@ fn lean_rename_stub_emits_typed_envelope() {
         "memstead_rename",
         json!({ "id": stub_id, "new_title": "Promoted", "expected_hash": "" }),
     );
-    let is_error = rename.get("isError").and_then(Value::as_bool).unwrap_or(false);
+    let is_error = rename
+        .get("isError")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     assert!(is_error, "expected isError on stub rename: {rename}");
     let structured = rename
         .get("structuredContent")
@@ -1108,7 +1112,6 @@ fn lean_rename_stub_emits_typed_envelope() {
         "code drifted: {structured}"
     );
 }
-
 
 // ---------------------------------------------------------------------------
 // `memstead_relate` STUB_CANNOT_RELATE — relate FROM an auto-stub source
@@ -1138,7 +1141,10 @@ fn lean_relate_from_stub_emits_typed_envelope() {
         "memstead_relate",
         json!({ "from": stub_id, "to": source, "type": "USES" }),
     );
-    let is_error = result.get("isError").and_then(Value::as_bool).unwrap_or(false);
+    let is_error = result
+        .get("isError")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     assert!(is_error, "expected isError on relate-from-stub: {result}");
     let structured = result
         .get("structuredContent")
@@ -1150,9 +1156,6 @@ fn lean_relate_from_stub_emits_typed_envelope() {
     );
 }
 
-
 // ---------------------------------------------------------------------------
 // Full-only mem-lifecycle pin — `memstead_mem_create` success
 // ---------------------------------------------------------------------------
-
-

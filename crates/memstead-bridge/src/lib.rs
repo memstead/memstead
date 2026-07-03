@@ -27,12 +27,14 @@ pub mod handlers;
 pub mod wire;
 
 pub use builder::{
-    build_commit_envelope, build_commit_envelopes, build_snapshot, run_search, BuildConfig,
-    DEFAULT_DELTA_LIMIT, DEFAULT_SEARCH_LIMIT, DEFAULT_SEARCH_MAX_LIMIT, SnapshotOutput,
+    BuildConfig, DEFAULT_DELTA_LIMIT, DEFAULT_SEARCH_LIMIT, DEFAULT_SEARCH_MAX_LIMIT,
+    SnapshotOutput, build_commit_envelope, build_commit_envelopes, build_snapshot, run_search,
 };
 pub use error::BridgeError;
 pub use handlers::{
     BridgeState, CommitsQuery, commit_handler, commits_handler, events_handler, head_handler,
     search_handler, snapshot_handler,
 };
-pub use wire::{CommitEnvelope, EntityChange, SearchHit, SearchQuery, SearchResult, MemChangedEvent};
+pub use wire::{
+    CommitEnvelope, EntityChange, MemChangedEvent, SearchHit, SearchQuery, SearchResult,
+};

@@ -241,9 +241,10 @@ fn run_mem_filesystem(
         .next()
         .map(String::from)
         .unwrap_or_default();
-    if let Some(name) = args.mem_name.as_deref() {
-        if name != workspace_mem {
-            return Err(CliError::new(
+    if let Some(name) = args.mem_name.as_deref()
+        && name != workspace_mem
+    {
+        return Err(CliError::new(
                 ExitKind::NotFound,
                 "UNKNOWN_MEM",
                 format!(
@@ -251,25 +252,27 @@ fn run_mem_filesystem(
                 ),
             )
             .into());
-        }
     }
 
     // assemble_archive is engine-agnostic now — pass the discovered
     // workspace root directly.
-    let workspace_root = crate::setup::find_filesystem_workspace_root(
-        &std::env::current_dir().map_err(|e| {
-            CliError::new(ExitKind::Generic, crate::INTERNAL_CODE, format!("current_dir: {e}"))
-        })?,
-    )
-    .ok_or_else(|| {
-        CliError::new(
-            ExitKind::NotFound,
-            "WORKSPACE_NOT_INITIALISED",
-            "no filesystem-mem workspace found from cwd",
-        )
-    })?;
-    let bytes = memstead_base::filesystem::publish::assemble_archive(&workspace_root)
-        .map_err(|e| {
+    let workspace_root =
+        crate::setup::find_filesystem_workspace_root(&std::env::current_dir().map_err(|e| {
+            CliError::new(
+                ExitKind::Generic,
+                crate::INTERNAL_CODE,
+                format!("current_dir: {e}"),
+            )
+        })?)
+        .ok_or_else(|| {
+            CliError::new(
+                ExitKind::NotFound,
+                "WORKSPACE_NOT_INITIALISED",
+                "no filesystem-mem workspace found from cwd",
+            )
+        })?;
+    let bytes =
+        memstead_base::filesystem::publish::assemble_archive(&workspace_root).map_err(|e| {
             // F1: backend-symmetric typed envelope for the missing-
             // version case — the mem-repo path surfaces the same
             // MEM_CONFIG_INCOMPLETE via Engine::export_mem.
@@ -365,8 +368,7 @@ mod tests {
     /// other subcommand uses; the former `--mem-name` outlier is gone.
     #[test]
     fn export_mem_selection_flag_is_mem_not_mem_name() {
-        let parsed =
-            Args::try_parse_from(["export", "--mem", "specs", "--format", "mem"]).unwrap();
+        let parsed = Args::try_parse_from(["export", "--mem", "specs", "--format", "mem"]).unwrap();
         assert_eq!(parsed.mem_name.as_deref(), Some("specs"));
         assert!(
             Args::try_parse_from(["export", "--mem-name", "specs"]).is_err(),

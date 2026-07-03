@@ -26,9 +26,7 @@ use std::io::{IsTerminal, Write as _};
 use std::path::{Path, PathBuf};
 
 use clap::{Args as ClapArgs, ValueEnum};
-use memstead_base::filesystem::config::{
-    config_path, init_filesystem_mem, validate_mem_name,
-};
+use memstead_base::filesystem::config::{config_path, init_filesystem_mem, validate_mem_name};
 use memstead_base::vcs::Actor;
 use memstead_base::{CreateEntityArgs, Engine as BaseEngine};
 use serde_json::json;
@@ -136,7 +134,10 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             CliError::new(
                 ExitKind::Generic,
                 crate::INTERNAL_CODE,
-                format!("failed to create target directory {}: {e}", target.display()),
+                format!(
+                    "failed to create target directory {}: {e}",
+                    target.display()
+                ),
             )
         })?;
     }
@@ -545,15 +546,15 @@ struct McpBinary {
 /// binary first (one install ships both), then `PATH`. Falls back to
 /// the bare name with a warning naming the install command.
 fn resolve_mcp_binary() -> McpBinary {
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            let sibling = dir.join("memstead-mcp");
-            if sibling.is_file() {
-                return McpBinary {
-                    command: sibling.display().to_string(),
-                    warning: None,
-                };
-            }
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(dir) = exe.parent()
+    {
+        let sibling = dir.join("memstead-mcp");
+        if sibling.is_file() {
+            return McpBinary {
+                command: sibling.display().to_string(),
+                warning: None,
+            };
         }
     }
     if let Some(paths) = std::env::var_os("PATH") {
@@ -598,7 +599,10 @@ fn read_agent_config(path: &Path) -> anyhow::Result<serde_json::Value> {
         CliError::new(
             ExitKind::Validation,
             "INVALID_INPUT",
-            format!("{} exists but is not valid JSON ({e}) — {fix_hint}", path.display()),
+            format!(
+                "{} exists but is not valid JSON ({e}) — {fix_hint}",
+                path.display()
+            ),
         )
     })?;
     if !root.is_object() {
@@ -631,7 +635,11 @@ fn read_agent_config(path: &Path) -> anyhow::Result<serde_json::Value> {
 /// configs get an `mcpServers.memstead` entry added, preserving every
 /// existing key; an existing `memstead` entry is never overwritten.
 /// Codex gets the exact `codex mcp add` command as its action line.
-fn wire_agent(target: &Path, agent: AgentTarget, mcp_command: &str) -> anyhow::Result<WiringOutcome> {
+fn wire_agent(
+    target: &Path,
+    agent: AgentTarget,
+    mcp_command: &str,
+) -> anyhow::Result<WiringOutcome> {
     let Some(rel) = agent.config_file() else {
         return Ok(WiringOutcome {
             target: agent,
@@ -675,7 +683,10 @@ fn wire_agent(target: &Path, agent: AgentTarget, mcp_command: &str) -> anyhow::R
             )
         })?;
     }
-    let rendered = format!("{}\n", serde_json::to_string_pretty(&root).unwrap_or_default());
+    let rendered = format!(
+        "{}\n",
+        serde_json::to_string_pretty(&root).unwrap_or_default()
+    );
     std::fs::write(&path, rendered).map_err(|e| {
         CliError::new(
             ExitKind::Generic,
@@ -733,9 +744,7 @@ fn report(
         String::new(),
         format!("- Workspace:   `{}`", target.display()),
         format!("- Schema pin:  `{}`", schema_pin.as_display()),
-        format!(
-            "- Seed entity: `{seed_id}` (remove any time: `memstead delete {seed_id}`)"
-        ),
+        format!("- Seed entity: `{seed_id}` (remove any time: `memstead delete {seed_id}`)"),
     ];
     for w in wirings {
         lines.push(format!("- {}: {}", w.target.label(), w.action));
@@ -765,7 +774,10 @@ mod tests {
     fn derive_mem_name_handles_common_directory_names() {
         assert_eq!(derive_mem_name("my-graph").as_deref(), Some("my-graph"));
         assert_eq!(derive_mem_name("My Project").as_deref(), Some("my-project"));
-        assert_eq!(derive_mem_name("Notes_2026 (v2)").as_deref(), Some("notes-2026-v2"));
+        assert_eq!(
+            derive_mem_name("Notes_2026 (v2)").as_deref(),
+            Some("notes-2026-v2")
+        );
         // Nothing valid survives: prompt/refusal path.
         assert_eq!(derive_mem_name("日本語"), None);
         assert_eq!(derive_mem_name(""), None);
@@ -800,7 +812,10 @@ mod tests {
         assert!(outcome.action.contains("wrote"), "got: {}", outcome.action);
         let parsed: serde_json::Value =
             serde_json::from_slice(&std::fs::read(tmp.path().join(".mcp.json")).unwrap()).unwrap();
-        assert_eq!(parsed["mcpServers"]["memstead"]["command"], "/bin/memstead-mcp");
+        assert_eq!(
+            parsed["mcpServers"]["memstead"]["command"],
+            "/bin/memstead-mcp"
+        );
 
         // Existing foreign server entries survive; existing `memstead`
         // entry is never overwritten.
@@ -816,10 +831,17 @@ mod tests {
         )
         .unwrap();
         let outcome = wire_agent(tmp.path(), AgentTarget::ClaudeCode, "/bin/memstead-mcp").unwrap();
-        assert!(outcome.action.contains("left untouched"), "got: {}", outcome.action);
+        assert!(
+            outcome.action.contains("left untouched"),
+            "got: {}",
+            outcome.action
+        );
         let parsed: serde_json::Value =
             serde_json::from_slice(&std::fs::read(tmp.path().join(".mcp.json")).unwrap()).unwrap();
-        assert_eq!(parsed["mcpServers"]["memstead"]["command"], "/custom/memstead-mcp");
+        assert_eq!(
+            parsed["mcpServers"]["memstead"]["command"],
+            "/custom/memstead-mcp"
+        );
         assert_eq!(parsed["mcpServers"]["other"]["command"], "/bin/other");
     }
 
@@ -828,7 +850,9 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let outcome = wire_agent(tmp.path(), AgentTarget::Codex, "/bin/memstead-mcp").unwrap();
         assert!(
-            outcome.action.contains("codex mcp add memstead -- /bin/memstead-mcp"),
+            outcome
+                .action
+                .contains("codex mcp add memstead -- /bin/memstead-mcp"),
             "got: {}",
             outcome.action,
         );

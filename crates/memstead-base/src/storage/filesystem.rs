@@ -94,7 +94,11 @@ impl FilesystemMemWriter {
     /// Read the current bytes at `rel_key` from the buffered op log if
     /// present, otherwise from disk. Used by `move_entity` to resolve
     /// the source content.
-    fn read_source(&self, pending: &Pending, rel_key: &str) -> Result<Option<Vec<u8>>, MemWriterError> {
+    fn read_source(
+        &self,
+        pending: &Pending,
+        rel_key: &str,
+    ) -> Result<Option<Vec<u8>>, MemWriterError> {
         if let Some(PendingState::Upsert(bytes)) = pending.ops.get(rel_key) {
             return Ok(Some(bytes.clone()));
         }
@@ -133,7 +137,7 @@ pub(crate) fn normalise_rel_path(rel_path: &Path) -> Result<String, MemWriterErr
                     return Err(MemWriterError::Path(format!(
                         "non-utf-8 or empty path component in {}",
                         rel_path.display()
-                    )))
+                    )));
                 }
             },
             Component::CurDir => continue,
@@ -159,7 +163,9 @@ impl MemWriter for FilesystemMemWriter {
         let mut pending = self.pending.lock().map_err(|_| {
             MemWriterError::Path("filesystem writer pending state poisoned".to_string())
         })?;
-        pending.ops.insert(key, PendingState::Upsert(content.to_vec()));
+        pending
+            .ops
+            .insert(key, PendingState::Upsert(content.to_vec()));
         Ok(())
     }
 
@@ -210,11 +216,7 @@ impl MemWriter for FilesystemMemWriter {
         Ok(())
     }
 
-    fn commit(
-        &self,
-        _message: &str,
-        _ctx: &CommitContext<'_>,
-    ) -> Result<CommitId, MemWriterError> {
+    fn commit(&self, _message: &str, _ctx: &CommitContext<'_>) -> Result<CommitId, MemWriterError> {
         let mut pending = self.pending.lock().map_err(|_| {
             MemWriterError::Path("filesystem writer pending state poisoned".to_string())
         })?;
@@ -288,11 +290,7 @@ impl crate::backend::MemBackend for FilesystemMemWriter {
         Ok(())
     }
 
-    fn commit(
-        &self,
-        message: &str,
-        ctx: &CommitContext<'_>,
-    ) -> Result<CommitId, BackendError> {
+    fn commit(&self, message: &str, ctx: &CommitContext<'_>) -> Result<CommitId, BackendError> {
         <Self as MemWriter>::commit(self, message, ctx).map_err(Into::into)
     }
 
@@ -300,10 +298,7 @@ impl crate::backend::MemBackend for FilesystemMemWriter {
         // Folder backend reads `<root>/.memstead/config.json`.
         // Missing file → Ok(None); other IO errors propagate as
         // BackendError.
-        let config_path = self
-            .root
-            .join(crate::mem::MEM_META_DIR)
-            .join("config.json");
+        let config_path = self.root.join(crate::mem::MEM_META_DIR).join("config.json");
         match std::fs::read(&config_path) {
             Ok(bytes) => Ok(Some(bytes)),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
@@ -356,16 +351,16 @@ impl crate::backend::MemBackend for FilesystemMemWriter {
                 Err(_) => continue,
             };
             let ts_str = value.get("ts").and_then(|v| v.as_str()).unwrap_or("");
-            if let Some(c) = cursor {
-                if ts_str <= c {
-                    continue;
-                }
+            if let Some(c) = cursor
+                && ts_str <= c
+            {
+                continue;
             }
             let timestamp = parse_rfc3339_utc(ts_str).unwrap_or(std::time::UNIX_EPOCH);
             let kind = value
                 .get("kind")
                 .and_then(|v| v.as_str())
-                .and_then(ProvenanceKind::from_str)
+                .and_then(ProvenanceKind::parse)
                 .unwrap_or(ProvenanceKind::Update);
             let entity = value
                 .get("entity")
@@ -402,11 +397,7 @@ impl crate::backend::MemBackend for FilesystemMemWriter {
 /// `out`. Skips the mem's `.memstead/` umbrella so the engine never
 /// confuses changelog / config / schema files with entity-bearing
 /// markdown.
-fn walk_for_md(
-    root: &Path,
-    dir: &Path,
-    out: &mut Vec<PathBuf>,
-) -> Result<(), BackendError> {
+fn walk_for_md(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), BackendError> {
     let entries = match std::fs::read_dir(dir) {
         Ok(e) => e,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
@@ -424,10 +415,9 @@ fn walk_for_md(
             walk_for_md(root, &path, out)?;
         } else if file_type.is_file()
             && path.extension().and_then(|s| s.to_str()) == Some("md")
+            && let Ok(rel) = path.strip_prefix(root)
         {
-            if let Ok(rel) = path.strip_prefix(root) {
-                out.push(rel.to_path_buf());
-            }
+            out.push(rel.to_path_buf());
         }
     }
     Ok(())
@@ -438,10 +428,10 @@ fn walk_for_md(
 /// shares the target's parent so the rename is same-fs (atomic on
 /// POSIX). On rename failure, the temp file is best-effort removed.
 fn atomic_write(target: &Path, bytes: &[u8]) -> Result<(), MemWriterError> {
-    if let Some(parent) = target.parent() {
-        if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent).map_err(MemWriterError::Io)?;
-        }
+    if let Some(parent) = target.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent).map_err(MemWriterError::Io)?;
     }
     let tmp = make_tmp_path(target);
     std::fs::write(&tmp, bytes).map_err(MemWriterError::Io)?;
@@ -556,7 +546,9 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let writer = FilesystemMemWriter::new(tmp.path().to_path_buf());
 
-        writer.write_entity(Path::new("from.md"), b"payload").unwrap();
+        writer
+            .write_entity(Path::new("from.md"), b"payload")
+            .unwrap();
         writer.commit("seed", &ctx_for_test()).unwrap();
 
         writer
@@ -681,9 +673,7 @@ mod tests {
         let writer = FilesystemMemWriter::new(tmp.path().to_path_buf());
 
         writer.write_entity(Path::new("a.md"), b"a").unwrap();
-        writer
-            .write_entity(Path::new("nested/b.md"), b"b")
-            .unwrap();
+        writer.write_entity(Path::new("nested/b.md"), b"b").unwrap();
         writer.commit("c", &ctx_for_test()).unwrap();
 
         // Walk the tree and ensure no `.tmp.` artefacts survived.
@@ -776,8 +766,10 @@ mod tests {
         // With both traits in scope, dot-syntax `writer.foo(...)`
         // is ambiguous — seed via fully-qualified MemWriter calls.
         <FilesystemMemWriter as MemWriter>::write_entity(&writer, Path::new("a.md"), b"a").unwrap();
-        <FilesystemMemWriter as MemWriter>::write_entity(&writer, Path::new("nested/b.md"), b"b").unwrap();
-        <FilesystemMemWriter as MemWriter>::write_entity(&writer, Path::new("notes.json"), b"{}").unwrap();
+        <FilesystemMemWriter as MemWriter>::write_entity(&writer, Path::new("nested/b.md"), b"b")
+            .unwrap();
+        <FilesystemMemWriter as MemWriter>::write_entity(&writer, Path::new("notes.json"), b"{}")
+            .unwrap();
         <FilesystemMemWriter as MemWriter>::commit(&writer, "seed", &ctx_for_test()).unwrap();
         // The current `.memstead/` meta dir is skipped by the walker.
         // An ordinary dot-dir (`.other/`) is not special, so markdown
@@ -815,9 +807,8 @@ mod tests {
         // `write_entity`; importing `MemBackend` later in the test
         // makes the dot-syntax ambiguous, so we route the seed
         // through the trait that's still implicitly in scope here.
-        let _ =
-            <FilesystemMemWriter as MemWriter>::write_entity(&writer, Path::new("on_disk.md"), b"disk")
-                .unwrap();
+        <FilesystemMemWriter as MemWriter>::write_entity(&writer, Path::new("on_disk.md"), b"disk")
+            .unwrap();
         <FilesystemMemWriter as MemWriter>::commit(&writer, "seed", &ctx_for_test()).unwrap();
 
         use crate::backend::MemBackend;
@@ -828,7 +819,9 @@ mod tests {
             Some(b"disk".to_vec())
         );
         // Buffered upsert wins over disk.
-        backend.write_entity(Path::new("on_disk.md"), b"buffered").unwrap();
+        backend
+            .write_entity(Path::new("on_disk.md"), b"buffered")
+            .unwrap();
         assert_eq!(
             backend.read_entity(Path::new("on_disk.md")).unwrap(),
             Some(b"buffered".to_vec())
@@ -882,7 +875,10 @@ mod tests {
         assert_eq!(all[0].actor, Actor::Agent);
         assert_eq!(all[0].note.as_deref(), Some("first"));
         assert_eq!(
-            all[0].client.as_ref().map(|c| (c.name.as_str(), c.version.as_str())),
+            all[0]
+                .client
+                .as_ref()
+                .map(|c| (c.name.as_str(), c.version.as_str())),
             Some(("claude-code", "2.1.0"))
         );
         assert_eq!(all[0].timestamp, earlier);
@@ -961,12 +957,9 @@ mod tests {
         // Fresh mem, no `.memstead/changes.jsonl` → empty BackendChanges
         // with `head` echoing the cursor.
         let tmp = TempDir::new().unwrap();
-        let result = crate::ops::folder_changes_since(
-            tmp.path(),
-            "specs",
-            crate::ops::EMPTY_TREE_SHA,
-        )
-        .unwrap();
+        let result =
+            crate::ops::folder_changes_since(tmp.path(), "specs", crate::ops::EMPTY_TREE_SHA)
+                .unwrap();
         assert_eq!(result.since, crate::ops::EMPTY_TREE_SHA);
         assert_eq!(result.head, crate::ops::EMPTY_TREE_SHA);
         assert!(result.changes.is_empty());
@@ -976,17 +969,23 @@ mod tests {
     fn folder_changes_since_create_only_yields_added_envelope() {
         let tmp = TempDir::new().unwrap();
         let writer = FilesystemMemWriter::new(tmp.path().to_path_buf());
-        append_at(&writer, 1_700_000_000, ProvenanceKind::Create, "specs--alpha");
+        append_at(
+            &writer,
+            1_700_000_000,
+            ProvenanceKind::Create,
+            "specs--alpha",
+        );
 
-        let result = crate::ops::folder_changes_since(
-            tmp.path(),
-            "specs",
-            crate::ops::EMPTY_TREE_SHA,
-        )
-        .unwrap();
+        let result =
+            crate::ops::folder_changes_since(tmp.path(), "specs", crate::ops::EMPTY_TREE_SHA)
+                .unwrap();
         assert_eq!(result.changes.len(), 1);
         match &result.changes[0] {
-            crate::ops::ChangeEnvelope::Added { id, title, entity_type } => {
+            crate::ops::ChangeEnvelope::Added {
+                id,
+                title,
+                entity_type,
+            } => {
                 assert_eq!(id.0, "specs--alpha");
                 assert!(title.is_none(), "id-only contract");
                 assert!(entity_type.is_none(), "id-only contract");
@@ -1003,15 +1002,22 @@ mod tests {
         // deleted nets out to Removed (final state wins for Delete).
         let tmp = TempDir::new().unwrap();
         let writer = FilesystemMemWriter::new(tmp.path().to_path_buf());
-        append_at(&writer, 1_700_000_000, ProvenanceKind::Create, "specs--ephemeral");
-        append_at(&writer, 1_700_000_001, ProvenanceKind::Delete, "specs--ephemeral");
+        append_at(
+            &writer,
+            1_700_000_000,
+            ProvenanceKind::Create,
+            "specs--ephemeral",
+        );
+        append_at(
+            &writer,
+            1_700_000_001,
+            ProvenanceKind::Delete,
+            "specs--ephemeral",
+        );
 
-        let result = crate::ops::folder_changes_since(
-            tmp.path(),
-            "specs",
-            crate::ops::EMPTY_TREE_SHA,
-        )
-        .unwrap();
+        let result =
+            crate::ops::folder_changes_since(tmp.path(), "specs", crate::ops::EMPTY_TREE_SHA)
+                .unwrap();
         assert_eq!(result.changes.len(), 1);
         match &result.changes[0] {
             crate::ops::ChangeEnvelope::Removed { id, .. } => {
@@ -1025,14 +1031,16 @@ mod tests {
     fn folder_changes_since_update_only_yields_updated_envelope() {
         let tmp = TempDir::new().unwrap();
         let writer = FilesystemMemWriter::new(tmp.path().to_path_buf());
-        append_at(&writer, 1_700_000_000, ProvenanceKind::Update, "specs--alpha");
+        append_at(
+            &writer,
+            1_700_000_000,
+            ProvenanceKind::Update,
+            "specs--alpha",
+        );
 
-        let result = crate::ops::folder_changes_since(
-            tmp.path(),
-            "specs",
-            crate::ops::EMPTY_TREE_SHA,
-        )
-        .unwrap();
+        let result =
+            crate::ops::folder_changes_since(tmp.path(), "specs", crate::ops::EMPTY_TREE_SHA)
+                .unwrap();
         assert_eq!(result.changes.len(), 1);
         assert!(matches!(
             result.changes[0],
@@ -1046,15 +1054,29 @@ mod tests {
         // second drops the first event from the window.
         let tmp = TempDir::new().unwrap();
         let writer = FilesystemMemWriter::new(tmp.path().to_path_buf());
-        append_at(&writer, 1_700_000_000, ProvenanceKind::Create, "specs--first");
-        append_at(&writer, 1_750_000_000, ProvenanceKind::Create, "specs--middle");
-        append_at(&writer, 1_800_000_000, ProvenanceKind::Create, "specs--last");
+        append_at(
+            &writer,
+            1_700_000_000,
+            ProvenanceKind::Create,
+            "specs--first",
+        );
+        append_at(
+            &writer,
+            1_750_000_000,
+            ProvenanceKind::Create,
+            "specs--middle",
+        );
+        append_at(
+            &writer,
+            1_800_000_000,
+            ProvenanceKind::Create,
+            "specs--last",
+        );
 
         let cursor = changelog::format_rfc3339_utc(
             std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_725_000_000),
         );
-        let result =
-            crate::ops::folder_changes_since(tmp.path(), "specs", &cursor).unwrap();
+        let result = crate::ops::folder_changes_since(tmp.path(), "specs", &cursor).unwrap();
         assert_eq!(result.changes.len(), 2);
         let ids: Vec<_> = result
             .changes
@@ -1078,15 +1100,22 @@ mod tests {
         // surface for the queried mem.
         let tmp = TempDir::new().unwrap();
         let writer = FilesystemMemWriter::new(tmp.path().to_path_buf());
-        append_at(&writer, 1_700_000_000, ProvenanceKind::Create, "specs--mine");
-        append_at(&writer, 1_700_000_001, ProvenanceKind::Create, "other--theirs");
+        append_at(
+            &writer,
+            1_700_000_000,
+            ProvenanceKind::Create,
+            "specs--mine",
+        );
+        append_at(
+            &writer,
+            1_700_000_001,
+            ProvenanceKind::Create,
+            "other--theirs",
+        );
 
-        let result = crate::ops::folder_changes_since(
-            tmp.path(),
-            "specs",
-            crate::ops::EMPTY_TREE_SHA,
-        )
-        .unwrap();
+        let result =
+            crate::ops::folder_changes_since(tmp.path(), "specs", crate::ops::EMPTY_TREE_SHA)
+                .unwrap();
         assert_eq!(result.changes.len(), 1);
         match &result.changes[0] {
             crate::ops::ChangeEnvelope::Added { id, .. } => {
@@ -1115,14 +1144,16 @@ mod tests {
                 None,
             ))
             .unwrap();
-        append_at(&writer, 1_700_000_001, ProvenanceKind::Create, "specs--real");
+        append_at(
+            &writer,
+            1_700_000_001,
+            ProvenanceKind::Create,
+            "specs--real",
+        );
 
-        let result = crate::ops::folder_changes_since(
-            tmp.path(),
-            "specs",
-            crate::ops::EMPTY_TREE_SHA,
-        )
-        .unwrap();
+        let result =
+            crate::ops::folder_changes_since(tmp.path(), "specs", crate::ops::EMPTY_TREE_SHA)
+                .unwrap();
         // Only the Create-Real event surfaces; the batch is dropped.
         assert_eq!(result.changes.len(), 1);
         match &result.changes[0] {
@@ -1143,8 +1174,7 @@ mod tests {
         let cursor = changelog::format_rfc3339_utc(
             std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_900_000_000),
         );
-        let result =
-            crate::ops::folder_changes_since(tmp.path(), "specs", &cursor).unwrap();
+        let result = crate::ops::folder_changes_since(tmp.path(), "specs", &cursor).unwrap();
         assert!(result.changes.is_empty());
         assert_eq!(result.head, cursor);
     }

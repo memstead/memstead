@@ -74,14 +74,9 @@ pub enum EntityChange {
         content: String,
     },
     /// Entity body changed in this commit.
-    Modified {
-        path: String,
-        content: String,
-    },
+    Modified { path: String, content: String },
     /// Entity removed in this commit. No content travels.
-    Deleted {
-        path: String,
-    },
+    Deleted { path: String },
     /// Entity renamed in this commit. `from` is the pre-rename
     /// path, `to` is the post-rename path; `content` is the body
     /// on the new side.

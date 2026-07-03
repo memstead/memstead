@@ -60,12 +60,13 @@ fn split_frontmatter_strict<'a>(
     };
 
     let after_open = &raw[after_open_len..];
-    let close_pos = after_open.find("\n---").ok_or_else(|| {
-        ValidationError::InvalidFrontmatter {
-            path: path.to_string(),
-            reason: "frontmatter block is not closed with `\\n---`".to_string(),
-        }
-    })?;
+    let close_pos =
+        after_open
+            .find("\n---")
+            .ok_or_else(|| ValidationError::InvalidFrontmatter {
+                path: path.to_string(),
+                reason: "frontmatter block is not closed with `\\n---`".to_string(),
+            })?;
     let meta_block = &after_open[..close_pos];
 
     let body_start_rel = close_pos + "\n---".len();
@@ -269,9 +270,7 @@ fn check_relationships_syntax(body: &str, path: &str) -> Result<(), ValidationEr
 
 fn relationship_line_regex() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| {
-        Regex::new(r"^-\s+\*\*[A-Z_]+\*\*:\s*\[\[[^\]]+\]\](\s*—.*)?$").unwrap()
-    })
+    RE.get_or_init(|| Regex::new(r"^-\s+\*\*[A-Z_]+\*\*:\s*\[\[[^\]]+\]\](\s*—.*)?$").unwrap())
 }
 
 fn check_relationship_types(entity: &Entity, path: &str) -> Result<(), ValidationError> {
@@ -433,12 +432,7 @@ mod tests {
     }
 
     fn validate(content: &str, entity: &Entity) -> Result<(), ValidationError> {
-        validate_strict(
-            content,
-            entity,
-            &spec_type(),
-            "test.md",
-        )
+        validate_strict(content, entity, &spec_type(), "test.md")
     }
 
     const MINIMAL_SPEC: &str = "\
@@ -495,11 +489,7 @@ Design notes.
 
     #[test]
     fn rejects_unknown_frontmatter_key() {
-        let content = MINIMAL_SPEC.replacen(
-            "level: M0",
-            "level: M0\nunexpected_key: oops",
-            1,
-        );
+        let content = MINIMAL_SPEC.replacen("level: M0", "level: M0\nunexpected_key: oops", 1);
         let entity = parse(&content);
         let err = validate(&content, &entity).unwrap_err();
         match err {
@@ -528,11 +518,7 @@ Design notes.
 
     #[test]
     fn rejects_missing_required_section() {
-        let content = MINIMAL_SPEC.replacen(
-            "## Purpose\n\nWhy it exists.\n\n",
-            "",
-            1,
-        );
+        let content = MINIMAL_SPEC.replacen("## Purpose\n\nWhy it exists.\n\n", "", 1);
         let entity = parse(&content);
         let err = validate(&content, &entity).unwrap_err();
         assert!(matches!(
@@ -550,9 +536,7 @@ Design notes.
 
     #[test]
     fn rejects_malformed_relationship_line() {
-        let content = format!(
-            "{MINIMAL_SPEC}\n## Relationships\n\n- USES: [[target]]\n"
-        );
+        let content = format!("{MINIMAL_SPEC}\n## Relationships\n\n- USES: [[target]]\n");
         let entity = parse(&content);
         let err = validate(&content, &entity).unwrap_err();
         assert!(matches!(
@@ -563,18 +547,14 @@ Design notes.
 
     #[test]
     fn accepts_valid_relationship_line() {
-        let content = format!(
-            "{MINIMAL_SPEC}\n## Relationships\n\n- **USES**: [[target-name]]\n"
-        );
+        let content = format!("{MINIMAL_SPEC}\n## Relationships\n\n- **USES**: [[target-name]]\n");
         let entity = parse(&content);
         validate(&content, &entity).unwrap();
     }
 
     #[test]
     fn rejects_invalid_wiki_link_uppercase() {
-        let content = format!(
-            "{MINIMAL_SPEC}\nSee [[MyThing]] for details.\n"
-        );
+        let content = format!("{MINIMAL_SPEC}\nSee [[MyThing]] for details.\n");
         let entity = parse(&content);
         let err = validate(&content, &entity).unwrap_err();
         assert!(matches!(err, ValidationError::InvalidWikiLink { .. }));
@@ -611,9 +591,7 @@ Design notes.
     /// create produces.
     #[test]
     fn accepts_hierarchical_tier_two_link() {
-        let content = format!(
-            "{MINIMAL_SPEC}\nSee [[external/engine:health]] for details.\n"
-        );
+        let content = format!("{MINIMAL_SPEC}\nSee [[external/engine:health]] for details.\n");
         let entity = parse(&content);
         validate(&content, &entity).unwrap();
     }
@@ -652,9 +630,7 @@ Design notes.
 
     #[test]
     fn rejects_reserved_cross_mem_syntax() {
-        let content = format!(
-            "{MINIMAL_SPEC}\nSee [[other-mem::entity]] for details.\n"
-        );
+        let content = format!("{MINIMAL_SPEC}\nSee [[other-mem::entity]] for details.\n");
         let entity = parse(&content);
         let err = validate(&content, &entity).unwrap_err();
         match err {
@@ -696,18 +672,15 @@ Design notes.
 
     #[test]
     fn accepts_valid_stub_wiki_link() {
-        let content = format!(
-            "{MINIMAL_SPEC}\nSee [[planned-feature]] and [[a/b/c]] for more.\n"
-        );
+        let content = format!("{MINIMAL_SPEC}\nSee [[planned-feature]] and [[a/b/c]] for more.\n");
         let entity = parse(&content);
         validate(&content, &entity).unwrap();
     }
 
     #[test]
     fn accepts_wiki_link_inside_inline_code() {
-        let content = format!(
-            "{MINIMAL_SPEC}\nOne line per edge, shape `- **<REL>**: [[<target>]]`.\n"
-        );
+        let content =
+            format!("{MINIMAL_SPEC}\nOne line per edge, shape `- **<REL>**: [[<target>]]`.\n");
         let entity = parse(&content);
         validate(&content, &entity).unwrap();
     }
@@ -732,36 +705,28 @@ Design notes.
         // `` `text` `` — double-backtick delimiter wrapping content that
         // itself contains single backticks. The stripped span may hold
         // unbalanced brackets without leaking to the bracket checker.
-        let content = format!(
-            "{MINIMAL_SPEC}\n| Inline code | `` `[[slug]]` `` | note. |\n"
-        );
+        let content = format!("{MINIMAL_SPEC}\n| Inline code | `` `[[slug]]` `` | note. |\n");
         let entity = parse(&content);
         validate(&content, &entity).unwrap();
     }
 
     #[test]
     fn accepts_wiki_link_with_alias() {
-        let content = format!(
-            "{MINIMAL_SPEC}\nSee [[target|Display Text]] for more.\n"
-        );
+        let content = format!("{MINIMAL_SPEC}\nSee [[target|Display Text]] for more.\n");
         let entity = parse(&content);
         validate(&content, &entity).unwrap();
     }
 
     #[test]
     fn accepts_wiki_link_with_parent_relative_and_md() {
-        let content = format!(
-            "{MINIMAL_SPEC}\nSee [[../parent/entity.md]] for more.\n"
-        );
+        let content = format!("{MINIMAL_SPEC}\nSee [[../parent/entity.md]] for more.\n");
         let entity = parse(&content);
         validate(&content, &entity).unwrap();
     }
 
     #[test]
     fn accepts_wiki_link_inside_code_block() {
-        let content = format!(
-            "{MINIMAL_SPEC}\n```\nlet x = [[this is not a link]];\n```\n"
-        );
+        let content = format!("{MINIMAL_SPEC}\n```\nlet x = [[this is not a link]];\n```\n");
         let entity = parse(&content);
         validate(&content, &entity).unwrap();
     }

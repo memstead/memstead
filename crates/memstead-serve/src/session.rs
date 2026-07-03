@@ -191,7 +191,10 @@ pub fn mount_session_engine(
     };
 
     Engine::from_mounts(vec![
-        (sketch_mount, Box::new(sketch_backend) as Box<dyn MemBackend>),
+        (
+            sketch_mount,
+            Box::new(sketch_backend) as Box<dyn MemBackend>,
+        ),
         (content_mount, content_backend),
     ])
 }
@@ -298,7 +301,10 @@ impl SessionMcpServer {
     /// Build from a pre-mounted writable session [`Engine`] with a
     /// per-session entity cap.
     pub fn from_engine(engine: Engine, entity_cap: usize) -> Self {
-        Self::new(FilesystemMcpServer::from_engine(engine, PathBuf::new()), entity_cap)
+        Self::new(
+            FilesystemMcpServer::from_engine(engine, PathBuf::new()),
+            entity_cap,
+        )
     }
 
     /// Attach a connection-born live-view binding: the public `view_id`, the
@@ -394,7 +400,8 @@ impl SessionMcpServer {
     /// session's mem — the snapshot a viewer renders, recomputed from the
     /// live store on every call.
     pub fn graph_snapshot(&self) -> GraphSnapshot {
-        self.inner.with_engine(|e| graph_projection(e, SESSION_MEM_NAME))
+        self.inner
+            .with_engine(|e| graph_projection(e, SESSION_MEM_NAME))
     }
 
     /// Subscribe to this session's mem-change events — the trigger that
@@ -525,9 +532,7 @@ sketch sessions right now). Reconnect and try again in a few minutes."
         // hands a human addresses the working session: the `initialize`
         // handshake cannot, because a client may surface instructions from a
         // different `initialize` than the one carrying the writes.
-        if is_overview
-            && let Some(url) = self.live_view_url()
-        {
+        if is_overview && let Some(url) = self.live_view_url() {
             result.content.push(Content::text(format!(
                 "\n---\nLive view (read-only — share so a human can watch this graph build): {url}"
             )));
@@ -588,7 +593,10 @@ impl std::fmt::Display for SessionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             SessionError::UnknownSession(id) => {
-                write!(f, "no live session for id '{id}' (never created or evicted)")
+                write!(
+                    f,
+                    "no live session for id '{id}' (never created or evicted)"
+                )
             }
             SessionError::EngineInit(msg) => write!(f, "session engine init failed: {msg}"),
             SessionError::ExportFailed(msg) => write!(f, "session export failed: {msg}"),
@@ -839,7 +847,10 @@ impl SessionRegistry {
 
     /// Live session count.
     pub fn len(&self) -> usize {
-        self.inner.lock().expect("session registry mutex poisoned").len()
+        self.inner
+            .lock()
+            .expect("session registry mutex poisoned")
+            .len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -1144,7 +1155,12 @@ pub fn build_sketch_app(
             .expect("rate-limit config must build"),
     );
     session_router(registry.clone())
-        .merge(sketch_router(registry, sketch_schema, view_base, soft_launch))
+        .merge(sketch_router(
+            registry,
+            sketch_schema,
+            view_base,
+            soft_launch,
+        ))
         .layer(GovernorLayer::new(governor_conf))
 }
 
@@ -1263,7 +1279,10 @@ Each mem keeps a typed model of a chosen subject.\n",
         assert_eq!(status, StatusCode::OK, "initialize must return 200");
         let sid = sid.expect("initialize issues an Mcp-Session-Id");
         let (status, ..) = mcp_post(&svc, INITIALIZED, Some(&sid)).await;
-        assert!(status.is_success(), "notifications/initialized must be accepted");
+        assert!(
+            status.is_success(),
+            "notifications/initialized must be accepted"
+        );
         (svc, sid)
     }
 
@@ -1279,7 +1298,10 @@ Each mem keeps a typed model of a chosen subject.\n",
         let mut expected: Vec<String> =
             SESSION_ENTITY_TOOLS.iter().map(|s| s.to_string()).collect();
         expected.sort();
-        assert_eq!(scoped, expected, "session must list exactly the 10 entity tools");
+        assert_eq!(
+            scoped, expected,
+            "session must list exactly the 10 entity tools"
+        );
         assert_eq!(SESSION_ENTITY_TOOLS.len(), 10);
     }
 
@@ -1332,12 +1354,20 @@ Each mem keeps a typed model of a chosen subject.\n",
             session_withheld_tools().into_iter().collect();
 
         // Allowlist is a real subset of the live surface (no stale names).
-        assert!(allowed.is_subset(&all), "every allowlisted tool must exist on the router");
+        assert!(
+            allowed.is_subset(&all),
+            "every allowlisted tool must exist on the router"
+        );
         // Disjoint, and together cover everything: a partition.
-        assert!(allowed.is_disjoint(&withheld), "a tool is either allowed or withheld, not both");
-        let union: std::collections::BTreeSet<String> =
-            allowed.union(&withheld).cloned().collect();
-        assert_eq!(union, all, "allowed ∪ withheld must equal the full tool surface");
+        assert!(
+            allowed.is_disjoint(&withheld),
+            "a tool is either allowed or withheld, not both"
+        );
+        let union: std::collections::BTreeSet<String> = allowed.union(&withheld).cloned().collect();
+        assert_eq!(
+            union, all,
+            "allowed ∪ withheld must equal the full tool surface"
+        );
         // The session server is hosted on the *lean* FilesystemMcpServer,
         // whose universe is the 10 entity tools plus two admin tools
         // (changes_since, diff). The mem-lifecycle and workspace-policy
@@ -1366,12 +1396,24 @@ Each mem keeps a typed model of a chosen subject.\n",
             info.server_info.name, "memstead-session",
             "identity must not delegate to the lean server name"
         );
-        let instr = info.instructions.expect("session handshake carries instructions");
+        let instr = info
+            .instructions
+            .expect("session handshake carries instructions");
         for available in SESSION_ENTITY_TOOLS {
-            assert!(instr.contains(available), "instructions name available tool {available}");
+            assert!(
+                instr.contains(available),
+                "instructions name available tool {available}"
+            );
         }
-        for absent in ["memstead_mem_create", "memstead_workspace_", "memstead_reload"] {
-            assert!(instr.contains(absent), "instructions name withheld tool class {absent}");
+        for absent in [
+            "memstead_mem_create",
+            "memstead_workspace_",
+            "memstead_reload",
+        ] {
+            assert!(
+                instr.contains(absent),
+                "instructions name withheld tool class {absent}"
+            );
         }
     }
 
@@ -1394,8 +1436,14 @@ Each mem keeps a typed model of a chosen subject.\n",
         assert!(reg.create_session(default_schema()).is_ok());
         assert_eq!(reg.len(), 2);
         // The third is shed with a typed capacity error — never an OOM, never a 500.
-        assert_eq!(reg.create_session(default_schema()), Err(SessionError::AtCapacity));
-        assert_eq!(reg.create_session(default_schema()).unwrap_err().code(), "AT_CAPACITY");
+        assert_eq!(
+            reg.create_session(default_schema()),
+            Err(SessionError::AtCapacity)
+        );
+        assert_eq!(
+            reg.create_session(default_schema()).unwrap_err().code(),
+            "AT_CAPACITY"
+        );
         assert_eq!(reg.len(), 2, "a refused create must not grow the live set");
     }
 
@@ -1405,7 +1453,10 @@ Each mem keeps a typed model of a chosen subject.\n",
         // clears the slot and a subsequent create gets in.
         let reg = registry(Duration::from_secs(0)).with_max_sessions(1);
         assert!(reg.create_session(default_schema()).is_ok());
-        assert_eq!(reg.create_session(default_schema()), Err(SessionError::AtCapacity));
+        assert_eq!(
+            reg.create_session(default_schema()),
+            Err(SessionError::AtCapacity)
+        );
         reg.sweep_expired(Instant::now());
         assert_eq!(reg.len(), 0);
         assert!(
@@ -1450,10 +1501,20 @@ Each mem keeps a typed model of a chosen subject.\n",
         let (status, _s, body) = mcp_post(&svc, list, Some(&sid)).await;
         assert_eq!(status, StatusCode::OK, "tools/list must return 200: {body}");
         for available in SESSION_ENTITY_TOOLS {
-            assert!(body.contains(available), "tools/list names {available}: {body}");
+            assert!(
+                body.contains(available),
+                "tools/list names {available}: {body}"
+            );
         }
-        for absent in ["memstead_mem_create", "memstead_reload", "memstead_workspace_allow_create"] {
-            assert!(!body.contains(absent), "tools/list must not name {absent}: {body}");
+        for absent in [
+            "memstead_mem_create",
+            "memstead_reload",
+            "memstead_workspace_allow_create",
+        ] {
+            assert!(
+                !body.contains(absent),
+                "tools/list must not name {absent}: {body}"
+            );
         }
 
         // A create issued over the session endpoint lands.
@@ -1594,9 +1655,11 @@ Each mem keeps a typed model of a chosen subject.\n",
     /// session log; the body wiki-links are visible to a reader regardless.)
     #[test]
     fn curated_content_mem_loads_conformant_and_queryable() {
-        let content_dir =
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("content/memstead");
-        assert!(content_dir.is_dir(), "curated content dir exists: {content_dir:?}");
+        let content_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("content/memstead");
+        assert!(
+            content_dir.is_dir(),
+            "curated content dir exists: {content_dir:?}"
+        );
 
         // Mount it read-only alongside a sketch mem, exactly as a session does.
         let engine = mount_session_engine(
@@ -1609,8 +1672,17 @@ Each mem keeps a typed model of a chosen subject.\n",
 
         // Every authored concept is present under the content mem.
         let slugs = [
-            "memstead", "mem", "schema", "entity", "wikilink", "workspace", "mount",
-            "storage-backend", "modal-flavour", "graph", "mcp-layer",
+            "memstead",
+            "mem",
+            "schema",
+            "entity",
+            "wikilink",
+            "workspace",
+            "mount",
+            "storage-backend",
+            "modal-flavour",
+            "graph",
+            "mcp-layer",
         ];
         for slug in slugs {
             let id = memstead_base::EntityId::new(CONTENT_MEM_NAME, slug);
@@ -1624,7 +1696,10 @@ Each mem keeps a typed model of a chosen subject.\n",
         // concept that is actually authored, so the agent reads a coherent
         // mem, not one littered with dangling references.
         let stubs = engine.store().all_entities().filter(|e| e.stub).count();
-        assert_eq!(stubs, 0, "no dangling wiki-links / stub entities in the curated mem");
+        assert_eq!(
+            stubs, 0,
+            "no dangling wiki-links / stub entities in the curated mem"
+        );
 
         // The content is queryable: a search over the two-mount engine surfaces
         // the curated concepts (this is the "reads return the public content"
@@ -1729,7 +1804,9 @@ Each mem keeps a typed model of a chosen subject.\n",
         // Lazy binding: a session that has only handshaked is NOT yet
         // resolvable — no "live but empty" mem exists until it does work.
         assert_eq!(
-            reg.snapshot("sess-0").err().expect("unbound before first tool call").code(),
+            reg.snapshot("sess-0")
+                .expect_err("unbound before first tool call")
+                .code(),
             "UNKNOWN_SESSION",
         );
 
@@ -1742,7 +1819,10 @@ Each mem keeps a typed model of a chosen subject.\n",
             "overview surfaces the working session's live-view link: {obody}"
         );
         assert!(
-            reg.snapshot("sess-0").expect("view resolves after first tool call").nodes.is_empty(),
+            reg.snapshot("sess-0")
+                .expect("view resolves after first tool call")
+                .nodes
+                .is_empty(),
             "the freshly-bound session's sketch is empty"
         );
 
@@ -1750,7 +1830,10 @@ Each mem keeps a typed model of a chosen subject.\n",
         // the view snapshot reflects it.
         let (cs, _s, cbody) = mcp_post(&svc, ALPHA_CREATE, Some(&rmcp_sid)).await;
         assert_eq!(cs, StatusCode::OK, "create: {cbody}");
-        assert!(cbody.contains("sketch--alpha-note"), "create lands in sketch: {cbody}");
+        assert!(
+            cbody.contains("sketch--alpha-note"),
+            "create lands in sketch: {cbody}"
+        );
         let snap = reg.snapshot("sess-0").unwrap();
         assert!(
             snap.nodes.iter().any(|n| n.id == "sketch--alpha-note"),
@@ -1774,7 +1857,10 @@ Each mem keeps a typed model of a chosen subject.\n",
         let (_s, probe_sid, pbody) = mcp_post(&svc, INIT, None).await;
         let probe_sid = probe_sid.expect("probe rmcp session id");
         mcp_post(&svc, INITIALIZED, Some(&probe_sid)).await;
-        assert!(!pbody.contains("/v/"), "the probe handshake surfaces no link: {pbody}");
+        assert!(
+            !pbody.contains("/v/"),
+            "the probe handshake surfaces no link: {pbody}"
+        );
 
         // initialize #2 (sess-1): the working session the client actually drives.
         let (_s, work_sid, _wbody) = mcp_post(&svc, INIT, None).await;
@@ -1793,7 +1879,9 @@ Each mem keeps a typed model of a chosen subject.\n",
         // The probe's id never bound → it refuses, rather than masquerading as a
         // live-but-empty graph (the original bug).
         assert_eq!(
-            reg.snapshot("sess-0").err().expect("probe id must refuse").code(),
+            reg.snapshot("sess-0")
+                .expect_err("probe id must refuse")
+                .code(),
             "UNKNOWN_SESSION",
             "a probe handshake leaves no resolvable empty mem behind",
         );
@@ -1851,7 +1939,14 @@ Each mem keeps a typed model of a chosen subject.\n",
     async fn view_endpoint_resolves_connection_born_session_over_app() {
         let reg = registry(Duration::from_secs(3600));
         // soft_launch=false: this asserts the public-surface `/mcp` mount.
-        let app = build_sketch_app(reg.clone(), default_schema(), String::new(), 1000, 1000, false);
+        let app = build_sketch_app(
+            reg.clone(),
+            default_schema(),
+            String::new(),
+            1000,
+            1000,
+            false,
+        );
 
         let (status, sid, body) = app_post_path(&app, "/mcp", INIT, None).await;
         assert_eq!(status, StatusCode::OK, "initialize over /mcp: {body}");
@@ -1876,7 +1971,10 @@ Each mem keeps a typed model of a chosen subject.\n",
         assert_eq!(resp.status(), StatusCode::OK);
         let bytes = resp.into_body().collect().await.unwrap().to_bytes();
         let bd = String::from_utf8_lossy(&bytes);
-        assert!(bd.contains("sketch--alpha-note"), "view graph reflects the entity: {bd}");
+        assert!(
+            bd.contains("sketch--alpha-note"),
+            "view graph reflects the entity: {bd}"
+        );
 
         // The connection-born session has no per-session MCP route.
         let (st, _s, _b) = app_post_path(&app, "/s/sess-0/mcp", INIT, Some(&sid)).await;
@@ -1900,7 +1998,11 @@ Each mem keeps a typed model of a chosen subject.\n",
 
         // The handshake succeeds at the gated path.
         let (gated, sid, body) = app_post_path(&app, "/try/mcp", INIT, None).await;
-        assert_eq!(gated, StatusCode::OK, "/try/mcp must answer the handshake: {body}");
+        assert_eq!(
+            gated,
+            StatusCode::OK,
+            "/try/mcp must answer the handshake: {body}"
+        );
         assert!(sid.is_some(), "gated handshake returns an mcp-session-id");
     }
 
@@ -1923,7 +2025,10 @@ Each mem keeps a typed model of a chosen subject.\n",
         let reg = registry(Duration::from_secs(3600));
         // `.err()` (not `unwrap_err`) — the Ok type is the rmcp service,
         // which isn't `Debug`.
-        let err = reg.service_for("never-created").err().expect("unknown id must refuse");
+        let err = reg
+            .service_for("never-created")
+            .err()
+            .expect("unknown id must refuse");
         assert_eq!(err.code(), "UNKNOWN_SESSION");
     }
 
@@ -1966,8 +2071,8 @@ Each mem keeps a typed model of a chosen subject.\n",
         assert_eq!(status, StatusCode::OK, "create must succeed: {body}");
 
         let bytes = reg.export_session(&id).expect("export succeeds");
-        let standalone =
-            memstead_base::Engine::from_archive_bytes(bytes).expect("exported .mem mounts standalone");
+        let standalone = memstead_base::Engine::from_archive_bytes(bytes)
+            .expect("exported .mem mounts standalone");
         assert!(
             standalone
                 .get_entity(&memstead_base::EntityId::new("sketch", "alpha-note"))
@@ -2013,7 +2118,9 @@ Each mem keeps a typed model of a chosen subject.\n",
     #[test]
     fn export_unknown_session_is_a_typed_refusal() {
         let reg = registry(Duration::from_secs(3600));
-        let err = reg.export_session("nope").err().expect("unknown id must refuse export");
+        let err = reg
+            .export_session("nope")
+            .expect_err("unknown id must refuse export");
         assert_eq!(err.code(), "UNKNOWN_SESSION");
     }
 
@@ -2084,13 +2191,19 @@ Each mem keeps a typed model of a chosen subject.\n",
         // Third create is over the cap of 2 → typed refusal, not dispatched.
         let (s3, b3) = create_over_mcp(&svc, &sid, "Three", 12).await;
         assert_eq!(s3, StatusCode::OK);
-        assert!(b3.contains("RESOURCE_CAP_EXCEEDED"), "over-cap create refused: {b3}");
+        assert!(
+            b3.contains("RESOURCE_CAP_EXCEEDED"),
+            "over-cap create refused: {b3}"
+        );
 
         // Reads still work at the cap, and the refused entity never landed.
         let search = r#"{"jsonrpc":"2.0","id":13,"method":"tools/call","params":{"name":"memstead_search","arguments":{}}}"#;
         let (s4, _s, b4) = mcp_post(&svc, search, Some(&sid)).await;
         assert_eq!(s4, StatusCode::OK, "reads work at the cap: {b4}");
-        assert!(!b4.contains("sketch--three"), "refused entity never landed: {b4}");
+        assert!(
+            !b4.contains("sketch--three"),
+            "refused entity never landed: {b4}"
+        );
     }
 
     // ----- HTTP surface: session creation + export ------------------------
@@ -2110,7 +2223,9 @@ Each mem keeps a typed model of a chosen subject.\n",
         assert_eq!(resp.status(), StatusCode::CREATED);
         let bytes = resp.into_body().collect().await.unwrap().to_bytes();
         let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-        let id = v["session_id"].as_str().expect("response carries a session id");
+        let id = v["session_id"]
+            .as_str()
+            .expect("response carries a session id");
         assert_eq!(v["mcp_url"], format!("/s/{id}/mcp"));
         assert_eq!(v["export_url"], format!("/s/{id}/export"));
     }
@@ -2136,7 +2251,13 @@ Each mem keeps a typed model of a chosen subject.\n",
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        let bytes = resp.into_body().collect().await.unwrap().to_bytes().to_vec();
+        let bytes = resp
+            .into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes()
+            .to_vec();
         let standalone = memstead_base::Engine::from_archive_bytes(bytes)
             .expect("downloaded .mem mounts standalone");
         assert!(
@@ -2162,7 +2283,10 @@ Each mem keeps a typed model of a chosen subject.\n",
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
         let bytes = resp.into_body().collect().await.unwrap().to_bytes();
         let body = String::from_utf8_lossy(&bytes);
-        assert!(body.contains("UNKNOWN_SESSION"), "typed code in body: {body}");
+        assert!(
+            body.contains("UNKNOWN_SESSION"),
+            "typed code in body: {body}"
+        );
     }
 
     /// The public session surface is rate-limited: over-budget requests
@@ -2267,16 +2391,26 @@ Each mem keeps a typed model of a chosen subject.\n",
         // create + read-back over the URL.
         let create = r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"memstead_create","arguments":{"title":"Alpha Note","entity_type":"spec","sections":{"identity":"i","purpose":"p"}}}}"#;
         let (_s, _x, cbody) = app_mcp_post(&app, &id, create, Some(&sid)).await;
-        assert!(cbody.contains("sketch--alpha-note"), "create over HTTP lands: {cbody}");
+        assert!(
+            cbody.contains("sketch--alpha-note"),
+            "create over HTTP lands: {cbody}"
+        );
         let search = r#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"memstead_search","arguments":{}}}"#;
         let (_s, _x, sbody) = app_mcp_post(&app, &id, search, Some(&sid)).await;
-        assert!(sbody.contains("alpha-note"), "create reflected by a read over HTTP: {sbody}");
+        assert!(
+            sbody.contains("alpha-note"),
+            "create reflected by a read over HTTP: {sbody}"
+        );
 
         // Evict the session; the same URL now refuses with a typed 404.
         let evicted = reg.sweep_expired(std::time::Instant::now() + Duration::from_secs(7200));
         assert_eq!(evicted, 1, "the session evicts");
         let (status, _x, _b) = app_mcp_post(&app, &id, list, Some(&sid)).await;
-        assert_eq!(status, StatusCode::NOT_FOUND, "an evicted session's URL refuses");
+        assert_eq!(
+            status,
+            StatusCode::NOT_FOUND,
+            "an evicted session's URL refuses"
+        );
     }
 
     // ----- live graph stream + snapshot ----------------------------------
@@ -2304,7 +2438,10 @@ Each mem keeps a typed model of a chosen subject.\n",
         let (id, svc, sid) = fresh_session(&reg).await;
 
         let (server, _handle, mut rx) = reg.subscribe_session(&id).unwrap();
-        assert!(server.graph_snapshot().nodes.is_empty(), "snapshot-on-subscribe is the empty mem");
+        assert!(
+            server.graph_snapshot().nodes.is_empty(),
+            "snapshot-on-subscribe is the empty mem"
+        );
 
         let (status, _s, _b) = mcp_post(&svc, ALPHA_CREATE, Some(&sid)).await;
         assert_eq!(status, StatusCode::OK);
@@ -2352,7 +2489,10 @@ Each mem keeps a typed model of a chosen subject.\n",
         let (server_a, _handle, mut rx_a) = reg.subscribe_session(&id_a).unwrap();
         mcp_post(&svc_b, ALPHA_CREATE, Some(&sid_b)).await;
 
-        assert!(rx_a.try_recv().is_err(), "session A's stream receives none of B's events");
+        assert!(
+            rx_a.try_recv().is_err(),
+            "session A's stream receives none of B's events"
+        );
         assert!(
             server_a.graph_snapshot().nodes.is_empty(),
             "session A's graph is unaffected by B's mutation"
@@ -2394,8 +2534,14 @@ Each mem keeps a typed model of a chosen subject.\n",
         assert_eq!(resp.status(), StatusCode::OK);
         let bytes = resp.into_body().collect().await.unwrap().to_bytes();
         let body = String::from_utf8_lossy(&bytes);
-        assert!(body.contains("sketch--alpha-note"), "graph reflects the entity: {body}");
-        assert!(!body.contains("\"x\"") && !body.contains("\"y\""), "no layout coordinates: {body}");
+        assert!(
+            body.contains("sketch--alpha-note"),
+            "graph reflects the entity: {body}"
+        );
+        assert!(
+            !body.contains("\"x\"") && !body.contains("\"y\""),
+            "no layout coordinates: {body}"
+        );
     }
 
     /// `GET /s/{id}/stream` returns a Server-Sent Events response. (The body
@@ -2418,6 +2564,9 @@ Each mem keeps a typed model of a chosen subject.\n",
             .get(axum::http::header::CONTENT_TYPE)
             .and_then(|v| v.to_str().ok())
             .unwrap_or_default();
-        assert!(ct.starts_with("text/event-stream"), "content-type is SSE: {ct}");
+        assert!(
+            ct.starts_with("text/event-stream"),
+            "content-type is SSE: {ct}"
+        );
     }
 }

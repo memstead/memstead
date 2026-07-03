@@ -88,9 +88,8 @@ pub trait BareRunner {
 
 impl BareRunner for ClaudeRunner {
     fn run_bare(&self, model: &str, task_text: &str) -> Result<AgentAnswer> {
-        std::fs::create_dir_all(&self.sandbox_dir).with_context(|| {
-            format!("creating A-arm sandbox {}", self.sandbox_dir.display())
-        })?;
+        std::fs::create_dir_all(&self.sandbox_dir)
+            .with_context(|| format!("creating A-arm sandbox {}", self.sandbox_dir.display()))?;
         let args = build_bare_args(model, task_text);
         let output = Command::new(&self.executable)
             .args(&args)
@@ -141,7 +140,13 @@ pub fn screen_tasks<R: BareRunner, J: Judge>(
             kept.push(task.clone());
         }
     }
-    Ok((kept, ContaminationReport { threshold, excluded }))
+    Ok((
+        kept,
+        ContaminationReport {
+            threshold,
+            excluded,
+        },
+    ))
 }
 
 #[cfg(test)]
@@ -167,7 +172,10 @@ mod tests {
         let sys = args.iter().position(|a| a == "--system-prompt").unwrap();
         assert_eq!(args[sys + 1], BARE_SYSTEM);
         assert!(!args[sys + 1].to_lowercase().contains("reference material"));
-        assert!(args.windows(2).any(|w| w[0] == "-p" && w[1] == "what is X?"));
+        assert!(
+            args.windows(2)
+                .any(|w| w[0] == "-p" && w[1] == "what is X?")
+        );
     }
 
     /// A stub bare model that "knows" one specific task and fails the rest.
@@ -176,8 +184,15 @@ mod tests {
     }
     impl BareRunner for StubBare {
         fn run_bare(&self, _model: &str, task_text: &str) -> Result<AgentAnswer> {
-            let q = if task_text.ends_with(self.known) { 0.95 } else { 0.05 };
-            Ok(AgentAnswer { text: format!("q={q:.3}"), tool_calls: vec![] })
+            let q = if task_text.ends_with(self.known) {
+                0.95
+            } else {
+                0.05
+            };
+            Ok(AgentAnswer {
+                text: format!("q={q:.3}"),
+                tool_calls: vec![],
+            })
         }
     }
     struct ParseQualityJudge;
@@ -212,7 +227,9 @@ mod tests {
     fn corpus_only_tasks_all_survive_the_screen() {
         // A clean corpus: the bare model fails every task → none excluded.
         let tasks = vec![task("a"), task("b")];
-        let runner = StubBare { known: "none-of-them" };
+        let runner = StubBare {
+            known: "none-of-them",
+        };
         let (kept, report) =
             screen_tasks(&runner, &ParseQualityJudge, &tasks, "m", 0.5, 2).unwrap();
         assert_eq!(kept.len(), 2);
@@ -226,7 +243,10 @@ mod tests {
         struct ExactStub;
         impl BareRunner for ExactStub {
             fn run_bare(&self, _m: &str, _t: &str) -> Result<AgentAnswer> {
-                Ok(AgentAnswer { text: "q=0.500".into(), tool_calls: vec![] })
+                Ok(AgentAnswer {
+                    text: "q=0.500".into(),
+                    tool_calls: vec![],
+                })
             }
         }
         let (kept, report) =

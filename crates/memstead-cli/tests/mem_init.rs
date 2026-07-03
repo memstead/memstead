@@ -60,7 +60,10 @@ fn seed_workspace(tmp: &Path) -> PathBuf {
 /// adapter shape: `.memstead/state/mounts.json`) and assert the named
 /// mem is registered.
 fn assert_mem_in_mounts(workspace: &Path, mem_name: &str) {
-    let mounts_path = workspace.join(".memstead").join("state").join("mounts.json");
+    let mounts_path = workspace
+        .join(".memstead")
+        .join("state")
+        .join("mounts.json");
     let raw = fs::read_to_string(&mounts_path).unwrap_or_else(|e| {
         panic!(
             "mounts.json must exist at {} after mem init: {e}",
@@ -113,7 +116,10 @@ fn memstead_mem_init_hierarchical_name_lands_full_path() {
         .args(["mem", "init", "demo/engine", "--no-gitignore"]);
     cmd.assert().success();
 
-    let mounts_path = workspace.join(".memstead").join("state").join("mounts.json");
+    let mounts_path = workspace
+        .join(".memstead")
+        .join("state")
+        .join("mounts.json");
     let raw = fs::read_to_string(&mounts_path).unwrap();
     assert!(
         raw.contains("\"demo/engine\""),
@@ -162,18 +168,12 @@ fn memstead_mem_init_json_mode_emits_structured_envelope() {
     let workspace = seed_workspace(tmp.path());
 
     let mut cmd = memstead();
-    cmd.current_dir(&workspace).args([
-        "--json",
-        "mem",
-        "init",
-        "json-mem",
-        "--no-gitignore",
-    ]);
+    cmd.current_dir(&workspace)
+        .args(["--json", "mem", "init", "json-mem", "--no-gitignore"]);
     let output = cmd.assert().success();
     let stdout = String::from_utf8(output.get_output().stdout.clone()).unwrap();
-    let parsed: serde_json::Value = serde_json::from_str(&stdout).unwrap_or_else(|e| {
-        panic!("--json output must parse as JSON: {e}; stdout:\n{stdout}")
-    });
+    let parsed: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("--json output must parse as JSON: {e}; stdout:\n{stdout}"));
     assert_eq!(
         parsed.get("name").and_then(|v| v.as_str()),
         Some("json-mem"),
@@ -249,9 +249,7 @@ fn memstead_mem_init_json_stdout_is_single_document_with_gitignore_step() {
 fn append_cross_link_grant(workspace: &Path, from: &str, to: &str) {
     let toml_path = workspace.join(".memstead").join("workspace.toml");
     let mut body = fs::read_to_string(&toml_path).unwrap();
-    body.push_str(&format!(
-        "\n[cross_mem_links]\n{from} = [\"{to}\"]\n",
-    ));
+    body.push_str(&format!("\n[cross_mem_links]\n{from} = [\"{to}\"]\n",));
     fs::write(&toml_path, body).unwrap();
 }
 
@@ -267,10 +265,7 @@ fn assert_branch_present(workspace: &Path, mem_name: &str) {
         .join("refs")
         .join("heads")
         .join(mem_name);
-    let packed_refs = workspace
-        .join("mem-repo")
-        .join(".git")
-        .join("packed-refs");
+    let packed_refs = workspace.join("mem-repo").join(".git").join("packed-refs");
     let loose_present = branch_ref.exists();
     let packed_present = packed_refs
         .exists()
@@ -291,10 +286,7 @@ fn assert_branch_absent(workspace: &Path, mem_name: &str) {
         .join("refs")
         .join("heads")
         .join(mem_name);
-    let packed_refs = workspace
-        .join("mem-repo")
-        .join(".git")
-        .join("packed-refs");
+    let packed_refs = workspace.join("mem-repo").join(".git").join("packed-refs");
     let loose_present = branch_ref.exists();
     let packed_present = packed_refs
         .exists()
@@ -309,7 +301,10 @@ fn assert_branch_absent(workspace: &Path, mem_name: &str) {
 }
 
 fn assert_mem_not_in_mounts(workspace: &Path, mem_name: &str) {
-    let mounts_path = workspace.join(".memstead").join("state").join("mounts.json");
+    let mounts_path = workspace
+        .join(".memstead")
+        .join("state")
+        .join("mounts.json");
     let raw = fs::read_to_string(&mounts_path).unwrap();
     assert!(
         !raw.contains(&format!("\"{mem_name}\"")),
@@ -509,8 +504,7 @@ fn memstead_mem_init_reattaches_after_unregister() {
         .args(["--json", "mem", "init", "preserved", "--no-gitignore"])
         .assert()
         .success();
-    let initial_stdout =
-        String::from_utf8(initial.get_output().stdout.clone()).unwrap();
+    let initial_stdout = String::from_utf8(initial.get_output().stdout.clone()).unwrap();
     let initial_envelope: serde_json::Value =
         serde_json::from_str(&initial_stdout).expect("--json envelope parses");
     let initial_seed = initial_envelope["seed_commit_sha"]
@@ -544,8 +538,7 @@ fn memstead_mem_init_reattaches_after_unregister() {
         .args(["--json", "mem", "init", "preserved", "--no-gitignore"])
         .assert()
         .success();
-    let reattach_stdout =
-        String::from_utf8(reattach.get_output().stdout.clone()).unwrap();
+    let reattach_stdout = String::from_utf8(reattach.get_output().stdout.clone()).unwrap();
     let reattach_envelope: serde_json::Value =
         serde_json::from_str(&reattach_stdout).expect("--json envelope parses");
     let reattach_seed = reattach_envelope["seed_commit_sha"]
@@ -648,10 +641,9 @@ fn memstead_mem_init_force_overwrite_prunes_and_recreates() {
         .args(["--json", "mem", "init", "scratch", "--no-gitignore"])
         .assert()
         .success();
-    let initial_envelope: serde_json::Value = serde_json::from_str(
-        &String::from_utf8(initial.get_output().stdout.clone()).unwrap(),
-    )
-    .unwrap();
+    let initial_envelope: serde_json::Value =
+        serde_json::from_str(&String::from_utf8(initial.get_output().stdout.clone()).unwrap())
+            .unwrap();
     let initial_seed = initial_envelope["seed_commit_sha"]
         .as_str()
         .unwrap()
@@ -692,10 +684,9 @@ fn memstead_mem_init_force_overwrite_prunes_and_recreates() {
         ])
         .assert()
         .success();
-    let overwrite_envelope: serde_json::Value = serde_json::from_str(
-        &String::from_utf8(overwritten.get_output().stdout.clone()).unwrap(),
-    )
-    .unwrap();
+    let overwrite_envelope: serde_json::Value =
+        serde_json::from_str(&String::from_utf8(overwritten.get_output().stdout.clone()).unwrap())
+            .unwrap();
     let new_seed = overwrite_envelope["seed_commit_sha"]
         .as_str()
         .expect("overwrite must produce a non-null seed_commit_sha")
@@ -788,10 +779,9 @@ fn memstead_mem_init_residue_isolation_is_path_aware() {
         .args(["--json", "mem", "init", "team-b/shared", "--no-gitignore"])
         .assert()
         .success();
-    let envelope: serde_json::Value = serde_json::from_str(
-        &String::from_utf8(output.get_output().stdout.clone()).unwrap(),
-    )
-    .unwrap();
+    let envelope: serde_json::Value =
+        serde_json::from_str(&String::from_utf8(output.get_output().stdout.clone()).unwrap())
+            .unwrap();
     let seed = envelope["seed_commit_sha"].as_str().unwrap_or("");
     assert!(
         !seed.is_empty(),
@@ -815,8 +805,7 @@ fn memstead_mem_init_residue_isolation_is_path_aware() {
 // ---------------------------------------------------------------------------
 
 fn memstead_no_env() -> Command {
-    let mut cmd =
-        Command::cargo_bin("memstead").expect("memstead binary must be built by cargo");
+    let mut cmd = Command::cargo_bin("memstead").expect("memstead binary must be built by cargo");
     cmd.env_remove("MEMSTEAD_OPERATOR_MODE");
     cmd
 }
@@ -860,8 +849,7 @@ fn mem_init_refuses_outside_allowlist_by_default() {
         .stdout
         .clone();
     let body = std::str::from_utf8(&output).expect("stdout UTF-8");
-    let env: serde_json::Value =
-        serde_json::from_str(body.trim()).expect("--json envelope parses");
+    let env: serde_json::Value = serde_json::from_str(body.trim()).expect("--json envelope parses");
     assert_eq!(
         env["code"], "MEM_PATH_NOT_ALLOWED",
         "expected typed refusal, got: {env}",

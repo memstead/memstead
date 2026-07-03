@@ -92,10 +92,7 @@ pub fn parse_markdown(
         .and_then(|v| v.as_str())
         .unwrap_or(schema.name.as_str())
         .to_string();
-    parsed_metadata.insert(
-        "type".to_string(),
-        MetadataValue::String(type_name.clone()),
-    );
+    parsed_metadata.insert("type".to_string(), MetadataValue::String(type_name.clone()));
 
     // Extract inline wiki-links from text fields (excluding relationships section)
     let inline_link_text: String = schema
@@ -174,10 +171,7 @@ pub fn parse_file(
     mem: &str,
 ) -> Result<ParseResult, ParseError> {
     let content = std::fs::read_to_string(path)?;
-    let relative_path = path
-        .strip_prefix(mem_dir)
-        .unwrap_or(path)
-        .to_string_lossy();
+    let relative_path = path.strip_prefix(mem_dir).unwrap_or(path).to_string_lossy();
     parse_markdown(&content, &relative_path, schema, mem)
 }
 
@@ -396,8 +390,7 @@ fn strip_inline_comment(s: &str) -> &str {
 /// slice in bounds (a 1-char `"` satisfies both starts_with and ends_with).
 fn strip_quotes(s: &str) -> String {
     if s.len() >= 2
-        && ((s.starts_with('"') && s.ends_with('"'))
-            || (s.starts_with('\'') && s.ends_with('\'')))
+        && ((s.starts_with('"') && s.ends_with('"')) || (s.starts_with('\'') && s.ends_with('\'')))
     {
         s[1..s.len() - 1].to_string()
     } else {
@@ -468,8 +461,7 @@ pub(super) fn split_sections(
     let mut sections = HashMap::new();
     let mut duplicates: HashMap<String, DuplicateSection> = HashMap::new();
     static SECTION_RE: OnceLock<Regex> = OnceLock::new();
-    let section_re =
-        SECTION_RE.get_or_init(|| Regex::new(r"(?m)^## (.+)$").unwrap());
+    let section_re = SECTION_RE.get_or_init(|| Regex::new(r"(?m)^## (.+)$").unwrap());
 
     let matches: Vec<_> = section_re.find_iter(masked_body).collect();
 
@@ -549,9 +541,7 @@ fn extract_title(body: &str) -> Option<String> {
 /// the end of the section. Level skips (H2 → H4 without H3) are tolerated:
 /// the H4 span is recorded flat, and query-time path resolution uses offset
 /// containment to reconstruct ancestry.
-fn extract_heading_spans(
-    sections: &IndexMap<String, String>,
-) -> HashMap<String, Vec<HeadingSpan>> {
+fn extract_heading_spans(sections: &IndexMap<String, String>) -> HashMap<String, Vec<HeadingSpan>> {
     // Compiled once per process; shape-constrained so it can't fail at runtime.
     static RE: OnceLock<Regex> = OnceLock::new();
     let re = RE.get_or_init(|| Regex::new(r"(?m)^(#{3,6})[ \t]+(.+)$").unwrap());
@@ -756,7 +746,10 @@ fn classify_description_tail(tail: &str) -> DescriptionTail {
     }
     // Dash-likes: ASCII `--`, ASCII `-`, en-dash U+2013, minus U+2212.
     let starters = [" --", " -", " \u{2013}", " \u{2212}"];
-    if starters.iter().any(|prefix| trimmed_end.starts_with(prefix)) {
+    if starters
+        .iter()
+        .any(|prefix| trimmed_end.starts_with(prefix))
+    {
         return DescriptionTail::Ambiguous(trimmed_end.to_string());
     }
     // Anything else after `]]` (e.g. inline comment, stray text) —
@@ -900,8 +893,8 @@ pub enum ParseError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
     use memstead_schema::{builtin_names, type_by_name};
+    use std::sync::Arc;
 
     fn spec_schema() -> Arc<TypeDefinition> {
         type_by_name(builtin_names::SPEC).unwrap()
@@ -941,7 +934,9 @@ mod tests {
     fn parse_metadata_survives_malformed_values() {
         // A lone quote character satisfies both starts_with and ends_with —
         // the old unguarded slice `s[1..s.len()-1]` panicked on it.
-        let meta = parse_metadata("key: \"\nkey2: '\nkey3: \"\"\nkey4: ''\nkey5: \"unterminated\nkey6: mixed'\"");
+        let meta = parse_metadata(
+            "key: \"\nkey2: '\nkey3: \"\"\nkey4: ''\nkey5: \"unterminated\nkey6: mixed'\"",
+        );
         assert_eq!(meta["key"], MetadataValue::String("\"".to_string()));
         assert_eq!(meta["key2"], MetadataValue::String("'".to_string()));
         assert_eq!(meta["key3"], MetadataValue::String(String::new()));
@@ -954,7 +949,8 @@ mod tests {
 
         // More frontmatter shapes that must parse to a value, never panic:
         // colon-only lines, multi-byte values, keyless colons, huge digits.
-        let meta = parse_metadata(":\n: value\nkey7: ✓\"\nkey8: 99999999999999999999999999\nkey9: -");
+        let meta =
+            parse_metadata(":\n: value\nkey7: ✓\"\nkey8: 99999999999999999999999999\nkey9: -");
         assert_eq!(meta["key7"], MetadataValue::String("✓\"".to_string()));
         assert_eq!(
             meta["key8"],
@@ -973,7 +969,10 @@ mod tests {
     #[test]
     fn peek_type_finds_value() {
         let content = "---\ntype: memo\ntitle: Test\n---\n# Body\n";
-        assert_eq!(peek_type_from_frontmatter(content), Some("memo".to_string()));
+        assert_eq!(
+            peek_type_from_frontmatter(content),
+            Some("memo".to_string())
+        );
     }
 
     #[test]
@@ -991,15 +990,24 @@ mod tests {
     #[test]
     fn peek_type_handles_windows_line_endings() {
         let content = "---\r\ntype: principle\r\n---\r\n# Body\r\n";
-        assert_eq!(peek_type_from_frontmatter(content), Some("principle".to_string()));
+        assert_eq!(
+            peek_type_from_frontmatter(content),
+            Some("principle".to_string())
+        );
     }
 
     #[test]
     fn peek_type_strips_quotes_and_comments() {
         let quoted = "---\ntype: \"concept\"\n---\n";
-        assert_eq!(peek_type_from_frontmatter(quoted), Some("concept".to_string()));
+        assert_eq!(
+            peek_type_from_frontmatter(quoted),
+            Some("concept".to_string())
+        );
         let commented = "---\ntype: memo # kind of\n---\n";
-        assert_eq!(peek_type_from_frontmatter(commented), Some("memo".to_string()));
+        assert_eq!(
+            peek_type_from_frontmatter(commented),
+            Some("memo".to_string())
+        );
     }
 
     #[test]
@@ -1092,8 +1100,7 @@ mod tests {
     fn parse_relationships_ambiguous_double_hyphen_warns_and_drops_content() {
         let text = "- **USES**: [[a]] -- legacy delimiter";
         let entity_id = EntityId::new("specs", "src");
-        let (rels, warnings) =
-            parse_relationships_with_warnings(text, "specs", Some(&entity_id));
+        let (rels, warnings) = parse_relationships_with_warnings(text, "specs", Some(&entity_id));
         assert_eq!(rels.len(), 1);
         assert!(rels[0].description.is_none(), "trailing content is dropped");
         assert_eq!(warnings.len(), 1);
@@ -1107,8 +1114,7 @@ mod tests {
     fn parse_relationships_ambiguous_single_hyphen_warns_and_drops_content() {
         let text = "- **USES**: [[a]] - single hyphen";
         let entity_id = EntityId::new("specs", "src");
-        let (rels, warnings) =
-            parse_relationships_with_warnings(text, "specs", Some(&entity_id));
+        let (rels, warnings) = parse_relationships_with_warnings(text, "specs", Some(&entity_id));
         assert_eq!(rels.len(), 1);
         assert!(rels[0].description.is_none());
         assert_eq!(warnings.len(), 1);
@@ -1382,8 +1388,7 @@ Specifies content.
         let schema = spec_schema();
         let first = parse_markdown(md, "order-roundtrip.md", &schema, "specs").unwrap();
         let regenerated = crate::entity::generator::generate_markdown(&first.entity, &schema);
-        let second =
-            parse_markdown(&regenerated, "order-roundtrip.md", &schema, "specs").unwrap();
+        let second = parse_markdown(&regenerated, "order-roundtrip.md", &schema, "specs").unwrap();
 
         let first_keys: Vec<&String> = first.entity.sections.keys().collect();
         let second_keys: Vec<&String> = second.entity.sections.keys().collect();
@@ -1595,7 +1600,12 @@ Second occurrence body.
             "first body must win"
         );
         assert!(
-            !result.entity.sections.get("identity").unwrap().contains("## Identity"),
+            !result
+                .entity
+                .sections
+                .get("identity")
+                .unwrap()
+                .contains("## Identity"),
             "storage value must not embed a duplicate heading"
         );
         assert_eq!(result.parse_warnings.len(), 1);
@@ -1619,7 +1629,8 @@ Second occurrence body.
         // First-wins is mechanical: a blank first occurrence wins over a
         // populated second one. The warning surfaces so the operator
         // notices content was discarded.
-        let md = "---\ntype: spec\n---\n# Title\n\n## Identity\n\n## Identity\n\nleftover content\n";
+        let md =
+            "---\ntype: spec\n---\n# Title\n\n## Identity\n\n## Identity\n\nleftover content\n";
         let result = parse_markdown(md, "x.md", &spec_schema(), "v").unwrap();
         assert_eq!(
             result.entity.sections.get("identity").map(String::as_str),
@@ -1634,7 +1645,11 @@ Second occurrence body.
         let md = "---\ntype: spec\n---\n# Title\n\n## Constraints\n\nA\n\n## Constraints\n\n## Constraints\n\nC\n";
         let result = parse_markdown(md, "x.md", &spec_schema(), "v").unwrap();
         assert_eq!(
-            result.entity.sections.get("constraints").map(String::as_str),
+            result
+                .entity
+                .sections
+                .get("constraints")
+                .map(String::as_str),
             Some("A"),
         );
         assert_eq!(result.parse_warnings.len(), 1);
@@ -1657,7 +1672,8 @@ Second occurrence body.
     fn no_warning_when_catch_all_section_repeats() {
         // `specifies` is the spec schema's catch-all section. Repetition
         // there is silent — duplicates only warn for non-catch-all keys.
-        let md = "---\ntype: spec\n---\n# Title\n\n## Specifies\n\nfirst\n\n## Specifies\n\nsecond\n";
+        let md =
+            "---\ntype: spec\n---\n# Title\n\n## Specifies\n\nfirst\n\n## Specifies\n\nsecond\n";
         let result = parse_markdown(md, "x.md", &spec_schema(), "v").unwrap();
         assert!(
             result.parse_warnings.is_empty(),

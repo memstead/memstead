@@ -76,9 +76,7 @@ impl IndexFields {
                 .types
                 .values()
                 .flat_map(|t| t.metadata_fields.iter())
-                .filter(|f| {
-                    matches!(f.filterable, Filterable::Equality | Filterable::Range)
-                })
+                .filter(|f| matches!(f.filterable, Filterable::Equality | Filterable::Range))
                 .map(|f| f.key.clone())
                 .collect(),
             None => BTreeSet::new(),
@@ -136,12 +134,7 @@ mod tests {
         // those must surface as tantivy fields.
         assert!(fields.sections.contains_key("identity"));
         assert!(fields.sections.contains_key("purpose"));
-        assert!(
-            fields
-                .schema
-                .get_field("section_identity")
-                .is_ok()
-        );
+        assert!(fields.schema.get_field("section_identity").is_ok());
     }
 
     #[test]

@@ -101,10 +101,9 @@ async fn run(_args: Args, workspace_root: PathBuf) -> anyhow::Result<()> {
         workspace_root.display()
     );
 
-    let server = memstead_mcp::filesystem_server::FilesystemMcpServer::from_workspace_root(
-        &workspace_root,
-    )
-    .with_context(|| format!("init lean engine at {}", workspace_root.display()))?;
+    let server =
+        memstead_mcp::filesystem_server::FilesystemMcpServer::from_workspace_root(&workspace_root)
+            .with_context(|| format!("init lean engine at {}", workspace_root.display()))?;
 
     let service = server.serve(stdio()).await?;
     service.waiting().await?;
@@ -146,8 +145,7 @@ async fn run(args: Args, workspace_root: PathBuf) -> anyhow::Result<()> {
 
     let settings = engine.settings();
     let token_budget = settings.mcp.token_budget.unwrap_or(DEFAULT_TOKEN_BUDGET);
-    let disabled_tools_raw: Vec<String> =
-        settings.mcp.disabled_tools.clone().unwrap_or_default();
+    let disabled_tools_raw: Vec<String> = settings.mcp.disabled_tools.clone().unwrap_or_default();
     let mutations = settings.mutations.clone();
     let plugin = settings.plugin.clone();
 
@@ -178,9 +176,8 @@ async fn run(args: Args, workspace_root: PathBuf) -> anyhow::Result<()> {
             logical_operation_id: None,
             entity_ids: None,
         };
-        let install_message = format!(
-            "memstead: install (read-mem registration into {target_mem_name})"
-        );
+        let install_message =
+            format!("memstead: install (read-mem registration into {target_mem_name})");
         let cwd = std::env::current_dir()
             .context("Could not determine current directory for --read-mem resolution")?;
         // Pass the workspace's writable-mount roster so
@@ -226,11 +223,7 @@ async fn run(args: Args, workspace_root: PathBuf) -> anyhow::Result<()> {
                     }
                 }
                 read_mems::ReadMemResult::Failed { archive, error } => {
-                    tracing::warn!(
-                        "skipped --read-mem {}: {}",
-                        archive.display(),
-                        error
-                    );
+                    tracing::warn!("skipped --read-mem {}: {}", archive.display(), error);
                 }
             }
         }

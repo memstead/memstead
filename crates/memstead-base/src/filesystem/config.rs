@@ -89,9 +89,9 @@ impl std::str::FromStr for DepRef {
         if trimmed.is_empty() {
             return Err("dep ref must not be empty (expected \"scope/name\")".into());
         }
-        let (scope, name) = trimmed.split_once('/').ok_or_else(|| {
-            format!("dep ref '{trimmed}' must be in 'scope/name' form")
-        })?;
+        let (scope, name) = trimmed
+            .split_once('/')
+            .ok_or_else(|| format!("dep ref '{trimmed}' must be in 'scope/name' form"))?;
         check_slug(scope, "scope")?;
         check_slug(name, "name")?;
         Ok(DepRef {
@@ -255,8 +255,8 @@ pub fn config_path(workspace_root: &Path) -> PathBuf {
 /// Parse workspace config bytes, enforcing the format pin, the name
 /// shape, and the deps-uniqueness invariant.
 pub fn parse_workspace_config(bytes: &[u8]) -> Result<WorkspaceConfig, WorkspaceConfigError> {
-    let value: serde_json::Value =
-        serde_json::from_slice(bytes).map_err(|e| WorkspaceConfigError::Malformed(e.to_string()))?;
+    let value: serde_json::Value = serde_json::from_slice(bytes)
+        .map_err(|e| WorkspaceConfigError::Malformed(e.to_string()))?;
 
     if !value.is_object() {
         return Err(WorkspaceConfigError::Malformed(
@@ -301,7 +301,9 @@ pub fn parse_workspace_config(bytes: &[u8]) -> Result<WorkspaceConfig, Workspace
 }
 
 /// Read + parse the workspace config at `<workspace_root>/.memstead/config.json`.
-pub fn read_workspace_config(workspace_root: &Path) -> Result<WorkspaceConfig, WorkspaceConfigError> {
+pub fn read_workspace_config(
+    workspace_root: &Path,
+) -> Result<WorkspaceConfig, WorkspaceConfigError> {
     let path = config_path(workspace_root);
     let bytes = match std::fs::read(&path) {
         Ok(b) => b,
@@ -343,9 +345,8 @@ pub fn write_workspace_config(
 
     // Serialize in struct-field order (format, schema, version?, description?,
     // authors?, deps). `name` is path-derived and intentionally omitted.
-    let mut bytes = serde_json::to_vec_pretty(config).map_err(|e| {
-        WorkspaceConfigError::Malformed(format!("serialise: {e}"))
-    })?;
+    let mut bytes = serde_json::to_vec_pretty(config)
+        .map_err(|e| WorkspaceConfigError::Malformed(format!("serialise: {e}")))?;
     bytes.push(b'\n');
 
     let tmp = make_tmp_path(&target);
@@ -376,11 +377,7 @@ pub fn write_workspace_config(
 /// own code — the engine owns the seed structure. Creates `root` (and the
 /// `.memstead/` tree) if absent; the caller is responsible for refusing a
 /// non-empty target if that matters.
-pub fn init_filesystem_mem(
-    root: &Path,
-    name: &str,
-    schema: &SchemaRef,
-) -> std::io::Result<()> {
+pub fn init_filesystem_mem(root: &Path, name: &str, schema: &SchemaRef) -> std::io::Result<()> {
     use crate::workspace::{
         Mount, MountCapability, MountLifecycle, MountStorage, Workspace, WorkspaceSettings,
     };
@@ -450,12 +447,21 @@ mod tests {
         // Seed structure landed: config + adapter marker + mounts roster.
         assert!(config_path(&root).is_file());
         assert!(root.join(".memstead").join("workspace.toml").is_file());
-        assert!(root.join(".memstead").join("state").join("mounts.json").is_file());
+        assert!(
+            root.join(".memstead")
+                .join("state")
+                .join("mounts.json")
+                .is_file()
+        );
 
         // And it roots directly through the engine, listing the one mem.
         let engine = crate::Engine::from_workspace_root(&root).unwrap();
         assert!(
-            engine.mem_router().writable_mems().iter().any(|v| v == "notes"),
+            engine
+                .mem_router()
+                .writable_mems()
+                .iter()
+                .any(|v| v == "notes"),
             "init'd mem must be writable in the rooted engine"
         );
     }
@@ -534,7 +540,10 @@ mod tests {
         let mut v = ok_config_value();
         v["format"] = serde_json::json!(PUBLISHED_MEM_FORMAT);
         let err = parse(v).unwrap_err();
-        assert!(matches!(err, WorkspaceConfigError::UnsupportedFormat { .. }));
+        assert!(matches!(
+            err,
+            WorkspaceConfigError::UnsupportedFormat { .. }
+        ));
     }
 
     #[test]

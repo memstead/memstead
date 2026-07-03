@@ -152,7 +152,9 @@ impl CoverageChecker for ClaudeCoverageChecker {
 
 /// Compose the coverage prompt. Reference first, then the single fact under test.
 pub fn build_coverage_prompt(substrate_content: &str, fact: &str) -> String {
-    format!("REFERENCE:\n{substrate_content}\n\nFACT:\n{fact}\n\nIs the fact present in the reference?")
+    format!(
+        "REFERENCE:\n{substrate_content}\n\nFACT:\n{fact}\n\nIs the fact present in the reference?"
+    )
 }
 
 /// Read a yes/no presence verdict from the checker's text, preferring an explicit
@@ -177,9 +179,18 @@ mod tests {
 
     fn facts() -> Vec<SourceFact> {
         vec![
-            SourceFact { id: "f1".into(), statement: "Widget X depends on Gadget Y".into() },
-            SourceFact { id: "f2".into(), statement: "Gadget Y was added in v2".into() },
-            SourceFact { id: "f3".into(), statement: "X exposes a read-only port".into() },
+            SourceFact {
+                id: "f1".into(),
+                statement: "Widget X depends on Gadget Y".into(),
+            },
+            SourceFact {
+                id: "f2".into(),
+                statement: "Gadget Y was added in v2".into(),
+            },
+            SourceFact {
+                id: "f3".into(),
+                statement: "X exposes a read-only port".into(),
+            },
         ]
     }
 
@@ -219,7 +230,9 @@ mod tests {
 
     #[test]
     fn measure_coverage_splits_covered_and_dropped() {
-        let checker = StubChecker { present: vec!["Widget X", "read-only"] };
+        let checker = StubChecker {
+            present: vec!["Widget X", "read-only"],
+        };
         let cov = measure_coverage(&checker, "schema-forced", "…", &facts()).unwrap();
         assert_eq!(cov.covered, vec!["f1", "f3"]);
         assert_eq!(cov.dropped, vec!["f2"]);
@@ -228,7 +241,9 @@ mod tests {
 
     #[test]
     fn full_coverage_drops_nothing() {
-        let checker = StubChecker { present: vec!["Widget X", "Gadget Y", "read-only"] };
+        let checker = StubChecker {
+            present: vec!["Widget X", "Gadget Y", "read-only"],
+        };
         let cov = measure_coverage(&checker, "free-form", "…", &facts()).unwrap();
         assert!(cov.dropped.is_empty());
         assert!((cov.coverage - 1.0).abs() < 1e-9);
@@ -240,12 +255,19 @@ mod tests {
         // would *win on tasks* (precision), yet it drops a source fact the
         // free-form substrate (B) kept (recall loss). The harness must surface the
         // drop alongside, never fold it away.
-        let b_checker = StubChecker { present: vec!["Widget X", "Gadget Y", "read-only"] };
-        let c_checker = StubChecker { present: vec!["Widget X", "read-only"] }; // drops f2
+        let b_checker = StubChecker {
+            present: vec!["Widget X", "Gadget Y", "read-only"],
+        };
+        let c_checker = StubChecker {
+            present: vec!["Widget X", "read-only"],
+        }; // drops f2
         let b_cov = measure_coverage(&b_checker, "free-form", "…", &facts()).unwrap();
         let c_cov = measure_coverage(&c_checker, "schema-forced", "…", &facts()).unwrap();
         // C has the higher implied precision but the lower coverage — the recall loss.
-        assert!(c_cov.coverage < b_cov.coverage, "C should drop a fact B kept");
+        assert!(
+            c_cov.coverage < b_cov.coverage,
+            "C should drop a fact B kept"
+        );
         assert_eq!(c_cov.dropped, vec!["f2"]);
 
         // Surfaced in the serialized output: build the series the way the run does
@@ -256,7 +278,11 @@ mod tests {
             points: vec![crate::eval::series::SeriesPoint::aggregate(
                 "schema-forced − free-form".into(),
                 2,
-                &[crate::eval::grade::TaskResult::new("t".into(), vec![0.9, 0.9], vec![0.5, 0.5])],
+                &[crate::eval::grade::TaskResult::new(
+                    "t".into(),
+                    vec![0.9, 0.9],
+                    vec![0.5, 0.5],
+                )],
             )],
             excluded_contaminated: vec![],
             coverage: vec![c_cov, b_cov],
@@ -266,6 +292,9 @@ mod tests {
         assert!(json.contains("\"delta\""));
         // …and so is the dropped source fact — the recall loss is not hidden.
         assert!(json.contains("\"dropped\""), "{json}");
-        assert!(json.contains("\"f2\""), "dropped fact f2 not surfaced: {json}");
+        assert!(
+            json.contains("\"f2\""),
+            "dropped fact f2 not surfaced: {json}"
+        );
     }
 }

@@ -2,6 +2,7 @@
 name = "memstead-git-branch"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
@@ -60,3 +61,6 @@ git-object-storage = []
 # unlocks it for `memstead-cli`, `memstead-mcp`, `memstead-swift` integration tests
 # that need to satisfy the `mem-repo/.git/` fail-fast.
 test-support = []
+
+[lints]
+workspace = true

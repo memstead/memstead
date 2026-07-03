@@ -62,10 +62,16 @@ mod tests {
     #[test]
     fn embedded_meta_schemas_are_valid_json_objects() {
         let manifest: serde_json::Value = serde_json::from_str(META_SCHEMA_MANIFEST).unwrap();
-        assert!(manifest.get("properties").is_some(), "manifest meta-schema has properties");
+        assert!(
+            manifest.get("properties").is_some(),
+            "manifest meta-schema has properties"
+        );
         let type_def: serde_json::Value =
             serde_json::from_str(META_SCHEMA_TYPE_DEFINITION).unwrap();
-        assert!(type_def.get("properties").is_some(), "type meta-schema has properties");
+        assert!(
+            type_def.get("properties").is_some(),
+            "type meta-schema has properties"
+        );
     }
 
     #[test]

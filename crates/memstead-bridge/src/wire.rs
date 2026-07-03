@@ -76,9 +76,18 @@ impl SearchHit {
             tokens: hit.tokens,
             snippet: hit.snippet.clone(),
             sections: hit.sections.clone(),
-            score_breakdown: hit.score_breakdown.as_ref().and_then(|v| serde_json::to_value(v).ok()),
-            matched_terms: hit.matched_terms.as_ref().and_then(|v| serde_json::to_value(v).ok()),
-            expansion: hit.expansion.as_ref().and_then(|v| serde_json::to_value(v).ok()),
+            score_breakdown: hit
+                .score_breakdown
+                .as_ref()
+                .and_then(|v| serde_json::to_value(v).ok()),
+            matched_terms: hit
+                .matched_terms
+                .as_ref()
+                .and_then(|v| serde_json::to_value(v).ok()),
+            expansion: hit
+                .expansion
+                .as_ref()
+                .and_then(|v| serde_json::to_value(v).ok()),
         }
     }
 }

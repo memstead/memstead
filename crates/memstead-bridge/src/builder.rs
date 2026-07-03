@@ -114,17 +114,16 @@ pub fn build_commit_envelopes(
         .map_err(|_| BridgeError::UnknownCommit(until_sha.clone()))?
         .detach();
 
-    let hidden: Vec<gix::ObjectId> = if since.is_empty()
-        || since == memstead_base::ops::EMPTY_TREE_SHA
-    {
-        Vec::new()
-    } else {
-        let id = repo
-            .rev_parse_single(since)
-            .map_err(|_| BridgeError::UnknownCommit(since.to_string()))?
-            .detach();
-        vec![id]
-    };
+    let hidden: Vec<gix::ObjectId> =
+        if since.is_empty() || since == memstead_base::ops::EMPTY_TREE_SHA {
+            Vec::new()
+        } else {
+            let id = repo
+                .rev_parse_single(since)
+                .map_err(|_| BridgeError::UnknownCommit(since.to_string()))?
+                .detach();
+            vec![id]
+        };
 
     let walk = repo
         .rev_walk([head_id])
@@ -254,7 +253,7 @@ pub fn run_search(
 
     // 3. Verify the mem is mounted. Folder, git-branch, archive —
     //    every backend `Engine::search` accepts is fine here.
-    if !engine.mem_names().iter().any(|n| *n == mem) {
+    if !engine.mem_names().contains(&mem) {
         return Err(BridgeError::UnknownMem(mem.to_string()));
     }
 
@@ -329,11 +328,7 @@ fn build_envelope_from_repo(
         .next()
         .map(|p| p.detach().to_string())
         .unwrap_or_default();
-    let timestamp = commit
-        .time()
-        .ok()
-        .map(format_iso_8601)
-        .unwrap_or_default();
+    let timestamp = commit.time().ok().map(format_iso_8601).unwrap_or_default();
 
     let raw_message = match commit.message_raw() {
         Ok(bstr) => std::str::from_utf8(bstr.as_ref())
@@ -350,8 +345,7 @@ fn build_envelope_from_repo(
     // Parent tree for the diff. Empty for the root commit — use gix's
     // synthetic empty tree so `tree.changes()` against it lists every
     // file as an Addition.
-    let parent_tree = if let Ok(Some(parent_id)) = commit.parent_ids().next().ok_or(()).map(Some)
-    {
+    let parent_tree = if let Ok(Some(parent_id)) = commit.parent_ids().next().ok_or(()).map(Some) {
         let parent_obj = parent_id
             .object()
             .map_err(|e| BridgeError::Git(format!("parent({resolved_sha}): {e}")))?;
@@ -385,18 +379,18 @@ fn build_envelope_from_repo(
             |change| -> Result<std::ops::ControlFlow<()>, std::convert::Infallible> {
                 match change {
                     Change::Addition { location, .. } => {
-                        if let Some(path) = mem_entity_path(location.as_ref()) {
+                        if let Some(path) = mem_entity_path(location) {
                             let content = read_blob(&tree, &path).unwrap_or_default();
                             changes.push(EntityChange::Added { path, content });
                         }
                     }
                     Change::Deletion { location, .. } => {
-                        if let Some(path) = mem_entity_path(location.as_ref()) {
+                        if let Some(path) = mem_entity_path(location) {
                             changes.push(EntityChange::Deleted { path });
                         }
                     }
                     Change::Modification { location, .. } => {
-                        if let Some(path) = mem_entity_path(location.as_ref()) {
+                        if let Some(path) = mem_entity_path(location) {
                             let content = read_blob(&tree, &path).unwrap_or_default();
                             changes.push(EntityChange::Modified { path, content });
                         }
@@ -406,8 +400,8 @@ fn build_envelope_from_repo(
                         location,
                         ..
                     } => {
-                        let from = mem_entity_path(source_location.as_ref());
-                        let to = mem_entity_path(location.as_ref());
+                        let from = mem_entity_path(source_location);
+                        let to = mem_entity_path(location);
                         if let (Some(from), Some(to)) = (from, to) {
                             let content = read_blob(&tree, &to).unwrap_or_default();
                             changes.push(EntityChange::Renamed { from, to, content });
@@ -419,7 +413,7 @@ fn build_envelope_from_repo(
         )
         .map_err(|e| BridgeError::Git(format!("diff({resolved_sha}): {e}")))?;
 
-    changes.sort_by(|a, b| primary_path(a).cmp(&primary_path(b)));
+    changes.sort_by(|a, b| primary_path(a).cmp(primary_path(b)));
 
     Ok(CommitEnvelope {
         sha: resolved_sha,
@@ -483,7 +477,7 @@ fn format_iso_8601(time: gix::date::Time) -> String {
 /// far enough for any reasonable mem history; commits outside that
 /// range fall back to a `?` placeholder.
 fn format_unix_seconds_utc(secs: i64) -> String {
-    if secs < 0 || secs > 4_102_444_800 {
+    if !(0..=4_102_444_800).contains(&secs) {
         return "?".to_string();
     }
     let s = secs as u64;
@@ -566,7 +560,7 @@ fn resolve_mem_gitdir(
     mem: &str,
 ) -> Result<std::path::PathBuf, BridgeError> {
     let names: Vec<&str> = engine.mem_names().into_iter().collect();
-    if !names.iter().any(|n| *n == mem) {
+    if !names.contains(&mem) {
         return Err(BridgeError::UnknownMem(mem.to_string()));
     }
     engine
@@ -589,8 +583,8 @@ fn head_sha_for_mem(gitdir: &Path, mem: &str) -> Option<String> {
 mod tests {
     use super::*;
     use memstead_base::storage::MemWriter;
-    use memstead_git_branch::storage::git_tree::GitTreeMemWriter;
     use memstead_base::vcs::CommitContext;
+    use memstead_git_branch::storage::git_tree::GitTreeMemWriter;
     use std::path::PathBuf;
     use tempfile::TempDir;
 
@@ -619,8 +613,8 @@ mod tests {
         let src_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         for name in ["lib.rs", "builder.rs", "handlers.rs", "wire.rs", "error.rs"] {
             let path = src_dir.join(name);
-            let file = std::fs::read_to_string(&path)
-                .unwrap_or_else(|e| panic!("read {name}: {e}"));
+            let file =
+                std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {name}: {e}"));
             // Production code only — drop the in-file `#[cfg(test)]`
             // module, which legitimately names mutating methods in
             // fixtures and in this very allowlist.
@@ -648,10 +642,7 @@ mod tests {
     }
 
     fn commit(gitdir: &Path, branch: &str, file: &str, content: &str, subject: &str) -> String {
-        let writer = GitTreeMemWriter::new(
-            gitdir.to_path_buf(),
-            format!("refs/heads/{branch}"),
-        );
+        let writer = GitTreeMemWriter::new(gitdir.to_path_buf(), format!("refs/heads/{branch}"));
         writer
             .write_entity(Path::new(file), content.as_bytes())
             .unwrap();
@@ -675,15 +666,15 @@ mod tests {
             migration_target: None,
         };
         let backend = memstead_git_branch::storage::instantiate_full_backend(&mount).unwrap();
-        let mut engine =
-            memstead_base::Engine::from_mounts(vec![(mount, backend)]).unwrap();
+        let mut engine = memstead_base::Engine::from_mounts(vec![(mount, backend)]).unwrap();
         engine.set_git_branch_ops(memstead_git_branch::storage::FULL_GIT_BRANCH_OPS);
         engine
     }
 
     #[test]
     fn parse_trailers_recovers_standard_key_value_lines() {
-        let msg = "subject\n\nbody paragraph\n\nTool: memstead_update\nActor: agent\nClient: claude\n";
+        let msg =
+            "subject\n\nbody paragraph\n\nTool: memstead_update\nActor: agent\nClient: claude\n";
         let trailers = parse_trailers(msg);
         assert_eq!(trailers.get("Tool"), Some(&"memstead_update".to_string()));
         assert_eq!(trailers.get("Actor"), Some(&"agent".to_string()));
@@ -725,8 +716,9 @@ mod tests {
         let gitdir = init_gitdir(&tmp);
         commit(&gitdir, "specs", "alpha.md", &body("Alpha"), "seed");
         let engine = engine_with_mem(&gitdir);
-        let err = build_commit_envelope(&engine, "specs", "0000000000000000000000000000000000000000")
-            .unwrap_err();
+        let err =
+            build_commit_envelope(&engine, "specs", "0000000000000000000000000000000000000000")
+                .unwrap_err();
         match err {
             BridgeError::UnknownCommit(s) => {
                 assert!(s.starts_with("0000"), "got: {s}");
@@ -837,10 +829,7 @@ mod tests {
         // The snapshot path needs a mem config blob — write one
         // through the same writer the engine uses for the mem
         // backend so the export path finds it.
-        let writer = GitTreeMemWriter::new(
-            gitdir.clone(),
-            "refs/heads/__MEMSTEAD".to_string(),
-        );
+        let writer = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/__MEMSTEAD".to_string());
         writer
             .write_entity(
                 Path::new("mems/specs/config.json"),
@@ -855,7 +844,10 @@ mod tests {
         let engine = engine_with_mem(&gitdir);
         let snap = build_snapshot(&engine, "specs").unwrap();
         assert_eq!(snap.mem, "specs");
-        assert!(!snap.bytes.is_empty(), "snapshot must produce non-empty archive bytes");
+        assert!(
+            !snap.bytes.is_empty(),
+            "snapshot must produce non-empty archive bytes"
+        );
         assert_eq!(snap.head, sha);
     }
 }

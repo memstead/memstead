@@ -82,10 +82,7 @@ fn read_git_tree(
             Err(e) => {
                 errors.push(SourceReadError {
                     source_path: PathBuf::from(&path),
-                    error: std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        format!("find blob {}: {e}", entry.oid),
-                    ),
+                    error: std::io::Error::other(format!("find blob {}: {e}", entry.oid)),
                 });
                 continue;
             }
@@ -151,11 +148,7 @@ mod tests {
     /// Build a fresh bare repository in `git_dir`, write the given
     /// `(path, content)` entries as blobs into a tree, commit that
     /// tree to `ref_name`, and return the open repository handle.
-    fn seed_git_tree(
-        git_dir: &Path,
-        ref_name: &str,
-        entries: &[(&str, &str)],
-    ) -> gix::Repository {
+    fn seed_git_tree(git_dir: &Path, ref_name: &str, entries: &[(&str, &str)]) -> gix::Repository {
         gix::init_bare(git_dir).unwrap();
         let repo = gix::open(git_dir).unwrap();
 
@@ -345,8 +338,7 @@ mod tests {
         .unwrap();
 
         let schema = Schema::builtin_default();
-        let result =
-            load_mem_from_git_tree(repo, "refs/heads/specs", "specs", &schema).unwrap();
+        let result = load_mem_from_git_tree(repo, "refs/heads/specs", "specs", &schema).unwrap();
 
         assert_eq!(result.entities.len(), 1);
         assert!(result.errors.is_empty());

@@ -235,10 +235,7 @@ mod tests {
         assert_eq!(json["status"], "renamed");
         assert_eq!(json["from_id"], "specs--old");
         assert_eq!(json["to_id"], "specs--new");
-        assert_eq!(
-            json["rename_chain"],
-            serde_json::json!(["specs--interim"])
-        );
+        assert_eq!(json["rename_chain"], serde_json::json!(["specs--interim"]));
     }
 
     #[test]

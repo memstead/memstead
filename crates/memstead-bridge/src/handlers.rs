@@ -36,7 +36,7 @@ use crate::builder::{
     BuildConfig, build_commit_envelope, build_commit_envelopes, build_snapshot, run_search,
 };
 use crate::error::{BridgeError, ErrorEnvelope};
-use crate::wire::{CommitEnvelope, SearchQuery, MemChangedEvent};
+use crate::wire::{CommitEnvelope, MemChangedEvent, SearchQuery};
 
 /// State the embedder constructs and threads through axum. The
 /// engine is shared behind a `tokio::sync::Mutex` so the
@@ -134,10 +134,7 @@ pub async fn snapshot_handler(
 /// `GET <prefix>/head` — returns the mem's HEAD SHA as
 /// `text/plain` (no trailing newline). Empty response when the
 /// branch does not exist locally.
-pub async fn head_handler(
-    State(state): State<BridgeState>,
-    Path(mem): Path<String>,
-) -> Response {
+pub async fn head_handler(State(state): State<BridgeState>, Path(mem): Path<String>) -> Response {
     if !state.mem_allowed(&mem) {
         return error_response(BridgeError::UnknownMem(mem));
     }
@@ -199,10 +196,7 @@ pub async fn commits_handler(
 /// subscription drops automatically when the client disconnects (axum
 /// drops the future, which drops the `SubscriptionHandle` we capture
 /// inside the stream).
-pub async fn events_handler(
-    State(state): State<BridgeState>,
-    Path(mem): Path<String>,
-) -> Response {
+pub async fn events_handler(State(state): State<BridgeState>, Path(mem): Path<String>) -> Response {
     if !state.mem_allowed(&mem) {
         return error_response(BridgeError::UnknownMem(mem));
     }

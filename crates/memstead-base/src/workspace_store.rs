@@ -51,8 +51,8 @@ use serde::{Deserialize, Serialize};
 use crate::backend::MemBackend;
 use crate::storage::{ArchiveBackend, FilesystemMemWriter, InMemoryBackend};
 use crate::workspace::{
-    McpSection, Mount, MountCapability, MountLifecycle, MountStorage, MutationsSection,
-    Workspace, WorkspaceSettings,
+    McpSection, Mount, MountCapability, MountLifecycle, MountStorage, MutationsSection, Workspace,
+    WorkspaceSettings,
 };
 
 /// The engine-managed workspace store directory under the workspace
@@ -132,8 +132,7 @@ pub trait WorkspaceStoreAdapter: Send + Sync {
     /// share one file with operator content must not overwrite it
     /// here. The two-layer file adapter writes only
     /// `state/mounts.json`.
-    fn save_state(&self, workspace_root: &Path, workspace: &Workspace)
-        -> Result<(), StoreError>;
+    fn save_state(&self, workspace_root: &Path, workspace: &Workspace) -> Result<(), StoreError>;
 }
 
 /// Two-layer file adapter — the default. Reads
@@ -153,7 +152,9 @@ impl FileWorkspaceStore {
 
     /// Path of the operator-edited file.
     pub fn workspace_toml_path(workspace_root: &Path) -> PathBuf {
-        workspace_root.join(WORKSPACE_STORE_DIR).join("workspace.toml")
+        workspace_root
+            .join(WORKSPACE_STORE_DIR)
+            .join("workspace.toml")
     }
 
     /// Path of the engine-managed state file.
@@ -270,12 +271,11 @@ impl WorkspaceStoreAdapter for FileWorkspaceStore {
                 }
             }
         })?;
-        let toml_doc: WorkspaceTomlDoc = toml::from_str(&toml_text).map_err(|e| {
-            StoreError::Parse {
+        let toml_doc: WorkspaceTomlDoc =
+            toml::from_str(&toml_text).map_err(|e| StoreError::Parse {
                 path: toml_path.clone(),
                 message: e.to_string(),
-            }
-        })?;
+            })?;
         check_workspace_toml_format(&toml_doc.format, &toml_path)?;
 
         // state/mounts.json is optional — a fresh workspace has the
@@ -288,12 +288,11 @@ impl WorkspaceStoreAdapter for FileWorkspaceStore {
                 // pre-rename file fails record deserialisation (old
                 // unit-noun field name), and the typed LegacyLayout
                 // refusal must win over that generic parse error.
-                let probe: MountsFormatProbe = serde_json::from_str(&text).map_err(|e| {
-                    StoreError::Parse {
+                let probe: MountsFormatProbe =
+                    serde_json::from_str(&text).map_err(|e| StoreError::Parse {
                         path: mounts_path.clone(),
                         message: e.to_string(),
-                    }
-                })?;
+                    })?;
                 if MOUNTS_JSON_FORMAT_LEGACY.contains(&probe.format.as_str()) {
                     return Err(StoreError::LegacyLayout {
                         path: mounts_path,
@@ -307,12 +306,11 @@ impl WorkspaceStoreAdapter for FileWorkspaceStore {
                         found: probe.format,
                     });
                 }
-                let doc: MountsJsonDoc = serde_json::from_str(&text).map_err(|e| {
-                    StoreError::Parse {
+                let doc: MountsJsonDoc =
+                    serde_json::from_str(&text).map_err(|e| StoreError::Parse {
                         path: mounts_path.clone(),
                         message: e.to_string(),
-                    }
-                })?;
+                    })?;
                 doc.mounts
                     .into_iter()
                     .map(|w| w.into_mount(workspace_root))
@@ -338,11 +336,7 @@ impl WorkspaceStoreAdapter for FileWorkspaceStore {
         Ok(Workspace { mounts, settings })
     }
 
-    fn save_state(
-        &self,
-        workspace_root: &Path,
-        workspace: &Workspace,
-    ) -> Result<(), StoreError> {
+    fn save_state(&self, workspace_root: &Path, workspace: &Workspace) -> Result<(), StoreError> {
         let mounts_path = Self::mounts_json_path(workspace_root);
         if let Some(parent) = mounts_path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| StoreError::Io {
@@ -499,11 +493,9 @@ pub fn parse_workspace_settings(
             }
         }
     })?;
-    let toml_doc: WorkspaceTomlDoc = toml::from_str(&toml_text).map_err(|e| {
-        StoreError::Parse {
-            path: toml_path.clone(),
-            message: e.to_string(),
-        }
+    let toml_doc: WorkspaceTomlDoc = toml::from_str(&toml_text).map_err(|e| StoreError::Parse {
+        path: toml_path.clone(),
+        message: e.to_string(),
     })?;
     check_workspace_toml_format(&toml_doc.format, &toml_path)?;
     warn_if_legacy_schemas_dir(toml_doc.schemas_dir.as_deref());
@@ -592,11 +584,12 @@ fn parse_cross_link_value(
     location: &str,
     value: &toml::Value,
 ) -> Result<memstead_schema::workspace_config::CrossLinkValue, StoreError> {
-    memstead_schema::workspace_config::CrossLinkValue::parse_toml(location, value)
-        .map_err(|e| StoreError::Parse {
+    memstead_schema::workspace_config::CrossLinkValue::parse_toml(location, value).map_err(|e| {
+        StoreError::Parse {
             path: std::path::PathBuf::from("workspace.toml"),
             message: e.to_string(),
-        })
+        }
+    })
 }
 
 /// Persistence-adapter section of `workspace.toml`. Future adapters
@@ -652,9 +645,16 @@ struct MountWire {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
 enum MountStorageWire {
-    Folder { path: PathBuf },
-    GitBranch { gitdir: PathBuf, branch: String },
-    Archive { path: PathBuf },
+    Folder {
+        path: PathBuf,
+    },
+    GitBranch {
+        gitdir: PathBuf,
+        branch: String,
+    },
+    Archive {
+        path: PathBuf,
+    },
     /// In-memory backend. Carries no fields — it serialises as the
     /// bare tag `{ "type": "in-memory" }`. Unambiguous against the
     /// other three variants (each of which carries a `path` or
@@ -772,20 +772,14 @@ pub enum InstantiateError {
 /// always-on; the function shape (one mount in, one boxed backend
 /// out) stays uniform for both flavours so the engine's
 /// `from_mounts` glue is identical between lean and full.
-pub fn instantiate_lean_backend(
-    mount: &Mount,
-) -> Result<Box<dyn MemBackend>, InstantiateError> {
+pub fn instantiate_lean_backend(mount: &Mount) -> Result<Box<dyn MemBackend>, InstantiateError> {
     match &mount.storage {
-        MountStorage::Folder { path } => {
-            Ok(Box::new(FilesystemMemWriter::new(path.clone())))
-        }
+        MountStorage::Folder { path } => Ok(Box::new(FilesystemMemWriter::new(path.clone()))),
         MountStorage::Archive { path } => Ok(Box::new(ArchiveBackend::new(path.clone()))),
         MountStorage::InMemory => Ok(Box::new(InMemoryBackend::new())),
-        MountStorage::GitBranch { .. } => {
-            Err(InstantiateError::GitBranchRequiresMemRepoFeature {
-                mem: mount.mem.clone(),
-            })
-        }
+        MountStorage::GitBranch { .. } => Err(InstantiateError::GitBranchRequiresMemRepoFeature {
+            mem: mount.mem.clone(),
+        }),
     }
 }
 
@@ -1187,10 +1181,8 @@ pattern = "exec-*"
             settings: WorkspaceSettings::default(),
         };
         store.save_state(tmp.path(), &original).unwrap();
-        let raw = std::fs::read_to_string(
-            FileWorkspaceStore::mounts_json_path(tmp.path()),
-        )
-        .unwrap();
+        let raw =
+            std::fs::read_to_string(FileWorkspaceStore::mounts_json_path(tmp.path())).unwrap();
         assert!(
             raw.contains("mig-b@0.1.0"),
             "migration_target must persist: {raw}"
@@ -1201,10 +1193,7 @@ pattern = "exec-*"
             "settled mounts must omit the key entirely: {raw}"
         );
         let loaded = store.load(tmp.path()).unwrap();
-        assert_eq!(
-            loaded.mounts[0].migration_target,
-            Some(pin("mig-b@0.1.0"))
-        );
+        assert_eq!(loaded.mounts[0].migration_target, Some(pin("mig-b@0.1.0")));
         assert_eq!(loaded.mounts[1].migration_target, None);
     }
 
@@ -1234,8 +1223,8 @@ name = "file-two-layer"
                     capability: MountCapability::Write,
                     lifecycle: MountLifecycle::Eager,
                     cross_linkable: true,
-            migration_target: None,
-        },
+                    migration_target: None,
+                },
                 Mount {
                     mem: "external".to_string(),
                     schema: Some(pin("default@1.0.0")),
@@ -1245,8 +1234,8 @@ name = "file-two-layer"
                     capability: MountCapability::ReadOnly,
                     lifecycle: MountLifecycle::Lazy,
                     cross_linkable: false,
-            migration_target: None,
-        },
+                    migration_target: None,
+                },
             ],
             settings: WorkspaceSettings::default(),
         };
@@ -1358,8 +1347,8 @@ name = "file-two-layer"
                     capability: MountCapability::Write,
                     lifecycle: MountLifecycle::Eager,
                     cross_linkable: true,
-            migration_target: None,
-        },
+                    migration_target: None,
+                },
                 Mount {
                     mem: "external".to_string(),
                     schema: Some(pin("default@1.0.0")),
@@ -1369,8 +1358,8 @@ name = "file-two-layer"
                     capability: MountCapability::ReadOnly,
                     lifecycle: MountLifecycle::Lazy,
                     cross_linkable: false,
-            migration_target: None,
-        },
+                    migration_target: None,
+                },
             ],
             settings: WorkspaceSettings::default(),
         };
@@ -1499,8 +1488,8 @@ name = "file-two-layer"
                 capability: MountCapability::Write,
                 lifecycle: MountLifecycle::Eager,
                 cross_linkable: true,
-            migration_target: None,
-        }],
+                migration_target: None,
+            }],
             settings: WorkspaceSettings::default(),
         };
         store.save_state(tmp.path(), &original).unwrap();
@@ -1729,15 +1718,14 @@ name = "file-two-layer"
         // Make a minimal valid zip so the archive backend can open it.
         let f = std::fs::File::create(&archive_path).unwrap();
         let mut w = zip::ZipWriter::new(f);
-        w.start_file("a.md", zip::write::SimpleFileOptions::default()).unwrap();
+        w.start_file("a.md", zip::write::SimpleFileOptions::default())
+            .unwrap();
         w.write_all(b"# a").unwrap();
         w.finish().unwrap();
         let archive = Mount {
             mem: "external".to_string(),
             schema: Some(pin("default@1.0.0")),
-            storage: MountStorage::Archive {
-                path: archive_path,
-            },
+            storage: MountStorage::Archive { path: archive_path },
             capability: MountCapability::ReadOnly,
             lifecycle: MountLifecycle::Lazy,
             cross_linkable: false,

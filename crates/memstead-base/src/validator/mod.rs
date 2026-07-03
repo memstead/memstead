@@ -195,10 +195,7 @@ pub enum ValidationError {
     #[error(
         "embedded schema pins '{embedded}' but `.memstead/config.json` declares '{declared}' — archive is inconsistent"
     )]
-    EmbeddedSchemaMismatch {
-        embedded: String,
-        declared: String,
-    },
+    EmbeddedSchemaMismatch { embedded: String, declared: String },
 
     // Entity-level
     #[error("missing frontmatter at {path}")]
@@ -242,10 +239,7 @@ pub enum ValidationError {
 
     // Cross-archive / graph
     #[error("duplicate entity id {id} from {} and {}", paths.0, paths.1)]
-    DuplicateEntityId {
-        id: String,
-        paths: (String, String),
-    },
+    DuplicateEntityId { id: String, paths: (String, String) },
     #[error("cross-mem relationship at {path}: target {target}")]
     CrossMemRelationship { path: String, target: String },
     #[error("graph construction failed: {0}")]
@@ -336,7 +330,10 @@ pub fn collect_dangling_cross_mem_edges_from_bytes(
         parse_results.push(parse_result);
     }
 
-    Ok(graph::dangling_cross_mem_edges_in(&parse_results, &config.name))
+    Ok(graph::dangling_cross_mem_edges_in(
+        &parse_results,
+        &config.name,
+    ))
 }
 
 fn validate_impl(
@@ -410,15 +407,16 @@ fn validate_impl(
     // 5. Entity-ID uniqueness (after all files parsed, before store
     //    construction — a duplicate would silently overwrite in
     //    upsert).
-    let parsed_entities: Vec<Entity> = parse_results
-        .iter()
-        .map(|pr| pr.entity.clone())
-        .collect();
+    let parsed_entities: Vec<Entity> = parse_results.iter().map(|pr| pr.entity.clone()).collect();
     ids::check_unique_ids(&parsed_entities)?;
 
     // 6. Graph: build store, detect communities, cross-mem guard.
-    let graph_result =
-        graph::build_and_check(parse_results, &fallback_schema, &config.name, cross_mem_as_error)?;
+    let graph_result = graph::build_and_check(
+        parse_results,
+        &fallback_schema,
+        &config.name,
+        cross_mem_as_error,
+    )?;
 
     let (entity_count, edge_count) = graph::tally(&graph_result.store);
 
@@ -487,8 +485,9 @@ fn check_embedded_schema(
     }
     let Some(manifest_yaml) = manifest else {
         return Err(ValidationError::EmbeddedSchemaInvalid {
-            reason: "`.memstead/schema/` tree present but `.memstead/schema/schema.yaml` is missing"
-                .into(),
+            reason:
+                "`.memstead/schema/` tree present but `.memstead/schema/schema.yaml` is missing"
+                    .into(),
         });
     };
 

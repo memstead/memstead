@@ -134,8 +134,8 @@ fn scaffold_new(ctx: &CliContext, args: NewArgs) -> anyhow::Result<()> {
         .with_details(json!({ "path": pkg_dir }))
         .into());
     }
-    if pkg_dir.is_dir() {
-        if let Some(entry) = std::fs::read_dir(&pkg_dir)
+    if pkg_dir.is_dir()
+        && let Some(entry) = std::fs::read_dir(&pkg_dir)
             .map_err(|e| {
                 CliError::new(
                     ExitKind::Generic,
@@ -152,21 +152,20 @@ fn scaffold_new(ctx: &CliContext, args: NewArgs) -> anyhow::Result<()> {
                     format!("read {}: {e}", pkg_dir.display()),
                 )
             })?
-        {
-            let found = entry.file_name().to_string_lossy().to_string();
-            return Err(CliError::new(
-                ExitKind::Validation,
-                "TARGET_NOT_EMPTY",
-                format!(
-                    "{} exists and is not empty (found `{found}`) — clear it or \
+    {
+        let found = entry.file_name().to_string_lossy().to_string();
+        return Err(CliError::new(
+            ExitKind::Validation,
+            "TARGET_NOT_EMPTY",
+            format!(
+                "{} exists and is not empty (found `{found}`) — clear it or \
                      pick a different name: memstead schema new {}-schema",
-                    pkg_dir.display(),
-                    args.name,
-                ),
-            )
-            .with_details(json!({ "path": pkg_dir, "found": [found] }))
-            .into());
-        }
+                pkg_dir.display(),
+                args.name,
+            ),
+        )
+        .with_details(json!({ "path": pkg_dir, "found": [found] }))
+        .into());
     }
 
     let manifest = scaffold_manifest(&args.name);
@@ -178,7 +177,10 @@ fn scaffold_new(ctx: &CliContext, args: NewArgs) -> anyhow::Result<()> {
             format!("create {}: {e}", pkg_dir.join("types").display()),
         )
     })?;
-    for (rel, content) in [("schema.yaml", &manifest), ("types/note.yaml", &example_type)] {
+    for (rel, content) in [
+        ("schema.yaml", &manifest),
+        ("types/note.yaml", &example_type),
+    ] {
         let dest = pkg_dir.join(rel);
         std::fs::write(&dest, content).map_err(|e| {
             CliError::new(
@@ -252,19 +254,16 @@ fn scaffold_next_steps(ctx: &CliContext, name: &str) -> Vec<Step> {
     use memstead_base::workspace::MountCapability;
     use memstead_base::workspace_store::{FileWorkspaceStore, WorkspaceStoreAdapter};
     let workspace = ctx.workspace_shape().and_then(|(shape, root)| match shape {
-        WorkspaceShape::Filesystem => FileWorkspaceStore::new()
-            .load(&root)
-            .ok()
-            .and_then(|ws| {
-                let mut writable = ws
-                    .mounts
-                    .iter()
-                    .filter(|m| m.capability == MountCapability::Write);
-                match (writable.next(), writable.next()) {
-                    (Some(only), None) => Some((only.mem.clone(), root.clone())),
-                    _ => None,
-                }
-            }),
+        WorkspaceShape::Filesystem => FileWorkspaceStore::new().load(&root).ok().and_then(|ws| {
+            let mut writable = ws
+                .mounts
+                .iter()
+                .filter(|m| m.capability == MountCapability::Write);
+            match (writable.next(), writable.next()) {
+                (Some(only), None) => Some((only.mem.clone(), root.clone())),
+                _ => None,
+            }
+        }),
         WorkspaceShape::MemRepo => None,
     });
     let mem = workspace
@@ -358,7 +357,10 @@ struct Step {
 
 impl Step {
     fn bare(command: String) -> Self {
-        Step { command, note: None }
+        Step {
+            command,
+            note: None,
+        }
     }
 }
 
@@ -634,11 +636,7 @@ fn install_to_git_branch(
     } else {
         print_markdown(&format!(
             "# Schema installed\n\n`{}@{}` → `__MEMSTEAD:schemas/{}@{}` (commit `{}`)\n",
-            schema_ref.name,
-            schema_ref.version,
-            schema_ref.name,
-            schema_ref.version,
-            commit,
+            schema_ref.name, schema_ref.version, schema_ref.name, schema_ref.version, commit,
         ));
     }
     Ok(())
@@ -662,7 +660,9 @@ fn install_to_git_branch(
 
 /// Resolve `<source>` (a path to a package dir, or a built-in name /
 /// `name@version`) to its pin and the package files to write.
-fn resolve_source(source: &str) -> anyhow::Result<(SchemaRef, Vec<memstead_schema::SchemaSourceFile>)> {
+fn resolve_source(
+    source: &str,
+) -> anyhow::Result<(SchemaRef, Vec<memstead_schema::SchemaSourceFile>)> {
     let as_path = Path::new(source);
     if as_path.is_dir() {
         // Path source — validate with the engine loader before copying.
@@ -680,13 +680,17 @@ fn resolve_source(source: &str) -> anyhow::Result<(SchemaRef, Vec<memstead_schem
     } else {
         // Name source — resolve against the built-in catalogue.
         let schema_ref = resolve_builtin_ref(source)?;
-        let mut files = memstead_schema::collect_schema_source(None, None, &schema_ref).map_err(|e| {
-            CliError::new(
-                ExitKind::Validation,
-                "SCHEMA_NOT_FOUND",
-                format!("could not collect source for {}: {e}", schema_ref.as_display()),
-            )
-        })?;
+        let mut files =
+            memstead_schema::collect_schema_source(None, None, &schema_ref).map_err(|e| {
+                CliError::new(
+                    ExitKind::Validation,
+                    "SCHEMA_NOT_FOUND",
+                    format!(
+                        "could not collect source for {}: {e}",
+                        schema_ref.as_display()
+                    ),
+                )
+            })?;
         // Built-in packages may ship a `mem-template.json`; install it
         // alongside the schema so the scaffolding travels with the fork.
         if let Some(tpl) = memstead_schema::builtins::builtin_mem_template(&schema_ref.name) {
@@ -715,7 +719,9 @@ fn resolve_builtin_ref(source: &str) -> anyhow::Result<SchemaRef> {
             return Err(CliError::new(
                 ExitKind::Validation,
                 "SCHEMA_NOT_FOUND",
-                format!("no built-in schema {source} — pass a path to install a non-built-in package"),
+                format!(
+                    "no built-in schema {source} — pass a path to install a non-built-in package"
+                ),
             )
             .into());
         }
@@ -787,7 +793,10 @@ fn collect_dir_package(dir: &Path) -> anyhow::Result<Vec<memstead_schema::Schema
 /// against the workspace's published `.memstead/meta-schemas/` rather
 /// than the package source's repo-relative path. Idempotent —
 /// re-running reproduces identical files.
-fn write_package(pkg_dir: &Path, files: &[memstead_schema::SchemaSourceFile]) -> anyhow::Result<()> {
+fn write_package(
+    pkg_dir: &Path,
+    files: &[memstead_schema::SchemaSourceFile],
+) -> anyhow::Result<()> {
     for f in files {
         let dest = pkg_dir.join(&f.archive_path);
         if let Some(parent) = dest.parent() {
@@ -850,7 +859,10 @@ mod tests {
     use std::path::Path;
 
     fn ctx() -> CliContext {
-        CliContext { json: false, quiet: true }
+        CliContext {
+            json: false,
+            quiet: true,
+        }
     }
 
     /// A shipped built-in package validates cleanly — the loader the
@@ -859,7 +871,10 @@ mod tests {
     fn validate_accepts_builtin_default_schema() {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../memstead-schema/builtins/schemas/default");
-        assert!(path.join("schema.yaml").is_file(), "fixture moved: {path:?}");
+        assert!(
+            path.join("schema.yaml").is_file(),
+            "fixture moved: {path:?}"
+        );
         validate(&ctx(), ValidateArgs { path }).expect("default builtin must validate");
     }
 
@@ -869,8 +884,13 @@ mod tests {
     fn validate_rejects_malformed_schema_with_typed_code() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("schema.yaml"), "name: [unterminated\n").unwrap();
-        let err = validate(&ctx(), ValidateArgs { path: dir.path().to_path_buf() })
-            .expect_err("malformed schema must refuse");
+        let err = validate(
+            &ctx(),
+            ValidateArgs {
+                path: dir.path().to_path_buf(),
+            },
+        )
+        .expect_err("malformed schema must refuse");
         let cli = err
             .downcast_ref::<CliError>()
             .expect("error is a typed CliError");
@@ -939,10 +959,16 @@ mod tests {
             doc,
             "# yaml-language-server: $schema=../../../meta-schemas/type-definition.schema.json\nname: doc\n",
         );
-        assert_eq!(std::fs::read(pkg.join("mem-template.json")).unwrap(), b"{}\n");
+        assert_eq!(
+            std::fs::read(pkg.join("mem-template.json")).unwrap(),
+            b"{}\n"
+        );
         // Idempotent: a second write reproduces identical files.
         write_package(&pkg, &files).unwrap();
-        assert_eq!(std::fs::read_to_string(pkg.join("schema.yaml")).unwrap(), schema);
+        assert_eq!(
+            std::fs::read_to_string(pkg.join("schema.yaml")).unwrap(),
+            schema
+        );
     }
 
     /// The directive retarget replaces an existing leading directive (it

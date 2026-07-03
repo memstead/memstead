@@ -70,9 +70,7 @@ pub enum LoadOutcome {
 /// [`crate::storage_memstead::load_schemas_from_memstead_ref`].
 ///
 /// `workspace_root` is the directory holding `mem-repo/.git/`.
-pub fn load_schemas_from_ref(
-    workspace_root: &Path,
-) -> Result<LoadOutcome, MemRepoSchemasError> {
+pub fn load_schemas_from_ref(workspace_root: &Path) -> Result<LoadOutcome, MemRepoSchemasError> {
     crate::storage_memstead::load_schemas_from_memstead_ref(workspace_root)
 }
 
@@ -105,7 +103,9 @@ impl memstead_base::schema_source::SchemaSource for GitBranchSchemaSource {
             // No mem-repo or no `__MEMSTEAD:schemas/` subtree → nothing
             // to overlay; the catalogue falls back to built-ins.
             Ok(LoadOutcome::NoMemRepo) | Ok(LoadOutcome::NoSchemas) => Ok(Vec::new()),
-            Err(e) => Err(memstead_base::schema_source::SchemaSourceError::Read(e.to_string())),
+            Err(e) => Err(memstead_base::schema_source::SchemaSourceError::Read(
+                e.to_string(),
+            )),
         }
     }
 
@@ -127,12 +127,13 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
+    /// `(name, version, [(filename, body)])` schema seed tuple.
+    type SchemaSeed<'a> = (&'a str, &'a str, &'a [(&'a str, &'a str)]);
+
     /// Seed `<root>/mem-repo/.git/` as a real bare repo carrying both
     /// `__SYSTEM` (empty seed) and `__SCHEMAS:<name>/{schema.yaml,
     /// types/*.yaml}` for each supplied schema. Returns the temp root.
-    fn seed_mem_repo_with_schemas(
-        schemas: &[(&str, &str, &[(&str, &str)])],
-    ) -> TempDir {
+    fn seed_mem_repo_with_schemas(schemas: &[SchemaSeed<'_>]) -> TempDir {
         let tmp = TempDir::new().unwrap();
         let gitdir = tmp.path().join("mem-repo").join(".git");
         std::fs::create_dir_all(&gitdir).unwrap();
@@ -141,7 +142,10 @@ mod tests {
         let actor = gix::actor::Signature {
             name: "test".into(),
             email: "test@example.com".into(),
-            time: gix::date::Time { seconds: 0, offset: 0 },
+            time: gix::date::Time {
+                seconds: 0,
+                offset: 0,
+            },
         };
 
         // Seed `__SYSTEM` with an empty tree so the "is real mem-repo"
@@ -341,11 +345,7 @@ staleness_threshold_days: 90
 write_rules:
   - Keep it short.
 "#;
-        let tmp = seed_mem_repo_with_schemas(&[(
-            "software",
-            manifest,
-            &[("sample", sample_type)],
-        )]);
+        let tmp = seed_mem_repo_with_schemas(&[("software", manifest, &[("sample", sample_type)])]);
 
         let outcome = load_schemas_from_ref(tmp.path()).expect("loader must succeed");
         let schemas = match outcome {
@@ -359,7 +359,12 @@ write_rules:
                 }
             ),
         };
-        assert_eq!(schemas.len(), 1, "expected one schema, got {}", schemas.len());
+        assert_eq!(
+            schemas.len(),
+            1,
+            "expected one schema, got {}",
+            schemas.len()
+        );
         let schema = &schemas[0];
         assert_eq!(schema.manifest.name, "software");
         assert_eq!(schema.version, semver::Version::new(1, 0, 0));
@@ -409,7 +414,10 @@ write_rules:
         let actor = gix::actor::Signature {
             name: "test".into(),
             email: "test@example.com".into(),
-            time: gix::date::Time { seconds: 0, offset: 0 },
+            time: gix::date::Time {
+                seconds: 0,
+                offset: 0,
+            },
         };
         let mut buf = gix::date::parse::TimeBuf::default();
         let actor_ref = actor.to_ref(&mut buf);

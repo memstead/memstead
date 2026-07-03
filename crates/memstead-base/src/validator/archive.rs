@@ -67,7 +67,8 @@ pub fn extract_entries(
     }
 
     let cursor = Cursor::new(bytes);
-    let mut archive = zip::ZipArchive::new(cursor).map_err(|e| ValidationError::Zip(e.to_string()))?;
+    let mut archive =
+        zip::ZipArchive::new(cursor).map_err(|e| ValidationError::Zip(e.to_string()))?;
 
     if archive.len() as u32 > limits.max_file_count {
         return Err(ValidationError::SizeCapExceeded {
@@ -109,18 +110,15 @@ pub fn extract_entries(
             )));
         }
         let raw_bytes = raw_name.as_bytes();
-        if raw_bytes.len() >= 2
-            && raw_bytes[1] == b':'
-            && raw_bytes[0].is_ascii_alphabetic()
-        {
+        if raw_bytes.len() >= 2 && raw_bytes[1] == b':' && raw_bytes[0].is_ascii_alphabetic() {
             return Err(ValidationError::Zip(format!(
                 "unsafe entry path: {raw_name}"
             )));
         }
 
-        let enclosed = entry.enclosed_name().ok_or_else(|| {
-            ValidationError::Zip(format!("unsafe entry path: {}", entry.name()))
-        })?;
+        let enclosed = entry
+            .enclosed_name()
+            .ok_or_else(|| ValidationError::Zip(format!("unsafe entry path: {}", entry.name())))?;
         let path_string = enclosed
             .to_str()
             .ok_or_else(|| ValidationError::Zip(format!("non-UTF-8 entry path: {}", entry.name())))?
@@ -311,8 +309,8 @@ mod tests {
         {
             let cursor = Cursor::new(&mut buf);
             let mut w = zip::ZipWriter::new(cursor);
-            let options = SimpleFileOptions::default()
-                .compression_method(zip::CompressionMethod::Deflated);
+            let options =
+                SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
             for (name, content) in entries {
                 w.start_file(*name, options).unwrap();
                 w.write_all(content).unwrap();
@@ -358,7 +356,11 @@ mod tests {
             Some(&prov[..]),
             "provenance bytes surface verbatim"
         );
-        assert_eq!(entries.markdown_files.len(), 1, "provenance is not an entity");
+        assert_eq!(
+            entries.markdown_files.len(),
+            1,
+            "provenance is not an entity"
+        );
     }
 
     /// Forward-compat: an unrecognised member under the engine-owned
@@ -423,7 +425,10 @@ mod tests {
             (".memstead/notes.md", b"# not an entity\n"),
         ]);
         let err = extract_entries(&zip, &ValidatorLimits::DEFAULT).unwrap_err();
-        assert!(matches!(err, ValidationError::UnknownFile(_)), "got {err:?}");
+        assert!(
+            matches!(err, ValidationError::UnknownFile(_)),
+            "got {err:?}"
+        );
     }
 
     #[test]
@@ -435,7 +440,11 @@ mod tests {
             ("m.md", b"# M\n"),
         ]);
         let entries = extract_entries(&zip, &ValidatorLimits::DEFAULT).unwrap();
-        let paths: Vec<_> = entries.markdown_files.iter().map(|e| e.path.as_str()).collect();
+        let paths: Vec<_> = entries
+            .markdown_files
+            .iter()
+            .map(|e| e.path.as_str())
+            .collect();
         assert_eq!(paths, vec!["a.md", "m.md", "z.md"]);
     }
 
@@ -486,7 +495,10 @@ mod tests {
             .collect();
         assert_eq!(
             paths,
-            vec![".memstead/schema/schema.yaml", ".memstead/schema/types/spec.yaml"]
+            vec![
+                ".memstead/schema/schema.yaml",
+                ".memstead/schema/types/spec.yaml"
+            ]
         );
     }
 
@@ -507,7 +519,10 @@ mod tests {
     fn rejects_nested_schema_type_file() {
         let zip = build_archive(&[
             (".memstead/config.json", ok_config()),
-            (".memstead/schema/types/nested/subtype.yaml", b"name: subtype\n"),
+            (
+                ".memstead/schema/types/nested/subtype.yaml",
+                b"name: subtype\n",
+            ),
         ]);
         let err = extract_entries(&zip, &ValidatorLimits::DEFAULT).unwrap_err();
         assert!(matches!(err, ValidationError::UnknownFile(_)));
@@ -519,7 +534,10 @@ mod tests {
     fn rejects_unknown_root_file() {
         let zip = build_archive(&[
             (".memstead/config.json", ok_config()),
-            ("some-root.json", br#"{"format":3,"name":"v","version":"0.1.0"}"#),
+            (
+                "some-root.json",
+                br#"{"format":3,"name":"v","version":"0.1.0"}"#,
+            ),
         ]);
         let err = extract_entries(&zip, &ValidatorLimits::DEFAULT).unwrap_err();
         assert!(

@@ -20,8 +20,8 @@ use std::path::{Path, PathBuf};
 
 use memstead_schema::{
     ARCHIVE_CONFIG_PATH, ARCHIVE_PROVENANCE_PATH, ARCHIVE_SCHEMA_PREFIX, ArchiveProvenance,
-    EntityProvenance, PublishConversionError, SchemaSourceError, MemConfig,
-    collect_schema_source, published_config_from,
+    EntityProvenance, MemConfig, PublishConversionError, SchemaSourceError, collect_schema_source,
+    published_config_from,
 };
 use zip::{CompressionMethod, DateTime, write::SimpleFileOptions};
 
@@ -60,7 +60,9 @@ pub fn build_archive_provenance(records: &[Provenance]) -> Option<ArchiveProvena
         let candidate = EntityProvenance {
             rationale: Some(note.to_string()),
             kind: Some(r.kind.as_str().to_string()),
-            timestamp: Some(crate::filesystem::changelog::format_rfc3339_utc(r.timestamp)),
+            timestamp: Some(crate::filesystem::changelog::format_rfc3339_utc(
+                r.timestamp,
+            )),
             actor: Some(r.actor.as_trailer().to_string()),
         };
         match by_path.get(&path) {
@@ -148,10 +150,7 @@ pub fn export_mem(
     workspace_root: Option<&Path>,
     workspace_schemas_dir: Option<&Path>,
 ) -> Result<MemExportResult, MemExportError> {
-    let basename = mem_dir
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("");
+    let basename = mem_dir.file_name().and_then(|n| n.to_str()).unwrap_or("");
     let explicit_name = config.name.as_deref().unwrap_or(basename);
     let out = export_mem_to_bytes(
         mem_dir,
@@ -198,9 +197,7 @@ pub fn export_mem_to_bytes(
     explicit_name: &str,
 ) -> Result<MemExportBytes, MemExportError> {
     if !mem_dir.is_dir() {
-        return Err(MemExportError::DirNotFound(
-            mem_dir.display().to_string(),
-        ));
+        return Err(MemExportError::DirNotFound(mem_dir.display().to_string()));
     }
 
     let mut md_files = Vec::new();

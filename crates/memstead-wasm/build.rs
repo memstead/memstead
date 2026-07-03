@@ -55,8 +55,8 @@ fn build_fixture_bytes() -> Vec<u8> {
         capability: MountCapability::Write,
         lifecycle: MountLifecycle::Eager,
         cross_linkable: true,
-            migration_target: None,
-        };
+        migration_target: None,
+    };
     let writer = FilesystemMemWriter::new(mem_dir.clone());
     let mut engine = Engine::from_mounts(vec![(mount, Box::new(writer) as Box<dyn MemBackend>)])
         .expect("from_mounts");
@@ -68,7 +68,10 @@ fn build_fixture_bytes() -> Vec<u8> {
     };
     for title in ["Alpha", "Beta"] {
         let mut sections = indexmap::IndexMap::new();
-        sections.insert("identity".to_string(), format!("{title} is a fixture spec."));
+        sections.insert(
+            "identity".to_string(),
+            format!("{title} is a fixture spec."),
+        );
         sections.insert(
             "purpose".to_string(),
             "Exercises the wasm-bindgen hydrate path.".to_string(),

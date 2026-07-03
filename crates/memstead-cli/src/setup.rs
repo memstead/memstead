@@ -243,9 +243,7 @@ pub fn find_workspace_root(start: &Path) -> Option<PathBuf> {
         if memstead_base::is_workspace_root(&cursor) {
             return Some(cursor);
         }
-        let Some(parent) = cursor.parent() else {
-            return None;
-        };
+        let parent = cursor.parent()?;
         if parent == cursor {
             return None;
         }
@@ -262,77 +260,6 @@ pub fn find_workspace_root(start: &Path) -> Option<PathBuf> {
 /// folder-mount-only intent of its caller).
 pub fn find_filesystem_workspace_root(start: &Path) -> Option<PathBuf> {
     find_workspace_root(start)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use tempfile::TempDir;
-
-    fn touch_marker(ws: &std::path::Path) {
-        std::fs::create_dir_all(ws.join(".memstead")).unwrap();
-        std::fs::write(ws.join(".memstead").join("workspace.toml"), "").unwrap();
-    }
-
-    #[test]
-    fn find_workspace_root_walks_up_to_marker() {
-        let tmp = TempDir::new().unwrap();
-        let ws = tmp.path().join("ws");
-        let nested = ws.join("a").join("b").join("specs");
-        std::fs::create_dir_all(&nested).unwrap();
-        touch_marker(&ws);
-        let found =
-            find_workspace_root(&nested).expect("walk should find .memstead/workspace.toml");
-        assert_eq!(found.canonicalize().unwrap(), ws.canonicalize().unwrap());
-    }
-
-    #[test]
-    fn find_workspace_root_returns_none_when_absent() {
-        let tmp = TempDir::new().unwrap();
-        let nested = tmp.path().join("a").join("b");
-        std::fs::create_dir_all(&nested).unwrap();
-        assert!(find_workspace_root(&nested).is_none());
-    }
-
-    #[test]
-    fn find_workspace_root_stops_at_containing_dir() {
-        let tmp = TempDir::new().unwrap();
-        let ws = tmp.path().join("ws");
-        std::fs::create_dir_all(&ws).unwrap();
-        touch_marker(&ws);
-        let found =
-            find_workspace_root(&ws).expect("ws itself carries .memstead/workspace.toml");
-        assert_eq!(found, ws);
-    }
-
-    #[test]
-    fn find_workspace_root_accepts_file_start() {
-        let tmp = TempDir::new().unwrap();
-        let ws = tmp.path().join("ws");
-        std::fs::create_dir_all(&ws).unwrap();
-        touch_marker(&ws);
-        let file = ws.join("some-file.md");
-        std::fs::write(&file, "").unwrap();
-        let found = find_workspace_root(&file).expect("file start should resolve to its dir");
-        assert_eq!(found, ws);
-    }
-
-    #[test]
-    fn find_workspace_root_deeper_marker_wins() {
-        // Outer and inner each carry `.memstead/workspace.toml`. The walk
-        // starts deep inside the inner dir and must resolve to the
-        // inner — deeper marker wins because the upward walk stops at
-        // the first match.
-        let tmp = TempDir::new().unwrap();
-        let outer = tmp.path().join("outer");
-        let inner = outer.join("inner");
-        let deep = inner.join("a").join("b");
-        std::fs::create_dir_all(&deep).unwrap();
-        touch_marker(&outer);
-        touch_marker(&inner);
-        let found = find_workspace_root(&deep).expect("walk should find the inner marker");
-        assert_eq!(found.canonicalize().unwrap(), inner.canonicalize().unwrap());
-    }
 }
 
 /// Provenance bundle for every CLI-initiated mutation. `Actor::Cli` +
@@ -418,4 +345,74 @@ pub fn pro_engine(_ctx: &CliContext) -> anyhow::Result<BaseEngine> {
 
     engine_from_workspace_root(&root)
         .map_err(|e| anyhow::anyhow!("init engine at {}: {e:#}", root.display()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn touch_marker(ws: &std::path::Path) {
+        std::fs::create_dir_all(ws.join(".memstead")).unwrap();
+        std::fs::write(ws.join(".memstead").join("workspace.toml"), "").unwrap();
+    }
+
+    #[test]
+    fn find_workspace_root_walks_up_to_marker() {
+        let tmp = TempDir::new().unwrap();
+        let ws = tmp.path().join("ws");
+        let nested = ws.join("a").join("b").join("specs");
+        std::fs::create_dir_all(&nested).unwrap();
+        touch_marker(&ws);
+        let found =
+            find_workspace_root(&nested).expect("walk should find .memstead/workspace.toml");
+        assert_eq!(found.canonicalize().unwrap(), ws.canonicalize().unwrap());
+    }
+
+    #[test]
+    fn find_workspace_root_returns_none_when_absent() {
+        let tmp = TempDir::new().unwrap();
+        let nested = tmp.path().join("a").join("b");
+        std::fs::create_dir_all(&nested).unwrap();
+        assert!(find_workspace_root(&nested).is_none());
+    }
+
+    #[test]
+    fn find_workspace_root_stops_at_containing_dir() {
+        let tmp = TempDir::new().unwrap();
+        let ws = tmp.path().join("ws");
+        std::fs::create_dir_all(&ws).unwrap();
+        touch_marker(&ws);
+        let found = find_workspace_root(&ws).expect("ws itself carries .memstead/workspace.toml");
+        assert_eq!(found, ws);
+    }
+
+    #[test]
+    fn find_workspace_root_accepts_file_start() {
+        let tmp = TempDir::new().unwrap();
+        let ws = tmp.path().join("ws");
+        std::fs::create_dir_all(&ws).unwrap();
+        touch_marker(&ws);
+        let file = ws.join("some-file.md");
+        std::fs::write(&file, "").unwrap();
+        let found = find_workspace_root(&file).expect("file start should resolve to its dir");
+        assert_eq!(found, ws);
+    }
+
+    #[test]
+    fn find_workspace_root_deeper_marker_wins() {
+        // Outer and inner each carry `.memstead/workspace.toml`. The walk
+        // starts deep inside the inner dir and must resolve to the
+        // inner — deeper marker wins because the upward walk stops at
+        // the first match.
+        let tmp = TempDir::new().unwrap();
+        let outer = tmp.path().join("outer");
+        let inner = outer.join("inner");
+        let deep = inner.join("a").join("b");
+        std::fs::create_dir_all(&deep).unwrap();
+        touch_marker(&outer);
+        touch_marker(&inner);
+        let found = find_workspace_root(&deep).expect("walk should find the inner marker");
+        assert_eq!(found.canonicalize().unwrap(), inner.canonicalize().unwrap());
+    }
 }

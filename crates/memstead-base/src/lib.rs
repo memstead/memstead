@@ -18,8 +18,10 @@ pub mod chunking;
 pub mod domain_authority_wire;
 pub mod engine;
 pub mod entity;
-pub mod graph;
 pub mod filesystem;
+pub mod graph;
+pub mod mem;
+pub mod mem_management;
 pub mod ops;
 pub mod pipeline;
 pub mod pipeline_edit;
@@ -34,8 +36,6 @@ pub mod search_index;
 pub mod storage;
 pub mod store;
 pub mod validator;
-pub mod mem;
-pub mod mem_management;
 pub mod vcs;
 pub mod workspace;
 pub mod workspace_root;
@@ -50,22 +50,23 @@ pub use engine::{
     BackendFactory, BootError, CreateEntityArgs, CreateEntityOutcome, DeleteEntityArgs,
     DeleteEntityOutcome, DeleteReferrers, Engine, EngineError, FromArchiveBytesError,
     GitBranchBranchResetFn, GitBranchChangesSinceFn, GitBranchDiffFn, GitBranchExportFn,
-    GitBranchExportToBytesFn, GitBranchFetchFn, GitBranchOps, GitBranchPullFn,
-    GitBranchPushFn, GitBranchReadTreeFn, INLINE_LIST_CAP, ReferrerInfo, RelateAction, RelateEntityArgs,
+    GitBranchExportToBytesFn, GitBranchFetchFn, GitBranchOps, GitBranchPullFn, GitBranchPushFn,
+    GitBranchReadTreeFn, INLINE_LIST_CAP, ReferrerInfo, RelateAction, RelateEntityArgs,
     RelateEntityOutcome, RenameEntityArgs, RenameEntityOutcome, SchemaSourceDiagnostic,
     UpdateEntityArgs, UpdateEntityOutcome, format_inline_list_overflow,
 };
 pub use entity::id::{ENTITY_ID_MAX_LEN, SlugError};
 pub use entity::{Entity, EntityId, MetadataValue, ParseResult, Relationship};
 pub use graph::{ClusterInfo, LouvainOutput};
+pub use mem::{MEM_META_DIR, MemOrigin, MemRouterSnapshot};
+pub use mem_management::{CreateRuleSet, DeleteRuleSet, MatcherSet, MatcherSetError};
 pub use ops::{
     BackendChanges, BatchEntry, BatchError, BatchResult, ChangeEnvelope, ChangesReport,
-    ContextResult, CreateArgs,
-    CreateResult, DeleteResult, EMPTY_TREE_SHA, ExportResult, Facets, HealthReport,
-    HealthSummary, ListResult, ModifiedMetadata, ModifiedSections, Query,
-    RENAME_SIMILARITY_DEFAULT, RENAME_SIMILARITY_MAX, RENAME_SIMILARITY_MIN, RelateArg,
+    ContextResult, CreateArgs, CreateResult, DeleteResult, EMPTY_TREE_SHA, ExportResult, Facets,
+    HealthReport, HealthSummary, ListResult, MemExportResult, ModifiedMetadata, ModifiedSections,
+    Query, RENAME_SIMILARITY_DEFAULT, RENAME_SIMILARITY_MAX, RENAME_SIMILARITY_MIN, RelateArg,
     RelateResult, ReloadReport, ReloadResult, RenameResult, SearchHit, SearchResult, SearchScope,
-    SetMemVersionOutcome, UpdateArgs, UpdateResult, MemExportResult, WarningHint,
+    SetMemVersionOutcome, UpdateArgs, UpdateResult, WarningHint,
 };
 pub use pipeline::{
     Facet, Ingest, IngestMode, IngestTrigger, Medium, MediumType, PatternEntry, PatternMode,
@@ -74,14 +75,10 @@ pub use pipeline::{
 pub use pipeline_edit::PipelineEditError;
 pub use pipeline_migrate::{migrate_legacy_pipeline, read_legacy_pipeline_configs};
 pub use pipeline_store::{
-    PipelineConfigs, PipelineRecord, MemPipelineRecord, load_pipeline_configs,
+    MemPipelineRecord, PipelineConfigs, PipelineRecord, load_pipeline_configs,
 };
 pub use provenance::{Provenance, ProvenanceKind};
 pub use store::{Edge, EdgeSource, InEdge, Store};
-pub use mem::{MEM_META_DIR, MemOrigin, MemRouterSnapshot};
-pub use mem_management::{
-    CreateRuleSet, DeleteRuleSet, MatcherSet, MatcherSetError,
-};
 pub use workspace::{
     CreateRuleSetting, DeleteRuleSetting, Mount, MountCapability, MountLifecycle, MountStorage,
     SCHEMA_WILDCARD, Workspace, WorkspaceSettings,

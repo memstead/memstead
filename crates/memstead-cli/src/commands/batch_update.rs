@@ -132,9 +132,10 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             "parser_error": e.to_string(),
         }))
     })?;
-    let updates_value = envelope.get("updates").cloned().unwrap_or_else(|| {
-        serde_json::Value::Array(Vec::new())
-    });
+    let updates_value = envelope
+        .get("updates")
+        .cloned()
+        .unwrap_or_else(|| serde_json::Value::Array(Vec::new()));
     let updates_array = match &updates_value {
         serde_json::Value::Array(a) => a.clone(),
         _ => {
@@ -170,12 +171,9 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     }
 
     if updates_array.is_empty() {
-        return Err(CliError::new(
-            ExitKind::Validation,
-            "INVALID_INPUT",
-            "updates[] is empty",
-        )
-        .into());
+        return Err(
+            CliError::new(ExitKind::Validation, "INVALID_INPUT", "updates[] is empty").into(),
+        );
     }
 
     let mut entries: Vec<EntryPayload> = Vec::with_capacity(updates_array.len());
@@ -186,7 +184,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         }
     }
 
-    let mut engine = crate::setup::pro_engine(&ctx)?;
+    let mut engine = crate::setup::pro_engine(ctx)?;
 
     let updates: Vec<(UpdateEntityArgs, Option<String>)> = entries
         .into_iter()
@@ -260,7 +258,10 @@ fn render_batch_markdown(result: &memstead_base::ops::BatchResult) -> String {
             .as_ref()
             .map(|e| format!(" — [{}] {}", e.code, e.message))
             .unwrap_or_default();
-        lines.push(format!("- {marker} `{}` ({}){}", entry.id, entry.action, detail));
+        lines.push(format!(
+            "- {marker} `{}` ({}){}",
+            entry.id, entry.action, detail
+        ));
     }
     if result.applied && !result.commit_sha.is_empty() {
         lines.push(String::new());
@@ -282,7 +283,11 @@ fn batch_refused_error(result: &memstead_base::ops::BatchResult) -> CliError {
             let err = entry.error.as_ref().expect("dominant entry has an error");
             (err.code.as_str(), entry.id.to_string(), err.message.clone())
         }
-        None => ("", String::new(), "batch-update refused; nothing committed".to_string()),
+        None => (
+            "",
+            String::new(),
+            "batch-update refused; nothing committed".to_string(),
+        ),
     };
     let kind = batch_refused_exit_kind(code);
     let summary = format!(
@@ -316,9 +321,8 @@ fn build_update_args(
     engine: &memstead_base::Engine,
     entry: EntryPayload,
 ) -> anyhow::Result<(UpdateEntityArgs, Option<String>)> {
-    let mode_count = entry.expected_hash.is_some() as u8
-        + entry.auto_hash as u8
-        + entry.force as u8;
+    let mode_count =
+        entry.expected_hash.is_some() as u8 + entry.auto_hash as u8 + entry.force as u8;
     if mode_count == 0 {
         return Err(CliError::new(
             ExitKind::Validation,

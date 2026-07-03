@@ -22,15 +22,14 @@ use std::path::{Path, PathBuf};
 
 use memstead_base::ops::WarningHint;
 use memstead_schema::{
-    ARCHIVE_CONFIG_PATH, ARCHIVE_EXTENSION, ARCHIVE_SCHEMA_PREFIX,
-    PublishedMemConfig, SchemaRef,
+    ARCHIVE_CONFIG_PATH, ARCHIVE_EXTENSION, ARCHIVE_SCHEMA_PREFIX, PublishedMemConfig, SchemaRef,
     SchemaRegistry,
 };
 use serde_json::{Map, Value, json};
 
 use crate::entity::loader::LoadError;
-use crate::validator::{ValidationError, validate_and_normalize_archive};
 use crate::mem_repo_config::{self, MemRepoWriteError};
+use crate::validator::{ValidationError, validate_and_normalize_archive};
 use crate::vcs::CommitContext;
 
 /// Where the per-mem `readMems` registration should land.
@@ -504,12 +503,11 @@ pub fn extract_archive_schema_if_needed(
     // Cheap prefix pass: read only the archive's published config so we can skip
     // the full validation for archives whose pin is already in the
     // registry (the common case for repeat loads).
-    let config = read_published_config(archive_path).map_err(|source| {
-        SchemaExtractionError::Archive {
+    let config =
+        read_published_config(archive_path).map_err(|source| SchemaExtractionError::Archive {
             archive_path: archive_path.to_path_buf(),
             source,
-        }
-    })?;
+        })?;
     if registry
         .get(&config.schema.name, &config.schema.version)
         .is_some()
@@ -532,11 +530,10 @@ pub fn extract_archive_schema_if_needed(
     // cache-miss is correct: an attacker who drops a tampered archive
     // into the global cache doesn't get to seed the workspace from an
     // unvalidated payload.
-    let bytes =
-        std::fs::read(archive_path).map_err(|source| SchemaExtractionError::Io {
-            path: archive_path.to_path_buf(),
-            source,
-        })?;
+    let bytes = std::fs::read(archive_path).map_err(|source| SchemaExtractionError::Io {
+        path: archive_path.to_path_buf(),
+        source,
+    })?;
     let validated = validate_and_normalize_archive(&bytes).map_err(|source| {
         SchemaExtractionError::Validation {
             archive_path: archive_path.to_path_buf(),
@@ -573,9 +570,9 @@ fn extract_schema_files_atomic(
     schema_files: &[crate::validator::archive::SchemaFile],
     dest: &Path,
 ) -> std::io::Result<()> {
-    let parent = dest.parent().ok_or_else(|| {
-        std::io::Error::other("schema cache destination has no parent directory")
-    })?;
+    let parent = dest
+        .parent()
+        .ok_or_else(|| std::io::Error::other("schema cache destination has no parent directory"))?;
     std::fs::create_dir_all(parent)?;
 
     // Sibling tmp dir name is dot-prefixed so `list_schema_subdirs`
@@ -640,10 +637,7 @@ mod tests {
         // directory under `<mem_dir.parent>/<name>/` so the basename
         // matches the requested name; tests can pass any throwaway
         // `mem_dir` path and trust the helper to align them.
-        let mem_dir = mem_dir
-            .parent()
-            .unwrap_or(mem_dir)
-            .join(name);
+        let mem_dir = mem_dir.parent().unwrap_or(mem_dir).join(name);
         std::fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
         std::fs::write(
             mem_dir.join(".memstead/config.json"),
@@ -665,10 +659,7 @@ mod tests {
     /// Wraps `install_read_mem(archive, TargetMem::Disk(project), ...)`
     /// with a deterministic dummy commit context so the call shape stays
     /// minimal at every test site.
-    fn install_to_disk(
-        archive: &Path,
-        project: &Path,
-    ) -> Result<InstallOutcome, InstallError> {
+    fn install_to_disk(archive: &Path, project: &Path) -> Result<InstallOutcome, InstallError> {
         install_read_mem(
             archive,
             TargetMem::Disk(project),
@@ -806,7 +797,11 @@ mod tests {
         let cached_bytes = std::fs::read(&cached).unwrap();
         let revalidated = validate_and_normalize_archive(&cached_bytes).unwrap();
         assert_eq!(revalidated.canonical_bytes, cached_bytes);
-        assert_eq!(key, content_cache_key(&cached_bytes), "cacheKey is the content digest");
+        assert_eq!(
+            key,
+            content_cache_key(&cached_bytes),
+            "cacheKey is the content digest"
+        );
     }
 
     #[test]
@@ -837,7 +832,10 @@ mod tests {
             "exactly one cache file, no .tmp sibling: {entries:?}",
         );
         let cache_file = entries.iter().find(|n| n.ends_with(".mem")).unwrap();
-        assert!(cache_file.starts_with("alpha-"), "name-keyed prefix: {cache_file}");
+        assert!(
+            cache_file.starts_with("alpha-"),
+            "name-keyed prefix: {cache_file}"
+        );
         assert!(!entries.iter().any(|n| n.ends_with(".tmp")));
     }
 
@@ -925,7 +923,11 @@ mod tests {
         let key_a = std::fs::read_to_string(project.join(".memstead/config.json"))
             .ok()
             .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-            .and_then(|c| c["readMems"]["alpha"]["cacheKey"].as_str().map(String::from))
+            .and_then(|c| {
+                c["readMems"]["alpha"]["cacheKey"]
+                    .as_str()
+                    .map(String::from)
+            })
             .expect("first install records a cacheKey");
 
         // Build a *different* archive that lands at the same canonical
@@ -964,15 +966,25 @@ mod tests {
             &[],
         )
         .unwrap();
-        assert!(second.copied_to_cache, "distinct bytes must install, not collide");
+        assert!(
+            second.copied_to_cache,
+            "distinct bytes must install, not collide"
+        );
         let key_b = std::fs::read_to_string(project_b.join(".memstead/config.json"))
             .ok()
             .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-            .and_then(|c| c["readMems"]["alpha"]["cacheKey"].as_str().map(String::from))
+            .and_then(|c| {
+                c["readMems"]["alpha"]["cacheKey"]
+                    .as_str()
+                    .map(String::from)
+            })
             .expect("second install records a cacheKey");
 
         // Distinct content ⇒ distinct keys ⇒ both cache files coexist.
-        assert_ne!(key_a, key_b, "distinct archives must get distinct content keys");
+        assert_ne!(
+            key_a, key_b,
+            "distinct archives must get distinct content keys"
+        );
         assert!(cache.join(format!("alpha-{key_a}.mem")).is_file());
         assert!(cache.join(format!("alpha-{key_b}.mem")).is_file());
     }

@@ -42,21 +42,21 @@
 
 pub use memstead_base::chunking;
 pub use memstead_base::graph;
+pub use memstead_base::mem;
 pub use memstead_base::render;
 pub use memstead_base::search_index;
 pub use memstead_base::store;
 pub use memstead_base::validator;
-pub use memstead_base::mem;
 pub use memstead_base::workspace_root;
 
 pub mod discover;
 pub mod entity;
-pub mod ops;
-pub mod storage;
-pub mod storage_memstead;
 pub mod mem_cache;
 pub mod mem_repo_config;
 pub mod mem_repo_schemas;
+pub mod ops;
+pub mod storage;
+pub mod storage_memstead;
 pub mod vcs;
 pub mod workspace_store;
 
@@ -69,6 +69,7 @@ use memstead_schema::SchemaRef;
 
 pub use entity::{Entity, EntityId, MetadataValue, ParseResult, Relationship};
 pub use graph::{ClusterInfo, LouvainOutput};
+pub use mem::{MemOrigin, MemRouterSnapshot};
 pub use ops::agent_notes::{AgentNotesReport, CommitNote};
 pub use ops::changes::{
     ChangeEnvelope, ChangesReport, EMPTY_TREE_SHA, RENAME_SIMILARITY_DEFAULT,
@@ -77,13 +78,11 @@ pub use ops::changes::{
 pub use ops::export::MemExportError;
 pub use ops::{
     BatchResult, ContextResult, CreateArgs, CreateResult, DeleteResult, ExportResult, Facets,
-    HealthReport, HealthSummary, ListResult, ModifiedMetadata, ModifiedSections, Query, RelateArg,
-    RelateResult, ReloadReport, ReloadResult, RenameResult, SearchHit, SearchResult, SearchScope,
-    UpdateArgs,
-    UpdateResult, MemExportResult, WarningHint,
+    HealthReport, HealthSummary, ListResult, MemExportResult, ModifiedMetadata, ModifiedSections,
+    Query, RelateArg, RelateResult, ReloadReport, ReloadResult, RenameResult, SearchHit,
+    SearchResult, SearchScope, UpdateArgs, UpdateResult, WarningHint,
 };
 pub use store::{Edge, EdgeSource, InEdge, Store};
-pub use mem::{MemOrigin, MemRouterSnapshot};
 pub use vcs::{Actor, ClientId, CommitContext, Vcs, VcsError};
 
 /// Description of a mem discovered on a git-branch backend. Produced

@@ -95,10 +95,7 @@ impl From<EngineError> for MemsteadError {
                     "relationship cycle: {rel_type} from {from} to {to} would close a cycle"
                 ),
             },
-            EngineError::CrossMemLinkNotAllowed {
-                from_mem,
-                to_mem,
-            } => Self::ValidationFailed {
+            EngineError::CrossMemLinkNotAllowed { from_mem, to_mem } => Self::ValidationFailed {
                 message: format!(
                     "cross-mem link from `{from_mem}` to `{to_mem}` is not allowed by the workspace `[cross_mem_links]` policy"
                 ),
@@ -164,14 +161,12 @@ impl From<EngineError> for MemsteadError {
                     "cannot remove {rel_type} {from_id} → {to_id}: section(s) {body_links:?} still reference the target"
                 ),
             },
-            EngineError::WikiLinkWithoutRelation { from_id, missing } => {
-                Self::ValidationFailed {
-                    message: format!(
-                        "post-mutation body of {from_id} has {n} unbacked wiki-link(s); declare relations via memstead_relate before retrying",
-                        n = missing.len()
-                    ),
-                }
-            }
+            EngineError::WikiLinkWithoutRelation { from_id, missing } => Self::ValidationFailed {
+                message: format!(
+                    "post-mutation body of {from_id} has {n} unbacked wiki-link(s); declare relations via memstead_relate before retrying",
+                    n = missing.len()
+                ),
+            },
             EngineError::ReadOnlyMount(name) => Self::ValidationFailed {
                 message: format!("mem {name} is mounted read-only"),
             },

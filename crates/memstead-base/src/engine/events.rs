@@ -132,16 +132,8 @@ impl std::fmt::Debug for SubscriptionHandle {
 }
 
 impl SubscriptionHandle {
-    pub(crate) fn new(
-        id: u64,
-        mem: String,
-        registry: Arc<Mutex<SubscriberRegistry>>,
-    ) -> Self {
-        Self {
-            id,
-            mem,
-            registry,
-        }
+    pub(crate) fn new(id: u64, mem: String, registry: Arc<Mutex<SubscriberRegistry>>) -> Self {
+        Self { id, mem, registry }
     }
 
     /// Mem name this subscription is bound to.
@@ -267,7 +259,10 @@ impl super::Engine {
         &self,
         mem: &str,
     ) -> Result<
-        (SubscriptionHandle, tokio::sync::broadcast::Receiver<MemChangedEvent>),
+        (
+            SubscriptionHandle,
+            tokio::sync::broadcast::Receiver<MemChangedEvent>,
+        ),
         crate::EngineError,
     > {
         self.subscribe_mem_changes_broadcast_with_capacity(mem, DEFAULT_BROADCAST_CAPACITY)
@@ -282,7 +277,10 @@ impl super::Engine {
         mem: &str,
         capacity: usize,
     ) -> Result<
-        (SubscriptionHandle, tokio::sync::broadcast::Receiver<MemChangedEvent>),
+        (
+            SubscriptionHandle,
+            tokio::sync::broadcast::Receiver<MemChangedEvent>,
+        ),
         crate::EngineError,
     > {
         let (tx, rx) = tokio::sync::broadcast::channel(capacity);
@@ -631,9 +629,7 @@ mod tests {
         #[test]
         fn broadcast_receiver_delivers_events_after_mutation() {
             let (mut engine, _tmp) = writable_specs_engine();
-            let (_handle, mut rx) = engine
-                .subscribe_mem_changes_broadcast("specs")
-                .unwrap();
+            let (_handle, mut rx) = engine.subscribe_mem_changes_broadcast("specs").unwrap();
 
             let (actor, client) = cli_actor();
             engine

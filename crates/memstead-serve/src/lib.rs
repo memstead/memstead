@@ -41,8 +41,10 @@ use tokio::sync::Mutex;
 /// built-in placeholder landing.
 static SITE: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/site");
 
-use memstead_base::{Engine, EntityId, Mount, MountCapability, MountLifecycle, MountStorage, render};
 use memstead_base::render::OriginClass;
+use memstead_base::{
+    Engine, EntityId, Mount, MountCapability, MountLifecycle, MountStorage, render,
+};
 
 /// Writable multi-tenant remote-MCP session server — the additive
 /// counterpart to the read-only surface in this module.
@@ -182,7 +184,10 @@ pub fn build_router(state: AppState) -> Router {
     let read = if state.soft_launch {
         Router::new()
             .route("/try/llms.txt", get(runbook_handler))
-            .route("/try/.well-known/memstead-authority.json", get(authority_handler))
+            .route(
+                "/try/.well-known/memstead-authority.json",
+                get(authority_handler),
+            )
             .route("/try/agent", get(agent_handler))
             .route("/try/overview", get(overview_handler))
             .route("/try/entities", get(entities_handler))
@@ -192,7 +197,10 @@ pub fn build_router(state: AppState) -> Router {
     } else {
         Router::new()
             .route("/llms.txt", get(runbook_handler))
-            .route("/.well-known/memstead-authority.json", get(authority_handler))
+            .route(
+                "/.well-known/memstead-authority.json",
+                get(authority_handler),
+            )
             .route("/agent", get(agent_handler))
             .route("/overview", get(overview_handler))
             .route("/entities", get(entities_handler))
@@ -442,11 +450,7 @@ async fn robots_handler(State(state): State<AppState>) -> Response {
     } else {
         "User-agent: *\nDisallow:\n"
     };
-    (
-        [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
-        body,
-    )
-        .into_response()
+    ([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], body).into_response()
 }
 
 /// Fallback for every GET path no route claimed — serves files from the
@@ -657,9 +661,16 @@ fn linkify_anchored(
 /// brackets — so an entity page's relationships and inline references become
 /// followable `/entity/<id>` anchors (the shared render emits bare `[[<id>]]`,
 /// dead for an HTML reader).
-fn linkify_wikilinks(mut body: String, id_titles: &[(String, String)], href_prefix: &str) -> String {
+fn linkify_wikilinks(
+    mut body: String,
+    id_titles: &[(String, String)],
+    href_prefix: &str,
+) -> String {
     for (id, title) in id_titles {
-        body = body.replace(&format!("[[{id}]]"), &entity_md_link(href_prefix, id, title));
+        body = body.replace(
+            &format!("[[{id}]]"),
+            &entity_md_link(href_prefix, id, title),
+        );
     }
     body
 }
@@ -698,7 +709,9 @@ fn linkify_overview(markdown: String, id_titles: &[(String, String)], href_prefi
 }
 
 async fn overview_handler(State(state): State<AppState>) -> Response {
-    use memstead_engine::overview::{ComposeOverviewError, OverviewArgs, Surface, compose_overview};
+    use memstead_engine::overview::{
+        ComposeOverviewError, OverviewArgs, Surface, compose_overview,
+    };
     let mut guard = state.engine.lock().await;
     let args = OverviewArgs {
         include: &[],
@@ -714,11 +727,14 @@ async fn overview_handler(State(state): State<AppState>) -> Response {
             let id_titles = entity_id_titles(&guard);
             let rp = state.read_prefix();
             let markdown = linkify_overview(out.markdown, &id_titles, rp);
-            let nav = nav_links(rp, &[
-                ("/agent", "agent"),
-                ("/entities", "entities"),
-                ("/schema", "schema"),
-            ]);
+            let nav = nav_links(
+                rp,
+                &[
+                    ("/agent", "agent"),
+                    ("/entities", "entities"),
+                    ("/schema", "schema"),
+                ],
+            );
             let body = format!("{nav}{}", markdown_to_html_body(&markdown));
             let title = format!("{} — overview", state.authority);
             html_page_response(html_document(&title, &body))
@@ -753,7 +769,9 @@ async fn overview_handler(State(state): State<AppState>) -> Response {
 // (escaping is for correct rendering; the inputs are trusted, not hostile).
 
 fn esc_html(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 /// Replace markdown links `[text](url)` with `<a href="url">text</a>`. Operates
@@ -945,18 +963,19 @@ fn nav_links(href_prefix: &str, links: &[(&str, &str)]) -> String {
         if i > 0 {
             s.push_str(" · ");
         }
-        s.push_str(&format!("<a href=\"{}{}\">{}</a>", href_prefix, href, esc_html(label)));
+        s.push_str(&format!(
+            "<a href=\"{}{}\">{}</a>",
+            href_prefix,
+            href,
+            esc_html(label)
+        ));
     }
     s.push_str("</nav>\n");
     s
 }
 
 fn html_page_response(body: String) -> Response {
-    (
-        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
-        body,
-    )
-        .into_response()
+    ([(header::CONTENT_TYPE, "text/html; charset=utf-8")], body).into_response()
 }
 
 // ---------------------------------------------------------------------------
@@ -968,11 +987,14 @@ fn html_page_response(body: String) -> Response {
 /// kept short so it survives a fetch tool's summarisation. Pure HTML; the
 /// authority and mem (the graph's subject) are interpolated.
 fn agent_page(authority: &str, mem: &str, rp: &str) -> String {
-    let nav = nav_links(rp, &[
-        ("/overview", "overview"),
-        ("/entities", "entities"),
-        ("/schema", "schema"),
-    ]);
+    let nav = nav_links(
+        rp,
+        &[
+            ("/overview", "overview"),
+            ("/entities", "entities"),
+            ("/schema", "schema"),
+        ],
+    );
     let a = esc_html(authority);
     let v = esc_html(mem);
     let body = format!(
@@ -1098,7 +1120,7 @@ async fn entities_handler(
     State(state): State<AppState>,
     Query(params): Query<ListQueryParams>,
 ) -> Response {
-    let limit = params.limit.unwrap_or(500).min(2000).max(1);
+    let limit = params.limit.unwrap_or(500).clamp(1, 2000);
     let offset = params.offset.unwrap_or(0);
     let engine = state.engine.lock().await;
 
@@ -1139,21 +1161,22 @@ async fn entities_handler(
     let mut page_nav = String::from("<nav>");
     if offset > 0 {
         let prev = offset.saturating_sub(limit);
-        page_nav.push_str(&format!("<a href=\"{rp}/entities?offset={prev}&limit={limit}\">prev</a>"));
+        page_nav.push_str(&format!(
+            "<a href=\"{rp}/entities?offset={prev}&limit={limit}\">prev</a>"
+        ));
     }
     if has_more {
         if offset > 0 {
             page_nav.push_str(" · ");
         }
-        page_nav
-            .push_str(&format!("<a href=\"{rp}/entities?offset={next_offset}&limit={limit}\">next</a>"));
+        page_nav.push_str(&format!(
+            "<a href=\"{rp}/entities?offset={next_offset}&limit={limit}\">next</a>"
+        ));
     }
     page_nav.push_str("</nav>\n");
 
     let top_nav = nav_links(rp, &[("/overview", "overview"), ("/agent", "agent")]);
-    let body = format!(
-        "{top_nav}<h1>Entities ({total})</h1>\n{list}{page_nav}"
-    );
+    let body = format!("{top_nav}<h1>Entities ({total})</h1>\n{list}{page_nav}");
     let title = format!("{} — entities", state.authority);
     html_page_response(html_document(&title, &body))
 }
@@ -1184,12 +1207,14 @@ async fn schema_handler(State(state): State<AppState>) -> Response {
     };
     // Content as-is: the existing schema rendering, presented as HTML.
     let md = render::render_type_catalog_markdown_for(&schema);
-    let nav = nav_links(state.read_prefix(), &[("/overview", "overview"), ("/agent", "agent")]);
+    let nav = nav_links(
+        state.read_prefix(),
+        &[("/overview", "overview"), ("/agent", "agent")],
+    );
     let body = format!("{nav}{}", markdown_to_html_body(&md));
     let title = format!("{} — schema", state.authority);
     html_page_response(html_document(&title, &body))
 }
-
 
 // ---------------------------------------------------------------------------
 // `/mcp` — native streamable-HTTP MCP endpoint, scoped to the read tools
@@ -1235,7 +1260,10 @@ impl ReadOnlyMcpServer {
 
     /// Build from a pre-mounted read-only [`Engine`].
     pub fn from_engine(engine: Engine) -> Self {
-        Self::new(FilesystemMcpServer::from_engine(engine, std::path::PathBuf::new()))
+        Self::new(FilesystemMcpServer::from_engine(
+            engine,
+            std::path::PathBuf::new(),
+        ))
     }
 
     /// The scoped tool list: the lean router's tools filtered to the five
@@ -1426,7 +1454,12 @@ pub fn build_unified_app(
     // drives both halves: read pages under `/try`, the MCP endpoint at `/try/mcp`.
     let soft_launch = state.soft_launch;
     build_router(state)
-        .merge(crate::session::sketch_router(registry, sketch_schema, view_base, soft_launch))
+        .merge(crate::session::sketch_router(
+            registry,
+            sketch_schema,
+            view_base,
+            soft_launch,
+        ))
         .layer(GovernorLayer::new(governor_conf))
 }
 
@@ -1533,15 +1566,28 @@ Widgets compose into larger systems; modularity is why they matter.\n",
     fn embedded_content_materializes_the_curated_concepts() {
         let names: Vec<String> = super::EMBEDDED_CONTENT
             .files()
-            .filter_map(|f| f.path().file_name().map(|n| n.to_string_lossy().into_owned()))
+            .filter_map(|f| {
+                f.path()
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+            })
             .collect();
-        assert!(names.len() >= 11, "embedded content carries the concept files: {names:?}");
+        assert!(
+            names.len() >= 11,
+            "embedded content carries the concept files: {names:?}"
+        );
         for expected in ["memstead.md", "mem.md", "schema.md", "mcp-layer.md"] {
-            assert!(names.iter().any(|n| n == expected), "embedded {expected}: {names:?}");
+            assert!(
+                names.iter().any(|n| n == expected),
+                "embedded {expected}: {names:?}"
+            );
         }
 
         let dir = super::materialize_embedded_content().expect("materialize embedded content");
-        assert!(dir.join("memstead.md").is_file(), "materialized memstead.md");
+        assert!(
+            dir.join("memstead.md").is_file(),
+            "materialized memstead.md"
+        );
         assert!(dir.join("schema.md").is_file(), "materialized schema.md");
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -1551,8 +1597,11 @@ Widgets compose into larger systems; modularity is why they matter.\n",
         let (state, _tmp) = test_state();
         let app = build_router(state);
 
-        for (uri, accept) in [("/llms.txt", None), ("/", Some("text/markdown")), ("/", Some("*/*"))]
-        {
+        for (uri, accept) in [
+            ("/llms.txt", None),
+            ("/", Some("text/markdown")),
+            ("/", Some("*/*")),
+        ] {
             let (status, headers, body) = get(&app, uri, accept).await;
             assert_eq!(status, StatusCode::OK, "{uri} {accept:?}");
             assert!(
@@ -1569,7 +1618,10 @@ Widgets compose into larger systems; modularity is why they matter.\n",
             assert!(body.contains("/overview"), "{uri} names the overview map");
             assert!(body.contains("/mcp"), "{uri} carries the MCP-upgrade line");
             // The /api channels are gone — the runbook must not advertise them.
-            assert!(!body.contains("/api/"), "{uri} must not name any /api route");
+            assert!(
+                !body.contains("/api/"),
+                "{uri} must not name any /api route"
+            );
         }
     }
 
@@ -1728,7 +1780,10 @@ Widgets compose into larger systems; modularity is why they matter.\n",
         assert_eq!(status, StatusCode::OK);
         assert!(content_type(&headers).contains("text/html"));
         // The schema summary leads the composer's content.
-        assert!(body.contains("default@1.0.0"), "overview names the schema: {body}");
+        assert!(
+            body.contains("default@1.0.0"),
+            "overview names the schema: {body}"
+        );
         // Every in-budget entity is a relative <a href> anchor.
         assert!(
             body.contains(&format!("<a href=\"/entity/{id}\">")),
@@ -1742,7 +1797,10 @@ Widgets compose into larger systems; modularity is why they matter.\n",
             );
         }
         // No raw markdown link syntax leaked through the conversion.
-        assert!(!body.contains("](/entity/"), "no raw markdown link syntax: {body}");
+        assert!(
+            !body.contains("](/entity/"),
+            "no raw markdown link syntax: {body}"
+        );
         // Every mention of the id is part of an /entity/<id> href — no bare id.
         assert_eq!(
             body.matches(&id).count(),
@@ -1814,7 +1872,10 @@ Widgets compose into larger systems; modularity is why they matter.\n",
         );
         // Nav to the sibling pages.
         for href in ["/overview", "/agent"] {
-            assert!(body.contains(&format!("<a href=\"{href}\">")), "links to {href}: {body}");
+            assert!(
+                body.contains(&format!("<a href=\"{href}\">")),
+                "links to {href}: {body}"
+            );
         }
 
         // Paging: an out-of-range offset yields an empty (or last) page, not a 500.
@@ -1829,7 +1890,10 @@ Widgets compose into larger systems; modularity is why they matter.\n",
         // entity on its page.
         let (status, _h, body) = get(&app, "/entities?offset=0&limit=1", None).await;
         assert_eq!(status, StatusCode::OK);
-        assert!(body.contains(&format!("<a href=\"/entity/{id}\">")), "first page lists it: {body}");
+        assert!(
+            body.contains(&format!("<a href=\"/entity/{id}\">")),
+            "first page lists it: {body}"
+        );
     }
 
     #[tokio::test]
@@ -1870,10 +1934,16 @@ Widgets compose into larger systems; modularity is why they matter.\n",
         // Title, type, and body are present.
         assert!(body.contains("<h1>Widget</h1>"), "title heading: {body}");
         assert!(body.contains("Type: concept"), "type is shown: {body}");
-        assert!(body.contains("self-contained"), "body content is shown: {body}");
+        assert!(
+            body.contains("self-contained"),
+            "body content is shown: {body}"
+        );
         // Links back to /overview and /agent.
         for href in ["/overview", "/agent"] {
-            assert!(body.contains(&format!("<a href=\"{href}\">")), "links to {href}: {body}");
+            assert!(
+                body.contains(&format!("<a href=\"{href}\">")),
+                "links to {href}: {body}"
+            );
         }
 
         // Unknown id → 404, not a 200 page.
@@ -1894,8 +1964,8 @@ Widgets compose into larger systems; modularity is why they matter.\n",
         for hostile in [
             "..%2F..%2F..%2Fetc%2Fpasswd",
             "%2e%2e%2f%2e%2e%2fsecret",
-            "%27%20OR%201%3D1--",                 // ' OR 1=1--
-            "%00null",                            // NUL injection
+            "%27%20OR%201%3D1--",                  // ' OR 1=1--
+            "%00null",                             // NUL injection
             "%3Cscript%3Ealert(1)%3C%2Fscript%3E", // <script>alert(1)</script>
             "....//....//etc/passwd",
         ] {
@@ -1919,10 +1989,16 @@ Widgets compose into larger systems; modularity is why they matter.\n",
         assert_eq!(status, StatusCode::OK);
         assert!(content_type(&headers).contains("text/html"));
         // The type/relationship vocabulary, content as-is, rendered as HTML.
-        assert!(body.contains("Available types"), "schema lists the types: {body}");
+        assert!(
+            body.contains("Available types"),
+            "schema lists the types: {body}"
+        );
         // Reachable from /overview and /agent (the nav).
         for href in ["/overview", "/agent"] {
-            assert!(body.contains(&format!("<a href=\"{href}\">")), "links to {href}: {body}");
+            assert!(
+                body.contains(&format!("<a href=\"{href}\">")),
+                "links to {href}: {body}"
+            );
         }
     }
 
@@ -1959,7 +2035,10 @@ Widgets compose into larger systems; modularity is why they matter.\n",
         // Schema page — reachable and naming the same schema vocabulary.
         let (status, _h, body) = get(&app, "/schema", None).await;
         assert_eq!(status, StatusCode::OK);
-        assert!(body.contains("Available types"), "schema page renders the vocabulary: {body}");
+        assert!(
+            body.contains("Available types"),
+            "schema page renders the vocabulary: {body}"
+        );
     }
 
     /// Overview layout under the sealed read-only mount: the rendered map opens
@@ -1992,8 +2071,14 @@ Widgets compose into larger systems; modularity is why they matter.\n",
         );
 
         // Nothing actionable dropped — Mems and Communities remain reachable.
-        assert!(body.contains("<h2>Mems</h2>"), "Mems section remains: {body}");
-        assert!(body.contains("<h2>Communities</h2>"), "Communities section remains: {body}");
+        assert!(
+            body.contains("<h2>Mems</h2>"),
+            "Mems section remains: {body}"
+        );
+        assert!(
+            body.contains("<h2>Communities</h2>"),
+            "Communities section remains: {body}"
+        );
     }
 
     /// Read-only invariant: every registered route is GET-only, so a POST
@@ -2066,14 +2151,26 @@ Widgets compose into larger systems; modularity is why they matter.\n",
         ] {
             let (status, headers, body) = get(&app, &uri, None).await;
             assert_eq!(status, StatusCode::OK, "{uri}");
-            assert!(content_type(&headers).contains("text/html"), "{uri} is html");
+            assert!(
+                content_type(&headers).contains("text/html"),
+                "{uri} is html"
+            );
             assert!(
                 body.starts_with("<!doctype html>") && body.contains("</html>"),
                 "{uri} must be a framed HTML document: {body}"
             );
-            assert!(!body.contains("<style"), "{uri} must carry no <style>: {body}");
-            assert!(!body.contains("<script"), "{uri} must carry no <script>: {body}");
-            assert!(!body.contains("class="), "{uri} must carry no class attribute: {body}");
+            assert!(
+                !body.contains("<style"),
+                "{uri} must carry no <style>: {body}"
+            );
+            assert!(
+                !body.contains("<script"),
+                "{uri} must carry no <script>: {body}"
+            );
+            assert!(
+                !body.contains("class="),
+                "{uri} must carry no class attribute: {body}"
+            );
             // No absolute authority href in the navigable body (the manifest is
             // exempt; these are graph pages).
             assert!(
@@ -2102,7 +2199,10 @@ Widgets compose into larger systems; modularity is why they matter.\n",
         assert_eq!(status, StatusCode::OK);
         assert!(content_type(&headers).contains("text/html"));
         // Job 1 — what this is.
-        assert!(body.contains("This is Memstead"), "names what this is: {body}");
+        assert!(
+            body.contains("This is Memstead"),
+            "names what this is: {body}"
+        );
         // Job 2 — how to read it: names the read pages and that MCP is needed to
         // search or write.
         for href in ["/overview", "/entities", "/schema"] {
@@ -2145,7 +2245,10 @@ Widgets compose into larger systems; modularity is why they matter.\n",
         let (status, _h, overview) = get(&app, "/overview", None).await;
         assert_eq!(status, StatusCode::OK);
         let href = format!("/entity/{id}");
-        assert!(overview.contains(&format!("<a href=\"{href}\">")), "map links the entity: {overview}");
+        assert!(
+            overview.contains(&format!("<a href=\"{href}\">")),
+            "map links the entity: {overview}"
+        );
 
         // 4. Read the answer from the entity the map handed back.
         let (status, _h, entity) = get(&app, &href, None).await;
@@ -2170,7 +2273,10 @@ Widgets compose into larger systems; modularity is why they matter.\n",
         sorted.sort();
         let mut expected: Vec<String> = MCP_READ_TOOLS.iter().map(|s| s.to_string()).collect();
         expected.sort();
-        assert_eq!(sorted, expected, "/mcp must list exactly the five read tools");
+        assert_eq!(
+            sorted, expected,
+            "/mcp must list exactly the five read tools"
+        );
 
         let full: Vec<String> = FilesystemMcpServer::tool_router()
             .list_all()
@@ -2271,7 +2377,11 @@ Widgets compose into larger systems; modularity is why they matter.\n",
     /// `(status, mcp-session-id, body)`. The body is the raw streamable-HTTP
     /// response (an SSE `event: message` frame for request methods); tool names
     /// are asserted by substring, no SSE parsing needed.
-    async fn mcp_post(app: &Router, body: &str, session: Option<&str>) -> (StatusCode, Option<String>, String) {
+    async fn mcp_post(
+        app: &Router,
+        body: &str,
+        session: Option<&str>,
+    ) -> (StatusCode, Option<String>, String) {
         let mut req = Request::builder()
             .method("POST")
             .uri("/mcp")
@@ -2281,7 +2391,11 @@ Widgets compose into larger systems; modularity is why they matter.\n",
         if let Some(s) = session {
             req = req.header("mcp-session-id", s);
         }
-        let resp = app.clone().oneshot(req.body(Body::from(body.to_string())).unwrap()).await.unwrap();
+        let resp = app
+            .clone()
+            .oneshot(req.body(Body::from(body.to_string())).unwrap())
+            .await
+            .unwrap();
         let status = resp.status();
         let sid = resp
             .headers()
@@ -2327,10 +2441,22 @@ Widgets compose into larger systems; modularity is why they matter.\n",
         let (status, _sid, body) = mcp_post(&app, list, Some(&sid)).await;
         assert_eq!(status, StatusCode::OK, "tools/list must return 200: {body}");
         for available in MCP_READ_TOOLS {
-            assert!(body.contains(available), "tools/list names {available}: {body}");
+            assert!(
+                body.contains(available),
+                "tools/list names {available}: {body}"
+            );
         }
-        for absent in ["memstead_create", "memstead_update", "memstead_delete", "memstead_relate", "memstead_rename"] {
-            assert!(!body.contains(absent), "tools/list must not name {absent}: {body}");
+        for absent in [
+            "memstead_create",
+            "memstead_update",
+            "memstead_delete",
+            "memstead_relate",
+            "memstead_rename",
+        ] {
+            assert!(
+                !body.contains(absent),
+                "tools/list must not name {absent}: {body}"
+            );
         }
     }
 
@@ -2385,7 +2511,10 @@ Widgets compose into larger systems; modularity is why they matter.\n",
         // (HTML here, markdown below) is what this test guards.
         let (status, headers, html) = get(&app, "/", Some("text/html")).await;
         assert_eq!(status, StatusCode::OK);
-        assert!(content_type(&headers).contains("text/html"), "browser gets HTML");
+        assert!(
+            content_type(&headers).contains("text/html"),
+            "browser gets HTML"
+        );
         if SITE.get_file("index.html").is_some() {
             // Embedded Astro build — the lean runbook surface (its full content
             // markers are asserted by the embedded-landing test).
@@ -2404,7 +2533,10 @@ Widgets compose into larger systems; modularity is why they matter.\n",
                 html.contains("mem.example"),
                 "placeholder carries the bare URL to hand a fetch agent"
             );
-            assert!(html.contains("mem-graph"), "placeholder carries the graph mount");
+            assert!(
+                html.contains("mem-graph"),
+                "placeholder carries the graph mount"
+            );
         }
 
         // Polarity: agent surfaces unchanged across markdown, */*, and absent.
@@ -2487,10 +2619,23 @@ Widgets compose into larger systems; modularity is why they matter.\n",
         for accept in [None, Some("*/*"), Some("text/markdown")] {
             let (status, _h, body) = get(&app, "/", accept).await;
             assert_eq!(status, StatusCode::OK);
-            for needle in ["/agent", "/overview", "/llms.txt", "/mcp", "/try", "/.well-known"] {
-                assert!(!body.contains(needle), "gated `/` ({accept:?}) leaks `{needle}`:\n{body}");
+            for needle in [
+                "/agent",
+                "/overview",
+                "/llms.txt",
+                "/mcp",
+                "/try",
+                "/.well-known",
+            ] {
+                assert!(
+                    !body.contains(needle),
+                    "gated `/` ({accept:?}) leaks `{needle}`:\n{body}"
+                );
             }
-            assert!(body.to_lowercase().contains("coming soon"), "{accept:?}: {body}");
+            assert!(
+                body.to_lowercase().contains("coming soon"),
+                "{accept:?}: {body}"
+            );
         }
     }
 
@@ -2529,14 +2674,23 @@ Widgets compose into larger systems; modularity is why they matter.\n",
         let app_on = build_router(state_on.with_soft_launch(true));
         let (status, _h, body) = get(&app_on, "/robots.txt", None).await;
         assert_eq!(status, StatusCode::OK);
-        assert!(!body.contains("Disallow: /"), "ON robots must not block root: {body}");
-        assert!(!body.contains("/try"), "ON robots must not name /try: {body}");
+        assert!(
+            !body.contains("Disallow: /"),
+            "ON robots must not block root: {body}"
+        );
+        assert!(
+            !body.contains("/try"),
+            "ON robots must not name /try: {body}"
+        );
 
         // OFF: crawlable, not the pre-gate blanket ban.
         let (state_off, _t2) = test_state();
         let app_off = build_router(state_off);
         let (_s, _h, body_off) = get(&app_off, "/robots.txt", None).await;
-        assert!(!body_off.contains("Disallow: /"), "OFF robots is crawlable: {body_off}");
+        assert!(
+            !body_off.contains("Disallow: /"),
+            "OFF robots is crawlable: {body_off}"
+        );
     }
 
     #[tokio::test]
@@ -2545,19 +2699,40 @@ Widgets compose into larger systems; modularity is why they matter.\n",
         let app = build_router(state.with_soft_launch(true));
 
         // Top-level read routes are gone while gated.
-        for path in ["/agent", "/overview", "/entities", "/schema", "/llms.txt",
-                     "/.well-known/memstead-authority.json", &format!("/entity/{id}")] {
+        for path in [
+            "/agent",
+            "/overview",
+            "/entities",
+            "/schema",
+            "/llms.txt",
+            "/.well-known/memstead-authority.json",
+            &format!("/entity/{id}"),
+        ] {
             let (status, headers, _b) = get(&app, path, None).await;
-            assert_eq!(status, StatusCode::NOT_FOUND, "top-level {path} must 404 while gated");
+            assert_eq!(
+                status,
+                StatusCode::NOT_FOUND,
+                "top-level {path} must 404 while gated"
+            );
             assert!(headers.get("x-robots-tag").is_none(), "{path}");
         }
 
         // Under /try they answer, and carry noindex.
-        for path in ["/try/agent", "/try/overview", "/try/entities", "/try/schema",
-                     "/try/llms.txt", "/try/.well-known/memstead-authority.json",
-                     &format!("/try/entity/{id}")] {
+        for path in [
+            "/try/agent",
+            "/try/overview",
+            "/try/entities",
+            "/try/schema",
+            "/try/llms.txt",
+            "/try/.well-known/memstead-authority.json",
+            &format!("/try/entity/{id}"),
+        ] {
             let (status, headers, _b) = get(&app, path, None).await;
-            assert_eq!(status, StatusCode::OK, "gated {path} must answer under /try");
+            assert_eq!(
+                status,
+                StatusCode::OK,
+                "gated {path} must answer under /try"
+            );
             assert_eq!(
                 headers.get("x-robots-tag").and_then(|v| v.to_str().ok()),
                 Some("noindex"),
@@ -2573,28 +2748,51 @@ Widgets compose into larger systems; modularity is why they matter.\n",
 
         // The overview map links entities and nav within /try, never at top-level.
         let (_s, _h, overview) = get(&app, "/try/overview", None).await;
-        assert!(overview.contains(&format!("/try/entity/{id}")), "overview links within /try: {overview}");
-        assert!(overview.contains("\"/try/agent\""), "nav points within /try: {overview}");
-        assert!(!overview.contains("\"/overview\""), "no bare top-level nav: {overview}");
+        assert!(
+            overview.contains(&format!("/try/entity/{id}")),
+            "overview links within /try: {overview}"
+        );
+        assert!(
+            overview.contains("\"/try/agent\""),
+            "nav points within /try: {overview}"
+        );
+        assert!(
+            !overview.contains("\"/overview\""),
+            "no bare top-level nav: {overview}"
+        );
 
         // The runbook (now at /try/llms.txt) breadcrumbs into /try.
         let (_s, _h, runbook) = get(&app, "/try/llms.txt", None).await;
-        assert!(runbook.contains("/try/agent"), "runbook points within /try: {runbook}");
+        assert!(
+            runbook.contains("/try/agent"),
+            "runbook points within /try: {runbook}"
+        );
 
         // The manifest's endpoints carry the /try prefix.
         let (_s, _h, manifest) = get(&app, "/try/.well-known/memstead-authority.json", None).await;
-        assert!(manifest.contains("/try/agent"), "manifest endpoints within /try: {manifest}");
+        assert!(
+            manifest.contains("/try/agent"),
+            "manifest endpoints within /try: {manifest}"
+        );
     }
 
     #[tokio::test]
     async fn gate_off_read_surface_stays_top_level() {
         let (state, _tmp, id) = seeded_state();
         let app = build_router(state); // OFF
-        for path in ["/agent", "/overview", "/llms.txt",
-                     "/.well-known/memstead-authority.json", &format!("/entity/{id}")] {
+        for path in [
+            "/agent",
+            "/overview",
+            "/llms.txt",
+            "/.well-known/memstead-authority.json",
+            &format!("/entity/{id}"),
+        ] {
             let (status, headers, _b) = get(&app, path, None).await;
             assert_eq!(status, StatusCode::OK, "public {path} answers at top-level");
-            assert!(headers.get("x-robots-tag").is_none(), "public {path} is indexable");
+            assert!(
+                headers.get("x-robots-tag").is_none(),
+                "public {path} is indexable"
+            );
         }
         // And nothing is mounted under /try.
         let (status, _h, _b) = get(&app, "/try/agent", None).await;

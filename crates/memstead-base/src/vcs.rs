@@ -241,11 +241,7 @@ pub fn format_commit_message(prose: &str, ctx: &CommitContext<'_>) -> String {
     if let Some(ids) = ctx.entity_ids.as_ref().filter(|v| !v.is_empty()) {
         trailers.push(format!("Entities: {}", ids.join(", ")));
     }
-    let note_body = ctx
-        .note
-        .as_deref()
-        .map(str::trim)
-        .filter(|n| !n.is_empty());
+    let note_body = ctx.note.as_deref().map(str::trim).filter(|n| !n.is_empty());
     match note_body {
         Some(note) => format!("{trimmed}\n\n{note}\n\n{}", trailers.join("\n")),
         None => format!("{trimmed}\n\n{}", trailers.join("\n")),

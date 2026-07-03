@@ -76,7 +76,10 @@ write_rules:
     .to_string()
 }
 
-fn load(manifest: &str, types: &[(&str, &str)]) -> Result<memstead_schema::schema::Schema, SchemaLoadError> {
+fn load(
+    manifest: &str,
+    types: &[(&str, &str)],
+) -> Result<memstead_schema::schema::Schema, SchemaLoadError> {
     let owned: Vec<(String, String)> = types
         .iter()
         .map(|(n, c)| ((*n).to_string(), (*c).to_string()))
@@ -113,35 +116,50 @@ fn manifest_rejects_unknown_field() {
 fn manifest_rejects_invalid_semver() {
     let manifest = minimal_manifest().replace("version: 1.0.0", "version: one-point-oh");
     let err = load(&manifest, &[("sample", &minimal_type())]).expect_err("must fail");
-    assert!(matches!(err, SchemaLoadError::InvalidVersion { .. }), "got: {err}");
+    assert!(
+        matches!(err, SchemaLoadError::InvalidVersion { .. }),
+        "got: {err}"
+    );
 }
 
 #[test]
 fn manifest_rejects_invalid_name_uppercase() {
     let manifest = minimal_manifest().replace("name: example", "name: Example");
     let err = load(&manifest, &[("sample", &minimal_type())]).expect_err("must fail");
-    assert!(matches!(err, SchemaLoadError::InvalidName { .. }), "got: {err}");
+    assert!(
+        matches!(err, SchemaLoadError::InvalidName { .. }),
+        "got: {err}"
+    );
 }
 
 #[test]
 fn manifest_rejects_invalid_name_spaces() {
     let manifest = minimal_manifest().replace("name: example", "name: \"has spaces\"");
     let err = load(&manifest, &[("sample", &minimal_type())]).expect_err("must fail");
-    assert!(matches!(err, SchemaLoadError::InvalidName { .. }), "got: {err}");
+    assert!(
+        matches!(err, SchemaLoadError::InvalidName { .. }),
+        "got: {err}"
+    );
 }
 
 #[test]
 fn manifest_rejects_invalid_name_empty() {
     let manifest = minimal_manifest().replace("name: example", "name: \"\"");
     let err = load(&manifest, &[("sample", &minimal_type())]).expect_err("must fail");
-    assert!(matches!(err, SchemaLoadError::InvalidName { .. }), "got: {err}");
+    assert!(
+        matches!(err, SchemaLoadError::InvalidName { .. }),
+        "got: {err}"
+    );
 }
 
 #[test]
 fn manifest_rejects_invalid_name_starts_with_digit() {
     let manifest = minimal_manifest().replace("name: example", "name: 1schema");
     let err = load(&manifest, &[("sample", &minimal_type())]).expect_err("must fail");
-    assert!(matches!(err, SchemaLoadError::InvalidName { .. }), "got: {err}");
+    assert!(
+        matches!(err, SchemaLoadError::InvalidName { .. }),
+        "got: {err}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -165,14 +183,20 @@ fn type_file_count_must_match_types_list_extras() {
         &[("sample", &minimal_type()), ("extra", &minimal_type())],
     )
     .expect_err("must fail");
-    assert!(matches!(err, SchemaLoadError::TypeFileMismatch { .. }), "got: {err}");
+    assert!(
+        matches!(err, SchemaLoadError::TypeFileMismatch { .. }),
+        "got: {err}"
+    );
 }
 
 #[test]
 fn type_file_count_must_match_types_list_missing() {
     let manifest = minimal_manifest().replace("  - sample\n", "  - sample\n  - extra\n");
     let err = load(&manifest, &[("sample", &minimal_type())]).expect_err("must fail");
-    assert!(matches!(err, SchemaLoadError::TypeFileMismatch { .. }), "got: {err}");
+    assert!(
+        matches!(err, SchemaLoadError::TypeFileMismatch { .. }),
+        "got: {err}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -195,7 +219,10 @@ fn default_weight_required() {
         "",
     );
     let err = load(&manifest, &[("sample", &minimal_type())]).expect_err("must fail");
-    assert!(matches!(err, SchemaLoadError::MissingDefaultWeight), "got: {err}");
+    assert!(
+        matches!(err, SchemaLoadError::MissingDefaultWeight),
+        "got: {err}"
+    );
 }
 
 #[test]
@@ -238,7 +265,10 @@ fn acyclic_rejects_non_boolean() {
         "    - name: PART_OF\n      description: Hierarchical containment\n      default_weight: 3.0\n      acyclic: maybe\n",
     );
     let err = load(&manifest, &[("sample", &minimal_type())]).expect_err("must fail");
-    assert!(matches!(err, SchemaLoadError::ParseManifest { .. }), "got: {err}");
+    assert!(
+        matches!(err, SchemaLoadError::ParseManifest { .. }),
+        "got: {err}"
+    );
 }
 
 #[test]
@@ -380,7 +410,10 @@ fn error_message_includes_closest_match() {
     );
     let err = load(&minimal_manifest(), &[("sample", &t)]).expect_err("must fail");
     let msg = format!("{err}");
-    assert!(msg.contains("PART_OFF"), "message must mention the offender: {msg}");
+    assert!(
+        msg.contains("PART_OFF"),
+        "message must mention the offender: {msg}"
+    );
     assert!(
         msg.contains("Did you mean 'PART_OF'"),
         "expected closest-match hint, got: {msg}"
@@ -455,9 +488,15 @@ fn base_metadata_carries_engine_flags() {
     let td = schema.get_type("sample").unwrap();
 
     let created = td.metadata_field("created_date").unwrap();
-    assert!(created.init_timestamp, "created_date must keep init_timestamp");
+    assert!(
+        created.init_timestamp,
+        "created_date must keep init_timestamp"
+    );
     let modified = td.metadata_field("last_modified").unwrap();
-    assert!(modified.auto_timestamp, "last_modified must keep auto_timestamp");
+    assert!(
+        modified.auto_timestamp,
+        "last_modified must keep auto_timestamp"
+    );
     let tags = td.metadata_field("tags").unwrap();
     assert!(tags.optional, "tags must be optional by default");
 }
@@ -563,7 +602,10 @@ fn per_edge_description_round_trips_through_loader() {
     let references = schema
         .relationship_def("REFERENCES")
         .expect("REFERENCES declared");
-    assert_eq!(references.per_edge_description, PerEdgeDescription::Optional);
+    assert_eq!(
+        references.per_edge_description,
+        PerEdgeDescription::Optional
+    );
 }
 
 /// `manual_authoring`
@@ -795,10 +837,7 @@ fn default_writing_guidance_round_trips_through_loader() {
         .default_writing_guidance
         .as_ref()
         .expect("default_writing_guidance present");
-    assert_eq!(
-        dwg.avoid.as_deref(),
-        Some("Schema-default avoid prose.\n"),
-    );
+    assert_eq!(dwg.avoid.as_deref(), Some("Schema-default avoid prose.\n"),);
     assert_eq!(dwg.goal.as_deref(), Some("Schema-default goal prose.\n"));
 }
 
@@ -864,10 +903,7 @@ fn cross_mem_relationships_omitted_loads_cleanly() {
 
 #[test]
 fn cross_mem_relationships_empty_array_loads_cleanly() {
-    let m = minimal_manifest().replace(
-        "community:",
-        "cross_mem_relationships: []\ncommunity:",
-    );
+    let m = minimal_manifest().replace("community:", "cross_mem_relationships: []\ncommunity:");
     let schema = load(&m, &[("sample", &minimal_type())]).expect("empty list loads");
     assert!(schema.manifest.cross_mem_relationships.is_empty());
 }
@@ -884,10 +920,16 @@ fn cross_mem_relationships_section_loads_well_formed_entries() {
     assert_eq!(entry.to_schema, "other");
     assert_eq!(entry.definitions.len(), 1);
     assert_eq!(entry.definitions[0].name, "ADDRESSES");
-    assert_eq!(entry.definitions[0].source_types, vec!["sample".to_string()]);
+    assert_eq!(
+        entry.definitions[0].source_types,
+        vec!["sample".to_string()]
+    );
     // Target types are opaque — they reference the target schema's
     // namespace, not the source schema's types.
-    assert_eq!(entry.definitions[0].target_types, vec!["foreign_type".to_string()]);
+    assert_eq!(
+        entry.definitions[0].target_types,
+        vec!["foreign_type".to_string()]
+    );
 }
 
 #[test]
@@ -1034,10 +1076,7 @@ fn alias_target_rel_type_round_trips_through_loader() {
 fn alias_target_rel_type_accepts_non_references_pointer() {
     // The engine must not hard-code REFERENCES. Any declared rel-type
     // name is a valid pointer.
-    let m = minimal_manifest().replace(
-        "community:",
-        "alias_target_rel_type: PART_OF\ncommunity:",
-    );
+    let m = minimal_manifest().replace("community:", "alias_target_rel_type: PART_OF\ncommunity:");
     let schema = load(&m, &[("sample", &minimal_type())])
         .expect("non-REFERENCES alias target loads cleanly");
     assert_eq!(schema.alias_target_rel_type(), Some("PART_OF"));
@@ -1049,8 +1088,7 @@ fn alias_target_rel_type_undeclared_refuses_at_load() {
         "community:",
         "alias_target_rel_type: NOT_DECLARED\ncommunity:",
     );
-    let err = load(&m, &[("sample", &minimal_type())])
-        .expect_err("undeclared pointer must refuse");
+    let err = load(&m, &[("sample", &minimal_type())]).expect_err("undeclared pointer must refuse");
     match err {
         SchemaLoadError::AliasTargetRelTypeNotDeclared {
             schema,
@@ -1067,10 +1105,8 @@ fn alias_target_rel_type_undeclared_refuses_at_load() {
 
 #[test]
 fn alias_target_rel_type_undeclared_surfaces_fuzzy_suggestion() {
-    let m = minimal_manifest().replace(
-        "community:",
-        "alias_target_rel_type: REFRENCES\ncommunity:",
-    );
+    let m =
+        minimal_manifest().replace("community:", "alias_target_rel_type: REFRENCES\ncommunity:");
     let err = load(&m, &[("sample", &minimal_type())]).expect_err("must fail");
     assert!(
         err.to_string().contains("Did you mean 'REFERENCES'?"),

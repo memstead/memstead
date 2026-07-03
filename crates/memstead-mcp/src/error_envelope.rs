@@ -30,8 +30,7 @@ use rmcp::model::{CallToolResult, Content};
 /// promise on the simple form.
 pub fn tool_error(code: &str, msg: &str) -> CallToolResult {
     let payload = serde_json::json!({ "code": code, "message": msg });
-    let mut r =
-        CallToolResult::success(vec![Content::text(format!("ERROR [{code}]: {msg}"))]);
+    let mut r = CallToolResult::success(vec![Content::text(format!("ERROR [{code}]: {msg}"))]);
     r.is_error = Some(true);
     r.structured_content = Some(payload);
     r

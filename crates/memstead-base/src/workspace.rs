@@ -103,9 +103,9 @@ impl Mount {
                     Some(trimmed.to_string())
                 }
             }
-            MountStorage::Folder { .. }
-            | MountStorage::Archive { .. }
-            | MountStorage::InMemory => None,
+            MountStorage::Folder { .. } | MountStorage::Archive { .. } | MountStorage::InMemory => {
+                None
+            }
         }
     }
 }
@@ -546,8 +546,8 @@ mod tests {
                     capability: MountCapability::Write,
                     lifecycle: MountLifecycle::Eager,
                     cross_linkable: true,
-            migration_target: None,
-        },
+                    migration_target: None,
+                },
                 Mount {
                     mem: "macos".into(),
                     schema: Some(pin("default")),
@@ -558,8 +558,8 @@ mod tests {
                     capability: MountCapability::Write,
                     lifecycle: MountLifecycle::Eager,
                     cross_linkable: true,
-            migration_target: None,
-        },
+                    migration_target: None,
+                },
                 Mount {
                     mem: "external".into(),
                     schema: Some(pin("default")),
@@ -569,8 +569,8 @@ mod tests {
                     capability: MountCapability::ReadOnly,
                     lifecycle: MountLifecycle::Lazy,
                     cross_linkable: false,
-            migration_target: None,
-        },
+                    migration_target: None,
+                },
             ],
             settings: WorkspaceSettings::default(),
         };

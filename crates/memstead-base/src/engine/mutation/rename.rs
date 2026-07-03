@@ -4,11 +4,11 @@
 use std::path::Path;
 
 use crate::engine_fallback_type;
+use crate::entity::EntityId;
 use crate::entity::generator::generate_markdown;
 use crate::entity::id::validate_and_derive_slug;
 use crate::entity::parser::parse_markdown;
 use crate::entity::store_builder::push_entities_into_store;
-use crate::entity::EntityId;
 use crate::ops::WarningHint;
 use crate::provenance::{Provenance, ProvenanceKind};
 use crate::vcs::{Actor, ClientId, CommitContext};
@@ -18,7 +18,6 @@ use super::super::{Engine, EngineError, RenameEntityArgs, RenameEntityOutcome};
 use super::{make_stub, unknown_type_error};
 
 impl Engine {
-
     /// Positional + CommitContext wrapper around
     /// [`Self::rename_entity`].
     pub fn rename_entity_with_ctx(
@@ -88,9 +87,7 @@ impl Engine {
         // `STUB_NOT_RENAMABLE` code the description list had
         // advertised since the strictness work landed.
         if entity.stub {
-            return Err(EngineError::StubNotRenamable {
-                id: id.to_string(),
-            });
+            return Err(EngineError::StubNotRenamable { id: id.to_string() });
         }
 
         if let Some(expected) = args.expected_hash.as_deref()
@@ -252,7 +249,7 @@ impl Engine {
                 MountCapability::ReadOnly => readonly_referrers.push(from_id),
             }
         }
-        readonly_referrers.sort_by(|a, b| a.to_string().cmp(&b.to_string()));
+        readonly_referrers.sort_by_key(|a| a.to_string());
 
         // Pre-flight policy gate. Each propagated referrer rewrite
         // is an edge of the form `referrer ∈ peer_mem → renamed ∈
@@ -289,8 +286,8 @@ impl Engine {
         // Deterministic iteration order so the resulting per-mem
         // pending-op replay is stable across runs (helpful for test
         // snapshots and human reviewers).
-        same_mem_ids.sort_by(|a, b| a.to_string().cmp(&b.to_string()));
-        cross_mem_write_ids.sort_by(|a, b| a.to_string().cmp(&b.to_string()));
+        same_mem_ids.sort_by_key(|a| a.to_string());
+        cross_mem_write_ids.sort_by_key(|a| a.to_string());
 
         // ----- Same-mem rewrite plan -----
         // (rewritten_markdown, file_path, type_def) per same-mem
@@ -352,11 +349,7 @@ impl Engine {
             // timestamp through from the cloned referrer. (Pre-fix this
             // stamped the shared `today` for cross-entity consistency.)
             let ref_markdown = generate_markdown(&next_ref, referrer_type_def.as_ref());
-            same_mem_writes.push((
-                ref_markdown,
-                next_ref.file_path.clone(),
-                referrer_type_def,
-            ));
+            same_mem_writes.push((ref_markdown, next_ref.file_path.clone(), referrer_type_def));
         }
 
         // ----- Cross-mem rewrite plan -----
@@ -367,7 +360,11 @@ impl Engine {
         struct PeerMemPlan {
             mount_idx: usize,
             mem: String,
-            writes: Vec<(String, String, std::sync::Arc<memstead_schema::TypeDefinition>)>,
+            writes: Vec<(
+                String,
+                String,
+                std::sync::Arc<memstead_schema::TypeDefinition>,
+            )>,
         }
         let mut peer_plans: std::collections::BTreeMap<String, PeerMemPlan> =
             std::collections::BTreeMap::new();
@@ -404,13 +401,12 @@ impl Engine {
             // form is reserved for same-mem refs and never appears
             // here.
             for body in next_ref.sections.values_mut() {
-                let (rewritten, count) =
-                    crate::entity::wikilink_rewrite::rewrite_cross_mem_slug(
-                        body,
-                        &mem,
-                        &old_slug,
-                        &new_slug_owned,
-                    );
+                let (rewritten, count) = crate::entity::wikilink_rewrite::rewrite_cross_mem_slug(
+                    body,
+                    &mem,
+                    &old_slug,
+                    &new_slug_owned,
+                );
                 if count > 0 {
                     *body = rewritten;
                 }
@@ -504,8 +500,10 @@ impl Engine {
             for (ref_markdown, ref_file_path, _) in &plan.writes {
                 peer_backend.write_entity(Path::new(ref_file_path), ref_markdown.as_bytes())?;
             }
-            let peer_commit_subject =
-                format!("memstead: rename {} → {new_id} (cross-mem rewrite in `{}`)", id, plan.mem);
+            let peer_commit_subject = format!(
+                "memstead: rename {} → {new_id} (cross-mem rewrite in `{}`)",
+                id, plan.mem
+            );
             let peer_ctx = CommitContext {
                 actor,
                 client: client.cloned(),
@@ -514,10 +512,7 @@ impl Engine {
                 logical_operation_id: Some(logical_op_id.as_str()),
                 entity_ids: None,
             };
-            let expected = peer_snapshots
-                .get(&plan.mem)
-                .cloned()
-                .unwrap_or(None);
+            let expected = peer_snapshots.get(&plan.mem).cloned().unwrap_or(None);
             let peer_commit_result = peer_backend.commit_with_expected_parent(
                 &peer_commit_subject,
                 &peer_ctx,
@@ -550,9 +545,8 @@ impl Engine {
         }
 
         // ----- Re-parse and push -----
-        let parse_result =
-            parse_markdown(&markdown, &new_file_path, type_def.as_ref(), &mem)
-                .map_err(|e| EngineError::ParseAfterWrite(e.to_string()))?;
+        let parse_result = parse_markdown(&markdown, &new_file_path, type_def.as_ref(), &mem)
+            .map_err(|e| EngineError::ParseAfterWrite(e.to_string()))?;
         let content_hash = parse_result.entity.content_hash.clone();
 
         let mut parse_results = vec![parse_result];
@@ -614,12 +608,7 @@ impl Engine {
         }
 
         let fallback = engine_fallback_type();
-        push_entities_into_store(
-            &mut self.store,
-            parse_results,
-            fallback.as_ref(),
-            None,
-        );
+        push_entities_into_store(&mut self.store, parse_results, fallback.as_ref(), None);
         crate::entity::store_builder::remap_alias_target_edge_sources(
             &mut self.store,
             &self.schemas,
@@ -674,7 +663,12 @@ mod tests {
             .unwrap();
             let (actor, client) = cli_actor();
             let seeded = engine
-                .create_entity(empty_create_args("specs", "Old Name"), actor, Some(&client), None)
+                .create_entity(
+                    empty_create_args("specs", "Old Name"),
+                    actor,
+                    Some(&client),
+                    None,
+                )
                 .unwrap();
             let outcome = engine
                 .rename_entity(
@@ -770,7 +764,6 @@ mod tests {
 
     #[test]
     fn rename_entity_rewrites_self_references_in_body_and_relationships() {
-        use crate::engine::RelateEntityArgs;
         use crate::entity::EntityId;
         use indexmap::IndexMap;
 
@@ -944,7 +937,7 @@ mod tests {
 
     #[test]
     fn rename_entity_rewrites_same_mem_referrers_atomically() {
-        use crate::engine::{CreateEntityArgs, RelateEntityArgs};
+        use crate::engine::CreateEntityArgs;
         use crate::entity::EntityId;
         use indexmap::IndexMap;
 
@@ -960,14 +953,22 @@ mod tests {
 
         // Target — the entity that will be renamed.
         let target = engine
-            .create_entity(empty_create_args("specs", "Target Spec"), actor, Some(&client), None)
+            .create_entity(
+                empty_create_args("specs", "Target Spec"),
+                actor,
+                Some(&client),
+                None,
+            )
             .unwrap();
         assert_eq!(target.id.to_string(), "specs--target-spec");
 
         // Referrer A — explicit relation declared atomically with the
         // body wiki-link. Both surfaces must be rewritten.
         let mut sections_a: IndexMap<String, String> = IndexMap::new();
-        sections_a.insert("identity".to_string(), "referrer alpha identity".to_string());
+        sections_a.insert(
+            "identity".to_string(),
+            "referrer alpha identity".to_string(),
+        );
         sections_a.insert(
             "purpose".to_string(),
             "rationale relies on [[target-spec]] for context".to_string(),
@@ -1023,7 +1024,12 @@ mod tests {
         // Bystander — no reference to the target. Must not be
         // touched on disk (its content_hash must be unchanged).
         let bystander = engine
-            .create_entity(empty_create_args("specs", "Bystander"), actor, Some(&client), None)
+            .create_entity(
+                empty_create_args("specs", "Bystander"),
+                actor,
+                Some(&client),
+                None,
+            )
             .unwrap();
         let bystander_bytes_before =
             std::fs::read_to_string(mem_dir.join(&bystander.file_path)).unwrap();
@@ -1136,7 +1142,7 @@ mod tests {
 
     #[test]
     fn rename_entity_rewrites_cross_mem_write_referrer() {
-        use crate::engine::{CreateEntityArgs, RelateEntityArgs};
+        use crate::engine::CreateEntityArgs;
         use crate::entity::EntityId;
         use indexmap::IndexMap;
 
@@ -1144,15 +1150,18 @@ mod tests {
         let tmp_memos = TempDir::new().unwrap();
         let specs_dir = tmp_specs.path().to_path_buf();
         let memos_dir = tmp_memos.path().to_path_buf();
-        let mut engine = engine_with_two_mems_and_bidirectional_policy(
-            specs_dir.clone(),
-            memos_dir.clone(),
-        );
+        let mut engine =
+            engine_with_two_mems_and_bidirectional_policy(specs_dir.clone(), memos_dir.clone());
         let (actor, client) = cli_actor();
 
         // Renaming target lives in `specs`.
         let target = engine
-            .create_entity(empty_create_args("specs", "Target Spec"), actor, Some(&client), None)
+            .create_entity(
+                empty_create_args("specs", "Target Spec"),
+                actor,
+                Some(&client),
+                None,
+            )
             .unwrap();
 
         // Cross-mem referrer in `memos` has a body wiki-link in the
@@ -1165,8 +1174,7 @@ mod tests {
         sections.insert("claim".to_string(), "the claim".to_string());
         sections.insert(
             "context".to_string(),
-            "discussion stems from [[specs:target-spec]]"
-                .to_string(),
+            "discussion stems from [[specs:target-spec]]".to_string(),
         );
         let referrer = engine
             .create_entity(
@@ -1265,10 +1273,7 @@ mod tests {
         ) -> Result<(), crate::backend::BackendError> {
             self.inner.write_entity(rel, b)
         }
-        fn delete_entity(
-            &self,
-            rel: &std::path::Path,
-        ) -> Result<(), crate::backend::BackendError> {
+        fn delete_entity(&self, rel: &std::path::Path) -> Result<(), crate::backend::BackendError> {
             self.inner.delete_entity(rel)
         }
         fn move_entity(
@@ -1291,9 +1296,9 @@ mod tests {
             c: &crate::vcs::CommitContext<'_>,
             expected_parent: Option<&str>,
         ) -> Result<crate::storage::CommitId, crate::backend::BackendError> {
-            if expected_parent.is_some() {
+            if let Some(expected) = expected_parent {
                 Err(crate::backend::BackendError::ParentMismatch {
-                    expected: expected_parent.unwrap().to_string(),
+                    expected: expected.to_string(),
                     actual: "drifted-by-sibling-writer".to_string(),
                 })
             } else {
@@ -1321,7 +1326,7 @@ mod tests {
 
     #[test]
     fn rename_entity_surfaces_partial_failure_when_peer_mem_drifts() {
-        use crate::engine::{CreateEntityArgs, RelateEntityArgs};
+        use crate::engine::CreateEntityArgs;
         use indexmap::IndexMap;
         use memstead_schema::workspace_config::CrossLinkValue;
 
@@ -1376,7 +1381,7 @@ mod tests {
             "context".to_string(),
             "see [[specs:target-spec]]".to_string(),
         );
-        let referrer = engine
+        let _referrer = engine
             .create_entity(
                 CreateEntityArgs {
                     mem: "memos".to_string(),
@@ -1433,21 +1438,24 @@ mod tests {
     #[test]
     fn rename_entity_tags_every_per_mem_commit_with_same_logical_operation_id() {
         use crate::backend::MemBackend;
-        use crate::engine::{CreateEntityArgs, RelateEntityArgs};
+        use crate::engine::CreateEntityArgs;
         use indexmap::IndexMap;
 
         let tmp_specs = TempDir::new().unwrap();
         let tmp_memos = TempDir::new().unwrap();
         let specs_dir = tmp_specs.path().to_path_buf();
         let memos_dir = tmp_memos.path().to_path_buf();
-        let mut engine = engine_with_two_mems_and_bidirectional_policy(
-            specs_dir.clone(),
-            memos_dir.clone(),
-        );
+        let mut engine =
+            engine_with_two_mems_and_bidirectional_policy(specs_dir.clone(), memos_dir.clone());
         let (actor, client) = cli_actor();
 
         let target = engine
-            .create_entity(empty_create_args("specs", "Target Spec"), actor, Some(&client), None)
+            .create_entity(
+                empty_create_args("specs", "Target Spec"),
+                actor,
+                Some(&client),
+                None,
+            )
             .unwrap();
         let mut sections: IndexMap<String, String> = IndexMap::new();
         sections.insert("claim".to_string(), "the claim".to_string());
@@ -1455,7 +1463,7 @@ mod tests {
             "context".to_string(),
             "discussion stems from [[specs:target-spec]]".to_string(),
         );
-        let referrer = engine
+        let _referrer = engine
             .create_entity(
                 CreateEntityArgs {
                     mem: "memos".to_string(),
@@ -1527,7 +1535,7 @@ mod tests {
 
     #[test]
     fn rename_entity_refuses_when_cross_mem_referrer_blocked_by_policy() {
-        use crate::engine::{CreateEntityArgs, RelateEntityArgs};
+        use crate::engine::CreateEntityArgs;
         use indexmap::IndexMap;
         use memstead_schema::workspace_config::CrossLinkValue;
 
@@ -1538,14 +1546,17 @@ mod tests {
 
         // Start with full policy so the create + cross-mem relate
         // succeed during setup.
-        let mut engine = engine_with_two_mems_and_bidirectional_policy(
-            specs_dir.clone(),
-            memos_dir.clone(),
-        );
+        let mut engine =
+            engine_with_two_mems_and_bidirectional_policy(specs_dir.clone(), memos_dir.clone());
         let (actor, client) = cli_actor();
 
         let target = engine
-            .create_entity(empty_create_args("specs", "Target Spec"), actor, Some(&client), None)
+            .create_entity(
+                empty_create_args("specs", "Target Spec"),
+                actor,
+                Some(&client),
+                None,
+            )
             .unwrap();
         let mut sections: IndexMap<String, String> = IndexMap::new();
         sections.insert("claim".to_string(), "the claim".to_string());
@@ -1553,7 +1564,7 @@ mod tests {
             "context".to_string(),
             "see [[specs:target-spec]]".to_string(),
         );
-        let referrer = engine
+        let _referrer = engine
             .create_entity(
                 CreateEntityArgs {
                     mem: "memos".to_string(),
@@ -1670,7 +1681,12 @@ mod tests {
 
         let (actor, client) = cli_actor();
         let target = engine
-            .create_entity(empty_create_args("specs", "Target"), actor, Some(&client), None)
+            .create_entity(
+                empty_create_args("specs", "Target"),
+                actor,
+                Some(&client),
+                None,
+            )
             .unwrap();
 
         // Sanity check: the archive's wiki-link produces an incoming
@@ -1740,7 +1756,10 @@ mod tests {
             .warnings
             .iter()
             .find_map(|w| match w {
-                WarningHint::ResidualStubForReadOnlyReferrers { id: warn_id, referrers } => {
+                WarningHint::ResidualStubForReadOnlyReferrers {
+                    id: warn_id,
+                    referrers,
+                } => {
                     assert_eq!(warn_id, &target.id);
                     Some(referrers.clone())
                 }
@@ -1773,7 +1792,12 @@ mod tests {
 
         // Target entity to rename.
         let target = engine
-            .create_entity(empty_create_args("specs", "Target Spec"), actor, Some(&client), None)
+            .create_entity(
+                empty_create_args("specs", "Target Spec"),
+                actor,
+                Some(&client),
+                None,
+            )
             .unwrap();
         assert_eq!(target.id.to_string(), "specs--target-spec");
 
@@ -1839,7 +1863,12 @@ mod tests {
         let (mut engine, first) = engine_with_seed(&tmp, "First");
         let (actor, client) = cli_actor();
         let _ = engine
-            .create_entity(empty_create_args("specs", "Second"), actor, Some(&client), None)
+            .create_entity(
+                empty_create_args("specs", "Second"),
+                actor,
+                Some(&client),
+                None,
+            )
             .unwrap();
         // Rename `first` to a title that slugifies to `second`.
         let err = engine
@@ -1865,8 +1894,8 @@ mod tests {
     /// rename refused for the wrong reason.
     #[test]
     fn rename_propagation_gate_checks_actual_edge_direction() {
-        use crate::engine::{CreateEntityArgs, RelateEntityArgs};
         use crate::engine::error::BlockedReferrer;
+        use crate::engine::{CreateEntityArgs, RelateEntityArgs};
         use indexmap::IndexMap;
         use memstead_schema::workspace_config::CrossLinkValue;
 
@@ -1903,7 +1932,12 @@ mod tests {
         engine.set_settings(settings);
 
         let target = engine
-            .create_entity(empty_create_args("other", "Target"), actor, Some(&client), None)
+            .create_entity(
+                empty_create_args("other", "Target"),
+                actor,
+                Some(&client),
+                None,
+            )
             .unwrap();
         let mut src_sections: IndexMap<String, String> = IndexMap::new();
         src_sections.insert("identity".to_string(), "source identity".to_string());
@@ -2020,7 +2054,12 @@ mod tests {
         engine.set_settings(settings);
 
         let target = engine
-            .create_entity(empty_create_args("other", "Target"), actor, Some(&client), None)
+            .create_entity(
+                empty_create_args("other", "Target"),
+                actor,
+                Some(&client),
+                None,
+            )
             .unwrap();
         let mut src_sections: IndexMap<String, String> = IndexMap::new();
         src_sections.insert("identity".to_string(), "source identity".to_string());
@@ -2105,7 +2144,12 @@ mod tests {
         // single-mem rename's referrers (if any) are all same-mem
         // and bypass the gate by construction.
         let target = engine
-            .create_entity(empty_create_args("specs", "Target"), actor, Some(&client), None)
+            .create_entity(
+                empty_create_args("specs", "Target"),
+                actor,
+                Some(&client),
+                None,
+            )
             .unwrap();
         let outcome = engine
             .rename_entity(

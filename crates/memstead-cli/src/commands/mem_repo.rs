@@ -13,9 +13,9 @@ use clap::{Args, Subcommand};
 use gix::object::tree::EntryKind;
 
 use crate::CliError;
+use crate::outer_gitignore::{OuterRepoOutcome, apply_outer_gitignore};
 use crate::output::ExitKind;
 use crate::setup::CliContext;
-use crate::outer_gitignore::{OuterRepoOutcome, apply_outer_gitignore};
 
 const README_TEMPLATE: &str = include_str!("../../templates/mem-repo-readme.md");
 
@@ -96,7 +96,11 @@ fn remote_add(ctx: &CliContext, args: RemoteAddArgs) -> anyhow::Result<()> {
     if ctx.json {
         crate::output::print_json(&outcome)?;
     } else {
-        let verb = if outcome.updated { "Re-pointed" } else { "Added" };
+        let verb = if outcome.updated {
+            "Re-pointed"
+        } else {
+            "Added"
+        };
         crate::output::print_markdown(&format!(
             "# {verb} remote `{}`\n\n- URL: `{}`",
             outcome.remote, outcome.url,
@@ -191,8 +195,7 @@ pub(crate) fn run_init(
     fs::create_dir_all(&mem_repo_root)
         .map_err(|e| generic_error(format!("create mem-repo directory: {e}")))?;
 
-    gix::init(&mem_repo_root)
-        .map_err(|e| generic_error(format!("init mem-repo gitdir: {e}")))?;
+    gix::init(&mem_repo_root).map_err(|e| generic_error(format!("init mem-repo gitdir: {e}")))?;
 
     let repo = gix::open(mem_repo_root.join(".git"))
         .map_err(|e| generic_error(format!("open mem-repo gitdir: {e}")))?;
@@ -323,7 +326,6 @@ fn init_signature() -> gix::actor::Signature {
     }
 }
 
-
 fn generic_error(msg: String) -> anyhow::Error {
     CliError {
         code: "MEM_REPO_INIT_FAILED",
@@ -338,7 +340,6 @@ fn generic_error(msg: String) -> anyhow::Error {
 mod tests {
     use super::*;
     use tempfile::TempDir;
-
 
     #[test]
     fn memstead_mem_repo_init_creates_layout() {
@@ -385,11 +386,15 @@ mod tests {
             "refs/heads/__MEMSTEAD must exist after init"
         );
         assert!(
-            repo.try_find_reference("refs/heads/__SYSTEM").unwrap().is_none(),
+            repo.try_find_reference("refs/heads/__SYSTEM")
+                .unwrap()
+                .is_none(),
             "refs/heads/__SYSTEM must NOT be written by init"
         );
         assert!(
-            repo.try_find_reference("refs/heads/__SCHEMAS").unwrap().is_none(),
+            repo.try_find_reference("refs/heads/__SCHEMAS")
+                .unwrap()
+                .is_none(),
             "refs/heads/__SCHEMAS must NOT be written by init"
         );
 
@@ -397,7 +402,11 @@ mod tests {
         // every subsequent command can boot from. Without
         // `.memstead/workspace.toml` the engine's loader bails with
         // `StoreError::NotInitialised` and `memstead stats` fails.
-        let workspace_toml = workspace.canonicalize().unwrap().join(".memstead").join("workspace.toml");
+        let workspace_toml = workspace
+            .canonicalize()
+            .unwrap()
+            .join(".memstead")
+            .join("workspace.toml");
         assert_eq!(outcome.workspace_toml, workspace_toml);
         assert!(
             workspace_toml.is_file(),
@@ -436,7 +445,10 @@ schemas = [\"default@1.0.0\"]\n";
 
         run_init(&workspace, true).unwrap();
         let actual = fs::read_to_string(&toml_path).unwrap();
-        assert_eq!(actual, authored, "init must not overwrite hand-edited workspace.toml");
+        assert_eq!(
+            actual, authored,
+            "init must not overwrite hand-edited workspace.toml"
+        );
     }
 
     #[test]

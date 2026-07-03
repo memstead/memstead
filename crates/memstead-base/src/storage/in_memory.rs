@@ -131,7 +131,9 @@ impl MemBackend for InMemoryBackend {
     fn write_entity(&self, rel_path: &Path, content: &[u8]) -> Result<(), BackendError> {
         let key = normalise_rel_path(rel_path)?;
         let mut state = self.lock()?;
-        state.pending.insert(key, PendingState::Upsert(content.to_vec()));
+        state
+            .pending
+            .insert(key, PendingState::Upsert(content.to_vec()));
         Ok(())
     }
 
@@ -266,14 +268,18 @@ mod tests {
     #[test]
     fn write_then_commit_round_trips_in_ram() {
         let b = InMemoryBackend::new();
-        b.write_entity(Path::new("notes/hello.md"), b"# hi\n").unwrap();
+        b.write_entity(Path::new("notes/hello.md"), b"# hi\n")
+            .unwrap();
         let id = b.commit("c1", &ctx()).unwrap();
         assert!(!id.is_empty());
         assert_eq!(
             b.read_entity(Path::new("notes/hello.md")).unwrap(),
             Some(b"# hi\n".to_vec())
         );
-        assert_eq!(b.list_entities().unwrap(), vec![PathBuf::from("notes/hello.md")]);
+        assert_eq!(
+            b.list_entities().unwrap(),
+            vec![PathBuf::from("notes/hello.md")]
+        );
     }
 
     #[test]
@@ -281,7 +287,10 @@ mod tests {
         let b = InMemoryBackend::new();
         b.write_entity(Path::new("a.md"), b"staged").unwrap();
         // Visible to read, not yet to list (uncommitted).
-        assert_eq!(b.read_entity(Path::new("a.md")).unwrap(), Some(b"staged".to_vec()));
+        assert_eq!(
+            b.read_entity(Path::new("a.md")).unwrap(),
+            Some(b"staged".to_vec())
+        );
         assert!(b.list_entities().unwrap().is_empty());
     }
 
@@ -294,7 +303,10 @@ mod tests {
         b.delete_entity(Path::new("a.md")).unwrap();
         b.commit("drop", &ctx()).unwrap();
         assert_eq!(b.read_entity(Path::new("a.md")).unwrap(), None);
-        assert_eq!(b.read_entity(Path::new("b.md")).unwrap(), Some(b"b".to_vec()));
+        assert_eq!(
+            b.read_entity(Path::new("b.md")).unwrap(),
+            Some(b"b".to_vec())
+        );
     }
 
     #[test]
@@ -310,7 +322,8 @@ mod tests {
         let b = InMemoryBackend::new();
         b.write_entity(Path::new("from.md"), b"payload").unwrap();
         b.commit("seed", &ctx()).unwrap();
-        b.move_entity(Path::new("from.md"), Path::new("nested/to.md")).unwrap();
+        b.move_entity(Path::new("from.md"), Path::new("nested/to.md"))
+            .unwrap();
         b.commit("rename", &ctx()).unwrap();
         assert_eq!(b.read_entity(Path::new("from.md")).unwrap(), None);
         assert_eq!(
@@ -326,7 +339,10 @@ mod tests {
         b.move_entity(Path::new("a.md"), Path::new("b.md")).unwrap();
         b.commit("write+move", &ctx()).unwrap();
         assert_eq!(b.read_entity(Path::new("a.md")).unwrap(), None);
-        assert_eq!(b.read_entity(Path::new("b.md")).unwrap(), Some(b"alpha".to_vec()));
+        assert_eq!(
+            b.read_entity(Path::new("b.md")).unwrap(),
+            Some(b"alpha".to_vec())
+        );
     }
 
     #[test]
@@ -353,11 +369,15 @@ mod tests {
         let b = InMemoryBackend::new();
         b.write_entity(Path::new("a.md"), b"first").unwrap();
         b.commit("seed", &ctx()).unwrap();
-        b.write_entity(Path::new("a.md"), b"second-uncommitted").unwrap();
+        b.write_entity(Path::new("a.md"), b"second-uncommitted")
+            .unwrap();
         b.discard_pending().unwrap();
         b.commit("after-discard", &ctx()).unwrap();
         // The discarded write never landed; committed bytes unchanged.
-        assert_eq!(b.read_entity(Path::new("a.md")).unwrap(), Some(b"first".to_vec()));
+        assert_eq!(
+            b.read_entity(Path::new("a.md")).unwrap(),
+            Some(b"first".to_vec())
+        );
     }
 
     #[test]
@@ -371,7 +391,8 @@ mod tests {
     fn mem_config_round_trips() {
         let b = InMemoryBackend::new();
         assert_eq!(b.read_mem_config().unwrap(), None);
-        b.write_mem_config(b"{\"schema\":\"default@1.0.0\"}").unwrap();
+        b.write_mem_config(b"{\"schema\":\"default@1.0.0\"}")
+            .unwrap();
         assert_eq!(
             b.read_mem_config().unwrap(),
             Some(b"{\"schema\":\"default@1.0.0\"}".to_vec())

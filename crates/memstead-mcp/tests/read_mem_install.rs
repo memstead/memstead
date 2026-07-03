@@ -14,8 +14,8 @@
 
 use std::path::{Path, PathBuf};
 
-use memstead_git_branch::ops::export::export_mem;
 use memstead_git_branch::mem_cache::{CACHE_OVERRIDE_ENV, InstallError, TargetMem};
+use memstead_git_branch::ops::export::export_mem;
 use memstead_git_branch::validator::ValidationError;
 use memstead_git_branch::vcs::CommitContext;
 use memstead_mcp::read_mems::{ReadMemResult, install_read_mems};
@@ -24,11 +24,7 @@ use tempfile::TempDir;
 /// Disk-shape install convenience for the existing test fixtures. Wraps
 /// `install_read_mems` with `TargetMem::Disk(project)` and a dummy
 /// commit context — the disk arm ignores `ctx` + `commit_message`.
-fn install_to_disk_project(
-    archives: &[PathBuf],
-    project: &Path,
-    cwd: &Path,
-) -> Vec<ReadMemResult> {
+fn install_to_disk_project(archives: &[PathBuf], project: &Path, cwd: &Path) -> Vec<ReadMemResult> {
     install_read_mems(
         archives,
         TargetMem::Disk(project),
@@ -49,10 +45,7 @@ fn build_valid_archive(mem_dir: &Path, archive_path: &Path, name: &str) {
     // identity comes from the disk-path basename via the
     // `published_config_from` fallback chain. Place the mem under
     // `<mem_dir.parent>/<name>/` so the basename matches.
-    let mem_dir = mem_dir
-        .parent()
-        .unwrap_or(mem_dir)
-        .join(name);
+    let mem_dir = mem_dir.parent().unwrap_or(mem_dir).join(name);
     std::fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
     std::fs::write(
         mem_dir.join(".memstead/config.json"),
@@ -147,7 +140,10 @@ fn valid_archive_installs_into_cache_and_registers_in_config() {
         .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
         .collect();
     assert_eq!(
-        names.iter().filter(|n| n.starts_with("good-") && n.ends_with(".mem")).count(),
+        names
+            .iter()
+            .filter(|n| n.starts_with("good-") && n.ends_with(".mem"))
+            .count(),
         1,
         "exactly one content-addressed cache file: {names:?}",
     );
@@ -187,7 +183,12 @@ fn corrupt_archive_reports_validation_zip_and_writes_nothing() {
     );
 
     // No cache file landed — validation failed before the write step.
-    assert!(cache.read_dir().map(|mut it| it.next().is_none()).unwrap_or(true));
+    assert!(
+        cache
+            .read_dir()
+            .map(|mut it| it.next().is_none())
+            .unwrap_or(true)
+    );
 }
 
 #[test]
@@ -226,9 +227,23 @@ fn bad_archive_in_batch_does_not_abort_good_ones() {
         .unwrap()
         .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
         .collect();
-    assert!(names.iter().any(|n| n.starts_with("alpha-") && n.ends_with(".mem")), "{names:?}");
-    assert!(names.iter().any(|n| n.starts_with("beta-") && n.ends_with(".mem")), "{names:?}");
-    assert_eq!(names.len(), 2, "only the two good archives landed: {names:?}");
+    assert!(
+        names
+            .iter()
+            .any(|n| n.starts_with("alpha-") && n.ends_with(".mem")),
+        "{names:?}"
+    );
+    assert!(
+        names
+            .iter()
+            .any(|n| n.starts_with("beta-") && n.ends_with(".mem")),
+        "{names:?}"
+    );
+    assert_eq!(
+        names.len(),
+        2,
+        "only the two good archives landed: {names:?}"
+    );
 }
 
 #[test]
@@ -250,7 +265,10 @@ fn relative_archive_paths_resolve_against_cwd() {
     let results = install_to_disk_project(&[relative], &project, tmp.path());
 
     assert_eq!(results.len(), 1);
-    let ReadMemResult::Installed { archive: resolved, .. } = &results[0] else {
+    let ReadMemResult::Installed {
+        archive: resolved, ..
+    } = &results[0]
+    else {
         panic!("expected Installed, got {:?}", results[0]);
     };
     assert_eq!(resolved, &archive);

@@ -142,8 +142,15 @@ fn full_round_trip_create_update_delete() {
     memstead()
         .current_dir(tmp.path())
         .args([
-            "create", "--title", "Delta", "--type", "spec", "--section",
-            "identity=d", "--section", "purpose=d",
+            "create",
+            "--title",
+            "Delta",
+            "--type",
+            "spec",
+            "--section",
+            "identity=d",
+            "--section",
+            "purpose=d",
         ])
         .assert()
         .success();
@@ -200,8 +207,15 @@ fn update_requires_hash_by_default() {
     memstead()
         .current_dir(tmp.path())
         .args([
-            "create", "--title", "Eps", "--type", "spec", "--section",
-            "identity=x", "--section", "purpose=x",
+            "create",
+            "--title",
+            "Eps",
+            "--type",
+            "spec",
+            "--section",
+            "identity=x",
+            "--section",
+            "purpose=x",
         ])
         .assert()
         .success();
@@ -226,8 +240,15 @@ fn update_wrong_hash_returns_exit_4() {
     memstead()
         .current_dir(tmp.path())
         .args([
-            "create", "--title", "Zeta", "--type", "spec", "--section",
-            "identity=x", "--section", "purpose=x",
+            "create",
+            "--title",
+            "Zeta",
+            "--type",
+            "spec",
+            "--section",
+            "identity=x",
+            "--section",
+            "purpose=x",
         ])
         .assert()
         .success();
@@ -254,8 +275,15 @@ fn update_wrong_hash_json_mode_carries_current() {
     memstead()
         .current_dir(tmp.path())
         .args([
-            "create", "--title", "Omicron", "--type", "spec", "--section",
-            "identity=x", "--section", "purpose=x",
+            "create",
+            "--title",
+            "Omicron",
+            "--type",
+            "spec",
+            "--section",
+            "identity=x",
+            "--section",
+            "purpose=x",
         ])
         .assert()
         .success();
@@ -286,8 +314,15 @@ fn relate_adds_edge_visible_from_relations() {
         memstead()
             .current_dir(tmp.path())
             .args([
-                "create", "--title", title, "--type", "spec", "--section",
-                slug_sections, "--section", "purpose=x",
+                "create",
+                "--title",
+                title,
+                "--type",
+                "spec",
+                "--section",
+                slug_sections,
+                "--section",
+                "purpose=x",
             ])
             .assert()
             .success();
@@ -316,8 +351,15 @@ fn delete_dry_run_does_not_remove_file() {
     memstead()
         .current_dir(tmp.path())
         .args([
-            "create", "--title", "Phi", "--type", "spec", "--section",
-            "identity=x", "--section", "purpose=x",
+            "create",
+            "--title",
+            "Phi",
+            "--type",
+            "spec",
+            "--section",
+            "identity=x",
+            "--section",
+            "purpose=x",
         ])
         .assert()
         .success();
@@ -346,8 +388,15 @@ fn delete_dry_run_reports_verdict_matching_real_delete() {
         memstead()
             .current_dir(tmp.path())
             .args([
-                "create", "--title", title, "--type", "spec", "--section", sect,
-                "--section", "purpose=x",
+                "create",
+                "--title",
+                title,
+                "--type",
+                "spec",
+                "--section",
+                sect,
+                "--section",
+                "purpose=x",
             ])
             .assert()
             .success();
@@ -404,20 +453,22 @@ fn rename_changes_id() {
     memstead()
         .current_dir(tmp.path())
         .args([
-            "create", "--title", "Old Name", "--type", "spec", "--section",
-            "identity=x", "--section", "purpose=x",
+            "create",
+            "--title",
+            "Old Name",
+            "--type",
+            "spec",
+            "--section",
+            "identity=x",
+            "--section",
+            "purpose=x",
         ])
         .assert()
         .success();
 
     memstead()
         .current_dir(tmp.path())
-        .args([
-            "rename",
-            "cli-write--old-name",
-            "New Name",
-            "--auto-hash",
-        ])
+        .args(["rename", "cli-write--old-name", "New Name", "--auto-hash"])
         .assert()
         .success()
         .stdout(contains("cli-write--new-name"));
@@ -439,8 +490,15 @@ fn batch_update_from_file() {
         memstead()
             .current_dir(tmp.path())
             .args([
-                "create", "--title", title, "--type", "spec", "--section",
-                "identity=x", "--section", "purpose=x",
+                "create",
+                "--title",
+                title,
+                "--type",
+                "spec",
+                "--section",
+                "identity=x",
+                "--section",
+                "purpose=x",
             ])
             .assert()
             .success();
@@ -485,8 +543,15 @@ fn batch_update_refuses_whole_batch_on_one_bad_entry() {
     memstead()
         .current_dir(tmp.path())
         .args([
-            "create", "--title", "Atomic", "--type", "spec", "--section",
-            "identity=x", "--section", "purpose=orig",
+            "create",
+            "--title",
+            "Atomic",
+            "--type",
+            "spec",
+            "--section",
+            "identity=x",
+            "--section",
+            "purpose=orig",
         ])
         .assert()
         .success();
@@ -548,8 +613,15 @@ fn batch_update_json_refusal_exits_nonzero_with_envelope() {
     memstead()
         .current_dir(tmp.path())
         .args([
-            "create", "--title", "JsonAtomic", "--type", "spec", "--section",
-            "identity=x", "--section", "purpose=orig",
+            "create",
+            "--title",
+            "JsonAtomic",
+            "--type",
+            "spec",
+            "--section",
+            "identity=x",
+            "--section",
+            "purpose=orig",
         ])
         .assert()
         .success();
@@ -589,7 +661,10 @@ fn batch_update_json_refusal_exits_nonzero_with_envelope() {
         "top-level code must signal the refusal: {parsed}",
     );
     // Full result preserved under details.
-    assert_eq!(parsed["details"]["applied"], false, "details carries the BatchResult: {parsed}");
+    assert_eq!(
+        parsed["details"]["applied"], false,
+        "details carries the BatchResult: {parsed}"
+    );
     assert_eq!(
         parsed["details"]["results"][0]["error"]["code"], "HASH_MISMATCH",
         "per-entry failure code stays available: {parsed}",
@@ -607,8 +682,15 @@ fn batch_update_json_success_unchanged_exits_zero() {
     memstead()
         .current_dir(tmp.path())
         .args([
-            "create", "--title", "JsonOk", "--type", "spec", "--section",
-            "identity=x", "--section", "purpose=x",
+            "create",
+            "--title",
+            "JsonOk",
+            "--type",
+            "spec",
+            "--section",
+            "identity=x",
+            "--section",
+            "purpose=x",
         ])
         .assert()
         .success();
@@ -637,7 +719,10 @@ fn batch_update_json_success_unchanged_exits_zero() {
         .clone();
     let stdout = String::from_utf8(output.stdout).unwrap();
     let parsed: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap();
-    assert_eq!(parsed["applied"], true, "success path keeps the bare BatchResult shape: {parsed}");
+    assert_eq!(
+        parsed["applied"], true,
+        "success path keeps the bare BatchResult shape: {parsed}"
+    );
     assert_eq!(parsed["succeeded"], 1);
     assert!(parsed["commit_sha"].as_str().is_some_and(|s| !s.is_empty()));
 }
@@ -655,8 +740,15 @@ fn batch_update_commit_note_names_entities_via_include_notes() {
         memstead()
             .current_dir(tmp.path())
             .args([
-                "create", "--title", title, "--type", "spec", "--section",
-                "identity=x", "--section", "purpose=x",
+                "create",
+                "--title",
+                title,
+                "--type",
+                "spec",
+                "--section",
+                "identity=x",
+                "--section",
+                "purpose=x",
             ])
             .assert()
             .success();
@@ -690,8 +782,10 @@ fn batch_update_commit_note_names_entities_via_include_notes() {
     let output = memstead()
         .current_dir(tmp.path())
         .args([
-            "--json", "changes",
-            "--since", "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+            "--json",
+            "changes",
+            "--since",
+            "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
             "--include-notes",
         ])
         .assert()
@@ -701,15 +795,24 @@ fn batch_update_commit_note_names_entities_via_include_notes() {
     let stdout = String::from_utf8(output.stdout).unwrap();
     let parsed: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap();
 
-    let notes = parsed["notes"].as_array().expect("notes[] present with --include-notes");
+    let notes = parsed["notes"]
+        .as_array()
+        .expect("notes[] present with --include-notes");
     let batch_note = notes
         .iter()
-        .find(|n| n["subject"].as_str().is_some_and(|s| s.contains("batch-update")))
+        .find(|n| {
+            n["subject"]
+                .as_str()
+                .is_some_and(|s| s.contains("batch-update"))
+        })
         .unwrap_or_else(|| panic!("batch-update commit note must be present; notes:\n{parsed}"));
 
     // Subject keeps its count-string shape (backward compatibility).
     assert!(
-        batch_note["subject"].as_str().unwrap().contains("(2 entities)"),
+        batch_note["subject"]
+            .as_str()
+            .unwrap()
+            .contains("(2 entities)"),
         "subject keeps the count-string: {batch_note}",
     );
     // The additive entity_ids array names both touched entities.
@@ -1236,4 +1339,3 @@ fn update_declare_relations_rejects_malformed_value() {
         .failure()
         .stderr(contains("expected REL_TYPE:TARGET_ID"));
 }
-

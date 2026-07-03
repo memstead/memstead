@@ -20,20 +20,17 @@ use memstead_schema::Schema;
 use crate::engine_fallback_type;
 use crate::entity::{Entity, EntityId};
 use crate::graph::{LouvainOutput, community::detect_communities};
-use crate::ops::{
-    ContextResult, Direction, NeighborInfo, SearchResult, SearchScope, WarningHint,
-};
+use crate::mem::MemRouterSnapshot;
+use crate::ops::{ContextResult, Direction, NeighborInfo, SearchResult, SearchScope, WarningHint};
 use crate::provenance::Provenance;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::search_index::{MemIndex, build_all};
 use crate::store::Store;
-use crate::mem::MemRouterSnapshot;
 use crate::workspace::{MountCapability, MountStorage, WorkspaceSettings};
 
 use super::{BackendFactory, Engine, EngineError, MountedBackend};
 
 impl Engine {
-
     /// In-memory store populated at construction time from every
     /// mount's backend. Read-only at this point in the rebuild —
     /// mutation paths land in a later session.
@@ -180,8 +177,9 @@ impl Engine {
     /// these plain records cannot fail; an empty store still yields the
     /// fallback empty object.
     pub fn pipeline_configs_json(&self) -> String {
-        serde_json::to_string(&self.pipeline_configs)
-            .unwrap_or_else(|_| "{\"mediums\":[],\"facets\":[],\"projections\":[],\"ingests\":[]}".to_string())
+        serde_json::to_string(&self.pipeline_configs).unwrap_or_else(|_| {
+            "{\"mediums\":[],\"facets\":[],\"projections\":[],\"ingests\":[]}".to_string()
+        })
     }
 
     /// Overwrite the in-memory pipeline configs. The workspace-root boot
@@ -376,16 +374,14 @@ impl Engine {
 
     /// On-disk folder path for a folder-backed mount, or `None` for
     /// any other backend (git-branch, archive) or unknown mem.
-    /// Convenience over `engine.mount(mem).map(|m| &m.storage)`
-    /// + matching on `MountStorage::Folder { path }`. Used by
+    /// Convenience over `engine.mount(mem).map(|m| &m.storage)` +
+    /// matching on `MountStorage::Folder { path }`. Used by
     /// handlers that need a filesystem path for a folder mem
     /// (e.g. `memstead_health { include_config: true }`'s
     /// `mems[].vcs.worktree` field for folder mounts).
     pub fn folder_path_for_mem(&self, mem: &str) -> Option<&Path> {
         match self.mount(mem).map(|m| &m.storage) {
-            Some(crate::workspace::MountStorage::Folder { path }) => {
-                Some(path.as_path())
-            }
+            Some(crate::workspace::MountStorage::Folder { path }) => Some(path.as_path()),
             _ => None,
         }
     }
@@ -417,11 +413,11 @@ impl Engine {
             .ok_or_else(|| EngineError::UnknownMem(mem_name.to_string()))?;
         match &m.storage {
             MountStorage::GitBranch { gitdir, .. } => Ok(gitdir.clone()),
-            MountStorage::Folder { .. }
-            | MountStorage::Archive { .. }
-            | MountStorage::InMemory => Err(EngineError::Mem(format!(
-                "mem '{mem_name}' has no resolved gitdir"
-            ))),
+            MountStorage::Folder { .. } | MountStorage::Archive { .. } | MountStorage::InMemory => {
+                Err(EngineError::Mem(format!(
+                    "mem '{mem_name}' has no resolved gitdir"
+                )))
+            }
         }
     }
 
@@ -486,10 +482,7 @@ impl Engine {
     /// accessor is intentionally lenient because memstead_health emits
     /// an empty detail block per missing config rather than
     /// aborting the call).
-    pub fn mem_config_for(
-        &self,
-        mem: &str,
-    ) -> Option<&memstead_schema::config::MemConfig> {
+    pub fn mem_config_for(&self, mem: &str) -> Option<&memstead_schema::config::MemConfig> {
         self.mounts
             .iter()
             .find(|m| m.mount.mem == mem)
@@ -502,10 +495,7 @@ impl Engine {
     /// runtime-created mem, or a backend that does not surface one) —
     /// the read path reports provenance as absent. Unknown mem names
     /// return `None`.
-    pub fn archive_provenance_for(
-        &self,
-        mem: &str,
-    ) -> Option<&memstead_schema::ArchiveProvenance> {
+    pub fn archive_provenance_for(&self, mem: &str) -> Option<&memstead_schema::ArchiveProvenance> {
         self.mounts
             .iter()
             .find(|m| m.mount.mem == mem)
@@ -550,10 +540,7 @@ impl Engine {
     /// successful commit.
     ///
     /// - `EngineError::UnknownMem` when the name does not resolve.
-    pub fn mem_head_sha(
-        &self,
-        mem_name: &str,
-    ) -> Result<Option<String>, EngineError> {
+    pub fn mem_head_sha(&self, mem_name: &str) -> Result<Option<String>, EngineError> {
         let m = self
             .mounts
             .iter()
@@ -785,17 +772,17 @@ impl Engine {
         if !self.schemas.contains_key(mem) {
             return Err(EngineError::UnknownMem(mem.to_string()));
         }
-        Ok(crate::ops::integrity::consistency_findings(&self.store, mem))
+        Ok(crate::ops::integrity::consistency_findings(
+            &self.store,
+            mem,
+        ))
     }
 
     /// Engine-wide health summary across every mount.
     pub fn health(&self) -> crate::ops::HealthSummary {
         let fallback = engine_fallback_type();
-        let mut summary = crate::ops::health::compute_health(
-            &self.store,
-            fallback.as_ref(),
-            &self.schemas,
-        );
+        let mut summary =
+            crate::ops::health::compute_health(&self.store, fallback.as_ref(), &self.schemas);
         // Merge in load-time drift warnings so every caller of
         // Engine::health — MCP handler, Swift FFI, direct CLI —
         // sees the SuspiciousNestedPrefix / DuplicateSectionHeading
@@ -816,10 +803,12 @@ impl Engine {
             && let Some(outer) = crate::workspace_root::find_enclosing_git_repo(root)
             && !crate::workspace_root::outer_repo_ignores_mem_repo(&outer, root)
         {
-            summary.warnings.push(WarningHint::OuterRepoNotIgnoringMemRepo {
-                outer_repo_root: outer.display().to_string(),
-                workspace_root: root.display().to_string(),
-            });
+            summary
+                .warnings
+                .push(WarningHint::OuterRepoNotIgnoringMemRepo {
+                    outer_repo_root: outer.display().to_string(),
+                    workspace_root: root.display().to_string(),
+                });
         }
         summary
     }
@@ -950,13 +939,11 @@ impl Engine {
     }
 
     /// Raw bytes for a single entity (`Ok(None)` if absent).
-    pub fn read_entity(
-        &self,
-        mem: &str,
-        rel_path: &Path,
-    ) -> Result<Option<Vec<u8>>, EngineError> {
+    pub fn read_entity(&self, mem: &str, rel_path: &Path) -> Result<Option<Vec<u8>>, EngineError> {
         let m = self.find_mount(mem)?;
-        m.backend.read_entity(rel_path).map_err(EngineError::Backend)
+        m.backend
+            .read_entity(rel_path)
+            .map_err(EngineError::Backend)
     }
 
     /// Provenance entries for `mem` since `cursor`. Cursor shape is
@@ -977,10 +964,7 @@ impl Engine {
     /// callers that need to gate before dispatching a write — the
     /// engine itself does not yet enforce capability (mutation paths
     /// land in a later session).
-    pub fn capability(
-        &self,
-        mem: &str,
-    ) -> Result<crate::workspace::MountCapability, EngineError> {
+    pub fn capability(&self, mem: &str) -> Result<crate::workspace::MountCapability, EngineError> {
         let m = self.find_mount(mem)?;
         Ok(m.mount.capability)
     }
@@ -1039,11 +1023,7 @@ impl Engine {
     ///
     /// The MCP `memstead_relate` handler's cross-mem gate consumes
     /// this method directly.
-    pub fn cross_mem_link_allowed(
-        &self,
-        from_mem: &str,
-        to_mem: &str,
-    ) -> bool {
+    pub fn cross_mem_link_allowed(&self, from_mem: &str, to_mem: &str) -> bool {
         use memstead_schema::workspace_config::CrossLinkValue;
         if from_mem == to_mem {
             return true;
@@ -1095,9 +1075,7 @@ impl Engine {
         {
             return match synth {
                 CrossLinkValue::Wildcard => true,
-                CrossLinkValue::List(targets) => {
-                    targets.iter().any(|t| t == to_mem)
-                }
+                CrossLinkValue::List(targets) => targets.iter().any(|t| t == to_mem),
             };
         }
 
@@ -1116,7 +1094,6 @@ impl Engine {
 mod tests {
     use std::path::Path;
 
-
     use tempfile::TempDir;
 
     use crate::backend::{BackendError, MemBackend};
@@ -1126,12 +1103,9 @@ mod tests {
     use crate::ops::{Direction, SearchScope, WarningHint};
     use crate::provenance::Provenance;
     use crate::storage::{ArchiveBackend, FilesystemMemWriter, MemWriter};
-    
+
     use crate::vcs::CommitContext;
-    use crate::workspace::{
-        Mount, MountCapability, MountLifecycle,
-        MountStorage,
-    };
+    use crate::workspace::{Mount, MountCapability, MountLifecycle, MountStorage};
 
     /// `schema_origin` is the trust-classification authority: a built-in
     /// (or workspace-authored) schema is first-party; a schema whose
@@ -1260,14 +1234,15 @@ community:
             let mount = Mount {
                 mem: "v".to_string(),
                 schema: Some(pin.clone()),
-                storage: MountStorage::Folder { path: mem_dir.clone() },
+                storage: MountStorage::Folder {
+                    path: mem_dir.clone(),
+                },
                 capability: cap,
                 lifecycle: MountLifecycle::Eager,
                 cross_linkable: true,
                 migration_target: None,
             };
-            let backend =
-                Box::new(FilesystemMemWriter::new(mem_dir)) as Box<dyn MemBackend>;
+            let backend = Box::new(FilesystemMemWriter::new(mem_dir)) as Box<dyn MemBackend>;
             // Keep `tmp` alive for the engine's lifetime by leaking it —
             // the test process is short-lived and the folder must outlast
             // the closure.
@@ -1330,7 +1305,11 @@ community:
         let prov = engine
             .archive_provenance_for("seed")
             .expect("provenance payload read from the archive");
-        assert_eq!(prov.history, History::Summarised, "history-not-shipped is observable");
+        assert_eq!(
+            prov.history,
+            History::Summarised,
+            "history-not-shipped is observable"
+        );
         assert_eq!(
             prov.entity("alpha").and_then(|r| r.rationale.as_deref()),
             Some("why alpha exists"),
@@ -1463,7 +1442,9 @@ community:
             None
         );
         assert_eq!(
-            engine.read_entity("external", Path::new("local.md")).unwrap(),
+            engine
+                .read_entity("external", Path::new("local.md"))
+                .unwrap(),
             None
         );
     }
@@ -1629,10 +1610,7 @@ community:
         let mut settings = crate::workspace::WorkspaceSettings::default();
         settings.cross_mem_links.insert(
             "specs".to_string(),
-            CrossLinkValue::List(vec![
-                "engine".to_string(),
-                "macos".to_string(),
-            ]),
+            CrossLinkValue::List(vec!["engine".to_string(), "macos".to_string()]),
         );
         engine.set_settings(settings);
         assert!(engine.cross_mem_link_allowed("specs", "engine"));
@@ -1727,9 +1705,7 @@ community:
             .push(crate::workspace::CreateRuleSetting {
                 pattern: "exec-*".to_string(),
                 schemas: vec!["default".to_string()],
-                default_cross_links: Some(CrossLinkValue::List(vec![
-                    "specs".to_string(),
-                ])),
+                default_cross_links: Some(CrossLinkValue::List(vec!["specs".to_string()])),
             });
         engine.set_settings(settings);
         assert!(engine.cross_mem_link_allowed("exec-foo", "specs"));
@@ -1771,9 +1747,7 @@ community:
             .push(crate::workspace::CreateRuleSetting {
                 pattern: "exec-*".to_string(),
                 schemas: vec!["default".to_string()],
-                default_cross_links: Some(CrossLinkValue::List(vec![
-                    "macos".to_string(),
-                ])),
+                default_cross_links: Some(CrossLinkValue::List(vec!["macos".to_string()])),
             });
         engine.set_settings(settings);
         // Explicit allowlist contains specs → allowed.
@@ -1798,9 +1772,7 @@ community:
             .push(crate::workspace::CreateRuleSetting {
                 pattern: "exec-*".to_string(),
                 schemas: vec!["default".to_string()],
-                default_cross_links: Some(CrossLinkValue::List(vec![
-                    "specs".to_string(),
-                ])),
+                default_cross_links: Some(CrossLinkValue::List(vec!["specs".to_string()])),
             });
         engine.set_settings(s1);
         assert!(engine.cross_mem_link_allowed("exec-foo", "specs"));
@@ -1921,10 +1893,10 @@ community:
         .unwrap();
         let health = engine.health();
         assert!(
-            !health.warnings.iter().any(|w| matches!(
-                w,
-                WarningHint::OuterRepoNotIgnoringMemRepo { .. }
-            )),
+            !health
+                .warnings
+                .iter()
+                .any(|w| matches!(w, WarningHint::OuterRepoNotIgnoringMemRepo { .. })),
             "outer-repo check must skip when workspace_root is None",
         );
     }
@@ -2048,10 +2020,7 @@ community:
         .unwrap();
 
         // Folder mount returns its path.
-        assert_eq!(
-            engine.folder_path_for_mem("specs"),
-            Some(mem_dir.as_path()),
-        );
+        assert_eq!(engine.folder_path_for_mem("specs"), Some(mem_dir.as_path()),);
         // Archive mount returns None — caller branches on storage type.
         assert_eq!(engine.folder_path_for_mem("sealed"), None);
         // Unknown mem returns None — same as Engine::mount.
@@ -2134,8 +2103,7 @@ community:
         assert!(!router.is_writable("ext"));
         assert!(router.is_visible("specs"));
         assert!(router.is_visible("ext"));
-        let writable: std::collections::HashSet<&String> =
-            router.writable_mems().iter().collect();
+        let writable: std::collections::HashSet<&String> = router.writable_mems().iter().collect();
         assert_eq!(writable.len(), 1);
         assert!(writable.contains(&"specs".to_string()));
     }
@@ -2266,7 +2234,10 @@ community:
             let file = std::fs::File::create(&archive_path).unwrap();
             let mut writer = zip::ZipWriter::new(file);
             writer
-                .start_file(".memstead/config.json", zip::write::SimpleFileOptions::default())
+                .start_file(
+                    ".memstead/config.json",
+                    zip::write::SimpleFileOptions::default(),
+                )
                 .unwrap();
             use std::io::Write;
             writer.write_all(body).unwrap();
@@ -2379,7 +2350,11 @@ community:
             "schema": "default@1.0.0",
             "writeGuidance": { "tone": "neutral" }
         }"#;
-        std::fs::write(with_config.join(".memstead").join("config.json"), config_body).unwrap();
+        std::fs::write(
+            with_config.join(".memstead").join("config.json"),
+            config_body,
+        )
+        .unwrap();
 
         let engine = Engine::from_mounts(vec![
             (
@@ -2543,7 +2518,10 @@ community:
         ])
         .unwrap();
 
-        assert_eq!(engine.capability("writable").unwrap(), MountCapability::Write);
+        assert_eq!(
+            engine.capability("writable").unwrap(),
+            MountCapability::Write
+        );
         assert_eq!(
             engine.capability("read-only").unwrap(),
             MountCapability::ReadOnly
@@ -2788,7 +2766,10 @@ community:
         // the loader-tolerance tests that hand-craft pre-strict
         // markdown files.
         assert!(
-            health.missing_fields.iter().all(|r| r.id.as_ref() != "specs--source-one"),
+            health
+                .missing_fields
+                .iter()
+                .all(|r| r.id.as_ref() != "specs--source-one"),
             "post-strict-create fixture must not surface as missing-fields; got {:?}",
             health.missing_fields,
         );
@@ -2862,28 +2843,25 @@ community:
         let writer = FilesystemMemWriter::new(mem_dir.clone());
         let mount = Mount {
             mem: "planning".to_string(),
-            schema: Some(memstead_schema::SchemaRef::new("planning", semver::Version::new(0, 1, 0))),
+            schema: Some(memstead_schema::SchemaRef::new(
+                "planning",
+                semver::Version::new(0, 1, 0),
+            )),
             storage: MountStorage::Folder { path: mem_dir },
             capability: MountCapability::Write,
             lifecycle: MountLifecycle::Eager,
             cross_linkable: true,
             migration_target: None,
         };
-        let mut engine = Engine::from_mounts(vec![(
-            mount,
-            Box::new(writer) as Box<dyn MemBackend>,
-        )])
-        .unwrap();
+        let mut engine =
+            Engine::from_mounts(vec![(mount, Box::new(writer) as Box<dyn MemBackend>)]).unwrap();
         let (actor, client) = cli_actor();
 
         // Two decisions with different status values; required fields
         // (decision/context/consequences sections, decided_on, deciders)
         // get placeholder defaults — the test only cares about the
         // status field's filterability.
-        for (title, status) in &[
-            ("Skip Postgres", "accepted"),
-            ("Use SQLite", "proposed"),
-        ] {
+        for (title, status) in &[("Skip Postgres", "accepted"), ("Use SQLite", "proposed")] {
             let mut metadata = indexmap::IndexMap::new();
             metadata.insert("status".to_string(), status.to_string());
             metadata.insert("deciders".to_string(), "alice".to_string());
@@ -2895,16 +2873,15 @@ community:
                 sections: indexmap::IndexMap::from_iter([
                     ("decision".to_string(), "We chose this.".to_string()),
                     ("context".to_string(), "Single-user dev.".to_string()),
-                    (
-                        "consequences".to_string(),
-                        "Lose multi-writer.".to_string(),
-                    ),
+                    ("consequences".to_string(), "Lose multi-writer.".to_string()),
                 ]),
                 metadata,
                 relations: Vec::new(),
                 dry_run: false,
             };
-            engine.create_entity(args, actor, Some(&client), None).unwrap();
+            engine
+                .create_entity(args, actor, Some(&client), None)
+                .unwrap();
         }
 
         // Filter on the schema-declared filterable field.
@@ -2944,11 +2921,13 @@ community:
         let result = engine.search(&scope).expect("native search returns Ok");
         assert!(result.total >= 1, "expected ≥1 hit for source: {result:?}");
         assert!(
-            result.hits.iter().any(|h| h.id.as_ref() == "specs--source-one"),
+            result
+                .hits
+                .iter()
+                .any(|h| h.id.as_ref() == "specs--source-one"),
             "expected source-one in hits: {result:?}"
         );
     }
 
     // ---- Engine::from_workspace_root (lean boot path) --------------
-
 }

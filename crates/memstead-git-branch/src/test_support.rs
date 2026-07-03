@@ -54,9 +54,9 @@ fn seed_new_layout(workspace_root: &Path, gitdir: &Path, mems: &[(&str, &str, &s
     let mounts: Vec<Mount> = mems
         .iter()
         .map(|(mem, branch, schema)| {
-            let pin: memstead_schema::SchemaRef = schema.parse().unwrap_or_else(|e| {
-                panic!("test seed: invalid schema pin {schema:?}: {e}")
-            });
+            let pin: memstead_schema::SchemaRef = schema
+                .parse()
+                .unwrap_or_else(|e| panic!("test seed: invalid schema pin {schema:?}: {e}"));
             Mount {
                 mem: mem.to_string(),
                 schema: Some(pin),
@@ -67,8 +67,8 @@ fn seed_new_layout(workspace_root: &Path, gitdir: &Path, mems: &[(&str, &str, &s
                 capability: MountCapability::Write,
                 lifecycle: MountLifecycle::Eager,
                 cross_linkable: true,
-            migration_target: None,
-        }
+                migration_target: None,
+            }
         })
         .collect();
     let workspace = Workspace {
@@ -109,8 +109,12 @@ pub fn init_real_mem_repo(workspace_root: &Path, mems: &[(&str, &str)]) -> PathB
     static INIT_LOCK: Mutex<()> = Mutex::new(());
 
     let gitdir = workspace_root.join("mem-repo").join(".git");
-    std::fs::create_dir_all(&gitdir)
-        .unwrap_or_else(|e| panic!("failed to create test mem-repo at {}: {e}", gitdir.display()));
+    std::fs::create_dir_all(&gitdir).unwrap_or_else(|e| {
+        panic!(
+            "failed to create test mem-repo at {}: {e}",
+            gitdir.display()
+        )
+    });
 
     let _guard = INIT_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
@@ -266,10 +270,7 @@ pub fn auto_seed_with_settings(
 /// dispatcher's GitTree read path keeps returning the stale tree
 /// state. Mirrors disk-fall-through behaviour where reload re-reads
 /// the live disk content.
-pub fn reseed_mem_repo_from_disk(
-    workspace_root: &Path,
-    mems: &[(&Path, &str)],
-) -> PathBuf {
+pub fn reseed_mem_repo_from_disk(workspace_root: &Path, mems: &[(&Path, &str)]) -> PathBuf {
     let gitdir = workspace_root.join("mem-repo").join(".git");
     let _ = std::fs::remove_dir_all(&gitdir);
     init_real_mem_repo_from_disk(workspace_root, mems)
@@ -290,10 +291,7 @@ pub fn reseed_mem_repo_from_disk(
 ///
 /// `name` is the mem name (matches `MemInit.name`). It is used
 /// for the branch ref and the `<name>/config.json` blob on `__SYSTEM`.
-pub fn init_real_mem_repo_from_disk(
-    workspace_root: &Path,
-    mems: &[(&Path, &str)],
-) -> PathBuf {
+pub fn init_real_mem_repo_from_disk(workspace_root: &Path, mems: &[(&Path, &str)]) -> PathBuf {
     let triples: Vec<(&Path, &str, &str)> = mems
         .iter()
         .map(|(dir, name)| (*dir, *name, *name))
@@ -322,8 +320,12 @@ pub fn init_real_mem_repo_from_disk_with_paths(
     static INIT_LOCK: Mutex<()> = Mutex::new(());
 
     let gitdir = workspace_root.join("mem-repo").join(".git");
-    std::fs::create_dir_all(&gitdir)
-        .unwrap_or_else(|e| panic!("failed to create test mem-repo at {}: {e}", gitdir.display()));
+    std::fs::create_dir_all(&gitdir).unwrap_or_else(|e| {
+        panic!(
+            "failed to create test mem-repo at {}: {e}",
+            gitdir.display()
+        )
+    });
 
     let _guard = INIT_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
@@ -373,10 +375,7 @@ pub fn init_real_mem_repo_from_disk_with_paths(
         let cfg_path = mem_dir.join(".memstead").join("config.json");
         let cfg_bytes = match std::fs::read(&cfg_path) {
             Ok(b) => b,
-            Err(_) => format!(
-                r#"{{"schema": "default@1.0.0"}}"#
-            )
-            .into_bytes(),
+            Err(_) => r#"{"schema": "default@1.0.0"}"#.to_string().into_bytes(),
         };
         let blob = repo.write_blob(&cfg_bytes).unwrap().detach();
         system_editor
@@ -417,11 +416,7 @@ pub fn init_real_mem_repo_from_disk_with_paths(
             for (rel, bytes) in &entities {
                 let blob = repo.write_blob(bytes).unwrap().detach();
                 editor
-                    .upsert(
-                        rel.clone(),
-                        gix::objs::tree::EntryKind::Blob,
-                        blob,
-                    )
+                    .upsert(rel.clone(), gix::objs::tree::EntryKind::Blob, blob)
                     .unwrap();
             }
             editor.write().unwrap().detach()
@@ -494,15 +489,18 @@ fn collect_md_entities(root: &Path, current: &Path, out: &mut Vec<(String, Vec<u
         }
         if path.is_dir() {
             collect_md_entities(root, &path, out);
-        } else if path.extension().and_then(|s| s.to_str()) == Some("md") {
-            if let Ok(rel) = path.strip_prefix(root) {
-                if let Ok(bytes) = std::fs::read(&path) {
-                    out.push((rel.to_string_lossy().into_owned(), bytes));
-                }
-            }
+        } else if path.extension().and_then(|s| s.to_str()) == Some("md")
+            && let Ok(rel) = path.strip_prefix(root)
+            && let Ok(bytes) = std::fs::read(&path)
+        {
+            out.push((rel.to_string_lossy().into_owned(), bytes));
         }
     }
 }
+
+/// `(name, schema, [(path, content)])` seed tuple consumed by
+/// [`init_real_mem_repo_with_entities`].
+pub type MemSeed<'a> = (&'a str, &'a str, &'a [(&'a str, &'a str)]);
 
 /// Initialise `<workspace_root>/mem-repo/.git/` as a real bare repo
 /// like [`init_real_mem_repo`], but additionally writes the supplied
@@ -515,13 +513,17 @@ fn collect_md_entities(root: &Path, current: &Path, out: &mut Vec<(String, Vec<u
 /// no entities" case use [`init_real_mem_repo`].
 pub fn init_real_mem_repo_with_entities(
     workspace_root: &Path,
-    mems_with_entities: &[(&str, &str, &[(&str, &str)])],
+    mems_with_entities: &[MemSeed<'_>],
 ) -> PathBuf {
     static INIT_LOCK: Mutex<()> = Mutex::new(());
 
     let gitdir = workspace_root.join("mem-repo").join(".git");
-    std::fs::create_dir_all(&gitdir)
-        .unwrap_or_else(|e| panic!("failed to create test mem-repo at {}: {e}", gitdir.display()));
+    std::fs::create_dir_all(&gitdir).unwrap_or_else(|e| {
+        panic!(
+            "failed to create test mem-repo at {}: {e}",
+            gitdir.display()
+        )
+    });
 
     let _guard = INIT_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 

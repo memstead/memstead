@@ -301,10 +301,7 @@ pub fn agent_notes_since(
             .object()
             .map_err(|e| VcsError::Git(format!("commit-load: {e}")))?;
         let sha = commit.id.to_hex().to_string();
-        let timestamp = commit
-            .time()
-            .map(|t| t.seconds)
-            .unwrap_or(0);
+        let timestamp = commit.time().map(|t| t.seconds).unwrap_or(0);
 
         // gix exposes the message via `decode()`. The body is the raw
         // bytes including subject + body — exactly what `format_commit_message`
@@ -435,7 +432,11 @@ mod tests {
         // Entities trailer, so entity_ids stays empty.
         let raw = crate::vcs::format_commit_message("memstead: update specs--solo", &ctx());
         let parsed = parse_commit_message(&raw);
-        assert!(parsed.entity_ids.is_empty(), "no trailer → empty: {:?}", parsed.entity_ids);
+        assert!(
+            parsed.entity_ids.is_empty(),
+            "no trailer → empty: {:?}",
+            parsed.entity_ids
+        );
         assert_eq!(parsed.entity_id.as_deref(), Some("specs--solo"));
     }
 

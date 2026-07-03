@@ -56,4 +56,3 @@ pub fn resolve_token(
     }
     Ok(None)
 }
-

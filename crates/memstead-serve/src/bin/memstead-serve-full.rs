@@ -41,7 +41,10 @@ use memstead_serve::{
 use uuid::Uuid;
 
 fn env_u64(key: &str, default: u64) -> u64 {
-    std::env::var(key).ok().and_then(|v| v.parse().ok()).unwrap_or(default)
+    std::env::var(key)
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(default)
 }
 
 #[tokio::main]
@@ -60,9 +63,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .parse()
         .map_err(|e| format!("invalid MEMSTEAD_SERVE_SCHEMA {schema_pin:?}: {e}"))?;
     let (mem, storage) = if let Ok(archive) = std::env::var("MEMSTEAD_SERVE_ARCHIVE") {
-        let mem =
-            std::env::var("MEMSTEAD_SERVE_MEM").unwrap_or_else(|_| "flagship".to_string());
-        (mem, MountStorage::Archive { path: PathBuf::from(archive) })
+        let mem = std::env::var("MEMSTEAD_SERVE_MEM").unwrap_or_else(|_| "flagship".to_string());
+        (
+            mem,
+            MountStorage::Archive {
+                path: PathBuf::from(archive),
+            },
+        )
     } else {
         let dir = materialize_embedded_content()?;
         let mem = std::env::var("MEMSTEAD_SERVE_MEM")
@@ -102,9 +109,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // absolute view URL in the MCP handshake.
     let view_base = std::env::var("MEMSTEAD_SESSION_VIEW_BASE").unwrap_or_default();
     let content_storage = if let Ok(dir) = std::env::var("MEMSTEAD_SESSION_CONTENT_DIR") {
-        MountStorage::Folder { path: PathBuf::from(dir) }
+        MountStorage::Folder {
+            path: PathBuf::from(dir),
+        }
     } else if let Ok(archive) = std::env::var("MEMSTEAD_SESSION_CONTENT_ARCHIVE") {
-        MountStorage::Archive { path: PathBuf::from(archive) }
+        MountStorage::Archive {
+            path: PathBuf::from(archive),
+        }
     } else {
         match materialize_embedded_content() {
             Ok(dir) => MountStorage::Folder { path: dir },
@@ -125,14 +136,23 @@ mounting an empty placeholder"
     let content_mem_name = std::env::var("MEMSTEAD_SESSION_CONTENT_MEM")
         .unwrap_or_else(|_| CONTENT_MEM_NAME.to_string());
     let ttl = Duration::from_secs(env_u64("MEMSTEAD_SESSION_TTL_SECS", 1800));
-    let cap = env_u64("MEMSTEAD_SESSION_ENTITY_CAP", DEFAULT_SESSION_ENTITY_CAP as u64) as usize;
+    let cap = env_u64(
+        "MEMSTEAD_SESSION_ENTITY_CAP",
+        DEFAULT_SESSION_ENTITY_CAP as u64,
+    ) as usize;
     // Global live-session ceiling: bounds memory under a traffic spike (each
     // live session is its own in-memory engine). Raise with the box's RAM.
     let max_sessions = env_u64("MEMSTEAD_SESSION_MAX", DEFAULT_SESSION_MAX as u64) as usize;
     let id_gen: IdGen = Arc::new(|| format!("s_{}", Uuid::new_v4().simple()));
-    let registry =
-        SessionRegistry::new(content_storage, content_schema, content_mem_name, ttl, cap, id_gen)
-            .with_max_sessions(max_sessions);
+    let registry = SessionRegistry::new(
+        content_storage,
+        content_schema,
+        content_mem_name,
+        ttl,
+        cap,
+        id_gen,
+    )
+    .with_max_sessions(max_sessions);
 
     // Drive idle eviction so abandoned sessions release their mems.
     {
@@ -152,7 +172,14 @@ mounting an empty placeholder"
 
     let per_second = env_u64("MEMSTEAD_SESSION_RATE_PER_SEC", 5);
     let burst = env_u64("MEMSTEAD_SESSION_RATE_BURST", 60) as u32;
-    let app = build_unified_app(state, registry, sketch_schema, view_base.clone(), per_second, burst);
+    let app = build_unified_app(
+        state,
+        registry,
+        sketch_schema,
+        view_base.clone(),
+        per_second,
+        burst,
+    );
 
     let listener = tokio::net::TcpListener::bind(&bind).await?;
     let view_base_display = if view_base.is_empty() {

@@ -26,18 +26,16 @@ pub use archive_provenance::{
 };
 pub use config::{
     ARCHIVE_CONFIG_PATH, ARCHIVE_EXTENSION, ARCHIVE_META_DIR, ARCHIVE_PROVENANCE_PATH,
-    ARCHIVE_SCHEMA_PREFIX,
-    CommunityOverride, ConfigCheckResult, ConfigError,
-    PUBLISHED_MEM_FORMAT, PublishConfig, PublishConversionError, PublishedMemConfig,
-    ReadMemSource, ReadMemSpec, RoleConfig, SchemaRef, MEM_META_DIR, MemConfig,
-    VcsConfig, check_config, load_and_validate, load_config, parse_mem_config,
-    published_config_from,
+    ARCHIVE_SCHEMA_PREFIX, CommunityOverride, ConfigCheckResult, ConfigError, MEM_META_DIR,
+    MemConfig, PUBLISHED_MEM_FORMAT, PublishConfig, PublishConversionError, PublishedMemConfig,
+    ReadMemSource, ReadMemSpec, RoleConfig, SchemaRef, VcsConfig, check_config, load_and_validate,
+    load_config, parse_mem_config, published_config_from,
 };
 pub use loader::{SchemaLoadError, load_schema_from_dir, load_schema_from_memory};
 pub use manifest::{
     Cardinality, CommunityConfig, CrossMemRelationshipEntry, DefaultWritingGuidance,
-    ManualAuthoring, PerEdgeDescription, RelationshipDef, RelationshipMode,
-    RelationshipVocabulary, SchemaManifest,
+    ManualAuthoring, PerEdgeDescription, RelationshipDef, RelationshipMode, RelationshipVocabulary,
+    SchemaManifest,
 };
 pub use schema::Schema;
 pub use source::{SchemaSourceError, SchemaSourceFile, collect_schema_source};
@@ -61,7 +59,16 @@ pub mod builtin_names {
     pub const PROCESS: &str = "process";
 
     pub const ALL: [&str; 10] = [
-        SPEC, MEMO, ASSERTION, CONCEPT, INQUIRY, MODEL, NARRATIVE, PERSPECTIVE, PRINCIPLE, PROCESS,
+        SPEC,
+        MEMO,
+        ASSERTION,
+        CONCEPT,
+        INQUIRY,
+        MODEL,
+        NARRATIVE,
+        PERSPECTIVE,
+        PRINCIPLE,
+        PROCESS,
     ];
 }
 
@@ -73,9 +80,7 @@ pub struct SchemaRegistry {
 
 #[derive(Debug, thiserror::Error)]
 pub enum SchemaRegistryError {
-    #[error(
-        "schema '{name}' version '{version}' is already registered — cannot reinsert"
-    )]
+    #[error("schema '{name}' version '{version}' is already registered — cannot reinsert")]
     AlreadyRegistered {
         name: String,
         version: semver::Version,
@@ -150,8 +155,10 @@ impl SchemaRegistry {
         for schema in builtins::load_builtin_schemas()
             .expect("built-in schemas must load cleanly — bug in shipped YAML")
         {
-            reg.schemas
-                .insert((schema.manifest.name.clone(), schema.version.clone()), schema);
+            reg.schemas.insert(
+                (schema.manifest.name.clone(), schema.version.clone()),
+                schema,
+            );
         }
         reg
     }
@@ -230,13 +237,12 @@ impl SchemaRegistry {
         // both cache and builtins.
         if let Some(ws_dir) = workspace_schemas_dir {
             for path in list_schema_subdirs(ws_dir)? {
-                let schema =
-                    loader::load_schema_from_dir(&path).map_err(|source| {
-                        WorkspaceSchemaLoadError::Invalid {
-                            path: path.clone(),
-                            source,
-                        }
-                    })?;
+                let schema = loader::load_schema_from_dir(&path).map_err(|source| {
+                    WorkspaceSchemaLoadError::Invalid {
+                        path: path.clone(),
+                        source,
+                    }
+                })?;
                 let key = (schema.manifest.name.clone(), schema.version.clone());
                 reg.schemas.insert(key, Arc::new(schema));
             }
@@ -285,7 +291,9 @@ impl SchemaRegistry {
     /// across writable mems without copying arcs twice.
     pub fn merge_from(&mut self, other: &SchemaRegistry) {
         for (key, schema) in &other.schemas {
-            self.schemas.entry(key.clone()).or_insert_with(|| schema.clone());
+            self.schemas
+                .entry(key.clone())
+                .or_insert_with(|| schema.clone());
         }
     }
 
@@ -582,7 +590,11 @@ write_rules: []
             // Use a name that does not collide with any registered
             // builtin schema (default / ingest / planning / project /
             // software all ship as builtins).
-            write_schema(&workspace_schemas.join("test-isolated"), "test-isolated", "1.0.0");
+            write_schema(
+                &workspace_schemas.join("test-isolated"),
+                "test-isolated",
+                "1.0.0",
+            );
 
             let reg =
                 SchemaRegistry::load_for_workspace(Some(tmp.path()), Some(&workspace_schemas))
@@ -604,8 +616,7 @@ write_rules: []
             let mem_override = tmp.path().join("mem/.memstead/schemas/default");
             write_schema(&mem_override, "default", "1.0.0");
 
-            let reg =
-                SchemaRegistry::load_for_workspace(Some(tmp.path()), None).unwrap();
+            let reg = SchemaRegistry::load_for_workspace(Some(tmp.path()), None).unwrap();
             let schema = reg
                 .get("default", &semver::Version::new(1, 0, 0))
                 .expect("builtin default still registered");
@@ -664,8 +675,7 @@ write_rules: []
             let cache_dir = tmp.path().join(".memstead.cache/schemas/recipe-1.0.0");
             write_schema(&cache_dir, "recipe", "1.0.0");
 
-            let reg =
-                SchemaRegistry::load_for_workspace(Some(tmp.path()), None).unwrap();
+            let reg = SchemaRegistry::load_for_workspace(Some(tmp.path()), None).unwrap();
             assert!(
                 reg.get("recipe", &semver::Version::new(1, 0, 0)).is_some(),
                 "workspace-wide cache schema must register"
@@ -683,8 +693,7 @@ write_rules: []
             write_schema(&first, "shared", "1.0.0");
             write_schema(&second, "shared", "1.0.0");
 
-            let err =
-                SchemaRegistry::load_for_workspace(Some(tmp.path()), None).unwrap_err();
+            let err = SchemaRegistry::load_for_workspace(Some(tmp.path()), None).unwrap_err();
             assert!(
                 matches!(err, WorkspaceSchemaLoadError::CacheCollision { .. }),
                 "expected CacheCollision, got {err:?}"
@@ -706,8 +715,7 @@ write_rules: []
             write_schema(&workspace_schemas.join("default"), "default", "1.0.0");
 
             // Workspace also overrides the cache at the same key.
-            let cache_overridden =
-                tmp.path().join(".memstead.cache/schemas/overridden-1.0.0");
+            let cache_overridden = tmp.path().join(".memstead.cache/schemas/overridden-1.0.0");
             write_schema(&cache_overridden, "overridden", "1.0.0");
             write_schema(&workspace_schemas.join("overridden"), "overridden", "1.0.0");
 

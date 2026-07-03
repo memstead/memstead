@@ -41,8 +41,8 @@ fn cache_guard() -> &'static Mutex<()> {
 /// content from this branch tip — disk-resident `.md` files alone are not
 /// sufficient under the GitObject default.
 fn commit_mem_branch(root: &Path, mem_name: &str, entries: &[(&str, &str)]) {
-    use memstead_git_branch::storage::git_tree::GitTreeMemWriter;
     use memstead_git_branch::storage::MemWriter;
+    use memstead_git_branch::storage::git_tree::GitTreeMemWriter;
     use memstead_git_branch::vcs::CommitContext;
 
     let gitdir = root.join("mem-repo").join(".git");
@@ -230,8 +230,9 @@ fn export_markdown_per_mem_refuses_with_json_envelope() {
 
     // Under `--json` the error envelope rides stdout.
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
-    let env: serde_json::Value = serde_json::from_str(stdout.trim())
-        .unwrap_or_else(|e| panic!("expected JSON error envelope on stdout; got:\n{stdout}\n({e})"));
+    let env: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap_or_else(|e| {
+        panic!("expected JSON error envelope on stdout; got:\n{stdout}\n({e})")
+    });
     assert_eq!(env["code"], "MARKDOWN_EXPORT_UNSUPPORTED_BACKEND");
     assert_eq!(env["details"]["mem"], "sender-mem");
     assert_eq!(env["details"]["active_backend"], "git-branch");
@@ -260,9 +261,9 @@ fn export_markdown_workspace_wide_json_carries_skipped_mounts() {
         .unwrap_or_else(|e| panic!("expected JSON envelope on stdout; got:\n{stdout}\n({e})"));
     assert_eq!(env["written"], 0);
     assert_eq!(env["unchanged"], 0);
-    let skipped = env["skipped_mounts"]
-        .as_array()
-        .expect("skipped_mounts must be a JSON array under the workspace-wide partial-success shape");
+    let skipped = env["skipped_mounts"].as_array().expect(
+        "skipped_mounts must be a JSON array under the workspace-wide partial-success shape",
+    );
     assert_eq!(skipped.len(), 1, "one git-branch-mount in this fixture");
     assert_eq!(skipped[0]["mem"], "sender-mem");
     assert_eq!(skipped[0]["active_backend"], "git-branch");
@@ -376,7 +377,12 @@ fn mem_set_description_persists_and_clears() {
 
     memstead()
         .current_dir(tmp.path())
-        .args(["mem", "set-description", "sender-mem", "Typed knowledge about senders."])
+        .args([
+            "mem",
+            "set-description",
+            "sender-mem",
+            "Typed knowledge about senders.",
+        ])
         .assert()
         .success()
         .stdout(contains("New: Typed knowledge about senders."));
@@ -500,13 +506,7 @@ fn mem_set_sync_state_persists_and_reports() {
     // Unknown mem refuses (UNKNOWN_MEM → non-zero exit).
     memstead()
         .current_dir(tmp.path())
-        .args([
-            "mem",
-            "set-sync-state",
-            "no-such-mem",
-            "k",
-            "v",
-        ])
+        .args(["mem", "set-sync-state", "no-such-mem", "k", "v"])
         .assert()
         .failure();
 }
@@ -706,8 +706,8 @@ fn workspace_dump_and_type_resolve_for_ro_mount_after_install() {
         .stdout
         .clone();
     let dump_str = String::from_utf8(dump).unwrap();
-    let dump_json: serde_json::Value = serde_json::from_str(&dump_str)
-        .expect("workspace dump must emit valid JSON");
+    let dump_json: serde_json::Value =
+        serde_json::from_str(&dump_str).expect("workspace dump must emit valid JSON");
     let mems = dump_json["mems"]
         .as_array()
         .expect("dump must carry a mems array");

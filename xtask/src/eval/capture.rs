@@ -226,7 +226,10 @@ fn collect_markdown(dir: &std::path::Path, out: &mut Vec<PathBuf>) -> std::io::R
 /// allowed only `mcp__memstead__*`, so it records typed entities into the mem.
 /// Everything before the kind-specific tail — model, permission mode, the prompt —
 /// is identical, so the storage form is the lone variable here too.
-pub fn build_capture_args(config: &CaptureConfig, mcp_config: Option<&std::path::Path>) -> Vec<String> {
+pub fn build_capture_args(
+    config: &CaptureConfig,
+    mcp_config: Option<&std::path::Path>,
+) -> Vec<String> {
     let mut args = vec![
         "-p".to_string(),
         build_capture_prompt(config),
@@ -361,7 +364,10 @@ pub struct ClaudeCapture {
 impl CaptureRunner for ClaudeCapture {
     fn capture(&self, config: &CaptureConfig) -> Result<Substrate> {
         std::fs::create_dir_all(&self.runner.sandbox_dir).with_context(|| {
-            format!("creating capture sandbox {}", self.runner.sandbox_dir.display())
+            format!(
+                "creating capture sandbox {}",
+                self.runner.sandbox_dir.display()
+            )
         })?;
         let mcp_config = if config.kind == CaptureKind::SchemaForced {
             let cfg = self.schema_mcp_config.as_ref().context(
@@ -423,7 +429,9 @@ mod tests {
         // The named negative test: a second difference (capture model) is refused.
         let (mut c, b) = build_capture_configs("claude-x", REASONING, CORPUS);
         c.model = "claude-y".into();
-        let err = check_single_capture_variable(&c, &b).unwrap_err().to_string();
+        let err = check_single_capture_variable(&c, &b)
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("capture model"), "{err}");
     }
 
@@ -432,7 +440,9 @@ mod tests {
         // The named negative test: a second difference (capture prompt) is refused.
         let (c, mut b) = build_capture_configs("claude-x", REASONING, CORPUS);
         b.reasoning_instruction = "a different, richer reasoning prompt".into();
-        let err = check_single_capture_variable(&c, &b).unwrap_err().to_string();
+        let err = check_single_capture_variable(&c, &b)
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("reasoning_instruction"), "{err}");
     }
 
@@ -440,14 +450,18 @@ mod tests {
     fn confound_different_corpus_is_refused() {
         let (c, mut b) = build_capture_configs("claude-x", REASONING, CORPUS);
         b.corpus = "an entirely different source".into();
-        let err = check_single_capture_variable(&c, &b).unwrap_err().to_string();
+        let err = check_single_capture_variable(&c, &b)
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("corpus"), "{err}");
     }
 
     #[test]
     fn non_distinct_kinds_are_refused() {
         let (c, _) = build_capture_configs("claude-x", REASONING, CORPUS);
-        let err = check_single_capture_variable(&c, &c).unwrap_err().to_string();
+        let err = check_single_capture_variable(&c, &c)
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("kind"), "{err}");
     }
 
@@ -466,7 +480,10 @@ mod tests {
         let split = "# Write step";
         let c_head = cp.split(split).next().unwrap();
         let b_head = bp.split(split).next().unwrap();
-        assert_eq!(c_head, b_head, "the pre-write-step prompt must be identical");
+        assert_eq!(
+            c_head, b_head,
+            "the pre-write-step prompt must be identical"
+        );
         // The write steps differ — that is the storage variable.
         assert_ne!(cp, bp);
         assert!(cp.contains("typed entity") || cp.contains("typed relationships"));
@@ -477,8 +494,16 @@ mod tests {
     fn schema_forced_args_mount_engine_free_form_does_not() {
         let (c, b) = build_capture_configs("m", REASONING, CORPUS);
         let c_args = build_capture_args(&c, Some(std::path::Path::new("/tmp/dest.json")));
-        assert!(c_args.windows(2).any(|w| w[0] == "--mcp-config" && w[1] == "/tmp/dest.json"));
-        assert!(c_args.windows(2).any(|w| w[0] == "--allowedTools" && w[1] == "mcp__memstead__*"));
+        assert!(
+            c_args
+                .windows(2)
+                .any(|w| w[0] == "--mcp-config" && w[1] == "/tmp/dest.json")
+        );
+        assert!(
+            c_args
+                .windows(2)
+                .any(|w| w[0] == "--allowedTools" && w[1] == "mcp__memstead__*")
+        );
         let b_args = build_capture_args(&b, None);
         assert!(!b_args.iter().any(|a| a == "--mcp-config"), "{b_args:?}");
         let idx = b_args.iter().position(|a| a == "--allowedTools").unwrap();
@@ -503,7 +528,11 @@ mod tests {
         let pos_a = s.content.find("first entity").unwrap();
         let pos_b = s.content.find("second entity").unwrap();
         let pos_c = s.content.find("nested entity").unwrap();
-        assert!(pos_a < pos_b && pos_b < pos_c, "not in path order: {}", s.content);
+        assert!(
+            pos_a < pos_b && pos_b < pos_c,
+            "not in path order: {}",
+            s.content
+        );
         assert!(!s.content.contains("ref: x"), "leaked .git");
         assert!(!s.content.contains("not markdown"), "leaked non-md");
     }
@@ -536,10 +565,20 @@ mod tests {
 
     #[test]
     fn init_args_bootstrap_a_named_folder_mem() {
-        let args = build_init_args(std::path::Path::new("/tmp/cap-ws"), "corpus", "default@1.0.0");
+        let args = build_init_args(
+            std::path::Path::new("/tmp/cap-ws"),
+            "corpus",
+            "default@1.0.0",
+        );
         assert_eq!(args[0], "init");
         assert!(args.iter().any(|a| a == "/tmp/cap-ws"));
-        assert!(args.windows(2).any(|w| w[0] == "--name" && w[1] == "corpus"));
-        assert!(args.windows(2).any(|w| w[0] == "--schema" && w[1] == "default@1.0.0"));
+        assert!(
+            args.windows(2)
+                .any(|w| w[0] == "--name" && w[1] == "corpus")
+        );
+        assert!(
+            args.windows(2)
+                .any(|w| w[0] == "--schema" && w[1] == "default@1.0.0")
+        );
     }
 }

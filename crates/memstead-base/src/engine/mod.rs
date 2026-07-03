@@ -25,11 +25,11 @@ use memstead_schema::Schema;
 
 use crate::backend::{BackendError, MemBackend};
 use crate::graph::LouvainOutput;
+use crate::mem::MemRouterSnapshot;
 use crate::ops::WarningHint;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::search_index::MemIndex;
 use crate::store::Store;
-use crate::mem::MemRouterSnapshot;
 use crate::workspace::{Mount, WorkspaceSettings};
 
 pub mod apply_commit;
@@ -47,21 +47,20 @@ pub mod query;
 
 pub use archive::FromArchiveBytesError;
 pub use error::{
-    BootError, EngineError, INLINE_LIST_CAP, MissingWikiLink, ReferrerInfo,
-    SchemaSourceDiagnostic, format_inline_list_overflow,
+    BootError, EngineError, INLINE_LIST_CAP, MissingWikiLink, ReferrerInfo, SchemaSourceDiagnostic,
+    format_inline_list_overflow,
 };
-pub use events::{EventCallback, SubscriptionHandle, MemChangedEvent};
 #[cfg(feature = "tokio")]
 pub use events::DEFAULT_BROADCAST_CAPACITY;
+pub use events::{EventCallback, MemChangedEvent, SubscriptionHandle};
 #[cfg(feature = "file-watcher")]
 pub use file_watcher::{FileWatcherError, MemRepoWatcher, watch_mem_repo};
 pub use mutation::delete::DeleteReferrers;
 pub use mutation::{PATCH_OLD_NOT_FOUND_CONTENT_CAP, RELATIONSHIP_CYCLE_PATH_CAP};
 pub use outcomes::{
-    SetSchemaOutcome, SetSchemaResult,
-    CreateEntityArgs, CreateEntityOutcome, DeleteEntityArgs, DeleteEntityOutcome,
-    RelateAction, RelateEntityArgs, RelateEntityOutcome, RenameEntityArgs, RenameEntityOutcome,
-    UpdateEntityArgs, UpdateEntityOutcome,
+    CreateEntityArgs, CreateEntityOutcome, DeleteEntityArgs, DeleteEntityOutcome, RelateAction,
+    RelateEntityArgs, RelateEntityOutcome, RenameEntityArgs, RenameEntityOutcome, SetSchemaOutcome,
+    SetSchemaResult, UpdateEntityArgs, UpdateEntityOutcome,
 };
 
 pub use boot::{SchemaResolver, resolve_builtin_schema_pin_pub};
@@ -355,17 +354,12 @@ pub type GitBranchFetchFn = fn(
 /// entries and non-blob nodes. Used by the pre-merge schema-validation
 /// pass `Engine::pull` and `Engine::push` run before they advance the
 /// branch pointer / push to the remote.
-pub type GitBranchReadTreeFn = fn(
-    gitdir: &Path,
-    ref_name: &str,
-) -> Result<Vec<(String, String)>, BackendError>;
+pub type GitBranchReadTreeFn =
+    fn(gitdir: &Path, ref_name: &str) -> Result<Vec<(String, String)>, BackendError>;
 
 /// `Engine::pull` dispatch for git-branch mounts.
-pub type GitBranchPullFn = fn(
-    gitdir: &Path,
-    remote: &str,
-    mem: &str,
-) -> Result<crate::ops::PullOutcome, BackendError>;
+pub type GitBranchPullFn =
+    fn(gitdir: &Path, remote: &str, mem: &str) -> Result<crate::ops::PullOutcome, BackendError>;
 
 /// `Engine::push` dispatch for git-branch mounts.
 pub type GitBranchPushFn = fn(
@@ -377,11 +371,8 @@ pub type GitBranchPushFn = fn(
 
 /// `Engine::remote_add` dispatch — configures a named remote on the
 /// mem-repo gitdir (upsert: add, or set-url when it already exists).
-pub type GitBranchRemoteAddFn = fn(
-    gitdir: &Path,
-    name: &str,
-    url: &str,
-) -> Result<crate::ops::RemoteAddOutcome, BackendError>;
+pub type GitBranchRemoteAddFn =
+    fn(gitdir: &Path, name: &str, url: &str) -> Result<crate::ops::RemoteAddOutcome, BackendError>;
 
 /// `Engine::branch_reset` dispatch for git-branch mounts. Returns the
 /// outcome on success; surfaces `BackendError::Other` carrying an
@@ -404,10 +395,8 @@ pub type GitBranchBranchResetFn = fn(
 /// flows). Surfaces as a function pointer so `memstead-engine` can
 /// drive a prune against an unmounted gitdir without depending on
 /// `memstead-git-branch`.
-pub type GitBranchPruneResidueFn = fn(
-    gitdir: &Path,
-    branch_full_path: &str,
-) -> Result<(), BackendError>;
+pub type GitBranchPruneResidueFn =
+    fn(gitdir: &Path, branch_full_path: &str) -> Result<(), BackendError>;
 
 /// `Engine::install_schema` dispatch for the git-branch backend: write a
 /// schema package (`(relative-path, bytes)` pairs) onto the workspace's
@@ -455,9 +444,6 @@ impl std::fmt::Debug for Engine {
             .finish()
     }
 }
-
-
-
 
 #[cfg(test)]
 mod in_memory_mem;
@@ -577,11 +563,7 @@ write_rules: []
         std::fs::write(dir.join("schema.yaml"), manifest).unwrap();
         for type_name in types {
             let body = format!("name: {type_name}\n{TYPE_BODY}");
-            std::fs::write(
-                dir.join("types").join(format!("{type_name}.yaml")),
-                body,
-            )
-            .unwrap();
+            std::fs::write(dir.join("types").join(format!("{type_name}.yaml")), body).unwrap();
         }
     }
 
@@ -618,10 +600,7 @@ write_rules: []
         )
     }
 
-    pub(crate) fn engine_with_seed(
-        tmp: &TempDir,
-        title: &str,
-    ) -> (Engine, CreateEntityOutcome) {
+    pub(crate) fn engine_with_seed(tmp: &TempDir, title: &str) -> (Engine, CreateEntityOutcome) {
         let mem_dir = tmp.path().to_path_buf();
         let writer = FilesystemMemWriter::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
@@ -631,7 +610,12 @@ write_rules: []
         .unwrap();
         let (actor, client) = cli_actor();
         let outcome = engine
-            .create_entity(empty_create_args("specs", title), actor, Some(&client), None)
+            .create_entity(
+                empty_create_args("specs", title),
+                actor,
+                Some(&client),
+                None,
+            )
             .unwrap();
         (engine, outcome)
     }
@@ -685,5 +669,4 @@ write_rules: []
             .unwrap();
         engine
     }
-
 }

@@ -91,7 +91,10 @@ fn scan_engine_codes(
             if in_code_fn {
                 depth += line.matches('{').count() as i32;
                 depth -= line.matches('}').count() as i32;
-                for cap in arm_re.captures_iter(line).chain(bare_lit_re.captures_iter(line)) {
+                for cap in arm_re
+                    .captures_iter(line)
+                    .chain(bare_lit_re.captures_iter(line))
+                {
                     let code = cap.get(1).unwrap().as_str().to_string();
                     push(codes, code, Surface::Engine, sub, (idx + 1) as u32);
                 }
@@ -108,21 +111,29 @@ fn scan_cli_codes(
     workspace_root: &Path,
     codes: &mut BTreeMap<String, Vec<Occurrence>>,
 ) -> Result<()> {
+    // Scanned against the whole file, not per line: rustfmt wraps call
+    // arguments across lines, so the code literal often sits on its own
+    // line below `CliError::new(` / `.with_code(`. `\s` and the negated
+    // classes match newlines; the reported line is the literal's own.
     let const_re =
         Regex::new(r#"pub const [A-Z_]+_CODE:\s*&str\s*=\s*"([A-Z][A-Z0-9_]+)""#).unwrap();
     let with_code_re = Regex::new(r#"\.with_code\(\s*"([A-Z][A-Z0-9_]+)"\s*\)"#).unwrap();
-    let new_re = Regex::new(r#"CliError::new\([^)]*?"([A-Z][A-Z0-9_]+)""#).unwrap();
+    let new_re = Regex::new(r#"CliError::new\([^)"]*?"([A-Z][A-Z0-9_]+)""#).unwrap();
     for crate_dir in ["crates/memstead-cli/src"] {
         let root = workspace_root.join(crate_dir);
         for path in rust_sources(&root)? {
             let rel = pathdiff(workspace_root, &path);
             let text = std::fs::read_to_string(&path)?;
-            for (idx, line) in text.lines().enumerate() {
-                for re in [&const_re, &with_code_re, &new_re] {
-                    for cap in re.captures_iter(line) {
-                        let code = cap.get(1).unwrap().as_str().to_string();
-                        push(codes, code, Surface::Cli, &rel, (idx + 1) as u32);
-                    }
+            for re in [&const_re, &with_code_re, &new_re] {
+                for cap in re.captures_iter(&text) {
+                    let m = cap.get(1).unwrap();
+                    push(
+                        codes,
+                        m.as_str().to_string(),
+                        Surface::Cli,
+                        &rel,
+                        line_of(&text, m.start()),
+                    );
                 }
             }
         }
@@ -134,6 +145,8 @@ fn scan_mcp_codes(
     workspace_root: &Path,
     codes: &mut BTreeMap<String, Vec<Occurrence>>,
 ) -> Result<()> {
+    // Whole-file scan for the same reason as `scan_cli_codes`: rustfmt
+    // may put the code literal on the line after `tool_error(`.
     let tool_re =
         Regex::new(r#"\btool_error(?:_with_payload)?\(\s*"([A-Z][A-Z0-9_]+)"\s*,"#).unwrap();
     for crate_dir in ["crates/memstead-mcp/src"] {
@@ -141,15 +154,24 @@ fn scan_mcp_codes(
         for path in rust_sources(&root)? {
             let rel = pathdiff(workspace_root, &path);
             let text = std::fs::read_to_string(&path)?;
-            for (idx, line) in text.lines().enumerate() {
-                for cap in tool_re.captures_iter(line) {
-                    let code = cap.get(1).unwrap().as_str().to_string();
-                    push(codes, code, Surface::Mcp, &rel, (idx + 1) as u32);
-                }
+            for cap in tool_re.captures_iter(&text) {
+                let m = cap.get(1).unwrap();
+                push(
+                    codes,
+                    m.as_str().to_string(),
+                    Surface::Mcp,
+                    &rel,
+                    line_of(&text, m.start()),
+                );
             }
         }
     }
     Ok(())
+}
+
+/// 1-based line number of a byte offset, for whole-file regex scans.
+fn line_of(text: &str, offset: usize) -> u32 {
+    (text[..offset].bytes().filter(|&b| b == b'\n').count() + 1) as u32
 }
 
 fn push(
@@ -179,8 +201,7 @@ fn render_index(codes: &BTreeMap<String, Vec<Occurrence>>) -> String {
     out.push_str("| Code | Surfaces | Source locations |\n");
     out.push_str("|------|----------|------------------|\n");
     for (code, occurrences) in codes {
-        let mut surfaces: Vec<Surface> =
-            occurrences.iter().map(|o| o.surface).collect();
+        let mut surfaces: Vec<Surface> = occurrences.iter().map(|o| o.surface).collect();
         surfaces.sort();
         surfaces.dedup();
         let surfaces_str: Vec<&str> = surfaces.iter().map(|s| s.label()).collect();

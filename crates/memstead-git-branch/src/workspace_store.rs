@@ -11,17 +11,20 @@
 use std::path::Path;
 
 use memstead_base::{
-    BootError, Engine, FileWorkspaceStore, Mount, MemBackend, WorkspaceStoreAdapter,
-    detect_layout,
+    BootError, Engine, FileWorkspaceStore, MemBackend, Mount, WorkspaceStoreAdapter, detect_layout,
 };
 
+/// A mount paired with its instantiated backend — the unit the boot
+/// pipeline hands to [`Engine`] construction.
+type MountedBackend = (Mount, Box<dyn MemBackend>);
+
 fn hydrate_read_mems(
-    writable_mounts: &[(Mount, Box<dyn MemBackend>)],
+    writable_mounts: &[MountedBackend],
     writable_names: &std::collections::HashSet<String>,
-) -> Result<Vec<(Mount, Box<dyn MemBackend>)>, BootError> {
+) -> Result<Vec<MountedBackend>, BootError> {
     let cache_dir = crate::mem_cache::mem_cache_dir();
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let mut extras: Vec<(Mount, Box<dyn MemBackend>)> = Vec::new();
+    let mut extras: Vec<MountedBackend> = Vec::new();
     for (_, backend) in writable_mounts {
         let bytes = match backend.read_mem_config() {
             Ok(Some(b)) => b,
@@ -85,8 +88,8 @@ fn hydrate_read_mems(
                 capability: memstead_base::MountCapability::ReadOnly,
                 lifecycle: memstead_base::MountLifecycle::Eager,
                 cross_linkable: false,
-            migration_target: None,
-        };
+                migration_target: None,
+            };
             let backend: Box<dyn MemBackend> =
                 Box::new(memstead_base::storage::ArchiveBackend::new(archive_path));
             extras.push((read_mount, backend));
@@ -101,25 +104,19 @@ pub fn engine_from_workspace_root(workspace_root: &Path) -> Result<Engine, BootE
         // no `workspace.toml`) roots as a one-mount workspace. The macOS app
         // boots through this full entry, so the unified lone-mem experience
         // must hold here too, not only in the lean boot path.
-        memstead_base::Layout::Empty => {
-            match memstead_base::standalone_workspace(workspace_root) {
-                Some(ws) => ws,
-                None => {
-                    return Err(BootError::NotInitialised(workspace_root.to_path_buf()));
-                }
+        memstead_base::Layout::Empty => match memstead_base::standalone_workspace(workspace_root) {
+            Some(ws) => ws,
+            None => {
+                return Err(BootError::NotInitialised(workspace_root.to_path_buf()));
             }
-        }
+        },
         memstead_base::Layout::New => FileWorkspaceStore::new().load(workspace_root)?,
     };
 
     let settings = workspace.settings.clone();
-    let writable_names: std::collections::HashSet<String> = workspace
-        .mounts
-        .iter()
-        .map(|m| m.mem.clone())
-        .collect();
-    let mut mounts: Vec<(Mount, Box<dyn MemBackend>)> =
-        Vec::with_capacity(workspace.mounts.len());
+    let writable_names: std::collections::HashSet<String> =
+        workspace.mounts.iter().map(|m| m.mem.clone()).collect();
+    let mut mounts: Vec<(Mount, Box<dyn MemBackend>)> = Vec::with_capacity(workspace.mounts.len());
     for mount in workspace.mounts {
         let backend = crate::storage::instantiate_full_backend(&mount)?;
         mounts.push((mount, backend));
@@ -180,7 +177,6 @@ pub fn engine_from_workspace_root(workspace_root: &Path) -> Result<Engine, BootE
     let _ = memstead_schema::meta_schema::publish_meta_schemas(workspace_root);
     Ok(engine)
 }
-
 
 #[cfg(test)]
 mod tests {

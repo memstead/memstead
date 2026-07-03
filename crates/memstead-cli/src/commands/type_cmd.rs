@@ -47,8 +47,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 out
             }
             None => {
-                let mut known: Vec<&str> =
-                    schema.types.keys().map(String::as_str).collect();
+                let mut known: Vec<&str> = schema.types.keys().map(String::as_str).collect();
                 known.sort();
                 return Err(CliError::new(
                     ExitKind::Generic,
@@ -95,10 +94,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
 ///    listing them and pointing at `--mem`.
 /// 4. Zero writable mems (no workspace, cold-start probe): fall back
 ///    to the engine built-in default so the catalogue is still readable.
-fn resolve_schema(
-    ctx: &CliContext,
-    mem: Option<&str>,
-) -> anyhow::Result<Arc<Schema>> {
+fn resolve_schema(ctx: &CliContext, mem: Option<&str>) -> anyhow::Result<Arc<Schema>> {
     let engine = match ctx.cli_engine() {
         Ok(e) => e,
         // No workspace at all: cold-start probe — fall through to
@@ -117,7 +113,7 @@ fn resolve_schema(
             // F25: `--mem` resolves against every loaded
             // mem, not just the writable subset. Schema lookup is
             // read-only; RO mounts have schemas worth introspecting.
-            if !all_loaded.iter().any(|w| *w == name) {
+            if !all_loaded.contains(&name) {
                 let known = if all_loaded.is_empty() {
                     "no mems loaded".to_string()
                 } else {
@@ -151,8 +147,7 @@ fn resolve_schema(
                         .map(|s| (s.manifest.name.clone(), s.version.clone()))
                 };
                 let first = schema_id(writable[0]);
-                let all_same =
-                    first.is_some() && writable.iter().all(|v| schema_id(v) == first);
+                let all_same = first.is_some() && writable.iter().all(|v| schema_id(v) == first);
                 if all_same {
                     writable[0]
                 } else {
@@ -174,5 +169,5 @@ fn resolve_schema(
         .schemas()
         .get(resolved_mem)
         .cloned()
-        .unwrap_or_else(|| Schema::builtin_default()))
+        .unwrap_or_else(Schema::builtin_default))
 }

@@ -41,10 +41,10 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use memstead_schema::{Schema, MemConfig, loader::SchemaLoadError};
+use memstead_schema::{MemConfig, Schema, loader::SchemaLoadError};
 
 use crate::mem_repo_config::{
-    RefSpec, MemRepoWriteError, commit_refs_at_gitdir, resolve_full_path_at_gitdir,
+    MemRepoWriteError, RefSpec, commit_refs_at_gitdir, resolve_full_path_at_gitdir,
 };
 use crate::mem_repo_schemas::{LoadOutcome, MemRepoSchemasError};
 use crate::vcs::{CommitContext, author_identity, format_commit_message};
@@ -104,7 +104,9 @@ pub struct MemsteadMigrationOutcome {
 /// tree under `__MEMSTEAD`. The runtime treats an empty `__MEMSTEAD` the
 /// same way it treats absent `__SCHEMAS` / `__SYSTEM` — fall through
 /// to legacy fallbacks while the cutover lands.
-pub fn migrate_to_memstead_ref(gitdir: &Path) -> Result<MemsteadMigrationOutcome, MemsteadRefError> {
+pub fn migrate_to_memstead_ref(
+    gitdir: &Path,
+) -> Result<MemsteadMigrationOutcome, MemsteadRefError> {
     let repo = gix::open(gitdir).map_err(|e| MemsteadRefError::GixOpen(e.to_string()))?;
     // 1. Read __SCHEMAS — for each schema directory, parse the
     //    manifest YAML to extract the version, then plan a write at
@@ -112,9 +114,9 @@ pub fn migrate_to_memstead_ref(gitdir: &Path) -> Result<MemsteadMigrationOutcome
     //    object id (the entire schema directory copies as a tree
     //    object, byte-identical).
     let mut schema_entries: Vec<(String, gix::ObjectId)> = Vec::new();
-    if let Some(reference) =
-        repo.try_find_reference("refs/heads/__SCHEMAS")
-            .map_err(|e| MemsteadRefError::GitTree(e.to_string()))?
+    if let Some(reference) = repo
+        .try_find_reference("refs/heads/__SCHEMAS")
+        .map_err(|e| MemsteadRefError::GitTree(e.to_string()))?
     {
         let id = reference
             .into_fully_peeled_id()
@@ -162,10 +164,7 @@ pub fn migrate_to_memstead_ref(gitdir: &Path) -> Result<MemsteadMigrationOutcome
                 }
                 None => "0.0.0".to_string(),
             };
-            schema_entries.push((
-                format!("{dir_name}@{version}"),
-                entry.oid().to_owned(),
-            ));
+            schema_entries.push((format!("{dir_name}@{version}"), entry.oid().to_owned()));
         }
     }
 
@@ -174,9 +173,9 @@ pub fn migrate_to_memstead_ref(gitdir: &Path) -> Result<MemsteadMigrationOutcome
     //    structures (`<seg>/<seg>/<mem>/config.json`) are
     //    preserved by copying the subtree's object id verbatim.
     let mut mem_entries: Vec<(String, gix::ObjectId, gix::object::tree::EntryKind)> = Vec::new();
-    if let Some(reference) =
-        repo.try_find_reference("refs/heads/__SYSTEM")
-            .map_err(|e| MemsteadRefError::GitTree(e.to_string()))?
+    if let Some(reference) = repo
+        .try_find_reference("refs/heads/__SYSTEM")
+        .map_err(|e| MemsteadRefError::GitTree(e.to_string()))?
     {
         let id = reference
             .into_fully_peeled_id()
@@ -412,9 +411,7 @@ fn extract_manifest_version(yaml: &str) -> Option<String> {
     for line in yaml.lines() {
         let trimmed = line.trim_start();
         if let Some(rest) = trimmed.strip_prefix("version:") {
-            let value = rest
-                .trim()
-                .trim_matches(|c: char| c == '"' || c == '\'');
+            let value = rest.trim().trim_matches(|c: char| c == '"' || c == '\'');
             if value.is_empty() {
                 return None;
             }
@@ -445,8 +442,8 @@ pub fn load_schemas_from_memstead_ref(
 pub fn load_schemas_from_memstead_ref_at_gitdir(
     gitdir: &Path,
 ) -> Result<LoadOutcome, MemRepoSchemasError> {
-    let repo =
-        gix::open(gitdir).map_err(|e| MemRepoSchemasError::GixOpen(e.to_string()))?;    let memstead_ref = match repo
+    let repo = gix::open(gitdir).map_err(|e| MemRepoSchemasError::GixOpen(e.to_string()))?;
+    let memstead_ref = match repo
         .try_find_reference("refs/heads/__MEMSTEAD")
         .map_err(|e| MemRepoSchemasError::GitTree(e.to_string()))?
     {
@@ -507,42 +504,40 @@ pub fn load_schemas_from_memstead_ref_at_gitdir(
         if let Some(types_entry) = schema_tree
             .lookup_entry_by_path("types")
             .map_err(|e| MemRepoSchemasError::GitTree(e.to_string()))?
+            && types_entry.mode().is_tree()
         {
-            if types_entry.mode().is_tree() {
-                let types_obj = types_entry
-                    .object()
-                    .map_err(|e| MemRepoSchemasError::GitTree(e.to_string()))?;
-                let types_tree = types_obj
-                    .try_into_tree()
-                    .map_err(|e| MemRepoSchemasError::GitTree(e.to_string()))?;
-                for entry_res in types_tree.iter() {
-                    let entry = entry_res
-                        .map_err(|e| MemRepoSchemasError::GitTree(e.to_string()))?;
-                    if !entry.mode().is_blob() {
-                        continue;
-                    }
-                    let filename = match std::str::from_utf8(entry.filename()) {
-                        Ok(s) => s,
-                        Err(_) => continue,
-                    };
-                    let stem = match filename.strip_suffix(".yaml") {
-                        Some(s) => s.to_string(),
-                        None => continue,
-                    };
-                    let blob = repo
-                        .find_object(entry.oid().to_owned())
-                        .map_err(|e| MemRepoSchemasError::GitTree(e.to_string()))?;
-                    let bytes = blob.data.clone();
-                    let contents = String::from_utf8(bytes).map_err(|e| {
-                        MemRepoSchemasError::NotUtf8(
-                            format!("{versioned_name}/types/{filename}"),
-                            e.to_string(),
-                        )
-                    })?;
-                    types_yamls.push((stem, contents));
+            let types_obj = types_entry
+                .object()
+                .map_err(|e| MemRepoSchemasError::GitTree(e.to_string()))?;
+            let types_tree = types_obj
+                .try_into_tree()
+                .map_err(|e| MemRepoSchemasError::GitTree(e.to_string()))?;
+            for entry_res in types_tree.iter() {
+                let entry = entry_res.map_err(|e| MemRepoSchemasError::GitTree(e.to_string()))?;
+                if !entry.mode().is_blob() {
+                    continue;
                 }
-                types_yamls.sort_by(|a, b| a.0.cmp(&b.0));
+                let filename = match std::str::from_utf8(entry.filename()) {
+                    Ok(s) => s,
+                    Err(_) => continue,
+                };
+                let stem = match filename.strip_suffix(".yaml") {
+                    Some(s) => s.to_string(),
+                    None => continue,
+                };
+                let blob = repo
+                    .find_object(entry.oid().to_owned())
+                    .map_err(|e| MemRepoSchemasError::GitTree(e.to_string()))?;
+                let bytes = blob.data.clone();
+                let contents = String::from_utf8(bytes).map_err(|e| {
+                    MemRepoSchemasError::NotUtf8(
+                        format!("{versioned_name}/types/{filename}"),
+                        e.to_string(),
+                    )
+                })?;
+                types_yamls.push((stem, contents));
             }
+            types_yamls.sort_by(|a, b| a.0.cmp(&b.0));
         }
 
         let schema = memstead_schema::loader::load_schema_from_memory(&manifest_yaml, &types_yamls)
@@ -569,15 +564,18 @@ fn read_blob_string_for_schemas(
     let entry = schema_tree
         .lookup_entry_by_path(filename)
         .map_err(|e| MemRepoSchemasError::GitTree(e.to_string()))?
-        .ok_or_else(|| MemRepoSchemasError::GitTree(format!(
-            "schema '{schema_name}': missing {filename} in __MEMSTEAD"
-        )))?;
+        .ok_or_else(|| {
+            MemRepoSchemasError::GitTree(format!(
+                "schema '{schema_name}': missing {filename} in __MEMSTEAD"
+            ))
+        })?;
     let object = entry
         .object()
         .map_err(|e| MemRepoSchemasError::GitTree(e.to_string()))?;
     let bytes = object.data.clone();
-    String::from_utf8(bytes)
-        .map_err(|e| MemRepoSchemasError::NotUtf8(format!("{schema_name}/{filename}"), e.to_string()))
+    String::from_utf8(bytes).map_err(|e| {
+        MemRepoSchemasError::NotUtf8(format!("{schema_name}/{filename}"), e.to_string())
+    })
 }
 
 /// Read a per-mem config from `__MEMSTEAD:mems/<mem>/config.json`.
@@ -609,14 +607,13 @@ pub fn read_mem_config_from_memstead_ref(
         }
     };
 
-    let repo = gix::open(gitdir).map_err(|e| MemsteadRefError::GixOpen(e.to_string()))?;    let memstead_ref = repo
+    let repo = gix::open(gitdir).map_err(|e| MemsteadRefError::GixOpen(e.to_string()))?;
+    let memstead_ref = repo
         .try_find_reference("refs/heads/__MEMSTEAD")
         .map_err(|e| MemsteadRefError::GitTree(e.to_string()))?
-        .ok_or_else(|| {
-            MemsteadRefError::Config {
-                path: "refs/heads/__MEMSTEAD".to_string(),
-                message: "ref not found".to_string(),
-            }
+        .ok_or_else(|| MemsteadRefError::Config {
+            path: "refs/heads/__MEMSTEAD".to_string(),
+            message: "ref not found".to_string(),
         })?;
     let id = memstead_ref
         .into_fully_peeled_id()
@@ -646,10 +643,11 @@ pub fn read_mem_config_from_memstead_ref(
         path: path.clone(),
         message: format!("not utf-8: {e}"),
     })?;
-    let value: serde_json::Value = serde_json::from_str(&raw).map_err(|e| MemsteadRefError::Config {
-        path: path.clone(),
-        message: format!("invalid json: {e}"),
-    })?;
+    let value: serde_json::Value =
+        serde_json::from_str(&raw).map_err(|e| MemsteadRefError::Config {
+            path: path.clone(),
+            message: format!("invalid json: {e}"),
+        })?;
     memstead_schema::parse_mem_config(&value).map_err(|e| MemsteadRefError::Config {
         path,
         message: e.to_string(),
@@ -739,10 +737,12 @@ pub fn commit_config_to_memstead_at_gitdir(
         .detach();
     let tree_path = format!("mems/{full_tree_path}/config.json");
     editor
-        .upsert(tree_path.as_str(), gix::objs::tree::EntryKind::Blob, blob_id)
-        .map_err(|e| {
-            MemRepoWriteError::GitTree(format!("tree upsert {tree_path}: {e}"))
-        })?;
+        .upsert(
+            tree_path.as_str(),
+            gix::objs::tree::EntryKind::Blob,
+            blob_id,
+        )
+        .map_err(|e| MemRepoWriteError::GitTree(format!("tree upsert {tree_path}: {e}")))?;
     let new_tree_id = editor
         .write()
         .map_err(|e| MemRepoWriteError::GitTree(format!("tree write for __MEMSTEAD: {e}")))?
@@ -780,15 +780,13 @@ pub fn commit_config_to_memstead_at_gitdir(
     };
     let new_commit_id = repo
         .write_object(&commit)
-        .map_err(|e| {
-            MemRepoWriteError::GitTree(format!("write {tree_path} commit: {e}"))
-        })?
+        .map_err(|e| MemRepoWriteError::GitTree(format!("write {tree_path} commit: {e}")))?
         .detach();
 
     let expected = match existing_tip {
-        Some(tip) => gix::refs::transaction::PreviousValue::MustExistAndMatch(
-            gix::refs::Target::Object(tip),
-        ),
+        Some(tip) => {
+            gix::refs::transaction::PreviousValue::MustExistAndMatch(gix::refs::Target::Object(tip))
+        }
         None => gix::refs::transaction::PreviousValue::MustNotExist,
     };
     commit_refs_at_gitdir(
@@ -870,25 +868,24 @@ pub fn delete_mem_artifacts_at_gitdir(
         let tree_path = format!("mems/{branch_leaf}/config.json");
         let entry_present = tree
             .lookup_entry_by_path(&tree_path)
-            .map_err(|e| {
-                MemRepoWriteError::GitTree(format!("lookup {tree_path}: {e}"))
-            })?
+            .map_err(|e| MemRepoWriteError::GitTree(format!("lookup {tree_path}: {e}")))?
             .is_some();
 
         if entry_present {
             let mut editor = tree.edit().map_err(|e| {
                 MemRepoWriteError::GitTree(format!("editor init for __MEMSTEAD: {e}"))
             })?;
-            editor.remove(tree_path.as_str()).map_err(|e| {
-                MemRepoWriteError::GitTree(format!("tree remove {tree_path}: {e}"))
-            })?;
+            editor
+                .remove(tree_path.as_str())
+                .map_err(|e| MemRepoWriteError::GitTree(format!("tree remove {tree_path}: {e}")))?;
             // gix's tree writer prunes empty subtrees on write, so
             // removing `mems/<path>/<name>/config.json` collapses
             // the now-empty `<path>/<name>/` and any `<path>/`
             // ancestors automatically. No manual walk needed.
-            let new_tree_id = editor.write().map_err(|e| {
-                MemRepoWriteError::GitTree(format!("tree write for __MEMSTEAD: {e}"))
-            })?.detach();
+            let new_tree_id = editor
+                .write()
+                .map_err(|e| MemRepoWriteError::GitTree(format!("tree write for __MEMSTEAD: {e}")))?
+                .detach();
 
             let time = gix::date::Time::now_local_or_utc();
             let committer_sig = gix::actor::Signature {
@@ -932,9 +929,7 @@ pub fn delete_mem_artifacts_at_gitdir(
 
     let branch_ref = format!("refs/heads/{branch_leaf}");
     let branch_full: FullName = branch_ref.as_str().try_into().map_err(|e| {
-        MemRepoWriteError::RefTransaction(format!(
-            "invalid branch ref {branch_ref:?}: {e}"
-        ))
+        MemRepoWriteError::RefTransaction(format!("invalid branch ref {branch_ref:?}: {e}"))
     })?;
     edits.push(RefEdit {
         change: Change::Delete {
@@ -956,11 +951,9 @@ pub fn delete_mem_artifacts_at_gitdir(
                 log: LogChange {
                     mode: RefLog::AndReference,
                     force_create_reflog: false,
-                    message: format!(
-                        "memstead: prune __MEMSTEAD:mems/{branch_leaf}/config.json"
-                    )
-                    .as_str()
-                    .into(),
+                    message: format!("memstead: prune __MEMSTEAD:mems/{branch_leaf}/config.json")
+                        .as_str()
+                        .into(),
                 },
                 expected: PreviousValue::MustExistAndMatch(Target::Object(prior_tip)),
                 new: Target::Object(new_commit),
@@ -999,10 +992,13 @@ mod tests {
         }
     }
 
+    /// `(name, version, [(filename, body)])` schema seed tuple.
+    type SchemaSeed<'a> = (&'a str, &'a str, &'a [(&'a str, &'a str)]);
+
     /// Build a minimal __SCHEMAS commit with one schema directory
     /// `<name>` containing `schema.yaml` (with a `version: <v>` field)
     /// and an optional types subtree of `(filename, body)` pairs.
-    fn seed_schemas(gitdir: &Path, schemas: &[(&str, &str, &[(&str, &str)])]) {
+    fn seed_schemas(gitdir: &Path, schemas: &[SchemaSeed<'_>]) {
         let repo = gix::open(gitdir).unwrap();
         let actor = actor_for_test();
         let mut buf = gix::date::parse::TimeBuf::default();
@@ -1053,11 +1049,7 @@ mod tests {
         if !repo_json.is_empty() {
             let blob = repo.write_blob(repo_json.as_bytes()).unwrap().detach();
             editor
-                .upsert(
-                    "repo.json",
-                    gix::object::tree::EntryKind::Blob,
-                    blob,
-                )
+                .upsert("repo.json", gix::object::tree::EntryKind::Blob, blob)
                 .unwrap();
         }
         for (mem, config) in mems {
@@ -1101,7 +1093,9 @@ mod tests {
 
     fn walk(repo: &gix::Repository, tree: &gix::Tree<'_>, prefix: &str, out: &mut Vec<String>) {
         for entry in tree.iter().flatten() {
-            let name = std::str::from_utf8(entry.filename()).unwrap_or("").to_string();
+            let name = std::str::from_utf8(entry.filename())
+                .unwrap_or("")
+                .to_string();
             let path = if prefix.is_empty() {
                 name.clone()
             } else {
@@ -1171,7 +1165,10 @@ mod tests {
 
         // Write a package onto an absent ref — the ref is created.
         let tiny = vec![
-            ("schema.yaml".to_string(), b"name: tiny\nversion: 0.1.0\n".to_vec()),
+            (
+                "schema.yaml".to_string(),
+                b"name: tiny\nversion: 0.1.0\n".to_vec(),
+            ),
             ("types/doc.yaml".to_string(), b"name: doc\n".to_vec()),
             ("mem-template.json".to_string(), b"{}\n".to_vec()),
         ];
@@ -1200,8 +1197,16 @@ mod tests {
         assert!(!out2.already_current);
         assert_ne!(out2.commit_sha, out.commit_sha);
         let entries2 = list_memstead_entries(&gitdir);
-        assert!(entries2.iter().any(|e| e == "schemas/tiny@0.1.0/schema.yaml"));
-        assert!(entries2.iter().any(|e| e == "schemas/other@2.0.0/schema.yaml"));
+        assert!(
+            entries2
+                .iter()
+                .any(|e| e == "schemas/tiny@0.1.0/schema.yaml")
+        );
+        assert!(
+            entries2
+                .iter()
+                .any(|e| e == "schemas/other@2.0.0/schema.yaml")
+        );
     }
 
     #[test]
@@ -1211,7 +1216,10 @@ mod tests {
         // is wired to `write_schema_to_memstead_ref` and returns a sha.
         let tmp = TempDir::new().unwrap();
         let gitdir = fresh_repo_dir(tmp.path());
-        let files = vec![("schema.yaml".to_string(), b"name: h\nversion: 1.0.0\n".to_vec())];
+        let files = vec![(
+            "schema.yaml".to_string(),
+            b"name: h\nversion: 1.0.0\n".to_vec(),
+        )];
         let commit =
             (crate::storage::FULL_GIT_BRANCH_OPS.write_schema)(&gitdir, "h", "1.0.0", &files)
                 .expect("hook writes the package");
@@ -1351,10 +1359,7 @@ mod tests {
         assert_eq!(entries, vec!["mems/alpha/config.json".to_string()]);
 
         let config = read_mem_config_from_memstead_ref(&gitdir, "alpha").unwrap();
-        assert_eq!(
-            config.schema.unwrap().to_string(),
-            "default@1.0.0"
-        );
+        assert_eq!(config.schema.unwrap().to_string(), "default@1.0.0");
     }
 
     #[test]
@@ -1381,10 +1386,7 @@ mod tests {
         .unwrap();
 
         let config = read_mem_config_from_memstead_ref(&gitdir, "alpha").unwrap();
-        assert_eq!(
-            config.schema.unwrap().to_string(),
-            "default@2.0.0"
-        );
+        assert_eq!(config.schema.unwrap().to_string(), "default@2.0.0");
     }
 
     #[test]

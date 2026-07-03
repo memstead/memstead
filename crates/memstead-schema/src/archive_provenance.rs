@@ -162,7 +162,8 @@ mod tests {
         assert_eq!(payload, back);
         assert_eq!(back.history, History::Summarised);
         assert_eq!(
-            back.entity("specs:alpha").and_then(|e| e.rationale.as_deref()),
+            back.entity("specs:alpha")
+                .and_then(|e| e.rationale.as_deref()),
             Some("first draft")
         );
     }

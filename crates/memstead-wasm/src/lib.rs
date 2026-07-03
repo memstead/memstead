@@ -30,10 +30,10 @@
 //! discipline the MCP server uses on the wire. JS callers branch on
 //! `code` (stable, UPPER_SNAKE_CASE) and never on `message`.
 
+use memstead_base::Engine as BaseEngine;
 use memstead_base::engine::{EngineError, FromArchiveBytesError};
 use memstead_base::entity::EntityId;
 use memstead_base::ops::{CommitEnvelope, SearchScope};
-use memstead_base::Engine as BaseEngine;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
@@ -103,9 +103,7 @@ impl Engine {
     pub fn apply_commit(&mut self, envelope: JsValue) -> Result<(), JsValue> {
         let env: CommitEnvelope = serde_wasm_bindgen::from_value(envelope)
             .map_err(|e| err_object("INVALID_INPUT", &e.to_string()))?;
-        self.inner
-            .apply_external_commit(&env)
-            .map_err(engine_err)
+        self.inner.apply_external_commit(&env).map_err(engine_err)
     }
 
     /// Read one entity by id (`<mem>--<slug>` shape). Returns

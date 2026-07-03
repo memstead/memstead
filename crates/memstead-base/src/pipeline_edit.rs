@@ -38,10 +38,16 @@ pub enum PipelineEditError {
     NoWorkspaceRoot,
     /// A create targeted a `(mem, name)` that already holds a record.
     #[error("{primitive} '{key}' already exists")]
-    AlreadyExists { primitive: &'static str, key: String },
+    AlreadyExists {
+        primitive: &'static str,
+        key: String,
+    },
     /// An update / delete / rename targeted a record that does not exist.
     #[error("{primitive} '{key}' does not exist")]
-    NotFound { primitive: &'static str, key: String },
+    NotFound {
+        primitive: &'static str,
+        key: String,
+    },
     /// A delete was refused because other records still reference the target.
     #[error("{primitive} '{key}' is referenced by {referrers:?} — remove or repoint them first")]
     Referenced {
@@ -51,7 +57,10 @@ pub enum PipelineEditError {
     },
     /// A rename target `(mem, new)` already holds a record.
     #[error("rename target {primitive} '{key}' already exists")]
-    RenameTargetExists { primitive: &'static str, key: String },
+    RenameTargetExists {
+        primitive: &'static str,
+        key: String,
+    },
     /// A JSON-string edit entry point received a payload that did not
     /// deserialize into the target primitive.
     #[error("invalid {primitive} JSON: {message}")]
@@ -199,7 +208,11 @@ pub fn rename_medium(
     // no point in the sequence leaves a facet pointing at a missing medium.
     pipeline_store::write_medium(root, mem, new, &renamed)?;
     for facet in facets_referencing_medium(&configs, mem, old) {
-        if let Some(rec) = configs.facets.iter().find(|r| r.mem == mem && r.name == facet) {
+        if let Some(rec) = configs
+            .facets
+            .iter()
+            .find(|r| r.mem == mem && r.name == facet)
+        {
             let mut updated = rec.config.clone();
             updated.medium = new.to_string();
             pipeline_store::write_facet(root, mem, &facet, &updated)?;
@@ -270,12 +283,7 @@ pub fn delete_facet(root: &Path, mem: &str, name: &str) -> Result<(), PipelineEd
 
 /// Rename a facet within its mem, updating its embedded `name` and every
 /// dependent projection's `source_facets` entry. No-op when `old == new`.
-pub fn rename_facet(
-    root: &Path,
-    mem: &str,
-    old: &str,
-    new: &str,
-) -> Result<(), PipelineEditError> {
+pub fn rename_facet(root: &Path, mem: &str, old: &str, new: &str) -> Result<(), PipelineEditError> {
     if old == new {
         return Ok(());
     }
@@ -298,7 +306,11 @@ pub fn rename_facet(
     renamed.name = new.to_string();
     pipeline_store::write_facet(root, mem, new, &renamed)?;
     for proj in projections_referencing_facet(&configs, mem, old) {
-        if let Some(rec) = configs.projections.iter().find(|r| r.mem == mem && r.name == proj) {
+        if let Some(rec) = configs
+            .projections
+            .iter()
+            .find(|r| r.mem == mem && r.name == proj)
+        {
             let mut updated = rec.config.clone();
             for f in updated.source_facets.iter_mut() {
                 if f == old {
@@ -728,12 +740,20 @@ impl Engine {
     }
 
     /// [`Self::add_ingest`] from a JSON-encoded [`Ingest`].
-    pub fn add_ingest_json(&mut self, name: &str, ingest_json: &str) -> Result<(), PipelineEditError> {
+    pub fn add_ingest_json(
+        &mut self,
+        name: &str,
+        ingest_json: &str,
+    ) -> Result<(), PipelineEditError> {
         self.add_ingest(name, &parse_json(ingest_json, "ingest")?)
     }
 
     /// [`Self::update_ingest`] from a JSON-encoded [`Ingest`].
-    pub fn update_ingest_json(&mut self, name: &str, ingest_json: &str) -> Result<(), PipelineEditError> {
+    pub fn update_ingest_json(
+        &mut self,
+        name: &str,
+        ingest_json: &str,
+    ) -> Result<(), PipelineEditError> {
         self.update_ingest(name, &parse_json(ingest_json, "ingest")?)
     }
 }
@@ -804,14 +824,20 @@ mod tests {
         let root = tmp.path();
         add_medium(root, "v", "m", &medium("m")).unwrap();
         let err = add_medium(root, "v", "m", &medium("m")).unwrap_err();
-        assert!(matches!(err, PipelineEditError::AlreadyExists { .. }), "got {err:?}");
+        assert!(
+            matches!(err, PipelineEditError::AlreadyExists { .. }),
+            "got {err:?}"
+        );
     }
 
     #[test]
     fn update_missing_medium_refuses() {
         let tmp = TempDir::new().unwrap();
         let err = update_medium(tmp.path(), "v", "m", &medium("m")).unwrap_err();
-        assert!(matches!(err, PipelineEditError::NotFound { .. }), "got {err:?}");
+        assert!(
+            matches!(err, PipelineEditError::NotFound { .. }),
+            "got {err:?}"
+        );
     }
 
     #[test]
@@ -858,7 +884,10 @@ mod tests {
         add_medium(root, "v", "a", &medium("a")).unwrap();
         add_medium(root, "v", "b", &medium("b")).unwrap();
         let err = rename_medium(root, "v", "a", "b").unwrap_err();
-        assert!(matches!(err, PipelineEditError::RenameTargetExists { .. }), "got {err:?}");
+        assert!(
+            matches!(err, PipelineEditError::RenameTargetExists { .. }),
+            "got {err:?}"
+        );
         // Nothing lost.
         let configs = pipeline_store::load_pipeline_configs(root).unwrap();
         assert_eq!(configs.mediums.len(), 2);
@@ -882,7 +911,10 @@ mod tests {
         add_facet(root, "v", "f", &facet("f", "m")).unwrap();
         add_projection(root, "v", "p", &projection(&["f"])).unwrap();
         let err = delete_facet(root, "v", "f").unwrap_err();
-        assert!(matches!(err, PipelineEditError::Referenced { .. }), "got {err:?}");
+        assert!(
+            matches!(err, PipelineEditError::Referenced { .. }),
+            "got {err:?}"
+        );
     }
 
     #[test]
@@ -897,7 +929,10 @@ mod tests {
         let configs = pipeline_store::load_pipeline_configs(root).unwrap();
         assert_eq!(configs.facets[0].name, "new");
         assert_eq!(configs.facets[0].config.name, "new");
-        assert_eq!(configs.projections[0].config.source_facets, vec!["new", "other"]);
+        assert_eq!(
+            configs.projections[0].config.source_facets,
+            vec!["new", "other"]
+        );
     }
 
     #[test]
@@ -925,7 +960,13 @@ mod tests {
     fn parse_json_maps_a_bad_payload_to_invalid_json() {
         let err = parse_json::<Medium>("{ not json", "medium").unwrap_err();
         assert!(
-            matches!(err, PipelineEditError::InvalidJson { primitive: "medium", .. }),
+            matches!(
+                err,
+                PipelineEditError::InvalidJson {
+                    primitive: "medium",
+                    ..
+                }
+            ),
             "got {err:?}"
         );
     }
@@ -950,14 +991,32 @@ mod tests {
         let root = tmp.path();
         add_ingest(root, "i", &ingest("v/p")).unwrap();
         let err = add_ingest(root, "i", &ingest("v/p")).unwrap_err();
-        assert!(matches!(err, PipelineEditError::AlreadyExists { primitive: "ingest", .. }), "got {err:?}");
+        assert!(
+            matches!(
+                err,
+                PipelineEditError::AlreadyExists {
+                    primitive: "ingest",
+                    ..
+                }
+            ),
+            "got {err:?}"
+        );
     }
 
     #[test]
     fn update_missing_ingest_refuses() {
         let tmp = TempDir::new().unwrap();
         let err = update_ingest(tmp.path(), "i", &ingest("v/p")).unwrap_err();
-        assert!(matches!(err, PipelineEditError::NotFound { primitive: "ingest", .. }), "got {err:?}");
+        assert!(
+            matches!(
+                err,
+                PipelineEditError::NotFound {
+                    primitive: "ingest",
+                    ..
+                }
+            ),
+            "got {err:?}"
+        );
     }
 
     #[test]
@@ -989,6 +1048,15 @@ mod tests {
         // Existing target refuses.
         add_ingest(root, "other", &ingest("v/p")).unwrap();
         let err = rename_ingest(root, "other", "new").unwrap_err();
-        assert!(matches!(err, PipelineEditError::RenameTargetExists { primitive: "ingest", .. }), "got {err:?}");
+        assert!(
+            matches!(
+                err,
+                PipelineEditError::RenameTargetExists {
+                    primitive: "ingest",
+                    ..
+                }
+            ),
+            "got {err:?}"
+        );
     }
 }

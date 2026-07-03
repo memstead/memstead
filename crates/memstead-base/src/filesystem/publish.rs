@@ -180,11 +180,11 @@ pub fn assemble_archive(workspace_root: &Path) -> Result<Vec<u8>, AssembleError>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
     use crate::filesystem::config::{WorkspaceConfig, write_workspace_config};
     use crate::validator::ValidatorLimits;
     use crate::validator::archive::extract_entries;
     use memstead_schema::SchemaRef;
+    use std::path::PathBuf;
     use tempfile::TempDir;
 
     fn versioned(name: &str, version: &str) -> SchemaRef {
@@ -277,7 +277,10 @@ mod tests {
         write_workspace_config(&root, &cfg).unwrap();
 
         // Install-shaped package dir, as `memstead schema install` writes it.
-        let schema_dir = root.join(".memstead").join("schemas").join("cookbook@0.1.0");
+        let schema_dir = root
+            .join(".memstead")
+            .join("schemas")
+            .join("cookbook@0.1.0");
         std::fs::create_dir_all(schema_dir.join("types")).unwrap();
         std::fs::write(
             schema_dir.join("schema.yaml"),

@@ -50,7 +50,7 @@ impl ProvenanceKind {
     /// Inverse of [`Self::as_str`]. Returns `None` for any unknown
     /// string so backend readers can treat unrecognised kinds as a
     /// forward-compat extension rather than misclassify.
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s {
             "create" => Some(ProvenanceKind::Create),
             "update" => Some(ProvenanceKind::Update),

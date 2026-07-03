@@ -61,10 +61,7 @@ pub fn chunk_markdown(markdown: &str, budget: usize) -> Option<Vec<String>> {
         // (1-byte ASCII) so `split + 1` is also a valid char boundary.
         // When rfind fails we split at `safe_budget` and advance to the
         // same offset — no `+1`, since there's no newline byte to skip.
-        let (split_at, advance) = match remaining[..safe_budget]
-            .rfind('\n')
-            .filter(|&i| i > 0)
-        {
+        let (split_at, advance) = match remaining[..safe_budget].rfind('\n').filter(|&i| i > 0) {
             Some(i) => (i, i + 1),
             None => (safe_budget, safe_budget),
         };
@@ -121,13 +118,7 @@ pub fn apply_chunking(
     // in isolation can answer "what kind of entity is this and when was
     // it last touched" without re-fetching chunk 1.
     let original_fm = extract_frontmatter_lines(markdown);
-    let merged_fm = merge_chunk_frontmatter(
-        &original_fm,
-        extra_fm,
-        idx + 1,
-        total,
-        !is_last,
-    );
+    let merged_fm = merge_chunk_frontmatter(&original_fm, extra_fm, idx + 1, total, !is_last);
 
     let result = if idx == 0 {
         if let Some(end) = find_frontmatter_end(&chunks[idx]) {
@@ -243,9 +234,7 @@ fn inject_chunk_frontmatter(markdown: &str, idx: usize, total: usize, truncated:
                 &markdown[end..]
             )
         }
-        None => format!(
-            "---\n{truncated_line}{chunk_line}\n{total_line}\n---\n\n{markdown}"
-        ),
+        None => format!("---\n{truncated_line}{chunk_line}\n{total_line}\n---\n\n{markdown}"),
     }
 }
 
@@ -304,7 +293,10 @@ mod tests {
     fn apply_chunking_no_split_needed_injects_chunk_metadata() {
         let md = "---\n_hash: abc\n---\n\n# Title\n\nContent";
         let result = apply_chunking(md, 10000, None, &[]).unwrap();
-        assert!(result.contains("_hash: abc"), "preserves existing frontmatter key");
+        assert!(
+            result.contains("_hash: abc"),
+            "preserves existing frontmatter key"
+        );
         assert!(result.contains("_chunk: 1 of 1"), "got: {result}");
         assert!(result.contains("_total_chunks: 1"), "got: {result}");
         assert!(result.ends_with("# Title\n\nContent"), "preserves body");
@@ -358,13 +350,17 @@ mod tests {
              ",
         );
         for i in 0..200 {
-            md.push_str(&format!("body line {i} with enough content to span chunks\n"));
+            md.push_str(&format!(
+                "body line {i} with enough content to span chunks\n"
+            ));
         }
 
-        let result = apply_chunking(&md, /* tiny budget */ 100, Some(1), &[
-            ("_hash", "fresh-hash"),
-            ("_mem_schema", "default@1.0.0"),
-        ])
+        let result = apply_chunking(
+            &md,
+            /* tiny budget */ 100,
+            Some(1),
+            &[("_hash", "fresh-hash"), ("_mem_schema", "default@1.0.0")],
+        )
         .unwrap();
         for key in [
             "type:",
@@ -407,7 +403,9 @@ mod tests {
              ",
         );
         for i in 0..300 {
-            md.push_str(&format!("body line {i}: long enough content for spread chunking\n"));
+            md.push_str(&format!(
+                "body line {i}: long enough content for spread chunking\n"
+            ));
         }
 
         // Get the chunk count first via Chunk 1; then read Chunks 2
@@ -515,7 +513,10 @@ mod tests {
         let md = "---\n_hash: x\n---\n\n# Title — with em-dash\n\nMore body — even more.";
         for budget in 0..=2 {
             let result = apply_chunking(md, budget, None, &[]);
-            assert!(result.is_ok(), "budget {budget} must not panic or error: {result:?}");
+            assert!(
+                result.is_ok(),
+                "budget {budget} must not panic or error: {result:?}"
+            );
         }
     }
 

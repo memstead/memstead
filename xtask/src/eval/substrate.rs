@@ -321,9 +321,17 @@ pub fn run_substrate_series<R: SubstrateRunner, J: Judge>(
 ) -> Result<DataSeries> {
     let mut results = Vec::with_capacity(tasks.len());
     for task in tasks {
-        let (c_arm, b_arm) =
-            build_substrate_arms(task, model, system_prompt, token_budget, schema_forced, free_form);
-        results.push(run_substrate_task(runner, judge, task, &c_arm, &b_arm, n_trials)?);
+        let (c_arm, b_arm) = build_substrate_arms(
+            task,
+            model,
+            system_prompt,
+            token_budget,
+            schema_forced,
+            free_form,
+        );
+        results.push(run_substrate_task(
+            runner, judge, task, &c_arm, &b_arm, n_trials,
+        )?);
     }
     let label = format!("{} − {}", schema_forced.label, free_form.label);
     Ok(DataSeries {
@@ -459,9 +467,16 @@ mod tests {
         assert_eq!(args[allow_idx + 1], "");
         // The substrate rides in the system prompt.
         let sys_idx = args.iter().position(|a| a == "--system-prompt").unwrap();
-        assert!(args[sys_idx + 1].contains("typed entity"), "{:?}", args[sys_idx + 1]);
+        assert!(
+            args[sys_idx + 1].contains("typed entity"),
+            "{:?}",
+            args[sys_idx + 1]
+        );
         // The task text is passed through.
-        assert!(args.windows(2).any(|w| w[0] == "-p" && w[1] == "what is X?"));
+        assert!(
+            args.windows(2)
+                .any(|w| w[0] == "-p" && w[1] == "what is X?")
+        );
     }
 
     #[test]
@@ -471,12 +486,19 @@ mod tests {
         let c_args = build_incontext_args(&c_arm);
         let b_args = build_incontext_args(&b_arm);
         assert_eq!(c_args.len(), b_args.len());
-        let sys_val = c_args.iter().position(|a| a == "sys" || a.contains("Reference material"));
+        let sys_val = c_args
+            .iter()
+            .position(|a| a == "sys" || a.contains("Reference material"));
         // Find the lone differing slot and confirm it is the system-prompt value.
-        let diffs: Vec<usize> = (0..c_args.len()).filter(|&i| c_args[i] != b_args[i]).collect();
+        let diffs: Vec<usize> = (0..c_args.len())
+            .filter(|&i| c_args[i] != b_args[i])
+            .collect();
         assert_eq!(diffs.len(), 1, "more than the substrate differs: {diffs:?}");
         let sys_idx = c_args.iter().position(|a| a == "--system-prompt").unwrap() + 1;
-        assert_eq!(diffs[0], sys_idx, "the differing slot is not the system prompt");
+        assert_eq!(
+            diffs[0], sys_idx,
+            "the differing slot is not the system prompt"
+        );
         let _ = sys_val;
     }
 
@@ -534,7 +556,10 @@ mod tests {
 
     #[test]
     fn run_substrate_task_reports_positive_delta_when_schema_helps() {
-        let runner = StubRunner { c_quality: 0.9, b_quality: 0.4 };
+        let runner = StubRunner {
+            c_quality: 0.9,
+            b_quality: 0.4,
+        };
         let t = task();
         let (c_arm, b_arm) = build_substrate_arms(&t, "m", "sys", 1000, &c(), &b());
         let r = run_substrate_task(&runner, &ParseQualityJudge, &t, &c_arm, &b_arm, 5).unwrap();
@@ -546,7 +571,10 @@ mod tests {
     fn run_substrate_task_reports_negative_delta_plainly() {
         // Honesty: when free-form (B) beats schema-forced (C), the delta is
         // negative — no floor, no relabel.
-        let runner = StubRunner { c_quality: 0.3, b_quality: 0.8 };
+        let runner = StubRunner {
+            c_quality: 0.3,
+            b_quality: 0.8,
+        };
         let t = task();
         let (c_arm, b_arm) = build_substrate_arms(&t, "m", "sys", 1000, &c(), &b());
         let r = run_substrate_task(&runner, &ParseQualityJudge, &t, &c_arm, &b_arm, 3).unwrap();
@@ -556,7 +584,10 @@ mod tests {
 
     #[test]
     fn run_substrate_task_refuses_a_confounded_pair() {
-        let runner = StubRunner { c_quality: 0.9, b_quality: 0.4 };
+        let runner = StubRunner {
+            c_quality: 0.9,
+            b_quality: 0.4,
+        };
         let t = task();
         let (mut c_arm, b_arm) = build_substrate_arms(&t, "m", "sys", 1000, &c(), &b());
         c_arm.token_budget = 9999; // a second variable
@@ -565,12 +596,18 @@ mod tests {
 
     #[test]
     fn run_substrate_series_emits_one_point_with_paired_deltas() {
-        let runner = StubRunner { c_quality: 0.8, b_quality: 0.5 };
-        let tasks = vec![task(), TaskSpec {
-            id: "t2".into(),
-            prompt: "what is Z?".into(),
-            reference: "Z is W".into(),
-        }];
+        let runner = StubRunner {
+            c_quality: 0.8,
+            b_quality: 0.5,
+        };
+        let tasks = vec![
+            task(),
+            TaskSpec {
+                id: "t2".into(),
+                prompt: "what is Z?".into(),
+                reference: "Z is W".into(),
+            },
+        ];
         let series = run_substrate_series(
             &runner,
             &ParseQualityJudge,

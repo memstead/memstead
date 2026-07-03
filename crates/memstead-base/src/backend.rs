@@ -86,11 +86,7 @@ pub trait MemBackend: Send + Sync {
     /// resulting opaque [`CommitId`]; backends without history
     /// return a synthetic id (UNIX-nanos + counter, hex) so callers
     /// always get a non-empty cursor.
-    fn commit(
-        &self,
-        message: &str,
-        ctx: &CommitContext<'_>,
-    ) -> Result<CommitId, BackendError>;
+    fn commit(&self, message: &str, ctx: &CommitContext<'_>) -> Result<CommitId, BackendError>;
 
     /// Commit pending mutations with a parent-ref pinning guard.
     /// When `expected_parent` is `Some`, the backend MUST refuse the
@@ -132,10 +128,7 @@ pub trait MemBackend: Send + Sync {
     /// backend-defined: a commit SHA for git-branch, an RFC-3339
     /// timestamp for folder, ignored for archive). `None` cursor
     /// means "from the beginning".
-    fn read_provenance(
-        &self,
-        cursor: Option<&str>,
-    ) -> Result<Vec<Provenance>, BackendError>;
+    fn read_provenance(&self, cursor: Option<&str>) -> Result<Vec<Provenance>, BackendError>;
 
     /// Opaque cursor pointing at the backend's current state. The
     /// engine compares against a per-mount cached cursor to detect

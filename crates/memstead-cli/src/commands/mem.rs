@@ -26,8 +26,8 @@ use std::path::PathBuf;
 
 use clap::{Args, Subcommand};
 
-use crate::outer_gitignore::{OuterRepoOutcome, apply_outer_gitignore};
 use crate::CliError;
+use crate::outer_gitignore::{OuterRepoOutcome, apply_outer_gitignore};
 use crate::output::ExitKind;
 use crate::setup::{CliContext, CliEngine, find_workspace_root};
 use memstead_engine::mem_management::{
@@ -332,9 +332,8 @@ pub struct UnregisterArgs {
 }
 
 pub fn run(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
-    let cwd = std::env::current_dir().map_err(|e| {
-        generic_error(format!("determine current directory: {e}"))
-    })?;
+    let cwd = std::env::current_dir()
+        .map_err(|e| generic_error(format!("determine current directory: {e}")))?;
 
     // Locate the workspace via the post-rebuild marker
     // (`.memstead/workspace.toml`). The presence of this file is the
@@ -352,22 +351,19 @@ pub fn run(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
     // or just `sub-mem` — the engine's mem-name grammar
     // validates the shape). There is no `--org-path` flag or path-vs-name
     // auto-split — the value flows through unchanged.
-    let mem_name = args
-        .path
-        .to_str()
-        .map(|s| s.to_string())
-        .ok_or_else(|| {
-            invalid_input_error(format!(
-                "mem name {:?} is not valid UTF-8 — mem names must be ASCII \
+    let mem_name = args.path.to_str().map(|s| s.to_string()).ok_or_else(|| {
+        invalid_input_error(format!(
+            "mem name {:?} is not valid UTF-8 — mem names must be ASCII \
                  (lowercase letters / digits / hyphens) optionally segmented by '/'.",
-                args.path.display(),
-            ))
-        })?;
+            args.path.display(),
+        ))
+    })?;
     let location = mem_name.clone();
 
-    let schema_ref: memstead_schema::SchemaRef = args.schema.parse().map_err(|e| {
-        invalid_input_error(format!("invalid schema ref {:?}: {e}", args.schema))
-    })?;
+    let schema_ref: memstead_schema::SchemaRef = args
+        .schema
+        .parse()
+        .map_err(|e| invalid_input_error(format!("invalid schema ref {:?}: {e}", args.schema)))?;
     let vcs_config = if args.vcs_shared {
         Some(memstead_schema::VcsConfig {
             gitdir: "../.git".to_string(),
@@ -378,12 +374,12 @@ pub fn run(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
     };
     let write_guidance = match &args.write_guidance {
         None => std::collections::HashMap::new(),
-        Some(raw) => serde_json::from_str::<
-            std::collections::HashMap<String, serde_json::Value>,
-        >(raw)
-        .map_err(|e| {
-            invalid_input_error(format!("--write-guidance must be a JSON object: {e}"))
-        })?,
+        Some(raw) => {
+            serde_json::from_str::<std::collections::HashMap<String, serde_json::Value>>(raw)
+                .map_err(|e| {
+                    invalid_input_error(format!("--write-guidance must be a JSON object: {e}"))
+                })?
+        }
     };
     let params = MemCreateParams {
         name: mem_name.clone(),
@@ -397,11 +393,7 @@ pub fn run(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
         // opts into bypass explicitly via `--operator-mode` (flag
         // wins) or `MEMSTEAD_OPERATOR_MODE=1` (env-var fallback).
         operator_mode: resolve_operator_mode(args.operator_mode),
-        recovery: recovery_from_flags(
-            args.reattach,
-            args.force_overwrite,
-            args.hard_cleanup_first,
-        ),
+        recovery: recovery_from_flags(args.reattach, args.force_overwrite, args.hard_cleanup_first),
     };
 
     let mut engine = match ctx.cli_engine()? {
@@ -413,8 +405,8 @@ pub fn run(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
             )));
         }
     };
-    let response = mem_management::create_mem(&mut engine, params)
-        .map_err(pro_engine_err_to_cli)?;
+    let response =
+        mem_management::create_mem(&mut engine, params).map_err(pro_engine_err_to_cli)?;
     if ctx.json {
         crate::output::print_json(&serde_json::json!({
             "name": response.name,
@@ -561,9 +553,8 @@ fn run_delete_inner(
     verb: &str,
     operator_mode: bool,
 ) -> anyhow::Result<()> {
-    let cwd = std::env::current_dir().map_err(|e| {
-        generic_error(format!("determine current directory: {e}"))
-    })?;
+    let cwd = std::env::current_dir()
+        .map_err(|e| generic_error(format!("determine current directory: {e}")))?;
     let workspace_root = find_workspace_root(&cwd).ok_or_else(|| {
         validation_error(format!(
             "no workspace found above {}. `memstead mem {verb}` must run \
@@ -587,8 +578,8 @@ fn run_delete_inner(
             )));
         }
     };
-    let response = mem_management::delete_mem(&mut engine, params)
-        .map_err(pro_engine_err_to_cli)?;
+    let response =
+        mem_management::delete_mem(&mut engine, params).map_err(pro_engine_err_to_cli)?;
     if ctx.json {
         crate::output::print_json(&serde_json::json!({
             "name": response.name,
@@ -618,10 +609,12 @@ fn render_mem_create_markdown(r: &MemCreateResponse) -> String {
     // the response. Adjust the heading so an operator picking up an
     // empty `seed_commit_sha` plus the reattach warning learns the
     // branch tip kept its prior history rather than starting fresh.
-    let reattached = r
-        .warnings
-        .iter()
-        .any(|w| matches!(w, memstead_base::ops::WarningHint::MemReattachedAfterUnregister { .. }));
+    let reattached = r.warnings.iter().any(|w| {
+        matches!(
+            w,
+            memstead_base::ops::WarningHint::MemReattachedAfterUnregister { .. }
+        )
+    });
     let heading = if reattached {
         format!("# Mem `{}` reattached\n\n", r.name)
     } else {
@@ -662,16 +655,10 @@ fn render_mem_delete_markdown(r: &MemDeleteResponse, verb: &str) -> String {
         for entry in &r.allowlist_entries_removed {
             match (&entry.pattern, &entry.from, &entry.to) {
                 (Some(p), _, _) => {
-                    out.push_str(&format!(
-                        "- `[{}]` pattern `{p}`\n",
-                        entry.table,
-                    ));
+                    out.push_str(&format!("- `[{}]` pattern `{p}`\n", entry.table,));
                 }
                 (_, Some(from), Some(to)) => {
-                    out.push_str(&format!(
-                        "- `[{}]` `{from} → {to}`\n",
-                        entry.table,
-                    ));
+                    out.push_str(&format!("- `[{}]` `{from} → {to}`\n", entry.table,));
                 }
                 _ => {
                     out.push_str(&format!("- `[{}]`\n", entry.table));
@@ -705,9 +692,7 @@ fn render_mem_delete_markdown(r: &MemDeleteResponse, verb: &str) -> String {
 /// translation table to update.
 fn pro_engine_err_to_cli(err: memstead_engine::FullEngineError) -> anyhow::Error {
     match err {
-        memstead_engine::FullEngineError::Lean(inner) => {
-            CliError::from_engine_op(inner).into()
-        }
+        memstead_engine::FullEngineError::Lean(inner) => CliError::from_engine_op(inner).into(),
         lifecycle => {
             let code = lifecycle.code();
             let details = lifecycle.details();
@@ -758,11 +743,7 @@ pub fn run_set_version(ctx: &CliContext, args: SetVersionArgs) -> anyhow::Result
         let warnings = if outcome.warnings.is_empty() {
             String::new()
         } else {
-            let rendered: Vec<String> = outcome
-                .warnings
-                .iter()
-                .map(ToString::to_string)
-                .collect();
+            let rendered: Vec<String> = outcome.warnings.iter().map(ToString::to_string).collect();
             format!("\n\n> warnings:\n> - {}", rendered.join("\n> - "))
         };
         crate::output::print_markdown(&format!(
@@ -781,7 +762,11 @@ pub fn run_set_version(ctx: &CliContext, args: SetVersionArgs) -> anyhow::Result
 pub fn run_set_description(ctx: &CliContext, args: SetDescriptionArgs) -> anyhow::Result<()> {
     let new_description = {
         let trimmed = args.description.trim();
-        if trimmed.is_empty() { None } else { Some(trimmed.to_string()) }
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
     };
     let note = args.note.as_deref();
     let outcome = match ctx.cli_engine()? {
@@ -801,8 +786,7 @@ pub fn run_set_description(ctx: &CliContext, args: SetDescriptionArgs) -> anyhow
         let warnings = if outcome.warnings.is_empty() {
             String::new()
         } else {
-            let rendered: Vec<String> =
-                outcome.warnings.iter().map(ToString::to_string).collect();
+            let rendered: Vec<String> = outcome.warnings.iter().map(ToString::to_string).collect();
             format!("\n\n> warnings:\n> - {}", rendered.join("\n> - "))
         };
         crate::output::print_markdown(&format!(
@@ -841,8 +825,7 @@ pub fn run_set_sync_state(ctx: &CliContext, args: SetSyncStateArgs) -> anyhow::R
         let warnings = if outcome.warnings.is_empty() {
             String::new()
         } else {
-            let rendered: Vec<String> =
-                outcome.warnings.iter().map(ToString::to_string).collect();
+            let rendered: Vec<String> = outcome.warnings.iter().map(ToString::to_string).collect();
             format!("\n\n> warnings:\n> - {}", rendered.join("\n> - "))
         };
         crate::output::print_markdown(&format!(
@@ -854,9 +837,10 @@ pub fn run_set_sync_state(ctx: &CliContext, args: SetSyncStateArgs) -> anyhow::R
 }
 
 pub fn run_set_schema(ctx: &CliContext, args: SetSchemaArgs) -> anyhow::Result<()> {
-    let target: memstead_schema::SchemaRef = args.schema.parse().map_err(|e| {
-        invalid_input_error(format!("invalid schema ref {:?}: {e}", args.schema))
-    })?;
+    let target: memstead_schema::SchemaRef = args
+        .schema
+        .parse()
+        .map_err(|e| invalid_input_error(format!("invalid schema ref {:?}: {e}", args.schema)))?;
     let outcome = match ctx.cli_engine()? {
         crate::setup::CliEngine::MemRepo(mut engine) => engine
             .set_mem_schema(&args.name, &target)
@@ -943,10 +927,12 @@ fn recovery_from_flags(
 }
 
 pub fn run_list(ctx: &CliContext, _args: ListArgs) -> anyhow::Result<()> {
-    let setup_ctx = CliContext { json: ctx.json, quiet: ctx.quiet };
-    let engine = crate::setup::pro_engine(&setup_ctx).map_err(|e| {
-        generic_error(format!("mem list: could not initialize engine: {e}"))
-    })?;
+    let setup_ctx = CliContext {
+        json: ctx.json,
+        quiet: ctx.quiet,
+    };
+    let engine = crate::setup::pro_engine(&setup_ctx)
+        .map_err(|e| generic_error(format!("mem list: could not initialize engine: {e}")))?;
 
     let mut rows: Vec<serde_json::Value> = Vec::new();
     for name in engine.mem_names() {
@@ -1021,7 +1007,10 @@ mod tests {
         let note = mem_template_guidance_note(&planning, false)
             .expect("planning ships a mem-template — a note is due");
         assert!(note.contains("phase_context"), "note names the key: {note}");
-        assert!(note.contains("--write-guidance"), "note tells how to fill: {note}");
+        assert!(
+            note.contains("--write-guidance"),
+            "note tells how to fill: {note}"
+        );
         // Operator supplied guidance → nothing to surface.
         assert!(mem_template_guidance_note(&planning, false).is_some());
         assert!(mem_template_guidance_note(&planning, true).is_none());

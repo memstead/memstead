@@ -202,10 +202,7 @@ mod tests {
     #[test]
     fn surfaces_hierarchical_layout_as_leaf_names() {
         let tmp = TempDir::new().unwrap();
-        init_mem_repo_with_branches(
-            tmp.path(),
-            &["demo/engine", "planning/exec-foo"],
-        );
+        init_mem_repo_with_branches(tmp.path(), &["demo/engine", "planning/exec-foo"]);
         let names = enumerate_mem_repo_branches(tmp.path()).expect("real workspace");
         assert_eq!(names, vec!["engine", "exec-foo"]);
     }

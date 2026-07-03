@@ -59,9 +59,7 @@ pub struct DiffParams {
         description = "First ref to diff. Branch name (`main`), full ref (`refs/heads/specs`), commit SHA, or tag. Unknown refs refuse with `UNKNOWN_REF` and `details.ref` carrying the raw input."
     )]
     pub ref_a: String,
-    #[schemars(
-        description = "Second ref to diff. Same input shape as `ref_a`."
-    )]
+    #[schemars(description = "Second ref to diff. Same input shape as `ref_a`.")]
     pub ref_b: String,
     #[schemars(
         description = "Rename detection threshold for content-similarity, in [0.1, 1.0]. Default (None) → 0.6. Out-of-range values refuse with `INVALID_INPUT` (`details.allowed_range`, `details.requested`)."

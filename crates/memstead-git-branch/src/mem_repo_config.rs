@@ -18,12 +18,10 @@
 //! the gix object database vs. file on disk).
 use std::path::Path;
 
-use memstead_schema::{
-    ConfigError, SchemaRef, MemConfig,
-};
+use memstead_schema::{ConfigError, MemConfig, SchemaRef};
 
-use crate::vcs::CommitContext;
 use crate::MemInit;
+use crate::vcs::CommitContext;
 
 /// Errors raised while reading a mem config from `mem-repo-git:__MEMSTEAD`.
 #[derive(Debug, thiserror::Error)]
@@ -236,10 +234,7 @@ fn gitdir_for_leaf(workspace_root: &Path, _mem_name: &str) -> std::path::PathBuf
 /// vs. missing config blob vs. parse error).
 ///
 /// Workspace-rooted convenience wrapper around [`read_config_at_gitdir`].
-pub fn read_config(
-    workspace_root: &Path,
-    mem_name: &str,
-) -> Result<MemConfig, MemRepoConfigError> {
+pub fn read_config(workspace_root: &Path, mem_name: &str) -> Result<MemConfig, MemRepoConfigError> {
     read_config_at_gitdir(&gitdir_for_leaf(workspace_root, mem_name), mem_name)
 }
 
@@ -348,7 +343,10 @@ pub fn has_real_mem_repo_main_at_gitdir(gitdir: &Path) -> bool {
     let Ok(repo) = gix::open(gitdir) else {
         return false;
     };
-    matches!(repo.try_find_reference("refs/heads/__MEMSTEAD"), Ok(Some(_)))
+    matches!(
+        repo.try_find_reference("refs/heads/__MEMSTEAD"),
+        Ok(Some(_))
+    )
 }
 
 /// Errors raised while writing a mem config to `mem-repo-git:__MEMSTEAD`.
@@ -433,19 +431,13 @@ pub struct RefSpec {
 /// mem-create batch.
 ///
 /// Workspace-rooted convenience wrapper around [`commit_refs_at_gitdir`].
-pub fn commit_refs(
-    workspace_root: &Path,
-    specs: &[RefSpec],
-) -> Result<(), MemRepoWriteError> {
+pub fn commit_refs(workspace_root: &Path, specs: &[RefSpec]) -> Result<(), MemRepoWriteError> {
     commit_refs_at_gitdir(&default_gitdir(workspace_root), specs)
 }
 
 /// Gitdir-rooted variant of [`commit_refs`]. Multi-mount callers route
 /// each batch to the target mount's gitdir directly.
-pub fn commit_refs_at_gitdir(
-    gitdir: &Path,
-    specs: &[RefSpec],
-) -> Result<(), MemRepoWriteError> {
+pub fn commit_refs_at_gitdir(gitdir: &Path, specs: &[RefSpec]) -> Result<(), MemRepoWriteError> {
     use gix::refs::transaction::{Change, LogChange, RefEdit, RefLog};
     use gix::refs::{FullName, Target};
 
@@ -457,10 +449,7 @@ pub fn commit_refs_at_gitdir(
     let mut edits: Vec<RefEdit> = Vec::with_capacity(specs.len());
     for spec in specs {
         let name: FullName = spec.ref_name.as_str().try_into().map_err(|e| {
-            MemRepoWriteError::RefTransaction(format!(
-                "invalid ref name {:?}: {e}",
-                spec.ref_name
-            ))
+            MemRepoWriteError::RefTransaction(format!("invalid ref name {:?}: {e}", spec.ref_name))
         })?;
         edits.push(RefEdit {
             change: Change::Update {
@@ -477,9 +466,8 @@ pub fn commit_refs_at_gitdir(
         });
     }
 
-    repo.edit_references(edits).map_err(|e| {
-        MemRepoWriteError::RefTransaction(e.to_string())
-    })?;
+    repo.edit_references(edits)
+        .map_err(|e| MemRepoWriteError::RefTransaction(e.to_string()))?;
 
     Ok(())
 }
@@ -556,19 +544,13 @@ mod tests {
 
     /// Build a minimal `mem-repo/.git/` carrying `__SYSTEM` with one
     /// config blob. Returns the workspace root.
-    fn init_mem_repo_with_config(
-        mem_name: &str,
-        config_json: &str,
-    ) -> TempDir {
+    fn init_mem_repo_with_config(mem_name: &str, config_json: &str) -> TempDir {
         let tmp = TempDir::new().unwrap();
         let gitdir = tmp.path().join("mem-repo").join(".git");
         std::fs::create_dir_all(&gitdir).unwrap();
         let repo = gix::init_bare(&gitdir).unwrap();
 
-        let blob = repo
-            .write_blob(config_json.as_bytes())
-            .unwrap()
-            .detach();
+        let blob = repo.write_blob(config_json.as_bytes()).unwrap().detach();
         let mut editor = repo.empty_tree().edit().unwrap();
         editor
             .upsert(
@@ -609,10 +591,7 @@ mod tests {
 
     #[test]
     fn reads_config_from_system_ref() {
-        let tmp = init_mem_repo_with_config(
-            "alpha",
-            r#"{"schema": "default@1.0.0"}"#,
-        );
+        let tmp = init_mem_repo_with_config("alpha", r#"{"schema": "default@1.0.0"}"#);
         let config = read_config(tmp.path(), "alpha").unwrap();
         // Configs no longer carry an in-config `name` field; the leaf folder on
         // `__SYSTEM` is authoritative.
@@ -632,10 +611,7 @@ mod tests {
 
     #[test]
     fn errors_when_config_missing_in_tree() {
-        let tmp = init_mem_repo_with_config(
-            "alpha",
-            r#"{"schema": "default@1.0.0"}"#,
-        );
+        let tmp = init_mem_repo_with_config("alpha", r#"{"schema": "default@1.0.0"}"#);
         let err = read_config(tmp.path(), "beta").unwrap_err();
         assert!(matches!(err, MemRepoConfigError::ConfigNotFound(name) if name == "beta"));
     }
@@ -652,7 +628,10 @@ mod tests {
         let actor = gix::actor::Signature {
             name: "test".into(),
             email: "test@example.com".into(),
-            time: gix::date::Time { seconds: 0, offset: 0 },
+            time: gix::date::Time {
+                seconds: 0,
+                offset: 0,
+            },
         };
         let mut buf = gix::date::parse::TimeBuf::default();
         let actor_ref = actor.to_ref(&mut buf);
@@ -732,7 +711,10 @@ mod tests {
         let actor = gix::actor::Signature {
             name: "test".into(),
             email: "test@example.com".into(),
-            time: gix::date::Time { seconds: 0, offset: 0 },
+            time: gix::date::Time {
+                seconds: 0,
+                offset: 0,
+            },
         };
         let empty_tree = repo.empty_tree().id().detach();
         for full_path in full_paths {
@@ -817,10 +799,7 @@ mod tests {
         // wrappers would all surface `GitdirNotFound`; the
         // `_at_gitdir` siblings must work because we hand them the
         // explicit gitdir.
-        let tmp = init_mem_repo_with_config(
-            "alpha",
-            r#"{"schema": "default@1.0.0"}"#,
-        );
+        let tmp = init_mem_repo_with_config("alpha", r#"{"schema": "default@1.0.0"}"#);
         // Move the gitdir from the workspace-default location to a
         // sibling so the workspace-rooted wrappers can no longer find
         // it. (Equivalent to a `[[mem_repos]] path = "external"`
@@ -861,10 +840,7 @@ mod tests {
     /// default mount untouched.
     #[test]
     fn commit_config_at_gitdir_targets_arbitrary_mount() {
-        let tmp = init_mem_repo_with_config(
-            "alpha",
-            r#"{"schema": "default@1.0.0"}"#,
-        );
+        let tmp = init_mem_repo_with_config("alpha", r#"{"schema": "default@1.0.0"}"#);
         let default_path = tmp.path().join("mem-repo");
         let mount_path = tmp.path().join("external");
         std::fs::rename(&default_path, &mount_path).unwrap();
@@ -901,13 +877,7 @@ mod tests {
 
         // Workspace-rooted commit_config still surfaces GixOpen
         // because the default mount has no gitdir.
-        let result = super::commit_config(
-            tmp.path(),
-            "alpha",
-            br#"{}"#,
-            &ctx,
-            "should fail",
-        );
+        let result = super::commit_config(tmp.path(), "alpha", br#"{}"#, &ctx, "should fail");
         assert!(matches!(result, Err(MemRepoWriteError::GixOpen { .. })));
     }
 
@@ -951,10 +921,7 @@ mod tests {
     /// mutex (out of scope).
     #[test]
     fn commit_config_rejects_stale_main_tip() {
-        let tmp = init_mem_repo_with_config(
-            "alpha",
-            r#"{"schema": "default@1.0.0"}"#,
-        );
+        let tmp = init_mem_repo_with_config("alpha", r#"{"schema": "default@1.0.0"}"#);
         let workspace_root = tmp.path();
         let gitdir = workspace_root.join("mem-repo").join(".git");
 
@@ -1024,10 +991,9 @@ mod tests {
                 &[RefSpec {
                     ref_name: "refs/heads/__MEMSTEAD".to_string(),
                     new_oid,
-                    expected:
-                        gix::refs::transaction::PreviousValue::MustExistAndMatch(
-                            gix::refs::Target::Object(observed_t0),
-                        ),
+                    expected: gix::refs::transaction::PreviousValue::MustExistAndMatch(
+                        gix::refs::Target::Object(observed_t0),
+                    ),
                     log_message: "memstead: stale RMW".to_string(),
                 }],
             )
@@ -1052,5 +1018,4 @@ mod tests {
             "__MEMSTEAD must remain at T1 after rejected stale RMW"
         );
     }
-
 }

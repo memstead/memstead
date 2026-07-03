@@ -223,8 +223,11 @@ mod tests {
 
     #[test]
     fn cross_mem_form_is_not_rewritten_by_bare_slug_pass() {
-        let (out, n) =
-            rewrite_bare_slug("[[specs:old-slug]] and [[old-slug]]", "old-slug", "new-slug");
+        let (out, n) = rewrite_bare_slug(
+            "[[specs:old-slug]] and [[old-slug]]",
+            "old-slug",
+            "new-slug",
+        );
         assert_eq!(out, "[[specs:old-slug]] and [[new-slug]]");
         assert_eq!(n, 1);
     }
@@ -238,8 +241,12 @@ mod tests {
 
     #[test]
     fn cross_mem_rewrites_colon_form() {
-        let (out, n) =
-            rewrite_cross_mem_slug("see [[specs:old-name]] now", "specs", "old-name", "new-name");
+        let (out, n) = rewrite_cross_mem_slug(
+            "see [[specs:old-name]] now",
+            "specs",
+            "old-name",
+            "new-name",
+        );
         assert_eq!(out, "see [[specs:new-name]] now");
         assert_eq!(n, 1);
     }
@@ -272,17 +279,18 @@ mod tests {
             "old-name",
             "new-name",
         );
-        assert_eq!(
-            out,
-            "[[memos:old-name]] [[specs:other]] [[specs:new-name]]"
-        );
+        assert_eq!(out, "[[memos:old-name]] [[specs:other]] [[specs:new-name]]");
         assert_eq!(n, 1);
     }
 
     #[test]
     fn cross_mem_skips_bare_slug() {
-        let (out, n) =
-            rewrite_cross_mem_slug("[[old-name]] [[specs:old-name]]", "specs", "old-name", "new-name");
+        let (out, n) = rewrite_cross_mem_slug(
+            "[[old-name]] [[specs:old-name]]",
+            "specs",
+            "old-name",
+            "new-name",
+        );
         assert_eq!(out, "[[old-name]] [[specs:new-name]]");
         assert_eq!(n, 1);
     }

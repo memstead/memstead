@@ -317,7 +317,9 @@ fn wiki_link_suggestion(raw: &str) -> Option<String> {
     if derived.is_empty() || derived.starts_with("entity-") {
         return None;
     }
-    validate_id_path_grammar(&derived).is_ok().then_some(derived)
+    validate_id_path_grammar(&derived)
+        .is_ok()
+        .then_some(derived)
 }
 
 /// Convert a wiki-link target to a mem-prefixed entity ID, refusing
@@ -385,8 +387,7 @@ pub fn wiki_link_to_id(link: &str, current_mem: &str) -> Result<EntityId, WikiLi
                 });
             }
             if let Err(reason) = validate_id_path_grammar(slug_part) {
-                let suggested = wiki_link_suggestion(slug_part)
-                    .map(|s| format!("{prefix}:{s}"));
+                let suggested = wiki_link_suggestion(slug_part).map(|s| format!("{prefix}:{s}"));
                 return Err(WikiLinkError::InvalidTarget {
                     raw: stripped.to_string(),
                     suggested,
@@ -420,7 +421,9 @@ pub fn wiki_link_to_id(link: &str, current_mem: &str) -> Result<EntityId, WikiLi
 
     let slug = if !current_mem.is_empty() {
         let self_prefix = format!("{current_mem}--");
-        stripped.strip_prefix(self_prefix.as_str()).unwrap_or(&stripped)
+        stripped
+            .strip_prefix(self_prefix.as_str())
+            .unwrap_or(&stripped)
     } else {
         &stripped
     };
@@ -510,7 +513,9 @@ pub fn wiki_link_to_id_lenient(link: &str, current_mem: &str) -> EntityId {
 
     let slug = if !current_mem.is_empty() {
         let self_prefix = format!("{current_mem}--");
-        stripped.strip_prefix(self_prefix.as_str()).unwrap_or(&stripped)
+        stripped
+            .strip_prefix(self_prefix.as_str())
+            .unwrap_or(&stripped)
     } else {
         &stripped
     };
@@ -703,7 +708,10 @@ mod tests {
     #[test]
     fn title_to_slug_special_chars() {
         assert_eq!(title_to_slug("Hello, World!").unwrap(), "hello-world");
-        assert_eq!(title_to_slug("--leading--trailing--").unwrap(), "leading-trailing");
+        assert_eq!(
+            title_to_slug("--leading--trailing--").unwrap(),
+            "leading-trailing"
+        );
     }
 
     #[test]
@@ -715,7 +723,10 @@ mod tests {
     /// no hash — the slug equals the title.
     #[test]
     fn title_to_slug_cjk() {
-        assert_eq!(title_to_slug("日本語のタイトル").unwrap(), "日本語のタイトル");
+        assert_eq!(
+            title_to_slug("日本語のタイトル").unwrap(),
+            "日本語のタイトル"
+        );
         // Spaces still collapse to hyphens.
         assert_eq!(title_to_slug("中文 標題").unwrap(), "中文-標題");
         // Mixed CJK + Latin + digits.
@@ -784,8 +795,8 @@ mod tests {
     /// invariant now.
     #[test]
     fn title_to_slug_nfc_normalization() {
-        let nfc = "Café";              // single-codepoint é
-        let nfd = "Cafe\u{0301}";      // e + combining acute
+        let nfc = "Café"; // single-codepoint é
+        let nfd = "Cafe\u{0301}"; // e + combining acute
         assert_ne!(nfc, nfd, "NFC and NFD forms must differ at the byte level");
         assert_eq!(
             title_to_slug(nfc).unwrap(),
@@ -851,7 +862,11 @@ mod tests {
     #[test]
     fn validate_and_derive_slug_rejects_control_chars() {
         let cases: &[(&str, &[char], &str)] = &[
-            ("Tab\tand\nnewline title", &['\t', '\n'], "tab-and-newline-title"),
+            (
+                "Tab\tand\nnewline title",
+                &['\t', '\n'],
+                "tab-and-newline-title",
+            ),
             ("line\rreturn", &['\r'], "line-return"),
             ("null\u{0}byte", &['\u{0}'], "nullbyte"),
         ];
@@ -970,7 +985,10 @@ mod tests {
 
     #[test]
     fn build_id_basic() {
-        assert_eq!(build_id("specs", "My Entity").unwrap().0, "specs--my-entity");
+        assert_eq!(
+            build_id("specs", "My Entity").unwrap().0,
+            "specs--my-entity"
+        );
     }
 
     /// F1 (B+A): non-Latin titles round-trip through `build_id`.
@@ -1035,11 +1053,15 @@ mod tests {
             "specs--result-entity"
         );
         assert_eq!(
-            wiki_link_to_id("test-mem-mini--engine", "test-mem-mini").unwrap().0,
+            wiki_link_to_id("test-mem-mini--engine", "test-mem-mini")
+                .unwrap()
+                .0,
             "test-mem-mini--engine"
         );
         assert_eq!(
-            wiki_link_to_id("specs--target.md|Display", "specs").unwrap().0,
+            wiki_link_to_id("specs--target.md|Display", "specs")
+                .unwrap()
+                .0,
             "specs--target"
         );
         assert_eq!(
@@ -1068,7 +1090,9 @@ mod tests {
             "other--entity"
         );
         assert_eq!(
-            wiki_link_to_id("nonexistent-mem--target", "specs").unwrap().0,
+            wiki_link_to_id("nonexistent-mem--target", "specs")
+                .unwrap()
+                .0,
             "nonexistent-mem--target"
         );
     }
@@ -1107,11 +1131,15 @@ mod tests {
     #[test]
     fn wiki_link_to_id_strips_section_anchor() {
         assert_eq!(
-            wiki_link_to_id("login-service#identity", "specs").unwrap().0,
+            wiki_link_to_id("login-service#identity", "specs")
+                .unwrap()
+                .0,
             "specs--login-service"
         );
         assert_eq!(
-            wiki_link_to_id("specs--login-service#identity", "specs").unwrap().0,
+            wiki_link_to_id("specs--login-service#identity", "specs")
+                .unwrap()
+                .0,
             "specs--login-service"
         );
         // Multi-anchor — strip from first `#`.
@@ -1121,7 +1149,9 @@ mod tests {
         );
         // Combined anchor + alias.
         assert_eq!(
-            wiki_link_to_id("specs--target#section|Display", "specs").unwrap().0,
+            wiki_link_to_id("specs--target#section|Display", "specs")
+                .unwrap()
+                .0,
             "specs--target"
         );
     }
@@ -1151,14 +1181,19 @@ mod tests {
             "engine--health"
         );
         assert_eq!(
-            wiki_link_to_id("engine:architecture/result", "plugin").unwrap().0,
+            wiki_link_to_id("engine:architecture/result", "plugin")
+                .unwrap()
+                .0,
             "engine--architecture/result"
         );
     }
 
     #[test]
     fn wiki_link_to_id_tier_two_self_prefix_collapses() {
-        assert_eq!(wiki_link_to_id("specs:foo", "specs").unwrap().0, "specs--foo");
+        assert_eq!(
+            wiki_link_to_id("specs:foo", "specs").unwrap().0,
+            "specs--foo"
+        );
         assert_eq!(
             wiki_link_to_id("specs:foo", "specs").unwrap(),
             wiki_link_to_id("foo", "specs").unwrap()
@@ -1168,7 +1203,9 @@ mod tests {
     #[test]
     fn wiki_link_to_id_tier_two_combines_with_alias_and_md() {
         assert_eq!(
-            wiki_link_to_id("engine:health.md|See health", "plugin").unwrap().0,
+            wiki_link_to_id("engine:health.md|See health", "plugin")
+                .unwrap()
+                .0,
             "engine--health"
         );
     }
@@ -1176,7 +1213,9 @@ mod tests {
     #[test]
     fn wiki_link_to_id_tier_two_accepts_hierarchical_prefix() {
         assert_eq!(
-            wiki_link_to_id("external/engine:health", "plugin").unwrap().0,
+            wiki_link_to_id("external/engine:health", "plugin")
+                .unwrap()
+                .0,
             "external/engine--health"
         );
     }
@@ -1184,7 +1223,9 @@ mod tests {
     #[test]
     fn wiki_link_to_id_tier_one_strips_hierarchical_self_prefix() {
         assert_eq!(
-            wiki_link_to_id("team/sub-mem--auth-service", "team/sub-mem").unwrap().0,
+            wiki_link_to_id("team/sub-mem--auth-service", "team/sub-mem")
+                .unwrap()
+                .0,
             "team/sub-mem--auth-service"
         );
     }
@@ -1202,7 +1243,10 @@ mod tests {
     #[test]
     fn wiki_link_to_id_double_colon_refuses() {
         let err = wiki_link_to_id("engine::health", "plugin").unwrap_err();
-        assert!(matches!(err, WikiLinkError::InvalidTarget { .. }), "got {err:?}");
+        assert!(
+            matches!(err, WikiLinkError::InvalidTarget { .. }),
+            "got {err:?}"
+        );
     }
 
     /// Empty halves around the colon refuse under strict mode — the
@@ -1253,7 +1297,12 @@ mod tests {
     #[test]
     fn wiki_link_to_id_hierarchical_dash_form_refuses_with_colon_suggestion() {
         let err = wiki_link_to_id("team/sub-mem--auth-service", "test").unwrap_err();
-        let WikiLinkError::InvalidTarget { raw, suggested, reason } = err else {
+        let WikiLinkError::InvalidTarget {
+            raw,
+            suggested,
+            reason,
+        } = err
+        else {
             panic!("expected InvalidTarget, got {err:?}");
         };
         assert_eq!(raw, "team/sub-mem--auth-service");
@@ -1350,9 +1399,8 @@ mod tests {
             ("ידע-גרף", "v--ידע-גרף"),
         ];
         for (input, expected) in cases {
-            let id = wiki_link_to_id(input, "v").unwrap_or_else(|e| {
-                panic!("expected ok for {input:?}, got {e:?}")
-            });
+            let id = wiki_link_to_id(input, "v")
+                .unwrap_or_else(|e| panic!("expected ok for {input:?}, got {e:?}"));
             assert_eq!(&id.0, expected, "input={input:?}");
         }
     }

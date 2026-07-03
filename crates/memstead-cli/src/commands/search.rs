@@ -131,7 +131,6 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             not: args.exclude.clone(),
             field: args.field.clone(),
             phrase: args.phrase.clone(),
-            ..Default::default()
         })
     };
 
@@ -161,18 +160,18 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     let result = match ctx.cli_engine()? {
         #[cfg(feature = "mem-repo")]
         CliEngine::MemRepo(engine) => {
-            if let Some(name) = scope.mem.as_deref() {
-                if engine.mount(name).is_none() {
-                    return Err(super::list::unknown_mem_error(name, &engine).into());
-                }
+            if let Some(name) = scope.mem.as_deref()
+                && engine.mount(name).is_none()
+            {
+                return Err(super::list::unknown_mem_error(name, &engine).into());
             }
             engine.search(&scope)?
         }
         CliEngine::Filesystem(engine) => {
-            if let Some(name) = scope.mem.as_deref() {
-                if engine.mount(name).is_none() {
-                    return Err(super::list::unknown_mem_error(name, &engine).into());
-                }
+            if let Some(name) = scope.mem.as_deref()
+                && engine.mount(name).is_none()
+            {
+                return Err(super::list::unknown_mem_error(name, &engine).into());
             }
             engine.search(&scope)?
         }
@@ -218,23 +217,32 @@ mod tests {
     fn search_accepts_remaining_named_shortcuts() {
         let parsed = Args::try_parse_from([
             "search",
-            "--type", "spec",
-            "--level", "M0",
-            "--status", "active",
-            "--edge-type", "USES",
+            "--type",
+            "spec",
+            "--level",
+            "M0",
+            "--status",
+            "active",
+            "--edge-type",
+            "USES",
         ]);
-        assert!(parsed.is_ok(), "remaining shortcuts must still parse: {:?}", parsed.err());
+        assert!(
+            parsed.is_ok(),
+            "remaining shortcuts must still parse: {:?}",
+            parsed.err()
+        );
     }
 
     /// `--filter confidence=high` parses via the generic filter
     /// path, which covers any schema that declares the field.
     #[test]
     fn search_filter_confidence_still_parses() {
-        let parsed = Args::try_parse_from([
-            "search",
-            "--filter", "confidence=high",
-        ]);
-        assert!(parsed.is_ok(), "--filter confidence=high must parse: {:?}", parsed.err());
+        let parsed = Args::try_parse_from(["search", "--filter", "confidence=high"]);
+        assert!(
+            parsed.is_ok(),
+            "--filter confidence=high must parse: {:?}",
+            parsed.err()
+        );
         let args = parsed.unwrap();
         assert!(
             args.filter.iter().any(|f| f.contains("confidence")),

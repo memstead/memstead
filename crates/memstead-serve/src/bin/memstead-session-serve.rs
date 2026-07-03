@@ -50,7 +50,10 @@ use memstead_serve::session::{
 use uuid::Uuid;
 
 fn env_u64(key: &str, default: u64) -> u64 {
-    std::env::var(key).ok().and_then(|v| v.parse().ok()).unwrap_or(default)
+    std::env::var(key)
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(default)
 }
 
 #[tokio::main]
@@ -77,9 +80,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // A folder or a sealed `.mem`; absent → an empty in-memory placeholder so
     // the two-mount structure holds until a curated mem is authored.
     let content_storage = if let Ok(dir) = std::env::var("MEMSTEAD_SESSION_CONTENT_DIR") {
-        MountStorage::Folder { path: PathBuf::from(dir) }
+        MountStorage::Folder {
+            path: PathBuf::from(dir),
+        }
     } else if let Ok(archive) = std::env::var("MEMSTEAD_SESSION_CONTENT_ARCHIVE") {
-        MountStorage::Archive { path: PathBuf::from(archive) }
+        MountStorage::Archive {
+            path: PathBuf::from(archive),
+        }
     } else {
         // No override → serve the embedded curated content mem. Falls back to
         // an empty placeholder only if materialization fails (e.g. a read-only
@@ -115,7 +122,10 @@ mounting an empty placeholder"
         .unwrap_or_else(|_| CONTENT_MEM_NAME.to_string());
 
     let ttl = Duration::from_secs(env_u64("MEMSTEAD_SESSION_TTL_SECS", 1800));
-    let cap = env_u64("MEMSTEAD_SESSION_ENTITY_CAP", DEFAULT_SESSION_ENTITY_CAP as u64) as usize;
+    let cap = env_u64(
+        "MEMSTEAD_SESSION_ENTITY_CAP",
+        DEFAULT_SESSION_ENTITY_CAP as u64,
+    ) as usize;
     // Global live-session ceiling: bounds memory under a spike (each live
     // session is its own in-memory engine). Raise with the box's RAM.
     let max_sessions = env_u64("MEMSTEAD_SESSION_MAX", DEFAULT_SESSION_MAX as u64) as usize;
@@ -126,9 +136,15 @@ mounting an empty placeholder"
     // throwaway empty mem.
     let id_gen: memstead_serve::session::IdGen =
         Arc::new(|| format!("s_{}", Uuid::new_v4().simple()));
-    let registry =
-        SessionRegistry::new(content_storage, content_schema, content_mem_name, ttl, cap, id_gen)
-            .with_max_sessions(max_sessions);
+    let registry = SessionRegistry::new(
+        content_storage,
+        content_schema,
+        content_mem_name,
+        ttl,
+        cap,
+        id_gen,
+    )
+    .with_max_sessions(max_sessions);
 
     // Idle eviction must be driven: sweep on an interval so abandoned sessions
     // release their mems and their URLs start refusing (observable expiry).
@@ -184,4 +200,3 @@ mounting an empty placeholder"
     .await?;
     Ok(())
 }
-

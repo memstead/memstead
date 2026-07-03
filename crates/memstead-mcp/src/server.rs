@@ -16,17 +16,17 @@ use rmcp::{ErrorData as McpError, RoleServer, ServerHandler, tool, tool_handler,
 use memstead_git_branch::ops::envelope;
 
 // Backend-neutral types live in memstead-base.
-use memstead_base::vcs::{Actor, ClientId};
-use memstead_base::{EntityId, SearchScope, ops::MemChangedNotice, ops::WarningHint};
 use memstead_base::chunking::{apply_chunking, estimate_tokens};
 use memstead_base::render;
+use memstead_base::vcs::{Actor, ClientId};
+use memstead_base::{EntityId, SearchScope, ops::MemChangedNotice, ops::WarningHint};
 
+use crate::error_envelope::{tool_error, tool_error_with_payload};
 use crate::tools::admin::{ChangesSinceParams, DiffParams, HealthParams, ReloadParams};
 use crate::tools::graph::{EntityParams, OverviewParams, SchemaParams, SearchParams};
 use crate::tools::mutation::{
     CreateParams, DeleteParams, RelateParams, RenameParams, UpdateParams,
 };
-use crate::error_envelope::{tool_error, tool_error_with_payload};
 
 /// The MCP server wrapping the Engine.
 #[derive(Clone)]
@@ -202,9 +202,7 @@ impl McpServer {
     /// included only when a file-backed config was loaded — matches the
     /// crate's `serde(skip_serializing_if)` conventions.
     pub(crate) fn tool_disabled_response(&self, name: &str) -> CallToolResult {
-        let msg = format!(
-            "Tool '{name}' is disabled in this workspace's MCP configuration."
-        );
+        let msg = format!("Tool '{name}' is disabled in this workspace's MCP configuration.");
         let mut details = serde_json::Map::new();
         details.insert("tool".to_string(), serde_json::json!(name));
         if let Some(path) = &self.config_source {
@@ -238,8 +236,7 @@ impl McpServer {
 
     /// Resolve a mem name, defaulting to primary.
     fn resolve_mem(&self, mem: Option<&str>) -> String {
-        mem
-            .map(|v| v.to_string())
+        mem.map(|v| v.to_string())
             .or_else(|| self.primary_mem())
             .unwrap_or_else(|| "default".to_string())
     }
@@ -309,9 +306,7 @@ fn validate_entity_id(id: &str) -> Option<CallToolResult> {
 /// Whitespace-only notes are allowed at the edge (the engine side
 /// collapses them to "no body line" during commit-message assembly).
 fn validate_note(note: Option<&str>) -> Option<CallToolResult> {
-    let Some(n) = note else {
-        return None;
-    };
+    let n = note?;
     if n.chars().count() > memstead_engine::mem_management::NOTE_MAX_LEN {
         let max = memstead_engine::mem_management::NOTE_MAX_LEN;
         let msg = format!(
@@ -325,8 +320,7 @@ fn validate_note(note: Option<&str>) -> Option<CallToolResult> {
         return Some(tool_error_with_payload(
             "INVALID_INPUT",
             &msg,
-            envelope(
-                "INVALID_INPUT", msg.clone(), details),
+            envelope("INVALID_INPUT", msg.clone(), details),
         ));
     }
     None
@@ -400,8 +394,9 @@ fn append_warning_hint(mut res: CallToolResult, warning: &WarningHint) -> CallTo
     let Some(obj) = sc.as_object_mut() else {
         return res;
     };
-    let entry = serde_json::to_value(warning)
-        .unwrap_or_else(|_| serde_json::json!({"code": warning.code(), "message": warning.message()}));
+    let entry = serde_json::to_value(warning).unwrap_or_else(
+        |_| serde_json::json!({"code": warning.code(), "message": warning.message()}),
+    );
     let warnings = obj
         .entry("warnings".to_string())
         .or_insert_with(|| serde_json::Value::Array(Vec::new()));
@@ -441,7 +436,6 @@ fn md_with_structured(markdown: String, structured: serde_json::Value) -> CallTo
     r
 }
 
-
 /// Prepend a `> [!warning]` admonition block describing drift events
 /// (`MemReloaded` warnings from [`Engine::reload_if_stale`])
 /// to a markdown response body. Visible to agents inline at the top
@@ -459,8 +453,7 @@ fn attach_mem_changed(body: &mut serde_json::Value, notices: Vec<MemChangedNotic
     if notices.is_empty() {
         return;
     }
-    body["mem_changed"] =
-        serde_json::to_value(&notices).unwrap_or(serde_json::Value::Null);
+    body["mem_changed"] = serde_json::to_value(&notices).unwrap_or(serde_json::Value::Null);
 }
 
 /// Attach the target mem's durability marker to a mutation response.
@@ -595,11 +588,6 @@ fn prepend_drift_warnings_md(md: String, drift_warnings: &[WarningHint]) -> Stri
     prefix
 }
 
-/// Format the canonical schema pin for a known mem as `name@version`,
-/// or `None` if the mem is not registered. Source of truth is the
-/// engine's `MemState.schema_ref`, which always reflects the schema
-/// actually loaded — never a stale on-disk pin.
-///
 // Per-mem schema pin / workspace policy / cross-catalogue schema
 // lookup helpers live in `memstead_engine::overview` so the shared
 // composer (this MCP tool + the full CLI) and the rest of this server
@@ -607,10 +595,11 @@ fn prepend_drift_warnings_md(md: String, drift_warnings: &[WarningHint]) -> Stri
 // the existing ~14 call sites in this file continue to compile
 // unchanged; their bodies just forward.
 
-fn mem_schema_ref_unified(
-    engine: &memstead_base::Engine,
-    mem_name: &str,
-) -> Option<String> {
+/// Format the canonical schema pin for a known mem as `name@version`,
+/// or `None` if the mem is not registered. Source of truth is the
+/// engine's `MemState.schema_ref`, which always reflects the schema
+/// actually loaded — never a stale on-disk pin.
+fn mem_schema_ref_unified(engine: &memstead_base::Engine, mem_name: &str) -> Option<String> {
     memstead_engine::overview::mem_schema_ref(engine, mem_name)
 }
 
@@ -630,11 +619,7 @@ fn find_schema_by_name<'a>(
     engine: &'a memstead_base::Engine,
     name: &str,
 ) -> Option<&'a std::sync::Arc<memstead_schema::Schema>> {
-    if let Some(s) = engine
-        .schemas()
-        .values()
-        .find(|s| s.manifest.name == name)
-    {
+    if let Some(s) = engine.schemas().values().find(|s| s.manifest.name == name) {
         return Some(s);
     }
     if let Some(s) = engine
@@ -687,7 +672,6 @@ fn with_mem_schema_anchor(mut res: CallToolResult, schema_ref: &str) -> CallTool
     }
     res
 }
-
 
 /// Convert an `EngineError` to a tool error response. Exhaustive over every
 /// variant — each case produces a `{code, message, details}` envelope on
@@ -746,7 +730,11 @@ fn engine_err_unified(
                 serde_json::json!({ "id": id }),
             ),
         ),
-        E::HashMismatch { id, current, is_stub } => tool_error_with_payload(
+        E::HashMismatch {
+            id,
+            current,
+            is_stub,
+        } => tool_error_with_payload(
             "HASH_MISMATCH",
             &message,
             envelope(
@@ -763,8 +751,7 @@ fn engine_err_unified(
             // #55: attach `known_mems` so this generic mapper matches the
             // dedicated mem-not-found handler regardless of which path
             // raised the error.
-            let known_mems: Vec<String> =
-                engine.mounts().iter().map(|m| m.mem.clone()).collect();
+            let known_mems: Vec<String> = engine.mounts().iter().map(|m| m.mem.clone()).collect();
             tool_error_with_payload(
                 "UNKNOWN_MEM",
                 &message,
@@ -958,7 +945,10 @@ fn engine_err_unified(
                 }),
             ),
         ),
-        E::CrossMemTargetNotFound { target_id, target_mem } => tool_error_with_payload(
+        E::CrossMemTargetNotFound {
+            target_id,
+            target_mem,
+        } => tool_error_with_payload(
             e.code(),
             &message,
             envelope(
@@ -1127,7 +1117,11 @@ fn engine_err_unified(
                 serde_json::json!({ "section": section }),
             ),
         ),
-        E::PatchOldNotFound { section, current_content, truncated } => tool_error_with_payload(
+        E::PatchOldNotFound {
+            section,
+            current_content,
+            truncated,
+        } => tool_error_with_payload(
             "PATCH_OLD_NOT_FOUND",
             &message,
             envelope(
@@ -1154,7 +1148,11 @@ fn engine_err_unified(
                     "reason": reason,
                     "input": input,
                 }),
-                SlugError::TitleHasInvalidChars { input, invalid_chars, proposed_slug } => {
+                SlugError::TitleHasInvalidChars {
+                    input,
+                    invalid_chars,
+                    proposed_slug,
+                } => {
                     let invalid_chars_str: Vec<String> =
                         invalid_chars.iter().map(|c| c.to_string()).collect();
                     serde_json::json!({
@@ -1164,9 +1162,15 @@ fn engine_err_unified(
                         "proposed_slug": proposed_slug,
                     })
                 }
-                SlugError::TitleHasControlChars { input, control_chars, proposed_slug } => {
-                    let control_chars_str: Vec<String> =
-                        control_chars.iter().map(|c| c.escape_default().to_string()).collect();
+                SlugError::TitleHasControlChars {
+                    input,
+                    control_chars,
+                    proposed_slug,
+                } => {
+                    let control_chars_str: Vec<String> = control_chars
+                        .iter()
+                        .map(|c| c.escape_default().to_string())
+                        .collect();
                     serde_json::json!({
                         "reason": reason,
                         "input": input,
@@ -1178,8 +1182,7 @@ fn engine_err_unified(
             tool_error_with_payload(
                 "INVALID_TITLE",
                 &message,
-                envelope(
-                    "INVALID_TITLE", message.clone(), details),
+                envelope("INVALID_TITLE", message.clone(), details),
             )
         }
         E::StubCannotRelate { id } => tool_error_with_payload(
@@ -1239,7 +1242,11 @@ fn engine_err_unified(
                 }),
             ),
         ),
-        E::InvalidWikiLinkMem { raw, section, reason } => tool_error_with_payload(
+        E::InvalidWikiLinkMem {
+            raw,
+            section,
+            reason,
+        } => tool_error_with_payload(
             "INVALID_MEM_NAME",
             &message,
             envelope(
@@ -1275,7 +1282,10 @@ fn engine_err_unified(
         // Lifecycle envelopes: the unified
         // `mem_management::create_mem` / `delete_mem` paths
         // surface these on the same wire contract.
-        E::MemNameCollision { name, source_origin } => tool_error_with_payload(
+        E::MemNameCollision {
+            name,
+            source_origin,
+        } => tool_error_with_payload(
             "MEM_NAME_COLLISION",
             &message,
             envelope(
@@ -1340,7 +1350,10 @@ fn engine_err_unified(
                 }),
             ),
         ),
-        E::MemConfigIncomplete { mem, missing_fields } => tool_error_with_payload(
+        E::MemConfigIncomplete {
+            mem,
+            missing_fields,
+        } => tool_error_with_payload(
             "MEM_CONFIG_INCOMPLETE",
             &message,
             envelope(
@@ -1365,7 +1378,11 @@ fn engine_err_unified(
                 }),
             ),
         ),
-        E::DescriptionNotPermitted { rel_type, from_id, to_id } => tool_error_with_payload(
+        E::DescriptionNotPermitted {
+            rel_type,
+            from_id,
+            to_id,
+        } => tool_error_with_payload(
             "DESCRIPTION_NOT_PERMITTED",
             &message,
             envelope(
@@ -1378,7 +1395,11 @@ fn engine_err_unified(
                 }),
             ),
         ),
-        E::MissingRequiredDescription { rel_type, from_id, to_id } => tool_error_with_payload(
+        E::MissingRequiredDescription {
+            rel_type,
+            from_id,
+            to_id,
+        } => tool_error_with_payload(
             "MISSING_REQUIRED_DESCRIPTION",
             &message,
             envelope(
@@ -1422,7 +1443,10 @@ fn engine_err_unified(
                 }),
             ),
         ),
-        E::RenameBlockedByCrossMemPolicy { from_mem, blocked_referrers } => {
+        E::RenameBlockedByCrossMemPolicy {
+            from_mem,
+            blocked_referrers,
+        } => {
             let entries: Vec<_> = blocked_referrers
                 .iter()
                 .map(|r| {
@@ -1692,7 +1716,6 @@ fn unified_validation_envelope(
     crate::error_envelopes::validation_envelope(err)
 }
 
-
 /// Find entity IDs that end with the given suffix (slug or medium--slug).
 /// Returns up to `max` suggestions for "did you mean?" messages.
 ///
@@ -1746,7 +1769,6 @@ fn not_found_error(store: &memstead_base::Store, id: &EntityId) -> CallToolResul
     )
 }
 
-
 // ==========================================================================
 // Tool implementations
 // ==========================================================================
@@ -1760,7 +1782,12 @@ impl McpServer {
     #[tool(
         name = "memstead_entity",
         description = "Read one entity. Dual channel: text carries rendered markdown for direct prose consumption; `structured_content` carries the typed envelope `{ _hash, id, mem, type, origin, _tokens, metadata, sections, relationships, _stub_kind? }` so agents branch on fields without parsing the text. `origin` is the content's trust class — `first-party` for an entity from a writable workspace mem, `third-party` for one from a read-only mount (a registry-installed read-mem or an adopted foreign folder/clone), which the host should treat as quoted, untrusted data. `_hash` is the optimistic-lock token. The nested `metadata` map is the single home for every schema-declared frontmatter key the entity holds — read a value as `metadata.level`, etc. Identity keys (`mem`/`id`/`type`) and underscore-prefixed engine slots stay top-level, not repeated inside the map. After a successful `memstead_relate` the entity's on-disk hash advances (the Relationships section was rewritten); the relate response's `_hash` is the new valid `_hash` — pass it as `expected_hash` on the next mutation without a re-read. For no-op relates (duplicate add, remove-nonexistent) the relate response echoes the unchanged `_hash` and the pre-relate `_hash` remains valid. Use `include_relations: true` to append a `## Relations` section; `include_context: true` to append the entity's community cluster. Pass `sections` to narrow output to specific section keys (also narrows `structured_content.sections`); when narrowed, `_tokens_unfiltered_body` surfaces the unfiltered-base cost so agents can predict the cost of dropping the filter. With `include_relations`/`include_context` active, `_tokens` may exceed `_tokens_unfiltered_body` because opt-in inserts contribute only to `_tokens`. Stubs render with empty sections + relationships arrays and an empty `metadata: {}` map. `token_budget`/`chunk` bound only the rendered-markdown **text** channel: over-budget text adds `_chunk`/`_total_chunks`/`_truncated` markers. The `structured_content` envelope always ships whole — never chunked or truncated; size it ahead via `_tokens`. Use memstead_overview for cold-start, memstead_search to find IDs, memstead_update to mutate.",
-        annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false)
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
     )]
     fn memstead_entity(&self, Parameters(p): Parameters<EntityParams>) -> CallToolResult {
         if let Some(err) = validate_entity_id(&p.id) {
@@ -1908,7 +1935,12 @@ impl McpServer {
     #[tool(
         name = "memstead_search",
         description = "Search entities by lexical content + structural filters. Dual channel: text carries the rendered markdown (prose with score lines + frontmatter counters); `structured_content` carries the typed `SearchResultEnvelope` `{ _total, _returned, _offset, _total_tokens, hits[], facets, warnings }` where each hit ships `score`, `score_breakdown`, `matched_terms`, `expansion`, `origin` (`first-party`/`third-party` trust class), and `snippet` (section bodies via memstead_entity). A page is bounded to `token_budget` (default 12000); an overflowing page is trimmed with a `SEARCH_RESULTS_TRUNCATED` warning (`kept`/`budget`), `_total` stays the full count, page with `offset`. Warnings ride as structured `{code, details, message}` entries (same shape every other tool emits) — branch on `code`. The caller expands a concept into keyword variants. Put variants into `query.any` (OR — ranks higher matches automatically); add excludes to `query.not`; use `query.phrase` for exact adjacency; use `query.field` to restrict to a single field. Set `expand_via` to relationship types — reached hits surface with `expansion` metadata + decayed score (0.5^depth). `facets` (by_type, by_mem, by_level, by_status, by_confidence, by_subsection, by_expansion) compose results structurally. Sub-heading matches carry `heading_path`. `stub: true|false` filters by stub status (combining with `entity_type` flags `STUB_FILTER_EXCLUDES_ALL`). Equality filters on `filterable: equality` fields ride on `filters` (e.g. `{\"level\": \"M0\"}`); one code per outcome, branch on `code`: `FILTER_TYPE_SCOPED` (declared on other types — applied with type-narrowing), `FIELD_NOT_FILTERABLE` (declared but not filterable — ignored, result unfiltered not emptied), `UNKNOWN_FILTER_KEY` (no schema declares it — ignored), `INVALID_ENUM_VALUE` (value outside the field's `enum_values` — applies but matches nothing, `details.allowed` lists the values). A `related_to` neighbourhood is ranked by proximity (nearer first) and bounded with `NEIGHBOURHOOD_CAPPED`. Range filters on `filterable: range` fields ride on `range_filters` (`min_<field>`/`max_<field>`/`<field>_before`/`<field>_after`), same contract: `RANGE_FILTER_KEY_MALFORMED`, `RANGE_FILTER_TYPE_SCOPED`, `UNKNOWN_RANGE_FILTER_FIELD`, `FIELD_NOT_RANGE_FILTERABLE`. Per-mem search-index unavailability (missing index or search-index execution failure) surfaces `SEARCH_MEM_INDEX_UNAVAILABLE` with `details.mem` and `details.reason`. Omit `query` for a pure metadata filter.",
-        annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false)
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
     )]
     fn memstead_search(&self, Parameters(p): Parameters<SearchParams>) -> CallToolResult {
         let filters = p.filters.clone().unwrap_or_default();
@@ -1975,24 +2007,23 @@ impl McpServer {
         // canonical form (the rendered prose with score lines) and
         // a typed branching shape — both ship in one call.
         let envelope = render::build_search_envelope(&result, offset);
-        let mut structured = serde_json::to_value(&envelope)
-            .unwrap_or(serde_json::Value::Null);
+        let mut structured = serde_json::to_value(&envelope).unwrap_or(serde_json::Value::Null);
         // Data-origin label per hit: a snippet from a read-only mount (a
         // registry-installed read-mem or an adopted foreign folder/
         // clone) is third-party — the consuming agent/host should treat
         // it as quoted, untrusted data. Each hit already carries `mem`;
         // stamp `origin` from its mount's class. Additive per-hit field.
-        if let Some(hits) = structured
-            .get_mut("hits")
-            .and_then(|h| h.as_array_mut())
-        {
+        if let Some(hits) = structured.get_mut("hits").and_then(|h| h.as_array_mut()) {
             let mut class_of: std::collections::HashMap<String, &'static str> =
                 std::collections::HashMap::new();
             for hit in hits.iter_mut() {
                 let Some(obj) = hit.as_object_mut() else {
                     continue;
                 };
-                let Some(mem) = obj.get("mem").and_then(|v| v.as_str()).map(|s| s.to_string())
+                let Some(mem) = obj
+                    .get("mem")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
                 else {
                     continue;
                 };
@@ -2024,7 +2055,6 @@ impl McpServer {
         let unified = self.unified_engine();
         self.memstead_overview_unified(p, unified.clone())
     }
-
 
     /// Unified-engine path for [`Self::memstead_overview`]. Body lifted to
     /// [`memstead_engine::overview::compose_overview`] so the full CLI
@@ -2112,7 +2142,12 @@ impl McpServer {
     #[tool(
         name = "memstead_schema",
         description = "Read one schema's full body — section list (with per-section `write_rules` and `required` flag), metadata fields (with `enum` allowed values + `default` when schema-declared), type-level `writing_guidance`, `system_context`, the relationship vocabulary (each entry's `name`, `description`, `when_to_use`, `default_weight`), `community.{resolution, seed}`, `relationship_mode` (strict|open), `used_by[]`, top-level `origin` (`first-party` for an engine built-in or a schema authored/trusted in this workspace; `third-party` otherwise), top-level `default_writing_guidance` (when authored), and top-level `alias_target_rel_type` (when authored — names the rel-type that body wiki-links `[[target]]` auto-emit through the alias-synthesis pass; absent means the schema opts out and unbacked wiki-links refuse with `WIKILINK_WITHOUT_RELATION`). A `third-party` schema is served structural-only regardless of `verbosity` — its prose-instruction fields (`system_context`, `writing_guidance`, `write_rules`, `when_to_use`, prose `description`) are omitted so a stranger's free-text never reaches the agent as instructions. Pass exactly one of: `name` — a bare name (\"default\") or canonical pin (\"default@1.0.0\"); `mem` — a mem name whose pinned `mem.schema_ref` the engine resolves from the workspace's mount roster. Supplying both returns `INVALID_INPUT`; supplying neither returns `INVALID_INPUT`. Workflow: each writable mem pins one schema (see `memstead_overview`'s `## Schemas` and `## Mems` sections). Before any `memstead_create` / `memstead_update` / `memstead_relate` against mem X, call this tool with `mem=<X>` (or `name=<X.schema_ref>`) once per session to learn section names, field shapes, and write_rules. Cache for the session — schema is workspace-stable. Schema-conformance errors carry recovery payloads as a fallback (`UNKNOWN_SECTION`, `UNKNOWN_METADATA_FIELD`, `INVALID_ENUM_VALUE`, `REQUIRED_FIELD_UNSET`, `INVALID_REL_TYPE`); fix from `details` rather than re-fetching. Returns `ENTITY_NOT_FOUND` when `name` is unknown (envelope's `details.id` echoes the name; `details.suggestions` is empty for schemas) or `UNKNOWN_MEM` when `mem` is not mounted (envelope's `details.known_mems` lists the writable roster).",
-        annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false)
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
     )]
     fn memstead_schema(&self, Parameters(p): Parameters<SchemaParams>) -> CallToolResult {
         // The unified engine exposes `schemas()` as a HashMap keyed by
@@ -2151,8 +2186,7 @@ impl McpServer {
                 );
             }
             (None, None) => {
-                let msg =
-                    "memstead_schema requires either `name` or `mem`.".to_string();
+                let msg = "memstead_schema requires either `name` or `mem`.".to_string();
                 return attach_drift_to_error(
                     tool_error_with_payload(
                         "INVALID_INPUT",
@@ -2171,11 +2205,8 @@ impl McpServer {
             (None, Some(mem)) => match engine.mount(mem) {
                 Some(m) => m.schema.as_ref().map(|s| s.to_string()).unwrap_or_default(),
                 None => {
-                    let known_mems: Vec<String> = engine
-                        .mounts()
-                        .iter()
-                        .map(|m| m.mem.clone())
-                        .collect();
+                    let known_mems: Vec<String> =
+                        engine.mounts().iter().map(|m| m.mem.clone()).collect();
                     let msg = format!("unknown mem: \"{mem}\"");
                     return attach_drift_to_error(
                         tool_error_with_payload(
@@ -2297,7 +2328,12 @@ impl McpServer {
     #[tool(
         name = "memstead_create",
         description = "Create a new entity. Read the target mem's schema first via `memstead_schema(name=<mem.schema_ref>)` (cached per session) — required sections, allowed metadata fields, relationship vocabulary, and write_rules live there. Required: `title`, `entity_type`, plus the type's required sections. The entity ID is the mem name plus a Unicode-aware slug of the title (e.g. \"Große Änderung\" → \"große-änderung\"). A title the slug pipeline cannot represent (emoji, punctuation, non-alphanumerics) or that slugifies to empty is refused with `INVALID_TITLE` carrying a `proposed_slug` to retry. `mem` defaults to the primary writable mem. Pass `relations` to wire edges inline (e.g. `[{to: \"specs--parent-id\", type: \"PART_OF\"}]`); unresolved targets auto-create stubs at that ID. Optional `note` (≤280 chars) lands in the commit body; missing when `[mutations].require_notes=true` emits `NOTE_MISSING`. Schema-bound failures carry recovery payload: `UNKNOWN_SECTION`/`UNKNOWN_METADATA_FIELD` ship `details.declared` + nearest-match `suggestion`; `INVALID_ENUM_VALUE` ships `details.allowed`, `details.field_description`, `suggestion`, `details.type_write_rules`; `REQUIRED_FIELD_UNSET` ships `details.field_description`, `details.enum_values`, `details.type_write_rules` — also fires on create when the caller omits a required-no-default metadata field, superseding the `MISSING_REQUIRED_FIELD` warning; `MISSING_REQUIRED_SECTION` ships per-section `write_rules` plus the top-level `type_guidance` map — refused on create so it never lands with a placeholder body; `INVALID_REL_TYPE` ships `details.allowed` (`{name, when_to_use}`) + `suggestion`. Other warnings (entity still lands): `UNDECLARED_RELATIONSHIP_OPEN`, `INLINE_WIKI_LINK_AUTO_STUBBED` (`[[wiki-link]]` in bodies auto-stubs unresolved targets; review `details.stubs` to catch prose-induced ghosts), `MISSING_REQUIRED_OUTGOING` (lists unsatisfied `required_outgoing` per `details.missing[]={relationships, cardinality}`; follow up with memstead_relate). Real writes return `commit_sha` (per-mem git; gitdir via `memstead_health include_config=true`) for polling via memstead_changes_since. `dry_run: true` validates then previews a VALID entity: response carries prospective `id`, `file_path`, `_hash`, warnings, `type_guidance`, and any `incoming` edges adopted from a pre-existing stub, with `commit_sha` empty — but an INVALID entity refuses with the same typed envelope a real call returns, not a warnings-list preview. Use memstead_relate for edges, memstead_update for sections.",
-        annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = false, open_world_hint = false)
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
     )]
     fn memstead_create(&self, Parameters(p): Parameters<CreateParams>) -> CallToolResult {
         if let Some(err) = validate_note(p.note.as_deref()) {
@@ -2330,12 +2366,7 @@ impl McpServer {
             dry_run,
         };
         let client = self.client.get().cloned();
-        match engine.create_entity(
-            args,
-            Actor::Agent,
-            client.as_ref(),
-            p.note.as_deref(),
-        ) {
+        match engine.create_entity(args, Actor::Agent, client.as_ref(), p.note.as_deref()) {
             Ok(outcome) => {
                 // Skip empty `incoming` / `None` `incoming_count`
                 // manually to match full's
@@ -2355,13 +2386,12 @@ impl McpServer {
                     body["incoming_count"] = serde_json::json!(count);
                 }
                 if !outcome.incoming.is_empty() {
-                    body["incoming"] = serde_json::to_value(&outcome.incoming)
-                        .unwrap_or(serde_json::Value::Null);
+                    body["incoming"] =
+                        serde_json::to_value(&outcome.incoming).unwrap_or(serde_json::Value::Null);
                 }
                 if !outcome.relations_declared.is_empty() {
-                    body["relations_declared"] =
-                        serde_json::to_value(&outcome.relations_declared)
-                            .unwrap_or(serde_json::Value::Null);
+                    body["relations_declared"] = serde_json::to_value(&outcome.relations_declared)
+                        .unwrap_or(serde_json::Value::Null);
                 }
                 attach_durability(&mut body, &engine, &outcome.mem);
                 attach_mem_changed(&mut body, engine.take_mem_changed_notices());
@@ -2389,7 +2419,12 @@ impl McpServer {
     #[tool(
         name = "memstead_update",
         description = "Modify an existing entity. Pre-fetch the target mem's schema via `memstead_schema(name=<mem.schema_ref>)` once per session — section names and write_rules live there. Read the entity first via memstead_entity and pass its hash as `expected_hash` — mismatch emits `HASH_MISMATCH` (`details.current` carries the live hash). `INLINE_WIKI_LINK_AUTO_STUBBED` warns when `[[…]]` parses to unresolved ids; `details.stubs` lists ghosts. `MISSING_REQUIRED_OUTGOING` warns when the type's `required_outgoing` blocks stay unsatisfied (payload mirrors memstead_create's; clear via memstead_relate). Three section modes: `sections` (replace), `append_sections` (append), `patch_sections` (find-and-replace, first or every via `all: true`). One mode per key. `patch_sections` errors on missing `old` or empty section. Schema-bound errors carry recovery payloads: `UNKNOWN_SECTION` / `UNKNOWN_METADATA_FIELD` ship `details.declared` + nearest-match `suggestion`; `INVALID_ENUM_VALUE` ships `details.allowed`, `details.field_description`, `suggestion`, `details.type_write_rules`; `REQUIRED_FIELD_UNSET` ships the same field+enum+rules payload. `metadata` sets frontmatter; `metadata_unset` removes it (silently no-ops on absent or section keys). Setting and unsetting the same key is a hard error. Read-only (set/unset → `READ_ONLY_FIELD`): `mem`, `id`, `type` (memstead_rename for title; delete+create for type/mem) plus engine-stamped `created_date` / `last_modified`. Stubs cannot be updated — memstead_create as real first. Optional `note` (≤280 chars) — see memstead_create; missing emits `NOTE_MISSING`. No-op short-circuit: post-state bytes-identical to disk (e.g. same-day auto-stamp, already-declared relation, absent-key unset, empty payload) returns `UPDATE_NOOP`, empty `commit_sha`, unchanged `_hash` — `expected_hash` stays stable. `dry_run: true` validates then previews OR recovers from a stale hash: it bypasses ONLY the `expected_hash` check (returns current `_hash` + `prospective_hash`), but section/field validation still refuses with the same typed envelope a real call returns — dry_run never reports an invalid update as clean. Reuse the current `_hash` as `expected_hash`, never `prospective_hash` — auto-stamped `last_modified` shifts the latter. A body-link removal orphaning its stub target GC's it into `orphan_stubs_removed`. Real-write responses carry `commit_sha` (per-mem git; gitdir via `memstead_health include_config=true`) for polling via memstead_changes_since.",
-        annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = false, open_world_hint = false)
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
     )]
     fn memstead_update(&self, Parameters(p): Parameters<UpdateParams>) -> CallToolResult {
         if let Some(err) = validate_entity_id(&p.id) {
@@ -2453,12 +2488,7 @@ impl McpServer {
                 .collect(),
         };
         let client = self.client.get().cloned();
-        match engine.update_entity(
-            args,
-            Actor::Agent,
-            client.as_ref(),
-            p.note.as_deref(),
-        ) {
+        match engine.update_entity(args, Actor::Agent, client.as_ref(), p.note.as_deref()) {
             Ok(outcome) => {
                 // ModifiedSections / ModifiedMetadata serialise
                 // with `#[serde(skip_serializing_if = "Vec::is_empty")]`
@@ -2497,9 +2527,8 @@ impl McpServer {
                 // "Vec::is_empty")` on the outcome keeps the
                 // no-batch case bytes-identical to pre-feature.
                 if !outcome.relations_declared.is_empty() {
-                    body["relations_declared"] =
-                        serde_json::to_value(&outcome.relations_declared)
-                            .unwrap_or(serde_json::Value::Null);
+                    body["relations_declared"] = serde_json::to_value(&outcome.relations_declared)
+                        .unwrap_or(serde_json::Value::Null);
                 }
                 attach_durability(&mut body, &engine, outcome.id.mem());
                 attach_mem_changed(&mut body, engine.take_mem_changed_notices());
@@ -2527,7 +2556,12 @@ impl McpServer {
     #[tool(
         name = "memstead_relate",
         description = "Connect two entities with a typed edge. Pre-fetch the target mem's schema via `memstead_schema(name=<mem.schema_ref>)` once per session — relationship vocabulary and shape live there. Type names are case-insensitive; stored canonically as UPPER_SNAKE_CASE. Unknown rel-types return `INVALID_REL_TYPE` with `details.allowed` (each `{name, when_to_use}`) and nearest-match `suggestion`. Shape pinned via `source_types` / `target_types` — add-path violations return `INVALID_REL_SHAPE` with `details.rel_type`, `details.from_type`, `details.to_type`, `details.allowed_source_types`, `details.allowed_target_types`, `suggestion`. Remove skips shape validation; existing violations surface via `memstead_health`. Pass `remove: true` to delete an edge. Source (`from`) must be real; target (`to`) may be auto-stubbed (wiki-link slug grammar — malformed ids return `INVALID_ENTITY_ID` with `details.id` / `details.reason`). Cross-mem edges policy-gated by `cross_mem_links` / `default_cross_links`: denial returns `CROSS_MEM_LINK_NOT_ALLOWED`; absent ReadOnly targets return `CROSS_MEM_TARGET_NOT_FOUND`; cross-different-schema edges undeclared in `cross_mem_relationships` return `CROSS_MEM_EDGE_NOT_DECLARED`. Auto-stubs into an uncreated mem emit `CROSS_MEM_TARGET_MEM_UNCREATED`. Cycle-closing edges on `acyclic: true` types return `RELATIONSHIP_CYCLE` with `details.rel_type`, `details.from`, `details.to`, `details.existing_path`, `details.path_truncated`. Add-existing / remove-missing are typed-warning no-ops (`DUPLICATE_RELATIONSHIP` / `NO_SUCH_RELATIONSHIP`, empty `commit_sha`). Optional `note` (≤280 chars) — see memstead_create. Response `_hash` is next mutation's `expected_hash`. Edges never move files — entities live at `{mem}/{slug}.md`. On `remove: true`, a stub whose last incoming edge dropped is GC'd and listed in `orphan_stubs_removed`; surviving body wiki-links refuse with `RELATION_HAS_BODY_LINKS` (`details.body_links` — drop them via `memstead_update` and retry). Real-writes carry `commit_sha` (per-mem git; gitdir via `memstead_health include_config=true`) for polling via memstead_changes_since.",
-        annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = true, open_world_hint = false)
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
     )]
     fn memstead_relate(&self, Parameters(p): Parameters<RelateParams>) -> CallToolResult {
         if let Some(err) = validate_note(p.note.as_deref()) {
@@ -2556,12 +2590,7 @@ impl McpServer {
             description: p.description.clone(),
         };
         let client = self.client.get().cloned();
-        match engine.relate_entity(
-            args,
-            Actor::Agent,
-            client.as_ref(),
-            p.note.as_deref(),
-        ) {
+        match engine.relate_entity(args, Actor::Agent, client.as_ref(), p.note.as_deref()) {
             Ok(outcome) => {
                 let mut body = serde_json::json!({
                     "from": outcome.from.to_string(),
@@ -2621,7 +2650,12 @@ impl McpServer {
     #[tool(
         name = "memstead_delete",
         description = "Remove an entity permanently. Deletes the entity's store record, every edge touching it (both directions), and its markdown file on disk. Requires `expected_hash` (read the entity via memstead_entity first — mirrors memstead_update / memstead_rename for optimistic locking); mismatch emits `HASH_MISMATCH` with `details.current` carrying the current on-disk hash. Binary semantics: any incoming reference from another entity in a Write-Mem refuses the delete with `HAS_INCOMING_REFS` and `details.referrers` listing each `{from_id, rel_types, mem}` (one entry per unique source, rel_types collapses multi-edge cases) — the agent removes the offending references via `memstead_relate --remove` (or `memstead_update` for body wiki-links) before retrying. There is no force flag. When the only incoming references come from ReadOnly mounts (archives), the delete proceeds: the on-disk file is removed and the in-memory entity is demoted to a stub at the same id so the surviving edges keep a valid target — the response carries a `RESIDUAL_STUB_FOR_READONLY_REFERRERS` warning naming the surviving referrers. PART_OF children survive the delete: their parent edge is removed; file paths are unaffected (every entity already lives at `{mem}/{slug}.md`). Stubs (`_hash` empty) are deleted with `expected_hash: \"\"` — the hash check is skipped because there is nothing to compare. Optional `note` (≤280 chars) — shared provenance contract, see memstead_create. Response carries `relations_removed` (edges removed by this delete), `orphan_stubs_removed` (ids of stub entities whose last incoming edge was this entity — they are GC'd in the same op so the graph stays tidy; field is serde-omitted when empty), `warnings` (residual-stub warning when the demote path applied), and `commit_sha` (per-mem git; gitdir via `memstead_health include_config=true`) for polling via memstead_changes_since.",
-        annotations(read_only_hint = false, destructive_hint = true, idempotent_hint = false, open_world_hint = false)
+        annotations(
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
     )]
     fn memstead_delete(&self, Parameters(p): Parameters<DeleteParams>) -> CallToolResult {
         if let Some(err) = validate_entity_id(&p.id) {
@@ -2651,12 +2685,7 @@ impl McpServer {
             expected_hash: expected_hash_opt,
         };
         let client = self.client.get().cloned();
-        match engine.delete_entity(
-            args,
-            Actor::Agent,
-            client.as_ref(),
-            p.note.as_deref(),
-        ) {
+        match engine.delete_entity(args, Actor::Agent, client.as_ref(), p.note.as_deref()) {
             Ok(outcome) => {
                 let mut body = serde_json::json!({
                     "id": outcome.id.to_string(),
@@ -2707,7 +2736,12 @@ impl McpServer {
     #[tool(
         name = "memstead_rename",
         description = "Rename an entity by changing its title. Updates the entity ID (mem prefix preserved) and its markdown file path (`{new_slug}.md` at mem root). Atomic referrer rewrite: every Write-Mem entity whose `relationships` or section bodies point at the old id has its `[[old-slug]]` tokens rewritten in one per-mem commit. Cross-mem referrers are gated by `cross_mem_links` policy in the propagated edge's actual direction (`referrer_mem → renamed_mem`) — a blocked direction aborts up-front with `RENAME_BLOCKED_BY_CROSS_MEM_POLICY` (`details.from_mem`, `details.blocked_referrers[{from_mem, to_mem, count}]`) before any write lands. Per-peer commits are parent-pinned; sibling-writer drift mid-rename surfaces `RENAME_PARTIAL_FAILURE` (`details.committed_mems`, `details.failed_mem`, `details.failure_cause`) so the agent retries the failed mem after reloading. Every per-mem commit in one rename shares a `logical_operation_id` in its provenance — correlate multi-mem renames via `memstead_changes_since`. ReadOnly referrers can't be rewritten; the old id is demoted to a stub in-memory holding the surviving incoming edges, and the response carries `RESIDUAL_STUB_FOR_READONLY_REFERRERS` naming each surviving referrer. Requires `expected_hash` (read via memstead_entity first); mismatch emits `HASH_MISMATCH` with `details.current` carrying the current on-disk hash. Slug-noop short-circuit: when the new title's slug matches the current one, `old_id` equals `new_id`, `commit_sha` is empty, and `warnings` carries `TITLE_NORMALIZED_TO_SLUG_NOOP`. ID collisions error — pick a different title. Stubs cannot be renamed (create a real entity instead). Optional `note` (≤280 chars) — shared provenance contract, see memstead_create. Response carries `old_id`, `new_id`, `_hash` (post-rename on-disk hash — pass as `expected_hash` on the next mutation, mirrors `memstead_relate`), `commit_sha` (per-mem git; gitdir via `memstead_health include_config=true`), and `warnings`.",
-        annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = false, open_world_hint = false)
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
     )]
     fn memstead_rename(&self, Parameters(p): Parameters<RenameParams>) -> CallToolResult {
         if let Some(err) = validate_entity_id(&p.id) {
@@ -2729,12 +2763,7 @@ impl McpServer {
             new_title: p.new_title.clone(),
         };
         let client = self.client.get().cloned();
-        match engine.rename_entity(
-            args,
-            Actor::Agent,
-            client.as_ref(),
-            p.note.as_deref(),
-        ) {
+        match engine.rename_entity(args, Actor::Agent, client.as_ref(), p.note.as_deref()) {
             Ok(outcome) => {
                 let mut body = serde_json::json!({
                     "old_id": outcome.old_id.to_string(),
@@ -2775,7 +2804,12 @@ impl McpServer {
     #[tool(
         name = "memstead_health",
         description = "Return graph health metrics. The typed payload is `structured_content` (always whole); the text channel is pretty JSON, becoming chunkable markdown only past `token_budget` (page via `chunk`). Default: summary counts (entities, orphans, stubs, stale, missing-fields, communities; also per-schema via `orphans_by_schema`/`communities_by_schema`, raw totals kept), node/edge totals, type/edge distributions, `writable_mems` + `read_mems` roster, `default_writable_mem` (omitted-`mem` target), and `mem_schemas`. Pass `include` to drill in — allowed keys: `orphans`, `stubs`, `most_connected`, `missing_fields`, `stale`, `dangling_links`, `tags`, `missing_required_outgoing`, `conformance`, `integrity`. `conformance` lints entities against `target_schema` or each mem's pin into `findings` (`{id, axis, code, detail}`, write-time typed codes); `integrity` adds `DANGLING_LINK`/`ORPHAN_STUB`. `dangling_links` scans bodies for `[[id]]` refs lacking on-disk files; entries carry `from`, `target_id`, `target_path`, `section`. `tags` aggregates authored tag strings into `tag_distribution` (count desc, capped by `limit`), `tag_distribution_folded` (drift sidecar; entries when ≥2 casings share a canonical tag), and `untagged_entities`. `missing_required_outgoing` lists entities with unsatisfied `required_outgoing` blocks (`id`/`title`/`entity_type`/`mem`/`missing[]`). `most_connected` entries carry `total`/`incoming`/`outgoing` (all edges) plus `typed_total`/`typed_incoming`/`typed_outgoing` (mention edges excluded); ranked by `typed_total` then `total` then id, so a co-mention hub doesn't outrank a dependency hub. Unknown include keys emit `UNKNOWN_INCLUDE_KEY` on warnings. `limit` caps `most_connected`/`tag_distribution` at 10; above 100 clamped via `LIMIT_CLAMPED`. `SUSPICIOUS_NESTED_PREFIX` flags nested-prefix drift (fix via memstead_update). `DUPLICATE_SECTION_HEADING` flags a section key whose `## Heading` was declared twice (first body kept). `OUTER_REPO_NOT_IGNORING_MEM_REPO` surfaces when the workspace is embedded in another git checkout not ignoring `mem-repo/`. `MEM_RELOADED` flags an auto-reload after a sibling writer advanced the on-disk HEAD. Pass `mem` to scope counts/details to one writable mem; roster fields stay global. Under a filter, edge counts are source-in-mem only, `dangling_links` and `warnings` filter to in-filter entities. Set `include_config: true` to add `mutations` (`require_notes`), opaque `plugin` map, and a `mems` detail array: per entry `origin`, optional `vcs` (`gitdir`/`worktree`/`head`), opaque `write_guidance` map, and `extra` (forward-compat catch-all).",
-        annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false)
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
     )]
     fn memstead_health(&self, Parameters(p): Parameters<HealthParams>) -> CallToolResult {
         // include_config: true is served end-to-end via the unified
@@ -2791,7 +2825,6 @@ impl McpServer {
         let unified = self.unified_engine();
         self.memstead_health_unified(p, unified.clone())
     }
-
 
     /// Body of [`Self::memstead_health`]. Default shape (`summary`,
     /// totals, distributions, rosters, `mem_schemas`) plus the
@@ -2884,7 +2917,11 @@ impl McpServer {
         };
 
         let res = json_response(&result);
-        let res = match p.mem.as_deref().and_then(|v| mem_schema_ref_unified(&engine, v)) {
+        let res = match p
+            .mem
+            .as_deref()
+            .and_then(|v| mem_schema_ref_unified(&engine, v))
+        {
             Some(s) => with_mem_schema_anchor(res, &s),
             None => res,
         };
@@ -2900,9 +2937,17 @@ impl McpServer {
     #[tool(
         name = "memstead_changes_since",
         description = "Per-mem commit-delta feed — reads the mem's own git repo (gitdir via `memstead_health include_config=true`). Pass `since` = a commit SHA previously returned by any mutation (`commit_sha` from create / update / delete / rename / relate responses), or the canonical git empty-tree hash `4b825dc642cb6eb9a060e54bf8d69288fbee4904` for a fresh-client first sync (fresh mems also return that hash as `head`). Returns a flat list of entity-level events — each event's `action` is one of `added`, `updated`, `removed`, `renamed`. Non-`removed` events carry `entity_type` (schema type name, e.g. spec, memo), looked up from the post-diff store; `removed` events carry `entity_type: null` alongside `title: null`. Engine-authored renames pair via commit-note provenance (`memstead: rename <old> → <new>`) — exact, similarity-independent, transitively composed across multi-step rename chains in the same window. Non-engine renames (`git mv`, pre-provenance migrations) fall back to a content-similarity scorer (default 0.6, tunable via `rename_similarity` in [0.1, 1.0]), capped at 1000 rewrite pairs per diff. Either path surfaces as a single `renamed` event with `from_id` and `to_id` rather than a removed+added pair. Out-of-range `rename_similarity` values refuse with `INVALID_INPUT` naming `details.allowed_range` and `details.requested`. `head` echoes the current HEAD SHA — save it as the next polling cursor (prefer full SHAs over refs). No pagination — every qualifying commit ships in one response. Pass `include_notes: true` to fold per-commit agent-notes (`notes[]`) and `memstead_ref` (SHA of the unified schema + per-mem-config registry) into the response — outer-repo auto-commit gets deltas, notes, and the registry-ref sha in one round-trip. Unknown or malformed `since` returns `INVALID_CURSOR` with `details.mem` and `details.since`.",
-        annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false)
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
     )]
-    fn memstead_changes_since(&self, Parameters(p): Parameters<ChangesSinceParams>) -> CallToolResult {
+    fn memstead_changes_since(
+        &self,
+        Parameters(p): Parameters<ChangesSinceParams>,
+    ) -> CallToolResult {
         // The engine's
         // `changes_since` populates `notes` and `memstead_ref` on every
         // git-branch call — the rename map is note-driven, so the
@@ -2944,7 +2989,10 @@ impl McpServer {
                 // `attach_mem_changed_to_result` below; prepend the
                 // `MEM_RELOADED` text line here so the error path
                 // carries the same channel split a success carries.
-                prepend_drift_warnings_to_result_text(engine_err_unified(e, &engine), &drift_warnings)
+                prepend_drift_warnings_to_result_text(
+                    engine_err_unified(e, &engine),
+                    &drift_warnings,
+                )
             }
         };
         attach_mem_changed_to_result(res, mem_changed_notices)
@@ -2953,7 +3001,12 @@ impl McpServer {
     #[tool(
         name = "memstead_diff",
         description = "Return a two-ref structural diff at entity granularity. Walks the tree at `ref_a` and the tree at `ref_b` in the mem's gitdir, surfacing per-entity changes as `entries[]` whose `status` is one of `added`, `modified`, `deleted`, `renamed`, `invalid_entity`. Each entry carries the full markdown body on both sides by default in `content_before` / `content_after`; pass `include_content: false` for the metadata-only shape (`id`, `title`, `entity_type`, `status`). Ref-handling conventions mirror `memstead_changes_since`: the canonical empty-tree sentinel `4b825dc642cb6eb9a060e54bf8d69288fbee4904` is accepted as either ref and short-circuits to git's empty tree (first-sync diffs against a fresh mem use this for `ref_a`); a bare `HEAD` resolves to the selected mem's branch tip rather than the gitdir's symbolic HEAD. Cross-mem diffs work via fully-qualified refs naming the peer mem's branch; cross-different-gitdir diffs are out of scope (the op operates on one mem-repo). Refusal codes: `UNKNOWN_MEM` (`details.name`), `UNKNOWN_REF` (`details.ref`), `INVALID_INPUT` for folder / archive mounts and for `rename_similarity` outside the allowed range. Rename detection uses content-similarity tuned by `rename_similarity`; agent-notes-driven rename-chain collapse is a follow-up. Each entry's `ripple` field carries per-side `{from_id, side}` entries for entities with inbound wiki-links to the affected entry — `side: \"ref_a\"` lists referrers at the `ref_a` snapshot, `side: \"ref_b\"` at `ref_b`. Pass `include_ripple: false` to omit the field entirely (e.g. for large mems where the per-side wiki-link scan is the dominant cost). Response top-level: `ref_a`, `ref_b`, `resolved_a_sha`, `resolved_b_sha`, `config`, `entries`.",
-        annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false)
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
     )]
     fn memstead_diff(&self, Parameters(p): Parameters<DiffParams>) -> CallToolResult {
         let unified = self.unified_engine();
@@ -2974,7 +3027,12 @@ impl McpServer {
     #[tool(
         name = "memstead_reload",
         description = "Reload one writable mem's slice of the in-memory store from its on-disk branch tip — or every writable mem when `mem` is omitted. For multi-engine coexistence: a sibling (forked subagent, macOS app, parallel terminal) or out-of-band `git pull` may have advanced HEAD past this engine's snapshot. The auto-reload-on-read pipeline surfaces `MEM_RELOADED` on the next read; this tool is explicit operator-driven refresh for the rare cases the throttle missed. Not a workaround for direct .md edits — restart the server instead. Per-mem form is cheap (~10 ms per few-hundred-entity mem); workspace-wide scales linearly. Response: `reports[]`, each entry `{ mem, head_before, head_after, entities_loaded, changed_entity_ids[] }`. `head_before` is the engine's prior cached SHA (canonical empty-tree hash for fresh mems); `head_after` is the freshly-peeled branch tip. `changed_entity_ids` is the union of added ∪ content-hash-changed ∪ removed entity ids — pass `head_before` to `memstead_changes_since` for the full per-entity diff. The workspace-wide form (omit `mem`) additionally picks up CLI writes to allowlist / cross-link / mutation policy (via `memstead workspace allow-create` etc.) without process restart. Per-mem form skips that workspace-level settings refresh. **Mem membership is fixed at process boot** — neither form re-scans the mount manifest. In-band lifecycle goes through `memstead_mem_create` / `memstead_mem_delete`; out-of-band creates / deletes require an MCP server restart.",
-        annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = true, open_world_hint = false)
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
     )]
     fn memstead_reload(&self, Parameters(p): Parameters<ReloadParams>) -> CallToolResult {
         let unified = self.unified_engine();
@@ -3004,7 +3062,12 @@ impl McpServer {
     #[tool(
         name = "memstead_mem_create",
         description = "Create and register a new writable mem at runtime. Requires workspace opt-in via `[[mem_management.create]]` rules (each `pattern` + `schemas[]`) — discover via `memstead_overview`'s `## Lifecycle Namespaces`. Engine composes the lifecycle candidate, canonicalizes `location`, runs first-match-wins glob over the rule list, then checks `schema` against the matched rule's `schemas[]` (`[\"*\"]` admits any). Two error envelopes: `MEM_PATH_NOT_ALLOWED` carries `details.candidate`, `details.patterns`, `details.reason` (`no_allowlist_configured` / `no_match` / `outside_workspace`); `MEM_SCHEMA_NOT_ALLOWED` carries `details.candidate`, `details.matched_pattern`, `details.requested_schema`, `details.allowed_schemas`. Name-collision check runs only after a path match — out-of-namespace collision surfaces as `MEM_PATH_NOT_ALLOWED`, not `MEM_NAME_COLLISION`. Storage-residue probe catches residue surviving a prior `memstead mem unregister` or a crash; residue left by a deliberate unregister reattaches and emits `MEM_REATTACHED_AFTER_UNREGISTER` (audit signal); residue from a crash refuses with `MEM_STORAGE_RESIDUE_DETECTED` — run `memstead mem delete <name>` first. Cross-mem edge authorization is workspace policy (`[cross_mem_links]`); the matched create-rule may carry `default_cross_links`. Bootstraps the gitdir per `vcs`, loads any pre-existing markdown, and produces a seed commit carrying `note` (≤280 chars). Response carries `location`, `seed_commit_sha` for `memstead_changes_since` polling, and `schema_ref` (gitdir via `memstead_health include_config=true`). Pass `include_schema: true` to additionally inline the full schema body — byte-identical to `memstead_schema(name=<resolved-schema>)`. Default `false`. A mem already present at the location returns `CONFIG_ERROR`. Seed-commit failure leaves partial disk state — no implicit rollback.",
-        annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = false, open_world_hint = false)
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
     )]
     fn memstead_mem_create(
         &self,
@@ -3019,7 +3082,12 @@ impl McpServer {
     #[tool(
         name = "memstead_mem_delete",
         description = "Remove a writable mem at runtime — always destructive: removes the mem and prunes every backend-visible artifact. Requires workspace opt-in via `[[mem_management.delete]]` rules — discover the current policy via `memstead_overview`'s `## Lifecycle Namespaces` section. Engine resolves `name` (`UNKNOWN_MEM` otherwise), composes the lifecycle candidate from the mem's full hierarchical path (or the bare name for flat-layout mems), runs first-match-wins glob lookup over the delete rule list (rejecting `no_allowlist_configured` or `no_match` with `MEM_PATH_NOT_ALLOWED`; `details.candidate` carries the composed string, `details.patterns` lists rules checked, `details.reason` discriminates). Refuses `MEM_REFERENCED_BY_POLICY` when the workspace `cross_mem_links` policy grants this mem as a write target (`details.referring_mems` names them). Refuses `MEM_HAS_INCOMING_REFS` when write-mem graph edges still target it (`details.referrers` lists each `{from_id, rel_types, mem}` — remove via `memstead_relate` / `memstead_update` first). On success the mem is gone — reads no longer see it and its backing storage is removed. The workspace policy is atomically scrubbed of the now-dangling `[cross_mem_links]` grants naming the deleted mem on either side. The `[[mem_management.create]]` / `[[mem_management.delete]]` allowlist rules are PRESERVED (exact-name and wildcard alike) — they are forward-looking permissions for the name, so re-creating a mem of the same name needs no fresh allow-create/allow-delete. No per-mem commit — `note` (≤280 chars) rides on the provenance context. Response: `name`, `deleted_from_router: true`, `files_deleted: true`, and `allowlist_entries_removed[{table, pattern?, from?, to?}]` listing the scrubbed cross-link grants (`table` is always `cross_mem_links`; empty when none named the mem). On partial cleanup failure `files_deleted` ends `false` and `MEM_FILES_NOT_DELETED` warnings name the survivors: `details.reason` is `rmdir_failed` (with `details.path` + `details.error`) or `backend_prune_failed` (with `details.error`).",
-        annotations(read_only_hint = false, destructive_hint = true, idempotent_hint = false, open_world_hint = false)
+        annotations(
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
     )]
     fn memstead_mem_delete(
         &self,
@@ -3032,7 +3100,12 @@ impl McpServer {
     #[tool(
         name = "memstead_mem_set_version",
         description = "Update a registered mem's `version` field. The version is consumed by `memstead_export --format mem` to stamp the archive filename and the `.mem` archive's published config — bump before publishing. Mem-create seeds `0.1.0` automatically, so this tool is the only surface that needs to fire when an agent or operator is ready to ship a new version. Gate-free: no `[[mem_management.*]]` allowlist check, no operator-mode bypass needed. Validates the new version as semver; malformed values refuse with `INVALID_INPUT`. Unknown mem name refuses with `UNKNOWN_MEM`; read-only mem refuses with `READ_ONLY_MOUNT`; a mem whose config failed to load returns `INVALID_INPUT`. Response carries `{mem, old_version, new_version, warnings}`; `MEM_RELOADED` rides on `warnings` when a sibling engine commit landed between the engine's prior snapshot and this write (no extra read needed to learn the drift).",
-        annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = false, open_world_hint = false)
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
     )]
     fn memstead_mem_set_version(
         &self,
@@ -3084,7 +3157,12 @@ impl McpServer {
     #[tool(
         name = "memstead_mem_set_schema",
         description = "Update a mem's schema pin — the integrity-driven schema-migration trigger. Stable response `{mem, schema_pin, migration_target, outcome, findings}`; branch on `outcome`: `noop` (requested == current pin), `switched` (mem already integral against the target — pin moved atomically), `migration_started` (not integral — mem enters dual-pin: writes now validate against the target, `findings` lists the non-integral entities as `{id, axis, code, detail}`), `migration_pending` (same target re-issued while repairs remain — `findings` carries the remaining entities). Migration loop: read `findings`, read both schemas via `memstead_schema`, repair each entity via `memstead_update` (validated strictly against the target; `relations_unset` is available on non-conformant entities), then re-issue this call — once every entity is integral it completes the switch. Reads stay permissive throughout; the dual-pin state survives engine restarts. Unknown mem refuses `UNKNOWN_MEM`; a schema ref that resolves to no loaded schema refuses `SCHEMA_NOT_FOUND`; malformed refs refuse `INVALID_INPUT`. Distinct from `memstead_mem_set_version`, which sets the mem *content* version, never the pin.",
-        annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = false, open_world_hint = false)
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
     )]
     fn memstead_mem_set_schema(
         &self,
@@ -3109,8 +3187,7 @@ impl McpServer {
         let mut engine = unified.lock().unwrap();
         match engine.set_mem_schema(&p.mem, &target) {
             Ok(outcome) => {
-                let mut body =
-                    serde_json::to_value(&outcome).expect("SetSchemaOutcome serialises");
+                let mut body = serde_json::to_value(&outcome).expect("SetSchemaOutcome serialises");
                 attach_mem_changed(&mut body, engine.take_mem_changed_notices());
                 json_response(&body)
             }
@@ -3217,9 +3294,7 @@ impl McpServer {
                 let create_warnings: Vec<memstead_base::ops::WarningHint> =
                     response.warnings.clone();
                 let res = json_response(&body);
-                let res = create_warnings
-                    .iter()
-                    .fold(res, |acc, w| append_warning_hint(acc, w));
+                let res = create_warnings.iter().fold(res, append_warning_hint);
                 // Inline the
                 // full schema body only when the caller opts in via
                 // `include_schema: true`. Otherwise every successful
@@ -3227,19 +3302,15 @@ impl McpServer {
                 // agent's second+ mem on the same schema where the
                 // value is workspace-stable and already cached.
                 let schema_payload = if p.include_schema {
-                    engine
-                        .schemas()
-                        .get(&response.name)
-                        .cloned()
-                        .map(|s| {
-                            let origin = engine.schema_origin(&s);
-                            render::build_schema_payload(
-                                &s,
-                                vec![response.name.clone()],
-                                schema_verbosity,
-                                origin,
-                            )
-                        })
+                    engine.schemas().get(&response.name).cloned().map(|s| {
+                        let origin = engine.schema_origin(&s);
+                        render::build_schema_payload(
+                            &s,
+                            vec![response.name.clone()],
+                            schema_verbosity,
+                            origin,
+                        )
+                    })
                 } else {
                     None
                 };
@@ -3335,7 +3406,12 @@ impl McpServer {
     #[tool(
         name = "memstead_workspace_grant_cross_link",
         description = "Grant mem `from` permission to author cross-mem links into mem `to`. Mutates the `[cross_mem_links]` workspace policy. Dynamic-mem-lifecycle workflow: `memstead_mem_create → memstead_workspace_grant_cross_link → memstead_relate cross-mem → memstead_relate remove → memstead_workspace_revoke_cross_link → memstead_mem_delete`. Idempotent: re-grant of an existing grant returns success with `GRANT_ALREADY_PRESENT` warning, file unchanged. Conflict mode (wildcard against an existing specific list, or a named target against an existing wildcard) returns `CROSS_LINK_CONFLICT` — operators pick a single shape per `from`-mem. Refuses with `WORKSPACE_NOT_INITIALISED` when the workspace config is missing, `INVALID_TOML` when the file fails to parse, `IO_ERROR` on write failure. Response carries `{from, to, warnings}`.",
-        annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = true, open_world_hint = false)
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
     )]
     fn memstead_workspace_grant_cross_link(
         &self,
@@ -3356,20 +3432,25 @@ impl McpServer {
                 &target,
                 &known_mems,
             )
-                .map(|warnings| {
-                    serde_json::json!({
-                        "from": p.from.clone(),
-                        "to": p.to.clone(),
-                        "warnings": warnings_payload(&warnings),
-                    })
+            .map(|warnings| {
+                serde_json::json!({
+                    "from": p.from.clone(),
+                    "to": p.to.clone(),
+                    "warnings": warnings_payload(&warnings),
                 })
+            })
         })
     }
 
     #[tool(
         name = "memstead_workspace_revoke_cross_link",
         description = "Revoke mem `from`'s permission to author cross-mem links into mem `to`. Mutates the `[cross_mem_links]` workspace policy; when the underlying list becomes empty, the `from` key is dropped entirely. Dynamic-mem-lifecycle workflow: revoke before `memstead_mem_delete` to clear the `MEM_REFERENCED_BY_POLICY` refusal. Idempotent: re-revoke of an absent grant returns success with `GRANT_NOT_FOUND` warning, file unchanged. Refuses with `WORKSPACE_NOT_INITIALISED` when the workspace config is missing, `INVALID_TOML` when the file fails to parse, `IO_ERROR` on write failure. Response carries `{from, to, warnings}`.",
-        annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = true, open_world_hint = false)
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
     )]
     fn memstead_workspace_revoke_cross_link(
         &self,
@@ -3377,21 +3458,27 @@ impl McpServer {
     ) -> CallToolResult {
         self.workspace_edit_dispatch("revoke_cross_link", |root| {
             let target = memstead_engine::workspace_config_edit::CrossLinkTarget::parse(&p.to);
-            memstead_engine::workspace_config_edit::revoke_cross_link(root, &p.from, &target)
-                .map(|warnings| {
+            memstead_engine::workspace_config_edit::revoke_cross_link(root, &p.from, &target).map(
+                |warnings| {
                     serde_json::json!({
                         "from": p.from.clone(),
                         "to": p.to.clone(),
                         "warnings": warnings_payload(&warnings),
                     })
-                })
+                },
+            )
         })
     }
 
     #[tool(
         name = "memstead_workspace_allow_create",
         description = "Append a `[[mem_management.create]]` rule admitting mem names matching `pattern` with the given schema pins. The allowlist gates `memstead_mem_create`; without a matching rule, mem creation refuses with `MEM_PATH_NOT_ALLOWED`. Pass `before` to lift the new rule above an existing pattern; without `before` the rule appends at the end (lowest priority). Pass `default_cross_links` to confer a cross-mem link grant on every mem matching `pattern` — saves a follow-up `memstead_workspace_grant_cross_link`. The grant is rule-derived and evaluated lazily at relate time (it is NOT written into the `[cross_mem_links]` table); `memstead_overview` surfaces it under the matching pattern in `## Lifecycle Namespaces` and as the `cross_mem_links_from_rules` workspace-policy posture. Idempotent: re-add with the same `pattern` AND the same `schemas` set returns success with `RULE_ALREADY_PRESENT` warning, file unchanged (schema-set comparison is order- and duplicate-insensitive). Re-adding an existing `pattern` with a *different* `schemas` set is refused with `RULE_EXISTS_SCHEMAS_DIFFER` (`details.stored_schemas`, `details.requested_schemas`, `details.recovery`) — this verb only adds rules, it does not modify a rule's schema pins; to change them, `memstead_workspace_revoke_create` the pattern then re-add with the new schemas. `before` resolution failure surfaces as `BEFORE_PATTERN_NOT_FOUND`. Refuses with `WORKSPACE_NOT_INITIALISED` when the workspace config is missing.",
-        annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = true, open_world_hint = false)
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
     )]
     fn memstead_workspace_allow_create(
         &self,
@@ -3404,9 +3491,7 @@ impl McpServer {
                 .map(|targets| {
                     targets
                         .iter()
-                        .map(|t| {
-                            memstead_engine::workspace_config_edit::CrossLinkTarget::parse(t)
-                        })
+                        .map(|t| memstead_engine::workspace_config_edit::CrossLinkTarget::parse(t))
                         .collect()
                 })
                 .unwrap_or_default();
@@ -3437,7 +3522,12 @@ impl McpServer {
     #[tool(
         name = "memstead_workspace_revoke_create",
         description = "Remove a `[[mem_management.create]]` rule by `pattern`. Counterpart to `memstead_workspace_allow_create`. Idempotent: revoking a `pattern` with no matching rule returns success with `RULE_NOT_FOUND_NOOP` warning, file unchanged. Refuses with `WORKSPACE_NOT_INITIALISED` when the workspace config is missing, `INVALID_TOML` on parse failure, `IO_ERROR` on write failure. Response carries `{pattern, warnings}`.",
-        annotations(read_only_hint = false, destructive_hint = true, idempotent_hint = true, open_world_hint = false)
+        annotations(
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
     )]
     fn memstead_workspace_revoke_create(
         &self,
@@ -3458,7 +3548,12 @@ impl McpServer {
     #[tool(
         name = "memstead_workspace_allow_delete",
         description = "Append a `[[mem_management.delete]]` rule admitting deletes of mem names matching `pattern`. Symmetric counterpart to `memstead_workspace_allow_create` — agent-creatable equals agent-deletable. Without a matching rule, `memstead_mem_delete` refuses with `MEM_PATH_NOT_ALLOWED`. Idempotent: re-add with the same `pattern` returns success with `RULE_ALREADY_PRESENT` warning, file unchanged. Refuses with `WORKSPACE_NOT_INITIALISED` when the workspace config is missing.",
-        annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = true, open_world_hint = false)
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
     )]
     fn memstead_workspace_allow_delete(
         &self,
@@ -3479,7 +3574,12 @@ impl McpServer {
     #[tool(
         name = "memstead_workspace_revoke_delete",
         description = "Remove a `[[mem_management.delete]]` rule by `pattern`. Counterpart to `memstead_workspace_allow_delete`. Idempotent: revoking a `pattern` with no matching rule returns success with `RULE_NOT_FOUND_NOOP` warning, file unchanged. Refuses with `WORKSPACE_NOT_INITIALISED` when the workspace config is missing, `INVALID_TOML` on parse failure, `IO_ERROR` on write failure. Response carries `{pattern, warnings}`.",
-        annotations(read_only_hint = false, destructive_hint = true, idempotent_hint = true, open_world_hint = false)
+        annotations(
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
     )]
     fn memstead_workspace_revoke_delete(
         &self,
@@ -3522,7 +3622,10 @@ impl McpServer {
                     "WORKSPACE_NOT_INITIALISED",
                     &msg,
                     envelope(
-                        "WORKSPACE_NOT_INITIALISED", msg.clone(), serde_json::json!({})),
+                        "WORKSPACE_NOT_INITIALISED",
+                        msg.clone(),
+                        serde_json::json!({}),
+                    ),
                 );
             }
         };
@@ -3572,7 +3675,9 @@ fn workspace_edit_err_to_envelope(
     let code = err.code();
     let message = err.to_string();
     let details = match &err {
-        E::WorkspaceNotInitialised { path } => serde_json::json!({ "path": path.display().to_string() }),
+        E::WorkspaceNotInitialised { path } => {
+            serde_json::json!({ "path": path.display().to_string() })
+        }
         E::InvalidToml { path, message } => {
             serde_json::json!({ "path": path.display().to_string(), "parse_error": message })
         }
@@ -3748,9 +3853,7 @@ mod tests {
     /// directories under `workspace_root` — every subdir carrying
     /// `.memstead/config.json` becomes a folder-backend `Mount`.
     fn setup_unified_test_engine(workspace_root: &std::path::Path) -> memstead_base::Engine {
-        use memstead_base::workspace::{
-            Mount, MountCapability, MountLifecycle, MountStorage,
-        };
+        use memstead_base::workspace::{Mount, MountCapability, MountLifecycle, MountStorage};
         let mut mounts: Vec<(Mount, Box<dyn memstead_base::backend::MemBackend>)> = Vec::new();
         for entry in std::fs::read_dir(workspace_root).unwrap().flatten() {
             let p = entry.path();
@@ -3783,8 +3886,8 @@ mod tests {
                 capability: MountCapability::Write,
                 lifecycle: MountLifecycle::Eager,
                 cross_linkable: true,
-            migration_target: None,
-        };
+                migration_target: None,
+            };
             let backend = memstead_base::instantiate_lean_backend(&mount).unwrap();
             mounts.push((mount, backend));
         }
@@ -3811,10 +3914,10 @@ mod tests {
     /// gitdir, producing 40-char hex `commit_sha` /
     /// `seed_commit_sha` values that lifecycle / commit-body tests
     /// assert on.
-    fn setup_unified_test_engine_git_branch(workspace_root: &std::path::Path) -> memstead_base::Engine {
-        use memstead_base::workspace::{
-            Mount, MountCapability, MountLifecycle, MountStorage,
-        };
+    fn setup_unified_test_engine_git_branch(
+        workspace_root: &std::path::Path,
+    ) -> memstead_base::Engine {
+        use memstead_base::workspace::{Mount, MountCapability, MountLifecycle, MountStorage};
         // Canonicalise the gitdir so `engine.gitdir_for(name)` matches
         // full's canonical paths (TempDir on macOS returns a symlink
         // to /private/var/...; full canonicalizes at init).
@@ -3913,10 +4016,8 @@ mod tests {
                         break;
                     }
                 }
-                if in_fm {
-                    if let Some((k, v)) = line.split_once(':') {
-                        frontmatter.insert(k.trim().to_string(), v.trim().to_string());
-                    }
+                if in_fm && let Some((k, v)) = line.split_once(':') {
+                    frontmatter.insert(k.trim().to_string(), v.trim().to_string());
                 }
             }
             Self { text, frontmatter }
@@ -4160,16 +4261,17 @@ mod tests {
         let stale = server.memstead_update(Parameters(crate::tools::mutation::UpdateParams {
             relations_unset: None,
             id: "specs--entity-a".to_string(),
-            expected_hash:
-                "0000000000000000000000000000000000000000000000000000000000000000".to_string(),
+            expected_hash: "0000000000000000000000000000000000000000000000000000000000000000"
+                .to_string(),
             sections: None,
             append_sections: None,
             patch_sections: None,
             metadata: None,
             metadata_unset: None,
             dry_run: Some(false),
-        
-            note: None,            declare_relations: None,
+
+            note: None,
+            declare_relations: None,
         }));
         assert!(stale.is_error.unwrap_or(false), "stale hash must error");
         let sc = stale
@@ -4219,7 +4321,10 @@ mod tests {
         }));
         // structured_content is whole regardless of chunking.
         let sc = result.structured_content.clone().unwrap();
-        assert!(sc.get("summary").is_some(), "structured payload ships whole");
+        assert!(
+            sc.get("summary").is_some(),
+            "structured payload ships whole"
+        );
         let text = extract_text(&result);
         assert!(
             text.contains("# Graph health"),
@@ -4351,7 +4456,7 @@ mod tests {
                 target_schema: None,
                 token_budget: None,
                 chunk: None,
-        }));
+            }));
             // #57: typed payload from structured_content (text is markdown).
             let json: serde_json::Value = result.structured_content.clone().unwrap();
             assert!(
@@ -4429,7 +4534,11 @@ mod tests {
                 dry_run: None,
                 note: None,
             }));
-            assert!(!r.is_error.unwrap_or(false), "create {title}: {}", extract_text(&r));
+            assert!(
+                !r.is_error.unwrap_or(false),
+                "create {title}: {}",
+                extract_text(&r)
+            );
         };
         mk("specs", "Source");
         mk("memos", "Target");
@@ -4444,7 +4553,11 @@ mod tests {
                 description: None,
                 note: None,
             }));
-            assert!(!r.is_error.unwrap_or(false), "relate {from}->{to}: {}", extract_text(&r));
+            assert!(
+                !r.is_error.unwrap_or(false),
+                "relate {from}->{to}: {}",
+                extract_text(&r)
+            );
         };
         // Intra-mem incoming (source in memos → counted) and a
         // cross-mem incoming (source in specs → excluded under mem=memos).
@@ -4461,15 +4574,18 @@ mod tests {
             chunk: None,
             target_schema: None,
         }));
-        let gjson: serde_json::Value =
-            serde_json::from_str(&extract_text(&global)).unwrap();
+        let gjson: serde_json::Value = serde_json::from_str(&extract_text(&global)).unwrap();
         let g_target = gjson["most_connected"]
             .as_array()
             .unwrap()
             .iter()
             .find(|e| e["id"] == "memos--target")
             .expect("target in global most_connected");
-        assert_eq!(g_target["incoming"].as_u64(), Some(2), "global degree counts both edges");
+        assert_eq!(
+            g_target["incoming"].as_u64(),
+            Some(2),
+            "global degree counts both edges"
+        );
 
         // Scoped to memos: the cross-mem incoming from specs is excluded
         // from both the aggregate and the node degree.
@@ -4482,8 +4598,7 @@ mod tests {
             chunk: None,
             target_schema: None,
         }));
-        let sjson: serde_json::Value =
-            serde_json::from_str(&extract_text(&scoped)).unwrap();
+        let sjson: serde_json::Value = serde_json::from_str(&extract_text(&scoped)).unwrap();
         let s_target = sjson["most_connected"]
             .as_array()
             .unwrap()
@@ -4547,8 +4662,9 @@ mod tests {
             ),
             (
                 mk_mount("scratch", scratch_dir.clone()),
-                Box::new(memstead_base::storage::FilesystemMemWriter::new(scratch_dir))
-                    as Box<dyn memstead_base::backend::MemBackend>,
+                Box::new(memstead_base::storage::FilesystemMemWriter::new(
+                    scratch_dir,
+                )) as Box<dyn memstead_base::backend::MemBackend>,
             ),
         ])
         .unwrap();
@@ -4569,7 +4685,11 @@ mod tests {
                 dry_run: None,
                 note: None,
             }));
-            assert!(!r.is_error.unwrap_or(false), "create {title}: {}", extract_text(&r));
+            assert!(
+                !r.is_error.unwrap_or(false),
+                "create {title}: {}",
+                extract_text(&r)
+            );
         };
         let relate = |from: &str, to: &str| {
             let r = server.memstead_relate(Parameters(RelateParams {
@@ -4580,7 +4700,11 @@ mod tests {
                 description: None,
                 note: None,
             }));
-            assert!(!r.is_error.unwrap_or(false), "relate {from}->{to}: {}", extract_text(&r));
+            assert!(
+                !r.is_error.unwrap_or(false),
+                "relate {from}->{to}: {}",
+                extract_text(&r)
+            );
         };
         // Two disconnected intra-mem edges → two clusters, one wholly
         // in `specs`, one wholly in `memos`. `scratch` stays empty.
@@ -4597,10 +4721,10 @@ mod tests {
                 limit: None,
                 mem: mem.map(String::from),
                 include_config: false,
-            token_budget: None,
-            chunk: None,
-            target_schema: None,
-        }));
+                token_budget: None,
+                chunk: None,
+                target_schema: None,
+            }));
             let j: serde_json::Value = serde_json::from_str(&extract_text(&r)).unwrap();
             j["summary"]["total_communities"].as_u64().unwrap()
         };
@@ -4610,10 +4734,10 @@ mod tests {
                 limit: None,
                 mem: mem.map(String::from),
                 include_config: false,
-            token_budget: None,
-            chunk: None,
-            target_schema: None,
-        }));
+                token_budget: None,
+                chunk: None,
+                target_schema: None,
+            }));
             let j: serde_json::Value = serde_json::from_str(&extract_text(&r)).unwrap();
             j["summary"]["total_entities"].as_u64().unwrap()
         };
@@ -4634,9 +4758,17 @@ mod tests {
         // Non-empty scope: exactly the one cluster whose members live in
         // the mem.
         assert_eq!(total_entities(Some("specs")), 2);
-        assert_eq!(total_communities(Some("specs")), 1, "specs touches one cluster");
+        assert_eq!(
+            total_communities(Some("specs")),
+            1,
+            "specs touches one cluster"
+        );
         assert_eq!(total_entities(Some("memos")), 2);
-        assert_eq!(total_communities(Some("memos")), 1, "memos touches one cluster");
+        assert_eq!(
+            total_communities(Some("memos")),
+            1,
+            "memos touches one cluster"
+        );
     }
 
     /// Scoped `memstead_overview` frontmatter reflects the mem: an empty
@@ -4673,8 +4805,9 @@ mod tests {
             ),
             (
                 mk_mount("scratch", scratch_dir.clone()),
-                Box::new(memstead_base::storage::FilesystemMemWriter::new(scratch_dir))
-                    as Box<dyn memstead_base::backend::MemBackend>,
+                Box::new(memstead_base::storage::FilesystemMemWriter::new(
+                    scratch_dir,
+                )) as Box<dyn memstead_base::backend::MemBackend>,
             ),
         ])
         .unwrap();
@@ -4694,7 +4827,11 @@ mod tests {
                 dry_run: None,
                 note: None,
             }));
-            assert!(!r.is_error.unwrap_or(false), "create {title}: {}", extract_text(&r));
+            assert!(
+                !r.is_error.unwrap_or(false),
+                "create {title}: {}",
+                extract_text(&r)
+            );
         };
         mk("A1");
         mk("A2");
@@ -4720,8 +4857,14 @@ mod tests {
 
         // Global: one cluster, two entities.
         let global = overview(None);
-        assert!(global.contains("_entity_count: 2"), "global entity count: {global}");
-        assert!(global.contains("_cluster_count: 1"), "global cluster count: {global}");
+        assert!(
+            global.contains("_entity_count: 2"),
+            "global entity count: {global}"
+        );
+        assert!(
+            global.contains("_cluster_count: 1"),
+            "global cluster count: {global}"
+        );
 
         // Empty mem: reconcilable summary — 0 entities, 0 clusters, no
         // communities listed.
@@ -4741,8 +4884,14 @@ mod tests {
 
         // Non-empty scope: the mem's own count and its one cluster.
         let scoped = overview(Some("specs"));
-        assert!(scoped.contains("_entity_count: 2"), "specs scope entity count: {scoped}");
-        assert!(scoped.contains("_cluster_count: 1"), "specs scope cluster count: {scoped}");
+        assert!(
+            scoped.contains("_entity_count: 2"),
+            "specs scope entity count: {scoped}"
+        );
+        assert!(
+            scoped.contains("_cluster_count: 1"),
+            "specs scope cluster count: {scoped}"
+        );
     }
 
     /// `include=missing_required_outgoing`
@@ -4880,13 +5029,11 @@ mod tests {
     fn mem_set_schema_wire_lifecycle_and_health_confirmation() {
         let (server, _tmp) = setup_dual_test_engine();
         let call = |schema: &str| {
-            server.memstead_mem_set_schema(Parameters(
-                crate::lifecycle::MemSetSchemaParams {
-                    mem: "specs".to_string(),
-                    schema: schema.to_string(),
-                    note: None,
-                },
-            ))
+            server.memstead_mem_set_schema(Parameters(crate::lifecycle::MemSetSchemaParams {
+                mem: "specs".to_string(),
+                schema: schema.to_string(),
+                note: None,
+            }))
         };
 
         // noop — every field present, agent branches on `outcome`.
@@ -4907,7 +5054,11 @@ mod tests {
         assert_eq!(json["migration_target"].as_str(), Some("planning@0.1.0"));
         let findings = json["findings"].as_array().unwrap();
         assert!(!findings.is_empty());
-        assert!(findings.iter().all(|f| f["axis"].as_str() == Some("conformance")));
+        assert!(
+            findings
+                .iter()
+                .all(|f| f["axis"].as_str() == Some("conformance"))
+        );
 
         // Dual-pin confirmation on memstead_health.
         let health = server.memstead_health(Parameters(HealthParams {
@@ -4974,9 +5125,9 @@ mod tests {
             .cloned()
             .unwrap_or_default();
         assert!(
-            !warnings.iter().any(|w| {
-                w.get("code").and_then(|c| c.as_str()) == Some("UNKNOWN_INCLUDE_KEY")
-            }),
+            !warnings
+                .iter()
+                .any(|w| { w.get("code").and_then(|c| c.as_str()) == Some("UNKNOWN_INCLUDE_KEY") }),
             "conformance must be on the allowlist; got {warnings:?}"
         );
     }
@@ -5012,8 +5163,8 @@ mod tests {
                 limit: None,
                 mem: Some("specs".to_string()),
                 include_config: false,
-            token_budget: None,
-            chunk: None,
+                token_budget: None,
+                chunk: None,
                 target_schema: None,
             }));
             let text = extract_text(&result);
@@ -5026,9 +5177,9 @@ mod tests {
             .expect("findings array present")
             .clone();
         let code_of = |axis: &str, code: &str| {
-            findings.iter().any(|f| {
-                f["axis"].as_str() == Some(axis) && f["code"].as_str() == Some(code)
-            })
+            findings
+                .iter()
+                .any(|f| f["axis"].as_str() == Some(axis) && f["code"].as_str() == Some(code))
         };
         assert!(
             code_of("conformance", "UNKNOWN_METADATA_FIELD"),
@@ -5062,8 +5213,8 @@ mod tests {
                 limit: None,
                 mem: None,
                 include_config: false,
-            token_budget: None,
-            chunk: None,
+                token_budget: None,
+                chunk: None,
                 target_schema: target.map(|s| s.to_string()),
             }))
         };
@@ -5112,8 +5263,16 @@ mod tests {
             tmp.path(),
             memstead_base::WorkspaceSettings {
                 mem_create_rules: vec![
-                    memstead_base::CreateRuleSetting { pattern: "exec-*".to_string(), schemas: vec!["default@1.0.0".to_string()], default_cross_links: None },
-                    memstead_base::CreateRuleSetting { pattern: "plan-*".to_string(), schemas: vec!["default@1.0.0".to_string()], default_cross_links: None },
+                    memstead_base::CreateRuleSetting {
+                        pattern: "exec-*".to_string(),
+                        schemas: vec!["default@1.0.0".to_string()],
+                        default_cross_links: None,
+                    },
+                    memstead_base::CreateRuleSetting {
+                        pattern: "plan-*".to_string(),
+                        schemas: vec!["default@1.0.0".to_string()],
+                        default_cross_links: None,
+                    },
                 ],
                 mem_delete_rules: vec![memstead_base::DeleteRuleSetting {
                     pattern: "exec-*".to_string(),
@@ -5125,7 +5284,8 @@ mod tests {
         let _ = (mem_dir, settings);
         let mut unified = setup_unified_test_engine(tmp.path());
         unified.set_settings(unified_settings);
-        let canonical_root = std::fs::canonicalize(tmp.path()).unwrap_or_else(|_| tmp.path().to_path_buf());
+        let canonical_root =
+            std::fs::canonicalize(tmp.path()).unwrap_or_else(|_| tmp.path().to_path_buf());
         unified.set_workspace_root(canonical_root);
         let server = McpServer::new(unified, crate::config::DEFAULT_TOKEN_BUDGET);
 
@@ -5141,8 +5301,14 @@ mod tests {
             text.contains("## Lifecycle Namespaces"),
             "overview must carry the lifecycle namespaces section: {text}"
         );
-        assert!(text.contains("`exec-*`"), "exec-* rule must surface: {text}");
-        assert!(text.contains("`plan-*`"), "plan-* rule must surface: {text}");
+        assert!(
+            text.contains("`exec-*`"),
+            "exec-* rule must surface: {text}"
+        );
+        assert!(
+            text.contains("`plan-*`"),
+            "plan-* rule must surface: {text}"
+        );
         assert!(
             text.contains("default@1.0.0"),
             "rule schemas must surface: {text}"
@@ -5195,8 +5361,8 @@ mod tests {
         let _ = (mem_dir, settings);
         let mut unified = setup_unified_test_engine(tmp.path());
         unified.set_settings(unified_settings);
-        let canonical_root = std::fs::canonicalize(tmp.path())
-            .unwrap_or_else(|_| tmp.path().to_path_buf());
+        let canonical_root =
+            std::fs::canonicalize(tmp.path()).unwrap_or_else(|_| tmp.path().to_path_buf());
         unified.set_workspace_root(canonical_root);
         let server = McpServer::new(unified, crate::config::DEFAULT_TOKEN_BUDGET);
 
@@ -5249,8 +5415,8 @@ mod tests {
         let _ = (mem_dir, settings);
         let mut unified = setup_unified_test_engine(tmp.path());
         unified.set_settings(unified_settings);
-        let canonical_root = std::fs::canonicalize(tmp.path())
-            .unwrap_or_else(|_| tmp.path().to_path_buf());
+        let canonical_root =
+            std::fs::canonicalize(tmp.path()).unwrap_or_else(|_| tmp.path().to_path_buf());
         unified.set_workspace_root(canonical_root);
         let server = McpServer::new(unified, crate::config::DEFAULT_TOKEN_BUDGET);
 
@@ -5290,8 +5456,8 @@ mod tests {
         let _ = (mem_dir, settings);
         let mut unified = setup_unified_test_engine(tmp.path());
         unified.set_settings(unified_settings);
-        let canonical_root = std::fs::canonicalize(tmp.path())
-            .unwrap_or_else(|_| tmp.path().to_path_buf());
+        let canonical_root =
+            std::fs::canonicalize(tmp.path()).unwrap_or_else(|_| tmp.path().to_path_buf());
         unified.set_workspace_root(canonical_root);
         let server = McpServer::new(unified, crate::config::DEFAULT_TOKEN_BUDGET);
 
@@ -5338,8 +5504,8 @@ mod tests {
         let _ = (mem_dir, settings);
         let mut unified = setup_unified_test_engine(tmp.path());
         unified.set_settings(unified_settings);
-        let canonical_root = std::fs::canonicalize(tmp.path())
-            .unwrap_or_else(|_| tmp.path().to_path_buf());
+        let canonical_root =
+            std::fs::canonicalize(tmp.path()).unwrap_or_else(|_| tmp.path().to_path_buf());
         unified.set_workspace_root(canonical_root);
         let server = McpServer::new(unified, crate::config::DEFAULT_TOKEN_BUDGET);
 
@@ -5421,7 +5587,11 @@ community:
             memstead_base::WorkspaceSettings {
                 // Rule pins `tinyschema@0.1.0` — no mem references
                 // this schema.
-                mem_create_rules: vec![memstead_base::CreateRuleSetting { pattern: "exec-*".to_string(), schemas: vec!["tinyschema@0.1.0".to_string()], default_cross_links: None }],
+                mem_create_rules: vec![memstead_base::CreateRuleSetting {
+                    pattern: "exec-*".to_string(),
+                    schemas: vec!["tinyschema@0.1.0".to_string()],
+                    default_cross_links: None,
+                }],
                 mem_delete_rules: vec![],
                 ..Default::default()
             },
@@ -5446,7 +5616,8 @@ community:
         )
         .unwrap();
         unified.set_settings(unified_settings);
-        let canonical_root = std::fs::canonicalize(tmp.path()).unwrap_or_else(|_| tmp.path().to_path_buf());
+        let canonical_root =
+            std::fs::canonicalize(tmp.path()).unwrap_or_else(|_| tmp.path().to_path_buf());
         unified.set_workspace_root(canonical_root);
         let server = McpServer::new(unified, crate::config::DEFAULT_TOKEN_BUDGET);
 
@@ -5479,10 +5650,7 @@ community:
             .split("### tinyschema@0.1.0")
             .nth(1)
             .expect("tinyschema section present");
-        let tiny_until_next_h3 = tiny_section
-            .split("\n### ")
-            .next()
-            .unwrap_or(tiny_section);
+        let tiny_until_next_h3 = tiny_section.split("\n### ").next().unwrap_or(tiny_section);
         assert!(
             tiny_until_next_h3.contains("**Reachable as:**"),
             "tinyschema must carry Reachable-as cross-reference: {tiny_until_next_h3}"
@@ -5543,7 +5711,8 @@ community:
         // worktree via the disk-shape composition).
         let tmp = setup_test_workspace();
         let mut unified = setup_unified_test_engine_git_branch(tmp.path());
-        let canonical_root = std::fs::canonicalize(tmp.path()).unwrap_or_else(|_| tmp.path().to_path_buf());
+        let canonical_root =
+            std::fs::canonicalize(tmp.path()).unwrap_or_else(|_| tmp.path().to_path_buf());
         unified.set_workspace_root(canonical_root);
         let server = McpServer::new(unified, crate::config::DEFAULT_TOKEN_BUDGET);
         let result = server.memstead_health(Parameters(HealthParams {
@@ -5617,10 +5786,7 @@ community:
         }));
         let text = extract_text(&result);
         let json: serde_json::Value = serde_json::from_str(&text).unwrap();
-        assert_eq!(
-            json["mutations"]["require_notes"],
-            serde_json::Value::Null
-        );
+        assert_eq!(json["mutations"]["require_notes"], serde_json::Value::Null);
         assert_eq!(json["plugin"], serde_json::json!({}));
 
         // Now with non-default values threaded through the full-surface
@@ -5730,8 +5896,16 @@ community:
         let tmp = TempDir::new().unwrap();
         let settings = memstead_base::WorkspaceSettings {
             mem_create_rules: vec![
-                memstead_base::CreateRuleSetting { pattern: "*".to_string(), schemas: vec!["default@1.0.0".to_string()], default_cross_links: None },
-                memstead_base::CreateRuleSetting { pattern: "**".to_string(), schemas: vec!["default@1.0.0".to_string()], default_cross_links: None },
+                memstead_base::CreateRuleSetting {
+                    pattern: "*".to_string(),
+                    schemas: vec!["default@1.0.0".to_string()],
+                    default_cross_links: None,
+                },
+                memstead_base::CreateRuleSetting {
+                    pattern: "**".to_string(),
+                    schemas: vec!["default@1.0.0".to_string()],
+                    default_cross_links: None,
+                },
             ],
             mem_delete_rules: vec![],
             ..Default::default()
@@ -5739,7 +5913,8 @@ community:
         memstead_git_branch::test_support::auto_seed_with_settings(tmp.path(), settings.clone());
         let mut unified = setup_unified_test_engine(tmp.path());
         unified.set_settings(settings);
-        let canonical_root = std::fs::canonicalize(tmp.path()).unwrap_or_else(|_| tmp.path().to_path_buf());
+        let canonical_root =
+            std::fs::canonicalize(tmp.path()).unwrap_or_else(|_| tmp.path().to_path_buf());
         unified.set_workspace_root(canonical_root);
         let server = McpServer::new(unified, crate::config::DEFAULT_TOKEN_BUDGET);
         let target = tmp.path().join("runtime-born");
@@ -5752,7 +5927,7 @@ community:
 
             vcs: None,
             note: Some("origin surface test".to_string()),
-        recovery: None,
+            recovery: None,
             include_schema: false,
         }));
         assert!(
@@ -6044,21 +6219,19 @@ community:
         });
         let server = McpServer::new(unified, crate::config::DEFAULT_TOKEN_BUDGET);
 
-        let result = server.memstead_mem_create(Parameters(
-            crate::lifecycle::MemCreateParams {
-                schema_verbosity: None,
-                write_guidance: Default::default(),
-                name: "alpha".to_string(),
-                location: workspace_root.join("alpha").to_string_lossy().into_owned(),
-                schema: "default@1.0.0".to_string(),
-                vcs: None,
-                note: Some("seed".to_string()),
-                recovery: None,
-                // Opt in so this end-to-end test still
-                // sees the inlined schema body it asserts on below.
-                include_schema: true,
-            },
-        ));
+        let result = server.memstead_mem_create(Parameters(crate::lifecycle::MemCreateParams {
+            schema_verbosity: None,
+            write_guidance: Default::default(),
+            name: "alpha".to_string(),
+            location: workspace_root.join("alpha").to_string_lossy().into_owned(),
+            schema: "default@1.0.0".to_string(),
+            vcs: None,
+            note: Some("seed".to_string()),
+            recovery: None,
+            // Opt in so this end-to-end test still
+            // sees the inlined schema body it asserts on below.
+            include_schema: true,
+        }));
         assert!(
             !result.is_error.unwrap_or(false),
             "expected success; got {}",
@@ -6158,12 +6331,10 @@ community:
         });
         let server = McpServer::new(unified, crate::config::DEFAULT_TOKEN_BUDGET);
 
-        let result = server.memstead_mem_delete(Parameters(
-            crate::lifecycle::MemDeleteParams {
-                name: "specs".to_string(),
-                note: None,
-            },
-        ));
+        let result = server.memstead_mem_delete(Parameters(crate::lifecycle::MemDeleteParams {
+            name: "specs".to_string(),
+            note: None,
+        }));
         assert!(
             !result.is_error.unwrap_or(false),
             "expected success; got {}",
@@ -6327,7 +6498,10 @@ community:
             .structured_content
             .as_ref()
             .expect("structured_content present");
-        assert!(payload.get("mutations").is_some(), "mutations present: {payload}");
+        assert!(
+            payload.get("mutations").is_some(),
+            "mutations present: {payload}"
+        );
         assert!(payload.get("plugin").is_some(), "plugin present: {payload}");
         let mems = payload["mems"].as_array().expect("mems[] array");
         let entry = mems
@@ -6336,10 +6510,18 @@ community:
             .expect("specs entry");
         // Folder mount: vcs.worktree must be present (gitdir is
         // git-branch-only; head may be absent on a fresh mem).
-        let vcs = entry["vcs"].as_object().expect("vcs block present for folder mount");
-        assert!(vcs.contains_key("worktree"), "vcs.worktree present: {vcs:?}");
+        let vcs = entry["vcs"]
+            .as_object()
+            .expect("vcs block present for folder mount");
+        assert!(
+            vcs.contains_key("worktree"),
+            "vcs.worktree present: {vcs:?}"
+        );
         // Snake_case rename — old camelCase must NOT appear on the wire.
-        assert!(entry.get("write_guidance").is_some(), "write_guidance present");
+        assert!(
+            entry.get("write_guidance").is_some(),
+            "write_guidance present"
+        );
         assert!(
             entry.get("writeGuidance").is_none(),
             "legacy camelCase writeGuidance must be gone: {entry}",
@@ -6659,7 +6841,11 @@ community:
             name: None,
             mem: Some("specs".to_string()),
         }));
-        assert!(!result.is_error.unwrap_or(false), "{:?}", extract_text(&result));
+        assert!(
+            !result.is_error.unwrap_or(false),
+            "{:?}",
+            extract_text(&result)
+        );
         let text = extract_text(&result);
         assert!(text.contains("\"default@1.0.0\""));
         assert!(text.contains("\"specs\""));
@@ -6844,7 +7030,8 @@ community:
             metadata: None,
             metadata_unset: None,
             dry_run: None,
-            note: None,            declare_relations: None,
+            note: None,
+            declare_relations: None,
         }));
         assert!(bad_section.is_error.unwrap_or(false));
         let body = bad_section.structured_content.unwrap();
@@ -6894,7 +7081,8 @@ community:
             metadata: None,
             metadata_unset: None,
             dry_run: None,
-            note: None,            declare_relations: None,
+            note: None,
+            declare_relations: None,
         }));
         assert!(bad_hash.is_error.unwrap_or(false));
         let body = bad_hash.structured_content.unwrap();
@@ -6911,7 +7099,12 @@ community:
         assert!(missing.is_error.unwrap_or(false));
         let body = missing.structured_content.unwrap();
         assert_eq!(body["code"], "ENTITY_NOT_FOUND");
-        assert!(body["details"]["id"].as_str().unwrap().contains("definitely-not-here"));
+        assert!(
+            body["details"]["id"]
+                .as_str()
+                .unwrap()
+                .contains("definitely-not-here")
+        );
     }
 
     /// #55: a not-found from the *generic* `engine_err_unified` mapper
@@ -7075,7 +7268,8 @@ community:
             metadata: None,
             metadata_unset: None,
             dry_run: None,
-            note: None,            declare_relations: None,
+            note: None,
+            declare_relations: None,
         }));
         assert_text_carries_code(&hash_mismatch, "HASH_MISMATCH");
 
@@ -7108,17 +7302,16 @@ community:
         let mut dup_sections = IndexMap::new();
         dup_sections.insert("identity".to_string(), "the identity".to_string());
         dup_sections.insert("purpose".to_string(), "the purpose".to_string());
-        let _seed = server
-            .memstead_create(Parameters(CreateParams {
-                mem: Some("specs".to_string()),
-                title: "Duplicate Probe".to_string(),
-                entity_type: "spec".to_string(),
-                sections: Some(dup_sections.clone()),
-                metadata: None,
-                relations: None,
-                dry_run: None,
-                note: None,
-            }));
+        let _seed = server.memstead_create(Parameters(CreateParams {
+            mem: Some("specs".to_string()),
+            title: "Duplicate Probe".to_string(),
+            entity_type: "spec".to_string(),
+            sections: Some(dup_sections.clone()),
+            metadata: None,
+            relations: None,
+            dry_run: None,
+            note: None,
+        }));
         let dup = server.memstead_create(Parameters(CreateParams {
             mem: Some("specs".to_string()),
             title: "Duplicate Probe".to_string(),
@@ -7294,12 +7487,22 @@ community:
         // payload describes the id throughout — `reason`, `input`, and
         // `length` agree (no `input.len() != length` contradiction).
         assert_eq!(payload["details"]["reason"], "id_too_long");
-        assert_eq!(payload["details"]["length"].as_u64(), Some((max + 1) as u64));
+        assert_eq!(
+            payload["details"]["length"].as_u64(),
+            Some((max + 1) as u64)
+        );
         assert_eq!(payload["details"]["max"].as_u64(), Some(max as u64));
         let echoed_id = format!("{mem}--{over_title}");
-        assert_eq!(payload["details"]["input"].as_str(), Some(echoed_id.as_str()));
         assert_eq!(
-            payload["details"]["input"].as_str().unwrap().chars().count() as u64,
+            payload["details"]["input"].as_str(),
+            Some(echoed_id.as_str())
+        );
+        assert_eq!(
+            payload["details"]["input"]
+                .as_str()
+                .unwrap()
+                .chars()
+                .count() as u64,
             payload["details"]["length"].as_u64().unwrap(),
             "echoed input and reported length must measure the same quantity (the id)",
         );
@@ -7332,7 +7535,10 @@ community:
             dry_run: None,
             note: None,
         }));
-        assert!(create.is_error.unwrap_or(false), "create with NUL must be refused");
+        assert!(
+            create.is_error.unwrap_or(false),
+            "create with NUL must be refused"
+        );
         let text = extract_text(&create);
         assert!(
             text.contains("SECTION_CONTENT_INVALID"),
@@ -7368,7 +7574,11 @@ community:
             dry_run: None,
             note: None,
         }));
-        assert!(!ok.is_error.unwrap_or(false), "clean create must succeed: {}", extract_text(&ok));
+        assert!(
+            !ok.is_error.unwrap_or(false),
+            "clean create must succeed: {}",
+            extract_text(&ok)
+        );
 
         // Pass the live hash so the test exercises the section-content
         // gate, not HASH_MISMATCH (update always honours expected_hash).
@@ -7381,7 +7591,10 @@ community:
                 .clone()
         };
         let mut bad_update = indexmap::IndexMap::new();
-        bad_update.insert("purpose".to_string(), "tab\tok but bell\u{7}bad".to_string());
+        bad_update.insert(
+            "purpose".to_string(),
+            "tab\tok but bell\u{7}bad".to_string(),
+        );
         let update = server.memstead_update(Parameters(crate::tools::mutation::UpdateParams {
             relations_unset: None,
             id: "specs--clean-carrier".to_string(),
@@ -7395,7 +7608,10 @@ community:
             declare_relations: None,
             note: None,
         }));
-        assert!(update.is_error.unwrap_or(false), "update with control byte must be refused");
+        assert!(
+            update.is_error.unwrap_or(false),
+            "update with control byte must be refused"
+        );
         assert!(
             extract_text(&update).contains("SECTION_CONTENT_INVALID"),
             "update refusal must carry SECTION_CONTENT_INVALID: {}",
@@ -7524,9 +7740,7 @@ community:
             .as_array()
             .expect("invalid_chars must be an array");
         assert!(
-            invalid_chars
-                .iter()
-                .any(|v| v.as_str() == Some("🚀")),
+            invalid_chars.iter().any(|v| v.as_str() == Some("🚀")),
             "invalid_chars must enumerate the offending emoji: {payload}",
         );
     }
@@ -7612,7 +7826,11 @@ community:
             note: None,
             description: None,
         }));
-        assert!(!result.is_error.unwrap_or(false), "{}", extract_text(&result));
+        assert!(
+            !result.is_error.unwrap_or(false),
+            "{}",
+            extract_text(&result)
+        );
         let text = extract_text(&result);
         // Full-shape wire fields: from/to/rel_type/source/content_hash/commit_sha.
         assert!(text.contains("\"from\""));
@@ -7700,9 +7918,14 @@ community:
             metadata: None,
             metadata_unset: None,
             dry_run: None,
-            note: None,            declare_relations: None,
+            note: None,
+            declare_relations: None,
         }));
-        assert!(!result.is_error.unwrap_or(false), "{}", extract_text(&result));
+        assert!(
+            !result.is_error.unwrap_or(false),
+            "{}",
+            extract_text(&result)
+        );
         let text = extract_text(&result);
         // Full-shape wire fields: id, title, nested
         // modified_sections/modified_metadata, content_hash,
@@ -7769,7 +7992,11 @@ community:
             dry_run: None,
             note: None,
         }));
-        assert!(!result.is_error.unwrap_or(false), "{}", extract_text(&result));
+        assert!(
+            !result.is_error.unwrap_or(false),
+            "{}",
+            extract_text(&result)
+        );
         let text = extract_text(&result);
         // Full-shape wire fields: id, title, mem, file_path,
         // created_date, content_hash, commit_sha, _mem_schema.
@@ -7872,7 +8099,11 @@ community:
             expected_hash: entity_hash,
             note: None,
         }));
-        assert!(!result.is_error.unwrap_or(false), "{}", extract_text(&result));
+        assert!(
+            !result.is_error.unwrap_or(false),
+            "{}",
+            extract_text(&result)
+        );
         let text = extract_text(&result);
         // Full-shape wire fields: id + relations_removed + commit_sha.
         assert!(text.contains("\"id\""));
@@ -7944,7 +8175,11 @@ community:
             expected_hash: entity_hash.clone(),
             note: None,
         }));
-        assert!(!result.is_error.unwrap_or(false), "{}", extract_text(&result));
+        assert!(
+            !result.is_error.unwrap_or(false),
+            "{}",
+            extract_text(&result)
+        );
         let text = extract_text(&result);
         // Full-shape wire fields: old_id/new_id/old_path/new_path/
         // content_hash/commit_sha. Schema anchor present.
@@ -8180,8 +8415,14 @@ community:
         assert!(sc.get("_total").and_then(|v| v.as_u64()).is_some());
         assert!(sc.get("hits").and_then(|v| v.as_array()).is_some());
         let text = extract_text(&search);
-        assert!(text.contains("_total:"), "frontmatter must carry _total; got:\n{text}");
-        assert!(text.contains("_offset: 0"), "frontmatter must carry _offset; got:\n{text}");
+        assert!(
+            text.contains("_total:"),
+            "frontmatter must carry _total; got:\n{text}"
+        );
+        assert!(
+            text.contains("_offset: 0"),
+            "frontmatter must carry _offset; got:\n{text}"
+        );
         assert!(
             text.contains("_total_tokens:"),
             "frontmatter must carry _total_tokens; got:\n{text}"
@@ -8193,7 +8434,9 @@ community:
         );
         // One of the summary labels for spec/memo/concept appears.
         assert!(
-            text.contains("**Identity**") || text.contains("**Claim**") || text.contains("**Definition**"),
+            text.contains("**Identity**")
+                || text.contains("**Claim**")
+                || text.contains("**Definition**"),
             "expected schema-driven summary label in markdown; got:\n{text}"
         );
 
@@ -8422,7 +8665,10 @@ community:
         .unwrap();
 
         memstead_git_branch::test_support::auto_seeded_settings(tmp.path());
-        let server = McpServer::new(setup_unified_test_engine(tmp.path()), crate::config::DEFAULT_TOKEN_BUDGET);
+        let server = McpServer::new(
+            setup_unified_test_engine(tmp.path()),
+            crate::config::DEFAULT_TOKEN_BUDGET,
+        );
 
         // See `overview_includes_schemas_mems_communities` for the
         // budget rationale.
@@ -8483,7 +8729,10 @@ community:
 
         let _ = (alpha_dir, beta_dir);
         memstead_git_branch::test_support::auto_seeded_settings(tmp.path());
-        let server = McpServer::new(setup_unified_test_engine(tmp.path()), crate::config::DEFAULT_TOKEN_BUDGET);
+        let server = McpServer::new(
+            setup_unified_test_engine(tmp.path()),
+            crate::config::DEFAULT_TOKEN_BUDGET,
+        );
 
         let result = server.memstead_overview(Parameters(OverviewParams {
             rebuild: Some(true),
@@ -8553,7 +8802,10 @@ community:
         let _ = (alpha_dir, beta_dir);
         memstead_git_branch::test_support::auto_seeded_settings(tmp.path());
 
-        let server = McpServer::new(setup_unified_test_engine(tmp.path()), crate::config::DEFAULT_TOKEN_BUDGET);
+        let server = McpServer::new(
+            setup_unified_test_engine(tmp.path()),
+            crate::config::DEFAULT_TOKEN_BUDGET,
+        );
         (server, tmp)
     }
 
@@ -8643,7 +8895,10 @@ community:
 
         memstead_git_branch::test_support::auto_seeded_settings(tmp.path());
 
-        let server = McpServer::new(setup_unified_test_engine(tmp.path()), crate::config::DEFAULT_TOKEN_BUDGET);
+        let server = McpServer::new(
+            setup_unified_test_engine(tmp.path()),
+            crate::config::DEFAULT_TOKEN_BUDGET,
+        );
         (server, tmp)
     }
 
@@ -8740,7 +8995,11 @@ community:
         assert!(mode == "reduced" || mode == "overbudget", "got mode={mode}");
 
         let hints = parsed.hint_keys();
-        assert!(!hints.is_empty(), "tight budget must produce hints; got:\n{}", parsed.text);
+        assert!(
+            !hints.is_empty(),
+            "tight budget must produce hints; got:\n{}",
+            parsed.text
+        );
 
         // Hard-required content still ships even in overbudget mode.
         assert!(
@@ -8820,7 +9079,10 @@ community:
         }));
         let parsed = ParsedOverview::from(&result);
         let hints = parsed.hint_keys();
-        assert!(!hints.is_empty(), "precondition: tight budget must produce hints");
+        assert!(
+            !hints.is_empty(),
+            "precondition: tight budget must produce hints"
+        );
 
         assert!(
             parsed.text.contains("## Hints"),
@@ -8967,7 +9229,10 @@ community:
         }));
         let parsed = ParsedOverview::from(&result);
         let headings = parsed.bridge_headings();
-        assert!(!headings.is_empty(), "bridge engine must produce at least one bridge");
+        assert!(
+            !headings.is_empty(),
+            "bridge engine must produce at least one bridge"
+        );
         // Heading shape: `<from> ↔ <to> (N edges)`. Pair lex-normalised ⇒
         // the from cluster id ≤ to cluster id textually.
         let h = &headings[0];
@@ -8975,7 +9240,10 @@ community:
         assert_eq!(parts.len(), 2, "unexpected bridge heading shape: {h}");
         let from = parts[0];
         let to = parts[1].split_once(' ').map(|(a, _)| a).unwrap_or(parts[1]);
-        assert!(from <= to, "bridge pair must be lex-normalised: {from} > {to}");
+        assert!(
+            from <= to,
+            "bridge pair must be lex-normalised: {from} > {to}"
+        );
         // The block must carry at least one `- **Edge types:**` row and one
         // sample edge bullet.
         assert!(parsed.text.contains("- **Edge types:**"));
@@ -9018,7 +9286,10 @@ community:
 
         let _ = (alpha_dir, beta_dir);
         memstead_git_branch::test_support::auto_seeded_settings(tmp.path());
-        let server = McpServer::new(setup_unified_test_engine(tmp.path()), crate::config::DEFAULT_TOKEN_BUDGET);
+        let server = McpServer::new(
+            setup_unified_test_engine(tmp.path()),
+            crate::config::DEFAULT_TOKEN_BUDGET,
+        );
 
         // Filter to beta: no outgoing edges from beta entities → no bridges.
         let result = server.memstead_overview(Parameters(OverviewParams {
@@ -9204,23 +9475,27 @@ community:
         // also USES two other sources to create a dense cluster. The hub
         // sits in its own cluster thanks to four target-side leaves.
         for i in 0..5 {
-            let mut rels = format!("- **USES**: [[hub]]\n");
+            let mut rels = "- **USES**: [[hub]]\n".to_string();
             for j in 0..5 {
                 if j != i {
                     rels.push_str(&format!("- **USES**: [[a{j}]]\n"));
                 }
             }
-            let body = format!("{fm}# a{i}\n\n## Identity\n\nSource {i}.\n\n## Purpose\n\nBridge fixture.\n\n## Relationships\n\n{rels}");
+            let body = format!(
+                "{fm}# a{i}\n\n## Identity\n\nSource {i}.\n\n## Purpose\n\nBridge fixture.\n\n## Relationships\n\n{rels}"
+            );
             fs::write(mem_dir.join(format!("a{i}.md")), body).unwrap();
         }
         for i in 0..4 {
-            let mut rels = format!("- **USES**: [[hub]]\n");
+            let mut rels = "- **USES**: [[hub]]\n".to_string();
             for j in 0..4 {
                 if j != i {
                     rels.push_str(&format!("- **USES**: [[b{j}]]\n"));
                 }
             }
-            let body = format!("{fm}# b{i}\n\n## Identity\n\nHub leaf {i}.\n\n## Purpose\n\nBridge fixture.\n\n## Relationships\n\n{rels}");
+            let body = format!(
+                "{fm}# b{i}\n\n## Identity\n\nHub leaf {i}.\n\n## Purpose\n\nBridge fixture.\n\n## Relationships\n\n{rels}"
+            );
             fs::write(mem_dir.join(format!("b{i}.md")), body).unwrap();
         }
         fs::write(
@@ -9230,7 +9505,10 @@ community:
         .unwrap();
 
         memstead_git_branch::test_support::auto_seeded_settings(tmp.path());
-        let server = McpServer::new(setup_unified_test_engine(tmp.path()), crate::config::DEFAULT_TOKEN_BUDGET);
+        let server = McpServer::new(
+            setup_unified_test_engine(tmp.path()),
+            crate::config::DEFAULT_TOKEN_BUDGET,
+        );
 
         let result = server.memstead_overview(Parameters(OverviewParams {
             rebuild: Some(true),
@@ -9270,7 +9548,10 @@ community:
             }
         }
 
-        assert!(!headings.is_empty(), "fixture must produce at least one bridge heading");
+        assert!(
+            !headings.is_empty(),
+            "fixture must produce at least one bridge heading"
+        );
         let mut saw_capped = false;
         for (h, ss) in &samples {
             assert!(
@@ -9287,16 +9568,15 @@ community:
                 {
                     let rest = rest.trim_start();
                     if let Some((from, to)) = rest.split_once(" → ") {
-                        parsed_keys.push((
-                            rel.to_string(),
-                            from.to_string(),
-                            to.to_string(),
-                        ));
+                        parsed_keys.push((rel.to_string(), from.to_string(), to.to_string()));
                     }
                 }
             }
             for w in parsed_keys.windows(2) {
-                assert!(w[0] <= w[1], "samples must be sorted by (rel_type, from, to)");
+                assert!(
+                    w[0] <= w[1],
+                    "samples must be sorted by (rel_type, from, to)"
+                );
             }
 
             // Find edge_count on the heading — trailing `(N edges)`.
@@ -9310,7 +9590,10 @@ community:
                 saw_capped = true;
             }
         }
-        assert!(saw_capped, "fixture should produce at least one bridge with 4+ edges");
+        assert!(
+            saw_capped,
+            "fixture should produce at least one bridge with 4+ edges"
+        );
     }
 
     /// `rebuild: true` discards the Louvain memo, so an edge added between
@@ -9338,7 +9621,11 @@ community:
             note: None,
             description: None,
         }));
-        assert!(!add.is_error.unwrap_or(false), "relate must succeed: {}", extract_text(&add));
+        assert!(
+            !add.is_error.unwrap_or(false),
+            "relate must succeed: {}",
+            extract_text(&add)
+        );
 
         let second = server.memstead_overview(Parameters(OverviewParams {
             rebuild: Some(true),
@@ -9350,7 +9637,7 @@ community:
         let after_total = sum_bridge_edge_counts(&ParsedOverview::from(&second));
 
         assert!(
-            after_total >= before_total + 1,
+            after_total > before_total,
             "rebuild must surface the new edge (before={before_total}, after={after_total})"
         );
     }
@@ -9434,7 +9721,10 @@ community:
         }));
         assert_eq!(result.is_error, Some(true));
         let text = extract_text(&result);
-        assert!(text.contains("ghost"), "error should name the bad mem: {text}");
+        assert!(
+            text.contains("ghost"),
+            "error should name the bad mem: {text}"
+        );
         assert!(
             text.contains("alpha") && text.contains("beta"),
             "error should list writable mems: {text}"
@@ -9449,10 +9739,7 @@ community:
         let (server, _tmp) = setup_two_mem_engine();
 
         let result = server.memstead_health(Parameters(HealthParams {
-            include: Some(vec![
-                "orphans".to_string(),
-                "most_connected".to_string(),
-            ]),
+            include: Some(vec!["orphans".to_string(), "most_connected".to_string()]),
             limit: None,
             mem: Some("alpha".to_string()),
             include_config: false,
@@ -9469,10 +9756,7 @@ community:
 
         // Type distribution narrowed to alpha's single entity.
         let type_dist = json["type_distribution"].as_array().unwrap();
-        let total: u64 = type_dist
-            .iter()
-            .map(|t| t["count"].as_u64().unwrap())
-            .sum();
+        let total: u64 = type_dist.iter().map(|t| t["count"].as_u64().unwrap()).sum();
         assert_eq!(total, 1, "type_distribution narrows to alpha");
 
         // Writable mems still lists both — roster must not be filtered.
@@ -9568,7 +9852,7 @@ community:
             metadata: None,
             relations: None,
             dry_run: None,
-        
+
             note: None,
         }));
         assert_eq!(result.is_error, Some(true));
@@ -9605,7 +9889,7 @@ community:
             metadata: None,
             relations: None,
             dry_run: Some(true),
-        
+
             note: None,
         }));
         assert!(
@@ -9637,11 +9921,10 @@ community:
             metadata: None,
             relations: None,
             dry_run: Some(false),
-        
+
             note: None,
         }));
-        let real_json: serde_json::Value =
-            serde_json::from_str(&extract_text(&real)).unwrap();
+        let real_json: serde_json::Value = serde_json::from_str(&extract_text(&real)).unwrap();
         assert_eq!(real_json["_hash"], json["_hash"]);
     }
 
@@ -9710,7 +9993,10 @@ community:
         .unwrap();
 
         memstead_git_branch::test_support::auto_seeded_settings(tmp.path());
-        let server = McpServer::new(setup_unified_test_engine(tmp.path()), crate::config::DEFAULT_TOKEN_BUDGET);
+        let server = McpServer::new(
+            setup_unified_test_engine(tmp.path()),
+            crate::config::DEFAULT_TOKEN_BUDGET,
+        );
 
         let result = server.memstead_health(Parameters(HealthParams {
             include: None,
@@ -9721,8 +10007,7 @@ community:
             chunk: None,
             target_schema: None,
         }));
-        let json: serde_json::Value =
-            serde_json::from_str(&extract_text(&result)).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&extract_text(&result)).unwrap();
         let warnings = json["warnings"]
             .as_array()
             .expect("warnings must be an array with the drift finding");
@@ -9807,8 +10092,7 @@ community:
             chunk: None,
             target_schema: None,
         }));
-        let global_json: serde_json::Value =
-            serde_json::from_str(&extract_text(&global)).unwrap();
+        let global_json: serde_json::Value = serde_json::from_str(&extract_text(&global)).unwrap();
         let global_warnings = global_json["warnings"]
             .as_array()
             .expect("global query carries the drift warning");
@@ -9930,7 +10214,7 @@ community:
             metadata: None,
             relations: None,
             dry_run: None,
-        
+
             note: None,
         }));
         assert!(
@@ -9974,8 +10258,9 @@ community:
             metadata: None,
             metadata_unset: None,
             dry_run: None,
-        
-            note: None,            declare_relations: None,
+
+            note: None,
+            declare_relations: None,
         }));
         assert!(
             !result.is_error.unwrap_or(false),
@@ -9994,7 +10279,7 @@ community:
         let result = server.memstead_delete(Parameters(DeleteParams {
             id: id.clone(),
             expected_hash: post_update_hash,
-        
+
             note: None,
         }));
         assert!(
@@ -10023,7 +10308,7 @@ community:
             to: "specs--entity-b".to_string(),
             r#type: "DEPENDS_ON".to_string(),
             remove: None,
-        
+
             note: None,
             description: None,
         }));
@@ -10049,7 +10334,7 @@ community:
             to: "specs--entity-b".to_string(),
             r#type: "DEPENDS_ON".to_string(),
             remove: None,
-        
+
             note: None,
             description: None,
         }));
@@ -10061,7 +10346,7 @@ community:
             to: "specs--entity-a".to_string(),
             r#type: "DEPENDS_ON".to_string(),
             remove: None,
-        
+
             note: None,
             description: None,
         }));
@@ -10186,7 +10471,8 @@ community:
             metadata: Some(metadata),
             metadata_unset: Some(vec!["tags".to_string()]),
             dry_run: Some(true),
-            note: None,            declare_relations: None,
+            note: None,
+            declare_relations: None,
         }));
         assert!(
             result.is_error.unwrap_or(false),
@@ -10290,7 +10576,8 @@ community:
             metadata: None,
             metadata_unset: None,
             dry_run: Some(true),
-            note: None,            declare_relations: None,
+            note: None,
+            declare_relations: None,
         }));
         assert!(result.is_error.unwrap_or(false));
         let sc = result
@@ -10624,11 +10911,10 @@ community:
             )])),
             relations: None,
             dry_run: Some(false),
-        
+
             note: None,
         }));
-        let create_json: serde_json::Value =
-            serde_json::from_str(&extract_text(&create)).unwrap();
+        let create_json: serde_json::Value = serde_json::from_str(&extract_text(&create)).unwrap();
         let id = create_json["id"].as_str().unwrap().to_string();
         let hash = create_json["_hash"].as_str().unwrap().to_string();
 
@@ -10660,7 +10946,7 @@ community:
             )])),
             metadata_unset: Some(vec!["tags".to_string()]),
             dry_run: Some(false),
-        
+
             note: None,
             declare_relations: None,
         }));
@@ -10669,8 +10955,7 @@ community:
             "mixed update must succeed: {}",
             extract_text(&result)
         );
-        let json: serde_json::Value =
-            serde_json::from_str(&extract_text(&result)).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&extract_text(&result)).unwrap();
 
         // Parent keys are always present as objects — stable shape for
         // callers.
@@ -10766,8 +11051,9 @@ community:
             metadata: None,
             metadata_unset: None,
             dry_run: Some(true),
-        
-            note: None,            declare_relations: None,
+
+            note: None,
+            declare_relations: None,
         }));
         assert!(
             !dry_run.is_error.unwrap_or(false),
@@ -10810,8 +11096,9 @@ community:
             metadata: None,
             metadata_unset: None,
             dry_run: Some(false),
-        
-            note: None,            declare_relations: None,
+
+            note: None,
+            declare_relations: None,
         }));
         assert!(
             !real.is_error.unwrap_or(false),
@@ -10861,23 +11148,27 @@ community:
             metadata: None,
             metadata_unset: None,
             dry_run: Some(true),
-        
-            note: None,            declare_relations: None,
+
+            note: None,
+            declare_relations: None,
         }));
         assert!(
             !dry_run.is_error.unwrap_or(false),
             "dry_run must ignore stale expected_hash: {}",
             extract_text(&dry_run)
         );
-        let dry_json: serde_json::Value =
-            serde_json::from_str(&extract_text(&dry_run)).unwrap();
+        let dry_json: serde_json::Value = serde_json::from_str(&extract_text(&dry_run)).unwrap();
         let recovered = dry_json["_hash"].as_str().unwrap();
         assert_ne!(
             recovered, stale,
             "content_hash must be the real on-disk hash, not the stale input"
         );
         // MCP serialises the engine's truncated SHA-256 (16 hex chars).
-        assert_eq!(recovered.len(), 16, "content_hash must be truncated SHA-256 hex");
+        assert_eq!(
+            recovered.len(),
+            16,
+            "content_hash must be truncated SHA-256 hex"
+        );
 
         // Follow-up real call with the recovered hash must succeed.
         let real = server.memstead_update(Parameters(UpdateParams {
@@ -10893,8 +11184,9 @@ community:
             metadata: None,
             metadata_unset: None,
             dry_run: Some(false),
-        
-            note: None,            declare_relations: None,
+
+            note: None,
+            declare_relations: None,
         }));
         assert!(
             !real.is_error.unwrap_or(false),
@@ -10913,10 +11205,10 @@ community:
 
         let result = server.memstead_delete(Parameters(DeleteParams {
             id: id.clone(),
-            expected_hash:
-                "0000000000000000000000000000000000000000000000000000000000000000".to_string(),
-        
-                note: None,
+            expected_hash: "0000000000000000000000000000000000000000000000000000000000000000"
+                .to_string(),
+
+            note: None,
         }));
         assert!(
             result.is_error.unwrap_or(false),
@@ -10982,11 +11274,10 @@ community:
             metadata: None,
             relations: None,
             dry_run: Some(false),
-        
+
             note: None,
         }));
-        let create_json: serde_json::Value =
-            serde_json::from_str(&extract_text(&create)).unwrap();
+        let create_json: serde_json::Value = serde_json::from_str(&extract_text(&create)).unwrap();
         let id = create_json["id"].as_str().unwrap().to_string();
         let create_hash = create_json["_hash"].as_str().unwrap().to_string();
 
@@ -10995,7 +11286,7 @@ community:
             id: id.clone(),
             new_title: "Rename Wire Changed".to_string(),
             expected_hash: create_hash.clone(),
-        
+
             note: None,
         }));
         assert!(
@@ -11003,8 +11294,7 @@ community:
             "real rename must succeed: {}",
             extract_text(&real)
         );
-        let real_json: serde_json::Value =
-            serde_json::from_str(&extract_text(&real)).unwrap();
+        let real_json: serde_json::Value = serde_json::from_str(&extract_text(&real)).unwrap();
         let real_hash = real_json["_hash"]
             .as_str()
             .expect("content_hash must be a string on real rename");
@@ -11019,7 +11309,7 @@ community:
             id: real_json["new_id"].as_str().unwrap().to_string(),
             new_title: "RENAME WIRE CHANGED".to_string(), // case-only — same slug
             expected_hash: real_hash.to_string(),
-        
+
             note: None,
         }));
         assert!(
@@ -11027,8 +11317,7 @@ community:
             "slug-noop rename must succeed: {}",
             extract_text(&noop)
         );
-        let noop_json: serde_json::Value =
-            serde_json::from_str(&extract_text(&noop)).unwrap();
+        let noop_json: serde_json::Value = serde_json::from_str(&extract_text(&noop)).unwrap();
         assert_eq!(
             noop_json["old_id"], noop_json["new_id"],
             "slug-noop must keep the id unchanged"
@@ -11053,7 +11342,7 @@ community:
             to: "specs--entity-b".to_string(),
             r#type: "DEPENDS_ON".to_string(),
             remove: None,
-        
+
             note: None,
             description: None,
         }));
@@ -11081,7 +11370,7 @@ community:
             to: "specs--entity-b".to_string(),
             r#type: "DEPENDS_ON".to_string(),
             remove: None,
-        
+
             note: None,
             description: None,
         }));
@@ -11115,7 +11404,7 @@ community:
             to: "specs--entity-b".to_string(),
             r#type: "DEPENDS_ON".to_string(),
             remove: Some(true),
-        
+
             note: None,
             description: None,
         }));
@@ -11219,7 +11508,10 @@ community:
         .unwrap();
 
         memstead_git_branch::test_support::auto_seeded_settings(tmp.path());
-        let server = McpServer::new(setup_unified_test_engine(tmp.path()), crate::config::DEFAULT_TOKEN_BUDGET);
+        let server = McpServer::new(
+            setup_unified_test_engine(tmp.path()),
+            crate::config::DEFAULT_TOKEN_BUDGET,
+        );
 
         let result = server.memstead_health(Parameters(HealthParams {
             include: Some(vec!["dangling_links".to_string()]),
@@ -11235,8 +11527,7 @@ community:
             "health call failed: {}",
             extract_text(&result)
         );
-        let json: serde_json::Value =
-            serde_json::from_str(&extract_text(&result)).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&extract_text(&result)).unwrap();
         let arr = json["dangling_links"]
             .as_array()
             .expect("dangling_links array present when key opted in");
@@ -11267,8 +11558,7 @@ community:
             target_schema: None,
         }));
         assert!(!result.is_error.unwrap_or(false));
-        let json: serde_json::Value =
-            serde_json::from_str(&extract_text(&result)).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&extract_text(&result)).unwrap();
         assert!(
             json.get("tag_distribution").is_some(),
             "tag_distribution present when key opted in"
@@ -11336,8 +11626,16 @@ community:
             tmp.path(),
             WorkspaceSettings {
                 mem_create_rules: vec![
-                    memstead_base::CreateRuleSetting { pattern: "*".to_string(), schemas: vec!["default@1.0.0".to_string()], default_cross_links: None },
-                    memstead_base::CreateRuleSetting { pattern: "**".to_string(), schemas: vec!["default@1.0.0".to_string()], default_cross_links: None },
+                    memstead_base::CreateRuleSetting {
+                        pattern: "*".to_string(),
+                        schemas: vec!["default@1.0.0".to_string()],
+                        default_cross_links: None,
+                    },
+                    memstead_base::CreateRuleSetting {
+                        pattern: "**".to_string(),
+                        schemas: vec!["default@1.0.0".to_string()],
+                        default_cross_links: None,
+                    },
                 ],
                 mem_delete_rules: vec![],
                 ..Default::default()
@@ -11346,8 +11644,8 @@ community:
         let unified_settings = pro_settings.clone();
         let mut unified = setup_unified_test_engine_git_branch(tmp.path());
         unified.set_settings(unified_settings);
-        let canonical_root = std::fs::canonicalize(tmp.path())
-            .unwrap_or_else(|_| tmp.path().to_path_buf());
+        let canonical_root =
+            std::fs::canonicalize(tmp.path()).unwrap_or_else(|_| tmp.path().to_path_buf());
         unified.set_workspace_root(canonical_root);
         McpServer::new(unified, crate::config::DEFAULT_TOKEN_BUDGET)
     }
@@ -11366,7 +11664,7 @@ community:
 
             vcs: None,
             note: Some("mcp handler happy path".to_string()),
-        recovery: None,
+            recovery: None,
             include_schema: false,
         }));
         assert!(
@@ -11378,7 +11676,9 @@ community:
             serde_json::from_str(&extract_text(&result)).expect("response must be JSON");
         assert_eq!(json["name"], "fresh");
         assert!(
-            json["seed_commit_sha"].as_str().is_some_and(|s| s.len() == 40),
+            json["seed_commit_sha"]
+                .as_str()
+                .is_some_and(|s| s.len() == 40),
             "seed_commit_sha must be a 40-char hex string: {}",
             json["seed_commit_sha"]
         );
@@ -11431,10 +11731,7 @@ community:
             "hierarchical content branch refs/heads/planning/hier must exist"
         );
         assert!(
-            matches!(
-                repo.try_find_reference("refs/heads/hier"),
-                Ok(None)
-            ),
+            matches!(repo.try_find_reference("refs/heads/hier"), Ok(None)),
             "flat fallback refs/heads/hier must NOT exist for hierarchical create"
         );
 
@@ -11470,7 +11767,7 @@ community:
 
             vcs: None,
             note: None,
-        recovery: None,
+            recovery: None,
             include_schema: false,
         }));
         assert!(
@@ -11493,7 +11790,7 @@ community:
 
             vcs: None,
             note: None,
-        recovery: None,
+            recovery: None,
             include_schema: false,
         }));
         assert_eq!(
@@ -11574,7 +11871,8 @@ community:
         let _ = settings;
         let mut unified = setup_unified_test_engine(tmp.path());
         unified.set_settings(unified_settings);
-        let canonical_root = std::fs::canonicalize(tmp.path()).unwrap_or_else(|_| tmp.path().to_path_buf());
+        let canonical_root =
+            std::fs::canonicalize(tmp.path()).unwrap_or_else(|_| tmp.path().to_path_buf());
         unified.set_workspace_root(canonical_root);
         let server = McpServer::new(unified, crate::config::DEFAULT_TOKEN_BUDGET);
 
@@ -11588,7 +11886,7 @@ community:
 
             vcs: None,
             note: None,
-        recovery: None,
+            recovery: None,
             include_schema: false,
         }));
         assert_eq!(result.is_error, Some(true));
@@ -11622,7 +11920,7 @@ community:
 
             vcs: None,
             note: None,
-        recovery: None,
+            recovery: None,
             include_schema: false,
         }));
         assert!(ok.is_error.is_none() || ok.is_error == Some(false));
@@ -11640,7 +11938,7 @@ community:
 
             vcs: None,
             note: None,
-        recovery: None,
+            recovery: None,
             include_schema: false,
         }));
         assert_eq!(err.is_error, Some(true));
@@ -11680,12 +11978,15 @@ community:
     fn memstead_mem_create_persists_mount_for_cold_boot() {
         let tmp = TempDir::new().unwrap();
         let server = setup_lifecycle_server_with_delete(&tmp);
-        let canonical_root = std::fs::canonicalize(tmp.path())
-            .unwrap_or_else(|_| tmp.path().to_path_buf());
+        let canonical_root =
+            std::fs::canonicalize(tmp.path()).unwrap_or_else(|_| tmp.path().to_path_buf());
 
         // No mount file yet — auto_seed doesn't create one when no
         // pre-existing disk mems are present.
-        let mounts_path = canonical_root.join(".memstead").join("state").join("mounts.json");
+        let mounts_path = canonical_root
+            .join(".memstead")
+            .join("state")
+            .join("mounts.json");
 
         let target = canonical_root.join("persisted");
         let ok = server.memstead_mem_create(Parameters(TlsMemCreateParams {
@@ -11696,7 +11997,7 @@ community:
             schema: "default@1.0.0".to_string(),
             vcs: None,
             note: None,
-        recovery: None,
+            recovery: None,
             include_schema: false,
         }));
         assert!(
@@ -11712,11 +12013,12 @@ community:
             "create must write {} so cold-boot sees the new mem",
             mounts_path.display()
         );
-        let reloaded = <memstead_base::FileWorkspaceStore as memstead_base::WorkspaceStoreAdapter>::load(
-            &memstead_base::FileWorkspaceStore::new(),
-            &canonical_root,
-        )
-        .expect("reload must succeed");
+        let reloaded =
+            <memstead_base::FileWorkspaceStore as memstead_base::WorkspaceStoreAdapter>::load(
+                &memstead_base::FileWorkspaceStore::new(),
+                &canonical_root,
+            )
+            .expect("reload must succeed");
         assert!(
             reloaded.mounts.iter().any(|m| m.mem == "persisted"),
             "cold-boot workspace must include the freshly-created mem: {:?}",
@@ -11733,7 +12035,7 @@ community:
             schema: "default@1.0.0".to_string(),
             vcs: None,
             note: None,
-        recovery: None,
+            recovery: None,
             include_schema: false,
         }));
         assert_eq!(
@@ -11782,7 +12084,7 @@ community:
 
             vcs: None,
             note: None,
-        recovery: None,
+            recovery: None,
             include_schema: false,
         }));
         assert_eq!(result.is_error, Some(true));
@@ -11805,16 +12107,22 @@ community:
         let pro_settings = memstead_git_branch::test_support::auto_seed_with_settings(
             tmp.path(),
             WorkspaceSettings {
-                mem_create_rules: vec![memstead_base::CreateRuleSetting { pattern: "*".to_string(), schemas: vec!["default@1.0.0".to_string()], default_cross_links: None }],
-                mem_delete_rules: vec![memstead_base::DeleteRuleSetting { pattern: "*".to_string() }],
+                mem_create_rules: vec![memstead_base::CreateRuleSetting {
+                    pattern: "*".to_string(),
+                    schemas: vec!["default@1.0.0".to_string()],
+                    default_cross_links: None,
+                }],
+                mem_delete_rules: vec![memstead_base::DeleteRuleSetting {
+                    pattern: "*".to_string(),
+                }],
                 ..Default::default()
             },
         );
         let unified_settings = pro_settings.clone();
         let mut unified = setup_unified_test_engine_git_branch(tmp.path());
         unified.set_settings(unified_settings);
-        let canonical_root = std::fs::canonicalize(tmp.path())
-            .unwrap_or_else(|_| tmp.path().to_path_buf());
+        let canonical_root =
+            std::fs::canonicalize(tmp.path()).unwrap_or_else(|_| tmp.path().to_path_buf());
         unified.set_workspace_root(canonical_root);
         McpServer::new(unified, crate::config::DEFAULT_TOKEN_BUDGET)
     }
@@ -11835,7 +12143,7 @@ community:
 
             vcs: None,
             note: None,
-        recovery: None,
+            recovery: None,
             include_schema: false,
         }));
         assert!(create_result.is_error.is_none() || create_result.is_error == Some(false));
@@ -11869,7 +12177,11 @@ community:
         let settings = memstead_git_branch::test_support::auto_seed_with_settings(
             tmp.path(),
             WorkspaceSettings {
-                mem_create_rules: vec![memstead_base::CreateRuleSetting { pattern: "*".to_string(), schemas: vec!["default@1.0.0".to_string()], default_cross_links: None }],
+                mem_create_rules: vec![memstead_base::CreateRuleSetting {
+                    pattern: "*".to_string(),
+                    schemas: vec!["default@1.0.0".to_string()],
+                    default_cross_links: None,
+                }],
                 mem_delete_rules: vec![],
                 ..Default::default()
             },
@@ -11878,7 +12190,8 @@ community:
         let _ = settings;
         let mut unified = setup_unified_test_engine(tmp.path());
         unified.set_settings(unified_settings);
-        let canonical_root = std::fs::canonicalize(tmp.path()).unwrap_or_else(|_| tmp.path().to_path_buf());
+        let canonical_root =
+            std::fs::canonicalize(tmp.path()).unwrap_or_else(|_| tmp.path().to_path_buf());
         unified.set_workspace_root(canonical_root);
         let server = McpServer::new(unified, crate::config::DEFAULT_TOKEN_BUDGET);
 
@@ -11893,7 +12206,7 @@ community:
 
             vcs: None,
             note: None,
-        recovery: None,
+            recovery: None,
             include_schema: false,
         }));
 
@@ -11952,7 +12265,7 @@ community:
             schema: "default@1.0.0".to_string(),
             vcs: None,
             note: None,
-        recovery: None,
+            recovery: None,
             include_schema: false,
         }));
         let _ = server.memstead_mem_create(Parameters(TlsMemCreateParams {
@@ -11963,7 +12276,7 @@ community:
             schema: "default@1.0.0".to_string(),
             vcs: None,
             note: None,
-        recovery: None,
+            recovery: None,
             include_schema: false,
         }));
         // Drop the seeded server; rebuild the engine with explicit
@@ -11975,12 +12288,14 @@ community:
             BTreeMap::new();
         links.insert(
             "plan-x".to_string(),
-            memstead_schema::workspace_config::CrossLinkValue::List(vec![
-                "primary".to_string(),
-            ]),
+            memstead_schema::workspace_config::CrossLinkValue::List(vec!["primary".to_string()]),
         );
         let settings = WorkspaceSettings {
-            mem_create_rules: vec![memstead_base::CreateRuleSetting { pattern: "*".to_string(), schemas: vec!["default@1.0.0".to_string()], default_cross_links: None }],
+            mem_create_rules: vec![memstead_base::CreateRuleSetting {
+                pattern: "*".to_string(),
+                schemas: vec!["default@1.0.0".to_string()],
+                default_cross_links: None,
+            }],
             mem_delete_rules: vec![memstead_base::DeleteRuleSetting {
                 pattern: "*".to_string(),
             }],
@@ -11995,8 +12310,10 @@ community:
         // runtime-created git-branch mems.
         let gitdir = tmp.path().join("mem-repo").join(".git");
         let canonical_gitdir = gitdir.canonicalize().unwrap_or(gitdir.clone());
-        let mut mounts: Vec<(memstead_base::Mount, Box<dyn memstead_base::backend::MemBackend>)> =
-            Vec::new();
+        let mut mounts: Vec<(
+            memstead_base::Mount,
+            Box<dyn memstead_base::backend::MemBackend>,
+        )> = Vec::new();
         for mem_name in ["primary", "plan-x"] {
             let mount = memstead_base::Mount {
                 migration_target: None,
@@ -12016,8 +12333,8 @@ community:
         let mut unified = memstead_base::Engine::from_mounts(mounts).unwrap();
         unified.set_backend_factory(memstead_git_branch::storage::instantiate_full_backend);
         unified.set_settings(settings.clone());
-        let canonical_root = std::fs::canonicalize(tmp.path())
-            .unwrap_or_else(|_| tmp.path().to_path_buf());
+        let canonical_root =
+            std::fs::canonicalize(tmp.path()).unwrap_or_else(|_| tmp.path().to_path_buf());
         unified.set_workspace_root(canonical_root);
         let server = McpServer::new(unified, crate::config::DEFAULT_TOKEN_BUDGET);
 
@@ -12068,7 +12385,7 @@ community:
             schema: "default@1.0.0".to_string(),
             vcs: None,
             note: None,
-        recovery: None,
+            recovery: None,
             include_schema: false,
         }));
         // Pre-condition: create wrote the branch + the __MEMSTEAD entry.
@@ -12175,8 +12492,8 @@ community:
             }],
             ..Default::default()
         });
-        let canonical_root = std::fs::canonicalize(tmp.path())
-            .unwrap_or_else(|_| tmp.path().to_path_buf());
+        let canonical_root =
+            std::fs::canonicalize(tmp.path()).unwrap_or_else(|_| tmp.path().to_path_buf());
         unified.set_workspace_root(canonical_root);
         let server = McpServer::new(unified, crate::config::DEFAULT_TOKEN_BUDGET);
 
@@ -12189,7 +12506,7 @@ community:
             schema: "default@1.0.0".to_string(),
             vcs: None,
             note: None,
-        recovery: None,
+            recovery: None,
             include_schema: false,
         }));
         assert!(mem_dir.is_dir(), "create must produce the mem dir on disk");
@@ -12252,8 +12569,8 @@ community:
         );
         let mut unified = setup_unified_test_engine_git_branch(tmp.path());
         unified.set_settings(pro_settings);
-        let canonical_root = std::fs::canonicalize(tmp.path())
-            .unwrap_or_else(|_| tmp.path().to_path_buf());
+        let canonical_root =
+            std::fs::canonicalize(tmp.path()).unwrap_or_else(|_| tmp.path().to_path_buf());
         unified.set_workspace_root(canonical_root);
         let server = McpServer::new(unified, crate::config::DEFAULT_TOKEN_BUDGET);
         let gitdir = tmp.path().join("mem-repo").join(".git");
@@ -12423,7 +12740,8 @@ community:
 
         #[test]
         fn filter_omits_disabled_names_from_list() {
-            let (server, _tmp) = setup_filtered_server(&["memstead_mem_create", "memstead_mem_delete"]);
+            let (server, _tmp) =
+                setup_filtered_server(&["memstead_mem_create", "memstead_mem_delete"]);
             let names: Vec<String> = server
                 .filtered_tool_list()
                 .iter()
@@ -12460,8 +12778,7 @@ community:
             let details = env.get("details").expect("details present");
             assert_eq!(details["tool"], "memstead_mem_create");
             assert_eq!(
-                details["config_source"],
-                "/tmp/test.memstead.toml",
+                details["config_source"], "/tmp/test.memstead.toml",
                 "config_source must echo the resolved path"
             );
         }
@@ -12622,8 +12939,8 @@ community:
             // `memstead_update` write to mem-repo and
             // `head_commit_message` reads from the same gitdir.
             let mut unified = setup_unified_test_engine_git_branch(tmp.path());
-            let canonical_root = std::fs::canonicalize(tmp.path())
-                .unwrap_or_else(|_| tmp.path().to_path_buf());
+            let canonical_root =
+                std::fs::canonicalize(tmp.path()).unwrap_or_else(|_| tmp.path().to_path_buf());
             unified.set_workspace_root(canonical_root);
             let server = McpServer::new_with_config(
                 unified,
@@ -12644,7 +12961,8 @@ community:
         fn memstead_create_with_note_lands_in_commit_body() {
             let tmp = setup_test_workspace();
             let mut unified = setup_unified_test_engine_git_branch(tmp.path());
-            let canonical_root = std::fs::canonicalize(tmp.path()).unwrap_or_else(|_| tmp.path().to_path_buf());
+            let canonical_root =
+                std::fs::canonicalize(tmp.path()).unwrap_or_else(|_| tmp.path().to_path_buf());
             unified.set_workspace_root(canonical_root);
             let server = McpServer::new(unified, crate::config::DEFAULT_TOKEN_BUDGET);
             let mut sections = IndexMap::new();
@@ -12682,8 +13000,7 @@ community:
             );
             // No warning added when the note is supplied (default
             // posture: require_notes = false / None).
-            let json: serde_json::Value =
-                serde_json::from_str(&extract_text(&result)).unwrap();
+            let json: serde_json::Value = serde_json::from_str(&extract_text(&result)).unwrap();
             let empty_vec: Vec<serde_json::Value> = vec![];
             let warnings = json["warnings"].as_array().unwrap_or(&empty_vec);
             assert!(
@@ -12745,8 +13062,7 @@ community:
                 extract_text(&result)
             );
             // Warning on the wire.
-            let json: serde_json::Value =
-                serde_json::from_str(&extract_text(&result)).unwrap();
+            let json: serde_json::Value = serde_json::from_str(&extract_text(&result)).unwrap();
             let warnings = json["warnings"].as_array().expect("warnings array");
             // The engine is the single enforcement point; the warning's
             // `tool` is the engine-level verb (`update_entity`), matching
@@ -12795,8 +13111,7 @@ community:
                 dry_run: Some(false),
                 note: Some("   \t ".into()),
             }));
-            let json: serde_json::Value =
-                serde_json::from_str(&extract_text(&result)).unwrap();
+            let json: serde_json::Value = serde_json::from_str(&extract_text(&result)).unwrap();
             let warnings = json["warnings"].as_array().expect("warnings array");
             assert!(
                 warnings
@@ -12908,10 +13223,7 @@ community:
             // section to keep this dry_run preview on the success
             // path that emits the anchor.
             let mut sections = indexmap::IndexMap::new();
-            sections.insert(
-                "identity".to_string(),
-                "First test entity.".to_string(),
-            );
+            sections.insert("identity".to_string(), "First test entity.".to_string());
             let result = server.memstead_update(Parameters(UpdateParams {
                 relations_unset: None,
                 id: "specs--entity-a".to_string(),
@@ -12922,9 +13234,14 @@ community:
                 metadata: None,
                 metadata_unset: None,
                 dry_run: Some(true),
-                note: None,                declare_relations: None,
+                note: None,
+                declare_relations: None,
             }));
-            assert!(!result.is_error.unwrap_or(false), "{}", extract_text(&result));
+            assert!(
+                !result.is_error.unwrap_or(false),
+                "{}",
+                extract_text(&result)
+            );
             assert_eq!(
                 payload(&result)["_mem_schema"].as_str(),
                 Some("default@1.0.0"),
@@ -12974,17 +13291,18 @@ community:
                     description: None,
                 }]),
             }));
-            assert!(!result.is_error.unwrap_or(false), "{}", extract_text(&result));
+            assert!(
+                !result.is_error.unwrap_or(false),
+                "{}",
+                extract_text(&result)
+            );
             let body = payload(&result);
             let declared = body["relations_declared"]
                 .as_array()
                 .expect("relations_declared must be an array on the response");
             assert_eq!(declared.len(), 1, "expected one declared relation: {body}");
             assert_eq!(declared[0]["rel_type"].as_str(), Some("USES"));
-            assert_eq!(
-                declared[0]["target"].as_str(),
-                Some("specs--entity-b"),
-            );
+            assert_eq!(declared[0]["target"].as_str(), Some("specs--entity-b"),);
             assert_eq!(
                 declared[0]["target_was_stubbed"].as_bool(),
                 Some(false),
@@ -13005,7 +13323,11 @@ community:
                 note: None,
                 description: None,
             }));
-            assert!(!result.is_error.unwrap_or(false), "{}", extract_text(&result));
+            assert!(
+                !result.is_error.unwrap_or(false),
+                "{}",
+                extract_text(&result)
+            );
             assert_eq!(
                 payload(&result)["_mem_schema"].as_str(),
                 Some("default@1.0.0"),
@@ -13112,10 +13434,10 @@ community:
                 limit: None,
                 mem: Some("specs".to_string()),
                 include_config: false,
-            token_budget: None,
-            chunk: None,
-            target_schema: None,
-        }));
+                token_budget: None,
+                chunk: None,
+                target_schema: None,
+            }));
             assert_eq!(
                 payload(&result)["_mem_schema"].as_str(),
                 Some("default@1.0.0"),
@@ -13130,10 +13452,10 @@ community:
                 limit: None,
                 mem: None,
                 include_config: false,
-            token_budget: None,
-            chunk: None,
-            target_schema: None,
-        }));
+                token_budget: None,
+                chunk: None,
+                target_schema: None,
+            }));
             assert!(
                 payload(&result).get("_mem_schema").is_none(),
                 "global health must not carry an anchor: {:?}",
@@ -13191,7 +13513,11 @@ community:
             let settings = memstead_git_branch::test_support::auto_seed_with_settings(
                 tmp.path(),
                 WorkspaceSettings {
-                        mem_create_rules: vec![memstead_base::CreateRuleSetting { pattern: "*".to_string(), schemas: vec!["default@1.0.0".to_string()], default_cross_links: None }],
+                    mem_create_rules: vec![memstead_base::CreateRuleSetting {
+                        pattern: "*".to_string(),
+                        schemas: vec!["default@1.0.0".to_string()],
+                        default_cross_links: None,
+                    }],
                     mem_delete_rules: vec![],
                     ..Default::default()
                 },
@@ -13207,7 +13533,8 @@ community:
             // the two to match.
             let mut unified = setup_unified_test_engine(tmp.path());
             unified.set_settings(unified_settings);
-            let canonical_root = std::fs::canonicalize(tmp.path()).unwrap_or_else(|_| tmp.path().to_path_buf());
+            let canonical_root =
+                std::fs::canonicalize(tmp.path()).unwrap_or_else(|_| tmp.path().to_path_buf());
             unified.set_workspace_root(canonical_root);
             let server = McpServer::new(unified, crate::config::DEFAULT_TOKEN_BUDGET);
             (server, tmp)
@@ -13217,10 +13544,14 @@ community:
         /// `include_schema:
         /// true` is required to surface the schema body — these tests
         /// exist *to verify* the inlined body, so the opt-in fires.
-        fn create_and_get_payload(server: &McpServer, tmp: &TempDir, name: &str) -> serde_json::Value {
+        fn create_and_get_payload(
+            server: &McpServer,
+            tmp: &TempDir,
+            name: &str,
+        ) -> serde_json::Value {
             let target = tmp.path().join(name);
             let result = server.memstead_mem_create(Parameters(TlsMemCreateParams {
-            schema_verbosity: None,
+                schema_verbosity: None,
                 write_guidance: Default::default(),
                 name: name.to_string(),
                 location: target.to_string_lossy().into_owned(),
@@ -13228,8 +13559,8 @@ community:
 
                 vcs: None,
                 note: Some("schema payload".to_string()),
-            recovery: None,
-            include_schema: true,
+                recovery: None,
+                include_schema: true,
             }));
             assert!(
                 !result.is_error.unwrap_or(false),
@@ -13259,7 +13590,10 @@ community:
                 "lite summary must not ship when types[] is requested"
             );
             assert!(
-                schema["types"].as_array().map(|a| !a.is_empty()).unwrap_or(false),
+                schema["types"]
+                    .as_array()
+                    .map(|a| !a.is_empty())
+                    .unwrap_or(false),
                 "types[] must be non-empty"
             );
         }
@@ -13337,7 +13671,12 @@ write_rules: []
                 )
                 .expect("dwg fixture must parse"),
             );
-            let payload = render::build_schema_payload(&schema, vec!["v".to_string()], render::SchemaVerbosity::Full, render::OriginClass::FirstParty);
+            let payload = render::build_schema_payload(
+                &schema,
+                vec!["v".to_string()],
+                render::SchemaVerbosity::Full,
+                render::OriginClass::FirstParty,
+            );
             let dwg = payload
                 .get("default_writing_guidance")
                 .expect("default_writing_guidance must surface at top level");
@@ -13426,7 +13765,12 @@ write_rules: []
                 )
                 .expect("filterable fixture must parse"),
             );
-            let payload = render::build_schema_payload(&schema, vec!["v".to_string()], render::SchemaVerbosity::Full, render::OriginClass::FirstParty);
+            let payload = render::build_schema_payload(
+                &schema,
+                vec!["v".to_string()],
+                render::SchemaVerbosity::Full,
+                render::OriginClass::FirstParty,
+            );
             let fields = payload["types"][0]["fields"]
                 .as_array()
                 .expect("fields array present");
@@ -13511,7 +13855,12 @@ write_rules: []
                 )
                 .expect("alias fixture must parse"),
             );
-            let payload = render::build_schema_payload(&schema, vec!["v".to_string()], render::SchemaVerbosity::Full, render::OriginClass::FirstParty);
+            let payload = render::build_schema_payload(
+                &schema,
+                vec!["v".to_string()],
+                render::SchemaVerbosity::Full,
+                render::OriginClass::FirstParty,
+            );
             assert_eq!(
                 payload["alias_target_rel_type"].as_str(),
                 Some("REFERENCES"),
@@ -13574,7 +13923,12 @@ write_rules: []
                 )
                 .expect("opt-out fixture must parse"),
             );
-            let payload = render::build_schema_payload(&schema, vec!["v".to_string()], render::SchemaVerbosity::Full, render::OriginClass::FirstParty);
+            let payload = render::build_schema_payload(
+                &schema,
+                vec!["v".to_string()],
+                render::SchemaVerbosity::Full,
+                render::OriginClass::FirstParty,
+            );
             assert!(
                 payload.get("alias_target_rel_type").is_none(),
                 "key must be absent for schemas without the pointer; got {payload}"
@@ -13646,7 +14000,12 @@ write_rules: []
                 )
                 .expect("cv fixture must parse"),
             );
-            let payload = render::build_schema_payload(&schema, vec!["v".to_string()], render::SchemaVerbosity::Full, render::OriginClass::FirstParty);
+            let payload = render::build_schema_payload(
+                &schema,
+                vec!["v".to_string()],
+                render::SchemaVerbosity::Full,
+                render::OriginClass::FirstParty,
+            );
             let cv = payload
                 .get("cross_mem_relationships")
                 .expect("cross_mem_relationships must surface at top level")
@@ -13768,15 +14127,17 @@ write_rules: []
                 )
                 .expect("fixture must parse"),
             );
-            let payload = render::build_schema_payload(&schema, vec!["v".to_string()], render::SchemaVerbosity::Full, render::OriginClass::FirstParty);
+            let payload = render::build_schema_payload(
+                &schema,
+                vec!["v".to_string()],
+                render::SchemaVerbosity::Full,
+                render::OriginClass::FirstParty,
+            );
             let rels = payload["relationships"]
                 .as_array()
                 .expect("relationships array present");
             // The user-facing rel-types survive; `_default` is filtered.
-            let names: Vec<&str> = rels
-                .iter()
-                .filter_map(|r| r["name"].as_str())
-                .collect();
+            let names: Vec<&str> = rels.iter().filter_map(|r| r["name"].as_str()).collect();
             assert!(
                 names.contains(&"PART_OF"),
                 "user-facing rel-types must survive; got {names:?}",
@@ -13824,10 +14185,7 @@ write_rules: []
             let propagating = spec["propagating_relationships"]
                 .as_array()
                 .expect("propagating_relationships array present");
-            let names: Vec<&str> = propagating
-                .iter()
-                .filter_map(|v| v.as_str())
-                .collect();
+            let names: Vec<&str> = propagating.iter().filter_map(|v| v.as_str()).collect();
             assert!(
                 names.contains(&"DEPENDS_ON") && names.contains(&"USES"),
                 "spec's propagating_relationships must list DEPENDS_ON and USES: {names:?}"
@@ -13883,9 +14241,7 @@ write_rules: []
         fn schema_payload_enum_fields_carry_allowed_values() {
             let (server, tmp) = setup();
             let payload = create_and_get_payload(&server, &tmp, "enum-fields");
-            let types = payload["schema"]["types"]
-                .as_array()
-                .expect("types array");
+            let types = payload["schema"]["types"].as_array().expect("types array");
 
             // Built-in `default@1.0.0` has at least one enum-typed field
             // (e.g. `status` on spec). Pin that the enum surfaces.
@@ -13952,7 +14308,7 @@ write_rules: []
             // structured-content response — byte-equality with the
             // priming payload from memstead_mem_create is the contract.
             let schema_result = server.memstead_schema(Parameters(SchemaParams {
-            verbosity: None,
+                verbosity: None,
                 name: Some(schema_ref.clone()),
                 mem: None,
             }));
@@ -13987,10 +14343,13 @@ write_rules: []
 
             // `used_by` itself must list the just-created mem on
             // both surfaces.
-            for (label, payload) in [("mem_create", &create_schema), ("memstead_schema", &schema_payload)] {
-                let used_by = payload["used_by"].as_array().unwrap_or_else(|| {
-                    panic!("{label}.used_by must be an array; got {payload}")
-                });
+            for (label, payload) in [
+                ("mem_create", &create_schema),
+                ("memstead_schema", &schema_payload),
+            ] {
+                let used_by = payload["used_by"]
+                    .as_array()
+                    .unwrap_or_else(|| panic!("{label}.used_by must be an array; got {payload}"));
                 let names: Vec<&str> = used_by.iter().filter_map(|v| v.as_str()).collect();
                 assert!(
                     names.contains(&"byte-identical"),
@@ -14040,7 +14399,7 @@ write_rules: []
 
             // MCP path: structured_content of the memstead_schema tool.
             let schema_result = server.memstead_schema(Parameters(SchemaParams {
-            verbosity: None,
+                verbosity: None,
                 name: Some("default@1.0.0".to_string()),
                 mem: None,
             }));
@@ -14068,13 +14427,17 @@ write_rules: []
                     .mounts()
                     .iter()
                     .filter(|m| {
-                        m.schema.as_ref().map(|s| s.to_string()).as_deref()
-                            == Some(canon.as_str())
+                        m.schema.as_ref().map(|s| s.to_string()).as_deref() == Some(canon.as_str())
                     })
                     .map(|m| m.mem.clone())
                     .collect();
                 used_by.sort();
-                render::build_schema_payload(&schema, used_by, render::SchemaVerbosity::Full, render::OriginClass::FirstParty)
+                render::build_schema_payload(
+                    &schema,
+                    used_by,
+                    render::SchemaVerbosity::Full,
+                    render::OriginClass::FirstParty,
+                )
             };
 
             assert_eq!(
@@ -14345,7 +14708,8 @@ write_rules: []
                 metadata: None,
                 metadata_unset: Some(vec!["level".to_string()]),
                 dry_run: Some(true),
-                note: None,                declare_relations: None,
+                note: None,
+                declare_relations: None,
             }));
             let env = envelope_payload(&result);
             assert_eq!(env["code"].as_str(), Some("REQUIRED_FIELD_UNSET"));
@@ -14375,9 +14739,10 @@ write_rules: []
                 title: "Probe".to_string(),
                 entity_type: "spec".to_string(),
                 mem: Some("specs".to_string()),
-                sections: Some(IndexMap::from_iter([
-                    ("idntity".to_string(), "typo".to_string()),
-                ])),
+                sections: Some(IndexMap::from_iter([(
+                    "idntity".to_string(),
+                    "typo".to_string(),
+                )])),
                 metadata: None,
                 relations: None,
                 dry_run: Some(true),
@@ -14560,8 +14925,7 @@ write_rules: []
             );
 
             assert_eq!(
-                create_declared[0]["target"],
-                update_declared[0]["target"],
+                create_declared[0]["target"], update_declared[0]["target"],
                 "same target on both sides",
             );
         }
@@ -14618,7 +14982,10 @@ write_rules: []
         use memstead_git_branch::workspace_store::engine_from_workspace_root;
 
         fn client() -> ClientId {
-            ClientId { name: "sibling".to_string(), version: "0".to_string() }
+            ClientId {
+                name: "sibling".to_string(),
+                version: "0".to_string(),
+            }
         }
 
         /// Create a `spec` (identity + purpose seeded) through the
@@ -14637,7 +15004,11 @@ write_rules: []
                 dry_run: None,
                 note: None,
             }));
-            assert!(!r.is_error.unwrap_or(false), "create {title}: {}", extract_text(&r));
+            assert!(
+                !r.is_error.unwrap_or(false),
+                "create {title}: {}",
+                extract_text(&r)
+            );
             let sc = r.structured_content.as_ref().expect("create envelope");
             sc["_hash"].as_str().expect("create _hash").to_string()
         }
@@ -14674,8 +15045,8 @@ write_rules: []
                     metadata_unset: Vec::new(),
                     dry_run: false,
                     declare_relations: Vec::new(),
-            relations_unset: Vec::new(),
-        },
+                    relations_unset: Vec::new(),
+                },
                 Actor::Cli,
                 Some(&client()),
                 None,
@@ -14711,7 +15082,10 @@ write_rules: []
             let y = EntityId::new("specs", "entity-y");
             sibling_update_purpose(&mut b, &y, y_hash, "sibling-edited Y");
             b.delete_entity(
-                memstead_base::DeleteEntityArgs { id: x.clone(), expected_hash: Some(x_hash) },
+                memstead_base::DeleteEntityArgs {
+                    id: x.clone(),
+                    expected_hash: Some(x_hash),
+                },
                 Actor::Cli,
                 Some(&client()),
                 None,
@@ -14724,7 +15098,10 @@ write_rules: []
             let r = read_entity(&server, "specs--entity-x");
             assert_eq!(r.is_error, Some(true), "deleted entity reads as error");
             let text = extract_text(&r);
-            assert!(text.contains("ENTITY_NOT_FOUND"), "text carries the code: {text}");
+            assert!(
+                text.contains("ENTITY_NOT_FOUND"),
+                "text carries the code: {text}"
+            );
             assert!(
                 text.contains("Engine snapshot reloaded"),
                 "404 text carries the MEM_RELOADED admonition: {text}",
@@ -14736,12 +15113,12 @@ write_rules: []
             let entries = notices[0]["changes"]["entries"]
                 .as_array()
                 .expect("detailed notice carries entries");
-            let removed_x = entries.iter().any(|e| {
-                e["id"] == "specs--entity-x" && e["action"] == "removed"
-            });
-            let modified_y = entries.iter().any(|e| {
-                e["id"] == "specs--entity-y" && e["action"] == "updated"
-            });
+            let removed_x = entries
+                .iter()
+                .any(|e| e["id"] == "specs--entity-x" && e["action"] == "removed");
+            let modified_y = entries
+                .iter()
+                .any(|e| e["id"] == "specs--entity-y" && e["action"] == "updated");
             assert!(removed_x, "window notice lists X as removed: {entries:?}");
             assert!(
                 modified_y,
@@ -14752,7 +15129,11 @@ write_rules: []
             // leak into the next op, and A's head is now current, so a
             // read of the untouched Z carries no notice.
             let z = read_entity(&server, "specs--entity-z");
-            assert!(!z.is_error.unwrap_or(false), "Z reads cleanly: {}", extract_text(&z));
+            assert!(
+                !z.is_error.unwrap_or(false),
+                "Z reads cleanly: {}",
+                extract_text(&z)
+            );
             assert!(
                 mem_changed(&z).is_none(),
                 "quiescent follow-on read carries no notice (no leak): {:?}",
@@ -14802,7 +15183,10 @@ write_rules: []
             }));
             assert_eq!(r.is_error, Some(true), "stale-hash write refuses");
             let text = extract_text(&r);
-            assert!(text.contains("HASH_MISMATCH"), "text carries the refusal code: {text}");
+            assert!(
+                text.contains("HASH_MISMATCH"),
+                "text carries the refusal code: {text}"
+            );
             assert!(
                 text.contains("Engine snapshot reloaded"),
                 "HASH_MISMATCH text now carries the MEM_RELOADED warning line: {text}",
@@ -14810,9 +15194,13 @@ write_rules: []
             let vc = mem_changed(&r).expect("HASH_MISMATCH carries mem_changed (regression guard)");
             let notices = vc.as_array().expect("notices array");
             assert_eq!(notices.len(), 1, "one notice for the collision reload");
-            let entries = notices[0]["changes"]["entries"].as_array().expect("entries");
+            let entries = notices[0]["changes"]["entries"]
+                .as_array()
+                .expect("entries");
             assert!(
-                entries.iter().any(|e| e["id"] == "specs--entity-x" && e["action"] == "updated"),
+                entries
+                    .iter()
+                    .any(|e| e["id"] == "specs--entity-x" && e["action"] == "updated"),
                 "notice lists the sibling X edit that caused the collision: {entries:?}",
             );
         }

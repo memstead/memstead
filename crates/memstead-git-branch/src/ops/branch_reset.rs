@@ -179,9 +179,10 @@ pub fn branch_reset_in_gitdir(
     // a sibling writer advanced the branch between our snapshot and
     // here — surfaces as a RefTransaction error rather than silently
     // overwriting their commit.
-    let name: FullName = branch_ref.as_str().try_into().map_err(|e| {
-        BackendError::Other(format!("invalid ref name {branch_ref:?}: {e}"))
-    })?;
+    let name: FullName = branch_ref
+        .as_str()
+        .try_into()
+        .map_err(|e| BackendError::Other(format!("invalid ref name {branch_ref:?}: {e}")))?;
     let edit = RefEdit {
         change: Change::Update {
             log: LogChange {
@@ -229,10 +230,11 @@ mod tests {
         )
     }
 
-    fn commit(gitdir: &PathBuf, branch: &str, file: &str, content: &str, subject: &str) -> String {
-        let writer =
-            GitTreeMemWriter::new(gitdir.clone(), format!("refs/heads/{branch}"));
-        writer.write_entity(Path::new(file), content.as_bytes()).unwrap();
+    fn commit(gitdir: &Path, branch: &str, file: &str, content: &str, subject: &str) -> String {
+        let writer = GitTreeMemWriter::new(gitdir.to_path_buf(), format!("refs/heads/{branch}"));
+        writer
+            .write_entity(Path::new(file), content.as_bytes())
+            .unwrap();
         writer.commit(subject, &CommitContext::internal()).unwrap()
     }
 
@@ -251,7 +253,7 @@ mod tests {
                     mode: RefLog::AndReference,
                     force_create_reflog: false,
                     message: "test-remote".into(),
-                    },
+                },
                 expected: PreviousValue::Any,
                 new: Target::Object(oid),
             },
@@ -350,13 +352,10 @@ mod tests {
             migration_target: None,
         };
         let backend = crate::storage::instantiate_full_backend(&mount).unwrap();
-        let mut engine =
-            memstead_base::Engine::from_mounts(vec![(mount, backend)]).unwrap();
+        let mut engine = memstead_base::Engine::from_mounts(vec![(mount, backend)]).unwrap();
         engine.set_git_branch_ops(crate::storage::FULL_GIT_BRANCH_OPS);
 
-        let err = engine
-            .branch_reset("specs", &_sha_a)
-            .unwrap_err();
+        let err = engine.branch_reset("specs", &_sha_a).unwrap_err();
         match err {
             memstead_base::EngineError::PushedCommitsProtected {
                 mem,

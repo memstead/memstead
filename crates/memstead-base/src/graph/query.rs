@@ -147,7 +147,8 @@ pub fn would_cycle(
         return Some(vec![from.clone()]);
     }
 
-    let mut parent: std::collections::HashMap<EntityId, EntityId> = std::collections::HashMap::new();
+    let mut parent: std::collections::HashMap<EntityId, EntityId> =
+        std::collections::HashMap::new();
     let mut visited: HashSet<EntityId> = HashSet::new();
     visited.insert(to.clone());
 
@@ -557,7 +558,12 @@ mod tests {
     fn would_cycle_self_loop_always_reported() {
         let mut store = Store::new();
         store.upsert(EntityId("a".into()), entity("a", "s", false));
-        let path = would_cycle(&store, &EntityId("a".into()), &EntityId("a".into()), "PART_OF");
+        let path = would_cycle(
+            &store,
+            &EntityId("a".into()),
+            &EntityId("a".into()),
+            "PART_OF",
+        );
         assert_eq!(path, Some(vec![EntityId("a".into())]));
     }
 
@@ -568,8 +574,13 @@ mod tests {
         store.upsert(EntityId("a".into()), entity("a", "s", false));
         store.upsert(EntityId("b".into()), entity("b", "s", false));
         add_edge(&mut store, "a", "b", "PART_OF");
-        let path = would_cycle(&store, &EntityId("b".into()), &EntityId("a".into()), "PART_OF")
-            .expect("cycle");
+        let path = would_cycle(
+            &store,
+            &EntityId("b".into()),
+            &EntityId("a".into()),
+            "PART_OF",
+        )
+        .expect("cycle");
         assert_eq!(path, vec![EntityId("a".into()), EntityId("b".into())]);
     }
 
@@ -609,8 +620,13 @@ mod tests {
         store.upsert(EntityId("b".into()), entity("b", "s", false));
         add_edge(&mut store, "a", "b", "DEPENDS_ON");
         assert!(
-            would_cycle(&store, &EntityId("b".into()), &EntityId("a".into()), "PART_OF")
-                .is_none()
+            would_cycle(
+                &store,
+                &EntityId("b".into()),
+                &EntityId("a".into()),
+                "PART_OF"
+            )
+            .is_none()
         );
     }
 
@@ -622,8 +638,13 @@ mod tests {
         }
         add_edge(&mut store, "c", "d", "PART_OF");
         assert!(
-            would_cycle(&store, &EntityId("a".into()), &EntityId("b".into()), "PART_OF")
-                .is_none()
+            would_cycle(
+                &store,
+                &EntityId("a".into()),
+                &EntityId("b".into()),
+                "PART_OF"
+            )
+            .is_none()
         );
     }
 
@@ -641,21 +662,33 @@ mod tests {
         add_edge(&mut store, "a", "c", "PART_OF");
         // Proposed a -PART_OF-> b is fine — a already -PART_OF-> b.
         assert!(
-            would_cycle(&store, &EntityId("a".into()), &EntityId("b".into()), "PART_OF")
-                .is_none(),
+            would_cycle(
+                &store,
+                &EntityId("a".into()),
+                &EntityId("b".into()),
+                "PART_OF"
+            )
+            .is_none(),
             "sibling paths must not trip"
         );
         // Proposed b -PART_OF-> a would close a cycle a->b->a.
         assert!(
-            would_cycle(&store, &EntityId("b".into()), &EntityId("a".into()), "PART_OF")
-                .is_some()
+            would_cycle(
+                &store,
+                &EntityId("b".into()),
+                &EntityId("a".into()),
+                "PART_OF"
+            )
+            .is_some()
         );
     }
 
     #[test]
     fn most_connected_distinguishes_hub_vs_fanout() {
         let mut store = Store::new();
-        for id in ["hub", "fanout", "r1", "r2", "r3", "r4", "t1", "t2", "t3", "t4"] {
+        for id in [
+            "hub", "fanout", "r1", "r2", "r3", "r4", "t1", "t2", "t3", "t4",
+        ] {
             store.upsert(EntityId(id.into()), entity(id, "s", false));
         }
         // hub: 4 incoming, 0 outgoing
@@ -699,7 +732,15 @@ mod tests {
     fn most_connected_ranks_by_dependency_not_mention() {
         let mut store = Store::new();
         for id in [
-            "mentionhub", "dephub", "m1", "m2", "m3", "m4", "m5", "d1", "d2",
+            "mentionhub",
+            "dephub",
+            "m1",
+            "m2",
+            "m3",
+            "m4",
+            "m5",
+            "d1",
+            "d2",
         ] {
             store.upsert(EntityId(id.into()), entity(id, "s", false));
         }
@@ -725,6 +766,9 @@ mod tests {
         // mentionhub's higher raw total — the co-mention inflation is gone.
         let mh_pos = top.iter().position(|c| c.id.0 == "mentionhub").unwrap();
         let dh_pos = top.iter().position(|c| c.id.0 == "dephub").unwrap();
-        assert!(dh_pos < mh_pos, "dependency hub must outrank co-mention hub");
+        assert!(
+            dh_pos < mh_pos,
+            "dependency hub must outrank co-mention hub"
+        );
     }
 }

@@ -73,7 +73,10 @@ pub fn render_cli_error(
             serde_json::to_string(&envelope).unwrap_or_default(),
         )
     } else {
-        (ErrorStream::Stderr, format!("memstead: ERROR [{code}]: {message}"))
+        (
+            ErrorStream::Stderr,
+            format!("memstead: ERROR [{code}]: {message}"),
+        )
     }
 }
 
@@ -93,6 +96,18 @@ pub fn print_cli_error(
         ErrorStream::Stdout => println!("{line}"),
         ErrorStream::Stderr => eprintln!("{line}"),
     }
+}
+
+/// Print markdown (or JSON when requested) to stdout.
+pub fn print_markdown(markdown: &str) {
+    println!("{markdown}");
+}
+
+/// Print a serializable value as pretty JSON to stdout.
+pub fn print_json<T: Serialize>(value: &T) -> anyhow::Result<()> {
+    let s = serde_json::to_string_pretty(value)?;
+    println!("{s}");
+    Ok(())
 }
 
 #[cfg(test)]
@@ -119,16 +134,4 @@ mod tests {
         assert_eq!(stream, ErrorStream::Stderr);
         assert!(line.starts_with("memstead: ERROR [ENTITY_NOT_FOUND]: "));
     }
-}
-
-/// Print markdown (or JSON when requested) to stdout.
-pub fn print_markdown(markdown: &str) {
-    println!("{markdown}");
-}
-
-/// Print a serializable value as pretty JSON to stdout.
-pub fn print_json<T: Serialize>(value: &T) -> anyhow::Result<()> {
-    let s = serde_json::to_string_pretty(value)?;
-    println!("{s}");
-    Ok(())
 }

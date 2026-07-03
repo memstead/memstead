@@ -17,19 +17,18 @@ use std::sync::Arc;
 
 use crate::backend::{BackendError, MemBackend};
 use crate::engine_fallback_type;
+use crate::entity::EntityId;
 use crate::entity::generator::generate_markdown;
 use crate::entity::loader::parse_entries;
 use crate::entity::store_builder::push_entities_into_store;
-use crate::entity::EntityId;
-use crate::ops::WarningHint;
 use crate::mem::MemOrigin;
+use crate::ops::WarningHint;
 use crate::workspace::{Mount, MountStorage, WorkspaceSettings};
 
 use super::boot::collect_source_entries;
 use super::{BackendFactory, Engine, EngineError, GitBranchOps, MountedBackend};
 
 impl Engine {
-
     /// Replace the workspace-level settings. Called by
     /// [`Self::from_workspace_root`] (and the full counterpart) after
     /// reading `.memstead/workspace.toml`. Tests / direct callers leave
@@ -93,7 +92,10 @@ impl Engine {
                 crate::workspace::MountStorage::GitBranch { gitdir, .. } => Some(gitdir.clone()),
                 _ => None,
             })
-            .or_else(|| self.workspace_root().map(|r| r.join("mem-repo").join(".git")))
+            .or_else(|| {
+                self.workspace_root()
+                    .map(|r| r.join("mem-repo").join(".git"))
+            })
             .ok_or_else(|| {
                 EngineError::Mem(
                     "schema install requires a mem-repo workspace (no git-branch mount and \
@@ -128,10 +130,7 @@ impl Engine {
         &mut self,
         mem_name: &str,
     ) -> Result<Option<Box<dyn MemBackend>>, EngineError> {
-        let pos = self
-            .mounts
-            .iter()
-            .position(|m| m.mount.mem == mem_name);
+        let pos = self.mounts.iter().position(|m| m.mount.mem == mem_name);
         let Some(idx) = pos else {
             return Ok(None);
         };
@@ -223,11 +222,7 @@ impl Engine {
                 source_origin: existing.render_source(),
             });
         }
-        if self
-            .mem_router
-            .archive_path_for_mem(&mount.mem)
-            .is_some()
-        {
+        if self.mem_router.archive_path_for_mem(&mount.mem).is_some() {
             return Err(EngineError::MemNameCollision {
                 name: mount.mem.clone(),
                 source_origin: "attached read mem".to_string(),
@@ -239,14 +234,10 @@ impl Engine {
         // the authoritative pin (mirrors the boot path), so a mem
         // re-registered or mounted from another machine resolves from
         // its own backend, not this workspace's mount expectation.
-        let mem_config = backend
-            .read_mem_config()
-            .ok()
-            .flatten()
-            .and_then(|bytes| {
-                let value: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
-                memstead_schema::config::parse_mem_config(&value).ok()
-            });
+        let mem_config = backend.read_mem_config().ok().flatten().and_then(|bytes| {
+            let value: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+            memstead_schema::config::parse_mem_config(&value).ok()
+        });
 
         // Step 3: schema resolution. `MemConfig.schema` is the
         // authoritative settled pin; `Mount.schema` is the fallback when
@@ -303,11 +294,7 @@ impl Engine {
         let (entries, read_errors) = collect_source_entries(backend.as_ref())?;
         let load_result = parse_entries(entries, read_errors, &mount.mem, schema.as_ref());
 
-        let mut mem_names: Vec<String> = self
-            .mounts
-            .iter()
-            .map(|m| m.mount.mem.clone())
-            .collect();
+        let mut mem_names: Vec<String> = self.mounts.iter().map(|m| m.mount.mem.clone()).collect();
         mem_names.push(mount.mem.clone());
         let known_suffixes: Vec<String> = mem_names
             .iter()
@@ -379,11 +366,7 @@ impl Engine {
             | MountStorage::Archive { .. }
             | MountStorage::InMemory => None,
         };
-        Arc::make_mut(&mut self.mem_router).add_writable(
-            mem_name_for_router,
-            dir,
-            origin,
-        );
+        Arc::make_mut(&mut self.mem_router).add_writable(mem_name_for_router, dir, origin);
 
         // Step 8: invalidate dependent memos.
         self.invalidate_communities();
@@ -595,9 +578,8 @@ impl Engine {
         let mut value: serde_json::Value = serde_json::from_slice(&bytes)
             .map_err(|e| EngineError::Mem(format!("parse mem config for pin update: {e}")))?;
         value["schema"] = serde_json::Value::String(target.as_display());
-        let new_bytes = serde_json::to_vec_pretty(&value).map_err(|e| {
-            EngineError::Mem(format!("serialize mem config for pin update: {e}"))
-        })?;
+        let new_bytes = serde_json::to_vec_pretty(&value)
+            .map_err(|e| EngineError::Mem(format!("serialize mem config for pin update: {e}")))?;
         self.mounts[mount_idx]
             .backend
             .write_mem_config(&new_bytes)
@@ -773,8 +755,7 @@ impl Engine {
         // Authored schemas live at the fixed `<workspace>/.memstead/schemas/`
         // location (the `schemas_dir` key is retired). Absent dir → the
         // schema-source chain falls through to cache/built-in, as before.
-        let fixed_schemas_dir =
-            workspace_root.map(|r| r.join(".memstead").join("schemas"));
+        let fixed_schemas_dir = workspace_root.map(|r| r.join(".memstead").join("schemas"));
         let workspace_schemas_dir = fixed_schemas_dir.as_deref();
         match &mount.mount.storage {
             MountStorage::Folder { path } => crate::ops::export::export_mem(
@@ -784,9 +765,7 @@ impl Engine {
                 workspace_root,
                 workspace_schemas_dir,
             )
-            .map_err(|e| {
-                EngineError::Backend(BackendError::Other(format!("export_mem: {e}")))
-            }),
+            .map_err(|e| EngineError::Backend(BackendError::Other(format!("export_mem: {e}")))),
             MountStorage::GitBranch { gitdir, branch } => {
                 let hook = self.git_branch_ops.as_ref().ok_or_else(|| {
                     EngineError::Backend(BackendError::Other(
@@ -815,9 +794,7 @@ impl Engine {
                 )
                 .map_err(EngineError::Backend)
             }
-            MountStorage::Archive { .. } => {
-                Err(EngineError::Backend(BackendError::Sealed))
-            }
+            MountStorage::Archive { .. } => Err(EngineError::Backend(BackendError::Sealed)),
             // `.mem` export from an in-memory mem lands with the
             // writable-session-server plan (it needs a backend-level
             // archive builder); this plan adds the backend, not the
@@ -880,23 +857,18 @@ impl Engine {
         }
 
         let mounted = &mut self.mounts[mount_idx];
-        let mut config = mounted
-            .mem_config
-            .clone()
-            .ok_or_else(|| {
-                EngineError::InvalidInput(format!(
-                    "mem '{mem_name}' has no loaded MemConfig — \
+        let mut config = mounted.mem_config.clone().ok_or_else(|| {
+            EngineError::InvalidInput(format!(
+                "mem '{mem_name}' has no loaded MemConfig — \
                      cannot set version (initialize the mem via `memstead init` \
                      or `memstead mem create` first)"
-                ))
-            })?;
+            ))
+        })?;
         let old_version = config.version.clone();
         config.version = Some(new_version.clone());
 
         let mut bytes = serde_json::to_vec_pretty(&config).map_err(|e| {
-            EngineError::InvalidInput(format!(
-                "could not serialize mem config: {e}"
-            ))
+            EngineError::InvalidInput(format!("could not serialize mem config: {e}"))
         })?;
         bytes.push(b'\n');
         mounted.backend.write_mem_config_with_note(&bytes, note)?;
@@ -947,23 +919,18 @@ impl Engine {
         }
 
         let mounted = &mut self.mounts[mount_idx];
-        let mut config = mounted
-            .mem_config
-            .clone()
-            .ok_or_else(|| {
-                EngineError::InvalidInput(format!(
-                    "mem '{mem_name}' has no loaded MemConfig — \
+        let mut config = mounted.mem_config.clone().ok_or_else(|| {
+            EngineError::InvalidInput(format!(
+                "mem '{mem_name}' has no loaded MemConfig — \
                      cannot set description (initialize the mem via `memstead init` \
                      or `memstead mem create` first)"
-                ))
-            })?;
+            ))
+        })?;
         let old_description = config.description.clone();
         config.description = new_description.clone();
 
         let mut bytes = serde_json::to_vec_pretty(&config).map_err(|e| {
-            EngineError::InvalidInput(format!(
-                "could not serialize mem config: {e}"
-            ))
+            EngineError::InvalidInput(format!("could not serialize mem config: {e}"))
         })?;
         bytes.push(b'\n');
         mounted.backend.write_mem_config_with_note(&bytes, note)?;
@@ -1050,9 +1017,7 @@ impl Engine {
             previous = config.sync_state.remove(key);
             removed = previous.is_some();
         } else {
-            previous = config
-                .sync_state
-                .insert(key.to_string(), token.to_string());
+            previous = config.sync_state.insert(key.to_string(), token.to_string());
             removed = false;
         }
 
@@ -1098,10 +1063,7 @@ impl Engine {
     /// full-flavour engine where they have meaning.
     ///
     /// Invalidates community + search-index memos on success.
-    pub fn reload_one_mem(
-        &mut self,
-        mem: &str,
-    ) -> Result<crate::ops::ReloadResult, EngineError> {
+    pub fn reload_one_mem(&mut self, mem: &str) -> Result<crate::ops::ReloadResult, EngineError> {
         // Per-mem reload is intentionally silent on the engine-
         // wide `load_warnings` accumulator — matches full's
         // `reload_one_mem`. A LOCAL sink absorbs any warnings
@@ -1142,8 +1104,7 @@ impl Engine {
             .filter(|e| !e.stub && e.mem == mem)
             .map(|e| (e.id.clone(), e.content_hash.clone()))
             .collect();
-        let pre_ids: std::collections::HashSet<EntityId> =
-            pre.keys().cloned().collect();
+        let pre_ids: std::collections::HashSet<EntityId> = pre.keys().cloned().collect();
 
         // Walk the backend; surface read-time errors instead of
         // mutating the store on a failed reload.
@@ -1154,11 +1115,7 @@ impl Engine {
         // Build the LoadCollector inputs — mem roster + last-
         // segment suffixes — so the parser pipeline can emit
         // typed drift warnings into the caller's sink.
-        let mem_names: Vec<String> = self
-            .mounts
-            .iter()
-            .map(|m| m.mount.mem.clone())
-            .collect();
+        let mem_names: Vec<String> = self.mounts.iter().map(|m| m.mount.mem.clone()).collect();
         let known_suffixes: Vec<String> = mem_names
             .iter()
             .map(|n| crate::entity::store_builder::last_segment_suffix(n).to_string())
@@ -1183,11 +1140,11 @@ impl Engine {
         // scan runs against the whole store. Hand-edits arriving via
         // sibling-writer commits get the same gauntlet boot enforces
         // (grammar / unknown_rel_type / shape / cycle).
-        let mount_caps: std::collections::HashMap<String, crate::workspace::MountCapability> =
-            self.mounts
-                .iter()
-                .map(|m| (m.mount.mem.clone(), m.mount.capability))
-                .collect();
+        let mount_caps: std::collections::HashMap<String, crate::workspace::MountCapability> = self
+            .mounts
+            .iter()
+            .map(|m| (m.mount.mem.clone(), m.mount.capability))
+            .collect();
         // Restore cross-mem edges that point INTO this mem. The
         // removal cascade above dropped their incoming mirrors and the
         // re-push only rebuilt edges authored by this mem's own
@@ -1195,10 +1152,7 @@ impl Engine {
         // index until a workspace-wide reload. Reconstruct from the
         // authoritative source records (in-memory only — no other mem is
         // re-read), then let the remap pass below reclassify alias sources.
-        crate::entity::store_builder::reconstruct_incoming_cross_mem_edges(
-            &mut self.store,
-            mem,
-        );
+        crate::entity::store_builder::reconstruct_incoming_cross_mem_edges(&mut self.store, mem);
         crate::entity::store_builder::validate_loaded_relations(
             &mut self.store,
             &self.schemas,
@@ -1252,9 +1206,9 @@ impl Engine {
         })
     }
 
-    /// Rich-shape variant of [`Self::reload_one_mem`] that returns
-    /// a [`crate::ops::ReloadReport`] (mem + head_before + head_after
-    /// + entities_loaded + changed_entity_ids) instead of the slim
+    /// Rich-shape variant of [`Self::reload_one_mem`] that returns a
+    /// [`crate::ops::ReloadReport`] (mem + head_before + head_after +
+    /// entities_loaded + changed_entity_ids) instead of the slim
     /// [`crate::ops::ReloadResult`]. Handler-facing wrapper consumed
     /// by the `memstead_reload` MCP tool — the rich shape is the wire
     /// contract MCP callers depend on; the slim form stays for
@@ -1341,8 +1295,8 @@ impl Engine {
         let mut changed_entity_ids: Vec<EntityId> = result
             .added
             .into_iter()
-            .chain(result.changed.into_iter())
-            .chain(result.removed.into_iter())
+            .chain(result.changed)
+            .chain(result.removed)
             .collect();
         changed_entity_ids.sort_by(|a, b| a.0.cmp(&b.0));
 
@@ -1388,11 +1342,7 @@ impl Engine {
         &mut self,
     ) -> Result<Vec<crate::ops::ReloadReport>, EngineError> {
         self.refresh_workspace_settings_if_possible();
-        let names: Vec<String> = self
-            .mounts
-            .iter()
-            .map(|m| m.mount.mem.clone())
-            .collect();
+        let names: Vec<String> = self.mounts.iter().map(|m| m.mount.mem.clone()).collect();
         let mut out = Vec::with_capacity(names.len());
         for name in names {
             let report = self.reload_one_mem_report(&name)?;
@@ -1442,11 +1392,7 @@ impl Engine {
     pub fn reload_each_writable_mem(
         &mut self,
     ) -> Result<Vec<(String, crate::ops::ReloadResult)>, EngineError> {
-        let names: Vec<String> = self
-            .mounts
-            .iter()
-            .map(|m| m.mount.mem.clone())
-            .collect();
+        let names: Vec<String> = self.mounts.iter().map(|m| m.mount.mem.clone()).collect();
         // Workspace-wide reload semantics: take the engine-wide
         // sink, clear it, route per-mem inner reloads through it,
         // put it back. The result is `self.load_warnings` carries
@@ -1475,20 +1421,15 @@ impl Engine {
 
 #[cfg(test)]
 mod tests {
-    
-    
 
-    
     use tempfile::TempDir;
 
     use crate::backend::{BackendError, MemBackend};
     use crate::engine::test_helpers::*;
     use crate::engine::{Engine, EngineError};
+    use crate::mem::MemOrigin;
     use crate::ops::WarningHint;
     use crate::storage::{ArchiveBackend, FilesystemMemWriter};
-    use crate::mem::MemOrigin;
-    
-    
 
     #[test]
     fn reload_each_writable_mem_repopulates_load_warnings() {
@@ -1503,10 +1444,14 @@ mod tests {
             Box::new(writer) as Box<dyn MemBackend>,
         )])
         .unwrap();
-        assert!(engine.load_warnings().is_empty(), "clean boot has no warnings");
+        assert!(
+            engine.load_warnings().is_empty(),
+            "clean boot has no warnings"
+        );
 
         // Drop a markdown file with two `## Identity` headings.
-        let body = "---\ntype: spec\n---\n# Dup\n\n## Identity\n\nfirst.\n\n## Identity\n\nsecond.\n";
+        let body =
+            "---\ntype: spec\n---\n# Dup\n\n## Identity\n\nfirst.\n\n## Identity\n\nsecond.\n";
         std::fs::write(mem_dir.join("dup.md"), body).unwrap();
 
         engine.reload_each_writable_mem().unwrap();
@@ -1530,8 +1475,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let mem_dir = tmp.path().to_path_buf();
         // Seed a clean target entity at boot.
-        let target_body =
-            "---\ntype: spec\n---\n# Target\n\n## Identity\n\nThe target.\n";
+        let target_body = "---\ntype: spec\n---\n# Target\n\n## Identity\n\nThe target.\n";
         std::fs::write(mem_dir.join("target.md"), target_body).unwrap();
         let writer = FilesystemMemWriter::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
@@ -1550,8 +1494,7 @@ mod tests {
         );
 
         // Sibling-writer drops a new file with an unknown rel-type.
-        let drift_body =
-            "---\ntype: spec\n---\n# Source\n\n## Identity\n\nThe source.\n\n## Relationships\n\n- **MADE_UP_TYPE**: [[specs--target]]\n";
+        let drift_body = "---\ntype: spec\n---\n# Source\n\n## Identity\n\nThe source.\n\n## Relationships\n\n- **MADE_UP_TYPE**: [[specs--target]]\n";
         std::fs::write(mem_dir.join("source.md"), drift_body).unwrap();
 
         engine.reload_each_writable_mem().unwrap();
@@ -1602,7 +1545,11 @@ mod tests {
         engine.reload_one_mem("specs").unwrap();
         let post = engine.load_warnings();
         // Pristine: same as boot snapshot.
-        assert_eq!(post.len(), pre.len(), "single-mem reload must not touch sink");
+        assert_eq!(
+            post.len(),
+            pre.len(),
+            "single-mem reload must not touch sink"
+        );
     }
 
     /// A cross-mem edge `A→B` must survive a
@@ -1643,10 +1590,20 @@ mod tests {
 
         let (actor, client) = cli_actor();
         let source = engine
-            .create_entity(empty_create_args("specs", "Source"), actor, Some(&client), None)
+            .create_entity(
+                empty_create_args("specs", "Source"),
+                actor,
+                Some(&client),
+                None,
+            )
             .unwrap();
         let target = engine
-            .create_entity(empty_create_args("memos", "Target"), actor, Some(&client), None)
+            .create_entity(
+                empty_create_args("memos", "Target"),
+                actor,
+                Some(&client),
+                None,
+            )
             .unwrap();
         engine
             .relate_entity(
@@ -1750,10 +1707,20 @@ mod tests {
 
         let (actor, client) = cli_actor();
         let source = engine
-            .create_entity(empty_create_args("specs", "Source"), actor, Some(&client), None)
+            .create_entity(
+                empty_create_args("specs", "Source"),
+                actor,
+                Some(&client),
+                None,
+            )
             .unwrap();
         let target = engine
-            .create_entity(empty_create_args("memos", "Target"), actor, Some(&client), None)
+            .create_entity(
+                empty_create_args("memos", "Target"),
+                actor,
+                Some(&client),
+                None,
+            )
             .unwrap();
         engine
             .relate_entity(
@@ -1783,7 +1750,10 @@ mod tests {
             .incoming(&target.id)
             .iter()
             .any(|edge| edge.from == source.id);
-        assert!(out && inc, "outgoing cross-mem edge must survive a source-mem reload");
+        assert!(
+            out && inc,
+            "outgoing cross-mem edge must survive a source-mem reload"
+        );
     }
 
     #[test]
@@ -1873,7 +1843,10 @@ mod tests {
         let archive_path = build_archive(
             tmp.path(),
             "ext",
-            &[(".memstead/config.json", b"{\"format\":1,\"schema\":\"default@1.0.0\",\"version\":\"1.0.0\"}")],
+            &[(
+                ".memstead/config.json",
+                b"{\"format\":1,\"schema\":\"default@1.0.0\",\"version\":\"1.0.0\"}",
+            )],
         );
         let engine = Engine::from_mounts(vec![(
             archive_mount("ext", archive_path.clone()),
@@ -1898,8 +1871,14 @@ mod tests {
             result.written, 0,
             "freshly-created entity's file already matches generated markdown"
         );
-        assert_eq!(result.unchanged, 1, "the one seeded entity counts as unchanged");
-        assert!(result.skipped_mounts.is_empty(), "folder-only workspace has no skipped mounts");
+        assert_eq!(
+            result.unchanged, 1,
+            "the one seeded entity counts as unchanged"
+        );
+        assert!(
+            result.skipped_mounts.is_empty(),
+            "folder-only workspace has no skipped mounts"
+        );
     }
 
     #[test]
@@ -1917,7 +1896,11 @@ mod tests {
         let result = engine.export_markdown(None, None).unwrap();
         assert_eq!(result.written, 0);
         assert_eq!(result.unchanged, 0);
-        assert_eq!(result.skipped_mounts.len(), 1, "archive mount is in the skipped list");
+        assert_eq!(
+            result.skipped_mounts.len(),
+            1,
+            "archive mount is in the skipped list"
+        );
         let entry = &result.skipped_mounts[0];
         assert_eq!(entry.mem, "ext");
         assert_eq!(entry.active_backend, "archive");
@@ -1943,7 +1926,6 @@ mod tests {
         assert_eq!(details["active_backend"], "archive");
         assert_eq!(details["supported_backends"], serde_json::json!(["folder"]));
     }
-
 
     #[test]
     fn register_writable_mem_adds_mount_and_router_entry() {
@@ -2018,7 +2000,9 @@ mod tests {
                 "totally-not-a-schema",
                 semver::Version::new(9, 9, 9),
             )),
-            storage: crate::workspace::MountStorage::Folder { path: mem_b.clone() },
+            storage: crate::workspace::MountStorage::Folder {
+                path: mem_b.clone(),
+            },
             capability: crate::workspace::MountCapability::Write,
             lifecycle: crate::workspace::MountLifecycle::Eager,
             cross_linkable: true,
@@ -2077,15 +2061,17 @@ mod tests {
             )
             .unwrap_err();
         match err {
-            EngineError::MemNameCollision { name, source_origin } => {
+            EngineError::MemNameCollision {
+                name,
+                source_origin,
+            } => {
                 assert_eq!(name, "alpha");
                 // post-restructure source_origin references
                 // `.memstead/workspace.toml`; the assertion stays
                 // permissive (substring OR non-empty) so the test
                 // doesn't lock the exact wording.
                 assert!(
-                    source_origin.contains(".memstead/workspace.toml")
-                        || !source_origin.is_empty()
+                    source_origin.contains(".memstead/workspace.toml") || !source_origin.is_empty()
                 );
             }
             other => panic!("expected MemNameCollision, got {other:?}"),
@@ -2339,7 +2325,11 @@ mod tests {
         assert!(result.added.is_empty());
         assert!(result.changed.is_empty());
         assert_eq!(
-            result.removed.iter().map(|i| i.as_ref()).collect::<Vec<_>>(),
+            result
+                .removed
+                .iter()
+                .map(|i| i.as_ref())
+                .collect::<Vec<_>>(),
             vec!["specs--lonely-three"]
         );
     }
@@ -2358,7 +2348,11 @@ mod tests {
         let result = engine.reload_one_mem("specs").unwrap();
         assert!(result.added.is_empty());
         assert_eq!(
-            result.changed.iter().map(|i| i.as_ref()).collect::<Vec<_>>(),
+            result
+                .changed
+                .iter()
+                .map(|i| i.as_ref())
+                .collect::<Vec<_>>(),
             vec!["specs--source-one"]
         );
         assert!(result.removed.is_empty());
@@ -2450,11 +2444,19 @@ mod tests {
             vec!["specs--new-via-disk"]
         );
         assert_eq!(
-            result.removed.iter().map(|i| i.as_ref()).collect::<Vec<_>>(),
+            result
+                .removed
+                .iter()
+                .map(|i| i.as_ref())
+                .collect::<Vec<_>>(),
             vec!["specs--lonely-three"]
         );
         assert_eq!(
-            result.changed.iter().map(|i| i.as_ref()).collect::<Vec<_>>(),
+            result
+                .changed
+                .iter()
+                .map(|i| i.as_ref())
+                .collect::<Vec<_>>(),
             vec!["specs--source-one"]
         );
     }
@@ -2582,12 +2584,15 @@ mod tests {
         engine.reload_each_writable_mem_reports().unwrap();
 
         let rules = &engine.settings().mem_create_rules;
-        assert_eq!(rules.len(), 1, "workspace-wide reload must refresh the policy");
+        assert_eq!(
+            rules.len(),
+            1,
+            "workspace-wide reload must refresh the policy"
+        );
         assert_eq!(rules[0].pattern, "exec-*");
     }
 
     // ---- Engine::reload_if_stale ------------------------------
-
 
     // ---- set_mem_schema / dual-pin migration ----
 
@@ -2646,7 +2651,13 @@ community:
         format!("name: doc\ndescription: t\nwhen_to_use: tests\n{metadata}{MIG_TYPE_TAIL}")
     }
 
-    fn write_mig_schema(root: &std::path::Path, dir: &str, name: &str, version: &str, with_status: bool) {
+    fn write_mig_schema(
+        root: &std::path::Path,
+        dir: &str,
+        name: &str,
+        version: &str,
+        with_status: bool,
+    ) {
         let d = root.join(dir);
         std::fs::create_dir_all(d.join("types")).unwrap();
         std::fs::write(d.join("schema.yaml"), mig_manifest(name, version)).unwrap();
@@ -2669,17 +2680,18 @@ community:
         let mut mount = folder_mount("specs", mem_dir);
         mount.schema = Some("mig-a@0.1.0".parse().unwrap());
         let mut engine = Engine::from_mounts_with_schemas_dir(
-            vec![(mount, Box::new(writer) as Box<dyn crate::backend::MemBackend>)],
+            vec![(
+                mount,
+                Box::new(writer) as Box<dyn crate::backend::MemBackend>,
+            )],
             Some(&schemas_dir),
         )
         .unwrap();
         for title in ["One", "Two"] {
             let mut args = empty_create_args("specs", title);
             args.entity_type = "doc".to_string();
-            args.sections = indexmap::IndexMap::from_iter([(
-                "body".to_string(),
-                "content".to_string(),
-            )]);
+            args.sections =
+                indexmap::IndexMap::from_iter([("body".to_string(), "content".to_string())]);
             engine
                 .create_entity(args, crate::vcs::Actor::Cli, None, None)
                 .expect("conformant create under mig-a");
@@ -2786,14 +2798,18 @@ community:
 
         // 1. Non-integral target → migration starts; pin unchanged.
         let out = engine.set_mem_schema("specs", &target).unwrap();
-        assert_eq!(out.outcome, crate::engine::SetSchemaResult::MigrationStarted);
+        assert_eq!(
+            out.outcome,
+            crate::engine::SetSchemaResult::MigrationStarted
+        );
         assert_eq!(out.schema_pin, "mig-a@0.1.0");
         assert_eq!(out.migration_target.as_deref(), Some("mig-b@0.1.0"));
         assert_eq!(out.findings.len(), 2, "both entities lack `status`");
-        assert!(out
-            .findings
-            .iter()
-            .all(|f| f.code == "REQUIRED_FIELD_UNSET"));
+        assert!(
+            out.findings
+                .iter()
+                .all(|f| f.code == "REQUIRED_FIELD_UNSET")
+        );
 
         // 2. Reads of not-yet-repaired entities stay permissive.
         let one = crate::entity::EntityId::new("specs", "one");
@@ -2801,7 +2817,10 @@ community:
 
         // 3. Re-issue while unrepaired → pending, full remaining set.
         let out = engine.set_mem_schema("specs", &target).unwrap();
-        assert_eq!(out.outcome, crate::engine::SetSchemaResult::MigrationPending);
+        assert_eq!(
+            out.outcome,
+            crate::engine::SetSchemaResult::MigrationPending
+        );
         assert_eq!(out.findings.len(), 2);
 
         // 4. Writes validate against the TARGET: `status` is unknown
@@ -2813,10 +2832,7 @@ community:
             sections: indexmap::IndexMap::new(),
             append_sections: indexmap::IndexMap::new(),
             patch_sections: indexmap::IndexMap::new(),
-            metadata: indexmap::IndexMap::from_iter([(
-                "status".to_string(),
-                "banana".to_string(),
-            )]),
+            metadata: indexmap::IndexMap::from_iter([("status".to_string(), "banana".to_string())]),
             metadata_unset: Vec::new(),
             declare_relations: Vec::new(),
             dry_run: false,
@@ -2826,15 +2842,17 @@ community:
             .update_entity(bad.clone(), crate::vcs::Actor::Cli, None, None)
             .unwrap_err();
         assert_eq!(err.code(), "INVALID_ENUM_VALUE", "strict against target");
-        bad.metadata =
-            indexmap::IndexMap::from_iter([("status".to_string(), "open".to_string())]);
+        bad.metadata = indexmap::IndexMap::from_iter([("status".to_string(), "open".to_string())]);
         engine
             .update_entity(bad, crate::vcs::Actor::Cli, None, None)
             .expect("repair write validated against the migration target");
 
         // 5. One entity repaired → still pending, findings shrink.
         let out = engine.set_mem_schema("specs", &target).unwrap();
-        assert_eq!(out.outcome, crate::engine::SetSchemaResult::MigrationPending);
+        assert_eq!(
+            out.outcome,
+            crate::engine::SetSchemaResult::MigrationPending
+        );
         assert_eq!(out.findings.len(), 1, "only `two` remains non-integral");
 
         // 6. Repair the second entity, re-issue → atomic switch.
@@ -2845,10 +2863,7 @@ community:
             sections: indexmap::IndexMap::new(),
             append_sections: indexmap::IndexMap::new(),
             patch_sections: indexmap::IndexMap::new(),
-            metadata: indexmap::IndexMap::from_iter([(
-                "status".to_string(),
-                "closed".to_string(),
-            )]),
+            metadata: indexmap::IndexMap::from_iter([("status".to_string(), "closed".to_string())]),
             metadata_unset: Vec::new(),
             declare_relations: Vec::new(),
             dry_run: false,
@@ -2968,7 +2983,10 @@ community:
         mount.schema = Some("mig-a@0.1.0".parse().unwrap());
         mount.migration_target = Some("mig-b@0.1.0".parse().unwrap());
         let engine = Engine::from_mounts_with_schemas_dir(
-            vec![(mount, Box::new(writer) as Box<dyn crate::backend::MemBackend>)],
+            vec![(
+                mount,
+                Box::new(writer) as Box<dyn crate::backend::MemBackend>,
+            )],
             Some(&schemas_dir),
         )
         .unwrap();
@@ -2981,11 +2999,13 @@ community:
         assert_eq!((name.as_str(), version.as_str()), ("mig-b", "0.1.0"));
         // ...while the settled pin and the in-flight target read back
         // distinctly.
-        assert_eq!(engine.schema_pin("specs").unwrap().as_display(), "mig-a@0.1.0");
+        assert_eq!(
+            engine.schema_pin("specs").unwrap().as_display(),
+            "mig-a@0.1.0"
+        );
         assert_eq!(
             engine.migration_target("specs").unwrap().as_display(),
             "mig-b@0.1.0"
         );
     }
 }
-

@@ -20,7 +20,11 @@ use super::MemState;
 /// The mcp-config JSON that mounts the workspace at `graph_dir` as a server named
 /// `memstead` (so `--allowedTools mcp__memstead__*` matches).
 pub fn mcp_config_json(graph_dir: &Path, mcp_binary: &Path) -> String {
-    let cmd = format!("cd {} && exec {}", graph_dir.display(), mcp_binary.display());
+    let cmd = format!(
+        "cd {} && exec {}",
+        graph_dir.display(),
+        mcp_binary.display()
+    );
     serde_json::json!({
         "mcpServers": { "memstead": { "command": "sh", "args": ["-c", cmd] } }
     })
@@ -90,7 +94,11 @@ pub fn prepare_state(
         .status()
         .context("copying live workspace")?;
     if !cp.success() {
-        bail!("copying {} → {} failed", live_graph.display(), dest.display());
+        bail!(
+            "copying {} → {} failed",
+            live_graph.display(),
+            dest.display()
+        );
     }
     let mem_repo = dest.join("mem-repo");
     let mv = Command::new("git")
@@ -100,7 +108,10 @@ pub fn prepare_state(
         .status()
         .context("moving mem branch ref")?;
     if !mv.success() {
-        bail!("git branch -f {mem_branch} {commit} failed in {}", mem_repo.display());
+        bail!(
+            "git branch -f {mem_branch} {commit} failed in {}",
+            mem_repo.display()
+        );
     }
     // Leave `.memstead/state/mounts.json` in place — it is the mount list, and
     // deleting it unmounts every mem. The mount points at the branch *ref*

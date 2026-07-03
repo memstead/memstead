@@ -53,9 +53,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use notify::{
-    Config, Event, PollWatcher, RecursiveMode, Watcher,
-};
+use notify::{Config, Event, PollWatcher, RecursiveMode, Watcher};
 
 use super::events::MemChangedEvent;
 
@@ -389,12 +387,20 @@ mod tests {
         let gitdir = make_refs_heads(&tmp);
         let refs_heads = gitdir.join("refs").join("heads");
 
-        write_ref(&refs_heads, "specs", "1111111111111111111111111111111111111111");
+        write_ref(
+            &refs_heads,
+            "specs",
+            "1111111111111111111111111111111111111111",
+        );
         let (_watcher, rx) = watch_mem_repo(&gitdir).unwrap();
 
         // Re-write the same SHA — notify will fire, but the SHA gate
         // in the event loop suppresses the duplicate emission.
-        write_ref(&refs_heads, "specs", "1111111111111111111111111111111111111111");
+        write_ref(
+            &refs_heads,
+            "specs",
+            "1111111111111111111111111111111111111111",
+        );
 
         // Wait briefly; no event for "specs" should arrive.
         assert!(
@@ -430,7 +436,11 @@ mod tests {
         drop(watcher);
 
         // After the watcher drops, new ref writes should not surface.
-        write_ref(&refs_heads, "specs", "cccccccccccccccccccccccccccccccccccccccc");
+        write_ref(
+            &refs_heads,
+            "specs",
+            "cccccccccccccccccccccccccccccccccccccccc",
+        );
         assert!(
             recv_event_for(&rx, "specs", Duration::from_millis(200)).is_none(),
             "dropped watcher must not deliver further events",

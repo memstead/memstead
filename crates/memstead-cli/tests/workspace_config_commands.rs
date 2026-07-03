@@ -16,7 +16,8 @@ use std::path::Path;
 use assert_cmd::Command;
 use tempfile::TempDir;
 
-const DEFAULT_BODY: &str = "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n";
+const DEFAULT_BODY: &str =
+    "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n";
 
 fn memstead() -> Command {
     Command::cargo_bin("memstead").expect("memstead binary must be built by cargo")
@@ -53,7 +54,10 @@ fn allow_create_writes_rule_then_re_derives_through_cli() {
     let body = read_toml(ws.path());
     assert!(body.contains("[[mem_management.create]]"), "got:\n{body}");
     assert!(body.contains("pattern = \"exec-*\""), "got:\n{body}");
-    assert!(body.contains("schemas = [\"default@1.0.0\"]"), "got:\n{body}");
+    assert!(
+        body.contains("schemas = [\"default@1.0.0\"]"),
+        "got:\n{body}"
+    );
 }
 
 #[test]
@@ -227,13 +231,7 @@ fn duplicate_pattern_is_idempotent_with_warning() {
         .success();
     let assertion = memstead()
         .current_dir(ws.path())
-        .args([
-            "workspace",
-            "allow-create",
-            "exec-*",
-            "--schema",
-            "default",
-        ])
+        .args(["workspace", "allow-create", "exec-*", "--schema", "default"])
         .assert()
         .success();
     let stdout = std::str::from_utf8(&assertion.get_output().stdout).unwrap();
@@ -260,8 +258,7 @@ fn duplicate_pattern_is_idempotent_with_warning() {
         ])
         .assert()
         .success();
-    let json_stderr =
-        std::str::from_utf8(&json_assertion.get_output().stderr).unwrap();
+    let json_stderr = std::str::from_utf8(&json_assertion.get_output().stderr).unwrap();
     assert!(
         json_stderr.contains("RULE_ALREADY_PRESENT"),
         "--json mode must keep the warning on stderr; got stderr:\n{json_stderr}",
@@ -301,7 +298,13 @@ fn workspace_show_renders_markdown_by_default() {
     let ws = seed_workspace();
     memstead()
         .current_dir(ws.path())
-        .args(["workspace", "allow-create", "exec-*", "--schema", "default@1.0.0"])
+        .args([
+            "workspace",
+            "allow-create",
+            "exec-*",
+            "--schema",
+            "default@1.0.0",
+        ])
         .assert()
         .success();
     memstead()
@@ -409,7 +412,10 @@ fn workspace_show_empty_workspace_reports_unset_sections() {
         .stdout
         .clone();
     let body = String::from_utf8(output).unwrap();
-    assert!(body.contains("no agent-driven mem creation allowed"), "got:\n{body}");
+    assert!(
+        body.contains("no agent-driven mem creation allowed"),
+        "got:\n{body}"
+    );
     assert!(body.contains("default-deny"), "got:\n{body}");
     assert!(body.contains("`require_notes`: (unset"), "got:\n{body}");
 }
@@ -486,7 +492,11 @@ fn end_to_end_rederive_loads_through_engine() {
     assert_eq!(workspace.settings.mem_create_rules.len(), 2);
     assert_eq!(workspace.settings.mem_delete_rules.len(), 2);
     assert!(
-        workspace.settings.mem_create_rules.iter().any(|r| r.pattern == "planning/plan-*")
+        workspace
+            .settings
+            .mem_create_rules
+            .iter()
+            .any(|r| r.pattern == "planning/plan-*")
     );
     assert!(workspace.settings.cross_mem_links.contains_key("plugin"));
     assert!(workspace.settings.cross_mem_links.contains_key("macos"));

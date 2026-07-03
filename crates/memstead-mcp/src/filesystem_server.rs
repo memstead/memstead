@@ -36,7 +36,9 @@ use std::path::Path;
 
 use crate::tools::admin::{ChangesSinceParams, DiffParams, HealthParams};
 use crate::tools::graph::{EntityParams, OverviewParams, SchemaParams, SearchParams};
-use crate::tools::mutation::{CreateParams, DeleteParams, RelateParams, RenameParams, UpdateParams};
+use crate::tools::mutation::{
+    CreateParams, DeleteParams, RelateParams, RenameParams, UpdateParams,
+};
 
 /// MCP server backed by the unified [`memstead_base::Engine`].
 ///
@@ -95,7 +97,10 @@ impl FilesystemMcpServer {
     /// engine carries exactly one mem (filesystem / session mems are
     /// single-mem by design); this exports it.
     pub fn export_mem_to_bytes(&self) -> Result<Vec<u8>, memstead_base::EngineError> {
-        let engine = self.engine.lock().expect("filesystem MCP engine mutex poisoned");
+        let engine = self
+            .engine
+            .lock()
+            .expect("filesystem MCP engine mutex poisoned");
         let mem = engine
             .mem_names()
             .into_iter()
@@ -124,7 +129,10 @@ impl FilesystemMcpServer {
     /// change-event subscription. Keeps the engine itself private; callers
     /// get a borrow only for the duration of `f`.
     pub fn with_engine<R>(&self, f: impl FnOnce(&Engine) -> R) -> R {
-        let engine = self.engine.lock().expect("filesystem MCP engine mutex poisoned");
+        let engine = self
+            .engine
+            .lock()
+            .expect("filesystem MCP engine mutex poisoned");
         f(&engine)
     }
 
@@ -295,7 +303,11 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
                     "reason": reason,
                     "input": input,
                 }),
-                SlugError::TitleHasInvalidChars { input, invalid_chars, proposed_slug } => {
+                SlugError::TitleHasInvalidChars {
+                    input,
+                    invalid_chars,
+                    proposed_slug,
+                } => {
                     let invalid_chars_str: Vec<String> =
                         invalid_chars.iter().map(|c| c.to_string()).collect();
                     serde_json::json!({
@@ -305,9 +317,15 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
                         "proposed_slug": proposed_slug,
                     })
                 }
-                SlugError::TitleHasControlChars { input, control_chars, proposed_slug } => {
-                    let control_chars_str: Vec<String> =
-                        control_chars.iter().map(|c| c.escape_default().to_string()).collect();
+                SlugError::TitleHasControlChars {
+                    input,
+                    control_chars,
+                    proposed_slug,
+                } => {
+                    let control_chars_str: Vec<String> = control_chars
+                        .iter()
+                        .map(|c| c.escape_default().to_string())
+                        .collect();
                     serde_json::json!({
                         "reason": reason,
                         "input": input,
@@ -322,13 +340,18 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
                 Some(details),
             )
         }
-        EngineError::AlreadyExists { id } => {
-            tool_error("ENTITY_ALREADY_EXISTS", &format!("entity already exists: {id}"))
-        }
+        EngineError::AlreadyExists { id } => tool_error(
+            "ENTITY_ALREADY_EXISTS",
+            &format!("entity already exists: {id}"),
+        ),
         EngineError::NotFound { id } => {
             tool_error("ENTITY_NOT_FOUND", &format!("entity not found: {id}"))
         }
-        EngineError::HashMismatch { id, current, is_stub } => {
+        EngineError::HashMismatch {
+            id,
+            current,
+            is_stub,
+        } => {
             // Stub-aware message — pre-fix code printed `current is `
             // with an empty trailing value when the entity was a stub
             // and misdirected toward hash-recovery. Surface
@@ -416,7 +439,10 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
                 "cross-mem link from `{from_mem}` to `{to_mem}` is not allowed by the workspace `[cross_mem_links]` policy"
             ),
         ),
-        EngineError::CrossMemTargetNotFound { target_id, target_mem } => tool_error(
+        EngineError::CrossMemTargetNotFound {
+            target_id,
+            target_mem,
+        } => tool_error(
             "CROSS_MEM_TARGET_NOT_FOUND",
             &format!(
                 "cross-mem target `{target_id}` is absent in read-only mem `{target_mem}` — auto-stub is unavailable across the read-only boundary"
@@ -479,7 +505,12 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
             result.structured_content = Some(payload);
             result
         }
-        EngineError::RelationHasBodyLinks { from_id, to_id, rel_type, body_links } => {
+        EngineError::RelationHasBodyLinks {
+            from_id,
+            to_id,
+            rel_type,
+            body_links,
+        } => {
             let message = display;
             let payload = serde_json::json!({
                 "code": "RELATION_HAS_BODY_LINKS",
@@ -496,7 +527,11 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
             result.structured_content = Some(payload);
             result
         }
-        EngineError::RenamePartialFailure { committed_mems, failed_mem, failure_cause } => {
+        EngineError::RenamePartialFailure {
+            committed_mems,
+            failed_mem,
+            failure_cause,
+        } => {
             let message = format!(
                 "rename partial-failure: mem `{failed_mem}` aborted with cause {failure_cause:?} after {committed_mems:?} already committed — reload and retry, or reconcile manually"
             );
@@ -514,7 +549,10 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
             result.structured_content = Some(payload);
             result
         }
-        EngineError::RenameBlockedByCrossMemPolicy { ref from_mem, ref blocked_referrers } => {
+        EngineError::RenameBlockedByCrossMemPolicy {
+            ref from_mem,
+            ref blocked_referrers,
+        } => {
             let message = err.to_string();
             let entries: Vec<_> = blocked_referrers
                 .iter()
@@ -611,7 +649,11 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
                 })),
             )
         }
-        EngineError::InvalidWikiLinkMem { raw, section, reason } => {
+        EngineError::InvalidWikiLinkMem {
+            raw,
+            section,
+            reason,
+        } => {
             let message = format!(
                 "body wiki-link mem prefix '{raw}' in section '{section}' is not a valid mem name: {reason}"
             );
@@ -719,9 +761,8 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
             sections,
             type_guidance,
         } => {
-            let message = format!(
-                "missing {missing_count} required section(s) for type '{entity_type}'"
-            );
+            let message =
+                format!("missing {missing_count} required section(s) for type '{entity_type}'");
             let sections_json: Vec<_> = sections
                 .iter()
                 .map(|s| {
@@ -788,28 +829,32 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
         // callers branch on `details.rel_type`/`details.from_id`/
         // `details.to_id` instead of parsing the message — bit-identical
         // wire shape with the full-server typed envelope.
-        ref err @ EngineError::MissingRequiredDescription { ref rel_type, ref from_id, ref to_id } => {
-            tool_error_with_details(
-                "MISSING_REQUIRED_DESCRIPTION",
-                &err.to_string(),
-                Some(serde_json::json!({
-                    "rel_type": rel_type,
-                    "from_id": from_id,
-                    "to_id": to_id,
-                })),
-            )
-        }
-        ref err @ EngineError::DescriptionNotPermitted { ref rel_type, ref from_id, ref to_id } => {
-            tool_error_with_details(
-                "DESCRIPTION_NOT_PERMITTED",
-                &err.to_string(),
-                Some(serde_json::json!({
-                    "rel_type": rel_type,
-                    "from_id": from_id,
-                    "to_id": to_id,
-                })),
-            )
-        }
+        ref err @ EngineError::MissingRequiredDescription {
+            ref rel_type,
+            ref from_id,
+            ref to_id,
+        } => tool_error_with_details(
+            "MISSING_REQUIRED_DESCRIPTION",
+            &err.to_string(),
+            Some(serde_json::json!({
+                "rel_type": rel_type,
+                "from_id": from_id,
+                "to_id": to_id,
+            })),
+        ),
+        ref err @ EngineError::DescriptionNotPermitted {
+            ref rel_type,
+            ref from_id,
+            ref to_id,
+        } => tool_error_with_details(
+            "DESCRIPTION_NOT_PERMITTED",
+            &err.to_string(),
+            Some(serde_json::json!({
+                "rel_type": rel_type,
+                "from_id": from_id,
+                "to_id": to_id,
+            })),
+        ),
         ref err @ EngineError::RelationManualAuthoringForbidden {
             ref rel_type,
             ref from_id,
@@ -855,7 +900,10 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
                 "allowed_range": [allowed_min, allowed_max],
             })),
         ),
-        EngineError::MemConfigIncomplete { mem, missing_fields } => {
+        EngineError::MemConfigIncomplete {
+            mem,
+            missing_fields,
+        } => {
             let message = format!(
                 "mem `{mem}` config is missing required field(s) {missing_fields:?} — \
                  set via `memstead mem set-version {mem} <version>` (e.g. 0.1.0)"
@@ -870,13 +918,11 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
                 })),
             )
         }
-        EngineError::SearchUnavailable => {
-            tool_error_with_details(
-                "SEARCH_UNAVAILABLE_IN_WASM",
-                &display,
-                Some(serde_json::json!({})),
-            )
-        }
+        EngineError::SearchUnavailable => tool_error_with_details(
+            "SEARCH_UNAVAILABLE_IN_WASM",
+            &display,
+            Some(serde_json::json!({})),
+        ),
         // Typed refusal when
         // `export_markdown` targets a mem whose active backend
         // doesn't support markdown regeneration. Filesystem-backed
@@ -924,9 +970,7 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
 /// the MCP wire envelope. Thin delegation to the shared
 /// [`crate::error_envelopes::validation_envelope`] so the wire shape
 /// stays bit-identical with the mem-repo `server.rs` handlers.
-fn validation_envelope(
-    err: memstead_base::runtime_validator::ValidationError,
-) -> CallToolResult {
+fn validation_envelope(err: memstead_base::runtime_validator::ValidationError) -> CallToolResult {
     crate::error_envelopes::validation_envelope(err)
 }
 
@@ -935,7 +979,12 @@ impl FilesystemMcpServer {
     #[tool(
         name = "memstead_entity",
         description = "Read one entity as markdown (filesystem-mem flavour). Same JSON shape as the mem-repo `memstead_entity`. Frontmatter carries `_hash` (content hash) for optimistic locking on follow-up mutations.",
-        annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false)
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
     )]
     fn memstead_entity(&self, Parameters(p): Parameters<EntityParams>) -> CallToolResult {
         let engine = self.engine.lock().unwrap();
@@ -977,10 +1026,7 @@ impl FilesystemMcpServer {
         if p.include_context.unwrap_or(false)
             && let Some(ctx) = engine.context(&id)
         {
-            let cluster_id = ctx
-                .community
-                .clone()
-                .unwrap_or_else(|| "unknown".into());
+            let cluster_id = ctx.community.clone().unwrap_or_else(|| "unknown".into());
             md.push_str(&memstead_base::render::render_community_context_section(
                 &ctx,
                 &cluster_id,
@@ -1012,7 +1058,12 @@ impl FilesystemMcpServer {
     #[tool(
         name = "memstead_create",
         description = "Create a new entity in the filesystem-mem workspace. Required: `title`, `entity_type`. Optional `sections`, `metadata`, `note`, `mem`. `mem` selects the target mount; omit it to land in the default writable mem (the first writable mount in declaration order). A create aimed at a read-only mount is refused with READ_ONLY_MOUNT. The `note` lands in `.memstead/changes.jsonl` (the filesystem-mem analogue of the mem-repo commit body). `relations` and `dry_run` are not implemented on this surface: passing a non-empty `relations` or `dry_run: true` is REFUSED up front with `UNSUPPORTED_PARAM` (`details.params` names them), never silently ignored — so a `dry_run` preview can never accidentally land a real write. Omit them, or use the unified engine (mem-repo MCP / CLI) which honours both.",
-        annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = false, open_world_hint = false)
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
     )]
     fn memstead_create(&self, Parameters(p): Parameters<CreateParams>) -> CallToolResult {
         // Part B: this surface hardwires `dry_run` off and ignores inline
@@ -1091,7 +1142,12 @@ impl FilesystemMcpServer {
     #[tool(
         name = "memstead_update",
         description = "Update an existing entity in the filesystem-mem workspace. `expected_hash` (from a previous memstead_entity read) is required — mismatch returns code HASH_MISMATCH with details.current carrying the live hash. This surface honours `sections` (replace) + `metadata` (set) + `metadata_unset` + `declare_relations` + `relations_unset`. The mem-repo `append_sections` / `patch_sections` / `dry_run` shapes are NOT implemented here: passing a non-empty `append_sections` / `patch_sections`, or `dry_run: true`, is REFUSED up front with `UNSUPPORTED_PARAM` (`details.params` names them), never silently ignored — an agent that patches is told its patch was dropped instead of believing it applied. Omit them, or use the unified engine (mem-repo MCP / CLI) which honours all three.",
-        annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = false, open_world_hint = false)
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
     )]
     fn memstead_update(&self, Parameters(p): Parameters<UpdateParams>) -> CallToolResult {
         // Part B: this surface hardwires `append_sections` / `patch_sections`
@@ -1183,7 +1239,12 @@ impl FilesystemMcpServer {
     #[tool(
         name = "memstead_delete",
         description = "Delete an entity from the filesystem-mem workspace. `expected_hash` is required (read first via memstead_entity); mismatch returns HASH_MISMATCH. Refuses entities with incoming references unless the agent passes `force` via the workspace-level config (v1 has no per-call force toggle on the MCP surface — use `memstead delete --force` on the CLI). The `note` lands in `.memstead/changes.jsonl`.",
-        annotations(read_only_hint = false, destructive_hint = true, idempotent_hint = false, open_world_hint = false)
+        annotations(
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
     )]
     fn memstead_delete(&self, Parameters(p): Parameters<DeleteParams>) -> CallToolResult {
         let mut engine = self.engine.lock().unwrap();
@@ -1286,7 +1347,12 @@ impl FilesystemMcpServer {
     #[tool(
         name = "memstead_search",
         description = "Search entities by lexical content + structural filters. Same JSON shape as the mem-repo `memstead_search`. The first call after engine init or any mutation pays a one-time search-index build (scales with entity count); subsequent calls reuse the cache. Pass an empty `query: {}` (or omit it) for a metadata-only structural filter — the list shape folds in here. Filters: `mem`, `entity_type`, `edge_type` (first-class engine axes), `stub`, plus `filters: { <field>: <value> }` for any schema-declared `filterable: equality` field (e.g. `{\"level\": \"M0\", \"tags\": \"auth\"}`). Strict type-narrowing: an entity whose type doesn't declare a *filterable* field is excluded (warning `FILTER_TYPE_SCOPED`); a field declared but not filterable on any reachable type is ignored — the result equals the same search without it (warning `FIELD_NOT_FILTERABLE`), never emptied, in both the scoped and unscoped case; a key no schema declares is ignored (`UNKNOWN_FILTER_KEY`). Pagination via `limit` / `offset`. Section bodies are not shipped per hit — read them with `memstead_entity`. A page is bounded to `token_budget` (default 12000): an overflowing page returns the highest-ranked hits that fit with a `SEARCH_RESULTS_TRUNCATED` warning (`kept`/`budget`) while `_total` stays the full count — page on with `offset` or raise `token_budget`.",
-        annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false)
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
     )]
     fn memstead_search(&self, Parameters(p): Parameters<SearchParams>) -> CallToolResult {
         let engine = self.engine.lock().unwrap();
@@ -1322,15 +1388,19 @@ impl FilesystemMcpServer {
         // channel; lean MCP mirrors full's split so cross-flavour
         // agents see the same wire contract.
         let envelope = memstead_base::render::build_search_envelope(&result, offset);
-        let structured =
-            serde_json::to_value(&envelope).unwrap_or(serde_json::Value::Null);
+        let structured = serde_json::to_value(&envelope).unwrap_or(serde_json::Value::Null);
         md_with_structured(md, structured)
     }
 
     #[tool(
         name = "memstead_health",
         description = "Health summary for the filesystem-mem workspace: orphans, stubs, missing required fields, stale entities. Returns the same JSON shape as the mem-repo `memstead_health` (single-mem, so `writable_mems` carries one entry). Detail sections are produced via the kernel's `compute_health`. `include` accepts the shared health key set — today the lean surface dispatches `dangling_links` (matching the mem-repo response shape: `{from, target_id, target_path, section}`) and validates every key against the allowed set, emitting `UNKNOWN_INCLUDE_KEY` on the response's `warnings[]` for typos. `conformance` / `integrity` are dispatched too: `conformance` lints every entity against the effective schema (the pin, or `target_schema` when given) into a `findings` array of `{id, axis, code, detail}` with write-time typed codes; `integrity` adds the consistency axis (DANGLING_LINK, ORPHAN_STUB) to the same list. Other detail keys (`orphans`, `stubs`, …) are accepted but the v1 surface returns the full report regardless — narrowing is a follow-up.",
-        annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false)
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
     )]
     fn memstead_health(&self, Parameters(p): Parameters<HealthParams>) -> CallToolResult {
         let engine = self.engine.lock().unwrap();
@@ -1342,13 +1412,15 @@ impl FilesystemMcpServer {
         // same shape full emits and the same shape the CLI consumes.
         for key in &include {
             if !memstead_base::ops::health::HEALTH_INCLUDE_KEYS.contains(&key.as_str()) {
-                health.warnings.push(memstead_base::WarningHint::UnknownIncludeKey {
-                    key: key.clone(),
-                    allowed: memstead_base::ops::health::HEALTH_INCLUDE_KEYS
-                        .iter()
-                        .map(|s| s.to_string())
-                        .collect(),
-                });
+                health
+                    .warnings
+                    .push(memstead_base::WarningHint::UnknownIncludeKey {
+                        key: key.clone(),
+                        allowed: memstead_base::ops::health::HEALTH_INCLUDE_KEYS
+                            .iter()
+                            .map(|s| s.to_string())
+                            .collect(),
+                    });
             }
         }
 
@@ -1366,7 +1438,10 @@ impl FilesystemMcpServer {
         // (`integrity`) — same `findings` slot and `{ id, axis, code,
         // detail }` shape as the mem-repo flavour. Filesystem-mem
         // is single-mem: the scan covers the one mounted mem.
-        if include.iter().any(|s| s == "conformance" || s == "integrity") {
+        if include
+            .iter()
+            .any(|s| s == "conformance" || s == "integrity")
+        {
             let target: Option<memstead_schema::SchemaRef> = match p.target_schema.as_deref() {
                 None => None,
                 Some(raw) => match raw.parse::<memstead_schema::SchemaRef>() {
@@ -1407,7 +1482,12 @@ impl FilesystemMcpServer {
     #[tool(
         name = "memstead_schema",
         description = "Read the workspace's pinned schema as a JSON document — `ref` (canonical `name@version`), `relationship_mode`, the relationship vocabulary, `community`, `used_by[]`, top-level `origin` (`first-party` / `third-party`; a third-party schema is served structural-only with its prose-instruction fields omitted), top-level `alias_target_rel_type` (when authored — the rel-type body wiki-links `[[target]]` auto-emit), and per-type section/field detail. Accepts either `name` (bare name or canonical pin) or `mem` (the workspace's single mem). Passing both is `INVALID_INPUT`. v1 surface returns the engine's pinned schema regardless of which form is used (filesystem-mem is single-mem, single-schema). Pass `verbosity: \"lite\"` for a cheap cold-start skeleton — entity-type names + section keys + field shapes, relationship names + endpoints, the alias pointer, prose dropped (heavy arrays ship as `types_summary`/`relationships_summary`); default `\"full\"`. An unrecognized `verbosity` returns `INVALID_INPUT`. Returns `ENTITY_NOT_FOUND` when `name` explicitly mismatches the pinned schema; `UNKNOWN_MEM` when `mem` is not the workspace's mem.",
-        annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false)
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
     )]
     fn memstead_schema(&self, Parameters(p): Parameters<SchemaParams>) -> CallToolResult {
         let engine = self.engine.lock().unwrap();
@@ -1447,9 +1527,7 @@ impl FilesystemMcpServer {
                 if mem != mem_name.as_str() {
                     return tool_error(
                         "UNKNOWN_MEM",
-                        &format!(
-                            "unknown mem: {mem:?} — workspace mounts {mem_name:?}"
-                        ),
+                        &format!("unknown mem: {mem:?} — workspace mounts {mem_name:?}"),
                     );
                 }
                 String::new() // matches pinned schema by default
@@ -1457,15 +1535,11 @@ impl FilesystemMcpServer {
             (None, None) => String::new(),
         };
         let want = want_owned.as_str();
-        let matches = want.is_empty()
-            || want == pinned_name.as_str()
-            || want == canon.as_str();
+        let matches = want.is_empty() || want == pinned_name.as_str() || want == canon.as_str();
         if !matches {
             return tool_error(
                 "ENTITY_NOT_FOUND",
-                &format!(
-                    "schema not found: {want:?} — workspace pins {canon}"
-                ),
+                &format!("schema not found: {want:?} — workspace pins {canon}"),
             );
         }
 
@@ -1504,11 +1578,15 @@ impl FilesystemMcpServer {
         json_response(&payload)
     }
 
-
     #[tool(
         name = "memstead_diff",
         description = "Two-ref structural diff at entity granularity. **Filesystem-mem flavour:** folder mounts carry no git refs, so this tool refuses with `INVALID_INPUT` against folder-backed mems. Use the mem-repo flavour for the real diff; the surface stays for cross-flavour clients that hit either server.",
-        annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false)
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
     )]
     fn memstead_diff(&self, Parameters(p): Parameters<DiffParams>) -> CallToolResult {
         let engine = self.engine.lock().unwrap();
@@ -1528,9 +1606,17 @@ impl FilesystemMcpServer {
     #[tool(
         name = "memstead_changes_since",
         description = "Read the per-mutation changelog at `.memstead/changes.jsonl` since a given RFC 3339 timestamp. **Diverges from the mem-repo flavour** — filesystem-mem has no commit history, so `since` is a timestamp string (e.g. `\"2026-05-08T15:30:00.000Z\"`) and the response yields the JSONL entries with `ts > since` as a structured array. Pass an empty string or the UNIX epoch (`\"1970-01-01T00:00:00.000Z\"`) for a full dump. The `mem` field is accepted for shape compatibility with the mem-repo flavour but ignored — single-mem. `rename_similarity` and `include_notes` are also accepted but ignored.",
-        annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false)
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
     )]
-    fn memstead_changes_since(&self, Parameters(p): Parameters<ChangesSinceParams>) -> CallToolResult {
+    fn memstead_changes_since(
+        &self,
+        Parameters(p): Parameters<ChangesSinceParams>,
+    ) -> CallToolResult {
         // The unified engine doesn't expose a workspace_root accessor
         // (mounts can be heterogeneous); use the captured field.
         let log_path = self
@@ -1577,7 +1663,12 @@ impl FilesystemMcpServer {
     #[tool(
         name = "memstead_rename",
         description = "Rename an entity by changing its title. The slug, id, and on-disk file path follow. `expected_hash` is required. Atomic referrer rewrite: every Write-Mem entity whose relationships or section bodies point at the old id has its `[[old-slug]]` tokens rewritten in one per-mem commit; ReadOnly referrers leave a residual stub at the old id holding the surviving incoming edges.",
-        annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = false, open_world_hint = false)
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
     )]
     fn memstead_rename(&self, Parameters(p): Parameters<RenameParams>) -> CallToolResult {
         let mut engine = self.engine.lock().unwrap();
@@ -1610,7 +1701,12 @@ impl FilesystemMcpServer {
     #[tool(
         name = "memstead_overview",
         description = "Cold-start entry point for filesystem-mem workspaces. Returns the schema catalogue, the (single) mem entry, and the community clusters as Markdown. Schemas list as `{ref, description}` only — call `memstead_schema(name=<ref>)` for full per-type bodies. Token-budget-driven: hard-required content (mem, schema, community titles) always ships; heavy content greedy-fills the remaining budget by default-priority. Anything that didn't fit is advertised under `## Hints` with `estimated_tokens`; re-query by passing `key` into `include[]`. Allowed `include` keys: `community_members`, `community_bridges`, `mem_distribution`, `dangling_links`. `mem` parameter is accepted for shape compatibility but only the workspace's single mem matches; an unknown name returns an error. Set `rebuild: true` to invalidate the community memo before computing — it recomputes the whole-graph Louvain partition (detection is global; there is no per-subgraph scoping). A small or disconnected subgraph may surface as no cluster: sparsely-connected / edge-less nodes collapse into a single catch-all rather than forming their own cluster, so building a handful of loosely-linked entities and expecting a distinct cluster will come back empty. The `## Mems` entry carries a `durable` flag and `storage` kind — on this in-memory sketch it reads `durable: false` / `storage: in-memory`, i.e. writes are volatile and evicted on session-TTL / restart. The mem-repo `## Lifecycle Namespaces` section is omitted — filesystem-mem has no mem-creation rules. Frontmatter `_overview_mode` is `\"complete\"`, `\"reduced\"`, or `\"overbudget\"`.",
-        annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false)
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
     )]
     fn memstead_overview(&self, Parameters(p): Parameters<OverviewParams>) -> CallToolResult {
         const DEFAULT_OVERVIEW_BUDGET: usize = 8_000;
@@ -1652,9 +1748,7 @@ impl FilesystemMcpServer {
         {
             return tool_error(
                 "INVALID_INPUT",
-                &format!(
-                    "unknown mem: \"{v}\". Writable mems: [{mem_name}]"
-                ),
+                &format!("unknown mem: \"{v}\". Writable mems: [{mem_name}]"),
             );
         }
 
@@ -1697,10 +1791,7 @@ impl FilesystemMcpServer {
                 "engine has no schemas — workspace mount list is empty",
             );
         };
-        let schema_canon = format!(
-            "{}@{}",
-            schema.manifest.name, schema.version
-        );
+        let schema_canon = format!("{}@{}", schema.manifest.name, schema.version);
         let schemas_slim = vec![serde_json::json!({
             "ref": schema_canon,
             "description": schema.manifest.description,
@@ -1785,19 +1876,16 @@ impl FilesystemMcpServer {
 
         // --- Costs ---
         let estimate_tokens = memstead_base::chunking::estimate_tokens;
-        let hard_required_cost = estimate_tokens(
-            &serde_json::to_string(&schemas_slim).unwrap_or_default(),
-        ) + estimate_tokens(
-            &serde_json::to_string(&mems_lite).unwrap_or_default(),
-        ) + estimate_tokens(
-            &serde_json::to_string(&communities_lite).unwrap_or_default(),
-        );
+        let hard_required_cost =
+            estimate_tokens(&serde_json::to_string(&schemas_slim).unwrap_or_default())
+                + estimate_tokens(&serde_json::to_string(&mems_lite).unwrap_or_default())
+                + estimate_tokens(&serde_json::to_string(&communities_lite).unwrap_or_default());
         let overbudget = hard_required_cost > budget;
 
         let mem_distribution_component =
             serde_json::to_value(&mems_full).unwrap_or(serde_json::Value::Array(Vec::new()));
-        let community_members_component = serde_json::to_value(&communities_full)
-            .unwrap_or(serde_json::Value::Array(Vec::new()));
+        let community_members_component =
+            serde_json::to_value(&communities_full).unwrap_or(serde_json::Value::Array(Vec::new()));
 
         let mem_distribution_cost = estimate_tokens(
             &serde_json::to_string(&mem_distribution_component).unwrap_or_default(),
@@ -1813,9 +1901,8 @@ impl FilesystemMcpServer {
         ));
         let bridges_cost =
             estimate_tokens(&serde_json::to_string(&bridges_component).unwrap_or_default());
-        let dangling_links_cost = estimate_tokens(
-            &serde_json::to_string(&dangling_links_component).unwrap_or_default(),
-        );
+        let dangling_links_cost =
+            estimate_tokens(&serde_json::to_string(&dangling_links_component).unwrap_or_default());
 
         // --- Greedy fill ---
         let candidates: [(&'static str, usize, serde_json::Value); 4] = [
@@ -2179,8 +2266,8 @@ mod tests {
                 capability: memstead_base::MountCapability::Write,
                 lifecycle: memstead_base::MountLifecycle::Eager,
                 cross_linkable: true,
-            migration_target: None,
-        }],
+                migration_target: None,
+            }],
             settings: memstead_base::WorkspaceSettings::default(),
         };
         use memstead_base::WorkspaceStoreAdapter;
@@ -2213,7 +2300,8 @@ mod tests {
         let create_result = server.memstead_create(Parameters(create_params));
         assert!(
             !create_result.is_error.unwrap_or(false),
-            "create must succeed: {:?}", create_result.structured_content,
+            "create must succeed: {:?}",
+            create_result.structured_content,
         );
         let create_body = create_result
             .structured_content
@@ -2223,10 +2311,8 @@ mod tests {
         assert_eq!(id, "demo--first");
 
         // Changelog has the note.
-        let log = std::fs::read_to_string(
-            tmp.path().join(".memstead").join("changes.jsonl"),
-        )
-        .unwrap();
+        let log =
+            std::fs::read_to_string(tmp.path().join(".memstead").join("changes.jsonl")).unwrap();
         assert!(log.contains("\"note\":\"first via mcp\""));
 
         // memstead_entity
@@ -2309,7 +2395,8 @@ mod tests {
     /// than silently redirected; an explicit writable target is honoured.
     #[test]
     fn create_resolves_target_mem_across_multiple_mounts() {
-        let server = FilesystemMcpServer::from_engine(two_mount_engine(), std::path::PathBuf::new());
+        let server =
+            FilesystemMcpServer::from_engine(two_mount_engine(), std::path::PathBuf::new());
 
         // Omitted mem → default writable mount (`sketch`).
         let r = server.memstead_create(Parameters(create_params("Default Target", None)));
@@ -2326,14 +2413,19 @@ mod tests {
 
         // Explicit read-only mem → typed refusal, not a redirect.
         let r = server.memstead_create(Parameters(create_params("Into Content", Some("content"))));
-        assert!(r.is_error.unwrap_or(false), "write to a read-only mount must refuse");
+        assert!(
+            r.is_error.unwrap_or(false),
+            "write to a read-only mount must refuse"
+        );
         assert_eq!(
-            r.structured_content.unwrap()["code"], "READ_ONLY_MOUNT",
+            r.structured_content.unwrap()["code"],
+            "READ_ONLY_MOUNT",
             "the engine capability layer refuses the read-only target"
         );
 
         // Explicit writable mem → honoured.
-        let r = server.memstead_create(Parameters(create_params("Explicit Sketch", Some("sketch"))));
+        let r =
+            server.memstead_create(Parameters(create_params("Explicit Sketch", Some("sketch"))));
         assert!(
             !r.is_error.unwrap_or(false),
             "explicit writable target must land: {:?}",
@@ -2559,7 +2651,10 @@ mod tests {
         assert_eq!(body["code"], "MISSING_REQUIRED_SECTION");
         assert_eq!(body["details"]["entity_type"], "memo");
         assert!(
-            body["details"]["sections"].as_array().map_or(0, |s| s.len()) >= 1,
+            body["details"]["sections"]
+                .as_array()
+                .map_or(0, |s| s.len())
+                >= 1,
             "details.sections must list at least one missing key, got: {body}"
         );
         assert!(
@@ -2807,10 +2902,7 @@ mod tests {
         let (id, hash) = seed_via_mcp(&server, "Sneaky");
 
         let mut sections = IndexMap::new();
-        sections.insert(
-            "relationships".to_string(),
-            "- KIND: target".to_string(),
-        );
+        sections.insert("relationships".to_string(), "- KIND: target".to_string());
         let result = server.memstead_update(Parameters(UpdateParams {
             relations_unset: None,
             id,
@@ -2853,10 +2945,8 @@ mod tests {
         let body = result.structured_content.unwrap();
         assert_eq!(body["id"], id);
 
-        let log = std::fs::read_to_string(
-            tmp.path().join(".memstead").join("changes.jsonl"),
-        )
-        .unwrap();
+        let log =
+            std::fs::read_to_string(tmp.path().join(".memstead").join("changes.jsonl")).unwrap();
         assert!(log.contains("\"kind\":\"delete\""));
         assert!(log.contains("\"note\":\"retired\""));
     }
@@ -3139,7 +3229,9 @@ mod tests {
         for w in warnings {
             let code = w["code"].as_str().unwrap_or("");
             assert!(
-                !code.starts_with("RANGE_FILTER_") && code != "UNKNOWN_RANGE_FILTER_FIELD" && code != "FIELD_NOT_RANGE_FILTERABLE",
+                !code.starts_with("RANGE_FILTER_")
+                    && code != "UNKNOWN_RANGE_FILTER_FIELD"
+                    && code != "FIELD_NOT_RANGE_FILTERABLE",
                 "no range-filter warning expected when range_filters omitted, got: {w}",
             );
         }
@@ -3252,7 +3344,14 @@ mod tests {
             token_budget: None,
         }));
         assert!(!result.is_error.unwrap_or(false));
-        let text = result.content.first().unwrap().as_text().unwrap().text.clone();
+        let text = result
+            .content
+            .first()
+            .unwrap()
+            .as_text()
+            .unwrap()
+            .text
+            .clone();
         assert!(
             text.contains("demo--post-boot-spec") || text.contains("Post Boot"),
             "post-seed search must surface the seeded entity, got: {text}"
@@ -3268,7 +3367,7 @@ mod tests {
         // Bare-name and canonical pin both work.
         for name in ["default", "default@1.0.0"] {
             let result = server.memstead_schema(Parameters(SchemaParams {
-            verbosity: None,
+                verbosity: None,
                 name: Some(name.into()),
                 mem: None,
             }));
@@ -3469,7 +3568,14 @@ mod tests {
             chunk: None,
         }));
         assert!(!result.is_error.unwrap_or(false));
-        let text = result.content.first().unwrap().as_text().unwrap().text.clone();
+        let text = result
+            .content
+            .first()
+            .unwrap()
+            .as_text()
+            .unwrap()
+            .text
+            .clone();
         assert!(text.contains("## Relations"));
     }
 
@@ -3491,7 +3597,14 @@ mod tests {
             chunk: None,
         }));
         assert!(!result.is_error.unwrap_or(false));
-        let text = result.content.first().unwrap().as_text().unwrap().text.clone();
+        let text = result
+            .content
+            .first()
+            .unwrap()
+            .as_text()
+            .unwrap()
+            .text
+            .clone();
         assert!(text.contains("## Community Context"));
     }
 
@@ -3559,7 +3672,14 @@ mod tests {
             token_budget: None,
         }));
         assert!(!result.is_error.unwrap_or(false));
-        let text = result.content.first().unwrap().as_text().unwrap().text.clone();
+        let text = result
+            .content
+            .first()
+            .unwrap()
+            .as_text()
+            .unwrap()
+            .text
+            .clone();
         // Markdown response — rendered by `render_search_markdown`.
         // The matching entity's title or id appears; the
         // non-matching one should not (asserts that the text
@@ -3596,7 +3716,14 @@ mod tests {
             token_budget: None,
         }));
         assert!(!result.is_error.unwrap_or(false));
-        let text = result.content.first().unwrap().as_text().unwrap().text.clone();
+        let text = result
+            .content
+            .first()
+            .unwrap()
+            .as_text()
+            .unwrap()
+            .text
+            .clone();
         // Both seeded entities appear when there is no text filter.
         assert!(text.contains("demo--alpha") || text.contains("Alpha"));
         assert!(text.contains("demo--beta") || text.contains("Beta"));
@@ -3618,7 +3745,14 @@ mod tests {
             token_budget: None,
         }));
         assert!(!result.is_error.unwrap_or(false));
-        let text = result.content.first().unwrap().as_text().unwrap().text.clone();
+        let text = result
+            .content
+            .first()
+            .unwrap()
+            .as_text()
+            .unwrap()
+            .text
+            .clone();
         // Frontmatter carries the workspace's pinned schema and an
         // overview_mode field; the markdown body has the standard
         // section headings.
@@ -3674,7 +3808,14 @@ mod tests {
             token_budget: None,
         }));
         assert!(!result.is_error.unwrap_or(false));
-        let text = result.content.first().unwrap().as_text().unwrap().text.clone();
+        let text = result
+            .content
+            .first()
+            .unwrap()
+            .as_text()
+            .unwrap()
+            .text
+            .clone();
         // With community_members forced, the rendered cluster lists
         // each member entity id as a bullet — both Alpha and Beta
         // should appear under Communities.
@@ -3768,7 +3909,14 @@ mod tests {
             token_budget: None,
         }));
         assert!(!result.is_error.unwrap_or(false));
-        let text = result.content.first().unwrap().as_text().unwrap().text.clone();
+        let text = result
+            .content
+            .first()
+            .unwrap()
+            .as_text()
+            .unwrap()
+            .text
+            .clone();
         assert!(text.contains("## Warnings"));
         assert!(text.contains("UNKNOWN_INCLUDE_KEY"));
     }

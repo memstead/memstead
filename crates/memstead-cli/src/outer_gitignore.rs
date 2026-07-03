@@ -52,10 +52,7 @@ pub enum OuterRepoOutcome {
 /// Refuses with a `Validation` error when the discovered outer root
 /// equals `$HOME`. Callers are expected to render the error verbatim
 /// or surface the `--no-gitignore` suggestion themselves.
-pub fn apply_outer_gitignore(
-    start: &Path,
-    ignore_path: &Path,
-) -> anyhow::Result<OuterRepoOutcome> {
+pub fn apply_outer_gitignore(start: &Path, ignore_path: &Path) -> anyhow::Result<OuterRepoOutcome> {
     let mut cursor = start.to_path_buf();
     let start_dev = device_id(&cursor);
 
@@ -141,13 +138,11 @@ fn write_to_outer_gitignore(
         .create(true)
         .append(true)
         .open(&gitignore_path)
-        .map_err(|e| {
-            CliError {
-                code: crate::INTERNAL_CODE,
-                kind: ExitKind::Generic,
-                message: format!("open outer .gitignore: {e}"),
-                details: None,
-            }
+        .map_err(|e| CliError {
+            code: crate::INTERNAL_CODE,
+            kind: ExitKind::Generic,
+            message: format!("open outer .gitignore: {e}"),
+            details: None,
         })?;
     f.write_all(block.as_bytes()).map_err(|e| CliError {
         code: crate::INTERNAL_CODE,

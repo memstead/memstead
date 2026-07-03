@@ -10,16 +10,16 @@
 //! something (e.g. how to compose `Relations`) belongs in `lib.rs`.
 
 use memstead_base::{
-    entity as core_entity, graph as core_graph, ops as core_ops, store as core_store,
-    mem as core_mem,
+    entity as core_entity, graph as core_graph, mem as core_mem, ops as core_ops,
+    store as core_store,
 };
 
 use crate::types::{
     AgentNotesReport, ChangeEnvelope, ChangesReport, ClusterInfo, CommitNote, EdgeSource,
-    EdgeTypeCount, Entity, HealthIssue, HealthSummary, ListResult, MetadataEntry, MetadataValue,
-    MissingField, ParseRecoveryEntry, ParseRecoveryReport, Query, RelationDirection, RelationEdge,
-    Relations, ReloadResult, Relationship, SearchHit, SearchResult, SearchScope, Section,
-    StaleEntity, Stats, MemSchemaOutcome,
+    EdgeTypeCount, Entity, HealthIssue, HealthSummary, ListResult, MemSchemaOutcome, MetadataEntry,
+    MetadataValue, MissingField, ParseRecoveryEntry, ParseRecoveryReport, Query, RelationDirection,
+    RelationEdge, Relations, Relationship, ReloadResult, SearchHit, SearchResult, SearchScope,
+    Section, StaleEntity, Stats,
 };
 
 // ---------------------------------------------------------------------------
@@ -81,7 +81,6 @@ pub(crate) fn stats_to_ffi(
     store: &core_store::Store,
     mem_router: &core_mem::MemRouterSnapshot,
 ) -> Stats {
-
     let mut edge_types: Vec<EdgeTypeCount> = stats
         .edge_types
         .into_iter()
@@ -263,10 +262,7 @@ fn edge_source_to_ffi(source: &core_store::EdgeSource) -> EdgeSource {
     }
 }
 
-pub(crate) fn build_relations(
-    store: &core_store::Store,
-    id: &core_entity::EntityId,
-) -> Relations {
+pub(crate) fn build_relations(store: &core_store::Store, id: &core_entity::EntityId) -> Relations {
     let outgoing = store
         .outgoing(id)
         .iter()
@@ -359,17 +355,29 @@ pub(crate) fn reload_result_to_ffi(result: core_ops::ReloadResult) -> ReloadResu
 pub(crate) fn change_envelope_to_ffi(envelope: memstead_base::ChangeEnvelope) -> ChangeEnvelope {
     use memstead_base::ChangeEnvelope::*;
     match envelope {
-        Added { id, title, entity_type } => ChangeEnvelope::Added {
+        Added {
+            id,
+            title,
+            entity_type,
+        } => ChangeEnvelope::Added {
             id: id.to_string(),
             title,
             entity_type,
         },
-        Updated { id, title, entity_type } => ChangeEnvelope::Updated {
+        Updated {
+            id,
+            title,
+            entity_type,
+        } => ChangeEnvelope::Updated {
             id: id.to_string(),
             title,
             entity_type,
         },
-        Removed { id, title, entity_type } => ChangeEnvelope::Removed {
+        Removed {
+            id,
+            title,
+            entity_type,
+        } => ChangeEnvelope::Removed {
             id: id.to_string(),
             title,
             entity_type,

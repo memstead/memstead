@@ -50,7 +50,10 @@ fn mem_repo_init_json_stdout_is_single_document() {
         panic!("--json stdout must be exactly one JSON document: {e}; stdout:\n{stdout}")
     });
     assert!(
-        parsed.get("mem_repo_dir").and_then(|v| v.as_str()).is_some(),
+        parsed
+            .get("mem_repo_dir")
+            .and_then(|v| v.as_str())
+            .is_some(),
         "--json envelope must carry `mem_repo_dir`, got: {parsed}",
     );
 
@@ -71,7 +74,12 @@ fn mem_repo_init_followed_by_stats_succeeds() {
     let workspace = tmp.path().join("ws");
 
     memstead()
-        .args(["mem-repo", "init", workspace.to_str().unwrap(), "--no-gitignore"])
+        .args([
+            "mem-repo",
+            "init",
+            workspace.to_str().unwrap(),
+            "--no-gitignore",
+        ])
         .assert()
         .success();
 
@@ -121,7 +129,10 @@ fn missing_workspace_emits_typed_envelope_json() {
         "details.hint.recovery_command must name the bootstrap command for this flavour, got: {parsed}",
     );
     assert!(
-        parsed["message"].as_str().unwrap_or("").contains(".memstead/workspace.toml"),
+        parsed["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains(".memstead/workspace.toml"),
         "human-readable prose must still name the workspace marker, got: {parsed}",
     );
 }

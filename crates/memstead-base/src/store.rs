@@ -565,5 +565,4 @@ mod tests {
         let store = Store::new();
         assert!(store.outgoing(&EntityId("unknown".to_string())).is_empty());
     }
-
 }

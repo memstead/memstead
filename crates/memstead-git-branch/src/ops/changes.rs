@@ -131,9 +131,8 @@ pub fn changes_since(
     // walk runs unconditionally; the resulting notes
     // and `__MEMSTEAD` ref ride on `BackendChanges` so MCP `include_notes`
     // becomes a renderer-side filter, not an engine-side trigger.
-    let notes_report = crate::ops::agent_notes::agent_notes_since(
-        mem_name, git_dir, &resolve_since, head_ref,
-    )?;
+    let notes_report =
+        crate::ops::agent_notes::agent_notes_since(mem_name, git_dir, &resolve_since, head_ref)?;
     let rename_map = build_authoritative_rename_map(&notes_report.notes);
 
     // Resolve `since`. The canonical empty-tree SHA bypasses rev_parse —
@@ -204,17 +203,17 @@ pub fn changes_since(
                 use gix::object::tree::diff::Change;
                 match change {
                     Change::Addition { location, .. } => {
-                        if let Some(id) = path_to_entity_id(mem_name, location.as_ref()) {
+                        if let Some(id) = path_to_entity_id(mem_name, location) {
                             additions.push(id);
                         }
                     }
                     Change::Deletion { location, .. } => {
-                        if let Some(id) = path_to_entity_id(mem_name, location.as_ref()) {
+                        if let Some(id) = path_to_entity_id(mem_name, location) {
                             deletions.push(id);
                         }
                     }
                     Change::Modification { location, .. } => {
-                        if let Some(id) = path_to_entity_id(mem_name, location.as_ref()) {
+                        if let Some(id) = path_to_entity_id(mem_name, location) {
                             modifications.push(id);
                         }
                     }
@@ -223,8 +222,8 @@ pub fn changes_since(
                         location,
                         ..
                     } => {
-                        let from = path_to_entity_id(mem_name, source_location.as_ref());
-                        let to = path_to_entity_id(mem_name, location.as_ref());
+                        let from = path_to_entity_id(mem_name, source_location);
+                        let to = path_to_entity_id(mem_name, location);
                         if let (Some(from_id), Some(to_id)) = (from, to) {
                             gix_rewrites.push((from_id, to_id));
                         }
@@ -466,8 +465,7 @@ mod tests {
 
     #[test]
     fn parse_rename_entity_field_extracts_old_and_new_ids() {
-        let parsed =
-            parse_rename_entity_field("specs--old-name → specs--new-name").unwrap();
+        let parsed = parse_rename_entity_field("specs--old-name → specs--new-name").unwrap();
         assert_eq!(parsed.0.0, "specs--old-name");
         assert_eq!(parsed.1.0, "specs--new-name");
     }
@@ -478,10 +476,8 @@ mod tests {
         // (rename.rs:433 path); they describe a rename that happened
         // in some other mem and so cannot drive local pairing.
         assert!(
-            parse_rename_entity_field(
-                "specs--old → specs--new (cross-mem rewrite in `other`)"
-            )
-            .is_none()
+            parse_rename_entity_field("specs--old → specs--new (cross-mem rewrite in `other`)")
+                .is_none()
         );
     }
 
@@ -513,13 +509,14 @@ mod tests {
         // rewrite in V)` qualifier) only rewrite wiki-link bodies in
         // the peer and don't add/remove the renaming entity there.
         let mut peer = rename_note("specs--a", "specs--b");
-        peer.subject = "memstead: rename specs--a → specs--b (cross-mem rewrite in `peers`)"
-            .to_string();
-        peer.entity_id = Some(
-            "specs--a → specs--b (cross-mem rewrite in `peers`)".to_string(),
-        );
+        peer.subject =
+            "memstead: rename specs--a → specs--b (cross-mem rewrite in `peers`)".to_string();
+        peer.entity_id = Some("specs--a → specs--b (cross-mem rewrite in `peers`)".to_string());
         let map = build_authoritative_rename_map(&[peer]);
-        assert!(map.is_empty(), "cross-mem peer commit must not enter the map: {map:?}");
+        assert!(
+            map.is_empty(),
+            "cross-mem peer commit must not enter the map: {map:?}"
+        );
     }
 
     #[test]

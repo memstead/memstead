@@ -112,22 +112,15 @@ impl Engine {
 
         let mut last_commit_sha = String::new();
         for (source_id, drop_indices) in writable_by_source {
-            let outcome = self.rewrite_for_parse_recovery(
-                &source_id,
-                actor,
-                client,
-                note,
-            );
+            let outcome = self.rewrite_for_parse_recovery(&source_id, actor, client, note);
             match outcome {
                 Ok(commit_sha) => {
                     if !commit_sha.is_empty() {
                         last_commit_sha = commit_sha;
                     }
                     for idx in drop_indices {
-                        result_per_drop[idx] = Some((
-                            ParseRecoveryEntry::OUTCOME_REMOVED.to_string(),
-                            None,
-                        ));
+                        result_per_drop[idx] =
+                            Some((ParseRecoveryEntry::OUTCOME_REMOVED.to_string(), None));
                     }
                 }
                 Err(err) => {
@@ -227,8 +220,7 @@ mod tests {
     use crate::backend::MemBackend;
     use crate::engine::Engine;
     use crate::engine::test_helpers::{
-        archive_mount, build_archive, cli_actor, folder_mount,
-        write_schema_files_with_default_type,
+        archive_mount, build_archive, cli_actor, folder_mount, write_schema_files_with_default_type,
     };
     use crate::ops::{ParseRecoveryEntry, WarningHint};
     use crate::storage::{ArchiveBackend, FilesystemMemWriter};
@@ -287,8 +279,14 @@ mod tests {
         assert!(post.is_empty(), "drops must be cleared, got {post:?}");
 
         let cleaned = std::fs::read_to_string(mem_dir.join("source.md")).unwrap();
-        assert!(!cleaned.contains("MADE_UP_TYPE_A"), "cleaned source: {cleaned}");
-        assert!(!cleaned.contains("MADE_UP_TYPE_B"), "cleaned source: {cleaned}");
+        assert!(
+            !cleaned.contains("MADE_UP_TYPE_A"),
+            "cleaned source: {cleaned}"
+        );
+        assert!(
+            !cleaned.contains("MADE_UP_TYPE_B"),
+            "cleaned source: {cleaned}"
+        );
     }
 
     /// Read-only-origin drops are reported as `skipped` with
@@ -326,7 +324,10 @@ mod tests {
             entry.reason.as_deref(),
             Some(ParseRecoveryEntry::REASON_READONLY_MOUNT),
         );
-        assert!(report.commit_sha.is_empty(), "readonly path commits nothing");
+        assert!(
+            report.commit_sha.is_empty(),
+            "readonly path commits nothing"
+        );
 
         let post: Vec<_> = engine
             .load_warnings()
@@ -359,13 +360,20 @@ mod tests {
             .apply_parse_recovery(actor, Some(&client), None)
             .expect("first recovery succeeds");
         assert_eq!(first.entries.len(), 1);
-        assert_eq!(first.entries[0].outcome, ParseRecoveryEntry::OUTCOME_REMOVED);
+        assert_eq!(
+            first.entries[0].outcome,
+            ParseRecoveryEntry::OUTCOME_REMOVED
+        );
         assert!(!first.commit_sha.is_empty());
 
         let second = engine
             .apply_parse_recovery(actor, Some(&client), None)
             .expect("second recovery succeeds");
-        assert!(second.entries.is_empty(), "second call must be no-op, got {:?}", second.entries);
+        assert!(
+            second.entries.is_empty(),
+            "second call must be no-op, got {:?}",
+            second.entries
+        );
         assert!(second.commit_sha.is_empty());
     }
 
@@ -473,7 +481,9 @@ community:
         let mount = Mount {
             mem: "specs".to_string(),
             schema: Some(pin),
-            storage: MountStorage::Folder { path: mem_dir.clone() },
+            storage: MountStorage::Folder {
+                path: mem_dir.clone(),
+            },
             capability: MountCapability::Write,
             lifecycle: MountLifecycle::Eager,
             cross_linkable: true,
@@ -500,7 +510,10 @@ community:
             entry.reason,
         );
         let unchanged = std::fs::read_to_string(mem_dir.join("source.md")).unwrap();
-        assert!(unchanged.contains("BADTYPE"), "source must be unchanged on failure");
+        assert!(
+            unchanged.contains("BADTYPE"),
+            "source must be unchanged on failure"
+        );
 
         let post: Vec<_> = engine
             .load_warnings()

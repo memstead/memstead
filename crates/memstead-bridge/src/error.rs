@@ -67,18 +67,12 @@ pub struct ErrorEnvelope {
 impl From<&BridgeError> for ErrorEnvelope {
     fn from(e: &BridgeError) -> Self {
         let details = match e {
-            BridgeError::UnknownMem(name) => {
-                Some(serde_json::json!({ "mem": name }))
-            }
-            BridgeError::UnknownCommit(sha) => {
-                Some(serde_json::json!({ "commit": sha }))
-            }
-            BridgeError::DeltaTooLarge { n_commits, limit } => {
-                Some(serde_json::json!({
-                    "n_commits": n_commits,
-                    "limit": limit,
-                }))
-            }
+            BridgeError::UnknownMem(name) => Some(serde_json::json!({ "mem": name })),
+            BridgeError::UnknownCommit(sha) => Some(serde_json::json!({ "commit": sha })),
+            BridgeError::DeltaTooLarge { n_commits, limit } => Some(serde_json::json!({
+                "n_commits": n_commits,
+                "limit": limit,
+            })),
             BridgeError::Engine(_) | BridgeError::Git(_) => None,
             BridgeError::InvalidSearchQuery { reason } => {
                 Some(serde_json::json!({ "reason": reason }))

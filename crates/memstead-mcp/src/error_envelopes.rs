@@ -88,15 +88,24 @@ mod inline_list_tests {
         let text = extract_text(&r);
         assert!(text.starts_with("ERROR [UNKNOWN_SECTION]: "), "got: {text}");
         for d in &declared {
-            assert!(text.contains(d.as_str()), "every declared key must appear inline; missing {d} in: {text}");
+            assert!(
+                text.contains(d.as_str()),
+                "every declared key must appear inline; missing {d} in: {text}"
+            );
         }
         // Suggestion clause is inlined too.
         assert!(text.contains("Did you mean 'sec0'?"), "got: {text}");
         // No prior "see details" pointer survives anywhere in the text.
-        assert!(!text.contains("see details"), "text channel must not point at the structured channel; got: {text}");
+        assert!(
+            !text.contains("see details"),
+            "text channel must not point at the structured channel; got: {text}"
+        );
         // Structured channel still ships the full list verbatim.
         let sc = r.structured_content.expect("payload");
-        assert_eq!(sc["details"]["declared"].as_array().unwrap().len(), declared.len());
+        assert_eq!(
+            sc["details"]["declared"].as_array().unwrap().len(),
+            declared.len()
+        );
     }
 
     #[test]
@@ -109,7 +118,10 @@ mod inline_list_tests {
             suggestion: None,
         });
         let text = extract_text(&r);
-        assert!(text.contains("declared sections: sec0, sec1"), "got: {text}");
+        assert!(
+            text.contains("declared sections: sec0, sec1"),
+            "got: {text}"
+        );
         assert!(!text.contains("see details"), "got: {text}");
     }
 
@@ -127,7 +139,10 @@ mod inline_list_tests {
         });
         let text = extract_text(&r);
         for a in &allowed {
-            assert!(text.contains(a.as_str()), "every allowed value must appear inline; missing {a} in: {text}");
+            assert!(
+                text.contains(a.as_str()),
+                "every allowed value must appear inline; missing {a} in: {text}"
+            );
         }
         assert!(!text.contains("see details"), "got: {text}");
     }
@@ -147,7 +162,10 @@ mod inline_list_tests {
         });
         let text = extract_text(&r);
         for n in ["REL0", "REL1", "REL2", "REL3", "REL4"] {
-            assert!(text.contains(n), "every rel-type name must appear inline; missing {n} in: {text}");
+            assert!(
+                text.contains(n),
+                "every rel-type name must appear inline; missing {n} in: {text}"
+            );
         }
         assert!(!text.contains("see details"), "got: {text}");
     }

@@ -75,16 +75,12 @@ fn resolve_slot(
         (Some(_), Some(_)) => Err(CliError::new(
             ExitKind::Validation,
             "INVALID_INPUT",
-            format!(
-                "`{slot}` supplied as both positional and flag; pick one form"
-            ),
+            format!("`{slot}` supplied as both positional and flag; pick one form"),
         )),
         (None, None) => Err(CliError::new(
             ExitKind::Validation,
             "INVALID_INPUT",
-            format!(
-                "`{slot}` not supplied — pass either as positional or via the `--{slot}` flag"
-            ),
+            format!("`{slot}` not supplied — pass either as positional or via the `--{slot}` flag"),
         )),
     }
 }

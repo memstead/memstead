@@ -38,9 +38,9 @@ pub fn instantiate_full_backend(
 ) -> Result<Box<dyn memstead_base::MemBackend>, memstead_base::InstantiateError> {
     use memstead_base::MountStorage;
     match &mount.storage {
-        MountStorage::Folder { .. }
-        | MountStorage::Archive { .. }
-        | MountStorage::InMemory => memstead_base::instantiate_lean_backend(mount),
+        MountStorage::Folder { .. } | MountStorage::Archive { .. } | MountStorage::InMemory => {
+            memstead_base::instantiate_lean_backend(mount)
+        }
         MountStorage::GitBranch { gitdir, branch } => {
             let ref_name = if branch.starts_with("refs/") {
                 branch.clone()
@@ -115,17 +115,14 @@ fn prune_residue_dispatch(
         logical_operation_id: None,
         entity_ids: None,
     };
-    crate::storage_memstead::delete_mem_artifacts_at_gitdir(
-        gitdir,
-        branch_full_path,
-        &ctx,
+    crate::storage_memstead::delete_mem_artifacts_at_gitdir(gitdir, branch_full_path, &ctx).map_err(
+        |e| {
+            memstead_base::backend::BackendError::Other(format!(
+                "force_overwrite prune at {}: {e}",
+                branch_full_path,
+            ))
+        },
     )
-    .map_err(|e| {
-        memstead_base::backend::BackendError::Other(format!(
-            "force_overwrite prune at {}: {e}",
-            branch_full_path,
-        ))
-    })
 }
 
 fn changes_since_dispatch(
@@ -173,6 +170,9 @@ fn changes_since_dispatch(
     })
 }
 
+// Signature (arity included) is pinned by the `GitBranchOps.export`
+// fn-pointer contract declared in memstead-base.
+#[allow(clippy::too_many_arguments)]
 fn export_dispatch(
     gitdir: &std::path::Path,
     branch: &str,
@@ -345,8 +345,6 @@ fn export_to_bytes_dispatch(
         provenance_bytes,
     )
     .map_err(|e| {
-        memstead_base::backend::BackendError::Other(format!(
-            "export_mem_from_branch_to_bytes: {e}"
-        ))
+        memstead_base::backend::BackendError::Other(format!("export_mem_from_branch_to_bytes: {e}"))
     })
 }

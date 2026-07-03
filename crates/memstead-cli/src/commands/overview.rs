@@ -103,7 +103,10 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             }
             .into());
         }
-        Err(ComposeOverviewError::UnknownMem { name, writable_mems }) => {
+        Err(ComposeOverviewError::UnknownMem {
+            name,
+            writable_mems,
+        }) => {
             return Err(CliError {
                 code: "UNKNOWN_MEM",
                 kind: ExitKind::NotFound,
@@ -315,10 +318,7 @@ mod tests {
             "community_members,mem_distribution",
         ])
         .expect("comma form parses");
-        assert_eq!(
-            comma.include,
-            vec!["community_members", "mem_distribution"],
-        );
+        assert_eq!(comma.include, vec!["community_members", "mem_distribution"],);
     }
 
     /// The `--include` help text names every known overview include

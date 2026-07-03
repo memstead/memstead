@@ -68,7 +68,10 @@ mod tests {
         assert_eq!(effective.len(), 2);
         assert!(effective.contains("memstead_entity"));
         assert!(effective.contains("memstead_search"));
-        assert_eq!(unknown, vec!["bogus".to_string(), "also_unknown".to_string()]);
+        assert_eq!(
+            unknown,
+            vec!["bogus".to_string(), "also_unknown".to_string()]
+        );
     }
 
     #[test]

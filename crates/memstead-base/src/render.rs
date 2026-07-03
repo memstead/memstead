@@ -15,8 +15,8 @@ use serde::Serialize;
 use crate::chunking::estimate_tokens;
 use crate::graph::community::generate_auto_summary;
 use crate::ops::Direction;
-use crate::store::Store;
 use crate::ops::{ExpansionInfo, Facets, ScoreBreakdown, SubsectionFacet, TermMatch};
+use crate::store::Store;
 use crate::{
     ContextResult, Edge, Entity, InEdge, ListResult, LouvainOutput, SearchHit, SearchResult,
 };
@@ -358,9 +358,7 @@ fn format_subsection_facet(entry: &SubsectionFacet) -> String {
 /// groups `TermMatch`es per query term; output is one `term (field×N, ...)`
 /// group per term, joined with `, `. Terms and fields both sort
 /// alphabetically for deterministic output.
-fn render_matched_terms_line(
-    matched: Option<&HashMap<String, Vec<TermMatch>>>,
-) -> Option<String> {
+fn render_matched_terms_line(matched: Option<&HashMap<String, Vec<TermMatch>>>) -> Option<String> {
     let matched = matched?;
     if matched.is_empty() {
         return None;
@@ -376,8 +374,7 @@ fn render_matched_terms_line(
             }
             let mut fields: Vec<(&&str, &usize)> = field_counts.iter().collect();
             fields.sort_by(|a, b| a.0.cmp(b.0));
-            let inner: Vec<String> =
-                fields.iter().map(|(f, n)| format!("{f}×{n}")).collect();
+            let inner: Vec<String> = fields.iter().map(|(f, n)| format!("{f}×{n}")).collect();
             format!("`{term}` ({})", inner.join(", "))
         })
         .collect();
@@ -407,9 +404,7 @@ fn render_score_breakdown_line(breakdown: Option<&ScoreBreakdown>) -> Option<Str
 /// Render the `**Heading path:**` line for one hit. Collects distinct
 /// non-empty `heading_path`s across the hit's `TermMatch`es. Single path
 /// renders inline (`A › B`), multiple paths render as `A › B; C › D`.
-fn render_heading_paths_line(
-    matched: Option<&HashMap<String, Vec<TermMatch>>>,
-) -> Option<String> {
+fn render_heading_paths_line(matched: Option<&HashMap<String, Vec<TermMatch>>>) -> Option<String> {
     let matched = matched?;
     let mut paths: Vec<Vec<String>> = Vec::new();
     let mut term_keys: Vec<&String> = matched.keys().collect();
@@ -986,9 +981,8 @@ fn section_heading_for(type_def: Option<&TypeDefinition>, key: &str) -> String {
 /// in the binary) still fall through to the key-derivation path.
 fn lookup_builtin_type(name: &str) -> Option<Arc<TypeDefinition>> {
     static CACHE: OnceLock<Vec<Arc<Schema>>> = OnceLock::new();
-    let schemas = CACHE.get_or_init(|| {
-        memstead_schema::builtins::load_builtin_schemas().unwrap_or_default()
-    });
+    let schemas =
+        CACHE.get_or_init(|| memstead_schema::builtins::load_builtin_schemas().unwrap_or_default());
     for s in schemas {
         if let Some(t) = s.get_type(name) {
             return Some(t);
@@ -1049,8 +1043,7 @@ pub fn render_type_info_markdown(schema: &TypeDefinition) -> String {
     lines.push(String::new());
     lines.push(format!(
         "Staleness threshold: {} days. Hierarchy: `{}`.",
-        schema.staleness_threshold_days,
-        schema.hierarchy_relationship,
+        schema.staleness_threshold_days, schema.hierarchy_relationship,
     ));
     lines.push(String::new());
 
@@ -1090,7 +1083,11 @@ pub fn render_type_info_markdown(schema: &TypeDefinition) -> String {
         if rel_type == &schema.hierarchy_relationship {
             flags.push("hierarchy");
         }
-        if schema.propagating_relationships.iter().any(|r| r == rel_type) {
+        if schema
+            .propagating_relationships
+            .iter()
+            .any(|r| r == rel_type)
+        {
             flags.push("propagating");
         }
         let flag_str = if flags.is_empty() {
@@ -2387,10 +2384,7 @@ mod tests {
                 ("memo".to_string(), 3),
                 ("decision".to_string(), 2),
             ]),
-            by_mem: HashMap::from([
-                ("specs".to_string(), 10),
-                ("memos".to_string(), 2),
-            ]),
+            by_mem: HashMap::from([("specs".to_string(), 10), ("memos".to_string(), 2)]),
             by_level: HashMap::from([("high".to_string(), 4)]),
             by_status: HashMap::from([("active".to_string(), 6)]),
             by_confidence: HashMap::from([("medium".to_string(), 3)]),
@@ -2404,10 +2398,7 @@ mod tests {
                     count: 2,
                 },
             ],
-            by_expansion: HashMap::from([
-                ("primary".to_string(), 8),
-                ("expanded".to_string(), 4),
-            ]),
+            by_expansion: HashMap::from([("primary".to_string(), 8), ("expanded".to_string(), 4)]),
         }
     }
 
@@ -2451,10 +2442,7 @@ mod tests {
         hit.score_breakdown = Some(ScoreBreakdown {
             bm25: 2.5,
             title_boost: 2.0,
-            field_weights: HashMap::from([
-                ("body".to_string(), 0.8),
-                ("purpose".to_string(), 0.3),
-            ]),
+            field_weights: HashMap::from([("body".to_string(), 0.8), ("purpose".to_string(), 0.3)]),
             expansion_decay: Some(0.5),
         });
         let out = render_search_markdown(&search_result(vec![hit]), 0);
@@ -2524,7 +2512,10 @@ mod tests {
         let mut result = search_result(vec![]);
         result.facets = Some(sample_facets());
         let out = render_search_markdown(&result, 0);
-        assert!(out.contains("## Facets"), "facets header missing; got:\n{out}");
+        assert!(
+            out.contains("## Facets"),
+            "facets header missing; got:\n{out}"
+        );
         assert!(
             out.contains("- **by_type:** spec=7, memo=3, decision=2"),
             "by_type bucket wrong; got:\n{out}"
@@ -2635,10 +2626,7 @@ mod tests {
         let body_link_target = EntityId("specs--body-link-target".to_string());
         let explicit_target = EntityId("specs--explicit-target".to_string());
         entity.relationships = vec![
-            crate::entity::Relationship::new(
-                "REFERENCES".to_string(),
-                body_link_target.clone(),
-            ),
+            crate::entity::Relationship::new("REFERENCES".to_string(), body_link_target.clone()),
             crate::entity::Relationship::new("USES".to_string(), explicit_target.clone()),
         ];
 
@@ -2661,12 +2649,18 @@ mod tests {
             .iter()
             .find(|r| r["rel_type"] == "REFERENCES")
             .expect("REFERENCES present");
-        assert_eq!(refs["source"], "body_link", "alias-synthesised edge must label body_link");
+        assert_eq!(
+            refs["source"], "body_link",
+            "alias-synthesised edge must label body_link"
+        );
         let uses = relationships
             .iter()
             .find(|r| r["rel_type"] == "USES")
             .expect("USES present");
-        assert_eq!(uses["source"], "explicit", "explicit-authored edge must label explicit");
+        assert_eq!(
+            uses["source"], "explicit",
+            "explicit-authored edge must label explicit"
+        );
     }
 
     /// A relationship whose store edge is missing
@@ -2677,10 +2671,7 @@ mod tests {
     fn build_entity_envelope_source_field_falls_back_to_explicit_when_edge_missing() {
         let mut entity = test_entity();
         let target = EntityId("specs--unmapped".to_string());
-        entity.relationships = vec![crate::entity::Relationship::new(
-            "USES".to_string(),
-            target,
-        )];
+        entity.relationships = vec![crate::entity::Relationship::new("USES".to_string(), target)];
         let edges: Vec<crate::store::Edge> = Vec::new();
         let env = build_entity_envelope(&entity, 0, None, None, None, &edges);
         let relationships = env["relationships"].as_array().expect("array");
@@ -2699,10 +2690,7 @@ mod tests {
         entity.entity_type = "contract".to_string();
         // Pre-fix the envelope dropped every non-promoted key.
         entity.metadata = IndexMap::from([
-            (
-                "level".to_string(),
-                MetadataValue::String("M0".to_string()),
-            ),
+            ("level".to_string(), MetadataValue::String("M0".to_string())),
             (
                 "stability".to_string(),
                 MetadataValue::String("stable".to_string()),
@@ -2733,10 +2721,22 @@ mod tests {
 
         // Metadata scalars are NOT hoisted to the top level — the
         // nested map is their single home.
-        assert!(env.get("level").is_none(), "level must not be hoisted top-level");
-        assert!(env.get("stability").is_none(), "stability must not be hoisted");
-        assert!(env.get("created_date").is_none(), "created_date must not be hoisted");
-        assert!(env.get("last_modified").is_none(), "last_modified must not be hoisted");
+        assert!(
+            env.get("level").is_none(),
+            "level must not be hoisted top-level"
+        );
+        assert!(
+            env.get("stability").is_none(),
+            "stability must not be hoisted"
+        );
+        assert!(
+            env.get("created_date").is_none(),
+            "created_date must not be hoisted"
+        );
+        assert!(
+            env.get("last_modified").is_none(),
+            "last_modified must not be hoisted"
+        );
         // `type` stays top-level as identity.
         assert_eq!(env["type"], "contract");
 
@@ -2802,7 +2802,10 @@ mod tests {
         ]);
         let env = build_entity_envelope(&entity, 0, None, None, None, &[]);
         // Top-level structured slots stay structured.
-        assert!(env["sections"].is_object(), "top-level sections stays a map");
+        assert!(
+            env["sections"].is_object(),
+            "top-level sections stays a map"
+        );
         assert!(
             env["relationships"].is_array(),
             "top-level relationships stays an array"
@@ -2820,9 +2823,7 @@ mod tests {
     fn build_entity_envelope_unfiltered_body_token_field_name() {
         let entity = test_entity();
         // Filter-active path — field present under new name.
-        let env_filtered = build_entity_envelope(
-            &entity, 10, Some(42), None, None, &[],
-        );
+        let env_filtered = build_entity_envelope(&entity, 10, Some(42), None, None, &[]);
         assert_eq!(env_filtered["_tokens_unfiltered_body"], 42);
         assert!(
             env_filtered.get("_tokens_full").is_none(),
@@ -2872,8 +2873,12 @@ mod tests {
     #[test]
     fn first_party_origin_is_labelled_and_keeps_prose() {
         let schema = software_schema();
-        let full =
-            build_schema_payload(&schema, vec!["v".into()], SchemaVerbosity::Full, OriginClass::FirstParty);
+        let full = build_schema_payload(
+            &schema,
+            vec!["v".into()],
+            SchemaVerbosity::Full,
+            OriginClass::FirstParty,
+        );
         assert_eq!(full["origin"], "first-party");
         // First-party full keeps the prose-instruction fields.
         assert!(full["description"].is_string());
@@ -2882,8 +2887,12 @@ mod tests {
         assert!(t.get("writing_guidance").is_some());
 
         // The origin label rides the lite skeleton too.
-        let lite =
-            build_schema_payload(&schema, vec!["v".into()], SchemaVerbosity::Lite, OriginClass::FirstParty);
+        let lite = build_schema_payload(
+            &schema,
+            vec!["v".into()],
+            SchemaVerbosity::Lite,
+            OriginClass::FirstParty,
+        );
         assert_eq!(lite["origin"], "first-party");
     }
 
@@ -2944,17 +2953,35 @@ mod tests {
 
         // Per-type prose-instruction fields dropped.
         for t in full_requested["types_summary"].as_array().unwrap() {
-            assert!(t.get("system_context").is_none(), "third-party drops system_context");
-            assert!(t.get("writing_guidance").is_none(), "third-party drops writing_guidance");
-            assert!(t.get("description").is_none(), "third-party drops type description");
+            assert!(
+                t.get("system_context").is_none(),
+                "third-party drops system_context"
+            );
+            assert!(
+                t.get("writing_guidance").is_none(),
+                "third-party drops writing_guidance"
+            );
+            assert!(
+                t.get("description").is_none(),
+                "third-party drops type description"
+            );
             for s in t["sections"].as_array().unwrap() {
-                assert!(s.get("write_rules").is_none(), "third-party drops section write_rules");
+                assert!(
+                    s.get("write_rules").is_none(),
+                    "third-party drops section write_rules"
+                );
             }
         }
         // Per-rel prose dropped.
         for r in full_requested["relationships_summary"].as_array().unwrap() {
-            assert!(r.get("description").is_none(), "third-party drops rel description");
-            assert!(r.get("when_to_use").is_none(), "third-party drops rel when_to_use");
+            assert!(
+                r.get("description").is_none(),
+                "third-party drops rel description"
+            );
+            assert!(
+                r.get("when_to_use").is_none(),
+                "third-party drops rel when_to_use"
+            );
         }
 
         // A third-party schema served under `full` is byte-identical to
@@ -2975,7 +3002,12 @@ mod tests {
     #[test]
     fn full_payload_carries_the_rich_arrays_and_prose() {
         let schema = software_schema();
-        let full = build_schema_payload(&schema, vec!["v".into()], SchemaVerbosity::Full, OriginClass::FirstParty);
+        let full = build_schema_payload(
+            &schema,
+            vec!["v".into()],
+            SchemaVerbosity::Full,
+            OriginClass::FirstParty,
+        );
 
         // Full keeps today's contract: rich arrays + schema-level prose.
         assert!(full["types"].is_array(), "full has `types`");
@@ -3013,7 +3045,12 @@ mod tests {
     #[test]
     fn lite_payload_is_the_structural_skeleton_without_prose() {
         let schema = software_schema();
-        let lite = build_schema_payload(&schema, vec!["v".into()], SchemaVerbosity::Lite, OriginClass::FirstParty);
+        let lite = build_schema_payload(
+            &schema,
+            vec!["v".into()],
+            SchemaVerbosity::Lite,
+            OriginClass::FirstParty,
+        );
 
         // Heavy arrays under the distinct lite keys; rich keys absent.
         let types = lite["types_summary"]
@@ -3125,8 +3162,18 @@ mod tests {
     #[test]
     fn lite_is_measurably_smaller_than_full() {
         let schema = software_schema();
-        let full = build_schema_payload(&schema, vec!["v".into()], SchemaVerbosity::Full, OriginClass::FirstParty);
-        let lite = build_schema_payload(&schema, vec!["v".into()], SchemaVerbosity::Lite, OriginClass::FirstParty);
+        let full = build_schema_payload(
+            &schema,
+            vec!["v".into()],
+            SchemaVerbosity::Full,
+            OriginClass::FirstParty,
+        );
+        let lite = build_schema_payload(
+            &schema,
+            vec!["v".into()],
+            SchemaVerbosity::Lite,
+            OriginClass::FirstParty,
+        );
         let full_len = serde_json::to_string(&full).unwrap().len();
         let lite_len = serde_json::to_string(&lite).unwrap().len();
         assert!(
@@ -3140,8 +3187,18 @@ mod tests {
         // The cut drops prose, never an entity type or a rel-type — an
         // agent orienting on lite sees the full vocabulary.
         let schema = software_schema();
-        let full = build_schema_payload(&schema, vec!["v".into()], SchemaVerbosity::Full, OriginClass::FirstParty);
-        let lite = build_schema_payload(&schema, vec!["v".into()], SchemaVerbosity::Lite, OriginClass::FirstParty);
+        let full = build_schema_payload(
+            &schema,
+            vec!["v".into()],
+            SchemaVerbosity::Full,
+            OriginClass::FirstParty,
+        );
+        let lite = build_schema_payload(
+            &schema,
+            vec!["v".into()],
+            SchemaVerbosity::Lite,
+            OriginClass::FirstParty,
+        );
 
         let names = |arr: &serde_json::Value| -> Vec<String> {
             arr.as_array()

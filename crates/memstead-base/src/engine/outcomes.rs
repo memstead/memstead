@@ -503,7 +503,6 @@ mod tests {
             "RenameEntityOutcome must serialize new_path: {rename_json}",
         );
     }
-
 }
 
 /// Outcome discriminator for [`Engine::set_mem_schema`]. The agent

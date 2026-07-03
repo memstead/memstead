@@ -5,10 +5,10 @@ use clap::Parser;
 use memstead_base::ops::SearchScope;
 use memstead_base::render;
 
-use crate::output::{print_json, print_markdown};
-use crate::setup::{CliContext, CliEngine};
 use crate::CliError;
 use crate::output::ExitKind;
+use crate::output::{print_json, print_markdown};
+use crate::setup::{CliContext, CliEngine};
 
 /// Filter entities by metadata (no text match — use `search` for that).
 #[derive(Parser, Debug)]
@@ -77,18 +77,18 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             // Validate `--mem` upfront so unknown names error
             // typed instead of silently returning `_total: 0` — matches
             // `memstead create --mem X`'s symmetry.
-            if let Some(name) = scope.mem.as_deref() {
-                if engine.mount(name).is_none() {
-                    return Err(unknown_mem_error(name, &engine).into());
-                }
+            if let Some(name) = scope.mem.as_deref()
+                && engine.mount(name).is_none()
+            {
+                return Err(unknown_mem_error(name, &engine).into());
             }
             engine.list(&scope)
         }
         CliEngine::Filesystem(engine) => {
-            if let Some(name) = scope.mem.as_deref() {
-                if engine.mount(name).is_none() {
-                    return Err(unknown_mem_error(name, &engine).into());
-                }
+            if let Some(name) = scope.mem.as_deref()
+                && engine.mount(name).is_none()
+            {
+                return Err(unknown_mem_error(name, &engine).into());
             }
             engine.list(&scope)
         }

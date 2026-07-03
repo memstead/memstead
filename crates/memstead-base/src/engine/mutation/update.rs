@@ -3,12 +3,11 @@
 
 use std::path::Path;
 
-
 use crate::engine_fallback_type;
+use crate::entity::EntityId;
 use crate::entity::generator::generate_markdown;
 use crate::entity::parser::parse_markdown;
 use crate::entity::store_builder::push_entities_into_store;
-use crate::entity::EntityId;
 use crate::ops::{ModifiedMetadata, ModifiedSections, WarningHint};
 use crate::provenance::{Provenance, ProvenanceKind};
 use crate::runtime_validator::{
@@ -19,8 +18,10 @@ use crate::vcs::{Actor, ClientId, CommitContext};
 use crate::workspace::MountCapability;
 
 use super::super::{Engine, EngineError, UpdateEntityArgs, UpdateEntityOutcome};
-use super::{make_stub, today_iso, unknown_type_error, validate_relation_target_grammar,
-    PATCH_OLD_NOT_FOUND_CONTENT_CAP};
+use super::{
+    PATCH_OLD_NOT_FOUND_CONTENT_CAP, make_stub, today_iso, unknown_type_error,
+    validate_relation_target_grammar,
+};
 use crate::engine::outcomes::RelationDeclared;
 use crate::entity::{Entity, Relationship};
 
@@ -67,7 +68,6 @@ struct AppliedWrite {
 }
 
 impl Engine {
-
     /// Update an entity's sections and/or metadata.
     ///
     /// Same six-concern shape as [`Engine::create_entity`]. Optimistic
@@ -211,10 +211,7 @@ impl Engine {
     /// caller stages + commits. May mutate the store in place via the
     /// alias-synthesis auto-stub upsert; the batch path snapshots the
     /// store before preparing so a refused batch can roll that back.
-    fn prepare_update(
-        &mut self,
-        args: UpdateEntityArgs,
-    ) -> Result<PrepareOutcome, EngineError> {
+    fn prepare_update(&mut self, args: UpdateEntityArgs) -> Result<PrepareOutcome, EngineError> {
         let id = &args.id;
         let mem = id.mem().to_string();
 
@@ -247,9 +244,7 @@ impl Engine {
         // `UnknownType { name: "" }` cascade. Mirrors the
         // `StubCannotRelate` guard on `memstead_relate`.
         if entity.stub {
-            return Err(EngineError::StubNotUpdatable {
-                id: id.to_string(),
-            });
+            return Err(EngineError::StubNotUpdatable { id: id.to_string() });
         }
 
         // Skip the hash check on dry_run — full's dry_run is the
@@ -287,9 +282,7 @@ impl Engine {
             && args.declare_relations.is_empty()
             && args.relations_unset.is_empty()
         {
-            return Err(EngineError::EmptyUpdate {
-                id: id.to_string(),
-            });
+            return Err(EngineError::EmptyUpdate { id: id.to_string() });
         }
 
         let schema = self
@@ -326,10 +319,7 @@ impl Engine {
             if args.patch_sections.contains_key(key) {
                 return Err(EngineError::ConflictingSectionModes {
                     section: key.clone(),
-                    modes: vec![
-                        "append_sections".to_string(),
-                        "patch_sections".to_string(),
-                    ],
+                    modes: vec!["append_sections".to_string(), "patch_sections".to_string()],
                 });
             }
         }
@@ -407,7 +397,7 @@ impl Engine {
         if !args.relations_unset.is_empty() {
             let findings = crate::ops::integrity::entity_conformance_findings(
                 &self.store,
-                &entity,
+                entity,
                 schema.as_ref(),
                 &self.schemas,
             );
@@ -522,8 +512,7 @@ impl Engine {
 
         let mut modified_metadata_set: Vec<String> = Vec::new();
         for (key, value) in &args.metadata {
-            let parsed =
-                parse_metadata_value(key.as_str(), value.as_str(), type_def.as_ref())?;
+            let parsed = parse_metadata_value(key.as_str(), value.as_str(), type_def.as_ref())?;
             modified_metadata_set.push(key.clone());
             next.metadata.insert(key.clone(), parsed);
         }
@@ -729,11 +718,7 @@ impl Engine {
             // entity and not modified since; equals the on-disk
             // value.
             let current_hash = next.content_hash.clone();
-            let modified_date = if type_def
-                .metadata_fields
-                .iter()
-                .any(|f| f.auto_timestamp)
-            {
+            let modified_date = if type_def.metadata_fields.iter().any(|f| f.auto_timestamp) {
                 today.clone()
             } else {
                 String::new()
@@ -769,11 +754,7 @@ impl Engine {
         // hand the staged write to the caller to commit. The single
         // path commits immediately; the batch path commits the whole
         // set at once.
-        let modified_date = if type_def
-            .metadata_fields
-            .iter()
-            .any(|f| f.auto_timestamp)
-        {
+        let modified_date = if type_def.metadata_fields.iter().any(|f| f.auto_timestamp) {
             today.clone()
         } else {
             String::new()
@@ -858,8 +839,10 @@ impl Engine {
         // is the one multi-op-per-process path, so a sibling commit
         // between boot and this call is plausible). Notices stash on
         // the engine for the caller to drain.
-        let mut touched_mems: Vec<String> =
-            updates.iter().map(|(a, _)| a.id.mem().to_string()).collect();
+        let mut touched_mems: Vec<String> = updates
+            .iter()
+            .map(|(a, _)| a.id.mem().to_string())
+            .collect();
         touched_mems.sort();
         touched_mems.dedup();
         for v in &touched_mems {
@@ -1078,7 +1061,11 @@ fn batch_error_envelope(err: &EngineError) -> crate::ops::BatchError {
     let code = err.code().to_string();
     let message = err.to_string();
     let details = err.details();
-    crate::ops::BatchError { code, message, details }
+    crate::ops::BatchError {
+        code,
+        message,
+        details,
+    }
 }
 
 /// Validate, auto-stub, and append a batch of relation declarations
@@ -1116,11 +1103,7 @@ fn apply_declare_relations(
         validate_relation_target_grammar(&rel.to)?;
 
         let target_mem = rel.to.mem().to_string();
-        super::validate_cross_mem_add_policy(
-            engine,
-            source_mem,
-            &target_mem,
-        )?;
+        super::validate_cross_mem_add_policy(engine, source_mem, &target_mem)?;
         if target_mem != source_mem
             && let Some(mount) = engine.mount(&target_mem)
             && mount.capability == MountCapability::ReadOnly
@@ -1176,11 +1159,7 @@ fn apply_declare_relations(
         // declare_relations is an explicit-author
         // boundary too — gate on manual_authoring posture.
         super::validate_manual_authoring_posture(
-            engine,
-            &canonical,
-            source_mem,
-            &next.id,
-            &rel.to,
+            engine, &canonical, source_mem, &next.id, &rel.to,
         )?;
 
         // Append to the entity's relationships list. Duplicate
@@ -1222,7 +1201,6 @@ fn apply_declare_relations(
 
 #[cfg(test)]
 mod tests {
-    
 
     use indexmap::IndexMap;
     use tempfile::TempDir;
@@ -1233,7 +1211,7 @@ mod tests {
         CreateEntityArgs, Engine, EngineError, RelateEntityArgs, UpdateEntityArgs,
     };
     use crate::entity::EntityId;
-    
+
     use crate::storage::{ArchiveBackend, FilesystemMemWriter};
     use crate::vcs::Actor;
 
@@ -1250,9 +1228,7 @@ mod tests {
         )])
         .unwrap();
 
-        let result = engine
-            .batch_update(Vec::new(), Actor::Cli, None)
-            .unwrap();
+        let result = engine.batch_update(Vec::new(), Actor::Cli, None).unwrap();
         assert!(result.applied, "empty batch is a vacuous success");
         assert_eq!(result.results.len(), 0);
         assert_eq!(result.succeeded, 0);
@@ -1298,10 +1274,7 @@ mod tests {
         let valid_update = UpdateEntityArgs {
             id: created.id.clone(),
             expected_hash: Some(created.content_hash.clone()),
-            sections: IndexMap::from_iter([(
-                "identity".to_string(),
-                "updated body".to_string(),
-            )]),
+            sections: IndexMap::from_iter([("identity".to_string(), "updated body".to_string())]),
             append_sections: IndexMap::new(),
             patch_sections: IndexMap::new(),
             metadata: IndexMap::new(),
@@ -1389,8 +1362,12 @@ mod tests {
             relations: Vec::new(),
             dry_run: false,
         };
-        let a = engine.create_entity(mk("A"), Actor::Cli, None, None).unwrap();
-        let b = engine.create_entity(mk("B"), Actor::Cli, None, None).unwrap();
+        let a = engine
+            .create_entity(mk("A"), Actor::Cli, None, None)
+            .unwrap();
+        let b = engine
+            .create_entity(mk("B"), Actor::Cli, None, None)
+            .unwrap();
 
         let upd = |id: EntityId, hash: String, body: &str| UpdateEntityArgs {
             id,
@@ -1418,15 +1395,28 @@ mod tests {
         assert!(result.applied);
         assert_eq!(result.succeeded, 2);
         assert_eq!(result.failed, 0);
-        assert!(!result.commit_sha.is_empty(), "applied batch carries the commit");
+        assert!(
+            !result.commit_sha.is_empty(),
+            "applied batch carries the commit"
+        );
         assert!(result.results.iter().all(|e| e.action == "updated"));
         // Both section changes landed.
         assert_eq!(
-            engine.get_entity(&a.id).unwrap().sections.get("identity").map(String::as_str),
+            engine
+                .get_entity(&a.id)
+                .unwrap()
+                .sections
+                .get("identity")
+                .map(String::as_str),
             Some("A body"),
         );
         assert_eq!(
-            engine.get_entity(&b.id).unwrap().sections.get("identity").map(String::as_str),
+            engine
+                .get_entity(&b.id)
+                .unwrap()
+                .sections
+                .get("identity")
+                .map(String::as_str),
             Some("B body"),
         );
     }
@@ -1452,7 +1442,12 @@ mod tests {
         let (actor, client) = cli_actor();
 
         let a = engine
-            .create_entity(empty_create_args("specs", "Anchor"), actor, Some(&client), None)
+            .create_entity(
+                empty_create_args("specs", "Anchor"),
+                actor,
+                Some(&client),
+                None,
+            )
             .unwrap();
 
         let stub_target = EntityId::new("specs", "would-be-stub");
@@ -1528,19 +1523,31 @@ mod tests {
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
                     dry_run: false,
-            relations_unset: Vec::new(),
-        },
+                    relations_unset: Vec::new(),
+                },
                 actor,
                 Some(&client),
                 Some("section update"),
             )
             .unwrap();
 
-        assert_eq!(outcome.modified_sections.replaced, vec!["identity".to_string()]);
-        assert_ne!(outcome.content_hash, seeded.content_hash, "hash must change");
+        assert_eq!(
+            outcome.modified_sections.replaced,
+            vec!["identity".to_string()]
+        );
+        assert_ne!(
+            outcome.content_hash, seeded.content_hash,
+            "hash must change"
+        );
         // Store carries the new content.
         let entity = engine.get_entity(&seeded.id).unwrap();
-        assert!(entity.sections.get("identity").unwrap().contains("Updated body."));
+        assert!(
+            entity
+                .sections
+                .get("identity")
+                .unwrap()
+                .contains("Updated body.")
+        );
         // Provenance log records the update.
         let log = std::fs::read_to_string(tmp.path().join(".memstead/changes.jsonl")).unwrap();
         assert!(log.contains("\"kind\":\"update\""));
@@ -1564,15 +1571,19 @@ mod tests {
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
                     dry_run: false,
-            relations_unset: Vec::new(),
-        },
+                    relations_unset: Vec::new(),
+                },
                 actor,
                 Some(&client),
                 None,
             )
             .unwrap_err();
         match err {
-            EngineError::HashMismatch { id, current, is_stub } => {
+            EngineError::HashMismatch {
+                id,
+                current,
+                is_stub,
+            } => {
                 assert_eq!(id, seeded.id.to_string());
                 assert_eq!(current, seeded.content_hash);
                 assert!(!is_stub, "real entity must not flag as stub");
@@ -1598,8 +1609,8 @@ mod tests {
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
                     dry_run: false,
-            relations_unset: Vec::new(),
-        },
+                    relations_unset: Vec::new(),
+                },
                 actor,
                 Some(&client),
                 None,
@@ -1638,8 +1649,8 @@ mod tests {
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
                     dry_run: false,
-            relations_unset: Vec::new(),
-        },
+                    relations_unset: Vec::new(),
+                },
                 actor,
                 Some(&client),
                 None,
@@ -1657,10 +1668,7 @@ mod tests {
         // Pre-write a known body via the replace path so the patch
         // test has a deterministic substring to target.
         let mut replace = IndexMap::new();
-        replace.insert(
-            "identity".to_string(),
-            "hello world hello".to_string(),
-        );
+        replace.insert("identity".to_string(), "hello world hello".to_string());
         let replaced = engine
             .update_entity(
                 UpdateEntityArgs {
@@ -1673,8 +1681,8 @@ mod tests {
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
                     dry_run: false,
-            relations_unset: Vec::new(),
-        },
+                    relations_unset: Vec::new(),
+                },
                 actor,
                 Some(&client),
                 None,
@@ -1703,8 +1711,8 @@ mod tests {
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
                     dry_run: false,
-            relations_unset: Vec::new(),
-        },
+                    relations_unset: Vec::new(),
+                },
                 actor,
                 Some(&client),
                 None,
@@ -1747,8 +1755,8 @@ mod tests {
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
                     dry_run: false,
-            relations_unset: Vec::new(),
-        },
+                    relations_unset: Vec::new(),
+                },
                 actor,
                 Some(&client),
                 None,
@@ -1783,8 +1791,8 @@ mod tests {
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
                     dry_run: false,
-            relations_unset: Vec::new(),
-        },
+                    relations_unset: Vec::new(),
+                },
                 actor,
                 Some(&client),
                 None,
@@ -1840,18 +1848,15 @@ mod tests {
                 UpdateEntityArgs {
                     id: stub_id.clone(),
                     expected_hash: Some(String::new()),
-                    sections: IndexMap::from_iter([(
-                        "identity".to_string(),
-                        "body".to_string(),
-                    )]),
+                    sections: IndexMap::from_iter([("identity".to_string(), "body".to_string())]),
                     append_sections: IndexMap::new(),
                     patch_sections: IndexMap::new(),
                     metadata: IndexMap::new(),
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
                     dry_run: false,
-            relations_unset: Vec::new(),
-        },
+                    relations_unset: Vec::new(),
+                },
                 actor,
                 Some(&client),
                 None,
@@ -1886,8 +1891,8 @@ mod tests {
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
                     dry_run: false,
-            relations_unset: Vec::new(),
-        },
+                    relations_unset: Vec::new(),
+                },
                 actor,
                 Some(&client),
                 None,
@@ -1931,8 +1936,8 @@ mod tests {
                     metadata_unset: vec!["tags".to_string()],
                     declare_relations: Vec::new(),
                     dry_run: false,
-            relations_unset: Vec::new(),
-        },
+                    relations_unset: Vec::new(),
+                },
                 actor,
                 Some(&client),
                 None,
@@ -1955,8 +1960,8 @@ mod tests {
         // (Schemas without the pointer continue to refuse with
         // `WIKILINK_WITHOUT_RELATION`; that path is covered by the
         // dedicated no-pointer fixture test elsewhere.)
-        use crate::engine::UpdateEntityArgs;
         use crate::EntityId;
+        use crate::engine::UpdateEntityArgs;
         use indexmap::IndexMap;
         use tempfile::TempDir;
 
@@ -1972,10 +1977,20 @@ mod tests {
         let (actor, client) = cli_actor();
 
         let target = engine
-            .create_entity(empty_create_args("specs", "Target"), actor, Some(&client), None)
+            .create_entity(
+                empty_create_args("specs", "Target"),
+                actor,
+                Some(&client),
+                None,
+            )
             .unwrap();
         let source = engine
-            .create_entity(empty_create_args("specs", "Source"), actor, Some(&client), None)
+            .create_entity(
+                empty_create_args("specs", "Source"),
+                actor,
+                Some(&client),
+                None,
+            )
             .unwrap();
 
         let mut sections: IndexMap<String, String> = IndexMap::new();
@@ -1995,21 +2010,28 @@ mod tests {
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
                     dry_run: false,
-            relations_unset: Vec::new(),
-        },
+                    relations_unset: Vec::new(),
+                },
                 actor,
                 Some(&client),
                 None,
             )
             .expect("auto-synthesis must satisfy the alias-existence invariant");
         // Body landed.
-        assert_eq!(
-            outcome.modified_sections.replaced.iter().any(|s| s == "purpose"),
-            true,
+        assert!(
+            outcome
+                .modified_sections
+                .replaced
+                .iter()
+                .any(|s| s == "purpose"),
         );
         let in_mem = engine.get_entity(&source.id).unwrap();
         assert_eq!(
-            in_mem.sections.get("purpose").map(String::as_str).unwrap_or(""),
+            in_mem
+                .sections
+                .get("purpose")
+                .map(String::as_str)
+                .unwrap_or(""),
             "see [[target]] for context",
         );
         // REFERENCES relation synthesised from the body wiki-link.
@@ -2050,10 +2072,20 @@ mod tests {
         let (actor, client) = cli_actor();
 
         let target = engine
-            .create_entity(empty_create_args("specs", "Target"), actor, Some(&client), None)
+            .create_entity(
+                empty_create_args("specs", "Target"),
+                actor,
+                Some(&client),
+                None,
+            )
             .unwrap();
         let source = engine
-            .create_entity(empty_create_args("specs", "Source"), actor, Some(&client), None)
+            .create_entity(
+                empty_create_args("specs", "Source"),
+                actor,
+                Some(&client),
+                None,
+            )
             .unwrap();
 
         // Atomic declare + body update. USES (not REFERENCES) — under
@@ -2113,9 +2145,9 @@ mod tests {
         // When the declared target doesn't exist yet, the engine
         // auto-stubs it (same mechanic as `memstead_relate`) and flags
         // `target_was_stubbed: true` in the outcome.
+        use crate::EntityId;
         use crate::engine::UpdateEntityArgs;
         use crate::ops::RelateArg;
-        use crate::EntityId;
         use indexmap::IndexMap;
 
         let tmp = TempDir::new().unwrap();
@@ -2181,10 +2213,20 @@ mod tests {
         engine.set_workspace_root(mem_dir.clone());
         let (actor, client) = cli_actor();
         let target = engine
-            .create_entity(empty_create_args("specs", "Target"), actor, Some(&client), None)
+            .create_entity(
+                empty_create_args("specs", "Target"),
+                actor,
+                Some(&client),
+                None,
+            )
             .unwrap();
         let source = engine
-            .create_entity(empty_create_args("specs", "Source"), actor, Some(&client), None)
+            .create_entity(
+                empty_create_args("specs", "Source"),
+                actor,
+                Some(&client),
+                None,
+            )
             .unwrap();
 
         let mut sections: IndexMap<String, String> = IndexMap::new();
@@ -2204,8 +2246,8 @@ mod tests {
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
                     dry_run: false,
-            relations_unset: Vec::new(),
-        },
+                    relations_unset: Vec::new(),
+                },
                 actor,
                 Some(&client),
                 None,
@@ -2246,8 +2288,8 @@ mod tests {
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
                     dry_run: true,
-            relations_unset: Vec::new(),
-        },
+                    relations_unset: Vec::new(),
+                },
                 actor,
                 Some(&client),
                 None,
@@ -2388,10 +2430,7 @@ mod tests {
         // GCs the synthesised REFERENCES → bar atomically with the
         // body update — no second `memstead_relate --remove` needed.
         let mut sections = IndexMap::new();
-        sections.insert(
-            "identity".to_string(),
-            "See [[foo]] inline.".to_string(),
-        );
+        sections.insert("identity".to_string(), "See [[foo]] inline.".to_string());
         let updated = engine
             .update_entity(
                 UpdateEntityArgs {
@@ -2404,8 +2443,8 @@ mod tests {
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
                     dry_run: false,
-            relations_unset: Vec::new(),
-        },
+                    relations_unset: Vec::new(),
+                },
                 actor,
                 Some(&client),
                 None,
@@ -2498,8 +2537,8 @@ mod tests {
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
                     dry_run: false,
-            relations_unset: Vec::new(),
-        },
+                    relations_unset: Vec::new(),
+                },
                 actor,
                 Some(&client),
                 None,
@@ -2526,7 +2565,10 @@ mod tests {
         // so the wire shape parity with full's UpdateResult holds.
         assert!(outcome.warnings.is_empty());
         // Section was modified (existing behaviour, sanity check).
-        assert_eq!(outcome.modified_sections.replaced, vec!["identity".to_string()]);
+        assert_eq!(
+            outcome.modified_sections.replaced,
+            vec!["identity".to_string()]
+        );
     }
 
     // ---- Engine::update_entity no-op detection ---------------------
@@ -2555,10 +2597,7 @@ mod tests {
         // helper writes "fixture identity body" — passing the same
         // string back must be a no-op.
         let mut sections = IndexMap::new();
-        sections.insert(
-            "identity".to_string(),
-            "fixture identity body".to_string(),
-        );
+        sections.insert("identity".to_string(), "fixture identity body".to_string());
         let outcome = engine
             .update_entity(
                 UpdateEntityArgs {
@@ -2571,8 +2610,8 @@ mod tests {
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
                     dry_run: false,
-            relations_unset: Vec::new(),
-        },
+                    relations_unset: Vec::new(),
+                },
                 actor,
                 Some(&client),
                 None,
@@ -2644,8 +2683,8 @@ mod tests {
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
                     dry_run: false,
-            relations_unset: Vec::new(),
-        },
+                    relations_unset: Vec::new(),
+                },
                 actor,
                 Some(&client),
                 None,
@@ -2678,10 +2717,7 @@ mod tests {
 
         // `empty_create_args` seeds `identity` with this exact body.
         let mut sections = IndexMap::new();
-        sections.insert(
-            "identity".to_string(),
-            "fixture identity body".to_string(),
-        );
+        sections.insert("identity".to_string(), "fixture identity body".to_string());
 
         let outcome = engine
             .update_entity(
@@ -2695,8 +2731,8 @@ mod tests {
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
                     dry_run: false,
-            relations_unset: Vec::new(),
-        },
+                    relations_unset: Vec::new(),
+                },
                 actor,
                 Some(&client),
                 None,
@@ -2737,8 +2773,8 @@ mod tests {
                     metadata_unset: vec!["tags".to_string()],
                     declare_relations: Vec::new(),
                     dry_run: false,
-            relations_unset: Vec::new(),
-        },
+                    relations_unset: Vec::new(),
+                },
                 actor,
                 Some(&client),
                 None,
@@ -2748,17 +2784,13 @@ mod tests {
         assert_eq!(outcome.commit_sha, "");
         assert_eq!(outcome.content_hash, seeded.content_hash);
         assert!(
-            outcome
-                .warnings
-                .iter()
-                .any(|w| w.code() == "UPDATE_NOOP"),
+            outcome.warnings.iter().any(|w| w.code() == "UPDATE_NOOP"),
             "absent-key metadata_unset must surface UPDATE_NOOP",
         );
         // Empty applied delta on the no-op —
         // `unset` must not claim `tags` was removed when nothing landed.
         assert!(
-            outcome.modified_metadata.set.is_empty()
-                && outcome.modified_metadata.unset.is_empty(),
+            outcome.modified_metadata.set.is_empty() && outcome.modified_metadata.unset.is_empty(),
             "no-op must report an empty metadata delta, got {:?}",
             outcome.modified_metadata,
         );
@@ -2779,8 +2811,8 @@ mod tests {
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
                     dry_run: false,
-            relations_unset: Vec::new(),
-        },
+                    relations_unset: Vec::new(),
+                },
                 actor,
                 Some(&client),
                 None,
@@ -2818,8 +2850,8 @@ mod tests {
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
                     dry_run: false,
-            relations_unset: Vec::new(),
-        },
+                    relations_unset: Vec::new(),
+                },
                 actor,
                 Some(&client),
                 None,
@@ -2827,14 +2859,16 @@ mod tests {
             .unwrap();
 
         assert_eq!(outcome.commit_sha, "", "no-op must not commit");
-        assert_eq!(outcome.content_hash, seeded.content_hash, "no-op must not advance hash");
+        assert_eq!(
+            outcome.content_hash, seeded.content_hash,
+            "no-op must not advance hash"
+        );
         assert!(
             outcome.warnings.iter().any(|w| w.code() == "UPDATE_NOOP"),
             "re-set to current value must surface UPDATE_NOOP",
         );
         assert!(
-            outcome.modified_metadata.set.is_empty()
-                && outcome.modified_metadata.unset.is_empty(),
+            outcome.modified_metadata.set.is_empty() && outcome.modified_metadata.unset.is_empty(),
             "no-op must not claim `level` was set — applied delta is empty, got {:?}",
             outcome.modified_metadata,
         );
@@ -2915,10 +2949,7 @@ mod tests {
         assert_eq!(outcome.commit_sha, "");
         assert_eq!(outcome.content_hash, after_relate.content_hash);
         assert!(
-            outcome
-                .warnings
-                .iter()
-                .any(|w| w.code() == "UPDATE_NOOP"),
+            outcome.warnings.iter().any(|w| w.code() == "UPDATE_NOOP"),
             "duplicate declare must surface UPDATE_NOOP",
         );
         // `relations_declared` still records the entry — the per-
@@ -2954,8 +2985,8 @@ mod tests {
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
                     dry_run: false,
-            relations_unset: Vec::new(),
-        },
+                    relations_unset: Vec::new(),
+                },
                 actor,
                 Some(&client),
                 None,
@@ -2988,10 +3019,7 @@ mod tests {
         // so UPDATE_NOOP fires (rather than EMPTY_UPDATE) and the
         // hash-chain invariant is exercised on the warning path.
         let mut noop_sections = IndexMap::new();
-        noop_sections.insert(
-            "identity".to_string(),
-            "fixture identity body".to_string(),
-        );
+        noop_sections.insert("identity".to_string(), "fixture identity body".to_string());
         for _ in 0..2 {
             let outcome = engine
                 .update_entity(
@@ -3005,8 +3033,8 @@ mod tests {
                         metadata_unset: Vec::new(),
                         declare_relations: Vec::new(),
                         dry_run: false,
-            relations_unset: Vec::new(),
-        },
+                        relations_unset: Vec::new(),
+                    },
                     actor,
                     Some(&client),
                     None,
@@ -3035,8 +3063,8 @@ mod tests {
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
                     dry_run: false,
-            relations_unset: Vec::new(),
-        },
+                    relations_unset: Vec::new(),
+                },
                 actor,
                 Some(&client),
                 None,
@@ -3075,7 +3103,12 @@ mod tests {
         let (actor, client) = cli_actor();
 
         let target = engine
-            .create_entity(empty_create_args("specs", "Target"), actor, Some(&client), None)
+            .create_entity(
+                empty_create_args("specs", "Target"),
+                actor,
+                Some(&client),
+                None,
+            )
             .unwrap();
         // Create source with the body wiki-link already present —
         // synthesis fires inside create.
@@ -3127,8 +3160,8 @@ mod tests {
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
                     dry_run: false,
-            relations_unset: Vec::new(),
-        },
+                    relations_unset: Vec::new(),
+                },
                 actor,
                 Some(&client),
                 None,
@@ -3172,7 +3205,10 @@ mod tests {
         let ghost = crate::EntityId::new("specs", "ghost");
         let mut sections: IndexMap<String, String> = IndexMap::new();
         sections.insert("identity".to_string(), "source identity".to_string());
-        sections.insert("purpose".to_string(), "see [[ghost]] for context".to_string());
+        sections.insert(
+            "purpose".to_string(),
+            "see [[ghost]] for context".to_string(),
+        );
         let source = engine
             .create_entity(
                 CreateEntityArgs {
@@ -3193,7 +3229,11 @@ mod tests {
             engine.store().contains(&ghost) && engine.get_entity(&ghost).unwrap().stub,
             "body wiki-link to an absent target must auto-stub it",
         );
-        assert_eq!(engine.health().stub_count, 1, "one stub before the link drop");
+        assert_eq!(
+            engine.health().stub_count,
+            1,
+            "one stub before the link drop"
+        );
 
         let mut new_sections: IndexMap<String, String> = IndexMap::new();
         new_sections.insert("purpose".to_string(), "no link any more".to_string());
@@ -3209,8 +3249,8 @@ mod tests {
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
                     dry_run: false,
-            relations_unset: Vec::new(),
-        },
+                    relations_unset: Vec::new(),
+                },
                 actor,
                 Some(&client),
                 None,
@@ -3226,7 +3266,11 @@ mod tests {
             !engine.store().contains(&ghost),
             "orphan stub must be gone from the in-memory store",
         );
-        assert_eq!(engine.health().stub_count, 0, "stub count decremented in-session");
+        assert_eq!(
+            engine.health().stub_count,
+            0,
+            "stub count decremented in-session"
+        );
 
         // Reload from disk: the source's on-disk markdown no longer
         // carries the link, so the parser re-emits no stub. The
@@ -3267,7 +3311,10 @@ mod tests {
         let ghost = crate::EntityId::new("specs", "ghost");
         let mut sections: IndexMap<String, String> = IndexMap::new();
         sections.insert("identity".to_string(), "original identity".to_string());
-        sections.insert("purpose".to_string(), "see [[ghost]] for context".to_string());
+        sections.insert(
+            "purpose".to_string(),
+            "see [[ghost]] for context".to_string(),
+        );
         let source = engine
             .create_entity(
                 CreateEntityArgs {
@@ -3302,8 +3349,8 @@ mod tests {
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
                     dry_run: false,
-            relations_unset: Vec::new(),
-        },
+                    relations_unset: Vec::new(),
+                },
                 actor,
                 Some(&client),
                 None,
@@ -3378,8 +3425,8 @@ mod tests {
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
                     dry_run: false,
-            relations_unset: Vec::new(),
-        },
+                    relations_unset: Vec::new(),
+                },
                 actor,
                 Some(&client),
                 None,
@@ -3422,10 +3469,20 @@ mod tests {
         let (actor, client) = cli_actor();
 
         let target = engine
-            .create_entity(empty_create_args("specs", "Target"), actor, Some(&client), None)
+            .create_entity(
+                empty_create_args("specs", "Target"),
+                actor,
+                Some(&client),
+                None,
+            )
             .unwrap();
         let source = engine
-            .create_entity(empty_create_args("specs", "Source"), actor, Some(&client), None)
+            .create_entity(
+                empty_create_args("specs", "Source"),
+                actor,
+                Some(&client),
+                None,
+            )
             .unwrap();
 
         // Explicit relate — no body wiki-link.
@@ -3461,8 +3518,8 @@ mod tests {
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
                     dry_run: false,
-            relations_unset: Vec::new(),
-        },
+                    relations_unset: Vec::new(),
+                },
                 actor,
                 Some(&client),
                 None,
@@ -3499,10 +3556,20 @@ mod tests {
         let (actor, client) = cli_actor();
 
         let target = engine
-            .create_entity(empty_create_args("specs", "Target"), actor, Some(&client), None)
+            .create_entity(
+                empty_create_args("specs", "Target"),
+                actor,
+                Some(&client),
+                None,
+            )
             .unwrap();
         let source = engine
-            .create_entity(empty_create_args("specs", "Source"), actor, Some(&client), None)
+            .create_entity(
+                empty_create_args("specs", "Source"),
+                actor,
+                Some(&client),
+                None,
+            )
             .unwrap();
 
         let mut sections: IndexMap<String, String> = IndexMap::new();
@@ -3522,8 +3589,8 @@ mod tests {
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
                     dry_run: false,
-            relations_unset: Vec::new(),
-        },
+                    relations_unset: Vec::new(),
+                },
                 actor,
                 Some(&client),
                 None,
@@ -3564,10 +3631,20 @@ mod tests {
         let (actor, client) = cli_actor();
 
         let target = engine
-            .create_entity(empty_create_args("specs", "Target"), actor, Some(&client), None)
+            .create_entity(
+                empty_create_args("specs", "Target"),
+                actor,
+                Some(&client),
+                None,
+            )
             .unwrap();
         let source = engine
-            .create_entity(empty_create_args("specs", "Source"), actor, Some(&client), None)
+            .create_entity(
+                empty_create_args("specs", "Source"),
+                actor,
+                Some(&client),
+                None,
+            )
             .unwrap();
         // Explicit USES.
         let relate = engine
@@ -3603,8 +3680,8 @@ mod tests {
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
                     dry_run: false,
-            relations_unset: Vec::new(),
-        },
+                    relations_unset: Vec::new(),
+                },
                 actor,
                 Some(&client),
                 None,
@@ -3675,21 +3752,12 @@ staleness_threshold_days: 90
 write_rules: []
 "#;
 
-        fn write_schema_files(
-            root: &Path,
-            name: &str,
-            manifest: &str,
-            types: &[(&str, &str)],
-        ) {
+        fn write_schema_files(root: &Path, name: &str, manifest: &str, types: &[(&str, &str)]) {
             let dir = root.join(name);
             std::fs::create_dir_all(dir.join("types")).unwrap();
             std::fs::write(dir.join("schema.yaml"), manifest).unwrap();
             for (type_name, body) in types {
-                std::fs::write(
-                    dir.join("types").join(format!("{type_name}.yaml")),
-                    body,
-                )
-                .unwrap();
+                std::fs::write(dir.join("types").join(format!("{type_name}.yaml")), body).unwrap();
             }
         }
 
@@ -3697,11 +3765,7 @@ write_rules: []
             format!("name: {name}\n{TYPE_BODY}")
         }
 
-        fn folder_mount_with_pin(
-            mem: &str,
-            path: std::path::PathBuf,
-            pin: SchemaRef,
-        ) -> Mount {
+        fn folder_mount_with_pin(mem: &str, path: std::path::PathBuf, pin: SchemaRef) -> Mount {
             Mount {
                 mem: mem.to_string(),
                 schema: Some(pin),
@@ -3709,8 +3773,8 @@ write_rules: []
                 capability: MountCapability::Write,
                 lifecycle: MountLifecycle::Eager,
                 cross_linkable: true,
-            migration_target: None,
-        }
+                migration_target: None,
+            }
         }
 
         fn engine_with_schema(
@@ -3923,8 +3987,8 @@ community:
                         metadata_unset: Vec::new(),
                         declare_relations: Vec::new(),
                         dry_run: false,
-            relations_unset: Vec::new(),
-        },
+                        relations_unset: Vec::new(),
+                    },
                     actor,
                     Some(&client),
                     None,
@@ -3982,10 +4046,7 @@ community:
             let (actor, client) = cli_actor();
 
             let mut sections: IndexMap<String, String> = IndexMap::new();
-            sections.insert(
-                "body".to_string(),
-                "see [[Knowledge Graph]]".to_string(),
-            );
+            sections.insert("body".to_string(), "see [[Knowledge Graph]]".to_string());
             let err = engine
                 .create_entity(
                     CreateEntityArgs {
@@ -4057,10 +4118,7 @@ community:
             let (actor, client) = cli_actor();
 
             let mut sections: IndexMap<String, String> = IndexMap::new();
-            sections.insert(
-                "body".to_string(),
-                "see [[Other Mem:foo]]".to_string(),
-            );
+            sections.insert("body".to_string(), "see [[Other Mem:foo]]".to_string());
             let err = engine
                 .create_entity(
                     CreateEntityArgs {
@@ -4277,9 +4335,7 @@ community:
         let (_tmp, mut engine) = repair_engine();
         let drifted = EntityId::new("specs", "drifted");
         // Pre-state really is non-conformant.
-        let pre = engine
-            .conformance_findings("specs", None)
-            .unwrap();
+        let pre = engine.conformance_findings("specs", None).unwrap();
         assert!(
             pre.iter().any(|f| f.id == drifted.to_string()),
             "fixture must lint non-conformant; got {pre:?}"
@@ -4316,8 +4372,7 @@ community:
         let mut args = repair_args(drifted.clone(), None);
         // Post-state violation: an unknown section alongside the
         // repair input.
-        args.sections =
-            IndexMap::from_iter([("nonexistent_section".to_string(), "x".to_string())]);
+        args.sections = IndexMap::from_iter([("nonexistent_section".to_string(), "x".to_string())]);
         let err = engine
             .update_entity(args, Actor::Cli, None, None)
             .unwrap_err();
@@ -4355,4 +4410,3 @@ community:
         );
     }
 }
-

@@ -172,7 +172,10 @@ fn dump_snapshot_token_is_stable_across_runs() {
             .stdout
             .clone();
         let parsed: serde_json::Value = serde_json::from_slice(&out).expect("valid JSON");
-        parsed["mems"][0]["snapshot_token"].as_str().unwrap().to_string()
+        parsed["mems"][0]["snapshot_token"]
+            .as_str()
+            .unwrap()
+            .to_string()
     };
 
     let first = run();
@@ -275,7 +278,9 @@ fn dump_workspace_root_is_absolute() {
         .stdout
         .clone();
     let parsed: serde_json::Value = serde_json::from_slice(&output).expect("valid JSON");
-    let root = parsed["workspace_root"].as_str().expect("workspace_root is string");
+    let root = parsed["workspace_root"]
+        .as_str()
+        .expect("workspace_root is string");
     assert!(
         Path::new(root).is_absolute(),
         "workspace_root is absolute: {root}"

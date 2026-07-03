@@ -114,8 +114,9 @@ fn normalize_lf(s: &str) -> String {
 /// serde_json's default string-escape rules (so behavior matches the
 /// parser's tolerance).
 pub fn canonical_json(config: &PublishedMemConfig) -> Result<String, ValidationError> {
-    let value = serde_json::to_value(config)
-        .map_err(|e| ValidationError::InvalidConfig { reason: e.to_string() })?;
+    let value = serde_json::to_value(config).map_err(|e| ValidationError::InvalidConfig {
+        reason: e.to_string(),
+    })?;
     let mut out = String::new();
     write_canonical(&value, &mut out, 0);
     out.push('\n');
@@ -163,8 +164,7 @@ fn write_canonical(value: &serde_json::Value, out: &mut String, indent: usize) {
             for (i, key) in keys.iter().enumerate() {
                 out.push('\n');
                 push_indent(out, indent + 1);
-                let key_escaped =
-                    serde_json::to_string(*key).expect("string escape infallible");
+                let key_escaped = serde_json::to_string(*key).expect("string escape infallible");
                 out.push_str(&key_escaped);
                 out.push_str(": ");
                 write_canonical(&map[*key], out, indent + 1);

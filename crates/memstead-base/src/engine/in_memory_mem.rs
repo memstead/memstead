@@ -76,12 +76,20 @@ fn full_lifecycle_round_trips_in_memory() {
     let (actor, client) = cli_actor();
 
     // Mem boots empty — nothing was provisioned.
-    assert!(engine.get_entity(&EntityId::new("specs", "target-spec")).is_none());
+    assert!(
+        engine
+            .get_entity(&EntityId::new("specs", "target-spec"))
+            .is_none()
+    );
 
     // --- create: target, then a referrer whose body wiki-links it ---
     let target = engine
         .create_entity(
-            spec_create("specs", "Target Spec", spec_sections("target identity", "target purpose")),
+            spec_create(
+                "specs",
+                "Target Spec",
+                spec_sections("target identity", "target purpose"),
+            ),
             actor,
             Some(&client),
             None,
@@ -106,7 +114,9 @@ fn full_lifecycle_round_trips_in_memory() {
         .unwrap();
 
     // --- read: the created entity reads back from the in-RAM store ---
-    let read_back = engine.get_entity(&referrer.id).expect("referrer reads back");
+    let read_back = engine
+        .get_entity(&referrer.id)
+        .expect("referrer reads back");
     assert_eq!(read_back.title, "Referrer Spec");
     assert_eq!(read_back.content_hash, referrer.content_hash);
     assert!(
@@ -120,8 +130,12 @@ fn full_lifecycle_round_trips_in_memory() {
 
     // --- update: replacing a section bumps the content hash ---
     let mut update = empty_update(referrer.id.clone(), Some(referrer.content_hash.clone()));
-    update.sections.insert("identity".to_string(), "revised identity body".to_string());
-    let updated = engine.update_entity(update, actor, Some(&client), None).unwrap();
+    update
+        .sections
+        .insert("identity".to_string(), "revised identity body".to_string());
+    let updated = engine
+        .update_entity(update, actor, Some(&client), None)
+        .unwrap();
     assert_ne!(
         updated.content_hash, referrer.content_hash,
         "an update must bump the content hash"
@@ -132,7 +146,9 @@ fn full_lifecycle_round_trips_in_memory() {
     //     backend — the guard is enforced above the backend, so the
     //     in-memory backend can neither skip nor weaken it. ---
     let stale = empty_update(referrer.id.clone(), Some(referrer.content_hash.clone()));
-    let err = engine.update_entity(stale, actor, Some(&client), None).unwrap_err();
+    let err = engine
+        .update_entity(stale, actor, Some(&client), None)
+        .unwrap_err();
     assert!(
         matches!(err, EngineError::HashMismatch { .. }),
         "stale expected-hash must refuse with HASH_MISMATCH, got {err:?}"
@@ -179,7 +195,10 @@ fn full_lifecycle_round_trips_in_memory() {
         .unwrap();
     let renamed_target = EntityId::new("specs", "renamed-spec");
     assert_eq!(renamed.new_id, renamed_target);
-    assert!(engine.get_entity(&target.id).is_none(), "old id must be gone after rename");
+    assert!(
+        engine.get_entity(&target.id).is_none(),
+        "old id must be gone after rename"
+    );
 
     let after_rename = engine.get_entity(&referrer.id).unwrap();
     // Both the auto-emitted REFERENCES edge and the explicit USES edge
@@ -215,26 +234,41 @@ fn full_lifecycle_round_trips_in_memory() {
     //     target loses its last incoming ref, then the target). ---
     engine
         .delete_entity(
-            DeleteEntityArgs { id: referrer.id.clone(), expected_hash: None },
+            DeleteEntityArgs {
+                id: referrer.id.clone(),
+                expected_hash: None,
+            },
             actor,
             Some(&client),
             None,
         )
         .unwrap();
-    assert!(engine.get_entity(&referrer.id).is_none(), "delete must remove the referrer");
+    assert!(
+        engine.get_entity(&referrer.id).is_none(),
+        "delete must remove the referrer"
+    );
 
     engine
         .delete_entity(
-            DeleteEntityArgs { id: renamed_target.clone(), expected_hash: None },
+            DeleteEntityArgs {
+                id: renamed_target.clone(),
+                expected_hash: None,
+            },
             actor,
             Some(&client),
             None,
         )
         .unwrap();
-    assert!(engine.get_entity(&renamed_target).is_none(), "delete must remove the target");
+    assert!(
+        engine.get_entity(&renamed_target).is_none(),
+        "delete must remove the target"
+    );
 
     // Edge actually committed (a real relate, not a no-op).
-    assert!(!relate.commit_sha.is_empty(), "relate must produce a commit id");
+    assert!(
+        !relate.commit_sha.is_empty(),
+        "relate must produce a commit id"
+    );
 }
 
 /// An in-memory mem exports to a self-describing `.mem` archive that
@@ -268,7 +302,11 @@ fn in_memory_mem_exports_to_mem_archive_that_mounts_standalone() {
     // body-wiki-links it (auto REFERENCES) and explicitly USES it.
     let target = engine
         .create_entity(
-            spec_create("playground", "Target Spec", spec_sections("target id", "target purpose")),
+            spec_create(
+                "playground",
+                "Target Spec",
+                spec_sections("target id", "target purpose"),
+            ),
             actor,
             Some(&client),
             None,
@@ -304,14 +342,21 @@ fn in_memory_mem_exports_to_mem_archive_that_mounts_standalone() {
 
     // Seal the live mem to `.mem` bytes, then mount those bytes
     // standalone in a brand-new engine — no shared state with the source.
-    let bytes = engine.export_mem_to_bytes("playground").expect("in-memory export succeeds");
+    let bytes = engine
+        .export_mem_to_bytes("playground")
+        .expect("in-memory export succeeds");
     let standalone = Engine::from_archive_bytes(bytes).expect("exported .mem mounts standalone");
 
     // The standalone engine yields the same graph the agent built.
     let target_id = EntityId::new("playground", "target-spec");
     let referrer_id = EntityId::new("playground", "referrer-spec");
-    assert!(standalone.get_entity(&target_id).is_some(), "target survives the round-trip");
-    let r = standalone.get_entity(&referrer_id).expect("referrer survives the round-trip");
+    assert!(
+        standalone.get_entity(&target_id).is_some(),
+        "target survives the round-trip"
+    );
+    let r = standalone
+        .get_entity(&referrer_id)
+        .expect("referrer survives the round-trip");
     assert!(
         r.relationships
             .iter()

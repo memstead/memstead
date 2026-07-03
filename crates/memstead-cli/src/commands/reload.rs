@@ -44,7 +44,10 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     if ctx.json {
         print_json(&serde_json::json!({ "reports": reports }))?;
     } else {
-        let mut lines = vec![format!("# Reloaded {} mem(s)", reports.len()), String::new()];
+        let mut lines = vec![
+            format!("# Reloaded {} mem(s)", reports.len()),
+            String::new(),
+        ];
         for r in &reports {
             lines.push(format!(
                 "- `{}` — {} entities, head {} → {}{}",

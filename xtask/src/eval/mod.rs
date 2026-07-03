@@ -184,7 +184,11 @@ pub fn run_series<R: Runner, J: Judge>(
                 build_arms(task, model, system_prompt, state.mcp_config.clone());
             task_results.push(run_task(runner, judge, task, &on_arm, &off_arm, n_trials)?);
         }
-        points.push(SeriesPoint::aggregate(state.label.clone(), n_trials, &task_results));
+        points.push(SeriesPoint::aggregate(
+            state.label.clone(),
+            n_trials,
+            &task_results,
+        ));
     }
     Ok(DataSeries {
         subject_mem: subject_mem.to_string(),
@@ -253,7 +257,10 @@ mod tests {
 
     #[test]
     fn run_task_reports_positive_delta_when_mem_helps() {
-        let runner = StubRunner { on_quality: 0.9, off_quality: 0.4 };
+        let runner = StubRunner {
+            on_quality: 0.9,
+            off_quality: 0.4,
+        };
         let t = task("t1");
         let (on, off) = build_arms(&t, "claude-x", "sys", Some("/tmp/on.json".into()));
         let r = run_task(&runner, &ParseQualityJudge, &t, &on, &off, 5).unwrap();
@@ -264,7 +271,10 @@ mod tests {
     #[test]
     fn run_task_reports_negative_delta_plainly() {
         // Honesty: when mem-off beats mem-on, the delta is negative — no floor.
-        let runner = StubRunner { on_quality: 0.2, off_quality: 0.7 };
+        let runner = StubRunner {
+            on_quality: 0.2,
+            off_quality: 0.7,
+        };
         let t = task("t1");
         let (on, off) = build_arms(&t, "claude-x", "sys", Some("/tmp/on.json".into()));
         let r = run_task(&runner, &ParseQualityJudge, &t, &on, &off, 3).unwrap();
@@ -275,7 +285,10 @@ mod tests {
     #[test]
     fn unrelated_mem_yields_near_zero_delta() {
         // Honesty: a mem that does not help the task produces on == off → ~0.
-        let runner = StubRunner { on_quality: 0.5, off_quality: 0.5 };
+        let runner = StubRunner {
+            on_quality: 0.5,
+            off_quality: 0.5,
+        };
         let t = task("t1");
         let (on, off) = build_arms(&t, "claude-x", "sys", Some("/tmp/on.json".into()));
         let r = run_task(&runner, &ParseQualityJudge, &t, &on, &off, 4).unwrap();
@@ -294,7 +307,11 @@ mod tests {
                     (Condition::MemOn, None) => 0.4, // empty/absent state: no lift
                     (Condition::MemOn, Some(p)) => {
                         // richer state label → higher quality
-                        if p.to_string_lossy().contains("rich") { 0.9 } else { 0.6 }
+                        if p.to_string_lossy().contains("rich") {
+                            0.9
+                        } else {
+                            0.6
+                        }
                     }
                 };
                 let tool_calls = match arm.condition {
@@ -305,14 +322,26 @@ mod tests {
                     Condition::MemOn => vec!["mcp__memstead__memstead_overview".to_string()],
                     Condition::MemOff => vec![],
                 };
-                Ok(AgentAnswer { text: format!("q={q:.3}"), tool_calls })
+                Ok(AgentAnswer {
+                    text: format!("q={q:.3}"),
+                    tool_calls,
+                })
             }
         }
         let tasks = vec![task("a"), task("b")];
         let states = vec![
-            MemState { label: "empty".into(), mcp_config: None },
-            MemState { label: "v1".into(), mcp_config: Some("/tmp/v1.json".into()) },
-            MemState { label: "v2-rich".into(), mcp_config: Some("/tmp/rich.json".into()) },
+            MemState {
+                label: "empty".into(),
+                mcp_config: None,
+            },
+            MemState {
+                label: "v1".into(),
+                mcp_config: Some("/tmp/v1.json".into()),
+            },
+            MemState {
+                label: "v2-rich".into(),
+                mcp_config: Some("/tmp/rich.json".into()),
+            },
         ];
         let series = run_series(
             &StatefulRunner,
@@ -327,7 +356,11 @@ mod tests {
         .unwrap();
         assert_eq!(series.points.len(), 3);
         // Empty state: no signal.
-        assert!(series.points[0].delta.abs() < 1e-9, "{:?}", series.points[0]);
+        assert!(
+            series.points[0].delta.abs() < 1e-9,
+            "{:?}",
+            series.points[0]
+        );
         // Monotone climb with richness.
         assert!(series.points[1].delta > series.points[0].delta);
         assert!(series.points[2].delta > series.points[1].delta);

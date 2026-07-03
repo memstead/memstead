@@ -9,9 +9,7 @@ use crate::provenance::{Provenance, ProvenanceKind};
 use crate::vcs::{Actor, ClientId, CommitContext};
 use crate::workspace::MountCapability;
 
-use super::super::{
-    DeleteEntityArgs, DeleteEntityOutcome, Engine, EngineError, ReferrerInfo,
-};
+use super::super::{DeleteEntityArgs, DeleteEntityOutcome, Engine, EngineError, ReferrerInfo};
 use super::{gc_orphan_stubs, make_stub};
 
 /// The would-be delete outcome for an entity, derived purely from the
@@ -35,7 +33,6 @@ impl DeleteReferrers {
 }
 
 impl Engine {
-
     /// Classify an entity's incoming referrers by the source mount's
     /// capability — the read-only core of the delete guard. Write-Mem
     /// referrers block the delete; ReadOnly referrers trigger the
@@ -172,10 +169,8 @@ impl Engine {
         }
 
         let demote_to_stub = !readonly_referrers.is_empty();
-        let removed_incoming: Vec<String> = readonly_referrers
-            .iter()
-            .map(|id| id.to_string())
-            .collect();
+        let removed_incoming: Vec<String> =
+            readonly_referrers.iter().map(|id| id.to_string()).collect();
 
         // Pre-delete edge count so the response carries the correct
         // value regardless of whether we drop the entity or demote it
@@ -308,7 +303,6 @@ impl Engine {
 
 #[cfg(test)]
 mod tests {
-    
 
     use tempfile::TempDir;
 
@@ -461,7 +455,6 @@ mod tests {
             }
             other => panic!("expected HashMismatch, got {other:?}"),
         }
-
     }
 
     /// `memstead_delete id=<stub> expected_hash=""` end-to-end. The pre-fix
@@ -722,7 +715,9 @@ mod tests {
         let folder_mount = Mount {
             mem: "specs".to_string(),
             schema: Some(crate::engine::test_helpers::pin("default")),
-            storage: MountStorage::Folder { path: writable_dir.clone() },
+            storage: MountStorage::Folder {
+                path: writable_dir.clone(),
+            },
             capability: MountCapability::Write,
             lifecycle: MountLifecycle::Eager,
             cross_linkable: true,
@@ -730,10 +725,7 @@ mod tests {
         };
         let archive_reader = crate::storage::ArchiveBackend::new(archive_path.clone());
         let mut engine = Engine::from_mounts(vec![
-            (
-                folder_mount,
-                Box::new(writer) as Box<dyn MemBackend>,
-            ),
+            (folder_mount, Box::new(writer) as Box<dyn MemBackend>),
             (
                 archive_mount("archive", archive_path.clone()),
                 Box::new(archive_reader) as Box<dyn MemBackend>,
@@ -743,7 +735,12 @@ mod tests {
 
         let (actor, client) = cli_actor();
         let target = engine
-            .create_entity(empty_create_args("specs", "Target"), actor, Some(&client), None)
+            .create_entity(
+                empty_create_args("specs", "Target"),
+                actor,
+                Some(&client),
+                None,
+            )
             .unwrap();
 
         // Sanity: the archive's wiki-link surfaces as an incoming
@@ -781,7 +778,9 @@ mod tests {
         // File is gone from the writable mem.
         assert!(!writable_dir.join(&target.file_path).exists());
         // Entity in the store is now a stub at the same id.
-        let demoted = engine.get_entity(&target.id).expect("residual stub must remain in store");
+        let demoted = engine
+            .get_entity(&target.id)
+            .expect("residual stub must remain in store");
         assert!(demoted.stub, "demoted entity must be flagged as stub");
         assert!(demoted.entity_type.is_empty());
         // Typed provenance: the residual stub records its origin so
@@ -798,9 +797,7 @@ mod tests {
                     "Residual.readonly_referrers must snapshot the surviving referrers at mutation time"
                 );
             }
-            other => panic!(
-                "demoted stub must be tagged Residual; got {other:?}"
-            ),
+            other => panic!("demoted stub must be tagged Residual; got {other:?}"),
         }
         // Incoming edge from archive survives.
         let incoming_post: Vec<_> = engine

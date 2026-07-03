@@ -13,21 +13,21 @@ use std::path::Path;
 #[cfg(test)]
 use std::path::PathBuf;
 
-use memstead_schema::{
-    ARCHIVE_CONFIG_PATH, ARCHIVE_SCHEMA_PREFIX, TypeDefinition, MemConfig,
-    collect_schema_source, published_config_from, type_by_name,
-};
 #[cfg(feature = "git-object-storage")]
 use memstead_base::ops::MemExportBytes;
+use memstead_schema::{
+    ARCHIVE_CONFIG_PATH, ARCHIVE_SCHEMA_PREFIX, MemConfig, TypeDefinition, collect_schema_source,
+    published_config_from, type_by_name,
+};
 use zip::{CompressionMethod, DateTime, write::SimpleFileOptions};
 
 use super::{ExportResult, MemExportResult};
 use crate::entity::generator::generate_markdown;
 use crate::entity::writer::write_entity;
-use crate::store::Store;
-use crate::validator::canonical::canonical_json;
 #[cfg(feature = "git-object-storage")]
 use crate::storage::git_tree::{BranchReadError, read_branch_blobs};
+use crate::store::Store;
+use crate::validator::canonical::canonical_json;
 
 /// Regenerate all entity markdown files from the in-memory store.
 /// Only writes files that have changed (incremental export).
@@ -244,13 +244,10 @@ pub fn export_mem_from_branch_to_bytes(
     // git-branch backend writes the package onto the `__MEMSTEAD` branch,
     // not the workspace disk. Builtins and pre-ref disk layouts fall
     // through to the shared chain.
-    let schema_files =
-        match schema_files_from_memstead_ref(mem_repo_gitdir, &published.schema) {
-            Some(files) => files,
-            None => {
-                collect_schema_source(workspace_root, workspace_schemas_dir, &published.schema)?
-            }
-        };
+    let schema_files = match schema_files_from_memstead_ref(mem_repo_gitdir, &published.schema) {
+        Some(files) => files,
+        None => collect_schema_source(workspace_root, workspace_schemas_dir, &published.schema)?,
+    };
 
     let ref_name = match workspace_root {
         Some(root) => crate::mem_repo_config::branch_ref_for_mem(root, mem_name),
@@ -681,8 +678,8 @@ mod tests {
     #[cfg(feature = "git-object-storage")]
     mod git_object_export {
         use super::*;
-        use crate::storage::git_tree::GitTreeMemWriter;
         use crate::storage::MemWriter;
+        use crate::storage::git_tree::GitTreeMemWriter;
         use crate::vcs::CommitContext;
 
         /// Build a fresh `mem-repo-git`-style bare repo and a side-by-side
@@ -712,18 +709,13 @@ mod tests {
             // Commit each entry to `refs/heads/<mem_name>` via the
             // production write path so the test exercises the same tree
             // shape `memstead-cli`'s mutations would produce.
-            let writer = GitTreeMemWriter::new(
-                gitdir.clone(),
-                format!("refs/heads/{mem_name}"),
-            );
+            let writer = GitTreeMemWriter::new(gitdir.clone(), format!("refs/heads/{mem_name}"));
             for (rel, content) in entries {
                 writer
                     .write_entity(Path::new(rel), content.as_bytes())
                     .unwrap();
             }
-            writer
-                .commit("seed", &CommitContext::internal())
-                .unwrap();
+            writer.commit("seed", &CommitContext::internal()).unwrap();
             (gitdir, mem_dir)
         }
 
@@ -747,16 +739,9 @@ mod tests {
 
             let config = memstead_schema::load_and_validate(&mem_dir).unwrap();
             let out = tmp.path().join("fixture.mem");
-            let result = export_mem_from_branch(
-                &gitdir,
-                "fixture",
-                &config,
-                &out,
-                None,
-                None,
-                None,
-            )
-            .unwrap();
+            let result =
+                export_mem_from_branch(&gitdir, "fixture", &config, &out, None, None, None)
+                    .unwrap();
 
             assert_eq!(result.name, "fixture");
             assert_eq!(result.version, "1.0.0");
@@ -845,11 +830,10 @@ mod tests {
             let out = tmp.path().join("fixture.mem");
             export_mem_from_branch(&gitdir, "fixture", &config, &out, None, None, None).unwrap();
             let path_bytes = std::fs::read(&out).unwrap();
-            let byte_bytes = export_mem_from_branch_to_bytes(
-                &gitdir, "fixture", &config, None, None, None,
-            )
-            .unwrap()
-            .bytes;
+            let byte_bytes =
+                export_mem_from_branch_to_bytes(&gitdir, "fixture", &config, None, None, None)
+                    .unwrap()
+                    .bytes;
             assert_eq!(path_bytes, byte_bytes);
         }
 
@@ -869,11 +853,10 @@ mod tests {
                 )],
             );
             let config = memstead_schema::load_and_validate(&mem_dir).unwrap();
-            let bytes = export_mem_from_branch_to_bytes(
-                &gitdir, "fixture", &config, None, None, None,
-            )
-            .unwrap()
-            .bytes;
+            let bytes =
+                export_mem_from_branch_to_bytes(&gitdir, "fixture", &config, None, None, None)
+                    .unwrap()
+                    .bytes;
 
             // Validator accepts the bytes standalone.
             let entries = memstead_base::validator::archive::extract_entries(

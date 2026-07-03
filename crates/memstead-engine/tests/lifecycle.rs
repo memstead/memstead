@@ -37,8 +37,8 @@ fn folder_mount(mem: &str, path: PathBuf) -> Mount {
         capability: MountCapability::Write,
         lifecycle: MountLifecycle::Eager,
         cross_linkable: true,
-            migration_target: None,
-        }
+        migration_target: None,
+    }
 }
 
 #[test]
@@ -63,7 +63,7 @@ fn create_mem_rejects_overlong_note() {
             schema_ref: "default@1.0.0".parse().unwrap(),
             note: Some("x".repeat(mem_management::NOTE_MAX_LEN + 1)),
             operator_mode: false,
-        recovery: None,
+            recovery: None,
         },
     )
     .unwrap_err();
@@ -97,7 +97,7 @@ fn create_mem_rejects_when_no_allowlist_configured() {
             schema_ref: "default@1.0.0".parse().unwrap(),
             note: None,
             operator_mode: false,
-        recovery: None,
+            recovery: None,
         },
     )
     .unwrap_err();
@@ -144,7 +144,7 @@ fn create_mem_rejects_name_collision() {
             schema_ref: "default@1.0.0".parse().unwrap(),
             note: None,
             operator_mode: false,
-        recovery: None,
+            recovery: None,
         },
     )
     .unwrap_err();
@@ -191,7 +191,7 @@ fn create_mem_succeeds_with_wildcard_rule() {
             schema_ref: "default@1.0.0".parse().unwrap(),
             note: Some("seed".to_string()),
             operator_mode: false,
-        recovery: None,
+            recovery: None,
         },
     )
     .unwrap();
@@ -208,7 +208,10 @@ fn create_mem_succeeds_with_wildcard_rule() {
     assert!(engine.mem_router().is_writable("alpha"));
     // config.json landed on disk.
     let config_path = new_loc.join(".memstead").join("config.json");
-    assert!(config_path.exists(), "config.json must land at {config_path:?}");
+    assert!(
+        config_path.exists(),
+        "config.json must land at {config_path:?}"
+    );
 }
 
 /// The optional `write_guidance` create-parameter is persisted
@@ -424,7 +427,10 @@ fn create_mem_structural_invalid_name_matrix() {
         )
         .unwrap_err();
         match err {
-            FullEngineError::InvalidMemName { name: got_name, reason } => {
+            FullEngineError::InvalidMemName {
+                name: got_name,
+                reason,
+            } => {
                 assert_eq!(got_name, *name, "name echoes the offending input");
                 assert_eq!(
                     reason, *expected_reason,
@@ -471,7 +477,7 @@ fn create_mem_rejects_basename_mismatch() {
             schema_ref: "default@1.0.0".parse().unwrap(),
             note: None,
             operator_mode: false,
-        recovery: None,
+            recovery: None,
         },
     )
     .unwrap_err();
@@ -510,7 +516,9 @@ fn delete_mem_rejects_when_no_allowlist_configured() {
     )
     .unwrap_err();
     match err {
-        FullEngineError::MemPathNotAllowed { reason, candidate, .. } => {
+        FullEngineError::MemPathNotAllowed {
+            reason, candidate, ..
+        } => {
             assert_eq!(reason, "no_allowlist_configured");
             assert_eq!(candidate, "specs");
         }
@@ -661,7 +669,7 @@ fn create_delete_round_trip_flat_namespace() {
             schema_ref: "default@1.0.0".parse().unwrap(),
             note: None,
             operator_mode: false,
-        recovery: None,
+            recovery: None,
         },
     )
     .unwrap();
@@ -801,7 +809,9 @@ fn delete_mem_hierarchical_name_in_path_not_allowed_envelope() {
     )
     .unwrap_err();
     match err {
-        FullEngineError::MemPathNotAllowed { reason, candidate, .. } => {
+        FullEngineError::MemPathNotAllowed {
+            reason, candidate, ..
+        } => {
             assert_eq!(reason, "no_match");
             // The candidate IS the mem name verbatim — no
             // composition step.
@@ -882,7 +892,7 @@ fn create_mem_operator_mode_bypasses_empty_allowlist() {
             schema_ref: "default@1.0.0".parse().unwrap(),
             note: None,
             operator_mode: false,
-        recovery: None,
+            recovery: None,
         },
     )
     .unwrap_err();
@@ -904,7 +914,7 @@ fn create_mem_operator_mode_bypasses_empty_allowlist() {
             schema_ref: "default@1.0.0".parse().unwrap(),
             note: None,
             operator_mode: true,
-        recovery: None,
+            recovery: None,
         },
     )
     .unwrap();
@@ -938,7 +948,7 @@ fn create_mem_operator_mode_still_enforces_input_validation() {
             schema_ref: "default@1.0.0".parse().unwrap(),
             note: Some("x".repeat(mem_management::NOTE_MAX_LEN + 1)),
             operator_mode: true,
-        recovery: None,
+            recovery: None,
         },
     )
     .unwrap_err();
@@ -1060,13 +1070,16 @@ fn delete_mem_policy_check_gates_on_delete_files() {
     )
     .unwrap_err();
     match agent_destroy_err {
-        FullEngineError::MemReferencedByPolicy { name, referring_mems } => {
+        FullEngineError::MemReferencedByPolicy {
+            name,
+            referring_mems,
+        } => {
             assert_eq!(name, "target");
             assert_eq!(referring_mems, vec!["referrer".to_string()]);
         }
-        other => panic!(
-            "expected MemReferencedByPolicy for agent-mode delete_files=true, got {other:?}"
-        ),
+        other => {
+            panic!("expected MemReferencedByPolicy for agent-mode delete_files=true, got {other:?}")
+        }
     }
 
     // Operator-mode + delete_files: true → STILL refused. Operator-
@@ -1177,8 +1190,12 @@ fn delete_mem_refuses_when_cross_mem_incoming_edges_remain() {
             relations: Vec::new(),
             dry_run: false,
         };
-        sample.sections.insert("identity".to_string(), "seed identity".to_string());
-        sample.sections.insert("purpose".to_string(), "seed purpose".to_string());
+        sample
+            .sections
+            .insert("identity".to_string(), "seed identity".to_string());
+        sample
+            .sections
+            .insert("purpose".to_string(), "seed purpose".to_string());
         sample.sections
     };
     engine
@@ -1325,9 +1342,9 @@ fn delete_mem_refuses_when_cross_mem_incoming_edges_remain() {
 /// still point at them are refused rather than silently admitted.
 #[test]
 fn delete_mem_router_only_refuses_when_cross_mem_incoming_edges_remain() {
+    use memstead_base::CreateEntityArgs;
     use memstead_base::ops::RelateArg;
     use memstead_base::vcs::Actor;
-    use memstead_base::CreateEntityArgs;
     use memstead_schema::workspace_config::CrossLinkValue;
 
     let tmp = TempDir::new().unwrap();
@@ -1369,8 +1386,12 @@ fn delete_mem_router_only_refuses_when_cross_mem_incoming_edges_remain() {
             relations: Vec::new(),
             dry_run: false,
         };
-        sample.sections.insert("identity".to_string(), "seed identity".to_string());
-        sample.sections.insert("purpose".to_string(), "seed purpose".to_string());
+        sample
+            .sections
+            .insert("identity".to_string(), "seed identity".to_string());
+        sample
+            .sections
+            .insert("purpose".to_string(), "seed purpose".to_string());
         sample.sections
     };
     engine
@@ -1449,8 +1470,8 @@ fn delete_mem_router_only_refuses_when_cross_mem_incoming_edges_remain() {
 /// file so a follow-up agent doesn't see a stale cross-link grant.
 #[test]
 fn destructive_delete_scrubs_cross_links_but_keeps_allowlist_rules() {
-    use memstead_base::vcs::Actor;
     use memstead_base::CreateEntityArgs;
+    use memstead_base::vcs::Actor;
 
     let tmp = TempDir::new().unwrap();
     let workspace = tmp.path().join("ws");
@@ -1517,8 +1538,12 @@ fn destructive_delete_scrubs_cross_links_but_keeps_allowlist_rules() {
         relations: Vec::new(),
         dry_run: false,
     };
-    sample.sections.insert("identity".to_string(), "seed identity".to_string());
-    sample.sections.insert("purpose".to_string(), "seed purpose".to_string());
+    sample
+        .sections
+        .insert("identity".to_string(), "seed identity".to_string());
+    sample
+        .sections
+        .insert("purpose".to_string(), "seed purpose".to_string());
     engine
         .create_entity(
             CreateEntityArgs {
@@ -1804,7 +1829,9 @@ fn rule_derived_cross_link_grant_is_enforced_and_surfaced_in_overview() {
     // any explicit grant.
     let entries = memstead_engine::overview::build_workspace_policy_entries(&engine);
     assert!(
-        entries.iter().any(|(k, v)| *k == "cross_mem_links_from_rules" && v == "named"),
+        entries
+            .iter()
+            .any(|(k, v)| *k == "cross_mem_links_from_rules" && v == "named"),
         "rule-derived grant must surface in the policy projection: {entries:?}",
     );
     assert!(
@@ -1827,8 +1854,7 @@ fn rule_derived_cross_link_grant_is_enforced_and_surfaced_in_overview() {
     )
     .unwrap();
     assert!(
-        out.markdown.contains("Cross-mem links (rule-derived)")
-            && out.markdown.contains("seed"),
+        out.markdown.contains("Cross-mem links (rule-derived)") && out.markdown.contains("seed"),
         "overview must name the rule-derived cross-link target under the pattern:\n{}",
         out.markdown,
     );
@@ -1872,11 +1898,15 @@ fn explicit_and_rule_derived_cross_links_project_as_distinct_entries() {
 
     let entries = memstead_engine::overview::build_workspace_policy_entries(&engine);
     assert!(
-        entries.iter().any(|(k, v)| *k == "cross_mem_links" && v == "wildcard"),
+        entries
+            .iter()
+            .any(|(k, v)| *k == "cross_mem_links" && v == "wildcard"),
         "explicit grant posture must project unchanged: {entries:?}",
     );
     assert!(
-        entries.iter().any(|(k, v)| *k == "cross_mem_links_from_rules" && v == "named"),
+        entries
+            .iter()
+            .any(|(k, v)| *k == "cross_mem_links_from_rules" && v == "named"),
         "rule-derived grant must project as its own entry: {entries:?}",
     );
 }

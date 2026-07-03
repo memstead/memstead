@@ -2,6 +2,7 @@
 name = "memstead-wasm"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
@@ -60,3 +61,6 @@ tempfile.workspace = true
 # brings the .wasm under the bundle-size budget documented in plan 07.
 [package.metadata.wasm-pack.profile.release]
 wasm-opt = ["-Os"]
+
+[lints]
+workspace = true

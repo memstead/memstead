@@ -191,7 +191,11 @@ fn poll_for_token(
 
         let parsed: TokenResponse = resp.json().context("parsing token response")?;
         match parsed {
-            TokenResponse::Success { access_token, scope, .. } => {
+            TokenResponse::Success {
+                access_token,
+                scope,
+                ..
+            } => {
                 let scopes: Vec<String> = scope
                     .split([',', ' '])
                     .filter(|s| !s.is_empty())
@@ -209,9 +213,9 @@ fn poll_for_token(
                 "slow_down" => {
                     interval += Duration::from_secs(5);
                 }
-                "expired_token" => anyhow::bail!(
-                    "device code expired before approval — rerun `memstead login`"
-                ),
+                "expired_token" => {
+                    anyhow::bail!("device code expired before approval — rerun `memstead login`")
+                }
                 "access_denied" => {
                     anyhow::bail!("authorization was denied on GitHub")
                 }

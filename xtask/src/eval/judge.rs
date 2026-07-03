@@ -104,7 +104,11 @@ fn first_float(s: &str) -> Option<f64> {
         let c = bytes[i] as char;
         if c.is_ascii_digit() || c == '.' {
             // Capture a leading minus sign if one immediately precedes the number.
-            let start = if i > 0 && bytes[i - 1] == b'-' { i - 1 } else { i };
+            let start = if i > 0 && bytes[i - 1] == b'-' {
+                i - 1
+            } else {
+                i
+            };
             let mut seen_dot = false;
             while i < bytes.len() {
                 let d = bytes[i] as char;

@@ -52,9 +52,7 @@ fn now_iso_utc() -> String {
     let mins = (rem % 3_600) / 60;
     let secs = rem % 60;
     let (year, month, day) = days_to_ymd(days);
-    format!(
-        "{year:04}-{month:02}-{day:02}T{hours:02}:{mins:02}:{secs:02}Z"
-    )
+    format!("{year:04}-{month:02}-{day:02}T{hours:02}:{mins:02}:{secs:02}Z")
 }
 
 /// Result shape of the storage-residue probe
@@ -67,7 +65,7 @@ enum ResidueProbe {
     Present {
         branch_ref: String,
         config_blob: Option<String>,
-        existing_config: Option<memstead_schema::config::MemConfig>,
+        existing_config: Option<Box<memstead_schema::config::MemConfig>>,
     },
 }
 
@@ -127,7 +125,9 @@ fn residue_probe_for_workspace(
         Ok(Some(b)) => b,
         Ok(None) | Err(_) => return ResidueProbe::None,
     };
-    let existing_config = serde_json::from_slice::<memstead_schema::config::MemConfig>(&bytes).ok();
+    let existing_config = serde_json::from_slice::<memstead_schema::config::MemConfig>(&bytes)
+        .ok()
+        .map(Box::new);
     ResidueProbe::Present {
         branch_ref: format!("refs/heads/{branch_full_path}"),
         config_blob: Some(format!("__MEMSTEAD:mems/{branch_full_path}/config.json")),
@@ -270,9 +270,10 @@ pub struct AllowlistEntryRemoved {
 ///      drops `refs/heads/<branch_leaf>` and prunes
 ///      `__MEMSTEAD:mems/<branch_leaf>/config.json`. There is no
 ///      on-disk directory to rmdir.
-///   `files_deleted: true` reflects "every backend-visible artifact
-///   for this mem has been removed" — the wire shape is unchanged
-///   but the semantic now covers both backends symmetrically.
+///
+///    `files_deleted: true` reflects "every backend-visible artifact
+///    for this mem has been removed" — the wire shape is unchanged
+///    but the semantic now covers both backends symmetrically.
 ///
 /// Operator-mode bypass. When [`MemDeleteParams::operator_mode`] is
 /// `true`, Step 2 (`[[mem_management.delete]]` allowlist match) is
@@ -342,17 +343,15 @@ pub fn delete_mem(
         // `team/sub-mem`) — no separate `mem_path` composition
         // step needed. The delete-side lifecycle candidate IS the
         // mem name.
-        let attempted = mem_dir.clone().unwrap_or_else(|| {
-            std::path::PathBuf::from(format!("(mem: {})", params.name))
-        });
+        let attempted = mem_dir
+            .clone()
+            .unwrap_or_else(|| std::path::PathBuf::from(format!("(mem: {})", params.name)));
         let candidate: String = params.name.clone();
 
-        let delete_rule_set = DeleteRuleSet::new(
-            engine.settings().mem_delete_rules.clone(),
-        )
-        .map_err(|e| memstead_base::EngineError::InvalidInput(format!(
-            "mem_delete_rules: {e}"
-        )))?;
+        let delete_rule_set = DeleteRuleSet::new(engine.settings().mem_delete_rules.clone())
+            .map_err(|e| {
+                memstead_base::EngineError::InvalidInput(format!("mem_delete_rules: {e}"))
+            })?;
         let patterns_for_errors: Vec<String> = delete_rule_set.patterns();
 
         if delete_rule_set.is_empty() {
@@ -481,9 +480,7 @@ pub fn delete_mem(
                 // to decide; mounts the router doesn't know about
                 // (shouldn't happen post-construction) are treated as
                 // Write to be conservative.
-                let is_writable = engine
-                    .mem_router()
-                    .is_writable(in_edge.from.mem());
+                let is_writable = engine.mem_router().is_writable(in_edge.from.mem());
                 if !is_writable {
                     continue;
                 }
@@ -517,9 +514,8 @@ pub fn delete_mem(
     // cleanup without re-resolving the mount through the router
     // (which has already lost the entry by the time we get here).
     let removed_backend = engine.unregister_writable_mem(&params.name)?;
-    let backend = removed_backend.expect(
-        "mem_router().is_writable check above guarantees a present mount",
-    );
+    let backend =
+        removed_backend.expect("mem_router().is_writable check above guarantees a present mount");
 
     // ---- Step 4b: tombstone write (unregister-only path) ----
     // When the operator asked for
@@ -673,57 +669,53 @@ pub fn delete_mem(
     // (`delete_files: false`): the storage and grants survive
     // together, set to re-activate on a future reattach.
     let mut allowlist_entries_removed: Vec<AllowlistEntryRemoved> = Vec::new();
-    if params.delete_files {
-        if let Some(root) = engine.workspace_root().map(|p| p.to_path_buf()) {
-            // Scrub failures are non-fatal but surfaced as warnings —
-            // the delete itself committed, and dangling policy entries
-            // would only cost reload-time `UNKNOWN_MEM` checks. Wrap
-            // the typed enum in a warning code the agent can branch on.
-            match crate::workspace_config_edit::scrub_policy_for_deleted_mem(
-                &root,
-                &params.name,
-            ) {
-                Err(e) => {
-                    tracing::warn!(
-                        mem = %params.name,
-                        error = %e,
-                        "delete_mem: destructive delete committed but policy \
-                         scrub failed — `.memstead/workspace.toml` may still \
-                         reference the deleted mem"
-                    );
-                }
-                Ok(scrubbed) => {
-                    // Lift scrubbed entries into the response envelope
-                    // so the agent doesn't have to re-read
-                    // `workspace show` to learn the side effects of
-                    // the delete.
-                    allowlist_entries_removed = scrubbed
-                        .into_iter()
-                        .map(|e| match e {
-                            crate::workspace_config_edit::ScrubbedEntry::CrossLink {
-                                from,
-                                to,
-                            } => AllowlistEntryRemoved {
+    if params.delete_files
+        && let Some(root) = engine.workspace_root().map(|p| p.to_path_buf())
+    {
+        // Scrub failures are non-fatal but surfaced as warnings —
+        // the delete itself committed, and dangling policy entries
+        // would only cost reload-time `UNKNOWN_MEM` checks. Wrap
+        // the typed enum in a warning code the agent can branch on.
+        match crate::workspace_config_edit::scrub_policy_for_deleted_mem(&root, &params.name) {
+            Err(e) => {
+                tracing::warn!(
+                    mem = %params.name,
+                    error = %e,
+                    "delete_mem: destructive delete committed but policy \
+                     scrub failed — `.memstead/workspace.toml` may still \
+                     reference the deleted mem"
+                );
+            }
+            Ok(scrubbed) => {
+                // Lift scrubbed entries into the response envelope
+                // so the agent doesn't have to re-read
+                // `workspace show` to learn the side effects of
+                // the delete.
+                allowlist_entries_removed = scrubbed
+                    .into_iter()
+                    .map(|e| match e {
+                        crate::workspace_config_edit::ScrubbedEntry::CrossLink { from, to } => {
+                            AllowlistEntryRemoved {
                                 table: "cross_mem_links".to_string(),
                                 pattern: None,
                                 from: Some(from),
                                 to: Some(to),
-                            },
-                        })
-                        .collect();
-                    // Refresh the in-memory settings so the scrub takes
-                    // effect without a full reload. Best-effort: missing or
-                    // unparseable file leaves the existing in-memory
-                    // settings untouched (the scrub already succeeded; the
-                    // pre-scrub settings were strictly more permissive).
-                    let store = memstead_base::workspace_store::FileWorkspaceStore::new();
-                    if let Ok(ws) = <memstead_base::workspace_store::FileWorkspaceStore as memstead_base::workspace_store::WorkspaceStoreAdapter>::load(
+                            }
+                        }
+                    })
+                    .collect();
+                // Refresh the in-memory settings so the scrub takes
+                // effect without a full reload. Best-effort: missing or
+                // unparseable file leaves the existing in-memory
+                // settings untouched (the scrub already succeeded; the
+                // pre-scrub settings were strictly more permissive).
+                let store = memstead_base::workspace_store::FileWorkspaceStore::new();
+                if let Ok(ws) = <memstead_base::workspace_store::FileWorkspaceStore as memstead_base::workspace_store::WorkspaceStoreAdapter>::load(
                         &store,
                         &root,
                     ) {
                         engine.set_settings(ws.settings);
                     }
-                }
             }
         }
     }
@@ -838,36 +830,6 @@ pub struct MemCreateResponse {
     pub warnings: Vec<memstead_base::ops::WarningHint>,
 }
 
-/// Create a new writable mem at runtime. Unified counterpart to
-/// full's `memstead_git_branch::mem_management::create_mem`. Routes
-/// through the engine's installed [`memstead_base::BackendFactory`] so the
-/// same call site materialises folder, archive, or git-branch
-/// backends transparently — production full consumers install
-/// `memstead_git_branch::storage::instantiate_full_backend` at boot via
-/// `engine_from_workspace_root`.
-///
-/// Pipeline:
-/// 0. Input validation (note length, optional `path` segments).
-/// 0b. Schema canonicalization against the built-in catalogue.
-///     Workspace-authored schemas are resolved by the workspace's
-///     schemas_dir, not yet here.
-/// 1. Canonicalize location against `engine.workspace_root()`
-///    (relative paths) or take absolute paths as-is.
-/// 1a. Allowlist match against the composed candidate
-///     (`<path>/<name>` when `path` is `Some`, else `<name>`).
-/// 1b. Schema gate against matched rule's `schemas` list. `["*"]`
-///     wildcard admits any schema.
-/// 1c. Basename invariant: `params.name` MUST equal the canonical
-///     location's basename.
-/// 2. Name collision probe against the current mem_router
-///    snapshot. The rich tree-walk collision detector (with
-///    `colliding_paths` envelope payload) is full-only; unified
-///    surfaces collisions through the snapshot probe with the
-///    same `EngineError::MemNameCollision` discriminant.
-/// 3. Build [`memstead_schema::config::MemConfig`] bytes.
-/// 3b. Pick the storage variant by workspace shape: git-branch
-///     when `<workspace_root>/mem-repo/.git/` exists; folder
-///     otherwise. The branch leaf composes as `<path>/<name>`.
 /// Classify a structurally-invalid mem name into the typed
 /// `FullEngineError::InvalidMemName.reason` discriminator. Returns
 /// `None` when the name passes the structural check and the caller
@@ -896,6 +858,36 @@ fn classify_invalid_mem_name(name: &str) -> Option<&'static str> {
     None
 }
 
+/// Create a new writable mem at runtime. Unified counterpart to
+/// full's `memstead_git_branch::mem_management::create_mem`. Routes
+/// through the engine's installed [`memstead_base::BackendFactory`] so the
+/// same call site materialises folder, archive, or git-branch
+/// backends transparently — production full consumers install
+/// `memstead_git_branch::storage::instantiate_full_backend` at boot via
+/// `engine_from_workspace_root`.
+///
+/// Pipeline:
+/// 0. Input validation (note length, optional `path` segments).
+///    - 0b. Schema canonicalization against the built-in catalogue.
+///      Workspace-authored schemas are resolved by the workspace's
+///      schemas_dir, not yet here.
+/// 1. Canonicalize location against `engine.workspace_root()`
+///    (relative paths) or take absolute paths as-is.
+///    - 1a. Allowlist match against the composed candidate
+///      (`<path>/<name>` when `path` is `Some`, else `<name>`).
+///    - 1b. Schema gate against matched rule's `schemas` list. `["*"]`
+///      wildcard admits any schema.
+///    - 1c. Basename invariant: `params.name` MUST equal the canonical
+///      location's basename.
+/// 2. Name collision probe against the current mem_router
+///    snapshot. The rich tree-walk collision detector (with
+///    `colliding_paths` envelope payload) is full-only; unified
+///    surfaces collisions through the snapshot probe with the
+///    same `EngineError::MemNameCollision` discriminant.
+/// 3. Build [`memstead_schema::config::MemConfig`] bytes.
+///    - 3b. Pick the storage variant by workspace shape: git-branch
+///      when `<workspace_root>/mem-repo/.git/` exists; folder
+///      otherwise. The branch leaf composes as `<path>/<name>`.
 /// 4. Write `<location>/.memstead/config.json` for folder mounts
 ///    only. Git-branch mounts skip the on-disk write — the
 ///    per-mem config travels in the workspace's `__MEMSTEAD` registry
@@ -1006,8 +998,8 @@ pub fn create_mem(
     let candidate: String = params.name.clone();
 
     if !params.operator_mode {
-        let create_rule_set =
-            CreateRuleSet::new(engine.settings().mem_create_rules.clone()).map_err(|e| {
+        let create_rule_set = CreateRuleSet::new(engine.settings().mem_create_rules.clone())
+            .map_err(|e| {
                 memstead_base::EngineError::InvalidInput(format!("mem_create_rules: {e}"))
             })?;
         let patterns_for_errors: Vec<String> = create_rule_set.patterns();
@@ -1036,16 +1028,16 @@ pub fn create_mem(
 
         // Outside-workspace check (skipped when no workspace_root is
         // set — tests / ad-hoc).
-        if let Some(root) = workspace_root.as_ref() {
-            if canonical.strip_prefix(root).is_err() {
-                return Err(FullEngineError::MemPathNotAllowed {
-                    attempted: canonical.clone(),
-                    candidate,
-                    patterns: patterns_for_errors,
-                    reason: "outside_workspace",
-                    policy_table: "mem_management.create",
-                });
-            }
+        if let Some(root) = workspace_root.as_ref()
+            && canonical.strip_prefix(root).is_err()
+        {
+            return Err(FullEngineError::MemPathNotAllowed {
+                attempted: canonical.clone(),
+                candidate,
+                patterns: patterns_for_errors,
+                reason: "outside_workspace",
+                policy_table: "mem_management.create",
+            });
         }
 
         // ---- Step 1b: schema gate ----
@@ -1229,18 +1221,14 @@ pub fn create_mem(
                     // (normal create path). The match arm yields
                     // `None` so no warning rides on the response;
                     // the prior entities are gone by design.
-                    let workspace_root_ref = workspace_root
-                        .as_ref()
-                        .ok_or_else(|| {
-                            memstead_base::EngineError::InvalidInput(
-                                "force_overwrite requires a workspace_root \
+                    let workspace_root_ref = workspace_root.as_ref().ok_or_else(|| {
+                        memstead_base::EngineError::InvalidInput(
+                            "force_overwrite requires a workspace_root \
                                  to locate mem-repo/.git/"
-                                    .to_string(),
-                            )
-                        })?;
-                    let gitdir = workspace_root_ref
-                        .join("mem-repo")
-                        .join(".git");
+                                .to_string(),
+                        )
+                    })?;
+                    let gitdir = workspace_root_ref.join("mem-repo").join(".git");
                     let canonical_gitdir = gitdir.canonicalize().unwrap_or(gitdir);
                     let ops = engine.git_branch_ops().ok_or_else(|| {
                         memstead_base::EngineError::InvalidInput(
@@ -1250,12 +1238,9 @@ pub fn create_mem(
                                 .to_string(),
                         )
                     })?;
-                    (ops.prune_residue)(&canonical_gitdir, &composed_branch_leaf)
-                        .map_err(|e| {
-                            memstead_base::EngineError::Mem(format!(
-                                "force_overwrite prune: {e}"
-                            ))
-                        })?;
+                    (ops.prune_residue)(&canonical_gitdir, &composed_branch_leaf).map_err(|e| {
+                        memstead_base::EngineError::Mem(format!("force_overwrite prune: {e}"))
+                    })?;
                     // Fall through to Step 3 — the residue is gone,
                     // create proceeds normally and the fresh seed
                     // commit is the new branch tip.
@@ -1269,18 +1254,14 @@ pub fn create_mem(
                     // audit warning. Falls out below via early
                     // return so steps 3-5 stay aligned with the
                     // fresh-create path.
-                    let workspace_root_ref = workspace_root
-                        .as_ref()
-                        .ok_or_else(|| {
-                            memstead_base::EngineError::InvalidInput(
-                                "reattach requires a workspace_root \
+                    let workspace_root_ref = workspace_root.as_ref().ok_or_else(|| {
+                        memstead_base::EngineError::InvalidInput(
+                            "reattach requires a workspace_root \
                                  to locate mem-repo/.git/"
-                                    .to_string(),
-                            )
-                        })?;
-                    let gitdir = workspace_root_ref
-                        .join("mem-repo")
-                        .join(".git");
+                                .to_string(),
+                        )
+                    })?;
+                    let gitdir = workspace_root_ref.join("mem-repo").join(".git");
                     let canonical_gitdir = gitdir.canonicalize().unwrap_or(gitdir);
                     let mount = memstead_base::workspace::Mount {
                         migration_target: None,
@@ -1303,21 +1284,21 @@ pub fn create_mem(
                     // Clear the tombstone if one was present, so a
                     // future drift probe doesn't re-trigger the
                     // reattach branch.
-                    if let Some(cfg) = existing_config.as_ref() {
-                        if cfg.unregistered_at.is_some() {
-                            let mut updated = cfg.clone();
-                            updated.unregistered_at = None;
-                            if let Ok(mut bytes) = serde_json::to_vec_pretty(&updated) {
-                                bytes.push(b'\n');
-                                if let Err(e) = backend.write_mem_config(&bytes) {
-                                    tracing::warn!(
-                                        mem = %params.name,
-                                        error = %e,
-                                        "reattach: tombstone clear failed — \
-                                         the marker survives; a re-unregister will \
-                                         overwrite it",
-                                    );
-                                }
+                    if let Some(cfg) = existing_config.as_ref()
+                        && cfg.unregistered_at.is_some()
+                    {
+                        let mut updated = cfg.clone();
+                        updated.unregistered_at = None;
+                        if let Ok(mut bytes) = serde_json::to_vec_pretty(&updated) {
+                            bytes.push(b'\n');
+                            if let Err(e) = backend.write_mem_config(&bytes) {
+                                tracing::warn!(
+                                    mem = %params.name,
+                                    error = %e,
+                                    "reattach: tombstone clear failed — \
+                                     the marker survives; a re-unregister will \
+                                     overwrite it",
+                                );
                             }
                         }
                     }
@@ -1424,7 +1405,10 @@ pub fn create_mem(
             path: canonical.clone(),
         }
     };
-    let is_git_branch = matches!(storage, memstead_base::workspace::MountStorage::GitBranch { .. });
+    let is_git_branch = matches!(
+        storage,
+        memstead_base::workspace::MountStorage::GitBranch { .. }
+    );
 
     // ---- Step 4: write .memstead/config.json ----
     // Folder path: write the config blob to disk before instantiating
@@ -1441,7 +1425,10 @@ pub fn create_mem(
         })?;
         let memstead_dir = canonical.join(memstead_base::MEM_META_DIR);
         std::fs::create_dir_all(&memstead_dir).map_err(|e| {
-            memstead_base::EngineError::Mem(format!("create_dir_all {}: {e}", memstead_dir.display()))
+            memstead_base::EngineError::Mem(format!(
+                "create_dir_all {}: {e}",
+                memstead_dir.display()
+            ))
         })?;
         let config_path = memstead_dir.join("config.json");
         if config_path.exists() {
@@ -1472,8 +1459,8 @@ pub fn create_mem(
         capability: memstead_base::workspace::MountCapability::Write,
         lifecycle: memstead_base::workspace::MountLifecycle::Eager,
         cross_linkable: true,
-            migration_target: None,
-        };
+        migration_target: None,
+    };
     let factory = engine.backend_factory();
     let backend = factory(&mount)
         .map_err(|e| memstead_base::EngineError::Mem(format!("instantiate backend: {e}")))?;
@@ -1496,10 +1483,7 @@ pub fn create_mem(
             .map_err(|e| memstead_base::EngineError::Mem(format!("write mem config: {e}")))?;
     }
     let seed_commit_sha = backend
-        .commit(
-            &format!("memstead: create mem {}", params.name),
-            &seed_ctx,
-        )
+        .commit(&format!("memstead: create mem {}", params.name), &seed_ctx)
         .map_err(|e| memstead_base::EngineError::Mem(format!("seed commit: {e}")))?;
     let origin = memstead_base::MemOrigin::RuntimeCreated {
         at: std::time::SystemTime::now(),

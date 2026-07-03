@@ -128,9 +128,7 @@ fn folder_refusal(op: &str, mem: &str) -> anyhow::Error {
     CliError {
         code: "INVALID_INPUT",
         kind: ExitKind::Validation,
-        message: format!(
-            "mem '{mem}' is not git-backed — `{op}` requires a git-branch mount",
-        ),
+        message: format!("mem '{mem}' is not git-backed — `{op}` requires a git-branch mount",),
         details: None,
     }
     .into()

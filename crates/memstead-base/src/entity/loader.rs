@@ -578,7 +578,10 @@ mod tests {
                 "good.md",
                 "---\ntype: spec\n---\n# Good\n\n## Identity\n\nGood.\n",
             ),
-            ("poisoned.md", "---\ntype: spec\nvalue: \"\n---\n# Poisoned\n\n## Identity\n\nStill parses.\n"),
+            (
+                "poisoned.md",
+                "---\ntype: spec\nvalue: \"\n---\n# Poisoned\n\n## Identity\n\nStill parses.\n",
+            ),
         ]);
         let schema = Schema::builtin_default();
         let result = load_mem(dir.path(), "specs", &schema).unwrap();

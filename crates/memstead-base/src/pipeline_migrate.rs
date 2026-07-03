@@ -31,7 +31,7 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 
 use crate::pipeline::{Facet, Ingest, Medium, MediumType, PatternEntry, PatternMode, Projection};
-use crate::pipeline_store::{PipelineConfigs, PipelineRecord, MemPipelineRecord};
+use crate::pipeline_store::{MemPipelineRecord, PipelineConfigs, PipelineRecord};
 use crate::workspace_store::StoreError;
 
 /// Legacy `scopes/<mem>/<name>.json` shape: a medium type, a human label,
@@ -164,13 +164,21 @@ fn read_legacy_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, St
 
 /// Walk a per-mem legacy directory (`<root>/<primitive>/<mem>/<name>.json`),
 /// yielding `(mem, name, path)` triples in sorted order. Absent → empty.
-fn walk_mem_scoped(root: &Path, primitive: &str) -> Result<Vec<(String, String, PathBuf)>, StoreError> {
+fn walk_mem_scoped(
+    root: &Path,
+    primitive: &str,
+) -> Result<Vec<(String, String, PathBuf)>, StoreError> {
     let dir = root.join(primitive);
     let mut out = Vec::new();
     let mem_dirs = match std::fs::read_dir(&dir) {
         Ok(rd) => rd,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(out),
-        Err(e) => return Err(StoreError::Io { path: dir, source: e }),
+        Err(e) => {
+            return Err(StoreError::Io {
+                path: dir,
+                source: e,
+            });
+        }
     };
     for mem_entry in mem_dirs.flatten() {
         let mem_path = mem_entry.path();
@@ -179,7 +187,10 @@ fn walk_mem_scoped(root: &Path, primitive: &str) -> Result<Vec<(String, String, 
         }
         let mem = mem_entry.file_name().to_string_lossy().into_owned();
         for file in std::fs::read_dir(&mem_path)
-            .map_err(|e| StoreError::Io { path: mem_path.clone(), source: e })?
+            .map_err(|e| StoreError::Io {
+                path: mem_path.clone(),
+                source: e,
+            })?
             .flatten()
         {
             let path = file.path();
@@ -293,9 +304,18 @@ mod tests {
     #[test]
     fn common_dir_prefix_stops_at_first_glob() {
         let tree = vec![
-            PatternEntry { path: "../engine/**/*.rs".into(), mode: PatternMode::Allow },
-            PatternEntry { path: "../engine/Cargo.lock".into(), mode: PatternMode::Allow },
-            PatternEntry { path: "../engine/target/**".into(), mode: PatternMode::Deny },
+            PatternEntry {
+                path: "../engine/**/*.rs".into(),
+                mode: PatternMode::Allow,
+            },
+            PatternEntry {
+                path: "../engine/Cargo.lock".into(),
+                mode: PatternMode::Allow,
+            },
+            PatternEntry {
+                path: "../engine/target/**".into(),
+                mode: PatternMode::Deny,
+            },
         ];
         // `..`,`engine` agree; the third allow component diverges (`**` vs
         // `Cargo.lock`), so the prefix is `../engine`. The deny path is ignored.
@@ -305,9 +325,18 @@ mod tests {
     #[test]
     fn common_dir_prefix_falls_back_to_shared_ancestor() {
         let tree = vec![
-            PatternEntry { path: "../dev/**/*.md".into(), mode: PatternMode::Allow },
-            PatternEntry { path: "../VISION.md".into(), mode: PatternMode::Allow },
-            PatternEntry { path: "../macos/VISION.md".into(), mode: PatternMode::Allow },
+            PatternEntry {
+                path: "../dev/**/*.md".into(),
+                mode: PatternMode::Allow,
+            },
+            PatternEntry {
+                path: "../VISION.md".into(),
+                mode: PatternMode::Allow,
+            },
+            PatternEntry {
+                path: "../macos/VISION.md".into(),
+                mode: PatternMode::Allow,
+            },
         ];
         // They diverge at component 1 (`dev` / `VISION.md` / `macos`), so the
         // common prefix is just `..`.
@@ -321,8 +350,14 @@ mod tests {
             label: Some("Rust engine source".into()),
             scope: LegacyScopeBody {
                 tree: vec![
-                    PatternEntry { path: "../engine/**/*.rs".into(), mode: PatternMode::Allow },
-                    PatternEntry { path: "../engine/target/**".into(), mode: PatternMode::Deny },
+                    PatternEntry {
+                        path: "../engine/**/*.rs".into(),
+                        mode: PatternMode::Allow,
+                    },
+                    PatternEntry {
+                        path: "../engine/target/**".into(),
+                        mode: PatternMode::Deny,
+                    },
                 ],
             },
         };
@@ -342,10 +377,18 @@ mod tests {
         let legacy = LegacyProjection {
             intent: Some("macOS source".into()),
             sources: vec![
-                LegacySource { scope_ref: Some("source-tree".into()), mem: None },
-                LegacySource { scope_ref: None, mem: Some("engine".into()) },
+                LegacySource {
+                    scope_ref: Some("source-tree".into()),
+                    mem: None,
+                },
+                LegacySource {
+                    scope_ref: None,
+                    mem: Some("engine".into()),
+                },
             ],
-            destinations: vec![LegacyDestination { mem: "macos".into() }],
+            destinations: vec![LegacyDestination {
+                mem: "macos".into(),
+            }],
         };
         let p = convert_projection(legacy);
         assert_eq!(p.source_facets, vec!["source-tree".to_string()]);
@@ -379,7 +422,10 @@ mod tests {
         assert_eq!(converted.mediums.len(), 1);
         assert_eq!(converted.mediums[0].config.pointer, "../macos");
         assert_eq!(converted.facets.len(), 1);
-        assert_eq!(converted.projections[0].config.reference_mems, vec!["engine".to_string()]);
+        assert_eq!(
+            converted.projections[0].config.reference_mems,
+            vec!["engine".to_string()]
+        );
         assert_eq!(converted.ingests[0].config.mode, IngestMode::Discovery);
 
         // Written to the `.memstead/` store and reloadable by the loader.
@@ -389,6 +435,9 @@ mod tests {
         // Idempotent: a second run reproduces identical store content.
         let again = migrate_legacy_pipeline(root).unwrap();
         assert_eq!(again, converted);
-        assert_eq!(crate::pipeline_store::load_pipeline_configs(root).unwrap(), converted);
+        assert_eq!(
+            crate::pipeline_store::load_pipeline_configs(root).unwrap(),
+            converted
+        );
     }
 }

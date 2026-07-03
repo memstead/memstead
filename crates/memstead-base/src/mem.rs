@@ -67,11 +67,7 @@ impl MemOrigin {
         match self {
             MemOrigin::ExplicitToml => "explicit from .memstead/workspace.toml".to_string(),
             MemOrigin::RuntimeCreated { at, by_tool } => {
-                format!(
-                    "runtime-created at {} by {}",
-                    render_rfc3339(*at),
-                    by_tool
-                )
+                format!("runtime-created at {} by {}", render_rfc3339(*at), by_tool)
             }
         }
     }
@@ -107,9 +103,7 @@ fn render_rfc3339(ts: SystemTime) -> String {
     let minute = (remainder % 3600) / 60;
     let second = remainder % 60;
     let (year, month, day) = days_to_ymd(days);
-    format!(
-        "{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}Z"
-    )
+    format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}Z")
 }
 
 /// Convert days since epoch (1970-01-01) to (year, month, day).
@@ -188,18 +182,11 @@ impl MemRouterSnapshot {
     /// `Mount::mem` field, and the lifecycle-allowlist candidate
     /// all converge on the same string — no separate composition
     /// step.
-    pub fn add_writable(
-        &mut self,
-        name: String,
-        dir: Option<PathBuf>,
-        origin: MemOrigin,
-    ) {
+    pub fn add_writable(&mut self, name: String, dir: Option<PathBuf>, origin: MemOrigin) {
         self.visible.insert(name.clone());
         self.writable.insert(name.clone());
-        self.writable_entries.insert(
-            name,
-            WritableEntry { dir, origin },
-        );
+        self.writable_entries
+            .insert(name, WritableEntry { dir, origin });
     }
 
     /// Remove a writable mem from the router. Returns `true` when
@@ -557,11 +544,7 @@ mod tests {
     #[test]
     fn hierarchical_name_is_the_router_key() {
         let mut router = MemRouterSnapshot::new();
-        router.add_writable(
-            "team/sub-mem".to_string(),
-            None,
-            MemOrigin::ExplicitToml,
-        );
+        router.add_writable("team/sub-mem".to_string(), None, MemOrigin::ExplicitToml);
         assert!(router.is_writable("team/sub-mem"));
         // Leaf-only lookup misses — there's no fallback path-lookup.
         assert!(!router.is_writable("sub-mem"));

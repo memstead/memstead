@@ -370,7 +370,9 @@ fn is_valid_scope_form(scope: &str) -> bool {
                     || (prefix.contains('.')
                         && prefix.split('.').all(|label| {
                             !label.is_empty()
-                                && label.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+                                && label
+                                    .bytes()
+                                    .all(|b| b.is_ascii_alphanumeric() || b == b'-')
                         })))
         }
         None => is_valid_handle(scope),

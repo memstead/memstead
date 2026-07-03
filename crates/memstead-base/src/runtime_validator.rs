@@ -18,8 +18,7 @@ use std::sync::OnceLock;
 
 use indexmap::IndexMap;
 use memstead_schema::{
-    CrossMemRelationshipEntry, FieldType, RelationshipDef, RelationshipMode, Schema,
-    TypeDefinition,
+    CrossMemRelationshipEntry, FieldType, RelationshipDef, RelationshipMode, Schema, TypeDefinition,
 };
 use regex::Regex;
 
@@ -297,8 +296,14 @@ impl ValidationError {
                     })
                 });
                 let mut details = serde_json::Map::new();
-                details.insert("rel_type".into(), serde_json::Value::String(rel_type.clone()));
-                details.insert("from_type".into(), serde_json::Value::String(from_type.clone()));
+                details.insert(
+                    "rel_type".into(),
+                    serde_json::Value::String(rel_type.clone()),
+                );
+                details.insert(
+                    "from_type".into(),
+                    serde_json::Value::String(from_type.clone()),
+                );
                 details.insert("to_type".into(), serde_json::Value::String(to_type.clone()));
                 // Empty source/target_types in the schema mean shape-free
                 // (any type admitted). Surface that as an omitted field on
@@ -431,10 +436,7 @@ impl ValidationError {
                 let rules_clause = if type_write_rules.is_empty() {
                     String::new()
                 } else {
-                    format!(
-                        " Type-level write_rules: {}.",
-                        type_write_rules.join("; ")
-                    )
+                    format!(" Type-level write_rules: {}.", type_write_rules.join("; "))
                 };
                 format!(
                     "invalid value '{value}' for field '{field}' on type '{entity_type}' — allowed: {allowed_inline}.{desc_clause}{suggestion_clause}{rules_clause}"
@@ -447,7 +449,11 @@ impl ValidationError {
                 section,
                 entity_type,
             } => format!("section '{section}' is not updatable for type '{entity_type}'"),
-            ValidationError::InvalidRelationshipType { input, allowed, suggestion } => {
+            ValidationError::InvalidRelationshipType {
+                input,
+                allowed,
+                suggestion,
+            } => {
                 let allowed_inline = if allowed.is_empty() {
                     "(none)".to_string()
                 } else {
@@ -550,7 +556,7 @@ pub fn validate_writable_metadata_key(
     key: &str,
     schema: &TypeDefinition,
 ) -> Result<(), ValidationError> {
-    if READ_ONLY_METADATA_KEYS.iter().any(|k| *k == key) {
+    if READ_ONLY_METADATA_KEYS.contains(&key) {
         return Err(ValidationError::ReadOnlyField {
             field: key.to_string(),
         });
@@ -580,8 +586,7 @@ pub fn validate_updatable_section(
             entity_type: schema.name.clone(),
         });
     }
-    if !schema.updatable_fields.is_empty()
-        && !schema.updatable_fields.iter().any(|f| f == section)
+    if !schema.updatable_fields.is_empty() && !schema.updatable_fields.iter().any(|f| f == section)
     {
         return Err(ValidationError::SectionNotUpdatable {
             section: section.to_string(),
@@ -833,7 +838,7 @@ pub fn missing_required_fields(
             // Engine-managed fields (`type`, `id`, `mem`) are seeded
             // independently of caller input; not the agent's
             // responsibility to supply.
-            !READ_ONLY_METADATA_KEYS.iter().any(|k| *k == f.key.as_str())
+            !READ_ONLY_METADATA_KEYS.contains(&f.key.as_str())
                 && !f.optional
                 && f.default_value.is_none()
                 && !f.init_timestamp
@@ -954,8 +959,7 @@ pub fn validate_rel_shape(
     let Some(def) = schema.relationship_def(rel_type) else {
         return Ok(());
     };
-    let source_ok =
-        def.source_types.is_empty() || def.source_types.iter().any(|t| t == from_type);
+    let source_ok = def.source_types.is_empty() || def.source_types.iter().any(|t| t == from_type);
     let target_ok = def.target_types.is_empty()
         || to_type.is_none_or(|t| def.target_types.iter().any(|d| d == t));
     if source_ok && target_ok {
@@ -1041,8 +1045,7 @@ pub fn validate_cross_mem_edge(
         });
     };
 
-    let source_ok =
-        def.source_types.is_empty() || def.source_types.iter().any(|t| t == from_type);
+    let source_ok = def.source_types.is_empty() || def.source_types.iter().any(|t| t == from_type);
     let target_ok = def.target_types.is_empty()
         || to_type.is_none_or(|t| def.target_types.iter().any(|d| d == t));
     if source_ok && target_ok {
@@ -1100,8 +1103,8 @@ fn cross_mem_suggest_shape(
 
 fn cross_mem_def_admits(d: &RelationshipDef, from_type: &str, to_type: Option<&str>) -> bool {
     let src_ok = d.source_types.is_empty() || d.source_types.iter().any(|t| t == from_type);
-    let tgt_ok = d.target_types.is_empty()
-        || to_type.is_none_or(|t| d.target_types.iter().any(|x| x == t));
+    let tgt_ok =
+        d.target_types.is_empty() || to_type.is_none_or(|t| d.target_types.iter().any(|x| x == t));
     src_ok && tgt_ok
 }
 
@@ -1122,8 +1125,7 @@ fn suggest_shape_admitting(
         .iter()
         .filter(|d| d.name != "_default")
         .find(|d| {
-            let src_ok =
-                d.source_types.is_empty() || d.source_types.iter().any(|t| t == from_type);
+            let src_ok = d.source_types.is_empty() || d.source_types.iter().any(|t| t == from_type);
             let tgt_ok = d.target_types.is_empty()
                 || to_type.is_none_or(|t| d.target_types.iter().any(|x| x == t));
             src_ok && tgt_ok
@@ -1234,9 +1236,8 @@ health_required_fields:
 staleness_threshold_days: 90
 write_rules: []
 "#;
-        let make_type = |name: &str| {
-            format!("name: {name}\ndescription: t\nwhen_to_use: Here\n{body_section}")
-        };
+        let make_type =
+            |name: &str| format!("name: {name}\ndescription: t\nwhen_to_use: Here\n{body_section}");
         std::sync::Arc::new(
             memstead_schema::load_schema_from_memory(
                 manifest_yaml,
@@ -1380,9 +1381,8 @@ health_required_fields:
 staleness_threshold_days: 90
 write_rules: []
 "#;
-        let make_type = |name: &str| {
-            format!("name: {name}\ndescription: t\nwhen_to_use: Here\n{body_section}")
-        };
+        let make_type =
+            |name: &str| format!("name: {name}\ndescription: t\nwhen_to_use: Here\n{body_section}");
         std::sync::Arc::new(
             memstead_schema::load_schema_from_memory(
                 manifest_yaml,
@@ -1434,8 +1434,7 @@ write_rules: []
             semver::Version::new(2, 5, 0),
         ] {
             let target = memstead_schema::SchemaRef::new("other", version.clone());
-            match validate_cross_mem_edge("ADDRESSES", "step", Some("requirement"), &src, &target)
-            {
+            match validate_cross_mem_edge("ADDRESSES", "step", Some("requirement"), &src, &target) {
                 CrossMemRelCheck::Ok => {}
                 other => panic!("expected Ok against other@{version}, got {other:?}"),
             }
@@ -1536,9 +1535,15 @@ write_rules: []
         let prose = err.prose_render();
         assert!(prose.contains("M0"), "got: {prose}");
         assert!(prose.contains("M6"), "got: {prose}");
-        assert!(prose.contains("maturity rung"), "field_description missing: {prose}");
+        assert!(
+            prose.contains("maturity rung"),
+            "field_description missing: {prose}"
+        );
         assert!(prose.contains("Did you mean 'M6'?"), "got: {prose}");
-        assert!(prose.contains("specs land at M0"), "type_write_rules missing: {prose}");
+        assert!(
+            prose.contains("specs land at M0"),
+            "type_write_rules missing: {prose}"
+        );
         assert!(!prose.contains("see details"), "got: {prose}");
     }
 
@@ -1556,14 +1561,8 @@ write_rules: []
         // The shape-free target axis renders as `any` (no brackets,
         // matching the existing convention pinned by
         // `relate_shape_violation_surfaces_typed_envelope`).
-        assert!(
-            prose.contains("allowed sources: actor"),
-            "got: {prose}"
-        );
-        assert!(
-            prose.contains("allowed targets: any"),
-            "got: {prose}"
-        );
+        assert!(prose.contains("allowed sources: actor"), "got: {prose}");
+        assert!(prose.contains("allowed targets: any"), "got: {prose}");
         assert!(!prose.contains("see details"), "got: {prose}");
     }
 
@@ -1729,7 +1728,10 @@ write_rules: []
         let prose = err.prose_render();
         assert!(prose.contains("not-a-real-date"), "got: {prose}");
         assert!(prose.contains("YYYY-MM-DD"), "format missing: {prose}");
-        assert!(prose.contains("date the widget was verified"), "purpose missing: {prose}");
+        assert!(
+            prose.contains("date the widget was verified"),
+            "purpose missing: {prose}"
+        );
         assert!(!prose.contains("see details"), "got: {prose}");
     }
 
@@ -1786,10 +1788,8 @@ write_rules: []
     fn section_content_allows_tab_and_newline() {
         // The two legitimate whitespace controls round-trip; multi-line
         // and tabbed bodies are unaffected.
-        validate_section_content(
-            [("body", "line1\nline2\n\tindented\tcols\n")].into_iter(),
-        )
-        .expect("tab and newline must stay legal in section bodies");
+        validate_section_content([("body", "line1\nline2\n\tindented\tcols\n")].into_iter())
+            .expect("tab and newline must stay legal in section bodies");
     }
 
     #[test]

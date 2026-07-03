@@ -93,10 +93,7 @@ pub fn check_single_variable(on: &ArmConfig, off: &ArmConfig) -> Result<()> {
 /// otherwise the mem leaked into the control arm. Either way the trial is
 /// invalid and the run stops rather than reporting a corrupted number.
 pub fn validate_mount_evidence(condition: Condition, answer: &AgentAnswer) -> Result<()> {
-    let used_memstead = answer
-        .tool_calls
-        .iter()
-        .any(|t| is_memstead_tool(t));
+    let used_memstead = answer.tool_calls.iter().any(|t| is_memstead_tool(t));
     match condition {
         Condition::MemOn if !used_memstead => bail!(
             "invalid trial: mem-on arm shows no memstead_* tool use — the MCP mount \
@@ -183,7 +180,10 @@ mod tests {
 
     #[test]
     fn mem_on_without_memstead_tool_is_invalid() {
-        let ans = AgentAnswer { text: "answer".into(), tool_calls: vec!["Read".into()] };
+        let ans = AgentAnswer {
+            text: "answer".into(),
+            tool_calls: vec!["Read".into()],
+        };
         assert!(validate_mount_evidence(Condition::MemOn, &ans).is_err());
     }
 

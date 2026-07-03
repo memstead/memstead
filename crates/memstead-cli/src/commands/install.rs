@@ -59,7 +59,7 @@ pub struct Args {
 }
 
 pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
-    let engine = crate::setup::pro_engine(&ctx)?;
+    let engine = crate::setup::pro_engine(ctx)?;
 
     let mem_name = resolve_mem_name(&engine, args.mem_name.clone())?;
     // Resolve target shape: mem-repo-backed mems have `dir: None`
@@ -117,7 +117,6 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     )
 }
 
-
 fn install_from_local(
     ctx: &CliContext,
     mem_name: &str,
@@ -136,6 +135,9 @@ fn install_from_local(
     emit_outcome(ctx, mem_name, outcome, None)
 }
 
+// Flat forwarding of the install subcommand's CLI flags to the one
+// registry download path; a params struct would just re-declare them.
+#[allow(clippy::too_many_arguments)]
 fn install_from_registry(
     ctx: &CliContext,
     mem_name: &str,
@@ -151,8 +153,13 @@ fn install_from_registry(
 
     // Stream the archive into a tempfile; `install_read_mem` reads
     // from a path, so a tempfile is the cheapest bridge.
-    let tmp = tempfile::NamedTempFile::new()
-        .map_err(|e| CliError::new(ExitKind::Generic, crate::INTERNAL_CODE, format!("tempfile: {e}")))?;
+    let tmp = tempfile::NamedTempFile::new().map_err(|e| {
+        CliError::new(
+            ExitKind::Generic,
+            crate::INTERNAL_CODE,
+            format!("tempfile: {e}"),
+        )
+    })?;
     registry::download_mem(&client, &base, scope, name, tmp.path()).map_err(|e| {
         let msg = match &e {
             DownloadError::NotFound => {
@@ -186,14 +193,9 @@ fn install_from_registry(
     let target = build_target(mem_name, mem_disk_dir, workspace_root);
     let commit_ctx = cli_ctx();
     let message = format!("memstead: install (read-mem registration into {mem_name})");
-    let outcome = mem_cache::install_read_mem(
-        tmp.path(),
-        target,
-        &commit_ctx,
-        &message,
-        &writable_refs,
-    )
-    .map_err(install_err_to_cli)?;
+    let outcome =
+        mem_cache::install_read_mem(tmp.path(), target, &commit_ctx, &message, &writable_refs)
+            .map_err(install_err_to_cli)?;
 
     let source_url = format!(
         "{base}/api/mem/{scope}/{name}.mem",
@@ -266,18 +268,32 @@ fn update_source_to_url(
 
     match mem_disk_dir {
         Some(mem_dir) => {
-            let (mut config, config_path) = memstead_schema::config::load_config(mem_dir)
-                .map_err(|e| CliError::new(ExitKind::Generic, "WORKSPACE_CONFIG_READ_FAILED", format!("reading config: {e}")))?;
+            let (mut config, config_path) =
+                memstead_schema::config::load_config(mem_dir).map_err(|e| {
+                    CliError::new(
+                        ExitKind::Generic,
+                        "WORKSPACE_CONFIG_READ_FAILED",
+                        format!("reading config: {e}"),
+                    )
+                })?;
 
             let root = config.as_object_mut().ok_or_else(|| {
-                CliError::new(ExitKind::Generic, "WORKSPACE_CONFIG_INVALID", "config root must be a JSON object")
+                CliError::new(
+                    ExitKind::Generic,
+                    "WORKSPACE_CONFIG_INVALID",
+                    "config root must be a JSON object",
+                )
             })?;
             let read_mems = root
                 .entry("readMems")
                 .or_insert_with(|| Value::Object(Map::new()))
                 .as_object_mut()
                 .ok_or_else(|| {
-                    CliError::new(ExitKind::Generic, "WORKSPACE_CONFIG_INVALID", "readMems must be a JSON object")
+                    CliError::new(
+                        ExitKind::Generic,
+                        "WORKSPACE_CONFIG_INVALID",
+                        "readMems must be a JSON object",
+                    )
                 })?;
 
             let existing_is_url_same = read_mems
@@ -293,22 +309,30 @@ fn update_source_to_url(
             let entry = url_entry(read_mems.get(read_mem_name));
             read_mems.insert(read_mem_name.to_string(), entry);
 
-            let body = serde_json::to_string_pretty(&config)
-                .map_err(|e| CliError::new(ExitKind::Generic, crate::INTERNAL_CODE, format!("serializing config: {e}")))?;
-            std::fs::write(&config_path, body + "\n")
-                .map_err(|e| CliError::new(ExitKind::Generic, crate::INTERNAL_CODE, format!("writing config: {e}")))?;
+            let body = serde_json::to_string_pretty(&config).map_err(|e| {
+                CliError::new(
+                    ExitKind::Generic,
+                    crate::INTERNAL_CODE,
+                    format!("serializing config: {e}"),
+                )
+            })?;
+            std::fs::write(&config_path, body + "\n").map_err(|e| {
+                CliError::new(
+                    ExitKind::Generic,
+                    crate::INTERNAL_CODE,
+                    format!("writing config: {e}"),
+                )
+            })?;
             Ok(())
         }
         None => {
             // Mem-repo shape: read configs/<host_mem>.json, mutate, commit on main.
-            let config = mem_repo_config::read_config(workspace_root, host_mem_name)
-                .map_err(|e| {
+            let config =
+                mem_repo_config::read_config(workspace_root, host_mem_name).map_err(|e| {
                     CliError::new(
                         ExitKind::Generic,
                         "WORKSPACE_CONFIG_READ_FAILED",
-                        format!(
-                            "reading configs/{host_mem_name}.json from mem-repo-git:main: {e}"
-                        ),
+                        format!("reading configs/{host_mem_name}.json from mem-repo-git:main: {e}"),
                     )
                 })?;
             let mut value = serde_json::to_value(&config).map_err(|e| {
@@ -319,14 +343,22 @@ fn update_source_to_url(
                 )
             })?;
             let root = value.as_object_mut().ok_or_else(|| {
-                CliError::new(ExitKind::Generic, "WORKSPACE_CONFIG_INVALID", "config root must be a JSON object")
+                CliError::new(
+                    ExitKind::Generic,
+                    "WORKSPACE_CONFIG_INVALID",
+                    "config root must be a JSON object",
+                )
             })?;
             let read_mems = root
                 .entry("readMems")
                 .or_insert_with(|| Value::Object(Map::new()))
                 .as_object_mut()
                 .ok_or_else(|| {
-                    CliError::new(ExitKind::Generic, "WORKSPACE_CONFIG_INVALID", "readMems must be a JSON object")
+                    CliError::new(
+                        ExitKind::Generic,
+                        "WORKSPACE_CONFIG_INVALID",
+                        "readMems must be a JSON object",
+                    )
                 })?;
 
             let existing_is_url_same = read_mems
@@ -371,7 +403,6 @@ fn update_source_to_url(
         }
     }
 }
-
 
 fn emit_outcome(
     ctx: &CliContext,
@@ -439,12 +470,16 @@ fn install_err_to_cli(e: memstead_git_branch::mem_cache::InstallError) -> anyhow
         shadows_writable,
     } = &e
     {
-        return CliError::new(ExitKind::Validation, "READ_MEM_SHADOWS_WRITABLE", e.to_string())
-            .with_details(json!({
-                "archive_name": archive_name,
-                "shadows_writable": shadows_writable,
-            }))
-            .into();
+        return CliError::new(
+            ExitKind::Validation,
+            "READ_MEM_SHADOWS_WRITABLE",
+            e.to_string(),
+        )
+        .with_details(json!({
+            "archive_name": archive_name,
+            "shadows_writable": shadows_writable,
+        }))
+        .into();
     }
     // There is no `CACHE_NAME_COLLISION` mapping: the cache is
     // content-addressed (`<name>-<content_key>.mem`), so distinct bytes

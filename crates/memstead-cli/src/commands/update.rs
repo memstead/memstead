@@ -16,10 +16,10 @@ use clap::Parser;
 use indexmap::IndexMap;
 use serde::Deserialize;
 
-use memstead_base::vcs::Actor;
-use memstead_base::{EntityId, UpdateEntityArgs};
 #[cfg(feature = "mem-repo")]
 use memstead_base::ops::PatchArg;
+use memstead_base::vcs::Actor;
+use memstead_base::{EntityId, UpdateEntityArgs};
 
 use crate::CliError;
 use crate::output::{ExitKind, print_json, print_markdown};
@@ -246,8 +246,8 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 metadata_unset: payload.metadata_unset,
                 dry_run: payload.dry_run,
                 declare_relations,
-            relations_unset: Vec::new(),
-        };
+                relations_unset: Vec::new(),
+            };
 
             let result = engine
                 .update_entity_with_ctx(
@@ -258,8 +258,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             let mem_changed = engine.take_mem_changed_notices();
 
             if ctx.json {
-                let mut body =
-                    serde_json::to_value(&result).unwrap_or(serde_json::Value::Null);
+                let mut body = serde_json::to_value(&result).unwrap_or(serde_json::Value::Null);
                 super::merge_mem_changed_json(&mut body, &mem_changed);
                 print_json(&body)?;
             } else {
@@ -282,7 +281,11 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                         .relations_declared
                         .iter()
                         .map(|r| {
-                            let stubbed_tag = if r.target_was_stubbed { " (stubbed)" } else { "" };
+                            let stubbed_tag = if r.target_was_stubbed {
+                                " (stubbed)"
+                            } else {
+                                ""
+                            };
                             format!("{} → {}{}", r.rel_type, r.target, stubbed_tag)
                         })
                         .collect();
@@ -368,8 +371,8 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 metadata_unset: payload.metadata_unset,
                 declare_relations,
                 dry_run: false,
-            relations_unset: Vec::new(),
-        };
+                relations_unset: Vec::new(),
+            };
             let outcome = engine
                 .update_entity(update_args, Actor::Cli, None, args.note.as_deref())
                 .map_err(CliError::from_engine_op)?;
@@ -378,11 +381,13 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 let relations_declared: Vec<serde_json::Value> = outcome
                     .relations_declared
                     .iter()
-                    .map(|r| serde_json::json!({
-                        "rel_type": r.rel_type,
-                        "target": r.target.to_string(),
-                        "target_was_stubbed": r.target_was_stubbed,
-                    }))
+                    .map(|r| {
+                        serde_json::json!({
+                            "rel_type": r.rel_type,
+                            "target": r.target.to_string(),
+                            "target_was_stubbed": r.target_was_stubbed,
+                        })
+                    })
                     .collect();
                 print_json(&serde_json::json!({
                     "id": outcome.id.as_ref(),
@@ -429,7 +434,11 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                         .relations_declared
                         .iter()
                         .map(|r| {
-                            let stubbed_tag = if r.target_was_stubbed { " (stubbed)" } else { "" };
+                            let stubbed_tag = if r.target_was_stubbed {
+                                " (stubbed)"
+                            } else {
+                                ""
+                            };
                             format!("{} → {}{}", r.rel_type, r.target, stubbed_tag)
                         })
                         .collect();
@@ -470,7 +479,11 @@ fn render_section_mutations(m: &memstead_git_branch::ModifiedSections) -> Option
     for k in &m.patched {
         parts.push(format!("{k} (patched)"));
     }
-    if parts.is_empty() { None } else { Some(parts.join(", ")) }
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join(", "))
+    }
 }
 
 /// Render `modified_metadata` as `level (set), tags (unset)`. `None` when empty.
@@ -483,7 +496,11 @@ fn render_metadata_mutations(m: &memstead_git_branch::ModifiedMetadata) -> Optio
     for k in &m.unset {
         parts.push(format!("{k} (unset)"));
     }
-    if parts.is_empty() { None } else { Some(parts.join(", ")) }
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join(", "))
+    }
 }
 
 /// Resolve the hash the update will be issued with.
@@ -568,9 +585,7 @@ fn parse_declare_relations(items: &[String]) -> anyhow::Result<Vec<DeclareRelati
             CliError::new(
                 ExitKind::Validation,
                 "INVALID_INPUT",
-                format!(
-                    "--declare-relations: expected REL_TYPE:TARGET_ID, got `{raw}`"
-                ),
+                format!("--declare-relations: expected REL_TYPE:TARGET_ID, got `{raw}`"),
             )
         })?;
         if rel_type.is_empty() || target.is_empty() {
@@ -612,10 +627,7 @@ fn parse_patch_list_combined(
     all: &[String],
 ) -> anyhow::Result<IndexMap<String, PatchPayload>> {
     let mut out = IndexMap::with_capacity(first_only.len() + all.len());
-    for (items, flag, replace_all) in [
-        (first_only, "--patch", false),
-        (all, "--patch-all", true),
-    ] {
+    for (items, flag, replace_all) in [(first_only, "--patch", false), (all, "--patch-all", true)] {
         for raw in items {
             let (key, rest) = raw.split_once('=').ok_or_else(|| {
                 CliError::new(

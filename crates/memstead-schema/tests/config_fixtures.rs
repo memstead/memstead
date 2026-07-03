@@ -28,8 +28,7 @@ fn update_fixtures() -> bool {
 fn read_json(path: &Path) -> Value {
     let s = std::fs::read_to_string(path)
         .unwrap_or_else(|e| panic!("read fixture {}: {e}", path.display()));
-    serde_json::from_str(&s)
-        .unwrap_or_else(|e| panic!("parse fixture {}: {e}", path.display()))
+    serde_json::from_str(&s).unwrap_or_else(|e| panic!("parse fixture {}: {e}", path.display()))
 }
 
 fn list_json_files(dir: &Path) -> Vec<PathBuf> {
@@ -114,7 +113,8 @@ fn validation_invalid_fixtures_fail_expected() {
         let expected: InvalidExpectation = serde_json::from_str(&raw).unwrap();
 
         assert_eq!(
-            result.error_code, expected.error_code,
+            result.error_code,
+            expected.error_code,
             "error_code mismatch for {}",
             name.to_string_lossy()
         );

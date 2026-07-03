@@ -61,7 +61,7 @@ pub fn run(ctx: &CliContext) -> anyhow::Result<()> {
     edge_pairs.sort_by(|a, b| b.1.cmp(a.1));
 
     let mut schema_pairs: Vec<(String, usize)> = schema_counts.into_iter().collect();
-    schema_pairs.sort_by(|a, b| b.1.cmp(&a.1));
+    schema_pairs.sort_by_key(|p| std::cmp::Reverse(p.1));
 
     if ctx.json {
         let payload = StatsPayload {

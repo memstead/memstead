@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
-use super::{TaskSpec, MemState};
+use super::{MemState, TaskSpec};
 
 #[derive(Debug, Deserialize)]
 struct TaskFileEntry {
@@ -23,8 +23,8 @@ struct TaskFileEntry {
 pub fn load_tasks(path: &Path) -> Result<Vec<TaskSpec>> {
     let text = std::fs::read_to_string(path)
         .with_context(|| format!("reading task file {}", path.display()))?;
-    let entries: Vec<TaskFileEntry> =
-        serde_json::from_str(&text).with_context(|| format!("parsing task file {}", path.display()))?;
+    let entries: Vec<TaskFileEntry> = serde_json::from_str(&text)
+        .with_context(|| format!("parsing task file {}", path.display()))?;
     if entries.is_empty() {
         bail!("task file {} contains no tasks", path.display());
     }

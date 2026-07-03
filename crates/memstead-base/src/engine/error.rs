@@ -136,24 +136,22 @@ impl SchemaSourceDiagnostic {
         consulted: &[std::sync::Arc<memstead_schema::Schema>],
     ) -> Vec<Self> {
         use std::collections::BTreeSet;
-        let builtin: BTreeSet<semver::Version> =
-            memstead_schema::builtins::load_builtin_schemas()
-                .map(|set| {
-                    set.iter()
-                        .filter(|s| s.manifest.name == name)
-                        .map(|s| s.version.clone())
-                        .collect()
-                })
-                .unwrap_or_default();
+        let builtin: BTreeSet<semver::Version> = memstead_schema::builtins::load_builtin_schemas()
+            .map(|set| {
+                set.iter()
+                    .filter(|s| s.manifest.name == name)
+                    .map(|s| s.version.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
         let local: BTreeSet<semver::Version> = consulted
             .iter()
             .filter(|s| s.manifest.name == name)
             .map(|s| s.version.clone())
             .filter(|v| !builtin.contains(v))
             .collect();
-        let to_strings = |set: &BTreeSet<semver::Version>| {
-            set.iter().map(|v| v.to_string()).collect::<Vec<_>>()
-        };
+        let to_strings =
+            |set: &BTreeSet<semver::Version>| set.iter().map(|v| v.to_string()).collect::<Vec<_>>();
         vec![
             Self {
                 source: "local_storage",
@@ -258,7 +256,10 @@ pub enum EngineError {
         n = referrers.len(),
         inline = format_inline_list_overflow(referrers, "referrers"),
     )]
-    HasIncomingRefs { id: String, referrers: Vec<ReferrerInfo> },
+    HasIncomingRefs {
+        id: String,
+        referrers: Vec<ReferrerInfo>,
+    },
     /// Refusal to delete a mem because entities in other Write-Mems
     /// still reference entities inside it. Mirrors entity-level
     /// [`Self::HasIncomingRefs`] at the mem granularity — the
@@ -290,10 +291,7 @@ pub enum EngineError {
     #[error(
         "cross-mem link from mem `{from_mem}` to mem `{to_mem}` is not allowed by the workspace `[cross_mem_links]` policy"
     )]
-    CrossMemLinkNotAllowed {
-        from_mem: String,
-        to_mem: String,
-    },
+    CrossMemLinkNotAllowed { from_mem: String, to_mem: String },
     /// `memstead_relate` cross-mem to a target whose mem is mounted
     /// `MountCapability::ReadOnly` and the target is absent. Auto-stub
     /// is unavailable across the engine/ReadOnly-mem boundary (the
@@ -340,12 +338,16 @@ pub enum EngineError {
     /// instead: `memstead_relate(remove)` detaches an edge, the additive
     /// `memstead_update` params evolve content. The entity is not
     /// modified.
-    #[error("repair input refused for {id}: the entity currently passes the conformance check — {recovery}")]
+    #[error(
+        "repair input refused for {id}: the entity currently passes the conformance check — {recovery}"
+    )]
     RepairNotNeeded { id: String, recovery: String },
     /// Rename where the new title would slugify to the existing id.
     /// Surfaced as a typed no-op so callers don't loop on a degenerate
     /// retry.
-    #[error("rename would not change the id of {id} — new title {new_title:?} produces the same slug")]
+    #[error(
+        "rename would not change the id of {id} — new title {new_title:?} produces the same slug"
+    )]
     RenameNoOp { id: String, new_title: String },
     /// `memstead_update` / `memstead_batch_update` payload parsed cleanly but
     /// carries no recognised mutation content — every mutation map is
@@ -375,7 +377,7 @@ pub enum EngineError {
     /// gates.
     #[error(
         "rename blocked: cross-mem rewrite from referrer mem(s) into `{from_mem}` is not permitted by `[cross_mem_links]` — blocked: {} — grant the missing direction or rewrite the blocked referrers manually",
-        format_blocked_referrers(blocked_referrers),
+        format_blocked_referrers(blocked_referrers)
     )]
     RenameBlockedByCrossMemPolicy {
         from_mem: String,
@@ -462,7 +464,9 @@ pub enum EngineError {
     /// `memstead_rename` target is a stub — stubs do not have a title to
     /// rename (their title is derived from the id). Same recovery
     /// path as [`Self::StubNotUpdatable`].
-    #[error("entity {id} is a stub — promote it to a real entity via memstead_create before renaming")]
+    #[error(
+        "entity {id} is a stub — promote it to a real entity via memstead_create before renaming"
+    )]
     StubNotRenamable { id: String },
     /// An `EntityId` reaching a write path (notably `memstead_relate to=`)
     /// does not match the wiki-link grammar
@@ -485,9 +489,7 @@ pub enum EngineError {
     /// `section` is the section key whose body carried the link;
     /// `source` is a stable discriminator (`"body_link"`) future-
     /// proofed against additional ingress surfaces.
-    #[error(
-        "body wiki-link target '{raw}' in section '{section}' is not slug-form: {reason}"
-    )]
+    #[error("body wiki-link target '{raw}' in section '{section}' is not slug-form: {reason}")]
     InvalidWikiLinkTarget {
         raw: String,
         suggested: Option<String>,
@@ -516,10 +518,7 @@ pub enum EngineError {
     /// and rejected before any disk write. `modes` lists the
     /// conflicting modes for the key in canonical order.
     #[error("conflicting section modes for {section}: {modes:?}")]
-    ConflictingSectionModes {
-        section: String,
-        modes: Vec<String>,
-    },
+    ConflictingSectionModes { section: String, modes: Vec<String> },
     /// Adding the proposed edge would close a cycle in an
     /// acyclic-declared subgraph. Carries the existing back-path
     /// `[from, …, current, target's intermediates, … from]` so MCP
@@ -610,9 +609,7 @@ pub enum EngineError {
     /// a warning continues to load, surface in health, and accept
     /// partial updates. The refusal is a write-boundary gate, not a
     /// global invariant.
-    #[error(
-        "missing {missing_count} required section(s) for type '{entity_type}'"
-    )]
+    #[error("missing {missing_count} required section(s) for type '{entity_type}'")]
     MissingRequiredSection {
         entity_type: String,
         /// Echoed for diagnostics; equals `sections.len()`.
@@ -694,10 +691,7 @@ pub enum EngineError {
     /// rendered via [`MemOrigin::render_source`] for writable
     /// entries or a stand-in for read-only ones.
     #[error("mem name collision: {name} is already registered ({source_origin})")]
-    MemNameCollision {
-        name: String,
-        source_origin: String,
-    },
+    MemNameCollision { name: String, source_origin: String },
     /// Lifecycle orchestrator rejected the input. Carries a single
     /// free-form message — the orchestrator's typed payload (note
     /// length, malformed path, etc.) is the message text.
@@ -786,9 +780,7 @@ pub enum EngineError {
     /// `details.requested`. Promoted from the prior silent-clamp + LIMIT_CLAMPED warning so
     /// nonsense inputs surface as recoverable refusal rather than
     /// silent rounding.
-    #[error(
-        "rename_similarity {requested} outside allowed range [{allowed_min}, {allowed_max}]"
-    )]
+    #[error("rename_similarity {requested} outside allowed range [{allowed_min}, {allowed_max}]")]
     RenameSimilarityOutOfRange {
         requested: f32,
         allowed_min: f32,
@@ -802,7 +794,9 @@ pub enum EngineError {
     /// sync loop branches cleanly: `INVALID_CURSOR` → re-seed from the
     /// empty-tree sentinel; `MEM_ERROR` → genuine backend fault.
     /// `details.since` carries the offending cursor untruncated.
-    #[error("commit cursor '{since}' is not a known commit in mem '{mem}' — pass a commit_sha from a prior mutation, or the empty-tree sentinel to re-seed")]
+    #[error(
+        "commit cursor '{since}' is not a known commit in mem '{mem}' — pass a commit_sha from a prior mutation, or the empty-tree sentinel to re-seed"
+    )]
     InvalidChangesCursor { mem: String, since: String },
     /// Mem config is missing a required field that the engine
     /// itself would normally populate (today: `version` at mem
@@ -1081,7 +1075,11 @@ impl EngineError {
                 "declared": declared,
                 "suggestion": suggestion,
             }),
-            EngineError::HashMismatch { id, current, is_stub } => serde_json::json!({
+            EngineError::HashMismatch {
+                id,
+                current,
+                is_stub,
+            } => serde_json::json!({
                 "id": id,
                 "current": current,
                 "is_stub": is_stub,
@@ -1116,7 +1114,12 @@ impl EngineError {
                 "from_id": from_id,
                 "missing": missing,
             }),
-            EngineError::RelationHasBodyLinks { from_id, to_id, rel_type, body_links } => {
+            EngineError::RelationHasBodyLinks {
+                from_id,
+                to_id,
+                rel_type,
+                body_links,
+            } => {
                 serde_json::json!({
                     "from_id": from_id,
                     "to_id": to_id,
@@ -1154,7 +1157,11 @@ impl EngineError {
                     "reason": reason,
                 })
             }
-            EngineError::InvalidWikiLinkMem { raw, section, reason } => {
+            EngineError::InvalidWikiLinkMem {
+                raw,
+                section,
+                reason,
+            } => {
                 serde_json::json!({ "raw": raw, "section": section, "reason": reason })
             }
             EngineError::ConflictingSectionModes { section, modes } => {
@@ -1223,7 +1230,11 @@ impl EngineError {
                 })
             }
             EngineError::PatchSectionEmpty { section } => serde_json::json!({ "section": section }),
-            EngineError::PatchOldNotFound { section, current_content, truncated } => {
+            EngineError::PatchOldNotFound {
+                section,
+                current_content,
+                truncated,
+            } => {
                 serde_json::json!({
                     "section": section,
                     "current_content": current_content,
@@ -1237,8 +1248,7 @@ impl EngineError {
                 existing_path,
                 path_truncated,
             } => {
-                let path_json: Vec<_> =
-                    existing_path.iter().map(|id| id.to_string()).collect();
+                let path_json: Vec<_> = existing_path.iter().map(|id| id.to_string()).collect();
                 serde_json::json!({
                     "rel_type": rel_type,
                     "from": from.to_string(),
@@ -1278,18 +1288,29 @@ impl EngineError {
                     "blocked_referrers": entries,
                 })
             }
-            EngineError::CrossMemTargetNotFound { target_id, target_mem } => {
+            EngineError::CrossMemTargetNotFound {
+                target_id,
+                target_mem,
+            } => {
                 serde_json::json!({ "target_id": target_id, "target_mem": target_mem })
             }
             EngineError::Validation(v) => v.details(),
-            EngineError::MissingRequiredDescription { rel_type, from_id, to_id } => {
+            EngineError::MissingRequiredDescription {
+                rel_type,
+                from_id,
+                to_id,
+            } => {
                 serde_json::json!({
                     "rel_type": rel_type,
                     "from_id": from_id,
                     "to_id": to_id,
                 })
             }
-            EngineError::DescriptionNotPermitted { rel_type, from_id, to_id } => {
+            EngineError::DescriptionNotPermitted {
+                rel_type,
+                from_id,
+                to_id,
+            } => {
                 serde_json::json!({
                     "rel_type": rel_type,
                     "from_id": from_id,
@@ -1404,7 +1425,11 @@ impl EngineError {
                         .collect::<Vec<_>>()
                         .join(" → ")
                 };
-                let trunc = if *path_truncated { " (path truncated)" } else { "" };
+                let trunc = if *path_truncated {
+                    " (path truncated)"
+                } else {
+                    ""
+                };
                 format!(
                     "creating edge {rel_type} from '{from}' to '{to}' would close a cycle in the {rel_type} subgraph — existing path: {path_inline}{trunc}; remove an edge along this path to break the cycle, then retry"
                 )
@@ -1430,10 +1455,7 @@ impl EngineError {
                 let rules_clause = if type_write_rules.is_empty() {
                     String::new()
                 } else {
-                    format!(
-                        " Type-level write_rules: {}.",
-                        type_write_rules.join("; ")
-                    )
+                    format!(" Type-level write_rules: {}.", type_write_rules.join("; "))
                 };
                 // Path-aware wording — create
                 // path says "not provided"; update path says "cannot
@@ -1455,10 +1477,7 @@ impl EngineError {
                 let tail_clause = if missing.len() > 1 {
                     let others: Vec<&str> =
                         missing.iter().skip(1).map(|m| m.key.as_str()).collect();
-                    format!(
-                        " Also unset (declaration order): {}.",
-                        others.join(", ")
-                    )
+                    format!(" Also unset (declaration order): {}.", others.join(", "))
                 } else {
                     String::new()
                 };
@@ -1487,10 +1506,7 @@ impl EngineError {
                         if rules.is_empty() {
                             continue;
                         }
-                        out.push_str(&format!(
-                            "\n  - {etype}: {}",
-                            rules.join("; ")
-                        ));
+                        out.push_str(&format!("\n  - {etype}: {}", rules.join("; ")));
                     }
                 }
                 out
@@ -1557,9 +1573,7 @@ fn _hash_mismatch_msg(id: &str, current: &str, is_stub: bool) -> String {
             "hash mismatch for {id} — entity is a stub (no content_hash); pass expected_hash: \"\" to operate on stubs"
         )
     } else {
-        format!(
-            "hash mismatch for {id} — entity was modified concurrently (current: {current})"
-        )
+        format!("hash mismatch for {id} — entity was modified concurrently (current: {current})")
     }
 }
 
@@ -1672,7 +1686,10 @@ mod plan05_subsystem_tests {
             reason: "ambiguous".to_string(),
         };
         let d = err.details();
-        assert!(d["proposed_slug"].is_null(), "colon-form must not be a proposed_slug: {d}");
+        assert!(
+            d["proposed_slug"].is_null(),
+            "colon-form must not be a proposed_slug: {d}"
+        );
         assert_eq!(d["suggested"], "team/sub:thing");
     }
 
@@ -1688,7 +1705,10 @@ mod plan05_subsystem_tests {
         assert_eq!(err.code(), "INVALID_CURSOR");
         let d = err.details();
         assert_eq!(d["mem"], "specs");
-        assert_eq!(d["since"], sha, "the offending SHA must ride untruncated in details");
+        assert_eq!(
+            d["since"], sha,
+            "the offending SHA must ride untruncated in details"
+        );
     }
 }
 
@@ -1744,7 +1764,10 @@ mod inline_list_tests {
         let s = err.to_string();
         // First three ids appear inline; the rest are summarised plus a
         // pointer to `details.referrers` on the structured channel.
-        assert!(s.contains("specs--ref0, specs--ref1, specs--ref2"), "got: {s}");
+        assert!(
+            s.contains("specs--ref0, specs--ref1, specs--ref2"),
+            "got: {s}"
+        );
         assert!(s.contains("+20 more — see details.referrers"), "got: {s}");
         // Pre-fix the message only carried the count; check the count
         // still appears so callers parsing it for "N references" keep
@@ -1792,7 +1815,10 @@ mod inline_list_tests {
             missing,
         };
         let s = err.to_string();
-        assert!(s.contains("s0→specs--t0, s1→specs--t1, s2→specs--t2"), "got: {s}");
+        assert!(
+            s.contains("s0→specs--t0, s1→specs--t1, s2→specs--t2"),
+            "got: {s}"
+        );
         assert!(s.contains("+3 more — see details.missing"), "got: {s}");
     }
 
@@ -1838,7 +1864,10 @@ mod inline_list_tests {
         assert!(!prose.contains("see details"), "got: {prose}");
         // Display stays terse with the overflow suffix.
         let display = err.to_string();
-        assert!(display.contains("+4 more — see details.referrers"), "got: {display}");
+        assert!(
+            display.contains("+4 more — see details.referrers"),
+            "got: {display}"
+        );
     }
 
     #[test]
@@ -1854,8 +1883,14 @@ mod inline_list_tests {
             missing: Vec::new(),
         };
         let prose = err.prose_render();
-        assert!(prose.contains("ISO-8601 date"), "field_description missing: {prose}");
-        assert!(prose.contains("bump verified_on"), "type_write_rules missing: {prose}");
+        assert!(
+            prose.contains("ISO-8601 date"),
+            "field_description missing: {prose}"
+        );
+        assert!(
+            prose.contains("bump verified_on"),
+            "type_write_rules missing: {prose}"
+        );
         assert!(!prose.contains("see details"), "got: {prose}");
         assert!(
             prose.contains("cannot unset"),
@@ -1890,8 +1925,14 @@ mod inline_list_tests {
         // Same Display dispatch — `to_string()` mirrors `prose_render`'s
         // create-path lead.
         let display = err.to_string();
-        assert!(display.contains("not provided"), "Display must match: {display}");
-        assert!(!display.contains("cannot unset"), "Display must match: {display}");
+        assert!(
+            display.contains("not provided"),
+            "Display must match: {display}"
+        );
+        assert!(
+            !display.contains("cannot unset"),
+            "Display must match: {display}"
+        );
     }
 
     /// The
@@ -1906,9 +1947,7 @@ mod inline_list_tests {
         let err = EngineError::RequiredFieldUnset {
             field: "decided_on".to_string(),
             entity_type: "decision".to_string(),
-            field_description: Some(
-                "Date the decision was accepted. ISO YYYY-MM-DD.".to_string(),
-            ),
+            field_description: Some("Date the decision was accepted. ISO YYYY-MM-DD.".to_string()),
             enum_values: vec![],
             type_write_rules: vec!["status transitions: proposed → accepted".to_string()],
             on_create: true,
@@ -1966,7 +2005,9 @@ mod inline_list_tests {
         };
         let details = err.details();
         assert_eq!(details["field"].as_str(), Some("decided_on"));
-        let missing = details["missing"].as_array().expect("missing[] array present");
+        let missing = details["missing"]
+            .as_array()
+            .expect("missing[] array present");
         assert!(missing.is_empty(), "unset-path missing[] must be empty");
         assert_eq!(err.code(), "REQUIRED_FIELD_UNSET");
     }
@@ -2002,8 +2043,14 @@ mod inline_list_tests {
         let prose = err.prose_render();
         assert!(prose.contains("purpose"), "got: {prose}");
         assert!(prose.contains("scope"), "got: {prose}");
-        assert!(prose.contains("one-sentence statement of intent"), "got: {prose}");
-        assert!(prose.contains("specs are immutable once stable"), "got: {prose}");
+        assert!(
+            prose.contains("one-sentence statement of intent"),
+            "got: {prose}"
+        );
+        assert!(
+            prose.contains("specs are immutable once stable"),
+            "got: {prose}"
+        );
         assert!(!prose.contains("see details"), "got: {prose}");
     }
 
@@ -2024,7 +2071,10 @@ mod inline_list_tests {
             path_truncated: false,
         };
         let prose = err.prose_render();
-        assert!(prose.contains("specs--a → specs--b → specs--c → specs--a"), "got: {prose}");
+        assert!(
+            prose.contains("specs--a → specs--b → specs--c → specs--a"),
+            "got: {prose}"
+        );
         assert!(!prose.contains("see details"), "got: {prose}");
     }
 

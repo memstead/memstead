@@ -72,9 +72,7 @@ impl From<RecoveryActionInput> for memstead_engine::RecoveryAction {
     fn from(v: RecoveryActionInput) -> Self {
         match v {
             RecoveryActionInput::Reattach => memstead_engine::RecoveryAction::Reattach,
-            RecoveryActionInput::ForceOverwrite => {
-                memstead_engine::RecoveryAction::ForceOverwrite
-            }
+            RecoveryActionInput::ForceOverwrite => memstead_engine::RecoveryAction::ForceOverwrite,
             RecoveryActionInput::HardCleanupFirst => {
                 memstead_engine::RecoveryAction::HardCleanupFirst
             }
@@ -210,9 +208,7 @@ pub struct WorkspaceGrantCrossLinkParams {
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WorkspaceRevokeCrossLinkParams {
-    #[schemars(
-        description = "Source mem. The grantee whose existing grant is being revoked."
-    )]
+    #[schemars(description = "Source mem. The grantee whose existing grant is being revoked.")]
     pub from: String,
     #[schemars(
         description = "Target mem, or `\"*\"` to revoke the wildcard shape. When the underlying list becomes empty, the `from` key is dropped entirely."

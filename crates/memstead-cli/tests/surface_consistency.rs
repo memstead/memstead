@@ -43,7 +43,10 @@ fn exit_code_table_documents_usage_error_two() {
         "4  hash mismatch",
         "5  validation",
     ] {
-        assert!(EXIT_CODES_HELP.contains(line), "exit-code `{line}` must survive");
+        assert!(
+            EXIT_CODES_HELP.contains(line),
+            "exit-code `{line}` must survive"
+        );
     }
 }
 
@@ -51,9 +54,14 @@ fn exit_code_table_documents_usage_error_two() {
 fn mem_sub_help(sub: &str) -> String {
     let cmd = Cli::command();
     let mem = cmd.find_subcommand("mem").expect("mem subcommand present");
-    let s = mem.find_subcommand(sub).unwrap_or_else(|| panic!("mem {sub} present"));
+    let s = mem
+        .find_subcommand(sub)
+        .unwrap_or_else(|| panic!("mem {sub} present"));
     let about = s.get_about().map(|a| a.to_string()).unwrap_or_default();
-    let long = s.get_long_about().map(|a| a.to_string()).unwrap_or_default();
+    let long = s
+        .get_long_about()
+        .map(|a| a.to_string())
+        .unwrap_or_default();
     format!("{about}\n{long}")
 }
 
@@ -78,9 +86,14 @@ fn mem_unregister_help_documents_incoming_refs_refusal() {
 #[test]
 fn workspace_group_help_describes_policy_configuration() {
     let cmd = Cli::command();
-    let ws = cmd.find_subcommand("workspace").expect("workspace subcommand present");
+    let ws = cmd
+        .find_subcommand("workspace")
+        .expect("workspace subcommand present");
     let about = ws.get_about().map(|a| a.to_string()).unwrap_or_default();
-    let long = ws.get_long_about().map(|a| a.to_string()).unwrap_or_default();
+    let long = ws
+        .get_long_about()
+        .map(|a| a.to_string())
+        .unwrap_or_default();
     let help = format!("{about}\n{long}");
     assert!(
         !help.contains("Read-only"),

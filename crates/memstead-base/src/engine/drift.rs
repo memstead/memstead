@@ -11,7 +11,6 @@
 //! git-branch hook walks the tree with rename detection, archive
 //! mounts return empty.
 
-
 use crate::backend::BackendError;
 use crate::workspace::MountStorage;
 
@@ -19,7 +18,6 @@ use super::mutation::lookup_title_and_type;
 use super::{Engine, EngineError};
 
 impl Engine {
-
     /// Reload-before-operation: before any read or write executes,
     /// check the mem ref; if it advanced past the engine's cached
     /// `last_known_head`, reload the affected mem(s) and return one
@@ -61,10 +59,7 @@ impl Engine {
     ///
     /// Cache invalidation rides on `reload_one_mem` — community
     /// and search-index memos drop when any mem reloads.
-    pub fn reload_if_stale(
-        &mut self,
-        mem: Option<&str>,
-    ) -> Vec<crate::ops::WarningHint> {
+    pub fn reload_if_stale(&mut self, mem: Option<&str>) -> Vec<crate::ops::WarningHint> {
         // Phase 1 — pick candidate mem names that match the filter.
         // Cloned so the immutable borrow doesn't survive into the
         // mutation phase.
@@ -106,8 +101,7 @@ impl Engine {
                                 mem: name.clone(),
                                 old_head: old.clone(),
                                 new_head: new.clone(),
-                                entities_loaded: report.added.len()
-                                    + report.changed.len(),
+                                entities_loaded: report.added.len() + report.changed.len(),
                             });
                             if let Some(state) =
                                 self.mounts.iter_mut().find(|m| m.mount.mem == name)
@@ -134,8 +128,7 @@ impl Engine {
                     }
                 }
                 _ => {
-                    if let Some(state) =
-                        self.mounts.iter_mut().find(|m| m.mount.mem == name)
+                    if let Some(state) = self.mounts.iter_mut().find(|m| m.mount.mem == name)
                         && state.last_known_head.is_none()
                     {
                         state.last_known_head = new_head;
@@ -284,8 +277,7 @@ impl Engine {
         // (e.g. 1.5 ≡ 1.0); typed refusal gives the agent a recoverable
         // signal.
         if let Some(v) = rename_similarity
-            && (v < crate::ops::RENAME_SIMILARITY_MIN
-                || v > crate::ops::RENAME_SIMILARITY_MAX)
+            && !(crate::ops::RENAME_SIMILARITY_MIN..=crate::ops::RENAME_SIMILARITY_MAX).contains(&v)
         {
             return Err(EngineError::RenameSimilarityOutOfRange {
                 requested: v,
@@ -297,8 +289,7 @@ impl Engine {
 
         let backend_changes = match &m.mount.storage {
             MountStorage::Folder { path } => {
-                crate::ops::folder_changes_since(path, mem, since)
-                    .map_err(EngineError::Backend)?
+                crate::ops::folder_changes_since(path, mem, since).map_err(EngineError::Backend)?
             }
             MountStorage::GitBranch { gitdir, branch } => match self.git_branch_ops.as_ref() {
                 Some(hook) => match (hook.changes_since)(gitdir, branch, mem, since, clamped) {
@@ -306,9 +297,7 @@ impl Engine {
                     // Lift the backend's typed bad-`since` marker to a typed
                     // engine error carrying the untruncated SHA, parallel
                     // to the UNKNOWN_REMOTE / LOCAL_DIVERGENCE prefixes.
-                    Err(BackendError::Other(msg))
-                        if msg.starts_with("COMMIT_NOT_FOUND:") =>
-                    {
+                    Err(BackendError::Other(msg)) if msg.starts_with("COMMIT_NOT_FOUND:") => {
                         let since = msg
                             .strip_prefix("COMMIT_NOT_FOUND:")
                             .unwrap_or_default()
@@ -364,9 +353,7 @@ impl Engine {
                         entity_type: None,
                     }
                 }
-                crate::ops::ChangeEnvelope::Renamed {
-                    from_id, to_id, ..
-                } => {
+                crate::ops::ChangeEnvelope::Renamed { from_id, to_id, .. } => {
                     let (title, entity_type) = lookup_title_and_type(&self.store, &to_id);
                     crate::ops::ChangeEnvelope::Renamed {
                         from_id,
@@ -426,9 +413,7 @@ impl Engine {
     ) -> Result<crate::ops::FetchOutcome, EngineError> {
         let m = self.find_mount(mem)?;
         match &m.mount.storage {
-            MountStorage::Folder { .. }
-            | MountStorage::Archive { .. }
-            | MountStorage::InMemory => {
+            MountStorage::Folder { .. } | MountStorage::Archive { .. } | MountStorage::InMemory => {
                 Err(EngineError::InvalidInput(format!(
                     "mem '{mem}' is not git-backed — `memstead_fetch` requires a git-branch mount",
                 )))
@@ -443,8 +428,7 @@ impl Engine {
                     other => EngineError::Backend(other),
                 }),
                 None => Err(EngineError::Backend(BackendError::Other(
-                    "git-branch fetch hook not installed (full flavour not loaded)"
-                        .to_string(),
+                    "git-branch fetch hook not installed (full flavour not loaded)".to_string(),
                 ))),
             },
         }
@@ -476,9 +460,7 @@ impl Engine {
         // pull's fast-forward land. Errors map to the typed surface
         // just like a standalone `memstead_fetch` call.
         let gitdir = match &self.mounts[mount_idx].mount.storage {
-            MountStorage::Folder { .. }
-            | MountStorage::Archive { .. }
-            | MountStorage::InMemory => {
+            MountStorage::Folder { .. } | MountStorage::Archive { .. } | MountStorage::InMemory => {
                 return Err(EngineError::InvalidInput(format!(
                     "mem '{mem}' is not git-backed — `memstead_pull` requires a git-branch mount",
                 )));
@@ -557,9 +539,7 @@ impl Engine {
     ) -> Result<crate::ops::PushOutcome, EngineError> {
         let m = self.find_mount(mem)?;
         let gitdir = match &m.mount.storage {
-            MountStorage::Folder { .. }
-            | MountStorage::Archive { .. }
-            | MountStorage::InMemory => {
+            MountStorage::Folder { .. } | MountStorage::Archive { .. } | MountStorage::InMemory => {
                 return Err(EngineError::InvalidInput(format!(
                     "mem '{mem}' is not git-backed — `memstead_push` requires a git-branch mount",
                 )));
@@ -605,9 +585,7 @@ impl Engine {
                 EngineError::NonFastForward { mem: v, remote: r }
             }
             BackendError::Other(msg) if msg.starts_with("UNKNOWN_REF:") => {
-                EngineError::UnknownRef(
-                    msg.trim_start_matches("UNKNOWN_REF:").trim().to_string(),
-                )
+                EngineError::UnknownRef(msg.trim_start_matches("UNKNOWN_REF:").trim().to_string())
             }
             other => EngineError::Backend(other),
         })
@@ -641,8 +619,7 @@ impl Engine {
             })
             .ok_or_else(|| {
                 EngineError::InvalidInput(
-                    "no git-branch mounts — `remote-add` requires a mem-repo workspace"
-                        .to_string(),
+                    "no git-branch mounts — `remote-add` requires a mem-repo workspace".to_string(),
                 )
             })?;
         let hook = self.git_branch_ops.ok_or_else(|| {
@@ -688,9 +665,7 @@ impl Engine {
 
         let blobs = (hook.read_tree)(gitdir, ref_name).map_err(|e| match e {
             BackendError::Other(msg) if msg.starts_with("UNKNOWN_REF:") => {
-                EngineError::UnknownRef(
-                    msg.trim_start_matches("UNKNOWN_REF:").trim().to_string(),
-                )
+                EngineError::UnknownRef(msg.trim_start_matches("UNKNOWN_REF:").trim().to_string())
             }
             other => EngineError::Backend(other),
         })?;
@@ -807,37 +782,37 @@ impl Engine {
             .ok_or_else(|| EngineError::UnknownMem(mem.to_string()))?;
 
         let outcome = match &self.mounts[mount_idx].mount.storage {
-            MountStorage::Folder { .. }
-            | MountStorage::Archive { .. }
-            | MountStorage::InMemory => {
+            MountStorage::Folder { .. } | MountStorage::Archive { .. } | MountStorage::InMemory => {
                 return Err(EngineError::InvalidInput(format!(
                     "mem '{mem}' is not git-backed — `memstead_branch_reset` requires a git-branch mount",
                 )));
             }
             MountStorage::GitBranch { gitdir, branch } => match self.git_branch_ops.as_ref() {
-                Some(hook) => (hook.branch_reset)(gitdir, branch, target_sha).map_err(|e| match e {
-                    BackendError::Other(msg) if msg.starts_with("UNKNOWN_REF:") => {
-                        let raw = msg.trim_start_matches("UNKNOWN_REF:").trim().to_string();
-                        EngineError::UnknownRef(raw)
-                    }
-                    BackendError::Other(msg)
-                        if msg.starts_with("PUSHED_COMMITS_PROTECTED:") =>
-                    {
-                        let payload =
-                            msg.trim_start_matches("PUSHED_COMMITS_PROTECTED:").trim();
-                        let pushed_shas = payload
-                            .split(',')
-                            .map(|s| s.trim().to_string())
-                            .filter(|s| !s.is_empty())
-                            .collect();
-                        EngineError::PushedCommitsProtected {
-                            mem: mem.to_string(),
-                            target_sha: target_sha.to_string(),
-                            pushed_shas,
+                Some(hook) => {
+                    (hook.branch_reset)(gitdir, branch, target_sha).map_err(|e| match e {
+                        BackendError::Other(msg) if msg.starts_with("UNKNOWN_REF:") => {
+                            let raw = msg.trim_start_matches("UNKNOWN_REF:").trim().to_string();
+                            EngineError::UnknownRef(raw)
                         }
-                    }
-                    other => EngineError::Backend(other),
-                })?,
+                        BackendError::Other(msg)
+                            if msg.starts_with("PUSHED_COMMITS_PROTECTED:") =>
+                        {
+                            let payload =
+                                msg.trim_start_matches("PUSHED_COMMITS_PROTECTED:").trim();
+                            let pushed_shas = payload
+                                .split(',')
+                                .map(|s| s.trim().to_string())
+                                .filter(|s| !s.is_empty())
+                                .collect();
+                            EngineError::PushedCommitsProtected {
+                                mem: mem.to_string(),
+                                target_sha: target_sha.to_string(),
+                                pushed_shas,
+                            }
+                        }
+                        other => EngineError::Backend(other),
+                    })?
+                }
                 None => {
                     return Err(EngineError::Backend(BackendError::Other(
                         "git-branch branch_reset hook not installed (full flavour not loaded)"
@@ -917,16 +892,14 @@ impl Engine {
         }
 
         match &m.mount.storage {
-            MountStorage::Folder { .. }
-            | MountStorage::Archive { .. }
-            | MountStorage::InMemory => {
+            MountStorage::Folder { .. } | MountStorage::Archive { .. } | MountStorage::InMemory => {
                 Err(EngineError::InvalidInput(format!(
                     "mem '{mem}' is not git-backed — `memstead_diff` requires a git-branch mount",
                 )))
             }
             MountStorage::GitBranch { gitdir, .. } => match self.git_branch_ops.as_ref() {
-                Some(hook) => (hook.diff)(gitdir, mem, ref_a, ref_b, &config)
-                    .map_err(|e| match e {
+                Some(hook) => {
+                    (hook.diff)(gitdir, mem, ref_a, ref_b, &config).map_err(|e| match e {
                         // Map the standard backend-side "ref not found" shape into the
                         // typed engine-level refusal. The git-branch dispatcher uses
                         // `BackendError::Other` with a leading marker so the engine can
@@ -936,10 +909,10 @@ impl Engine {
                             EngineError::UnknownRef(raw)
                         }
                         other => EngineError::Backend(other),
-                    }),
+                    })
+                }
                 None => Err(EngineError::Backend(BackendError::Other(
-                    "git-branch diff hook not installed (full flavour not loaded)"
-                        .to_string(),
+                    "git-branch diff hook not installed (full flavour not loaded)".to_string(),
                 ))),
             },
         }
@@ -949,16 +922,14 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     use std::path::{Path, PathBuf};
-    
 
-    
     use tempfile::TempDir;
 
     use crate::backend::{BackendError, MemBackend};
     use crate::engine::test_helpers::*;
     use crate::engine::{DeleteEntityArgs, Engine, EngineError};
     use crate::entity::EntityId;
-    
+
     use crate::provenance::Provenance;
     use crate::storage::ArchiveBackend;
     use crate::vcs::CommitContext;
@@ -997,7 +968,10 @@ mod tests {
             ..Default::default()
         };
         let err = engine.diff("specs", "a", "b", Some(bad)).unwrap_err();
-        assert!(matches!(err, EngineError::RenameSimilarityOutOfRange { .. }));
+        assert!(matches!(
+            err,
+            EngineError::RenameSimilarityOutOfRange { .. }
+        ));
     }
 
     #[test]
@@ -1012,9 +986,7 @@ mod tests {
             Box::new(ArchiveBackend::new(archive_path)) as Box<dyn MemBackend>,
         )])
         .unwrap();
-        let report = engine
-            .changes_since("ext", "abc", None)
-            .expect("known mem");
+        let report = engine.changes_since("ext", "abc", None).expect("known mem");
         assert_eq!(report.mem, "ext");
         assert_eq!(report.since, "abc");
         assert_eq!(report.head, "abc");
@@ -1026,7 +998,9 @@ mod tests {
     fn engine_changes_since_unknown_mem_returns_typed_error() {
         let tmp = TempDir::new().unwrap();
         let engine = build_demo_engine(&tmp);
-        let err = engine.changes_since("does-not-exist", "abc", None).unwrap_err();
+        let err = engine
+            .changes_since("does-not-exist", "abc", None)
+            .unwrap_err();
         assert!(matches!(err, EngineError::UnknownMem(_)));
     }
 
@@ -1153,11 +1127,15 @@ mod tests {
         let removed = report
             .changes
             .iter()
-            .find(|e| matches!(e,
-                crate::ops::ChangeEnvelope::Removed { id: rid, .. } if rid == &id))
+            .find(|e| {
+                matches!(e,
+                crate::ops::ChangeEnvelope::Removed { id: rid, .. } if rid == &id)
+            })
             .expect("removed envelope for lonely-three");
         match removed {
-            crate::ops::ChangeEnvelope::Removed { title, entity_type, .. } => {
+            crate::ops::ChangeEnvelope::Removed {
+                title, entity_type, ..
+            } => {
                 assert!(title.is_none());
                 assert!(entity_type.is_none());
             }
@@ -1251,10 +1229,7 @@ mod tests {
         fn append_provenance(&self, _: &Provenance) -> Result<(), BackendError> {
             Ok(())
         }
-        fn read_provenance(
-            &self,
-            _: Option<&str>,
-        ) -> Result<Vec<Provenance>, BackendError> {
+        fn read_provenance(&self, _: Option<&str>) -> Result<Vec<Provenance>, BackendError> {
             Ok(Vec::new())
         }
         fn current_head(&self) -> Result<Option<String>, BackendError> {
@@ -1294,10 +1269,7 @@ mod tests {
             fn append_provenance(&self, r: &Provenance) -> Result<(), BackendError> {
                 self.0.append_provenance(r)
             }
-            fn read_provenance(
-                &self,
-                c: Option<&str>,
-            ) -> Result<Vec<Provenance>, BackendError> {
+            fn read_provenance(&self, c: Option<&str>) -> Result<Vec<Provenance>, BackendError> {
                 self.0.read_provenance(c)
             }
             fn current_head(&self) -> Result<Option<String>, BackendError> {
@@ -1382,10 +1354,7 @@ mod tests {
             fn append_provenance(&self, r: &Provenance) -> Result<(), BackendError> {
                 self.0.append_provenance(r)
             }
-            fn read_provenance(
-                &self,
-                c: Option<&str>,
-            ) -> Result<Vec<Provenance>, BackendError> {
+            fn read_provenance(&self, c: Option<&str>) -> Result<Vec<Provenance>, BackendError> {
                 self.0.read_provenance(c)
             }
             fn current_head(&self) -> Result<Option<String>, BackendError> {
@@ -1464,10 +1433,7 @@ mod tests {
             fn append_provenance(&self, r: &Provenance) -> Result<(), BackendError> {
                 self.0.append_provenance(r)
             }
-            fn read_provenance(
-                &self,
-                c: Option<&str>,
-            ) -> Result<Vec<Provenance>, BackendError> {
+            fn read_provenance(&self, c: Option<&str>) -> Result<Vec<Provenance>, BackendError> {
                 self.0.read_provenance(c)
             }
             fn current_head(&self) -> Result<Option<String>, BackendError> {
@@ -1540,10 +1506,7 @@ mod tests {
             fn append_provenance(&self, r: &Provenance) -> Result<(), BackendError> {
                 self.0.append_provenance(r)
             }
-            fn read_provenance(
-                &self,
-                c: Option<&str>,
-            ) -> Result<Vec<Provenance>, BackendError> {
+            fn read_provenance(&self, c: Option<&str>) -> Result<Vec<Provenance>, BackendError> {
                 self.0.read_provenance(c)
             }
             fn current_head(&self) -> Result<Option<String>, BackendError> {

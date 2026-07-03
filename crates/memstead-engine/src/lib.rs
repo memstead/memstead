@@ -31,8 +31,8 @@
 
 pub mod error;
 pub mod health;
-pub mod overview;
 pub mod mem_management;
+pub mod overview;
 pub mod workspace_config_edit;
 
 pub use error::{FullEngineError, RecoveryAction};

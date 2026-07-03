@@ -95,16 +95,12 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         #[cfg(feature = "mem-repo")]
         Command::Mem { action } => match action {
             commands::mem::MemAction::Init(args) => commands::mem::run(&ctx, args),
-            commands::mem::MemAction::Unregister(args) => {
-                commands::mem::run_unregister(&ctx, args)
-            }
+            commands::mem::MemAction::Unregister(args) => commands::mem::run_unregister(&ctx, args),
             commands::mem::MemAction::Delete(args) => commands::mem::run_delete(&ctx, args),
             commands::mem::MemAction::SetVersion(args) => {
                 commands::mem::run_set_version(&ctx, args)
             }
-            commands::mem::MemAction::SetSchema(args) => {
-                commands::mem::run_set_schema(&ctx, args)
-            }
+            commands::mem::MemAction::SetSchema(args) => commands::mem::run_set_schema(&ctx, args),
             commands::mem::MemAction::SetDescription(args) => {
                 commands::mem::run_set_description(&ctx, args)
             }

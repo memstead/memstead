@@ -229,7 +229,10 @@ mod closest_match_tests {
         // A rel-type token sharing nothing with the vocabulary (distance
         // well past floor) is suppressed too.
         assert_eq!(
-            closest_match("TOTALLY_UNRELATED", ["MOTIVATES", "REFERENCES", "PART_OF"].into_iter()),
+            closest_match(
+                "TOTALLY_UNRELATED",
+                ["MOTIVATES", "REFERENCES", "PART_OF"].into_iter()
+            ),
             None,
             "a far rel-type token must not get a suggestion",
         );

@@ -88,8 +88,8 @@ pub fn collect_inputs(udl_source: &str, wasm_methods: Vec<String>) -> Inputs {
 }
 
 pub fn render(operations_toml: &str, inputs: &Inputs) -> Result<String> {
-    let parsed: Operations = toml::from_str(operations_toml)
-        .context("parsing xtask/operations.toml")?;
+    let parsed: Operations =
+        toml::from_str(operations_toml).context("parsing xtask/operations.toml")?;
     Ok(render_parsed(&parsed, inputs))
 }
 
@@ -105,18 +105,12 @@ fn render_parsed(ops: &Operations, inputs: &Inputs) -> String {
          own publication layer and not in this matrix.\n\n",
     );
 
-    let mcp_lean_set: BTreeSet<&str> =
-        inputs.mcp_lean.iter().map(String::as_str).collect();
-    let mcp_pro_set: BTreeSet<&str> =
-        inputs.mcp_pro.iter().map(String::as_str).collect();
-    let cli_lean_set: BTreeSet<&str> =
-        inputs.cli_lean.iter().map(String::as_str).collect();
-    let cli_pro_set: BTreeSet<&str> =
-        inputs.cli_pro.iter().map(String::as_str).collect();
-    let uniffi_set: BTreeSet<&str> =
-        inputs.uniffi_methods.iter().map(String::as_str).collect();
-    let wasm_set: BTreeSet<&str> =
-        inputs.wasm_methods.iter().map(String::as_str).collect();
+    let mcp_lean_set: BTreeSet<&str> = inputs.mcp_lean.iter().map(String::as_str).collect();
+    let mcp_pro_set: BTreeSet<&str> = inputs.mcp_pro.iter().map(String::as_str).collect();
+    let cli_lean_set: BTreeSet<&str> = inputs.cli_lean.iter().map(String::as_str).collect();
+    let cli_pro_set: BTreeSet<&str> = inputs.cli_pro.iter().map(String::as_str).collect();
+    let uniffi_set: BTreeSet<&str> = inputs.uniffi_methods.iter().map(String::as_str).collect();
+    let wasm_set: BTreeSet<&str> = inputs.wasm_methods.iter().map(String::as_str).collect();
 
     out.push_str("## Matrix\n\n");
     out.push_str("| Operation | MCP | CLI | UniFFI | WASM |\n");

@@ -70,8 +70,13 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     };
 
     let chunked = match args.token_budget {
-        Some(budget) => apply_chunking(&output, budget, args.chunk, &[("_hash", &entity.content_hash)])
-            .map_err(|e| CliError::new(ExitKind::Generic, "CHUNK_OUT_OF_RANGE", e))?,
+        Some(budget) => apply_chunking(
+            &output,
+            budget,
+            args.chunk,
+            &[("_hash", &entity.content_hash)],
+        )
+        .map_err(|e| CliError::new(ExitKind::Generic, "CHUNK_OUT_OF_RANGE", e))?,
         None => output.to_string(),
     };
 
@@ -130,9 +135,7 @@ fn render_with_optional_relations(
         let incoming = store.incoming(id).to_vec();
         let rel_json = render::render_relations_json(id.as_ref(), &outgoing, &incoming);
         md.push_str("\n## Relations (JSON)\n\n```json\n");
-        md.push_str(
-            &serde_json::to_string_pretty(&rel_json).unwrap_or_else(|_| "{}".to_string()),
-        );
+        md.push_str(&serde_json::to_string_pretty(&rel_json).unwrap_or_else(|_| "{}".to_string()));
         md.push_str("\n```\n");
     }
     md

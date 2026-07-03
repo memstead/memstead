@@ -62,15 +62,13 @@ impl EntitySource {
     }
 }
 
-fn read_directory(
-    root: &Path,
-) -> Result<(Vec<SourceEntry>, Vec<SourceReadError>), LoadError> {
+fn read_directory(root: &Path) -> Result<(Vec<SourceEntry>, Vec<SourceReadError>), LoadError> {
     if !root.exists() {
         return Err(LoadError::DirNotFound(root.display().to_string()));
     }
 
     let mut files = Vec::new();
-    find_markdown_files(root, root, &mut files)?;
+    find_markdown_files(root, &mut files)?;
     files.sort();
 
     let mut entries = Vec::with_capacity(files.len());
@@ -214,11 +212,7 @@ fn read_zip_archive(
 ///
 /// All other directories (including unrelated dot-prefixed dirs like
 /// `.obsidian/`, `.idea/`) are walked.
-fn find_markdown_files(
-    root: &Path,
-    dir: &Path,
-    files: &mut Vec<PathBuf>,
-) -> Result<(), LoadError> {
+fn find_markdown_files(dir: &Path, files: &mut Vec<PathBuf>) -> Result<(), LoadError> {
     let entries = std::fs::read_dir(dir)?;
 
     for entry in entries {
@@ -231,7 +225,7 @@ fn find_markdown_files(
             if name.as_ref() == ".git" || name.as_ref() == crate::mem::MEM_META_DIR {
                 continue;
             }
-            find_markdown_files(root, &path, files)?;
+            find_markdown_files(&path, files)?;
         } else if name.ends_with(".md") {
             files.push(path);
         }
@@ -255,8 +249,8 @@ mod tests {
         let (entries, errors) = EntitySource::Directory {
             root: dir.path().to_path_buf(),
         }
-            .read_all()
-            .unwrap();
+        .read_all()
+        .unwrap();
         assert!(errors.is_empty());
         let paths: Vec<_> = entries.iter().map(|e| e.relative_path.as_str()).collect();
         assert_eq!(paths, vec!["a.md", "b.md"]);
@@ -279,8 +273,8 @@ mod tests {
         let (entries, _) = EntitySource::Directory {
             root: dir.path().to_path_buf(),
         }
-            .read_all()
-            .unwrap();
+        .read_all()
+        .unwrap();
         let paths: Vec<_> = entries.iter().map(|e| e.relative_path.as_str()).collect();
         assert!(paths.contains(&"keep.md"), "keep.md must load: {paths:?}");
         assert!(

@@ -90,9 +90,21 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
 /// entries — the same three numbers the markdown header and the JSON
 /// envelope both surface.
 fn recovery_counts(report: &memstead_base::ops::ParseRecoveryReport) -> (usize, usize, usize) {
-    let removed = report.entries.iter().filter(|e| e.outcome == "removed").count();
-    let skipped = report.entries.iter().filter(|e| e.outcome == "skipped").count();
-    let failed = report.entries.iter().filter(|e| e.outcome == "failed").count();
+    let removed = report
+        .entries
+        .iter()
+        .filter(|e| e.outcome == "removed")
+        .count();
+    let skipped = report
+        .entries
+        .iter()
+        .filter(|e| e.outcome == "skipped")
+        .count();
+    let failed = report
+        .entries
+        .iter()
+        .filter(|e| e.outcome == "failed")
+        .count();
     (removed, skipped, failed)
 }
 
@@ -103,9 +115,7 @@ fn recovery_counts(report: &memstead_base::ops::ParseRecoveryReport) -> (usize, 
 /// command (the raw report serialises to `{}` when clean because both
 /// its fields skip-serialise when empty). Mirrors the markdown channel's
 /// counter summary. `commit_sha` stays omitted when no recovery wrote.
-fn recovery_json_envelope(
-    report: &memstead_base::ops::ParseRecoveryReport,
-) -> serde_json::Value {
+fn recovery_json_envelope(report: &memstead_base::ops::ParseRecoveryReport) -> serde_json::Value {
     let (removed, skipped, failed) = recovery_counts(report);
     let mut obj = serde_json::json!({
         "removed": removed,

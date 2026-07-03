@@ -163,11 +163,7 @@ impl crate::backend::MemBackend for ArchiveBackend {
         Err(BackendError::Sealed)
     }
 
-    fn commit(
-        &self,
-        _message: &str,
-        _ctx: &CommitContext<'_>,
-    ) -> Result<CommitId, BackendError> {
+    fn commit(&self, _message: &str, _ctx: &CommitContext<'_>) -> Result<CommitId, BackendError> {
         Err(BackendError::Sealed)
     }
 
@@ -175,10 +171,7 @@ impl crate::backend::MemBackend for ArchiveBackend {
         Err(BackendError::Sealed)
     }
 
-    fn read_provenance(
-        &self,
-        _cursor: Option<&str>,
-    ) -> Result<Vec<Provenance>, BackendError> {
+    fn read_provenance(&self, _cursor: Option<&str>) -> Result<Vec<Provenance>, BackendError> {
         // Archives are history-free at the engine seam.
         Ok(Vec::new())
     }
@@ -385,7 +378,10 @@ mod tests {
         let archive = build_archive(
             tmp.path(),
             "foreign",
-            &[("a.md", b"# a"), (".other/config.json", b"{\"foreign\":true}")],
+            &[
+                ("a.md", b"# a"),
+                (".other/config.json", b"{\"foreign\":true}"),
+            ],
         );
         let backend = ArchiveBackend::new(archive);
         assert_eq!(
@@ -478,7 +474,12 @@ mod tests {
         ));
         assert!(backend.read_provenance(None).unwrap().is_empty());
         // Cursor parameter is accepted but ignored — same empty result.
-        assert!(backend.read_provenance(Some("anything")).unwrap().is_empty());
+        assert!(
+            backend
+                .read_provenance(Some("anything"))
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]
@@ -530,15 +531,13 @@ mod tests {
 
     #[test]
     fn from_bytes_writes_return_sealed() {
-        let backend = ArchiveBackend::from_bytes(build_archive(
-            TempDir::new().unwrap().path(),
-            "pkg",
-            &[("a.md", b"# a")],
-        )
-        .as_os_str()
-        .to_string_lossy()
-        .as_bytes()
-        .to_vec());
+        let backend = ArchiveBackend::from_bytes(
+            build_archive(TempDir::new().unwrap().path(), "pkg", &[("a.md", b"# a")])
+                .as_os_str()
+                .to_string_lossy()
+                .as_bytes()
+                .to_vec(),
+        );
         // Even with bogus bytes, the write methods short-circuit on
         // Sealed before parsing the archive — covers the symmetry
         // contract that byte-backed archives are also read-only.

@@ -31,10 +31,7 @@ impl CrossLinkValue {
     /// Parse a TOML value into a `CrossLinkValue`, rejecting mixed lists
     /// containing `"*"` and any non-string-list shape. Used by both
     /// `[cross_mem_links]` and `[[mem_management.create]].default_cross_links`.
-    pub fn parse_toml(
-        location: &str,
-        value: &toml::Value,
-    ) -> Result<Self, ConfigError> {
+    pub fn parse_toml(location: &str, value: &toml::Value) -> Result<Self, ConfigError> {
         match value {
             toml::Value::String(s) if s == "*" => Ok(Self::Wildcard),
             toml::Value::String(other) => Err(ConfigError::Other(format!(

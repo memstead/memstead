@@ -122,7 +122,10 @@ mod tests {
             None => {}
             Some(found) => {
                 let canon_found = found.canonicalize().unwrap_or(found);
-                let canon_tmp = tmp.path().canonicalize().unwrap_or(tmp.path().to_path_buf());
+                let canon_tmp = tmp
+                    .path()
+                    .canonicalize()
+                    .unwrap_or(tmp.path().to_path_buf());
                 assert!(
                     !canon_found.starts_with(&canon_tmp),
                     "test environment leaked a `.git` under TempDir: {}",
@@ -165,7 +168,10 @@ mod tests {
                     canon_found, canon_workspace,
                     "walker must skip the workspace's own `.git/`"
                 );
-                let canon_tmp = tmp.path().canonicalize().unwrap_or(tmp.path().to_path_buf());
+                let canon_tmp = tmp
+                    .path()
+                    .canonicalize()
+                    .unwrap_or(tmp.path().to_path_buf());
                 assert!(
                     !canon_found.starts_with(&canon_tmp),
                     "match must come from outside the TempDir"

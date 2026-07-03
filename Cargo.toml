@@ -17,12 +17,23 @@ members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
+# Verified floor: 1.90 fails on `str::floor_char_boundary` (stabilised in
+# 1.91); 1.91 checks the full workspace cleanly in both flavours. Dependency
+# MSRVs (zip 8, time 0.3.47, darling 0.23) already require >= 1.88.
+rust-version = "1.91"
 license = "MIT OR Apache-2.0"
 # Required by cargo-dist for the GitHub Releases hosting backend.
 # Inherited by every crate via `repository.workspace = true`; the
 # `[publish = false]` registry crates inherit the same value harmlessly.
 repository = "https://github.com/memstead/memstead"
 homepage = "https://memstead.io"
+
+[workspace.lints.clippy]
+# `result_large_err` flags fallible functions returning the engine's large
+# error enums by value. The proper fix is a broad error-boxing refactor across
+# those enums, tracked as a follow-up; until then one workspace-level allow
+# beats scattering per-site allows across every fallible function.
+result_large_err = "allow"
 
 [workspace.dependencies]
 # Internal crates carry both `path` (local resolution) and `version`

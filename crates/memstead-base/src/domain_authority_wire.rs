@@ -65,12 +65,30 @@ mod tests {
     #[test]
     fn payload_is_deterministic_and_binds_every_field() {
         let base = signing_payload("deadbeef", "acme.com:pay", "mem", "1.0.0", 1000);
-        assert_eq!(base, signing_payload("deadbeef", "acme.com:pay", "mem", "1.0.0", 1000));
-        assert_ne!(base, signing_payload("feedface", "acme.com:pay", "mem", "1.0.0", 1000));
-        assert_ne!(base, signing_payload("deadbeef", "other.com:pay", "mem", "1.0.0", 1000));
-        assert_ne!(base, signing_payload("deadbeef", "acme.com:pay", "other", "1.0.0", 1000));
-        assert_ne!(base, signing_payload("deadbeef", "acme.com:pay", "mem", "2.0.0", 1000));
-        assert_ne!(base, signing_payload("deadbeef", "acme.com:pay", "mem", "1.0.0", 1001));
+        assert_eq!(
+            base,
+            signing_payload("deadbeef", "acme.com:pay", "mem", "1.0.0", 1000)
+        );
+        assert_ne!(
+            base,
+            signing_payload("feedface", "acme.com:pay", "mem", "1.0.0", 1000)
+        );
+        assert_ne!(
+            base,
+            signing_payload("deadbeef", "other.com:pay", "mem", "1.0.0", 1000)
+        );
+        assert_ne!(
+            base,
+            signing_payload("deadbeef", "acme.com:pay", "other", "1.0.0", 1000)
+        );
+        assert_ne!(
+            base,
+            signing_payload("deadbeef", "acme.com:pay", "mem", "2.0.0", 1000)
+        );
+        assert_ne!(
+            base,
+            signing_payload("deadbeef", "acme.com:pay", "mem", "1.0.0", 1001)
+        );
     }
 
     /// Pin the exact wire bytes. If this vector ever changes, every already-

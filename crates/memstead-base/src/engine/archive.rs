@@ -93,8 +93,9 @@ impl Engine {
             ..
         } = &entries;
 
-        let published: memstead_schema::PublishedMemConfig = serde_json::from_slice(config_bytes)
-            .map_err(|e| FromArchiveBytesError::InvalidConfig(e.to_string()))?;
+        let published: memstead_schema::PublishedMemConfig =
+            serde_json::from_slice(config_bytes)
+                .map_err(|e| FromArchiveBytesError::InvalidConfig(e.to_string()))?;
 
         let extra_schemas = load_embedded_schemas(schema_files)?;
 
@@ -133,10 +134,7 @@ impl Engine {
     /// loaded config is missing `version`. The git-branch byte-export
     /// path lifts in a follow-up; today it surfaces as
     /// [`EngineError::Backend`] wrapping the unmounted-hook message.
-    pub fn export_mem_to_bytes(
-        &self,
-        mem_name: &str,
-    ) -> Result<Vec<u8>, EngineError> {
+    pub fn export_mem_to_bytes(&self, mem_name: &str) -> Result<Vec<u8>, EngineError> {
         let mount = self
             .mounts
             .iter()
@@ -158,21 +156,19 @@ impl Engine {
         let fixed_schemas_dir = workspace_root.map(|r| r.join(".memstead").join("schemas"));
         let workspace_schemas_dir = fixed_schemas_dir.as_deref();
         match &mount.mount.storage {
-            MountStorage::Folder { path } => {
-                crate::ops::export::export_mem_to_bytes(
-                    path,
-                    config,
-                    workspace_root,
-                    workspace_schemas_dir,
-                    mem_name,
-                )
-                .map(|out| out.bytes)
-                .map_err(|e| {
-                    EngineError::Backend(crate::backend::BackendError::Other(format!(
-                        "export_mem_to_bytes: {e}"
-                    )))
-                })
-            }
+            MountStorage::Folder { path } => crate::ops::export::export_mem_to_bytes(
+                path,
+                config,
+                workspace_root,
+                workspace_schemas_dir,
+                mem_name,
+            )
+            .map(|out| out.bytes)
+            .map_err(|e| {
+                EngineError::Backend(crate::backend::BackendError::Other(format!(
+                    "export_mem_to_bytes: {e}"
+                )))
+            }),
             MountStorage::Archive { .. } => {
                 Err(EngineError::Backend(crate::backend::BackendError::Sealed))
             }
@@ -216,9 +212,7 @@ impl Engine {
                 let mut md_entries: Vec<(std::path::PathBuf, Vec<u8>)> =
                     Vec::with_capacity(rels.len());
                 for rel in rels {
-                    if let Some(bytes) =
-                        backend.read_entity(&rel).map_err(EngineError::Backend)?
-                    {
+                    if let Some(bytes) = backend.read_entity(&rel).map_err(EngineError::Backend)? {
                         md_entries.push((rel, bytes));
                     }
                 }
@@ -370,7 +364,12 @@ mod tests {
             )
             .unwrap();
         engine
-            .create_entity(empty_create_args("specs", "Beta"), actor, Some(&client), None)
+            .create_entity(
+                empty_create_args("specs", "Beta"),
+                actor,
+                Some(&client),
+                None,
+            )
             .unwrap();
 
         let bytes = engine.export_mem_to_bytes("specs").unwrap();
@@ -384,8 +383,8 @@ mod tests {
         // The publish/install store path persists the *canonical* (re-packed)
         // bytes, not the raw upload — so normalize must preserve the
         // provenance member or it would be dropped before serving.
-        let validated = crate::validator::validate_and_normalize_archive(&bytes)
-            .expect("archive re-validates");
+        let validated =
+            crate::validator::validate_and_normalize_archive(&bytes).expect("archive re-validates");
         let canonical_entries =
             extract_entries(&validated.canonical_bytes, &ValidatorLimits::DEFAULT).unwrap();
         assert!(
@@ -465,9 +464,12 @@ mod tests {
             "provenance payload ({} B) is a small fraction of the budget",
             prov.len()
         );
-        let parsed =
-            memstead_schema::ArchiveProvenance::from_archive_bytes(&prov).unwrap();
-        assert_eq!(parsed.entities.len(), 60, "every noted entity has provenance");
+        let parsed = memstead_schema::ArchiveProvenance::from_archive_bytes(&prov).unwrap();
+        assert_eq!(
+            parsed.entities.len(),
+            60,
+            "every noted entity has provenance"
+        );
     }
 
     /// A mem slice carrying a
@@ -540,7 +542,10 @@ E
         let bytes = std::fs::read(&out).unwrap();
         let err = crate::validator::validate_and_normalize_archive(&bytes).unwrap_err();
         assert!(
-            matches!(err, crate::validator::ValidationError::CrossMemRelationship { .. }),
+            matches!(
+                err,
+                crate::validator::ValidationError::CrossMemRelationship { .. }
+            ),
             "install-side strict validation must refuse the same edge: {err:?}",
         );
     }
@@ -600,15 +605,18 @@ E
         let archive_engine = Engine::from_mounts(vec![(
             Mount {
                 mem: "ext".to_string(),
-                schema: Some(memstead_schema::SchemaRef::new("default", semver::Version::new(1, 0, 0))),
+                schema: Some(memstead_schema::SchemaRef::new(
+                    "default",
+                    semver::Version::new(1, 0, 0),
+                )),
                 storage: MountStorage::Archive {
                     path: archive_path.clone(),
                 },
                 capability: MountCapability::ReadOnly,
                 lifecycle: MountLifecycle::Lazy,
                 cross_linkable: false,
-            migration_target: None,
-        },
+                migration_target: None,
+            },
             Box::new(crate::storage::ArchiveBackend::new(archive_path)) as Box<dyn MemBackend>,
         )])
         .unwrap();
@@ -663,7 +671,12 @@ E
         // typed envelope (no new error categories on the hydrate path).
         let (actor, client) = cli_actor();
         let err = hydrated
-            .create_entity(empty_create_args("specs", "Forbidden"), actor, Some(&client), None)
+            .create_entity(
+                empty_create_args("specs", "Forbidden"),
+                actor,
+                Some(&client),
+                None,
+            )
             .unwrap_err();
         assert!(matches!(err, EngineError::ReadOnlyMount(v) if v == "specs"));
     }
@@ -689,10 +702,20 @@ E
         .unwrap();
         let (actor, client) = cli_actor();
         let src = source
-            .create_entity(empty_create_args("specs", "Source"), actor, Some(&client), None)
+            .create_entity(
+                empty_create_args("specs", "Source"),
+                actor,
+                Some(&client),
+                None,
+            )
             .unwrap();
         let tgt = source
-            .create_entity(empty_create_args("specs", "Target"), actor, Some(&client), None)
+            .create_entity(
+                empty_create_args("specs", "Target"),
+                actor,
+                Some(&client),
+                None,
+            )
             .unwrap();
         source
             .relate_entity(
@@ -855,8 +878,7 @@ E
     #[test]
     fn fixture_sweep_round_trip_multi_entity_no_relations() {
         let tmp = TempDir::new().unwrap();
-        let (engine, _mem) =
-            folder_mem_with_entities(&tmp, &["A One", "A Two", "A Three"]);
+        let (engine, _mem) = folder_mem_with_entities(&tmp, &["A One", "A Two", "A Three"]);
         round_trip(&engine, "specs");
     }
 
@@ -880,8 +902,14 @@ E
 
         let mut sections = indexmap::IndexMap::new();
         sections.insert("identity".to_string(), "A rich body.".to_string());
-        sections.insert("purpose".to_string(), "To exercise the archive round-trip.".to_string());
-        sections.insert("rationale".to_string(), "Because the spec said so.".to_string());
+        sections.insert(
+            "purpose".to_string(),
+            "To exercise the archive round-trip.".to_string(),
+        );
+        sections.insert(
+            "rationale".to_string(),
+            "Because the spec said so.".to_string(),
+        );
 
         let mut metadata: indexmap::IndexMap<String, String> = indexmap::IndexMap::new();
         metadata.insert("level".to_string(), "M0".to_string());
@@ -923,13 +951,28 @@ E
         .unwrap();
         let (actor, client) = cli_actor();
         let src = engine
-            .create_entity(empty_create_args("specs", "Source"), actor, Some(&client), None)
+            .create_entity(
+                empty_create_args("specs", "Source"),
+                actor,
+                Some(&client),
+                None,
+            )
             .unwrap();
         let mid = engine
-            .create_entity(empty_create_args("specs", "Middle"), actor, Some(&client), None)
+            .create_entity(
+                empty_create_args("specs", "Middle"),
+                actor,
+                Some(&client),
+                None,
+            )
             .unwrap();
         let tgt = engine
-            .create_entity(empty_create_args("specs", "Target"), actor, Some(&client), None)
+            .create_entity(
+                empty_create_args("specs", "Target"),
+                actor,
+                Some(&client),
+                None,
+            )
             .unwrap();
         // Two outgoing edges of different rel-types from the same
         // source — the round-trip must preserve both.

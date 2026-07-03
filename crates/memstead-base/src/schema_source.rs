@@ -274,7 +274,8 @@ write_rules: []
             zw.write_all(br#"{"schema":"archsrc@0.1.0"}"#).unwrap();
             zw.start_file(".memstead/schema/schema.yaml", opts).unwrap();
             zw.write_all(TEST_MANIFEST).unwrap();
-            zw.start_file(".memstead/schema/types/doc.yaml", opts).unwrap();
+            zw.start_file(".memstead/schema/types/doc.yaml", opts)
+                .unwrap();
             zw.write_all(TEST_DOC).unwrap();
             zw.finish().unwrap();
         }

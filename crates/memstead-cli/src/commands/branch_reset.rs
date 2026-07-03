@@ -61,11 +61,7 @@ pub fn run(ctx: &CliContext, args: BranchResetArgs) -> anyhow::Result<()> {
         };
         crate::output::print_markdown(&format!(
             "# Branch reset: `{}`\n\n- Branch ref: `{}`\n- Previous: `{}`\n- New: `{}`\n- Discarded commits:\n{}",
-            outcome.mem,
-            outcome.branch_ref,
-            outcome.previous_sha,
-            outcome.new_sha,
-            discarded,
+            outcome.mem, outcome.branch_ref, outcome.previous_sha, outcome.new_sha, discarded,
         ));
     }
     Ok(())

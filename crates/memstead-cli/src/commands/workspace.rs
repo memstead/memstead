@@ -340,7 +340,10 @@ fn allow_create(ctx: &CliContext, args: AllowCreateArgs) -> anyhow::Result<()> {
     let bullets = vec![
         format!("Pattern: `{}`", args.pattern),
         format!("Schemas: {}", render_list_inline(&schemas)),
-        format!("Default cross-links: {}", render_list_inline(&args.cross_link)),
+        format!(
+            "Default cross-links: {}",
+            render_list_inline(&args.cross_link)
+        ),
         position,
     ];
     confirm_block(
@@ -360,8 +363,8 @@ fn allow_create(ctx: &CliContext, args: AllowCreateArgs) -> anyhow::Result<()> {
 
 fn revoke_create(ctx: &CliContext, args: PatternArg) -> anyhow::Result<()> {
     let root = require_workspace_root()?;
-    let warnings = workspace_config_edit::remove_create_rule(&root, &args.pattern)
-        .map_err(lift_edit_error)?;
+    let warnings =
+        workspace_config_edit::remove_create_rule(&root, &args.pattern).map_err(lift_edit_error)?;
     let heading = format!("Workspace revoke-create rule `{}`", args.pattern);
     let bullets = vec![format!("Pattern: `{}`", args.pattern)];
     confirm_block(
@@ -376,8 +379,8 @@ fn revoke_create(ctx: &CliContext, args: PatternArg) -> anyhow::Result<()> {
 
 fn allow_delete(ctx: &CliContext, args: PatternArg) -> anyhow::Result<()> {
     let root = require_workspace_root()?;
-    let warnings = workspace_config_edit::add_delete_rule(&root, &args.pattern)
-        .map_err(lift_edit_error)?;
+    let warnings =
+        workspace_config_edit::add_delete_rule(&root, &args.pattern).map_err(lift_edit_error)?;
     let heading = format!("Workspace allow-delete rule `{}`", args.pattern);
     let bullets = vec![format!("Pattern: `{}`", args.pattern)];
     confirm_block(
@@ -392,8 +395,8 @@ fn allow_delete(ctx: &CliContext, args: PatternArg) -> anyhow::Result<()> {
 
 fn revoke_delete(ctx: &CliContext, args: PatternArg) -> anyhow::Result<()> {
     let root = require_workspace_root()?;
-    let warnings = workspace_config_edit::remove_delete_rule(&root, &args.pattern)
-        .map_err(lift_edit_error)?;
+    let warnings =
+        workspace_config_edit::remove_delete_rule(&root, &args.pattern).map_err(lift_edit_error)?;
     let heading = format!("Workspace revoke-delete rule `{}`", args.pattern);
     let bullets = vec![format!("Pattern: `{}`", args.pattern)];
     confirm_block(
@@ -416,9 +419,8 @@ fn grant_cross_link(ctx: &CliContext, args: CrossLinkArgs) -> anyhow::Result<()>
         engine.mem_names().iter().map(|s| s.to_string()).collect()
     };
     let target = CrossLinkTarget::parse(&args.to);
-    let warnings =
-        workspace_config_edit::grant_cross_link(&root, &args.from, &target, &known_mems)
-            .map_err(lift_edit_error)?;
+    let warnings = workspace_config_edit::grant_cross_link(&root, &args.from, &target, &known_mems)
+        .map_err(lift_edit_error)?;
     let heading = format!("Workspace grant-cross-link `{}` → `{}`", args.from, args.to);
     let bullets = vec![
         format!("From: `{}`", args.from),
@@ -538,7 +540,10 @@ fn show(ctx: &CliContext, _args: ShowArgs) -> anyhow::Result<()> {
     lines.push("## Mem management".to_string());
     lines.push(String::new());
     if settings.mem_create_rules.is_empty() {
-        lines.push("- `[[mem_management.create]]`: (none — no agent-driven mem creation allowed)".to_string());
+        lines.push(
+            "- `[[mem_management.create]]`: (none — no agent-driven mem creation allowed)"
+                .to_string(),
+        );
     } else {
         lines.push("- `[[mem_management.create]]`:".to_string());
         for r in &settings.mem_create_rules {
@@ -589,7 +594,9 @@ fn show(ctx: &CliContext, _args: ShowArgs) -> anyhow::Result<()> {
         let mut keys: Vec<&String> = settings.plugin.keys().collect();
         keys.sort();
         for k in keys {
-            lines.push(format!("- `[plugin.{k}]`: (operator-managed; CLI does not edit)"));
+            lines.push(format!(
+                "- `[plugin.{k}]`: (operator-managed; CLI does not edit)"
+            ));
         }
     }
 
@@ -597,12 +604,17 @@ fn show(ctx: &CliContext, _args: ShowArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn cross_link_value_to_json(v: &memstead_schema::workspace_config::CrossLinkValue) -> serde_json::Value {
+fn cross_link_value_to_json(
+    v: &memstead_schema::workspace_config::CrossLinkValue,
+) -> serde_json::Value {
     use memstead_schema::workspace_config::CrossLinkValue;
     match v {
         CrossLinkValue::Wildcard => serde_json::Value::String("*".to_string()),
         CrossLinkValue::List(names) => serde_json::Value::Array(
-            names.iter().map(|n| serde_json::Value::String(n.clone())).collect(),
+            names
+                .iter()
+                .map(|n| serde_json::Value::String(n.clone()))
+                .collect(),
         ),
     }
 }
@@ -618,8 +630,7 @@ fn render_cross_link_value(v: &memstead_schema::workspace_config::CrossLinkValue
 fn set_mutations(ctx: &CliContext, args: SetMutationsArgs) -> anyhow::Result<()> {
     let root = require_workspace_root()?;
     if let Some(value) = args.require_notes {
-        workspace_config_edit::set_mutation_require_notes(&root, value)
-            .map_err(lift_edit_error)?;
+        workspace_config_edit::set_mutation_require_notes(&root, value).map_err(lift_edit_error)?;
         let heading = "Workspace set-mutations".to_string();
         let bullets = vec![format!("`require_notes`: `{value}`")];
         confirm_block(
@@ -710,7 +721,10 @@ struct SchemaWritingGuidance {
 }
 
 fn dump(_ctx: &CliContext, _args: DumpArgs) -> anyhow::Result<()> {
-    let setup_ctx = CliContext { json: true, quiet: false };
+    let setup_ctx = CliContext {
+        json: true,
+        quiet: false,
+    };
     // Engine init can fail for several reasons; `WORKSPACE_NOT_INITIALISED`
     // is the dominant one for cold-start usage and the only one the test
     // contract pins. Pre-fix the boot error was wrapped under a generic
@@ -766,7 +780,11 @@ fn dump(_ctx: &CliContext, _args: DumpArgs) -> anyhow::Result<()> {
         let schema_pin = config
             .schema
             .as_ref()
-            .map(|p| serde_json::to_value(p).ok().and_then(|v| v.as_str().map(String::from)))
+            .map(|p| {
+                serde_json::to_value(p)
+                    .ok()
+                    .and_then(|v| v.as_str().map(String::from))
+            })
             .unwrap_or(None);
 
         let mut write_guidance = Map::new();
@@ -793,32 +811,31 @@ fn dump(_ctx: &CliContext, _args: DumpArgs) -> anyhow::Result<()> {
         });
 
         // Record the schema body for this pin if we haven't seen it yet.
-        if let Some(pin) = schema_pin {
-            if !schemas.contains_key(&pin) {
-                if let Some(schema) = engine.schema_for(name) {
-                    let dwg = schema
-                        .manifest
-                        .default_writing_guidance
-                        .as_ref()
-                        .map(|d| SchemaWritingGuidance {
-                            avoid: d.avoid.clone(),
-                            goal: d.goal.clone(),
-                        })
-                        .unwrap_or_default();
-                    let body = DumpSchema {
-                        default_writing_guidance: dwg,
-                    };
-                    schemas.insert(pin, serde_json::to_value(body)?);
-                }
-            }
+        if let Some(pin) = schema_pin
+            && !schemas.contains_key(&pin)
+            && let Some(schema) = engine.schema_for(name)
+        {
+            let dwg = schema
+                .manifest
+                .default_writing_guidance
+                .as_ref()
+                .map(|d| SchemaWritingGuidance {
+                    avoid: d.avoid.clone(),
+                    goal: d.goal.clone(),
+                })
+                .unwrap_or_default();
+            let body = DumpSchema {
+                default_writing_guidance: dwg,
+            };
+            schemas.insert(pin, serde_json::to_value(body)?);
         }
     }
 
     mems.sort_by(|a, b| a.name.cmp(&b.name));
 
-    let workspace_root = std::env::current_dir().ok().and_then(|cwd| {
-        crate::setup::find_workspace_root(&cwd).map(|p| p.display().to_string())
-    });
+    let workspace_root = std::env::current_dir()
+        .ok()
+        .and_then(|cwd| crate::setup::find_workspace_root(&cwd).map(|p| p.display().to_string()));
 
     let document = serde_json::json!({
         "format": DUMP_FORMAT,

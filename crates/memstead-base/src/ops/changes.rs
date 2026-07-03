@@ -253,12 +253,11 @@ pub fn folder_changes_since(
         std::collections::BTreeMap::new();
     let mut max_ts: Option<String> = None;
 
-    let cursor_opt: Option<&str> =
-        if since.is_empty() || since == EMPTY_TREE_SHA {
-            None
-        } else {
-            Some(since)
-        };
+    let cursor_opt: Option<&str> = if since.is_empty() || since == EMPTY_TREE_SHA {
+        None
+    } else {
+        Some(since)
+    };
 
     for line in raw.lines() {
         let trimmed = line.trim();
@@ -270,15 +269,15 @@ pub fn folder_changes_since(
             Err(_) => continue,
         };
         let ts_str = value.get("ts").and_then(|v| v.as_str()).unwrap_or("");
-        if let Some(c) = cursor_opt {
-            if ts_str <= c {
-                continue;
-            }
+        if let Some(c) = cursor_opt
+            && ts_str <= c
+        {
+            continue;
         }
         let kind = match value
             .get("kind")
             .and_then(|v| v.as_str())
-            .and_then(ProvenanceKind::from_str)
+            .and_then(ProvenanceKind::parse)
         {
             Some(k) => k,
             None => continue,
@@ -288,7 +287,7 @@ pub fn folder_changes_since(
             _ => continue,
         };
 
-        if max_ts.as_deref().map_or(true, |m| ts_str > m) {
+        if max_ts.as_deref().is_none_or(|m| ts_str > m) {
             max_ts = Some(ts_str.to_string());
         }
 
@@ -473,7 +472,10 @@ impl MemChangedNotice {
             NoticeChanges::Detailed { entries: changes }
         } else if n <= NOTICE_IDS_MAX {
             NoticeChanges::Ids {
-                entries: changes.iter().map(ChangeEnvelope::without_metadata).collect(),
+                entries: changes
+                    .iter()
+                    .map(ChangeEnvelope::without_metadata)
+                    .collect(),
             }
         } else {
             let mut counts: std::collections::BTreeMap<String, usize> =
@@ -512,14 +514,9 @@ impl MemChangedNotice {
     /// error-text warning line is reconstructed from the notice itself.
     pub fn entity_count(&self) -> usize {
         match &self.changes {
-            NoticeChanges::Detailed { entries } | NoticeChanges::Ids { entries } => {
-                entries.len()
-            }
+            NoticeChanges::Detailed { entries } | NoticeChanges::Ids { entries } => entries.len(),
             NoticeChanges::Counts { by_change, .. } => {
-                by_change.added
-                    + by_change.updated
-                    + by_change.removed
-                    + by_change.renamed
+                by_change.added + by_change.updated + by_change.removed + by_change.renamed
             }
         }
     }
@@ -577,7 +574,10 @@ mod tests {
             memstead_ref: Some("aabbccdd".to_string()),
         };
         let json = serde_json::to_string(&r).unwrap();
-        assert!(json.contains("\"notes\":["), "notes must be present: {json}");
+        assert!(
+            json.contains("\"notes\":["),
+            "notes must be present: {json}"
+        );
         assert!(
             json.contains("\"memstead_ref\":\"aabbccdd\""),
             "memstead_ref must be present and carry the SHA: {json}"
@@ -682,7 +682,10 @@ mod tests {
         // and `entity_type` (not the old `change`/`modified`/`type`).
         assert!(json.contains(r#""action":"updated""#));
         assert!(json.contains(r#""entity_type":"spec""#));
-        assert!(!json.contains(r#""change":"#), "no legacy `change` key: {json}");
+        assert!(
+            !json.contains(r#""change":"#),
+            "no legacy `change` key: {json}"
+        );
     }
 
     #[test]
@@ -738,8 +741,14 @@ mod tests {
             other => panic!("expected detailed, got {other:?}"),
         }
         let json = serde_json::to_string(&notice).unwrap();
-        assert!(json.contains(r#""from_id":"specs--old""#), "rename carries from_id: {json}");
-        assert!(json.contains(r#""to_id":"specs--new""#), "rename carries to_id: {json}");
+        assert!(
+            json.contains(r#""from_id":"specs--old""#),
+            "rename carries from_id: {json}"
+        );
+        assert!(
+            json.contains(r#""to_id":"specs--new""#),
+            "rename carries to_id: {json}"
+        );
     }
 
     #[test]
@@ -760,7 +769,10 @@ mod tests {
             changes,
         );
         let json = serde_json::to_string(&notice).unwrap();
-        assert!(json.contains(r#""mode":"ids""#), "expected ids tier: {json}");
+        assert!(
+            json.contains(r#""mode":"ids""#),
+            "expected ids tier: {json}"
+        );
         assert!(json.contains(r#""from_id":"specs--zzz-old""#));
         assert!(json.contains(r#""to_id":"specs--zzz-new""#));
         // Rich detail still dropped in the ids tier.

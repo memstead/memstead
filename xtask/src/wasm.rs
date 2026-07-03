@@ -42,17 +42,14 @@ pub enum EntryKind {
 /// The free `setPanicHook` is included; it's still a JS-visible entry
 /// point even though it doesn't map to an engine operation.
 pub fn method_names_from_file(path: &Path) -> Result<Vec<String>> {
-    let text = std::fs::read_to_string(path)
-        .with_context(|| format!("reading {}", path.display()))?;
-    Ok(parse(&text)
-        .into_iter()
-        .map(|e| e.js_name)
-        .collect())
+    let text =
+        std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+    Ok(parse(&text).into_iter().map(|e| e.js_name).collect())
 }
 
 pub fn render_from_file(path: &Path) -> Result<String> {
-    let text = std::fs::read_to_string(path)
-        .with_context(|| format!("reading {}", path.display()))?;
+    let text =
+        std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
     Ok(render(&parse(&text)))
 }
 
@@ -148,8 +145,8 @@ pub fn parse(src: &str) -> Vec<WasmEntry> {
             // through the signature until we hit the opening brace.
             if target.starts_with("pub fn") {
                 let (signature, end_i) = collect_signature(&lines, j);
-                let rust_name = parse_fn_name(&signature)
-                    .unwrap_or_else(|| "<unknown>".to_string());
+                let rust_name =
+                    parse_fn_name(&signature).unwrap_or_else(|| "<unknown>".to_string());
                 let js_name = js_override
                     .clone()
                     .unwrap_or_else(|| snake_to_camel(&rust_name));
@@ -177,8 +174,8 @@ pub fn parse(src: &str) -> Vec<WasmEntry> {
                 // and prematurely exit `in_engine_impl` when the
                 // body's closing brace appears.
                 if in_engine_impl {
-                    for k in (i + 1)..=end_i {
-                        engine_impl_depth += brace_delta(lines[k]);
+                    for line in &lines[(i + 1)..=end_i] {
+                        engine_impl_depth += brace_delta(line);
                     }
                     if engine_impl_depth <= 0 {
                         in_engine_impl = false;
@@ -252,18 +249,14 @@ fn parse_fn_name(signature: &str) -> Option<String> {
         .chars()
         .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
         .collect();
-    if name.is_empty() {
-        None
-    } else {
-        Some(name)
-    }
+    if name.is_empty() { None } else { Some(name) }
 }
 
 fn parse_js_name(attr: &str) -> Option<String> {
     let key = "js_name";
     let pos = attr.find(key)?;
     let after = &attr[pos + key.len()..];
-    let after = after.trim_start_matches(|c: char| c == ' ' || c == '=');
+    let after = after.trim_start_matches([' ', '=']);
     // The value can be either an identifier (`js_name = setPanicHook`) or
     // a string literal (`js_name = "setPanicHook"`).
     if let Some(stripped) = after.strip_prefix('"') {
@@ -274,11 +267,7 @@ fn parse_js_name(attr: &str) -> Option<String> {
             .chars()
             .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
             .collect();
-        if name.is_empty() {
-            None
-        } else {
-            Some(name)
-        }
+        if name.is_empty() { None } else { Some(name) }
     }
 }
 

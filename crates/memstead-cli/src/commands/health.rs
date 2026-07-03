@@ -4,8 +4,7 @@ use serde_json::json;
 use memstead_base::EntityId;
 use memstead_base::Store;
 use memstead_base::ops::{
-    DanglingLink, HealthSummary, health::HEALTH_INCLUDE_KEYS,
-    health::MissingRequiredOutgoingReport,
+    DanglingLink, HealthSummary, health::HEALTH_INCLUDE_KEYS, health::MissingRequiredOutgoingReport,
 };
 
 use crate::output::{ExitKind, print_json, print_markdown};
@@ -134,7 +133,16 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         let connected: Vec<_> = most_connected_with_titles
             .iter()
             .map(
-                |(id, title, total, incoming, outgoing, typed_total, typed_incoming, typed_outgoing)| {
+                |(
+                    id,
+                    title,
+                    total,
+                    incoming,
+                    outgoing,
+                    typed_total,
+                    typed_incoming,
+                    typed_outgoing,
+                )| {
                     json!({
                         "id": id.to_string(),
                         "title": title,
@@ -191,15 +199,18 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             .collect();
         obj.insert("dangling_links".into(), json!(arr));
     }
-    if include.iter().any(|s| s == "conformance" || s == "integrity") {
+    if include
+        .iter()
+        .any(|s| s == "conformance" || s == "integrity")
+    {
         obj.insert("findings".into(), serde_json::to_value(&findings)?);
     }
-    if include.iter().any(|s| s == "tags") {
-        if let Some((distribution, folded, untagged)) = tag_distribution {
-            obj.insert("tag_distribution".into(), distribution);
-            obj.insert("tag_distribution_folded".into(), folded);
-            obj.insert("untagged_entities".into(), untagged);
-        }
+    if include.iter().any(|s| s == "tags")
+        && let Some((distribution, folded, untagged)) = tag_distribution
+    {
+        obj.insert("tag_distribution".into(), distribution);
+        obj.insert("tag_distribution_folded".into(), folded);
+        obj.insert("untagged_entities".into(), untagged);
     }
 
     // Typed warnings array — agents see `UNKNOWN_INCLUDE_KEY` here in
@@ -239,7 +250,11 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             .iter()
             .map(|(s, n)| format!("{}: {n}", if s.is_empty() { "(unpinned)" } else { s }))
             .collect();
-        lines.push(format!("- Orphans: {} ({})", orphan_ids.len(), by.join(", ")));
+        lines.push(format!(
+            "- Orphans: {} ({})",
+            orphan_ids.len(),
+            by.join(", ")
+        ));
     } else {
         lines.push(format!("- Orphans: {}", orphan_ids.len()));
     }
@@ -311,7 +326,10 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         }
         lines.push(String::new());
     }
-    if let Some(v) = obj.get("missing_required_outgoing").and_then(|v| v.as_array()) {
+    if let Some(v) = obj
+        .get("missing_required_outgoing")
+        .and_then(|v| v.as_array())
+    {
         lines.push("## Missing required outgoing".to_string());
         for item in v {
             let blocks: Vec<String> = item["missing"]
@@ -648,6 +666,28 @@ fn engine_most_connected_filesystem(
         .collect()
 }
 
+/// Translate the strict-violation tally into an exit code. With
+/// `--strict` set and any Tier-2 violations recorded, return a
+/// `CliError(Generic)` so `main` exits 1 after the report has been
+/// written to stdout. When `--strict` is unset, or when no Tier-2
+/// `--include` token was supplied, this is a no-op.
+fn strict_exit(strict: bool, violations: &[(&'static str, usize)]) -> anyhow::Result<()> {
+    if !strict || violations.is_empty() {
+        return Ok(());
+    }
+    let summary = violations
+        .iter()
+        .map(|(code, n)| format!("{code}: {n}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    Err(crate::CliError::new(
+        ExitKind::Generic,
+        "HEALTH_STRICT_VIOLATIONS",
+        format!("strict mode: tier-2 violations present ({summary})"),
+    )
+    .into())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -671,26 +711,4 @@ mod tests {
             );
         }
     }
-}
-
-/// Translate the strict-violation tally into an exit code. With
-/// `--strict` set and any Tier-2 violations recorded, return a
-/// `CliError(Generic)` so `main` exits 1 after the report has been
-/// written to stdout. When `--strict` is unset, or when no Tier-2
-/// `--include` token was supplied, this is a no-op.
-fn strict_exit(strict: bool, violations: &[(&'static str, usize)]) -> anyhow::Result<()> {
-    if !strict || violations.is_empty() {
-        return Ok(());
-    }
-    let summary = violations
-        .iter()
-        .map(|(code, n)| format!("{code}: {n}"))
-        .collect::<Vec<_>>()
-        .join(", ");
-    Err(crate::CliError::new(
-        ExitKind::Generic,
-        "HEALTH_STRICT_VIOLATIONS",
-        format!("strict mode: tier-2 violations present ({summary})"),
-    )
-    .into())
 }

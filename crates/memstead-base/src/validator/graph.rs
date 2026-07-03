@@ -81,9 +81,12 @@ pub fn build_and_check(
     // without blocking the snapshot. Same condition either way, so the
     // two surfaces can't drift.
     if cross_mem_as_error
-        && let Some(pr) = parse_results
-            .iter()
-            .find(|pr| pr.entity.relationships.iter().any(|r| r.target.mem() != mem_name))
+        && let Some(pr) = parse_results.iter().find(|pr| {
+            pr.entity
+                .relationships
+                .iter()
+                .any(|r| r.target.mem() != mem_name)
+        })
     {
         let rel = pr
             .entity
@@ -165,10 +168,7 @@ pub fn resolve_fallback_type(config_types: Option<&[String]>) -> Arc<TypeDefinit
 /// `MemStats` post-validation.
 pub fn tally(store: &Store) -> (usize, usize) {
     let entity_count = store.len();
-    let edge_count: usize = store
-        .all_ids()
-        .map(|id| store.outgoing(id).len())
-        .sum();
+    let edge_count: usize = store.all_ids().map(|id| store.outgoing(id).len()).sum();
     (entity_count, edge_count)
 }
 
@@ -249,13 +249,7 @@ E
 
     #[test]
     fn empty_archive_yields_zero_communities() {
-        let result = build_and_check(
-            vec![],
-            &spec_type(),
-            "v",
-            true,
-        )
-        .unwrap();
+        let result = build_and_check(vec![], &spec_type(), "v", true).unwrap();
         assert_eq!(result.communities.count, 0);
     }
 
@@ -273,14 +267,12 @@ E
             });
             pr
         };
-        let err = build_and_check(vec![cross_mem_pr()], &spec_type(), "v", true)
-            .unwrap_err();
+        let err = build_and_check(vec![cross_mem_pr()], &spec_type(), "v", true).unwrap_err();
         assert!(matches!(err, ValidationError::CrossMemRelationship { .. }));
 
         // Lenient mode: the same cross-mem edge is collected as data
         // (no error), so the export side can warn without blocking.
-        let result =
-            build_and_check(vec![cross_mem_pr()], &spec_type(), "v", false).unwrap();
+        let result = build_and_check(vec![cross_mem_pr()], &spec_type(), "v", false).unwrap();
         assert_eq!(result.dangling_cross_mem_edges.len(), 1);
         let edge = &result.dangling_cross_mem_edges[0];
         assert_eq!(edge.target_id, "other-mem--thing");

@@ -58,8 +58,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 .map_err(CliError::from_engine_op)?;
             let mem_changed = engine.take_mem_changed_notices();
             if ctx.json {
-                let mut body =
-                    serde_json::to_value(&result).unwrap_or(serde_json::Value::Null);
+                let mut body = serde_json::to_value(&result).unwrap_or(serde_json::Value::Null);
                 super::merge_mem_changed_json(&mut body, &mem_changed);
                 print_json(&body)?;
             } else {

@@ -149,26 +149,19 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             };
             // Persist the version bump before exporting — but never
             // under --dry-run, which must leave the workspace untouched.
-            if let Some(ver) = target_version.clone() {
-                if !args.dry_run {
-                    engine
-                        .set_mem_version(
-                            mem_name,
-                            ver,
-                            Some("version bump for registry publish"),
-                        )
-                        .map_err(CliError::from_engine_op)?;
-                }
+            if let Some(ver) = target_version.clone()
+                && !args.dry_run
+            {
+                engine
+                    .set_mem_version(mem_name, ver, Some("version bump for registry publish"))
+                    .map_err(CliError::from_engine_op)?;
             }
-            resolved_version = target_version
-                .as_ref()
-                .map(|v| v.to_string())
-                .or_else(|| {
-                    engine
-                        .mem_config_for(mem_name)
-                        .and_then(|c| c.version.clone())
-                        .map(|v| v.to_string())
-                });
+            resolved_version = target_version.as_ref().map(|v| v.to_string()).or_else(|| {
+                engine
+                    .mem_config_for(mem_name)
+                    .and_then(|c| c.version.clone())
+                    .map(|v| v.to_string())
+            });
             let bytes = engine
                 .export_mem_to_bytes(mem_name)
                 .map_err(CliError::from_engine_op)?;
@@ -205,14 +198,8 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     if let Some(domain) = domain_scope(args.scope.as_deref()) {
         let scope = args.scope.as_deref().expect("domain_scope implies a scope");
         let sig = build_domain_signature(&archive_path, scope, &domain)?;
-        return match registry::publish(
-            &client,
-            &base,
-            &archive_path,
-            None,
-            Some(scope),
-            Some(&sig),
-        ) {
+        return match registry::publish(&client, &base, &archive_path, None, Some(scope), Some(&sig))
+        {
             Ok(resp) => emit_success(ctx, &base, &resp),
             Err(e) => Err(map_publish_error(e).into()),
         };
@@ -275,7 +262,11 @@ fn build_domain_signature(
     use crate::auth::domain_key;
 
     let bytes = std::fs::read(archive_path).map_err(|e| {
-        CliError::new(ExitKind::Generic, "ARCHIVE_READ_FAILED", format!("read archive: {e}"))
+        CliError::new(
+            ExitKind::Generic,
+            "ARCHIVE_READ_FAILED",
+            format!("read archive: {e}"),
+        )
     })?;
     let validated = validate_and_normalize_archive(&bytes).map_err(|e| {
         CliError::new(
@@ -287,14 +278,16 @@ fn build_domain_signature(
     let content_sha256 = {
         let mut h = Sha256::new();
         h.update(&validated.canonical_bytes);
-        h.finalize().iter().map(|b| format!("{b:02x}")).collect::<String>()
+        h.finalize()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>()
     };
     let name = validated.config.name.clone();
     let version = validated.config.version.to_string();
 
-    let signing = domain_key::load(domain).map_err(|e| {
-        CliError::new(ExitKind::NotFound, "DOMAIN_KEY_NOT_FOUND", e.to_string())
-    })?;
+    let signing = domain_key::load(domain)
+        .map_err(|e| CliError::new(ExitKind::NotFound, "DOMAIN_KEY_NOT_FOUND", e.to_string()))?;
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
@@ -337,7 +330,9 @@ fn emit_dry_run(
     version: Option<&str>,
     scope: Option<&str>,
 ) -> anyhow::Result<()> {
-    let size = std::fs::metadata(archive_path).map(|m| m.len()).unwrap_or(0);
+    let size = std::fs::metadata(archive_path)
+        .map(|m| m.len())
+        .unwrap_or(0);
     let mem_label = mem.unwrap_or("(workspace mem)");
     let version_label = version.unwrap_or("(from mem config / archive)");
     if ctx.json {
@@ -374,7 +369,11 @@ fn emit_dry_run(
 /// them in sync.
 fn find_filesystem_workspace_root() -> anyhow::Result<PathBuf> {
     let cwd = std::env::current_dir().map_err(|e| {
-        CliError::new(ExitKind::Generic, crate::INTERNAL_CODE, format!("read cwd: {e}"))
+        CliError::new(
+            ExitKind::Generic,
+            crate::INTERNAL_CODE,
+            format!("read cwd: {e}"),
+        )
     })?;
     let mut current: &Path = &cwd;
     loop {
@@ -429,7 +428,11 @@ fn resolve_workspace_root(workspace: Option<&Path>) -> anyhow::Result<PathBuf> {
 /// guard the caller must hold until the POST completes.
 fn stage_bytes_to_tempfile(bytes: &[u8]) -> anyhow::Result<(PathBuf, Option<NamedTempFile>)> {
     let tempfile = NamedTempFile::new().map_err(|e| {
-        CliError::new(ExitKind::Generic, crate::INTERNAL_CODE, format!("tempfile: {e}"))
+        CliError::new(
+            ExitKind::Generic,
+            crate::INTERNAL_CODE,
+            format!("tempfile: {e}"),
+        )
     })?;
     std::fs::write(tempfile.path(), bytes).map_err(|e| {
         CliError::new(
@@ -503,10 +506,7 @@ fn emit_success(
     // to `current`, so publishing an older version succeeds but does not
     // become what users get by default. Surface that rather than letting
     // the bare "Published vX" imply X is now live.
-    let demoted = resp
-        .current
-        .as_deref()
-        .filter(|cur| *cur != resp.version);
+    let demoted = resp.current.as_deref().filter(|cur| *cur != resp.version);
     if ctx.json {
         print_json(&json!({
             "ok": true,
@@ -594,7 +594,9 @@ fn map_api_error(status: reqwest::StatusCode, envelope: ApiErrorBody) -> CliErro
                 format!("{variant}: {detail}")
             }
         }
-        401 => "unauthorized — set MEMSTEAD_TOKEN, run `memstead login`, or pass --token".to_string(),
+        401 => {
+            "unauthorized — set MEMSTEAD_TOKEN, run `memstead login`, or pass --token".to_string()
+        }
         403 => envelope
             .detail
             .clone()
@@ -668,13 +670,12 @@ mod tests {
     /// echoes a success body. The body is captured so the test can
     /// assert it is a non-empty zip-shaped buffer (zip magic
     /// `PK\x03\x04`).
-    async fn spawn_fixture_publish_registry()
-    -> (
+    async fn spawn_fixture_publish_registry() -> (
         String,
         std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
         tokio::task::JoinHandle<()>,
     ) {
-        use axum::{Router, extract::State, http::StatusCode, routing::post, Json};
+        use axum::{Json, Router, extract::State, http::StatusCode, routing::post};
         use std::sync::{Arc, Mutex};
 
         let captured: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
@@ -718,7 +719,10 @@ mod tests {
         let base_clone = base.clone();
         let captured_clone = captured.clone();
         let result = tokio::task::spawn_blocking(move || {
-            let ctx = CliContext { json: false, quiet: false };
+            let ctx = CliContext {
+                json: false,
+                quiet: false,
+            };
             run(
                 &ctx,
                 Args {
@@ -749,7 +753,10 @@ mod tests {
     fn publish_rejects_when_workspace_override_lacks_config() {
         let tmp = TempDir::new().unwrap();
         // No `.memstead/workspace.toml` under tmp.
-        let ctx = CliContext { json: false, quiet: false };
+        let ctx = CliContext {
+            json: false,
+            quiet: false,
+        };
         let err = run(
             &ctx,
             Args {
@@ -784,7 +791,10 @@ mod tests {
         // --format mem` exercises under test.
         let tmp = TempDir::new().unwrap();
         write_publishable_workspace(&tmp, "demo");
-        let ctx = CliContext { json: false, quiet: false };
+        let ctx = CliContext {
+            json: false,
+            quiet: false,
+        };
         let err = run(
             &ctx,
             Args {
@@ -811,7 +821,10 @@ mod tests {
         // `--version` persists a bump through the workspace engine, so
         // it is meaningless without `--mem` — and must refuse up front
         // (no workspace touched, no network) with an actionable message.
-        let ctx = CliContext { json: false, quiet: false };
+        let ctx = CliContext {
+            json: false,
+            quiet: false,
+        };
         let err = run(
             &ctx,
             Args {
@@ -846,7 +859,10 @@ mod tests {
         let workspace = tmp.path().to_path_buf();
         let base_clone = base.clone();
         let result = tokio::task::spawn_blocking(move || {
-            let ctx = CliContext { json: false, quiet: false };
+            let ctx = CliContext {
+                json: false,
+                quiet: false,
+            };
             run(
                 &ctx,
                 Args {

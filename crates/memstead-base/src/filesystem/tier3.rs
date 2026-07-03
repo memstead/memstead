@@ -38,8 +38,8 @@ use regex::Regex;
 use std::sync::OnceLock;
 
 use crate::entity::EntityId;
-use crate::entity::source::EntitySource;
 use crate::entity::loader::LoadError;
+use crate::entity::source::EntitySource;
 
 /// Parsed Tier 3 reference.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,8 +53,11 @@ impl Tier3Ref {
     /// On-disk path of the cached archive for this dep, given the
     /// workspace root — the `.mem` cache file.
     pub fn cache_path(&self, workspace_root: &Path) -> PathBuf {
-        self.cache_dir(workspace_root)
-            .join(format!("{}.{}", self.name, memstead_schema::ARCHIVE_EXTENSION))
+        self.cache_dir(workspace_root).join(format!(
+            "{}.{}",
+            self.name,
+            memstead_schema::ARCHIVE_EXTENSION
+        ))
     }
 
     fn cache_dir(&self, workspace_root: &Path) -> PathBuf {
@@ -83,11 +86,13 @@ impl Tier3Ref {
         }
 
         let source = EntitySource::ZipArchive(cache_path.clone());
-        let (entries, _) = source.read_all().map_err(|e| Tier3ResolveError::ArchiveRead {
-            cache_path: cache_path.clone(),
-            tier3: self.as_display(),
-            error: e.to_string(),
-        })?;
+        let (entries, _) = source
+            .read_all()
+            .map_err(|e| Tier3ResolveError::ArchiveRead {
+                cache_path: cache_path.clone(),
+                tier3: self.as_display(),
+                error: e.to_string(),
+            })?;
 
         // Match by `relative_path` stem — the archive's entity ids
         // are computed from the relative path via
@@ -129,10 +134,7 @@ pub enum Tier3ResolveError {
          — run `memstead link {{scope}}/{{name}}` to populate it",
         cache_path.display()
     )]
-    CacheMissing {
-        cache_path: PathBuf,
-        tier3: String,
-    },
+    CacheMissing { cache_path: PathBuf, tier3: String },
     /// The cached archive is present but does not contain an entity
     /// with the requested slug. The dep version may be stale (run
     /// `memstead link <scope>/<name>` again to refresh) or the slug may
@@ -141,10 +143,7 @@ pub enum Tier3ResolveError {
         "tier 3 link {tier3} cannot resolve: slug not found in cached archive at {}",
         cache_path.display()
     )]
-    SlugAbsent {
-        cache_path: PathBuf,
-        tier3: String,
-    },
+    SlugAbsent { cache_path: PathBuf, tier3: String },
     /// The cached archive could not be read — corrupt zip,
     /// permission error, or similar. Concrete IO error message is
     /// preserved for debugging.
@@ -244,7 +243,10 @@ mod tests {
     }
 
     fn cache_archive(workspace_root: &Path, scope: &str, name: &str, entries: &[(&str, &str)]) {
-        let dir = workspace_root.join(".memstead").join("memstead-io").join(scope);
+        let dir = workspace_root
+            .join(".memstead")
+            .join("memstead-io")
+            .join(scope);
         std::fs::create_dir_all(&dir).unwrap();
         write_archive(&dir.join(format!("{name}.mem")), entries);
     }

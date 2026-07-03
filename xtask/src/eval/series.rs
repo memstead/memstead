@@ -147,7 +147,11 @@ mod tests {
     fn series_round_trips_to_json() {
         let series = DataSeries {
             subject_mem: "engine".into(),
-            points: vec![SeriesPoint::aggregate("empty".into(), 1, &[result("a", 0.5, 0.5)])],
+            points: vec![SeriesPoint::aggregate(
+                "empty".into(),
+                1,
+                &[result("a", 0.5, 0.5)],
+            )],
             excluded_contaminated: vec![],
             coverage: vec![],
         };
@@ -164,7 +168,11 @@ mod tests {
         let path = dir.path().join("series.json");
         let series = DataSeries {
             subject_mem: "engine".into(),
-            points: vec![SeriesPoint::aggregate("v1".into(), 3, &[result("a", 0.9, 0.4)])],
+            points: vec![SeriesPoint::aggregate(
+                "v1".into(),
+                3,
+                &[result("a", 0.9, 0.4)],
+            )],
             excluded_contaminated: vec![],
             coverage: vec![],
         };

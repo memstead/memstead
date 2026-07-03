@@ -14,11 +14,11 @@ use indexmap::IndexMap;
 use serde::Deserialize;
 
 use memstead_base::CreateEntityArgs;
-use memstead_base::vcs::Actor;
 #[cfg(feature = "mem-repo")]
 use memstead_base::EntityId;
 #[cfg(feature = "mem-repo")]
 use memstead_base::ops::RelateArg;
+use memstead_base::vcs::Actor;
 
 use crate::CliError;
 use crate::output::{ExitKind, print_json, print_markdown};
@@ -192,16 +192,12 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             };
 
             let result = engine
-                .create_entity_with_ctx(
-                    create_args,
-                    &crate::setup::cli_ctx_with_note(note.clone()),
-                )
+                .create_entity_with_ctx(create_args, &crate::setup::cli_ctx_with_note(note.clone()))
                 .map_err(CliError::from_engine_op)?;
             let mem_changed = engine.take_mem_changed_notices();
 
             if ctx.json {
-                let mut body =
-                    serde_json::to_value(&result).unwrap_or(serde_json::Value::Null);
+                let mut body = serde_json::to_value(&result).unwrap_or(serde_json::Value::Null);
                 super::merge_mem_changed_json(&mut body, &mem_changed);
                 print_json(&body)?;
             } else {
@@ -210,12 +206,9 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 } else {
                     let rendered: Vec<String> =
                         result.warnings.iter().map(ToString::to_string).collect();
-                    let warnings_block = format!(
-                        "\n\n> warnings:\n> - {}",
-                        rendered.join("\n> - "),
-                    );
-                    let guidance_block =
-                        super::render_type_guidance_block(&result.type_guidance);
+                    let warnings_block =
+                        format!("\n\n> warnings:\n> - {}", rendered.join("\n> - "),);
+                    let guidance_block = super::render_type_guidance_block(&result.type_guidance);
                     format!("{warnings_block}{guidance_block}")
                 };
                 let incoming_block = if result.incoming.is_empty() {
@@ -229,7 +222,9 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                     let rows: Vec<String> = result
                         .incoming
                         .iter()
-                        .map(|r| format!("- {} --[{}]--> (this) [{}]", r.from, r.rel_type, r.source))
+                        .map(|r| {
+                            format!("- {} --[{}]--> (this) [{}]", r.from, r.rel_type, r.source)
+                        })
                         .collect();
                     format!("\n\n## {}\n\n{}", heading, rows.join("\n"))
                 };
@@ -264,9 +259,10 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 .next()
                 .map(String::from)
                 .unwrap_or_default();
-            if let Some(requested) = payload.mem.as_deref() {
-                if requested != workspace_mem {
-                    return Err(CliError::new(
+            if let Some(requested) = payload.mem.as_deref()
+                && requested != workspace_mem
+            {
+                return Err(CliError::new(
                         ExitKind::NotFound,
                         "UNKNOWN_MEM",
                         format!(
@@ -274,7 +270,6 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                         ),
                     )
                     .into());
-                }
             }
             // `--relation` and `--dry-run` are not yet honoured on the
             // filesystem path — the unified `Engine::create_entity`
@@ -330,12 +325,9 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                     // readable text per variant.
                     let rendered: Vec<String> =
                         outcome.warnings.iter().map(|w| w.to_string()).collect();
-                    let warnings_block = format!(
-                        "\n\n> warnings:\n> - {}",
-                        rendered.join("\n> - "),
-                    );
-                    let guidance_block =
-                        super::render_type_guidance_block(&outcome.type_guidance);
+                    let warnings_block =
+                        format!("\n\n> warnings:\n> - {}", rendered.join("\n> - "),);
+                    let guidance_block = super::render_type_guidance_block(&outcome.type_guidance);
                     format!("{warnings_block}{guidance_block}")
                 };
                 print_markdown(&format!(
@@ -413,15 +405,13 @@ mod tests {
     /// without `note` still deserialises (the field is optional).
     #[test]
     fn create_payload_accepts_optional_note() {
-        let with_note: CreatePayload = serde_json::from_str(
-            r#"{"title":"X","entity_type":"spec","note":"why this landed"}"#,
-        )
-        .expect("payload with note must parse");
+        let with_note: CreatePayload =
+            serde_json::from_str(r#"{"title":"X","entity_type":"spec","note":"why this landed"}"#)
+                .expect("payload with note must parse");
         assert_eq!(with_note.note.as_deref(), Some("why this landed"));
 
-        let without: CreatePayload =
-            serde_json::from_str(r#"{"title":"X","entity_type":"spec"}"#)
-                .expect("note-less payload must still parse");
+        let without: CreatePayload = serde_json::from_str(r#"{"title":"X","entity_type":"spec"}"#)
+            .expect("note-less payload must still parse");
         assert!(without.note.is_none());
     }
 
@@ -431,7 +421,10 @@ mod tests {
     fn cli_note_takes_precedence_over_file_note() {
         let cli = Some("from-flag".to_string());
         let file = Some("from-file".to_string());
-        assert_eq!(cli.clone().or_else(|| file.clone()).as_deref(), Some("from-flag"));
+        assert_eq!(
+            cli.clone().or_else(|| file.clone()).as_deref(),
+            Some("from-flag")
+        );
         assert_eq!(None.or_else(|| file.clone()).as_deref(), Some("from-file"));
     }
 }

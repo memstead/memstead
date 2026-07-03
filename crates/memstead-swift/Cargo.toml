@@ -2,6 +2,7 @@
 name = "memstead-swift"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
@@ -53,3 +54,6 @@ git-object-storage = ["memstead-git-branch/git-object-storage"]
 # rooted at a `TempDir` whose `mem-repo/.git/` has been stubbed,
 # satisfying the new fail-fast under the `GitObject` default.
 test-support = ["memstead-git-branch/test-support"]
+
+[lints]
+workspace = true

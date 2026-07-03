@@ -66,7 +66,9 @@ pub enum ComposeOverviewError {
     /// recovery is to call the per-schema reader instead — wording
     /// hint stays surface-specific (see `memstead_schema(name=...)` /
     /// `memstead type ...`).
-    #[error("include key 'schema_types' was removed; call the per-schema reader for full schema bodies")]
+    #[error(
+        "include key 'schema_types' was removed; call the per-schema reader for full schema bodies"
+    )]
     InvalidIncludeKeySchemaTypes,
 
     /// `args.mem` names a mem that isn't writable in this
@@ -236,8 +238,12 @@ pub fn find_schema<'a>(
 
 fn schema_lookup_hint_md(surface: Surface) -> &'static str {
     match surface {
-        Surface::Mcp => "_(call `memstead_schema(name=<ref>)` for the full per-type catalogue, sections, fields, and relationship vocabulary)_\n\n",
-        Surface::Cli => "_(run `memstead type <name>` for the full per-type catalogue, sections, fields, and relationship vocabulary)_\n\n",
+        Surface::Mcp => {
+            "_(call `memstead_schema(name=<ref>)` for the full per-type catalogue, sections, fields, and relationship vocabulary)_\n\n"
+        }
+        Surface::Cli => {
+            "_(run `memstead type <name>` for the full per-type catalogue, sections, fields, and relationship vocabulary)_\n\n"
+        }
     }
 }
 
@@ -396,13 +402,12 @@ pub fn compose_overview(
             if raw == memstead_base::SCHEMA_WILDCARD {
                 continue;
             }
-            if let Ok(parsed) = raw.parse::<memstead_schema::SchemaRef>() {
-                if let Some(schema) = find_schema(engine, &parsed) {
-                    let canon =
-                        format!("{}@{}", schema.manifest.name, schema.manifest.version);
-                    if !schema_refs.contains(&canon) {
-                        schema_refs.push(canon);
-                    }
+            if let Ok(parsed) = raw.parse::<memstead_schema::SchemaRef>()
+                && let Some(schema) = find_schema(engine, &parsed)
+            {
+                let canon = format!("{}@{}", schema.manifest.name, schema.manifest.version);
+                if !schema_refs.contains(&canon) {
+                    schema_refs.push(canon);
                 }
             }
         }
@@ -562,18 +567,16 @@ pub fn compose_overview(
             mem_filter.as_deref(),
         ))
         .unwrap_or(serde_json::Value::Array(Vec::new()));
-    let dangling_links_component =
-        serde_json::to_value(memstead_base::ops::health::collect_dangling_links(
-            engine.store(),
-            mem_filter.as_deref(),
-        ))
-        .unwrap_or(serde_json::Value::Array(Vec::new()));
+    let dangling_links_component = serde_json::to_value(
+        memstead_base::ops::health::collect_dangling_links(engine.store(), mem_filter.as_deref()),
+    )
+    .unwrap_or(serde_json::Value::Array(Vec::new()));
 
     // --- Costs ---
-    let hard_required_cost = estimate_tokens(
-        &serde_json::to_string(&schemas_slim).unwrap_or_default(),
-    ) + estimate_tokens(&serde_json::to_string(&mems_lite).unwrap_or_default())
-        + estimate_tokens(&serde_json::to_string(&communities_lite).unwrap_or_default());
+    let hard_required_cost =
+        estimate_tokens(&serde_json::to_string(&schemas_slim).unwrap_or_default())
+            + estimate_tokens(&serde_json::to_string(&mems_lite).unwrap_or_default())
+            + estimate_tokens(&serde_json::to_string(&communities_lite).unwrap_or_default());
     let overbudget = hard_required_cost > budget;
 
     let mem_distribution_component =
@@ -581,18 +584,16 @@ pub fn compose_overview(
     let community_members_component =
         serde_json::to_value(&communities_full).unwrap_or(serde_json::Value::Array(Vec::new()));
 
-    let mem_distribution_cost = estimate_tokens(
-        &serde_json::to_string(&mem_distribution_component).unwrap_or_default(),
-    )
-    .saturating_sub(estimate_tokens(
-        &serde_json::to_string(&mems_lite).unwrap_or_default(),
-    ));
-    let community_members_cost = estimate_tokens(
-        &serde_json::to_string(&community_members_component).unwrap_or_default(),
-    )
-    .saturating_sub(estimate_tokens(
-        &serde_json::to_string(&communities_lite).unwrap_or_default(),
-    ));
+    let mem_distribution_cost =
+        estimate_tokens(&serde_json::to_string(&mem_distribution_component).unwrap_or_default())
+            .saturating_sub(estimate_tokens(
+                &serde_json::to_string(&mems_lite).unwrap_or_default(),
+            ));
+    let community_members_cost =
+        estimate_tokens(&serde_json::to_string(&community_members_component).unwrap_or_default())
+            .saturating_sub(estimate_tokens(
+                &serde_json::to_string(&communities_lite).unwrap_or_default(),
+            ));
     let bridges_cost =
         estimate_tokens(&serde_json::to_string(&bridges_component).unwrap_or_default());
     let dangling_links_cost =
@@ -600,10 +601,22 @@ pub fn compose_overview(
 
     // --- Greedy fill ---
     let candidates: [(&'static str, usize, serde_json::Value); 4] = [
-        ("mem_distribution", mem_distribution_cost, mem_distribution_component),
-        ("community_members", community_members_cost, community_members_component),
+        (
+            "mem_distribution",
+            mem_distribution_cost,
+            mem_distribution_component,
+        ),
+        (
+            "community_members",
+            community_members_cost,
+            community_members_component,
+        ),
         ("community_bridges", bridges_cost, bridges_component),
-        ("dangling_links", dangling_links_cost, dangling_links_component),
+        (
+            "dangling_links",
+            dangling_links_cost,
+            dangling_links_component,
+        ),
     ];
 
     let mut emitted: BTreeMap<&'static str, serde_json::Value> = Default::default();
@@ -695,7 +708,9 @@ pub fn compose_overview(
                 memstead_schema::workspace_config::CrossLinkValue::Wildcard => {
                     "any mem".to_string()
                 }
-                memstead_schema::workspace_config::CrossLinkValue::List(targets) if targets.is_empty() => {
+                memstead_schema::workspace_config::CrossLinkValue::List(targets)
+                    if targets.is_empty() =>
+                {
                     "none (locked down)".to_string()
                 }
                 memstead_schema::workspace_config::CrossLinkValue::List(targets) => {
@@ -717,10 +732,9 @@ pub fn compose_overview(
             } else {
                 match raw.parse::<memstead_schema::SchemaRef>() {
                     Ok(parsed) => match find_schema(engine, &parsed) {
-                        Some(schema) => format!(
-                            "{}@{}",
-                            schema.manifest.name, schema.manifest.version
-                        ),
+                        Some(schema) => {
+                            format!("{}@{}", schema.manifest.name, schema.manifest.version)
+                        }
                         None => raw.clone(),
                     },
                     Err(_) => format!("{raw} (invalid)"),
@@ -756,7 +770,10 @@ pub fn compose_overview(
         }
     }
     let mut seen: HashSet<String> = HashSet::new();
-    for pat in create_pattern_order.iter().chain(delete_pattern_order.iter()) {
+    for pat in create_pattern_order
+        .iter()
+        .chain(delete_pattern_order.iter())
+    {
         if !seen.insert(pat.clone()) {
             continue;
         }
@@ -789,54 +806,55 @@ pub fn compose_overview(
         writable_names.is_empty() && lifecycle_entries.is_empty() && !args.operator_mode;
 
     if !suppress_empty_lifecycle {
-    md.push_str("## Lifecycle Namespaces\n\n");
-    if args.operator_mode {
-        md.push_str(&format!(
+        md.push_str("## Lifecycle Namespaces\n\n");
+        if args.operator_mode {
+            md.push_str(&format!(
             "_(this server is booted in `--operator-mode`: `{create_tool}` and `{delete_tool}` bypass the `[[mem_management.create]]` / `[[mem_management.delete]]` allowlists and the `MEM_REFERENCED_BY_POLICY` safeguard for the lifetime of this process)_\n\n",
         ));
-    }
-    if lifecycle_entries.is_empty() {
-        if args.operator_mode {
-            md.push_str("_(no `[[mem_management.create]]` / `[[mem_management.delete]]` rules — agent-mode would reject every candidate, but operator-mode admits them)_\n\n");
-        } else {
-            md.push_str(&format!(
+        }
+        if lifecycle_entries.is_empty() {
+            if args.operator_mode {
+                md.push_str("_(no `[[mem_management.create]]` / `[[mem_management.delete]]` rules — agent-mode would reject every candidate, but operator-mode admits them)_\n\n");
+            } else {
+                md.push_str(&format!(
                 "_(no `[[mem_management.create]]` / `[[mem_management.delete]]` rules — `{create_tool}` and `{delete_tool}` reject every candidate)_\n\n",
             ));
-        }
-    } else {
-        md.push_str(
+            }
+        } else {
+            md.push_str(
             "_(matching is first-match-wins over the composed lifecycle candidate; gitignore semantics — `*` does not cross `/`, `**` matches zero-or-more segments)_\n\n",
         );
-        for entry in &lifecycle_entries {
-            let pat = entry["pattern"].as_str().unwrap_or("?");
-            let actions = entry["actions"]
-                .as_array()
-                .map(|a| {
-                    a.iter()
-                        .filter_map(|v| v.as_str().map(String::from))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                })
-                .unwrap_or_default();
-            md.push_str(&format!("### `{pat}`\n\n"));
-            md.push_str(&format!("- **Actions:** {actions}\n"));
-            if let Some(schemas) = entry.get("schemas").and_then(|v| v.as_array()) {
-                let names: Vec<String> = schemas
-                    .iter()
-                    .filter_map(|x| x.as_str().map(String::from))
-                    .collect();
-                if !names.is_empty() {
-                    md.push_str(&format!("- **Allowed schemas:** {}\n", names.join(", ")));
+            for entry in &lifecycle_entries {
+                let pat = entry["pattern"].as_str().unwrap_or("?");
+                let actions = entry["actions"]
+                    .as_array()
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|v| v.as_str().map(String::from))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    })
+                    .unwrap_or_default();
+                md.push_str(&format!("### `{pat}`\n\n"));
+                md.push_str(&format!("- **Actions:** {actions}\n"));
+                if let Some(schemas) = entry.get("schemas").and_then(|v| v.as_array()) {
+                    let names: Vec<String> = schemas
+                        .iter()
+                        .filter_map(|x| x.as_str().map(String::from))
+                        .collect();
+                    if !names.is_empty() {
+                        md.push_str(&format!("- **Allowed schemas:** {}\n", names.join(", ")));
+                    }
                 }
-            }
-            if let Some(cross_links) = entry.get("default_cross_links").and_then(|v| v.as_str()) {
-                md.push_str(&format!(
+                if let Some(cross_links) = entry.get("default_cross_links").and_then(|v| v.as_str())
+                {
+                    md.push_str(&format!(
                     "- **Cross-mem links (rule-derived):** a mem matching this pattern may link into: {cross_links}\n"
                 ));
+                }
+                md.push('\n');
             }
-            md.push('\n');
         }
-    }
     } // end if !suppress_empty_lifecycle
 
     // --- Workspace policy ---
@@ -859,10 +877,10 @@ pub fn compose_overview(
         for s in &schemas_out {
             let schema_ref = s["ref"].as_str().unwrap_or("?");
             md.push_str(&format!("### {schema_ref}\n\n"));
-            if let Some(desc) = s["description"].as_str() {
-                if !desc.is_empty() {
-                    md.push_str(&format!("{desc}\n\n"));
-                }
+            if let Some(desc) = s["description"].as_str()
+                && !desc.is_empty()
+            {
+                md.push_str(&format!("{desc}\n\n"));
             }
             let mut reach: Vec<String> = schema_to_patterns
                 .get(schema_ref)

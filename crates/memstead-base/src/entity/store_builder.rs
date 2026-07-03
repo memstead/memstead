@@ -68,7 +68,8 @@ pub fn push_entities_into_store(
         if let Some(ctx) = load_ctx.as_mut()
             && !parse_result.parse_warnings.is_empty()
         {
-            ctx.warnings.extend(parse_result.parse_warnings.iter().cloned());
+            ctx.warnings
+                .extend(parse_result.parse_warnings.iter().cloned());
         }
 
         if load_ctx.is_some() {
@@ -225,12 +226,8 @@ fn scan_nested_prefix_drift(
             // empirically-dominant drift pattern.
             for suffix in ctx.known_suffixes.iter() {
                 if target_mem == suffix {
-                    let candidate_target = resolve_two_pass(
-                        target_id.path(),
-                        current_mem,
-                        ctx.mem_names,
-                        store,
-                    );
+                    let candidate_target =
+                        resolve_two_pass(target_id.path(), current_mem, ctx.mem_names, store);
                     ctx.warnings.push(WarningHint::SuspiciousNestedPrefix {
                         from: from.clone(),
                         resolved_id: target_id.clone(),
@@ -397,11 +394,7 @@ pub fn validate_loaded_relations(
                 ) {
                     CrossMemRelCheck::Ok => {}
                     CrossMemRelCheck::EdgeNotDeclared => {
-                        to_drop.push((
-                            entity.id.clone(),
-                            rel.clone(),
-                            "cross_mem_not_declared",
-                        ));
+                        to_drop.push((entity.id.clone(), rel.clone(), "cross_mem_not_declared"));
                         continue;
                     }
                     CrossMemRelCheck::Invalid(_) => {
@@ -440,11 +433,13 @@ pub fn validate_loaded_relations(
                 .retain(|r| !(r.rel_type == rel.rel_type && r.target == rel.target));
         }
         let recovery = if origin == "writable" {
-            Some(crate::ops::ParsedRelationRecovery::remove_explicit_relation(
-                from_id.clone(),
-                rel.target.clone(),
-                rel.rel_type.clone(),
-            ))
+            Some(
+                crate::ops::ParsedRelationRecovery::remove_explicit_relation(
+                    from_id.clone(),
+                    rel.target.clone(),
+                    rel.rel_type.clone(),
+                ),
+            )
         } else {
             None
         };
@@ -490,11 +485,10 @@ pub fn validate_loaded_relations(
                 } else {
                     schemas.get(target_mem).cloned()
                 };
-                let target_schema_ref: Option<SchemaRef> =
-                    target_schema.as_ref().map(|s| {
-                        let (name, version) = s.id();
-                        SchemaRef::new(name, version)
-                    });
+                let target_schema_ref: Option<SchemaRef> = target_schema.as_ref().map(|s| {
+                    let (name, version) = s.id();
+                    SchemaRef::new(name, version)
+                });
                 let cross_mem_different = match (&target_schema_ref, schema.id()) {
                     (Some(target), (src_name, _)) => target.name != src_name,
                     (None, _) => false,
@@ -505,9 +499,7 @@ pub fn validate_loaded_relations(
                         .expect("target_schema_ref is Some when cross_mem_different");
                     schema
                         .cross_mem_entry(&target_ref.name)
-                        .and_then(|entry| {
-                            entry.definitions.iter().find(|d| d.name == rel.rel_type)
-                        })
+                        .and_then(|entry| entry.definitions.iter().find(|d| d.name == rel.rel_type))
                         .map(|d| d.per_edge_description)
                 } else {
                     schema
@@ -516,22 +508,18 @@ pub fn validate_loaded_relations(
                 };
                 match posture {
                     Some(PerEdgeDescription::Required) if rel.description.is_none() => {
-                        posture_warnings.push(
-                            WarningHint::ParseMissingRequiredDescription {
-                                from: entity.id.clone(),
-                                rel_type: rel.rel_type.clone(),
-                                target: rel.target.clone(),
-                            },
-                        );
+                        posture_warnings.push(WarningHint::ParseMissingRequiredDescription {
+                            from: entity.id.clone(),
+                            rel_type: rel.rel_type.clone(),
+                            target: rel.target.clone(),
+                        });
                     }
                     Some(PerEdgeDescription::Forbidden) if rel.description.is_some() => {
-                        posture_warnings.push(
-                            WarningHint::ParseDescriptionNotPermitted {
-                                from: entity.id.clone(),
-                                rel_type: rel.rel_type.clone(),
-                                target: rel.target.clone(),
-                            },
-                        );
+                        posture_warnings.push(WarningHint::ParseDescriptionNotPermitted {
+                            from: entity.id.clone(),
+                            rel_type: rel.rel_type.clone(),
+                            target: rel.target.clone(),
+                        });
                         to_strip_description.push((
                             entity.id.clone(),
                             rel.rel_type.clone(),
@@ -632,8 +620,7 @@ pub fn validate_loaded_relations(
             // Iterative DFS to avoid stack blow-ups on deep graphs.
             // Stack entry: (node, sorted-adjacency-index, sorted-adjacency-snapshot).
             let mut stack: Vec<(EntityId, usize, Vec<EntityId>)> = Vec::new();
-            let mut start_targets: Vec<EntityId> =
-                adj.get(&seed).cloned().unwrap_or_default();
+            let mut start_targets: Vec<EntityId> = adj.get(&seed).cloned().unwrap_or_default();
             start_targets.sort_by(|a, b| a.as_ref().cmp(b.as_ref()));
             color.insert(seed.clone(), Color::Gray);
             stack.push((seed.clone(), 0, start_targets));
@@ -657,11 +644,7 @@ pub fn validate_loaded_relations(
                     }
                     Some(Color::Gray) => {
                         // Back-edge — closes a cycle. Drop it.
-                        cycle_drops.push((
-                            node_id,
-                            target,
-                            rel_type.clone(),
-                        ));
+                        cycle_drops.push((node_id, target, rel_type.clone()));
                     }
                     Some(Color::Black) | None => {
                         // Already fully explored or not in the
@@ -681,11 +664,13 @@ pub fn validate_loaded_relations(
                 .retain(|r| !(r.rel_type == rel_type && r.target == target));
         }
         let recovery = if origin == "writable" {
-            Some(crate::ops::ParsedRelationRecovery::remove_explicit_relation(
-                from_id.clone(),
-                target.clone(),
-                rel_type.clone(),
-            ))
+            Some(
+                crate::ops::ParsedRelationRecovery::remove_explicit_relation(
+                    from_id.clone(),
+                    target.clone(),
+                    rel_type.clone(),
+                ),
+            )
         } else {
             None
         };
@@ -732,7 +717,11 @@ pub fn remap_alias_target_edge_sources(
         };
         for edge in store.outgoing(&entity.id) {
             if edge.rel_type == pointer && edge.source != EdgeSource::BodyLink {
-                remaps.push((entity.id.clone(), edge.target.clone(), edge.rel_type.clone()));
+                remaps.push((
+                    entity.id.clone(),
+                    edge.target.clone(),
+                    edge.rel_type.clone(),
+                ));
             }
         }
     }
@@ -942,10 +931,7 @@ mod tests {
         let fallback = default_fallback();
         let mut store = Store::new();
 
-        let author = real_entity(
-            "test-mem-plugin--author",
-            &[("constraints", "[[foo]]")],
-        );
+        let author = real_entity("test-mem-plugin--author", &[("constraints", "[[foo]]")]);
         let mut warnings = Vec::new();
         let mem_names = vec!["test-mem-plugin".to_string()];
         let known_suffixes = vec!["plugin".to_string()];
@@ -985,10 +971,7 @@ mod tests {
             &[("purpose", "See [[engine--health]].")],
         );
         let mut warnings = Vec::new();
-        let mem_names = vec![
-            "test-mem-engine".to_string(),
-            "test-mem-plugin".to_string(),
-        ];
+        let mem_names = vec!["test-mem-engine".to_string(), "test-mem-plugin".to_string()];
         let known_suffixes = vec!["engine".to_string(), "plugin".to_string()];
         push_entities_into_store(
             &mut store,
@@ -1030,10 +1013,7 @@ mod tests {
         push_entities_into_store(&mut store, vec![target], &fallback, None);
 
         // An author in `beta-alpha` writes `[[alpha--target]]`.
-        let author = real_entity(
-            "beta-alpha--author",
-            &[("purpose", "[[alpha--target]]")],
-        );
+        let author = real_entity("beta-alpha--author", &[("purpose", "[[alpha--target]]")]);
         let mut warnings = Vec::new();
         let mem_names = vec!["alpha".to_string(), "beta-alpha".to_string()];
         let known_suffixes = vec!["alpha".to_string(), "alpha".to_string()]; // collision
@@ -1047,7 +1027,11 @@ mod tests {
                 mem_names: &mem_names,
             }),
         );
-        assert_eq!(warnings.len(), 1, "collision must not duplicate the warning");
+        assert_eq!(
+            warnings.len(),
+            1,
+            "collision must not duplicate the warning"
+        );
         match &warnings[0] {
             WarningHint::SuspiciousNestedPrefix {
                 candidate_target, ..

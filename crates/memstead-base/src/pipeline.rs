@@ -208,8 +208,14 @@ mod tests {
             preparation: None,
         };
         let json = serde_json::to_string(&f).unwrap();
-        assert!(!json.contains("preparation"), "unset preparation omitted: {json}");
-        assert!(!json.contains("engagement"), "unset engagement omitted: {json}");
+        assert!(
+            !json.contains("preparation"),
+            "unset preparation omitted: {json}"
+        );
+        assert!(
+            !json.contains("engagement"),
+            "unset engagement omitted: {json}"
+        );
         assert!(json.contains(r#""mode":"deny""#), "got {json}");
         let back: Facet = serde_json::from_str(&json).unwrap();
         assert_eq!(back, f);

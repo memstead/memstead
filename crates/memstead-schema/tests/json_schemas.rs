@@ -26,7 +26,9 @@ fn emitted_json_schemas_match_committed() {
         "type-definition.schema.json drifted — regenerate via emit_json_schemas"
     );
     assert_eq!(
-        serde_json::to_string_pretty(&manifest_schema).unwrap().trim(),
+        serde_json::to_string_pretty(&manifest_schema)
+            .unwrap()
+            .trim(),
         on_disk_manifest.trim(),
         "schema-manifest.schema.json drifted — regenerate via emit_json_schemas"
     );

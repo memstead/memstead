@@ -155,10 +155,10 @@ pub fn parse_stream_json(stdout: &str) -> Result<AgentAnswer> {
                     for item in content {
                         match item.get("type").and_then(|t| t.as_str()) {
                             Some("text") => {
-                                if let Some(t) = item.get("text").and_then(|t| t.as_str()) {
-                                    if !t.is_empty() {
-                                        texts.push(t.to_string());
-                                    }
+                                if let Some(t) = item.get("text").and_then(|t| t.as_str())
+                                    && !t.is_empty()
+                                {
+                                    texts.push(t.to_string());
                                 }
                             }
                             Some("tool_use") => {
@@ -207,18 +207,40 @@ mod tests {
 
     #[test]
     fn mem_on_args_carry_mcp_config_and_allowlist() {
-        let (on, _) = build_arms(&task(), "claude-opus-4-8", "sys", Some("/tmp/on.json".into()));
+        let (on, _) = build_arms(
+            &task(),
+            "claude-opus-4-8",
+            "sys",
+            Some("/tmp/on.json".into()),
+        );
         let args = build_args(&on);
-        assert!(args.windows(2).any(|w| w[0] == "--mcp-config" && w[1] == "/tmp/on.json"));
-        assert!(args.windows(2).any(|w| w[0] == "--allowedTools" && w[1] == "mcp__memstead__*"));
+        assert!(
+            args.windows(2)
+                .any(|w| w[0] == "--mcp-config" && w[1] == "/tmp/on.json")
+        );
+        assert!(
+            args.windows(2)
+                .any(|w| w[0] == "--allowedTools" && w[1] == "mcp__memstead__*")
+        );
         // The task text and model are passed through.
-        assert!(args.windows(2).any(|w| w[0] == "-p" && w[1] == "what changed?"));
-        assert!(args.windows(2).any(|w| w[0] == "--model" && w[1] == "claude-opus-4-8"));
+        assert!(
+            args.windows(2)
+                .any(|w| w[0] == "-p" && w[1] == "what changed?")
+        );
+        assert!(
+            args.windows(2)
+                .any(|w| w[0] == "--model" && w[1] == "claude-opus-4-8")
+        );
     }
 
     #[test]
     fn mem_off_args_have_no_mcp_and_empty_allowlist() {
-        let (_, off) = build_arms(&task(), "claude-opus-4-8", "sys", Some("/tmp/on.json".into()));
+        let (_, off) = build_arms(
+            &task(),
+            "claude-opus-4-8",
+            "sys",
+            Some("/tmp/on.json".into()),
+        );
         let args = build_args(&off);
         assert!(!args.iter().any(|a| a == "--mcp-config"), "{args:?}");
         // allowedTools is present but empty — every tool denied.

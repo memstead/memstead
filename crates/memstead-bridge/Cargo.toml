@@ -2,6 +2,7 @@
 name = "memstead-bridge"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
@@ -34,3 +35,6 @@ indexmap.workspace = true
 # extractor; pin the version here so the dev-only wire-parse test
 # can call it directly without depending on a transitive minor-bump.
 serde_urlencoded = "0.7"
+
+[lints]
+workspace = true

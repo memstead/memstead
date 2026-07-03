@@ -3,7 +3,6 @@
 
 use std::path::Path;
 
-
 use crate::engine_fallback_type;
 use crate::entity::generator::generate_markdown;
 use crate::entity::parser::parse_markdown;
@@ -19,16 +18,13 @@ use crate::vcs::{Actor, ClientId, CommitContext};
 use crate::workspace::MountCapability;
 use memstead_schema::SchemaRef;
 
-use super::super::{
-    Engine, EngineError, RelateAction, RelateEntityArgs, RelateEntityOutcome,
-};
+use super::super::{Engine, EngineError, RelateAction, RelateEntityArgs, RelateEntityOutcome};
 use super::{
-    make_stub, unknown_type_error, validate_description_posture,
-    validate_relation_target_grammar, RELATIONSHIP_CYCLE_PATH_CAP,
+    RELATIONSHIP_CYCLE_PATH_CAP, make_stub, unknown_type_error, validate_description_posture,
+    validate_relation_target_grammar,
 };
 
 impl Engine {
-
     /// Add or remove a typed relationship on `args.source`.
     ///
     /// Cross-mem relate is policy-gated through
@@ -103,11 +99,7 @@ impl Engine {
             // as "only these new edges may be created", not "these
             // edges may exist."
             if !args.remove {
-                super::validate_cross_mem_add_policy(
-                    self,
-                    &source_mem,
-                    &target_mem,
-                )?;
+                super::validate_cross_mem_add_policy(self, &source_mem, &target_mem)?;
             }
             // ReadOnly target mem: the engine has no write access to
             // persist a stub there, so the target must already exist
@@ -354,26 +346,27 @@ impl Engine {
         // existing path (capped). Skipped on the remove path and
         // when the rel_type isn't declared acyclic. The acyclic-add
         // guard runs here via `graph::query::would_cycle`.
-        if !args.remove && schema.relationship_acyclic(&args.rel_type) {
-            if let Some(path) = crate::graph::query::would_cycle(
+        if !args.remove
+            && schema.relationship_acyclic(&args.rel_type)
+            && let Some(path) = crate::graph::query::would_cycle(
                 &self.store,
                 &args.source,
                 &args.target,
                 &args.rel_type,
-            ) {
-                let truncated = path.len() > RELATIONSHIP_CYCLE_PATH_CAP;
-                let mut existing_path = path;
-                if truncated {
-                    existing_path.truncate(RELATIONSHIP_CYCLE_PATH_CAP);
-                }
-                return Err(EngineError::RelationshipCycle {
-                    rel_type: args.rel_type.clone(),
-                    from: args.source.clone(),
-                    to: args.target.clone(),
-                    existing_path,
-                    path_truncated: truncated,
-                });
+            )
+        {
+            let truncated = path.len() > RELATIONSHIP_CYCLE_PATH_CAP;
+            let mut existing_path = path;
+            if truncated {
+                existing_path.truncate(RELATIONSHIP_CYCLE_PATH_CAP);
             }
+            return Err(EngineError::RelationshipCycle {
+                rel_type: args.rel_type.clone(),
+                from: args.source.clone(),
+                to: args.target.clone(),
+                existing_path,
+                path_truncated: truncated,
+            });
         }
 
         let type_def = schema
@@ -393,9 +386,10 @@ impl Engine {
         // empty the relation-set to `b` while body wiki-links to `b`
         // are still present in the source entity's section bodies.
         if args.remove && already.is_some() {
-            let other_relation_to_target_exists = entity.relationships.iter().any(|r| {
-                r.target == args.target && r.rel_type != args.rel_type
-            });
+            let other_relation_to_target_exists = entity
+                .relationships
+                .iter()
+                .any(|r| r.target == args.target && r.rel_type != args.rel_type);
             if !other_relation_to_target_exists {
                 // Read-side scan over the source entity's existing
                 // body. Use the lenient decoder so on-disk drift on
@@ -405,10 +399,8 @@ impl Engine {
                 // scan of historical state.
                 let mut surviving_sections: Vec<String> = Vec::new();
                 for (section_key, body) in entity.sections.iter() {
-                    let inline_targets = crate::entity::parser::extract_inline_links_lenient(
-                        body,
-                        &source_mem,
-                    );
+                    let inline_targets =
+                        crate::entity::parser::extract_inline_links_lenient(body, &source_mem);
                     if inline_targets.iter().any(|t| t == &args.target) {
                         surviving_sections.push(section_key.clone());
                     }
@@ -456,9 +448,7 @@ impl Engine {
         // `stub_warning` field that pre-Item-03 carried this fact has
         // been removed, so every diagnostic now follows the uniform
         // `{ code, message, details }` warning shape.
-        if matches!(action, RelateAction::Added)
-            && !self.store.contains(&args.target)
-        {
+        if matches!(action, RelateAction::Added) && !self.store.contains(&args.target) {
             self.store.upsert(
                 args.target.clone(),
                 make_stub(&args.target, crate::entity::StubKind::ForwardReference),
@@ -557,18 +547,12 @@ impl Engine {
 
         self.record_self_write(mount_idx, &commit_sha);
 
-        let parse_result =
-            parse_markdown(&markdown, &file_path, type_def.as_ref(), &source_mem)
-                .map_err(|e| EngineError::ParseAfterWrite(e.to_string()))?;
+        let parse_result = parse_markdown(&markdown, &file_path, type_def.as_ref(), &source_mem)
+            .map_err(|e| EngineError::ParseAfterWrite(e.to_string()))?;
         let content_hash = parse_result.entity.content_hash.clone();
 
         let fallback = engine_fallback_type();
-        push_entities_into_store(
-            &mut self.store,
-            vec![parse_result],
-            fallback.as_ref(),
-            None,
-        );
+        push_entities_into_store(&mut self.store, vec![parse_result], fallback.as_ref(), None);
         crate::entity::store_builder::remap_alias_target_edge_sources(
             &mut self.store,
             &self.schemas,
@@ -640,27 +624,19 @@ impl Engine {
             remove,
             description: None,
         };
-        self.relate_entity(
-            args,
-            ctx.actor,
-            ctx.client.as_ref(),
-            ctx.note.as_deref(),
-        )
+        self.relate_entity(args, ctx.actor, ctx.client.as_ref(), ctx.note.as_deref())
     }
 }
 
 #[cfg(test)]
 mod tests {
-    
 
     use indexmap::IndexMap;
     use tempfile::TempDir;
 
     use crate::backend::MemBackend;
     use crate::engine::test_helpers::*;
-    use crate::engine::{
-        CreateEntityArgs, Engine, EngineError, RelateAction, RelateEntityArgs,
-    };
+    use crate::engine::{CreateEntityArgs, Engine, EngineError, RelateAction, RelateEntityArgs};
     use crate::ops::WarningHint;
     use crate::storage::FilesystemMemWriter;
     use crate::vcs::{Actor, CommitContext};
@@ -722,15 +698,17 @@ mod tests {
 
         // Use the positional `relate` alias.
         let ctx = CommitContext::internal();
-        let result = engine
-            .relate(&a.id, &b.id, "PART_OF", false, &ctx)
-            .unwrap();
+        let result = engine.relate(&a.id, &b.id, "PART_OF", false, &ctx).unwrap();
         assert_eq!(result.from, a.id);
         assert_eq!(result.to, b.id);
         assert_eq!(result.rel_type, "PART_OF");
         // The edge is in the store post-call.
         let outgoing: Vec<_> = engine.store().outgoing(&a.id).to_vec();
-        assert!(outgoing.iter().any(|e| e.target == b.id && e.rel_type == "PART_OF"));
+        assert!(
+            outgoing
+                .iter()
+                .any(|e| e.target == b.id && e.rel_type == "PART_OF")
+        );
     }
 
     #[test]
@@ -739,7 +717,12 @@ mod tests {
         let (mut engine, source) = engine_with_seed(&tmp, "Source");
         let (actor, client) = cli_actor();
         let target = engine
-            .create_entity(empty_create_args("specs", "Target"), actor, Some(&client), None)
+            .create_entity(
+                empty_create_args("specs", "Target"),
+                actor,
+                Some(&client),
+                None,
+            )
             .unwrap();
 
         let outcome = engine
@@ -762,7 +745,9 @@ mod tests {
         // Edge present in store.
         let edges = engine.store().outgoing(&source.id);
         assert!(
-            edges.iter().any(|e| e.rel_type == "USES" && e.target == target.id),
+            edges
+                .iter()
+                .any(|e| e.rel_type == "USES" && e.target == target.id),
             "expected USES edge in store"
         );
         // Provenance log records relate.
@@ -819,7 +804,12 @@ mod tests {
         let (mut engine, source) = engine_with_seed(&tmp, "Source");
         let (actor, client) = cli_actor();
         let target = engine
-            .create_entity(empty_create_args("specs", "Target"), actor, Some(&client), None)
+            .create_entity(
+                empty_create_args("specs", "Target"),
+                actor,
+                Some(&client),
+                None,
+            )
             .unwrap();
 
         let outcome = engine
@@ -978,7 +968,12 @@ mod tests {
         let (mut engine, source) = engine_with_seed(&tmp, "Src");
         let (actor, client) = cli_actor();
         let target = engine
-            .create_entity(empty_create_args("specs", "Real"), actor, Some(&client), None)
+            .create_entity(
+                empty_create_args("specs", "Real"),
+                actor,
+                Some(&client),
+                None,
+            )
             .unwrap();
 
         let outcome = engine
@@ -1062,7 +1057,12 @@ mod tests {
         let (actor, client) = cli_actor();
 
         let target = engine
-            .create_entity(empty_create_args("specs", "Target"), actor, Some(&client), None)
+            .create_entity(
+                empty_create_args("specs", "Target"),
+                actor,
+                Some(&client),
+                None,
+            )
             .unwrap();
 
         // Source entity carries a body wiki-link to the target — the
@@ -1145,7 +1145,12 @@ mod tests {
         let (mut engine, source) = engine_with_seed(&tmp, "Src");
         let (actor, client) = cli_actor();
         let target = engine
-            .create_entity(empty_create_args("specs", "Other"), actor, Some(&client), None)
+            .create_entity(
+                empty_create_args("specs", "Other"),
+                actor,
+                Some(&client),
+                None,
+            )
             .unwrap();
         // Default seed has empty body sections, so the relation can be
         // added and removed without body-link interference. This locks
@@ -1236,7 +1241,12 @@ mod tests {
         let (mut engine, source) = engine_with_seed(&tmp, "Source");
         let (actor, client) = cli_actor();
         let target = engine
-            .create_entity(empty_create_args("specs", "Target"), actor, Some(&client), None)
+            .create_entity(
+                empty_create_args("specs", "Target"),
+                actor,
+                Some(&client),
+                None,
+            )
             .unwrap();
 
         // Lowercase input — must succeed and store as `USES`.
@@ -1259,7 +1269,9 @@ mod tests {
         assert_eq!(lower.action, RelateAction::Added);
         let edges = engine.store().outgoing(&source.id);
         assert!(
-            edges.iter().any(|e| e.rel_type == "USES" && e.target == target.id),
+            edges
+                .iter()
+                .any(|e| e.rel_type == "USES" && e.target == target.id),
             "store must hold UPPER_SNAKE_CASE rel_type after lowercase input"
         );
 
@@ -1376,9 +1388,7 @@ mod tests {
                     source: source.id.clone(),
                     expected_hash: Some(source.content_hash.clone()),
                     rel_type: "USES".to_string(),
-                    target: crate::EntityId(format!(
-                        "{source_mem}--bad target with spaces!!"
-                    )),
+                    target: crate::EntityId(format!("{source_mem}--bad target with spaces!!")),
                     remove: false,
                     description: None,
                 },
@@ -1664,7 +1674,12 @@ mod tests {
         let (mut engine, source_a) = engine_with_seed(&tmp, "SrcA");
         let (actor, client) = cli_actor();
         let source_b = engine
-            .create_entity(empty_create_args("specs", "SrcB"), actor, Some(&client), None)
+            .create_entity(
+                empty_create_args("specs", "SrcB"),
+                actor,
+                Some(&client),
+                None,
+            )
             .unwrap();
         let stub_id = crate::EntityId::new("specs", "ghost-target");
 
@@ -1754,7 +1769,7 @@ mod tests {
             RelateEntityArgs,
         };
         use crate::storage::FilesystemMemWriter;
-        use crate::vcs::Actor;
+
         use crate::workspace::{
             Mount, MountCapability, MountLifecycle, MountStorage, WorkspaceSettings,
         };
@@ -1764,8 +1779,7 @@ mod tests {
             std::fs::create_dir_all(dir.join("types")).unwrap();
             std::fs::write(dir.join("schema.yaml"), manifest).unwrap();
             for (type_name, body) in types {
-                std::fs::write(dir.join("types").join(format!("{type_name}.yaml")), body)
-                    .unwrap();
+                std::fs::write(dir.join("types").join(format!("{type_name}.yaml")), body).unwrap();
             }
         }
 
@@ -1805,8 +1819,8 @@ write_rules: []
                 capability: MountCapability::Write,
                 lifecycle: MountLifecycle::Eager,
                 cross_linkable: true,
-            migration_target: None,
-        }
+                migration_target: None,
+            }
         }
 
         /// Build an engine with two mems pinning two distinct schemas
@@ -1867,8 +1881,18 @@ community:
 "#;
             let schemas_dir = tmp.path().join("schemas");
             std::fs::create_dir_all(&schemas_dir).unwrap();
-            write_schema_files(&schemas_dir, "src-cv", src_manifest, &[("doc", &make_type_yaml("doc"))]);
-            write_schema_files(&schemas_dir, "tgt-cv", tgt_manifest, &[("req", &make_type_yaml("req"))]);
+            write_schema_files(
+                &schemas_dir,
+                "src-cv",
+                src_manifest,
+                &[("doc", &make_type_yaml("doc"))],
+            );
+            write_schema_files(
+                &schemas_dir,
+                "tgt-cv",
+                tgt_manifest,
+                &[("req", &make_type_yaml("req"))],
+            );
 
             let src_dir = tmp.path().join("mem-src");
             let tgt_dir = tmp.path().join("mem-tgt");
@@ -1911,10 +1935,7 @@ community:
                         mem: "src".to_string(),
                         title: "Doc One".to_string(),
                         entity_type: "doc".to_string(),
-                        sections: IndexMap::from_iter([(
-                            "body".to_string(),
-                            "seed".to_string(),
-                        )]),
+                        sections: IndexMap::from_iter([("body".to_string(), "seed".to_string())]),
                         metadata: IndexMap::new(),
                         relations: Vec::new(),
                         dry_run: false,
@@ -1930,10 +1951,7 @@ community:
                         mem: "tgt".to_string(),
                         title: "Req One".to_string(),
                         entity_type: "req".to_string(),
-                        sections: IndexMap::from_iter([(
-                            "body".to_string(),
-                            "seed".to_string(),
-                        )]),
+                        sections: IndexMap::from_iter([("body".to_string(), "seed".to_string())]),
                         metadata: IndexMap::new(),
                         relations: Vec::new(),
                         dry_run: false,
@@ -2198,7 +2216,12 @@ community:
 "#;
             let schemas_dir = tmp.path().join("schemas");
             std::fs::create_dir_all(&schemas_dir).unwrap();
-            write_schema_files(&schemas_dir, "src-cv", src_manifest, &[("doc", &make_type_yaml("doc"))]);
+            write_schema_files(
+                &schemas_dir,
+                "src-cv",
+                src_manifest,
+                &[("doc", &make_type_yaml("doc"))],
+            );
             write_schema_files(
                 &schemas_dir,
                 "other-cv",
@@ -2468,7 +2491,9 @@ community:
             // 5. Edge is gone from the store's outgoing index.
             let outgoing = engine.store().outgoing(&src.id);
             assert!(
-                !outgoing.iter().any(|e| e.target == tgt.id && e.rel_type == "ADDRESSES"),
+                !outgoing
+                    .iter()
+                    .any(|e| e.target == tgt.id && e.rel_type == "ADDRESSES"),
                 "ADDRESSES edge must be gone after remove"
             );
         }

@@ -282,7 +282,10 @@ fn overview_json_promotes_mode_chunks_and_hints_as_siblings() {
         "overview_mode must be a known value, got: {mode}"
     );
     assert!(
-        parsed.get("total_chunks").and_then(|v| v.as_u64()).is_some(),
+        parsed
+            .get("total_chunks")
+            .and_then(|v| v.as_u64())
+            .is_some(),
         "total_chunks must be a numeric sibling: {parsed}"
     );
     assert!(

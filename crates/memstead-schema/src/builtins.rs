@@ -53,9 +53,7 @@ pub fn load_builtin_schemas() -> Result<Vec<Arc<Schema>>, SchemaLoadError> {
 }
 
 fn load_builtin_dir(dir: &Dir<'_>) -> Result<Schema, SchemaLoadError> {
-    let manifest_file = dir.get_file(
-        format!("{}/schema.yaml", dir.path().display()).as_str(),
-    );
+    let manifest_file = dir.get_file(format!("{}/schema.yaml", dir.path().display()).as_str());
     let manifest_text = manifest_file
         .and_then(|f| f.contents_utf8())
         .ok_or_else(|| SchemaLoadError::Io {
@@ -115,7 +113,10 @@ mod tests {
         for (name, instance_key) in cases {
             let tpl = builtin_mem_template(name)
                 .unwrap_or_else(|| panic!("{name} must ship a mem-template.json"));
-            assert!(tpl["language"].is_string(), "{name}: template carries language");
+            assert!(
+                tpl["language"].is_string(),
+                "{name}: template carries language"
+            );
             let wg = &tpl["writeGuidance"];
             assert!(
                 wg.get(instance_key).is_some(),

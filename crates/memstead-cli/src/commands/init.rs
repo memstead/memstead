@@ -90,10 +90,7 @@ pub fn run(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
         if !target.is_dir() {
             return Err(CliError {
                 code: "INVALID_INPUT",
-                message: format!(
-                    "target {} exists but is not a directory",
-                    target.display()
-                ),
+                message: format!("target {} exists but is not a directory", target.display()),
                 kind: ExitKind::Validation,
                 details: None,
             }
@@ -163,10 +160,7 @@ pub fn run(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
         format!("# Initialised filesystem mem `{}`", args.name),
         String::new(),
         format!("- Workspace root: `{}`", target.display()),
-        format!(
-            "- Config:         `{}`",
-            config_path(&target).display()
-        ),
+        format!("- Config:         `{}`", config_path(&target).display()),
         format!("- Schema pin:     `{}`", schema_pin.as_display()),
         String::new(),
         "Next steps:".to_string(),
@@ -254,7 +248,10 @@ mod tests {
     use tempfile::TempDir;
 
     fn run_init(target: &Path, name: &str, schema: &str) -> anyhow::Result<()> {
-        let ctx = CliContext { json: false, quiet: false };
+        let ctx = CliContext {
+            json: false,
+            quiet: false,
+        };
         run(
             &ctx,
             InitArgs {
@@ -281,7 +278,10 @@ mod tests {
         // validator tombstones a stray one).
         let raw: serde_json::Value =
             serde_json::from_slice(&std::fs::read(config_path(&root)).unwrap()).unwrap();
-        assert!(raw.get("name").is_none(), "config.json must not persist `name`");
+        assert!(
+            raw.get("name").is_none(),
+            "config.json must not persist `name`"
+        );
 
         assert!(root.join(".memstead").join("cache").is_dir());
         assert!(root.join(".memstead").join("memstead-io").is_dir());

@@ -46,10 +46,7 @@ pub enum SchemaLoadError {
     InvalidVersion { value: String },
 
     #[error("invalid schema name '{value}': {reason}")]
-    InvalidName {
-        value: String,
-        reason: &'static str,
-    },
+    InvalidName { value: String, reason: &'static str },
 
     #[error(
         "schema type file mismatch — declared in manifest: [{}], found in types/: [{}]",
@@ -61,7 +58,9 @@ pub enum SchemaLoadError {
         found: Vec<String>,
     },
 
-    #[error("type file '{file}.yaml' has `name: {declared}` — filename and `name` field must match")]
+    #[error(
+        "type file '{file}.yaml' has `name: {declared}` — filename and `name` field must match"
+    )]
     TypeNameMismatch { file: String, declared: String },
 
     #[error("schema relationship vocabulary must include a '_default' definition")]
@@ -292,11 +291,10 @@ fn load_with_context(
 
     validate_name(&manifest.name)?;
 
-    let version = semver::Version::parse(&manifest.version).map_err(|_| {
-        SchemaLoadError::InvalidVersion {
+    let version =
+        semver::Version::parse(&manifest.version).map_err(|_| SchemaLoadError::InvalidVersion {
             value: manifest.version.clone(),
-        }
-    })?;
+        })?;
 
     // Relationship vocabulary: unique names + _default present
     let mut rel_names: HashSet<String> = HashSet::new();
@@ -583,7 +581,10 @@ fn validate_type(
                 type_name: td.name.clone(),
                 kind: "section",
                 offending_key: section.key.clone(),
-                reserved_keys: reserved_section_keys().iter().map(|s| s.to_string()).collect(),
+                reserved_keys: reserved_section_keys()
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect(),
             });
         }
     }
@@ -605,7 +606,13 @@ fn validate_type(
         )?;
     }
     for r in td.edge_weight_overrides.keys() {
-        check_rel(&td.name, "edge_weight_overrides", r, rel_names, available_rels)?;
+        check_rel(
+            &td.name,
+            "edge_weight_overrides",
+            r,
+            rel_names,
+            available_rels,
+        )?;
     }
     for block in &td.required_outgoing {
         for r in &block.relationships {

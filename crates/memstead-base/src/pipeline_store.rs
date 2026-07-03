@@ -182,7 +182,12 @@ fn load_mem_scoped<T: DeserializeOwned>(
     let mem_dirs = match std::fs::read_dir(&dir) {
         Ok(rd) => rd,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(out),
-        Err(e) => return Err(StoreError::Io { path: dir, source: e }),
+        Err(e) => {
+            return Err(StoreError::Io {
+                path: dir,
+                source: e,
+            });
+        }
     };
     for mem_entry in mem_dirs.flatten() {
         let mem_path = mem_entry.path();
@@ -230,7 +235,12 @@ fn load_flat<T: DeserializeOwned>(
     let files = match std::fs::read_dir(&dir) {
         Ok(rd) => rd,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(out),
-        Err(e) => return Err(StoreError::Io { path: dir, source: e }),
+        Err(e) => {
+            return Err(StoreError::Io {
+                path: dir,
+                source: e,
+            });
+        }
     };
     for file in files.flatten() {
         let path = file.path();
@@ -267,7 +277,10 @@ pub fn write_medium(
     name: &str,
     medium: &Medium,
 ) -> Result<(), StoreError> {
-    write_json(&mem_scoped_path(workspace_root, MEDIUMS_DIR, mem, name)?, medium)
+    write_json(
+        &mem_scoped_path(workspace_root, MEDIUMS_DIR, mem, name)?,
+        medium,
+    )
 }
 
 /// Write a facet to `<root>/.memstead/facets/<mem>/<name>.json`.
@@ -277,7 +290,10 @@ pub fn write_facet(
     name: &str,
     facet: &Facet,
 ) -> Result<(), StoreError> {
-    write_json(&mem_scoped_path(workspace_root, FACETS_DIR, mem, name)?, facet)
+    write_json(
+        &mem_scoped_path(workspace_root, FACETS_DIR, mem, name)?,
+        facet,
+    )
 }
 
 /// Write a projection to `<root>/.memstead/projections/<mem>/<name>.json`.
@@ -294,11 +310,7 @@ pub fn write_projection(
 }
 
 /// Write an ingest to `<root>/.memstead/ingests/<name>.json` (flat).
-pub fn write_ingest(
-    workspace_root: &Path,
-    name: &str,
-    ingest: &Ingest,
-) -> Result<(), StoreError> {
+pub fn write_ingest(workspace_root: &Path, name: &str, ingest: &Ingest) -> Result<(), StoreError> {
     write_json(&flat_path(workspace_root, INGESTS_DIR, name)?, ingest)
 }
 
@@ -315,7 +327,12 @@ pub fn delete_facet(workspace_root: &Path, mem: &str, name: &str) -> Result<(), 
 
 /// Delete a projection file. See [`delete_medium`] for missing-file semantics.
 pub fn delete_projection(workspace_root: &Path, mem: &str, name: &str) -> Result<(), StoreError> {
-    remove_file(&mem_scoped_path(workspace_root, PROJECTIONS_DIR, mem, name)?)
+    remove_file(&mem_scoped_path(
+        workspace_root,
+        PROJECTIONS_DIR,
+        mem,
+        name,
+    )?)
 }
 
 /// Delete an ingest file (flat). See [`delete_medium`] for missing-file semantics.
@@ -370,9 +387,7 @@ pub fn load_pipeline_configs(workspace_root: &Path) -> Result<PipelineConfigs, S
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pipeline::{
-        IngestMode, IngestTrigger, MediumType, PatternEntry, PatternMode,
-    };
+    use crate::pipeline::{IngestMode, IngestTrigger, MediumType, PatternEntry, PatternMode};
     use tempfile::TempDir;
 
     fn sample() -> (Medium, Facet, Projection, Ingest) {
@@ -483,9 +498,18 @@ mod tests {
         write_ingest(root, "macos-graph", &ingest).unwrap();
 
         // Files land at the documented `.memstead/` locations.
-        assert!(root.join(".memstead/mediums/macos/source-tree.json").is_file());
-        assert!(root.join(".memstead/facets/macos/source-files.json").is_file());
-        assert!(root.join(".memstead/projections/macos/graph.json").is_file());
+        assert!(
+            root.join(".memstead/mediums/macos/source-tree.json")
+                .is_file()
+        );
+        assert!(
+            root.join(".memstead/facets/macos/source-files.json")
+                .is_file()
+        );
+        assert!(
+            root.join(".memstead/projections/macos/graph.json")
+                .is_file()
+        );
         assert!(root.join(".memstead/ingests/macos-graph.json").is_file());
 
         let configs = load_pipeline_configs(root).unwrap();
@@ -553,7 +577,11 @@ mod tests {
         delete_medium(root, "macos", "source-tree").unwrap();
         delete_ingest(root, "macos-graph").unwrap();
 
-        assert!(!root.join(".memstead/mediums/macos/source-tree.json").exists());
+        assert!(
+            !root
+                .join(".memstead/mediums/macos/source-tree.json")
+                .exists()
+        );
         assert!(!root.join(".memstead/ingests/macos-graph.json").exists());
         let configs = load_pipeline_configs(root).unwrap();
         assert!(configs.mediums.is_empty());
@@ -581,7 +609,11 @@ mod tests {
 
         rename_projection(root, "macos", "old-name", "new-name").unwrap();
 
-        assert!(!root.join(".memstead/projections/macos/old-name.json").exists());
+        assert!(
+            !root
+                .join(".memstead/projections/macos/old-name.json")
+                .exists()
+        );
         let configs = load_pipeline_configs(root).unwrap();
         assert_eq!(configs.projections.len(), 1);
         assert_eq!(configs.projections[0].name, "new-name");

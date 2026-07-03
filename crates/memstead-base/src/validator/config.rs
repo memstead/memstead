@@ -35,11 +35,10 @@ const LEGACY_AUTHOR_FIELDS: &[&str] = &[
 /// check in this module (shape, legacy detection, format, name,
 /// version, schema resolution).
 pub fn parse_config_bytes(bytes: &[u8]) -> Result<PublishedMemConfig, ValidationError> {
-    let value: serde_json::Value = serde_json::from_slice(bytes).map_err(|e| {
-        ValidationError::InvalidConfig {
+    let value: serde_json::Value =
+        serde_json::from_slice(bytes).map_err(|e| ValidationError::InvalidConfig {
             reason: format!("malformed JSON: {e}"),
-        }
-    })?;
+        })?;
 
     if let Some(obj) = value.as_object() {
         for &field in LEGACY_AUTHOR_FIELDS {
@@ -76,8 +75,7 @@ fn check_format(config: &PublishedMemConfig) -> Result<(), ValidationError> {
     // mismatch falls through to the generic `UnsupportedFormat`.
     if config.format == 2 {
         return Err(ValidationError::InvalidConfig {
-            reason: "legacy mem format (format: 2) — re-export via `memstead export`"
-                .to_string(),
+            reason: "legacy mem format (format: 2) — re-export via `memstead export`".to_string(),
         });
     }
     Err(ValidationError::UnsupportedFormat {
@@ -94,9 +92,7 @@ fn name_regex() -> &'static Regex {
 fn check_name(name: &str) -> Result<(), ValidationError> {
     if !name_regex().is_match(name) {
         return Err(ValidationError::InvalidName {
-            reason: format!(
-                "name must match ^[a-z0-9][a-z0-9-]{{0,62}}[a-z0-9]$, got {name:?}"
-            ),
+            reason: format!("name must match ^[a-z0-9][a-z0-9-]{{0,62}}[a-z0-9]$, got {name:?}"),
         });
     }
     Ok(())
@@ -155,7 +151,9 @@ mod tests {
     #[test]
     fn rejects_non_object_root() {
         let err = parse(serde_json::json!([])).unwrap_err();
-        assert!(matches!(err, ValidationError::InvalidConfig { reason } if reason.contains("object")));
+        assert!(
+            matches!(err, ValidationError::InvalidConfig { reason } if reason.contains("object"))
+        );
     }
 
     #[test]
@@ -211,7 +209,13 @@ mod tests {
         v["format"] = serde_json::json!(1);
         let err = parse(v).unwrap_err();
         assert!(
-            matches!(err, ValidationError::UnsupportedFormat { got: 1, expected: _ }),
+            matches!(
+                err,
+                ValidationError::UnsupportedFormat {
+                    got: 1,
+                    expected: _
+                }
+            ),
             "unexpected err: {err:?}"
         );
     }

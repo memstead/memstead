@@ -19,23 +19,23 @@ pub mod changes;
 pub mod commit_envelope;
 pub mod diff;
 pub mod export;
-pub mod transport;
 pub mod health;
 pub mod integrity;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod search;
+pub mod transport;
 
 pub use agent_notes::{AgentNotesReport, CommitNote};
+pub use branch_reset::BranchResetOutcome;
+pub use changes::{
+    BackendChanges, ChangeEnvelope, ChangesReport, EMPTY_TREE_SHA, MemChangedNotice,
+    NoticeByChange, NoticeChanges, RENAME_SIMILARITY_DEFAULT, RENAME_SIMILARITY_MAX,
+    RENAME_SIMILARITY_MIN, folder_changes_since,
+};
 pub use commit_envelope::{CommitEnvelope, EntityChange};
 pub use diff::{Diff, DiffConfig, EntityDiff, IncomingRipple};
-pub use branch_reset::BranchResetOutcome;
 pub use export::{MemExportBytes, MemExportError};
 pub use transport::{FetchOutcome, PullOutcome, PushOutcome, RemoteAddOutcome, UpdatedRef};
-pub use changes::{
-    BackendChanges, ChangeEnvelope, ChangesReport, EMPTY_TREE_SHA, NoticeByChange,
-    NoticeChanges, RENAME_SIMILARITY_DEFAULT, RENAME_SIMILARITY_MAX, RENAME_SIMILARITY_MIN,
-    MemChangedNotice, folder_changes_since,
-};
 
 use crate::entity::EntityId;
 use indexmap::IndexMap;
@@ -263,10 +263,7 @@ pub enum WarningHint {
     /// An undeclared relationship was admitted because the mem's schema
     /// is in open mode. The caller can still suggest the name be added to
     /// the schema vocabulary.
-    UndeclaredRelationshipOpen {
-        rel_type: String,
-        message: String,
-    },
+    UndeclaredRelationshipOpen { rel_type: String, message: String },
     /// `memstead_relate` was asked to add an edge that already exists. The
     /// op is a successful no-op — the warning surfaces what would otherwise
     /// be silent so an agent relying on `renames` / side-effects can notice
@@ -288,17 +285,11 @@ pub enum WarningHint {
     /// set. The key is ignored; the allowed list is echoed back verbatim so
     /// an agent with a typo can correct on the next call without opening a
     /// schema doc.
-    UnknownIncludeKey {
-        key: String,
-        allowed: Vec<String>,
-    },
+    UnknownIncludeKey { key: String, allowed: Vec<String> },
     /// A paged/bounded parameter exceeded its cap. The cap is authoritative
     /// so the op still ran, but the warning surfaces what the caller
     /// requested vs. what was served.
-    LimitClamped {
-        requested: usize,
-        actual: usize,
-    },
+    LimitClamped { requested: usize, actual: usize },
     /// `memstead_rename` was asked to change the title but normalisation
     /// (lowercase, diacritic-folding, punctuation-strip, hyphen-collapse)
     /// mapped the requested title to the existing slug — so the id is
@@ -324,9 +315,7 @@ pub enum WarningHint {
     /// set by construction. Surfaced so an agent doesn't interpret the
     /// empty result as "no stubs of this type exist" when in fact no
     /// stub can ever satisfy the filter. Drop `entity_type` to list stubs.
-    StubFilterExcludesAll {
-        entity_type: String,
-    },
+    StubFilterExcludesAll { entity_type: String },
     /// `memstead_search(filters: {<key>: ...})` named a filter key that the
     /// queried type does not declare. The wire `code()` discriminates
     /// the two outcomes, so a consumer branches on `code` alone:
@@ -338,6 +327,7 @@ pub enum WarningHint {
     ///   type-narrowing (result restricted to the declaring type(s), or
     ///   emptied when the call scoped to a non-declaring type) →
     ///   `FILTER_TYPE_SCOPED`.
+    ///
     /// `declared_on_other_types` stays on the wire as enrichment, not as
     /// the disambiguator.
     UnknownFilterKey {
@@ -352,9 +342,7 @@ pub enum WarningHint {
     /// `memstead_search(filters: {<field>: ...})` named a field that the
     /// schema declares but with `filterable: none` — the filter is
     /// ignored, the hit set is unconstrained by it.
-    FieldNotFilterable {
-        field: String,
-    },
+    FieldNotFilterable { field: String },
     /// `memstead_search(filters: {<csv-field>: "a,b"})` passed a comma-bearing
     /// value to a csv-array field. csv fields match a *single* member, so
     /// the whole rendered value (e.g. the `tags: dedup,retry` an entity
@@ -364,10 +352,7 @@ pub enum WarningHint {
     /// rather than an empty result indistinguishable from a true
     /// no-match. The filter still applies as written (matches nothing);
     /// this only adds the advisory.
-    FilterValueMultiMember {
-        key: String,
-        value: String,
-    },
+    FilterValueMultiMember { key: String, value: String },
     /// `memstead_search(filters: {<field>: <value>})` passed a value the
     /// schema field constrains with an `enum_values` allow-list, but the
     /// value (or, for a csv-array field, one of its comma members) is not a
@@ -386,25 +371,17 @@ pub enum WarningHint {
     /// and bounded to the nearest `kept` of `total` reachable entities so a
     /// hub can't flood the caller. Surfaced so the agent knows the
     /// neighbourhood was truncated — narrow with `depth`/filters for more.
-    NeighbourhoodCapped {
-        kept: usize,
-        total: usize,
-    },
+    NeighbourhoodCapped { kept: usize, total: usize },
     /// `memstead_search` trimmed the returned page to fit the token budget.
     /// The highest-ranked `kept` hits that fit under `budget` are returned;
     /// the rest of the page is dropped so the response stays under the MCP
     /// transport cap. `_total` still reflects the full match count — page the
     /// remainder with `offset`, narrow the query, or raise `token_budget`.
-    SearchResultsTruncated {
-        kept: usize,
-        budget: usize,
-    },
+    SearchResultsTruncated { kept: usize, budget: usize },
     /// `memstead_search(range_filters: {<key>: ...})` named a key that
     /// doesn't follow the `min_<field>` / `max_<field>` / `<field>_before`
     /// / `<field>_after` grammar. The key is ignored.
-    RangeFilterKeyMalformed {
-        key: String,
-    },
+    RangeFilterKeyMalformed { key: String },
     /// `memstead_search(range_filters: {<key>: ...})` named a range-filter
     /// key whose underlying field the queried type does not declare.
     /// Same shape and same one-code-per-outcome split as
@@ -423,9 +400,7 @@ pub enum WarningHint {
     /// `memstead_search(range_filters: {<field>: ...})` named a field that
     /// the schema declares but with a filterability other than `range`.
     /// The range filter is ignored.
-    FieldNotRangeFilterable {
-        field: String,
-    },
+    FieldNotRangeFilterable { field: String },
     /// `memstead_search` could not query a target mem's search index —
     /// either the mem has no index yet (`reason: "missing_index"`)
     /// or a tantivy execution failure surfaced (`reason:
@@ -451,10 +426,7 @@ pub enum WarningHint {
     /// drift. Internal whitespace (between words) is preserved
     /// untouched. Fully-whitespace titles are still refused at the
     /// validator boundary (those collapse to empty).
-    TitleTrimmed {
-        original: String,
-        trimmed: String,
-    },
+    TitleTrimmed { original: String, trimmed: String },
     /// An inline wiki-link resolved to an ID of the form
     /// `<current-mem>--<other-known-mem-suffix>--<slug>`. This is
     /// almost always drift from a mem-rename — the author wrote
@@ -496,9 +468,7 @@ pub enum WarningHint {
     /// own slug); this warns so the dropped link is observable, matching
     /// the alias pass's other side-effect warnings (`AUTO_STUB_CREATED` /
     /// `INLINE_WIKI_LINK_AUTO_STUBBED`).
-    SelfLinkIgnored {
-        id: EntityId,
-    },
+    SelfLinkIgnored { id: EntityId },
     /// `memstead_relate` to a cross-mem target whose mem is not (yet)
     /// mounted in the workspace. The cross-mem link policy permits
     /// the edge, so the engine auto-stubs the target as a forward
@@ -678,6 +648,7 @@ pub enum WarningHint {
     ///   `refs/heads/<branch_leaf>` + `__MEMSTEAD:mems/.../config.json`
     ///   (gitdir IO, concurrent writer racing the ref). `path` is
     ///   `None`; `error` carries the wrapped backend message.
+    ///
     /// One emission per failed step — both can land in the same
     /// response when a folder mount somehow has both an rmdir
     /// failure and a backend cleanup failure (rare; the folder
@@ -944,19 +915,11 @@ impl fmt::Display for WarningHint {
                 Ok(())
             }
             WarningHint::UndeclaredRelationshipOpen { message, .. } => f.write_str(message),
-            WarningHint::DuplicateRelationship {
-                rel_type,
-                from,
-                to,
-            } => write!(
+            WarningHint::DuplicateRelationship { rel_type, from, to } => write!(
                 f,
                 "relationship {rel_type} from {from} to {to} already exists — no-op"
             ),
-            WarningHint::NoSuchRelationship {
-                rel_type,
-                from,
-                to,
-            } => write!(
+            WarningHint::NoSuchRelationship { rel_type, from, to } => write!(
                 f,
                 "relationship {rel_type} from {from} to {to} does not exist — no-op"
             ),
@@ -1024,10 +987,9 @@ impl fmt::Display for WarningHint {
                     "unknown filter key '{key}' — no reachable schema declares it — filter ignored"
                 )
             }
-            WarningHint::FieldNotFilterable { field } => write!(
-                f,
-                "field '{field}' is not filterable — filter ignored"
-            ),
+            WarningHint::FieldNotFilterable { field } => {
+                write!(f, "field '{field}' is not filterable — filter ignored")
+            }
             WarningHint::FilterValueMultiMember { key, value } => write!(
                 f,
                 "filter '{key}={value}' targets a csv-array field but the value contains a comma — \
@@ -1035,7 +997,11 @@ impl fmt::Display for WarningHint {
                  member at a time (e.g. `{key}={first}`)",
                 first = value.split(',').next().map(str::trim).unwrap_or("").trim(),
             ),
-            WarningHint::FilterValueNotInEnum { key, value, allowed } => write!(
+            WarningHint::FilterValueNotInEnum {
+                key,
+                value,
+                allowed,
+            } => write!(
                 f,
                 "filter '{key}={value}' is not an allowed value for '{key}' — allowed: [{}]. \
                  The filter applies as written and matches nothing.",
@@ -1098,28 +1064,18 @@ impl fmt::Display for WarningHint {
                 f,
                 "field '{field}' is not range-filterable — filter ignored"
             ),
-            WarningHint::SearchMemIndexUnavailable {
-                mem,
-                reason,
-                error,
-            } => match (*reason, error.as_deref()) {
-                ("missing_index", _) => write!(
-                    f,
-                    "mem '{mem}' has no search index — query returns no hits"
-                ),
-                ("query_failed", Some(e)) => write!(
-                    f,
-                    "search index for mem '{mem}' errored: {e}"
-                ),
-                _ => write!(
-                    f,
-                    "search index for mem '{mem}' is unavailable ({reason})"
-                ),
-            },
-            WarningHint::TitleTrimmed {
-                original,
-                trimmed,
-            } => write!(
+            WarningHint::SearchMemIndexUnavailable { mem, reason, error } => {
+                match (*reason, error.as_deref()) {
+                    ("missing_index", _) => {
+                        write!(f, "mem '{mem}' has no search index — query returns no hits")
+                    }
+                    ("query_failed", Some(e)) => {
+                        write!(f, "search index for mem '{mem}' errored: {e}")
+                    }
+                    _ => write!(f, "search index for mem '{mem}' is unavailable ({reason})"),
+                }
+            }
+            WarningHint::TitleTrimmed { original, trimmed } => write!(
                 f,
                 "title trimmed of surrounding whitespace: {original:?} → {trimmed:?}"
             ),
@@ -1331,7 +1287,8 @@ impl fmt::Display for WarningHint {
                  text from the source markdown if it should not round-trip."
             ),
             WarningHint::MemReattachedAfterUnregister {
-                mem, unregistered_at,
+                mem,
+                unregistered_at,
             } => write!(
                 f,
                 "mem '{mem}' was reattached to pre-existing storage \
@@ -1342,42 +1299,43 @@ impl fmt::Display for WarningHint {
                  {mem}` to destroy the storage and start fresh."
             ),
             WarningHint::MemFilesNotDeleted {
-                mem, reason, path, error,
-            } => {
-                match (reason.as_str(), path.as_deref(), error.as_deref()) {
-                    ("rmdir_failed", Some(p), Some(e)) => write!(
-                        f,
-                        "mem '{mem}' was unregistered but rmdir of \
+                mem,
+                reason,
+                path,
+                error,
+            } => match (reason.as_str(), path.as_deref(), error.as_deref()) {
+                ("rmdir_failed", Some(p), Some(e)) => write!(
+                    f,
+                    "mem '{mem}' was unregistered but rmdir of \
                          {p:?} failed: {e}. Files remain on disk; agent \
                          may follow up with manual cleanup."
-                    ),
-                    ("rmdir_failed", Some(p), None) => write!(
-                        f,
-                        "mem '{mem}' was unregistered but rmdir of \
+                ),
+                ("rmdir_failed", Some(p), None) => write!(
+                    f,
+                    "mem '{mem}' was unregistered but rmdir of \
                          {p:?} failed. Files remain on disk."
-                    ),
-                    ("backend_prune_failed", _, Some(e)) => write!(
-                        f,
-                        "mem '{mem}' was unregistered but backend \
+                ),
+                ("backend_prune_failed", _, Some(e)) => write!(
+                    f,
+                    "mem '{mem}' was unregistered but backend \
                          artifact cleanup failed: {e}. The mem-repo \
                          branch and/or `__MEMSTEAD:mems/.../config.json` \
                          entry may survive; rerun delete with the same \
                          arguments or have an operator inspect."
-                    ),
-                    ("backend_prune_failed", _, None) => write!(
-                        f,
-                        "mem '{mem}' was unregistered but backend \
+                ),
+                ("backend_prune_failed", _, None) => write!(
+                    f,
+                    "mem '{mem}' was unregistered but backend \
                          artifact cleanup failed. The mem-repo branch \
                          and/or `__MEMSTEAD` config entry may survive."
-                    ),
-                    _ => write!(
-                        f,
-                        "mem '{mem}' was unregistered but \
+                ),
+                _ => write!(
+                    f,
+                    "mem '{mem}' was unregistered but \
                          `delete_files: true` did not run to completion \
                          (reason: {reason})."
-                    ),
-                }
-            }
+                ),
+            },
         }
     }
 }
@@ -1408,7 +1366,10 @@ impl WarningHint {
             // (which is truly ignored). A consumer branches on `code`
             // alone to learn whether its filter took effect, without
             // inspecting `declared_on_other_types`.
-            Self::UnknownFilterKey { declared_on_other_types, .. } => {
+            Self::UnknownFilterKey {
+                declared_on_other_types,
+                ..
+            } => {
                 if declared_on_other_types.is_empty() {
                     "UNKNOWN_FILTER_KEY"
                 } else {
@@ -1421,7 +1382,10 @@ impl WarningHint {
             Self::NeighbourhoodCapped { .. } => "NEIGHBOURHOOD_CAPPED",
             Self::SearchResultsTruncated { .. } => "SEARCH_RESULTS_TRUNCATED",
             Self::RangeFilterKeyMalformed { .. } => "RANGE_FILTER_KEY_MALFORMED",
-            Self::UnknownRangeFilterField { declared_on_other_types, .. } => {
+            Self::UnknownRangeFilterField {
+                declared_on_other_types,
+                ..
+            } => {
                 if declared_on_other_types.is_empty() {
                     "UNKNOWN_RANGE_FILTER_FIELD"
                 } else {
@@ -1442,9 +1406,7 @@ impl WarningHint {
             Self::AutoStubCreated { .. } => "AUTO_STUB_CREATED",
             Self::SelfLinkIgnored { .. } => "SELF_LINK_IGNORED",
             Self::ParsedRelationInvalid { .. } => "PARSED_RELATION_INVALID",
-            Self::ResidualStubForReadOnlyReferrers { .. } => {
-                "RESIDUAL_STUB_FOR_READONLY_REFERRERS"
-            }
+            Self::ResidualStubForReadOnlyReferrers { .. } => "RESIDUAL_STUB_FOR_READONLY_REFERRERS",
             Self::MemFilesNotDeleted { .. } => "MEM_FILES_NOT_DELETED",
             Self::MemReattachedAfterUnregister { .. } => "MEM_REATTACHED_AFTER_UNREGISTER",
             Self::AmbiguousDescriptionDelimiter { .. } => "AMBIGUOUS_DESCRIPTION_DELIMITER",
@@ -1544,7 +1506,10 @@ impl WarningHint {
                 key: "x".into(),
                 allowed: vec![],
             },
-            WarningHint::LimitClamped { requested: 1, actual: 1 },
+            WarningHint::LimitClamped {
+                requested: 1,
+                actual: 1,
+            },
             WarningHint::SearchResultsTruncated {
                 kept: 12,
                 budget: 12_000,
@@ -1601,9 +1566,7 @@ impl WarningHint {
             },
             WarningHint::SuspiciousNestedPrefix {
                 from: EntityId("test-mem-plugin--audit-skill".into()),
-                resolved_id: EntityId(
-                    "test-mem-plugin--plugin--memstead-mcp-tool-surface".into(),
-                ),
+                resolved_id: EntityId("test-mem-plugin--plugin--memstead-mcp-tool-surface".into()),
                 candidate_target: Some(EntityId(
                     "test-mem-plugin--memstead-mcp-tool-surface".into(),
                 )),
@@ -1762,7 +1725,11 @@ impl WarningHint {
             Self::FilterValueMultiMember { key, value } => {
                 serde_json::json!({ "key": key, "value": value })
             }
-            Self::FilterValueNotInEnum { key, value, allowed } => {
+            Self::FilterValueNotInEnum {
+                key,
+                value,
+                allowed,
+            } => {
                 serde_json::json!({ "key": key, "value": value, "allowed": allowed })
             }
             Self::NeighbourhoodCapped { kept, total } => {
@@ -1784,19 +1751,12 @@ impl WarningHint {
                 "declared_on_other_types": declared_on_other_types,
             }),
             Self::FieldNotRangeFilterable { field } => serde_json::json!({ "field": field }),
-            Self::SearchMemIndexUnavailable {
-                mem,
-                reason,
-                error,
-            } => serde_json::json!({
+            Self::SearchMemIndexUnavailable { mem, reason, error } => serde_json::json!({
                 "mem": mem,
                 "reason": reason,
                 "error": error,
             }),
-            Self::TitleTrimmed {
-                original,
-                trimmed,
-            } => serde_json::json!({
+            Self::TitleTrimmed { original, trimmed } => serde_json::json!({
                 "original": original,
                 "trimmed": trimmed,
             }),
@@ -1868,7 +1828,14 @@ impl WarningHint {
                 "entities_loaded": entities_loaded,
             }),
             Self::AutoStubCreated { stub_id } => serde_json::json!({ "stub_id": stub_id }),
-            Self::ParsedRelationInvalid { entity_id, rel_type, target, reason, origin, recovery } => {
+            Self::ParsedRelationInvalid {
+                entity_id,
+                rel_type,
+                target,
+                reason,
+                origin,
+                recovery,
+            } => {
                 serde_json::json!({
                     "entity_id": entity_id,
                     "rel_type": rel_type,
@@ -1882,13 +1849,21 @@ impl WarningHint {
                 "id": id,
                 "referrers": referrers,
             }),
-            Self::MemFilesNotDeleted { mem, reason, path, error } => serde_json::json!({
+            Self::MemFilesNotDeleted {
+                mem,
+                reason,
+                path,
+                error,
+            } => serde_json::json!({
                 "mem": mem,
                 "reason": reason,
                 "path": path,
                 "error": error,
             }),
-            Self::MemReattachedAfterUnregister { mem, unregistered_at } => serde_json::json!({
+            Self::MemReattachedAfterUnregister {
+                mem,
+                unregistered_at,
+            } => serde_json::json!({
                 "mem": mem,
                 "unregistered_at": unregistered_at,
             }),
@@ -1903,13 +1878,25 @@ impl WarningHint {
                 "target": target,
                 "trailing": trailing,
             }),
-            Self::ParseMissingRequiredDescription { from, rel_type, target } => {
+            Self::ParseMissingRequiredDescription {
+                from,
+                rel_type,
+                target,
+            } => {
                 serde_json::json!({ "from": from, "rel_type": rel_type, "target": target })
             }
-            Self::ParseDescriptionNotPermitted { from, rel_type, target } => {
+            Self::ParseDescriptionNotPermitted {
+                from,
+                rel_type,
+                target,
+            } => {
                 serde_json::json!({ "from": from, "rel_type": rel_type, "target": target })
             }
-            Self::SchemaPinMismatch { mem, config_pin, mount_pin } => {
+            Self::SchemaPinMismatch {
+                mem,
+                config_pin,
+                mount_pin,
+            } => {
                 serde_json::json!({
                     "mem": mem,
                     "config_pin": config_pin,
@@ -2054,6 +2041,7 @@ pub struct RenameResult {
     ///     `rename_entity` and any wiki-link rewrites in referrers.
     ///   - Slug-noop short-circuit: the unchanged on-disk hash (no write
     ///     happened).
+    ///
     /// Pass this as `expected_hash` on the next hash-protected op
     /// (`memstead_update`, `memstead_rename`, `memstead_delete`) on the entity — no
     /// `memstead_entity` re-read required. Mirrors `RelateResult._hash`.
@@ -2827,10 +2815,8 @@ mod tests {
     #[test]
     fn query_accepts_missing_and_null_fields() {
         let with_missing: Query = serde_json::from_str("{}").unwrap();
-        let with_nulls: Query = serde_json::from_str(
-            r#"{"any":[],"not":[],"phrase":null,"field":null}"#,
-        )
-        .unwrap();
+        let with_nulls: Query =
+            serde_json::from_str(r#"{"any":[],"not":[],"phrase":null,"field":null}"#).unwrap();
         assert!(with_missing.is_empty());
         assert!(with_nulls.is_empty());
     }
@@ -2875,7 +2861,12 @@ mod tests {
         };
         let json = to_envelope(&w);
         assert_eq!(json["code"], "MISSING_REQUIRED_SECTION");
-        assert!(json["message"].as_str().unwrap().contains("required section"));
+        assert!(
+            json["message"]
+                .as_str()
+                .unwrap()
+                .contains("required section")
+        );
         assert_eq!(json["details"]["entity_type"], "spec");
         assert_eq!(json["details"]["key"], "purpose");
         assert_eq!(json["details"]["heading"], "Purpose");

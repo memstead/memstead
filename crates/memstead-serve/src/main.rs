@@ -48,7 +48,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // content mem so the read tier serves real content with no setup.
     let (mem, storage) = if let Ok(archive) = std::env::var("MEMSTEAD_SERVE_ARCHIVE") {
         let mem = std::env::var("MEMSTEAD_SERVE_MEM").unwrap_or_else(|_| "flagship".to_string());
-        (mem, MountStorage::Archive { path: PathBuf::from(archive) })
+        (
+            mem,
+            MountStorage::Archive {
+                path: PathBuf::from(archive),
+            },
+        )
     } else {
         let dir = materialize_embedded_content()?;
         eprintln!(
@@ -56,8 +61,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 content mem from {}",
             dir.display()
         );
-        let mem =
-            std::env::var("MEMSTEAD_SERVE_MEM").unwrap_or_else(|_| EMBEDDED_CONTENT_MEM.to_string());
+        let mem = std::env::var("MEMSTEAD_SERVE_MEM")
+            .unwrap_or_else(|_| EMBEDDED_CONTENT_MEM.to_string());
         (mem, MountStorage::Folder { path: dir })
     };
     // `/api` and `/mcp` each get their own read-only engine over the same

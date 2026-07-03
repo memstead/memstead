@@ -39,7 +39,10 @@ pub enum WorkspaceEditError {
     InvalidToml { path: PathBuf, message: String },
     /// `add_create_rule` with `--before <p>` where `<p>` isn't an
     /// existing pattern in the section.
-    BeforePatternNotFound { section: &'static str, pattern: String },
+    BeforePatternNotFound {
+        section: &'static str,
+        pattern: String,
+    },
     /// `grant_cross_link` with `*` against an existing specific list,
     /// or with a specific target against an existing `*`. Operators
     /// pick a single shape per `from`-mem.
@@ -58,7 +61,10 @@ pub enum WorkspaceEditError {
         requested: Vec<String>,
     },
     /// IO failure writing the file back.
-    Io { path: PathBuf, source: std::io::Error },
+    Io {
+        path: PathBuf,
+        source: std::io::Error,
+    },
 }
 
 /// Idempotency notices emitted by the writer when a call lands on
@@ -70,10 +76,16 @@ pub enum WorkspaceEditError {
 pub enum WorkspaceEditWarning {
     /// `add_create_rule` / `add_delete_rule` called with a pattern
     /// that already has a matching entry. File unchanged.
-    RuleAlreadyPresent { section: &'static str, pattern: String },
+    RuleAlreadyPresent {
+        section: &'static str,
+        pattern: String,
+    },
     /// `remove_create_rule` / `remove_delete_rule` called with a
     /// pattern that has no matching entry. File unchanged.
-    RuleNotFoundNoop { section: &'static str, pattern: String },
+    RuleNotFoundNoop {
+        section: &'static str,
+        pattern: String,
+    },
     /// `grant_cross_link` called with a `(from, to)` pair already
     /// permitted (target already in the allowlist, or `*` already
     /// set). File unchanged.
@@ -204,18 +216,26 @@ fn load(workspace_root: &Path) -> Result<(PathBuf, DocumentMut), WorkspaceEditEr
         if source.kind() == std::io::ErrorKind::NotFound {
             WorkspaceEditError::WorkspaceNotInitialised { path: path.clone() }
         } else {
-            WorkspaceEditError::Io { path: path.clone(), source }
+            WorkspaceEditError::Io {
+                path: path.clone(),
+                source,
+            }
         }
     })?;
-    let doc: DocumentMut = text.parse().map_err(|e: toml_edit::TomlError| {
-        WorkspaceEditError::InvalidToml { path: path.clone(), message: e.to_string() }
-    })?;
+    let doc: DocumentMut =
+        text.parse()
+            .map_err(|e: toml_edit::TomlError| WorkspaceEditError::InvalidToml {
+                path: path.clone(),
+                message: e.to_string(),
+            })?;
     Ok((path, doc))
 }
 
 fn save(path: &Path, doc: &DocumentMut) -> Result<(), WorkspaceEditError> {
-    fs::write(path, doc.to_string())
-        .map_err(|source| WorkspaceEditError::Io { path: path.to_path_buf(), source })
+    fs::write(path, doc.to_string()).map_err(|source| WorkspaceEditError::Io {
+        path: path.to_path_buf(),
+        source,
+    })
 }
 
 /// Either-or shape mirroring `[cross_mem_links]` semantics on disk:
@@ -406,9 +426,7 @@ pub fn grant_cross_link(
                 mem: from.to_string(),
             });
         } else if !known_mems.iter().any(|v| v == name) {
-            warnings.push(WorkspaceEditWarning::CrossLinkTargetUnregistered {
-                to: name.clone(),
-            });
+            warnings.push(WorkspaceEditWarning::CrossLinkTargetUnregistered { to: name.clone() });
         }
     }
 
@@ -423,9 +441,7 @@ pub fn grant_cross_link(
             arr.push(name.as_str());
             table.insert(from, Item::Value(Value::Array(arr)));
         }
-        (Some(Item::Value(Value::String(s))), CrossLinkTarget::Wildcard)
-            if s.value() == "*" =>
-        {
+        (Some(Item::Value(Value::String(s))), CrossLinkTarget::Wildcard) if s.value() == "*" => {
             warnings.push(WorkspaceEditWarning::GrantAlreadyPresent {
                 from: from.to_string(),
                 to: "*".to_string(),
@@ -442,9 +458,8 @@ pub fn grant_cross_link(
         (Some(Item::Value(Value::Array(_))), CrossLinkTarget::Wildcard) => {
             return Err(WorkspaceEditError::CrossLinkConflict {
                 from: from.to_string(),
-                message:
-                    "specific allowlist already set — revoke every entry before granting `*`"
-                        .to_string(),
+                message: "specific allowlist already set — revoke every entry before granting `*`"
+                    .to_string(),
             });
         }
         (Some(Item::Value(Value::Array(arr))), CrossLinkTarget::Named(name)) => {
@@ -581,77 +596,79 @@ pub fn scrub_policy_for_deleted_mem(
             return Ok(Vec::new());
         }
         Err(source) => {
-            return Err(WorkspaceEditError::Io { path: path.clone(), source });
+            return Err(WorkspaceEditError::Io {
+                path: path.clone(),
+                source,
+            });
         }
     };
-    let mut doc: DocumentMut = text.parse().map_err(|e: toml_edit::TomlError| {
-        WorkspaceEditError::InvalidToml { path: path.clone(), message: e.to_string() }
-    })?;
+    let mut doc: DocumentMut =
+        text.parse()
+            .map_err(|e: toml_edit::TomlError| WorkspaceEditError::InvalidToml {
+                path: path.clone(),
+                message: e.to_string(),
+            })?;
 
     let mut scrubbed: Vec<ScrubbedEntry> = Vec::new();
 
-    if let Some(item) = doc.get_mut("cross_mem_links") {
-        if let Some(table) = item.as_table_mut() {
-            // The deleted mem's own key — every grant `mem_name
-            // → <anything>` is dropped wholesale.
-            if let Some(removed) = table.remove(mem_name) {
-                let targets = match removed {
-                    Item::Value(Value::Array(arr)) => arr
-                        .iter()
-                        .filter_map(|v| match v {
-                            Value::String(s) => Some(s.value().to_string()),
-                            _ => None,
-                        })
-                        .collect::<Vec<_>>(),
-                    Item::Value(Value::String(s)) => vec![s.value().to_string()],
-                    _ => Vec::new(),
-                };
-                if targets.is_empty() {
+    if let Some(item) = doc.get_mut("cross_mem_links")
+        && let Some(table) = item.as_table_mut()
+    {
+        // The deleted mem's own key — every grant `mem_name
+        // → <anything>` is dropped wholesale.
+        if let Some(removed) = table.remove(mem_name) {
+            let targets = match removed {
+                Item::Value(Value::Array(arr)) => arr
+                    .iter()
+                    .filter_map(|v| match v {
+                        Value::String(s) => Some(s.value().to_string()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>(),
+                Item::Value(Value::String(s)) => vec![s.value().to_string()],
+                _ => Vec::new(),
+            };
+            if targets.is_empty() {
+                scrubbed.push(ScrubbedEntry::CrossLink {
+                    from: mem_name.to_string(),
+                    to: "*".to_string(),
+                });
+            } else {
+                for to in targets {
                     scrubbed.push(ScrubbedEntry::CrossLink {
                         from: mem_name.to_string(),
-                        to: "*".to_string(),
+                        to,
                     });
-                } else {
-                    for to in targets {
-                        scrubbed.push(ScrubbedEntry::CrossLink {
-                            from: mem_name.to_string(),
-                            to,
-                        });
-                    }
                 }
             }
-            // Peer entries referencing the deleted mem as a grant
-            // target — drop the entry from the array; collapse empty
-            // arrays.
-            let keys: Vec<String> = table.iter().map(|(k, _)| k.to_string()).collect();
-            for key in keys {
-                let drop_key = match table.get(&key) {
-                    Some(Item::Value(Value::Array(arr))) => {
-                        if array_contains(arr, mem_name) {
-                            let mut arr = arr.clone();
-                            arr.retain(|v| match v {
-                                Value::String(s) => s.value() != mem_name,
-                                _ => true,
-                            });
-                            scrubbed.push(ScrubbedEntry::CrossLink {
-                                from: key.clone(),
-                                to: mem_name.to_string(),
-                            });
-                            if arr.is_empty() {
-                                true
-                            } else {
-                                table.insert(&key, Item::Value(Value::Array(arr)));
-                                false
-                            }
-                        } else {
-                            false
-                        }
+        }
+        // Peer entries referencing the deleted mem as a grant
+        // target — drop the entry from the array; collapse empty
+        // arrays.
+        let keys: Vec<String> = table.iter().map(|(k, _)| k.to_string()).collect();
+        for key in keys {
+            let drop_key = match table.get(&key) {
+                Some(Item::Value(Value::Array(arr))) if array_contains(arr, mem_name) => {
+                    let mut arr = arr.clone();
+                    arr.retain(|v| match v {
+                        Value::String(s) => s.value() != mem_name,
+                        _ => true,
+                    });
+                    scrubbed.push(ScrubbedEntry::CrossLink {
+                        from: key.clone(),
+                        to: mem_name.to_string(),
+                    });
+                    if arr.is_empty() {
+                        true
+                    } else {
+                        table.insert(&key, Item::Value(Value::Array(arr)));
+                        false
                     }
-                    _ => false,
-                };
-                if drop_key {
-                    table.remove(&key);
                 }
+                _ => false,
+            };
+            if drop_key {
+                table.remove(&key);
             }
         }
     }
@@ -694,7 +711,10 @@ fn ensure_table<'a>(doc: &'a mut DocumentMut, name: &str) -> &'a mut Table {
         t.set_implicit(false);
         doc.insert(name, Item::Table(t));
     }
-    doc.get_mut(name).unwrap().as_table_mut().expect("ensured table shape")
+    doc.get_mut(name)
+        .unwrap()
+        .as_table_mut()
+        .expect("ensured table shape")
 }
 
 fn ensure_array_of_tables<'a>(
@@ -755,7 +775,10 @@ fn schema_sets_equal(a: &[String], b: &[String]) -> bool {
 }
 
 fn cross_link_value_item(targets: &[CrossLinkTarget]) -> Item {
-    if targets.iter().any(|t| matches!(t, CrossLinkTarget::Wildcard)) {
+    if targets
+        .iter()
+        .any(|t| matches!(t, CrossLinkTarget::Wildcard))
+    {
         Item::Value(Value::from("*"))
     } else {
         let mut arr = Array::new();
@@ -780,7 +803,8 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
-    const DEFAULT_BODY: &str = "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n";
+    const DEFAULT_BODY: &str =
+        "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n";
 
     fn seed(body: &str) -> TempDir {
         let tmp = TempDir::new().unwrap();
@@ -820,7 +844,10 @@ mod tests {
         let body = read(tmp.path());
         assert!(body.contains("[[mem_management.create]]"), "got:\n{body}");
         assert!(body.contains("pattern = \"exec-*\""), "got:\n{body}");
-        assert!(body.contains("schemas = [\"default@1.0.0\"]"), "got:\n{body}");
+        assert!(
+            body.contains("schemas = [\"default@1.0.0\"]"),
+            "got:\n{body}"
+        );
     }
 
     /// Adding a duplicate rule is idempotent — the call returns
@@ -864,8 +891,14 @@ mod tests {
     #[test]
     fn add_create_rule_differing_schemas_refused_file_unchanged() {
         let tmp = seed(DEFAULT_BODY);
-        add_create_rule(tmp.path(), "scratch", &["software@0.1.0".to_string()], None, None)
-            .unwrap();
+        add_create_rule(
+            tmp.path(),
+            "scratch",
+            &["software@0.1.0".to_string()],
+            None,
+            None,
+        )
+        .unwrap();
         let body_before = read(tmp.path());
 
         let err = add_create_rule(
@@ -923,22 +956,46 @@ mod tests {
     #[test]
     fn revoke_then_readd_applies_the_new_schemas() {
         let tmp = seed(DEFAULT_BODY);
-        add_create_rule(tmp.path(), "scratch", &["software@0.1.0".to_string()], None, None)
-            .unwrap();
+        add_create_rule(
+            tmp.path(),
+            "scratch",
+            &["software@0.1.0".to_string()],
+            None,
+            None,
+        )
+        .unwrap();
         remove_create_rule(tmp.path(), "scratch").unwrap();
-        let warnings =
-            add_create_rule(tmp.path(), "scratch", &["planning@0.1.0".to_string()], None, None)
-                .expect("re-add after revoke must succeed");
+        let warnings = add_create_rule(
+            tmp.path(),
+            "scratch",
+            &["planning@0.1.0".to_string()],
+            None,
+            None,
+        )
+        .expect("re-add after revoke must succeed");
         assert!(warnings.is_empty(), "fresh add returns no warnings");
         let body = read(tmp.path());
-        assert!(body.contains("schemas = [\"planning@0.1.0\"]"), "new pins stored; got:\n{body}");
-        assert!(!body.contains("software@0.1.0"), "old pins gone; got:\n{body}");
+        assert!(
+            body.contains("schemas = [\"planning@0.1.0\"]"),
+            "new pins stored; got:\n{body}"
+        );
+        assert!(
+            !body.contains("software@0.1.0"),
+            "old pins gone; got:\n{body}"
+        );
     }
 
     #[test]
     fn add_create_rule_before_lifts_priority() {
         let tmp = seed(DEFAULT_BODY);
-        add_create_rule(tmp.path(), "z-*", &["default@1.0.0".to_string()], None, None).unwrap();
+        add_create_rule(
+            tmp.path(),
+            "z-*",
+            &["default@1.0.0".to_string()],
+            None,
+            None,
+        )
+        .unwrap();
         add_create_rule(
             tmp.path(),
             "a-*",
@@ -950,7 +1007,10 @@ mod tests {
         let body = read(tmp.path());
         let a_idx = body.find("pattern = \"a-*\"").expect("a-* must exist");
         let z_idx = body.find("pattern = \"z-*\"").expect("z-* must exist");
-        assert!(a_idx < z_idx, "--before must place new rule above target; got:\n{body}");
+        assert!(
+            a_idx < z_idx,
+            "--before must place new rule above target; got:\n{body}"
+        );
     }
 
     #[test]
@@ -979,7 +1039,10 @@ mod tests {
         )
         .unwrap();
         let body = read(tmp.path());
-        assert!(body.contains("default_cross_links = [\"engine\"]"), "got:\n{body}");
+        assert!(
+            body.contains("default_cross_links = [\"engine\"]"),
+            "got:\n{body}"
+        );
     }
 
     #[test]
@@ -1000,8 +1063,14 @@ mod tests {
     #[test]
     fn remove_create_rule_succeeds() {
         let tmp = seed(DEFAULT_BODY);
-        add_create_rule(tmp.path(), "exec-*", &["default@1.0.0".to_string()], None, None)
-            .unwrap();
+        add_create_rule(
+            tmp.path(),
+            "exec-*",
+            &["default@1.0.0".to_string()],
+            None,
+            None,
+        )
+        .unwrap();
         remove_create_rule(tmp.path(), "exec-*").unwrap();
         let body = read(tmp.path());
         assert!(!body.contains("pattern = \"exec-*\""), "got:\n{body}");
@@ -1017,7 +1086,10 @@ mod tests {
         assert_eq!(warnings.len(), 1);
         assert_eq!(warnings[0].code(), "RULE_NOT_FOUND_NOOP");
         let body_after = read(tmp.path());
-        assert_eq!(body_before, body_after, "no-op remove must not touch the file");
+        assert_eq!(
+            body_before, body_after,
+            "no-op remove must not touch the file"
+        );
     }
 
     #[test]
@@ -1035,8 +1107,13 @@ mod tests {
     #[test]
     fn grant_cross_link_creates_named_list() {
         let tmp = seed(DEFAULT_BODY);
-        grant_cross_link(tmp.path(), "plugin", &CrossLinkTarget::Named("engine".to_string()), &known())
-            .unwrap();
+        grant_cross_link(
+            tmp.path(),
+            "plugin",
+            &CrossLinkTarget::Named("engine".to_string()),
+            &known(),
+        )
+        .unwrap();
         let body = read(tmp.path());
         assert!(body.contains("plugin = [\"engine\"]"), "got:\n{body}");
     }
@@ -1044,12 +1121,25 @@ mod tests {
     #[test]
     fn grant_cross_link_appends_named_target() {
         let tmp = seed(DEFAULT_BODY);
-        grant_cross_link(tmp.path(), "macos", &CrossLinkTarget::Named("engine".to_string()), &known())
-            .unwrap();
-        grant_cross_link(tmp.path(), "macos", &CrossLinkTarget::Named("plugin".to_string()), &known())
-            .unwrap();
+        grant_cross_link(
+            tmp.path(),
+            "macos",
+            &CrossLinkTarget::Named("engine".to_string()),
+            &known(),
+        )
+        .unwrap();
+        grant_cross_link(
+            tmp.path(),
+            "macos",
+            &CrossLinkTarget::Named("plugin".to_string()),
+            &known(),
+        )
+        .unwrap();
         let body = read(tmp.path());
-        assert!(body.contains("macos = [\"engine\", \"plugin\"]"), "got:\n{body}");
+        assert!(
+            body.contains("macos = [\"engine\", \"plugin\"]"),
+            "got:\n{body}"
+        );
     }
 
     #[test]
@@ -1066,8 +1156,13 @@ mod tests {
     #[test]
     fn grant_cross_link_duplicate_named_is_idempotent_with_warning() {
         let tmp = seed(DEFAULT_BODY);
-        grant_cross_link(tmp.path(), "plugin", &CrossLinkTarget::Named("engine".to_string()), &known())
-            .unwrap();
+        grant_cross_link(
+            tmp.path(),
+            "plugin",
+            &CrossLinkTarget::Named("engine".to_string()),
+            &known(),
+        )
+        .unwrap();
         let body_before = read(tmp.path());
         let warnings = grant_cross_link(
             tmp.path(),
@@ -1079,7 +1174,10 @@ mod tests {
         assert_eq!(warnings.len(), 1);
         assert_eq!(warnings[0].code(), "GRANT_ALREADY_PRESENT");
         let body_after = read(tmp.path());
-        assert_eq!(body_before, body_after, "duplicate grant must not rewrite the file");
+        assert_eq!(
+            body_before, body_after,
+            "duplicate grant must not rewrite the file"
+        );
     }
 
     #[test]
@@ -1164,36 +1262,68 @@ mod tests {
             &registered,
         )
         .unwrap();
-        assert!(warnings.is_empty(), "registered target must warn nothing: {warnings:?}");
+        assert!(
+            warnings.is_empty(),
+            "registered target must warn nothing: {warnings:?}"
+        );
     }
 
     #[test]
     fn revoke_cross_link_removes_named_target() {
         let tmp = seed(DEFAULT_BODY);
-        grant_cross_link(tmp.path(), "macos", &CrossLinkTarget::Named("engine".to_string()), &known())
-            .unwrap();
-        grant_cross_link(tmp.path(), "macos", &CrossLinkTarget::Named("plugin".to_string()), &known())
-            .unwrap();
-        revoke_cross_link(tmp.path(), "macos", &CrossLinkTarget::Named("engine".to_string()))
-            .unwrap();
+        grant_cross_link(
+            tmp.path(),
+            "macos",
+            &CrossLinkTarget::Named("engine".to_string()),
+            &known(),
+        )
+        .unwrap();
+        grant_cross_link(
+            tmp.path(),
+            "macos",
+            &CrossLinkTarget::Named("plugin".to_string()),
+            &known(),
+        )
+        .unwrap();
+        revoke_cross_link(
+            tmp.path(),
+            "macos",
+            &CrossLinkTarget::Named("engine".to_string()),
+        )
+        .unwrap();
         let body = read(tmp.path());
         // toml_edit preserves the original array's inner whitespace
         // (e.g. `[ "plugin"]` if the original was `["engine", "plugin"]`).
         // Assert on the key + remaining target + the dropped target.
         assert!(body.contains("macos = ["), "got:\n{body}");
         assert!(body.contains("\"plugin\""), "got:\n{body}");
-        assert!(!body.contains("\"engine\""), "engine target must be removed, got:\n{body}");
+        assert!(
+            !body.contains("\"engine\""),
+            "engine target must be removed, got:\n{body}"
+        );
     }
 
     #[test]
     fn revoke_cross_link_empties_key() {
         let tmp = seed(DEFAULT_BODY);
-        grant_cross_link(tmp.path(), "macos", &CrossLinkTarget::Named("engine".to_string()), &known())
-            .unwrap();
-        revoke_cross_link(tmp.path(), "macos", &CrossLinkTarget::Named("engine".to_string()))
-            .unwrap();
+        grant_cross_link(
+            tmp.path(),
+            "macos",
+            &CrossLinkTarget::Named("engine".to_string()),
+            &known(),
+        )
+        .unwrap();
+        revoke_cross_link(
+            tmp.path(),
+            "macos",
+            &CrossLinkTarget::Named("engine".to_string()),
+        )
+        .unwrap();
         let body = read(tmp.path());
-        assert!(!body.contains("macos"), "empty allowlist must drop the key, got:\n{body}");
+        assert!(
+            !body.contains("macos"),
+            "empty allowlist must drop the key, got:\n{body}"
+        );
     }
 
     #[test]
@@ -1221,7 +1351,10 @@ mod tests {
         assert_eq!(warnings.len(), 1);
         assert_eq!(warnings[0].code(), "GRANT_NOT_FOUND");
         let body_after = read(tmp.path());
-        assert_eq!(body_before, body_after, "no-op revoke must not touch the file");
+        assert_eq!(
+            body_before, body_after,
+            "no-op revoke must not touch the file"
+        );
     }
 
     #[test]
@@ -1267,8 +1400,14 @@ name = \"file-two-layer\"\n\
 plugin = [\"engine\"]  # inline pin\n";
         let tmp = seed(body);
 
-        add_create_rule(tmp.path(), "exec-*", &["default@1.0.0".to_string()], None, None)
-            .unwrap();
+        add_create_rule(
+            tmp.path(),
+            "exec-*",
+            &["default@1.0.0".to_string()],
+            None,
+            None,
+        )
+        .unwrap();
 
         let new_body = read(tmp.path());
         assert!(new_body.contains("# operator comment 1"));
@@ -1347,8 +1486,14 @@ plugin = [\"engine\"]  # inline pin\n";
             2,
             "exact-name mem_management.{{create,delete}} rules for `other` must survive — got:\n{after}"
         );
-        assert!(after.contains("pattern = \"*\""), "wildcard `*` rule must survive");
-        assert!(after.contains("pattern = \"team/*\""), "glob `team/*` rule must survive");
+        assert!(
+            after.contains("pattern = \"*\""),
+            "wildcard `*` rule must survive"
+        );
+        assert!(
+            after.contains("pattern = \"team/*\""),
+            "glob `team/*` rule must survive"
+        );
     }
 
     /// Acceptance complement: a refused (or pre-init) workspace.toml

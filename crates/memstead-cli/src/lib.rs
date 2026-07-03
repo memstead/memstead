@@ -93,11 +93,7 @@ impl CliError {
     /// human message. Every callsite spells the code at construction
     /// time — there is no Option-default-to-INTERNAL fallback. Use
     /// [`INTERNAL_CODE`] explicitly for genuinely-systemic paths.
-    pub fn new(
-        kind: ExitKind,
-        code: &'static str,
-        message: impl Into<String>,
-    ) -> Self {
+    pub fn new(kind: ExitKind, code: &'static str, message: impl Into<String>) -> Self {
         Self {
             kind,
             code,
@@ -142,11 +138,12 @@ impl CliError {
         use memstead_base::EngineError::*;
         let code = e.code();
         let (kind, details) = match &e {
-            NotFound { id } => (
-                ExitKind::NotFound,
-                Some(serde_json::json!({ "id": id })),
-            ),
-            HashMismatch { id, current, is_stub } => (
+            NotFound { id } => (ExitKind::NotFound, Some(serde_json::json!({ "id": id }))),
+            HashMismatch {
+                id,
+                current,
+                is_stub,
+            } => (
                 ExitKind::HashMismatch,
                 Some(serde_json::json!({
                     "id": id,
@@ -200,7 +197,12 @@ impl CliError {
                     "missing": missing,
                 })),
             ),
-            RelationHasBodyLinks { from_id, to_id, rel_type, body_links } => (
+            RelationHasBodyLinks {
+                from_id,
+                to_id,
+                rel_type,
+                body_links,
+            } => (
                 ExitKind::Validation,
                 Some(serde_json::json!({
                     "from_id": from_id,
@@ -229,7 +231,11 @@ impl CliError {
                     "reason": reason,
                 })),
             ),
-            InvalidWikiLinkMem { raw, section, reason } => (
+            InvalidWikiLinkMem {
+                raw,
+                section,
+                reason,
+            } => (
                 ExitKind::Validation,
                 Some(serde_json::json!({
                     "raw": raw,
@@ -244,7 +250,10 @@ impl CliError {
                     "to_mem": to_mem,
                 })),
             ),
-            CrossMemTargetNotFound { target_id, target_mem } => (
+            CrossMemTargetNotFound {
+                target_id,
+                target_mem,
+            } => (
                 ExitKind::Validation,
                 Some(serde_json::json!({
                     "target_id": target_id,
@@ -255,17 +264,16 @@ impl CliError {
                 ExitKind::Validation,
                 Some(serde_json::json!({ "id": id, "new_title": new_title })),
             ),
-            StubCannotRelate { id }
-            | StubNotUpdatable { id }
-            | StubNotRenamable { id } => (
-                ExitKind::Validation,
-                Some(serde_json::json!({ "id": id })),
-            ),
-            AlreadyExists { id } => (
-                ExitKind::Validation,
-                Some(serde_json::json!({ "id": id })),
-            ),
-            UnknownType { name, schema_ref, declared, suggestion } => (
+            StubCannotRelate { id } | StubNotUpdatable { id } | StubNotRenamable { id } => {
+                (ExitKind::Validation, Some(serde_json::json!({ "id": id })))
+            }
+            AlreadyExists { id } => (ExitKind::Validation, Some(serde_json::json!({ "id": id }))),
+            UnknownType {
+                name,
+                schema_ref,
+                declared,
+                suggestion,
+            } => (
                 ExitKind::Validation,
                 Some(serde_json::json!({
                     "name": name,
@@ -275,7 +283,10 @@ impl CliError {
                 })),
             ),
             Validation(v) => (ExitKind::Validation, Some(v.details())),
-            MemConfigIncomplete { mem, missing_fields } => (
+            MemConfigIncomplete {
+                mem,
+                missing_fields,
+            } => (
                 ExitKind::Validation,
                 Some(serde_json::json!({
                     "mem": mem,
@@ -339,7 +350,11 @@ impl CliError {
             // exhaustive match forces every new `EngineError` variant to
             // declare its CLI shape before it can land. Compiler is the
             // forcing function.
-            DescriptionNotPermitted { rel_type, from_id, to_id } => (
+            DescriptionNotPermitted {
+                rel_type,
+                from_id,
+                to_id,
+            } => (
                 ExitKind::Validation,
                 Some(serde_json::json!({
                     "rel_type": rel_type,
@@ -347,7 +362,11 @@ impl CliError {
                     "to_id": to_id,
                 })),
             ),
-            MissingRequiredDescription { rel_type, from_id, to_id } => (
+            MissingRequiredDescription {
+                rel_type,
+                from_id,
+                to_id,
+            } => (
                 ExitKind::Validation,
                 Some(serde_json::json!({
                     "rel_type": rel_type,
@@ -486,7 +505,11 @@ impl CliError {
                 ExitKind::Validation,
                 Some(serde_json::json!({ "section": section })),
             ),
-            PatchOldNotFound { section, current_content, truncated } => (
+            PatchOldNotFound {
+                section,
+                current_content,
+                truncated,
+            } => (
                 ExitKind::Validation,
                 Some(serde_json::json!({
                     "section": section,
@@ -494,7 +517,10 @@ impl CliError {
                     "truncated": truncated,
                 })),
             ),
-            RenameBlockedByCrossMemPolicy { from_mem, blocked_referrers } => {
+            RenameBlockedByCrossMemPolicy {
+                from_mem,
+                blocked_referrers,
+            } => {
                 let entries: Vec<_> = blocked_referrers
                     .iter()
                     .map(|r| {
@@ -597,7 +623,10 @@ impl CliError {
                 ExitKind::Validation,
                 Some(serde_json::json!({ "mem": mem })),
             ),
-            MemNameCollision { name, source_origin } => (
+            MemNameCollision {
+                name,
+                source_origin,
+            } => (
                 ExitKind::Validation,
                 Some(serde_json::json!({
                     "name": name,
@@ -629,10 +658,7 @@ impl CliError {
             // CLI surfaces the typed code via `e.code()` (already set
             // at the top of this fn) and the message text describes
             // the underlying cause.
-            DuplicateMem(name) => (
-                ExitKind::Generic,
-                Some(serde_json::json!({ "name": name })),
-            ),
+            DuplicateMem(name) => (ExitKind::Generic, Some(serde_json::json!({ "name": name }))),
             SchemaResolverInit(detail) => (
                 ExitKind::Generic,
                 Some(serde_json::json!({ "detail": detail })),
@@ -707,8 +733,8 @@ impl CliError {
 mod tests {
     use super::*;
     use crate::output::ExitKind;
-    use memstead_base::engine::MissingWikiLink;
     use memstead_base::EngineError;
+    use memstead_base::engine::MissingWikiLink;
 
     /// `DescriptionNotPermitted` must reach the CLI wire as
     /// `code: DESCRIPTION_NOT_PERMITTED` with `ExitKind::Validation`

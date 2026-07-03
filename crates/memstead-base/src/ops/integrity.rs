@@ -32,8 +32,8 @@ use crate::engine::mutation::unknown_type_error;
 use crate::entity::Entity;
 use crate::runtime_validator::{
     CrossMemRelCheck, READ_ONLY_METADATA_KEYS, RelationshipCheck, missing_required_fields,
-    missing_required_sections, parse_metadata_value, validate_cross_mem_edge,
-    validate_rel_shape, validate_rel_type, validate_section_keys,
+    missing_required_sections, parse_metadata_value, validate_cross_mem_edge, validate_rel_shape,
+    validate_rel_type, validate_section_keys,
 };
 use crate::store::Store;
 
@@ -261,9 +261,7 @@ fn lint_entity(
         } else {
             mem_schemas.get(target_mem)
         };
-        let cross_mem_different = target_schema
-            .map(|t| t.id().0 != src_name)
-            .unwrap_or(false);
+        let cross_mem_different = target_schema.map(|t| t.id().0 != src_name).unwrap_or(false);
         let target_type = store
             .get(&rel.target)
             .map(|e| e.entity_type.clone())
@@ -436,9 +434,7 @@ community:
                     ),
                     (
                         "req".to_string(),
-                        format!(
-                            "name: req\ndescription: t\nwhen_to_use: tests\n{PLAIN_TYPE_TAIL}"
-                        ),
+                        format!("name: req\ndescription: t\nwhen_to_use: tests\n{PLAIN_TYPE_TAIL}"),
                     ),
                 ],
             )
@@ -513,9 +509,7 @@ community:
         e
     }
 
-    fn schemas_for(
-        entries: &[(&str, Arc<Schema>)],
-    ) -> HashMap<String, Arc<Schema>> {
+    fn schemas_for(entries: &[(&str, Arc<Schema>)]) -> HashMap<String, Arc<Schema>> {
         entries
             .iter()
             .map(|(v, s)| (v.to_string(), s.clone()))

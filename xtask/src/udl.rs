@@ -48,7 +48,10 @@ fn method_name(line: &str) -> Option<String> {
     let paren = line.find('(')?;
     let before = &line[..paren];
     let last_token = before.split_whitespace().last()?;
-    if last_token.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+    if last_token
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_')
+    {
         Some(last_token.to_string())
     } else {
         None

@@ -75,10 +75,7 @@ pub(crate) fn normalise_ref_for_mem(mem: &str, raw: &str) -> String {
 /// tree-only SHAs that are not the canonical sentinel continue to
 /// refuse with `UNKNOWN_REF` — the sentinel handling is keyed on
 /// the literal hash, not on "is it a tree".
-fn resolve_tree<'r>(
-    repo: &'r gix::Repository,
-    raw: &str,
-) -> Result<gix::Tree<'r>, BackendError> {
+fn resolve_tree<'r>(repo: &'r gix::Repository, raw: &str) -> Result<gix::Tree<'r>, BackendError> {
     if raw == EMPTY_TREE_SHA {
         return Ok(repo.empty_tree());
     }
@@ -128,7 +125,9 @@ fn read_md_at_path(
     tree: &gix::Tree<'_>,
     path: &gix::bstr::BStr,
 ) -> Option<String> {
-    let entry = tree.lookup_entry_by_path(path.to_string().as_str()).ok()??;
+    let entry = tree
+        .lookup_entry_by_path(path.to_string().as_str())
+        .ok()??;
     let object = entry.object().ok()?;
     let blob = object.try_into_blob().ok()?;
     String::from_utf8(blob.data.clone()).ok()
@@ -138,7 +137,9 @@ fn read_md_at_path(
 /// blob. `(None, None)` when the blob is absent / non-UTF-8 or carries
 /// neither a `# ` heading nor a `type:` frontmatter field.
 fn peek_meta(raw: &Option<String>) -> (Option<String>, Option<String>) {
-    raw.as_deref().map(peek_title_and_type).unwrap_or((None, None))
+    raw.as_deref()
+        .map(peek_title_and_type)
+        .unwrap_or((None, None))
 }
 
 /// Two-ref structural diff. See module docs for the v1 scope and the
@@ -189,12 +190,12 @@ pub fn diff_two_refs(
             |change| -> Result<std::ops::ControlFlow<()>, std::convert::Infallible> {
                 match change {
                     Change::Addition { location, .. } => {
-                        if let Some(id) = path_to_entity_id(mem, location.as_ref()) {
+                        if let Some(id) = path_to_entity_id(mem, location) {
                             // Read the post-state blob unconditionally to
                             // populate `title`/`entity_type` (the docstring's
                             // metadata-only shape); keep the full body as
                             // `content_after` only when content is requested.
-                            let raw = read_md_at_path(&repo, &tree_b, location.as_ref());
+                            let raw = read_md_at_path(&repo, &tree_b, location);
                             let (title, entity_type) = peek_meta(&raw);
                             let content_after = if config.include_content { raw } else { None };
                             entries.push(EntityDiff::Added {
@@ -207,11 +208,11 @@ pub fn diff_two_refs(
                         }
                     }
                     Change::Deletion { location, .. } => {
-                        if let Some(id) = path_to_entity_id(mem, location.as_ref()) {
+                        if let Some(id) = path_to_entity_id(mem, location) {
                             // The entity still exists on `ref_a`; pull its
                             // metadata from that side so a deleted entry
                             // still carries `title`/`entity_type`.
-                            let raw = read_md_at_path(&repo, &tree_a, location.as_ref());
+                            let raw = read_md_at_path(&repo, &tree_a, location);
                             let (title, entity_type) = peek_meta(&raw);
                             let content_before = if config.include_content { raw } else { None };
                             entries.push(EntityDiff::Deleted {
@@ -224,13 +225,13 @@ pub fn diff_two_refs(
                         }
                     }
                     Change::Modification { location, .. } => {
-                        if let Some(id) = path_to_entity_id(mem, location.as_ref()) {
+                        if let Some(id) = path_to_entity_id(mem, location) {
                             // Post-state (`ref_b`) is the source for the
                             // current metadata, mirroring `memstead_changes_since`.
-                            let raw_b = read_md_at_path(&repo, &tree_b, location.as_ref());
+                            let raw_b = read_md_at_path(&repo, &tree_b, location);
                             let (title, entity_type) = peek_meta(&raw_b);
                             let content_before = if config.include_content {
-                                read_md_at_path(&repo, &tree_a, location.as_ref())
+                                read_md_at_path(&repo, &tree_a, location)
                             } else {
                                 None
                             };
@@ -250,15 +251,15 @@ pub fn diff_two_refs(
                         location,
                         ..
                     } => {
-                        let from = path_to_entity_id(mem, source_location.as_ref());
-                        let to = path_to_entity_id(mem, location.as_ref());
+                        let from = path_to_entity_id(mem, source_location);
+                        let to = path_to_entity_id(mem, location);
                         if let (Some(from_id), Some(to_id)) = (from, to) {
                             // Post-state (the `to` side) carries the surviving
                             // metadata.
-                            let raw_b = read_md_at_path(&repo, &tree_b, location.as_ref());
+                            let raw_b = read_md_at_path(&repo, &tree_b, location);
                             let (title, entity_type) = peek_meta(&raw_b);
                             let content_before = if config.include_content {
-                                read_md_at_path(&repo, &tree_a, source_location.as_ref())
+                                read_md_at_path(&repo, &tree_a, source_location)
                             } else {
                                 None
                             };
@@ -304,7 +305,7 @@ pub fn diff_two_refs(
 
     // Stable ordering: sort by primary entity id so consumers can
     // structurally compare diff outputs across runs.
-    entries.sort_by(|a, b| primary_id(a).cmp(&primary_id(b)));
+    entries.sort_by_key(primary_id);
 
     if config.include_ripple {
         let affected = collect_affected_ids(&entries);
@@ -340,12 +341,7 @@ fn apply_agent_notes_renames(
     entries: &mut Vec<EntityDiff>,
     config: &DiffConfig,
 ) {
-    let report = match crate::ops::agent_notes::agent_notes_since(
-        mem,
-        gitdir,
-        ref_a,
-        Some(ref_b),
-    ) {
+    let report = match crate::ops::agent_notes::agent_notes_since(mem, gitdir, ref_a, Some(ref_b)) {
         Ok(r) => r,
         // The notes walker may refuse with `ObjectNotFound` for
         // unrelated refs — that's expected and not fatal. The diff
@@ -366,8 +362,7 @@ fn apply_agent_notes_renames(
         let Some(id_str) = note.entity_id.as_deref() else {
             continue;
         };
-        let Some((old_id, new_id)) = crate::ops::changes::parse_rename_entity_field(id_str)
-        else {
+        let Some((old_id, new_id)) = crate::ops::changes::parse_rename_entity_field(id_str) else {
             continue;
         };
         forward.insert(old_id, new_id);
@@ -433,9 +428,9 @@ fn apply_agent_notes_renames(
         // into the promoted Renamed — the collapse must not drop the
         // `title`/`entity_type` the addition already resolved.
         let (title, entity_type) = match &entries[add_idx] {
-            EntityDiff::Added { title, entity_type, .. } => {
-                (title.clone(), entity_type.clone())
-            }
+            EntityDiff::Added {
+                title, entity_type, ..
+            } => (title.clone(), entity_type.clone()),
             _ => (None, None),
         };
         let promoted = EntityDiff::Renamed {
@@ -528,10 +523,12 @@ fn classify_parse_failure(content: &str) -> Option<String> {
 /// minimum-bar parse check classifies as [`EntityDiff::InvalidEntity`]
 /// instead. Preserves the surviving content on whichever side is
 /// available so consumers can still surface what's there.
-fn demote_invalid_entries(entries: &mut Vec<EntityDiff>) {
+fn demote_invalid_entries(entries: &mut [EntityDiff]) {
     for entry in entries.iter_mut() {
         match entry {
-            EntityDiff::Added { id, content_after, .. } => {
+            EntityDiff::Added {
+                id, content_after, ..
+            } => {
                 if let Some(c) = content_after.as_ref()
                     && let Some(err) = classify_parse_failure(c)
                 {
@@ -544,7 +541,9 @@ fn demote_invalid_entries(entries: &mut Vec<EntityDiff>) {
                     };
                 }
             }
-            EntityDiff::Deleted { id, content_before, .. } => {
+            EntityDiff::Deleted {
+                id, content_before, ..
+            } => {
                 if let Some(c) = content_before.as_ref()
                     && let Some(err) = classify_parse_failure(c)
                 {
@@ -571,7 +570,9 @@ fn demote_invalid_entries(entries: &mut Vec<EntityDiff>) {
                     .and_then(|c| classify_parse_failure(c));
                 if err_a.is_some() || err_b.is_some() {
                     let (side, error) = match (err_a, err_b) {
-                        (Some(a), Some(b)) => ("both".to_string(), format!("{a} (ref_a); {b} (ref_b)")),
+                        (Some(a), Some(b)) => {
+                            ("both".to_string(), format!("{a} (ref_a); {b} (ref_b)"))
+                        }
                         (Some(a), None) => ("ref_a".to_string(), a),
                         (None, Some(b)) => ("ref_b".to_string(), b),
                         (None, None) => unreachable!(),
@@ -755,14 +756,16 @@ mod tests {
     }
 
     fn write_and_commit(
-        gitdir: &PathBuf,
+        gitdir: &Path,
         mem: &str,
         entries: &[(&str, &str)],
         subject: &str,
     ) -> String {
-        let writer = GitTreeMemWriter::new(gitdir.clone(), format!("refs/heads/{mem}"));
+        let writer = GitTreeMemWriter::new(gitdir.to_path_buf(), format!("refs/heads/{mem}"));
         for (path, content) in entries {
-            writer.write_entity(Path::new(path), content.as_bytes()).unwrap();
+            writer
+                .write_entity(Path::new(path), content.as_bytes())
+                .unwrap();
         }
         writer.commit(subject, &CommitContext::internal()).unwrap()
     }
@@ -797,7 +800,10 @@ mod tests {
         assert_eq!(normalise_ref_for_mem("v", "HEAD"), "refs/heads/v");
         assert_eq!(normalise_ref_for_mem("v", "HEAD~5"), "refs/heads/v~5");
         assert_eq!(normalise_ref_for_mem("v", "HEAD^"), "refs/heads/v^");
-        assert_eq!(normalise_ref_for_mem("v", "HEAD^{tree}"), "refs/heads/v^{tree}");
+        assert_eq!(
+            normalise_ref_for_mem("v", "HEAD^{tree}"),
+            "refs/heads/v^{tree}"
+        );
         assert_eq!(normalise_ref_for_mem("v", "HEAD@{1}"), "refs/heads/v@{1}");
         // Refusal: a ref that merely starts with "HEAD" is left alone.
         assert_eq!(normalise_ref_for_mem("v", "HEADER"), "HEADER");
@@ -865,10 +871,11 @@ mod tests {
             "update beta + add gamma",
         );
         // Drop alpha in a third commit so it surfaces as a deletion.
-        let writer =
-            GitTreeMemWriter::new(gitdir.clone(), "refs/heads/specs".to_string());
+        let writer = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/specs".to_string());
         writer.delete_entity(Path::new("alpha.md")).unwrap();
-        writer.commit("drop alpha", &CommitContext::internal()).unwrap();
+        writer
+            .commit("drop alpha", &CommitContext::internal())
+            .unwrap();
 
         let diff = diff_two_refs(
             &gitdir,
@@ -945,8 +952,14 @@ mod tests {
                 content_after,
                 ..
             } => {
-                assert!(content_before.is_none(), "include_content=false elides before");
-                assert!(content_after.is_none(), "include_content=false elides after");
+                assert!(
+                    content_before.is_none(),
+                    "include_content=false elides before"
+                );
+                assert!(
+                    content_after.is_none(),
+                    "include_content=false elides after"
+                );
                 // Metadata is present regardless of the content toggle —
                 // the docstring's metadata-only shape promises it and a
                 // JSON consumer needs `title`/`entity_type` without
@@ -996,7 +1009,11 @@ mod tests {
                 ..
             } => {
                 assert_eq!(title.as_deref(), Some("Alpha"), "title populated on Added");
-                assert_eq!(entity_type.as_deref(), Some("spec"), "entity_type populated");
+                assert_eq!(
+                    entity_type.as_deref(),
+                    Some("spec"),
+                    "entity_type populated"
+                );
                 assert!(
                     content_after.is_some(),
                     "content_after present and additive to the metadata fields"
@@ -1016,30 +1033,38 @@ mod tests {
         let gitdir = init_gitdir(&tmp);
 
         let body = body_with_title("Title");
-        let writer =
-            GitTreeMemWriter::new(gitdir.clone(), "refs/heads/specs".to_string());
-        writer.write_entity(Path::new("alpha.md"), body.as_bytes()).unwrap();
+        let writer = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/specs".to_string());
+        writer
+            .write_entity(Path::new("alpha.md"), body.as_bytes())
+            .unwrap();
         writer.commit("seed", &CommitContext::internal()).unwrap();
-        let sha_seed =
-            sha_for(&gix::open(&gitdir).unwrap(), "refs/heads/specs").unwrap();
+        let sha_seed = sha_for(&gix::open(&gitdir).unwrap(), "refs/heads/specs").unwrap();
 
         // alpha → beta. Move the file (delete + write) and emit the
         // commit subject the engine uses on its rename pipeline.
-        let writer =
-            GitTreeMemWriter::new(gitdir.clone(), "refs/heads/specs".to_string());
+        let writer = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/specs".to_string());
         writer.delete_entity(Path::new("alpha.md")).unwrap();
-        writer.write_entity(Path::new("beta.md"), body.as_bytes()).unwrap();
         writer
-            .commit("memstead: rename specs--alpha → specs--beta", &CommitContext::internal())
+            .write_entity(Path::new("beta.md"), body.as_bytes())
+            .unwrap();
+        writer
+            .commit(
+                "memstead: rename specs--alpha → specs--beta",
+                &CommitContext::internal(),
+            )
             .unwrap();
 
         // beta → gamma. Same shape.
-        let writer =
-            GitTreeMemWriter::new(gitdir.clone(), "refs/heads/specs".to_string());
+        let writer = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/specs".to_string());
         writer.delete_entity(Path::new("beta.md")).unwrap();
-        writer.write_entity(Path::new("gamma.md"), body.as_bytes()).unwrap();
         writer
-            .commit("memstead: rename specs--beta → specs--gamma", &CommitContext::internal())
+            .write_entity(Path::new("gamma.md"), body.as_bytes())
+            .unwrap();
+        writer
+            .commit(
+                "memstead: rename specs--beta → specs--gamma",
+                &CommitContext::internal(),
+            )
             .unwrap();
 
         let diff = diff_two_refs(
@@ -1099,29 +1124,23 @@ mod tests {
         let gitdir = init_gitdir(&tmp);
 
         let alpha_v1 = body_with_title("Alpha-v1");
-        let beta_links_alpha = format!(
-            "---\ntype: spec\ncreated_date: 2026-01-01\nlast_modified: 2026-01-01\nlevel: M0\n---\n# Beta\n\n## Identity\n\nLinks to [[specs--alpha]].\n"
-        );
+        let beta_links_alpha = "---\ntype: spec\ncreated_date: 2026-01-01\nlast_modified: 2026-01-01\nlevel: M0\n---\n# Beta\n\n## Identity\n\nLinks to [[specs--alpha]].\n".to_string();
         write_and_commit(
             &gitdir,
             "specs",
-            &[
-                ("alpha.md", &alpha_v1),
-                ("beta.md", &beta_links_alpha),
-            ],
+            &[("alpha.md", &alpha_v1), ("beta.md", &beta_links_alpha)],
             "seed",
         );
         let sha_a = sha_for(&gix::open(&gitdir).unwrap(), "refs/heads/specs").unwrap();
 
         let alpha_v2 = body_with_title("Alpha-v2");
-        let gamma_links_alpha = format!(
-            "---\ntype: spec\ncreated_date: 2026-01-01\nlast_modified: 2026-01-01\nlevel: M0\n---\n# Gamma\n\n## Identity\n\nLinks to [[specs--alpha]].\n"
-        );
+        let gamma_links_alpha = "---\ntype: spec\ncreated_date: 2026-01-01\nlast_modified: 2026-01-01\nlevel: M0\n---\n# Gamma\n\n## Identity\n\nLinks to [[specs--alpha]].\n".to_string();
         // Drop beta to break its outbound link on ref_b. Add gamma
         // with a fresh inbound link to alpha.
-        let writer =
-            GitTreeMemWriter::new(gitdir.clone(), "refs/heads/specs".to_string());
-        writer.write_entity(Path::new("alpha.md"), alpha_v2.as_bytes()).unwrap();
+        let writer = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/specs".to_string());
+        writer
+            .write_entity(Path::new("alpha.md"), alpha_v2.as_bytes())
+            .unwrap();
         writer
             .write_entity(Path::new("gamma.md"), gamma_links_alpha.as_bytes())
             .unwrap();
@@ -1219,10 +1238,12 @@ mod tests {
         );
         let sha_a = sha_for(&gix::open(&gitdir).unwrap(), "refs/heads/specs").unwrap();
         // Overwrite alpha with a body that has no frontmatter.
-        let writer =
-            GitTreeMemWriter::new(gitdir.clone(), "refs/heads/specs".to_string());
+        let writer = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/specs".to_string());
         writer
-            .write_entity(Path::new("alpha.md"), b"# Alpha but no frontmatter\n\nbody.\n")
+            .write_entity(
+                Path::new("alpha.md"),
+                b"# Alpha but no frontmatter\n\nbody.\n",
+            )
             .unwrap();
         writer.commit("break", &CommitContext::internal()).unwrap();
 
@@ -1236,7 +1257,9 @@ mod tests {
         .unwrap();
         let alpha = diff.entries.first().expect("alpha should appear");
         match alpha {
-            EntityDiff::InvalidEntity { id, side, error, .. } => {
+            EntityDiff::InvalidEntity {
+                id, side, error, ..
+            } => {
                 assert_eq!(id.to_string(), "specs--alpha");
                 assert_eq!(side, "ref_b");
                 assert!(error.contains("frontmatter"), "unexpected error: {error}");
@@ -1260,8 +1283,7 @@ mod tests {
             &[("alpha.md", &body_with_title("Alpha"))],
             "seed",
         );
-        let sha_seed =
-            sha_for(&gix::open(&gitdir).unwrap(), "refs/heads/specs").unwrap();
+        let sha_seed = sha_for(&gix::open(&gitdir).unwrap(), "refs/heads/specs").unwrap();
         write_and_commit(
             &gitdir,
             "specs",
@@ -1285,17 +1307,11 @@ mod tests {
             migration_target: None,
         };
         let backend = crate::storage::instantiate_full_backend(&mount).unwrap();
-        let mut engine =
-            memstead_base::Engine::from_mounts(vec![(mount, backend)]).unwrap();
+        let mut engine = memstead_base::Engine::from_mounts(vec![(mount, backend)]).unwrap();
         engine.set_git_branch_ops(crate::storage::FULL_GIT_BRANCH_OPS);
 
         let diff = engine
-            .diff(
-                "specs",
-                &sha_seed,
-                "refs/heads/specs",
-                None,
-            )
+            .diff("specs", &sha_seed, "refs/heads/specs", None)
             .unwrap();
         assert_eq!(diff.entries.len(), 1);
         assert!(matches!(diff.entries[0], EntityDiff::Modified { .. }));
@@ -1329,13 +1345,10 @@ mod tests {
             migration_target: None,
         };
         let backend = crate::storage::instantiate_full_backend(&mount).unwrap();
-        let mut engine =
-            memstead_base::Engine::from_mounts(vec![(mount, backend)]).unwrap();
+        let mut engine = memstead_base::Engine::from_mounts(vec![(mount, backend)]).unwrap();
         engine.set_git_branch_ops(crate::storage::FULL_GIT_BRANCH_OPS);
 
-        let err = engine
-            .diff("specs", "nope-a", "nope-b", None)
-            .unwrap_err();
+        let err = engine.diff("specs", "nope-a", "nope-b", None).unwrap_err();
         match err {
             memstead_base::EngineError::UnknownRef(raw) => {
                 assert!(raw.contains("nope"), "unexpected UnknownRef payload: {raw}");
@@ -1480,14 +1493,8 @@ mod tests {
         // resolving bare HEAD literally would either refuse or hit
         // the wrong branch. The substitution targets
         // `refs/heads/<mem>` per the mem selector.
-        let via_head = diff_two_refs(
-            &gitdir,
-            "specs",
-            &sha_a,
-            "HEAD",
-            &DiffConfig::default(),
-        )
-        .expect("bare HEAD must resolve via mem substitution");
+        let via_head = diff_two_refs(&gitdir, "specs", &sha_a, "HEAD", &DiffConfig::default())
+            .expect("bare HEAD must resolve via mem substitution");
         let via_explicit = diff_two_refs(
             &gitdir,
             "specs",

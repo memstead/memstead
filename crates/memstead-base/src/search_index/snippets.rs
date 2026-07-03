@@ -237,7 +237,7 @@ fn find_folded(haystack: &str, needle: &str) -> Option<(usize, usize)> {
     let start_raw = positions
         .get(start_folded)
         .copied()
-        .unwrap_or_else(|| haystack.len());
+        .unwrap_or(haystack.len());
     let end_raw = if end_folded < positions.len() {
         positions[end_folded]
     } else {
@@ -271,8 +271,12 @@ fn fold_with_map(s: &str) -> (String, Vec<usize>) {
 /// fall back to `char::to_lowercase`.
 fn fold_char(ch: char) -> String {
     match ch {
-        'ä' | 'Ä' | 'á' | 'Á' | 'à' | 'À' | 'â' | 'Â' | 'ã' | 'Ã' | 'å' | 'Å' => "a".into(),
-        'ö' | 'Ö' | 'ó' | 'Ó' | 'ò' | 'Ò' | 'ô' | 'Ô' | 'õ' | 'Õ' | 'ø' | 'Ø' => "o".into(),
+        'ä' | 'Ä' | 'á' | 'Á' | 'à' | 'À' | 'â' | 'Â' | 'ã' | 'Ã' | 'å' | 'Å' => {
+            "a".into()
+        }
+        'ö' | 'Ö' | 'ó' | 'Ó' | 'ò' | 'Ò' | 'ô' | 'Ô' | 'õ' | 'Õ' | 'ø' | 'Ø' => {
+            "o".into()
+        }
         'ü' | 'Ü' | 'ú' | 'Ú' | 'ù' | 'Ù' | 'û' | 'Û' => "u".into(),
         'é' | 'É' | 'è' | 'È' | 'ê' | 'Ê' | 'ë' | 'Ë' => "e".into(),
         'í' | 'Í' | 'ì' | 'Ì' | 'î' | 'Î' | 'ï' | 'Ï' => "i".into(),
