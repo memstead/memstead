@@ -1,0 +1,31 @@
+# Leak hygiene gate — runs scripts/leak-scan.sh over the tree on every
+# push and PR and fails the build on any hit. The script defines the
+# pattern classes (absolute user paths, secret material, private-infra
+# hosts, private-dir references, retired names/domains); this workflow
+# only wires it in, so the patterns stay in one place.
+
+name: Leak scan
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: leak-scan-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  leak-scan:
+    name: Scan tree for leak patterns
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Run leak scan
+        run: ./scripts/leak-scan.sh .
