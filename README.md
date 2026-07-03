@@ -1,16 +1,20 @@
 # Memstead
 
-> **Status: pre-1.0.** APIs, schemas, file formats, CLI flags, and the wire shape of MCP tools and HTTP endpoints may change without notice. Not yet stable. Back up your data before exercising mutation operations. See [LICENSING.md](LICENSING.md) for per-folder licenses and [SECURITY.md](SECURITY.md) for vulnerability disclosure.
+[![CI](https://github.com/memstead/memstead/actions/workflows/ci.yml/badge.svg)](https://github.com/memstead/memstead/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/memstead/memstead)](https://github.com/memstead/memstead/releases)
+[![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](LICENSING.md)
 
-**Memstead gives AI agents a durable, typed memory you own.** Your agent's knowledge lives as plain markdown in a git repository — readable by you, diffable in review, with no database and no vendor lock-in. Any MCP-capable agent (Claude Code, Codex, Gemini, …) or the `memstead` CLI reads and writes it through a schema *you* control, and the engine enforces that schema on every write so the graph never drifts into mush.
+**Memstead gives AI agents a durable, typed memory you own.** Your agent's knowledge lives as plain markdown in a git repository — readable by you, diffable in review, with no database and no vendor lock-in. Any agent that speaks [MCP (the Model Context Protocol)](https://modelcontextprotocol.io) — Claude Code, Codex, Gemini, … — or the `memstead` CLI reads and writes it through a schema *you* control, and the engine enforces that schema on every write so the graph never drifts into mush.
 
 Under the hood: each **mem** is a typed graph of interconnected entities. A **schema** you pin defines the entity types, their sections, and the relationships allowed between them — knowledge, plans, specs, inquiry, or any mix. Knowledge graphs are one well-known slice; Memstead generalises across all of them.
 
-Use it for software specs, ADRs, decision logs, ontologies, research notes, or any domain you define. For precise definitions of *mem*, *schema*, *workspace*, *mount*, and other terms, see [GLOSSARY.md](GLOSSARY.md).
+Use it for software specs, ADRs, decision logs, ontologies, research notes, or any domain you define. New here? [CONCEPTS.md](CONCEPTS.md) is the three-minute tour of the fourteen terms everything else assumes — each links into the normative [glossary](GLOSSARY.md).
+
+> **Status: pre-1.0.** APIs, schemas, file formats, CLI flags, and the wire shape of MCP tools and HTTP endpoints may change without notice. Not yet stable. Back up your data before exercising mutation operations. See [LICENSING.md](LICENSING.md) for per-folder licenses and [SECURITY.md](SECURITY.md) for vulnerability disclosure.
 
 ## Quickstart
 
-Get from nothing to your own graph in a few minutes.
+Get from nothing to your own graph in a few minutes. (The [getting-started guide](docs-site/src/content/docs/guides/getting-started.md) is the full tutorial version of this section.)
 
 **1. Install the binaries.** The install script fetches the latest [release](https://github.com/memstead/memstead/releases) binaries — `memstead` (the CLI) and `memstead-mcp` (the MCP server agents connect to):
 
@@ -48,6 +52,28 @@ memstead stats              # node / edge counts and type distribution
 memstead search idempotency # find it back
 ```
 
+On disk that entity is one readable markdown file, `idempotency.md` — this is the whole trick, your agent's memory is a file you can open, diff, and review:
+
+```markdown
+---
+type: concept
+created_date: 2026-07-03T15:01:02Z
+last_modified: 2026-07-03T15:01:02Z
+maturity: emerging
+abstraction_level: concrete
+---
+
+# Idempotency
+
+## Definition
+An operation is idempotent when applying it twice has the same effect as applying it once.
+
+## Explanation
+It matters for retries — a client can safely resend a request without double-applying it.
+```
+
+(Plus two empty optional sections, `Boundaries` and `Significance`, omitted here.)
+
 The `default` schema ships ten general-purpose types (`concept`, `assertion`, `memo`, `spec`, `inquiry`, …); run `memstead type` to list them, or author your own schema for a specialised domain.
 
 **4. (Optional) Let an AI agent read and write it.** `quickstart` already wrote the MCP config for the agent targets you selected — restart your agent inside the workspace and it's connected. To wire an agent up later or by hand:
@@ -69,7 +95,7 @@ The `default` schema ships ten general-purpose types (`concept`, `assertion`, `m
 
 ## Share and reuse mems
 
-Publish a mem to the [memstead.io](https://memstead.io) registry, and install someone else's with one command:
+Publish a mem to the [memstead.io](https://memstead.io) registry, and install someone else's with one command. (The registry opens publicly at launch; until then it runs gated.) Domain roles: **memstead.io** hosts the registry and the install script; **memstead.com** hosts the docs and contact addresses (`hello@` / `security@memstead.com`).
 
 ```bash
 memstead export --format mem -o my.mem
@@ -106,11 +132,20 @@ The schema drives all engine behaviour — there are no hardcoded field names. A
 
 | Folder | What it is |
 |---|---|
-| `engine/` | The Rust engine — schema layer, in-memory store, the two storage backends (folder + git-branch), the `memstead` CLI, the `memstead-mcp` server, plus serve/bridge/wasm crates |
+| `crates/` | The Rust engine — schema layer, in-memory store, the two storage backends (folder + git-branch), the `memstead` CLI, the `memstead-mcp` server, plus serve/bridge/wasm crates |
 | `plugins/claude-code/` | The Claude Code plugin (skills + guard hooks). Self-contained, no npm dependencies |
 | [`docs/`](docs/), [`examples/`](examples/) | [Documentation](docs/) (organized by Diátaxis: tutorial / how-to / reference / explanation) and [example schemas](examples/) (`agent-program`, and the paired `reimpl-source`/`reimpl-target`) |
 
 Memstead also has a native macOS app and a hosted registry; those are separate, closed-source products and are not part of this open repository.
+
+## What Memstead does not do (yet)
+
+Stated here so you don't have to discover it:
+
+- **No semantic / embedding search.** `memstead_search` is exact and structural (content match, type/metadata filters) — there is no vector index. Agents navigate by structure: communities, types, relationships.
+- **No bulk import.** No command turns an existing folder of notes into a mem in one shot; content enters through schema-validated writes (the Claude Code plugin's ingest flows are agent-driven and write entity by entity).
+- **No built-in visualization.** The graph is queryable (stats, overview, relations) but ships no renderer; projections and exports are the extension point.
+- **Windows is untested.** Developed and CI-tested on macOS and Linux. Release archives include a Windows build, but no Windows CI gate exists yet — expect rough edges, path handling especially.
 
 ## Development
 
