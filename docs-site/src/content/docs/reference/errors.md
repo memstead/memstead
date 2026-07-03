@@ -6,7 +6,7 @@ title: "Error Code Index"
 
 Every typed error code emitted by the engine, the CLI (`memstead-cli`), and the MCP server (`memstead-mcp`). Each row lists the code, the surfaces that emit it, and the source locations the static scan found.
 
-**Distinct codes:** 146
+**Distinct codes:** 147
 
 | Code | Surfaces | Source locations |
 |------|----------|------------------|
@@ -36,6 +36,7 @@ Every typed error code emitted by the engine, the CLI (`memstead-cli`), and the 
 | `DUPLICATE_RELATIONSHIP` | engine | `crates/memstead-base/src/ops/mod.rs:1354` |
 | `DUPLICATE_SECTION_HEADING` | engine | `crates/memstead-base/src/ops/mod.rs:1403` |
 | `EMPTY_UPDATE` | engine, MCP | `crates/memstead-base/src/engine/error.rs:996`<br>`crates/memstead-mcp/src/server.rs:1559` |
+| `ENGINE_LOCK_POISONED` | MCP | `crates/memstead-mcp/src/error_envelopes.rs:183` |
 | `ENTITY_ALREADY_EXISTS` | engine, MCP | `crates/memstead-base/src/engine/error.rs:986`<br>`crates/memstead-mcp/src/filesystem_server.rs:344`<br>`crates/memstead-mcp/src/server.rs:725` |
 | `ENTITY_NOT_FOUND` | engine, CLI, MCP | `crates/memstead-base/src/engine/error.rs:987`<br>`crates/memstead-cli/src/commands/context.rs:60`<br>`crates/memstead-cli/src/commands/delete.rs:55`<br>`crates/memstead-cli/src/commands/delete.rs:84`<br>`crates/memstead-cli/src/commands/delete.rs:127`<br>`crates/memstead-cli/src/commands/delete.rs:151`<br>`crates/memstead-cli/src/commands/entity.rs:45`<br>`crates/memstead-cli/src/commands/relations.rs:72`<br>`crates/memstead-cli/src/commands/rename.rs:139`<br>`crates/memstead-cli/src/commands/rename.rs:173`<br>`crates/memstead-cli/src/commands/update.rs:528`<br>`crates/memstead-cli/src/commands/update.rs:551`<br>`crates/memstead-mcp/src/filesystem_server.rs:348`<br>`crates/memstead-mcp/src/filesystem_server.rs:995`<br>`crates/memstead-mcp/src/filesystem_server.rs:1541`<br>`crates/memstead-mcp/src/server.rs:715`<br>`crates/memstead-mcp/src/server.rs:1759`<br>`crates/memstead-mcp/src/server.rs:2253` |
 | `FIELD_NOT_FILTERABLE` | engine | `crates/memstead-base/src/ops/mod.rs:1379` |

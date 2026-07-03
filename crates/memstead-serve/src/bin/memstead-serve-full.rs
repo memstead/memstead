@@ -11,7 +11,8 @@
 //! It reads BOTH env families:
 //! - `MEMSTEAD_SERVE_*` — the read side: `AUTHORITY`, `SCHEMA`, `ARCHIVE`/`MEM`
 //!   for the read engine; the embedded site is chosen at build time
-//!   (`MEMSTEAD_SERVE_SITE_DIST`); `BIND` (honours `PORT`) is the listen address.
+//!   (`MEMSTEAD_SERVE_SITE_DIST`); `MEMSTEAD_SERVE_BIND` is the explicit listen
+//!   address (unset: `PORT` → `0.0.0.0:$PORT`, else loopback `127.0.0.1:8080`).
 //! - `MEMSTEAD_SESSION_*` — the sketch side: `SCHEMA` (the writable sketch
 //!   mem), `CONTENT_DIR`/`CONTENT_ARCHIVE` + `CONTENT_SCHEMA` + `CONTENT_MEM`
 //!   (the read-only content the agent orients against), `TTL_SECS`,
@@ -54,11 +55,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::env::var("MEMSTEAD_SERVE_AUTHORITY").unwrap_or_else(|_| "memstead".to_string());
     let schema_pin =
         std::env::var("MEMSTEAD_SERVE_SCHEMA").unwrap_or_else(|_| "default@1.0.0".to_string());
-    // Explicit bind wins; otherwise honour `PORT` (Railway injects it).
-    let bind = std::env::var("MEMSTEAD_SERVE_BIND").unwrap_or_else(|_| {
-        let port = std::env::var("PORT").unwrap_or_else(|_| "8080".to_string());
-        format!("0.0.0.0:{port}")
-    });
+    // Explicit bind wins; else `PORT` binds all interfaces (containers);
+    // else loopback — local runs must not broadcast to the LAN.
+    let bind = memstead_serve::resolve_bind("MEMSTEAD_SERVE_BIND");
     let schema: memstead_schema::SchemaRef = schema_pin
         .parse()
         .map_err(|e| format!("invalid MEMSTEAD_SERVE_SCHEMA {schema_pin:?}: {e}"))?;

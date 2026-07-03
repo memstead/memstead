@@ -8,7 +8,7 @@ repository.workspace = true
 homepage.workspace = true
 description = "Mem-repo engine for Memstead — multi-mem, git-backed typed entity graphs."
 readme = "README.md"
-keywords = ["memstead", "knowledge-graph", "git", "markdown", "graph"]
+keywords = ["agent-memory", "knowledge-graph", "git", "markdown", "graph"]
 categories = ["database-implementations"]
 
 [dependencies]

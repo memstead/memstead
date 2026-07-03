@@ -12,7 +12,9 @@
 //! - `MEMSTEAD_SERVE_MEM` — mem name (default: `flagship` for an archive,
 //!   `memstead` for the embedded content)
 //! - `MEMSTEAD_SERVE_SCHEMA` — schema pin `name@x.y.z` (default: `default@1.0.0`)
-//! - `MEMSTEAD_SERVE_BIND` — listen address (default: `0.0.0.0:8080`)
+//! - `MEMSTEAD_SERVE_BIND` — explicit listen address. Unset: a set `PORT`
+//!   (Railway and most PaaS inject it) binds `0.0.0.0:$PORT`; otherwise
+//!   loopback `127.0.0.1:8080`.
 //!
 //! The optional embedded static site is selected at build time via
 //! `MEMSTEAD_SERVE_SITE_DIST` (see `build.rs`); with none configured the binary
@@ -33,12 +35,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::env::var("MEMSTEAD_SERVE_AUTHORITY").unwrap_or_else(|_| "memstead".to_string());
     let schema_pin =
         std::env::var("MEMSTEAD_SERVE_SCHEMA").unwrap_or_else(|_| "default@1.0.0".to_string());
-    // Explicit bind wins; otherwise honour `PORT` (Railway and most PaaS inject
-    // it) so a container needs no extra wiring, falling back to 8080 locally.
-    let bind = std::env::var("MEMSTEAD_SERVE_BIND").unwrap_or_else(|_| {
-        let port = std::env::var("PORT").unwrap_or_else(|_| "8080".to_string());
-        format!("0.0.0.0:{port}")
-    });
+    // Explicit bind wins; else `PORT` binds all interfaces (containers);
+    // else loopback — local runs must not broadcast to the LAN.
+    let bind = memstead_serve::resolve_bind("MEMSTEAD_SERVE_BIND");
 
     let schema: memstead_schema::SchemaRef = schema_pin
         .parse()

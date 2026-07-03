@@ -8,7 +8,7 @@ repository.workspace = true
 homepage.workspace = true
 description = "Read-only HTTP bridge library — wire-format types, envelope builder, change-event SSE adapter, axum handler helpers for Memstead thin clients."
 readme = "README.md"
-keywords = ["memstead", "knowledge-graph", "http", "sse", "wasm"]
+keywords = ["agent-memory", "knowledge-graph", "http", "sse", "wasm"]
 categories = ["web-programming"]
 
 [dependencies]

@@ -8,7 +8,7 @@ repository.workspace = true
 homepage.workspace = true
 description = "Schema types for Memstead — entity definitions, vocabulary, and validation rules."
 readme = "README.md"
-keywords = ["memstead", "knowledge-graph", "schema", "markdown", "validation"]
+keywords = ["agent-memory", "knowledge-graph", "schema", "markdown", "validation"]
 categories = ["data-structures"]
 
 [dependencies]

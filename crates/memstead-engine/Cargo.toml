@@ -8,7 +8,7 @@ repository.workspace = true
 homepage.workspace = true
 description = "Full engine extension for Memstead — multi-mem policy, mem management, cross-mem-link resolution, lifecycle. Depends on memstead-base."
 readme = "README.md"
-keywords = ["memstead", "knowledge-graph", "markdown", "graph", "agents"]
+keywords = ["agent-memory", "knowledge-graph", "markdown", "graph", "agents"]
 categories = ["database-implementations"]
 
 [dependencies]

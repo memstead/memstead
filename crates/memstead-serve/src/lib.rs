@@ -138,6 +138,51 @@ pub fn mount_read_only(
     Engine::from_mounts(vec![(mount, backend)])
 }
 
+/// Resolve a serve binary's listen address. An explicit `<explicit_var>`
+/// value wins verbatim; else a set `PORT` (Railway and most PaaS inject
+/// it) binds all interfaces on that port — container deployments need no
+/// extra wiring; else loopback `127.0.0.1:8080` — a local experiment
+/// must not broadcast a writable endpoint to the LAN. Callers log the
+/// resolved address at startup so the polarity is always visible.
+pub fn resolve_bind(explicit_var: &str) -> String {
+    if let Ok(bind) = std::env::var(explicit_var) {
+        return bind;
+    }
+    match std::env::var("PORT") {
+        Ok(port) => format!("0.0.0.0:{port}"),
+        Err(_) => "127.0.0.1:8080".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod bind_tests {
+    use super::resolve_bind;
+
+    /// All three polarities in one test: env is process-global, so the
+    /// sequence stays in a single #[test] (nextest runs it in its own
+    /// process; the unsafe blocks are sound because nothing else reads
+    /// the env concurrently here).
+    #[test]
+    fn resolve_bind_polarity() {
+        unsafe {
+            std::env::remove_var("TEST_BIND_VAR");
+            std::env::remove_var("PORT");
+        }
+        assert_eq!(resolve_bind("TEST_BIND_VAR"), "127.0.0.1:8080");
+
+        unsafe { std::env::set_var("PORT", "9137") };
+        assert_eq!(resolve_bind("TEST_BIND_VAR"), "0.0.0.0:9137");
+
+        unsafe { std::env::set_var("TEST_BIND_VAR", "10.1.2.3:4444") };
+        assert_eq!(resolve_bind("TEST_BIND_VAR"), "10.1.2.3:4444");
+
+        unsafe {
+            std::env::remove_var("TEST_BIND_VAR");
+            std::env::remove_var("PORT");
+        }
+    }
+}
+
 /// The curated "what is Memstead" content mem, embedded at compile time so
 /// both servers ship real content with no external files. A flat folder of
 /// `.md` concept entities; the folder backend reads them when mounted.

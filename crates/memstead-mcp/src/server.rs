@@ -1796,7 +1796,7 @@ impl McpServer {
         let id = EntityId::canonical(&p.id);
 
         let unified = self.unified_engine();
-        let mut engine = unified.lock().unwrap();
+        let mut engine = crate::lock_engine!(unified);
         let drift_warnings = engine.reload_if_stale(Some(id.mem()));
         // Drain the stashed structured notices: attached to the
         // response's `structured_content` below (and the markdown
@@ -1986,7 +1986,7 @@ impl McpServer {
         let offset = scope.offset.unwrap_or(0);
 
         let unified = self.unified_engine();
-        let mut engine = unified.lock().unwrap();
+        let mut engine = crate::lock_engine!(unified);
         let drift_warnings = engine.reload_if_stale(mem_filter.as_deref());
         let mem_changed_notices = engine.take_mem_changed_notices();
         let result = match engine.search(&scope) {
@@ -2067,7 +2067,7 @@ impl McpServer {
         p: OverviewParams,
         unified: Arc<Mutex<memstead_base::Engine>>,
     ) -> CallToolResult {
-        let mut engine = unified.lock().unwrap();
+        let mut engine = crate::lock_engine!(unified);
         let drift_warnings = engine.reload_if_stale(p.mem.as_deref());
         let _ = engine.take_mem_changed_notices(); // leak-proof drain; see memstead_entity
 
@@ -2156,7 +2156,7 @@ impl McpServer {
         // has no fuzzy index); not-found errors carry an empty
         // suggestions list — wire shape stays consistent.
         let unified = self.unified_engine();
-        let mut engine = unified.lock().unwrap();
+        let mut engine = crate::lock_engine!(unified);
         let drift_warnings = engine.reload_if_stale(None);
         let mem_changed_notices = engine.take_mem_changed_notices();
 
@@ -2344,7 +2344,7 @@ impl McpServer {
 
         // Wire JSON matches the `CreateResult` contract.
         let unified = self.unified_engine();
-        let mut engine = unified.lock().unwrap();
+        let mut engine = crate::lock_engine!(unified);
         let relations: Vec<memstead_base::ops::RelateArg> = p
             .relations
             .clone()
@@ -2439,7 +2439,7 @@ impl McpServer {
 
         // Wire JSON matches the `UpdateResult` contract.
         let unified = self.unified_engine();
-        let mut engine = unified.lock().unwrap();
+        let mut engine = crate::lock_engine!(unified);
         let patch_sections: indexmap::IndexMap<String, memstead_base::ops::PatchArg> = p
             .patch_sections
             .clone()
@@ -2580,7 +2580,7 @@ impl McpServer {
         // referrer stub surfaces the gone id without a follow-up
         // `memstead_search(stub: true)` poll.
         let unified = self.unified_engine();
-        let mut engine = unified.lock().unwrap();
+        let mut engine = crate::lock_engine!(unified);
         let args = memstead_base::RelateEntityArgs {
             source: from.clone(),
             target: to.clone(),
@@ -2676,7 +2676,7 @@ impl McpServer {
         };
 
         let unified = self.unified_engine();
-        let mut engine = unified.lock().unwrap();
+        let mut engine = crate::lock_engine!(unified);
         // Capture the schema-ref BEFORE the delete — mem may
         // drop with the last entity.
         let mem_for_anchor = mem_schema_ref_unified(&engine, id.mem());
@@ -2756,7 +2756,7 @@ impl McpServer {
         // Unified outcome exposes `old_path` / `new_path` directly
         // (matching full's `RenameResult` shape).
         let unified = self.unified_engine();
-        let mut engine = unified.lock().unwrap();
+        let mut engine = crate::lock_engine!(unified);
         let args = memstead_base::RenameEntityArgs {
             id: id.clone(),
             expected_hash: Some(p.expected_hash.clone()),
@@ -2840,7 +2840,7 @@ impl McpServer {
         p: HealthParams,
         unified: Arc<Mutex<memstead_base::Engine>>,
     ) -> CallToolResult {
-        let mut engine = unified.lock().unwrap();
+        let mut engine = crate::lock_engine!(unified);
         let drift_warnings = engine.reload_if_stale(p.mem.as_deref());
         let mem_changed_notices = engine.take_mem_changed_notices();
 
@@ -2957,7 +2957,7 @@ impl McpServer {
         // `include_notes: false` contract.
         let include_notes = p.include_notes;
         let unified = self.unified_engine();
-        let mut engine = unified.lock().unwrap();
+        let mut engine = crate::lock_engine!(unified);
         let drift_warnings = engine.reload_if_stale(Some(&p.mem));
         let mem_changed_notices = engine.take_mem_changed_notices();
         let mem_for_anchor = p.mem.clone();
@@ -3010,7 +3010,7 @@ impl McpServer {
     )]
     fn memstead_diff(&self, Parameters(p): Parameters<DiffParams>) -> CallToolResult {
         let unified = self.unified_engine();
-        let engine = unified.lock().unwrap();
+        let engine = crate::lock_engine!(unified);
         let config = memstead_base::ops::DiffConfig {
             rename_similarity: p
                 .rename_similarity
@@ -3036,7 +3036,7 @@ impl McpServer {
     )]
     fn memstead_reload(&self, Parameters(p): Parameters<ReloadParams>) -> CallToolResult {
         let unified = self.unified_engine();
-        let mut engine = unified.lock().unwrap();
+        let mut engine = crate::lock_engine!(unified);
         let result = match p.mem.as_deref() {
             Some(name) => engine.reload_one_mem_report(name).map(|r| vec![r]),
             None => engine.reload_each_writable_mem_reports(),
@@ -3127,7 +3127,7 @@ impl McpServer {
             }
         };
         let unified = self.unified_engine();
-        let mut engine = unified.lock().unwrap();
+        let mut engine = crate::lock_engine!(unified);
         match engine.set_mem_version(&p.name, new_version, p.note.as_deref()) {
             Ok(outcome) => {
                 let mut body = serde_json::json!({
@@ -3184,7 +3184,7 @@ impl McpServer {
             }
         };
         let unified = self.unified_engine();
-        let mut engine = unified.lock().unwrap();
+        let mut engine = crate::lock_engine!(unified);
         match engine.set_mem_schema(&p.mem, &target) {
             Ok(outcome) => {
                 let mut body = serde_json::to_value(&outcome).expect("SetSchemaOutcome serialises");
@@ -3205,7 +3205,7 @@ impl McpServer {
         p: crate::lifecycle::MemCreateParams,
         unified: Arc<Mutex<memstead_base::Engine>>,
     ) -> CallToolResult {
-        let mut engine = unified.lock().unwrap();
+        let mut engine = crate::lock_engine!(unified);
 
         let schema_ref = match p.schema.parse::<memstead_schema::SchemaRef>() {
             Ok(r) => r,
@@ -3343,7 +3343,7 @@ impl McpServer {
         p: crate::lifecycle::MemDeleteParams,
         unified: Arc<Mutex<memstead_base::Engine>>,
     ) -> CallToolResult {
-        let mut engine = unified.lock().unwrap();
+        let mut engine = crate::lock_engine!(unified);
 
         // MCP `memstead_mem_delete`
         // always means destructive. The wire shape no longer exposes
@@ -3421,7 +3421,7 @@ impl McpServer {
         // validation; collect owned names so the dispatch closure
         // doesn't hold the engine lock.
         let known_mems: Vec<String> = {
-            let engine = self.unified_engine().lock().unwrap();
+            let engine = crate::lock_engine!(self.unified_engine());
             engine.mem_names().iter().map(|s| s.to_string()).collect()
         };
         self.workspace_edit_dispatch("grant_cross_link", |root| {
@@ -3613,7 +3613,7 @@ impl McpServer {
         >,
     {
         let unified = self.unified_engine();
-        let engine = unified.lock().unwrap();
+        let engine = crate::lock_engine!(unified);
         let root = match engine.workspace_root() {
             Some(p) => p.to_path_buf(),
             None => {
@@ -3643,7 +3643,7 @@ impl McpServer {
                 if let Ok(refreshed) =
                     memstead_base::workspace_store::parse_workspace_settings(&root)
                 {
-                    let mut engine = unified.lock().unwrap();
+                    let mut engine = crate::lock_engine!(unified);
                     engine.set_settings(refreshed);
                 }
                 json_response(&body)

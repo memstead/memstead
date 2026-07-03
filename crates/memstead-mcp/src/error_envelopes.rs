@@ -58,6 +58,21 @@ pub fn validation_envelope(err: ValidationError) -> CallToolResult {
 // list so an agent reading only the text channel recovers without
 // consulting `structured_content`.
 
+/// Typed envelope for a poisoned engine mutex — a prior tool call
+/// panicked mid-mutation and the engine's in-memory state can no
+/// longer be trusted. The refusal is deliberate (no poison-recovery:
+/// resuming over a half-applied mutation corrupts silently); the
+/// process needs a restart, which reloads the graph from git truth.
+/// Reached via the `lock_engine!` macro — the single acquisition path
+/// for engine mutexes on both servers' tool dispatch.
+pub fn engine_lock_poisoned() -> CallToolResult {
+    crate::error_envelope::tool_error(
+        "ENGINE_LOCK_POISONED",
+        "engine lock poisoned by a prior panic — restart the MCP server \
+         (state reloads from the mem-repo on boot)",
+    )
+}
+
 #[cfg(test)]
 mod inline_list_tests {
     use super::*;

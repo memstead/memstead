@@ -11,8 +11,9 @@
 //! deployment.
 //!
 //! Every deployment specific is an environment input:
-//! - `MEMSTEAD_SESSION_BIND` — listen address (default `0.0.0.0:8080`; honours
-//!   `PORT`, which Railway and most PaaS inject).
+//! - `MEMSTEAD_SESSION_BIND` — explicit listen address. Unset: a set
+//!   `PORT` (Railway and most PaaS inject it) binds `0.0.0.0:$PORT`;
+//!   otherwise loopback `127.0.0.1:8080`.
 //! - `MEMSTEAD_SESSION_SCHEMA` — schema pin for the writable sketch mem
 //!   (default `default@1.0.0`). The server takes the pin rather than hard-coding it.
 //! - `MEMSTEAD_SESSION_CONTENT_DIR` / `MEMSTEAD_SESSION_CONTENT_ARCHIVE` —
@@ -58,10 +59,9 @@ fn env_u64(key: &str, default: u64) -> u64 {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let bind = std::env::var("MEMSTEAD_SESSION_BIND").unwrap_or_else(|_| {
-        let port = std::env::var("PORT").unwrap_or_else(|_| "8080".to_string());
-        format!("0.0.0.0:{port}")
-    });
+    // Explicit bind wins; else `PORT` binds all interfaces (containers);
+    // else loopback — local runs must not broadcast to the LAN.
+    let bind = memstead_serve::resolve_bind("MEMSTEAD_SESSION_BIND");
     let schema_pin =
         std::env::var("MEMSTEAD_SESSION_SCHEMA").unwrap_or_else(|_| "default@1.0.0".to_string());
     // The sketch-mem pin for the connection-born `/mcp` flow (one engine per

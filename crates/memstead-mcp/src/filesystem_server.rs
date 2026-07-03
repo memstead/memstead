@@ -987,7 +987,7 @@ impl FilesystemMcpServer {
         )
     )]
     fn memstead_entity(&self, Parameters(p): Parameters<EntityParams>) -> CallToolResult {
-        let engine = self.engine.lock().unwrap();
+        let engine = crate::lock_engine!(self.engine);
         let id = EntityId::canonical(&p.id);
         let entity = match engine.get_entity(&id) {
             Some(e) => e.clone(),
@@ -1079,7 +1079,7 @@ impl FilesystemMcpServer {
         ]) {
             return err;
         }
-        let mut engine = self.engine.lock().unwrap();
+        let mut engine = crate::lock_engine!(self.engine);
         let (actor, client) = self.actor_and_client();
         // Resolve the target mem. An explicit, non-empty `mem` is
         // honoured verbatim — so a multi-mount engine (e.g. a read-only
@@ -1169,7 +1169,7 @@ impl FilesystemMcpServer {
         ]) {
             return err;
         }
-        let mut engine = self.engine.lock().unwrap();
+        let mut engine = crate::lock_engine!(self.engine);
         let (actor, client) = self.actor_and_client();
         let args = UpdateEntityArgs {
             relations_unset: p
@@ -1247,7 +1247,7 @@ impl FilesystemMcpServer {
         )
     )]
     fn memstead_delete(&self, Parameters(p): Parameters<DeleteParams>) -> CallToolResult {
-        let mut engine = self.engine.lock().unwrap();
+        let mut engine = crate::lock_engine!(self.engine);
         let (actor, client) = self.actor_and_client();
         let args = DeleteEntityArgs {
             id: EntityId(p.id),
@@ -1289,7 +1289,7 @@ impl FilesystemMcpServer {
         annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = true, open_world_hint = false)
     )]
     fn memstead_relate(&self, Parameters(p): Parameters<RelateParams>) -> CallToolResult {
-        let mut engine = self.engine.lock().unwrap();
+        let mut engine = crate::lock_engine!(self.engine);
         let (actor, client) = self.actor_and_client();
         // Relate is hash-stable: the source's content_hash does not
         // change under add/remove. The mem-repo tool surface omits
@@ -1355,7 +1355,7 @@ impl FilesystemMcpServer {
         )
     )]
     fn memstead_search(&self, Parameters(p): Parameters<SearchParams>) -> CallToolResult {
-        let engine = self.engine.lock().unwrap();
+        let engine = crate::lock_engine!(self.engine);
         let filters = p.filters.unwrap_or_default();
         let scope = SearchScope {
             query: p.query,
@@ -1403,7 +1403,7 @@ impl FilesystemMcpServer {
         )
     )]
     fn memstead_health(&self, Parameters(p): Parameters<HealthParams>) -> CallToolResult {
-        let engine = self.engine.lock().unwrap();
+        let engine = crate::lock_engine!(self.engine);
         let mut health = engine.health();
         let include = p.include.unwrap_or_default();
 
@@ -1490,7 +1490,7 @@ impl FilesystemMcpServer {
         )
     )]
     fn memstead_schema(&self, Parameters(p): Parameters<SchemaParams>) -> CallToolResult {
-        let engine = self.engine.lock().unwrap();
+        let engine = crate::lock_engine!(self.engine);
         // filesystem-mem is single-mem by design; the new engine
         // carries one schemas[] entry. Pick it.
         let Some((mem_name, schema)) = engine.schemas().iter().next() else {
@@ -1589,7 +1589,7 @@ impl FilesystemMcpServer {
         )
     )]
     fn memstead_diff(&self, Parameters(p): Parameters<DiffParams>) -> CallToolResult {
-        let engine = self.engine.lock().unwrap();
+        let engine = crate::lock_engine!(self.engine);
         let config = memstead_base::ops::DiffConfig {
             rename_similarity: p
                 .rename_similarity
@@ -1671,7 +1671,7 @@ impl FilesystemMcpServer {
         )
     )]
     fn memstead_rename(&self, Parameters(p): Parameters<RenameParams>) -> CallToolResult {
-        let mut engine = self.engine.lock().unwrap();
+        let mut engine = crate::lock_engine!(self.engine);
         let (actor, client) = self.actor_and_client();
         let args = RenameEntityArgs {
             id: EntityId(p.id),
@@ -1729,7 +1729,7 @@ impl FilesystemMcpServer {
             return tool_error("INVALID_INPUT", &msg);
         }
 
-        let mut engine = self.engine.lock().unwrap();
+        let mut engine = crate::lock_engine!(self.engine);
         if p.rebuild.unwrap_or(false) && p.chunk.unwrap_or(1) <= 1 {
             engine.invalidate_communities();
         }
@@ -2274,6 +2274,39 @@ mod tests {
         memstead_base::FileWorkspaceStore::new()
             .save_state(tmp.path(), &workspace)
             .unwrap();
+    }
+
+    #[test]
+    fn poisoned_engine_lock_returns_typed_envelope_not_panic() {
+        let tmp = TempDir::new().unwrap();
+        write_workspace(&tmp, "demo");
+        let server = FilesystemMcpServer::from_workspace_root(tmp.path()).unwrap();
+
+        // Poison the engine mutex for real: a thread panics while
+        // holding the guard.
+        let engine = server.engine.clone();
+        std::thread::spawn(move || {
+            let _guard = engine.lock().unwrap();
+            panic!("deliberate poison");
+        })
+        .join()
+        .unwrap_err();
+
+        let result = server.memstead_overview(Parameters(OverviewParams {
+            rebuild: None,
+            chunk: None,
+            mem: None,
+            include: None,
+            token_budget: None,
+        }));
+        assert_eq!(result.is_error, Some(true));
+        let code = result
+            .structured_content
+            .as_ref()
+            .and_then(|v| v.get("code"))
+            .and_then(|c| c.as_str())
+            .unwrap();
+        assert_eq!(code, "ENGINE_LOCK_POISONED");
     }
 
     #[test]

@@ -17,6 +17,7 @@
 //! The binary entry point ([`main.rs`](main.rs)) stays thin: argument
 //! parsing, logging, then delegation into this crate.
 
+pub mod error_envelope;
 pub mod error_envelopes;
 pub mod filesystem_server;
 pub mod tools;
@@ -27,10 +28,22 @@ pub mod tools;
 #[cfg(feature = "mem-repo")]
 pub mod config;
 #[cfg(feature = "mem-repo")]
-pub mod error_envelope;
-#[cfg(feature = "mem-repo")]
 pub mod lifecycle;
 #[cfg(feature = "mem-repo")]
 pub mod read_mems;
 #[cfg(feature = "mem-repo")]
 pub mod server;
+
+/// Acquire an engine mutex on a tool dispatch path. A poisoned lock
+/// (a prior tool call panicked) early-returns the typed
+/// `ENGINE_LOCK_POISONED` envelope instead of panicking the server —
+/// usable only inside functions returning `CallToolResult`.
+#[macro_export]
+macro_rules! lock_engine {
+    ($mutex:expr) => {
+        match $mutex.lock() {
+            Ok(guard) => guard,
+            Err(_) => return $crate::error_envelopes::engine_lock_poisoned(),
+        }
+    };
+}
