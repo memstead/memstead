@@ -1,0 +1,21 @@
+# Keep the three dependency trees current: the Rust workspace, the
+# pinned GitHub Actions SHAs, and the docs-site npm tree. Weekly
+# batches — pre-release, review bandwidth beats freshness.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: npm
+    directory: /docs-site
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5

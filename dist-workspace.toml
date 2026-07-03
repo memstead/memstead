@@ -7,6 +7,9 @@ members = ["cargo:."]
 cargo-dist-version = "0.31.0"
 # CI backends to support
 ci = "github"
+# Sign build provenance for every release artifact (GitHub Artifact
+# Attestations — verifiable with `gh attestation verify <file> -R memstead/memstead`).
+github-attestations = true
 # The installers to generate for each app (dist emits ONE installer per
 # dist-able app — memstead-cli-installer.sh and memstead-mcp-installer.sh;
 # memstead.io/install.sh wraps both):
@@ -27,3 +30,7 @@ hosting = "github"
 # Publish jobs that run after the binary release lands. `homebrew`
 # opens a PR to the tap repo above with the rendered formula.
 publish-jobs = ["homebrew"]
+# Path that installers should place binaries in
+install-path = "CARGO_HOME"
+# Whether to install an updater program
+install-updater = false

@@ -14,7 +14,7 @@ workspace (`memstead mem-repo init` + `memstead mem init`), boots the full
   initial empty-tree commit (the canonical fresh-client first sync).
 
 The mem-repo path's surface differs from filesystem in subtle ways
-(14-tool surface, gitdir-backed commits, different changelog
+(23-tool surface, gitdir-backed commits, different changelog
 mechanism), so this probe runs the same shape as lean-mutation
 without the JSONL changelog inspection.
 
@@ -55,8 +55,9 @@ def run(memstead: Path, memstead_mcp: Path) -> int:
 
         with McpServer(memstead_mcp, workspace) as server:
             tools = server.list_tools()
-            # Full surface is 14 tools — read-only + mutation +
-            # mem-lifecycle (`memstead_mem_create`, `memstead_mem_delete`)
+            # Full surface is 23 tools — read-only + mutation +
+            # mem-lifecycle (`memstead_mem_create`, `memstead_mem_delete`),
+            # workspace policy (`memstead_workspace_*`)
             # + `memstead_reload`. The probe exercises the entity-surface
             # subset; the lifecycle tools are covered in
             # `memstead-workspace`'s in-process tests already.
