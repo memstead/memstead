@@ -333,7 +333,7 @@ pub fn render(entries: &[WasmEntry]) -> String {
     let mut out = String::new();
     out.push_str("# WASM surface\n\n");
     out.push_str(
-        "Auto-generated from `engine/crates/memstead-wasm/src/lib.rs`. \
+        "Auto-generated from `crates/memstead-wasm/src/lib.rs`. \
          Every entry point annotated with `#[wasm_bindgen]` is listed \
          below with the JS-visible name, the underlying Rust signature, \
          and the doc comment captured from the source.\n\n",

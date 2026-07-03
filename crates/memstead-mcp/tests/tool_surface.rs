@@ -117,18 +117,18 @@ fn tool_count_matches_expected_set() {
         count, expected,
         "Tool count drift — expected {expected}, got {count}. Update `EXPECTED_TOOLS` if a new tool intentionally landed."
     );
-    // CLAUDE.md MCP policy: stay well under Anthropic's 30-50 tool
+    // AGENTS.md MCP policy: stay well under Anthropic's 30-50 tool
     // degradation threshold. The cap below is informational — a hard
     // failure here means the surface has grown past where it should.
     assert!(
         count <= 30,
-        "Tool surface at {count} — review CLAUDE.md MCP policy before adding more (Anthropic's degradation threshold is 30-50). Consolidate or remove a tool first."
+        "Tool surface at {count} — review AGENTS.md MCP policy before adding more (Anthropic's degradation threshold is 30-50). Consolidate or remove a tool first."
     );
 }
 
 /// Layering pin. The MCP server (`memstead-mcp`) must not depend on the
-/// CLI crate (`memstead-cli`). CLAUDE.md spells out the rule — "CLI,
-/// MCP, UniFFI are siblings over the engine" — so MCP tools that need
+/// CLI crate (`memstead-cli`). The layering rule: CLI, MCP, and
+/// UniFFI are sibling surfaces over the engine — so MCP tools that need
 /// shared logic (e.g. the `workspace_config_edit` writers) reach it
 /// through `memstead-engine`, never back through the CLI. Inspecting the
 /// Cargo.toml is the canonical source of truth.

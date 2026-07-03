@@ -13,7 +13,7 @@ Each entry has two parts:
 
 **Terms remaining.** None at present — the conceptual surface this glossary covers is closed. New terms will land as new architectural questions surface; today's set is the reframing target.
 
-**Doc convergence.** Definitions here are normative. VISION.md, CLAUDE.md, and README.md converged at the 2026-06 rename; some companion docs still pre-date this glossary and use different vocabulary in places; they converge to this file at their next revision. Where a current concept doc contradicts a glossary entry directly, the entry calls it out under *status* in its rationale.
+**Doc convergence.** Definitions here are normative. VISION.md, AGENTS.md, and README.md converged at the 2026-06 rename; some companion docs still pre-date this glossary and use different vocabulary in places; they converge to this file at their next revision. Where a current concept doc contradicts a glossary entry directly, the entry calls it out under *status* in its rationale.
 
 ---
 
@@ -53,7 +53,7 @@ Three constraints earn their place in the definition by code-verification:
 
 - **"schema-pinned"** (not "-bound") because `MemConfig.schema: SchemaRef` is a versioned reference lock, not a generic binding. Same verb the next sentence uses ("from the pinned schema") — consistency.
 - **"entity graph"** (not "corpus") because typed relationships are first-class: schema-validated vocabulary, traversal, community detection. "Corpus" understates the graph layer.
-- **"Mutations are typed and pass exclusively through the engine, with append-only structured provenance"** — without this clause, a mem is indistinguishable from a raw markdown folder. The CLAUDE.md rule against direct `.md` edits is not a stylistic convention; it is a definitional property.
+- **"Mutations are typed and pass exclusively through the engine, with append-only structured provenance"** — without this clause, a mem is indistinguishable from a raw markdown folder. The AGENTS.md rule against direct `.md` edits is not a stylistic convention; it is a definitional property.
 
 Pinning the metaphor to the sealed form (`.mem` registry archive) is what makes "mem" the right word: a sealed archive is exactly a content-addressed subject capsule. Open mems are the same kind of thing in a writable state.
 

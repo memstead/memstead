@@ -97,21 +97,21 @@ npm run typecheck   # tsc --noEmit
 running `memstead-bridge` embedder. Reproduce:
 
 ```bash
-# 1. Build the WASM bundle
-cd ../memstead-wasm
+# 1. Build the WASM bundle (from client-js/, the crate root is one up)
+cd ..
 wasm-pack build --target web --release
 
 # 2. Build this package
-cd ../client-js
+cd client-js
 npm install
 npm run build
 
 # 3. Run an memstead-bridge embedder on localhost:8000 (separate process)
 
-# 4. Serve the static files
-cd ../../../..
+# 4. Serve the static files (from the repo root)
+cd ../../..
 python3 -m http.server 8000
-# open http://localhost:8000/engine/crates/memstead-wasm/client-js/examples/index.html
+# open http://localhost:8000/crates/memstead-wasm/client-js/examples/index.html
 ```
 
 ## Out of scope (v1)

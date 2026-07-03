@@ -44,8 +44,8 @@ check fails the build if the committed copy lags).
 - **[CLI / MCP / UniFFI / WASM reference + parity matrix](../docs-site/src/content/docs/reference/)**
   — every command, tool, and binding, plus the cross-surface parity matrix and
   the error-code index.
-- **[Workspace config example](memstead.toml.example)** — annotated
-  workspace-level configuration file.
+- **[Workspace config example](workspace.toml.example)** — annotated
+  example of the engine's `.memstead/workspace.toml`.
 
 ## 💡 Explanation — *understanding why*
 

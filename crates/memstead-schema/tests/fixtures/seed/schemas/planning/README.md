@@ -109,6 +109,5 @@ For publishable or portable schema variants, author a copy under `recipes/planni
 
 ## Reference
 
-- Paired recipe config: [recipes/planning/config.json](../../../recipes/planning/config.json)
 - Companion software schema (lens destination): [../software/](../software/)
-- Authoring guide: [dev/authoring-schemas.md](../../../dev/authoring-schemas.md)
+- Authoring guide: [Author a schema](../../../../../../../docs-site/src/content/docs/guides/author-a-schema.md)

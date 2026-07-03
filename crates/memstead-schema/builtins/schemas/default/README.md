@@ -2,7 +2,7 @@
 
 `default@1.0.0` is the built-in memstead schema. It ships embedded in the engine binary via `include_dir!` and backs any mem whose `.memstead/config.json` does not override it. Ten entity types spanning spec-authoring and knowledge capture, one shared relationship vocabulary, strict mode.
 
-Use when you want a general-purpose knowledge graph without authoring a custom schema. Author a dedicated schema when the domain vocabulary is specialised enough that generic types would hurt agent judgement — see [../../../examples/minimal/](../../../examples/minimal/) and [dev/authoring-schemas.md](../../../../../dev/authoring-schemas.md) for the authoring flow.
+Use when you want a general-purpose knowledge graph without authoring a custom schema. Author a dedicated schema when the domain vocabulary is specialised enough that generic types would hurt agent judgement — see [../../../examples/minimal/](../../../examples/minimal/) and the [Author a schema](../../../../../docs-site/src/content/docs/guides/author-a-schema.md) guide for the authoring flow.
 
 ## Mem pinning
 
@@ -15,7 +15,7 @@ Exact semver only — no ranges, no "latest".
 
 ## Types
 
-Every type inherits the engine's four implicit metadata fields — `type`, `created_date`, `last_modified`, `tags` — on top of whatever the YAML declares. See [dev/authoring-schemas.md §"What you don't need to declare"](../../../../../dev/authoring-schemas.md) for the contract.
+Every type inherits the engine's four implicit metadata fields — `type`, `created_date`, `last_modified`, `tags` — on top of whatever the YAML declares; schema authors never declare them.
 
 The schema is split into two loose families. Pick the most specific type — an `assertion` is better than a `memo` for a factual claim.
 

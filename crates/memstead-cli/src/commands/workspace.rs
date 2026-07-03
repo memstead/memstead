@@ -11,7 +11,7 @@
 //!   surface for `.memstead/workspace.toml`'s engine-bound sections.
 //!   Mirrors what an operator would hand-edit, with `toml_edit`
 //!   preserving comments and formatting on sections the CLI doesn't
-//!   touch. The principle from CLAUDE.md is that every engine
+//!   touch. The principle from AGENTS.md is that every engine
 //!   operation should be reachable via the CLI; this family closes the
 //!   asymmetry for workspace configuration.
 //!

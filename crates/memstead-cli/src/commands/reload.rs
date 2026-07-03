@@ -2,7 +2,7 @@
 //! branch state. CLI surface parity with the MCP `memstead_reload` tool:
 //! without the `Reload` subcommand variant, `memstead reload` would refuse
 //! with `unrecognized subcommand` while the same op stays reachable through
-//! MCP. CLAUDE.md's parity rule
+//! MCP. AGENTS.md's parity rule
 //! ("every operation reachable through the engine SHOULD be
 //! reachable via both UniFFI and CLI") makes this the correct
 //! direction to close.

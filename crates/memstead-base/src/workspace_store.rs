@@ -375,6 +375,7 @@ impl WorkspaceStoreAdapter for FileWorkspaceStore {
 /// rule lists, and `[cross_mem_links]` permission policy. Plugin
 /// hooks land additively when consumers need them.
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct WorkspaceTomlDoc {
     /// Schema version of the TOML file. Must equal
     /// `memstead-git-branch-1` for V1; mismatch surfaces
@@ -1695,6 +1696,29 @@ name = "file-two-layer"
         let store = FileWorkspaceStore::new();
         let err = store.load(tmp.path()).unwrap_err();
         assert!(matches!(err, StoreError::Parse { .. }));
+    }
+
+    #[test]
+    fn load_rejects_unknown_top_level_key() {
+        // The workspace config's contract (and its shipped example's
+        // claim) is that typos never pass silently — at the top level,
+        // not just inside [mcp]/[mutations].
+        let tmp = TempDir::new().unwrap();
+        write_workspace_toml(
+            tmp.path(),
+            "format = \"memstead-git-branch-2\"\nnonexistent_key = true\n",
+        );
+        let store = FileWorkspaceStore::new();
+        let err = store.load(tmp.path()).unwrap_err();
+        match err {
+            StoreError::Parse { message, .. } => {
+                assert!(
+                    message.contains("nonexistent_key"),
+                    "refusal must name the unknown key: {message}"
+                );
+            }
+            other => panic!("expected Parse error, got {other:?}"),
+        }
     }
 
     #[test]

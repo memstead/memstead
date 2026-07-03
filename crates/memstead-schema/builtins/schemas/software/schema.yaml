@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=../../../../generated/schema-manifest.schema.json
+# yaml-language-server: $schema=../../../generated/schema-manifest.schema.json
 
 # ─────────────────────────────────────────────────────────────────────────────
 # software@0.1.0 — knowledge-graph schema for software projects.

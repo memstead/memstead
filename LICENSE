@@ -7,7 +7,8 @@ at your option.
 
 SPDX-License-Identifier: MIT OR Apache-2.0
 
-Proprietary components — engine/crates/memstead-registry/ (the registry
-server) and macos/ (the macOS application) — carry their own terms and are
-not covered by the dual license above. See LICENSING.md for the full
+The one folder-level exception in this repository is plugins/claude-code/
+(MIT only — see plugins/claude-code/LICENSE). The proprietary components
+(the registry server and the macOS application) are not part of this
+repository and carry their own terms. See LICENSING.md for the full
 per-folder license map.

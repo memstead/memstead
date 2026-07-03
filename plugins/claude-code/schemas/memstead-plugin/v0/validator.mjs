@@ -1,6 +1,6 @@
 // Hand-rolled JSON Schema 2020-12 validator for the memstead-plugin/v0
-// schemas. Node built-ins only — no npm dependencies (per the plugin's
-// "Self-contained, no npm deps" policy in plugins/claude-code/CLAUDE.md).
+// schemas. Node built-ins only — no npm dependencies (the plugin is
+// self-contained by policy and ships without a node_modules tree).
 //
 // Covers the keywords actually used by the schemas under
 // `plugins/claude-code/schemas/memstead-plugin/v0/`:

@@ -14,7 +14,8 @@ That's it. The script:
 
 1. Builds the whole Rust workspace (sanity-checks everything compiles)
 2. Installs the `memstead` CLI globally at `~/.cargo/bin/memstead` (with `--locked` so dependency resolution stays predictable)
-3. Builds the release `memstead-mcp` binary that an MCP client (e.g. Claude Code) spawns
+3. Installs `memstead-mcp` next to it at `~/.cargo/bin/memstead-mcp` (the CLI's sibling-of-current-exe resolution looks there for mem-lifecycle subprocess spawns)
+4. Builds the in-tree release `memstead-mcp` binary at `target/release/memstead-mcp` that an MCP client (e.g. Claude Code) spawns
 
 When it finishes (typically 30 s – 2 min depending on what changed), it reminds you to **reconnect the `memstead` MCP server in your MCP client** so the new binary is picked up. That's the one step the script can't automate — the client caches the previously-spawned subprocess and needs an explicit reconnect.
 
@@ -51,7 +52,7 @@ The engine has two build flavours:
 - **lean** — folder backend only, no `gix`. `cargo build --no-default-features`.
 - **full** — adds the git-branch storage backend. This is the default build (the `mem-repo` feature is on by default): plain `cargo build`, or explicitly `cargo build --features mem-repo`.
 
-Both must stay green. `./run-tests.sh` runs both flavours plus the plugin gates; CI runs them as separate smoke jobs.
+Both must stay green. `./run-tests.sh` runs both flavours (plus a targeted `-p memstead-cli --no-default-features` run that exercises the CLI's true lean flavour), the plugin architecture gate, and the plugin `node --test` suite; CI runs the flavours as separate smoke jobs.
 
 ## Specific workflows
 
@@ -80,7 +81,7 @@ The `--locked` flag is mandatory — without it Cargo re-resolves dependency ver
 cargo build --release -p memstead-mcp
 ```
 
-Then reconnect the MCP server in your client. Same as step 3 of the script, standalone.
+Then reconnect the MCP server in your client. Same as step 4 of the script, standalone.
 
 ## When does Cargo rebuild what
 
@@ -112,7 +113,7 @@ opt-level = 1                        # dependencies compile with light optimisat
                                      # (gix, tantivy, tokio runtime is fast in tests)
 ```
 
-These mean a one-time slow rebuild (~2–3 min) when you first pull this profile, but every test cycle afterwards is significantly faster — dependency-heavy tests (gix tree walks, tantivy index builds) run optimised.
+These mean a one-time full rebuild (a cold debug build of the whole workspace measures ~1.5 min on an M-series laptop; CI takes longer) when you first pull this profile, but every test cycle afterwards is significantly faster — dependency-heavy tests (gix tree walks, tantivy index builds) run optimised.
 
 Workspace crates stay unoptimised so incremental rebuilds during development are fast.
 
@@ -122,17 +123,10 @@ Workspace crates stay unoptimised so incremental rebuilds during development are
 
 | Feature | Purpose | Default? |
 |---|---|---|
-| `git-object-storage` | The git-object write path. Mutations go through `gix::object::tree::Editor` against the mem-repo's `.git/`. No working tree. | Yes |
-| `disk-storage` | Legacy path: every mutation writes a real file and `vcs::commit` rebuilds the tree by walking disk. Kept compiled-in for rollback. | No |
-| `test-support` | Exposes `init_mem_db_stub` for downstream test crates. | No |
+| `git-object-storage` | The git-object write path. Mutations go through `gix::object::tree::Editor` against the mem-repo's `.git/`. No working tree. Retained for forward symmetry — it is the only compiled-in storage adapter. | Yes |
+| `test-support` | Exposes `init_mem_repo_stub` (and future helpers) for downstream test crates. | No |
 
-Default `cargo build --workspace` (and `./build-engine.sh`) builds with `git-object-storage`. To compile the rollback path:
-
-```bash
-cargo build --workspace --features disk-storage --no-default-features
-```
-
-You only need this if you're investigating a regression and want to A/B against the legacy storage path.
+Default `cargo build --workspace` (and `./build-engine.sh`) builds with `git-object-storage`. The crate-level flavour switch (`mem-repo` on `memstead-cli` / `memstead-mcp`, on by default) is what selects full vs lean — see the flavours section above.
 
 ## Output paths
 
@@ -142,18 +136,18 @@ You only need this if you're investigating a regression and want to A/B against 
 | `cargo build --release` | `target/release/<binary>` |
 | `cargo install --path crates/memstead-cli --locked` | `~/.cargo/bin/memstead` |
 
-The `target/` directory grows large (~5 GB+ after several builds across profiles). It's git-ignored. Periodically `cargo clean` it if disk pressure matters — first build after `clean` is slow (~3–5 min).
+The `target/` directory grows large (~5 GB+ after several builds across profiles). It's git-ignored. Periodically `cargo clean` it if disk pressure matters — the first debug build after `clean` measures ~1.5 min on an M-series laptop (release and CI builds take longer).
 
 ## Troubleshooting
 
 **`memstead: command not found`**
 You haven't installed the CLI. Easiest fix: `./build-engine.sh`. Or just step 2 of it: `cargo install --path crates/memstead-cli --locked`.
 
-**`CONFIG_ERROR: no \`.memstead/workspace.toml\` workspace found in cwd or any ancestor`**
-The binary discovers its workspace by walking up from the current directory looking for `.memstead/workspace.toml`. Run the command from inside (or under) a workspace, or `cd` into one first. To create a new workspace, run `memstead init --name <slug> --schema default@1.0.0` in an empty directory.
+**`CONFIG_ERROR: no \`.memstead/workspace.toml\` workspace found in cwd or any ancestor. Run \`memstead mem-repo init\` to bootstrap a new workspace.`**
+The binary discovers its workspace by walking up from the current directory looking for `.memstead/workspace.toml`. Run the command from inside (or under) a workspace, or `cd` into one first. To create a new workspace, do what the message says: `memstead mem-repo init` bootstraps a git-backed workspace (for a strict folder mem instead, `memstead init --name <slug> --schema default@1.0.0` in an empty directory).
 
 **MCP server "Failed" in the client**
-The binary at `target/release/memstead-mcp` is missing or stale. Run `./build-engine.sh` (or just step 3: `cargo build --release -p memstead-mcp`) and reconnect the MCP server. If the binary runs but exits during engine init, check that the spawn directory (or one of its ancestors) carries a `.memstead/workspace.toml`; the same `CONFIG_ERROR` shape applies as for the CLI.
+The binary at `target/release/memstead-mcp` is missing or stale. Run `./build-engine.sh` (or just step 4: `cargo build --release -p memstead-mcp`) and reconnect the MCP server. If the binary runs but exits during engine init, check that the spawn directory (or one of its ancestors) carries a `.memstead/workspace.toml`; the same `CONFIG_ERROR` shape applies as for the CLI.
 
 **`cargo install` fails with `winnow` / `gix-object` version mismatch**
 You forgot `--locked`. `./build-engine.sh` always passes `--locked`; if you ran the install command manually, re-run with the flag.
@@ -162,17 +156,17 @@ You forgot `--locked`. `./build-engine.sh` always passes `--locked`; if you ran 
 The Developer Tools exemption is missing. See [docs/macos-dev-setup.md](macos-dev-setup.md).
 
 **Linker errors after pulling fresh deps**
-Run `cargo clean` then `./build-engine.sh`. Cargo's incremental cache occasionally desyncs after large dep upgrades; the clean rebuild costs ~3–5 min.
+Run `cargo clean` then `./build-engine.sh`. Cargo's incremental cache occasionally desyncs after large dep upgrades; the clean debug rebuild costs ~1.5 min (plus the script's release build on top).
 
 **Stale `memstead-mcp` processes holding gitdir locks**
 ```bash
 ps aux | grep memstead-mcp                   # find them
-pkill -9 -f 'memstead-mcp --config'          # nuke them
+pkill -9 -f memstead-mcp                     # nuke them
 ```
 Common after a client crashes or aborts a session. Stale processes can deadlock test runs and CLI commands.
 
 **`./build-engine.sh` failed at one of the steps**
 Read the failure summary at the bottom (`Failed: <step-name>`). Each step's stdout is shown above it — scroll up to find the actual error. Common cases:
 - `workspace-build`: Rust compile error in your edits, not a build-system issue. Fix the code.
-- `cli-install`: usually a `--locked` Cargo.lock mismatch resolved by pulling main.
+- `cli-install` / `mcp-install`: usually a `--locked` Cargo.lock mismatch resolved by pulling main.
 - `mcp-build`: same root causes as `workspace-build`, since memstead-mcp depends on memstead-git-branch.

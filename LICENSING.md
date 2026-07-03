@@ -12,14 +12,13 @@ engine (the `memstead-git-branch` git-backed backend is open too).
 
 | Path | License | Notes |
 |---|---|---|
-| `/` (everything not listed below) | MIT OR Apache-2.0 ([LICENSE-MIT](LICENSE-MIT), [LICENSE-APACHE](LICENSE-APACHE), [NOTICE](NOTICE)) | Engine, CLI, MCP server, schemas, the `.mem` format/protocol + publish/install client, build tooling, docs — the open core. |
-| `engine/` | MIT OR Apache-2.0 | The Rust workspace and all open engine crates (incl. `memstead-git-branch`). |
-| `docs-site/` | MIT OR Apache-2.0 | Auto-generated Astro site for the public API reference. |
-| `inspector/` | MIT OR Apache-2.0 | Developer-facing browser UI. |
-| `local-ai/` | MIT OR Apache-2.0 | Wrapper for running skills against a local LLM. |
+| `/` (everything not listed below) | MIT OR Apache-2.0 ([LICENSE-MIT](LICENSE-MIT), [LICENSE-APACHE](LICENSE-APACHE), [NOTICE](NOTICE)) | The Rust workspace and all open engine crates (`crates/`, incl. `memstead-git-branch`), CLI, MCP server, schemas, the `.mem` format/protocol + publish/install client, build tooling, docs, and the auto-generated docs site (`docs-site/`) — the open core. |
 | `plugins/claude-code/` | MIT ([plugins/claude-code/LICENSE](plugins/claude-code/LICENSE)) | Plugin code that extends Claude Code with memstead-aware skills and hooks. MIT chosen to encourage broad ecosystem use. |
-| `registry/` | Proprietary | The registry **server** — the network moat and seed of the commercial layer. Lives outside the open engine workspace (its own private cargo workspace) and depends on the open engine crates by path. The `.mem` format, authority protocol, and publish/install client stay open; the server code does not. |
-| `macos/` | Proprietary ([macos/LICENSE](macos/LICENSE)) | The macOS application — commercial product. All rights reserved; not open. |
+
+The proprietary commercial layer is **not part of this repository**:
+
+- The registry **server** — the network moat and seed of the commercial layer. Lives in a private repository (its own cargo workspace) and depends on the open engine crates by path. The `.mem` format, authority protocol, and publish/install client stay open; the server code does not.
+- The **macOS application** — commercial product. All rights reserved; not open.
 
 ## Rationale
 

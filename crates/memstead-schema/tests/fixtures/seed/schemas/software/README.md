@@ -76,6 +76,5 @@ For publishable or portable schema variants, author a copy under `recipes/softwa
 
 ## Reference
 
-- Paired recipe config (write guidance + projection template): [recipes/software/config.json](../../../recipes/software/config.json)
-- Authoring guide: [dev/authoring-schemas.md](../../../dev/authoring-schemas.md)
-- Built-in default schema this one draws from: [engine/crates/memstead-schema/builtins/schemas/default/](../../../engine/crates/memstead-schema/builtins/schemas/default/)
+- Authoring guide: [Author a schema](../../../../../../../docs-site/src/content/docs/guides/author-a-schema.md)
+- Built-in default schema this one draws from: [crates/memstead-schema/builtins/schemas/default/](../../../../../builtins/schemas/default/)

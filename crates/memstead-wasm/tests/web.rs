@@ -3,7 +3,7 @@
 //! Run with:
 //!
 //! ```ignore
-//! wasm-pack test --chrome --headless engine/crates/memstead-wasm
+//! wasm-pack test --chrome --headless crates/memstead-wasm
 //! ```
 //!
 //! Three smoke tests:

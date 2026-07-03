@@ -153,6 +153,5 @@ smallest schema that lets a useful program run.
 
 ## Reference
 
-- Companion recipe config (write guidance): [../config.json](../config.json)
-- Built-in schema this one extends: [engine/crates/memstead-schema/builtins/schemas/default/](../../../engine/crates/memstead-schema/builtins/schemas/default/)
-- Sister built-in schemas: [planning](../../../engine/crates/memstead-schema/builtins/schemas/planning/) (deliberation), [software](../../../engine/crates/memstead-schema/builtins/schemas/software/) (code-bound knowledge)
+- Built-in schema this one extends: [crates/memstead-schema/builtins/schemas/default/](../../../crates/memstead-schema/builtins/schemas/default/)
+- Sister built-in schemas: [planning](../../../crates/memstead-schema/builtins/schemas/planning/) (deliberation), [software](../../../crates/memstead-schema/builtins/schemas/software/) (code-bound knowledge)

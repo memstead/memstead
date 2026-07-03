@@ -158,7 +158,6 @@ Ship new versions alongside old ones rather than editing in place.
 ## Reference
 
 - Per-mem scaffolding (instance write guidance): [`mem-template.json`](./mem-template.json)
-- Main-graph companion schema (lens projection target): [../../software/](../../software/)
-- Authoring guide: [dev/authoring-schemas.md](../../../dev/authoring-schemas.md)
-- Built-in schema this one draws from: [engine/crates/memstead-schema/builtins/schemas/default/](../../../engine/crates/memstead-schema/builtins/schemas/default/)
-- Mem-ideas input this schema implements: [dev/archive/complete/mems-ideas-input.md](../../../dev/archive/complete/mems-ideas-input.md)
+- Main-graph companion schema (lens projection target): [../software/](../software/)
+- Authoring guide: [Author a schema](../../../../../docs-site/src/content/docs/guides/author-a-schema.md)
+- Built-in schema this one draws from: [crates/memstead-schema/builtins/schemas/default/](../default/)

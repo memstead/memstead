@@ -41,7 +41,7 @@ sections:
     required: true
     search_weight: 15.0
     write_rules:
-      - "The concrete source artifact whose reading would resolve the claim — a file path with line range, a contract spec, a documented decision in `dev/archive/`, a test file. Vague pointers ('the codebase') make the entry unactionable."
+      - "The concrete source artifact whose reading would resolve the claim — a file path with line range, a contract spec, a documented decision record, a test file. Vague pointers ('the codebase') make the entry unactionable."
   - key: verifiable_when
     heading: Verifiable when
     required: true

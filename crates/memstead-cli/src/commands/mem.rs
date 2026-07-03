@@ -6,8 +6,9 @@
 //! `delete_mem`. An earlier design spawned `memstead-mcp --operator-mode`
 //! as a child process and drove the matching MCP tool over JSON-RPC
 //! — wire-format parity with the agent path was the intent,
-//! but the CLI-as-MCP-consumer relationship cut against CLAUDE.md's
-//! "CLI, MCP, UniFFI are siblings over the engine" posture. In-process
+//! but the CLI-as-MCP-consumer relationship cut against the layering
+//! posture that CLI, MCP, and UniFFI are sibling surfaces over the
+//! engine (AGENTS.md's parity rule). In-process
 //! collapses CLI and MCP onto the same Rust call, with `operator_mode:
 //! true` hardcoded at the call site so the engine bypasses the
 //! `[[mem_management.create]]` / `[[mem_management.delete]]`

@@ -36,7 +36,7 @@ const COMMIT_BLOCK_MARKER = '--EOC--';
 export const GIT_EMPTY_TREE_SHA = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
 
 // Engine error codes the pipeline branches on. Stable strings from
-// `memstead-mcp` — see CLAUDE.md "MCP error codes" plus the engine's own
+// `memstead-mcp`'s error envelope — the engine's own
 // `EngineError -> { code }` mapping.
 const ENGINE_OBJECT_NOT_FOUND_CODES = new Set(['OBJECT_NOT_FOUND', 'VCS_ERROR']);
 

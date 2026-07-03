@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=../../../../engine/crates/memstead-schema/generated/type-definition.schema.json
+# yaml-language-server: $schema=../../../../../../generated/type-definition.schema.json
 
 name: incident
 description: |

@@ -1,6 +1,6 @@
 # `reimpl-source@0.1.0` — Legacy extraction schema
 
-Paired with [`reimpl-target@0.1.0`](../../reimpl-target/schema/). This schema lives
+Paired with [`reimpl-target@0.1.0`](../reimpl-target/). This schema lives
 in the **Legacy mem** — the read-mostly extraction of what the old
 system actually is. It captures two things and nothing else: **evidence**
 (grounded observations about the old system) and **capabilities**

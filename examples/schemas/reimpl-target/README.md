@@ -1,6 +1,6 @@
 # `reimpl-target@0.1.0` — Target design schema
 
-Paired with [`reimpl-source@0.1.0`](../../reimpl-source/schema/). This schema lives
+Paired with [`reimpl-source@0.1.0`](../reimpl-source/). This schema lives
 in a **Target mem** — the design and build surface for a new
 implementation of the system captured in the Legacy mem. A single
 Legacy mem can feed multiple Target mems (different apps, different

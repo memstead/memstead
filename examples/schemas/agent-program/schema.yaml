@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=../../../engine/crates/memstead-schema/generated/schema-manifest.schema.json
+# yaml-language-server: $schema=../../../crates/memstead-schema/generated/schema-manifest.schema.json
 
 # ─────────────────────────────────────────────────────────────────────────────
 # agent-program@0.1.0 — knowledge-graph schema for executable agent programs.

@@ -1,6 +1,6 @@
 # Memstead — Claude Code plugin
 
-See the root `CLAUDE.md` for full project documentation. This plugin provides MCP tools (prefix: `memstead_`) and slash commands for graph interaction.
+See the root `AGENTS.md` for full project documentation. This plugin provides MCP tools (prefix: `memstead_`) and slash commands for graph interaction.
 
 - Always mutate via MCP tools — never edit entity markdown directly
 - Use `/graph <task>` for guided interaction with the graph

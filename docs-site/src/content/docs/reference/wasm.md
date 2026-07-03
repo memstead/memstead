@@ -4,7 +4,7 @@ title: "WASM surface"
 
 # WASM surface
 
-Auto-generated from `engine/crates/memstead-wasm/src/lib.rs`. Every entry point annotated with `#[wasm_bindgen]` is listed below with the JS-visible name, the underlying Rust signature, and the doc comment captured from the source.
+Auto-generated from `crates/memstead-wasm/src/lib.rs`. Every entry point annotated with `#[wasm_bindgen]` is listed below with the JS-visible name, the underlying Rust signature, and the doc comment captured from the source.
 
 The WASM surface is the **read-side** of the browser-sync architecture — writes happen server-side and flow back through `applyCommit`. Full-text search is intentionally unavailable in the WASM build; the method exists as a typed-refusal stub so JS call sites can branch on the stable error code (`SEARCH_UNAVAILABLE_IN_WASM`) instead of cfg-style imports.
 

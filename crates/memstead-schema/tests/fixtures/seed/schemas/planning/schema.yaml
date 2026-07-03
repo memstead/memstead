@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=../../../engine/crates/memstead-schema/generated/schema-manifest.schema.json
+# yaml-language-server: $schema=../../../../../generated/schema-manifest.schema.json
 
 # ─────────────────────────────────────────────────────────────────────────────
 # planning@0.1.0 — knowledge-graph schema for planning phases.

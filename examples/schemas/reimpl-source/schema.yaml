@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=../../../engine/crates/memstead-schema/generated/schema-manifest.schema.json
+# yaml-language-server: $schema=../../../crates/memstead-schema/generated/schema-manifest.schema.json
 
 # ─────────────────────────────────────────────────────────────────────────────
 # reimpl-source@0.1.0 — Legacy-extraction schema, paired with reimpl-target.

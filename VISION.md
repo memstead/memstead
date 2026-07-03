@@ -113,7 +113,7 @@ The engine has a deliberate form: typed entities in markdown, agent-navigated, g
 
 Refused domains are not gaps. Every accommodation that loosens the form to fit a new domain dilutes the guarantees the form gives to the domains it already serves. The honest answer to "could the engine serve X?" is sometimes "no, and that is the design."
 
-This pairs with [Constraints become capabilities](dev/concepts/composition-layering.md): that principle says every restriction inside the form must unlock a concrete capability; this one says every claim of fit against the form must be earned. Together they keep the engine narrow and sharp.
+This pairs with the *constraints become capabilities* principle: that principle says every restriction inside the form must unlock a concrete capability; this one says every claim of fit against the form must be earned. Together they keep the engine narrow and sharp.
 
 ## The freshness problem (central unsolved challenge)
 
@@ -179,6 +179,5 @@ This turns Memstead from "a registry for sharing knowledge graphs" into "an open
 
 ## Where to look next
 
-- Architectural details on cross-mem composition, the projection DAG, and the registry layer: [dev/concepts/composition-layering.md](dev/concepts/composition-layering.md).
-- Working rules for contributors and AI agents in this repository: [CLAUDE.md](CLAUDE.md).
-- Engine and registry source: [engine/](engine/).
+- Working rules for contributors and AI agents in this repository: [AGENTS.md](AGENTS.md).
+- Engine source: the crates at [crates/](crates/) in this repository.

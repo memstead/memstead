@@ -106,6 +106,6 @@ alongside old ones rather than editing in place.
 ## Reference
 
 - Per-mem scaffolding (instance write guidance): [`mem-template.json`](./mem-template.json)
-- Authoring guide: [dev/authoring-schemas.md](../../../dev/authoring-schemas.md)
-- Built-in schema this one draws from: [engine/crates/memstead-schema/builtins/schemas/default/](../../../engine/crates/memstead-schema/builtins/schemas/default/)
-- Fully commented example of a minimal schema: [engine/crates/memstead-schema/examples/minimal/](../../../engine/crates/memstead-schema/examples/minimal/)
+- Authoring guide: [Author a schema](../../../../../docs-site/src/content/docs/guides/author-a-schema.md)
+- Built-in schema this one draws from: [crates/memstead-schema/builtins/schemas/default/](../default/)
+- Fully commented example of a minimal schema: [crates/memstead-schema/examples/minimal/](../../../examples/minimal/)

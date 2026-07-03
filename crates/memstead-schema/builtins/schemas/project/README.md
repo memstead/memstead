@@ -194,7 +194,7 @@ is the right time to harden v1.
 ## Reference
 
 - Per-mem scaffolding (instance write guidance): [`mem-template.json`](./mem-template.json)
-- Companion code-side schema: [../../software/](../../software/)
-- Companion phase-scoped schema: [../../planning/](../../planning/)
-- Authoring guide: [dev/authoring-schemas.md](../../../dev/authoring-schemas.md)
-- Built-in schema this one draws from: [engine/crates/memstead-schema/builtins/schemas/default/](../../../engine/crates/memstead-schema/builtins/schemas/default/)
+- Companion code-side schema: [../software/](../software/)
+- Companion phase-scoped schema: [../planning/](../planning/)
+- Authoring guide: [Author a schema](../../../../../docs-site/src/content/docs/guides/author-a-schema.md)
+- Built-in schema this one draws from: [crates/memstead-schema/builtins/schemas/default/](../default/)

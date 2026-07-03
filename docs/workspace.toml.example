@@ -1,0 +1,112 @@
+# Example `.memstead/workspace.toml` — the operator-edited workspace
+# configuration the engine reads at boot.
+#
+# The engine (CLI and MCP binary alike) discovers its workspace by
+# walking up from the current directory for `.memstead/workspace.toml`;
+# `memstead mem-repo init` scaffolds a minimal file (just `format` +
+# `[persistence_adapter]`). Everything else here is optional — minimal
+# configs work. The engine never writes this file; its engine-managed
+# sibling is `.memstead/state/mounts.json`.
+#
+# Parsed by `memstead-base`'s `FileWorkspaceStore`
+# (`crates/memstead-base/src/workspace_store.rs`). Typo behaviour:
+# unknown keys refuse loudly at boot (serde `deny_unknown_fields` —
+# the error names the unknown key), at the top level and inside
+# `[mcp]` / `[mutations]` alike. Typos never pass silently.
+
+# ---------------------------------------------------------------------
+# Format gate (required)
+# ---------------------------------------------------------------------
+
+# The only required key. Current version; anything else refuses at
+# boot (`memstead-git-branch-1` as a recognised legacy layout, unknown
+# values as a format mismatch).
+format = "memstead-git-branch-2"
+
+# ---------------------------------------------------------------------
+# Persistence adapter
+# ---------------------------------------------------------------------
+
+# Optional — this is the default (and currently only) adapter:
+# workspace.toml (operator) + state/mounts.json (engine).
+[persistence_adapter]
+name = "file-two-layer"
+
+# ---------------------------------------------------------------------
+# Mem lifecycle authorization
+# ---------------------------------------------------------------------
+#
+# Enables agent-driven `memstead_mem_create` / `memstead_mem_delete`.
+# The default posture is conservative: with no `[[mem_management.create]]`
+# / `[[mem_management.delete]]` entries, the corresponding lifecycle
+# tool rejects every input. Opt in explicitly, rule by rule; rules
+# match first-hit in declaration order.
+#
+# `pattern` uses gitignore glob semantics (`*` does not cross `/`;
+# `**` matches zero-or-more segments) against the candidate mem path.
+# `schemas` is an allowlist of exact `name@x.y.z` pins, or `["*"]` for
+# any schema; an omitted/empty list is a deny rule. Agents discover
+# the compiled rules at runtime via `memstead_health
+# { include_config: true }`.
+
+[[mem_management.create]]
+pattern = "memstead/*"                # top-level mems under memstead/
+schemas = ["default@1.0.0"]           # exact pins only, or ["*"]
+# default_cross_links = "*"           # optional: cross-link permission
+                                      # synthesised for every mem this
+                                      # rule creates — "*" or a list of
+                                      # target mems
+
+[[mem_management.create]]
+pattern = "*/.plans/*"                # plan submems anywhere
+schemas = ["*"]
+
+[[mem_management.delete]]
+pattern = "*/.plans/*"                # only plan submems delete-eligible
+
+# ---------------------------------------------------------------------
+# Cross-mem link policy
+# ---------------------------------------------------------------------
+#
+# Workspace-level cross-mem edge permissions, keyed by source mem.
+# Values: "*" (any target) or an allowlist of target mems. Absent
+# section (or absent key) = default-deny for that source.
+
+[cross_mem_links]
+"memstead/engine" = "*"
+"memstead/plans" = ["memstead/engine"]
+
+# ---------------------------------------------------------------------
+# MCP server tuning
+# ---------------------------------------------------------------------
+#
+# Read off the engine's settings by the `memstead-mcp` binary at boot.
+# Unknown keys in this section refuse loudly (deny_unknown_fields).
+
+[mcp]
+token_budget = 10000                  # per-response chunking budget;
+                                      # omit for the compiled default
+# disabled_tools = ["memstead_mem_delete"]   # hide tools from tools/list;
+                                      # unknown names warn and drop
+
+# ---------------------------------------------------------------------
+# Mutation policy
+# ---------------------------------------------------------------------
+#
+# Unknown keys in this section refuse loudly (deny_unknown_fields).
+
+[mutations]
+require_notes = true                  # mutations without a `note` get a
+                                      # `note_missing` warning hint (the
+                                      # mutation still succeeds)
+
+# ---------------------------------------------------------------------
+# Plugin namespace
+# ---------------------------------------------------------------------
+#
+# Opaque pass-through tables keyed by plugin identifier. The engine
+# never inspects them; named plugins read their own sub-table via
+# `memstead_health { include_config: true }`.
+
+# [plugin.claude_code]
+# outer_vcs = "auto"
