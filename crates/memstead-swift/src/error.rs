@@ -298,6 +298,11 @@ impl From<PipelineEditError> for MemsteadError {
             PipelineEditError::Store(e) => Self::IoError {
                 message: e.to_string(),
             },
+            // The edit landed on disk but the provenance mirror commit
+            // failed — surfaced, never silently dropped.
+            PipelineEditError::Provenance(_) => Self::IoError {
+                message: err.to_string(),
+            },
         }
     }
 }

@@ -229,6 +229,34 @@ pub trait MemBackend: Send + Sync {
         self.write_mem_config(bytes)
     }
 
+    /// Record provenance for a pipeline-config edit (mediums / facets /
+    /// projections / ingests). The canonical pipeline config is a plain
+    /// JSON file under `.memstead/` on the workspace root — it has no
+    /// commit of its own — so backends with a commit timeline mirror the
+    /// edit into their provenance record; the commit is the audit trail,
+    /// the disk file stays the read path.
+    ///
+    /// `edits`: `(config_name, Some(bytes))` upserts the mirrored blob,
+    /// `(config_name, None)` removes it (a rename passes both). `kind`
+    /// is the primitive's plural (`mediums`, `facets`, `projections`,
+    /// `ingests`); `verb` names the operation for the commit subject.
+    ///
+    /// The default is a successful no-op: folder and archive backends
+    /// have no commit timeline, so the note is accepted and dropped —
+    /// the same posture as [`Self::write_mem_config_with_note`]. The
+    /// git-branch backend overrides this to commit the mirror under
+    /// `__MEMSTEAD:pipeline/<kind>/<mem>/<name>.json` with `note` on
+    /// the commit body.
+    fn record_pipeline_edit(
+        &self,
+        _kind: &str,
+        _edits: &[(String, Option<Vec<u8>>)],
+        _note: Option<&str>,
+        _verb: &str,
+    ) -> Result<(), BackendError> {
+        Ok(())
+    }
+
     /// Drop every backend-side artifact for this mem — the
     /// symmetric counterpart to the writes performed by
     /// `memstead_mem_create` (entity-seed commit on the per-mem

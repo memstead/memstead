@@ -1400,6 +1400,7 @@ community:
                     medium_type: MediumType::Codebase,
                     pointer: "..".to_string(),
                 },
+                None,
             )
             .unwrap();
         // Snapshot refreshed in place.
@@ -1417,10 +1418,11 @@ community:
                     engagement: None,
                     preparation: None,
                 },
+                None,
             )
             .unwrap();
         // Deleting a referenced medium is refused through the engine surface.
-        let err = engine.delete_medium("specs", "src").unwrap_err();
+        let err = engine.delete_medium("specs", "src", None).unwrap_err();
         assert!(
             matches!(
                 err,
@@ -1440,6 +1442,7 @@ community:
                 "specs",
                 "docs",
                 r#"{"name":"docs","type":"filesystem","pointer":"./docs"}"#,
+                None,
             )
             .unwrap();
         assert!(
@@ -1452,7 +1455,7 @@ community:
         );
         // A malformed payload is refused without touching the store.
         let err = engine
-            .add_medium_json("specs", "bad", "{ not json")
+            .add_medium_json("specs", "bad", "{ not json", None)
             .unwrap_err();
         assert!(
             matches!(

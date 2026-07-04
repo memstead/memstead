@@ -823,6 +823,25 @@ impl Engine {
     /// loaded `MemConfig` (folder mount with no
     /// `.memstead/config.json`; the residual missing-config path is
     /// distinct from the missing-version path). F1.
+    /// Record pipeline-edit provenance through `mem`'s backend — the
+    /// bridge the pipeline-edit block (outside the engine module) uses
+    /// to reach a mount's backend. A mem that isn't currently mounted
+    /// is a successful no-op: pipeline configs may reference unmounted
+    /// mems, and provenance is recorded against the mounted set.
+    pub fn record_pipeline_edit_provenance(
+        &self,
+        mem: &str,
+        kind: &str,
+        edits: &[(String, Option<Vec<u8>>)],
+        note: Option<&str>,
+        verb: &str,
+    ) -> Result<(), crate::backend::BackendError> {
+        match self.mounts.iter().find(|m| m.mount.mem == mem) {
+            Some(m) => m.backend.record_pipeline_edit(kind, edits, note, verb),
+            None => Ok(()),
+        }
+    }
+
     pub fn set_mem_version(
         &mut self,
         mem_name: &str,

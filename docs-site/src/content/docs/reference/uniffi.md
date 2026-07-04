@@ -681,42 +681,53 @@ interface Engine {
     // free-form `engagement` field rules out a typed record); delete/rename
     // take identifiers. Referential integrity and snapshot refresh live in
     // the engine. See `memstead_base::pipeline_edit`.
+    // Every edit accepts an optional provenance note. Git-branch
+    // workspaces commit the edit's mirror to __MEMSTEAD with the note on
+    // the commit body; folder workspaces accept and drop it (no commit
+    // timeline exists) — the same posture as set_mem_version.
     [Throws=MemsteadError]
-    void add_medium(string mem, string name, string medium_json);
+    void add_medium(string mem, string name, string medium_json, string? note);
     [Throws=MemsteadError]
-    void update_medium(string mem, string name, string medium_json);
+    void update_medium(string mem, string name, string medium_json, string? note);
     [Throws=MemsteadError]
-    void delete_medium(string mem, string name);
+    void delete_medium(string mem, string name, string? note);
     [Throws=MemsteadError]
-    void rename_medium(string mem, string old_name, string new_name);
+    void rename_medium(string mem, string old_name, string new_name, string? note);
 
     [Throws=MemsteadError]
-    void add_facet(string mem, string name, string facet_json);
+    void add_facet(string mem, string name, string facet_json, string? note);
     [Throws=MemsteadError]
-    void update_facet(string mem, string name, string facet_json);
+    void update_facet(string mem, string name, string facet_json, string? note);
     [Throws=MemsteadError]
-    void delete_facet(string mem, string name);
+    void delete_facet(string mem, string name, string? note);
     [Throws=MemsteadError]
-    void rename_facet(string mem, string old_name, string new_name);
+    void rename_facet(string mem, string old_name, string new_name, string? note);
 
     [Throws=MemsteadError]
-    void add_projection(string mem, string name, string projection_json);
+    void add_projection(string mem, string name, string projection_json, string? note);
     [Throws=MemsteadError]
-    void update_projection(string mem, string name, string projection_json);
+    void update_projection(string mem, string name, string projection_json, string? note);
     [Throws=MemsteadError]
-    void delete_projection(string mem, string name);
+    void delete_projection(string mem, string name, string? note);
     [Throws=MemsteadError]
-    void rename_projection(string mem, string old_name, string new_name);
+    void rename_projection(string mem, string old_name, string new_name, string? note);
 
-    // Ingests are flat (workspace-level, not mem-scoped) — no mem param.
+    // Ingests are flat (workspace-level, not mem-scoped) — no mem param;
+    // provenance records against the projection's destination mem.
     [Throws=MemsteadError]
-    void add_ingest(string name, string ingest_json);
+    void add_ingest(string name, string ingest_json, string? note);
     [Throws=MemsteadError]
-    void update_ingest(string name, string ingest_json);
+    void update_ingest(string name, string ingest_json, string? note);
     [Throws=MemsteadError]
-    void delete_ingest(string name);
+    void delete_ingest(string name, string? note);
     [Throws=MemsteadError]
-    void rename_ingest(string old_name, string new_name);
+    void rename_ingest(string old_name, string new_name, string? note);
+
+    // Whether the workspace's mutation policy requires provenance notes
+    // ([mutations].require_notes). The app reads this to collect a note
+    // up front and refuse an empty one with the policy named — the
+    // engine itself only nudges (NOTE_MISSING warning), never blocks.
+    boolean workspace_requires_notes();
 
     // Read the four-primitive store as JSON (the edit methods' read
     // counterpart). The macOS pipeline editor deserializes this to display

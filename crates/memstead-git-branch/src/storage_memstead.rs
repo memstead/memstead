@@ -802,6 +802,137 @@ pub fn commit_config_to_memstead_at_gitdir(
     Ok(())
 }
 
+/// Commit a batch of tree edits (upsert or remove) to arbitrary paths
+/// on the unified `__MEMSTEAD` ref in one commit. The pipeline-edit
+/// provenance path: `.memstead/` pipeline configs are plain disk JSON
+/// with no commit of their own, so each edit mirrors its config bytes
+/// under `__MEMSTEAD:pipeline/<kind>/<mem>/<name>.json` — the commit
+/// (subject + `Note:` trailer from `ctx`) IS the provenance record;
+/// the disk file stays the read path. Same read-modify-write shape and
+/// atomic ref advance as [`commit_config_to_memstead_at_gitdir`],
+/// generalized to N paths so a rename (remove old + upsert new) lands
+/// as one commit.
+///
+/// `edits`: `(tree_path, Some(bytes))` upserts, `(tree_path, None)`
+/// removes. Missing-`__MEMSTEAD` bootstrap follows the config helper's
+/// race-safe `MustNotExist` creation.
+pub fn commit_paths_to_memstead_at_gitdir(
+    gitdir: &Path,
+    edits: &[(String, Option<Vec<u8>>)],
+    ctx: &CommitContext<'_>,
+    message: &str,
+) -> Result<(), MemRepoWriteError> {
+    let repo = gix::open(gitdir).map_err(|e| MemRepoWriteError::GixOpen {
+        path: gitdir.display().to_string(),
+        message: e.to_string(),
+    })?;
+    let existing_tip: Option<gix::ObjectId> = repo
+        .try_find_reference("refs/heads/__MEMSTEAD")
+        .map_err(|e| MemRepoWriteError::GitTree(e.to_string()))?
+        .map(|r| {
+            r.into_fully_peeled_id()
+                .map(|id| id.detach())
+                .map_err(|e| MemRepoWriteError::GitTree(format!("peel __MEMSTEAD: {e}")))
+        })
+        .transpose()?;
+
+    let mut editor = match existing_tip {
+        Some(tip) => {
+            let commit = repo
+                .find_object(tip)
+                .map_err(|e| MemRepoWriteError::GitTree(format!("read __MEMSTEAD commit: {e}")))?
+                .into_commit();
+            let tree = commit
+                .tree()
+                .map_err(|e| MemRepoWriteError::GitTree(format!("peel __MEMSTEAD tree: {e}")))?;
+            tree.edit().map_err(|e| {
+                MemRepoWriteError::GitTree(format!("editor init for __MEMSTEAD: {e}"))
+            })?
+        }
+        None => repo.empty_tree().edit().map_err(|e| {
+            MemRepoWriteError::GitTree(format!("editor init (empty) for __MEMSTEAD: {e}"))
+        })?,
+    };
+    for (tree_path, bytes) in edits {
+        match bytes {
+            Some(bytes) => {
+                let blob_id = repo
+                    .write_blob(bytes.as_slice())
+                    .map_err(|e| MemRepoWriteError::GitTree(format!("write blob: {e}")))?
+                    .detach();
+                editor
+                    .upsert(
+                        tree_path.as_str(),
+                        gix::objs::tree::EntryKind::Blob,
+                        blob_id,
+                    )
+                    .map_err(|e| {
+                        MemRepoWriteError::GitTree(format!("tree upsert {tree_path}: {e}"))
+                    })?;
+            }
+            None => {
+                editor.remove(tree_path.as_str()).map_err(|e| {
+                    MemRepoWriteError::GitTree(format!("tree remove {tree_path}: {e}"))
+                })?;
+            }
+        }
+    }
+    let new_tree_id = editor
+        .write()
+        .map_err(|e| MemRepoWriteError::GitTree(format!("tree write for __MEMSTEAD: {e}")))?
+        .detach();
+
+    let time = gix::date::Time::now_local_or_utc();
+    let committer_sig = gix::actor::Signature {
+        name: COMMITTER_NAME.into(),
+        email: COMMITTER_EMAIL.into(),
+        time,
+    };
+    let author_sig = match author_identity(ctx) {
+        Some((name, email)) => gix::actor::Signature {
+            name: name.into(),
+            email: email.into(),
+            time,
+        },
+        None => committer_sig.clone(),
+    };
+    let full_message = format_commit_message(message, ctx);
+    let parents: Vec<gix::ObjectId> = match existing_tip {
+        Some(tip) => vec![tip],
+        None => Vec::new(),
+    };
+    let commit = gix::objs::Commit {
+        message: full_message.into(),
+        tree: new_tree_id,
+        author: author_sig,
+        committer: committer_sig,
+        encoding: None,
+        parents: parents.into_iter().collect(),
+        extra_headers: Default::default(),
+    };
+    let new_commit_id = repo
+        .write_object(&commit)
+        .map_err(|e| MemRepoWriteError::GitTree(format!("write __MEMSTEAD commit: {e}")))?
+        .detach();
+
+    let expected = match existing_tip {
+        Some(tip) => {
+            gix::refs::transaction::PreviousValue::MustExistAndMatch(gix::refs::Target::Object(tip))
+        }
+        None => gix::refs::transaction::PreviousValue::MustNotExist,
+    };
+    commit_refs_at_gitdir(
+        gitdir,
+        &[RefSpec {
+            ref_name: "refs/heads/__MEMSTEAD".to_string(),
+            new_oid: new_commit_id,
+            expected,
+            log_message: message.to_string(),
+        }],
+    )?;
+    Ok(())
+}
+
 /// Drop every git-branch artifact the engine wrote for one mem:
 /// the per-mem content branch (`refs/heads/<branch_leaf>`) and the
 /// `__MEMSTEAD:mems/<branch_leaf>/config.json` blob (collapsing any

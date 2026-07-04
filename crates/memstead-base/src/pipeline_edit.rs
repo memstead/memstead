@@ -36,6 +36,13 @@ pub enum PipelineEditError {
     /// list in a test or in-memory consumer).
     #[error("engine has no workspace root — pipeline edits require a workspace-backed engine")]
     NoWorkspaceRoot,
+    /// The edit landed on disk but its provenance record (the
+    /// `__MEMSTEAD` mirror commit carrying the note) could not be
+    /// committed. The disk state is live; the audit trail is missing
+    /// this event — callers surface it rather than silently dropping
+    /// the note.
+    #[error("pipeline edit landed, but recording provenance failed: {0}")]
+    Provenance(String),
     /// A create targeted a `(mem, name)` that already holds a record.
     #[error("{primitive} '{key}' already exists")]
     AlreadyExists {
@@ -514,15 +521,37 @@ impl Engine {
         Ok(())
     }
 
+    /// Provenance bridge with error translation: the disk write has
+    /// already landed when this runs, so a failure here is surfaced as
+    /// `Provenance` (edit live, audit record missing) rather than
+    /// rolling anything back.
+    fn pipeline_provenance(
+        &self,
+        mem: &str,
+        kind: &str,
+        edits: &[(String, Option<Vec<u8>>)],
+        note: Option<&str>,
+        verb: &str,
+    ) -> Result<(), PipelineEditError> {
+        self.record_pipeline_edit_provenance(mem, kind, edits, note, verb)
+            .map_err(|e| PipelineEditError::Provenance(e.to_string()))
+    }
+
     /// Create a medium and refresh the in-memory snapshot. See [`add_medium`].
     pub fn add_medium(
         &mut self,
         mem: &str,
         name: &str,
         medium: &Medium,
+        note: Option<&str>,
     ) -> Result<(), PipelineEditError> {
         let root = self.pipeline_edit_root()?;
         add_medium(&root, mem, name, medium)?;
+        let bytes = serde_json::to_vec_pretty(medium).map_err(|e| PipelineEditError::InvalidJson {
+            primitive: "config",
+            message: e.to_string(),
+        })?;
+        self.pipeline_provenance(mem, "mediums", &[(name.to_string(), Some(bytes))], note, "add")?;
         self.refresh_pipeline_configs(&root)
     }
 
@@ -532,16 +561,28 @@ impl Engine {
         mem: &str,
         name: &str,
         medium: &Medium,
+        note: Option<&str>,
     ) -> Result<(), PipelineEditError> {
         let root = self.pipeline_edit_root()?;
         update_medium(&root, mem, name, medium)?;
+        let bytes = serde_json::to_vec_pretty(medium).map_err(|e| PipelineEditError::InvalidJson {
+            primitive: "config",
+            message: e.to_string(),
+        })?;
+        self.pipeline_provenance(mem, "mediums", &[(name.to_string(), Some(bytes))], note, "update")?;
         self.refresh_pipeline_configs(&root)
     }
 
     /// Delete a medium and refresh the snapshot. See [`delete_medium`].
-    pub fn delete_medium(&mut self, mem: &str, name: &str) -> Result<(), PipelineEditError> {
+    pub fn delete_medium(
+        &mut self,
+        mem: &str,
+        name: &str,
+        note: Option<&str>,
+    ) -> Result<(), PipelineEditError> {
         let root = self.pipeline_edit_root()?;
         delete_medium(&root, mem, name)?;
+        self.pipeline_provenance(mem, "mediums", &[(name.to_string(), None)], note, "delete")?;
         self.refresh_pipeline_configs(&root)
     }
 
@@ -551,9 +592,32 @@ impl Engine {
         mem: &str,
         old: &str,
         new: &str,
+        note: Option<&str>,
     ) -> Result<(), PipelineEditError> {
         let root = self.pipeline_edit_root()?;
         rename_medium(&root, mem, old, new)?;
+        // Mirror the rename as remove-old + upsert-new in one commit.
+        // The in-memory snapshot still holds the record under its old
+        // name here (refresh runs after), and a rename changes the
+        // name only — the config bytes are those of the old record.
+        let bytes = self
+            .pipeline_configs()
+            .mediums
+            .iter()
+            .find(|r| r.mem == mem && r.name == old)
+            .map(|r| serde_json::to_vec_pretty(&r.config))
+            .transpose()
+            .map_err(|e| PipelineEditError::InvalidJson {
+                primitive: "config",
+                message: e.to_string(),
+            })?;
+        self.pipeline_provenance(
+            mem,
+            "mediums",
+            &[(old.to_string(), None), (new.to_string(), bytes)],
+            note,
+            "rename",
+        )?;
         self.refresh_pipeline_configs(&root)
     }
 
@@ -563,9 +627,15 @@ impl Engine {
         mem: &str,
         name: &str,
         facet: &Facet,
+        note: Option<&str>,
     ) -> Result<(), PipelineEditError> {
         let root = self.pipeline_edit_root()?;
         add_facet(&root, mem, name, facet)?;
+        let bytes = serde_json::to_vec_pretty(facet).map_err(|e| PipelineEditError::InvalidJson {
+            primitive: "config",
+            message: e.to_string(),
+        })?;
+        self.pipeline_provenance(mem, "facets", &[(name.to_string(), Some(bytes))], note, "add")?;
         self.refresh_pipeline_configs(&root)
     }
 
@@ -575,16 +645,28 @@ impl Engine {
         mem: &str,
         name: &str,
         facet: &Facet,
+        note: Option<&str>,
     ) -> Result<(), PipelineEditError> {
         let root = self.pipeline_edit_root()?;
         update_facet(&root, mem, name, facet)?;
+        let bytes = serde_json::to_vec_pretty(facet).map_err(|e| PipelineEditError::InvalidJson {
+            primitive: "config",
+            message: e.to_string(),
+        })?;
+        self.pipeline_provenance(mem, "facets", &[(name.to_string(), Some(bytes))], note, "update")?;
         self.refresh_pipeline_configs(&root)
     }
 
     /// Delete a facet and refresh the snapshot. See [`delete_facet`].
-    pub fn delete_facet(&mut self, mem: &str, name: &str) -> Result<(), PipelineEditError> {
+    pub fn delete_facet(
+        &mut self,
+        mem: &str,
+        name: &str,
+        note: Option<&str>,
+    ) -> Result<(), PipelineEditError> {
         let root = self.pipeline_edit_root()?;
         delete_facet(&root, mem, name)?;
+        self.pipeline_provenance(mem, "facets", &[(name.to_string(), None)], note, "delete")?;
         self.refresh_pipeline_configs(&root)
     }
 
@@ -594,9 +676,32 @@ impl Engine {
         mem: &str,
         old: &str,
         new: &str,
+        note: Option<&str>,
     ) -> Result<(), PipelineEditError> {
         let root = self.pipeline_edit_root()?;
         rename_facet(&root, mem, old, new)?;
+        // Mirror the rename as remove-old + upsert-new in one commit.
+        // The in-memory snapshot still holds the record under its old
+        // name here (refresh runs after), and a rename changes the
+        // name only — the config bytes are those of the old record.
+        let bytes = self
+            .pipeline_configs()
+            .facets
+            .iter()
+            .find(|r| r.mem == mem && r.name == old)
+            .map(|r| serde_json::to_vec_pretty(&r.config))
+            .transpose()
+            .map_err(|e| PipelineEditError::InvalidJson {
+                primitive: "config",
+                message: e.to_string(),
+            })?;
+        self.pipeline_provenance(
+            mem,
+            "facets",
+            &[(old.to_string(), None), (new.to_string(), bytes)],
+            note,
+            "rename",
+        )?;
         self.refresh_pipeline_configs(&root)
     }
 
@@ -606,9 +711,15 @@ impl Engine {
         mem: &str,
         name: &str,
         projection: &Projection,
+        note: Option<&str>,
     ) -> Result<(), PipelineEditError> {
         let root = self.pipeline_edit_root()?;
         add_projection(&root, mem, name, projection)?;
+        let bytes = serde_json::to_vec_pretty(projection).map_err(|e| PipelineEditError::InvalidJson {
+            primitive: "config",
+            message: e.to_string(),
+        })?;
+        self.pipeline_provenance(mem, "projections", &[(name.to_string(), Some(bytes))], note, "add")?;
         self.refresh_pipeline_configs(&root)
     }
 
@@ -618,16 +729,28 @@ impl Engine {
         mem: &str,
         name: &str,
         projection: &Projection,
+        note: Option<&str>,
     ) -> Result<(), PipelineEditError> {
         let root = self.pipeline_edit_root()?;
         update_projection(&root, mem, name, projection)?;
+        let bytes = serde_json::to_vec_pretty(projection).map_err(|e| PipelineEditError::InvalidJson {
+            primitive: "config",
+            message: e.to_string(),
+        })?;
+        self.pipeline_provenance(mem, "projections", &[(name.to_string(), Some(bytes))], note, "update")?;
         self.refresh_pipeline_configs(&root)
     }
 
     /// Delete a projection and refresh the snapshot. See [`delete_projection`].
-    pub fn delete_projection(&mut self, mem: &str, name: &str) -> Result<(), PipelineEditError> {
+    pub fn delete_projection(
+        &mut self,
+        mem: &str,
+        name: &str,
+        note: Option<&str>,
+    ) -> Result<(), PipelineEditError> {
         let root = self.pipeline_edit_root()?;
         delete_projection(&root, mem, name)?;
+        self.pipeline_provenance(mem, "projections", &[(name.to_string(), None)], note, "delete")?;
         self.refresh_pipeline_configs(&root)
     }
 
@@ -637,37 +760,133 @@ impl Engine {
         mem: &str,
         old: &str,
         new: &str,
+        note: Option<&str>,
     ) -> Result<(), PipelineEditError> {
         let root = self.pipeline_edit_root()?;
         rename_projection(&root, mem, old, new)?;
+        // Mirror the rename as remove-old + upsert-new in one commit.
+        // The in-memory snapshot still holds the record under its old
+        // name here (refresh runs after), and a rename changes the
+        // name only — the config bytes are those of the old record.
+        let bytes = self
+            .pipeline_configs()
+            .projections
+            .iter()
+            .find(|r| r.mem == mem && r.name == old)
+            .map(|r| serde_json::to_vec_pretty(&r.config))
+            .transpose()
+            .map_err(|e| PipelineEditError::InvalidJson {
+                primitive: "config",
+                message: e.to_string(),
+            })?;
+        self.pipeline_provenance(
+            mem,
+            "projections",
+            &[(old.to_string(), None), (new.to_string(), bytes)],
+            note,
+            "rename",
+        )?;
         self.refresh_pipeline_configs(&root)
     }
 
+    /// Destination mem of an ingest: the `<mem>` half of its
+    /// `projection: "<mem>/<name>"` pointer. Ingests are
+    /// workspace-level; their provenance records against the mem the
+    /// runs would land in.
+    fn ingest_destination_mem(projection: &str) -> String {
+        projection
+            .split('/')
+            .next()
+            .unwrap_or(projection)
+            .to_string()
+    }
+
     /// Create an ingest and refresh the snapshot. See [`add_ingest`].
-    pub fn add_ingest(&mut self, name: &str, ingest: &Ingest) -> Result<(), PipelineEditError> {
+    pub fn add_ingest(
+        &mut self,
+        name: &str,
+        ingest: &Ingest,
+        note: Option<&str>,
+    ) -> Result<(), PipelineEditError> {
         let root = self.pipeline_edit_root()?;
         add_ingest(&root, name, ingest)?;
+        let bytes = serde_json::to_vec_pretty(ingest).map_err(|e| PipelineEditError::InvalidJson {
+            primitive: "config",
+            message: e.to_string(),
+        })?;
+        let mem = Self::ingest_destination_mem(&ingest.projection);
+        self.pipeline_provenance(&mem, "ingests", &[(name.to_string(), Some(bytes))], note, "add")?;
         self.refresh_pipeline_configs(&root)
     }
 
     /// Overwrite an ingest and refresh the snapshot. See [`update_ingest`].
-    pub fn update_ingest(&mut self, name: &str, ingest: &Ingest) -> Result<(), PipelineEditError> {
+    pub fn update_ingest(
+        &mut self,
+        name: &str,
+        ingest: &Ingest,
+        note: Option<&str>,
+    ) -> Result<(), PipelineEditError> {
         let root = self.pipeline_edit_root()?;
         update_ingest(&root, name, ingest)?;
+        let bytes = serde_json::to_vec_pretty(ingest).map_err(|e| PipelineEditError::InvalidJson {
+            primitive: "config",
+            message: e.to_string(),
+        })?;
+        let mem = Self::ingest_destination_mem(&ingest.projection);
+        self.pipeline_provenance(&mem, "ingests", &[(name.to_string(), Some(bytes))], note, "update")?;
         self.refresh_pipeline_configs(&root)
     }
 
     /// Delete an ingest and refresh the snapshot. See [`delete_ingest`].
-    pub fn delete_ingest(&mut self, name: &str) -> Result<(), PipelineEditError> {
+    pub fn delete_ingest(&mut self, name: &str, note: Option<&str>) -> Result<(), PipelineEditError> {
         let root = self.pipeline_edit_root()?;
+        // Snapshot still holds the record — resolve the destination mem
+        // before the delete lands.
+        let mem = self
+            .pipeline_configs()
+            .ingests
+            .iter()
+            .find(|r| r.name == name)
+            .map(|r| Self::ingest_destination_mem(&r.config.projection));
         delete_ingest(&root, name)?;
+        if let Some(mem) = mem {
+            self.pipeline_provenance(&mem, "ingests", &[(name.to_string(), None)], note, "delete")?;
+        }
         self.refresh_pipeline_configs(&root)
     }
 
     /// Rename an ingest and refresh the snapshot. See [`rename_ingest`].
-    pub fn rename_ingest(&mut self, old: &str, new: &str) -> Result<(), PipelineEditError> {
+    pub fn rename_ingest(
+        &mut self,
+        old: &str,
+        new: &str,
+        note: Option<&str>,
+    ) -> Result<(), PipelineEditError> {
         let root = self.pipeline_edit_root()?;
         rename_ingest(&root, old, new)?;
+        // Pre-refresh snapshot: the record still lives under its old name.
+        let record = self
+            .pipeline_configs()
+            .ingests
+            .iter()
+            .find(|r| r.name == old);
+        let mem = record.map(|r| Self::ingest_destination_mem(&r.config.projection));
+        let bytes = record
+            .map(|r| serde_json::to_vec_pretty(&r.config))
+            .transpose()
+            .map_err(|e| PipelineEditError::InvalidJson {
+                primitive: "config",
+                message: e.to_string(),
+            })?;
+        if let Some(mem) = mem {
+            self.pipeline_provenance(
+                &mem,
+                "ingests",
+                &[(old.to_string(), None), (new.to_string(), bytes)],
+                note,
+                "rename",
+            )?;
+        }
         self.refresh_pipeline_configs(&root)
     }
 
@@ -685,8 +904,9 @@ impl Engine {
         mem: &str,
         name: &str,
         medium_json: &str,
+        note: Option<&str>,
     ) -> Result<(), PipelineEditError> {
-        self.add_medium(mem, name, &parse_json(medium_json, "medium")?)
+        self.add_medium(mem, name, &parse_json(medium_json, "medium")?, note)
     }
 
     /// [`Self::update_medium`] from a JSON-encoded [`Medium`].
@@ -695,8 +915,9 @@ impl Engine {
         mem: &str,
         name: &str,
         medium_json: &str,
+        note: Option<&str>,
     ) -> Result<(), PipelineEditError> {
-        self.update_medium(mem, name, &parse_json(medium_json, "medium")?)
+        self.update_medium(mem, name, &parse_json(medium_json, "medium")?, note)
     }
 
     /// [`Self::add_facet`] from a JSON-encoded [`Facet`].
@@ -705,8 +926,9 @@ impl Engine {
         mem: &str,
         name: &str,
         facet_json: &str,
+        note: Option<&str>,
     ) -> Result<(), PipelineEditError> {
-        self.add_facet(mem, name, &parse_json(facet_json, "facet")?)
+        self.add_facet(mem, name, &parse_json(facet_json, "facet")?, note)
     }
 
     /// [`Self::update_facet`] from a JSON-encoded [`Facet`].
@@ -715,8 +937,9 @@ impl Engine {
         mem: &str,
         name: &str,
         facet_json: &str,
+        note: Option<&str>,
     ) -> Result<(), PipelineEditError> {
-        self.update_facet(mem, name, &parse_json(facet_json, "facet")?)
+        self.update_facet(mem, name, &parse_json(facet_json, "facet")?, note)
     }
 
     /// [`Self::add_projection`] from a JSON-encoded [`Projection`].
@@ -725,8 +948,9 @@ impl Engine {
         mem: &str,
         name: &str,
         projection_json: &str,
+        note: Option<&str>,
     ) -> Result<(), PipelineEditError> {
-        self.add_projection(mem, name, &parse_json(projection_json, "projection")?)
+        self.add_projection(mem, name, &parse_json(projection_json, "projection")?, note)
     }
 
     /// [`Self::update_projection`] from a JSON-encoded [`Projection`].
@@ -735,8 +959,9 @@ impl Engine {
         mem: &str,
         name: &str,
         projection_json: &str,
+        note: Option<&str>,
     ) -> Result<(), PipelineEditError> {
-        self.update_projection(mem, name, &parse_json(projection_json, "projection")?)
+        self.update_projection(mem, name, &parse_json(projection_json, "projection")?, note)
     }
 
     /// [`Self::add_ingest`] from a JSON-encoded [`Ingest`].
@@ -744,8 +969,9 @@ impl Engine {
         &mut self,
         name: &str,
         ingest_json: &str,
+        note: Option<&str>,
     ) -> Result<(), PipelineEditError> {
-        self.add_ingest(name, &parse_json(ingest_json, "ingest")?)
+        self.add_ingest(name, &parse_json(ingest_json, "ingest")?, note)
     }
 
     /// [`Self::update_ingest`] from a JSON-encoded [`Ingest`].
@@ -753,8 +979,9 @@ impl Engine {
         &mut self,
         name: &str,
         ingest_json: &str,
+        note: Option<&str>,
     ) -> Result<(), PipelineEditError> {
-        self.update_ingest(name, &parse_json(ingest_json, "ingest")?)
+        self.update_ingest(name, &parse_json(ingest_json, "ingest")?, note)
     }
 }
 

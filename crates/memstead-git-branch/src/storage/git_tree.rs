@@ -840,6 +840,48 @@ impl memstead_base::backend::MemBackend for GitTreeMemWriter {
         )
         .map_err(|e| memstead_base::backend::BackendError::Other(e.to_string()))
     }
+
+    fn record_pipeline_edit(
+        &self,
+        kind: &str,
+        edits: &[(String, Option<Vec<u8>>)],
+        note: Option<&str>,
+        verb: &str,
+    ) -> Result<(), memstead_base::backend::BackendError> {
+        // Mirror the pipeline-config edit under
+        // `__MEMSTEAD:pipeline/<kind>/<leaf>/<name>.json` — the commit
+        // (subject + Note trailer) is the provenance record for a disk
+        // write that has no commit of its own.
+        let leaf = self
+            .ref_name
+            .strip_prefix("refs/heads/")
+            .unwrap_or(&self.ref_name);
+        let tree_edits: Vec<(String, Option<Vec<u8>>)> = edits
+            .iter()
+            .map(|(name, bytes)| {
+                (
+                    format!("pipeline/{kind}/{leaf}/{name}.json"),
+                    bytes.clone(),
+                )
+            })
+            .collect();
+        let ctx = CommitContext {
+            actor: memstead_base::vcs::Actor::Agent,
+            client: None,
+            tool: Some("memstead_pipeline_edit"),
+            note: note.map(str::to_string),
+            logical_operation_id: None,
+            entity_ids: None,
+        };
+        let names: Vec<&str> = edits.iter().map(|(n, _)| n.as_str()).collect();
+        crate::storage_memstead::commit_paths_to_memstead_at_gitdir(
+            &self.gitdir,
+            &tree_edits,
+            &ctx,
+            &format!("memstead: {verb} {kind} {leaf}/{}", names.join(", ")),
+        )
+        .map_err(|e| memstead_base::backend::BackendError::Other(e.to_string()))
+    }
 }
 
 /// Read a blob from `ref_name:path` in the gitdir. Returns

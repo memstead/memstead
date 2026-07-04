@@ -490,12 +490,13 @@ impl Engine {
         mem: String,
         name: String,
         medium_json: String,
+        note: Option<String>,
     ) -> Result<(), MemsteadError> {
         let mut engine = self
             .inner
             .lock()
             .expect("memstead-swift engine mutex poisoned");
-        engine.add_medium_json(&mem, &name, &medium_json)?;
+        engine.add_medium_json(&mem, &name, &medium_json, note.as_deref())?;
         Ok(())
     }
 
@@ -505,22 +506,23 @@ impl Engine {
         mem: String,
         name: String,
         medium_json: String,
+        note: Option<String>,
     ) -> Result<(), MemsteadError> {
         let mut engine = self
             .inner
             .lock()
             .expect("memstead-swift engine mutex poisoned");
-        engine.update_medium_json(&mem, &name, &medium_json)?;
+        engine.update_medium_json(&mem, &name, &medium_json, note.as_deref())?;
         Ok(())
     }
 
     /// Delete a medium (refused while a facet references it). See `Engine::delete_medium`.
-    pub fn delete_medium(&self, mem: String, name: String) -> Result<(), MemsteadError> {
+    pub fn delete_medium(&self, mem: String, name: String, note: Option<String>) -> Result<(), MemsteadError> {
         let mut engine = self
             .inner
             .lock()
             .expect("memstead-swift engine mutex poisoned");
-        engine.delete_medium(&mem, &name)?;
+        engine.delete_medium(&mem, &name, note.as_deref())?;
         Ok(())
     }
 
@@ -530,12 +532,13 @@ impl Engine {
         mem: String,
         old_name: String,
         new_name: String,
+        note: Option<String>,
     ) -> Result<(), MemsteadError> {
         let mut engine = self
             .inner
             .lock()
             .expect("memstead-swift engine mutex poisoned");
-        engine.rename_medium(&mem, &old_name, &new_name)?;
+        engine.rename_medium(&mem, &old_name, &new_name, note.as_deref())?;
         Ok(())
     }
 
@@ -545,12 +548,13 @@ impl Engine {
         mem: String,
         name: String,
         facet_json: String,
+        note: Option<String>,
     ) -> Result<(), MemsteadError> {
         let mut engine = self
             .inner
             .lock()
             .expect("memstead-swift engine mutex poisoned");
-        engine.add_facet_json(&mem, &name, &facet_json)?;
+        engine.add_facet_json(&mem, &name, &facet_json, note.as_deref())?;
         Ok(())
     }
 
@@ -560,22 +564,23 @@ impl Engine {
         mem: String,
         name: String,
         facet_json: String,
+        note: Option<String>,
     ) -> Result<(), MemsteadError> {
         let mut engine = self
             .inner
             .lock()
             .expect("memstead-swift engine mutex poisoned");
-        engine.update_facet_json(&mem, &name, &facet_json)?;
+        engine.update_facet_json(&mem, &name, &facet_json, note.as_deref())?;
         Ok(())
     }
 
     /// Delete a facet (refused while a projection references it). See `Engine::delete_facet`.
-    pub fn delete_facet(&self, mem: String, name: String) -> Result<(), MemsteadError> {
+    pub fn delete_facet(&self, mem: String, name: String, note: Option<String>) -> Result<(), MemsteadError> {
         let mut engine = self
             .inner
             .lock()
             .expect("memstead-swift engine mutex poisoned");
-        engine.delete_facet(&mem, &name)?;
+        engine.delete_facet(&mem, &name, note.as_deref())?;
         Ok(())
     }
 
@@ -585,12 +590,13 @@ impl Engine {
         mem: String,
         old_name: String,
         new_name: String,
+        note: Option<String>,
     ) -> Result<(), MemsteadError> {
         let mut engine = self
             .inner
             .lock()
             .expect("memstead-swift engine mutex poisoned");
-        engine.rename_facet(&mem, &old_name, &new_name)?;
+        engine.rename_facet(&mem, &old_name, &new_name, note.as_deref())?;
         Ok(())
     }
 
@@ -600,12 +606,13 @@ impl Engine {
         mem: String,
         name: String,
         projection_json: String,
+        note: Option<String>,
     ) -> Result<(), MemsteadError> {
         let mut engine = self
             .inner
             .lock()
             .expect("memstead-swift engine mutex poisoned");
-        engine.add_projection_json(&mem, &name, &projection_json)?;
+        engine.add_projection_json(&mem, &name, &projection_json, note.as_deref())?;
         Ok(())
     }
 
@@ -615,22 +622,23 @@ impl Engine {
         mem: String,
         name: String,
         projection_json: String,
+        note: Option<String>,
     ) -> Result<(), MemsteadError> {
         let mut engine = self
             .inner
             .lock()
             .expect("memstead-swift engine mutex poisoned");
-        engine.update_projection_json(&mem, &name, &projection_json)?;
+        engine.update_projection_json(&mem, &name, &projection_json, note.as_deref())?;
         Ok(())
     }
 
     /// Delete a projection (refused while an ingest runs it). See `Engine::delete_projection`.
-    pub fn delete_projection(&self, mem: String, name: String) -> Result<(), MemsteadError> {
+    pub fn delete_projection(&self, mem: String, name: String, note: Option<String>) -> Result<(), MemsteadError> {
         let mut engine = self
             .inner
             .lock()
             .expect("memstead-swift engine mutex poisoned");
-        engine.delete_projection(&mem, &name)?;
+        engine.delete_projection(&mem, &name, note.as_deref())?;
         Ok(())
     }
 
@@ -640,54 +648,69 @@ impl Engine {
         mem: String,
         old_name: String,
         new_name: String,
+        note: Option<String>,
     ) -> Result<(), MemsteadError> {
         let mut engine = self
             .inner
             .lock()
             .expect("memstead-swift engine mutex poisoned");
-        engine.rename_projection(&mem, &old_name, &new_name)?;
+        engine.rename_projection(&mem, &old_name, &new_name, note.as_deref())?;
         Ok(())
     }
 
     /// Create an ingest from a JSON-encoded `Ingest`. Ingests are flat
     /// (workspace-level). See `Engine::add_ingest`.
-    pub fn add_ingest(&self, name: String, ingest_json: String) -> Result<(), MemsteadError> {
+    pub fn add_ingest(&self, name: String, ingest_json: String, note: Option<String>) -> Result<(), MemsteadError> {
         let mut engine = self
             .inner
             .lock()
             .expect("memstead-swift engine mutex poisoned");
-        engine.add_ingest_json(&name, &ingest_json)?;
+        engine.add_ingest_json(&name, &ingest_json, note.as_deref())?;
         Ok(())
     }
 
     /// Overwrite an ingest from a JSON-encoded `Ingest`. See `Engine::update_ingest`.
-    pub fn update_ingest(&self, name: String, ingest_json: String) -> Result<(), MemsteadError> {
+    pub fn update_ingest(&self, name: String, ingest_json: String, note: Option<String>) -> Result<(), MemsteadError> {
         let mut engine = self
             .inner
             .lock()
             .expect("memstead-swift engine mutex poisoned");
-        engine.update_ingest_json(&name, &ingest_json)?;
+        engine.update_ingest_json(&name, &ingest_json, note.as_deref())?;
         Ok(())
     }
 
     /// Delete an ingest (nothing references it). See `Engine::delete_ingest`.
-    pub fn delete_ingest(&self, name: String) -> Result<(), MemsteadError> {
+    pub fn delete_ingest(&self, name: String, note: Option<String>) -> Result<(), MemsteadError> {
         let mut engine = self
             .inner
             .lock()
             .expect("memstead-swift engine mutex poisoned");
-        engine.delete_ingest(&name)?;
+        engine.delete_ingest(&name, note.as_deref())?;
         Ok(())
     }
 
     /// Rename an ingest. See `Engine::rename_ingest`.
-    pub fn rename_ingest(&self, old_name: String, new_name: String) -> Result<(), MemsteadError> {
+    pub fn rename_ingest(&self, old_name: String, new_name: String, note: Option<String>) -> Result<(), MemsteadError> {
         let mut engine = self
             .inner
             .lock()
             .expect("memstead-swift engine mutex poisoned");
-        engine.rename_ingest(&old_name, &new_name)?;
+        engine.rename_ingest(&old_name, &new_name, note.as_deref())?;
         Ok(())
+    }
+
+    /// Whether the workspace's mutation policy requires provenance
+    /// notes. Delegates to the engine's single `require_notes`
+    /// enforcement point (`note_missing_warning`) rather than re-reading
+    /// settings here.
+    pub fn workspace_requires_notes(&self) -> bool {
+        let engine = self
+            .inner
+            .lock()
+            .expect("memstead-swift engine mutex poisoned");
+        engine
+            .note_missing_warning("pipeline_edit", None)
+            .is_some()
     }
 
     /// The four-primitive pipeline store serialized as JSON — the read
