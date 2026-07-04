@@ -27,7 +27,7 @@ pub struct BranchResetArgs {
 pub fn run(ctx: &CliContext, args: BranchResetArgs) -> anyhow::Result<()> {
     let outcome = match ctx.cli_engine()? {
         CliEngine::MemRepo(mut engine) => engine
-            .branch_reset(&args.mem, &args.target_sha)
+            .branch_reset(&args.mem, &args.target_sha, None)
             .map_err(CliError::from_engine_op)?,
         CliEngine::Filesystem(_) => {
             // Folder mounts have no git refs — same refusal the

@@ -392,6 +392,7 @@ pub type GitBranchBranchResetFn = fn(
     gitdir: &Path,
     branch: &str,
     target_sha: &str,
+    expected_head: Option<&str>,
 ) -> Result<crate::ops::BranchResetOutcome, BackendError>;
 
 /// Residue-prune dispatch for git-branch mounts.

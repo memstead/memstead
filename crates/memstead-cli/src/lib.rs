@@ -565,6 +565,18 @@ impl CliError {
                 ExitKind::Validation,
                 Some(serde_json::json!({ "ref": raw })),
             ),
+            BranchResetHeadMoved {
+                mem,
+                expected,
+                current,
+            } => (
+                ExitKind::Validation,
+                Some(serde_json::json!({
+                    "mem": mem,
+                    "expected": expected,
+                    "current": current,
+                })),
+            ),
             PushedCommitsProtected {
                 mem,
                 target_sha,

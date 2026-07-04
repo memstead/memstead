@@ -292,10 +292,11 @@ fn branch_reset_dispatch(
     gitdir: &std::path::Path,
     branch: &str,
     target_sha: &str,
+    expected_head: Option<&str>,
 ) -> Result<memstead_base::ops::BranchResetOutcome, memstead_base::backend::BackendError> {
     #[cfg(feature = "git-object-storage")]
     {
-        crate::ops::branch_reset::branch_reset_in_gitdir(gitdir, branch, target_sha)
+        crate::ops::branch_reset::branch_reset_in_gitdir(gitdir, branch, target_sha, expected_head)
     }
     #[cfg(not(feature = "git-object-storage"))]
     {

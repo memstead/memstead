@@ -771,6 +771,23 @@ fn engine_err_unified(
                 serde_json::json!({ "ref": raw }),
             ),
         ),
+        E::BranchResetHeadMoved {
+            mem,
+            expected,
+            current,
+        } => tool_error_with_payload(
+            "BRANCH_RESET_HEAD_MOVED",
+            &message,
+            envelope(
+                "BRANCH_RESET_HEAD_MOVED",
+                message.clone(),
+                serde_json::json!({
+                    "mem": mem,
+                    "expected": expected,
+                    "current": current,
+                }),
+            ),
+        ),
         E::PushedCommitsProtected {
             mem,
             target_sha,

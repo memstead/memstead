@@ -315,12 +315,13 @@ impl Engine {
         &self,
         mem: String,
         target_sha: String,
+        expected_head: Option<String>,
     ) -> Result<BranchResetOutcome, MemsteadError> {
         let mut engine = self
             .inner
             .lock()
             .expect("memstead-swift engine mutex poisoned");
-        let outcome = engine.branch_reset(&mem, &target_sha)?;
+        let outcome = engine.branch_reset(&mem, &target_sha, expected_head.as_deref())?;
         Ok(BranchResetOutcome {
             mem: outcome.mem,
             branch_ref: outcome.branch_ref,
@@ -1154,14 +1155,29 @@ mod tests {
             .expect("head")
             .expect("git-branch mem has a head");
         let outcome = engine
-            .branch_reset("specs".into(), head.clone())
+            .branch_reset("specs".into(), head.clone(), Some(head.clone()))
             .expect("no-op reset");
         assert_eq!(outcome.previous_sha, outcome.new_sha);
         assert!(outcome.discarded_commits.is_empty());
 
         // Refusal: an unresolvable target surfaces a typed error, never a
         // silent success.
-        let refused = engine.branch_reset("specs".into(), "not-a-sha".into());
+        let refused = engine.branch_reset("specs".into(), "not-a-sha".into(), None);
+        assert!(refused.is_err(), "unresolvable target must refuse");
+
+        // Optimistic-concurrency refusal: an expected head that no longer
+        // matches the live head refuses typed — never a silent discard.
+        let moved = engine.branch_reset(
+            "specs".into(),
+            head.clone(),
+            Some("0000000000000000000000000000000000000000".into()),
+        );
+        match moved {
+            Err(MemsteadError::HashMismatch { current, .. }) => {
+                assert_eq!(current, head, "refusal names the live head");
+            }
+            other => panic!("expected HashMismatch refusal, got {other:?}"),
+        }
         assert!(refused.is_err(), "unresolvable target must refuse");
     }
 

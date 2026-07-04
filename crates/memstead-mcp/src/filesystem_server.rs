@@ -881,6 +881,7 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
         | e @ EngineError::LocalInvalidState { .. }
         | e @ EngineError::SchemaViolationInFetch { .. }
         | e @ EngineError::PushedCommitsProtected { .. }
+        | e @ EngineError::BranchResetHeadMoved { .. }
         | e @ EngineError::ReadOnlyMount(_)
         | e @ EngineError::Mem(_)
         | e @ EngineError::MemNameCollision { .. }

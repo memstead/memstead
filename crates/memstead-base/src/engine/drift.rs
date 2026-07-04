@@ -774,12 +774,19 @@ impl Engine {
         &mut self,
         mem: &str,
         target_sha: &str,
+        expected_head: Option<&str>,
     ) -> Result<crate::ops::BranchResetOutcome, EngineError> {
         let mount_idx = self
             .mounts
             .iter()
             .position(|m| m.mount.mem == mem)
             .ok_or_else(|| EngineError::UnknownMem(mem.to_string()))?;
+
+        // History rewriting is a write — read-only and archive mounts
+        // refuse before any dispatch (parity with the mutation surface).
+        if self.mounts[mount_idx].mount.capability != crate::workspace::MountCapability::Write {
+            return Err(EngineError::ReadOnlyMount(mem.to_string()));
+        }
 
         let outcome = match &self.mounts[mount_idx].mount.storage {
             MountStorage::Folder { .. } | MountStorage::Archive { .. } | MountStorage::InMemory => {
@@ -789,10 +796,21 @@ impl Engine {
             }
             MountStorage::GitBranch { gitdir, branch } => match self.git_branch_ops.as_ref() {
                 Some(hook) => {
-                    (hook.branch_reset)(gitdir, branch, target_sha).map_err(|e| match e {
+                    (hook.branch_reset)(gitdir, branch, target_sha, expected_head).map_err(|e| match e {
                         BackendError::Other(msg) if msg.starts_with("UNKNOWN_REF:") => {
                             let raw = msg.trim_start_matches("UNKNOWN_REF:").trim().to_string();
                             EngineError::UnknownRef(raw)
+                        }
+                        BackendError::Other(msg) if msg.starts_with("EXPECTED_HEAD_MISMATCH:") => {
+                            let current = msg
+                                .trim_start_matches("EXPECTED_HEAD_MISMATCH:")
+                                .trim()
+                                .to_string();
+                            EngineError::BranchResetHeadMoved {
+                                mem: mem.to_string(),
+                                expected: expected_head.unwrap_or_default().to_string(),
+                                current,
+                            }
                         }
                         BackendError::Other(msg)
                             if msg.starts_with("PUSHED_COMMITS_PROTECTED:") =>

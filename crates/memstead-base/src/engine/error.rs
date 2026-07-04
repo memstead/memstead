@@ -768,6 +768,20 @@ pub enum EngineError {
         target_sha: String,
         pushed_shas: Vec<String>,
     },
+    /// `branch_reset` refused because the live branch head no longer
+    /// matches the head the caller observed (`expected_head`) — a
+    /// sibling writer advanced the mem, and resetting now would discard
+    /// that foreign work. Optimistic concurrency for history rewrites;
+    /// the caller re-reads and re-decides. Typed code:
+    /// `BRANCH_RESET_HEAD_MOVED`.
+    #[error(
+        "branch_reset refused: '{mem}' has advanced past the observed head (expected {expected}, live {current}) — the span now contains foreign commits; reload and review the accumulated delta instead"
+    )]
+    BranchResetHeadMoved {
+        mem: String,
+        expected: String,
+        current: String,
+    },
     /// `memstead_diff` (or any future ref-comparing op) received a ref
     /// that does not resolve against the workspace's mem-repo.
     /// Carries the ref string verbatim so the caller can fix the
@@ -980,6 +994,7 @@ impl EngineError {
             EngineError::LocalInvalidState { .. } => "LOCAL_INVALID_STATE",
             EngineError::SchemaViolationInFetch { .. } => "SCHEMA_VIOLATION_IN_FETCH",
             EngineError::PushedCommitsProtected { .. } => "PUSHED_COMMITS_PROTECTED",
+            EngineError::BranchResetHeadMoved { .. } => "BRANCH_RESET_HEAD_MOVED",
             EngineError::ReadOnlyMount(_) => "READ_ONLY_MOUNT",
             EngineError::UnknownType { .. } => "UNKNOWN_ENTITY_TYPE",
             EngineError::InvalidTitle(_) => "INVALID_TITLE",

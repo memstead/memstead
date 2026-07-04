@@ -224,6 +224,16 @@ impl From<EngineError> for MemsteadError {
                 message: err.to_string(),
             },
 
+            // Optimistic-locking shape the app already renders as
+            // "Concurrent change — reload and retry": the reset's observed
+            // head no longer matches the live one.
+            EngineError::BranchResetHeadMoved { ref current, .. } => {
+                let current = current.clone();
+                return Self::HashMismatch {
+                    message: err.to_string(),
+                    current,
+                };
+            }
             EngineError::PushedCommitsProtected {
                 ref pushed_shas, ..
             } => {

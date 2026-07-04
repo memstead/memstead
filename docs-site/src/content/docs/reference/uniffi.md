@@ -643,8 +643,12 @@ interface Engine {
     // guarded rewind (CLI parity; deliberately NOT on the MCP wire).
     // Refuses with PushedCommitsProtected when the target would discard
     // pushed commits, UnknownRef for an unresolvable target.
+    // `expected_head`: optimistic-concurrency guard — the head the caller
+    // observed (a review span's end, the head at preview time). A live
+    // head that moved past it refuses (HashMismatch carrying the live
+    // head) instead of discarding foreign commits.
     [Throws=MemsteadError]
-    BranchResetOutcome branch_reset(string mem, string target_sha);
+    BranchResetOutcome branch_reset(string mem, string target_sha, string? expected_head);
 
     // Cross-mem references a reset would strand — a read, computed fresh
     // at confirmation-dialog time.

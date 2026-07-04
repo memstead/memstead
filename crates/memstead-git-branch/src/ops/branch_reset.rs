@@ -129,6 +129,7 @@ pub fn branch_reset_in_gitdir(
     gitdir: &Path,
     branch: &str,
     target_sha: &str,
+    expected_head: Option<&str>,
 ) -> Result<BranchResetOutcome, BackendError> {
     if !gitdir.is_dir() {
         return Err(BackendError::Other(format!(
@@ -146,6 +147,20 @@ pub fn branch_reset_in_gitdir(
     let current = current_head(&repo, branch)?;
     let target = resolve_target(&repo, target_sha)?;
     let branch_ref = format!("refs/heads/{branch}");
+
+    // Optimistic-concurrency guard: the caller names the head it observed
+    // (a review span's end, the head at preview time); a live head that
+    // moved past it refuses instead of silently discarding the foreign
+    // commits. The ref-update CAS below closes the residual read-to-write
+    // window — a sibling advancing between this check and the transaction
+    // fails the transaction, never overwrites.
+    if let Some(expected) = expected_head {
+        if current.to_string() != expected {
+            return Err(BackendError::Other(format!(
+                "EXPECTED_HEAD_MISMATCH: {current}"
+            )));
+        }
+    }
 
     // Fast-path: target equals current head — no-op reset. Return an
     // outcome with empty `discarded` so callers can branch on
@@ -267,7 +282,7 @@ mod tests {
     fn branch_reset_unknown_branch_returns_unknown_ref_marker() {
         let tmp = TempDir::new().unwrap();
         let gitdir = init_gitdir(&tmp);
-        let err = branch_reset_in_gitdir(&gitdir, "nope", "abc").unwrap_err();
+        let err = branch_reset_in_gitdir(&gitdir, "nope", "abc", None).unwrap_err();
         match err {
             BackendError::Other(msg) => assert!(msg.starts_with("UNKNOWN_REF:"), "got: {msg}"),
             other => panic!("expected Other(UNKNOWN_REF), got {other:?}"),
@@ -283,7 +298,7 @@ mod tests {
         let gitdir = init_gitdir(&tmp);
         let sha_a = commit(&gitdir, "specs", "a.md", &body("A"), "A");
         let _sha_b = commit(&gitdir, "specs", "b.md", &body("B"), "B");
-        let outcome = branch_reset_in_gitdir(&gitdir, "refs/heads/specs", &sha_a).unwrap();
+        let outcome = branch_reset_in_gitdir(&gitdir, "refs/heads/specs", &sha_a, None).unwrap();
         assert_eq!(outcome.new_sha, sha_a);
         assert_eq!(outcome.branch_ref, "refs/heads/specs");
     }
@@ -293,7 +308,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let gitdir = init_gitdir(&tmp);
         let sha = commit(&gitdir, "specs", "a.md", &body("A"), "seed");
-        let outcome = branch_reset_in_gitdir(&gitdir, "specs", &sha).unwrap();
+        let outcome = branch_reset_in_gitdir(&gitdir, "specs", &sha, None).unwrap();
         assert!(outcome.discarded_commits.is_empty());
         assert_eq!(outcome.previous_sha, outcome.new_sha);
     }
@@ -308,7 +323,7 @@ mod tests {
 
         // Reset back to A; B and C are unpushed (no remote-tracking ref
         // exists), so the reset is allowed.
-        let outcome = branch_reset_in_gitdir(&gitdir, "specs", &sha_a).unwrap();
+        let outcome = branch_reset_in_gitdir(&gitdir, "specs", &sha_a, None).unwrap();
         assert_eq!(outcome.new_sha, sha_a);
         assert_eq!(outcome.previous_sha, sha_c);
         assert_eq!(outcome.discarded_commits.len(), 2);
@@ -355,7 +370,7 @@ mod tests {
         let mut engine = memstead_base::Engine::from_mounts(vec![(mount, backend)]).unwrap();
         engine.set_git_branch_ops(crate::storage::FULL_GIT_BRANCH_OPS);
 
-        let err = engine.branch_reset("specs", &_sha_a).unwrap_err();
+        let err = engine.branch_reset("specs", &_sha_a, None).unwrap_err();
         match err {
             memstead_base::EngineError::PushedCommitsProtected {
                 mem,
@@ -382,7 +397,7 @@ mod tests {
         set_remote_tracking(&gitdir, "origin", "specs", &sha_b);
 
         // Try to reset back to A — B is pushed and would be discarded.
-        let err = branch_reset_in_gitdir(&gitdir, "specs", &sha_a).unwrap_err();
+        let err = branch_reset_in_gitdir(&gitdir, "specs", &sha_a, None).unwrap_err();
         match err {
             BackendError::Other(msg) => {
                 assert!(
