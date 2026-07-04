@@ -15,7 +15,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 # Verified floor: 1.90 fails on `str::floor_char_boundary` (stabilised in
 # 1.91); 1.91 checks the full workspace cleanly in both flavours. Dependency
@@ -40,12 +40,12 @@ result_large_err = "allow"
 # (what ends up in the published manifest after `cargo package` strips
 # the path) — required for crates.io. Keep `version` in lockstep with
 # `workspace.package.version`.
-memstead-schema = { path = "crates/memstead-schema", version = "0.1.0" }
-memstead-base = { path = "crates/memstead-base", version = "0.1.0" }
-memstead-engine = { path = "crates/memstead-engine", version = "0.1.0" }
-memstead-mcp = { path = "crates/memstead-mcp", version = "0.1.0" }
-memstead-cli = { path = "crates/memstead-cli", version = "0.1.0" }
-memstead-git-branch = { path = "crates/memstead-git-branch", version = "0.1.0" }
+memstead-schema = { path = "crates/memstead-schema", version = "0.2.0" }
+memstead-base = { path = "crates/memstead-base", version = "0.2.0" }
+memstead-engine = { path = "crates/memstead-engine", version = "0.2.0" }
+memstead-mcp = { path = "crates/memstead-mcp", version = "0.2.0" }
+memstead-cli = { path = "crates/memstead-cli", version = "0.2.0" }
+memstead-git-branch = { path = "crates/memstead-git-branch", version = "0.2.0" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
