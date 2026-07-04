@@ -1,6 +1,6 @@
 {
   "name": "@memstead/client",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Browser client wrapping @memstead/wasm + the memstead-bridge HTTP/SSE surface as a single MemSyncClient class.",
   "license": "(MIT OR Apache-2.0)",
   "type": "module",

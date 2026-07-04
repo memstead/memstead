@@ -1,6 +1,6 @@
 {
   "name": "@memstead/wasm",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "WebAssembly bindings for the Memstead engine — hydrate a knowledge-graph snapshot in the browser and read it with the same typed engine that runs natively.",
   "license": "(MIT OR Apache-2.0)",
   "repository": {
