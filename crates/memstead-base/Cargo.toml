@@ -53,6 +53,12 @@ notify = { version = "7", optional = true }
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tantivy.workspace = true
 
+# `SystemTime::now()` is unimplemented on wasm32-unknown-unknown (it
+# traps), so time-reading paths (health staleness) use the JS-backed
+# clock there. Same version pin as memstead-wasm.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+js-sys = "0.3"
+
 [features]
 default = []
 # Opt-in tokio convenience: `Engine::subscribe_mem_changes_broadcast`

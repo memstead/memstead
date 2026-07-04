@@ -2668,6 +2668,7 @@ version = "0.2.0"
 dependencies = [
  "globset",
  "indexmap",
+ "js-sys",
  "memstead-schema",
  "notify",
  "regex",

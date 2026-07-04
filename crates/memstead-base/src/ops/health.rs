@@ -583,12 +583,24 @@ pub fn entity_health(entity: &crate::entity::Entity, schema: &TypeDefinition) ->
 // ---------------------------------------------------------------------------
 
 /// Get current days since Unix epoch.
+///
+/// `SystemTime::now()` is unimplemented on `wasm32-unknown-unknown` —
+/// it traps with `RuntimeError: unreachable` and poisons the wasm
+/// instance (cold-start F11) — so the wasm build reads the JS-backed
+/// clock instead. Same value, same summary shape on every target.
 fn days_since_epoch() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
-        / 86400
+    #[cfg(target_arch = "wasm32")]
+    {
+        (js_sys::Date::now() / 1000.0) as u64 / 86400
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs()
+            / 86400
+    }
 }
 
 /// Parse an ISO 8601 date string to days since epoch.

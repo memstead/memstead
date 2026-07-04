@@ -93,6 +93,39 @@ fn apply_commit_then_get_entity_after() {
     );
 }
 
+/// The cold-start F11 reproducer: `Engine.fromSnapshot(bytes).health()`
+/// trapped (`RuntimeError: unreachable` out of `SystemTime::now`) and
+/// poisoned the instance. Pin the trap-free property: health() returns
+/// the `memstead_health`-shaped summary — staleness fields included,
+/// since the staleness computation is exactly what read the clock — and
+/// the instance stays usable afterwards.
+#[wasm_bindgen_test]
+fn health_returns_summary_without_trapping_and_instance_survives() {
+    let engine = hydrate();
+
+    let summary = engine
+        .health()
+        .expect("health() must not throw on wasm32 (F11: it used to trap)");
+    let json = js_sys::JSON::stringify(&summary).expect("stringify health summary");
+    let s: String = json.dyn_into::<js_sys::JsString>().unwrap().into();
+    for field in ["stale_entities", "orphan_count", "stub_count"] {
+        assert!(
+            s.contains(field),
+            "health summary must carry the memstead_health shape (missing {field}): {s}"
+        );
+    }
+
+    // The trap poisoned the instance for every later call — prove this
+    // one survives: health() again, then a read.
+    engine
+        .health()
+        .expect("second health() call must succeed (instance not poisoned)");
+    let v = engine
+        .get_entity("specs--alpha")
+        .expect("getEntity must still work after health()");
+    assert!(!v.is_undefined(), "reads must survive health()");
+}
+
 #[wasm_bindgen_test]
 fn search_refuses_with_typed_code() {
     let engine = hydrate();
