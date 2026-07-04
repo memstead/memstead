@@ -280,6 +280,7 @@ impl Engine {
             search_indexes_memo: OnceCell::new(),
             settings: WorkspaceSettings::default(),
             create_rule_set_memo: OnceCell::new(),
+            declared_origins: HashMap::new(),
             workspace_root: None,
             load_warnings,
             pipeline_configs: crate::pipeline_store::PipelineConfigs::default(),

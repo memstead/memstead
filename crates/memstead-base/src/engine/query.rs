@@ -127,18 +127,41 @@ impl Engine {
     /// [`OriginClass::ThirdParty`], so the consuming agent/host treats the
     /// content as quoted, untrusted data.
     ///
-    /// This reads the mount's already-decided writable/read-only posture
-    /// (fixed at adopt/mount time) — it never scans content, and the class
-    /// is set by the consumer's mount config, so a publisher cannot forge
-    /// first-party. Distinct from [`Self::schema_origin`], which governs a
-    /// schema's instruction-prose: the data channel and the
-    /// instruction channel are separate vectors with separate authorities.
+    /// This reads the deployment's declaration when one exists (see
+    /// [`Self::declare_mem_origin`]), else the mount's already-decided
+    /// writable/read-only posture (fixed at adopt/mount time) — it never
+    /// scans content, and both levers are consumer-side config, so a
+    /// publisher cannot forge first-party. Distinct from
+    /// [`Self::schema_origin`], which governs a schema's
+    /// instruction-prose: the data channel and the instruction channel
+    /// are separate vectors with separate authorities.
     pub fn mem_origin_class(&self, mem: &str) -> crate::render::OriginClass {
+        if let Some(declared) = self.declared_origins.get(mem) {
+            return *declared;
+        }
         if self.mem_router().is_writable(mem) {
             crate::render::OriginClass::FirstParty
         } else {
             crate::render::OriginClass::ThirdParty
         }
+    }
+
+    /// Declare a mem's data-trust origin as a deployment fact — the
+    /// embedding process (a curated hosted read tier, an app that vouches
+    /// for a bundled mem) overrides the writability inference for one mem.
+    /// Composition-layer-only by design: not persisted, not reachable over
+    /// MCP, never derived from mem content — the operator running the
+    /// process is the only authority that can set it, so a served mem the
+    /// deployment does *not* vouch for keeps reporting third-party on
+    /// every surface. (Deliberately absent from UniFFI/CLI: those surfaces
+    /// operate a workspace, not a deployment; the CLI counterpart would be
+    /// a workspace-config knob no use case demands yet.)
+    pub fn declare_mem_origin(
+        &mut self,
+        mem: impl Into<String>,
+        origin: crate::render::OriginClass,
+    ) {
+        self.declared_origins.insert(mem.into(), origin);
     }
 
     /// Per-file errors collected during load. Non-fatal: the engine
@@ -1192,6 +1215,45 @@ mod tests {
             engine.mem_origin_class("no-such-mem"),
             OriginClass::ThirdParty,
             "an unknown mem is third-party (safe default)"
+        );
+    }
+
+    /// `declare_mem_origin` lets the embedding deployment vouch for one
+    /// read-only mount as first-party (the curated hosted read tier),
+    /// overriding the writability inference for that mem only — sibling
+    /// read-only mounts keep the safe third-party default.
+    #[test]
+    fn declared_origin_overrides_inference_per_mem() {
+        use crate::render::OriginClass;
+
+        let tmp = TempDir::new().unwrap();
+        let body = "---\ntype: spec\n---\n# Ext\n\n## Identity\n\nFrom an archive.\n";
+        let vouched_path = build_archive(tmp.path(), "vouched", &[("v.md", body.as_bytes())]);
+        let other_path = build_archive(tmp.path(), "other", &[("o.md", body.as_bytes())]);
+
+        let mut engine = Engine::from_mounts(vec![
+            (
+                archive_mount("vouched", vouched_path.clone()),
+                Box::new(ArchiveBackend::new(vouched_path)) as Box<dyn MemBackend>,
+            ),
+            (
+                archive_mount("other", other_path.clone()),
+                Box::new(ArchiveBackend::new(other_path)) as Box<dyn MemBackend>,
+            ),
+        ])
+        .unwrap();
+
+        engine.declare_mem_origin("vouched", OriginClass::FirstParty);
+
+        assert_eq!(
+            engine.mem_origin_class("vouched"),
+            OriginClass::FirstParty,
+            "the deployment's declaration wins over the read-only inference"
+        );
+        assert_eq!(
+            engine.mem_origin_class("other"),
+            OriginClass::ThirdParty,
+            "an undeclared sibling mount keeps the safe default"
         );
     }
 

@@ -181,6 +181,15 @@ pub struct Engine {
     /// [`crate::mem_management::CreateRuleSet::new`] before passing
     /// settings.
     create_rule_set_memo: OnceCell<crate::mem_management::CreateRuleSet>,
+    /// Per-mem data-trust origin declared by the embedding deployment
+    /// (e.g. a curated hosted read tier vouching for a read-only mount as
+    /// first-party). A *composition* fact set through
+    /// [`Self::declare_mem_origin`] by the process that owns the engine —
+    /// never persisted with the mem, never derived from mem content, and
+    /// deliberately not reachable over MCP, so a publisher cannot forge
+    /// first-party. Empty by default; [`Self::mem_origin_class`] falls back
+    /// to the writability inference for undeclared mems.
+    declared_origins: HashMap<String, crate::render::OriginClass>,
     /// Workspace root path — set when the engine boots from a
     /// workspace store ([`Self::from_workspace_root`] or the full
     /// counterpart). `None` for tests + ad-hoc consumers that build
