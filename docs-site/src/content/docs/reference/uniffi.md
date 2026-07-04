@@ -65,6 +65,10 @@ interface MemsteadError {
     Internal(string message);
     UnknownSection(string key, string entity_type, sequence<string> declared, string? suggestion);
     UnknownMem(string name, sequence<string> writable_mems);
+    // A branch reset refused because the target would discard commits
+    // already pushed to a remote — the one guard the human surface must
+    // render distinctly (its reason names the protected SHAs).
+    PushedCommitsProtected(string message, sequence<string> pushed_shas);
 };
 ```
 
@@ -253,6 +257,24 @@ dictionary StaleEntity {
 };
 ```
 
+## `dictionary HealthFinding`
+
+One per-entity integrity finding: the conformance axis (which entities a
+write would refuse under the effective schema, and why) or the
+consistency axis (DANGLING_LINK, ORPHAN_STUB). `detail_json` carries the
+engine's structured detail (schema context: type, field, allowed values)
+rendered as JSON — the same payload the MCP surface ships.
+
+```idl
+dictionary HealthFinding {
+    string id;
+    string mem;
+    string axis;
+    string code;
+    string detail_json;
+};
+```
+
 ## `dictionary HealthSummary`
 
 ```idl
@@ -261,6 +283,14 @@ dictionary HealthSummary {
     sequence<MissingField> missing_fields;
     u64 orphan_count;
     u64 stub_count;
+    // Additive widening (macos-cockpit): conformance + consistency findings
+    // per mounted mem, plus the orphan entity ids behind `orphan_count` so
+    // the app can list them. Pre-existing fields are unchanged.
+    sequence<HealthFinding> findings;
+    sequence<string> orphan_ids;
+    // A mem whose findings collector errored is reported here, never
+    // silently rendered clean.
+    sequence<string> collector_warnings;
 };
 ```
 
@@ -341,9 +371,37 @@ dictionary ClusterInfo {
 };
 ```
 
-## `dictionary ReloadResult`
+## `dictionary BranchResetOutcome`
 
 Reload diff.
+Successful outcome of `branch_reset` — what moved and which commits
+the reset discarded (all guaranteed unpushed by the safety probe).
+
+```idl
+dictionary BranchResetOutcome {
+    string mem;
+    string branch_ref;
+    string previous_sha;
+    string new_sha;
+    sequence<string> discarded_commits;
+};
+```
+
+## `dictionary StrandedCrossMemRef`
+
+One inbound cross-mem reference a reset would strand — computed fresh
+by `branch_reset_stranded_refs` at confirmation time.
+
+```idl
+dictionary StrandedCrossMemRef {
+    string from_id;
+    string from_mem;
+    string to_id;
+    string rel_type;
+};
+```
+
+## `dictionary ReloadResult`
 
 ```idl
 dictionary ReloadResult {
@@ -580,6 +638,18 @@ interface Engine {
     // empty-tree sentinel `4b825dc642cb6eb9a060e54bf8d69288fbee4904`.
     [Throws=MemsteadError]
     string? mem_head_sha(string mem);
+
+    // Reset a git-branch mem to `target_sha` — the human surface's
+    // guarded rewind (CLI parity; deliberately NOT on the MCP wire).
+    // Refuses with PushedCommitsProtected when the target would discard
+    // pushed commits, UnknownRef for an unresolvable target.
+    [Throws=MemsteadError]
+    BranchResetOutcome branch_reset(string mem, string target_sha);
+
+    // Cross-mem references a reset would strand — a read, computed fresh
+    // at confirmation-dialog time.
+    [Throws=MemsteadError]
+    sequence<StrandedCrossMemRef> branch_reset_stranded_refs(string mem, string target_sha);
 
     // Two-tree diff between `since` and the mem's current HEAD. See
     // `memstead_changes_since` for semantics. `rename_similarity` mirrors

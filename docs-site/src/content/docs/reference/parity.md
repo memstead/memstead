@@ -24,7 +24,7 @@ Every public engine operation across the four programmatic surfaces (MCP, CLI, U
 | `fetch` | — | `fetch` *(full only)* | — | — |
 | `pull` | — | `pull` *(full only)* | — | — |
 | `push` | — | `push` *(full only)* | — | — |
-| `branch-reset` | — | `branch-reset` *(full only)* | — | — |
+| `branch-reset` | — | `branch-reset` *(full only)* | `branch_reset` | — |
 | `create` | `memstead_create` *(lean + full)* | `create` *(lean + full)* | — | — |
 | `update` | `memstead_update` *(lean + full)* | `update` *(lean + full)* | — | — |
 | `relate` | `memstead_relate` *(lean + full)* | `relate` *(lean + full)* | — | — |
@@ -80,6 +80,7 @@ Surface entries the registry does not pin to a logical operation. Either add a r
 - `add_ingest`
 - `add_medium`
 - `add_projection`
+- `branch_reset_stranded_refs`
 - `create_mem`
 - `delete_facet`
 - `delete_ingest`

@@ -642,8 +642,8 @@ Slug derivation:
 * `--mem <MEM>` — Mem name. Defaults to the first writable mem
 * `--section <KEY=VALUE>` — Section content: repeatable `--section key=value`. Body wiki-links must take slug-form (`[[idempotency]]`, not the title-case `[[Idempotency]]`) — a non-slug target refuses with `INVALID_WIKI_LINK_TARGET` carrying a `proposed_slug` to retry with
 * `--metadata <KEY=VALUE>` — Metadata override: repeatable `--metadata key=value`
-* `--relation <TYPE:TARGET>` — Initial relationship: repeatable `--relation TYPE:target-id`
-* `--from <FILE>` — JSON file matching the MCP `memstead_create` args shape. If set, all `--title` / `--type` / `--section` / `--metadata` / `--relation` flags are ignored (the file is the single source of truth)
+* `--relation <TYPE:TARGET>` — Initial relationship: repeatable `--relation TYPE:target-id`. Mem-repo workspaces only — on filesystem mems this refuses; use `memstead relate` after creation there
+* `--from <FILE>` — JSON file matching the MCP `memstead_create` args shape. If set, all `--title` / `--type` / `--section` / `--metadata` / `--relation` flags are ignored (the file is the single source of truth). The JSON type field is `entity_type` (not `type`), matching the response envelopes — a previous `--json` response pipes back in unchanged
 * `--dry-run` — Preview only — validate and compute the result without writing to disk, mutating the store, or producing a commit. Response carries the prospective id / file_path / content_hash plus any warnings
 * `--note <NOTE>` — Agent-authored provenance note (≤280 chars, one sentence describing why this mutation happened). Lands in the per-mem commit body between the mechanical subject line and the provenance trailers. When `[mutations].require_notes = true` in workspace config a missing note adds a `NOTE_MISSING` warning to the response (the mutation still commits). When `--from` also carries a `note`, this flag takes precedence
 
