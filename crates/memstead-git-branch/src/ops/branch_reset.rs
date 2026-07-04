@@ -339,6 +339,43 @@ mod tests {
     }
 
     #[test]
+    fn branch_reset_refuses_when_expected_head_moved() {
+        // Optimistic-concurrency guard: the caller observed head A→B, a
+        // sibling then committed C. A reset carrying expected_head=B must
+        // refuse with the live head — never silently discard C.
+        let tmp = TempDir::new().unwrap();
+        let gitdir = init_gitdir(&tmp);
+        let sha_a = commit(&gitdir, "specs", "a.md", &body("A"), "A");
+        let sha_b = commit(&gitdir, "specs", "b.md", &body("B"), "B");
+        // Sibling writer advances past the observed head.
+        let sha_c = commit(&gitdir, "specs", "c.md", &body("C"), "C");
+
+        let err =
+            branch_reset_in_gitdir(&gitdir, "specs", &sha_a, Some(&sha_b)).unwrap_err();
+        let msg = format!("{err}");
+        assert!(
+            msg.starts_with("EXPECTED_HEAD_MISMATCH:") || msg.contains("EXPECTED_HEAD_MISMATCH"),
+            "expected mismatch marker, got: {msg}"
+        );
+        assert!(msg.contains(&sha_c), "refusal names the live head: {msg}");
+
+        // Nothing moved.
+        let repo = gix::open(&gitdir).unwrap();
+        let head = repo
+            .rev_parse_single("refs/heads/specs")
+            .unwrap()
+            .detach()
+            .to_string();
+        assert_eq!(head, sha_c, "the branch pointer is untouched");
+
+        // With the true live head as expected, the reset proceeds.
+        let outcome =
+            branch_reset_in_gitdir(&gitdir, "specs", &sha_a, Some(&sha_c)).unwrap();
+        assert_eq!(outcome.new_sha, sha_a);
+        assert_eq!(outcome.discarded_commits.len(), 2);
+    }
+
+    #[test]
     fn engine_branch_reset_routes_git_branch_mount_and_surfaces_typed_error() {
         // End-to-end: build an engine with a git-branch mount, install
         // the full ops bundle, then assert the typed surfacing:
@@ -383,6 +420,79 @@ mod tests {
             }
             other => panic!("expected PushedCommitsProtected, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn engine_branch_reset_surfaces_head_moved_and_read_only_typed() {
+        // Typed surfacing of the two newest guards through the engine:
+        // EXPECTED_HEAD_MISMATCH un-marshals into BranchResetHeadMoved, and
+        // a non-Write mount refuses with ReadOnlyMount before dispatch.
+        let tmp = TempDir::new().unwrap();
+        let gitdir = init_gitdir(&tmp);
+        let sha_a = commit(&gitdir, "specs", "a.md", &body("A"), "A");
+        let sha_b = commit(&gitdir, "specs", "b.md", &body("B"), "B");
+        let sha_c = commit(&gitdir, "specs", "c.md", &body("C"), "C");
+
+        let mount = memstead_base::Mount {
+            mem: "specs".to_string(),
+            schema: Some(memstead_schema::SchemaRef::new(
+                "default",
+                semver::Version::new(1, 0, 0),
+            )),
+            storage: memstead_base::MountStorage::GitBranch {
+                gitdir: gitdir.clone(),
+                branch: "specs".to_string(),
+            },
+            capability: memstead_base::MountCapability::Write,
+            lifecycle: memstead_base::MountLifecycle::Eager,
+            cross_linkable: true,
+            migration_target: None,
+        };
+        let backend = crate::storage::instantiate_full_backend(&mount).unwrap();
+        let mut engine = memstead_base::Engine::from_mounts(vec![(mount, backend)]).unwrap();
+        engine.set_git_branch_ops(crate::storage::FULL_GIT_BRANCH_OPS);
+
+        let err = engine
+            .branch_reset("specs", &sha_a, Some(&sha_b))
+            .unwrap_err();
+        match err {
+            memstead_base::EngineError::BranchResetHeadMoved {
+                mem,
+                expected,
+                current,
+            } => {
+                assert_eq!(mem, "specs");
+                assert_eq!(expected, sha_b);
+                assert_eq!(current, sha_c);
+            }
+            other => panic!("expected BranchResetHeadMoved, got {other:?}"),
+        }
+
+        // Read-only capability refuses before any storage dispatch.
+        let ro_mount = memstead_base::Mount {
+            mem: "sealed".to_string(),
+            schema: Some(memstead_schema::SchemaRef::new(
+                "default",
+                semver::Version::new(1, 0, 0),
+            )),
+            storage: memstead_base::MountStorage::GitBranch {
+                gitdir: gitdir.clone(),
+                branch: "specs".to_string(),
+            },
+            capability: memstead_base::MountCapability::ReadOnly,
+            lifecycle: memstead_base::MountLifecycle::Eager,
+            cross_linkable: true,
+            migration_target: None,
+        };
+        let ro_backend = crate::storage::instantiate_full_backend(&ro_mount).unwrap();
+        let mut ro_engine =
+            memstead_base::Engine::from_mounts(vec![(ro_mount, ro_backend)]).unwrap();
+        ro_engine.set_git_branch_ops(crate::storage::FULL_GIT_BRANCH_OPS);
+        let refused = ro_engine.branch_reset("sealed", &sha_a, None).unwrap_err();
+        assert!(
+            matches!(refused, memstead_base::EngineError::ReadOnlyMount(_)),
+            "expected ReadOnlyMount, got {refused:?}"
+        );
     }
 
     #[test]
