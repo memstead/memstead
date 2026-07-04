@@ -71,5 +71,5 @@ write_rules:
   - "Status: binary. active = still live, closed = resolved. Closure reason belongs in Outcome section, not status."
   - "Supersession: express via SUPERSEDES relationship, not status. \"Closed\" means resolved, not replaced."
   - "Tags: every memo MUST include at least one of: decision, observation, lesson, plan, goal, constraint. Free vocabulary beyond that."
-  - "Relationships: UPPER_SNAKE_CASE, open vocabulary. DERIVED_FROM, MOTIVATED_BY, SUPERSEDES, BLOCKS, ENABLES are the common types."
+  - "Relationships: UPPER_SNAKE_CASE, from the schema's declared relationship types (INVALID_REL_TYPE lists them on refusal). DERIVED_FROM, MOTIVATED_BY, SUPERSEDES, BLOCKS, ENABLES are the common types."
   - "Outcome is append-friendly — add entries, don't rewrite. Records what happened over time."

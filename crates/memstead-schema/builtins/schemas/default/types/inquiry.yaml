@@ -75,5 +75,5 @@ write_rules:
   - "Inquiries are open questions — each must have a conceivable resolution path."
   - "Status: open (not yet investigated), investigating (actively being explored), answered (resolution found), abandoned (no longer relevant)."
   - "Urgency: low (background), normal (should be addressed), high (blocking progress), critical (blocking multiple workstreams)."
-  - "Relationships: UPPER_SNAKE_CASE, open vocabulary. BLOCKS = this inquiry blocks progress on the target. DEPENDS_ON = answer requires another entity first. Never declare REFERENCES manually."
+  - "Relationships: UPPER_SNAKE_CASE, from the schema's declared relationship types (INVALID_REL_TYPE lists them on refusal). BLOCKS = this inquiry blocks progress on the target. DEPENDS_ON = answer requires another entity first. Never declare REFERENCES manually."
   - "Current State is append-friendly — add new findings, don't rewrite. When an inquiry is answered, set status to \"answered\" and record the resolution in Current State."

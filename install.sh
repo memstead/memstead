@@ -2,14 +2,18 @@
 # memstead unified installer: wraps cargo-dist's per-crate installers so
 # `curl -sSf <url> | sh` lands both `memstead` and `memstead-mcp` in one call.
 #
+# One project, three origins: memstead.ai serves the docs and the live
+# graph, memstead.io hosts this installer and the registry, and the
+# source of both binaries is github.com/memstead/memstead — this script
+# only downloads release artifacts from that repository.
+#
 # cargo-dist publishes two installers per release:
 #
 #   * `memstead-cli-installer.sh` — installs the `memstead` binary
 #   * `memstead-mcp-installer.sh` — installs the `memstead-mcp` binary
 #
-# This wrapper fetches and runs both in sequence. The plan AC names
-# a single `curl -sSf <url> | sh` install path; this file is the
-# operator-side bridge that delivers it.
+# This wrapper fetches and runs both in sequence, delivering the single
+# `curl -sSf <url> | sh` install path the docs advertise.
 #
 # Operator-side setup:
 #   1. Host this file at `https://memstead.io/install.sh` (Vercel/Cloudflare

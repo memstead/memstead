@@ -52,12 +52,17 @@ pub struct Args {
     pub metadata: Vec<String>,
 
     /// Initial relationship: repeatable `--relation TYPE:target-id`.
+    /// Mem-repo workspaces only — on filesystem mems this refuses;
+    /// use `memstead relate` after creation there.
     #[arg(long = "relation", value_name = "TYPE:TARGET")]
     pub relations: Vec<String>,
 
     /// JSON file matching the MCP `memstead_create` args shape. If set,
     /// all `--title` / `--type` / `--section` / `--metadata` / `--relation`
     /// flags are ignored (the file is the single source of truth).
+    /// The JSON type field is `entity_type` (not `type`), matching the
+    /// response envelopes — a previous `--json` response pipes back in
+    /// unchanged.
     #[arg(long = "from", value_name = "FILE")]
     pub from: Option<PathBuf>,
 

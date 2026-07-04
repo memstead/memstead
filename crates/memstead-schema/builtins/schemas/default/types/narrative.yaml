@@ -70,6 +70,6 @@ staleness_threshold_days: 180
 write_rules:
   - "Narratives are accounts of what happened — each must describe events that actually occurred (or are believed to have occurred)."
   - "Reliability: firsthand (author witnessed it), reported (from a source), reconstructed (pieced together from evidence), speculative (hypothesized sequence)."
-  - "Relationships: UPPER_SNAKE_CASE, open vocabulary. PRECEDED_BY/FOLLOWED_BY establish temporal chains. CAUSED links to effects. VALIDATES links to models/principles this narrative confirms. Never declare REFERENCES manually."
+  - "Relationships: UPPER_SNAKE_CASE, from the schema's declared relationship types (INVALID_REL_TYPE lists them on refusal). PRECEDED_BY/FOLLOWED_BY establish temporal chains. CAUSED links to effects. VALIDATES links to models/principles this narrative confirms. Never declare REFERENCES manually."
   - "Sequence should be chronological. Include decision points and their consequences — these are the highest-value parts of a narrative."
   - "Sources section establishes trustworthiness — a narrative without sources is unverifiable."

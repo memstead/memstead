@@ -68,5 +68,5 @@ write_rules:
   - "Concepts are precise definitions — each must enable distinguishing instances from non-instances."
   - "Maturity: emerging (newly identified, definition may shift), stable (well-defined, actively used), established (widely understood, unlikely to change)."
   - "Abstraction level: concrete (directly observable), abstract (requires reasoning to identify), meta (about other concepts)."
-  - "Relationships: UPPER_SNAKE_CASE, open vocabulary. GENERALIZES/SPECIALIZES link broader/narrower concepts. CONTRASTS_WITH links easily confused neighbors. Never declare REFERENCES manually."
+  - "Relationships: UPPER_SNAKE_CASE, from the schema's declared relationship types (INVALID_REL_TYPE lists them on refusal). GENERALIZES/SPECIALIZES link broader/narrower concepts. CONTRASTS_WITH links easily confused neighbors. Never declare REFERENCES manually."
   - "Boundaries section is high-value — confusion between similar concepts causes more errors than missing definitions."

@@ -73,5 +73,5 @@ write_rules:
   - "Models are recurring patterns — each must apply across at least two distinct instances."
   - "Abstraction level: concrete (directly observable pattern), abstract (requires reasoning), meta (pattern about patterns)."
   - "Predictive power: low (descriptive only), moderate (some predictive value), high (reliably predicts new instances)."
-  - "Relationships: UPPER_SNAKE_CASE, open vocabulary. GENERALIZES/SPECIALIZES link broader/narrower models. EXPLAINS links to phenomena the model accounts for. Never declare REFERENCES manually."
+  - "Relationships: UPPER_SNAKE_CASE, from the schema's declared relationship types (INVALID_REL_TYPE lists them on refusal). GENERALIZES/SPECIALIZES link broader/narrower models. EXPLAINS links to phenomena the model accounts for. Never declare REFERENCES manually."
   - "Limits section is critical — a model without stated limits implies universal applicability, which is almost never true."

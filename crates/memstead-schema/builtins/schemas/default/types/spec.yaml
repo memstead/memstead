@@ -68,6 +68,6 @@ staleness_threshold_days: 90
 write_rules:
   - "Every section describes the current state. Never reference past states, what changed, or migration history — specs are reference documentation, not changelogs."
   - "Level: M0 for concrete things (vast majority), M1 for patterns/categories, M2 for structural rules, M3 almost never. When in doubt, M0."
-  - "Relationships: UPPER_SNAKE_CASE, open vocabulary. PART_OF = child meaningless without parent (use USES/DEPENDS_ON instead for independent concepts). Never declare REFERENCES manually. No automatic inverses."
+  - "Relationships: UPPER_SNAKE_CASE, from the schema's declared relationship types (INVALID_REL_TYPE lists them on refusal). PART_OF = child meaningless without parent (use USES/DEPENDS_ON instead for independent concepts). Never declare REFERENCES manually. No automatic inverses."
   - "Granularity: one spec = one concept, not a chapter."
   - "Tags: comma-separated labels for categorization (e.g. \"backend, api\"). Free vocabulary, no predefined set. Updates replace all tags — merge with existing values when adding."

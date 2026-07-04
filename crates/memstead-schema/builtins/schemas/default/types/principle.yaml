@@ -75,5 +75,5 @@ write_rules:
   - "Principles are rules that hold consistently — each must be testable within its scope."
   - "Authority: proposed (under discussion), accepted (agreed upon), established (long-standing), deprecated (no longer applicable)."
   - "Universality: contextual (specific situation), domain-wide (entire domain), universal (all domains)."
-  - "Relationships: UPPER_SNAKE_CASE, open vocabulary. GOVERNS = this principle constrains the target. OVERRIDES = this principle supersedes another. Never declare REFERENCES manually."
+  - "Relationships: UPPER_SNAKE_CASE, from the schema's declared relationship types (INVALID_REL_TYPE lists them on refusal). GOVERNS = this principle constrains the target. OVERRIDES = this principle supersedes another. Never declare REFERENCES manually."
   - "Exceptions section is high-value — a principle with no stated exceptions is either truly universal or underexamined."

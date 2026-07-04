@@ -64,6 +64,6 @@ staleness_threshold_days: 120
 write_rules:
   - "Perspectives are viewpoints — each must identify whose perspective it is and what it is about."
   - "Faithfully represent the viewpoint as its holder would express it, even when you disagree."
-  - "Relationships: UPPER_SNAKE_CASE, open vocabulary. AGREES_WITH/DISAGREES_WITH link related perspectives. INTERPRETS links to the subject being analyzed. Never declare REFERENCES manually."
+  - "Relationships: UPPER_SNAKE_CASE, from the schema's declared relationship types (INVALID_REL_TYPE lists them on refusal). AGREES_WITH/DISAGREES_WITH link related perspectives. INTERPRETS links to the subject being analyzed. Never declare REFERENCES manually."
   - "Contrasts section is high-value — perspectives gain meaning through comparison. A perspective without contrasts is isolated."
   - "Multiple perspectives on the same subject should link to each other via AGREES_WITH or DISAGREES_WITH."

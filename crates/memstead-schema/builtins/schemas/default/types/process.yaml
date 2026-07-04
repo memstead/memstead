@@ -76,5 +76,5 @@ write_rules:
   - "Processes are executable workflows — each must be concrete enough to follow without ambiguity."
   - "Complexity: trivial (one step), low (few steps, no branching), moderate (multi-step with some branching), high (many steps, complex branching), extreme (requires expert judgment at multiple points)."
   - "Reversibility: reversible (can undo completely), partially_reversible (some steps irreversible), irreversible (cannot undo)."
-  - "Relationships: UPPER_SNAKE_CASE, open vocabulary. REQUIRES = this process needs the target to exist/complete first. TRIGGERS = completing this process starts the target. Never declare REFERENCES manually."
+  - "Relationships: UPPER_SNAKE_CASE, from the schema's declared relationship types (INVALID_REL_TYPE lists them on refusal). REQUIRES = this process needs the target to exist/complete first. TRIGGERS = completing this process starts the target. Never declare REFERENCES manually."
   - "Variations section captures error paths — a process without documented failure modes is incomplete."

@@ -12,18 +12,15 @@ round-trips after the snapshot fetch.
 
 ## Install
 
-> **Status:** not yet published to npm — the package is prepared and the
-> first release will land it. Until then, build the bundle from source:
->
-> ```bash
-> cd crates/memstead-wasm
-> wasm-pack build --target web --release   # output in pkg/
-> ```
-
-Once published:
-
 ```bash
 npm install @memstead/wasm
+```
+
+Or build the bundle from source:
+
+```bash
+cd crates/memstead-wasm
+wasm-pack build --target web --release   # output in pkg/
 ```
 
 ## Use

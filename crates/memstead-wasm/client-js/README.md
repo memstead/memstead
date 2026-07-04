@@ -6,18 +6,15 @@ SSE + commit-apply lifecycle on top of `@memstead/wasm` and the
 
 ## Install
 
-> **Status:** not yet published to npm — the package is prepared and the
-> first release will land it. Until then, build from source in this repo:
-> `npm install && npm run build` here, plus `wasm-pack build --target web
-> --release` in `../` for the `@memstead/wasm` bundle (see Demo below).
-
-Once published:
-
 ```bash
 npm install @memstead/client @memstead/wasm
 # or
 pnpm add @memstead/client @memstead/wasm
 ```
+
+Or build from source in this repo: `npm install && npm run build` here,
+plus `wasm-pack build --target web --release` in `../` for the
+`@memstead/wasm` bundle (see Demo below).
 
 > `@memstead/wasm` is a peer dependency — install it alongside.
 
