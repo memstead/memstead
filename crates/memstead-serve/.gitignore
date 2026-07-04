@@ -1,5 +1,0 @@
-# Optional embedded static site — mirrored by build.rs from the directory named
-# by MEMSTEAD_SERVE_SITE_DIST before each cargo build. Track the directory itself
-# via .gitkeep but never the generated output.
-site/*
-!site/.gitkeep

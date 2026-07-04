@@ -68,8 +68,8 @@ pub fn run(output: &Path) -> Result<()> {
     let tasks = vec![
         TaskSpec {
             id: "what-changed".into(),
-            prompt: "What changed when the serve crate landed?".into(),
-            reference: "memstead-serve added a read-only projection surface.".into(),
+            prompt: "What changed when the projection surface landed?".into(),
+            reference: "The engine added a read-only projection surface.".into(),
         },
         TaskSpec {
             id: "why-chosen".into(),

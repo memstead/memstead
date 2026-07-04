@@ -8,9 +8,7 @@ members = [
     "crates/memstead-mcp",
     "crates/memstead-cli",
     "crates/memstead-swift",
-    "crates/memstead-bridge",
     "crates/memstead-wasm",
-    "crates/memstead-serve",
     "xtask",
 ]
 

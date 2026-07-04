@@ -11,14 +11,13 @@
 #   memstead-base         -> schema
 #   memstead-engine       -> base, schema
 #   memstead-git-branch   -> base, engine, schema
-#   memstead-bridge       -> base, git-branch
 #   memstead-mcp          -> base, engine (opt), git-branch (opt), schema
 #   memstead-cli          -> base, engine (opt), git-branch (opt), schema
 #
-# Deliberately NOT published (see the `publish = false` comments in their
-# manifests): memstead-swift (xcframework bindings artifact), memstead-wasm
-# (distribution channel is npm — scripts/publish-npm.sh), memstead-serve
-# (deployment binary embedding build-time site artifacts), xtask (internal
+# Exactly these six crates are the public Rust surface. Deliberately NOT
+# published (see the `publish = false` comments in their manifests):
+# memstead-swift (xcframework bindings artifact), memstead-wasm
+# (distribution channel is npm — scripts/publish-npm.sh), xtask (internal
 # tooling).
 #
 # Dry-run note: a *per-crate* `cargo publish --dry-run -p <crate>` cannot
@@ -45,7 +44,6 @@ CRATES=(
     memstead-base
     memstead-engine
     memstead-git-branch
-    memstead-bridge
     memstead-mcp
     memstead-cli
 )

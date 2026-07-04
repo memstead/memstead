@@ -40,8 +40,8 @@ use wasm_bindgen::prelude::*;
 /// Serialize a value to a `JsValue` with Rust maps rendered as plain JS
 /// **objects** rather than ES `Map`s. `serde_wasm_bindgen::to_value`
 /// defaults to `Map`, which silently breaks `Object.entries` /
-/// `Object.keys` consumers and contradicts the documented
-/// `@memstead/client` `Entity` shape (`sections: Record<string,string>`,
+/// `Object.keys` consumers and contradicts the documented JS
+/// `Entity` shape (`sections: Record<string,string>`,
 /// `metadata: Record<string,unknown>`). Map-bearing reads (`getEntity`,
 /// `health`) must go through this.
 fn to_js<T: Serialize>(value: &T) -> Result<JsValue, JsValue> {

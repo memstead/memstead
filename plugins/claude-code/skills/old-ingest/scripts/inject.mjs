@@ -33,7 +33,7 @@ import {
  * Walk up from a starting directory looking for a workspace root. Two shapes
  * are recognised (in this order, per-directory):
  *   1. The directory contains `.memstead.toml` directly — that directory is root.
- *   2. The directory contains `.mcp.json` whose memstead server arg list includes
+ *   2. The directory contains `.mcp.json` whose memstead MCP server arg list includes
  *      `--config <relative-path-to-.memstead.toml>` — the workspace root is the
  *      directory containing that TOML, resolved relative to the `.mcp.json`.
  * Returns the absolute workspace root or null.

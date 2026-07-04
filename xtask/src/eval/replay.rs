@@ -159,7 +159,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn mcp_config_mounts_named_memstead_server() {
+    fn mcp_config_mounts_server_named_memstead() {
         let json = mcp_config_json(Path::new("/x/graph"), Path::new("/x/memstead-mcp"));
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(v["mcpServers"]["memstead"]["command"], "sh");

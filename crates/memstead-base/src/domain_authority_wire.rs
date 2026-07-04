@@ -8,7 +8,7 @@
 //! pure — no crypto, no I/O — so it carries no extra dependency weight.
 
 /// The fixed path the proof manifest is served at on the publisher's own
-/// domain. Distinct from `memstead-serve`'s discovery manifest
+/// domain. Distinct from a deployment's discovery manifest
 /// (`memstead-authority.json`): the two make different claims.
 pub const MANIFEST_PATH: &str = "/.well-known/memstead-publishing.json";
 
