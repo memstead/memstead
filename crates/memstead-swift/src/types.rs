@@ -172,6 +172,10 @@ pub struct HealthSummary {
     /// The entity ids behind `orphan_count`, so orphans are listable, not
     /// just countable.
     pub orphan_ids: Vec<String>,
+    /// Per-mem collector failures ("mem 'x': conformance findings
+    /// unavailable: …") — a broken collector is reported, never rendered
+    /// as a clean mem.
+    pub collector_warnings: Vec<String>,
 }
 
 // ---------------------------------------------------------------------------

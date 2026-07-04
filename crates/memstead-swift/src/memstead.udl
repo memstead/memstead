@@ -217,6 +217,9 @@ dictionary HealthSummary {
     // the app can list them. Pre-existing fields are unchanged.
     sequence<HealthFinding> findings;
     sequence<string> orphan_ids;
+    // A mem whose findings collector errored is reported here, never
+    // silently rendered clean.
+    sequence<string> collector_warnings;
 };
 
 // ---------------------------------------------------------------------------

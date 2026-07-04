@@ -186,6 +186,7 @@ pub(crate) fn health_summary_to_ffi(summary: core_ops::HealthSummary) -> HealthS
         // carry them.
         findings: Vec::new(),
         orphan_ids: Vec::new(),
+        collector_warnings: Vec::new(),
     }
 }
 

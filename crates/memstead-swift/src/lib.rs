@@ -165,27 +165,37 @@ impl Engine {
         let mut summary = convert::health_summary_to_ffi(engine.health());
         // Additive widening: conformance + consistency findings per mounted
         // mem, in mount order (the roster's sort is a UI concern). A per-mem
-        // collector error (e.g. a mount with no loaded schema) skips that
-        // mem rather than failing the whole report — the summary fields
-        // above are already computed.
+        // collector error (e.g. a mount with no loaded schema) is reported
+        // in collector_warnings rather than failing the whole report or —
+        // worse — rendering the mem as clean.
         let mut findings = Vec::new();
+        let mut collector_warnings = Vec::new();
         for mount in engine.mounts() {
-            if let Ok(conformance) = engine.conformance_findings(&mount.mem, None) {
-                findings.extend(
+            match engine.conformance_findings(&mount.mem, None) {
+                Ok(conformance) => findings.extend(
                     conformance
                         .into_iter()
                         .map(|f| convert::integrity_finding_to_ffi(f, &mount.mem)),
-                );
+                ),
+                Err(e) => collector_warnings.push(format!(
+                    "mem '{}': conformance findings unavailable: {e}",
+                    mount.mem
+                )),
             }
-            if let Ok(consistency) = engine.consistency_findings(&mount.mem) {
-                findings.extend(
+            match engine.consistency_findings(&mount.mem) {
+                Ok(consistency) => findings.extend(
                     consistency
                         .into_iter()
                         .map(|f| convert::integrity_finding_to_ffi(f, &mount.mem)),
-                );
+                ),
+                Err(e) => collector_warnings.push(format!(
+                    "mem '{}': consistency findings unavailable: {e}",
+                    mount.mem
+                )),
             }
         }
         summary.findings = findings;
+        summary.collector_warnings = collector_warnings;
         summary.orphan_ids = engine.orphans().iter().map(|id| id.to_string()).collect();
         summary
     }
