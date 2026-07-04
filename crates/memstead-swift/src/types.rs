@@ -146,12 +146,32 @@ pub struct StaleEntity {
     pub days_since_modified: u64,
 }
 
+/// One per-entity integrity finding crossing the FFI: the conformance axis
+/// (schema lint — what a write would refuse and why) or the consistency
+/// axis (`DANGLING_LINK`, `ORPHAN_STUB`). `detail_json` is the engine's
+/// structured detail rendered as JSON, carrying the schema context (type,
+/// field, allowed values) the app surfaces per finding.
+#[derive(Debug, Clone)]
+pub struct HealthFinding {
+    pub id: String,
+    pub mem: String,
+    pub axis: String,
+    pub code: String,
+    pub detail_json: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct HealthSummary {
     pub stale_entities: Vec<StaleEntity>,
     pub missing_fields: Vec<MissingField>,
     pub orphan_count: u64,
     pub stub_count: u64,
+    /// Additive widening: integrity findings per mounted mem. Empty when
+    /// every mounted mem lints clean.
+    pub findings: Vec<HealthFinding>,
+    /// The entity ids behind `orphan_count`, so orphans are listable, not
+    /// just countable.
+    pub orphan_ids: Vec<String>,
 }
 
 // ---------------------------------------------------------------------------

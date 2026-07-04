@@ -194,11 +194,29 @@ dictionary StaleEntity {
     u64 days_since_modified;
 };
 
+// One per-entity integrity finding: the conformance axis (which entities a
+// write would refuse under the effective schema, and why) or the
+// consistency axis (DANGLING_LINK, ORPHAN_STUB). `detail_json` carries the
+// engine's structured detail (schema context: type, field, allowed values)
+// rendered as JSON — the same payload the MCP surface ships.
+dictionary HealthFinding {
+    string id;
+    string mem;
+    string axis;
+    string code;
+    string detail_json;
+};
+
 dictionary HealthSummary {
     sequence<StaleEntity> stale_entities;
     sequence<MissingField> missing_fields;
     u64 orphan_count;
     u64 stub_count;
+    // Additive widening (macos-cockpit): conformance + consistency findings
+    // per mounted mem, plus the orphan entity ids behind `orphan_count` so
+    // the app can list them. Pre-existing fields are unchanged.
+    sequence<HealthFinding> findings;
+    sequence<string> orphan_ids;
 };
 
 // ---------------------------------------------------------------------------

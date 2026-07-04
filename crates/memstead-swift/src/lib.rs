@@ -26,7 +26,8 @@ mod types;
 pub use error::MemsteadError;
 pub use types::{
     AgentNotesReport, ChangeEnvelope, ChangesReport, ClusterInfo, CommitNote, DanglingCrossMemEdge,
-    EdgeSource, EdgeTypeCount, Entity, HealthIssue, HealthOptions, HealthSummary, ListResult,
+    EdgeSource, EdgeTypeCount, Entity, HealthFinding, HealthIssue, HealthOptions, HealthSummary,
+    ListResult,
     MemBackendKind, MemCreateOutcome, MemCreateRequest, MemDeleteOutcome, MemExportOutcome,
     MemInit, MemRosterEntry, MemSchemaOutcome, MemVersionOutcome, MetadataEntry, MetadataValue,
     MissingField, ParseRecoveryEntry, ParseRecoveryReport, Query, RelationDirection, RelationEdge,
@@ -161,7 +162,32 @@ impl Engine {
             .inner
             .lock()
             .expect("memstead-swift engine mutex poisoned");
-        convert::health_summary_to_ffi(engine.health())
+        let mut summary = convert::health_summary_to_ffi(engine.health());
+        // Additive widening: conformance + consistency findings per mounted
+        // mem, in mount order (the roster's sort is a UI concern). A per-mem
+        // collector error (e.g. a mount with no loaded schema) skips that
+        // mem rather than failing the whole report — the summary fields
+        // above are already computed.
+        let mut findings = Vec::new();
+        for mount in engine.mounts() {
+            if let Ok(conformance) = engine.conformance_findings(&mount.mem, None) {
+                findings.extend(
+                    conformance
+                        .into_iter()
+                        .map(|f| convert::integrity_finding_to_ffi(f, &mount.mem)),
+                );
+            }
+            if let Ok(consistency) = engine.consistency_findings(&mount.mem) {
+                findings.extend(
+                    consistency
+                        .into_iter()
+                        .map(|f| convert::integrity_finding_to_ffi(f, &mount.mem)),
+                );
+            }
+        }
+        summary.findings = findings;
+        summary.orphan_ids = engine.orphans().iter().map(|id| id.to_string()).collect();
+        summary
     }
 
     pub fn list_entities(&self, scope: SearchScope) -> ListResult {
@@ -1004,10 +1030,57 @@ mod tests {
         let summary = engine.get_health(HealthOptions {
             most_connected_limit: 10,
         });
+        // Pre-widening fields decode unchanged (additive contract).
         assert!(summary.stale_entities.is_empty() || !summary.stale_entities.is_empty());
         let _ = summary.missing_fields.len();
         let _ = summary.orphan_count;
         let _ = summary.stub_count;
+        // Widened field: every finding is fully populated and its detail is
+        // valid JSON. The canonical fixture lints clean on conformance, so
+        // an empty list is legitimate — shape, not count, is the contract.
+        for finding in &summary.findings {
+            assert!(!finding.id.is_empty());
+            assert!(!finding.mem.is_empty());
+            assert!(matches!(finding.axis.as_str(), "conformance" | "consistency"));
+            assert!(!finding.code.is_empty());
+            assert!(serde_json::from_str::<serde_json::Value>(&finding.detail_json).is_ok());
+        }
+    }
+
+    #[test]
+    fn get_health_findings_surface_dangling_links() {
+        // A body wiki-link to a target with no on-disk file is the
+        // consistency axis's DANGLING_LINK — the canonical fixture's
+        // entity-a USES [[entity-b]] resolves (both exist), so seed an
+        // extra entity pointing at a ghost.
+        let tmp = tempfile::tempdir().expect("tempdir");
+        memstead_git_branch::test_support::init_real_mem_repo_with_entities(
+            tmp.path(),
+            &[(
+                "specs",
+                "default@1.0.0",
+                &[
+                    ("entity-a.md", FIXTURE_ENTITY_A),
+                    ("entity-b.md", FIXTURE_ENTITY_B),
+                    (
+                        "entity-c.md",
+                        "---\ntype: spec\n---\n# Entity C\n\n## Identity\n\nLinks to a ghost: [[missing-target]].\n",
+                    ),
+                ],
+            )],
+        );
+        let engine = Engine::new_for_test(Vec::new(), tmp.path().to_path_buf()).expect("engine");
+        let summary = engine.get_health(HealthOptions {
+            most_connected_limit: 10,
+        });
+        assert!(
+            summary
+                .findings
+                .iter()
+                .any(|f| f.code == "DANGLING_LINK" && f.mem == "specs"),
+            "expected a DANGLING_LINK finding, got: {:?}",
+            summary.findings
+        );
     }
 
     #[test]

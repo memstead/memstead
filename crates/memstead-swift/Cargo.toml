@@ -39,6 +39,8 @@ uniffi = { version = "0.32", features = ["build"] }
 
 [dev-dependencies]
 tempfile.workspace = true
+# JSON validity assertion over the widened health-finding `detail_json`.
+serde_json.workspace = true
 # Pull in `memstead-git-branch::test_support::init_mem_repo_stub` so integration
 # tests can satisfy the `mem-repo/.git/` fail-fast under the
 # `GitObject` default (Phase 2 Session 6).

@@ -16,7 +16,8 @@ use memstead_base::{
 
 use crate::types::{
     AgentNotesReport, ChangeEnvelope, ChangesReport, ClusterInfo, CommitNote, EdgeSource,
-    EdgeTypeCount, Entity, HealthIssue, HealthSummary, ListResult, MemSchemaOutcome, MetadataEntry,
+    EdgeTypeCount, Entity, HealthFinding, HealthIssue, HealthSummary, ListResult, MemSchemaOutcome,
+    MetadataEntry,
     MetadataValue, MissingField, ParseRecoveryEntry, ParseRecoveryReport, Query, RelationDirection,
     RelationEdge, Relations, Relationship, ReloadResult, SearchHit, SearchResult, SearchScope,
     Section, StaleEntity, Stats,
@@ -130,6 +131,26 @@ pub(crate) fn stats_to_ffi(
 // Health.
 // ---------------------------------------------------------------------------
 
+/// Map one engine integrity finding into the FFI shape, tagging it with the
+/// mem it was collected for (the engine's per-mem collectors don't repeat
+/// the mem in the finding itself).
+pub(crate) fn integrity_finding_to_ffi(
+    finding: memstead_base::ops::integrity::IntegrityFinding,
+    mem: &str,
+) -> HealthFinding {
+    use memstead_base::ops::integrity::IntegrityAxis;
+    HealthFinding {
+        id: finding.id,
+        mem: mem.to_string(),
+        axis: match finding.axis {
+            IntegrityAxis::Conformance => "conformance".to_string(),
+            IntegrityAxis::Consistency => "consistency".to_string(),
+        },
+        code: finding.code,
+        detail_json: finding.detail.to_string(),
+    }
+}
+
 pub(crate) fn health_summary_to_ffi(summary: core_ops::HealthSummary) -> HealthSummary {
     HealthSummary {
         stale_entities: summary
@@ -160,6 +181,11 @@ pub(crate) fn health_summary_to_ffi(summary: core_ops::HealthSummary) -> HealthS
             .collect(),
         orphan_count: summary.orphan_count as u64,
         stub_count: summary.stub_count as u64,
+        // Filled by the caller (`Engine::get_health`) from the per-mem
+        // integrity collectors / orphan query; the core summary doesn't
+        // carry them.
+        findings: Vec::new(),
+        orphan_ids: Vec::new(),
     }
 }
 
