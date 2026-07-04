@@ -262,6 +262,25 @@ pub struct ClusterInfo {
 // Reload
 // ---------------------------------------------------------------------------
 
+/// FFI mirror of `memstead_base::ops::BranchResetOutcome`.
+#[derive(Debug, Clone)]
+pub struct BranchResetOutcome {
+    pub mem: String,
+    pub branch_ref: String,
+    pub previous_sha: String,
+    pub new_sha: String,
+    pub discarded_commits: Vec<String>,
+}
+
+/// FFI mirror of `memstead_base::ops::StrandedCrossMemRef`.
+#[derive(Debug, Clone)]
+pub struct StrandedCrossMemRef {
+    pub from_id: String,
+    pub from_mem: String,
+    pub to_id: String,
+    pub rel_type: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct ReloadResult {
     pub added: Vec<String>,

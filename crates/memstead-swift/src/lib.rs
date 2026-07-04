@@ -25,7 +25,8 @@ mod types;
 
 pub use error::MemsteadError;
 pub use types::{
-    AgentNotesReport, ChangeEnvelope, ChangesReport, ClusterInfo, CommitNote, DanglingCrossMemEdge,
+    AgentNotesReport, BranchResetOutcome, ChangeEnvelope, ChangesReport, ClusterInfo, CommitNote,
+    DanglingCrossMemEdge, StrandedCrossMemRef,
     EdgeSource, EdgeTypeCount, Entity, HealthFinding, HealthIssue, HealthOptions, HealthSummary,
     ListResult,
     MemBackendKind, MemCreateOutcome, MemCreateRequest, MemDeleteOutcome, MemExportOutcome,
@@ -304,6 +305,52 @@ impl Engine {
         // Stable order for SwiftUI Identifiable lists.
         roster.sort_by(|a, b| a.mem.cmp(&b.mem));
         roster
+    }
+
+    /// Reset a git-branch mem to `target_sha` — the human surface's
+    /// guarded rewind (CLI parity; deliberately absent from the MCP
+    /// wire). All guards live in the engine: pushed-commit protection,
+    /// CAS-guarded ref update, coherent change event, drift-cache rewind.
+    pub fn branch_reset(
+        &self,
+        mem: String,
+        target_sha: String,
+    ) -> Result<BranchResetOutcome, MemsteadError> {
+        let mut engine = self
+            .inner
+            .lock()
+            .expect("memstead-swift engine mutex poisoned");
+        let outcome = engine.branch_reset(&mem, &target_sha)?;
+        Ok(BranchResetOutcome {
+            mem: outcome.mem,
+            branch_ref: outcome.branch_ref,
+            previous_sha: outcome.previous_sha,
+            new_sha: outcome.new_sha,
+            discarded_commits: outcome.discarded_commits,
+        })
+    }
+
+    /// Cross-mem references a reset of `mem` to `target_sha` would
+    /// strand — a read the confirmation dialog computes fresh.
+    pub fn branch_reset_stranded_refs(
+        &self,
+        mem: String,
+        target_sha: String,
+    ) -> Result<Vec<StrandedCrossMemRef>, MemsteadError> {
+        let engine = self
+            .inner
+            .lock()
+            .expect("memstead-swift engine mutex poisoned");
+        let stranded = engine.branch_reset_stranded_refs(&mem, &target_sha)?;
+        Ok(stranded
+            .into_iter()
+            .map(|s| StrandedCrossMemRef {
+                from_id: s.from_id,
+                from_mem: s.from_mem,
+                to_id: s.to_id,
+                rel_type: s.rel_type,
+            })
+            .collect())
     }
 
     /// Workspace-wide reload. Aggregates per-mem reload diffs from
@@ -1055,6 +1102,67 @@ mod tests {
             assert!(!finding.code.is_empty());
             assert!(serde_json::from_str::<serde_json::Value>(&finding.detail_json).is_ok());
         }
+    }
+
+    #[test]
+    fn branch_reset_ffi_round_trip() {
+        // Two mems, notes--linker holds a cross-mem USES edge into specs.
+        let tmp = tempfile::tempdir().expect("tempdir");
+        memstead_git_branch::test_support::init_real_mem_repo_with_entities(
+            tmp.path(),
+            &[
+                (
+                    "specs",
+                    "default@1.0.0",
+                    &[("entity-a.md", FIXTURE_ENTITY_A)],
+                ),
+                (
+                    "notes",
+                    "default@1.0.0",
+                    &[(
+                        "linker.md",
+                        "---\ntype: spec\n---\n# Linker\n\n## Identity\n\nHolds a cross-mem edge.\n\n## Relationships\n\n- **USES**: [[specs--entity-a]]\n",
+                    )],
+                ),
+            ],
+        );
+        let engine = Engine::new_for_test(Vec::new(), tmp.path().to_path_buf()).expect("engine");
+
+        // Strand preview against the empty tree: every specs entity would
+        // be discarded, so notes--linker's edge must surface.
+        const EMPTY_TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+        let stranded = engine
+            .branch_reset_stranded_refs("specs".into(), EMPTY_TREE.into())
+            .expect("stranded refs");
+        assert!(
+            stranded.iter().any(|s| s.from_id == "notes--linker"
+                && s.from_mem == "notes"
+                && s.to_id == "specs--entity-a"
+                && s.rel_type == "USES"),
+            "cross-mem edge must strand: {stranded:?}"
+        );
+        // The reverse direction has nothing to strand (no edges into notes).
+        let none = engine
+            .branch_reset_stranded_refs("notes".into(), EMPTY_TREE.into())
+            .expect("stranded refs");
+        assert!(none.is_empty(), "no inbound cross-mem refs into notes: {none:?}");
+
+        // No-op reset to the current head: pointer unchanged, nothing
+        // discarded — the write path works without moving history.
+        let head = engine
+            .mem_head_sha("specs".into())
+            .expect("head")
+            .expect("git-branch mem has a head");
+        let outcome = engine
+            .branch_reset("specs".into(), head.clone())
+            .expect("no-op reset");
+        assert_eq!(outcome.previous_sha, outcome.new_sha);
+        assert!(outcome.discarded_commits.is_empty());
+
+        // Refusal: an unresolvable target surfaces a typed error, never a
+        // silent success.
+        let refused = engine.branch_reset("specs".into(), "not-a-sha".into());
+        assert!(refused.is_err(), "unresolvable target must refuse");
     }
 
     #[test]

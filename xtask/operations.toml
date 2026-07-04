@@ -90,6 +90,11 @@ cli = "push"
 [[operation]]
 name = "branch-reset"
 cli = "branch-reset"
+# Human-surface rewind parity (macos-cockpit plan 04): the app exposes the
+# guarded reset over UniFFI; deliberately absent from MCP (history
+# rewriting stays off the agent wire). branch_reset_stranded_refs is the
+# read-side confirmation companion.
+uniffi = "branch_reset"
 
 [[operation]]
 name = "create"

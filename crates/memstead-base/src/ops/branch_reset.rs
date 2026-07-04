@@ -28,3 +28,20 @@ pub struct BranchResetOutcome {
     /// from any `refs/remotes/*` ref.
     pub discarded_commits: Vec<String>,
 }
+
+/// One inbound cross-mem reference that a branch reset would strand: an
+/// edge from an entity in another mem pointing at an entity that exists
+/// at the current head but would not exist at the reset target (it was
+/// created — or renamed to its current id — after the target commit).
+/// Computed engine-side by `Engine::branch_reset_stranded_refs`; the
+/// human surface warns with these before confirming a reset.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StrandedCrossMemRef {
+    /// Referencing entity (lives in a different mem than the reset).
+    pub from_id: String,
+    /// The referencing entity's mem.
+    pub from_mem: String,
+    /// The referenced entity that the reset would remove.
+    pub to_id: String,
+    pub rel_type: String,
+}

@@ -46,6 +46,14 @@ pub enum MemsteadError {
         name: String,
         writable_mems: Vec<String>,
     },
+    /// Mirrors `EngineError::PushedCommitsProtected` — the rewind
+    /// surface renders this guard refusal distinctly (the reset would
+    /// discard commits already pushed to a remote).
+    #[error("{message}")]
+    PushedCommitsProtected {
+        message: String,
+        pushed_shas: Vec<String>,
+    },
 }
 
 impl From<EngineError> for MemsteadError {
@@ -206,7 +214,6 @@ impl From<EngineError> for MemsteadError {
             | EngineError::NonFastForward { .. }
             | EngineError::LocalInvalidState { .. }
             | EngineError::SchemaViolationInFetch { .. }
-            | EngineError::PushedCommitsProtected { .. }
             | EngineError::RenameSimilarityOutOfRange { .. }
             | EngineError::InvalidChangesCursor { .. }
             | EngineError::MissingRequiredDescription { .. }
@@ -216,6 +223,16 @@ impl From<EngineError> for MemsteadError {
             | EngineError::MarkdownExportUnsupportedBackend { .. } => Self::ValidationFailed {
                 message: err.to_string(),
             },
+
+            EngineError::PushedCommitsProtected {
+                ref pushed_shas, ..
+            } => {
+                let shas = pushed_shas.clone();
+                Self::PushedCommitsProtected {
+                    message: err.to_string(),
+                    pushed_shas: shas,
+                }
+            }
 
             // --- Boundary / internal ---------------------------------------
             EngineError::Parse(s) => Self::ValidationFailed {

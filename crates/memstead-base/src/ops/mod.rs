@@ -26,7 +26,7 @@ pub mod search;
 pub mod transport;
 
 pub use agent_notes::{AgentNotesReport, CommitNote};
-pub use branch_reset::BranchResetOutcome;
+pub use branch_reset::{BranchResetOutcome, StrandedCrossMemRef};
 pub use changes::{
     BackendChanges, ChangeEnvelope, ChangesReport, EMPTY_TREE_SHA, MemChangedNotice,
     NoticeByChange, NoticeChanges, RENAME_SIMILARITY_DEFAULT, RENAME_SIMILARITY_MAX,

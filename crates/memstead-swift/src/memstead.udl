@@ -55,6 +55,10 @@ interface MemsteadError {
     Internal(string message);
     UnknownSection(string key, string entity_type, sequence<string> declared, string? suggestion);
     UnknownMem(string name, sequence<string> writable_mems);
+    // A branch reset refused because the target would discard commits
+    // already pushed to a remote — the one guard the human surface must
+    // render distinctly (its reason names the protected SHAs).
+    PushedCommitsProtected(string message, sequence<string> pushed_shas);
 };
 
 // ---------------------------------------------------------------------------
@@ -300,6 +304,25 @@ dictionary ClusterInfo {
 // Reload diff.
 // ---------------------------------------------------------------------------
 
+// Successful outcome of `branch_reset` — what moved and which commits
+// the reset discarded (all guaranteed unpushed by the safety probe).
+dictionary BranchResetOutcome {
+    string mem;
+    string branch_ref;
+    string previous_sha;
+    string new_sha;
+    sequence<string> discarded_commits;
+};
+
+// One inbound cross-mem reference a reset would strand — computed fresh
+// by `branch_reset_stranded_refs` at confirmation time.
+dictionary StrandedCrossMemRef {
+    string from_id;
+    string from_mem;
+    string to_id;
+    string rel_type;
+};
+
 dictionary ReloadResult {
     sequence<string> added;
     sequence<string> changed;
@@ -488,6 +511,18 @@ interface Engine {
     // empty-tree sentinel `4b825dc642cb6eb9a060e54bf8d69288fbee4904`.
     [Throws=MemsteadError]
     string? mem_head_sha(string mem);
+
+    // Reset a git-branch mem to `target_sha` — the human surface's
+    // guarded rewind (CLI parity; deliberately NOT on the MCP wire).
+    // Refuses with PushedCommitsProtected when the target would discard
+    // pushed commits, UnknownRef for an unresolvable target.
+    [Throws=MemsteadError]
+    BranchResetOutcome branch_reset(string mem, string target_sha);
+
+    // Cross-mem references a reset would strand — a read, computed fresh
+    // at confirmation-dialog time.
+    [Throws=MemsteadError]
+    sequence<StrandedCrossMemRef> branch_reset_stranded_refs(string mem, string target_sha);
 
     // Two-tree diff between `since` and the mem's current HEAD. See
     // `memstead_changes_since` for semantics. `rename_similarity` mirrors

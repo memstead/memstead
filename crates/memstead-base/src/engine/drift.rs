@@ -848,6 +848,68 @@ impl Engine {
         Ok(outcome)
     }
 
+    /// Cross-mem references that a reset of `mem` to `target_sha` would
+    /// strand: incoming edges from entities in *other* mems whose target
+    /// exists at the current head but would not exist at the target
+    /// commit — entities created after the target, or renamed to their
+    /// current id after it (the reset re-materialises the old id, so
+    /// references to the new id dangle either way).
+    ///
+    /// A read — computes against the live store and the commit history,
+    /// moves nothing. The human surface calls this fresh at
+    /// confirmation-dialog time and warns before `branch_reset`. Sorted
+    /// (from_id, to_id, rel_type) for stable rendering.
+    ///
+    /// Refusals mirror `changes_since`: `UnknownMem`, `InvalidCursor`
+    /// for an unresolvable `target_sha`, `InvalidInput` for
+    /// non-git-backed mounts.
+    pub fn branch_reset_stranded_refs(
+        &self,
+        mem: &str,
+        target_sha: &str,
+    ) -> Result<Vec<crate::ops::StrandedCrossMemRef>, EngineError> {
+        use crate::ops::ChangeEnvelope;
+
+        let report = self.changes_since(mem, target_sha, None)?;
+        let mut discarded: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for change in &report.changes {
+            match change {
+                ChangeEnvelope::Added { id, .. } => {
+                    discarded.insert(id.to_string());
+                }
+                ChangeEnvelope::Renamed { to_id, .. } => {
+                    discarded.insert(to_id.to_string());
+                }
+                ChangeEnvelope::Updated { .. } | ChangeEnvelope::Removed { .. } => {}
+            }
+        }
+        if discarded.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut stranded: Vec<crate::ops::StrandedCrossMemRef> = self
+            .store
+            .all_entities()
+            .filter(|e| e.mem != mem)
+            .flat_map(|e| {
+                e.relationships
+                    .iter()
+                    .filter(|r| discarded.contains(&r.target.to_string()))
+                    .map(|r| crate::ops::StrandedCrossMemRef {
+                        from_id: e.id.to_string(),
+                        from_mem: e.mem.clone(),
+                        to_id: r.target.to_string(),
+                        rel_type: r.rel_type.clone(),
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        stranded.sort_by(|a, b| {
+            (&a.from_id, &a.to_id, &a.rel_type).cmp(&(&b.from_id, &b.to_id, &b.rel_type))
+        });
+        Ok(stranded)
+    }
+
     /// Two-ref structural diff. Produces a per-entity [`crate::ops::Diff`]
     /// comparing the trees at `ref_a` and `ref_b` for the named
     /// mem's storage. Folder and archive backends carry no git
