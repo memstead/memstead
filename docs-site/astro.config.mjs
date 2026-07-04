@@ -1,7 +1,17 @@
 import { defineConfig } from "astro/config";
 import starlight from "@astrojs/starlight";
+import remarkGfm from "remark-gfm";
 
 export default defineConfig({
+  // The CLI/MCP/etc. reference pages are machine-generated from clap
+  // help prose, which routinely contains stray single tildes (`~/config`
+  // paths, `~10` approximations). micromark's GFM strikethrough defaults
+  // to `singleTilde: true`, so two such tildes wrap everything between
+  // them in one `<del>` — striking through whole sections. Re-register
+  // remark-gfm with `singleTilde: false` so only `~~double~~` strikes.
+  markdown: {
+    remarkPlugins: [[remarkGfm, { singleTilde: false }]],
+  },
   // GitHub Pages publishes from `<org>.github.io/memstead/` by default;
   // DOCS_SITE / DOCS_BASE override both for other hosts (e.g. the
   // memstead.com image builds this site with DOCS_SITE=https://memstead.com
