@@ -699,6 +699,57 @@ impl Engine {
         Ok(())
     }
 
+    /// Resolved schema for a mem as JSON — the exact wire shape the MCP
+    /// `memstead_schema` tool serves, single-sourced through
+    /// `memstead_base::render::build_schema_payload` (full verbosity;
+    /// third-party schemas de-frame to structural-only inside the
+    /// builder, same as MCP). Errors are typed and honest: `NotFound`
+    /// with the roster when the mem isn't mounted, `NotFound` naming the
+    /// pin when it fails to resolve — the app renders that resolution
+    /// error rather than an empty browser.
+    pub fn schema_json(&self, mem: String) -> Result<String, MemsteadError> {
+        let engine = self
+            .inner
+            .lock()
+            .expect("memstead-swift engine mutex poisoned");
+        let mount = engine.mount(&mem).ok_or_else(|| {
+            let known: Vec<String> = engine.mounts().iter().map(|m| m.mem.clone()).collect();
+            MemsteadError::NotFound {
+                message: format!("unknown mem: \"{mem}\" (mounted: {})", known.join(", ")),
+            }
+        })?;
+        let pin = mount
+            .schema
+            .as_ref()
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "<no schema pin>".to_string());
+        let schema = engine.schemas().get(&mem).cloned().ok_or_else(|| {
+            MemsteadError::NotFound {
+                message: format!(
+                    "schema pin \"{pin}\" for mem \"{mem}\" did not resolve — the pin names a schema this workspace cannot load"
+                ),
+            }
+        })?;
+        let canon = format!("{}@{}", schema.manifest.name, schema.version);
+        let mut used_by: Vec<String> = engine
+            .mounts()
+            .iter()
+            .filter(|m| {
+                m.schema.as_ref().map(|s| s.to_string()).as_deref() == Some(canon.as_str())
+            })
+            .map(|m| m.mem.clone())
+            .collect();
+        used_by.sort();
+        let origin = engine.schema_origin(&schema);
+        let payload = memstead_base::render::build_schema_payload(
+            &schema,
+            used_by,
+            memstead_base::render::SchemaVerbosity::Full,
+            origin,
+        );
+        Ok(payload.to_string())
+    }
+
     /// Whether the workspace's mutation policy requires provenance
     /// notes. Delegates to the engine's single `require_notes`
     /// enforcement point (`note_missing_warning`) rather than re-reading

@@ -51,6 +51,9 @@ uniffi = "get_stats"
 name = "schema-describe"
 mcp = "memstead_schema"
 cli = "type"
+# The app's schema browser reads the same wire shape the MCP tool
+# serves (single-sourced through render::build_schema_payload).
+uniffi = "schema_json"
 
 [[operation]]
 name = "health"

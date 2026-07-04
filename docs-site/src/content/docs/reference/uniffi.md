@@ -723,6 +723,13 @@ interface Engine {
     [Throws=MemsteadError]
     void rename_ingest(string old_name, string new_name, string? note);
 
+    // Resolved schema for a mem — the same JSON wire shape the MCP
+    // memstead_schema tool serves (single-sourced builder). Typed
+    // NotFound for an unknown mem or an unresolvable pin (message names
+    // the pin so the app renders the resolution error honestly).
+    [Throws=MemsteadError]
+    string schema_json(string mem);
+
     // Whether the workspace's mutation policy requires provenance notes
     // ([mutations].require_notes). The app reads this to collect a note
     // up front and refuse an empty one with the policy named — the
