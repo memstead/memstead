@@ -35,11 +35,6 @@ const bytes = new Uint8Array(await (await fetch("/my-graph.mem")).arrayBuffer())
 const engine = Engine.fromSnapshot(bytes);
 ```
 
-For the full snapshot + live-update (SSE) lifecycle against a
-`memstead-bridge` server, use `@memstead/client` (in this repo at
-`crates/memstead-wasm/client-js/`, likewise not yet on npm), which wraps
-this package behind a single `MemSyncClient` class.
-
 Type definitions (`.d.ts`) ship in the package.
 
 ## License

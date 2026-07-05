@@ -9,8 +9,8 @@
 //! envelope and the SSE event.
 //!
 //! Two producers exist today:
-//! - `memstead_bridge::builder` — walks a git-branch tree-diff to build
-//!   envelopes from native repos for thin-client consumers.
+//! - Native embedders — walk a git-branch tree-diff to build envelopes
+//!   from native repos for thin-client consumers.
 //! - WASM clients — receive envelopes over the bridge wire and pass
 //!   them to [`crate::Engine::apply_external_commit`] to materialize
 //!   the new state in their in-memory store.

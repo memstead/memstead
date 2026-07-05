@@ -67,7 +67,7 @@ describe('ENTITY_FILENAME_RE / isEntityFilename', () => {
 });
 
 describe('findMemDir', () => {
-  it('finds --mem from memstead server', () => {
+  it('finds --mem from the memstead MCP server', () => {
     const config = { mcpServers: { memstead: { args: ['--mem', './specs'] } } };
     assert.equal(findMemDir(config), './specs');
   });

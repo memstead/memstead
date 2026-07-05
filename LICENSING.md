@@ -18,6 +18,7 @@ engine (the `memstead-git-branch` git-backed backend is open too).
 The proprietary commercial layer is **not part of this repository**:
 
 - The registry **server** — the network moat and seed of the commercial layer. Lives in a private repository (its own cargo workspace) and depends on the open engine crates by path. The `.mem` format, authority protocol, and publish/install client stay open; the server code does not.
+- The **hosted-deployment server layer** — the serve/bridge crates behind our hosted web surfaces (read-only HTTP/MCP deployment server, HTTP+SSE sync bridge, and its JS sync client). Product surface, not public libraries; lives in the same private repository, wired like the registry (own workspace roots, path-dependencies on the open engine). The public JS story is `@memstead/wasm` snapshot reads.
 - The **macOS application** — commercial product. All rights reserved; not open.
 
 ## Rationale

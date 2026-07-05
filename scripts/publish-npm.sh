@@ -1,33 +1,26 @@
 #!/usr/bin/env bash
-# Assemble and publish the Memstead npm packages:
+# Assemble and publish the Memstead npm package:
 #
-#   @memstead/wasm    — the browser engine bundle, built from crates/memstead-wasm
-#   @memstead/client  — the MemSyncClient thin client, crates/memstead-wasm/client-js
+#   @memstead/wasm — the browser engine bundle, built from crates/memstead-wasm
 #
 # Usage:
 #   scripts/publish-npm.sh --dry-run   # assemble + `npm publish --dry-run`, upload nothing
 #   scripts/publish-npm.sh             # real publish (requires `npm login` as a
 #                                      # member of the npm `memstead` org)
 #
-# Both packages are scoped, so publishes need `--access public`; that is
-# also pinned via `publishConfig.access` in each package.json, and passed
+# The package is scoped, so publishes need `--access public`; that is
+# also pinned via `publishConfig.access` in package.json, and passed
 # explicitly below for good measure.
 #
-# @memstead/wasm assembly: wasm-pack (preferred) or cargo+wasm-bindgen
-# (fallback — wasm-pack's installer has no aarch64-apple-darwin asset)
-# emits the web-target bundle into target/npm/wasm, then the checked-in
+# Assembly: wasm-pack (preferred) or cargo+wasm-bindgen (fallback —
+# wasm-pack's installer has no aarch64-apple-darwin asset) emits the
+# web-target bundle into target/npm/wasm, then the checked-in
 # crates/memstead-wasm/package.json is copied over the generated one —
 # the checked-in manifest is authoritative (scoped name, files list,
 # metadata). The crate README ships as the package README.
 #
-# @memstead/client: plain tsc build; dist/ + README are the package.
-#
 # Toolchain: rustup target wasm32-unknown-unknown, plus wasm-pack or a
 # wasm-bindgen-cli matching the wasm-bindgen version in Cargo.lock.
-#
-# Publication order does not matter between the two packages —
-# @memstead/wasm is an *optional* peer of @memstead/client — but wasm
-# first is the natural order.
 #
 # After the real publish, flip the memstead.io site to the published
 # package (the site's activate-published-wasm script, maintained with the site).
@@ -36,7 +29,6 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CRATE_DIR="$ROOT/crates/memstead-wasm"
-CLIENT_DIR="$CRATE_DIR/client-js"
 OUT_DIR="$ROOT/target/npm/wasm"
 
 DRY_RUN=0
@@ -51,8 +43,6 @@ PUBLISH_ARGS=(--access public)
 if [[ "$DRY_RUN" == 1 ]]; then
     PUBLISH_ARGS+=(--dry-run)
 fi
-
-# ---- 1. @memstead/wasm -----------------------------------------------------
 
 rm -rf "$OUT_DIR"
 mkdir -p "$OUT_DIR"
@@ -91,20 +81,9 @@ done
 echo "publish-npm: npm publish ${PUBLISH_ARGS[*]} (@memstead/wasm)"
 (cd "$OUT_DIR" && npm publish "${PUBLISH_ARGS[@]}")
 
-# ---- 2. @memstead/client ---------------------------------------------------
-
-echo "publish-npm: building @memstead/client"
-(cd "$CLIENT_DIR" && npm ci && npm run build && npm test)
-
-[[ -f "$CLIENT_DIR/dist/index.js" && -f "$CLIENT_DIR/dist/index.d.ts" ]] \
-    || { echo "publish-npm: client dist/ is missing entry point or types" >&2; exit 1; }
-
-echo "publish-npm: npm publish ${PUBLISH_ARGS[*]} (@memstead/client)"
-(cd "$CLIENT_DIR" && npm publish "${PUBLISH_ARGS[@]}")
-
 if [[ "$DRY_RUN" == 1 ]]; then
-    echo "publish-npm: dry-run OK — both packages assemble and pass npm publish --dry-run"
+    echo "publish-npm: dry-run OK — @memstead/wasm assembles and passes npm publish --dry-run"
 else
-    echo "publish-npm: done — @memstead/wasm and @memstead/client published"
+    echo "publish-npm: done — @memstead/wasm published"
     echo "publish-npm: next, flip the .io site to the published package (its activate-published-wasm script)"
 fi

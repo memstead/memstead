@@ -49,7 +49,7 @@ import {
 /**
  * Walk up from a starting directory looking for a workspace root.
  * Recognises three shapes: a `.memstead.toml` directly; a `.mcp.json` whose
- * memstead server arg list carries a `--config <path>.toml`; or a `.mcp.json`
+ * memstead MCP server arg list carries a `--config <path>.toml`; or a `.mcp.json`
  * whose server launch command `cd`s into the workspace before exec'ing
  * the engine. The engine binary has no `--config` flag — it locates its
  * workspace by cwd — so the `cd <dir>` form is what real configs use.
