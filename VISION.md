@@ -86,11 +86,11 @@ The engine handles both with the same primitives — what changes is which featu
 
 ### Mem scaling: many small, federated
 
-A mem is sized for one coherent subject — typically 1,000–5,000 entities. Beyond ~10,000, the subject discipline usually breaks: the "subject" has become two or three subjects in one bucket. The architectural answer at higher scale is not a bigger mem but **more mems connected by cross-mem edges**.
+A mem is sized for one coherent subject — by design on the order of 1,000–5,000 entities. Beyond ~10,000, the subject discipline usually breaks: the "subject" has become two or three subjects in one bucket. The architectural answer at higher scale is not a bigger mem but **more mems connected by cross-mem edges**.
 
 Two tiers fall out of this:
 
-- **Working Mem** — folder or git-branch backed, 1k–5k entities, full read/write, agents traverse the whole graph, communities, mutations through MCP. This is what the engine ships today.
+- **Working Mem** — folder or git-branch backed, sized for 1k–5k entities, full read/write, agents traverse the whole graph, communities, mutations through MCP. This is what the engine ships today.
 - **Indexed Mem** *(planned, not built)* — read-only at million-entity scale. Agents don't traverse; they query an index. The index is a **derived projection over finished mems, never a parallel source of truth**: markdown+git stays authoritative, the index is rebuilt from it, and drift is one-directional — rebuild forward, never sync back. It answers questions; it never originates state. Because it is derived, its backing engine (an embedded graph store, Neo4j, a search index) is an interchangeable implementation detail — no lock-in, since truth never lives there. Cross-mem edges from working mems point into it; full-graph operations (community-detect, full-traverse) are not offered. The use case is "the FDA's structured drug database" or "every paper in PubMed" — knowledge an agent needs to query, not navigate.
 
 The federation pattern follows: a workspace mounts dozens of small working mems plus a handful of indexed mems; the memstead.io registry indexes published mems across authorities. The engine's `MemBackend` trait makes new backend kinds (indexed-archive, remote-fetch, etc.) additive — no engine surgery to add a new tier.

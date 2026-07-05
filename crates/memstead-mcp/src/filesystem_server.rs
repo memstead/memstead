@@ -2140,7 +2140,7 @@ impl FilesystemMcpServer {
     router = FilesystemMcpServer::tool_router(),
     name = "memstead-mcp",
     version = "0.1.0",
-    instructions = "Memstead: schema-agnostic graph engine over typed, interconnected markdown entities. Each mem is a typed model of a chosen subject — its modal flavour (knowledge, planning, inquiry, spec, or any mix) follows from the schema the mem pins. Granularity: a mem is the packaged unit — a whole typed model, typically 1,000-5,000 entities; an entity is never called a mem (a mem is not one 'memory'/fact). Cold-start: call memstead_overview first for the schema catalogue and mem inventory; read a mem's schema via memstead_schema before mutating."
+    instructions = "Memstead: schema-agnostic graph engine over typed, interconnected markdown entities. Each mem is a typed model of a chosen subject — its modal flavour (knowledge, planning, inquiry, spec, or any mix) follows from the schema the mem pins. Granularity: a mem is the packaged unit — a whole typed model, designed for 1,000-5,000 entities; an entity is never called a mem (a mem is not one 'memory'/fact). Cold-start: call memstead_overview first for the schema catalogue and mem inventory; read a mem's schema via memstead_schema before mutating."
 )]
 impl ServerHandler for FilesystemMcpServer {
     async fn initialize(

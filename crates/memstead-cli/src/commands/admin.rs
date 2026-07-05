@@ -202,7 +202,7 @@ fn map_admin_api_error(status: reqwest::StatusCode, envelope: ApiErrorBody) -> C
             "unauthorized — set MEMSTEAD_TOKEN, run `memstead login`, or pass --token".to_string()
         }
         403 => {
-            "forbidden — this is an admin-only action; your GitHub login is not in MEMSTEAD_ADMINS"
+            "forbidden — this is an admin-only action; your GitHub account id is not in MEMSTEAD_ADMINS"
                 .to_string()
         }
         404 => "no such mem on the registry".to_string(),

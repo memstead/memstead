@@ -26,11 +26,11 @@ The model's modal flavour (knowledge / planning / inquiry / spec / hybrid) follo
 
 **Role.** Atomic unit for [mount](#mount), schema-pin, cross-mem permissions, and registry distribution.
 
-**Granularity (normative).** A mem is the packaged unit — a whole typed model, typically 1,000–5,000 entities. An [entity](#entity) is never called a mem. This rule defends against the agent-memory reading ("a memory" = one stored fact, as in RAG stores): a Memstead mem is the model, not one of its facts.
+**Granularity (normative).** A mem is the packaged unit — a whole typed model, sized for 1,000–5,000 entities. An [entity](#entity) is never called a mem. This rule defends against the agent-memory reading ("a memory" = one stored fact, as in RAG stores): a Memstead mem is the model, not one of its facts.
 
 **Subject-discipline.** Editorial — ad-hoc scratch mems like `exec-*` are a documented exception whose subject is the session itself.
 
-**Sizing.** A mem is sized for one coherent subject — typically **1,000–5,000 entities**. Beyond ~10,000, the subject discipline usually means: split into sub-mems connected by cross-mem edges. The engine does not hard-cap; operators are nudged toward sub-division. Reasons the cap exists in practice:
+**Sizing.** A mem is sized for one coherent subject — **1,000–5,000 entities by design**. Beyond ~10,000, the subject discipline usually means: split into sub-mems connected by cross-mem edges. The engine does not hard-cap; operators are nudged toward sub-division. Reasons the cap exists in practice:
 
 - **Subject coherence** — a "subject" with 50k entities is usually three subjects in one bucket.
 - **Agent navigation** — agents generate workspace-overviews, walk communities, and reason about structure. At 1k–5k they hold the whole picture; at 100k+ every operation degrades to "subset selection first".
@@ -367,7 +367,7 @@ Two distinctions worth preserving:
 
 A mem has exactly one subject. The subject is editorial — not enforced by code. The mem's name and entity content together imply it; convention keeps the entities on-subject.
 
-**Examples.** The Memstead project's own full mem-repo carries five mems with the `software@0.1.0` schema; each has a different subject — *the engine codebase*, *the macOS app*, *the Claude Code plugin*, *the registry server*, *the project as a whole*. Same schema, five distinct mems, because five distinct subjects.
+**Examples.** The Memstead project's own full mem-repo carries four mems with the `software@0.1.0` schema; each has a different subject — *the engine codebase*, *the macOS app*, *the Claude Code plugin*, *the registry server* — while *the project as a whole* is a fifth mem on its own `project@0.1.0` schema. Same software schema, four distinct mems, because four distinct subjects.
 
 **Boundary.**
 

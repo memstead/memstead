@@ -7,11 +7,14 @@ This folder is the source for the claim on Memstead's public surfaces:
 > authored that knowledge had consumed.
 
 It is **one observed measurement, not a benchmark**. Everything needed to
-rerun the reconstruction side yourself — the measured mem, the counting
-script, and the task prompt — is in this folder. The raw evidence bundle
-(per-session token accounting, the reconstruction transcript, the brief the
-agent produced) is retained privately and available on request; it embeds
-full session transcripts and local paths that we do not republish.
+audit and rerun it is in this folder: the measured mem, the counting script,
+the task prompt, the fresh agent's complete reconstruction transcript, the
+brief it produced, and the per-session token accounting for all 22 authoring
+conversations. Only the 22 raw authoring transcripts themselves are withheld
+— they embed bulk fetched third-party web content we do not republish; their
+sha256 hashes and per-session counts are in `authoring-sessions.json`, so the
+denominator stays auditable without them. Local filesystem paths in the
+published records are screened (the home directory is shown as `~`).
 
 ## What was measured
 
@@ -58,11 +61,14 @@ so the reconstruction side is rerunnable byte-for-byte.
 |---|---|
 | `count_tokens.py` | The counting script (Python 3, needs `tiktoken`). Applied identically to both sides. |
 | `landing-page-design-0.1.0.mem` | The measured mem, exported as a portable archive (`memstead install ./landing-page-design-0.1.0.mem`). |
+| `reconstruction-transcript.jsonl` | The fresh agent's complete reconstruction session (JSONL), the numerator. Local paths screened (home directory shown as `~`). |
+| `reconstruction-brief.md` | The domain brief the reconstruction agent produced — the demonstrated understanding. |
+| `authoring-sessions.json` | Per-session accounting for all 22 authoring conversations (sha256, time span, turn count, content tokens, API usage) — the denominator. |
 
-Retained privately (available on request): the per-transcript accounting for
-all 22 authoring conversations (sha256, time span, turn count, content tokens,
-API usage), the fresh agent's complete reconstruction transcript, and the
-domain brief it produced.
+Withheld: only the 22 raw authoring transcripts themselves — they embed bulk
+fetched third-party web content we do not republish. Their sha256 hashes and
+per-session token counts are in `authoring-sessions.json`, so the denominator
+is auditable without them.
 
 ## How the run worked
 
@@ -88,9 +94,8 @@ domain brief it produced.
 ## Rerun it
 
 The denominator is a fixed historical record — its per-session accounting
-(sha256 hashes, time spans, per-file counts) is retained privately and
-available on request, but it cannot be re-produced. The reconstruction side
-is fully rerunnable:
+(sha256 hashes, time spans, per-file counts) is in `authoring-sessions.json`,
+but it cannot be re-produced. The reconstruction side is fully rerunnable:
 
 ```sh
 # 1. Get the engine (https://memstead.com), then mount the measured mem
@@ -148,7 +153,7 @@ it should land in the same order of magnitude, and that is the claim.
 - **Not a benchmark.** One mem, one topic, first-party. No comparison with
   any other tool is made or implied.
 - **"Understanding" is demonstrated, not scored.** The evidence is the
-  brief itself (retained privately, available on request) — judge it. There
+  brief itself (`reconstruction-brief.md` in this folder) — judge it. There
   is no formal eval; the task required every
   claim to be entity-cited and to carry specifics (named studies, figures,
   dates) that exist only in the mem, which bounds how much the agent could
@@ -170,11 +175,12 @@ it should land in the same order of magnitude, and that is the claim.
   engine after the run (684 → 681 edges) so the archive is self-contained
   and passes strict install validation. Entity content is otherwise
   identical; the 108,034 serialized-token figure was measured pre-removal.
-- **The raw evidence is retained privately.** The authoring transcripts
-  embed bulk fetched third-party web content that we do not republish; the
-  reconstruction transcript and the per-session accounting (sha256 hashes,
-  time spans, token counts) embed local paths and full session records. All
-  of it is available on request for audit.
+- **What is published, what is withheld.** The reconstruction transcript,
+  the brief, and the per-session authoring accounting are in this folder
+  (local filesystem paths screened, home directory shown as `~`). Only the 22 raw
+  authoring transcripts are withheld — they embed bulk fetched third-party
+  web content we do not republish; `authoring-sessions.json` carries their
+  sha256 hashes and token counts so the denominator stays auditable.
 - **Prior number, replaced.** An earlier informal observation from April
   2026 reported roughly the same ~13:1 ratio on a hand-built, pre-engine
   graph. That experiment was retired from any public citation on
