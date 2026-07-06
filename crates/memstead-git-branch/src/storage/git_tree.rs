@@ -858,12 +858,7 @@ impl memstead_base::backend::MemBackend for GitTreeMemWriter {
             .unwrap_or(&self.ref_name);
         let tree_edits: Vec<(String, Option<Vec<u8>>)> = edits
             .iter()
-            .map(|(name, bytes)| {
-                (
-                    format!("pipeline/{kind}/{leaf}/{name}.json"),
-                    bytes.clone(),
-                )
-            })
+            .map(|(name, bytes)| (format!("pipeline/{kind}/{leaf}/{name}.json"), bytes.clone()))
             .collect();
         let ctx = CommitContext {
             actor: memstead_base::vcs::Actor::Agent,

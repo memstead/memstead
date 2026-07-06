@@ -795,8 +795,8 @@ impl Engine {
                 )));
             }
             MountStorage::GitBranch { gitdir, branch } => match self.git_branch_ops.as_ref() {
-                Some(hook) => {
-                    (hook.branch_reset)(gitdir, branch, target_sha, expected_head).map_err(|e| match e {
+                Some(hook) => (hook.branch_reset)(gitdir, branch, target_sha, expected_head)
+                    .map_err(|e| match e {
                         BackendError::Other(msg) if msg.starts_with("UNKNOWN_REF:") => {
                             let raw = msg.trim_start_matches("UNKNOWN_REF:").trim().to_string();
                             EngineError::UnknownRef(raw)
@@ -829,8 +829,7 @@ impl Engine {
                             }
                         }
                         other => EngineError::Backend(other),
-                    })?
-                }
+                    })?,
                 None => {
                     return Err(EngineError::Backend(BackendError::Other(
                         "git-branch branch_reset hook not installed (full flavour not loaded)"

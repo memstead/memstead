@@ -24,7 +24,10 @@ fn memstead_tip_message(workspace_root: &std::path::Path) -> String {
         .expect("__MEMSTEAD exists")
         .into_fully_peeled_id()
         .expect("peel");
-    let commit = repo.find_object(tip.detach()).expect("commit").into_commit();
+    let commit = repo
+        .find_object(tip.detach())
+        .expect("commit")
+        .into_commit();
     String::from_utf8_lossy(commit.message_raw().expect("message")).to_string()
 }
 

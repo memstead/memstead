@@ -26,14 +26,13 @@ mod types;
 pub use error::MemsteadError;
 pub use types::{
     AgentNotesReport, BranchResetOutcome, ChangeEnvelope, ChangesReport, ClusterInfo, CommitNote,
-    DanglingCrossMemEdge, StrandedCrossMemRef,
-    EdgeSource, EdgeTypeCount, Entity, HealthFinding, HealthIssue, HealthOptions, HealthSummary,
-    ListResult,
-    MemBackendKind, MemCreateOutcome, MemCreateRequest, MemDeleteOutcome, MemExportOutcome,
-    MemInit, MemRosterEntry, MemSchemaOutcome, MemVersionOutcome, MetadataEntry, MetadataValue,
-    MissingField, ParseRecoveryEntry, ParseRecoveryReport, Query, RelationDirection, RelationEdge,
-    Relations, Relationship, ReloadResult, SearchHit, SearchResult, SearchScope, Section,
-    StaleEntity, Stats,
+    DanglingCrossMemEdge, EdgeSource, EdgeTypeCount, Entity, HealthFinding, HealthIssue,
+    HealthOptions, HealthSummary, ListResult, MemBackendKind, MemCreateOutcome, MemCreateRequest,
+    MemDeleteOutcome, MemExportOutcome, MemInit, MemRosterEntry, MemSchemaOutcome,
+    MemVersionOutcome, MetadataEntry, MetadataValue, MissingField, ParseRecoveryEntry,
+    ParseRecoveryReport, Query, RelationDirection, RelationEdge, Relations, Relationship,
+    ReloadResult, SearchHit, SearchResult, SearchScope, Section, StaleEntity, Stats,
+    StrandedCrossMemRef,
 };
 
 uniffi::include_scaffolding!("memstead");
@@ -517,7 +516,12 @@ impl Engine {
     }
 
     /// Delete a medium (refused while a facet references it). See `Engine::delete_medium`.
-    pub fn delete_medium(&self, mem: String, name: String, note: Option<String>) -> Result<(), MemsteadError> {
+    pub fn delete_medium(
+        &self,
+        mem: String,
+        name: String,
+        note: Option<String>,
+    ) -> Result<(), MemsteadError> {
         let mut engine = self
             .inner
             .lock()
@@ -575,7 +579,12 @@ impl Engine {
     }
 
     /// Delete a facet (refused while a projection references it). See `Engine::delete_facet`.
-    pub fn delete_facet(&self, mem: String, name: String, note: Option<String>) -> Result<(), MemsteadError> {
+    pub fn delete_facet(
+        &self,
+        mem: String,
+        name: String,
+        note: Option<String>,
+    ) -> Result<(), MemsteadError> {
         let mut engine = self
             .inner
             .lock()
@@ -633,7 +642,12 @@ impl Engine {
     }
 
     /// Delete a projection (refused while an ingest runs it). See `Engine::delete_projection`.
-    pub fn delete_projection(&self, mem: String, name: String, note: Option<String>) -> Result<(), MemsteadError> {
+    pub fn delete_projection(
+        &self,
+        mem: String,
+        name: String,
+        note: Option<String>,
+    ) -> Result<(), MemsteadError> {
         let mut engine = self
             .inner
             .lock()
@@ -660,7 +674,12 @@ impl Engine {
 
     /// Create an ingest from a JSON-encoded `Ingest`. Ingests are flat
     /// (workspace-level). See `Engine::add_ingest`.
-    pub fn add_ingest(&self, name: String, ingest_json: String, note: Option<String>) -> Result<(), MemsteadError> {
+    pub fn add_ingest(
+        &self,
+        name: String,
+        ingest_json: String,
+        note: Option<String>,
+    ) -> Result<(), MemsteadError> {
         let mut engine = self
             .inner
             .lock()
@@ -670,7 +689,12 @@ impl Engine {
     }
 
     /// Overwrite an ingest from a JSON-encoded `Ingest`. See `Engine::update_ingest`.
-    pub fn update_ingest(&self, name: String, ingest_json: String, note: Option<String>) -> Result<(), MemsteadError> {
+    pub fn update_ingest(
+        &self,
+        name: String,
+        ingest_json: String,
+        note: Option<String>,
+    ) -> Result<(), MemsteadError> {
         let mut engine = self
             .inner
             .lock()
@@ -690,7 +714,12 @@ impl Engine {
     }
 
     /// Rename an ingest. See `Engine::rename_ingest`.
-    pub fn rename_ingest(&self, old_name: String, new_name: String, note: Option<String>) -> Result<(), MemsteadError> {
+    pub fn rename_ingest(
+        &self,
+        old_name: String,
+        new_name: String,
+        note: Option<String>,
+    ) -> Result<(), MemsteadError> {
         let mut engine = self
             .inner
             .lock()
@@ -734,9 +763,7 @@ impl Engine {
         let mut used_by: Vec<String> = engine
             .mounts()
             .iter()
-            .filter(|m| {
-                m.schema.as_ref().map(|s| s.to_string()).as_deref() == Some(canon.as_str())
-            })
+            .filter(|m| m.schema.as_ref().map(|s| s.to_string()).as_deref() == Some(canon.as_str()))
             .map(|m| m.mem.clone())
             .collect();
         used_by.sort();
@@ -759,9 +786,7 @@ impl Engine {
             .inner
             .lock()
             .expect("memstead-swift engine mutex poisoned");
-        engine
-            .note_missing_warning("pipeline_edit", None)
-            .is_some()
+        engine.note_missing_warning("pipeline_edit", None).is_some()
     }
 
     /// The four-primitive pipeline store serialized as JSON — the read
@@ -1173,7 +1198,10 @@ mod tests {
         for finding in &summary.findings {
             assert!(!finding.id.is_empty());
             assert!(!finding.mem.is_empty());
-            assert!(matches!(finding.axis.as_str(), "conformance" | "consistency"));
+            assert!(matches!(
+                finding.axis.as_str(),
+                "conformance" | "consistency"
+            ));
             assert!(!finding.code.is_empty());
             assert!(serde_json::from_str::<serde_json::Value>(&finding.detail_json).is_ok());
         }
@@ -1220,7 +1248,10 @@ mod tests {
         let none = engine
             .branch_reset_stranded_refs("notes".into(), EMPTY_TREE.into())
             .expect("stranded refs");
-        assert!(none.is_empty(), "no inbound cross-mem refs into notes: {none:?}");
+        assert!(
+            none.is_empty(),
+            "no inbound cross-mem refs into notes: {none:?}"
+        );
 
         // No-op reset to the current head: pointer unchanged, nothing
         // discarded — the write path works without moving history.

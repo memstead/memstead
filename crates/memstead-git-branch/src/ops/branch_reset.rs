@@ -154,12 +154,12 @@ pub fn branch_reset_in_gitdir(
     // commits. The ref-update CAS below closes the residual read-to-write
     // window — a sibling advancing between this check and the transaction
     // fails the transaction, never overwrites.
-    if let Some(expected) = expected_head {
-        if current.to_string() != expected {
-            return Err(BackendError::Other(format!(
-                "EXPECTED_HEAD_MISMATCH: {current}"
-            )));
-        }
+    if let Some(expected) = expected_head
+        && current.to_string() != expected
+    {
+        return Err(BackendError::Other(format!(
+            "EXPECTED_HEAD_MISMATCH: {current}"
+        )));
     }
 
     // Fast-path: target equals current head — no-op reset. Return an
@@ -350,8 +350,7 @@ mod tests {
         // Sibling writer advances past the observed head.
         let sha_c = commit(&gitdir, "specs", "c.md", &body("C"), "C");
 
-        let err =
-            branch_reset_in_gitdir(&gitdir, "specs", &sha_a, Some(&sha_b)).unwrap_err();
+        let err = branch_reset_in_gitdir(&gitdir, "specs", &sha_a, Some(&sha_b)).unwrap_err();
         let msg = format!("{err}");
         assert!(
             msg.starts_with("EXPECTED_HEAD_MISMATCH:") || msg.contains("EXPECTED_HEAD_MISMATCH"),
@@ -369,8 +368,7 @@ mod tests {
         assert_eq!(head, sha_c, "the branch pointer is untouched");
 
         // With the true live head as expected, the reset proceeds.
-        let outcome =
-            branch_reset_in_gitdir(&gitdir, "specs", &sha_a, Some(&sha_c)).unwrap();
+        let outcome = branch_reset_in_gitdir(&gitdir, "specs", &sha_a, Some(&sha_c)).unwrap();
         assert_eq!(outcome.new_sha, sha_a);
         assert_eq!(outcome.discarded_commits.len(), 2);
     }

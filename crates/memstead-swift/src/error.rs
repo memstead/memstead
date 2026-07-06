@@ -229,10 +229,10 @@ impl From<EngineError> for MemsteadError {
             // head no longer matches the live one.
             EngineError::BranchResetHeadMoved { ref current, .. } => {
                 let current = current.clone();
-                return Self::HashMismatch {
+                Self::HashMismatch {
                     message: err.to_string(),
                     current,
-                };
+                }
             }
             EngineError::PushedCommitsProtected {
                 ref pushed_shas, ..

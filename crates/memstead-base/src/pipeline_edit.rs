@@ -547,11 +547,18 @@ impl Engine {
     ) -> Result<(), PipelineEditError> {
         let root = self.pipeline_edit_root()?;
         add_medium(&root, mem, name, medium)?;
-        let bytes = serde_json::to_vec_pretty(medium).map_err(|e| PipelineEditError::InvalidJson {
-            primitive: "config",
-            message: e.to_string(),
-        })?;
-        self.pipeline_provenance(mem, "mediums", &[(name.to_string(), Some(bytes))], note, "add")?;
+        let bytes =
+            serde_json::to_vec_pretty(medium).map_err(|e| PipelineEditError::InvalidJson {
+                primitive: "config",
+                message: e.to_string(),
+            })?;
+        self.pipeline_provenance(
+            mem,
+            "mediums",
+            &[(name.to_string(), Some(bytes))],
+            note,
+            "add",
+        )?;
         self.refresh_pipeline_configs(&root)
     }
 
@@ -565,11 +572,18 @@ impl Engine {
     ) -> Result<(), PipelineEditError> {
         let root = self.pipeline_edit_root()?;
         update_medium(&root, mem, name, medium)?;
-        let bytes = serde_json::to_vec_pretty(medium).map_err(|e| PipelineEditError::InvalidJson {
-            primitive: "config",
-            message: e.to_string(),
-        })?;
-        self.pipeline_provenance(mem, "mediums", &[(name.to_string(), Some(bytes))], note, "update")?;
+        let bytes =
+            serde_json::to_vec_pretty(medium).map_err(|e| PipelineEditError::InvalidJson {
+                primitive: "config",
+                message: e.to_string(),
+            })?;
+        self.pipeline_provenance(
+            mem,
+            "mediums",
+            &[(name.to_string(), Some(bytes))],
+            note,
+            "update",
+        )?;
         self.refresh_pipeline_configs(&root)
     }
 
@@ -631,11 +645,18 @@ impl Engine {
     ) -> Result<(), PipelineEditError> {
         let root = self.pipeline_edit_root()?;
         add_facet(&root, mem, name, facet)?;
-        let bytes = serde_json::to_vec_pretty(facet).map_err(|e| PipelineEditError::InvalidJson {
-            primitive: "config",
-            message: e.to_string(),
-        })?;
-        self.pipeline_provenance(mem, "facets", &[(name.to_string(), Some(bytes))], note, "add")?;
+        let bytes =
+            serde_json::to_vec_pretty(facet).map_err(|e| PipelineEditError::InvalidJson {
+                primitive: "config",
+                message: e.to_string(),
+            })?;
+        self.pipeline_provenance(
+            mem,
+            "facets",
+            &[(name.to_string(), Some(bytes))],
+            note,
+            "add",
+        )?;
         self.refresh_pipeline_configs(&root)
     }
 
@@ -649,11 +670,18 @@ impl Engine {
     ) -> Result<(), PipelineEditError> {
         let root = self.pipeline_edit_root()?;
         update_facet(&root, mem, name, facet)?;
-        let bytes = serde_json::to_vec_pretty(facet).map_err(|e| PipelineEditError::InvalidJson {
-            primitive: "config",
-            message: e.to_string(),
-        })?;
-        self.pipeline_provenance(mem, "facets", &[(name.to_string(), Some(bytes))], note, "update")?;
+        let bytes =
+            serde_json::to_vec_pretty(facet).map_err(|e| PipelineEditError::InvalidJson {
+                primitive: "config",
+                message: e.to_string(),
+            })?;
+        self.pipeline_provenance(
+            mem,
+            "facets",
+            &[(name.to_string(), Some(bytes))],
+            note,
+            "update",
+        )?;
         self.refresh_pipeline_configs(&root)
     }
 
@@ -715,11 +743,18 @@ impl Engine {
     ) -> Result<(), PipelineEditError> {
         let root = self.pipeline_edit_root()?;
         add_projection(&root, mem, name, projection)?;
-        let bytes = serde_json::to_vec_pretty(projection).map_err(|e| PipelineEditError::InvalidJson {
-            primitive: "config",
-            message: e.to_string(),
-        })?;
-        self.pipeline_provenance(mem, "projections", &[(name.to_string(), Some(bytes))], note, "add")?;
+        let bytes =
+            serde_json::to_vec_pretty(projection).map_err(|e| PipelineEditError::InvalidJson {
+                primitive: "config",
+                message: e.to_string(),
+            })?;
+        self.pipeline_provenance(
+            mem,
+            "projections",
+            &[(name.to_string(), Some(bytes))],
+            note,
+            "add",
+        )?;
         self.refresh_pipeline_configs(&root)
     }
 
@@ -733,11 +768,18 @@ impl Engine {
     ) -> Result<(), PipelineEditError> {
         let root = self.pipeline_edit_root()?;
         update_projection(&root, mem, name, projection)?;
-        let bytes = serde_json::to_vec_pretty(projection).map_err(|e| PipelineEditError::InvalidJson {
-            primitive: "config",
-            message: e.to_string(),
-        })?;
-        self.pipeline_provenance(mem, "projections", &[(name.to_string(), Some(bytes))], note, "update")?;
+        let bytes =
+            serde_json::to_vec_pretty(projection).map_err(|e| PipelineEditError::InvalidJson {
+                primitive: "config",
+                message: e.to_string(),
+            })?;
+        self.pipeline_provenance(
+            mem,
+            "projections",
+            &[(name.to_string(), Some(bytes))],
+            note,
+            "update",
+        )?;
         self.refresh_pipeline_configs(&root)
     }
 
@@ -750,7 +792,13 @@ impl Engine {
     ) -> Result<(), PipelineEditError> {
         let root = self.pipeline_edit_root()?;
         delete_projection(&root, mem, name)?;
-        self.pipeline_provenance(mem, "projections", &[(name.to_string(), None)], note, "delete")?;
+        self.pipeline_provenance(
+            mem,
+            "projections",
+            &[(name.to_string(), None)],
+            note,
+            "delete",
+        )?;
         self.refresh_pipeline_configs(&root)
     }
 
@@ -810,12 +858,19 @@ impl Engine {
     ) -> Result<(), PipelineEditError> {
         let root = self.pipeline_edit_root()?;
         add_ingest(&root, name, ingest)?;
-        let bytes = serde_json::to_vec_pretty(ingest).map_err(|e| PipelineEditError::InvalidJson {
-            primitive: "config",
-            message: e.to_string(),
-        })?;
+        let bytes =
+            serde_json::to_vec_pretty(ingest).map_err(|e| PipelineEditError::InvalidJson {
+                primitive: "config",
+                message: e.to_string(),
+            })?;
         let mem = Self::ingest_destination_mem(&ingest.projection);
-        self.pipeline_provenance(&mem, "ingests", &[(name.to_string(), Some(bytes))], note, "add")?;
+        self.pipeline_provenance(
+            &mem,
+            "ingests",
+            &[(name.to_string(), Some(bytes))],
+            note,
+            "add",
+        )?;
         self.refresh_pipeline_configs(&root)
     }
 
@@ -828,17 +883,28 @@ impl Engine {
     ) -> Result<(), PipelineEditError> {
         let root = self.pipeline_edit_root()?;
         update_ingest(&root, name, ingest)?;
-        let bytes = serde_json::to_vec_pretty(ingest).map_err(|e| PipelineEditError::InvalidJson {
-            primitive: "config",
-            message: e.to_string(),
-        })?;
+        let bytes =
+            serde_json::to_vec_pretty(ingest).map_err(|e| PipelineEditError::InvalidJson {
+                primitive: "config",
+                message: e.to_string(),
+            })?;
         let mem = Self::ingest_destination_mem(&ingest.projection);
-        self.pipeline_provenance(&mem, "ingests", &[(name.to_string(), Some(bytes))], note, "update")?;
+        self.pipeline_provenance(
+            &mem,
+            "ingests",
+            &[(name.to_string(), Some(bytes))],
+            note,
+            "update",
+        )?;
         self.refresh_pipeline_configs(&root)
     }
 
     /// Delete an ingest and refresh the snapshot. See [`delete_ingest`].
-    pub fn delete_ingest(&mut self, name: &str, note: Option<&str>) -> Result<(), PipelineEditError> {
+    pub fn delete_ingest(
+        &mut self,
+        name: &str,
+        note: Option<&str>,
+    ) -> Result<(), PipelineEditError> {
         let root = self.pipeline_edit_root()?;
         // Snapshot still holds the record — resolve the destination mem
         // before the delete lands.

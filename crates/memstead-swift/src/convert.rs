@@ -17,10 +17,9 @@ use memstead_base::{
 use crate::types::{
     AgentNotesReport, ChangeEnvelope, ChangesReport, ClusterInfo, CommitNote, EdgeSource,
     EdgeTypeCount, Entity, HealthFinding, HealthIssue, HealthSummary, ListResult, MemSchemaOutcome,
-    MetadataEntry,
-    MetadataValue, MissingField, ParseRecoveryEntry, ParseRecoveryReport, Query, RelationDirection,
-    RelationEdge, Relations, Relationship, ReloadResult, SearchHit, SearchResult, SearchScope,
-    Section, StaleEntity, Stats,
+    MetadataEntry, MetadataValue, MissingField, ParseRecoveryEntry, ParseRecoveryReport, Query,
+    RelationDirection, RelationEdge, Relations, Relationship, ReloadResult, SearchHit,
+    SearchResult, SearchScope, Section, StaleEntity, Stats,
 };
 
 // ---------------------------------------------------------------------------
