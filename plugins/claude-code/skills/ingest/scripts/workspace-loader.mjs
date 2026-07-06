@@ -170,10 +170,22 @@ export function fetchDumpFromCli(workspaceRoot) {
 export function loadWorkspace(workspaceRoot, opts = {}) {
   const root = resolve(workspaceRoot);
   const tomlPath = join(root, '.memstead.toml');
-  if (!existsSync(tomlPath)) {
-    throw new Error(`workspace-loader: .memstead.toml not found at ${tomlPath}`);
+  const engineMarker = join(root, '.memstead', 'workspace.toml');
+  const hasLegacyToml = existsSync(tomlPath);
+  // A fresh workspace from the shipped `init`/`quickstart` carries only the
+  // engine marker (`.memstead/workspace.toml`), never `.memstead.toml`.
+  // Requiring the legacy marker made `/ingest` fail with "not found" for every
+  // non-maintainer user. Accept either; only the absence of BOTH means this is
+  // not a Memstead workspace.
+  if (!hasLegacyToml && !existsSync(engineMarker)) {
+    throw new Error(
+      `workspace-loader: no Memstead workspace at ${root} ` +
+      `(neither .memstead/workspace.toml nor .memstead.toml present)`
+    );
   }
-  const toml = loadMemsteadToml(tomlPath);
+  // `.memstead.toml` carries only the plugin-shape `format` gate. A fresh
+  // engine workspace has no such file — treat it as the current format.
+  const toml = hasLegacyToml ? loadMemsteadToml(tomlPath) : { format: null };
 
   const format = toml.format;
   if (format !== null && !SUPPORTED_FORMATS.includes(format)) {
@@ -181,7 +193,7 @@ export function loadWorkspace(workspaceRoot, opts = {}) {
       `workspace-loader: unsupported plugin format "${format}" in ${tomlPath}; supported versions: ${SUPPORTED_FORMATS.join(', ')}`
     );
   }
-  if (format === null) {
+  if (format === null && hasLegacyToml) {
     console.warn(
       `workspace-loader: .memstead.toml at ${tomlPath} is missing the \`format\` key — ` +
       `treating as legacy and validating against ${SUPPORTED_FORMATS[0]}.`
@@ -201,8 +213,27 @@ export function loadWorkspace(workspaceRoot, opts = {}) {
   // Fetch the engine dump. In dev / test the caller may inject a
   // fixture; the production path spawns the CLI. The dump-format gate
   // applies regardless of source — both surfaces must agree on v0.
+  //
+  // `workspace dump` is mem-repo-only: a folder-backed workspace — the default
+  // shape a fresh `quickstart`/`init` produces — cannot yet emit one. Turning
+  // that into a hard failure would make `/ingest`, an advertised front-door
+  // command, die with a confusing error for exactly the fresh non-maintainer
+  // user it must serve. Degrade instead: an empty dump lets the store walk
+  // below still surface any configured ingests, and a fresh workspace with none
+  // reaches the honest "no ingests found" result rather than "not found". The
+  // maintainer's mem-repo `graph/` workspace dumps fine — this path is only
+  // taken where the dump is genuinely unavailable.
   const fetchDump = opts.fetchDump || fetchDumpFromCli;
-  const dump = fetchDump(root);
+  let dump;
+  try {
+    dump = fetchDump(root);
+  } catch (e) {
+    console.warn(
+      `workspace-loader: workspace dump unavailable (${e.message}); ` +
+      `proceeding without per-mem metadata`
+    );
+    dump = { format: SUPPORTED_DUMP_FORMATS[0], mems: [], schemas: {} };
+  }
   if (!SUPPORTED_DUMP_FORMATS.includes(dump.format)) {
     throw new Error(
       `workspace-loader: unsupported workspace-dump format "${dump.format}"; ` +

@@ -6,17 +6,80 @@
 
 import { spawn } from 'node:child_process';
 import { readFileSync, existsSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
+import { resolve, dirname, isAbsolute, join, sep } from 'node:path';
+import { homedir } from 'node:os';
 
 const CLIENT_NAME = 'memstead-plugin-auto-commit';
 const CLIENT_VERSION = '0.1.0';
 const PROTOCOL_VERSION = '2024-11-05';
 
 /**
+ * Turn an `.mcp.json` `command` into what `spawn` should exec.
+ *
+ * A bare command name (`sh`, `node`, a binary on `PATH`) carries no path
+ * separator — leave it untouched so `spawn` finds it on `PATH`. A path
+ * (absolute, or workspace-relative like `target/release/memstead-mcp`) is
+ * resolved against the workspace root so the hook's own cwd doesn't matter.
+ *
+ * The previous unconditional `resolve(workspaceRoot, command)` mangled a bare
+ * `"sh"` into `<root>/sh` (ENOENT) — so the real `sh -c "cd <dir> && exec
+ * <binary>"` launch form never spawned and the auto-commit Stop hook produced
+ * zero commits. Both real launch forms (this shell form, and the bare-absolute
+ * binary a fresh `quickstart` writes) now resolve correctly.
+ */
+export function resolveLaunchCommand(workspaceRoot, command) {
+  if (isAbsolute(command) || command.includes('/') || command.includes(sep)) {
+    return resolve(workspaceRoot, command);
+  }
+  return command;
+}
+
+/**
+ * True when Claude Code would auto-start the named project `.mcp.json` server
+ * for `workspaceRoot` — i.e. the user has approved it. The engine-spawning
+ * hooks anchor to the SAME trust signals Claude Code uses, so they only ever
+ * launch a `.mcp.json` command the user already approved for MCP. A
+ * freshly-cloned repo the user has not approved carries none of these signals,
+ * so the hook never spawns its `command` — closing the "hostile clone executes
+ * code on the first prompt/edit" path. Fail-closed: unreadable/absent config
+ * means untrusted.
+ */
+export function isEngineSpawnTrusted(workspaceRoot, serverName = 'memstead', home = homedir()) {
+  const readJson = (path) => {
+    try {
+      return JSON.parse(readFileSync(path, 'utf-8'));
+    } catch {
+      return null;
+    }
+  };
+  const layers = [
+    readJson(join(workspaceRoot, '.claude', 'settings.local.json')),
+    readJson(join(workspaceRoot, '.claude', 'settings.json')),
+    readJson(join(home, '.claude', 'settings.json')),
+    readJson(join(home, '.claude.json'))?.projects?.[workspaceRoot] ?? null,
+  ].filter(Boolean);
+
+  // An explicit deny in any layer wins over every allow signal.
+  for (const layer of layers) {
+    if (Array.isArray(layer.disabledMcpjsonServers) && layer.disabledMcpjsonServers.includes(serverName)) {
+      return false;
+    }
+  }
+  for (const layer of layers) {
+    if (layer.enableAllProjectMcpServers === true) return true;
+    if (Array.isArray(layer.enabledMcpjsonServers) && layer.enabledMcpjsonServers.includes(serverName)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Resolve the engine command + args from `.mcp.json` at the given workspace
  * root. Returns `null` if the file or the `memstead` server entry is
- * missing — callers treat that as a silent no-op (plugin not configured
- * for this repo).
+ * missing, or if the user has not approved this workspace's `.mcp.json`
+ * `memstead` server for MCP (see `isEngineSpawnTrusted`) — callers treat that
+ * as a silent no-op (plugin not configured / not trusted for this repo).
  */
 export function resolveEngineCommand(workspaceRoot) {
   const mcpJsonPath = resolve(workspaceRoot, '.mcp.json');
@@ -29,10 +92,11 @@ export function resolveEngineCommand(workspaceRoot) {
   }
   const entry = raw.mcpServers?.memstead;
   if (!entry?.command) return null;
-  // `command` in `.mcp.json` may be workspace-relative (e.g.
-  // `target/release/memstead-mcp`). Resolve against the workspace root so the
-  // hook doesn't care what the hook's cwd happens to be.
-  const cmd = resolve(workspaceRoot, entry.command);
+  // Trust anchor: never spawn a `.mcp.json` command the user hasn't approved
+  // for MCP — the same gate Claude Code applies before auto-starting the
+  // server. A hostile cloned repo carries no approval, so the hook no-ops.
+  if (!isEngineSpawnTrusted(workspaceRoot)) return null;
+  const cmd = resolveLaunchCommand(workspaceRoot, entry.command);
   const args = Array.isArray(entry.args) ? entry.args.slice() : [];
   return { cmd, args, cwd: workspaceRoot };
 }

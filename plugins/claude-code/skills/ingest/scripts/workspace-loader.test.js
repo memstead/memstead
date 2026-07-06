@@ -136,3 +136,50 @@ describe('workspace-loader — four-primitive store', () => {
     }
   });
 });
+
+describe('workspace-loader — front-door discovery (fresh engine-marker workspace)', () => {
+  it('loads a workspace with only the engine marker (no legacy .memstead.toml)', () => {
+    // A fresh `init`/`quickstart` workspace has `.memstead/workspace.toml` and
+    // NO `.memstead.toml`. Requiring the legacy marker made `/ingest` fail with
+    // "not found" for every non-maintainer user.
+    const root = mkdtempSync(join(tmpdir(), 'wsl-enginemarker-'));
+    try {
+      mkdirSync(join(root, '.memstead'), { recursive: true });
+      writeFileSync(join(root, '.memstead', 'workspace.toml'), 'name = "fresh"\n');
+      const ws = loadWorkspace(root, { fetchDump: () => DUMP });
+      assert.equal(ws.format, null); // no legacy toml → current-format default
+      assert.equal(ws.ingests.length, 0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('throws only when NEITHER marker is present', () => {
+    const root = mkdtempSync(join(tmpdir(), 'wsl-nomarker-'));
+    try {
+      assert.throws(
+        () => loadWorkspace(root, { fetchDump: () => DUMP }),
+        /no Memstead workspace/,
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('degrades to empty when `workspace dump` is unavailable (folder-backed workspace)', () => {
+    // `workspace dump` is mem-repo-only; on a folder-backed workspace it errors.
+    // The loader must degrade to a useful "no ingests" result, not hard-fail.
+    const root = mkdtempSync(join(tmpdir(), 'wsl-nodump-'));
+    try {
+      mkdirSync(join(root, '.memstead'), { recursive: true });
+      writeFileSync(join(root, '.memstead', 'workspace.toml'), 'name = "fresh"\n');
+      const ws = loadWorkspace(root, {
+        fetchDump: () => { throw new Error('mem-repo-only'); },
+      });
+      assert.equal(ws.ingests.length, 0);
+      assert.deepEqual(ws.mems, []);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});

@@ -47,17 +47,33 @@ import {
 // ── Workspace root discovery ────────────────────────────────────────────────
 
 /**
+ * True when `dir` is a Memstead workspace root: it carries the engine marker
+ * `.memstead/workspace.toml` (written by `init`/`quickstart` — what a fresh
+ * non-maintainer user actually has), or the pre-rebuild standalone
+ * `.memstead.toml` some workspaces still carry. Recognising only the legacy
+ * marker made `/ingest` — an advertised front-door command — fail with
+ * "workspace not found" on every freshly-initialised workspace.
+ */
+function hasWorkspaceMarker(dir) {
+  return (
+    existsSync(join(dir, '.memstead', 'workspace.toml')) ||
+    existsSync(join(dir, '.memstead.toml'))
+  );
+}
+
+/**
  * Walk up from a starting directory looking for a workspace root.
- * Recognises three shapes: a `.memstead.toml` directly; a `.mcp.json` whose
- * memstead MCP server arg list carries a `--config <path>.toml`; or a `.mcp.json`
- * whose server launch command `cd`s into the workspace before exec'ing
- * the engine. The engine binary has no `--config` flag — it locates its
- * workspace by cwd — so the `cd <dir>` form is what real configs use.
+ * Recognises three shapes: a workspace marker directly (see
+ * `hasWorkspaceMarker`); a `.mcp.json` whose memstead MCP server arg list
+ * carries a `--config <path>.toml`; or a `.mcp.json` whose server launch
+ * command `cd`s into the workspace before exec'ing the engine. The engine
+ * binary has no `--config` flag — it locates its workspace by cwd — so the
+ * `cd <dir>` form is what real configs use.
  */
 function findWorkspaceRoot(startDir) {
   let dir = resolve(startDir);
   while (true) {
-    if (existsSync(join(dir, '.memstead.toml'))) return dir;
+    if (hasWorkspaceMarker(dir)) return dir;
 
     const mcp = join(dir, '.mcp.json');
     if (existsSync(mcp)) {
@@ -86,7 +102,7 @@ function findWorkspaceRoot(startDir) {
             if (!m) continue;
             const target = m[1].replace(/^["']|["']$/g, '');
             const candidate = resolve(dir, target);
-            if (existsSync(join(candidate, '.memstead.toml'))) return candidate;
+            if (hasWorkspaceMarker(candidate)) return candidate;
           }
         }
       } catch {}
@@ -1291,7 +1307,7 @@ function oneShotLensBlock(ingest, memMeta) {
 
 try {
   if (!WORKSPACE_ROOT) {
-    process.stdout.write(`> **[${STATE_PREFIX}] No workspace root found (no .memstead.toml in cwd or skill-dir ancestry).**\n`);
+    process.stdout.write(`> **[${STATE_PREFIX}] No workspace root found (no .memstead/workspace.toml or .memstead.toml in cwd or skill-dir ancestry).**\n`);
     process.exit(0);
   }
   dbg(`workspace=${WORKSPACE_ROOT}`);
