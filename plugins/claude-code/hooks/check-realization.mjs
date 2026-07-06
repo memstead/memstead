@@ -10,7 +10,6 @@
 
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { basename, resolve, join, relative } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { extractRealizationPaths, fileToId, pathMatches } from './check-realization-utils.mjs';
 import { isEntityFilename } from './guard-entity-edit-utils.mjs';
 import { resolveMemDirsFromCwd } from './workspace-resolve-utils.mjs';
@@ -73,25 +72,20 @@ for (const memDir of resolveMemDirsFromCwd()) {
 
 // --- Helpers ---
 
-// Load a folder mem's schema module from its `.memstead/config.json`
-// "schema" field. Returns null when the config or schema is unavailable
-// (e.g. a git-branch mem whose schema lives on the __SCHEMAS ref, not
-// on disk).
-async function loadMemSchema(memDir) {
-  try {
-    const configPath = join(memDir, '.memstead', 'config.json');
-    if (!existsSync(configPath)) return null;
-    const schemaRef = JSON.parse(readFileSync(configPath, 'utf-8')).schema;
-    if (!schemaRef) return null;
-    const isRelative = schemaRef.startsWith('./') || schemaRef.startsWith('../');
-    const resolved = isRelative ? resolve(memDir, schemaRef) : schemaRef;
-    const mod = resolved.startsWith('/')
-      ? await import(pathToFileURL(resolved).href)
-      : await import(resolved);
-    return mod.default?.schema || mod.default || mod.schema;
-  } catch {
-    return null;
-  }
+// The realization scan needs a schema carrying `drift.realizationPatterns`.
+// This USED to obtain it by `import()`-ing the string in a workspace's
+// `.memstead/config.json` "schema" field — but that field is an engine
+// schema REF (e.g. `"default@1.0.0"`), never a loadable JS module, so the
+// scan was dead on every real workspace. Worse, `import()` of a
+// workspace-controlled string was an arbitrary-module-load surface: a cloned
+// hostile repo whose config named `"./evil.mjs"` (or a bare specifier
+// resolvable from its node_modules) would execute code on the first
+// Write/Edit that fired this PostToolUse hook. The engine owns schemas; a
+// plugin hook must never load code from a workspace-controlled path. Until a
+// trusted, engine-sourced drift-pattern channel exists, the scan yields no
+// schema and stays inert — the always-on direct-edit guard above is unaffected.
+async function loadMemSchema(_memDir) {
+  return null;
 }
 
 function findMarkdownFiles(dir) {
