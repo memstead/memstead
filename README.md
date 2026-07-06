@@ -104,7 +104,7 @@ The `default` schema ships ten general-purpose types (`concept`, `assertion`, `m
 
 ## Share and reuse mems
 
-Publish a mem to the [memstead.io](https://memstead.io) registry, and install someone else's with one command. (The registry opens publicly at launch; until then it runs gated.) Domain roles: **memstead.io** hosts the registry and the install script; **memstead.com** hosts the docs and contact addresses (`hello@` / `security@memstead.com`).
+Publish a mem to the [memstead.io](https://memstead.io) registry, and install someone else's with one command. Domain roles: **memstead.io** hosts the registry and the install script; **memstead.com** hosts the docs and contact addresses (`hello@` / `security@memstead.com`).
 
 ```bash
 memstead export --format mem -o my.mem
@@ -176,3 +176,12 @@ The engine builds in two flavours from one set of crates: the default build is t
 # Force-restart the MCP server (kills all instances; your agent auto-restarts it)
 pkill -f memstead-mcp
 ```
+
+## License
+
+Memstead is dual-licensed under either of
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or <https://www.apache.org/licenses/LICENSE-2.0>)
+- MIT license ([LICENSE-MIT](LICENSE-MIT) or <https://opensource.org/licenses/MIT>)
+
+at your option. The one folder-level exception is `plugins/claude-code/` (MIT only); see [LICENSING.md](LICENSING.md) for the full per-folder map.
