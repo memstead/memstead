@@ -4,6 +4,11 @@ Schema types for [Memstead](https://github.com/memstead/memstead) — the
 schema-agnostic graph engine that gives AI agents a durable, typed memory
 stored as plain markdown in git.
 
+> **Stability:** this crate is an internal library of the Memstead engine,
+> consumed by the `memstead` / `memstead-mcp` binaries. Its Rust API is
+> pre-1.0 and experimental — it changes without deprecation cycles. For a
+> stable contract, consume the binaries or the MCP surface instead.
+
 This crate defines what a schema *is*: entity type definitions (sections,
 metadata fields, required/optional shape), the controlled relationship
 vocabulary, validation rules, and the loading pipeline that resolves a

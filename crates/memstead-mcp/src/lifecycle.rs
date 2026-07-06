@@ -109,12 +109,12 @@ pub struct MemCreateParams {
     )]
     pub recovery: Option<RecoveryActionInput>,
     #[schemars(
-        description = "Inline the full resolved schema body on the response (byte-identical to `memstead_schema(name=<resolved-schema>)`). Default `false` — the response carries only `schema_ref`, `name`, `location`, and `seed_commit_sha`. Set to `true` for first-time-schema callers that want one round-trip instead of two; for the agent's second+ mem on the same schema this opt-in saves ~25 KB of context per call since the schema is workspace-stable and already cached."
+        description = "Inline the resolved schema body on the response (byte-identical to `memstead_schema(name=<resolved-schema>)` at the same verbosity). Default `false` — the response carries only `schema_ref`, `name`, `location`, and `seed_commit_sha`. Set to `true` for first-time-schema callers that want one round-trip instead of two; the schema is workspace-stable, so for the agent's second+ mem on the same schema the omitted default is the right call."
     )]
     #[serde(default)]
     pub include_schema: bool,
     #[schemars(
-        description = "Verbosity of the inlined schema body when `include_schema: true`. `\"full\"` (default, absent) inlines the complete schema — byte-identical to `memstead_schema(name=<resolved-schema>)`. `\"lite\"` inlines the cheap cold-start skeleton instead (entity-type names + section keys + field shapes, relationship names + endpoints, the alias pointer; prose dropped) — the recommended pairing for a first-mem create that only needs to orient. Ignored when `include_schema` is false. Any value other than `\"full\"`/`\"lite\"` returns `INVALID_INPUT` naming the bad value."
+        description = "Verbosity of the inlined schema body when `include_schema: true`. `\"lite\"` (default, absent) inlines the cheap cold-start skeleton (entity-type names + section keys + field shapes, relationship names + endpoints, the alias pointer; prose dropped) — the right pairing for a first-mem create that only needs to orient, and byte-identical to `memstead_schema`'s default reply. `\"full\"` inlines the complete schema — byte-identical to `memstead_schema(name=<resolved-schema>, verbosity=\"full\")`. Ignored when `include_schema` is false. Any value other than `\"full\"`/`\"lite\"` returns `INVALID_INPUT` naming the bad value."
     )]
     pub schema_verbosity: Option<String>,
     #[schemars(

@@ -27,7 +27,7 @@ pub use error::MemsteadError;
 pub use types::{
     AgentNotesReport, BranchResetOutcome, ChangeEnvelope, ChangesReport, ClusterInfo, CommitNote,
     DanglingCrossMemEdge, EdgeSource, EdgeTypeCount, Entity, HealthFinding, HealthIssue,
-    HealthOptions, HealthSummary, ListResult, MemBackendKind, MemCreateOutcome, MemCreateRequest,
+    HealthSummary, ListResult, MemBackendKind, MemCreateOutcome, MemCreateRequest,
     MemDeleteOutcome, MemExportOutcome, MemInit, MemRosterEntry, MemSchemaOutcome,
     MemVersionOutcome, MetadataEntry, MetadataValue, MissingField, ParseRecoveryEntry,
     ParseRecoveryReport, Query, RelationDirection, RelationEdge, Relations, Relationship,
@@ -122,11 +122,12 @@ pub struct Engine {
 }
 
 impl Engine {
-    /// Construct an engine rooted at the current working directory. The
-    /// `mems` parameter is retained for FFI compatibility but is
-    /// ignored — mounts come from `.memstead/state/mounts.json` via the
-    /// workspace-store loader.
-    pub fn new(_mems: Vec<MemInit>) -> Result<Self, MemsteadError> {
+    /// Construct an engine rooted at the current working directory.
+    /// Mounts come from `.memstead/state/mounts.json` via the
+    /// workspace-store loader. (The former `mems` parameter was dead —
+    /// accepted and ignored — and was removed in the pre-release
+    /// window; `discover_mems` output seeds the UI, never the engine.)
+    pub fn new() -> Result<Self, MemsteadError> {
         let workspace_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         Self::from_workspace_root(&workspace_root)
     }
@@ -154,10 +155,11 @@ impl Engine {
         convert::stats_to_ffi(engine.stats(), engine.store(), engine.mem_router())
     }
 
-    pub fn get_health(&self, _options: HealthOptions) -> HealthSummary {
-        // `HealthOptions` is reserved for future knobs (most-connected limit
-        // etc.). The engine's `health()` has no options today; once it grows
-        // any, route them here without changing the FFI signature.
+    pub fn get_health(&self) -> HealthSummary {
+        // The engine's `health()` takes no options; if knobs land later
+        // (most-connected limit etc.) they arrive as a new optional
+        // record — the former always-empty `HealthOptions` parameter was
+        // removed in the pre-release window rather than carried forward.
         let engine = self
             .inner
             .lock()
@@ -966,10 +968,7 @@ impl Engine {
     /// engine can be rooted at a `TempDir` whose `mem-repo/.git/` has
     /// been seeded by `memstead_git_branch::test_support`.
     #[cfg(any(test, feature = "test-support"))]
-    pub fn new_for_test(
-        _mems: Vec<MemInit>,
-        workspace_root: PathBuf,
-    ) -> Result<Self, MemsteadError> {
+    pub fn new_for_test(workspace_root: PathBuf) -> Result<Self, MemsteadError> {
         Self::from_workspace_root(&workspace_root)
     }
 }
@@ -1051,16 +1050,7 @@ mod tests {
         let tmp = TempDir::new().expect("tempdir");
         seed_canonical_fixture(tmp.path());
 
-        let engine = Engine::new_for_test(
-            vec![MemInit {
-                name: "specs".to_string(),
-                dir: String::new(),
-                schema_name: "default".to_string(),
-                schema_version: "1.0.0".to_string(),
-            }],
-            tmp.path().to_path_buf(),
-        )
-        .expect("engine init");
+        let engine = Engine::new_for_test(tmp.path().to_path_buf()).expect("engine init");
 
         (engine, tmp)
     }
@@ -1184,9 +1174,7 @@ mod tests {
     #[test]
     fn get_health_returns_summary_shape() {
         let (engine, _tmp) = setup_test_engine();
-        let summary = engine.get_health(HealthOptions {
-            most_connected_limit: 10,
-        });
+        let summary = engine.get_health();
         // Pre-widening fields decode unchanged (additive contract).
         assert!(summary.stale_entities.is_empty() || !summary.stale_entities.is_empty());
         let _ = summary.missing_fields.len();
@@ -1229,7 +1217,7 @@ mod tests {
                 ),
             ],
         );
-        let engine = Engine::new_for_test(Vec::new(), tmp.path().to_path_buf()).expect("engine");
+        let engine = Engine::new_for_test(tmp.path().to_path_buf()).expect("engine");
 
         // Strand preview against the empty tree: every specs entity would
         // be discarded, so notes--linker's edge must surface.
@@ -1308,10 +1296,8 @@ mod tests {
                 ],
             )],
         );
-        let engine = Engine::new_for_test(Vec::new(), tmp.path().to_path_buf()).expect("engine");
-        let summary = engine.get_health(HealthOptions {
-            most_connected_limit: 10,
-        });
+        let engine = Engine::new_for_test(tmp.path().to_path_buf()).expect("engine");
+        let summary = engine.get_health();
         assert!(
             summary
                 .findings

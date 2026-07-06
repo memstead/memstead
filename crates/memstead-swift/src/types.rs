@@ -21,11 +21,6 @@ pub struct MemInit {
     pub schema_version: String,
 }
 
-#[derive(Debug, Clone)]
-pub struct HealthOptions {
-    pub most_connected_limit: u32,
-}
-
 /// FFI-mirror of `memstead_base::ops::Query`. `any_of` / `not_in` are the FFI
 /// names for the core `any` / `not` fields (both are Swift keywords).
 #[derive(Debug, Clone, Default)]

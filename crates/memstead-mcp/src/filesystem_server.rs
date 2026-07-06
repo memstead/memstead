@@ -1544,11 +1544,12 @@ impl FilesystemMcpServer {
             );
         }
 
-        // Verbosity toggle — `full` (default) or the `lite` skeleton.
-        // An unrecognized value refuses with a typed INVALID_INPUT
-        // naming the bad value rather than silently falling back.
+        // Verbosity toggle — `lite` (default) or the full body, mirroring
+        // the mem-repo server's default. An unrecognized value refuses
+        // with a typed INVALID_INPUT naming the bad value rather than
+        // silently falling back.
         let verbosity = match p.verbosity.as_deref() {
-            None => memstead_base::render::SchemaVerbosity::Full,
+            None => memstead_base::render::SchemaVerbosity::Lite,
             Some(v) => match memstead_base::render::SchemaVerbosity::from_wire(v) {
                 Some(sv) => sv,
                 None => {
@@ -3409,11 +3410,23 @@ mod tests {
             let body = result.structured_content.unwrap();
             // Converged onto the shared `build_schema_payload`: the
             // canonical `ref` subsumes the former top-level `name`/`version`.
+            // The omitted-verbosity default is the lite skeleton.
             assert_eq!(body["ref"], "default@1.0.0");
-            assert!(body["types"].is_array());
+            assert!(body["types_summary"].is_array());
+            assert!(body.get("types").is_none(), "default is lite, not full");
             assert!(body["used_by"].is_array());
             assert_eq!(body["used_by"][0], "demo");
         }
+
+        // Explicit full verbosity still ships the rich catalogue.
+        let result = server.memstead_schema(Parameters(SchemaParams {
+            verbosity: Some("full".into()),
+            name: Some("default".into()),
+            mem: None,
+        }));
+        assert!(!result.is_error.unwrap_or(false));
+        let body = result.structured_content.unwrap();
+        assert!(body["types"].is_array());
 
         // `mem` shortcut resolves the same schema.
         let result = server.memstead_schema(Parameters(SchemaParams {

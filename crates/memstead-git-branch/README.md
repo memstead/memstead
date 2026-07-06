@@ -5,6 +5,11 @@ Mem-repo engine backend for
 graph engine that gives AI agents a durable, typed memory stored as plain
 markdown in git.
 
+> **Stability:** this crate is an internal library of the Memstead engine,
+> consumed by the `memstead` / `memstead-mcp` binaries. Its Rust API is
+> pre-1.0 and experimental — it changes without deprecation cycles. For a
+> stable contract, consume the binaries or the MCP surface instead.
+
 This crate implements the git-backed storage backend: each mem lives as
 its own root in a multi-root `mem-repo` git repository, mutations are
 applied as git tree edits (no working-tree writes for mem content), and
