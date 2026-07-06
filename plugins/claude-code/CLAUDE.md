@@ -10,7 +10,7 @@ See the root `AGENTS.md` for full project documentation. This plugin provides MC
 
 Two **inverse** frontmatter keys control how a skill is invoked. They are not redundant, and each skill's assignment is deliberate — do not collapse them into one key (they express different axes: `/`-menu visibility vs. model auto-trigger):
 
-- `user-invocable: false` → **model-only**: hidden from the `/` menu, but the model may auto-invoke it. Used for the internal/power-user skills (audit, maintain, refactor, learn, start, rollback, outer-commit, old-ingest).
+- `user-invocable: false` → **model-only**: hidden from the `/` menu, but the model may auto-invoke it. Used for the internal/power-user skills (audit, maintain, refactor, learn, start, outer-commit, old-ingest).
 - `disable-model-invocation: true` → **human-only**: stays visible in the `/` menu, but the model never auto-triggers it. Used for the front-door skills the human drives (setup, interview).
 - **neither key** → **both**: visible in `/` and model-invocable (graph, ingest, reconcile).
 

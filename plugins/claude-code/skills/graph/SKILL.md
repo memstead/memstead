@@ -70,7 +70,6 @@ Example for "how does auth work?":
 ## Versioning
 
 - `/commit` — export + git commit
-- `/rollback` — restore entities from git + rebuild graph
 
 ## Rules
 
