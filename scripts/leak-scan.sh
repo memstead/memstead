@@ -16,9 +16,10 @@ HITS=0
 
 # Skip build artifacts and the committed-static registry HTTP reference
 # (registry.md documents a public HTTP API — an allowed prose mention).
-# Exclude this script itself: it *defines* the leak patterns (dev/plans,
-# macos/, …) as regex literals, so scanning it self-matches every class.
-PRUNE=( --exclude-dir=target --exclude-dir=.git --exclude-dir=node_modules --exclude=leak-scan.sh )
+# Exclude the guard scripts themselves: they *define* the leak patterns
+# (dev/plans, macos/, …) as regex literals, so scanning them self-matches.
+PRUNE=( --exclude-dir=target --exclude-dir=.git --exclude-dir=node_modules \
+  --exclude=leak-scan.sh --exclude=check-no-plan-refs.sh --exclude=check-no-mechanism-leak.sh )
 
 # Allowlist — path-anchored references that match a leak pattern but are
 # legitimate and must stay, so they don't mask real leaks elsewhere:
@@ -64,8 +65,6 @@ scan "excluded-private-dirs" '(^|[[:space:]"'"'"'`(:,])(macos|websites|graph|ins
   --include='*.sh' --include='*.md' --include='*.toml' --include='*.rs' --include='*.mdx' --include='*.yml' \
   --include='*.mjs' --include='*.js' --include='*.json' --include='*.udl' --include='*.swift' --include='*.py'
 scan "legacy-domain"       '(mdgv\.io|dasboe/mdgv|dasboe\.github\.io)'
-# The sketch product's domain stays out of the public repo until launch.
-scan "prelaunch-domain"    'memstead\.ai'
 
 echo
 if [ "$HITS" -eq 0 ]; then

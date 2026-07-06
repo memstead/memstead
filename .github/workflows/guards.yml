@@ -1,0 +1,40 @@
+# Agent-facing-surface guards. These scan *public* content, so the real
+# exposure is external PRs to this repo — which the private workspace's
+# CI never sees. Each script defines its own patterns; this workflow only
+# wires them in.
+#
+# check-no-plan-refs.sh is a blocking gate: no decision-trail reference
+# (Plan N of…, dev/plans/…, probe finding numbers) may leak into
+# user-facing CLI `--help` or MCP tool/param descriptions.
+#
+# check-no-mechanism-leak.sh lives in scripts/ alongside it but is NOT
+# yet wired here: it currently flags pre-existing internal-path mentions
+# in a few CLI `#[arg]` doc comments. Making it a green gate requires
+# rewording those docs first; until then, wiring it would either turn CI
+# red or (worse) weaken the guard. Run it locally before touching MCP tool
+# descriptions or CLI `///` help:  ./scripts/check-no-mechanism-leak.sh
+
+name: Guards
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: guards-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  no-plan-refs:
+    name: No plan/decision-trail refs in agent-facing text
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Run plan-ref guard
+        run: ./scripts/check-no-plan-refs.sh
