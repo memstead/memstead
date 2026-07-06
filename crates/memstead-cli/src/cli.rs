@@ -97,8 +97,8 @@ pub enum Command {
     Install(commands::install::Args),
 
     /// Link a filesystem mem to a registry-published dependency.
-    /// `memstead link <scope/name>` fetches the archive into
-    /// `.memstead/memstead-io/` and records the dep in `.memstead/config.json`.
+    /// `memstead link <scope/name>` fetches the archive into the
+    /// workspace and records the dependency in the workspace config.
     Link(commands::link::LinkArgs),
 
     /// Publish a `.mem` archive to the registry. Triggers GitHub

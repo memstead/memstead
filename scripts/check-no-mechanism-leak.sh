@@ -111,13 +111,21 @@ desc_lines=$(grep -rnE '(description|instructions)[[:space:]]*=' \
 # downstream marker grep and error report stay uniform.
 cli_clap_doc_lines=$(awk '
   function flush(keep,   i) { if (keep) for (i = 1; i <= n; i++) print buf[i]; n = 0 }
-  FNR == 1 { flush(0) }
+  FNR == 1 { flush(0); in_clap_type = 0; pending_clap = 0 }
   /^[[:space:]]*\/\/\// { buf[++n] = FILENAME ":" FNR ":" $0; next }
+  # A derive attribute decides whether the type it precedes is one clap
+  # renders (Parser / Args / Subcommand) — only those fields/variants
+  # reach --help. Internal enums/structs (e.g. a dispatch flavour enum)
+  # legitimately name internals and must not be scanned.
+  /^[[:space:]]*#\[derive\(/ { pending_clap = ($0 ~ /(Parser|Args|Subcommand)/) ? 1 : 0; next }
   /^[[:space:]]*#\[/ { next }
   /^[[:space:]]*#!\[/ { next }
+  /^[[:space:]]*(pub(\([a-z]+\))?[[:space:]]+)?(struct|enum)[[:space:]]/ {
+    in_clap_type = pending_clap; pending_clap = 0; flush(0); next
+  }
   {
     if (n > 0) {
-      keep = ($0 ~ /^[[:space:]]+/ && $0 !~ /(^|[[:space:]])(pub |pub\(crate\) |async )*fn /)
+      keep = (in_clap_type && $0 ~ /^[[:space:]]+/ && $0 !~ /(^|[[:space:]])(pub |pub\(crate\) |async )*fn /)
       flush(keep)
     }
   }

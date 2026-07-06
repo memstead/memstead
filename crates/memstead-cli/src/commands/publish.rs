@@ -41,7 +41,7 @@ use crate::setup::{CliContext, CliEngine};
 pub struct Args {
     /// Path to a `.mem` archive on disk. Omit to assemble the
     /// archive from the surrounding filesystem-mem workspace
-    /// (walks up from cwd looking for `.memstead/config.json`).
+    /// (walks up from cwd to find the workspace root).
     #[arg(value_name = "PATH")]
     pub archive: Option<PathBuf>,
 

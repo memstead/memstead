@@ -19,8 +19,8 @@ pub struct Args {
     /// mem. Mirrors the MCP `memstead_reload` parameter shape and the
     /// op's semantics: per-mem form is cheap and skips the
     /// workspace-level settings refresh; workspace-wide form
-    /// (omit `--mem`) reloads every mem and also re-reads
-    /// `.memstead/workspace.toml` to pick up policy edits.
+    /// (omit `--mem`) reloads every mem and also re-reads the
+    /// workspace policy to pick up edits.
     #[arg(long)]
     pub mem: Option<String>,
 }

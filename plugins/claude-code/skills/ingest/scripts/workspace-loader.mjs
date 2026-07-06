@@ -221,8 +221,8 @@ export function loadWorkspace(workspaceRoot, opts = {}) {
   // user it must serve. Degrade instead: an empty dump lets the store walk
   // below still surface any configured ingests, and a fresh workspace with none
   // reaches the honest "no ingests found" result rather than "not found". The
-  // maintainer's mem-repo `graph/` workspace dumps fine — this path is only
-  // taken where the dump is genuinely unavailable.
+  // maintainer's fully-populated mem-repo workspace dumps fine — this path
+  // is only taken where the dump is genuinely unavailable.
   const fetchDump = opts.fetchDump || fetchDumpFromCli;
   let dump;
   try {

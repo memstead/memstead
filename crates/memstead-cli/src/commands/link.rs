@@ -39,9 +39,8 @@ pub struct LinkArgs {
     #[arg(long, value_name = "URL")]
     pub registry: Option<String>,
 
-    /// Override the workspace root (the folder containing
-    /// `.memstead/config.json`). When omitted, the command walks up from
-    /// the current working directory.
+    /// Override the workspace root. When omitted, the command walks up
+    /// from the current working directory to find it.
     #[arg(long, value_name = "PATH")]
     pub workspace: Option<PathBuf>,
 }

@@ -26,7 +26,7 @@ pub struct Args {
     /// Rename detection threshold in [0.1, 1.0]; mirrors the MCP
     /// `rename_similarity` parameter. Default 0.6. Engine-authored
     /// renames pair via commit-note provenance and bypass this
-    /// threshold; the value drives the gix-similarity fallback for
+    /// threshold; the value drives the rename-similarity fallback for
     /// non-engine renames (external `git mv`, pre-provenance
     /// migrations). Lower widens the recall window at the cost of
     /// false-positive pairing on that path.
@@ -34,7 +34,7 @@ pub struct Args {
     pub rename_similarity: Option<f32>,
 
     /// Fold per-commit agent-notes (subject, note, actor, tool, client)
-    /// and the workspace-level `__MEMSTEAD` ref tip (unified schemas +
+    /// and the workspace-level schema/registry ref tip (unified schemas +
     /// per-mem configs) into the response. Default off — entity-
     /// delta only. Outer-repo auto-commit consumers turn this on so
     /// they get notes + the registry-ref sha in one round-trip without

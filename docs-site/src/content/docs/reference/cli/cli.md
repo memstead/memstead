@@ -110,7 +110,7 @@ Exit codes:
 * `init` — Initialise a filesystem mem in the current (or named) folder. Strict: errors out when the target is not empty
 * `quickstart` — One-command cold start: workspace + default-schema mem + seed entity + MCP wiring for your agent(s), in the current (or named) folder. Tolerates dotfiles and README-grade files; derives the mem name from the folder. For the strict, script-safe variant use `memstead init`
 * `install` — Install a sealed `.mem` mem — either a local file, or `<scope>/<name>` from the memstead.io registry
-* `link` — Link a filesystem mem to a registry-published dependency. `memstead link <scope/name>` fetches the archive into `.memstead/memstead-io/` and records the dep in `.memstead/config.json`
+* `link` — Link a filesystem mem to a registry-published dependency. `memstead link <scope/name>` fetches the archive into the workspace and records the dependency in the workspace config
 * `publish` — Publish a `.mem` archive to the registry. Triggers GitHub Device Flow on first use; subsequent runs are silent
 * `unpublish` — Unpublish (hard-delete) `<scope>/<name>` from the registry. Permitted to the original uploader and to admins. The same `<scope>/<name>` becomes immediately re-publishable
 * `domain` — Domain-authority publishing: generate the signing key for a domain you control and print the `.well-known` manifest to host. `publish --scope <domain>:<handle>` then signs with that key — no GitHub account needed
@@ -427,7 +427,7 @@ Install a sealed `.mem` mem — either a local file, or `<scope>/<name>` from th
 
 ## `memstead link`
 
-Link a filesystem mem to a registry-published dependency. `memstead link <scope/name>` fetches the archive into `.memstead/memstead-io/` and records the dep in `.memstead/config.json`
+Link a filesystem mem to a registry-published dependency. `memstead link <scope/name>` fetches the archive into the workspace and records the dependency in the workspace config
 
 **Usage:** `memstead link [OPTIONS] <SCOPE/NAME>`
 
@@ -438,7 +438,7 @@ Link a filesystem mem to a registry-published dependency. `memstead link <scope/
 ###### **Options:**
 
 * `--registry <URL>` — Override the registry URL. Falls back to `MEMSTEAD_REGISTRY` then the default `https://memstead.io`
-* `--workspace <PATH>` — Override the workspace root (the folder containing `.memstead/config.json`). When omitted, the command walks up from the current working directory
+* `--workspace <PATH>` — Override the workspace root. When omitted, the command walks up from the current working directory to find it
 
 
 
@@ -450,7 +450,7 @@ Publish a `.mem` archive to the registry. Triggers GitHub Device Flow on first u
 
 ###### **Arguments:**
 
-* `<PATH>` — Path to a `.mem` archive on disk. Omit to assemble the archive from the surrounding filesystem-mem workspace (walks up from cwd looking for `.memstead/config.json`)
+* `<PATH>` — Path to a `.mem` archive on disk. Omit to assemble the archive from the surrounding filesystem-mem workspace (walks up from cwd to find the workspace root)
 
 ###### **Options:**
 
@@ -793,8 +793,8 @@ Diff a mem's HEAD against a commit SHA. Pass `--since` = a prior `commit_sha` fr
 
 * `--mem <MEM>` — Writable mem name. Defaults to the first loaded mem
 * `--since <SINCE>` — Commit SHA to diff against. Pass a prior mutation's `commit_sha`, or the git canonical empty-tree hash `4b825dc642cb6eb9a060e54bf8d69288fbee4904` for a fresh-client first sync
-* `--rename-similarity <RENAME_SIMILARITY>` — Rename detection threshold in [0.1, 1.0]; mirrors the MCP `rename_similarity` parameter. Default 0.6. Engine-authored renames pair via commit-note provenance and bypass this threshold; the value drives the gix-similarity fallback for non-engine renames (external `git mv`, pre-provenance migrations). Lower widens the recall window at the cost of false-positive pairing on that path
-* `--include-notes` — Fold per-commit agent-notes (subject, note, actor, tool, client) and the workspace-level `__MEMSTEAD` ref tip (unified schemas + per-mem configs) into the response. Default off — entity- delta only. Outer-repo auto-commit consumers turn this on so they get notes + the registry-ref sha in one round-trip without re-walking the gitdir
+* `--rename-similarity <RENAME_SIMILARITY>` — Rename detection threshold in [0.1, 1.0]; mirrors the MCP `rename_similarity` parameter. Default 0.6. Engine-authored renames pair via commit-note provenance and bypass this threshold; the value drives the rename-similarity fallback for non-engine renames (external `git mv`, pre-provenance migrations). Lower widens the recall window at the cost of false-positive pairing on that path
+* `--include-notes` — Fold per-commit agent-notes (subject, note, actor, tool, client) and the workspace-level schema/registry ref tip (unified schemas + per-mem configs) into the response. Default off — entity- delta only. Outer-repo auto-commit consumers turn this on so they get notes + the registry-ref sha in one round-trip without re-walking the gitdir
 
 
 
@@ -806,7 +806,7 @@ Reload one writable mem's slice of the in-memory store from its on-disk branch t
 
 ###### **Options:**
 
-* `--mem <MEM>` — Writable mem name to reload. Omit to reload every writable mem. Mirrors the MCP `memstead_reload` parameter shape and the op's semantics: per-mem form is cheap and skips the workspace-level settings refresh; workspace-wide form (omit `--mem`) reloads every mem and also re-reads `.memstead/workspace.toml` to pick up policy edits
+* `--mem <MEM>` — Writable mem name to reload. Omit to reload every writable mem. Mirrors the MCP `memstead_reload` parameter shape and the op's semantics: per-mem form is cheap and skips the workspace-level settings refresh; workspace-wide form (omit `--mem`) reloads every mem and also re-reads the workspace policy to pick up edits
 
 
 
