@@ -33,6 +33,13 @@ namespace memstead {
     // mem root is the workspace root (collapsed single-mem form).
     [Throws=MemsteadError]
     void init_filesystem_mem(string root, string name, string schema);
+
+    // Render an ingest's run-brief — the Markdown prompt an ingest agent
+    // consumes — for the ingest named `ingest_name` in the workspace at
+    // `workspace_root`. Byte-identical to `memstead ingest brief <name>`:
+    // both call the one shared engine entry point. Discovery mode today.
+    [Throws=MemsteadError]
+    string ingest_brief(string workspace_root, string ingest_name);
 };
 
 // ---------------------------------------------------------------------------

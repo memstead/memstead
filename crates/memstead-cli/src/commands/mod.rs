@@ -224,6 +224,7 @@ pub mod domain;
 pub mod entity;
 pub mod export;
 pub mod health;
+pub mod ingest;
 pub mod init;
 pub mod link;
 pub mod list;

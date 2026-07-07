@@ -336,6 +336,21 @@ pub fn compose_overview(
     // rendering as absent. A normal writable workspace has no read mems,
     // so `visible_names == writable_names` there and its output is unchanged
     // but for the additive `writable` attribute on each mem entry. ---
+    // Ingest process-state mems (process-state redesign, candidate (b)) carry
+    // `internal: true` in their config. They are real, schema-validated,
+    // diffable mems, but hidden from the *default* overview so they do not
+    // clutter the roster alongside real content — inspectable only when
+    // explicitly scoped via `args.mem`.
+    let scoped_mem = args.mem;
+    let is_hidden_internal = |name: &str| -> bool {
+        scoped_mem != Some(name)
+            && engine
+                .mem_config_for(name)
+                .and_then(|c| c.extra.get("internal"))
+                .and_then(serde_json::Value::as_bool)
+                == Some(true)
+    };
+
     let writable_names: Vec<String> = {
         let mut names: Vec<String> = engine
             .mem_router()
@@ -344,6 +359,7 @@ pub fn compose_overview(
             .cloned()
             .collect();
         names.sort();
+        names.retain(|n| !is_hidden_internal(n));
         names
     };
     let read_names: Vec<String> = {
@@ -356,6 +372,7 @@ pub fn compose_overview(
             .cloned()
             .collect();
         names.sort();
+        names.retain(|n| !is_hidden_internal(n));
         names
     };
     let writable_set: HashSet<String> = writable_names.iter().cloned().collect();

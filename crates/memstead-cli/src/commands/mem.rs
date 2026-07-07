@@ -82,6 +82,12 @@ pub enum MemAction {
     /// and surfaced verbatim on `memstead workspace dump`.
     #[command(name = "set-sync-state")]
     SetSyncState(SetSyncStateArgs),
+    /// Mark (or unmark) a mem as internal — hidden from the default
+    /// `memstead overview` roster and public projections, while staying a
+    /// real, inspectable (`overview --mem <name>`), deletable mem. Ingest
+    /// process-state mems are flagged this way.
+    #[command(name = "set-internal")]
+    SetInternal(SetInternalArgs),
     /// Enumerate every mounted mem in the workspace with its
     /// schema pin, version, entity count, and capability (writable
     /// vs read-only). Markdown by default; pass `--json` (root flag)
@@ -792,6 +798,51 @@ pub fn run_set_description(ctx: &CliContext, args: SetDescriptionArgs) -> anyhow
         crate::output::print_markdown(&format!(
             "# Mem `{}` description updated\n\n- Old: {}\n- New: {}{}",
             outcome.mem, old, new, warnings,
+        ));
+    }
+    Ok(())
+}
+
+/// `memstead mem set-internal <NAME> [--off]` arguments.
+#[derive(Args, Debug)]
+pub struct SetInternalArgs {
+    /// Mem name (must be registered in the workspace).
+    pub name: String,
+
+    /// Unmark the mem as internal (make it visible in the default overview
+    /// again). Without this flag, the mem is marked internal.
+    #[arg(long)]
+    pub off: bool,
+
+    /// Optional provenance note (≤280 chars) recorded on the commit body.
+    #[arg(long)]
+    pub note: Option<String>,
+}
+
+/// `memstead mem set-internal <NAME> [--off]` — mark or unmark a mem as
+/// internal (hidden from the default overview roster + public projections).
+pub fn run_set_internal(ctx: &CliContext, args: SetInternalArgs) -> anyhow::Result<()> {
+    let internal = !args.off;
+    let note = args.note.as_deref();
+    let applied = match ctx.cli_engine()? {
+        crate::setup::CliEngine::MemRepo(mut engine) => engine
+            .set_mem_internal(&args.name, internal, note)
+            .map_err(crate::CliError::from_engine_op)?,
+        crate::setup::CliEngine::Filesystem(mut engine) => engine
+            .set_mem_internal(&args.name, internal, note)
+            .map_err(crate::CliError::from_engine_op)?,
+    };
+
+    if ctx.json {
+        crate::output::print_json(&serde_json::json!({ "mem": args.name, "internal": applied }))?;
+    } else {
+        crate::output::print_markdown(&format!(
+            "# Mem `{}` {}\n\nHidden from the default overview: **{}**. Inspect with \
+             `memstead overview --mem {}`.",
+            args.name,
+            if applied { "marked internal" } else { "un-marked internal" },
+            applied,
+            args.name,
         ));
     }
     Ok(())

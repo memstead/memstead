@@ -20,6 +20,7 @@ pub mod engine;
 pub mod entity;
 pub mod filesystem;
 pub mod graph;
+pub mod ingest;
 pub mod mem;
 pub mod mem_management;
 pub mod ops;

@@ -115,6 +115,9 @@ fn convert_scope(name: &str, scope: LegacyScope) -> (Medium, Facet) {
         name: name.to_string(),
         medium_type: scope.medium_type,
         pointer,
+        // Legacy scopes carry no change-detection declaration; the ingest
+        // resolver defaults an unset medium to `auto`.
+        change_detection: None,
     };
     let facet = Facet {
         name: name.to_string(),
@@ -147,6 +150,7 @@ fn convert_projection(p: LegacyProjection) -> Projection {
             .next()
             .map(|d| d.mem)
             .unwrap_or_default(),
+        rules: None,
     }
 }
 

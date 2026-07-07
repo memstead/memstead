@@ -968,6 +968,63 @@ impl Engine {
         })
     }
 
+    /// Mark (or unmark) a mem as **internal** — hidden from the default
+    /// `memstead_overview` roster and public projections, while remaining a
+    /// real, schema-validated, diffable mem (inspectable when explicitly
+    /// scoped by name, and deletable). The ingest process-state redesign
+    /// (candidate (b)) flags each `ingest/<name>` process mem this way so it
+    /// does not clutter the roster alongside real content.
+    ///
+    /// Stored as the top-level `internal` config field (captured by the
+    /// flattened `extra` map). Backend-symmetric like
+    /// [`Self::set_mem_description`]; `EngineError::UnknownMem` /
+    /// `ReadOnlyMount` / `InvalidInput` on the usual failures.
+    pub fn set_mem_internal(
+        &mut self,
+        mem_name: &str,
+        internal: bool,
+        note: Option<&str>,
+    ) -> Result<bool, EngineError> {
+        let mount_idx = self
+            .mounts
+            .iter()
+            .position(|m| m.mount.mem == mem_name)
+            .ok_or_else(|| EngineError::UnknownMem(mem_name.to_string()))?;
+        if self.mounts[mount_idx].mount.capability != crate::workspace::MountCapability::Write {
+            return Err(EngineError::ReadOnlyMount(mem_name.to_string()));
+        }
+
+        let _ = self.reload_if_stale(Some(mem_name));
+
+        let mounted = &mut self.mounts[mount_idx];
+        let mut config = mounted.mem_config.clone().ok_or_else(|| {
+            EngineError::InvalidInput(format!(
+                "mem '{mem_name}' has no loaded MemConfig — initialize the mem first"
+            ))
+        })?;
+        if internal {
+            config
+                .extra
+                .insert("internal".to_string(), serde_json::Value::Bool(true));
+        } else {
+            config.extra.remove("internal");
+        }
+
+        let mut bytes = serde_json::to_vec_pretty(&config).map_err(|e| {
+            EngineError::InvalidInput(format!("could not serialize mem config: {e}"))
+        })?;
+        bytes.push(b'\n');
+        mounted.backend.write_mem_config_with_note(&bytes, note)?;
+        mounted.mem_config = Some(config);
+
+        let new_head = mounted.backend.current_head().ok().flatten();
+        if let Some(sha) = new_head {
+            mounted.last_known_head = Some(sha);
+        }
+
+        Ok(internal)
+    }
+
     /// Set (or clear) one opaque sync-state token in a mem's per-mem
     /// config and persist it through the backend. The ingest layer calls
     /// this after a successful pass over a source's changed slice to

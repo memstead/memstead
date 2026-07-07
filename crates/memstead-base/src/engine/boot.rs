@@ -1305,6 +1305,7 @@ community:
                 name: "src".to_string(),
                 medium_type: MediumType::Codebase,
                 pointer: "..".to_string(),
+                change_detection: None,
             },
         )
         .unwrap();
@@ -1330,6 +1331,7 @@ community:
                 source_facets: vec!["view".to_string()],
                 reference_mems: Vec::new(),
                 destination_mem: "specs".to_string(),
+                rules: None,
             },
         )
         .unwrap();
@@ -1342,6 +1344,7 @@ community:
                 trigger: IngestTrigger::Loop,
                 batch_size: 10,
                 deny_paths: Vec::new(),
+                post_actions: None,
             },
         )
         .unwrap();
@@ -1399,6 +1402,7 @@ community:
                     name: "src".to_string(),
                     medium_type: MediumType::Codebase,
                     pointer: "..".to_string(),
+                    change_detection: None,
                 },
                 None,
             )

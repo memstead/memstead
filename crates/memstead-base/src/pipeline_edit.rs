@@ -1076,6 +1076,7 @@ mod tests {
             name: name.to_string(),
             medium_type: MediumType::Codebase,
             pointer: "../src".to_string(),
+            change_detection: None,
         }
     }
 
@@ -1098,6 +1099,7 @@ mod tests {
             source_facets: facets.iter().map(|s| s.to_string()).collect(),
             reference_mems: vec![],
             destination_mem: "v".to_string(),
+            rules: None,
         }
     }
 
@@ -1108,6 +1110,7 @@ mod tests {
             trigger: IngestTrigger::Loop,
             batch_size: 10,
             deny_paths: vec![],
+            post_actions: None,
         }
     }
 

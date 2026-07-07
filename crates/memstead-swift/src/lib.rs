@@ -114,6 +114,28 @@ pub fn init_filesystem_mem(
     Ok(())
 }
 
+/// Render an ingest's run-brief — the same Markdown prompt
+/// `memstead ingest brief <name>` emits, byte-identical because both call the
+/// one shared engine entry point [`memstead_base::ingest::render_ingest_brief`].
+/// Opens an engine at `workspace_root` (backend-agnostic) and renders the
+/// discovery-mode brief for `ingest_name`.
+pub fn ingest_brief(workspace_root: String, ingest_name: String) -> Result<String, MemsteadError> {
+    let root = Path::new(&workspace_root);
+    let engine = memstead_git_branch::workspace_store::engine_from_workspace_root(root).map_err(
+        |e| MemsteadError::Internal {
+            message: format!("failed to load workspace at {}: {e}", root.display()),
+        },
+    )?;
+    memstead_base::ingest::render_ingest_brief(&engine, root, &ingest_name).map_err(|e| {
+        match &e {
+            memstead_base::ingest::RenderBriefError::Resolve(_) => {
+                MemsteadError::NotFound { message: e.to_string() }
+            }
+            _ => MemsteadError::Internal { message: e.to_string() },
+        }
+    })
+}
+
 /// In-process handle to the Memstead engine. Wraps `memstead_base::Engine` behind
 /// a `Mutex` — same shape as `memstead-mcp::McpServer` — so multiple Swift
 /// callers can share one engine instance.

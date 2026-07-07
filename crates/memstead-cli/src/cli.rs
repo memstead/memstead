@@ -245,4 +245,10 @@ pub enum Command {
     /// legacy `scopes|projections|ingests/` JSON folders into the
     /// `.memstead/` workspace store's four-primitive shape.
     Pipeline(commands::pipeline::Args),
+
+    /// Engine-side ingest orchestration. `memstead ingest brief <name>`
+    /// renders an ingest's run-brief — the Markdown prompt an agent
+    /// consumes — from the four-primitive config and the destination mem's
+    /// schema / writing guidance.
+    Ingest(commands::ingest::Args),
 }

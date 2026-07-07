@@ -395,6 +395,7 @@ mod tests {
             name: "source-tree".to_string(),
             medium_type: MediumType::Codebase,
             pointer: "../macos".to_string(),
+            change_detection: None,
         };
         let facet = Facet {
             name: "source-files".to_string(),
@@ -411,6 +412,7 @@ mod tests {
             source_facets: vec!["source-files".to_string()],
             reference_mems: vec!["engine".to_string()],
             destination_mem: "macos".to_string(),
+            rules: None,
         };
         let ingest = Ingest {
             projection: "macos/graph".to_string(),
@@ -418,6 +420,7 @@ mod tests {
             trigger: IngestTrigger::Loop,
             batch_size: 20,
             deny_paths: vec!["VISION.md".to_string()],
+            post_actions: None,
         };
         (medium, facet, projection, ingest)
     }

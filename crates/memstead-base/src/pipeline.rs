@@ -52,6 +52,13 @@ pub struct Medium {
     /// Where the body of information lives — a path, URL, or mem id,
     /// interpreted per [`Self::medium_type`]. Opaque to this layer.
     pub pointer: String,
+    /// An optional declared change-detection strategy for sources reading
+    /// this medium — `none` / `git` / `mtime` / `auto`. Unset (the common
+    /// case) means `auto`: the ingest resolver probes for a git work tree
+    /// over [`Self::pointer`] and picks `git` or `mtime`. A graph-typed
+    /// medium ignores this and always uses the graph snapshot signal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub change_detection: Option<String>,
 }
 
 /// Whether a [`PatternEntry`] admits or excludes the matched paths.
@@ -125,6 +132,10 @@ pub struct Projection {
     pub reference_mems: Vec<String>,
     /// The mem this projection writes into.
     pub destination_mem: String,
+    /// Free-form projection rules (e.g. a one-shot lens `routing` string).
+    /// Opaque to the engine — consumed only by the one-shot brief renderer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rules: Option<serde_json::Value>,
 }
 
 /// How an [`Ingest`] run engages its projection.
@@ -166,6 +177,10 @@ pub struct Ingest {
     /// Paths excluded for this ingest's runs, on top of facet scope.
     #[serde(default)]
     pub deny_paths: Vec<String>,
+    /// Free-form post-run actions (e.g. a one-shot `archive_source` flag).
+    /// Opaque to the engine — consumed only by the one-shot brief renderer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub post_actions: Option<serde_json::Value>,
 }
 
 #[cfg(test)]
@@ -180,10 +195,33 @@ mod tests {
             name: "source-tree".to_string(),
             medium_type: MediumType::Codebase,
             pointer: "../macos".to_string(),
+            change_detection: None,
         };
         let json = serde_json::to_string(&m).unwrap();
+        assert!(
+            !json.contains("change_detection"),
+            "unset change_detection is omitted on the wire: {json}"
+        );
         assert!(json.contains(r#""type":"codebase""#), "got {json}");
         let back: Medium = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, m);
+    }
+
+    /// A medium declaring a `change_detection` strategy round-trips with the
+    /// value present; the field is the optional slot the ingest resolver
+    /// reads to pick a source's change-detection strategy.
+    #[test]
+    fn medium_change_detection_round_trips_when_set() {
+        let m = Medium {
+            name: "manuals".to_string(),
+            medium_type: MediumType::Filesystem,
+            pointer: "../docs".to_string(),
+            change_detection: Some("mtime".to_string()),
+        };
+        let json = serde_json::to_string(&m).unwrap();
+        assert!(json.contains(r#""change_detection":"mtime""#), "got {json}");
+        let back: Medium = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.change_detection.as_deref(), Some("mtime"));
         assert_eq!(back, m);
     }
 
@@ -247,6 +285,7 @@ mod tests {
             source_facets: vec!["source-files".to_string()],
             reference_mems: vec!["engine".to_string()],
             destination_mem: "macos".to_string(),
+            rules: None,
         };
         let json = serde_json::to_string(&p).unwrap();
         let back: Projection = serde_json::from_str(&json).unwrap();
@@ -264,6 +303,7 @@ mod tests {
             trigger: IngestTrigger::Loop,
             batch_size: 20,
             deny_paths: vec!["VISION.md".to_string(), "dev".to_string()],
+            post_actions: None,
         };
         let json = serde_json::to_string(&i).unwrap();
         assert!(json.contains(r#""mode":"discovery""#), "got {json}");

@@ -109,6 +109,9 @@ fn run(cli: Cli) -> anyhow::Result<()> {
             commands::mem::MemAction::SetDescription(args) => {
                 commands::mem::run_set_description(&ctx, args)
             }
+            commands::mem::MemAction::SetInternal(args) => {
+                commands::mem::run_set_internal(&ctx, args)
+            }
             commands::mem::MemAction::SetSyncState(args) => {
                 commands::mem::run_set_sync_state(&ctx, args)
             }
@@ -120,5 +123,6 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         Command::Workspace { action } => commands::workspace::run(&ctx, action),
         Command::Schema(args) => commands::schema::run(&ctx, args),
         Command::Pipeline(args) => commands::pipeline::run(&ctx, args),
+        Command::Ingest(args) => commands::ingest::run(&ctx, args),
     }
 }
