@@ -42,7 +42,8 @@ pub struct Args {
     #[arg(long)]
     pub chunk: Option<usize>,
 
-    /// Scope schemas + mem inventory to a single writable mem.
+    /// Scope schemas + mem inventory to any single visible mem
+    /// (read-only mounts included).
     #[arg(long)]
     pub mem: Option<String>,
 

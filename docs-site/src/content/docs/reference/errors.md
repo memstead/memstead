@@ -21,7 +21,7 @@ Typed error codes the static scan finds in the engine, the CLI (`memstead-cli`),
 | `BATCH_REFUSED` | CLI | `crates/memstead-cli/src/commands/batch_update.rs:297` |
 | `BRANCH_RESET_HEAD_MOVED` | engine, MCP | `crates/memstead-base/src/engine/error.rs:997`<br>`crates/memstead-mcp/src/server.rs:779` |
 | `CHANGELOG_ERROR` | MCP | `crates/memstead-mcp/src/filesystem_server.rs:1636` |
-| `CHUNK_OUT_OF_RANGE` | CLI | `crates/memstead-cli/src/commands/context.rs:44`<br>`crates/memstead-cli/src/commands/entity.rs:79`<br>`crates/memstead-cli/src/commands/overview.rs:149`<br>`crates/memstead-cli/src/commands/overview.rs:237`<br>`crates/memstead-cli/src/lib.rs:42` |
+| `CHUNK_OUT_OF_RANGE` | CLI | `crates/memstead-cli/src/commands/context.rs:44`<br>`crates/memstead-cli/src/commands/entity.rs:79`<br>`crates/memstead-cli/src/commands/overview.rs:150`<br>`crates/memstead-cli/src/commands/overview.rs:238`<br>`crates/memstead-cli/src/lib.rs:42` |
 | `CONFIG_ERROR` | MCP | `crates/memstead-mcp/src/server.rs:1693` |
 | `CONFLICTING_SECTION_MODES` | engine, MCP | `crates/memstead-base/src/engine/error.rs:1024`<br>`crates/memstead-mcp/src/server.rs:1011` |
 | `CONTEXT_NOT_COMPUTABLE` | CLI | `crates/memstead-cli/src/commands/context.rs:54` |

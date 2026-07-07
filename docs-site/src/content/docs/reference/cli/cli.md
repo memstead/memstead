@@ -303,7 +303,7 @@ All clusters with summaries and member lists. The full build renders the same ri
 
 * `--rebuild` — Re-run Louvain community detection before rendering
 * `--chunk <CHUNK>` — 1-based chunk index for large overviews
-* `--mem <MEM>` — Scope schemas + mem inventory to a single writable mem
+* `--mem <MEM>` — Scope schemas + mem inventory to any single visible mem (read-only mounts included)
 * `--include <KEY>` — Opt heavy content into the response: `community_members`, `community_bridges`, `mem_distribution`, `dangling_links`. Keys listed here are always included even past `token_budget`; keys omitted may surface in the `Hints` section instead. Repeatable (`--include K --include K`) AND comma-string (`--include K1,K2`) forms both parse — uniform with `memstead health --include`. Unknown keys emit `UNKNOWN_INCLUDE_KEY` warnings
 * `--token-budget <N>` — Token budget for heavy content only (`community_members`, `community_bridges`, `mem_distribution`, `dangling_links`). Hard-required content (mem roster, schema refs, community titles, workspace policy) always ships in addition — total response size will exceed this budget. Default 8000 (matches the MCP tool). Budgets below ~10 tokens are safe but unproductive — the response still arrives as a structured envelope (`_overview_mode: overbudget`), but no useful chunking happens and the full body ships as one chunk
 
