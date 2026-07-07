@@ -26,7 +26,8 @@ mod types;
 pub use error::MemsteadError;
 pub use types::{
     AgentNotesReport, BranchResetOutcome, ChangeEnvelope, ChangesReport, ClusterInfo, CommitNote,
-    DanglingCrossMemEdge, EdgeSource, EdgeTypeCount, Entity, HealthFinding, HealthIssue,
+    DanglingCrossMemEdge, Diff, DiffConfig, EdgeSource, EdgeTypeCount, Entity, EntityDiff,
+    HealthFinding, HealthIssue, IncomingRipple,
     HealthSummary, ListResult, MemBackendKind, MemCreateOutcome, MemCreateRequest,
     MemDeleteOutcome, MemExportOutcome, MemInit, MemRosterEntry, MemSchemaOutcome,
     MemVersionOutcome, MetadataEntry, MetadataValue, MissingField, ParseRecoveryEntry,
@@ -422,6 +423,35 @@ impl Engine {
             .expect("memstead-swift engine mutex poisoned");
         let report = engine.changes_since(&mem, &since, rename_similarity)?;
         Ok(convert::changes_report_to_ffi(report))
+    }
+
+    /// Two-ref structural diff between `ref_a` and `ref_b` for one mem.
+    /// Exposes the engine's existing `Engine::diff` (the `memstead_diff`
+    /// MCP / `memstead diff` CLI surface) in-process — read-only,
+    /// git-branch mems only. The optional knobs mirror the MCP defaults:
+    /// `include_content`/`include_ripple` default `true`,
+    /// `rename_similarity` defaults to `RENAME_SIMILARITY_DEFAULT` (0.6).
+    pub fn diff(
+        &self,
+        mem: String,
+        ref_a: String,
+        ref_b: String,
+        include_content: Option<bool>,
+        include_ripple: Option<bool>,
+        rename_similarity: Option<f32>,
+    ) -> Result<Diff, MemsteadError> {
+        let engine = self
+            .inner
+            .lock()
+            .expect("memstead-swift engine mutex poisoned");
+        let config = memstead_base::ops::DiffConfig {
+            rename_similarity: rename_similarity
+                .unwrap_or(memstead_base::ops::RENAME_SIMILARITY_DEFAULT),
+            include_content: include_content.unwrap_or(true),
+            include_ripple: include_ripple.unwrap_or(true),
+        };
+        let diff = engine.diff(&mem, &ref_a, &ref_b, Some(config))?;
+        Ok(convert::diff_to_ffi(diff))
     }
 
     pub fn agent_notes(
@@ -1484,6 +1514,65 @@ mod tests {
             added.len() >= 2,
             "expected ≥2 added events, got {} total changes",
             report.changes.len(),
+        );
+    }
+
+    #[test]
+    fn diff_empty_tree_to_head_reports_added_entities_with_content() {
+        let (engine, _tmp) = setup_test_engine();
+        let head = engine
+            .mem_head_sha("specs".to_string())
+            .expect("mem_head_sha")
+            .expect("seeded mem has a head");
+        let diff = engine
+            .diff(
+                "specs".to_string(),
+                memstead_base::EMPTY_TREE_SHA.to_string(),
+                head.clone(),
+                Some(true),
+                None,
+                None,
+            )
+            .expect("diff");
+        assert_eq!(diff.ref_b, head);
+        assert_eq!(diff.resolved_b_sha, head);
+        let added: Vec<_> = diff
+            .entries
+            .iter()
+            .filter(|e| matches!(e, EntityDiff::Added { .. }))
+            .collect();
+        assert!(
+            added.len() >= 2,
+            "expected ≥2 added entries, got {} total",
+            diff.entries.len(),
+        );
+        // include_content: true → both sides' bodies ride along.
+        assert!(
+            diff.entries
+                .iter()
+                .any(|e| matches!(e, EntityDiff::Added { content_after: Some(_), .. })),
+            "include_content should populate content_after on added entries",
+        );
+    }
+
+    #[test]
+    fn diff_unknown_ref_errors() {
+        let (engine, _tmp) = setup_test_engine();
+        let err = engine
+            .diff(
+                "specs".to_string(),
+                memstead_base::EMPTY_TREE_SHA.to_string(),
+                "not-a-ref".to_string(),
+                None,
+                None,
+                None,
+            )
+            .unwrap_err();
+        // A bad ref must refuse typed, never a silent empty diff.
+        // `EngineError::UnknownRef` maps to `ValidationFailed` in error.rs.
+        assert!(
+            matches!(err, MemsteadError::ValidationFailed { .. }),
+            "expected a typed refusal for an unresolvable ref, got {err:?}",
         );
     }
 

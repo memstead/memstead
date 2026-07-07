@@ -344,6 +344,91 @@ pub struct AgentNotesReport {
 }
 
 // ---------------------------------------------------------------------------
+// Two-ref structural diff (`Engine::diff` / `memstead_diff`). Read-only,
+// git-branch mems only. Flat FFI mirror of `memstead_base::ops::{Diff,
+// EntityDiff, IncomingRipple, DiffConfig}` — the same wire shape the MCP and
+// CLI surfaces serve, exposed in-process so the macOS review card can render a
+// per-entity before→after on card-expand. No diff logic lives here; this is
+// pure marshalling.
+// ---------------------------------------------------------------------------
+
+/// One entry in an entity's incoming-wikilink ripple list. `side` is
+/// `"ref_a"` or `"ref_b"` — which side of the diff the referrer lives on.
+#[derive(Debug, Clone)]
+pub struct IncomingRipple {
+    pub from_id: String,
+    pub side: String,
+    pub section: Option<String>,
+}
+
+/// Per-entity diff entry. Variants mirror `memstead_base::ops::EntityDiff`;
+/// `content_before` / `content_after` are `None` when the caller passed
+/// `include_content: false`, and `ripple` is empty when ripple is disabled.
+#[derive(Debug, Clone)]
+pub enum EntityDiff {
+    Added {
+        id: String,
+        title: Option<String>,
+        entity_type: Option<String>,
+        content_after: Option<String>,
+        ripple: Vec<IncomingRipple>,
+    },
+    Modified {
+        id: String,
+        title: Option<String>,
+        entity_type: Option<String>,
+        content_before: Option<String>,
+        content_after: Option<String>,
+        ripple: Vec<IncomingRipple>,
+    },
+    Deleted {
+        id: String,
+        title: Option<String>,
+        entity_type: Option<String>,
+        content_before: Option<String>,
+        ripple: Vec<IncomingRipple>,
+    },
+    Renamed {
+        from_id: String,
+        to_id: String,
+        rename_chain: Vec<String>,
+        title: Option<String>,
+        entity_type: Option<String>,
+        content_before: Option<String>,
+        content_after: Option<String>,
+        ripple: Vec<IncomingRipple>,
+    },
+    InvalidEntity {
+        id: String,
+        /// `"ref_a"`, `"ref_b"`, or `"both"` — whichever side failed to parse.
+        side: String,
+        error: String,
+        content_before: Option<String>,
+        content_after: Option<String>,
+    },
+}
+
+/// Configuration echoed back on the diff response.
+#[derive(Debug, Clone)]
+pub struct DiffConfig {
+    pub rename_similarity: f32,
+    pub include_content: bool,
+    pub include_ripple: bool,
+}
+
+/// Top-level two-ref diff response. Echoes the caller's refs, the SHAs they
+/// resolved to, the config in effect, and every per-entity entry.
+#[derive(Debug, Clone)]
+pub struct Diff {
+    pub ref_a: String,
+    pub ref_b: String,
+    pub resolved_a_sha: String,
+    pub resolved_b_sha: String,
+    pub config: DiffConfig,
+    pub entries: Vec<EntityDiff>,
+}
+
+// ---------------------------------------------------------------------------
 // Parse-recovery (first disk-mutating UniFFI surface — parity with the CLI's
 // `memstead recover`).
 // ---------------------------------------------------------------------------

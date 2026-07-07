@@ -15,11 +15,11 @@ use memstead_base::{
 };
 
 use crate::types::{
-    AgentNotesReport, ChangeEnvelope, ChangesReport, ClusterInfo, CommitNote, EdgeSource,
-    EdgeTypeCount, Entity, HealthFinding, HealthIssue, HealthSummary, ListResult, MemSchemaOutcome,
-    MetadataEntry, MetadataValue, MissingField, ParseRecoveryEntry, ParseRecoveryReport, Query,
-    RelationDirection, RelationEdge, Relations, Relationship, ReloadResult, SearchHit,
-    SearchResult, SearchScope, Section, StaleEntity, Stats,
+    AgentNotesReport, ChangeEnvelope, ChangesReport, ClusterInfo, CommitNote, Diff, DiffConfig,
+    EdgeSource, EdgeTypeCount, Entity, EntityDiff, HealthFinding, HealthIssue, HealthSummary,
+    IncomingRipple, ListResult, MemSchemaOutcome, MetadataEntry, MetadataValue, MissingField,
+    ParseRecoveryEntry, ParseRecoveryReport, Query, RelationDirection, RelationEdge, Relations,
+    Relationship, ReloadResult, SearchHit, SearchResult, SearchScope, Section, StaleEntity, Stats,
 };
 
 // ---------------------------------------------------------------------------
@@ -435,6 +435,111 @@ pub(crate) fn changes_report_to_ffi(report: memstead_base::ChangesReport) -> Cha
             .into_iter()
             .map(change_envelope_to_ffi)
             .collect(),
+    }
+}
+
+fn incoming_ripple_to_ffi(r: core_ops::IncomingRipple) -> IncomingRipple {
+    IncomingRipple {
+        from_id: r.from_id.to_string(),
+        side: r.side,
+        section: r.section,
+    }
+}
+
+fn entity_diff_to_ffi(entry: core_ops::EntityDiff) -> EntityDiff {
+    use core_ops::EntityDiff as E;
+    let ripple_to_ffi = |ripple: Vec<core_ops::IncomingRipple>| {
+        ripple.into_iter().map(incoming_ripple_to_ffi).collect()
+    };
+    match entry {
+        E::Added {
+            id,
+            title,
+            entity_type,
+            content_after,
+            ripple,
+        } => EntityDiff::Added {
+            id: id.to_string(),
+            title,
+            entity_type,
+            content_after,
+            ripple: ripple_to_ffi(ripple),
+        },
+        E::Modified {
+            id,
+            title,
+            entity_type,
+            content_before,
+            content_after,
+            ripple,
+        } => EntityDiff::Modified {
+            id: id.to_string(),
+            title,
+            entity_type,
+            content_before,
+            content_after,
+            ripple: ripple_to_ffi(ripple),
+        },
+        E::Deleted {
+            id,
+            title,
+            entity_type,
+            content_before,
+            ripple,
+        } => EntityDiff::Deleted {
+            id: id.to_string(),
+            title,
+            entity_type,
+            content_before,
+            ripple: ripple_to_ffi(ripple),
+        },
+        E::Renamed {
+            from_id,
+            to_id,
+            rename_chain,
+            title,
+            entity_type,
+            content_before,
+            content_after,
+            ripple,
+        } => EntityDiff::Renamed {
+            from_id: from_id.to_string(),
+            to_id: to_id.to_string(),
+            rename_chain: rename_chain.into_iter().map(|id| id.to_string()).collect(),
+            title,
+            entity_type,
+            content_before,
+            content_after,
+            ripple: ripple_to_ffi(ripple),
+        },
+        E::InvalidEntity {
+            id,
+            side,
+            error,
+            content_before,
+            content_after,
+        } => EntityDiff::InvalidEntity {
+            id: id.to_string(),
+            side,
+            error,
+            content_before,
+            content_after,
+        },
+    }
+}
+
+pub(crate) fn diff_to_ffi(diff: core_ops::Diff) -> Diff {
+    Diff {
+        ref_a: diff.ref_a,
+        ref_b: diff.ref_b,
+        resolved_a_sha: diff.resolved_a_sha,
+        resolved_b_sha: diff.resolved_b_sha,
+        config: DiffConfig {
+            rename_similarity: diff.config.rename_similarity,
+            include_content: diff.config.include_content,
+            include_ripple: diff.config.include_ripple,
+        },
+        entries: diff.entries.into_iter().map(entity_diff_to_ffi).collect(),
     }
 }
 
