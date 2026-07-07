@@ -14061,13 +14061,23 @@ write_rules: []
         /// produces no top-level key — presence-of-key is the
         /// consumer's signal that the schema speaks cross-mem.
         #[test]
-        fn schema_payload_omits_cross_mem_relationships_when_absent() {
+        fn schema_payload_includes_cross_mem_relationships_for_default() {
+            // `default@1.0.0` declares a cross-mem REFERENCES relationship into
+            // the `software` schema (the "knowledge mem → code mem" pairing), so
+            // its schema payload must surface `cross_mem_relationships` naming
+            // that entry. The omit-when-absent serialization contract (the key is
+            // absent, never null/empty, when a schema declares no cross-mem) stays
+            // covered by the sibling `schema_payload_omits_default_writing_guidance_when_absent`.
             let (server, tmp) = setup();
-            let payload = create_and_get_payload(&server, &tmp, "no-cv");
+            let payload = create_and_get_payload(&server, &tmp, "cv");
             let schema = &payload["schema"];
+            let cmr = schema.get("cross_mem_relationships").unwrap_or_else(|| {
+                panic!("default now declares cross-mem into software → key must be present; got {schema}")
+            });
+            let s = cmr.to_string();
             assert!(
-                schema.get("cross_mem_relationships").is_none(),
-                "default schema has no cross-mem entries → key must be absent; got {schema}"
+                s.contains("software") && s.contains("REFERENCES"),
+                "the cross-mem payload names REFERENCES into software; got {cmr}"
             );
         }
 

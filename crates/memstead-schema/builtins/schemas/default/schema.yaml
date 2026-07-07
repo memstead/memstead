@@ -180,6 +180,20 @@ relationships:
       description: Fallback weight for any relationship not otherwise specified.
       default_weight: 1.0
 
+# Cross-mem: a default (general-knowledge) mem may soft-reference a code-side
+# (software) mem — the natural "my notes point at the codebase" pairing. Only
+# REFERENCES is allowed and only via body wiki-links (the alias channel below);
+# source_types is omitted, so any default entity type may anchor into software.
+# This is what makes a general intro mem's `[[<code-mem>--<id>]]` links resolve
+# to real typed cross-mem edges instead of dropping as `cross_mem_not_declared`.
+cross_mem_relationships:
+  - to_schema: software
+    definitions:
+      - name: REFERENCES
+        description: Soft reference from a default-schema (general knowledge) entity into a code-side (software) entity — the cross-mem anchor that ties a knowledge mem to its realization or detail in code.
+        when_to_use: Auto-emitted from inline wiki-links into a software-schema mem (e.g. an engine/macos/plugin/registry mem). Do not author manually. Anchors a knowledge entity to the code-mem entity that details or realizes it.
+        default_weight: 0.5
+
 # Body wiki-links `[[target]]` auto-emit as REFERENCES relations via the
 # alias-synthesis pass. Explicit `memstead_relate type=REFERENCES` is
 # forbidden: the loader forces `manual_authoring: forbidden` on this pointer
