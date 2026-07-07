@@ -54,6 +54,7 @@ This document contains the help content for the `memstead` command-line program.
 * [`memstead mem set-schema`↴](#memstead-mem-set-schema)
 * [`memstead mem set-description`↴](#memstead-mem-set-description)
 * [`memstead mem set-sync-state`↴](#memstead-mem-set-sync-state)
+* [`memstead mem set-internal`↴](#memstead-mem-set-internal)
 * [`memstead mem list`↴](#memstead-mem-list)
 * [`memstead mem-repo`↴](#memstead-mem-repo)
 * [`memstead mem-repo init`↴](#memstead-mem-repo-init)
@@ -74,6 +75,8 @@ This document contains the help content for the `memstead` command-line program.
 * [`memstead schema install`↴](#memstead-schema-install)
 * [`memstead pipeline`↴](#memstead-pipeline)
 * [`memstead pipeline migrate`↴](#memstead-pipeline-migrate)
+* [`memstead ingest`↴](#memstead-ingest)
+* [`memstead ingest brief`↴](#memstead-ingest-brief)
 
 ## `memstead`
 
@@ -135,6 +138,7 @@ Exit codes:
 * `workspace` — Introspect and configure workspace policy — `dump` reads the effective config; `allow-create`/`revoke-create`/`allow-delete`/ `revoke-delete`/`grant-cross-link`/`revoke-cross-link`/`set-mutations` write the mem-lifecycle allowlist, cross-mem link grants, and mutation policy
 * `schema` — Author-time schema tooling. `memstead schema validate <path>` checks a schema package directory against the engine's loader without touching a workspace
 * `pipeline` — Pipeline-config tooling. `memstead pipeline migrate` converts the legacy `scopes|projections|ingests/` JSON folders into the `.memstead/` workspace store's four-primitive shape
+* `ingest` — Engine-side ingest orchestration. `memstead ingest brief <name>` renders an ingest's run-brief — the Markdown prompt an agent consumes — from the four-primitive config and the destination mem's schema / writing guidance
 
 ###### **Options:**
 
@@ -896,6 +900,7 @@ Mem lifecycle commands
 * `set-schema` — Set a mem's schema pin — the integrity-driven schema-migration trigger. Already-integral mems switch immediately; otherwise the mem enters dual-pin migration (writes validate against the target) and the response lists the non-integral entities. Re-issue after repairing to complete the switch
 * `set-description` — Set a mem's one-line `description` — embedded in `.mem` archive exports and surfaced on the registry card at publish time. An empty string clears the field. Set it before `memstead export` / `memstead publish` so the shared archive carries its card text
 * `set-sync-state` — Set (or clear) one opaque sync-state token in a mem's config — the ingest layer's durable "last synced source state" baseline. `<KEY>` and `<TOKEN>` are opaque to the engine (the ingest layer keys per `(ingest, facet)` and owns the token's meaning). An empty `<TOKEN>` clears the key. Written into the per-mem config and surfaced verbatim on `memstead workspace dump`
+* `set-internal` — Mark (or unmark) a mem as internal — hidden from the default `memstead overview` roster and public projections, while staying a real, inspectable (`overview --mem <name>`), deletable mem. Ingest process-state mems are flagged this way
 * `list` — Enumerate every mounted mem in the workspace with its schema pin, version, entity count, and capability (writable vs read-only). Markdown by default; pass `--json` (root flag) for the structured envelope
 
 
@@ -1022,6 +1027,23 @@ Set (or clear) one opaque sync-state token in a mem's config — the ingest laye
 ###### **Options:**
 
 * `--note <NOTE>` — Optional provenance note (≤280 chars) recorded on the commit body, like the other commit-producing mem-lifecycle commands
+
+
+
+## `memstead mem set-internal`
+
+Mark (or unmark) a mem as internal — hidden from the default `memstead overview` roster and public projections, while staying a real, inspectable (`overview --mem <name>`), deletable mem. Ingest process-state mems are flagged this way
+
+**Usage:** `memstead mem set-internal [OPTIONS] <NAME>`
+
+###### **Arguments:**
+
+* `<NAME>` — Mem name (must be registered in the workspace)
+
+###### **Options:**
+
+* `--off` — Unmark the mem as internal (make it visible in the default overview again). Without this flag, the mem is marked internal
+* `--note <NOTE>` — Optional provenance note (≤280 chars) recorded on the commit body
 
 
 
@@ -1275,6 +1297,34 @@ Pipeline-config tooling. `memstead pipeline migrate` converts the legacy `scopes
 Migrate the legacy `scopes|projections|ingests/` JSON folders at the workspace root into the four-primitive workspace-store shape under `.memstead/`. A legacy scope splits into a Medium (territory) and a Facet (engagement). Idempotent — re-running reproduces identical files. The legacy folders are left in place; remove them when ready
 
 **Usage:** `memstead pipeline migrate`
+
+
+
+## `memstead ingest`
+
+Engine-side ingest orchestration. `memstead ingest brief <name>` renders an ingest's run-brief — the Markdown prompt an agent consumes — from the four-primitive config and the destination mem's schema / writing guidance
+
+**Usage:** `memstead ingest <COMMAND>`
+
+###### **Subcommands:**
+
+* `brief` — Render the run-brief for an ingest — the Markdown prompt an agent consumes — on stdout. Reads the four-primitive config and the destination mem's schema / writing guidance
+
+
+
+## `memstead ingest brief`
+
+Render the run-brief for an ingest — the Markdown prompt an agent consumes — on stdout. Reads the four-primitive config and the destination mem's schema / writing guidance
+
+**Usage:** `memstead ingest brief [OPTIONS] [NAME]`
+
+###### **Arguments:**
+
+* `<NAME>` — The ingest name (its `.memstead/ingests/<name>.json` file stem). Omit (or pass `--all`) to select the next due ingest by round-robin + backoff
+
+###### **Options:**
+
+* `--all` — Select the next due ingest across all ingests (round-robin + backoff) and render its brief, instead of naming one
 
 
 

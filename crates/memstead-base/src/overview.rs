@@ -55,6 +55,14 @@ pub struct OverviewArgs<'a> {
     pub rebuild: bool,
     pub token_budget: usize,
     pub operator_mode: bool,
+    /// Force-suppress the `## Lifecycle Namespaces` section regardless of the
+    /// writable roster. Set by an embedder whose surface categorically carries
+    /// no mem-lifecycle tools (the lean `memstead-mcp` build and the per-session
+    /// sketch endpoint): naming `memstead_mem_create` / `memstead_mem_delete`
+    /// there would describe tools the surface does not expose. This is embedder
+    /// configuration, not response-shape polymorphism — the section is a truthful
+    /// function of which tools exist, and the composer stays the single authority.
+    pub suppress_lifecycle: bool,
 }
 
 /// Typed input failures the composer surfaces. The MCP wrapper maps
@@ -71,9 +79,13 @@ pub enum ComposeOverviewError {
     )]
     InvalidIncludeKeySchemaTypes,
 
-    /// `args.mem` names a mem that isn't writable in this
-    /// workspace. The composer surfaces the writable roster so the
-    /// caller can correct the input.
+    /// `args.mem` names a mem that isn't *visible* in this workspace. The
+    /// composer surfaces the visible roster (writable + read-only mounts) so
+    /// the caller can correct the input — scoping a read overview to a
+    /// registry-installed read-only mem is legitimate, so the accepted set is
+    /// the visible roster, not the writable subset. The field name stays
+    /// `writable_mems` for wire-shape stability; it now carries the visible
+    /// roster.
     #[error("unknown mem: \"{name}\"")]
     UnknownMem {
         name: String,
@@ -284,12 +296,16 @@ pub fn compose_overview(
     }
 
     // --- Mem filter validation ---
+    // Scope to any *visible* mem (writable or read-only mount): scoping a read
+    // overview to a registry-installed read-only mem is legitimate on every
+    // surface. A name matching no visible mem is the typed unknown-mem error,
+    // whose roster is the full visible set.
     let mem_filter: Option<String> = match args.mem {
-        Some(v) if engine.mem_router().is_writable(v) => Some(v.to_string()),
+        Some(v) if engine.mem_router().visible_mems().iter().any(|m| m == v) => Some(v.to_string()),
         Some(v) => {
             let mut names: Vec<String> = engine
                 .mem_router()
-                .writable_mems()
+                .visible_mems()
                 .iter()
                 .cloned()
                 .collect();
@@ -819,8 +835,8 @@ pub fn compose_overview(
     // (the ordinary case) is untouched: it still presents the section, with
     // its placeholder when there are no rules. Operator-mode always renders
     // it (the bypass notice is itself the signal).
-    let suppress_empty_lifecycle =
-        writable_names.is_empty() && lifecycle_entries.is_empty() && !args.operator_mode;
+    let suppress_empty_lifecycle = args.suppress_lifecycle
+        || (writable_names.is_empty() && lifecycle_entries.is_empty() && !args.operator_mode);
 
     if !suppress_empty_lifecycle {
         md.push_str("## Lifecycle Namespaces\n\n");

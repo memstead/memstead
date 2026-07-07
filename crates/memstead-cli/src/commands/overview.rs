@@ -88,6 +88,9 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         // MCP-server boot toggle. CLI callers always see the
         // agent-mode rendering.
         operator_mode: false,
+        // The full CLI carries the mem-lifecycle commands, so the section is
+        // truthful here.
+        suppress_lifecycle: false,
     };
 
     let out = match compose_overview(&mut engine, composer_args, Surface::Cli) {

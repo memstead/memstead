@@ -2097,6 +2097,8 @@ impl McpServer {
                 .token_budget
                 .unwrap_or(memstead_engine::overview::DEFAULT_OVERVIEW_BUDGET),
             operator_mode: self.operator_mode,
+            // The full mem-repo MCP surface carries the mem-lifecycle tools.
+            suppress_lifecycle: false,
         };
 
         let out = match memstead_engine::overview::compose_overview(

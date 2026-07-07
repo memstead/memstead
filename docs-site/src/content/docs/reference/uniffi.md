@@ -9,7 +9,7 @@ Auto-generated from the engine's UniFFI UDL. Each top-level declaration (`namesp
 ## `namespace memstead`
 
 UniFFI interface for the macOS app.
-Read-only surface: input records (MemInit, HealthOptions, SearchScope),
+Read-only surface: input records (MemInit, SearchScope),
 response records (Entity, Stats, HealthSummary, List/Search/Relations/
 Cluster/Path results), the error enum, and the Engine interface with
 method signatures. Mutation FFI is deferred — kept as a UniFFI
@@ -29,7 +29,7 @@ namespace memstead {
 
     // Construct an engine rooted at an explicit `workspace_root` (a directory
     // containing `.memstead/workspace.toml`). Cwd-independent — unlike the
-    // `Engine(mems:)` constructor, which falls back to the process cwd.
+    // bare `Engine()` constructor, which falls back to the process cwd.
     // Backend-agnostic: folder and git-branch mounts open through this one
     // call with no caller-side branching. Throws a typed, actionable error
     // when the path has no recognised workspace layout.
@@ -43,6 +43,13 @@ namespace memstead {
     // mem root is the workspace root (collapsed single-mem form).
     [Throws=MemsteadError]
     void init_filesystem_mem(string root, string name, string schema);
+
+    // Render an ingest's run-brief — the Markdown prompt an ingest agent
+    // consumes — for the ingest named `ingest_name` in the workspace at
+    // `workspace_root`. Byte-identical to `memstead ingest brief <name>`:
+    // both call the one shared engine entry point. Discovery mode today.
+    [Throws=MemsteadError]
+    string ingest_brief(string workspace_root, string ingest_name);
 };
 ```
 
@@ -82,14 +89,6 @@ dictionary MemInit {
     string dir;
     string schema_name;
     string schema_version;
-};
-```
-
-## `dictionary HealthOptions`
-
-```idl
-dictionary HealthOptions {
-    u32 most_connected_limit = 10;
 };
 ```
 
@@ -609,10 +608,10 @@ mutation methods can land without breaking the existing bindings.
 ```idl
 interface Engine {
     [Throws=MemsteadError]
-    constructor(sequence<MemInit> mems);
+    constructor();
 
     Stats get_stats();
-    HealthSummary get_health(HealthOptions options);
+    HealthSummary get_health();
     ListResult list_entities(SearchScope scope);
     SearchResult search(SearchScope scope);
     Entity? get_entity(string id);

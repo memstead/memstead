@@ -1437,8 +1437,12 @@ impl FilesystemMcpServer {
 
         // Conformance axis (`conformance`), or both axes
         // (`integrity`) — same `findings` slot and `{ id, axis, code,
-        // detail }` shape as the mem-repo flavour. Filesystem-mem
-        // is single-mem: the scan covers the one mounted mem.
+        // detail }` shape as the mem-repo flavour. The scan iterates every
+        // mounted mem's schema (`engine.schemas().keys()`), so on a
+        // two-mount session engine (writable sketch + read-only content) it
+        // covers both mounts — the summary counts and roster come straight
+        // from `engine.health()`, which is mount-aware, so nothing is
+        // misreported on a multi-mount engine.
         if include
             .iter()
             .any(|s| s == "conformance" || s == "integrity")
@@ -1702,7 +1706,7 @@ impl FilesystemMcpServer {
 
     #[tool(
         name = "memstead_overview",
-        description = "Cold-start entry point for filesystem-mem workspaces. Returns the schema catalogue, the (single) mem entry, and the community clusters as Markdown. Schemas list as `{ref, description}` only — call `memstead_schema(name=<ref>)` for full per-type bodies. Token-budget-driven: hard-required content (mem, schema, community titles) always ships; heavy content greedy-fills the remaining budget by default-priority. Anything that didn't fit is advertised under `## Hints` with `estimated_tokens`; re-query by passing `key` into `include[]`. Allowed `include` keys: `community_members`, `community_bridges`, `mem_distribution`, `dangling_links`. `mem` parameter is accepted for shape compatibility but only the workspace's single mem matches; an unknown name returns an error. Set `rebuild: true` to invalidate the community memo before computing — it recomputes the whole-graph Louvain partition (detection is global; there is no per-subgraph scoping). A small or disconnected subgraph may surface as no cluster: sparsely-connected / edge-less nodes collapse into a single catch-all rather than forming their own cluster, so building a handful of loosely-linked entities and expecting a distinct cluster will come back empty. The `## Mems` entry carries a `durable` flag and `storage` kind — on this in-memory sketch it reads `durable: false` / `storage: in-memory`, i.e. writes are volatile and evicted on session-TTL / restart. The mem-repo `## Lifecycle Namespaces` section is omitted — filesystem-mem has no mem-creation rules. Frontmatter `_overview_mode` is `\"complete\"`, `\"reduced\"`, or `\"overbudget\"`.",
+        description = "Cold-start entry point for a Memstead engine. Returns the schema catalogue, the mem inventory, and the community clusters as Markdown. Every visible mem is listed under `## Mems`: a writable mem carries a `durable` flag and `storage` kind (an in-memory sketch reads `durable: false` / `storage: in-memory` — writes are volatile, evicted on session-TTL / restart), and a read-only mount carries `Access: read-only`, its deployment-declared trust `Origin` (`first-party` / `third-party`), and its own entity count. Per-mem counts, `_entity_count`, and the communities section always agree — one rendering authority. Schemas list as `{ref, description}` only — call `memstead_schema(name=<ref>)` for full per-type bodies. Token-budget-driven: hard-required content (mems, schema, community titles) always ships; heavy content greedy-fills the remaining budget by default-priority. Anything that didn't fit is advertised under `## Hints` with `estimated_tokens`; re-query by passing `key` into `include[]`. Allowed `include` keys: `community_members`, `community_bridges`, `mem_distribution`, `dangling_links`. `mem` scopes the roster, schema anchor, and communities to any one visible mem (a read-only mount included); a name matching no visible mem returns `UNKNOWN_MEM` whose list names every visible mem. Set `rebuild: true` to invalidate the community memo before computing — it recomputes the whole-graph Louvain partition (detection is global; there is no per-subgraph scoping). A small or disconnected subgraph may surface as no cluster: sparsely-connected / edge-less nodes collapse into a single catch-all rather than forming their own cluster. This surface carries no mem-lifecycle tools, so the `## Lifecycle Namespaces` section is omitted. Frontmatter `_overview_mode` is \"complete\", \"reduced\", or \"overbudget\"; `_mem_schema` appears only under a `mem` filter.",
         annotations(
             read_only_hint = true,
             destructive_hint = false,
@@ -1711,429 +1715,51 @@ impl FilesystemMcpServer {
         )
     )]
     fn memstead_overview(&self, Parameters(p): Parameters<OverviewParams>) -> CallToolResult {
-        const DEFAULT_OVERVIEW_BUDGET: usize = 8_000;
-        const ALLOWED_OVERVIEW_INCLUDE: &[&str] = &[
-            "community_members",
-            "community_bridges",
-            "mem_distribution",
-            "dangling_links",
-        ];
-
-        // Schema-tool split: the legacy `schema_types` include key is gone;
-        // surface the same actionable error the mem-repo flavour does so an agent that
-        // still passes it gets a clear hint to call memstead_schema instead.
-        if let Some(include) = p.include.as_ref()
-            && include.iter().any(|k| k == "schema_types")
-        {
-            let msg = "include key 'schema_types' was removed; \
-                       call memstead_schema(name=...) for full schema bodies."
-                .to_string();
-            return tool_error("INVALID_INPUT", &msg);
-        }
-
+        // The lean surface renders the identical overview through the one shared
+        // composer in `memstead_base::overview` (relocated there so this
+        // no-`memstead-engine` build can reach it). The hand-rolled single-mem
+        // renderer is gone: with one rendering authority the roster,
+        // `_entity_count`, and the communities section can never disagree, and a
+        // read-only mount appears with its `Access: read-only` / `Origin` lines
+        // instead of being dropped. `suppress_lifecycle` is set because this
+        // surface carries no mem-lifecycle tools, so naming them would be false.
         let mut engine = crate::lock_engine!(self.engine);
-        if p.rebuild.unwrap_or(false) && p.chunk.unwrap_or(1) <= 1 {
-            engine.invalidate_communities();
-        }
-
-        // --- Mem filter validation ---
-        // filesystem-mem has exactly one mem. A non-matching `mem`
-        // is a typed error — same shape as the mem-repo surface.
-        let mem_name = engine
-            .mem_names()
-            .into_iter()
-            .next()
-            .map(String::from)
-            .unwrap_or_default();
-        if let Some(v) = p.mem.as_deref()
-            && v != mem_name
-        {
-            return tool_error(
-                "INVALID_INPUT",
-                &format!("unknown mem: \"{v}\". Writable mems: [{mem_name}]"),
-            );
-        }
-
-        // --- include validation ---
-        let budget = p.token_budget.unwrap_or(DEFAULT_OVERVIEW_BUDGET);
-        let include: Vec<String> = p.include.clone().unwrap_or_default();
-        let mut warnings: Vec<(String, String)> = Vec::new();
-        for key in &include {
-            if !ALLOWED_OVERVIEW_INCLUDE.contains(&key.as_str()) {
-                warnings.push((
-                    "UNKNOWN_INCLUDE_KEY".to_string(),
-                    format!(
-                        "unknown include key: \"{key}\". Allowed: {}",
-                        ALLOWED_OVERVIEW_INCLUDE.join(", ")
-                    ),
-                ));
-            }
-        }
-        let include_set: std::collections::BTreeSet<&'static str> = include
-            .iter()
-            .filter_map(|k| {
-                ALLOWED_OVERVIEW_INCLUDE
-                    .iter()
-                    .find(|a| **a == k.as_str())
-                    .copied()
-            })
-            .collect();
-
-        // --- Schema (single entry) ---
-        let Some((_, schema)) = engine.schemas().iter().next() else {
-            // Genuinely-systemic: the filesystem boot path always
-            // mounts exactly one mem and pins exactly one schema. An
-            // empty `schemas()` map means engine construction itself
-            // is inconsistent — no agent-side recovery applies, so
-            // `INTERNAL` is the honest wire code (this class of
-            // genuinely-systemic failure is the legitimate `INTERNAL`
-            // use case).
-            return tool_error(
-                "INTERNAL",
-                "engine has no schemas — workspace mount list is empty",
-            );
+        let include = p.include.clone().unwrap_or_default();
+        let args = memstead_base::overview::OverviewArgs {
+            include: &include,
+            mem: p.mem.as_deref(),
+            rebuild: p.rebuild.unwrap_or(false) && p.chunk.unwrap_or(1) <= 1,
+            token_budget: p
+                .token_budget
+                .unwrap_or(memstead_base::overview::DEFAULT_OVERVIEW_BUDGET),
+            operator_mode: false,
+            suppress_lifecycle: true,
         };
-        let schema_canon = format!("{}@{}", schema.manifest.name, schema.version);
-        let schemas_slim = vec![serde_json::json!({
-            "ref": schema_canon,
-            "description": schema.manifest.description,
-        })];
-
-        // --- Mem (single entry, lite + full variants) ---
-        let mut entity_count: usize = 0;
-        let mut type_dist: std::collections::BTreeMap<String, usize> = Default::default();
-        for e in engine.store().all_entities() {
-            if e.stub || e.mem != mem_name {
-                continue;
+        match memstead_base::overview::compose_overview(
+            &mut engine,
+            args,
+            memstead_base::overview::Surface::Mcp,
+        ) {
+            Ok(out) => md_response(out.markdown),
+            Err(memstead_base::overview::ComposeOverviewError::InvalidIncludeKeySchemaTypes) => {
+                tool_error(
+                    "INVALID_INPUT",
+                    "include key 'schema_types' was removed; \
+                     call memstead_schema(name=...) for full schema bodies.",
+                )
             }
-            entity_count += 1;
-            *type_dist.entry(e.entity_type.clone()).or_default() += 1;
-        }
-        // Per-mem storage backend → durability marker, derived from the
-        // mount's `MountStorage` kind. On the ephemeral sketch this reads
-        // `in-memory` / `durable: false`, so an agent learns the mem is
-        // volatile (writes evicted on session-TTL / restart) before its
-        // first write rather than after a reset.
-        let (storage, durable) = engine
-            .mounts()
-            .iter()
-            .find(|m| m.mem == mem_name)
-            .map(|m| (m.storage.backend_id(), m.storage.is_durable()))
-            .unwrap_or(("unknown", false));
-        let mems_lite = vec![serde_json::json!({
-            "name": mem_name,
-            "schema": schema_canon,
-            "entity_count": entity_count,
-            "storage": storage,
-            "durable": durable,
-        })];
-        let mems_full = vec![serde_json::json!({
-            "name": mem_name,
-            "schema": schema_canon,
-            "entity_count": entity_count,
-            "type_distribution": type_dist,
-            "storage": storage,
-            "durable": durable,
-        })];
-
-        // --- Communities ---
-        let output = engine.communities();
-        let cluster_count = output.count;
-        let entity_count_total: usize = output.clusters.values().map(|c| c.entities.len()).sum();
-        let modularity = output.modularity;
-
-        let mut cluster_ids: Vec<String> = output.clusters.keys().cloned().collect();
-        cluster_ids.sort();
-
-        let mut communities_lite: Vec<serde_json::Value> = Vec::with_capacity(cluster_ids.len());
-        let mut communities_full: Vec<serde_json::Value> = Vec::with_capacity(cluster_ids.len());
-        for cid in &cluster_ids {
-            let info = &output.clusters[cid];
-            let summary = memstead_base::graph::community::generate_auto_summary(
-                engine.store(),
-                &info.entities,
-            );
-            communities_lite.push(serde_json::json!({
-                "cluster_id": cid,
-                "entity_count": info.entities.len(),
-                "summary": summary,
-            }));
-            communities_full.push(serde_json::json!({
-                "cluster_id": cid,
-                "entity_count": info.entities.len(),
-                "summary": summary,
-                "members": info.entities,
-            }));
-        }
-
-        // --- Bridges / dangling links ---
-        let bridges_component: serde_json::Value = serde_json::to_value(
-            memstead_base::graph::community::aggregate_bridges(engine.store(), output, None),
-        )
-        .unwrap_or(serde_json::Value::Array(Vec::new()));
-        let dangling_links_component = serde_json::to_value(
-            memstead_base::ops::health::collect_dangling_links(engine.store(), None),
-        )
-        .unwrap_or(serde_json::Value::Array(Vec::new()));
-
-        // --- Costs ---
-        let estimate_tokens = memstead_base::chunking::estimate_tokens;
-        let hard_required_cost =
-            estimate_tokens(&serde_json::to_string(&schemas_slim).unwrap_or_default())
-                + estimate_tokens(&serde_json::to_string(&mems_lite).unwrap_or_default())
-                + estimate_tokens(&serde_json::to_string(&communities_lite).unwrap_or_default());
-        let overbudget = hard_required_cost > budget;
-
-        let mem_distribution_component =
-            serde_json::to_value(&mems_full).unwrap_or(serde_json::Value::Array(Vec::new()));
-        let community_members_component =
-            serde_json::to_value(&communities_full).unwrap_or(serde_json::Value::Array(Vec::new()));
-
-        let mem_distribution_cost = estimate_tokens(
-            &serde_json::to_string(&mem_distribution_component).unwrap_or_default(),
-        )
-        .saturating_sub(estimate_tokens(
-            &serde_json::to_string(&mems_lite).unwrap_or_default(),
-        ));
-        let community_members_cost = estimate_tokens(
-            &serde_json::to_string(&community_members_component).unwrap_or_default(),
-        )
-        .saturating_sub(estimate_tokens(
-            &serde_json::to_string(&communities_lite).unwrap_or_default(),
-        ));
-        let bridges_cost =
-            estimate_tokens(&serde_json::to_string(&bridges_component).unwrap_or_default());
-        let dangling_links_cost =
-            estimate_tokens(&serde_json::to_string(&dangling_links_component).unwrap_or_default());
-
-        // --- Greedy fill ---
-        let candidates: [(&'static str, usize, serde_json::Value); 4] = [
-            (
-                "mem_distribution",
-                mem_distribution_cost,
-                mem_distribution_component,
+            Err(memstead_base::overview::ComposeOverviewError::UnknownMem {
+                name,
+                writable_mems,
+            }) => tool_error_with_details(
+                "UNKNOWN_MEM",
+                &format!(
+                    "unknown mem: \"{name}\". Visible mems: [{}]",
+                    writable_mems.join(", ")
+                ),
+                Some(serde_json::json!({ "name": name, "visible_mems": writable_mems })),
             ),
-            (
-                "community_members",
-                community_members_cost,
-                community_members_component,
-            ),
-            ("community_bridges", bridges_cost, bridges_component),
-            (
-                "dangling_links",
-                dangling_links_cost,
-                dangling_links_component,
-            ),
-        ];
-
-        let mut emitted: std::collections::BTreeMap<&'static str, serde_json::Value> =
-            Default::default();
-        let mut hints: Vec<(String, usize)> = Vec::new();
-        let mut used = hard_required_cost;
-        let mut remaining = budget.saturating_sub(hard_required_cost);
-
-        for (key, cost, component) in candidates {
-            let forced = include_set.contains(key);
-            if forced {
-                emitted.insert(key, component);
-                used += cost;
-                remaining = remaining.saturating_sub(cost);
-            } else if !overbudget && remaining >= cost {
-                emitted.insert(key, component);
-                used += cost;
-                remaining -= cost;
-            } else {
-                hints.push((key.to_string(), cost));
-            }
         }
-
-        let overview_mode = if overbudget {
-            "overbudget"
-        } else if hints.is_empty() {
-            "complete"
-        } else {
-            "reduced"
-        };
-
-        let schemas_out = schemas_slim.clone();
-        let mems_out = if emitted.contains_key("mem_distribution") {
-            mems_full.clone()
-        } else {
-            mems_lite.clone()
-        };
-
-        // --- Markdown render ---
-        let mod_str = if modularity == 0.0 {
-            "0".to_string()
-        } else {
-            format!("{modularity:.4}")
-        };
-
-        let mut md = String::new();
-        md.push_str("---\n");
-        md.push_str(&format!("_mem_schema: {schema_canon}\n"));
-        md.push_str(&format!("_overview_mode: {overview_mode}\n"));
-        md.push_str(&format!("_budget_requested: {budget}\n"));
-        md.push_str(&format!("_budget_used: {used}\n"));
-        md.push_str(&format!("_cluster_count: {cluster_count}\n"));
-        md.push_str(&format!("_entity_count: {entity_count_total}\n"));
-        md.push_str(&format!("_modularity: {mod_str}\n"));
-        md.push_str("---\n\n");
-
-        // Schemas
-        md.push_str("## Schemas\n\n");
-        if schemas_out.is_empty() {
-            md.push_str("_(no schemas)_\n\n");
-        } else {
-            md.push_str(
-                "_(call `memstead_schema(name=<ref>)` for the full per-type catalogue, sections, fields, and relationship vocabulary)_\n\n",
-            );
-            for s in &schemas_out {
-                let r = s["ref"].as_str().unwrap_or("?");
-                md.push_str(&format!("### {r}\n\n"));
-                if let Some(desc) = s["description"].as_str()
-                    && !desc.is_empty()
-                {
-                    md.push_str(&format!("{desc}\n\n"));
-                }
-            }
-        }
-
-        // Mems
-        let emit_mem_distribution = emitted.contains_key("mem_distribution");
-        md.push_str("## Mems\n\n");
-        for v in &mems_out {
-            let name = v["name"].as_str().unwrap_or("?");
-            let schema_ref = v["schema"].as_str().unwrap_or("(unspecified)");
-            let count = v["entity_count"].as_u64().unwrap_or(0);
-            md.push_str(&format!("### {name}\n\n"));
-            md.push_str(&format!("- **Schema:** {schema_ref}\n"));
-            // Flag ephemeral storage loudly; durable-on-disk mems keep
-            // their lines unchanged. On the sketch this is the line that
-            // tells an agent its `commit_sha` is volatile before it writes.
-            if v["durable"].as_bool() == Some(false) {
-                let storage = v["storage"].as_str().unwrap_or("in-memory");
-                md.push_str(&format!(
-                    "- **Storage:** {storage} (ephemeral — writes are volatile, evicted on restart/TTL; `commit_sha` is not durable)\n"
-                ));
-            }
-            md.push_str(&format!("- **Entities:** {count}\n"));
-            if emit_mem_distribution
-                && let Some(td) = v["type_distribution"].as_object()
-                && !td.is_empty()
-            {
-                let pairs: Vec<String> = td
-                    .iter()
-                    .map(|(k, v)| format!("{k}={}", v.as_u64().unwrap_or(0)))
-                    .collect();
-                md.push_str(&format!("- **By type:** {}\n", pairs.join(", ")));
-            }
-            md.push('\n');
-        }
-
-        // Communities
-        let emit_community_members = emitted.contains_key("community_members");
-        md.push_str("## Communities\n\n");
-        if cluster_ids.is_empty() {
-            md.push_str("_(no communities — graph is empty or has no edges)_\n");
-        } else {
-            for cid in &cluster_ids {
-                let info = &output.clusters[cid];
-                let summary = memstead_base::graph::community::generate_auto_summary(
-                    engine.store(),
-                    &info.entities,
-                );
-                md.push_str(&format!(
-                    "### Cluster {cid} ({} entities)\n",
-                    info.entities.len()
-                ));
-                if !summary.is_empty() {
-                    md.push_str(&format!("{summary}\n"));
-                }
-                if emit_community_members {
-                    for eid in &info.entities {
-                        md.push_str(&format!("- {eid}\n"));
-                    }
-                } else {
-                    md.push_str(
-                        "_(call with include=[\"community_members\"] to see member lists)_\n",
-                    );
-                }
-                md.push('\n');
-            }
-        }
-
-        // Community bridges
-        if emitted.contains_key("community_bridges")
-            && let Some(bridges) = emitted["community_bridges"].as_array()
-            && !bridges.is_empty()
-        {
-            md.push_str("## Community Bridges\n\n");
-            for b in bridges {
-                let from_c = b["from_cluster"].as_str().unwrap_or("?");
-                let to_c = b["to_cluster"].as_str().unwrap_or("?");
-                let n = b["edge_count"].as_u64().unwrap_or(0);
-                md.push_str(&format!("### {from_c} ↔ {to_c} ({n} edges)\n"));
-                if let Some(types) = b["edge_types"].as_array() {
-                    let list: Vec<String> = types
-                        .iter()
-                        .filter_map(|x| x.as_str().map(String::from))
-                        .collect();
-                    if !list.is_empty() {
-                        md.push_str(&format!("- **Edge types:** {}\n", list.join(", ")));
-                    }
-                }
-                if let Some(samples) = b["sample_edges"].as_array() {
-                    for s in samples {
-                        let rel = s["rel_type"].as_str().unwrap_or("?");
-                        let from = s["from"].as_str().unwrap_or("?");
-                        let to = s["to"].as_str().unwrap_or("?");
-                        md.push_str(&format!("  - `{rel}` {from} → {to}\n"));
-                    }
-                }
-                md.push('\n');
-            }
-        }
-
-        // Dangling links
-        if emitted.contains_key("dangling_links")
-            && let Some(links) = emitted["dangling_links"].as_array()
-            && !links.is_empty()
-        {
-            md.push_str("## Dangling Links\n\n");
-            for link in links {
-                let from = link["from"].as_str().unwrap_or("?");
-                let target = link["target_id"].as_str().unwrap_or("?");
-                let section = link["section"].as_str();
-                if let Some(s) = section {
-                    md.push_str(&format!("- `{from}` → `{target}` (in `{s}`)\n"));
-                } else {
-                    md.push_str(&format!("- `{from}` → `{target}`\n"));
-                }
-            }
-            md.push('\n');
-        }
-
-        // Hints
-        if !hints.is_empty() {
-            md.push_str("## Hints\n\n");
-            md.push_str("_(keys not included — re-query with `include: [\"<key>\"]`)_\n\n");
-            for (key, tokens) in &hints {
-                md.push_str(&format!("- `{key}` — estimated_tokens: {tokens}\n"));
-            }
-            md.push('\n');
-        }
-
-        // Warnings
-        if !warnings.is_empty() {
-            md.push_str("## Warnings\n\n");
-            for (code, message) in &warnings {
-                md.push_str(&format!("- **{code}** — {message}\n"));
-            }
-            md.push('\n');
-        }
-
-        md_response(md)
     }
 }
 
@@ -3800,16 +3426,41 @@ mod tests {
             .unwrap()
             .text
             .clone();
-        // Frontmatter carries the workspace's pinned schema and an
-        // overview_mode field; the markdown body has the standard
-        // section headings.
-        assert!(text.contains("_mem_schema: default@1.0.0"));
+        // Produced by the shared composer now: an `_overview_mode` frontmatter
+        // line and the standard section headings, with the single mem in the
+        // roster and its own entity count. `_mem_schema` is emitted only under a
+        // `mem` filter (composer behaviour), so it is absent from this
+        // unscoped call — asserted below. The lean surface carries no
+        // mem-lifecycle tools, so the lifecycle section is suppressed.
         assert!(text.contains("_overview_mode:"));
         assert!(text.contains("## Schemas"));
         assert!(text.contains("## Mems"));
         assert!(text.contains("### demo"));
         assert!(text.contains("- **Entities:** 2"));
         assert!(text.contains("## Communities"));
+        assert!(
+            !text.contains("## Lifecycle Namespaces"),
+            "lean surface has no mem-lifecycle tools: {text}"
+        );
+        assert!(
+            !text.contains("_mem_schema:"),
+            "_mem_schema is emitted only under a mem filter: {text}"
+        );
+
+        // Scoping to the one visible mem succeeds and now anchors `_mem_schema`.
+        let scoped = server.memstead_overview(Parameters(OverviewParams {
+            rebuild: None,
+            chunk: None,
+            mem: Some("demo".into()),
+            include: None,
+            token_budget: None,
+        }));
+        assert!(!scoped.is_error.unwrap_or(false));
+        let stext = scoped.content.first().unwrap().as_text().unwrap().text.clone();
+        assert!(
+            stext.contains("_mem_schema: default@1.0.0"),
+            "a mem-scoped overview anchors the schema: {stext}"
+        );
     }
 
     #[test]
@@ -3827,7 +3478,10 @@ mod tests {
         }));
         assert!(result.is_error.unwrap_or(false));
         let body = result.structured_content.unwrap();
-        assert_eq!(body["code"], "INVALID_INPUT");
+        // The shared composer returns the typed unknown-mem error, and its mem
+        // list names every visible mem (here, the workspace's single mem).
+        assert_eq!(body["code"], "UNKNOWN_MEM");
+        assert_eq!(body["details"]["visible_mems"][0], "demo");
     }
 
     #[test]

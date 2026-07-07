@@ -1849,6 +1849,7 @@ fn rule_derived_cross_link_grant_is_enforced_and_surfaced_in_overview() {
             rebuild: false,
             token_budget: 8000,
             operator_mode: false,
+            suppress_lifecycle: false,
         },
         memstead_engine::overview::Surface::Mcp,
     )
