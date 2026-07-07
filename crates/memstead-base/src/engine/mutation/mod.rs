@@ -250,16 +250,27 @@ pub(super) fn make_stub(id: &EntityId, kind: crate::entity::StubKind) -> Entity 
 /// `(from_mem, to_mem)` payload an agent already sees on
 /// `memstead_relate`.
 ///
+/// After the grant admits the pairing, a target absent from a
+/// `MountCapability::ReadOnly` mount refuses with
+/// [`EngineError::CrossMemTargetNotFound`]: the engine cannot
+/// persist a stub through the read-only boundary, and a read-only
+/// mem never gains the entity later — a missing target there is a
+/// wrong link, not a pending forward reference. Same-mem targets,
+/// cross-mem targets in Write mounts, and unmounted target mems all
+/// retain the auto-stub mechanic.
+///
 /// Funnel point for every add-shaped edge write — `memstead_relate`,
-/// `memstead_create.relations[]`, `memstead_update.declare_relations`, and
-/// any future add-path mutation surface route through one gate so
-/// the policy can't drift between sites. Remove-shaped writes
-/// (cleanup) remain permissive and call this helper not at all.
+/// `memstead_create.relations[]`, `memstead_update.declare_relations`,
+/// body-wiki-link alias synthesis, and any future add-path mutation
+/// surface route through one gate so the policy can't drift between
+/// sites. Remove-shaped writes (cleanup) remain permissive and call
+/// this helper not at all.
 pub(super) fn validate_cross_mem_add_policy(
     engine: &super::Engine,
     source_mem: &str,
-    target_mem: &str,
+    target: &EntityId,
 ) -> Result<(), EngineError> {
+    let target_mem = target.mem();
     if source_mem == target_mem {
         return Ok(());
     }
@@ -267,6 +278,15 @@ pub(super) fn validate_cross_mem_add_policy(
         return Err(EngineError::CrossMemLinkNotAllowed {
             from_mem: source_mem.to_string(),
             to_mem: target_mem.to_string(),
+        });
+    }
+    if let Some(mount) = engine.mount(target_mem)
+        && mount.capability == crate::workspace::MountCapability::ReadOnly
+        && !engine.store.contains(target)
+    {
+        return Err(EngineError::CrossMemTargetNotFound {
+            target_id: target.to_string(),
+            target_mem: target_mem.to_string(),
         });
     }
     Ok(())
@@ -526,9 +546,12 @@ pub(super) fn validate_manual_authoring_posture(
 ///    `(target, rel_type)` — a USES or DEPENDS_ON edge to the same
 ///    target does not suppress synthesis of the pointer rel-type.
 /// 3. Schema has a pointer but a body wiki-link crosses a mem
-///    boundary the workspace doesn't grant: return
-///    `EngineError::CrossMemLinkNotAllowed` with the source/target
-///    mem pair. The entire mutation aborts — no partial state.
+///    boundary the workspace doesn't grant — or targets an entity
+///    absent from a read-only mount: return the funnel's typed
+///    refusal ([`EngineError::CrossMemLinkNotAllowed`] /
+///    [`EngineError::CrossMemTargetNotFound`], via
+///    [`validate_cross_mem_add_policy`]). The entire mutation
+///    aborts — no partial state.
 ///
 /// GC: when `prev` is `Some`, the pass also drops pointer-rel-type
 /// relations whose target was a body wiki-link in `prev` but no longer
@@ -612,14 +635,7 @@ pub(super) fn synthesise_alias_relations(
             if existing.contains(&key) || already_synthesised.contains(&target) {
                 continue;
             }
-            if target.mem() != next.mem.as_str()
-                && !engine.cross_mem_link_allowed(&next.mem, target.mem())
-            {
-                return Err(super::EngineError::CrossMemLinkNotAllowed {
-                    from_mem: next.mem.clone(),
-                    to_mem: target.mem().to_string(),
-                });
-            }
+            validate_cross_mem_add_policy(engine, &next.mem, &target)?;
             let rel = crate::entity::Relationship::new(pointer.clone(), target.clone());
             next.relationships.push(rel.clone());
             already_synthesised.insert(target);

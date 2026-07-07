@@ -1103,17 +1103,9 @@ fn apply_declare_relations(
         validate_relation_target_grammar(&rel.to)?;
 
         let target_mem = rel.to.mem().to_string();
-        super::validate_cross_mem_add_policy(engine, source_mem, &target_mem)?;
-        if target_mem != source_mem
-            && let Some(mount) = engine.mount(&target_mem)
-            && mount.capability == MountCapability::ReadOnly
-            && !engine.store.contains(&rel.to)
-        {
-            return Err(EngineError::CrossMemTargetNotFound {
-                target_id: rel.to.to_string(),
-                target_mem: target_mem.clone(),
-            });
-        }
+        // Grant + ReadOnly-missing-target checks both live in the
+        // shared add-path funnel.
+        super::validate_cross_mem_add_policy(engine, source_mem, &rel.to)?;
 
         // Rel-type + shape validation, routed through the engine's
         // cross-mem-aware edge validator. Cross-different-schema

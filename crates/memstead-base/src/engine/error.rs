@@ -292,13 +292,16 @@ pub enum EngineError {
         "cross-mem link from mem `{from_mem}` to mem `{to_mem}` is not allowed by the workspace `[cross_mem_links]` policy"
     )]
     CrossMemLinkNotAllowed { from_mem: String, to_mem: String },
-    /// `memstead_relate` cross-mem to a target whose mem is mounted
+    /// Any add-shaped cross-mem edge write (`memstead_relate`,
+    /// `memstead_create.relations[]`, `memstead_update.declare_relations`,
+    /// or a body wiki-link) to a target whose mem is mounted
     /// `MountCapability::ReadOnly` and the target is absent. Auto-stub
     /// is unavailable across the engine/ReadOnly-mem boundary (the
     /// engine cannot persist a stub in a mem it has no write access
-    /// to), so the target must already exist before the relate call.
+    /// to), and a read-only mem never gains the entity later — the
+    /// target must already exist before the link is written.
     #[error(
-        "cross-mem relate target {target_id} is absent in read-only mem `{target_mem}` — auto-stub is unavailable across the read-only boundary; the target must exist before relating"
+        "cross-mem link target {target_id} is absent in read-only mem `{target_mem}` — auto-stub is unavailable across the read-only boundary; the target must exist before linking"
     )]
     CrossMemTargetNotFound {
         target_id: String,

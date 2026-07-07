@@ -99,12 +99,15 @@ impl Engine {
             // as "only these new edges may be created", not "these
             // edges may exist."
             if !args.remove {
-                super::validate_cross_mem_add_policy(self, &source_mem, &target_mem)?;
+                super::validate_cross_mem_add_policy(self, &source_mem, &args.target)?;
             }
             // ReadOnly target mem: the engine has no write access to
             // persist a stub there, so the target must already exist
             // before relate. (Same-mem and cross-mem-to-Write
-            // both retain the auto-stub mechanic below.)
+            // both retain the auto-stub mechanic below.) The add path
+            // already refused above via the shared funnel; this check
+            // stays unconditional so the remove path keeps its
+            // pre-funnel behaviour.
             if let Some(mount) = self.mount(&target_mem)
                 && mount.capability == MountCapability::ReadOnly
                 && !self.store.contains(&args.target)
@@ -2526,6 +2529,344 @@ community:
                 matches!(outcome.action, RelateAction::NoOpAbsent),
                 "expected NoOpAbsent, got {:?}",
                 outcome.action
+            );
+        }
+
+        // ---- ReadOnly-target refusal (shared add-path funnel) --------
+
+        /// Engine with mem `src` (Write, `alias_target_rel_type:
+        /// REFERENCES`, cross-mem vocabulary into `tgt-al`) and mem
+        /// `tgt` mounted with the given capability, pre-populated on
+        /// disk with one entity `tgt--req-one`. Wildcard cross-mem
+        /// grant for `src`. Exercises the funnel's ReadOnly-missing-
+        /// target refusal across every add-shaped write path.
+        fn engine_with_tgt_capability(
+            capability: MountCapability,
+        ) -> (TempDir, Engine, CreateEntityOutcome) {
+            let tmp = TempDir::new().unwrap();
+
+            let src_manifest = r#"name: src-al
+version: 0.1.0
+description: source schema with alias pointer
+when_to_use: tests
+types:
+  - doc
+relationships:
+  mode: strict
+  definitions:
+    - name: ADDRESSES
+      description: explicit cross-mem
+      default_weight: 1.0
+    - name: REFERENCES
+      description: alias pointer
+      default_weight: 1.0
+    - name: _default
+      description: fallback
+      default_weight: 1.0
+cross_mem_relationships:
+  - to_schema: tgt-al
+    definitions:
+      - name: ADDRESSES
+        description: explicit cross-mem
+        default_weight: 1.0
+      - name: REFERENCES
+        description: alias-emitted cross-mem
+        default_weight: 1.0
+alias_target_rel_type: REFERENCES
+community:
+  resolution: 1.0
+  seed: 42
+"#;
+            let tgt_manifest = r#"name: tgt-al
+version: 0.1.0
+description: target schema
+when_to_use: tests
+types:
+  - req
+relationships:
+  mode: strict
+  definitions:
+    - name: _default
+      description: fallback
+      default_weight: 1.0
+community:
+  resolution: 1.0
+  seed: 42
+"#;
+            let schemas_dir = tmp.path().join("schemas");
+            std::fs::create_dir_all(&schemas_dir).unwrap();
+            write_schema_files(
+                &schemas_dir,
+                "src-al",
+                src_manifest,
+                &[("doc", &make_type_yaml("doc"))],
+            );
+            write_schema_files(
+                &schemas_dir,
+                "tgt-al",
+                tgt_manifest,
+                &[("req", &make_type_yaml("req"))],
+            );
+
+            let src_dir = tmp.path().join("mem-src");
+            let tgt_dir = tmp.path().join("mem-tgt");
+            std::fs::create_dir_all(&src_dir).unwrap();
+            std::fs::create_dir_all(&tgt_dir).unwrap();
+            // The read-only mem is pre-populated on disk — the engine
+            // never writes to it.
+            std::fs::write(
+                tgt_dir.join("req-one.md"),
+                "---\ntype: req\n---\n# Req One\n\n## Body\n\nseed.\n",
+            )
+            .unwrap();
+
+            let src_writer = FilesystemMemWriter::new(src_dir.clone());
+            let tgt_writer = FilesystemMemWriter::new(tgt_dir.clone());
+            let src_pin = SchemaRef::new("src-al", semver::Version::new(0, 1, 0));
+            let tgt_pin = SchemaRef::new("tgt-al", semver::Version::new(0, 1, 0));
+
+            let tgt_mount = Mount {
+                mem: "tgt".to_string(),
+                schema: Some(tgt_pin),
+                storage: MountStorage::Folder {
+                    path: tgt_dir.clone(),
+                },
+                capability,
+                lifecycle: MountLifecycle::Eager,
+                cross_linkable: true,
+                migration_target: None,
+            };
+            let mut engine = Engine::from_mounts_with_schemas_dir(
+                vec![
+                    (
+                        folder_mount_with_pin("src", src_dir, src_pin),
+                        Box::new(src_writer) as Box<dyn MemBackend>,
+                    ),
+                    (tgt_mount, Box::new(tgt_writer) as Box<dyn MemBackend>),
+                ],
+                Some(&schemas_dir),
+            )
+            .expect("two-mem engine constructs");
+
+            let mut settings = WorkspaceSettings::default();
+            let mut links: BTreeMap<String, CrossLinkValue> = BTreeMap::new();
+            links.insert("src".to_string(), CrossLinkValue::Wildcard);
+            settings.cross_mem_links = links;
+            engine.set_settings(settings);
+
+            let (actor, client) = cli_actor();
+            let src_entity = engine
+                .create_entity(
+                    CreateEntityArgs {
+                        mem: "src".to_string(),
+                        title: "Doc One".to_string(),
+                        entity_type: "doc".to_string(),
+                        sections: IndexMap::from_iter([("body".to_string(), "seed".to_string())]),
+                        metadata: IndexMap::new(),
+                        relations: Vec::new(),
+                        dry_run: false,
+                    },
+                    actor,
+                    Some(&client),
+                    None,
+                )
+                .expect("source entity creates");
+
+            (tmp, engine, src_entity)
+        }
+
+        fn assert_cross_mem_target_not_found(err: EngineError, expected_target: &str) {
+            match err {
+                EngineError::CrossMemTargetNotFound {
+                    target_id,
+                    target_mem,
+                } => {
+                    assert_eq!(target_id, expected_target);
+                    assert_eq!(target_mem, "tgt");
+                }
+                other => panic!("expected CrossMemTargetNotFound, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn relate_to_missing_target_in_readonly_mem_refuses() {
+            let (_tmp, mut engine, src) = engine_with_tgt_capability(MountCapability::ReadOnly);
+            let (actor, client) = cli_actor();
+            let err = engine
+                .relate_entity(
+                    RelateEntityArgs {
+                        source: src.id.clone(),
+                        expected_hash: Some(src.content_hash.clone()),
+                        rel_type: "ADDRESSES".to_string(),
+                        target: crate::EntityId::new("tgt", "missing"),
+                        remove: false,
+                        description: None,
+                    },
+                    actor,
+                    Some(&client),
+                    None,
+                )
+                .unwrap_err();
+            assert_cross_mem_target_not_found(err, "tgt--missing");
+        }
+
+        /// Pre-funnel, `memstead_create.relations[]` lacked the
+        /// ReadOnly-missing-target check the relate path had — an
+        /// inline relation to an absent read-only target auto-stubbed
+        /// instead of refusing.
+        #[test]
+        fn create_inline_relation_to_missing_target_in_readonly_mem_refuses() {
+            let (_tmp, mut engine, _src) = engine_with_tgt_capability(MountCapability::ReadOnly);
+            let (actor, client) = cli_actor();
+            let err = engine
+                .create_entity(
+                    CreateEntityArgs {
+                        mem: "src".to_string(),
+                        title: "Doc Two".to_string(),
+                        entity_type: "doc".to_string(),
+                        sections: IndexMap::from_iter([("body".to_string(), "x".to_string())]),
+                        metadata: IndexMap::new(),
+                        relations: vec![crate::ops::RelateArg {
+                            to: crate::EntityId::new("tgt", "missing"),
+                            rel_type: "ADDRESSES".to_string(),
+                            description: None,
+                        }],
+                        dry_run: false,
+                    },
+                    actor,
+                    Some(&client),
+                    None,
+                )
+                .unwrap_err();
+            assert_cross_mem_target_not_found(err, "tgt--missing");
+        }
+
+        /// The body-wiki-link channel (alias synthesis) — pre-funnel a
+        /// granted body link to a missing read-only target silently
+        /// auto-stubbed at load; `memstead_health` was the only signal.
+        #[test]
+        fn create_body_link_to_missing_target_in_readonly_mem_refuses() {
+            let (_tmp, mut engine, _src) = engine_with_tgt_capability(MountCapability::ReadOnly);
+            let (actor, client) = cli_actor();
+            let err = engine
+                .create_entity(
+                    CreateEntityArgs {
+                        mem: "src".to_string(),
+                        title: "Doc Three".to_string(),
+                        entity_type: "doc".to_string(),
+                        sections: IndexMap::from_iter([(
+                            "body".to_string(),
+                            "see [[tgt--missing]].".to_string(),
+                        )]),
+                        metadata: IndexMap::new(),
+                        relations: Vec::new(),
+                        dry_run: false,
+                    },
+                    actor,
+                    Some(&client),
+                    None,
+                )
+                .unwrap_err();
+            assert_cross_mem_target_not_found(err, "tgt--missing");
+        }
+
+        #[test]
+        fn update_body_link_to_missing_target_in_readonly_mem_refuses() {
+            let (_tmp, mut engine, src) = engine_with_tgt_capability(MountCapability::ReadOnly);
+            let (actor, client) = cli_actor();
+            let err = engine
+                .update_entity(
+                    crate::engine::UpdateEntityArgs {
+                        id: src.id.clone(),
+                        expected_hash: Some(src.content_hash.clone()),
+                        sections: IndexMap::from_iter([(
+                            "body".to_string(),
+                            "now see [[tgt--missing]].".to_string(),
+                        )]),
+                        append_sections: IndexMap::new(),
+                        patch_sections: IndexMap::new(),
+                        metadata: IndexMap::new(),
+                        metadata_unset: Vec::new(),
+                        declare_relations: Vec::new(),
+                        dry_run: false,
+                        relations_unset: Vec::new(),
+                    },
+                    actor,
+                    Some(&client),
+                    None,
+                )
+                .unwrap_err();
+            assert_cross_mem_target_not_found(err, "tgt--missing");
+        }
+
+        /// Positive control: a body link to a target that EXISTS in
+        /// the read-only mem writes clean and materialises the typed
+        /// alias edge — the seam's happy path.
+        #[test]
+        fn body_link_to_existing_target_in_readonly_mem_admits_and_emits_edge() {
+            let (_tmp, mut engine, _src) = engine_with_tgt_capability(MountCapability::ReadOnly);
+            let (actor, client) = cli_actor();
+            let created = engine
+                .create_entity(
+                    CreateEntityArgs {
+                        mem: "src".to_string(),
+                        title: "Doc Four".to_string(),
+                        entity_type: "doc".to_string(),
+                        sections: IndexMap::from_iter([(
+                            "body".to_string(),
+                            "see [[tgt--req-one]].".to_string(),
+                        )]),
+                        metadata: IndexMap::new(),
+                        relations: Vec::new(),
+                        dry_run: false,
+                    },
+                    actor,
+                    Some(&client),
+                    None,
+                )
+                .expect("body link to existing read-only target admits");
+            let outgoing = engine.store().outgoing(&created.id);
+            assert!(
+                outgoing.iter().any(|e| e.rel_type == "REFERENCES"
+                    && e.target == crate::EntityId::new("tgt", "req-one")),
+                "alias REFERENCES edge to the read-only target must materialise; got {outgoing:?}"
+            );
+        }
+
+        /// Behaviour preserved: a missing target in a WRITE-mounted
+        /// sibling mem is a legitimate forward reference and keeps
+        /// the auto-stub mechanic on every path.
+        #[test]
+        fn body_link_to_missing_target_in_write_mem_still_stubs() {
+            let (_tmp, mut engine, _src) = engine_with_tgt_capability(MountCapability::Write);
+            let (actor, client) = cli_actor();
+            let created = engine
+                .create_entity(
+                    CreateEntityArgs {
+                        mem: "src".to_string(),
+                        title: "Doc Five".to_string(),
+                        entity_type: "doc".to_string(),
+                        sections: IndexMap::from_iter([(
+                            "body".to_string(),
+                            "see [[tgt--missing]].".to_string(),
+                        )]),
+                        metadata: IndexMap::new(),
+                        relations: Vec::new(),
+                        dry_run: false,
+                    },
+                    actor,
+                    Some(&client),
+                    None,
+                )
+                .expect("forward reference into a Write sibling mem keeps stubbing");
+            assert!(
+                engine.store().contains(&crate::EntityId::new("tgt", "missing")),
+                "auto-stub must land for the Write-mem forward reference"
+            );
+            let outgoing = engine.store().outgoing(&created.id);
+            assert!(
+                outgoing.iter().any(|e| e.rel_type == "REFERENCES"),
+                "alias edge must still emit for the stubbed target"
             );
         }
     }

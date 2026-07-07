@@ -319,7 +319,7 @@ impl Engine {
             // sits ahead of the rel-type / shape checks so the policy
             // refusal is identical in shape and ordering to
             // `memstead_relate` and `memstead_update.declare_relations`.
-            super::validate_cross_mem_add_policy(self, &args.mem, &target_mem)?;
+            super::validate_cross_mem_add_policy(self, &args.mem, &rel.to)?;
             // Target-type lookup mirrors the relate path: `None` for
             // not-yet-present targets so the target gate admits the
             // stub-bound case. The cross-mem router below consults
