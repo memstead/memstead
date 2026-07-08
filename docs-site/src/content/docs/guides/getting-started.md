@@ -5,7 +5,7 @@ sidebar:
   order: 1
 ---
 
-Memstead gives AI agents a durable, typed memory you own. Knowledge lives as plain markdown in a **mem** — a typed graph of interconnected entities, validated on every write against a **schema** you control. This tutorial takes you from nothing to a working, agent-connected graph.
+Memstead gives AI agents a typed, validated model of a project. Knowledge lives as plain markdown in a **mem** — a typed graph of interconnected entities, validated on every write against a **schema** you control. This tutorial takes you from nothing to a working, agent-connected graph.
 
 Terms like *mem*, *schema*, *workspace*, and *entity* have precise meanings — the [Glossary](../../glossary/) is the normative reference; this page uses its vocabulary.
 
