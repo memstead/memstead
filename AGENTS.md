@@ -20,3 +20,4 @@ This file is the public mirror of the private workspace constitution: where they
 - **MCP tool policy:** keep the tool count small — extend an existing tool's parameters before adding one; no action-discriminators, no response-shape polymorphism.
 - **Work and commit on `main`;** never create a branch unless explicitly asked. English only — code, commits, issues.
 - **One unit noun: mem** — an entity is never called a mem; a mem is not one "memory"/fact.
+- **Versioned git hooks:** wire once per clone with `git config core.hooksPath .githooks`. The `pre-push` hook refuses pushes that change an API surface (`crates/`, `xtask/`, the generated reference) without the regenerated docs reference committed — on drift it regenerates into your working tree; commit the result and push again. `docs-drift.yml` remains the CI backstop; it cannot block a direct push.
