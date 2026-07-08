@@ -71,7 +71,7 @@ Every mem mutation lands as a native git commit with structured provenance. Auth
 
 The engine has no hardcoded entity types. Schemas — a `schema.yaml` manifest plus `types/*.yaml` definitions — are first-class, semver-versioned packages. A mem pins its schema by name; a workspace can share schemas across many mems; published mem archives embed the pinned schema so they remain self-describing on import. New schemas — for product requirements, customer research, legal compliance, anything — are author-only work, never engine work.
 
-This is the foundation for a schema marketplace on memstead.io: domain-specific schemas published, browsed, and installed the way packages are.
+This is the foundation the memstead.io registry is being built toward — domain-specific schemas published, browsed, and installed the way packages are: an invitation to the first publishers, not yet an achieved marketplace.
 
 ### LLM-first engine, human-first app
 
@@ -126,6 +126,8 @@ Keeping specs in sync with reality is the hardest problem the engine has to solv
 
 None of these alone solves freshness. Together they bound the rot.
 
+In the spec-first / spec-anchored / spec-as-source taxonomy that Birgitta Böckeler and Thoughtworks named (martinfowler.com, 2025-10-15), the market adopted spec-*first* — specs as ephemeral per-feature fuel — and hit exactly this rot. Memstead targets the **spec-anchored** slot the wave left structurally empty: a persistent, typed, queryable knowledge layer whose freshness is a first-class mechanism rather than a manual chore.
+
 The project itself is the test case. Memstead must keep its own specs synchronised while it is being developed. If it cannot, the system has not solved the problem.
 
 ## Competitive positioning
@@ -134,7 +136,7 @@ Memstead's category is agent memory: the systems that give AI agents durable sta
 
 Obsidian and Notion are adjacent tools with a different job, not competitors. Obsidian shares the substrate — markdown, wikilinks, a graph view — but is a thinking-and-writing environment for humans; the shared substrate is why an Obsidian user's mental model transfers to Memstead in minutes, not a sign of product overlap. Notion demonstrated typed structured records for human teams inside a closed SaaS; Memstead takes the typed-record idea and moves it to open files, write-time schema validation, and an agent-first MCP surface. Both are excellent at what they do; neither validates writes, types relationships, or offers agents the graph as a first-class query surface — because that was never their job.
 
-Differentiators: schema-driven structure, typed and validated relationships, MCP-native AI access, drift detection at the data layer, community clustering for navigation, git-native versioning with structured provenance.
+Differentiators: schema-driven structure, typed and validated relationships, MCP-native AI access, drift detection at the data layer, community clustering for navigation, and git-native versioning with structured provenance that travels inside the published package — each entity's authoring rationale ships in the sealed `.mem`, so an installer can ask "why should I trust this entity?" offline, with no running engine.
 
 ## Open-core go-to-market
 
@@ -148,7 +150,7 @@ Open-source serves three purposes:
 
 1. **Distribution** — visibility in the MCP ecosystem and the Rust community.
 2. **Trust** — enterprises evaluate open-source tools, not opaque proprietary engines from unknown developers.
-3. **Ecosystem** — community schema contributions create network effects without development effort.
+3. **Ecosystem** — the aim is that community schema contributions compound into network effects over time; that is a bet on the future, not a network that exists today.
 
 ## Long-term vision: Memstead as a web standard
 

@@ -4,7 +4,7 @@
 [![Release](https://img.shields.io/github/v/release/memstead/memstead)](https://github.com/memstead/memstead/releases)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](LICENSING.md)
 
-**Memstead gives AI agents a durable, typed memory you own.** Your agent's knowledge lives as plain markdown in a git repository — readable by you, diffable in review, with no database and no vendor lock-in. Any agent that speaks [MCP (the Model Context Protocol)](https://modelcontextprotocol.io) — Claude Code, Codex, Gemini, … — or the `memstead` CLI reads and writes it through a schema *you* control, and the engine enforces that schema on every write so the graph never drifts into mush.
+**Memstead gives AI agents a typed, validated model of a project — as markdown in git you own.** Your agent's knowledge lives as plain markdown in a git repository — readable by you, diffable in review, with no database and no vendor lock-in. Any agent that speaks [MCP (the Model Context Protocol)](https://modelcontextprotocol.io) — Claude Code, Codex, Gemini, … — or the `memstead` CLI reads and writes it through a schema *you* control, and the engine enforces that schema on every write so the graph never drifts into mush.
 
 Under the hood: each **mem** is a typed graph of interconnected entities. A **schema** you pin defines the entity types, their sections, and the relationships allowed between them — knowledge, plans, specs, inquiry, or any mix. Knowledge graphs are one well-known slice; Memstead generalises across all of them.
 
@@ -176,6 +176,10 @@ The engine builds in two flavours from one set of crates: the default build is t
 # Force-restart the MCP server (kills all instances; your agent auto-restarts it)
 pkill -f memstead-mcp
 ```
+
+## Built in the open, on itself
+
+Memstead is built by one person — Björn Bösenberg, a full-stack developer of ~25 years, independent since 2026 — on a single thesis: *correctness enforced at boundaries replaces trust in the author.* That is why the engine is Rust — the compiler and borrow-checker stand in for the human code review a solo builder gives up — and why every write to a mem is validated at the boundary rather than trusted after the fact. The same thesis, applied to knowledge instead of code, *is* the product. The platform — roughly 138K lines of Rust, none written by hand, about 3,100 agent commits against 4 human ones — was built across roughly 4.5 **calendar** months of **part-time** work as an AI-orchestration project, and it keeps its own project knowledge as live Memstead mems, in the open, gaps included.
 
 ## License
 
