@@ -47,9 +47,10 @@ struct EvalArgs {
     /// series — proves the scaffold without invoking `claude` or a real mem.
     #[arg(long)]
     self_test: bool,
-    /// Where to write the JSON data series.
+    /// Where to write the JSON data series. Optional under `--self-test` (a
+    /// scaffold check defaults to a temp file); required for a real run.
     #[arg(long)]
-    output: PathBuf,
+    output: Option<PathBuf>,
 
     // --- real-run options (used when --self-test is absent) ---
     /// Name of the subject mem under test (recorded in the series).
@@ -159,7 +160,12 @@ fn main() -> Result<()> {
 
 fn run_eval(args: EvalArgs) -> Result<()> {
     if args.self_test {
-        return eval::selftest::run(&args.output);
+        // A scaffold check shouldn't force choosing an output path; default it.
+        let output = args
+            .output
+            .clone()
+            .unwrap_or_else(|| std::env::temp_dir().join("memstead-eval-selftest.json"));
+        return eval::selftest::run(&output);
     }
     let subject = args
         .subject
@@ -233,14 +239,18 @@ fn run_eval(args: EvalArgs) -> Result<()> {
         system_prompt,
         args.trials,
     )?;
-    series.write(&args.output)?;
+    let output = args
+        .output
+        .as_ref()
+        .context("a real run needs --output <path>")?;
+    series.write(output)?;
     for p in &series.points {
         eprintln!(
             "  {:<14} delta={:+.3} (on={:.3} off={:.3}, n={})",
             p.state_label, p.delta, p.on_mean, p.off_mean, p.n_trials
         );
     }
-    eprintln!("wrote series to {}", args.output.display());
+    eprintln!("wrote series to {}", output.display());
     Ok(())
 }
 
@@ -405,14 +415,18 @@ fn run_substrate_eval(args: &EvalArgs, subject: &str, tasks: &[eval::TaskSpec]) 
             series.coverage.push(cov);
         }
     }
-    series.write(&args.output)?;
+    let output = args
+        .output
+        .as_ref()
+        .context("a real run needs --output <path>")?;
+    series.write(output)?;
     for p in &series.points {
         eprintln!(
             "  {:<28} delta(C−B)={:+.3} (C={:.3} B={:.3}, n={})",
             p.state_label, p.delta, p.on_mean, p.off_mean, p.n_trials
         );
     }
-    eprintln!("wrote series to {}", args.output.display());
+    eprintln!("wrote series to {}", output.display());
     Ok(())
 }
 
