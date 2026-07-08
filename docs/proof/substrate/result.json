@@ -4,27 +4,35 @@
     {
       "state_label": "schema-forced − free-form",
       "n_trials": 3,
-      "on_mean": 0.9708333333333333,
-      "off_mean": 0.9833333333333333,
-      "delta": -0.012499999999999956,
-      "delta_stddev": 0.032004773949452614,
-      "delta_stderr": 0.016002386974726307,
+      "on_mean": 0.9733333333333334,
+      "off_mean": 0.9833333333333334,
+      "delta": -0.010000000000000009,
+      "delta_stddev": 0.013333333333333376,
+      "delta_stderr": 0.005962847939999458,
       "per_task": [
+        {
+          "task_id": "concurrent-writes",
+          "on_mean": 1.0,
+          "off_mean": 1.0,
+          "delta": 0.0,
+          "on_stddev": 0.0,
+          "off_stddev": 0.0
+        },
         {
           "task_id": "sibling-coherence",
           "on_mean": 0.9666666666666667,
-          "off_mean": 1.0,
-          "delta": -0.033333333333333326,
-          "on_stddev": 0.023570226039551605,
-          "off_stddev": 0.0
+          "off_mean": 0.9833333333333334,
+          "delta": -0.01666666666666672,
+          "on_stddev": 0.04714045207910316,
+          "off_stddev": 0.023570226039551608
         },
         {
           "task_id": "bad-write-response",
           "on_mean": 0.9666666666666667,
-          "off_mean": 0.9333333333333332,
-          "delta": 0.03333333333333344,
+          "off_mean": 0.9666666666666667,
+          "delta": 0.0,
           "on_stddev": 0.023570226039551608,
-          "off_stddev": 0.023570226039551553
+          "off_stddev": 0.023570226039551605
         },
         {
           "task_id": "portability-copy",
@@ -36,23 +44,56 @@
         },
         {
           "task_id": "provenance-rate",
-          "on_mean": 0.9499999999999998,
-          "off_mean": 1.0,
-          "delta": -0.050000000000000155,
-          "on_stddev": 1.1102230246251565e-16,
-          "off_stddev": 0.0
+          "on_mean": 0.9333333333333332,
+          "off_mean": 0.9666666666666667,
+          "delta": -0.03333333333333344,
+          "on_stddev": 0.023570226039551553,
+          "off_stddev": 0.023570226039551608
         }
       ]
     }
   ],
-  "excluded_contaminated": [
+  "transcripts": [
     {
       "task_id": "concurrent-writes",
-      "bare_score": 0.6
+      "prompt": "Two actors read the same entity, then both try to update it. How does Memstead stop the second write from silently overwriting the first?",
+      "reference": "Optimistic content-hash locking: every update must present the expected hash of the entity's current on-disk state. If the state moved since the caller read it, the hashes disagree and the write is refused rather than applied; the loser re-reads and retries. No write is silently lost.",
+      "schema_forced": "Memstead uses **optimistic content-hash locking**, enforced at the engine, which is the only process allowed to write.\n\nWhen each actor reads the entity, it obtains the content-hash of that entity's current state. To update, a caller must present the hash it last read. The engine compares that presented hash against the actual on-disk state:\n\n1. The **first** writer's hash still matches the on-disk state, so its write succeeds. This advances the entity's state (and its hash).\n2. When the **second** writer submits, it's still presenting the hash from the *old* state it read. The on-disk state has now moved, so the hashes disagree. The engine **refuses** the write rather than applying it — it does not overwrite the first change.\n\nThe losing (stale) caller must then re-read the fresh state and retry its update against it. The guarantee is that no write is ever silently lost: a caller either wins with an up-to-date hash, or is refused and forced to reconcile against the current state before retrying.\n\nThere's also a supporting safeguard for a long-lived engine process: if a sibling process moves the repository's branch ref underneath it, a file-watcher marks the in-memory store stale and reloads from the branch tip before serving the next operation — so reads reconcile against the committed branch rather than trusting a stale in-memory snapshot, which is a known way an in-memory store can drift ahead of committed disk.",
+      "free_form": "Optimistic content-hash locking. When both actors read the entity, each captures the content-hash of its current state. The first update commits successfully. When the second actor tries to write, it must present the content-hash it read — but the on-disk state has now changed, so the hash it presents no longer matches the entity's current hash. The hashes disagree, and the engine refuses the write rather than applying it.\n\nThe refused actor then re-reads the new (now updated) state and retries its change on top of it. That's why no write is ever silently lost: the second writer is forced to retry against the current state instead of overwriting the first writer's change."
     },
     {
+      "task_id": "sibling-coherence",
+      "prompt": "A long-lived engine process is serving reads while a separate CLI invocation commits a change to the same mem branch. What keeps the engine from answering out of a stale in-memory snapshot?",
+      "reference": "The reload-before-operation rule: a polling file-watcher detects that the mem-repo ref moved, a mem_changed notice marks the in-memory store stale, and the store reloads from the branch tip before serving the next operation. It reconciles against the branch rather than trusting memory.",
+      "schema_forced": "The reload-before-operation mechanism keeps it current. A polling file-watcher observes the branch ref; when a sibling process (the CLI commit) moves that ref, the watcher detects the move and a `mem_changed` notice marks the in-memory store stale. Before serving the next operation, the store reloads from the branch tip. As a result, the engine never answers from a snapshot the disk has already left behind — reads reconcile against the branch rather than trusting memory.\n\nThis also guards a known failure mode where a failed writer check-and-set can leave the in-memory store ahead of committed disk, which is exactly why reads must reconcile against the branch instead of trusting the in-memory snapshot.",
+      "free_form": "The reload-before-operation coherence rule keeps it current.\n\nHere's the chain that protects against a stale snapshot: a polling file-watcher detects that the mem-repo's ref has moved (because the CLI's commit advanced the branch). A `mem_changed` notice then marks the in-memory store as stale, and before serving the next operation the store reloads from the branch tip. As a result, the engine never answers out of a snapshot the disk has already moved past — it reconciles against the branch rather than trusting memory.\n\nThis is distinct from the per-write content-hash lock. That lock only guards a single individual write against clobbering; the reload rule is the separate mechanism that handles a sibling process moving the branch underneath a long-lived engine."
+    },
+    {
+      "task_id": "bad-write-response",
+      "prompt": "An agent attempts a write with a relationship type the schema's vocabulary doesn't allow. What does the engine do, and what does the agent get back?",
+      "reference": "The runtime validator refuses the write rather than coercing it into something that validates (never silently admit unvalidated content). The refusal carries a typed recovery payload naming what was wrong and how to fix it — the declared field/section list, the allowed values, and a nearest-match suggestion — so the agent can correct and resubmit without guessing.",
+      "schema_forced": "The engine refuses the write — it does not coerce the invalid relationship into something that validates. The runtime validator gates every ingress into the graph, and a relationship type outside the schema's allowed vocabulary is rejected rather than admitted.\n\nWhat the agent gets back is not a bare error but a typed recovery payload naming what was wrong and how to fix it. It carries the declared field list, the allowed values, and a nearest-match suggestion, so the agent can correct and resubmit without guessing. The write itself does not land.",
+      "free_form": "The engine refuses the write — it does not coerce the disallowed relationship into something that happens to validate. A runtime validator gates every write into the graph, and a relationship type the vocabulary doesn't permit is one of the violations it rejects.\n\nWhat the agent gets back is not a bare error. The refusal carries a typed recovery payload that names what was wrong and how to fix it — including the allowed values (and, where applicable, the declared field list and a nearest-match suggestion). This lets the agent correct its submission and resubmit without guessing."
+    },
+    {
+      "task_id": "portability-copy",
+      "prompt": "You want to move a project's entire Memstead knowledge base to a new machine using only a file copy, no export tool. What do you copy, and why is that enough?",
+      "reference": "Copy the .git directory (the git repo). Markdown-plus-git is the only authoritative store; every index (search, in-memory graph) is a derived projection that rebuilds from the markdown on first load. Nothing of value lives only in an index, so the repo carries everything — there is no export step or vendor format.",
+      "schema_forced": "Copy the project's `.git` directory — that alone.\n\nThat's enough because the authoritative store *is* plain markdown files under git version control; nothing of value lives anywhere else. Every index — the search index and the in-memory graph — is a derived projection of that markdown, not an authoritative store of its own. Each such index can be rebuilt from the markdown at any time, so when you copy the `.git` directory the data travels with it and the indexes simply rebuild on first load on the new machine.\n\nBecause of this, there is no export step and no vendor format to escape: markdown-plus-git is the single source of truth, and portability follows by construction from keeping every index reconstructible from that markdown.",
+      "free_form": "Copy the project's `.git` directory — that's all you need.\n\nThat single copy is sufficient because in Memstead the markdown-plus-git store is the *only* authoritative source of data. Everything else — the search index and the in-memory graph — is a derived projection that can be rebuilt from the markdown at any time; nothing of value lives solely in an index. So when you copy `.git`, the actual data travels with it, and the indexes simply rebuild themselves on first load on the new machine.\n\nThat's why there's no export step and no vendor format to escape: the repository *is* the knowledge base, portable by construction."
+    },
+    {
+      "task_id": "provenance-rate",
+      "prompt": "How much of the project's mutation history carries a human-readable reason for each change, and what makes that happen?",
+      "reference": "Near 97% of mutating commits (measured directly over the live mem-repo). The workspace's require_notes policy nudges each mutating commit to carry a one-sentence prose rationale beyond the auto-emitted Tool/Actor/Client trailers, so the decision history is readable with git log alone — no engine, no database.",
+      "schema_forced": "Roughly 97% of the mem‑repo's mutating commits carry a one-sentence, human-readable prose rationale explaining why each change was made.\n\nWhat makes that happen is the workspace's `require_notes` policy. It nudges every mutating commit to include a one-sentence prose rationale in the commit body — placed between the mechanical subject line and the auto-emitted provenance trailers — capturing the \"why\" of a change rather than only the \"what.\" Because it nudges rather than hard-enforces, adherence is high but not total, leaving a small remainder of commits (mostly pure-housekeeping edits) without a note.",
+      "free_form": "About 97% of the project's mutating commits carry a one-sentence, human-readable rationale — the *why* behind the change, not just the *what*.\n\nWhat makes that happen is the workspace's `require_notes` policy, which nudges every mutating commit to include that one-sentence prose reason. (Separately, each mutation is a git commit and automatically gets a trailer block with `Tool:`, `Actor:`, and `Client:` lines, but those record the *what/who*; the prose note is what supplies the *why*.) The payoff is that the project's decision history can be read years later with `git log` alone — no engine or database required."
+    }
+  ],
+  "excluded_contaminated": [
+    {
       "task_id": "why-engine-only",
-      "bare_score": 0.5666666666666668
+      "bare_score": 0.5333333333333333
     }
   ],
   "coverage": [

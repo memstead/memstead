@@ -286,6 +286,7 @@ mod tests {
             )],
             excluded_contaminated: vec![],
             coverage: vec![c_cov, b_cov],
+            transcripts: vec![],
         };
         let json = series.to_json().unwrap();
         // The task win is present…

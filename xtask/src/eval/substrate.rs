@@ -35,7 +35,7 @@ use anyhow::{Context, Result, bail};
 
 use super::claude::ClaudeRunner;
 use super::grade::{TaskResult, strip_tells};
-use super::series::{DataSeries, SeriesPoint};
+use super::series::{AnswerTranscript, DataSeries, SeriesPoint};
 use super::{AgentAnswer, Judge, TaskSpec};
 
 /// A captured body of knowledge, ready to be placed in an agent's context.
@@ -282,19 +282,29 @@ pub fn run_substrate_task<R: SubstrateRunner, J: Judge>(
     c_arm: &SubstrateArm,
     b_arm: &SubstrateArm,
     n_trials: usize,
-) -> Result<TaskResult> {
+) -> Result<(TaskResult, (String, String))> {
     check_single_substrate_variable(c_arm, b_arm)?;
     let mut c_scores = Vec::with_capacity(n_trials);
     let mut b_scores = Vec::with_capacity(n_trials);
+    // Keep the first trial's raw answers so the eval's output doubles as an
+    // auditable transcript. The judge still scores the tell-stripped text; the
+    // captured answers are the real (unstripped) ones a reader should see.
+    let mut first_answers: Option<(String, String)> = None;
     for _ in 0..n_trials {
         let c = runner.run(c_arm)?;
         validate_no_retrieval(&c)?;
         let b = runner.run(b_arm)?;
         validate_no_retrieval(&b)?;
+        if first_answers.is_none() {
+            first_answers = Some((c.text.clone(), b.text.clone()));
+        }
         c_scores.push(judge.score(&task.reference, &strip_tells(&c.text))?);
         b_scores.push(judge.score(&task.reference, &strip_tells(&b.text))?);
     }
-    Ok(TaskResult::new(task.id.clone(), c_scores, b_scores))
+    Ok((
+        TaskResult::new(task.id.clone(), c_scores, b_scores),
+        first_answers.unwrap_or_default(),
+    ))
 }
 
 /// Score a whole task set against one (C, B) substrate pair and aggregate into a
@@ -320,6 +330,7 @@ pub fn run_substrate_series<R: SubstrateRunner, J: Judge>(
     n_trials: usize,
 ) -> Result<DataSeries> {
     let mut results = Vec::with_capacity(tasks.len());
+    let mut transcripts = Vec::with_capacity(tasks.len());
     for task in tasks {
         let (c_arm, b_arm) = build_substrate_arms(
             task,
@@ -329,9 +340,16 @@ pub fn run_substrate_series<R: SubstrateRunner, J: Judge>(
             schema_forced,
             free_form,
         );
-        results.push(run_substrate_task(
-            runner, judge, task, &c_arm, &b_arm, n_trials,
-        )?);
+        let (result, (c_answer, b_answer)) =
+            run_substrate_task(runner, judge, task, &c_arm, &b_arm, n_trials)?;
+        transcripts.push(AnswerTranscript {
+            task_id: task.id.clone(),
+            prompt: task.prompt.clone(),
+            reference: task.reference.clone(),
+            schema_forced: c_answer,
+            free_form: b_answer,
+        });
+        results.push(result);
     }
     let label = format!("{} − {}", schema_forced.label, free_form.label);
     Ok(DataSeries {
@@ -341,6 +359,7 @@ pub fn run_substrate_series<R: SubstrateRunner, J: Judge>(
         // their reports are attached to the returned series by the caller.
         excluded_contaminated: Vec::new(),
         coverage: Vec::new(),
+        transcripts,
     })
 }
 
@@ -562,7 +581,7 @@ mod tests {
         };
         let t = task();
         let (c_arm, b_arm) = build_substrate_arms(&t, "m", "sys", 1000, &c(), &b());
-        let r = run_substrate_task(&runner, &ParseQualityJudge, &t, &c_arm, &b_arm, 5).unwrap();
+        let (r, _) = run_substrate_task(&runner, &ParseQualityJudge, &t, &c_arm, &b_arm, 5).unwrap();
         assert!((r.delta - 0.5).abs() < 1e-9, "delta = {}", r.delta);
         assert!(r.on_mean > r.off_mean, "C should beat B");
     }
@@ -577,7 +596,7 @@ mod tests {
         };
         let t = task();
         let (c_arm, b_arm) = build_substrate_arms(&t, "m", "sys", 1000, &c(), &b());
-        let r = run_substrate_task(&runner, &ParseQualityJudge, &t, &c_arm, &b_arm, 3).unwrap();
+        let (r, _) = run_substrate_task(&runner, &ParseQualityJudge, &t, &c_arm, &b_arm, 3).unwrap();
         assert!(r.delta < 0.0, "delta = {}", r.delta);
         assert!((r.delta + 0.5).abs() < 1e-9, "delta = {}", r.delta);
     }

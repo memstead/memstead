@@ -193,9 +193,11 @@ pub fn run_series<R: Runner, J: Judge>(
     Ok(DataSeries {
         subject_mem: subject_mem.to_string(),
         points,
-        // The mount/retrieval mode does not screen for contamination or coverage.
+        // The mount/retrieval mode does not screen for contamination or coverage,
+        // and does not persist per-arm answer transcripts.
         excluded_contaminated: Vec::new(),
         coverage: Vec::new(),
+        transcripts: Vec::new(),
     })
 }
 

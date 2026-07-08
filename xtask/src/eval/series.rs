@@ -83,11 +83,30 @@ impl SeriesPoint {
     }
 }
 
+/// One task's answer from each arm — persisted so the eval's own output doubles
+/// as an auditable transcript and as concrete before/after copy, rather than the
+/// answers being scored and thrown away. Captured from the first trial of each
+/// kept task; the substrate labels match the scored point's arms.
+#[derive(Clone, Debug, Serialize)]
+pub struct AnswerTranscript {
+    pub task_id: String,
+    pub prompt: String,
+    pub reference: String,
+    /// The schema-forced (C) arm's answer — the `on` slot of the scored delta.
+    pub schema_forced: String,
+    /// The free-form (B) arm's answer — the `off` slot of the scored delta.
+    pub free_form: String,
+}
+
 /// The full series for one subject mem — what a chart renderer consumes.
 #[derive(Clone, Debug, Serialize)]
 pub struct DataSeries {
     pub subject_mem: String,
     pub points: Vec<SeriesPoint>,
+    /// First-trial answers per kept task, one per arm — auditable transcripts.
+    /// Empty for the mount/retrieval mode and whenever no answers were captured.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub transcripts: Vec<AnswerTranscript>,
     /// Tasks the contamination guard (A arm) excluded from the comparison as
     /// guessable, surfaced in the output so an excluded task is reported rather
     /// than silently dropped. Empty for the mount/retrieval mode, which does not
@@ -154,6 +173,7 @@ mod tests {
             )],
             excluded_contaminated: vec![],
             coverage: vec![],
+            transcripts: vec![],
         };
         let json = series.to_json().unwrap();
         let back: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -175,6 +195,7 @@ mod tests {
             )],
             excluded_contaminated: vec![],
             coverage: vec![],
+            transcripts: vec![],
         };
         series.write(&path).unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
