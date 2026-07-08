@@ -508,12 +508,82 @@ fn write_cli_reference(output: &Path) -> Result<()> {
 
     // One CLI crate, one reference. `xtask` links `memstead-cli` with
     // `mem-repo` on, so this renders the full `memstead` surface.
-    let cli = clap_markdown::help_markdown_command(&memstead_cli::cli::Cli::command());
+    // clap help text is plain text; clap_markdown embeds it verbatim, so a
+    // placeholder like `--status <S>` outside a code span parses as a raw
+    // HTML tag downstream (tag names are case-insensitive — `<S>` is the
+    // strikethrough element and struck out the rest of the rendered page).
+    let cli = escape_raw_html_in_markdown(&clap_markdown::help_markdown_command(
+        &memstead_cli::cli::Cli::command(),
+    ));
     write_if_changed(
         &cli_dir.join("cli.md"),
         &with_frontmatter("CLI (`memstead`)", &cli),
     )?;
     Ok(())
+}
+
+/// Escape raw HTML-tag lookalikes in generated Markdown prose.
+///
+/// Replaces `<` with `&lt;` wherever it would open an HTML tag (next char
+/// is a letter, `/`, `!`, or `?`), except inside fenced code blocks,
+/// inline code spans, and autolinks (`<http://…>`, `<https://…>`,
+/// `<mailto:…>`). Without this, plain-text help embedded in Markdown can
+/// smuggle real elements into the rendered page — `<S>` (strikethrough)
+/// visibly, any other placeholder by being silently swallowed.
+fn escape_raw_html_in_markdown(md: &str) -> String {
+    let mut out = String::with_capacity(md.len() + 64);
+    let mut in_fence = false;
+    for line in md.split_inclusive('\n') {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("```") {
+            in_fence = !in_fence;
+            out.push_str(line);
+            continue;
+        }
+        if in_fence {
+            out.push_str(line);
+            continue;
+        }
+        let chars: Vec<char> = line.chars().collect();
+        let mut i = 0;
+        // Length of the opening backtick run of the current inline code
+        // span; 0 = not inside a span. A span closes only on a backtick
+        // run of exactly the same length (CommonMark).
+        let mut span_ticks = 0usize;
+        while i < chars.len() {
+            if chars[i] == '`' {
+                let mut run = 0;
+                while i + run < chars.len() && chars[i + run] == '`' {
+                    run += 1;
+                }
+                out.extend(std::iter::repeat_n('`', run));
+                if span_ticks == 0 {
+                    span_ticks = run;
+                } else if run == span_ticks {
+                    span_ticks = 0;
+                }
+                i += run;
+                continue;
+            }
+            if chars[i] == '<' && span_ticks == 0 {
+                let opens_tag = chars
+                    .get(i + 1)
+                    .is_some_and(|c| c.is_ascii_alphabetic() || matches!(c, '/' | '!' | '?'));
+                let rest: String = chars[i + 1..].iter().take(8).collect();
+                let autolink = rest.starts_with("http://")
+                    || rest.starts_with("https://")
+                    || rest.starts_with("mailto:");
+                if opens_tag && !autolink {
+                    out.push_str("&lt;");
+                    i += 1;
+                    continue;
+                }
+            }
+            out.push(chars[i]);
+            i += 1;
+        }
+    }
+    out
 }
 
 /// Prepend a YAML frontmatter block carrying just the page title.
@@ -558,4 +628,46 @@ fn write_if_changed(path: &Path, contents: &str) -> Result<()> {
     }
     fs::write(path, contents).with_context(|| format!("writing {}", path.display()))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod escape_raw_html_tests {
+    use super::escape_raw_html_in_markdown;
+
+    #[test]
+    fn escapes_tag_lookalikes_in_prose() {
+        assert_eq!(
+            escape_raw_html_in_markdown("--status <S>  Filter by status."),
+            "--status &lt;S>  Filter by status."
+        );
+        // Case-insensitivity is the whole point: <S> == <s> == strikethrough.
+        assert_eq!(escape_raw_html_in_markdown("a </del> b"), "a &lt;/del> b");
+    }
+
+    #[test]
+    fn leaves_inline_code_spans_alone() {
+        let s = "Usage: `memstead install [OPTIONS] <PATH or SCOPE/NAME>`";
+        assert_eq!(escape_raw_html_in_markdown(s), s);
+        // Double-backtick span containing a single backtick.
+        let s = "``code with ` and <TAG>`` and prose <TAG>";
+        assert_eq!(
+            escape_raw_html_in_markdown(s),
+            "``code with ` and <TAG>`` and prose &lt;TAG>"
+        );
+    }
+
+    #[test]
+    fn leaves_fenced_blocks_alone() {
+        let s = "prose <X>\n```\ncode <Y>\n```\nprose <Z>\n";
+        assert_eq!(
+            escape_raw_html_in_markdown(s),
+            "prose &lt;X>\n```\ncode <Y>\n```\nprose &lt;Z>\n"
+        );
+    }
+
+    #[test]
+    fn leaves_autolinks_and_comparisons_alone() {
+        let s = "see <https://memstead.io> and note 3 < 5, also a <- b";
+        assert_eq!(escape_raw_html_in_markdown(s), s);
+    }
 }

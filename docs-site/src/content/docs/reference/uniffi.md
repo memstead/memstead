@@ -470,6 +470,57 @@ dictionary AgentNotesReport {
 };
 ```
 
+## `dictionary IncomingRipple`
+
+Two-ref structural diff (`Engine::diff` / `memstead_diff`). Read-only,
+git-branch mems only — the same wire shape MCP and the CLI serve, exposed
+in-process. `content_before` / `content_after` are populated only when the
+caller passes `include_content: true`; `ripple` only when `include_ripple`.
+
+```idl
+dictionary IncomingRipple {
+    string from_id;
+    // `"ref_a"` or `"ref_b"` — which side the referrer lives on.
+    string side;
+    string? section;
+};
+```
+
+## `[Enum] interface EntityDiff`
+
+```idl
+interface EntityDiff {
+    Added(string id, string? title, string? entity_type, string? content_after, sequence<IncomingRipple> ripple);
+    Modified(string id, string? title, string? entity_type, string? content_before, string? content_after, sequence<IncomingRipple> ripple);
+    Deleted(string id, string? title, string? entity_type, string? content_before, sequence<IncomingRipple> ripple);
+    Renamed(string from_id, string to_id, sequence<string> rename_chain, string? title, string? entity_type, string? content_before, string? content_after, sequence<IncomingRipple> ripple);
+    InvalidEntity(string id, string side, string error, string? content_before, string? content_after);
+};
+```
+
+## `dictionary DiffConfig`
+
+```idl
+dictionary DiffConfig {
+    f32 rename_similarity;
+    boolean include_content;
+    boolean include_ripple;
+};
+```
+
+## `dictionary Diff`
+
+```idl
+dictionary Diff {
+    string ref_a;
+    string ref_b;
+    string resolved_a_sha;
+    string resolved_b_sha;
+    DiffConfig config;
+    sequence<EntityDiff> entries;
+};
+```
+
 ## `dictionary ParseRecoveryEntry`
 
 ```idl
@@ -659,6 +710,14 @@ interface Engine {
     // the MCP knob (default 0.6 when `None`).
     [Throws=MemsteadError]
     ChangesReport changes_since(string mem, string since, f32? rename_similarity);
+
+    // Two-ref structural diff for one mem — exposes the engine's existing
+    // `Engine::diff` (the `memstead_diff` MCP surface). Read-only,
+    // git-branch mems only. Optional knobs mirror the MCP defaults:
+    // `include_content`/`include_ripple` default true, `rename_similarity`
+    // defaults to 0.6 when `None`.
+    [Throws=MemsteadError]
+    Diff diff(string mem, string ref_a, string ref_b, boolean? include_content, boolean? include_ripple, f32? rename_similarity);
 
     // Walk per-commit agent-notes between `since` and HEAD. See the
     // engine's `Engine::agent_notes`. The response also carries the

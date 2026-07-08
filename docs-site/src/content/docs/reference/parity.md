@@ -88,6 +88,7 @@ Surface entries the registry does not pin to a logical operation. Either add a r
 - `delete_medium`
 - `delete_mem`
 - `delete_projection`
+- `diff`
 - `export_mem`
 - `mem_roster`
 - `pipeline_configs_json`

@@ -93,7 +93,7 @@ Exit codes:
   5  validation / schema / policy refusal
 
   For programmatic branching, prefer `--json` over the exit code:
-    memstead <subcommand> ... --json | jq -r .code
+    memstead &lt;subcommand> ... --json | jq -r .code
   The JSON envelope's `code` field carries the typed token
   (e.g. INVALID_TITLE, HAS_INCOMING_REFS, CROSS_MEM_LINK_NOT_ALLOWED)
   with structured recovery details under `.details`.
@@ -195,10 +195,10 @@ Find entities by text or graph proximity
 Filter surface:
   Named-flag shortcuts (frozen — no new ones are added; use --filter
   for any other schema-declared filterable field):
-    --type <T>          Filter by entity_type (engine first-class axis).
-    --level <L>         Filter by level (e.g. M0, M1).
-    --status <S>        Filter by status (e.g. active, closed).
-    --edge-type <E>     Filter by edge type (engine first-class axis).
+    --type &lt;T>          Filter by entity_type (engine first-class axis).
+    --level &lt;L>         Filter by level (e.g. M0, M1).
+    --status &lt;S>        Filter by status (e.g. active, closed).
+    --edge-type &lt;E>     Filter by edge type (engine first-class axis).
 
   Generic equality filter:
     --filter KEY=VALUE  Filter by any schema-declared `filterable: equality`
@@ -247,10 +247,10 @@ Filter entities by metadata (no text match — use `search` for that)
 Filter surface:
   Named-flag shortcuts (frozen — no new ones are added; use --filter
   for any other schema-declared filterable field):
-    --type <T>          Filter by entity_type (engine first-class axis).
-    --level <L>         Filter by level (e.g. M0, M1).
-    --status <S>        Filter by status (e.g. active, closed).
-    --edge-type <E>     Filter by edge type (engine first-class axis).
+    --type &lt;T>          Filter by entity_type (engine first-class axis).
+    --level &lt;L>         Filter by level (e.g. M0, M1).
+    --status &lt;S>        Filter by status (e.g. active, closed).
+    --edge-type &lt;E>     Filter by edge type (engine first-class axis).
 
   Generic equality filter:
     --filter KEY=VALUE  Filter by any schema-declared `filterable: equality`
@@ -1328,9 +1328,9 @@ Render the run-brief for an ingest — the Markdown prompt an agent consumes —
 
 
 
-<hr/>
+&lt;hr/>
 
-<small><i>
+&lt;small>&lt;i>
     This document was generated automatically by
-    <a href="https://crates.io/crates/clap-markdown"><code>clap-markdown</code></a>.
-</i></small>
+    &lt;a href="https://crates.io/crates/clap-markdown">&lt;code>clap-markdown&lt;/code>&lt;/a>.
+&lt;/i>&lt;/small>
