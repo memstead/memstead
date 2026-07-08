@@ -1,0 +1,118 @@
+{
+  "subject_mem": "mem-repo-trust",
+  "points": [
+    {
+      "state_label": "schema-forced − free-form",
+      "n_trials": 3,
+      "on_mean": 0.9708333333333333,
+      "off_mean": 0.9833333333333333,
+      "delta": -0.012499999999999956,
+      "delta_stddev": 0.032004773949452614,
+      "delta_stderr": 0.016002386974726307,
+      "per_task": [
+        {
+          "task_id": "sibling-coherence",
+          "on_mean": 0.9666666666666667,
+          "off_mean": 1.0,
+          "delta": -0.033333333333333326,
+          "on_stddev": 0.023570226039551605,
+          "off_stddev": 0.0
+        },
+        {
+          "task_id": "bad-write-response",
+          "on_mean": 0.9666666666666667,
+          "off_mean": 0.9333333333333332,
+          "delta": 0.03333333333333344,
+          "on_stddev": 0.023570226039551608,
+          "off_stddev": 0.023570226039551553
+        },
+        {
+          "task_id": "portability-copy",
+          "on_mean": 1.0,
+          "off_mean": 1.0,
+          "delta": 0.0,
+          "on_stddev": 0.0,
+          "off_stddev": 0.0
+        },
+        {
+          "task_id": "provenance-rate",
+          "on_mean": 0.9499999999999998,
+          "off_mean": 1.0,
+          "delta": -0.050000000000000155,
+          "on_stddev": 1.1102230246251565e-16,
+          "off_stddev": 0.0
+        }
+      ]
+    }
+  ],
+  "excluded_contaminated": [
+    {
+      "task_id": "concurrent-writes",
+      "bare_score": 0.6
+    },
+    {
+      "task_id": "why-engine-only",
+      "bare_score": 0.5666666666666668
+    }
+  ],
+  "coverage": [
+    {
+      "substrate_label": "schema-forced",
+      "covered": [
+        "f-engine-only",
+        "f-reads-any",
+        "f-boundary-discipline",
+        "f-bypass-two",
+        "f-cas",
+        "f-cas-refuse",
+        "f-cas-retry",
+        "f-many-actors",
+        "f-reload-rule",
+        "f-watcher",
+        "f-mem-changed",
+        "f-cas-ahead",
+        "f-validator",
+        "f-violations",
+        "f-recovery-payload",
+        "f-commit-per-mutation",
+        "f-trailers",
+        "f-require-notes",
+        "f-97",
+        "f-git-log-alone",
+        "f-md-git-authoritative",
+        "f-copy-git"
+      ],
+      "dropped": [],
+      "coverage": 1.0
+    },
+    {
+      "substrate_label": "free-form",
+      "covered": [
+        "f-engine-only",
+        "f-reads-any",
+        "f-boundary-discipline",
+        "f-bypass-two",
+        "f-cas",
+        "f-cas-refuse",
+        "f-cas-retry",
+        "f-many-actors",
+        "f-reload-rule",
+        "f-watcher",
+        "f-mem-changed",
+        "f-cas-ahead",
+        "f-validator",
+        "f-violations",
+        "f-recovery-payload",
+        "f-commit-per-mutation",
+        "f-trailers",
+        "f-require-notes",
+        "f-97",
+        "f-git-log-alone",
+        "f-md-git-authoritative",
+        "f-copy-git"
+      ],
+      "dropped": [],
+      "coverage": 1.0
+    }
+  ]
+}
