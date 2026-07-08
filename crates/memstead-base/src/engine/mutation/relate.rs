@@ -2860,7 +2860,9 @@ community:
                 )
                 .expect("forward reference into a Write sibling mem keeps stubbing");
             assert!(
-                engine.store().contains(&crate::EntityId::new("tgt", "missing")),
+                engine
+                    .store()
+                    .contains(&crate::EntityId::new("tgt", "missing")),
                 "auto-stub must land for the Write-mem forward reference"
             );
             let outgoing = engine.store().outgoing(&created.id);

@@ -151,9 +151,7 @@ pub fn mem_schema_ref(engine: &crate::Engine, mem_name: &str) -> Option<String> 
 /// from `memstead_overview` (the agent's permission surface) instead of only
 /// at relate time; the named targets appear per-pattern under
 /// `## Lifecycle Namespaces`.
-pub fn build_workspace_policy_entries(
-    engine: &crate::Engine,
-) -> Vec<(&'static str, String)> {
+pub fn build_workspace_policy_entries(engine: &crate::Engine) -> Vec<(&'static str, String)> {
     use memstead_schema::workspace_config::CrossLinkValue;
     let mut entries: Vec<(&'static str, String)> = Vec::new();
     let settings = engine.settings();
@@ -303,12 +301,8 @@ pub fn compose_overview(
     let mem_filter: Option<String> = match args.mem {
         Some(v) if engine.mem_router().visible_mems().iter().any(|m| m == v) => Some(v.to_string()),
         Some(v) => {
-            let mut names: Vec<String> = engine
-                .mem_router()
-                .visible_mems()
-                .iter()
-                .cloned()
-                .collect();
+            let mut names: Vec<String> =
+                engine.mem_router().visible_mems().iter().cloned().collect();
             names.sort();
             return Err(ComposeOverviewError::UnknownMem {
                 name: v.to_string(),
@@ -593,13 +587,10 @@ pub fn compose_overview(
     }
 
     // --- Bridges / dangling links ---
-    let bridges_component: serde_json::Value =
-        serde_json::to_value(crate::graph::community::aggregate_bridges(
-            engine.store(),
-            output,
-            mem_filter.as_deref(),
-        ))
-        .unwrap_or(serde_json::Value::Array(Vec::new()));
+    let bridges_component: serde_json::Value = serde_json::to_value(
+        crate::graph::community::aggregate_bridges(engine.store(), output, mem_filter.as_deref()),
+    )
+    .unwrap_or(serde_json::Value::Array(Vec::new()));
     let dangling_links_component = serde_json::to_value(
         crate::ops::health::collect_dangling_links(engine.store(), mem_filter.as_deref()),
     )
@@ -723,10 +714,8 @@ pub fn compose_overview(
     let mut schema_to_patterns: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let mut wildcard_patterns: Vec<String> = Vec::new();
     let mut lifecycle_entries: Vec<serde_json::Value> = Vec::new();
-    let create_rules: Vec<crate::CreateRuleSetting> =
-        engine.settings().mem_create_rules.clone();
-    let delete_rules: Vec<crate::DeleteRuleSetting> =
-        engine.settings().mem_delete_rules.clone();
+    let create_rules: Vec<crate::CreateRuleSetting> = engine.settings().mem_create_rules.clone();
+    let delete_rules: Vec<crate::DeleteRuleSetting> = engine.settings().mem_delete_rules.clone();
     let mut by_pattern: BTreeMap<String, (Vec<String>, Vec<String>)> = BTreeMap::new();
     // Pattern → rendered `default_cross_links` targets, so the
     // rule-derived cross-mem grant is named where the rule that confers
@@ -1010,10 +999,8 @@ pub fn compose_overview(
     } else {
         for cid in &cluster_ids {
             let info = &output.clusters[cid];
-            let summary = crate::graph::community::generate_auto_summary(
-                engine.store(),
-                &info.entities,
-            );
+            let summary =
+                crate::graph::community::generate_auto_summary(engine.store(), &info.entities);
             md.push_str(&format!(
                 "### Cluster {cid} ({} entities)\n",
                 info.entities.len()

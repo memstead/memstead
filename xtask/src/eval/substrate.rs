@@ -581,7 +581,8 @@ mod tests {
         };
         let t = task();
         let (c_arm, b_arm) = build_substrate_arms(&t, "m", "sys", 1000, &c(), &b());
-        let (r, _) = run_substrate_task(&runner, &ParseQualityJudge, &t, &c_arm, &b_arm, 5).unwrap();
+        let (r, _) =
+            run_substrate_task(&runner, &ParseQualityJudge, &t, &c_arm, &b_arm, 5).unwrap();
         assert!((r.delta - 0.5).abs() < 1e-9, "delta = {}", r.delta);
         assert!(r.on_mean > r.off_mean, "C should beat B");
     }
@@ -596,7 +597,8 @@ mod tests {
         };
         let t = task();
         let (c_arm, b_arm) = build_substrate_arms(&t, "m", "sys", 1000, &c(), &b());
-        let (r, _) = run_substrate_task(&runner, &ParseQualityJudge, &t, &c_arm, &b_arm, 3).unwrap();
+        let (r, _) =
+            run_substrate_task(&runner, &ParseQualityJudge, &t, &c_arm, &b_arm, 3).unwrap();
         assert!(r.delta < 0.0, "delta = {}", r.delta);
         assert!((r.delta + 0.5).abs() < 1e-9, "delta = {}", r.delta);
     }

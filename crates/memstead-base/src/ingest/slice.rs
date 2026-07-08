@@ -279,7 +279,9 @@ mod tests {
         assert!(!is_git_token("a1b2c3")); // 6 — too short
         assert!(!is_git_token(&"a".repeat(65))); // too long
         assert!(!is_git_token("not-hex")); // non-hex
-        assert!(!is_git_token(r#"{"v":1,"count":2,"watermark":9,"aggregate":"x"}"#));
+        assert!(!is_git_token(
+            r#"{"v":1,"count":2,"watermark":9,"aggregate":"x"}"#
+        ));
         assert!(!is_git_token(""));
     }
 
@@ -301,7 +303,10 @@ mod tests {
                 EntityId::new("m", "new-d").as_ref().to_string(),
             ]
         );
-        assert_eq!(slice.modified, vec![EntityId::new("m", "changed-b").as_ref().to_string()]);
+        assert_eq!(
+            slice.modified,
+            vec![EntityId::new("m", "changed-b").as_ref().to_string()]
+        );
         assert_eq!(
             slice.deleted,
             vec![
@@ -318,7 +323,10 @@ mod tests {
         let cur = "a".repeat(40);
 
         // current not a snapshot token → degrade.
-        assert_eq!(graph_slice_outcome(Some(&cur), "not-a-sha", &[]), SliceOutcome::NoSignal);
+        assert_eq!(
+            graph_slice_outcome(Some(&cur), "not-a-sha", &[]),
+            SliceOutcome::NoSignal
+        );
 
         // no baseline → reseed at current.
         assert_eq!(
@@ -340,10 +348,17 @@ mod tests {
         // moved → changed with the mapped slice.
         let base = "b".repeat(40);
         match graph_slice_outcome(Some(&base), &cur, &[added("m", "x")]) {
-            SliceOutcome::Changed { token, slice, degraded } => {
+            SliceOutcome::Changed {
+                token,
+                slice,
+                degraded,
+            } => {
                 assert_eq!(token, cur);
                 assert!(!degraded);
-                assert_eq!(slice.added, vec![EntityId::new("m", "x").as_ref().to_string()]);
+                assert_eq!(
+                    slice.added,
+                    vec![EntityId::new("m", "x").as_ref().to_string()]
+                );
             }
             other => panic!("expected Changed, got {other:?}"),
         }
@@ -384,7 +399,11 @@ mod tests {
         let prev = stat_map(&[("a.rs", 100, 10), ("gone.rs", 5, 5)]);
         let prev_token = serialize_digest_token(&digest_stat_map(&prev));
         match mtime_slice_outcome(Some(&prev_token), Some(&prev), &now) {
-            SliceOutcome::Changed { token, slice, degraded } => {
+            SliceOutcome::Changed {
+                token,
+                slice,
+                degraded,
+            } => {
                 assert_eq!(token, token_now);
                 assert!(!degraded);
                 assert_eq!(slice.added, vec!["b.rs"]);
@@ -396,7 +415,11 @@ mod tests {
 
         // Moved, memo miss → degraded full scan (every current file added).
         match mtime_slice_outcome(Some(&prev_token), None, &now) {
-            SliceOutcome::Changed { token, slice, degraded } => {
+            SliceOutcome::Changed {
+                token,
+                slice,
+                degraded,
+            } => {
                 assert_eq!(token, token_now);
                 assert!(degraded, "memo miss is a degraded full scan");
                 assert_eq!(slice.added, vec!["a.rs", "b.rs"]);

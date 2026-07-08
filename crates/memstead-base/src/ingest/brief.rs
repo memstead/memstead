@@ -79,13 +79,23 @@ fn medium_type_label(t: MediumType) -> &'static str {
 pub fn render_goal_and_avoid(guidance: &ResolvedGuidance) -> String {
     let mut lines: Vec<String> = Vec::new();
 
-    if let Some(goal) = guidance.goal.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+    if let Some(goal) = guidance
+        .goal
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
         lines.push("## Goal".to_string());
         lines.push(String::new());
         lines.push(goal.to_string());
         lines.push(String::new());
     }
-    if let Some(avoid) = guidance.avoid.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+    if let Some(avoid) = guidance
+        .avoid
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
         lines.push("## Failure modes to avoid".to_string());
         lines.push(String::new());
         lines.push(avoid.to_string());
@@ -195,7 +205,10 @@ pub fn render_operative_data(
         for source in &resolved.sources {
             match source {
                 ResolvedSource::Primary(p) => {
-                    lines.push(format!("- **{}** (primary)", medium_type_label(p.medium_type)));
+                    lines.push(format!(
+                        "- **{}** (primary)",
+                        medium_type_label(p.medium_type)
+                    ));
                     let allows: Vec<&str> = p
                         .scope
                         .iter()
@@ -365,7 +378,11 @@ pub fn render_changed_slice(cursor: &SourceCursor) -> String {
             .map(|r| format!("`{}`", r.key))
             .collect::<Vec<_>>()
             .join(", ");
-        let it = if cursor.reseed.len() == 1 { "it" } else { "them" };
+        let it = if cursor.reseed.len() == 1 {
+            "it"
+        } else {
+            "them"
+        };
         lines.push(format!(
             "No prior sync baseline exists for {keys} — treating the current source state as the \
              baseline (first sync). No priority slice from {it} this pass; proceed as usual.\n"
@@ -518,7 +535,9 @@ pub fn render_one_shot_lens(
     lines.push(String::new());
     lines.push("- Search the destination before writing; route changes through `memstead_update` against the existing entity if present.".to_string());
     lines.push("- Skip writes when the lifted content matches what is already there (record as `skipped: already-up-to-date`).".to_string());
-    lines.push("- Use `memstead_create` only when no entity for that concept exists yet.".to_string());
+    lines.push(
+        "- Use `memstead_create` only when no entity for that concept exists yet.".to_string(),
+    );
     lines.push(String::new());
 
     lines.push("### End-of-run report".to_string());
@@ -692,7 +711,10 @@ mod tests {
     #[test]
     fn renders_intent() {
         let r = resolved("macos", Some("  Swift app source.  "), vec![]);
-        assert_eq!(render_intent(&r), "## About the source\n\nSwift app source.\n\n");
+        assert_eq!(
+            render_intent(&r),
+            "## About the source\n\nSwift app source.\n\n"
+        );
         let none = resolved("macos", None, vec![]);
         assert_eq!(render_intent(&none), "");
     }
@@ -707,7 +729,10 @@ mod tests {
         assert!(out.contains("Mutating the destination is this run's mandate:"));
         assert!(out.contains("The `PreCompact` hook fires near the limit"));
         assert!(out.contains("A paired process mem `ingest/macos` (schema `ingest@0.1.0`) carries destination-quality debt"));
-        assert!(out.ends_with("write rules.\n\n"), "block ends in a blank line");
+        assert!(
+            out.ends_with("write rules.\n\n"),
+            "block ends in a blank line"
+        );
     }
 
     /// The skipped (one-shot) and failed-to-create process-mem branches each
@@ -723,8 +748,10 @@ mod tests {
             leaf_name: "os".to_string(),
             mem_label: "ingest/os".to_string(),
         };
-        assert!(render_situation(&r, &skipped)
-            .contains("No process mem is paired with this ingest (mode=one-shot;"));
+        assert!(
+            render_situation(&r, &skipped)
+                .contains("No process mem is paired with this ingest (mode=one-shot;")
+        );
 
         let failed = ProcessMemInfo {
             present: false,
@@ -747,7 +774,10 @@ mod tests {
             "macos",
             None,
             vec![
-                primary(MediumType::Codebase, vec![allow("src/**/*.swift"), deny("src/gen/**")]),
+                primary(
+                    MediumType::Codebase,
+                    vec![allow("src/**/*.swift"), deny("src/gen/**")],
+                ),
                 ResolvedSource::Reference {
                     mem: "engine".to_string(),
                 },
@@ -795,14 +825,21 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
         assert!(out.contains("- **filesystem** (primary)\n"));
         assert!(!out.contains("Cross-mem references"), "no reference note");
         assert!(out.contains("### Destination\n\n- **g**\n"));
-        assert!(!out.contains("Paired process mem"), "skipped process mem omitted");
+        assert!(
+            !out.contains("Paired process mem"),
+            "skipped process mem omitted"
+        );
     }
 
     /// The discovery assembly concatenates the truthy blocks in order; an
     /// empty changed-slice preface (source unmoved) drops out.
     #[test]
     fn assembles_discovery_brief() {
-        let r = resolved("macos", Some("Swift source."), vec![primary(MediumType::Codebase, vec![allow("src/**")])]);
+        let r = resolved(
+            "macos",
+            Some("Swift source."),
+            vec![primary(MediumType::Codebase, vec![allow("src/**")])],
+        );
         let g = guidance(Some("build coverage"), None);
         let pm = process_present("macos");
         let brief = assemble_discovery_brief(&r, &g, &pm, Some("s@1"), "");
@@ -812,11 +849,18 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
         let src = brief.find("## About the source").unwrap();
         let goal = brief.find("## Goal").unwrap();
         let op = brief.find("## Operative data").unwrap();
-        assert!(sit < src && src < goal && goal < op, "blocks in brief order");
-        assert!(!brief.contains("## Source changes"), "no changed-slice block when preface empty");
+        assert!(
+            sit < src && src < goal && goal < op,
+            "blocks in brief order"
+        );
+        assert!(
+            !brief.contains("## Source changes"),
+            "no changed-slice block when preface empty"
+        );
 
         // A non-empty preface is appended verbatim at the end.
-        let with_slice = assemble_discovery_brief(&r, &g, &pm, Some("s@1"), "## Source changes\n\n…\n\n");
+        let with_slice =
+            assemble_discovery_brief(&r, &g, &pm, Some("s@1"), "## Source changes\n\n…\n\n");
         assert!(with_slice.ends_with("## Source changes\n\n…\n\n"));
     }
 
@@ -878,7 +922,10 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
             "```",
             "If you were interrupted before finishing, skip this — leaving the baseline where it is re-presents the same slice next run.\n",
         ];
-        assert_eq!(render_changed_slice(&cursor), format!("{}\n", expected_lines.join("\n")));
+        assert_eq!(
+            render_changed_slice(&cursor),
+            format!("{}\n", expected_lines.join("\n"))
+        );
     }
 
     /// The reseed-only path names the first-sync keys and still emits the
@@ -899,7 +946,10 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
             "No prior sync baseline exists for `ing/f` — treating the current source state as the baseline (first sync). No priority slice from it this pass; proceed as usual."
         ));
         assert!(out.contains("memstead mem set-sync-state d 'ing/f' 'TOK'"));
-        assert!(!out.contains("The source moved"), "no 'moved' copy when only reseeding");
+        assert!(
+            !out.contains("The source moved"),
+            "no 'moved' copy when only reseeding"
+        );
     }
 
     /// The one-shot lens block: destination-set table, routing rule (when set),
@@ -935,7 +985,11 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
     /// goal/avoid + operative-data + the lens block; no process mem, no slice.
     #[test]
     fn assembles_one_shot_brief() {
-        let mut r = resolved("os", Some("src"), vec![primary(MediumType::Filesystem, vec![])]);
+        let mut r = resolved(
+            "os",
+            Some("src"),
+            vec![primary(MediumType::Filesystem, vec![])],
+        );
         r.mode = IngestMode::OneShot;
         let g = guidance(Some("goal"), None);
         let skipped = ProcessMemInfo {
@@ -949,7 +1003,10 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
         assert!(brief.contains("(one-shot mode)"));
         assert!(brief.contains("No process mem is paired with this ingest (mode=one-shot;"));
         assert!(brief.contains("## Mode: one-shot — lens routing"));
-        assert!(!brief.contains("## Source changes"), "one-shot has no changed-slice");
+        assert!(
+            !brief.contains("## Source changes"),
+            "one-shot has no changed-slice"
+        );
     }
 
     /// Beyond SLICE_CAP entries an overflow line stands in; the degraded flag

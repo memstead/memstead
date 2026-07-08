@@ -120,7 +120,10 @@ fn write_json<T: Serialize>(cache_root: &Path, name: &str, value: &T) {
 /// Read the set of one-shot ingests that have already run.
 fn read_one_shot_runs(cache_root: &Path) -> BTreeSet<String> {
     let map: BTreeMap<String, bool> = read_json(cache_root, "ingest-one-shot-runs.json");
-    map.into_iter().filter(|(_, v)| *v).map(|(k, _)| k).collect()
+    map.into_iter()
+        .filter(|(_, v)| *v)
+        .map(|(k, _)| k)
+        .collect()
 }
 
 /// Select the next *due* ingest for a `--all` rotation, advancing the
@@ -238,8 +241,18 @@ mod tests {
             snapshot: "s".to_string(),
         };
         // one-shot / refinement never skip, regardless of backoff.
-        assert!(!should_skip(IngestMode::OneShot, false, &mut e.clone(), "s"));
-        assert!(!should_skip(IngestMode::Refinement, false, &mut e.clone(), "s"));
+        assert!(!should_skip(
+            IngestMode::OneShot,
+            false,
+            &mut e.clone(),
+            "s"
+        ));
+        assert!(!should_skip(
+            IngestMode::Refinement,
+            false,
+            &mut e.clone(),
+            "s"
+        ));
         // Discovery with a moved source → run (backoff untouched).
         let mut e2 = e.clone();
         assert!(!should_skip(IngestMode::Discovery, true, &mut e2, "s"));

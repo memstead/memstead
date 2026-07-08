@@ -114,7 +114,11 @@ fn git_head(git_root: &Path) -> Option<String> {
 fn to_git_pathspec(pattern: &str, git_root: &Path, workspace_root: &Path, exclude: bool) -> String {
     let resolved = normalize_lexical(&workspace_root.join(pattern));
     let git_rel = relative_path(git_root, &resolved);
-    let magic = if exclude { ":(glob,exclude)" } else { ":(glob)" };
+    let magic = if exclude {
+        ":(glob,exclude)"
+    } else {
+        ":(glob)"
+    };
     format!("{magic}{}", git_rel.to_string_lossy())
 }
 
@@ -244,7 +248,14 @@ fn compute_git_slice(
     }
 
     let mut cmd = Command::new("git");
-    cmd.args(["diff", "--no-renames", "--name-status", baseline, &head, "--"]);
+    cmd.args([
+        "diff",
+        "--no-renames",
+        "--name-status",
+        baseline,
+        &head,
+        "--",
+    ]);
     cmd.args(&specs);
     cmd.current_dir(&git_root);
     let out = match cmd.output() {
@@ -400,9 +411,9 @@ fn compute_mtime_slice(
         &now_digest.aggregate,
         &now_map,
     );
-    let prev_map = baseline
-        .and_then(parse_digest_token)
-        .and_then(|base| read_cursor_memo(cache_root, ingest_name, &source.facet_ref, &base.aggregate));
+    let prev_map = baseline.and_then(parse_digest_token).and_then(|base| {
+        read_cursor_memo(cache_root, ingest_name, &source.facet_ref, &base.aggregate)
+    });
     mtime_slice_outcome(baseline, prev_map.as_ref(), &now_map)
 }
 
@@ -415,9 +426,10 @@ fn current_primary_token(
     workspace_root: &Path,
 ) -> Option<String> {
     match resolve_change_strategy(source, workspace_root) {
-        ChangeStrategy::Git => {
-            git_head(&find_git_root(&medium_base(&source.medium_pointer, workspace_root))?)
-        }
+        ChangeStrategy::Git => git_head(&find_git_root(&medium_base(
+            &source.medium_pointer,
+            workspace_root,
+        ))?),
         ChangeStrategy::Graph => engine.mem_head_sha(&source.medium_pointer).ok().flatten(),
         ChangeStrategy::Mtime => {
             let files = enumerate_facet_files(source, workspace_root);
@@ -445,9 +457,10 @@ pub fn source_moved(engine: &Engine, resolved: &ResolvedIngest, workspace_root: 
 
     for source in &resolved.sources {
         let (facet_ref, current) = match source {
-            ResolvedSource::Primary(p) => {
-                (p.facet_ref.clone(), current_primary_token(engine, p, workspace_root))
-            }
+            ResolvedSource::Primary(p) => (
+                p.facet_ref.clone(),
+                current_primary_token(engine, p, workspace_root),
+            ),
             ResolvedSource::Reference { mem } => {
                 (mem.clone(), engine.mem_head_sha(mem).ok().flatten())
             }
@@ -497,10 +510,16 @@ pub fn compute_source_cursor(
                         compute_git_slice(p, &resolved.deny_paths, workspace_root, baseline)
                     }
                     // A graph-typed primary's medium pointer is the source mem id.
-                    ChangeStrategy::Graph => compute_graph_slice(engine, &p.medium_pointer, baseline),
-                    ChangeStrategy::Mtime => {
-                        compute_mtime_slice(p, &resolved.name, workspace_root, &cache_root, baseline)
+                    ChangeStrategy::Graph => {
+                        compute_graph_slice(engine, &p.medium_pointer, baseline)
                     }
+                    ChangeStrategy::Mtime => compute_mtime_slice(
+                        p,
+                        &resolved.name,
+                        workspace_root,
+                        &cache_root,
+                        baseline,
+                    ),
                     // `none` is inert — no slice.
                     ChangeStrategy::None => SliceOutcome::NoSignal,
                 };
@@ -617,7 +636,11 @@ mod tests {
             .env("GIT_COMMITTER_EMAIL", "t@t")
             .output()
             .unwrap();
-        assert!(status.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&status.stderr));
+        assert!(
+            status.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&status.stderr)
+        );
     }
 
     fn primary(scope: Vec<PatternEntry>) -> ResolvedPrimarySource {
@@ -645,7 +668,12 @@ mod tests {
         git(root, &["add", "-A"]);
         git(root, &["commit", "-qm", "base"]);
         let baseline = String::from_utf8(
-            std::process::Command::new("git").args(["rev-parse", "HEAD"]).current_dir(root).output().unwrap().stdout,
+            std::process::Command::new("git")
+                .args(["rev-parse", "HEAD"])
+                .current_dir(root)
+                .output()
+                .unwrap()
+                .stdout,
         )
         .unwrap()
         .trim()
@@ -666,7 +694,9 @@ mod tests {
         }]);
         let outcome = compute_git_slice(&source, &[], root, Some(&baseline));
         match outcome {
-            SliceOutcome::Changed { slice, degraded, .. } => {
+            SliceOutcome::Changed {
+                slice, degraded, ..
+            } => {
                 assert!(!degraded);
                 assert_eq!(slice.added, vec!["new.rs"]);
                 assert_eq!(slice.modified, vec!["keep.rs"]);
@@ -677,8 +707,16 @@ mod tests {
 
         // Same baseline == HEAD → Unchanged.
         let head = String::from_utf8(
-            std::process::Command::new("git").args(["rev-parse", "HEAD"]).current_dir(root).output().unwrap().stdout,
-        ).unwrap().trim().to_string();
+            std::process::Command::new("git")
+                .args(["rev-parse", "HEAD"])
+                .current_dir(root)
+                .output()
+                .unwrap()
+                .stdout,
+        )
+        .unwrap()
+        .trim()
+        .to_string();
         assert!(matches!(
             compute_git_slice(&source, &[], root, Some(&head)),
             SliceOutcome::Unchanged { .. }
@@ -752,10 +790,17 @@ mod tests {
             SliceOutcome::Changed {
                 slice, degraded, ..
             } => {
-                assert!(!degraded, "memo present → precise, not a degraded full scan");
+                assert!(
+                    !degraded,
+                    "memo present → precise, not a degraded full scan"
+                );
                 assert_eq!(slice.added, vec!["new.rs"]);
                 assert_eq!(slice.modified, vec!["a.rs"]);
-                assert_eq!(slice.deleted, vec!["gone.rs"], "deletions come from the memo");
+                assert_eq!(
+                    slice.deleted,
+                    vec!["gone.rs"],
+                    "deletions come from the memo"
+                );
             }
             other => panic!("expected Changed, got {other:?}"),
         }

@@ -3456,7 +3456,14 @@ mod tests {
             token_budget: None,
         }));
         assert!(!scoped.is_error.unwrap_or(false));
-        let stext = scoped.content.first().unwrap().as_text().unwrap().text.clone();
+        let stext = scoped
+            .content
+            .first()
+            .unwrap()
+            .as_text()
+            .unwrap()
+            .text
+            .clone();
         assert!(
             stext.contains("_mem_schema: default@1.0.0"),
             "a mem-scoped overview anchors the schema: {stext}"

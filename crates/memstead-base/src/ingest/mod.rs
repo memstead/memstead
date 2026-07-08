@@ -30,29 +30,30 @@ pub mod resolve;
 pub mod selection;
 pub mod slice;
 
+pub use brief::{
+    PROCESS_MEM_SCHEMA, ProcessMemInfo, SourceCursor, SyncCommand, assemble_discovery_brief,
+    assemble_one_shot_brief, assemble_refinement_brief, render_changed_slice,
+    render_goal_and_avoid, render_intent, render_one_shot_lens, render_operative_data,
+    render_situation,
+};
 pub use change_detection::{
     Digest, StatDiff, StatEntry, StatMap, compute_stat_map, diff_stat_maps, digest_stat_map,
     digests_equal, parse_digest_token, serialize_digest_token,
 };
-pub use resolve::{
-    ChangeStrategy, ResolveError, ResolvedIngest, ResolvedPrimarySource, ResolvedSource,
-    find_git_root, resolve_change_strategy, resolve_ingest,
-};
-pub use slice::{
-    Slice, SliceOutcome, graph_changes_to_slice, graph_slice_outcome, is_git_token,
-    mtime_slice_outcome,
-};
-pub use brief::{
-    PROCESS_MEM_SCHEMA, ProcessMemInfo, SourceCursor, SyncCommand, assemble_discovery_brief,
-    assemble_one_shot_brief, assemble_refinement_brief, render_changed_slice, render_goal_and_avoid,
-    render_intent, render_one_shot_lens, render_operative_data, render_situation,
+pub use cursor::{compute_source_cursor, enumerate_facet_files, source_moved};
+pub use guidance::{
+    GuidanceDefaults, MemGuidance, ResolvedGuidance, merge_guidance_block, resolve_writing_guidance,
 };
 pub use refinement::{
     Batch, next_batch, read_pending_findings, render_refinement_scout, render_refinement_writer,
 };
-pub use cursor::{compute_source_cursor, enumerate_facet_files, source_moved};
-pub use selection::{BackoffEntry, MAX_SKIP_LEVEL, apply_backoff, select_next_due, should_skip};
 pub use render::{RenderBriefError, mode_name, render_ingest_brief};
-pub use guidance::{
-    GuidanceDefaults, MemGuidance, ResolvedGuidance, merge_guidance_block, resolve_writing_guidance,
+pub use resolve::{
+    ChangeStrategy, ResolveError, ResolvedIngest, ResolvedPrimarySource, ResolvedSource,
+    find_git_root, resolve_change_strategy, resolve_ingest,
+};
+pub use selection::{BackoffEntry, MAX_SKIP_LEVEL, apply_backoff, select_next_due, should_skip};
+pub use slice::{
+    Slice, SliceOutcome, graph_changes_to_slice, graph_slice_outcome, is_git_token,
+    mtime_slice_outcome,
 };

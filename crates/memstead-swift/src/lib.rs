@@ -27,13 +27,12 @@ pub use error::MemsteadError;
 pub use types::{
     AgentNotesReport, BranchResetOutcome, ChangeEnvelope, ChangesReport, ClusterInfo, CommitNote,
     DanglingCrossMemEdge, Diff, DiffConfig, EdgeSource, EdgeTypeCount, Entity, EntityDiff,
-    HealthFinding, HealthIssue, IncomingRipple,
-    HealthSummary, ListResult, MemBackendKind, MemCreateOutcome, MemCreateRequest,
-    MemDeleteOutcome, MemExportOutcome, MemInit, MemRosterEntry, MemSchemaOutcome,
-    MemVersionOutcome, MetadataEntry, MetadataValue, MissingField, ParseRecoveryEntry,
-    ParseRecoveryReport, Query, RelationDirection, RelationEdge, Relations, Relationship,
-    ReloadResult, SearchHit, SearchResult, SearchScope, Section, StaleEntity, Stats,
-    StrandedCrossMemRef,
+    HealthFinding, HealthIssue, HealthSummary, IncomingRipple, ListResult, MemBackendKind,
+    MemCreateOutcome, MemCreateRequest, MemDeleteOutcome, MemExportOutcome, MemInit,
+    MemRosterEntry, MemSchemaOutcome, MemVersionOutcome, MetadataEntry, MetadataValue,
+    MissingField, ParseRecoveryEntry, ParseRecoveryReport, Query, RelationDirection, RelationEdge,
+    Relations, Relationship, ReloadResult, SearchHit, SearchResult, SearchScope, Section,
+    StaleEntity, Stats, StrandedCrossMemRef,
 };
 
 uniffi::include_scaffolding!("memstead");
@@ -122,18 +121,19 @@ pub fn init_filesystem_mem(
 /// discovery-mode brief for `ingest_name`.
 pub fn ingest_brief(workspace_root: String, ingest_name: String) -> Result<String, MemsteadError> {
     let root = Path::new(&workspace_root);
-    let engine = memstead_git_branch::workspace_store::engine_from_workspace_root(root).map_err(
-        |e| MemsteadError::Internal {
-            message: format!("failed to load workspace at {}: {e}", root.display()),
-        },
-    )?;
-    memstead_base::ingest::render_ingest_brief(&engine, root, &ingest_name).map_err(|e| {
-        match &e {
-            memstead_base::ingest::RenderBriefError::Resolve(_) => {
-                MemsteadError::NotFound { message: e.to_string() }
+    let engine =
+        memstead_git_branch::workspace_store::engine_from_workspace_root(root).map_err(|e| {
+            MemsteadError::Internal {
+                message: format!("failed to load workspace at {}: {e}", root.display()),
             }
-            _ => MemsteadError::Internal { message: e.to_string() },
-        }
+        })?;
+    memstead_base::ingest::render_ingest_brief(&engine, root, &ingest_name).map_err(|e| match &e {
+        memstead_base::ingest::RenderBriefError::Resolve(_) => MemsteadError::NotFound {
+            message: e.to_string(),
+        },
+        _ => MemsteadError::Internal {
+            message: e.to_string(),
+        },
     })
 }
 
@@ -1548,9 +1548,13 @@ mod tests {
         );
         // include_content: true → both sides' bodies ride along.
         assert!(
-            diff.entries
-                .iter()
-                .any(|e| matches!(e, EntityDiff::Added { content_after: Some(_), .. })),
+            diff.entries.iter().any(|e| matches!(
+                e,
+                EntityDiff::Added {
+                    content_after: Some(_),
+                    ..
+                }
+            )),
             "include_content should populate content_after on added entries",
         );
     }

@@ -136,7 +136,13 @@ pub fn compute_stat_map<S: AsRef<str>>(rel_paths: &[S], root: &Path) -> StatMap 
             continue;
         }
         let mtime = md.modified().ok().map(system_time_to_millis).unwrap_or(0);
-        map.insert(rel.to_string(), StatEntry { mtime, size: md.len() });
+        map.insert(
+            rel.to_string(),
+            StatEntry {
+                mtime,
+                size: md.len(),
+            },
+        );
     }
     map
 }
@@ -364,7 +370,7 @@ mod tests {
             ("touch.rs", 200, 10), // mtime touched
             ("grow.rs", 100, 99),  // size grew (mtime preserved)
             ("new.rs", 300, 5),    // added
-            // gone.rs deleted
+                                   // gone.rs deleted
         ]);
         let StatDiff {
             added,
@@ -411,7 +417,10 @@ mod tests {
             !m.contains_key("missing.txt"),
             "a path that does not exist is omitted"
         );
-        assert!(!m.contains_key("sub"), "a directory is not a file — skipped");
+        assert!(
+            !m.contains_key("sub"),
+            "a directory is not a file — skipped"
+        );
         assert_eq!(m["a.txt"].size, 5);
         assert_eq!(m["sub/b.txt"].size, 10);
         assert!(

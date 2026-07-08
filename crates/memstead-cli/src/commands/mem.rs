@@ -840,7 +840,11 @@ pub fn run_set_internal(ctx: &CliContext, args: SetInternalArgs) -> anyhow::Resu
             "# Mem `{}` {}\n\nHidden from the default overview: **{}**. Inspect with \
              `memstead overview --mem {}`.",
             args.name,
-            if applied { "marked internal" } else { "un-marked internal" },
+            if applied {
+                "marked internal"
+            } else {
+                "un-marked internal"
+            },
             applied,
             args.name,
         ));

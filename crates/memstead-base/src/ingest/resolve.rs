@@ -112,7 +112,9 @@ pub enum ResolveError {
         available: Vec<String>,
     },
     /// The ingest's `projection` field is not the required `"<mem>/<name>"`.
-    #[error("ingest '{ingest}' has a malformed projection ref '{projection}'; expected \"<mem>/<name>\"")]
+    #[error(
+        "ingest '{ingest}' has a malformed projection ref '{projection}'; expected \"<mem>/<name>\""
+    )]
     MalformedProjectionRef {
         /// The ingest whose projection ref is malformed.
         ingest: String,
@@ -120,7 +122,10 @@ pub enum ResolveError {
         projection: String,
     },
     /// The projection the ingest references does not exist.
-    #[error("ingest '{ingest}' references projection '{projection_ref}' not found in mem '{mem}'; available: {}", fmt_list(available))]
+    #[error(
+        "ingest '{ingest}' references projection '{projection_ref}' not found in mem '{mem}'; available: {}",
+        fmt_list(available)
+    )]
     ProjectionNotFound {
         /// The referencing ingest.
         ingest: String,
@@ -132,7 +137,10 @@ pub enum ResolveError {
         available: Vec<String>,
     },
     /// A projection source facet does not exist in the projection's mem.
-    #[error("projection '{projection_ref}' references facet '{facet}' not found in mem '{mem}'; available: {}", fmt_list(available))]
+    #[error(
+        "projection '{projection_ref}' references facet '{facet}' not found in mem '{mem}'; available: {}",
+        fmt_list(available)
+    )]
     FacetNotFound {
         /// The projection that references the missing facet.
         projection_ref: String,
@@ -144,7 +152,10 @@ pub enum ResolveError {
         available: Vec<String>,
     },
     /// A facet's medium does not exist in the projection's mem.
-    #[error("facet '{facet}' references medium '{medium}' not found in mem '{mem}'; available: {}", fmt_list(available))]
+    #[error(
+        "facet '{facet}' references medium '{medium}' not found in mem '{mem}'; available: {}",
+        fmt_list(available)
+    )]
     MediumNotFound {
         /// The facet whose medium is missing.
         facet: String,
@@ -218,7 +229,8 @@ pub fn resolve_ingest(
 
     // Primary sources: each source facet joined to the medium it engages,
     // both looked up in the projection's owning mem.
-    let mut sources = Vec::with_capacity(projection.source_facets.len() + projection.reference_mems.len());
+    let mut sources =
+        Vec::with_capacity(projection.source_facets.len() + projection.reference_mems.len());
     for facet_name in &projection.source_facets {
         let facet: &Facet = configs
             .facets
@@ -382,7 +394,11 @@ mod tests {
         }
     }
 
-    fn primary(medium_type: MediumType, pointer: &str, declared: Option<&str>) -> ResolvedPrimarySource {
+    fn primary(
+        medium_type: MediumType,
+        pointer: &str,
+        declared: Option<&str>,
+    ) -> ResolvedPrimarySource {
         ResolvedPrimarySource {
             facet_ref: "f".to_string(),
             medium: "m".to_string(),
@@ -394,7 +410,12 @@ mod tests {
         }
     }
 
-    fn facet(mem: &str, name: &str, medium: &str, scope: Vec<PatternEntry>) -> MemPipelineRecord<Facet> {
+    fn facet(
+        mem: &str,
+        name: &str,
+        medium: &str,
+        scope: Vec<PatternEntry>,
+    ) -> MemPipelineRecord<Facet> {
         MemPipelineRecord {
             mem: mem.to_string(),
             name: name.to_string(),
@@ -455,7 +476,12 @@ mod tests {
     #[test]
     fn resolves_a_well_formed_ingest() {
         let configs = PipelineConfigs {
-            mediums: vec![medium("macos", "source-tree", MediumType::Codebase, "../macos")],
+            mediums: vec![medium(
+                "macos",
+                "source-tree",
+                MediumType::Codebase,
+                "../macos",
+            )],
             facets: vec![facet(
                 "macos",
                 "source-files",
@@ -636,7 +662,10 @@ mod tests {
         );
         // An unrecognized declared value also falls through to the probe.
         assert_eq!(
-            resolve_change_strategy(&primary(MediumType::Codebase, "sub", Some("weird")), git.path()),
+            resolve_change_strategy(
+                &primary(MediumType::Codebase, "sub", Some("weird")),
+                git.path()
+            ),
             ChangeStrategy::Git
         );
         // No git work tree over the pointer → Mtime.

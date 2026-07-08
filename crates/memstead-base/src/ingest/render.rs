@@ -263,15 +263,21 @@ mod tests {
     /// preparation guard, ported.
     #[test]
     fn preparation_step_is_refused() {
-        assert_eq!(preparation_refusal(&ingest_with(vec![primary("f", None)])), None);
+        assert_eq!(
+            preparation_refusal(&ingest_with(vec![primary("f", None)])),
+            None
+        );
         assert_eq!(
             preparation_refusal(&ingest_with(vec![ResolvedSource::Reference {
                 mem: "e".to_string()
             }])),
             None
         );
-        let msg = preparation_refusal(&ingest_with(vec![primary("manuals", Some("pdf-to-markdown"))]))
-            .unwrap();
+        let msg = preparation_refusal(&ingest_with(vec![primary(
+            "manuals",
+            Some("pdf-to-markdown"),
+        )]))
+        .unwrap();
         assert_eq!(
             msg,
             "> **[ingest] Ingest \"ing\" is unsupported: facet \"manuals\" declares preparation \"pdf-to-markdown\", which has no implementation. Skipping.**\n"

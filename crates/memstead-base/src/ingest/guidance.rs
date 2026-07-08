@@ -88,7 +88,9 @@ pub fn merge_guidance_block(
         (None, None) => None,
         (Some(default), None) => Some(default.to_string()),
         (None, Some(additions)) => Some(additions.to_string()),
-        (Some(default), Some(additions)) => Some(format!("{}\n\n{}", default.trim_end(), additions)),
+        (Some(default), Some(additions)) => {
+            Some(format!("{}\n\n{}", default.trim_end(), additions))
+        }
     }
 }
 
@@ -142,7 +144,11 @@ mod tests {
     #[test]
     fn legacy_literal_wins() {
         assert_eq!(
-            merge_guidance_block(Some("schema default"), Some("additions"), Some("legacy prose")),
+            merge_guidance_block(
+                Some("schema default"),
+                Some("additions"),
+                Some("legacy prose")
+            ),
             Some("legacy prose".to_string())
         );
     }
