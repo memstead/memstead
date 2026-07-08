@@ -61,7 +61,7 @@ per-branch split are recorded in the project's own status-site campaign protocol
 ## Where this figure lives
 
 The number rendered on [memstead.com](https://memstead.com) is generated from the
-project's graph, not hand-typed — see `websites/memstead.com/scripts/build-scoreboard.mjs`.
+project's graph by a committed projection script, not hand-typed.
 Its source of record is the launch-claims register assertion
 *"The measured drift loop closed 79 percent of 153 findings at a 12-minute
 median."*

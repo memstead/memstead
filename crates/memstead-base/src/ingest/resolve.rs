@@ -477,44 +477,44 @@ mod tests {
     fn resolves_a_well_formed_ingest() {
         let configs = PipelineConfigs {
             mediums: vec![medium(
-                "macos",
+                "studio",
                 "source-tree",
                 MediumType::Codebase,
-                "../macos",
+                "../studio",
             )],
             facets: vec![facet(
-                "macos",
+                "studio",
                 "source-files",
                 "source-tree",
-                vec![allow("../macos/**/*.swift")],
+                vec![allow("../studio/**/*.swift")],
             )],
             projections: vec![projection(
-                "macos",
-                "macos-graph",
+                "studio",
+                "studio-graph",
                 &["source-files"],
                 &["engine"],
-                "macos",
+                "studio",
             )],
-            ingests: vec![ingest("macos", "macos/macos-graph")],
+            ingests: vec![ingest("studio", "studio/studio-graph")],
         };
 
-        let r = resolve_ingest(&configs, "macos").unwrap();
+        let r = resolve_ingest(&configs, "studio").unwrap();
         assert_eq!(r.mode, IngestMode::Discovery);
         assert_eq!(r.batch_size, 20);
         assert_eq!(r.deny_paths, ["VISION.md"]);
-        assert_eq!(r.projection_mem, "macos");
-        assert_eq!(r.projection_name, "macos-graph");
-        assert_eq!(r.intent.as_deref(), Some("intent of macos-graph"));
-        assert_eq!(r.destination_mem, "macos");
+        assert_eq!(r.projection_mem, "studio");
+        assert_eq!(r.projection_name, "studio-graph");
+        assert_eq!(r.intent.as_deref(), Some("intent of studio-graph"));
+        assert_eq!(r.destination_mem, "studio");
         assert_eq!(r.sources.len(), 2);
         match &r.sources[0] {
             ResolvedSource::Primary(p) => {
                 assert_eq!(p.facet_ref, "source-files");
                 assert_eq!(p.medium, "source-tree");
                 assert_eq!(p.medium_type, MediumType::Codebase);
-                assert_eq!(p.medium_pointer, "../macos");
+                assert_eq!(p.medium_pointer, "../studio");
                 assert_eq!(p.declared_change_detection, None);
-                assert_eq!(p.scope, vec![allow("../macos/**/*.swift")]);
+                assert_eq!(p.scope, vec![allow("../studio/**/*.swift")]);
                 assert_eq!(p.preparation, None);
             }
             other => panic!("expected primary source first, got {other:?}"),
@@ -566,8 +566,8 @@ mod tests {
     #[test]
     fn missing_projection_errors_with_available() {
         let configs = PipelineConfigs {
-            projections: vec![projection("macos", "other", &[], &[], "macos")],
-            ingests: vec![ingest("i", "macos/macos-graph")],
+            projections: vec![projection("studio", "other", &[], &[], "studio")],
+            ingests: vec![ingest("i", "studio/studio-graph")],
             ..Default::default()
         };
         let err = resolve_ingest(&configs, "i").unwrap_err();
@@ -575,8 +575,8 @@ mod tests {
             err,
             ResolveError::ProjectionNotFound {
                 ingest: "i".to_string(),
-                projection_ref: "macos/macos-graph".to_string(),
-                mem: "macos".to_string(),
+                projection_ref: "studio/studio-graph".to_string(),
+                mem: "studio".to_string(),
                 available: vec!["other".to_string()],
             }
         );
@@ -586,8 +586,8 @@ mod tests {
     #[test]
     fn dangling_facet_errors() {
         let configs = PipelineConfigs {
-            projections: vec![projection("macos", "p", &["missing-facet"], &[], "macos")],
-            ingests: vec![ingest("i", "macos/p")],
+            projections: vec![projection("studio", "p", &["missing-facet"], &[], "studio")],
+            ingests: vec![ingest("i", "studio/p")],
             ..Default::default()
         };
         let err = resolve_ingest(&configs, "i").unwrap_err();
@@ -601,9 +601,9 @@ mod tests {
     #[test]
     fn dangling_medium_errors() {
         let configs = PipelineConfigs {
-            facets: vec![facet("macos", "f", "missing-medium", vec![])],
-            projections: vec![projection("macos", "p", &["f"], &[], "macos")],
-            ingests: vec![ingest("i", "macos/p")],
+            facets: vec![facet("studio", "f", "missing-medium", vec![])],
+            projections: vec![projection("studio", "p", &["f"], &[], "studio")],
+            ingests: vec![ingest("i", "studio/p")],
             ..Default::default()
         };
         let err = resolve_ingest(&configs, "i").unwrap_err();

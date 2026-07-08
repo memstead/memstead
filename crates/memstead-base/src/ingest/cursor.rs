@@ -598,7 +598,7 @@ mod tests {
             relative_path(Path::new("/a/b/c"), Path::new("/a/x")),
             PathBuf::from("../../x")
         );
-        // The dogfood shape: workspace graph/, medium ../public.
+        // A workspace whose medium is a sibling repository.
         assert_eq!(
             relative_path(Path::new("/m/public"), Path::new("/m/public/crates/x.rs")),
             PathBuf::from("crates/x.rs")

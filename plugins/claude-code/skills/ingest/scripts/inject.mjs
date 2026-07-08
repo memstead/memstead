@@ -16,7 +16,7 @@
  *                        idempotent)
  *
  * The full pre-rebuild orchestration is preserved in the `old-ingest` skill as
- * a fallback. See dev/plans/ingest-engine-planner.md.
+ * a fallback.
  */
 
 import { spawnSync } from 'node:child_process';
