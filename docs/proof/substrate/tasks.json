@@ -1,0 +1,32 @@
+[
+  {
+    "id": "concurrent-writes",
+    "prompt": "Two actors read the same entity, then both try to update it. How does Memstead stop the second write from silently overwriting the first?",
+    "reference": "Optimistic content-hash locking: every update must present the expected hash of the entity's current on-disk state. If the state moved since the caller read it, the hashes disagree and the write is refused rather than applied; the loser re-reads and retries. No write is silently lost."
+  },
+  {
+    "id": "why-engine-only",
+    "prompt": "Nothing outside the engine is allowed to write to a mem-repo directly, even though the files are plain markdown on disk. Why is that, and which two guarantees would a raw git or file edit bypass?",
+    "reference": "The boundary is enforced by discipline, not capability: routing every write through the engine is the only way to guarantee the two things it exists for. A raw write bypasses (1) schema validation at the moment of the write, and (2) the provenance record of why the write happened. Route around the engine and you route around both."
+  },
+  {
+    "id": "sibling-coherence",
+    "prompt": "A long-lived engine process is serving reads while a separate CLI invocation commits a change to the same mem branch. What keeps the engine from answering out of a stale in-memory snapshot?",
+    "reference": "The reload-before-operation rule: a polling file-watcher detects that the mem-repo ref moved, a mem_changed notice marks the in-memory store stale, and the store reloads from the branch tip before serving the next operation. It reconciles against the branch rather than trusting memory."
+  },
+  {
+    "id": "bad-write-response",
+    "prompt": "An agent attempts a write with a relationship type the schema's vocabulary doesn't allow. What does the engine do, and what does the agent get back?",
+    "reference": "The runtime validator refuses the write rather than coercing it into something that validates (never silently admit unvalidated content). The refusal carries a typed recovery payload naming what was wrong and how to fix it — the declared field/section list, the allowed values, and a nearest-match suggestion — so the agent can correct and resubmit without guessing."
+  },
+  {
+    "id": "portability-copy",
+    "prompt": "You want to move a project's entire Memstead knowledge base to a new machine using only a file copy, no export tool. What do you copy, and why is that enough?",
+    "reference": "Copy the .git directory (the git repo). Markdown-plus-git is the only authoritative store; every index (search, in-memory graph) is a derived projection that rebuilds from the markdown on first load. Nothing of value lives only in an index, so the repo carries everything — there is no export step or vendor format."
+  },
+  {
+    "id": "provenance-rate",
+    "prompt": "How much of the project's mutation history carries a human-readable reason for each change, and what makes that happen?",
+    "reference": "Near 97% of mutating commits (measured directly over the live mem-repo). The workspace's require_notes policy nudges each mutating commit to carry a one-sentence prose rationale beyond the auto-emitted Tool/Actor/Client trailers, so the decision history is readable with git log alone — no engine, no database."
+  }
+]
