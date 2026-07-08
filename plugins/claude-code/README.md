@@ -44,8 +44,12 @@ to call them directly.)
 | **`/setup`** | First-time setup of a mem in this workspace (see above). |
 | **`/graph`** `<task>` | You want to work with the graph — create, query, update, or connect entities. The general-purpose entry point for graph work. |
 | **`/interview`** | You want to capture what a domain expert knows — a guided, one-question-at-a-time conversation that turns answers into structured entities. |
-| **`/ingest`** | You want to build the graph in bulk from a body of source material — a knowledge-graph builder that runs one pass at a time. |
+| **`/ingest`** *(early)* | You want to build the graph in bulk from a body of source material — a knowledge-graph builder that runs one pass at a time. *Early: bulk ingest needs a source-declaration step that isn't documented for external use yet — expect to set it up by hand for now.* |
 | **`/reconcile`** | Your code changed and you want the graph to catch up — syncs the graph to code changes (reads the code, writes the graph, commits nothing itself). |
+
+> These commands are **early and will consolidate ahead of 1.0** — names and
+> shapes can still change, and `/ingest` in particular is not yet operable
+> end-to-end from public docs alone (see its note above).
 
 ## How mutations work
 
