@@ -3,18 +3,18 @@
 See the root `AGENTS.md` for full project documentation. This plugin provides MCP tools (prefix: `memstead_`) and slash commands for graph interaction.
 
 - Always mutate via MCP tools — never edit entity markdown directly
-- Use `/graph <task>` for guided interaction with the graph
+- There is no command for everyday graph work — just talk to Claude; the `memstead_*` MCP tools are always live and Claude calls them directly
 - Plugin code MUST NOT mutate mem-repo state directly — no `git` commands against mem-repo, no raw entity-file writes via `Write`/`Edit`, no `mem-repo/.git/` introspection. All mutations route through Memstead MCP tools, which carry the engine's schema validation, write rules, link-graph integrity, and commit provenance. Reads may use `memstead-cli` (subprocess) or `memstead-mcp` (MCP). The single allowed exception: outer-repo operations on the user's project repo (the cwd containing the workspace, not mem-repo), which the auto-commit hook performs and which are not Memstead-managed git.
 
 ## Skill invocation-control frontmatter
 
 Two **inverse** frontmatter keys control how a skill is invoked. They are not redundant, and each skill's assignment is deliberate — do not collapse them into one key (they express different axes: `/`-menu visibility vs. model auto-trigger):
 
-- `user-invocable: false` → **model-only**: hidden from the `/` menu, but the model may auto-invoke it. Used for the internal/power-user skills (audit, maintain, refactor, learn, start, outer-commit, old-ingest).
+- `user-invocable: false` → **model-only**: hidden from the `/` menu, but the model may auto-invoke it. Used for the internal/power-user skills (audit, maintain, refactor, learn, outer-commit).
 - `disable-model-invocation: true` → **human-only**: stays visible in the `/` menu, but the model never auto-triggers it. Used for the front-door skills the human drives (setup, interview).
-- **neither key** → **both**: visible in `/` and model-invocable (graph, ingest, reconcile).
+- **neither key** → **both**: visible in `/` and model-invocable (ingest, reconcile).
 
-The public-five / hidden-rest split of the `/` menu is derivable from `user-invocable` alone. Per-skill state files (e.g. `interview`'s mode flag) live at `<mem-dir>/.memstead/<name>` — the same per-mem location the hooks resolve and read; the writer (SKILL) and reader (hook) must name the same path.
+The front-door / hidden-rest split of the `/` menu is derivable from `user-invocable` alone. Per-skill state files (e.g. `interview`'s mode flag) live at `<mem-dir>/.memstead/<name>` — the same per-mem location the hooks resolve and read; the writer (SKILL) and reader (hook) must name the same path.
 
 ## Subagent safety
 

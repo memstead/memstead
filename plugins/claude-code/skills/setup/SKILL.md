@@ -96,7 +96,13 @@ For scripted / CI use the strict variant is `memstead init` — this skill only 
 
 The MCP server only registers on Claude Code startup. Tell the user explicitly:
 
-> Setup complete. **Restart Claude Code** for the `memstead` MCP server to register. Once you're back, run `/interview <topic>` to capture knowledge into entities, or just chat — ask me to show your graph, or I'll call `memstead_search` / `memstead_create` / etc. directly.
+> Setup complete. **Restart Claude Code** for the `memstead` MCP server to register.
+>
+> Once you're back: **there's no command for everyday graph work — just talk to me.** The `memstead_*` MCP tools are always live and I call them on my own. For example:
+> - *"Show me what my graph knows about the login flow"* — I'll search and read the matching entities.
+> - *"Add an entity for the new caching layer and link it to the request handler"* — I'll create and connect them for you.
+>
+> Run `/interview <topic>` when you want the guided, one-question-at-a-time capture flow instead.
 
 Do not try to verify the MCP server is reachable from inside this run — the new server only spawns on the next Claude Code session.
 

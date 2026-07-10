@@ -11,7 +11,7 @@ First-time onboarding for a filesystem-mem Memstead workspace. The user just ins
 The setup flow:
 
 - Running it in an empty directory: prompts for mem name and schema, runs `memstead init`, resolves `memstead-mcp` to its absolute path at setup time (e.g. via `command -v memstead-mcp`) and writes that absolute path into `.mcp.json` so the spawned MCP server does not depend on the parent shell's `PATH`, and tells the user to restart Claude Code.
-- After restart, the `memstead` MCP server is registered, the user issues `/start` (or asks the agent freely) and the agent successfully calls `memstead_search`.
+- After restart, the `memstead` MCP server is registered, the user asks the agent freely (there is no command for everyday graph work) and the agent successfully calls `memstead_search`.
 
 ## Principles
 

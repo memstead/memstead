@@ -22,9 +22,6 @@
 #     their own ephemeral mem-repo via `git init` and use git to
 #     synthesise MCP responses for hook unit-tests. Test infrastructure
 #     is not plugin code under the rule.
-#   - `plugins/claude-code/skills/old-ingest/` — frozen pre-rebuild
-#     ingest surface. Slated for removal; the carve-out drops in the
-#     same commit that removes the directory.
 #
 # The rule: the plugin must reach mem-repo via memstead-cli or
 # memstead-mcp, never via direct git. These patterns enforce it.
@@ -62,15 +59,13 @@ forbidden_patterns=(
 
 for pattern in "${forbidden_patterns[@]}"; do
     # The find expression scopes the scan to plugin source files only,
-    # excluding test files and the frozen old-ingest tree. Using `find`
-    # rather than `grep --exclude` keeps the carve-outs explicit and
-    # easy to audit.
+    # excluding test files. Using `find` rather than `grep --exclude`
+    # keeps the carve-outs explicit and easy to audit.
     if find "$plugin_root" \
         -type f \
         \( -name "*.mjs" -o -name "*.js" -o -name "*.json" \) \
         ! -name "*.test.js" \
         ! -name "*.integration.test.js" \
-        ! -path "*/skills/old-ingest/*" \
         -print0 \
         | xargs -0 grep -nE "$pattern" 2>/dev/null > "$tmp"
     then

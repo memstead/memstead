@@ -42,14 +42,23 @@ to call them directly.)
 | Command | Use it when… |
 |---|---|
 | **`/setup`** | First-time setup of a mem in this workspace (see above). |
-| **`/graph`** `<task>` | You want to work with the graph — create, query, update, or connect entities. The general-purpose entry point for graph work. |
 | **`/interview`** | You want to capture what a domain expert knows — a guided, one-question-at-a-time conversation that turns answers into structured entities. |
-| **`/ingest`** *(early)* | You want to build the graph in bulk from a body of source material — a knowledge-graph builder that runs one pass at a time. *Early: bulk ingest needs a source-declaration step that isn't documented for external use yet — expect to set it up by hand for now.* |
+| **`/ingest`** *(early)* | You want to build the graph in bulk from a body of source material — a knowledge-graph builder that runs one pass at a time. Declaring the source it reads is documented in the [ingest-declaration guide](https://memstead.io/guides/declare-an-ingest/). |
 | **`/reconcile`** | Your code changed and you want the graph to catch up — syncs the graph to code changes (reads the code, writes the graph, commits nothing itself). |
 
+**Everyday graph work has no command — just talk to Claude.** The `memstead_*`
+MCP tools are always live, and Claude reaches for them on its own whenever you
+describe what you want. Ask in plain language:
+
+- *"Show me every entity that references the auth module"* (a read).
+- *"Add a note that the parser now handles UTF-16, and link it to the parser entity"* (a mutation).
+
+Claude picks `memstead_search` / `memstead_entity` for the first and
+`memstead_create` / `memstead_relate` for the second — you never name a tool or
+a command.
+
 > These commands are **early and will consolidate ahead of 1.0** — names and
-> shapes can still change, and `/ingest` in particular is not yet operable
-> end-to-end from public docs alone (see its note above).
+> shapes can still change.
 
 ## How mutations work
 

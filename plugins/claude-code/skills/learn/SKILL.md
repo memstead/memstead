@@ -5,7 +5,7 @@ description: >
   Load knowledge from Memstead mems into context. Searches entities by topic and reads
   them fully so the LLM has internalized knowledge before starting work.
   Use when you need to understand a topic before implementing.
-allowed-tools: mcp__memstead__*, AskUserQuestion
+allowed-tools: mcp__memstead__*
 argument-hint: "[topic1 topic2 ...] | --research"
 ---
 
@@ -17,15 +17,15 @@ Search and read entities from knowledge mems so the knowledge is available in th
 
 Call `memstead_health` (no `include` needed) — the default response carries graph-size counts and the `writable_mems` / `read_mems` lists directly. If you want a content sample too, also run `memstead_search` with no `query` and extract the unique `mem` values from `results`.
 
-## Step 2: Ask the user which mem to use
+## Step 2: Infer the mem scope
 
-Present the discovered mems via `AskUserQuestion`:
+This is a model-invoked skill — infer the scope, don't stop to ask. Pick from the mems discovered in Step 1:
 
-- First option: "All mems" (recommended)
-- Then each discovered mem as a separate option (use mem name as label, entity count as description if known)
-- The user can also type a custom mem via "Other"
+- **A mem named in `$ARGUMENTS`** (an argument that matches a discovered mem name) → use that mem.
+- **The conversation points at one mem** (the task is clearly about a subject a single writable mem models — e.g. work on the engine when an `engine` mem exists) → scope to that mem.
+- **Otherwise → all mems.** Searching across all mems is the safe default; the search is scoped only to save tokens, and reading a few extra results is cheaper than missing the right entity.
 
-Wait for the user's selection before proceeding.
+Ask the user a **plain-prose** question (not `AskUserQuestion`) **only** when the scope is genuinely ambiguous — two or more plausible mems that would give *materially different* answers to the same query (e.g. a term that means different things in two installed third-party mems), and inferring wrong would mislead. Do not ask when a single mem or all-mems is the obvious scope.
 
 ## Step 3: Determine mode from arguments
 
@@ -33,7 +33,7 @@ Parse `$ARGUMENTS`:
 
 - **If `--research`:** Research mode — go to Step 4a
 - **If keywords given** (e.g. `skills hooks`): Targeted mode — go to Step 4b
-- **If empty:** Ask the user what topics to search for via `AskUserQuestion` (free text input)
+- **If empty:** Infer the topics from the current conversation the same way research mode does (Step 4a) — analyze what task is being worked on and what would be relevant, then proceed as research mode. Do not stop to ask.
 
 ## Step 4a: Research mode
 
@@ -58,5 +58,5 @@ Parse `$ARGUMENTS`:
 - **No `context: fork`** — the whole point is that knowledge stays in the main conversation context.
 - **Read fully** — always use `memstead_entity` to read the full entity, not just search results.
 - **Deduplicate** — the same entity may match multiple keywords. Read it only once.
-- **Mem selection is mandatory** — always ask the user first, even if arguments include a mem-looking string.
+- **Infer the mem scope, don't block on it** — resolve it from arguments, the conversation, and the mem roster (Step 2). A plain-prose question is warranted only for genuine ambiguity (multiple plausible mems giving materially different answers); never guess silently across contradictory scopes, and never ask when a single mem or all-mems is obvious.
 - **Budget-aware reads** — check `_tokens` on search results before reading. Stay under ~15000 tokens total to leave room for the task. Skip very large entities (>3000 tokens) unless they're the primary topic.

@@ -112,4 +112,4 @@ If no drift detected, say so explicitly: "All analyzed entities match their real
 - Respect abstraction levels: an entity about "the operations layer" doesn't drift when a variable is renamed.
 - When uncertain, report as "suspect" not "drifted".
 - Cost awareness: deep analysis of one entity may read 3-5 files. For large audits, batch wisely.
-- This is a **report-only** skill. Do not propose to apply fixes — the user applies fixes separately via `/graph`.
+- This is a **report-only** skill. Do not propose to apply fixes — fixes are applied separately by talking to Claude, which routes the changes through the `memstead_*` MCP tools.

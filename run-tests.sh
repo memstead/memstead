@@ -68,7 +68,7 @@ echo ""
 echo "══════════════════════════════════"
 echo "  Testing: plugin (node --test)"
 echo "══════════════════════════════════"
-if (cd "$ROOT" && node --test plugins/claude-code/hooks/*.test.js plugins/claude-code/skills/lib/*.test.js plugins/claude-code/skills/ingest/scripts/*.test.js); then
+if (cd "$ROOT" && node --test plugins/claude-code/hooks/*.test.js plugins/claude-code/skills/ingest/scripts/*.test.js); then
   echo "  ✓ plugin tests passed"
 else
   FAILED+=("plugin-tests")

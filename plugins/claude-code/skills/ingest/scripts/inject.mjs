@@ -14,9 +14,6 @@
  *                        and render its brief
  *   --clear <name>       delete the ingest's paired process mem (per-ingest,
  *                        idempotent)
- *
- * The full pre-rebuild orchestration is preserved in the `old-ingest` skill as
- * a fallback.
  */
 
 import { spawnSync } from 'node:child_process';
