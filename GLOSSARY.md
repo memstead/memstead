@@ -478,7 +478,7 @@ Four primitives compose the pipeline:
 - **Medium** — a named reference to a body of information the mem acknowledges as part of its territory (a codebase, a filesystem, another mem, a git repo, a web resource). Passive: a medium does not fetch, transform, or filter. It only names what's out there.
 - **Facet** — a specific perspective from which a projection engages with a medium: a scope (allow / deny patterns), an engagement contract (verbs, tools, discipline), and an optional preparation step (PDF→markdown, audio→transcript, codebase→code-map).
 - **Projection** — a declared mapping from sources (one or more facets over mediums, plus optional reference mems) into a destination mem. Defines *what* the projection produces.
-- **Ingest** — operational configuration for running a projection: mode (`discovery` / `refinement` / `one-shot`), trigger (`loop` / `manual` / `on-event`), batch size, deny-path overrides. Defines *how and when* the projection runs.
+- **Ingest** — operational configuration for running a projection: mode (`discovery` / `one-shot`), trigger (`loop` / `manual` / `on-event`), batch size, deny-path overrides. Defines *how and when* the projection runs.
 
 The pipeline is **per-mem** (each mem declares its own mediums, facets, projections, ingests — different mems have different territory) but **persisted centrally in the [workspace store](#workspace-store)** because the configuration changes with workspace lifecycle, not with mem content. The engine persists the four primitives under `.memstead/{mediums,facets,projections,ingests}/`.
 
@@ -494,4 +494,4 @@ Why the pipeline lives at workspace level even though its declarations are per-m
 
 Why mediums are passive: a medium can be reused across facets without inheriting any one engagement's preparation logic. The medium is "the engine codebase here" or "the filesystem there"; how a particular projection engages with it is the facet's job.
 
-Why ingest is separate from projection: a projection declares what feeds what; the same projection may be run in different modes (full discovery vs incremental refinement) at different times. Ingest carries the mode / trigger / batch — the operational layer over the declarative projection.
+Why ingest is separate from projection: a projection declares what feeds what; the same projection may be run in different modes (a full discovery pass vs a targeted one-shot run) at different times. Ingest carries the mode / trigger / batch — the operational layer over the declarative projection.
