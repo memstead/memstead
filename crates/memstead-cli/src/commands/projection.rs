@@ -87,9 +87,9 @@ pub enum ProjectionCommand {
     /// Scaffold a fresh v1 binding non-interactively: a `Medium`, a `Facet`,
     /// and a v1 binding under `.memstead/{mediums,facets,projections}/<mem>/`.
     /// All inputs are flags — no prompts ever (parity across callers). The
-    /// default binding declares build+sync+verify capability-permitting (D6):
+    /// default binding declares build+sync+verify where the medium permits:
     /// a `web` source scaffolds build-only, with the deferral named in
-    /// `warnings[]`. A `prune` block (F1) is scaffolded wherever sync survived,
+    /// `warnings[]`. A `prune` block is scaffolded wherever sync survived,
     /// with the strongest guarantee the medium supports (never-clobber for a
     /// git-backed source). Refuses `PROJECTION_EXISTS` (without touching disk)
     /// when a binding of the same id already exists — never overwrites.
