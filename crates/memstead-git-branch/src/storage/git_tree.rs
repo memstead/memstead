@@ -768,6 +768,35 @@ impl memstead_base::backend::MemBackend for GitTreeMemWriter {
         )
     }
 
+    fn read_anchors_sidecar(
+        &self,
+    ) -> Result<Option<Vec<u8>>, memstead_base::backend::BackendError> {
+        // Read via the MemBackend entity path so pending-buffer
+        // precedence applies (a staged sidecar write is visible before
+        // its commit) and a sibling engine's committed sidecar is seen on
+        // a between-transaction read — identical semantics to entity reads.
+        <Self as memstead_base::backend::MemBackend>::read_entity(
+            self,
+            Path::new(memstead_base::anchor::ANCHOR_SIDECAR_PATH),
+        )
+    }
+
+    fn write_anchors_sidecar(
+        &self,
+        bytes: &[u8],
+    ) -> Result<(), memstead_base::backend::BackendError> {
+        // Stage into the same pending op buffer entity writes use, under
+        // the `.memstead/anchors.json` path, so the next commit() carries
+        // entity + sidecar atomically. `list_entities` filters `.memstead/`,
+        // so the sidecar never surfaces as an entity.
+        <Self as MemWriter>::write_entity(
+            self,
+            Path::new(memstead_base::anchor::ANCHOR_SIDECAR_PATH),
+            bytes,
+        )
+        .map_err(Into::into)
+    }
+
     fn delete_artifacts(&self) -> Result<(), memstead_base::backend::BackendError> {
         // The branch leaf is the per-mem ref minus the
         // `refs/heads/` prefix — symmetric with the resolution done
@@ -1257,6 +1286,38 @@ mod tests {
 
         let bytes = read_blob(&gitdir, "refs/heads/test", "notes/hello.md").unwrap();
         assert_eq!(bytes, b"# hi\n");
+    }
+
+    #[test]
+    fn git_tree_writer_anchors_sidecar_rides_commit_and_survives_reload() {
+        use memstead_base::backend::MemBackend;
+        let tmp = TempDir::new().unwrap();
+        let gitdir = fresh_repo_dir(tmp.path());
+        let writer = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/test".to_string());
+
+        // Stage an entity write and the anchors sidecar, then commit
+        // once — both land in the same commit.
+        MemBackend::write_entity(&writer, Path::new("hello.md"), b"# hi\n").unwrap();
+        writer
+            .write_anchors_sidecar(b"{\"version\":1,\"entities\":{}}")
+            .unwrap();
+        MemBackend::commit(&writer, "entity+anchors", &ctx_for_test()).unwrap();
+
+        // Sidecar blob is present in the branch tree at the reserved path.
+        let sidecar = read_blob(&gitdir, "refs/heads/test", ".memstead/anchors.json").unwrap();
+        assert_eq!(sidecar, b"{\"version\":1,\"entities\":{}}");
+
+        // A fresh writer (engine reload) reads it back.
+        let reloaded = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/test".to_string());
+        assert_eq!(
+            reloaded.read_anchors_sidecar().unwrap(),
+            Some(b"{\"version\":1,\"entities\":{}}".to_vec())
+        );
+        // And it never surfaces as an entity.
+        assert_eq!(
+            MemBackend::list_entities(&reloaded).unwrap(),
+            vec![PathBuf::from("hello.md")]
+        );
     }
 
     #[test]

@@ -13,6 +13,7 @@
 //! does not include `gix`. Code that needs git-backed mems depends on
 //! `memstead-git-branch`, which builds on `memstead-base`.
 
+pub mod anchor;
 pub mod backend;
 pub mod binding;
 pub mod binding_migrate;
@@ -49,6 +50,12 @@ use std::sync::Arc;
 
 use memstead_schema::{TypeDefinition, type_by_name};
 
+pub use anchor::{
+    ANCHOR_SIDECAR_PATH, Anchor, AnchorGrain, AnchorHashStability, AnchorInput,
+    AnchorProvenanceClass, AnchorSidecar, AnchorState, AnchorValidationError, AnchorVersion,
+    ArtifactObservation, EntityAnchorComposition, INVALID_ANCHOR_CODE, compose_entity_anchors,
+    resolve_anchor,
+};
 pub use backend::{BackendError, MemBackend};
 pub use binding_migrate::{
     BindingMigrateError, MigratedBinding, migrate_gen2_bindings, resolve_migrated_binding,

@@ -319,6 +319,25 @@ impl crate::backend::MemBackend for FilesystemMemWriter {
         std::fs::write(&config_path, bytes).map_err(BackendError::Io)
     }
 
+    fn read_anchors_sidecar(&self) -> Result<Option<Vec<u8>>, BackendError> {
+        // Read via the entity path so a staged (pending) sidecar write is
+        // visible before its commit, symmetric with the other backends.
+        self.read_entity(Path::new(crate::anchor::ANCHOR_SIDECAR_PATH))
+    }
+
+    fn write_anchors_sidecar(&self, bytes: &[u8]) -> Result<(), BackendError> {
+        // Stage into the same op buffer entity writes use so the sidecar
+        // rides the entity mutation's commit. `list_entities`
+        // (`walk_for_md`) skips `.memstead/`, so it never lists as an
+        // entity.
+        <Self as MemWriter>::write_entity(
+            self,
+            Path::new(crate::anchor::ANCHOR_SIDECAR_PATH),
+            bytes,
+        )
+        .map_err(Into::into)
+    }
+
     fn append_provenance(&self, record: &Provenance) -> Result<(), BackendError> {
         let kind: MutationKind = record.kind.into();
         let entry = ChangeEntry {

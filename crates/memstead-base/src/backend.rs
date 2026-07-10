@@ -257,6 +257,43 @@ pub trait MemBackend: Send + Sync {
         Ok(())
     }
 
+    /// Read the engine-owned anchors sidecar
+    /// ([`crate::anchor::ANCHOR_SIDECAR_PATH`]) bytes, if any.
+    ///
+    /// The sidecar lives on the mem branch under the `.memstead/`
+    /// umbrella every external reader already filters, so it never
+    /// surfaces as an entity. Returns the raw bytes the engine parses via
+    /// [`crate::anchor::AnchorSidecar::from_bytes`]; `Ok(None)` for a mem
+    /// that has never written anchors.
+    ///
+    /// Default impl returns `Ok(None)` — a backend that does not persist
+    /// anchors (a pre-anchor archive, any read-only mount) inherits and
+    /// signals "no anchors". Mirrors [`Self::read_mem_config`]. The
+    /// git-branch and in-memory backends override to read the sidecar
+    /// from their store (pending-buffer precedence, so a staged sidecar
+    /// write is visible before its commit).
+    fn read_anchors_sidecar(&self) -> Result<Option<Vec<u8>>, BackendError> {
+        Ok(None)
+    }
+
+    /// Stage a write of the engine-owned anchors sidecar so it rides the
+    /// **same commit** as the entity mutation that produced it — the
+    /// atomicity guarantee anchors depend on (rename's referrer-rewrite,
+    /// delete's anchor removal, and branch_reset's rewind all move
+    /// entity + anchor state together).
+    ///
+    /// Pending until the next [`Self::commit`] — callers stage the entity
+    /// write, then the sidecar write, then commit once. Backends that
+    /// cannot persist anchors (archive / any sealed backend) inherit the
+    /// default returning [`BackendError::Sealed`]; the engine's write
+    /// path branches on mount capability before calling. The git-branch
+    /// and in-memory backends override to buffer the sidecar under
+    /// [`crate::anchor::ANCHOR_SIDECAR_PATH`] in the same pending set the
+    /// entity write used.
+    fn write_anchors_sidecar(&self, _bytes: &[u8]) -> Result<(), BackendError> {
+        Err(BackendError::Sealed)
+    }
+
     /// Drop every backend-side artifact for this mem — the
     /// symmetric counterpart to the writes performed by
     /// `memstead_mem_create` (entity-seed commit on the per-mem

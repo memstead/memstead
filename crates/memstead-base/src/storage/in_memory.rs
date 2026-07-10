@@ -107,9 +107,18 @@ impl MemBackend for InMemoryBackend {
     fn list_entities(&self) -> Result<Vec<PathBuf>, BackendError> {
         // Committed state only — pending writes are not listable until
         // they commit, matching the folder backend (which walks the
-        // on-disk tree and ignores its in-memory buffer).
+        // on-disk tree and ignores its in-memory buffer). Entity-bearing
+        // `.md` files outside the `.memstead/` umbrella only, so the
+        // engine-owned anchors sidecar (`.memstead/anchors.json`) — and
+        // any other `.memstead/` member — is never mis-parsed as an
+        // entity. Mirrors the git-branch and folder backends' filters.
         let state = self.lock()?;
-        Ok(state.committed.keys().map(PathBuf::from).collect())
+        Ok(state
+            .committed
+            .keys()
+            .filter(|k| k.ends_with(".md") && !k.starts_with(".memstead/"))
+            .map(PathBuf::from)
+            .collect())
     }
 
     fn read_entity(&self, rel_path: &Path) -> Result<Option<Vec<u8>>, BackendError> {
@@ -227,6 +236,20 @@ impl MemBackend for InMemoryBackend {
             .cloned()
             .collect();
         Ok(out)
+    }
+
+    fn read_anchors_sidecar(&self) -> Result<Option<Vec<u8>>, BackendError> {
+        // Read via the entity path so pending-buffer precedence applies —
+        // a staged sidecar write is visible before its commit, symmetric
+        // with the git-branch backend.
+        self.read_entity(Path::new(crate::anchor::ANCHOR_SIDECAR_PATH))
+    }
+
+    fn write_anchors_sidecar(&self, bytes: &[u8]) -> Result<(), BackendError> {
+        // Stage into the same pending buffer entity writes use, so the
+        // next commit folds entity + sidecar together. `list_entities`
+        // filters `.memstead/`, so the sidecar never lists as an entity.
+        self.write_entity(Path::new(crate::anchor::ANCHOR_SIDECAR_PATH), bytes)
     }
 
     fn read_mem_config(&self) -> Result<Option<Vec<u8>>, BackendError> {
@@ -396,6 +419,34 @@ mod tests {
         assert_eq!(
             b.read_mem_config().unwrap(),
             Some(b"{\"schema\":\"default@1.0.0\"}".to_vec())
+        );
+    }
+
+    #[test]
+    fn anchors_sidecar_round_trips_and_is_not_listed_as_entity() {
+        let b = InMemoryBackend::new();
+        // No sidecar on a fresh mem.
+        assert_eq!(b.read_anchors_sidecar().unwrap(), None);
+        // Seed a real entity so list has something to filter against.
+        b.write_entity(Path::new("x.md"), b"# x\n").unwrap();
+        b.write_anchors_sidecar(b"{\"version\":1,\"entities\":{}}")
+            .unwrap();
+        // Staged sidecar is visible before commit (pending precedence).
+        assert_eq!(
+            b.read_anchors_sidecar().unwrap(),
+            Some(b"{\"version\":1,\"entities\":{}}".to_vec())
+        );
+        b.commit("seed+anchors", &ctx()).unwrap();
+        // Survives the commit.
+        assert_eq!(
+            b.read_anchors_sidecar().unwrap(),
+            Some(b"{\"version\":1,\"entities\":{}}".to_vec())
+        );
+        // The sidecar never surfaces as an entity.
+        assert_eq!(
+            b.list_entities().unwrap(),
+            vec![PathBuf::from("x.md")],
+            "anchors sidecar must not list as an entity"
         );
     }
 
