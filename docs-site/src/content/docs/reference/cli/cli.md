@@ -75,6 +75,8 @@ This document contains the help content for the `memstead` command-line program.
 * [`memstead schema install`↴](#memstead-schema-install)
 * [`memstead pipeline`↴](#memstead-pipeline)
 * [`memstead pipeline migrate`↴](#memstead-pipeline-migrate)
+* [`memstead projection`↴](#memstead-projection)
+* [`memstead projection migrate`↴](#memstead-projection-migrate)
 * [`memstead ingest`↴](#memstead-ingest)
 * [`memstead ingest brief`↴](#memstead-ingest-brief)
 
@@ -138,6 +140,7 @@ Exit codes:
 * `workspace` — Introspect and configure workspace policy — `dump` reads the effective config; `allow-create`/`revoke-create`/`allow-delete`/ `revoke-delete`/`grant-cross-link`/`revoke-cross-link`/`set-mutations` write the mem-lifecycle allowlist, cross-mem link grants, and mutation policy
 * `schema` — Author-time schema tooling. `memstead schema validate <path>` checks a schema package directory against the engine's loader without touching a workspace
 * `pipeline` — Pipeline-config tooling. `memstead pipeline migrate` converts the legacy `scopes|projections|ingests/` JSON folders into the `.memstead/` workspace store's four-primitive shape
+* `projection` — Binding (projection-promotion) tooling. `memstead projection migrate` promotes gen-2 four-primitive configs (per-mem projection + flat ingest) into v1 bindings — one versioned record per source→mem obligation, with an `operations { build, sync, verify }` block
 * `ingest` — Engine-side ingest orchestration. `memstead ingest brief <name>` renders an ingest's run-brief — the Markdown prompt an agent consumes — from the four-primitive config and the destination mem's schema / writing guidance
 
 ###### **Options:**
@@ -1297,6 +1300,30 @@ Pipeline-config tooling. `memstead pipeline migrate` converts the legacy `scopes
 Migrate the legacy `scopes|projections|ingests/` JSON folders at the workspace root into the four-primitive workspace-store shape under `.memstead/`. A legacy scope splits into a Medium (territory) and a Facet (engagement). Idempotent — re-running reproduces identical files. The legacy folders are left in place; remove them when ready
 
 **Usage:** `memstead pipeline migrate`
+
+
+
+## `memstead projection`
+
+Binding (projection-promotion) tooling. `memstead projection migrate` promotes gen-2 four-primitive configs (per-mem projection + flat ingest) into v1 bindings — one versioned record per source→mem obligation, with an `operations { build, sync, verify }` block
+
+**Usage:** `memstead projection <COMMAND>`
+
+###### **Subcommands:**
+
+* `migrate` — Migrate gen-2 four-primitive configs (per-mem `Projection` + flat `Ingest`) into v1 bindings, merging each ingest into the projection its `projection` ref names. The binding takes the projection's file identity (`.memstead/projections/<mem>/<stem>.json`); the merged ingest is removed. `refinement` mode and dangling projection refs refuse with a typed error. Use `--dry-run` to preview without writing
+
+
+
+## `memstead projection migrate`
+
+Migrate gen-2 four-primitive configs (per-mem `Projection` + flat `Ingest`) into v1 bindings, merging each ingest into the projection its `projection` ref names. The binding takes the projection's file identity (`.memstead/projections/<mem>/<stem>.json`); the merged ingest is removed. `refinement` mode and dangling projection refs refuse with a typed error. Use `--dry-run` to preview without writing
+
+**Usage:** `memstead projection migrate [OPTIONS]`
+
+###### **Options:**
+
+* `--dry-run` — Preview the produced bindings (and any warnings) without writing them to disk or removing the merged ingest files
 
 
 

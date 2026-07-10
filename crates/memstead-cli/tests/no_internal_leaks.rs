@@ -208,3 +208,59 @@ fn cold_start_returns_typed_code() {
     let env = parse_envelope(&output);
     assert_typed_code(&env, "stats outside workspace");
 }
+
+/// `projection migrate` outside a workspace returns the single-sourced
+/// WORKSPACE_NOT_INITIALISED code, not INTERNAL.
+#[test]
+fn projection_migrate_outside_workspace_returns_typed_code() {
+    let tmp = TempDir::new().unwrap();
+    let output = memstead()
+        .current_dir(tmp.path())
+        .args(["--json", "projection", "migrate"])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let env = parse_envelope(&output);
+    assert_typed_code(&env, "projection migrate outside workspace");
+    assert_eq!(env["code"], "WORKSPACE_NOT_INITIALISED", "got: {env}");
+}
+
+/// `projection migrate` over a dangling ingest→projection ref returns the
+/// typed PROJECTION_MIGRATE_DANGLING_REF code, not INTERNAL.
+#[test]
+fn projection_migrate_dangling_ref_returns_typed_code() {
+    let tmp = TempDir::new().unwrap();
+    let workspace = tmp.path().join("ws");
+    memstead()
+        .args([
+            "mem-repo",
+            "init",
+            workspace.to_str().unwrap(),
+            "--no-gitignore",
+        ])
+        .assert()
+        .success();
+
+    // A flat ingest naming a projection that does not exist — a dangling ref.
+    let ingests = workspace.join(".memstead").join("ingests");
+    std::fs::create_dir_all(&ingests).unwrap();
+    std::fs::write(
+        ingests.join("engine-graph.json"),
+        r#"{"projection":"engine/missing","mode":"discovery","trigger":"loop","batch_size":20,"deny_paths":[]}"#,
+    )
+    .unwrap();
+
+    let output = memstead()
+        .current_dir(&workspace)
+        .args(["--json", "projection", "migrate"])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let env = parse_envelope(&output);
+    assert_typed_code(&env, "projection migrate dangling ref");
+    assert_eq!(env["code"], "PROJECTION_MIGRATE_DANGLING_REF", "got: {env}");
+}

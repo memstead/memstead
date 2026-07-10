@@ -246,6 +246,12 @@ pub enum Command {
     /// `.memstead/` workspace store's four-primitive shape.
     Pipeline(commands::pipeline::Args),
 
+    /// Binding (projection-promotion) tooling. `memstead projection migrate`
+    /// promotes gen-2 four-primitive configs (per-mem projection + flat
+    /// ingest) into v1 bindings — one versioned record per source→mem
+    /// obligation, with an `operations { build, sync, verify }` block.
+    Projection(commands::projection::Args),
+
     /// Engine-side ingest orchestration. `memstead ingest brief <name>`
     /// renders an ingest's run-brief — the Markdown prompt an agent
     /// consumes — from the four-primitive config and the destination mem's

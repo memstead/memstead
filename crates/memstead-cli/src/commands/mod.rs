@@ -232,6 +232,7 @@ pub mod login;
 pub mod logout;
 pub mod overview;
 pub mod pipeline;
+pub mod projection;
 pub mod publish;
 pub mod quickstart;
 pub mod relate;

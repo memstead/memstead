@@ -70,6 +70,7 @@ Surface entries the registry does not pin to a logical operation. Either add a r
 - `logout`
 - `mem-repo`
 - `pipeline`
+- `projection`
 - `publish`
 - `quickstart`
 - `schema`

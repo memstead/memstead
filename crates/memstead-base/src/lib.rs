@@ -15,6 +15,7 @@
 
 pub mod backend;
 pub mod binding;
+pub mod binding_migrate;
 pub mod chunking;
 pub mod domain_authority_wire;
 pub mod engine;
@@ -49,6 +50,10 @@ use std::sync::Arc;
 use memstead_schema::{TypeDefinition, type_by_name};
 
 pub use backend::{BackendError, MemBackend};
+pub use binding_migrate::{
+    BindingMigrateError, MigratedBinding, binding_from_gen2, migrate_gen2_bindings,
+    resolve_migrated_binding,
+};
 pub use engine::{
     BackendFactory, BootError, CreateEntityArgs, CreateEntityOutcome, DeleteEntityArgs,
     DeleteEntityOutcome, DeleteReferrers, Engine, EngineError, FromArchiveBytesError,

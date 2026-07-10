@@ -28,6 +28,7 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
+use crate::binding::BindingV1;
 use crate::pipeline::{Facet, Ingest, Medium, Projection};
 use crate::workspace_store::{StoreError, WORKSPACE_STORE_DIR};
 
@@ -312,6 +313,25 @@ pub fn write_projection(
 /// Write an ingest to `<root>/.memstead/ingests/<name>.json` (flat).
 pub fn write_ingest(workspace_root: &Path, name: &str, ingest: &Ingest) -> Result<(), StoreError> {
     write_json(&flat_path(workspace_root, INGESTS_DIR, name)?, ingest)
+}
+
+/// Write a v1 binding to `<root>/.memstead/projections/<mem>/<name>.json`.
+///
+/// A binding (`BindingV1`) occupies the *same* per-mem projections tier and
+/// file identity a gen-2 [`Projection`] did (stem-identity preserved, D1/D3),
+/// so this overwrites the gen-2 projection file in place when promoting a
+/// workspace. Additive counterpart to [`write_projection`]; nothing in the
+/// live loader reads the v1 shape yet (that gate is a later slice).
+pub fn write_binding(
+    workspace_root: &Path,
+    mem: &str,
+    name: &str,
+    binding: &BindingV1,
+) -> Result<(), StoreError> {
+    write_json(
+        &mem_scoped_path(workspace_root, PROJECTIONS_DIR, mem, name)?,
+        binding,
+    )
 }
 
 /// Delete a medium file. Missing → [`StoreError::Io`]; callers that want a
