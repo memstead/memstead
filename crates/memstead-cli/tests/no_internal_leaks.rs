@@ -227,6 +227,88 @@ fn projection_migrate_outside_workspace_returns_typed_code() {
     assert_eq!(env["code"], "WORKSPACE_NOT_INITIALISED", "got: {env}");
 }
 
+/// `projection init` outside a workspace returns the single-sourced
+/// WORKSPACE_NOT_INITIALISED code, not INTERNAL.
+#[test]
+fn projection_init_outside_workspace_returns_typed_code() {
+    let tmp = TempDir::new().unwrap();
+    let output = memstead()
+        .current_dir(tmp.path())
+        .args([
+            "--json",
+            "projection",
+            "init",
+            "--mem",
+            "m",
+            "--source",
+            "../x",
+            "--medium-type",
+            "codebase",
+        ])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let env = parse_envelope(&output);
+    assert_typed_code(&env, "projection init outside workspace");
+    assert_eq!(env["code"], "WORKSPACE_NOT_INITIALISED", "got: {env}");
+}
+
+/// `projection init` on an existing binding id returns the typed
+/// PROJECTION_EXISTS code, not INTERNAL.
+#[test]
+fn projection_init_existing_binding_returns_typed_code() {
+    let tmp = TempDir::new().unwrap();
+    let workspace = tmp.path().join("ws");
+    memstead()
+        .args([
+            "mem-repo",
+            "init",
+            workspace.to_str().unwrap(),
+            "--no-gitignore",
+        ])
+        .assert()
+        .success();
+
+    let init_args = [
+        "projection",
+        "init",
+        "--mem",
+        "engine",
+        "--source",
+        "../public",
+        "--medium-type",
+        "codebase",
+        "--name",
+        "graph",
+    ];
+    memstead()
+        .current_dir(&workspace)
+        .args(init_args)
+        .assert()
+        .success();
+
+    // Second init on the same id refuses.
+    let output = memstead()
+        .current_dir(&workspace)
+        .args(
+            ["--json"]
+                .iter()
+                .chain(init_args.iter())
+                .copied()
+                .collect::<Vec<_>>(),
+        )
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let env = parse_envelope(&output);
+    assert_typed_code(&env, "projection init existing binding");
+    assert_eq!(env["code"], "PROJECTION_EXISTS", "got: {env}");
+}
+
 /// `projection migrate` over a dangling ingest→projection ref returns the
 /// typed PROJECTION_MIGRATE_DANGLING_REF code, not INTERNAL.
 #[test]

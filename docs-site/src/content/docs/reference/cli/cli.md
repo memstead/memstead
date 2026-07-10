@@ -76,6 +76,7 @@ This document contains the help content for the `memstead` command-line program.
 * [`memstead pipeline`↴](#memstead-pipeline)
 * [`memstead pipeline migrate`↴](#memstead-pipeline-migrate)
 * [`memstead projection`↴](#memstead-projection)
+* [`memstead projection init`↴](#memstead-projection-init)
 * [`memstead projection migrate`↴](#memstead-projection-migrate)
 * [`memstead ingest`↴](#memstead-ingest)
 * [`memstead ingest brief`↴](#memstead-ingest-brief)
@@ -140,7 +141,7 @@ Exit codes:
 * `workspace` — Introspect and configure workspace policy — `dump` reads the effective config; `allow-create`/`revoke-create`/`allow-delete`/ `revoke-delete`/`grant-cross-link`/`revoke-cross-link`/`set-mutations` write the mem-lifecycle allowlist, cross-mem link grants, and mutation policy
 * `schema` — Author-time schema tooling. `memstead schema validate <path>` checks a schema package directory against the engine's loader without touching a workspace
 * `pipeline` — Pipeline-config tooling. `memstead pipeline migrate` converts the legacy `scopes|projections|ingests/` JSON folders into the `.memstead/` workspace store's four-primitive shape
-* `projection` — Binding (projection-promotion) tooling. `memstead projection migrate` promotes gen-2 four-primitive configs (per-mem projection + flat ingest) into v1 bindings — one versioned record per source→mem obligation, with an `operations { build, sync, verify }` block
+* `projection` — Binding (projection-promotion) tooling. `memstead projection init` scaffolds a fresh v1 binding non-interactively; `memstead projection migrate` promotes gen-2 four-primitive configs (per-mem projection + flat ingest) into v1 bindings — one versioned record per source→mem obligation, with an `operations { build, sync, verify }` block
 * `ingest` — Engine-side ingest orchestration. `memstead ingest brief <name>` renders an ingest's run-brief — the Markdown prompt an agent consumes — from the four-primitive config and the destination mem's schema / writing guidance
 
 ###### **Options:**
@@ -1305,13 +1306,43 @@ Migrate the legacy `scopes|projections|ingests/` JSON folders at the workspace r
 
 ## `memstead projection`
 
-Binding (projection-promotion) tooling. `memstead projection migrate` promotes gen-2 four-primitive configs (per-mem projection + flat ingest) into v1 bindings — one versioned record per source→mem obligation, with an `operations { build, sync, verify }` block
+Binding (projection-promotion) tooling. `memstead projection init` scaffolds a fresh v1 binding non-interactively; `memstead projection migrate` promotes gen-2 four-primitive configs (per-mem projection + flat ingest) into v1 bindings — one versioned record per source→mem obligation, with an `operations { build, sync, verify }` block
 
 **Usage:** `memstead projection <COMMAND>`
 
 ###### **Subcommands:**
 
+* `init` — Scaffold a fresh v1 binding non-interactively: a `Medium`, a `Facet`, and a v1 binding under `.memstead/{mediums,facets,projections}/<mem>/`. All inputs are flags — no prompts ever (parity across callers). The default binding declares build+sync+verify capability-permitting (D6): a `web` source scaffolds build-only, with the deferral named in `warnings[]`. Refuses `PROJECTION_EXISTS` (without touching disk) when a binding of the same id already exists — never overwrites
 * `migrate` — Migrate gen-2 four-primitive configs (per-mem `Projection` + flat `Ingest`) into v1 bindings, merging each ingest into the projection its `projection` ref names. The binding takes the projection's file identity (`.memstead/projections/<mem>/<stem>.json`); the merged ingest is removed. `refinement` mode and dangling projection refs refuse with a typed error. Use `--dry-run` to preview without writing
+
+
+
+## `memstead projection init`
+
+Scaffold a fresh v1 binding non-interactively: a `Medium`, a `Facet`, and a v1 binding under `.memstead/{mediums,facets,projections}/<mem>/`. All inputs are flags — no prompts ever (parity across callers). The default binding declares build+sync+verify capability-permitting (D6): a `web` source scaffolds build-only, with the deferral named in `warnings[]`. Refuses `PROJECTION_EXISTS` (without touching disk) when a binding of the same id already exists — never overwrites
+
+**Usage:** `memstead projection init [OPTIONS] --mem <MEM> --source <SOURCE> --medium-type <MEDIUM_TYPE>`
+
+###### **Options:**
+
+* `--mem <MEM>` — Destination mem the binding writes into — the `<mem>` half of the binding id `<mem>/<stem>` and the per-mem tier the three files live under
+* `--source <SOURCE>` — The medium pointer — a path (codebase / filesystem / git) or a mem id / URL (graph / web). Becomes the scaffolded medium's `pointer`
+* `--medium-type <MEDIUM_TYPE>` — The medium type — decides the capability matrix (D6) that filters which operations the default binding declares
+
+  Possible values:
+  - `codebase`:
+    A source tree of code
+  - `filesystem`:
+    A directory of files (non-code)
+  - `git`:
+    A git history
+  - `graph`:
+    Another mem's graph
+  - `web`:
+    Web sources (build-only this cycle — no change signal)
+
+* `--intent <INTENT>` — Intent prose for the agent (the binding's `intent`). Optional
+* `--name <NAME>` — Binding stem — the `<stem>` half of the binding id and the shared file name of the scaffolded medium / facet / binding. Defaults to the final path component of `--source`
 
 
 

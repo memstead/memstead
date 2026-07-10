@@ -1,11 +1,20 @@
 //! Integration tests for the `memstead projection` command tree.
 //!
-//! This slice ships the `migrate` leaf (gen-2 four-primitive → v1 bindings,
-//! D10 gen-2 path). The tests build a fixture gen-2 workspace on disk, run
-//! `memstead projection migrate`, and assert: the produced v1 binding
-//! round-trips and carries the merged build operations; the merged ingest is
-//! removed; `refinement` mode and a dangling ingest→projection ref each refuse
-//! with a typed `PROJECTION_*` code (exit 5); and `--dry-run` writes nothing.
+//! Two leaves ship here: `init` (D8 — non-interactive v1 scaffold) and
+//! `migrate` (D10 gen-2 path — four-primitive → v1 bindings).
+//!
+//! `init` tests assert: a codebase/filesystem source scaffolds all three files
+//! (`mediums`/`facets`/`projections`) with `operations:[build,sync,verify]` and
+//! a round-trippable v1 binding; a `web` source scaffolds build-only with a
+//! deferral warning; the `--json` output matches D8's pinned byte-shape; and a
+//! re-run on an existing id refuses `PROJECTION_EXISTS` without touching disk
+//! (the three files are byte-identical after the refused second run).
+//!
+//! `migrate` tests build a fixture gen-2 workspace on disk, run the migration,
+//! and assert: the produced v1 binding round-trips and carries the merged build
+//! operations; the merged ingest is removed; `refinement` mode and a dangling
+//! ingest→projection ref each refuse with a typed `PROJECTION_*` code (exit 5);
+//! and `--dry-run` writes nothing.
 
 use assert_cmd::Command;
 use memstead_base::binding::{BindingV1, BuildMode};
@@ -23,6 +32,13 @@ fn write_store(root: &Path, rel: &str, contents: &str) {
     let path = root.join(".memstead").join(rel);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(path, contents).unwrap();
+}
+
+/// A bare workspace: just the `.memstead/workspace.toml` marker.
+fn bare_workspace() -> TempDir {
+    let tmp = TempDir::new().unwrap();
+    write_store(tmp.path(), "workspace.toml", "");
+    tmp
 }
 
 /// A minimal gen-2 workspace: the workspace marker plus one codebase medium,
@@ -257,6 +273,256 @@ fn migrate_outside_workspace_is_typed() {
     let output = memstead()
         .current_dir(tmp.path())
         .args(["--json", "projection", "migrate"])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(env["code"], "WORKSPACE_NOT_INITIALISED");
+    assert_ne!(env["code"], "INTERNAL");
+}
+
+// ---------------------------------------------------------------------------
+// projection init (D8)
+// ---------------------------------------------------------------------------
+
+/// Read the three scaffolded files' raw bytes as a comparable triple.
+fn triple_bytes(root: &Path, mem: &str, stem: &str) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
+    let m = root.join(format!(".memstead/mediums/{mem}/{stem}.json"));
+    let f = root.join(format!(".memstead/facets/{mem}/{stem}.json"));
+    let p = root.join(format!(".memstead/projections/{mem}/{stem}.json"));
+    (
+        std::fs::read(m).unwrap(),
+        std::fs::read(f).unwrap(),
+        std::fs::read(p).unwrap(),
+    )
+}
+
+/// A codebase source scaffolds all three files, the binding declares
+/// build+sync+verify (matrix-permitting), the on-disk binding round-trips, and
+/// the `--json` output matches D8's pinned byte-shape.
+#[test]
+fn init_codebase_scaffolds_all_three_with_full_operations() {
+    let tmp = bare_workspace();
+    let root = tmp.path();
+
+    let output = memstead()
+        .current_dir(root)
+        .args([
+            "--json",
+            "projection",
+            "init",
+            "--mem",
+            "engine",
+            "--source",
+            "../public",
+            "--medium-type",
+            "codebase",
+            "--intent",
+            "model the engine",
+            "--name",
+            "graph",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&output).expect("--json init must emit JSON");
+
+    // D8 pinned contract byte-shape: { binding, created, operations, warnings }.
+    assert_eq!(env["binding"], "engine/graph");
+    assert_eq!(
+        env["created"],
+        serde_json::json!([
+            ".memstead/mediums/engine/graph.json",
+            ".memstead/facets/engine/graph.json",
+            ".memstead/projections/engine/graph.json",
+        ])
+    );
+    assert_eq!(
+        env["operations"],
+        serde_json::json!(["build", "sync", "verify"])
+    );
+    assert_eq!(env["warnings"], serde_json::json!([]));
+    // Exactly the four contract keys — no extras leaked.
+    let keys: Vec<&str> = env
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    assert_eq!(keys, vec!["binding", "created", "operations", "warnings"]);
+
+    // All three files exist on disk.
+    assert!(root.join(".memstead/mediums/engine/graph.json").is_file());
+    assert!(root.join(".memstead/facets/engine/graph.json").is_file());
+    assert!(
+        root.join(".memstead/projections/engine/graph.json")
+            .is_file()
+    );
+
+    // The projection file parses as a v1 binding and round-trips losslessly.
+    let bytes = std::fs::read(root.join(".memstead/projections/engine/graph.json")).unwrap();
+    let b: BindingV1 = serde_json::from_slice(&bytes).expect("scaffold must be a v1 binding");
+    assert_eq!(b.version, 1);
+    assert_eq!(b.destination_mem, "engine");
+    assert_eq!(b.intent.as_deref(), Some("model the engine"));
+    assert_eq!(b.source_facets, vec!["graph".to_string()]);
+    assert_eq!(b.operations.build.mode, BuildMode::Discovery);
+    assert!(b.operations.sync.is_some());
+    assert!(b.operations.verify.is_some());
+    let round = serde_json::to_string(&b).unwrap();
+    let back: BindingV1 = serde_json::from_str(&round).unwrap();
+    assert_eq!(back, b);
+}
+
+/// A filesystem source likewise scaffolds build+sync+verify (the matrix marks
+/// it path-shaped with a change signal).
+#[test]
+fn init_filesystem_scaffolds_full_operations() {
+    let tmp = bare_workspace();
+    let root = tmp.path();
+    let output = memstead()
+        .current_dir(root)
+        .args([
+            "--json",
+            "projection",
+            "init",
+            "--mem",
+            "docs",
+            "--source",
+            "../docs",
+            "--medium-type",
+            "filesystem",
+            "--name",
+            "manual",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(env["binding"], "docs/manual");
+    assert_eq!(
+        env["operations"],
+        serde_json::json!(["build", "sync", "verify"])
+    );
+    assert_eq!(env["warnings"], serde_json::json!([]));
+}
+
+/// A `web` source scaffolds build-only, with the deferral named in `warnings[]`
+/// (operator decision 7). The binding on disk carries no sync/verify block.
+#[test]
+fn init_web_source_scaffolds_build_only_with_warning() {
+    let tmp = bare_workspace();
+    let root = tmp.path();
+    let output = memstead()
+        .current_dir(root)
+        .args([
+            "--json",
+            "projection",
+            "init",
+            "--mem",
+            "research",
+            "--source",
+            "https://example.com/docs",
+            "--medium-type",
+            "web",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&output).unwrap();
+    // Stem derived from the source's final path component.
+    assert_eq!(env["binding"], "research/docs");
+    assert_eq!(env["operations"], serde_json::json!(["build"]));
+    let warnings = env["warnings"].as_array().unwrap();
+    assert!(!warnings.is_empty(), "web must warn about the deferral");
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.as_str().unwrap_or("").contains("out of scope")
+                && w.as_str().unwrap_or("").contains("operator decision 7")),
+        "expected a deferral warning, got {warnings:?}"
+    );
+
+    // On disk: build-only binding.
+    let bytes = std::fs::read(root.join(".memstead/projections/research/docs.json")).unwrap();
+    let b: BindingV1 = serde_json::from_slice(&bytes).unwrap();
+    assert!(b.operations.sync.is_none());
+    assert!(b.operations.verify.is_none());
+}
+
+/// Re-running `init` on an existing binding id refuses `PROJECTION_EXISTS`
+/// (exit 5) and touches nothing — the three files are byte-identical after the
+/// refused second run.
+#[test]
+fn init_existing_binding_refuses_without_touching_disk() {
+    let tmp = bare_workspace();
+    let root = tmp.path();
+    let args = [
+        "projection",
+        "init",
+        "--mem",
+        "engine",
+        "--source",
+        "../public",
+        "--medium-type",
+        "codebase",
+        "--name",
+        "graph",
+    ];
+
+    memstead().current_dir(root).args(args).assert().success();
+    let before = triple_bytes(root, "engine", "graph");
+
+    // Second run refuses.
+    let output = memstead()
+        .current_dir(root)
+        .args(
+            ["--json"]
+                .iter()
+                .chain(args.iter())
+                .copied()
+                .collect::<Vec<_>>(),
+        )
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(env["code"], "PROJECTION_EXISTS");
+    assert_eq!(env["details"]["binding"], "engine/graph");
+
+    // No partial writes: all three files are byte-identical.
+    let after = triple_bytes(root, "engine", "graph");
+    assert_eq!(before, after, "refused init must not touch disk");
+}
+
+/// `init` outside a workspace refuses with the shared, single-sourced
+/// `WORKSPACE_NOT_INITIALISED` code — never a generic/internal leak.
+#[test]
+fn init_outside_workspace_is_typed() {
+    let tmp = TempDir::new().unwrap();
+    let output = memstead()
+        .current_dir(tmp.path())
+        .args([
+            "--json",
+            "projection",
+            "init",
+            "--mem",
+            "m",
+            "--source",
+            "../x",
+            "--medium-type",
+            "codebase",
+        ])
         .assert()
         .failure()
         .get_output()

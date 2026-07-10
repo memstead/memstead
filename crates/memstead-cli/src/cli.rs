@@ -246,9 +246,10 @@ pub enum Command {
     /// `.memstead/` workspace store's four-primitive shape.
     Pipeline(commands::pipeline::Args),
 
-    /// Binding (projection-promotion) tooling. `memstead projection migrate`
-    /// promotes gen-2 four-primitive configs (per-mem projection + flat
-    /// ingest) into v1 bindings — one versioned record per source→mem
+    /// Binding (projection-promotion) tooling. `memstead projection init`
+    /// scaffolds a fresh v1 binding non-interactively; `memstead projection
+    /// migrate` promotes gen-2 four-primitive configs (per-mem projection +
+    /// flat ingest) into v1 bindings — one versioned record per source→mem
     /// obligation, with an `operations { build, sync, verify }` block.
     Projection(commands::projection::Args),
 
