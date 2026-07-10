@@ -58,11 +58,11 @@ import { dirname, join } from 'node:path';
 // ── Policy (single source of truth) ─────────────────────────────────
 
 export const ROUTER_BODY_MAX = 60;
-export const THIN_ROUTERS = ['ingest', 'commit'];
+export const THIN_ROUTERS = ['ingest', 'commit', 'sync', 'verify'];
 
 // The roster skills subject to rules (1), (2) and (4). reconcile + audit
 // are the frozen interim survivors — exempt everywhere.
-export const ROSTER = ['setup', 'interview', 'learn', 'ingest', 'tidy', 'commit'];
+export const ROSTER = ['setup', 'interview', 'learn', 'ingest', 'tidy', 'commit', 'verify'];
 export const EXEMPT = ['reconcile', 'audit'];
 
 const MECHANISM_TERMS = [
