@@ -8,11 +8,12 @@
 //! ending in a blank line (or the empty string), and the full brief is the
 //! truthy blocks concatenated.
 //!
-//! Ported so far: the discovery-mode header blocks ([`render_situation`],
-//! [`render_intent`], [`render_goal_and_avoid`], [`render_operative_data`])
-//! and their [`assemble_discovery_brief`] dispatch. The changed-slice
-//! preface (rendered from a [`super::slice::Slice`]) and the refinement /
-//! one-shot modes follow.
+//! All three modes are assembled here: [`assemble_discovery_brief`] (with the
+//! header blocks [`render_situation`], [`render_intent`],
+//! [`render_goal_and_avoid`], [`render_operative_data`]),
+//! [`assemble_refinement_brief`], and [`assemble_one_shot_brief`] — plus the
+//! changed-slice preface ([`render_changed_slice`], rendered from a
+//! [`SourceCursor`]).
 
 use super::guidance::ResolvedGuidance;
 use super::resolve::{ResolvedIngest, ResolvedSource};
@@ -293,7 +294,7 @@ pub struct SyncCommand {
 
 /// The combined source-cursor across a projection's source facets — the
 /// engine-side of the plugin's `cursor` object that `changedSliceBlock`
-/// consumes. Assembled by the (not-yet-wired) source-cursor driver from the
+/// consumes. Assembled by [`super::cursor::compute_source_cursor`] from the
 /// per-facet [`super::slice::SliceOutcome`]s.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceCursor {

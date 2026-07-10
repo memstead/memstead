@@ -16,9 +16,13 @@
 //! engine renders the brief and advances deterministic state — it never
 //! hosts the agent.
 //!
-//! Ported so far: the filesystem (`mtime`) [`change_detection`] primitives,
-//! and the structural [`resolve`] layer that joins an ingest config to its
-//! projection, facets, and mediums.
+//! The deterministic half is ported and wired: the structural [`resolve`]
+//! layer (joins an ingest config to its projection, facets, and mediums), the
+//! [`change_detection`] primitives, the [`cursor`] driver that assembles a
+//! per-source changed slice across the git / graph / mtime strategies, and
+//! [`brief`] assembly — all reachable through `memstead ingest brief` (CLI)
+//! and the UniFFI surface, which the plugin skill and macOS app consume as
+//! thin clients.
 
 pub mod brief;
 pub mod change_detection;

@@ -60,6 +60,25 @@ jobs:
       - name: rustfmt
         run: cargo fmt --check
 
+  wasm:
+    name: wasm32 dependency gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Install stable toolchain (wasm32 target)
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable branch
+        with:
+          toolchain: stable
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: . -> target
+      # memstead-wasm pulls memstead-base with default-features off; the
+      # ingest/pipeline modules sit ungated in that closure. A wasm-breaking
+      # addition there is otherwise caught only at npm publish time.
+      - name: Check memstead-wasm builds for wasm32
+        run: cargo check --target wasm32-unknown-unknown -p memstead-wasm
+
   audit:
     name: RustSec advisories
     runs-on: ubuntu-latest

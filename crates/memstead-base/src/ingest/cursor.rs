@@ -14,9 +14,10 @@
 //!     `:(glob,exclude)` pathspecs.
 //!   - **graph** — diff the source mem's snapshot token via the engine's own
 //!     [`Engine::changes_since`]; reference mems are graph-detected too.
-//!   - **mtime** — not yet assembled here (needs facet-file enumeration); a
-//!     source resolving to `mtime` currently contributes no slice. The pure
-//!     [`super::slice::mtime_slice_outcome`] core is ready for it.
+//!   - **mtime** — enumerate the facet's files, compute a stat-map digest,
+//!     memoise it under `.memstead.cache/ingest/source-cursor/`, and diff the
+//!     current digest against the memoised baseline via the pure
+//!     [`super::slice::mtime_slice_outcome`] core (precise, incl. deletions).
 //!
 //! Load-bearing invariant: the new baseline `token` is only *collected* here
 //! (into `write_commands` / `reseed`); the agent records it via
