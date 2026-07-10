@@ -171,8 +171,8 @@ fn split_binding_id(binding_id: &str) -> Result<(String, String), AdvanceError> 
 
 /// Is `value` a single, plain path component — safe as a `<mem>` / `<name>`
 /// directory or file segment? (No separators, traversal segments, drive/stream
-/// colon, or NUL.)
-fn is_single_component(value: &str) -> bool {
+/// colon, or NUL.) Shared with the findings store's identical path guard.
+pub(crate) fn is_single_component(value: &str) -> bool {
     !value.is_empty()
         && value != "."
         && value != ".."

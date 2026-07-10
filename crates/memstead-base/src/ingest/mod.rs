@@ -28,6 +28,7 @@ pub mod advance;
 pub mod brief;
 pub mod change_detection;
 pub mod cursor;
+pub mod findings;
 pub mod guidance;
 pub mod refinement;
 pub mod render;
@@ -51,6 +52,11 @@ pub use change_detection::{
 };
 pub use cursor::{
     compute_source_cursor, enumerate_facet_files, source_moved, write_active_deny_file,
+};
+pub use findings::{
+    Finding, FindingClass, FindingKey, FindingTarget, FindingsBatch, FindingsError, FindingsStore,
+    VerifyOutcome, adjudicate_anchor, delete_findings_store, findings_store_path,
+    read_findings_store, verify_binding, write_findings_store,
 };
 pub use guidance::{
     GuidanceDefaults, MemGuidance, ResolvedGuidance, merge_guidance_block, resolve_writing_guidance,

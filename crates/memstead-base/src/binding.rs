@@ -8,7 +8,7 @@
 //! migrate/legacy path (via [`crate::pipeline_store::LegacyIngest`]); the
 //! retired `Ingest` / `IngestMode` machinery is gone.
 //!
-//! Four things live here:
+//! Three things live here:
 //!
 //! 1. [`BindingV1`] — the versioned binding record (D1): one file per
 //!    source→mem obligation, collapsing the projection + ingest split into a
@@ -18,11 +18,14 @@
 //!    Scheduling knobs (`trigger` / `batch_size` / `post_actions`) are
 //!    excluded by construction; a facet selection pattern or a medium pointer
 //!    changing — inputs *outside* the binding file — changes the hash.
-//! 3. [`FindingKey`] + [`FindingRecord`] — the findings-store schema stub
-//!    (D5): shape only, keyed `(hash(D), source_head)`; no storage/IO.
-//! 4. [`medium_capabilities`] + [`validate_binding`] — the medium-capability
+//! 3. [`medium_capabilities`] + [`validate_binding`] — the medium-capability
 //!    matrix (D6) and the validation entry point that generalizes the
 //!    render-time preparation refusal to binding-validation time.
+//!
+//! The findings-store key + record (plan 03's schema stub, once here) now live
+//! as the real, IO-backed store in [`crate::ingest::findings`] (group A of plan
+//! 05): [`crate::ingest::findings::FindingKey`] keys it, `hash(D)` still
+//! partitions its keyspace so a declaration edit invalidates prior findings.
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
@@ -299,48 +302,6 @@ pub fn hash_binding(resolved: &ResolvedBinding) -> String {
     let canonical = canonical_json(&value);
     let digest = Sha256::digest(canonical.as_bytes());
     format!("{digest:x}")
-}
-
-// ---------------------------------------------------------------------------
-// D5 — findings-store schema stub (shape only; no storage/IO)
-// ---------------------------------------------------------------------------
-
-/// The key a [`FindingRecord`] is stored under (D5): a binding's `hash(D)`
-/// plus the `source_head` the finding was observed at. A changed `hash(D)`
-/// (see [`hash_binding`]) partitions findings into a fresh keyspace, so prior
-/// findings are invalidated by construction.
-///
-/// Schema stub — the store proper is built in a later session (E3b). No
-/// storage or IO lives here.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct FindingKey {
-    /// The binding's `hash(D)` (lowercase hex SHA-256).
-    pub binding_hash: String,
-    /// The source `HEAD` (medium-typed baseline token) the finding was
-    /// observed at.
-    pub source_head: String,
-}
-
-/// A single verify finding (D5), schema stub — shape only. Keyed under a
-/// [`FindingKey`]. The store, its IO, and the class/severity vocabularies are
-/// built in a later session (E3b); the fields stay strings here so nothing is
-/// prematurely committed.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct FindingRecord {
-    /// The binding id (`<destination-mem-dir>/<file-stem>`) this finding is about.
-    pub binding: String,
-    /// The source facet the finding concerns.
-    pub facet: String,
-    /// The artifact (source-side id) the finding concerns.
-    pub artifact: String,
-    /// The finding class (e.g. drifted / missing / wrong) — vocabulary TBD (E3b).
-    pub class: String,
-    /// The finding severity — vocabulary TBD (E3b).
-    pub severity: String,
-    /// Human/agent-readable detail.
-    pub detail: String,
-    /// When the finding was recorded (opaque timestamp string).
-    pub created_at: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -855,33 +816,6 @@ mod tests {
         // Hashes without panicking; build_mode is omitted from the canonical JSON.
         let h = hash_binding(&resolved(b, one_codebase_source()));
         assert_eq!(h.len(), 64);
-    }
-
-    // ---- D5: findings-store schema stub ---------------------------------
-
-    /// The findings key + record round-trip through serde.
-    #[test]
-    fn finding_key_and_record_round_trip() {
-        let key = FindingKey {
-            binding_hash: "abc123".to_string(),
-            source_head: "d148574".to_string(),
-        };
-        let key_back: FindingKey =
-            serde_json::from_str(&serde_json::to_string(&key).unwrap()).unwrap();
-        assert_eq!(key_back, key);
-
-        let rec = FindingRecord {
-            binding: "engine/graph".to_string(),
-            facet: "source-tree".to_string(),
-            artifact: "src/lib.rs".to_string(),
-            class: "drifted".to_string(),
-            severity: "warn".to_string(),
-            detail: "hash mismatch".to_string(),
-            created_at: "2026-07-10T00:00:00Z".to_string(),
-        };
-        let rec_back: FindingRecord =
-            serde_json::from_str(&serde_json::to_string(&rec).unwrap()).unwrap();
-        assert_eq!(rec_back, rec);
     }
 
     // ---- D6: capability matrix + validate -------------------------------

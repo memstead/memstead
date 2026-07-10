@@ -399,6 +399,44 @@ impl Engine {
         out
     }
 
+    /// Every `(entity_id, resolved anchor)` in `mem`, read from its anchors
+    /// sidecar once and each paired with its **live** resolution state (the
+    /// same observation [`Self::entity_anchors_resolved`] produces per entity,
+    /// computed here mem-wide in a single sidecar read). Empty for an unknown
+    /// mem, a backend that persists no anchors, or a mem with none.
+    ///
+    /// Additive read surface: the durable data is unchanged; `state` is the
+    /// [`crate::anchor::resolve_anchor`] outcome against an observation the
+    /// engine produces for a single `path`-namespace medium, or `None` when
+    /// unobserved (never fabricated). The verify pipeline consumes it to
+    /// adjudicate a mem's anchors against the source; audit/health can reuse it.
+    pub fn mem_anchors_resolved(&self, mem: &str) -> Vec<(EntityId, ResolvedAnchor)> {
+        let Some(mount) = self.mounts.iter().find(|m| m.mount.mem == mem) else {
+            return Vec::new();
+        };
+        let Ok(Some(bytes)) = mount.backend.read_anchors_sidecar() else {
+            return Vec::new();
+        };
+        let Ok(sc) = crate::anchor::AnchorSidecar::from_bytes(&bytes) else {
+            return Vec::new();
+        };
+        let root = self.single_path_medium_root(mem);
+        let mut out = Vec::new();
+        for (eid, anchors) in &sc.entities {
+            for anchor in anchors {
+                let state = root.as_deref().and_then(|r| observe_path_anchor(r, anchor));
+                out.push((
+                    EntityId(eid.clone()),
+                    ResolvedAnchor {
+                        anchor: anchor.clone(),
+                        state,
+                    },
+                ));
+            }
+        }
+        out
+    }
+
     /// Mem names the engine knows about, in declaration order.
     /// Cheap; useful for callers that need to enumerate before
     /// dispatching by mem.

@@ -80,6 +80,7 @@ This document contains the help content for the `memstead` command-line program.
 * [`memstead projection migrate`↴](#memstead-projection-migrate)
 * [`memstead projection enable`↴](#memstead-projection-enable)
 * [`memstead projection advance`↴](#memstead-projection-advance)
+* [`memstead projection verify`↴](#memstead-projection-verify)
 
 ## `memstead`
 
@@ -1314,6 +1315,7 @@ Binding (projection-promotion) tooling — the projection is the unit, one versi
 * `migrate` — Migrate both legacy generations into v1 bindings (D10). Gen-1 — the root-folder `scopes|projections|ingests/` JSON layout the retired `pipeline migrate` command handled — is first materialized into the gen-2 `.memstead/` store, then promoted. Gen-2 — the four-primitive store (per-mem `Projection` + flat `Ingest`) — merges each ingest into the projection its `projection` ref names; the binding takes the projection's file identity (`.memstead/projections/<mem>/<stem>.json`) and the merged ingest is removed. `refinement` mode and dangling projection refs refuse with a typed error. Use `--dry-run` to preview without writing
 * `enable` — Enable a `build` / `sync` / `verify` operation on an existing binding by adding its block (with sensible defaults) if absent. This is the remedy a refused *mutating* operation cites (D6): `projection enable sync <binding>`. Before writing, the operation is checked against the medium-capability matrix (D6) — enabling `sync`/`verify` over a medium that cannot support it (e.g. a `web` source) refuses with the capability gap and writes nothing. Enabling an already-present operation refuses `PROJECTION_OP_ALREADY_ENABLED`; a missing binding refuses `PROJECTION_NOT_FOUND`
 * `advance` — Advance a binding's sync baseline by recording per-artifact dispositions (D7). The engine freezes the presented changed slice, subtracts already-disposed artifacts on re-presentation, appends new-HEAD deltas when the source moves mid-pass, and — when the remainder empties — advances the destination mem's `#synced` token via the sync-state writer (provenance piggybacks that commit). Dispositions are durable (`.memstead/state/advance/`), so a partial pass resumes across process restarts. The gate accepts **only** artifact ids the engine presented — an unknown id refuses the whole call atomically (`PROJECTION_ADVANCE_UNKNOWN_ARTIFACT`). In this cycle the agent supplies a disposition for **every** artifact explicitly (auto-derivation lands later)
+* `verify` — Measure a binding's fidelity and record durable findings (E3b, group A). Read-only on the destination mem: verify adjudicates the mem's anchors against the live source and samples in-scope artifacts, writing findings keyed `(hash(D), source_head)` into the engine-owned findings store (`.memstead/state/findings/`). A binding-declaration edit or a source-head move partitions the keyspace, so prior findings are segregated as superseded, never presented as current. Verify never mutates the mem — any repair routes through the (later) sync brief. The full tier-1 fidelity report is a later slice; this reports the recorded / superseded / backlog counts
 
 
 
@@ -1409,6 +1411,18 @@ Advance a binding's sync baseline by recording per-artifact dispositions (D7). T
 ###### **Options:**
 
 * `--dispositions <DISPOSITIONS>` — A JSON object mapping each judged artifact id to its disposition, e.g. `'{"src/lib.rs": "worked", "src/old.rs": "irrelevant"}'`. Only ids the engine presented in the brief's changed slice are accepted — an unknown id refuses the whole call. Pass `'{}'` to re-present the remainder without recording anything
+
+
+
+## `memstead projection verify`
+
+Measure a binding's fidelity and record durable findings (E3b, group A). Read-only on the destination mem: verify adjudicates the mem's anchors against the live source and samples in-scope artifacts, writing findings keyed `(hash(D), source_head)` into the engine-owned findings store (`.memstead/state/findings/`). A binding-declaration edit or a source-head move partitions the keyspace, so prior findings are segregated as superseded, never presented as current. Verify never mutates the mem — any repair routes through the (later) sync brief. The full tier-1 fidelity report is a later slice; this reports the recorded / superseded / backlog counts
+
+**Usage:** `memstead projection verify <BINDING>`
+
+###### **Arguments:**
+
+* `<BINDING>` — The binding id `<mem>/<stem>` (D3) — e.g. `engine/graph`
 
 
 

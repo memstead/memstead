@@ -33,6 +33,7 @@ use memstead_base::binding_migrate::{
     BindingMigrateError, migrate_gen2_bindings, resolve_migrated_binding,
 };
 use memstead_base::ingest::advance::{AdvanceError, advance_baseline};
+use memstead_base::ingest::findings::verify_binding;
 use memstead_base::ingest::resolve::{
     ResolveError, ResolvedPrimarySource, ResolvedSource, resolve_binding, resolve_binding_run,
 };
@@ -109,6 +110,17 @@ pub enum ProjectionCommand {
     /// a disposition for **every** artifact explicitly (auto-derivation lands
     /// later).
     Advance(AdvanceArgs),
+    /// Measure a binding's fidelity and record durable findings (E3b, group A).
+    /// Read-only on the destination mem: verify adjudicates the mem's anchors
+    /// against the live source and samples in-scope artifacts, writing findings
+    /// keyed `(hash(D), source_head)` into the engine-owned findings store
+    /// (`.memstead/state/findings/`). A binding-declaration edit or a source-head
+    /// move partitions the keyspace, so prior findings are segregated as
+    /// superseded, never presented as current. Verify never mutates the mem —
+    /// any repair routes through the (later) sync brief. The full tier-1 fidelity
+    /// report is a later slice; this reports the recorded / superseded / backlog
+    /// counts.
+    Verify(VerifyArgs),
 }
 
 /// The medium type flag for `projection init` — the CLI-facing mirror of
@@ -230,6 +242,12 @@ pub struct AdvanceArgs {
     pub dispositions: String,
 }
 
+#[derive(ClapArgs, Debug)]
+pub struct VerifyArgs {
+    /// The binding id `<mem>/<stem>` (D3) — e.g. `engine/graph`.
+    pub binding: String,
+}
+
 pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     match args.command {
         ProjectionCommand::Brief(a) => brief(ctx, a),
@@ -237,6 +255,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         ProjectionCommand::Migrate(a) => migrate(ctx, a),
         ProjectionCommand::Enable(a) => enable(ctx, a),
         ProjectionCommand::Advance(a) => advance(ctx, a),
+        ProjectionCommand::Verify(a) => verify(ctx, a),
     }
 }
 
@@ -1215,6 +1234,93 @@ fn advance(ctx: &CliContext, args: AdvanceArgs) -> anyhow::Result<()> {
             for w in &outcome.warnings {
                 out.push_str(&format!("- {w}\n"));
             }
+        }
+        print_markdown(&out);
+    }
+    Ok(())
+}
+
+/// `projection verify <binding>` — measure fidelity and record durable findings
+/// (group A). Read-only on the destination mem.
+fn verify(ctx: &CliContext, args: VerifyArgs) -> anyhow::Result<()> {
+    let (_shape, root) = ctx.workspace_shape().ok_or_else(|| {
+        workspace_not_initialised_error(
+            "not inside a Memstead workspace (no `.memstead/workspace.toml` in any ancestor)",
+        )
+    })?;
+
+    let binding_id = args.binding;
+
+    let configs = load_pipeline_configs(&root).map_err(|e| {
+        CliError::new(
+            ExitKind::Generic,
+            "PROJECTION_VERIFY_FAILED",
+            format!("could not load pipeline config: {e}"),
+        )
+        .with_details(json!({ "error": e.to_string() }))
+    })?;
+    let record = configs
+        .bindings
+        .iter()
+        .find(|r| format!("{}/{}", r.mem, r.name) == binding_id)
+        .ok_or_else(|| {
+            CliError::new(
+                ExitKind::NotFound,
+                "PROJECTION_NOT_FOUND",
+                format!(
+                    "no binding `{binding_id}` in this workspace — scaffold one with \
+                     `projection init` or migrate a legacy workspace with `projection migrate`"
+                ),
+            )
+            .with_details(json!({ "binding": binding_id }))
+        })?;
+
+    let resolved = resolve_binding_run(&configs, &binding_id, &record.config)
+        .map_err(|e| map_resolve_err(&binding_id, e))?;
+
+    // Verify is read-only — a shared engine borrow makes a mem mutation
+    // structurally impossible (A5).
+    let cli_engine = ctx.cli_engine_at(&root)?;
+    let engine = match &cli_engine {
+        #[cfg(feature = "mem-repo")]
+        CliEngine::MemRepo(e) => e,
+        CliEngine::Filesystem(e) => e,
+    };
+
+    let outcome = verify_binding(engine, &root, &record.config, &resolved).map_err(|e| {
+        CliError::new(
+            ExitKind::Generic,
+            "PROJECTION_VERIFY_FAILED",
+            format!("verify failed for `{binding_id}`: {e}"),
+        )
+        .with_details(json!({ "binding": binding_id, "error": e.to_string() }))
+    })?;
+
+    if ctx.json {
+        print_json(&json!({
+            "binding": outcome.binding,
+            "key": {
+                "binding_hash": outcome.key.binding_hash,
+                "source_head": outcome.key.source_head,
+            },
+            "recorded": outcome.recorded,
+            "superseded": outcome.superseded,
+            "backlog": outcome.backlog,
+        }))?;
+    } else {
+        let mut out = format!(
+            "# Projection verify\n\nBinding `{}`: {} finding(s) recorded under the current key.\n",
+            outcome.binding, outcome.recorded
+        );
+        out.push_str(&format!(
+            "\n- Tier-3 adjudication backlog: {}\n- Superseded findings (prior key): {}\n",
+            outcome.backlog, outcome.superseded
+        ));
+        if outcome.superseded > 0 {
+            out.push_str(
+                "\nSuperseded findings were recorded under a prior `(hash(D), source_head)` — a \
+                 declaration edit or source move segregated them; they are not current.\n",
+            );
         }
         print_markdown(&out);
     }
