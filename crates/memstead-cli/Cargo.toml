@@ -31,7 +31,7 @@ thiserror.workspace = true
 dirs.workspace = true
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 tempfile.workspace = true
-toml = "0.8"
+toml = "1.1"
 toml_edit.workspace = true
 time = { version = "0.3", features = ["formatting", "parsing", "serde-well-known", "serde"] }
 # Domain-authority publishing: generate a signing keypair and sign a publish.
