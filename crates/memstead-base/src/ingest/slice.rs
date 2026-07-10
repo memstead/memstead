@@ -61,15 +61,45 @@ impl From<StatDiff> for Slice {
     }
 }
 
+/// Why a source produced no usable change signal — the classified reason a
+/// [`SliceOutcome::NoSignal`] carries so the brief can render it
+/// *distinguishably* from a genuinely-unchanged source (which stays silent).
+/// Every variant is a rendered state; none is dropped silently.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NoSignalReason {
+    /// The facet has no allow patterns — it is **unscoped**, so no file-tree
+    /// strategy will diff or enumerate the whole medium. A typed refusal,
+    /// uniform across git / mtime / refinement. A facet that truly wants the
+    /// whole medium writes `**/*`.
+    Unscoped,
+    /// Change detection is declared `none` — the source is inert by design
+    /// ([`super::resolve::ChangeStrategy::None`]), re-roamed whole with no
+    /// slice.
+    DetectionNone,
+    /// A git strategy could not read a signal: no work tree over the medium
+    /// pointer, `HEAD` unreadable, the stored baseline is unknown (gc'd /
+    /// rewritten / out-of-repo pathspec), or the diff subprocess failed.
+    GitUnavailable,
+    /// A graph strategy could not read a signal: the source mem has no
+    /// snapshot token, is unknown to the engine, or its change history could
+    /// not be fetched against the stored baseline.
+    GraphSnapshotMissing,
+}
+
 /// The outcome of computing a source's changed slice against its baseline —
 /// the engine-side shape of the plugin's per-facet `computeSourceCursor`
 /// return. The `token` in `Reseed` / `Unchanged` / `Changed` is the new
 /// baseline the agent records **only after a full pass** (never written
-/// here). `NoSignal` degrades to a whole re-roam with no baseline advance.
+/// here). `NoSignal` carries a [`NoSignalReason`] and renders in the brief; it
+/// advances no baseline (a whole re-roam or a typed refusal, per reason).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SliceOutcome {
-    /// No usable signal (backend unavailable, unknown baseline) — degrade.
-    NoSignal,
+    /// No usable change signal, classified by [`NoSignalReason`] — rendered in
+    /// the brief, never silently dropped. Advances no baseline.
+    NoSignal {
+        /// Why detection produced no signal.
+        reason: NoSignalReason,
+    },
     /// No prior baseline — seed at the current token, present no slice.
     Reseed {
         /// The token to seed the baseline at.
@@ -140,7 +170,9 @@ pub fn graph_slice_outcome(
     changes: &[ChangeEnvelope],
 ) -> SliceOutcome {
     if !is_git_token(current) {
-        return SliceOutcome::NoSignal;
+        return SliceOutcome::NoSignal {
+            reason: NoSignalReason::GraphSnapshotMissing,
+        };
     }
     match baseline {
         Some(b) if is_git_token(b) => {
@@ -325,7 +357,9 @@ mod tests {
         // current not a snapshot token → degrade.
         assert_eq!(
             graph_slice_outcome(Some(&cur), "not-a-sha", &[]),
-            SliceOutcome::NoSignal
+            SliceOutcome::NoSignal {
+                reason: NoSignalReason::GraphSnapshotMissing
+            }
         );
 
         // no baseline → reseed at current.

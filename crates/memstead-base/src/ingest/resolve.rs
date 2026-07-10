@@ -56,7 +56,10 @@ pub struct ResolvedPrimarySource {
     /// `git` / `mtime` / `auto`). Unset means `auto` — see
     /// [`resolve_change_strategy`].
     pub declared_change_detection: Option<String>,
-    /// The facet's allow/deny selection over the medium. Empty = whole medium.
+    /// The facet's allow/deny selection over the medium. A facet with **no
+    /// allow patterns is *unscoped*** — a typed refusal at run time (see
+    /// [`super::cursor`]'s empty-scope semantics), not "whole medium". A facet
+    /// that truly wants everything writes `**/*`.
     pub scope: Vec<PatternEntry>,
     /// A declared deterministic preparation step (e.g. `pdf-to-markdown`).
     /// Unset for every text medium today; a set value is reported

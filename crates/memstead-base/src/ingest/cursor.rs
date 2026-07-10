@@ -23,13 +23,30 @@
 //!
 //! **Deny invariance.** Ingest `deny_paths` are enforced identically by every
 //! strategy that reads a file tree — git, mtime, and refinement's enumeration,
-//! plus both token computations ([`current_primary_token`] / [`source_moved`]).
+//! plus both token computations (`current_primary_token` / [`source_moved`]).
 //! A file matching a `deny_paths` entry appears in no changed slice, no
 //! refinement batch, and never influences the mtime digest or the
 //! `source_moved` token. The **graph** strategy is exempt *by definition*:
 //! `deny_paths` entries are file-path globs, but a graph source's artifacts are
 //! entities (entity-granular), so a file-path glob can never select one. This
 //! exemption is designed, not an omission.
+//!
+//! **One empty-scope semantic.** A facet with **no allow patterns** is
+//! *unscoped* — and that is a **typed refusal**, identical on every file-tree
+//! strategy: git, mtime, and refinement all decline to diff or enumerate the
+//! whole medium (a `facet_unscoped` check gates it). No strategy silently emits an
+//! empty slice, enumeration, or batch for an unscoped facet; instead the source
+//! contributes [`NoSignalReason::Unscoped`], which renders in the brief. A
+//! facet that genuinely wants the whole medium writes `**/*`. This is a
+//! different field from the ingest's `deny_paths`: an **empty `deny_paths`**
+//! list is valid and means "no denies" — it never trips the unscoped refusal.
+//!
+//! **Visible no-signal.** Every source contributes a per-source outcome. A
+//! genuinely-unchanged source (baseline present, nothing moved) stays silent —
+//! the only documented silence, preserving the "brief is byte-identical to a
+//! plain roam when nothing moved" property. Every other no-signal condition —
+//! unscoped facet, `signal:none`, git failure / unknown baseline, missing graph
+//! snapshot — is collected as a [`NoSignalNote`] and rendered distinguishably.
 //!
 //! Load-bearing invariant: the new baseline `token` is only *collected* here
 //! (into `write_commands` / `reseed`); the agent records it via
@@ -44,7 +61,7 @@ use globset::{Glob, GlobSet, GlobSetBuilder};
 use crate::Engine;
 use crate::pipeline::{MediumType, PatternMode};
 
-use super::brief::{SourceCursor, SyncCommand};
+use super::brief::{NoSignalNote, SourceCursor, SyncCommand};
 use super::change_detection::{
     StatMap, compute_stat_map, digest_stat_map, parse_digest_token, serialize_digest_token,
 };
@@ -52,7 +69,9 @@ use super::resolve::{
     ChangeStrategy, ResolvedIngest, ResolvedPrimarySource, ResolvedSource, find_git_root,
     resolve_change_strategy,
 };
-use super::slice::{Slice, SliceOutcome, graph_slice_outcome, is_git_token, mtime_slice_outcome};
+use super::slice::{
+    NoSignalReason, Slice, SliceOutcome, graph_slice_outcome, is_git_token, mtime_slice_outcome,
+};
 
 /// Lexically normalize a path — resolve `.` and `..` without touching the
 /// filesystem (no symlink resolution), matching Node's `path.resolve` on an
@@ -145,12 +164,25 @@ fn build_glob_set(patterns: &[&str]) -> Option<GlobSet> {
     builder.build().ok()
 }
 
+/// Whether a primary source's facet declares **no allow patterns** — an
+/// *unscoped* facet. This is the single condition behind the uniform
+/// empty-scope refusal ([`NoSignalReason::Unscoped`]): neither git nor mtime
+/// diffs or enumerates the whole medium for such a facet, and refinement emits
+/// no batch for it. It is orthogonal to the ingest's `deny_paths` — an empty
+/// deny list is not an unscoped facet.
+fn facet_unscoped(source: &ResolvedPrimarySource) -> bool {
+    !source.scope.iter().any(|r| r.mode == PatternMode::Allow)
+}
+
 /// Enumerate the workspace-relative file paths a primary source's facet scope
 /// selects — the `mtime` strategy's input set. Mirrors the plugin's
 /// `enumerateFacetFiles`: only `codebase`/`filesystem` mediums; the facet's
 /// allow globs minus its deny globs, evaluated over the medium's directory
-/// tree; empty when the facet has no allows. Returns a sorted, de-duplicated
-/// list.
+/// tree. Returns a sorted, de-duplicated list. An unscoped facet (no allows)
+/// yields an empty list here — but callers must not treat that as signal: the
+/// strategy layer (`compute_mtime_slice` / `current_primary_token`) refuses
+/// an unscoped facet via `facet_unscoped` *before* enumerating, so the empty
+/// list is only ever reached for a genuinely-empty scoped enumeration.
 ///
 /// `deny_paths` are the ingest-level denies (`ResolvedIngest::deny_paths`),
 /// applied on top of the facet's own scope denies with the *same*
@@ -239,10 +271,14 @@ fn compute_git_slice(
 ) -> SliceOutcome {
     let base = medium_base(&source.medium_pointer, workspace_root);
     let Some(git_root) = find_git_root(&base) else {
-        return SliceOutcome::NoSignal;
+        return SliceOutcome::NoSignal {
+            reason: NoSignalReason::GitUnavailable,
+        };
     };
     let Some(head) = git_head(&git_root) else {
-        return SliceOutcome::NoSignal;
+        return SliceOutcome::NoSignal {
+            reason: NoSignalReason::GitUnavailable,
+        };
     };
 
     let baseline = match baseline {
@@ -264,8 +300,11 @@ fn compute_git_slice(
         }
     }
     if allows.is_empty() {
-        // Unscoped facet — refuse to diff the whole repo.
-        return SliceOutcome::NoSignal;
+        // Unscoped facet — the uniform typed refusal (never diff the whole
+        // repo); renders in the brief rather than degrading silently.
+        return SliceOutcome::NoSignal {
+            reason: NoSignalReason::Unscoped,
+        };
     }
     for dp in deny_paths {
         denies.push(dp);
@@ -293,7 +332,11 @@ fn compute_git_slice(
         Ok(o) if o.status.success() => o,
         // Unknown baseline (gc'd / rewritten), an out-of-repo pathspec, or a
         // git failure — degrade to a whole re-roam (the plugin does the same).
-        _ => return SliceOutcome::NoSignal,
+        _ => {
+            return SliceOutcome::NoSignal {
+                reason: NoSignalReason::GitUnavailable,
+            };
+        }
     };
     let text = String::from_utf8_lossy(&out.stdout);
 
@@ -332,7 +375,11 @@ fn compute_graph_slice(engine: &Engine, source_mem: &str, baseline: Option<&str>
     let current = match engine.mem_head_sha(source_mem) {
         Ok(Some(sha)) => sha,
         // Source has no snapshot signal, or is unknown — degrade.
-        _ => return SliceOutcome::NoSignal,
+        _ => {
+            return SliceOutcome::NoSignal {
+                reason: NoSignalReason::GraphSnapshotMissing,
+            };
+        }
     };
     // Fetch the entity delta only when the source actually moved.
     let changed = matches!(baseline, Some(b) if is_git_token(b) && b != current);
@@ -341,7 +388,9 @@ fn compute_graph_slice(engine: &Engine, source_mem: &str, baseline: Option<&str>
         match engine.changes_since(source_mem, baseline, None) {
             Ok(report) => graph_slice_outcome(Some(baseline), &current, &report.changes),
             // Unknown baseline / engine error — degrade.
-            Err(_) => SliceOutcome::NoSignal,
+            Err(_) => SliceOutcome::NoSignal {
+                reason: NoSignalReason::GraphSnapshotMissing,
+            },
         }
     } else {
         graph_slice_outcome(baseline, &current, &[])
@@ -433,6 +482,13 @@ fn compute_mtime_slice(
     cache_root: &Path,
     baseline: Option<&str>,
 ) -> SliceOutcome {
+    if facet_unscoped(source) {
+        // Unscoped facet — the same typed refusal git raises, so the mtime
+        // strategy never enumerates the whole medium nor emits an empty slice.
+        return SliceOutcome::NoSignal {
+            reason: NoSignalReason::Unscoped,
+        };
+    }
     let files = enumerate_facet_files(source, deny_paths, workspace_root);
     let now_map = compute_stat_map(&files, workspace_root);
     let now_digest = digest_stat_map(&now_map);
@@ -465,11 +521,17 @@ fn current_primary_token(
         ))?),
         ChangeStrategy::Graph => engine.mem_head_sha(&source.medium_pointer).ok().flatten(),
         ChangeStrategy::Mtime => {
-            let files = enumerate_facet_files(source, deny_paths, workspace_root);
-            Some(serialize_digest_token(&digest_stat_map(&compute_stat_map(
-                &files,
-                workspace_root,
-            ))))
+            if facet_unscoped(source) {
+                // Unscoped facet has no signal — not an empty-set digest posing
+                // as one, so the source can never register as "moved".
+                None
+            } else {
+                let files = enumerate_facet_files(source, deny_paths, workspace_root);
+                Some(serialize_digest_token(&digest_stat_map(&compute_stat_map(
+                    &files,
+                    workspace_root,
+                ))))
+            }
         }
         ChangeStrategy::None => None,
     }
@@ -529,6 +591,7 @@ pub fn compute_source_cursor(
     let mut union = Slice::default();
     let mut write_commands: Vec<SyncCommand> = Vec::new();
     let mut reseed: Vec<SyncCommand> = Vec::new();
+    let mut no_signal: Vec<NoSignalNote> = Vec::new();
     let mut degraded = false;
 
     for source in &resolved.sources {
@@ -554,8 +617,10 @@ pub fn compute_source_cursor(
                         &cache_root,
                         baseline,
                     ),
-                    // `none` is inert — no slice.
-                    ChangeStrategy::None => SliceOutcome::NoSignal,
+                    // `none` is inert — a rendered `signal:none` state, no slice.
+                    ChangeStrategy::None => SliceOutcome::NoSignal {
+                        reason: NoSignalReason::DetectionNone,
+                    },
                 };
                 (p.facet_ref.clone(), outcome)
             }
@@ -568,7 +633,15 @@ pub fn compute_source_cursor(
 
         let key = format!("{}/{}", resolved.name, facet_ref);
         match outcome {
-            SliceOutcome::NoSignal | SliceOutcome::Unchanged { .. } => {}
+            // Genuinely unchanged (baseline present, nothing moved) is the only
+            // documented silence — it renders nothing, keeping an all-unchanged
+            // brief byte-identical to a plain roam.
+            SliceOutcome::Unchanged { .. } => {}
+            // Every no-signal reason is a visible per-source note.
+            SliceOutcome::NoSignal { reason } => no_signal.push(NoSignalNote {
+                source: facet_ref.clone(),
+                reason,
+            }),
             SliceOutcome::Reseed { token } => reseed.push(SyncCommand { key, token }),
             SliceOutcome::Changed {
                 token,
@@ -594,6 +667,7 @@ pub fn compute_source_cursor(
         union,
         write_commands,
         reseed,
+        no_signal,
         any_changes,
         degraded,
         dest_mem: dest.clone(),
@@ -994,6 +1068,189 @@ mod tests {
             !batch.files.contains(&"denied.rs".to_string()),
             "denied.rs must never enter a refinement batch"
         );
+    }
+
+    /// AC2 (one empty-scope semantic): an **unscoped** facet (no allow
+    /// patterns) is the same typed refusal — `NoSignal { Unscoped }` — on git
+    /// AND mtime, never a silent empty slice. AC2 complement: an empty
+    /// `deny_paths` list does NOT trip that refusal — a *scoped* facet still
+    /// classifies normally (empty scope and empty deny_paths are different
+    /// fields with different semantics).
+    #[test]
+    fn unscoped_facet_refuses_uniformly_and_empty_deny_is_distinct() {
+        let repo = tempfile::tempdir().unwrap();
+        let root = repo.path();
+        let cache = root.join(".memstead.cache").join("ingest");
+        git(root, &["init", "-q"]);
+        std::fs::write(root.join("a.rs"), "one").unwrap();
+        git(root, &["add", "-A"]);
+        git(root, &["commit", "-qm", "base"]);
+        let baseline = head_sha(root);
+        std::fs::write(root.join("a.rs"), "two").unwrap();
+        git(root, &["add", "-A"]);
+        git(root, &["commit", "-qm", "move"]);
+
+        // Unscoped: a deny pattern but no allow. `deny_paths` is empty here —
+        // so the refusal comes from the empty *scope*, not from denies.
+        let unscoped = primary(vec![PatternEntry {
+            path: "target/**".to_string(),
+            mode: PatternMode::Deny,
+        }]);
+        assert_eq!(
+            compute_git_slice(&unscoped, &[], root, Some(&baseline)),
+            SliceOutcome::NoSignal {
+                reason: NoSignalReason::Unscoped
+            },
+            "git refuses an unscoped facet"
+        );
+        assert_eq!(
+            compute_mtime_slice(&unscoped, "ing", &[], root, &cache, None),
+            SliceOutcome::NoSignal {
+                reason: NoSignalReason::Unscoped
+            },
+            "mtime refuses an unscoped facet identically"
+        );
+        // A fully empty scope is unscoped too.
+        let empty_scope = primary(vec![]);
+        assert_eq!(
+            compute_git_slice(&empty_scope, &[], root, Some(&baseline)),
+            SliceOutcome::NoSignal {
+                reason: NoSignalReason::Unscoped
+            }
+        );
+
+        // Complement: a SCOPED facet with an empty `deny_paths` classifies
+        // normally — empty deny_paths (no denies) must not trip the refusal.
+        let scoped = primary(vec![PatternEntry {
+            path: "**/*.rs".to_string(),
+            mode: PatternMode::Allow,
+        }]);
+        assert!(
+            matches!(
+                compute_git_slice(&scoped, &[], root, Some(&baseline)),
+                SliceOutcome::Changed { .. }
+            ),
+            "scoped facet + empty deny_paths → normal git slice, not a refusal"
+        );
+        assert!(
+            matches!(
+                compute_mtime_slice(&scoped, "ing", &[], root, &cache, None),
+                SliceOutcome::Reseed { .. }
+            ),
+            "scoped facet + empty deny_paths → normal mtime reseed, not a refusal"
+        );
+    }
+
+    /// AC2 refinement leg: an ingest whose only source is unscoped emits no
+    /// refinement batch — the refusal, not a silent empty batch.
+    #[test]
+    fn unscoped_facet_emits_no_refinement_batch() {
+        use crate::ingest::refinement::next_batch;
+        use crate::pipeline::{IngestMode, IngestTrigger};
+
+        let ws = tempfile::tempdir().unwrap();
+        let root = ws.path();
+        let cache = root.join(".memstead.cache").join("ingest");
+        std::fs::write(root.join("a.rs"), "x").unwrap();
+
+        let resolved = ResolvedIngest {
+            name: "ing".to_string(),
+            mode: IngestMode::Refinement,
+            trigger: IngestTrigger::Loop,
+            batch_size: 50,
+            deny_paths: vec![],
+            projection_ref: "m/p".to_string(),
+            projection_mem: "m".to_string(),
+            projection_name: "p".to_string(),
+            intent: None,
+            // Only source: an unscoped facet (no allow patterns).
+            sources: vec![ResolvedSource::Primary(primary(vec![]))],
+            destination_mem: "m".to_string(),
+            rules: None,
+            post_actions: None,
+        };
+        assert!(
+            next_batch(&resolved, root, &cache).is_none(),
+            "an all-unscoped ingest emits no refinement batch"
+        );
+    }
+
+    /// AC3 (visible NoSignal) end-to-end through the cursor: a `signal:none`
+    /// source and an unscoped source each contribute a distinct no-signal note;
+    /// a first-seen (reseed) source does NOT — only no-signal reasons are
+    /// noted. The rendered preface names `signal:none` explicitly and the
+    /// unscoped reason distinctly.
+    #[test]
+    fn compute_source_cursor_notes_no_signal_reasons() {
+        use crate::pipeline::{IngestMode, IngestTrigger};
+
+        let engine = crate::Engine::from_mounts(Vec::new()).unwrap();
+        // No `.git` over the workspace → mtime strategy for `auto`/`mtime`.
+        let ws = tempfile::tempdir().unwrap();
+        let root = ws.path();
+        std::fs::write(root.join("a.rs"), "x").unwrap();
+
+        let allow_rs = || {
+            vec![PatternEntry {
+                path: "**/*.rs".to_string(),
+                mode: PatternMode::Allow,
+            }]
+        };
+        let src = |facet: &str, declared: &str, scope: Vec<PatternEntry>| {
+            ResolvedSource::Primary(ResolvedPrimarySource {
+                facet_ref: facet.to_string(),
+                medium: "m".to_string(),
+                medium_type: MediumType::Filesystem,
+                medium_pointer: String::new(),
+                declared_change_detection: Some(declared.to_string()),
+                scope,
+                preparation: None,
+            })
+        };
+
+        let resolved = ResolvedIngest {
+            name: "ing".to_string(),
+            mode: IngestMode::Discovery,
+            trigger: IngestTrigger::Loop,
+            batch_size: 20,
+            deny_paths: vec![],
+            projection_ref: "m/p".to_string(),
+            projection_mem: "m".to_string(),
+            projection_name: "p".to_string(),
+            intent: None,
+            sources: vec![
+                // signal:none → DetectionNone note (even though it is scoped).
+                src("plan", "none", allow_rs()),
+                // mtime + no allows → Unscoped note.
+                src("blind", "mtime", vec![]),
+                // mtime + allows, first-seen → Reseed, NOT a no-signal note.
+                src("watched", "mtime", allow_rs()),
+            ],
+            destination_mem: "m".to_string(),
+            rules: None,
+            post_actions: None,
+        };
+
+        let cursor = compute_source_cursor(&engine, &resolved, root);
+        let reasons: BTreeMap<&str, NoSignalReason> = cursor
+            .no_signal
+            .iter()
+            .map(|n| (n.source.as_str(), n.reason))
+            .collect();
+        assert_eq!(reasons.get("plan"), Some(&NoSignalReason::DetectionNone));
+        assert_eq!(reasons.get("blind"), Some(&NoSignalReason::Unscoped));
+        assert!(
+            !reasons.contains_key("watched"),
+            "a first-seen (reseed) source is not a no-signal note"
+        );
+        assert_eq!(cursor.no_signal.len(), 2);
+        // The reseed source still produced a reseed command.
+        assert!(cursor.reseed.iter().any(|c| c.key == "ing/watched"));
+
+        // The rendered preface names signal:none and the unscoped reason.
+        let out = crate::ingest::brief::render_changed_slice(&cursor);
+        assert!(out.contains("- `plan`: `signal:none`"));
+        assert!(out.contains("- `blind`: unscoped facet"));
     }
 
     fn stat_map_for(paths: &[&str]) -> super::super::change_detection::StatMap {

@@ -17,7 +17,7 @@
 
 use super::guidance::ResolvedGuidance;
 use super::resolve::{ResolvedIngest, ResolvedSource};
-use super::slice::Slice;
+use super::slice::{NoSignalReason, Slice};
 use crate::pipeline::{IngestMode, MediumType, PatternMode};
 
 /// Per-class cap on the rendered changed slice — mirrors the plugin's
@@ -292,6 +292,20 @@ pub struct SyncCommand {
     pub token: String,
 }
 
+/// A source whose change detection produced **no usable signal** this pass,
+/// with the classified [`NoSignalReason`]. Rendered as a distinct per-source
+/// note in the changed-slice preface, so the agent can tell a *blind* source
+/// (no baseline comparison happened) from a *genuinely-unchanged* one (checked,
+/// did not move — which stays silent).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NoSignalNote {
+    /// The source's label — the facet ref (primary) or mem id (reference), the
+    /// same token the `<ingest>/<label>` sync-state key is built from.
+    pub source: String,
+    /// Why detection produced no signal.
+    pub reason: NoSignalReason,
+}
+
 /// The combined source-cursor across a projection's source facets — the
 /// engine-side of the plugin's `cursor` object that `changedSliceBlock`
 /// consumes. Assembled by [`super::cursor::compute_source_cursor`] from the
@@ -304,6 +318,12 @@ pub struct SourceCursor {
     pub write_commands: Vec<SyncCommand>,
     /// New-baseline commands for facets seen for the first time (reseed).
     pub reseed: Vec<SyncCommand>,
+    /// Per-source no-signal notes — sources whose detection could not produce a
+    /// slice this pass (unscoped facet, `signal:none`, git failure, missing
+    /// graph snapshot). Rendered distinctly from changed/reseed; a
+    /// genuinely-unchanged source contributes nothing here, so an all-unchanged
+    /// brief still renders no preface (byte-identical to a plain roam).
+    pub no_signal: Vec<NoSignalNote>,
     /// Whether any facet reported changes (drives the "source moved" copy).
     pub any_changes: bool,
     /// Whether any facet's slice was degraded (mtime memo miss → full scan).
@@ -340,13 +360,37 @@ fn render_slice_class(lines: &mut Vec<String>, label: &str, paths: &[String]) {
     lines.push(String::new());
 }
 
+/// The one-line explanation the brief prints for a [`NoSignalReason`] — each
+/// reason renders as distinct text, so the agent can tell the no-signal
+/// conditions apart (and all apart from a genuinely-unchanged source, which
+/// renders nothing at all).
+fn no_signal_reason_text(reason: NoSignalReason) -> &'static str {
+    match reason {
+        NoSignalReason::Unscoped => {
+            "unscoped facet (no allow patterns) — nothing is monitored; write `**/*` in the \
+             facet scope to watch the whole medium"
+        }
+        NoSignalReason::DetectionNone => {
+            "`signal:none` — change detection is disabled for this source (declared `none`)"
+        }
+        NoSignalReason::GitUnavailable => {
+            "git signal unavailable — no work tree, an unreadable `HEAD`, or an unknown baseline; \
+             a full re-roam is warranted this pass"
+        }
+        NoSignalReason::GraphSnapshotMissing => {
+            "graph snapshot missing — the source mem has no comparable baseline this pass"
+        }
+    }
+}
+
 /// Render the `## Source changes since the last sync` preface — the changed
-/// slice to steer at first, plus the `set-sync-state` "record the baseline
-/// LAST" section. Byte-for-byte the plugin's `changedSliceBlock`. Returns the
-/// empty string when nothing changed and nothing needs reseeding (making the
-/// discovery brief byte-identical to a plain roam).
+/// slice to steer at first, any no-signal sources, plus the `set-sync-state`
+/// "record the baseline LAST" section. Extends the plugin's `changedSliceBlock`
+/// with the no-signal notes. Returns the empty string when nothing changed,
+/// nothing needs reseeding, and every source is genuinely unchanged (no
+/// no-signal notes) — making the brief byte-identical to a plain roam.
 pub fn render_changed_slice(cursor: &SourceCursor) -> String {
-    if !cursor.any_changes && cursor.reseed.is_empty() {
+    if !cursor.any_changes && cursor.reseed.is_empty() && cursor.no_signal.is_empty() {
         return String::new();
     }
     let mut lines: Vec<String> = Vec::new();
@@ -388,6 +432,23 @@ pub fn render_changed_slice(cursor: &SourceCursor) -> String {
             "No prior sync baseline exists for {keys} — treating the current source state as the \
              baseline (first sync). No priority slice from {it} this pass; proceed as usual.\n"
         ));
+    }
+
+    if !cursor.no_signal.is_empty() {
+        lines.push(
+            "Some sources produced **no change signal** this pass — detection could not compare \
+             them against a baseline, so they were not steered (roam them as usual). This is \
+             distinct from a source that was checked and had not moved:\n"
+                .to_string(),
+        );
+        for note in &cursor.no_signal {
+            lines.push(format!(
+                "- `{}`: {}",
+                note.source,
+                no_signal_reason_text(note.reason)
+            ));
+        }
+        lines.push(String::new());
     }
 
     // Cursor-write instruction — recorded by the agent as the FINAL step, so
@@ -880,6 +941,13 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
         }
     }
 
+    fn note(source: &str, reason: NoSignalReason) -> NoSignalNote {
+        NoSignalNote {
+            source: source.to_string(),
+            reason,
+        }
+    }
+
     /// No changes and no reseed → the block is empty (brief stays a plain roam).
     #[test]
     fn changed_slice_empty_when_nothing_moved() {
@@ -887,6 +955,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
             union: slice(&[], &[], &[]),
             write_commands: vec![],
             reseed: vec![],
+            no_signal: vec![],
             any_changes: false,
             degraded: false,
             dest_mem: "engine".to_string(),
@@ -903,6 +972,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
             union: slice(&["a.rs"], &["b.rs"], &[]),
             write_commands: vec![cmd("engine-graph/source", "HEADSHA")],
             reseed: vec![],
+            no_signal: vec![],
             any_changes: true,
             degraded: false,
             dest_mem: "engine".to_string(),
@@ -937,6 +1007,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
             union: slice(&[], &[], &[]),
             write_commands: vec![],
             reseed: vec![cmd("ing/f", "TOK")],
+            no_signal: vec![],
             any_changes: false,
             degraded: false,
             dest_mem: "d".to_string(),
@@ -951,6 +1022,77 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
             !out.contains("The source moved"),
             "no 'moved' copy when only reseeding"
         );
+    }
+
+    /// Every no-signal reason renders a distinct, named note under the preface,
+    /// distinguishable from one another and from a genuinely-unchanged source
+    /// (which renders nothing). With no changes and no reseed there is no
+    /// recording block, but the preface is non-empty — a source's blindness is
+    /// visible. `signal:none` renders literally.
+    #[test]
+    fn changed_slice_renders_no_signal_reasons_distinguishably() {
+        let cursor = SourceCursor {
+            union: slice(&[], &[], &[]),
+            write_commands: vec![],
+            reseed: vec![],
+            no_signal: vec![
+                note("code-facet", NoSignalReason::Unscoped),
+                note("plan-facet", NoSignalReason::DetectionNone),
+                note("git-facet", NoSignalReason::GitUnavailable),
+                note("ref-mem", NoSignalReason::GraphSnapshotMissing),
+            ],
+            any_changes: false,
+            degraded: false,
+            dest_mem: "d".to_string(),
+        };
+        let out = render_changed_slice(&cursor);
+        assert!(out.starts_with("## Source changes since the last sync\n"));
+        assert!(out.contains("Some sources produced **no change signal**"));
+        // Each source is named and carries its own distinct reason text.
+        assert!(out.contains("- `code-facet`: unscoped facet (no allow patterns)"));
+        assert!(
+            out.contains("- `plan-facet`: `signal:none`"),
+            "detection-none renders the literal signal:none state"
+        );
+        assert!(out.contains("- `git-facet`: git signal unavailable"));
+        assert!(out.contains("- `ref-mem`: graph snapshot missing"));
+        // The four reason texts are mutually distinct.
+        let texts = [
+            no_signal_reason_text(NoSignalReason::Unscoped),
+            no_signal_reason_text(NoSignalReason::DetectionNone),
+            no_signal_reason_text(NoSignalReason::GitUnavailable),
+            no_signal_reason_text(NoSignalReason::GraphSnapshotMissing),
+        ];
+        for (i, a) in texts.iter().enumerate() {
+            for b in &texts[i + 1..] {
+                assert_ne!(a, b, "each no-signal reason must render distinctly");
+            }
+        }
+        // No baseline to advance → no recording block, no "moved" copy.
+        assert!(!out.contains("### Recording the new baseline"));
+        assert!(!out.contains("The source moved"));
+    }
+
+    /// A changed source and a no-signal source coexist: the changed slice AND
+    /// the no-signal note both render in the one preface, and the changed
+    /// source still emits its recording command.
+    #[test]
+    fn changed_slice_mixes_changes_and_no_signal() {
+        let cursor = SourceCursor {
+            union: slice(&[], &["b.rs"], &[]),
+            write_commands: vec![cmd("ing/f", "HEAD")],
+            reseed: vec![],
+            no_signal: vec![note("other", NoSignalReason::Unscoped)],
+            any_changes: true,
+            degraded: false,
+            dest_mem: "d".to_string(),
+        };
+        let out = render_changed_slice(&cursor);
+        assert!(out.contains("The source moved"));
+        assert!(out.contains("**Modified:**"));
+        assert!(out.contains("- `other`: unscoped facet"));
+        assert!(out.contains("### Recording the new baseline"));
+        assert!(out.contains("memstead mem set-sync-state d 'ing/f' 'HEAD'"));
     }
 
     /// The one-shot lens block: destination-set table, routing rule (when set),
@@ -1024,6 +1166,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
             },
             write_commands: vec![cmd("ing/f", r#"{"v":1,"aggregate":"x"}"#)],
             reseed: vec![],
+            no_signal: vec![],
             any_changes: true,
             degraded: true,
             dest_mem: "d".to_string(),

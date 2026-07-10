@@ -99,7 +99,11 @@ pub struct Facet {
     /// The [`Medium`] (by name) this facet is a perspective on. A facet
     /// always references exactly one medium.
     pub medium: String,
-    /// Allow/deny selection over the referenced medium. Empty = whole medium.
+    /// Allow/deny selection over the referenced medium. A facet with **no
+    /// allow patterns is *unscoped*** — a typed refusal at run time (no
+    /// strategy diffs or enumerates the whole medium; the brief reports it as
+    /// unmonitored), not "whole medium". A facet that truly wants everything
+    /// writes `**/*`.
     #[serde(default)]
     pub scope: Vec<PatternEntry>,
     /// Engagement contract — verbs, tools, terminology, discipline. Free-form

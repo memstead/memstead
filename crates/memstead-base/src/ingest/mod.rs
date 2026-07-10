@@ -35,10 +35,10 @@ pub mod selection;
 pub mod slice;
 
 pub use brief::{
-    PROCESS_MEM_SCHEMA, ProcessMemInfo, SourceCursor, SyncCommand, assemble_discovery_brief,
-    assemble_one_shot_brief, assemble_refinement_brief, render_changed_slice,
-    render_goal_and_avoid, render_intent, render_one_shot_lens, render_operative_data,
-    render_situation,
+    NoSignalNote, PROCESS_MEM_SCHEMA, ProcessMemInfo, SourceCursor, SyncCommand,
+    assemble_discovery_brief, assemble_one_shot_brief, assemble_refinement_brief,
+    render_changed_slice, render_goal_and_avoid, render_intent, render_one_shot_lens,
+    render_operative_data, render_situation,
 };
 pub use change_detection::{
     Digest, StatDiff, StatEntry, StatMap, compute_stat_map, diff_stat_maps, digest_stat_map,
