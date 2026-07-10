@@ -892,22 +892,22 @@ mod tests {
         };
         let configs = BindingConfigs {
             mediums: vec![MemPipelineRecord {
-                mem: "macos".to_string(),
+                mem: "app".to_string(),
                 name: "src".to_string(),
                 config: Medium {
                     name: "src".to_string(),
                     medium_type: MediumType::Codebase,
-                    pointer: "../macos".to_string(),
+                    pointer: "../app".to_string(),
                     change_detection: None,
                 },
             }],
             facets: vec![MemPipelineRecord {
-                mem: "macos".to_string(),
+                mem: "app".to_string(),
                 name: "source-tree".to_string(),
                 config: Facet {
                     name: "source-tree".to_string(),
                     medium: "src".to_string(),
-                    scope: vec![allow("../macos/**/*.swift")],
+                    scope: vec![allow("../app/**/*.swift")],
                     engagement: None,
                     preparation: None,
                 },
@@ -919,7 +919,7 @@ mod tests {
             intent: Some("swift".to_string()),
             source_facets: vec!["source-tree".to_string()],
             reference_mems: vec!["engine".to_string()],
-            destination_mem: "macos".to_string(),
+            destination_mem: "app".to_string(),
             deny_paths: vec!["**/VISION.md".to_string()],
             coverage_semantics: CoverageSemantics::Exhaustive,
             rules: None,
@@ -935,15 +935,15 @@ mod tests {
             },
         };
 
-        let r = resolve_binding_run(&configs, "macos/graph", &binding).unwrap();
-        assert_eq!(r.name, "macos/graph");
-        assert_eq!(r.projection_ref, "macos/graph");
-        assert_eq!(r.projection_mem, "macos");
+        let r = resolve_binding_run(&configs, "app/graph", &binding).unwrap();
+        assert_eq!(r.name, "app/graph");
+        assert_eq!(r.projection_ref, "app/graph");
+        assert_eq!(r.projection_mem, "app");
         assert_eq!(r.projection_name, "graph");
         assert_eq!(r.mode, IngestMode::Discovery);
         assert_eq!(r.batch_size, 20);
         assert_eq!(r.deny_paths, ["**/VISION.md"]);
-        assert_eq!(r.destination_mem, "macos");
+        assert_eq!(r.destination_mem, "app");
         assert_eq!(r.intent.as_deref(), Some("swift"));
         assert_eq!(
             r.post_actions,
@@ -954,7 +954,7 @@ mod tests {
             ResolvedSource::Primary(p) => {
                 assert_eq!(p.facet_ref, "source-tree");
                 assert_eq!(p.medium_type, MediumType::Codebase);
-                assert_eq!(p.medium_pointer, "../macos");
+                assert_eq!(p.medium_pointer, "../app");
             }
             other => panic!("expected primary first, got {other:?}"),
         }
