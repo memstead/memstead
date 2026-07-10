@@ -31,6 +31,18 @@
 //! entities (entity-granular), so a file-path glob can never select one. This
 //! exemption is designed, not an omission.
 //!
+//! **One deny dialect.** A `deny_paths` entry is a **workspace-relative glob**
+//! — the exact grammar and resolution root as a facet-scope entry, resolved by
+//! the same [`build_glob_set`] / `:(glob,exclude)` machinery. The plugin's
+//! PreToolUse deny hook enforces the *identical* dialect against the ingest
+//! agent's Read/Glob/Grep, reading the active list from an engine-written cache
+//! file. [`write_active_deny_file`] publishes that file during brief rendering
+//! (remove-then-write, overwrite-always), so hook enforcement tracks the last
+//! rendered ingest and is never stale. A deny entry that selects **no file** in
+//! the project tree is surfaced as a rendered brief warning
+//! ([`SourceCursor::dead_denies`]) rather than silently no-op'ing — catching
+//! typos and un-migrated legacy bare names, never a hard error.
+//!
 //! **One empty-scope semantic.** A facet with **no allow patterns** is
 //! *unscoped* — and that is a **typed refusal**, identical on every file-tree
 //! strategy: git, mtime, and refinement all decline to diff or enumerate the
@@ -152,6 +164,33 @@ fn to_git_pathspec(pattern: &str, git_root: &Path, workspace_root: &Path, exclud
         ":(glob)"
     };
     format!("{magic}{}", git_rel.to_string_lossy())
+}
+
+/// Like [`to_git_pathspec`], but `None` when the pattern resolves *outside*
+/// `git_root` (its git-relative path escapes with a leading `..`). Git fatals
+/// on an out-of-tree pathspec, so a cross-repo deny must be dropped from the
+/// diff rather than pushed — it can match nothing in this repo regardless.
+fn in_repo_pathspec(
+    pattern: &str,
+    git_root: &Path,
+    workspace_root: &Path,
+    exclude: bool,
+) -> Option<String> {
+    let resolved = normalize_lexical(&workspace_root.join(pattern));
+    let git_rel = relative_path(git_root, &resolved);
+    if git_rel
+        .components()
+        .next()
+        .is_some_and(|c| c == Component::ParentDir)
+    {
+        return None;
+    }
+    let magic = if exclude {
+        ":(glob,exclude)"
+    } else {
+        ":(glob)"
+    };
+    Some(format!("{magic}{}", git_rel.to_string_lossy()))
 }
 
 /// Build a [`GlobSet`] from workspace-relative glob patterns, or `None` if
@@ -314,7 +353,17 @@ fn compute_git_slice(
         specs.push(to_git_pathspec(a, &git_root, workspace_root, false));
     }
     for d in &denies {
-        specs.push(to_git_pathspec(d, &git_root, workspace_root, true));
+        // A deny may target a path OUTSIDE this medium's git repo — a
+        // cross-medium workspace-relative glob such as `../dev/**`, whose tree
+        // lives in a sibling repo. Git *fatals* on an out-of-tree pathspec
+        // (`'../dev/**' is outside repository`), which would sink the entire
+        // diff into a no-signal degrade. Such a deny can exclude nothing here
+        // anyway (the files simply aren't in this repo), so drop it: the plugin
+        // hook still enforces it agent-side (workspace-relative, cross-repo),
+        // and a genuinely-dead entry is still surfaced by the brief warning.
+        if let Some(spec) = in_repo_pathspec(d, &git_root, workspace_root, true) {
+            specs.push(spec);
+        }
     }
 
     let mut cmd = Command::new("git");
@@ -468,6 +517,138 @@ fn write_cursor_memo(cache_root: &Path, ingest: &str, facet: &str, aggregate: &s
     if let Ok(bytes) = serde_json::to_vec(&memo) {
         let _ = std::fs::write(&path, bytes);
     }
+}
+
+// ── active-deny hook channel & dead-deny detection ──────────────────────────
+//
+// The plugin's PreToolUse deny hook (`deny-meta-files.mjs`) blocks the ingest
+// agent from Read/Glob/Grep against the *active* ingest's `deny_paths`. It
+// reads the list from an engine-written cache file; the engine writes that file
+// during brief rendering (below), so the hook always enforces the list of the
+// ingest whose brief was last rendered — never a stale one. Same
+// workspace-relative glob dialect the engine resolves here.
+
+/// The hook's active-deny cache path:
+/// `<workspace>/.memstead.cache/ingest/active-deny-paths.json`.
+fn active_deny_path(workspace_root: &Path) -> PathBuf {
+    workspace_root
+        .join(".memstead.cache")
+        .join("ingest")
+        .join("active-deny-paths.json")
+}
+
+/// Write the active ingest's deny list for the plugin hook, **stale-safe**.
+///
+/// Rendering a brief for ingest X publishes X's name and X's (dialect-normalized)
+/// deny entries here; a later render for Y overwrites it. An ingest with an
+/// empty `deny_paths` writes an explicit empty list (so the hook enforces
+/// *nothing*, rather than inheriting a previous ingest's list).
+///
+/// **Remove-then-write:** the previous file is unlinked *before* the new write,
+/// so a failed write can never leave X's list in place to be enforced against
+/// Y. Best-effort like the mtime memo (engine-internal cache, not a tracked
+/// mutation) — but the failure mode is fail-*closed* (no file ⇒ the hook
+/// blocks nothing), never fail-stale.
+pub fn write_active_deny_file(workspace_root: &Path, ingest_name: &str, deny_paths: &[String]) {
+    let path = active_deny_path(workspace_root);
+    // Unlink first: a subsequent write failure then leaves *no* file rather
+    // than a stale previous-ingest file the hook would keep enforcing.
+    let _ = std::fs::remove_file(&path);
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let payload = serde_json::json!({
+        "ingest": ingest_name,
+        "deny_paths": deny_paths,
+    });
+    if let Ok(bytes) = serde_json::to_vec(&payload) {
+        let _ = std::fs::write(&path, bytes);
+    }
+}
+
+/// Directory names never worth walking for the dead-deny scan — build output,
+/// VCS metadata, dependency caches, and the engine's own cache.
+const DEAD_DENY_SKIP_DIRS: &[&str] = &[
+    ".git",
+    "node_modules",
+    "target",
+    "dist",
+    ".memstead.cache",
+    ".sqlx",
+    ".svn",
+    ".hg",
+];
+
+/// Bounded, pruned walk of `base` collecting every file's **workspace-relative**
+/// path (the same string space the deny globs match). Skips heavy directories
+/// ([`DEAD_DENY_SKIP_DIRS`]) and gives up (returns `None`) past `cap` files, so
+/// the dead-deny scan degrades to "can't tell" rather than warning falsely or
+/// walking an unbounded tree. Best-effort: unreadable directories are skipped.
+fn walk_tree_bounded(base: &Path, workspace_root: &Path, cap: usize) -> Option<Vec<String>> {
+    let mut out: Vec<String> = Vec::new();
+    let mut stack = vec![base.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            let path = entry.path();
+            if file_type.is_dir() {
+                let skip = path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| DEAD_DENY_SKIP_DIRS.contains(&n));
+                if !skip {
+                    stack.push(path);
+                }
+            } else if file_type.is_file() {
+                if out.len() >= cap {
+                    return None;
+                }
+                out.push(
+                    relative_path(workspace_root, &normalize_lexical(&path))
+                        .to_string_lossy()
+                        .to_string(),
+                );
+            }
+        }
+    }
+    Some(out)
+}
+
+/// The ingest `deny_paths` entries that select **no file** in the project tree
+/// — surfaced as a rendered brief warning (AC 6 refusal leg) so a zero-matching
+/// deny is never a silent no-op. Resolution base is the medium's git project
+/// root (so a cross-medium workspace-relative deny like `../dev/**`, whose
+/// target lives outside a sub-medium, still resolves against real files),
+/// falling back to the workspace root. Uses the *same* [`build_glob_set`]
+/// matcher the strategies use, so "does this deny select anything" is answered
+/// with the identical dialect. Best-effort: if the tree can't be enumerated
+/// (walk cap hit, no readable base) nothing is reported — a warning is only
+/// ever raised on a confirmed zero-match.
+fn dead_deny_entries(resolved: &ResolvedIngest, workspace_root: &Path) -> Vec<String> {
+    if resolved.deny_paths.is_empty() {
+        return Vec::new();
+    }
+    let base = find_git_root(workspace_root).unwrap_or_else(|| workspace_root.to_path_buf());
+    let Some(files) = walk_tree_bounded(&base, workspace_root, 100_000) else {
+        return Vec::new();
+    };
+    let mut dead: Vec<String> = Vec::new();
+    for entry in &resolved.deny_paths {
+        let Some(set) = build_glob_set(&[entry.as_str()]) else {
+            // A malformed glob can't be resolved either way — not a confirmed
+            // zero-match, so it is not reported here.
+            continue;
+        };
+        if !files.iter().any(|f| set.is_match(f)) {
+            dead.push(entry.clone());
+        }
+    }
+    dead
 }
 
 /// Compute the `mtime` changed slice for one primary source: enumerate the
@@ -670,6 +851,7 @@ pub fn compute_source_cursor(
         no_signal,
         any_changes,
         degraded,
+        dead_denies: dead_deny_entries(resolved, workspace_root),
         dest_mem: dest.clone(),
     }
 }
@@ -760,6 +942,151 @@ mod tests {
             declared_change_detection: Some("git".to_string()),
             scope,
             preparation: None,
+        }
+    }
+
+    /// Shared deny-dialect fixture: the SAME entry list must exclude the SAME
+    /// files from an engine slice as it blocks in the plugin hook
+    /// (`deny-meta-files.test.js` asserts the hook half against this file).
+    /// Proven here by materialising every `blocked` + `allowed` path into a
+    /// temp workspace, scoping a facet to `**` (everything), applying the
+    /// fixture `entries` as the ingest `deny_paths`, and asserting
+    /// `enumerate_facet_files` yields exactly `allowed`.
+    #[test]
+    fn deny_dialect_fixture_matches_engine_slice() {
+        let fixture_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../plugins/claude-code/hooks/deny-dialect-fixture.json");
+        let raw = std::fs::read(&fixture_path)
+            .unwrap_or_else(|e| panic!("read fixture {}: {e}", fixture_path.display()));
+        let fixture: serde_json::Value = serde_json::from_slice(&raw).unwrap();
+        let strs = |key: &str| -> Vec<String> {
+            fixture[key]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| v.as_str().unwrap().to_string())
+                .collect()
+        };
+        let entries = strs("entries");
+        let blocked = strs("blocked");
+        let allowed = strs("allowed");
+
+        let ws = tempfile::tempdir().unwrap();
+        for rel in blocked.iter().chain(allowed.iter()) {
+            let path = ws.path().join(rel);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, "x").unwrap();
+        }
+
+        // Scope = everything; the ONLY exclusions are the ingest deny_paths.
+        let source = primary(vec![PatternEntry {
+            path: "**".to_string(),
+            mode: PatternMode::Allow,
+        }]);
+        let mut got = enumerate_facet_files(&source, &entries, ws.path());
+        got.sort();
+        let mut want = allowed.clone();
+        want.sort();
+        assert_eq!(
+            got, want,
+            "engine slice must equal the fixture `allowed` set"
+        );
+
+        for b in &blocked {
+            assert!(
+                !got.contains(b),
+                "denied `{b}` leaked into the engine slice"
+            );
+        }
+        for a in &allowed {
+            assert!(
+                got.contains(a),
+                "allowed `{a}` missing from the engine slice"
+            );
+        }
+    }
+
+    /// The active-deny hook channel: a render for ingest X publishes X's list;
+    /// a render for Y overwrites it (never a stale X); an empty deny list writes
+    /// an explicit empty array (so the hook enforces nothing, not a leftover).
+    #[test]
+    fn active_deny_file_overwrites_and_writes_empty() {
+        let ws = tempfile::tempdir().unwrap();
+        let path = active_deny_path(ws.path());
+
+        write_active_deny_file(ws.path(), "x-graph", &["dev/**".to_string()]);
+        let v: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(v["ingest"], "x-graph");
+        assert_eq!(v["deny_paths"], serde_json::json!(["dev/**"]));
+
+        // A later render for Y overwrites — nothing from X survives.
+        write_active_deny_file(ws.path(), "y-graph", &["**/VISION.md".to_string()]);
+        let v: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(v["ingest"], "y-graph");
+        assert_eq!(v["deny_paths"], serde_json::json!(["**/VISION.md"]));
+
+        // An empty-deny ingest writes an explicit empty list.
+        write_active_deny_file(ws.path(), "z-graph", &[]);
+        let v: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(v["ingest"], "z-graph");
+        assert_eq!(v["deny_paths"], serde_json::json!([]));
+    }
+
+    /// A cross-repo deny (its target sibling to the medium's git repo)
+    /// resolves outside `git_root` and is dropped from the pathspecs — pushing
+    /// it would make git fatal on the whole diff. An in-repo deny is kept.
+    #[test]
+    fn out_of_repo_deny_pathspec_is_dropped() {
+        let ws = Path::new("/m/graph");
+        let git_root = Path::new("/m/public");
+        // `../dev/**` (workspace-relative) → /m/dev/** — outside /m/public.
+        assert_eq!(in_repo_pathspec("../dev/**", git_root, ws, true), None);
+        assert_eq!(in_repo_pathspec("../CLAUDE.md", git_root, ws, true), None);
+        // An in-repo deny is preserved as a normal exclude pathspec.
+        assert_eq!(
+            in_repo_pathspec("../public/target/**", git_root, ws, true),
+            Some(":(glob,exclude)target/**".to_string())
+        );
+    }
+
+    /// A real git diff with a cross-repo deny present must still succeed (the
+    /// out-of-repo pathspec is dropped, not fataled), and the in-repo scope is
+    /// honoured. Regression for the dogfood dialect (`../dev/**` under a
+    /// sub-medium): git must not degrade the whole slice.
+    #[test]
+    fn git_slice_survives_cross_repo_deny() {
+        let repo = tempfile::tempdir().unwrap();
+        let root = repo.path();
+        std::fs::write(root.join("keep.rs"), "one").unwrap();
+        git(root, &["init", "-q"]);
+        git(root, &["add", "-A"]);
+        git(root, &["commit", "-qm", "seed"]);
+        let baseline = String::from_utf8(
+            std::process::Command::new("git")
+                .args(["rev-parse", "HEAD"])
+                .current_dir(root)
+                .output()
+                .unwrap()
+                .stdout,
+        )
+        .unwrap()
+        .trim()
+        .to_string();
+        std::fs::write(root.join("keep.rs"), "two").unwrap();
+        git(root, &["add", "-A"]);
+        git(root, &["commit", "-qm", "move"]);
+
+        let source = primary(vec![PatternEntry {
+            path: "**/*.rs".to_string(),
+            mode: PatternMode::Allow,
+        }]);
+        // `../dev/**` resolves outside this repo — must be dropped, not fatal.
+        let outcome = compute_git_slice(&source, &["../dev/**".to_string()], root, Some(&baseline));
+        match outcome {
+            SliceOutcome::Changed { slice, .. } => {
+                assert_eq!(slice.modified, vec!["keep.rs"]);
+            }
+            other => panic!("expected Changed (deny dropped), got {other:?}"),
         }
     }
 

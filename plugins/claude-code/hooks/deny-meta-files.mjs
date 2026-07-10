@@ -2,17 +2,19 @@
 // PreToolUse hook for the ingest skill — blocks Read/Glob/Grep against the
 // paths declared on the active ingest's `deny_paths`.
 //
-// The active deny list is sourced from a cache file written by inject.mjs:
-//   <memstead-dir>/.memstead.cache/ingest/active-deny-paths.json
-// Shape: { ingest: <name>, deny_paths: [ ... ] }
-// Missing file or empty list → default-open (nothing blocked).
+// The active deny list is sourced from a cache file the ENGINE writes during
+// brief rendering (memstead-base `write_active_deny_file`):
+//   <workspace>/.memstead.cache/ingest/active-deny-paths.json
+// Shape: { ingest: <name>, deny_paths: [ ...workspace-relative globs... ] }
+// Missing file or empty list → default-open (nothing blocked). The engine
+// overwrites this file (remove-then-write) on every render, so the list always
+// reflects the ingest whose brief was last produced — never a stale one.
 //
-// Project root is discovered by walking up from the input cwd until a `.git`
-// directory is found. The cache-file location is discovered by an
-// independent walk looking for the workspace marker
-// (`.memstead/workspace.toml`, with legacy fallbacks). Either walk failing causes the
-// hook to fail open — the deny list is project-relative and meaningless
-// outside one, and the cache file is meaningless without a workspace.
+// Deny entries are workspace-relative glob patterns (the same dialect and
+// resolution root as facet scope), so both the cache file and the deny entries
+// are resolved against the WORKSPACE root (`.memstead/workspace.toml`, with
+// legacy fallbacks), located exactly as the engine locates it. Outside a
+// workspace the deny list is meaningless, so the hook fails open (exit 0).
 
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
@@ -27,14 +29,14 @@ const candidates = extractCandidates(input.tool_input);
 if (!candidates.length) process.exit(0);
 
 const cwd = input.cwd || process.cwd();
-const projectRoot = findUp(cwd, '.git');
-if (!projectRoot) process.exit(0);
+const workspaceRoot = findWorkspaceDir(cwd);
+if (!workspaceRoot) process.exit(0); // fail open outside a workspace
 
-const denyPaths = loadActiveDenyPaths(cwd);
+const denyPaths = loadActiveDenyPaths(workspaceRoot);
 if (!denyPaths.length) process.exit(0);
 
 for (const c of candidates) {
-  const reason = checkCandidate(c, cwd, projectRoot, denyPaths);
+  const reason = checkCandidate(c, cwd, workspaceRoot, denyPaths);
   if (reason) {
     process.stdout.write(`BLOCKED: ${reason}\nPath/pattern: ${c}\n`);
     process.exit(2);
@@ -53,9 +55,14 @@ function findUp(start, marker) {
   }
 }
 
-function loadActiveDenyPaths(start) {
-  const cachePath = findCachePath(start);
-  if (!cachePath || !existsSync(cachePath)) return [];
+function loadActiveDenyPaths(workspaceRoot) {
+  const cachePath = join(
+    workspaceRoot,
+    '.memstead.cache',
+    'ingest',
+    'active-deny-paths.json',
+  );
+  if (!existsSync(cachePath)) return [];
   try {
     const raw = JSON.parse(readFileSync(cachePath, 'utf-8'));
     if (!raw || !Array.isArray(raw.deny_paths)) return [];
@@ -65,15 +72,13 @@ function loadActiveDenyPaths(start) {
   }
 }
 
-// Locate `<memstead-dir>/.memstead.cache/ingest/active-deny-paths.json`. The agent's
-// cwd may be inside the workspace (walk-up to the workspace marker
-// succeeds) or at the project root with the workspace one level beneath
-// (walk-up fails; fallback to a depth-1 scan from `.git/` parent).
-function findCachePath(start) {
-  const memsteadDir = findWorkspaceDirUp(start)
-    ?? findGraphDirBelowProjectRoot(start);
-  if (!memsteadDir) return null;
-  return join(memsteadDir, '.memstead.cache', 'ingest', 'active-deny-paths.json');
+// Locate the workspace root — the resolution root for both the cache file and
+// every deny glob. The agent's cwd may be inside the workspace (walk-up to the
+// workspace marker succeeds) or at the project root with the workspace one
+// level beneath (walk-up fails; fall back to a depth-1 scan from the `.git`
+// parent).
+function findWorkspaceDir(start) {
+  return findWorkspaceDirUp(start) ?? findGraphDirBelowProjectRoot(start);
 }
 
 function findWorkspaceDirUp(start) {

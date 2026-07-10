@@ -19,7 +19,7 @@ use super::brief::{
     ProcessMemInfo, assemble_discovery_brief, assemble_one_shot_brief, assemble_refinement_brief,
     render_changed_slice,
 };
-use super::cursor::compute_source_cursor;
+use super::cursor::{compute_source_cursor, write_active_deny_file};
 use super::guidance::{GuidanceDefaults, MemGuidance, ResolvedGuidance, resolve_writing_guidance};
 use super::refinement::{
     clear_findings, next_batch, read_pending_findings, render_refinement_scout,
@@ -83,6 +83,12 @@ pub fn render_ingest_brief(
     let configs = load_pipeline_configs(workspace_root)
         .map_err(|e| RenderBriefError::ConfigLoad(e.to_string()))?;
     let resolved = resolve_ingest(&configs, ingest_name)?;
+
+    // Publish this ingest's deny list for the plugin's PreToolUse deny hook —
+    // stale-safe (remove-then-write), overwrite-always, before any mode branch
+    // so the channel is live for every rendered brief and never pins a
+    // previous ingest's list. Best-effort engine cache, not a tracked mutation.
+    write_active_deny_file(workspace_root, &resolved.name, &resolved.deny_paths);
 
     // Refuse an ingest whose source facet declares a deterministic preparation
     // step (e.g. `pdf-to-markdown`) — no preparation implementation exists, so

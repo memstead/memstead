@@ -328,6 +328,12 @@ pub struct SourceCursor {
     pub any_changes: bool,
     /// Whether any facet's slice was degraded (mtime memo miss → full scan).
     pub degraded: bool,
+    /// Ingest `deny_paths` entries that matched **no file** anywhere the agent
+    /// can reach (the project tree). A zero-selecting deny is surfaced as a
+    /// rendered warning rather than silently no-op'ing — it catches typos and
+    /// un-migrated legacy bare names (which, as globs, match nothing). Never a
+    /// hard error: the ingest still runs, the entry just does nothing.
+    pub dead_denies: Vec<String>,
     /// The destination mem the `set-sync-state` commands target.
     pub dest_mem: String,
 }
@@ -390,7 +396,11 @@ fn no_signal_reason_text(reason: NoSignalReason) -> &'static str {
 /// nothing needs reseeding, and every source is genuinely unchanged (no
 /// no-signal notes) — making the brief byte-identical to a plain roam.
 pub fn render_changed_slice(cursor: &SourceCursor) -> String {
-    if !cursor.any_changes && cursor.reseed.is_empty() && cursor.no_signal.is_empty() {
+    if !cursor.any_changes
+        && cursor.reseed.is_empty()
+        && cursor.no_signal.is_empty()
+        && cursor.dead_denies.is_empty()
+    {
         return String::new();
     }
     let mut lines: Vec<String> = Vec::new();
@@ -447,6 +457,21 @@ pub fn render_changed_slice(cursor: &SourceCursor) -> String {
                 note.source,
                 no_signal_reason_text(note.reason)
             ));
+        }
+        lines.push(String::new());
+    }
+
+    if !cursor.dead_denies.is_empty() {
+        lines.push(
+            "**Warning — some `deny_paths` entries match nothing.** The following ingest \
+             `deny_paths` selected **no file** in the project tree, so they exclude nothing from \
+             the slice and hide nothing from the ingest agent. This is usually a typo or a legacy \
+             bare name that never migrated to the workspace-relative glob dialect (e.g. `dev` → \
+             `dev/**`, `VISION.md` → `**/VISION.md`). Fix or remove them:\n"
+                .to_string(),
+        );
+        for entry in &cursor.dead_denies {
+            lines.push(format!("- `{entry}`"));
         }
         lines.push(String::new());
     }
@@ -958,9 +983,31 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
             no_signal: vec![],
             any_changes: false,
             degraded: false,
+            dead_denies: vec![],
             dest_mem: "engine".to_string(),
         };
         assert_eq!(render_changed_slice(&cursor), "");
+    }
+
+    /// A zero-selecting deny entry surfaces as a rendered warning even when
+    /// nothing else moved — it is never a silent no-op. The entry name and the
+    /// migration hint both appear.
+    #[test]
+    fn changed_slice_renders_dead_deny_warning() {
+        let cursor = SourceCursor {
+            union: slice(&[], &[], &[]),
+            write_commands: vec![],
+            reseed: vec![],
+            no_signal: vec![],
+            any_changes: false,
+            degraded: false,
+            dead_denies: vec!["dev".to_string(), "typo/**".to_string()],
+            dest_mem: "engine".to_string(),
+        };
+        let out = render_changed_slice(&cursor);
+        assert!(out.contains("deny_paths` entries match nothing"));
+        assert!(out.contains("- `dev`"));
+        assert!(out.contains("- `typo/**`"));
     }
 
     /// A changed pass renders deleted-first, then the recording block — built
@@ -975,6 +1022,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
             no_signal: vec![],
             any_changes: true,
             degraded: false,
+            dead_denies: vec![],
             dest_mem: "engine".to_string(),
         };
         let expected_lines = [
@@ -1010,6 +1058,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
             no_signal: vec![],
             any_changes: false,
             degraded: false,
+            dead_denies: vec![],
             dest_mem: "d".to_string(),
         };
         let out = render_changed_slice(&cursor);
@@ -1043,6 +1092,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
             ],
             any_changes: false,
             degraded: false,
+            dead_denies: vec![],
             dest_mem: "d".to_string(),
         };
         let out = render_changed_slice(&cursor);
@@ -1085,6 +1135,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
             no_signal: vec![note("other", NoSignalReason::Unscoped)],
             any_changes: true,
             degraded: false,
+            dead_denies: vec![],
             dest_mem: "d".to_string(),
         };
         let out = render_changed_slice(&cursor);
@@ -1169,6 +1220,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
             no_signal: vec![],
             any_changes: true,
             degraded: true,
+            dead_denies: vec![],
             dest_mem: "d".to_string(),
         };
         let out = render_changed_slice(&cursor);

@@ -44,7 +44,9 @@ pub use change_detection::{
     Digest, StatDiff, StatEntry, StatMap, compute_stat_map, diff_stat_maps, digest_stat_map,
     digests_equal, parse_digest_token, serialize_digest_token,
 };
-pub use cursor::{compute_source_cursor, enumerate_facet_files, source_moved};
+pub use cursor::{
+    compute_source_cursor, enumerate_facet_files, source_moved, write_active_deny_file,
+};
 pub use guidance::{
     GuidanceDefaults, MemGuidance, ResolvedGuidance, merge_guidance_block, resolve_writing_guidance,
 };
