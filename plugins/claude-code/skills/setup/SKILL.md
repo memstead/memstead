@@ -92,7 +92,17 @@ If the user wants a schema other than the default, point them at `memstead link 
 
 For scripted / CI use the strict variant is `memstead init` — this skill only reaches for it in the pre-`quickstart` fallback above; quickstart is the interactive path.
 
-## Step 3 — Tell the user to restart Claude Code
+## Step 3 — Record the binary version
+
+Record the resolved binary's version into the workspace so later skills can gate optional capabilities (e.g. anchored writes) on what the installed binary supports — without ever probing by sending a call and catching a rejection:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/binary-version.mjs" record "$(pwd)"
+```
+
+This writes `.memstead.cache/plugin/binary-version.json` — a **gitignored plugin-cache file, never mem-repo state**. It is a **generic mechanism**: any version-gated capability reads it, not just one skill. It is **best-effort** — if it fails (e.g. `memstead` resolves only by an absolute source-build path, not on `PATH`), say so and continue: capability-gated skills fail closed to their degraded path and never break. Skip it only when no working binary resolved at all.
+
+## Step 4 — Tell the user to restart Claude Code
 
 The MCP server only registers on Claude Code startup. Tell the user explicitly:
 
