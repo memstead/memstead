@@ -1,11 +1,10 @@
 ---
-name: outer-commit
-user-invocable: false
-description: Commit pending entity changes to git — shares the Stop hook's commit pipeline. Use when auto-commit is disabled or a previous Stop failed.
+name: commit
+description: Commit pending graph changes — the recovery path when auto-commit is off or a previous session's commit failed. Graph only: it commits entity changes in your mems, never changes in your project.
 allowed-tools: Bash, Read, mcp__memstead__memstead_health
 ---
 
-# Memstead Outer-Commit
+# Memstead Commit
 
 Manually fires the same commit pipeline the Stop hook uses. Both paths
 produce `memstead: session changes (...)` commits with `Memstead-cursor:`
@@ -46,6 +45,9 @@ the skill bypasses the `outer_vcs.enabled` gate.
 ## Rules
 
 - Never amend, never force push, never rewrite history.
+- This skill only moves history forward. If you need to recover or rewind
+  a mem's history, that is a different job — use `memstead branch-reset`,
+  never this skill.
 - Only the writable-mem worktrees are staged — no code, no config
   outside mems.
 - The skill does not build its own commit message — the shared pipeline

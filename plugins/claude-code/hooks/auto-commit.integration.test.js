@@ -538,18 +538,18 @@ describe('integration: sanity — removed files and skill rename', () => {
     assert.strictEqual(existsSync(path), false);
   });
 
-  it('outer-commit skill exists and is named outer-commit', () => {
+  it('commit skill exists and is named commit', () => {
     const skillPath = resolve(
       new URL('.', import.meta.url).pathname,
-      '../skills/outer-commit/SKILL.md',
+      '../skills/commit/SKILL.md',
     );
-    assert.ok(existsSync(skillPath), 'outer-commit SKILL.md should exist');
+    assert.ok(existsSync(skillPath), 'commit SKILL.md should exist');
     const content = readFileSync(skillPath, 'utf-8');
-    assert.match(content, /^name: outer-commit$/m);
+    assert.match(content, /^name: commit$/m);
   });
 
-  it('old commit skill directory is gone', () => {
-    const oldPath = resolve(new URL('.', import.meta.url).pathname, '../skills/commit');
+  it('old outer-commit skill directory is gone', () => {
+    const oldPath = resolve(new URL('.', import.meta.url).pathname, '../skills/outer-commit');
     assert.strictEqual(existsSync(oldPath), false);
   });
 });

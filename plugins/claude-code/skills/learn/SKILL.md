@@ -1,10 +1,9 @@
 ---
 name: learn
-user-invocable: false
 description: >
-  Load knowledge from Memstead mems into context. Searches entities by topic and reads
-  them fully so the LLM has internalized knowledge before starting work.
-  Use when you need to understand a topic before implementing.
+  Load what a mem already knows into context before starting work — searches entities by
+  topic and reads them fully, so the session builds on captured knowledge instead of
+  re-deriving it. Not a docs or web lookup: it reads your mems.
 allowed-tools: mcp__memstead__*
 argument-hint: "[topic1 topic2 ...] | --research"
 ---

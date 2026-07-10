@@ -1,4 +1,4 @@
-# Outer-Commit — Design Intent
+# Commit — Design Intent
 
 What this skill must achieve. Use this as the reference when tuning SKILL.md.
 

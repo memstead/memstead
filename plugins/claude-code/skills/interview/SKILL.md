@@ -1,6 +1,6 @@
 ---
 name: interview
-description: Conversational knowledge capture — guides domain experts through structured entity creation via a one-question-at-a-time interview.
+description: Conversational knowledge capture — you talk, Claude asks one question at a time and writes what you know into typed, linked entities. Use when the knowledge lives in a person's head rather than in any source Claude could read.
 disable-model-invocation: true
 allowed-tools: mcp__memstead__*, Bash, Read
 argument-hint: "[topic]"

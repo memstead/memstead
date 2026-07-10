@@ -10,9 +10,9 @@ See the root `AGENTS.md` for full project documentation. This plugin provides MC
 
 Two **inverse** frontmatter keys control how a skill is invoked. They are not redundant, and each skill's assignment is deliberate — do not collapse them into one key (they express different axes: `/`-menu visibility vs. model auto-trigger):
 
-- `user-invocable: false` → **model-only**: hidden from the `/` menu, but the model may auto-invoke it. Used for the internal/power-user skills (audit, maintain, refactor, learn, outer-commit).
+- `user-invocable: false` → **model-only**: hidden from the `/` menu, but the model may auto-invoke it. Used for the internal/power-user skills (audit).
 - `disable-model-invocation: true` → **human-only**: stays visible in the `/` menu, but the model never auto-triggers it. Used for the front-door skills the human drives (setup, interview).
-- **neither key** → **both**: visible in `/` and model-invocable (ingest, reconcile).
+- **neither key** → **both**: visible in `/` and model-invocable (learn, ingest, tidy, commit, reconcile).
 
 The front-door / hidden-rest split of the `/` menu is derivable from `user-invocable` alone. Per-skill state files (e.g. `interview`'s mode flag) live at `<mem-dir>/.memstead/<name>` — the same per-mem location the hooks resolve and read; the writer (SKILL) and reader (hook) must name the same path.
 

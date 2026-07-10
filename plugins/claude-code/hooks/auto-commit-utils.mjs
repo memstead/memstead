@@ -1,5 +1,5 @@
 // Pure helpers + the shared commit pipeline for the auto-commit Stop
-// hook and the `/outer-commit` skill.
+// hook and the `/commit` skill.
 //
 // Pure-helper section (top) is synchronous, side-effect-free, and
 // unit-testable without mocking stdin, child processes, or the
@@ -366,7 +366,7 @@ function runGit(args, { cwd } = {}) {
 
 // ---------------------------------------------------------------------
 // Shared commit pipeline invoked by both the Stop hook and the
-// `/outer-commit` skill.
+// `/commit` skill.
 // ---------------------------------------------------------------------
 
 /**
@@ -403,7 +403,7 @@ function isUnreachableSinceError(err) {
  *
  * Flags:
  *   skipEnabledCheck — when true, ignore `outer_vcs.enabled`. Used by
- *     the `/outer-commit` skill, which is always a manual invocation.
+ *     the `/commit` skill, which is always a manual invocation.
  *   sessionId — included in the `Session:` trailer when non-null;
  *     omitted when null. Hook passes the Claude Code session id; skill
  *     passes null.

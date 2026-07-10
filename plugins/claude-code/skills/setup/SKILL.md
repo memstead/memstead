@@ -1,6 +1,6 @@
 ---
 name: setup
-description: First-time setup for a filesystem-mem Memstead workspace — resolves the memstead binaries (installing them if needed), then delegates workspace + mem + MCP wiring to `memstead quickstart` and instructs the user to restart Claude Code so the MCP server registers.
+description: First-time Memstead setup in the current directory — resolves the binaries (installing if needed), creates the workspace and mem, and wires the MCP server. Run once per project. Afterwards there is no command for everyday graph work — just talk to Claude; the MCP tools are always live.
 disable-model-invocation: true
 allowed-tools: AskUserQuestion, Bash, Read, Write
 ---
