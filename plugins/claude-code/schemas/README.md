@@ -88,6 +88,24 @@ projection, ingest) live at fixed `.memstead/{mediums,facets,projections,ingests
 paths — there are no directory-pointer keys — and their schema files are
 entirely plugin-owned.
 
+### `drift.realizationPatterns` — deprecated (E3a)
+
+The `drift.realizationPatterns` sub-key (`fileHeader` / `backtickPath`
+regexes) is **deprecated and no longer read by any plugin surface.** The
+`check-realization` hook used to load these patterns and regex-scan entity
+markdown for file references; that scan was both dead (the loader was
+hard-nulled after a workspace-controlled-module-load security fix) and the
+wrong design. The hook is now anchor-based: it asks the engine which entities
+anchored the edited file via `memstead anchors --artifact` and never loads any
+schema-derived scan patterns. Provenance from source artifact → entity lives in
+engine-owned anchors, not in schema regexes.
+
+The frozen **v0** `memstead-toml.schema.json` keeps its generic
+`drift` description ("Engine-owned disk-drift policy") **byte-identical** — v0
+stays frozen (see Versioning above), so no realization-patterns removal happens
+in v0; the key is simply inert. A future **v1** never carries a
+`realizationPatterns` key.
+
 ## Validation against the live workspace
 
 ```

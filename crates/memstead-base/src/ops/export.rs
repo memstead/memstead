@@ -19,9 +19,9 @@ use std::io::{Cursor, Write};
 use std::path::{Path, PathBuf};
 
 use memstead_schema::{
-    ARCHIVE_CONFIG_PATH, ARCHIVE_PROVENANCE_PATH, ARCHIVE_SCHEMA_PREFIX, ArchiveProvenance,
-    EntityProvenance, MemConfig, PublishConversionError, SchemaSourceError, collect_schema_source,
-    published_config_from,
+    ARCHIVE_ANCHORS_PATH, ARCHIVE_CONFIG_PATH, ARCHIVE_PROVENANCE_PATH, ARCHIVE_SCHEMA_PREFIX,
+    ArchiveProvenance, EntityProvenance, MemConfig, PublishConversionError, SchemaSourceError,
+    collect_schema_source, published_config_from,
 };
 use zip::{CompressionMethod, DateTime, write::SimpleFileOptions};
 
@@ -216,10 +216,18 @@ pub fn export_mem_to_bytes(
     // backend so the JSONL parsing has one home. A mem with no changelog
     // yields no records → no provenance member (absent, not empty).
     use crate::backend::MemBackend;
-    let provenance = crate::storage::FilesystemMemWriter::new(mem_dir.to_path_buf())
+    let backend = crate::storage::FilesystemMemWriter::new(mem_dir.to_path_buf());
+    let provenance = backend
         .read_provenance(None)
         .ok()
         .and_then(|records| build_archive_provenance(&records));
+
+    // Source the engine-owned anchors sidecar (`.memstead/anchors.json`)
+    // through the same backend so it travels inside the `.mem` archive.
+    // Absent (a mem with no anchors) → no member, distinct from an empty
+    // sidecar. The recognised-member set + canonical re-pack already accept
+    // and thread it verbatim; export is the producer half of that contract.
+    let anchors_bytes = backend.read_anchors_sidecar().ok().flatten();
 
     export_entries_to_bytes(
         config,
@@ -228,6 +236,7 @@ pub fn export_mem_to_bytes(
         explicit_name,
         md_entries,
         provenance.as_ref(),
+        anchors_bytes.as_deref(),
     )
 }
 
@@ -250,6 +259,7 @@ pub fn export_entries_to_bytes(
     explicit_name: &str,
     md_entries: Vec<(PathBuf, Vec<u8>)>,
     provenance: Option<&ArchiveProvenance>,
+    anchors_bytes: Option<&[u8]>,
 ) -> Result<MemExportBytes, MemExportError> {
     let published = published_config_from(config, explicit_name)?;
     let config_bytes = canonical_json(&published)
@@ -270,6 +280,12 @@ pub fn export_entries_to_bytes(
         && let Ok(bytes) = prov.to_archive_bytes()
     {
         all_entries.push((ARCHIVE_PROVENANCE_PATH.to_string(), bytes));
+    }
+    // Embed the engine-owned anchors sidecar verbatim when the mem carries
+    // one. A recognised `.memstead/` member: the archive validator strictly
+    // validates it and the canonical re-pack threads it through unchanged.
+    if let Some(anchors) = anchors_bytes {
+        all_entries.push((ARCHIVE_ANCHORS_PATH.to_string(), anchors.to_vec()));
     }
     for sf in &schema_files {
         all_entries.push((

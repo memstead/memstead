@@ -1370,6 +1370,126 @@ community:
         assert_eq!(pc.ingests[0].config.mode, LegacyIngestMode::Discovery);
     }
 
+    /// Live per-anchor state (criteria 1, 9 — path-medium subset): a
+    /// single-medium `path` mem observes working-tree existence at the current
+    /// HEAD. Absent artifact ⇒ `orphaned`; present + non-hash class ⇒
+    /// `resolves`; present + hash-bearing class ⇒ `recheck` (never a
+    /// fabricated `drifted` — the prepared-content hash adjudication is E3b's).
+    #[test]
+    fn entity_anchors_resolve_live_state_for_path_medium() {
+        use crate::anchor::{AnchorInput, AnchorState};
+        use crate::pipeline::{Medium, MediumType};
+        use crate::vcs::Actor;
+        use crate::workspace_store::WorkspaceStoreAdapter;
+        use indexmap::IndexMap;
+
+        let tmp = TempDir::new().unwrap();
+        let mem_dir = tmp.path().join("mem");
+        std::fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
+        std::fs::write(
+            mem_dir.join(".memstead").join("config.json"),
+            r#"{"format":1,"schema":"default@1.0.0","version":"1.0.0"}"#,
+        )
+        .unwrap();
+
+        let memstead = tmp.path().join(".memstead");
+        std::fs::create_dir_all(&memstead).unwrap();
+        std::fs::write(
+            memstead.join("workspace.toml"),
+            "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+        )
+        .unwrap();
+        crate::FileWorkspaceStore::new()
+            .save_state(
+                tmp.path(),
+                &crate::workspace::Workspace {
+                    mounts: vec![folder_mount("specs", mem_dir.clone())],
+                    settings: crate::workspace::WorkspaceSettings::default(),
+                },
+            )
+            .unwrap();
+
+        // A single `path` medium rooted at `<workspace>/src`; a file exists
+        // there, so `present.rs` observes present and `gone.rs` observes
+        // absent.
+        crate::pipeline_store::write_medium(
+            tmp.path(),
+            "specs",
+            "src",
+            &Medium {
+                name: "src".to_string(),
+                medium_type: MediumType::Codebase,
+                pointer: "src".to_string(),
+                change_detection: None,
+            },
+        )
+        .unwrap();
+        std::fs::create_dir_all(tmp.path().join("src")).unwrap();
+        std::fs::write(tmp.path().join("src").join("present.rs"), "fn main() {}").unwrap();
+
+        let mut engine = Engine::from_workspace_root(tmp.path()).unwrap();
+
+        let anchor = |artifact: &str, class: &str, hash: Option<&str>| AnchorInput {
+            artifact: Some(artifact.to_string()),
+            grain: Some("file".to_string()),
+            class: Some(class.to_string()),
+            hash: hash.map(str::to_string),
+            hash_stability: Some("stable".to_string()),
+            ..Default::default()
+        };
+        let mut sections = IndexMap::new();
+        sections.insert("identity".to_string(), "Covers src.".to_string());
+        sections.insert("purpose".to_string(), "Track sources.".to_string());
+        let created = engine
+            .create_entity(
+                crate::CreateEntityArgs {
+                    mem: "specs".to_string(),
+                    title: "Covers".to_string(),
+                    entity_type: "spec".to_string(),
+                    sections,
+                    metadata: IndexMap::new(),
+                    relations: Vec::new(),
+                    anchors: vec![
+                        anchor("present.rs", "anchored", Some("h1")), // present + hash → recheck
+                        anchor("present.rs", "informed-by", None), // present + non-hash → resolves
+                        anchor("gone.rs", "anchored", Some("h2")), // absent → orphaned
+                    ],
+                    dry_run: false,
+                },
+                Actor::Agent,
+                None,
+                None,
+            )
+            .unwrap();
+
+        let resolved = engine.entity_anchors_resolved(&created.id);
+        assert_eq!(resolved.len(), 3);
+        let state_of = |artifact: &str, class: crate::anchor::AnchorProvenanceClass| {
+            resolved
+                .iter()
+                .find(|r| r.anchor.artifact == artifact && r.anchor.class == class)
+                .and_then(|r| r.state)
+        };
+        assert_eq!(
+            state_of("present.rs", crate::anchor::AnchorProvenanceClass::Anchored),
+            Some(AnchorState::Recheck),
+            "present hash-bearing anchor cannot adjudicate the prepared hash here → recheck"
+        );
+        assert_eq!(
+            state_of(
+                "present.rs",
+                crate::anchor::AnchorProvenanceClass::InformedBy
+            ),
+            Some(AnchorState::Resolves),
+            "present non-hash anchor resolves on existence"
+        );
+        assert_eq!(
+            state_of("gone.rs", crate::anchor::AnchorProvenanceClass::Anchored),
+            Some(AnchorState::Orphaned),
+            "absent artifact is orphaned"
+        );
+    }
+
     /// The engine edit surface: a wrapper edit (`add_medium`) routes through
     /// the pipeline-edit layer, writes the store, and refreshes the in-memory
     /// snapshot in place (no `reload()`), and referential integrity (a facet

@@ -253,6 +253,47 @@ mod tests {
         writer.commit(subject, &CommitContext::internal()).unwrap()
     }
 
+    /// branch_reset leg (criterion 5): the anchors sidecar is a tree blob on
+    /// the mem branch, so resetting the branch pointer to an earlier commit
+    /// rewinds the sidecar coherently with the entities — post-reset the
+    /// sidecar matches the reset point exactly.
+    #[test]
+    fn branch_reset_rewinds_the_anchors_sidecar_with_entities() {
+        let tmp = TempDir::new().unwrap();
+        let gitdir = init_gitdir(&tmp);
+
+        // Commit A: entity `a` + a sidecar carrying one anchor.
+        let sidecar_a = br#"{"version":1,"entities":{"specs--a":[{"artifact":"a.rs","grain":"file","class":"anchored","hash_stability":"stable","hash":"h1"}]}}"#;
+        let sha_a = {
+            let w = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/specs".to_string());
+            w.write_entity(Path::new("a.md"), body("A").as_bytes())
+                .unwrap();
+            w.write_entity(Path::new(".memstead/anchors.json"), sidecar_a)
+                .unwrap();
+            w.commit("A", &CommitContext::internal()).unwrap()
+        };
+
+        // Commit B: extend the sidecar with a second anchor.
+        let sidecar_b = br#"{"version":1,"entities":{"specs--a":[{"artifact":"a.rs","grain":"file","class":"anchored","hash_stability":"stable","hash":"h1"},{"artifact":"b.rs","grain":"file","class":"anchored","hash_stability":"stable","hash":"h2"}]}}"#;
+        {
+            let w = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/specs".to_string());
+            w.write_entity(Path::new(".memstead/anchors.json"), sidecar_b)
+                .unwrap();
+            w.commit("B", &CommitContext::internal()).unwrap();
+        }
+
+        // Reset to A → the sidecar rewinds with the branch.
+        branch_reset_in_gitdir(&gitdir, "specs", &sha_a, None).unwrap();
+
+        let reader = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/specs".to_string());
+        let after = memstead_base::backend::MemBackend::read_anchors_sidecar(&reader).unwrap();
+        assert_eq!(
+            after.as_deref(),
+            Some(&sidecar_a[..]),
+            "post-reset sidecar matches the reset point (only anchor A)"
+        );
+    }
+
     /// Create a `refs/remotes/<remote>/<branch>` pointing at the given
     /// SHA so the pushed-status probe sees it as "pushed".
     fn set_remote_tracking(gitdir: &PathBuf, remote: &str, branch: &str, sha: &str) {

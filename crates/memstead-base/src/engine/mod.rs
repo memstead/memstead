@@ -316,6 +316,11 @@ pub type GitBranchExportFn = fn(
     // `read_provenance` log) to embed at `.memstead/provenance.json`.
     // `None` when the mem carried no noted mutations.
     provenance_bytes: Option<&[u8]>,
+    // Engine-sourced anchors sidecar bytes (from the mount's
+    // `read_anchors_sidecar`) to embed at `.memstead/anchors.json`. `None`
+    // when the mem carried no anchors. The engine reads the branch tip; the
+    // hook only embeds, keeping git tree-walking out of the fn-pointer.
+    anchors_bytes: Option<&[u8]>,
 ) -> Result<crate::ops::MemExportResult, BackendError>;
 
 /// `Engine::export_mem_to_bytes` dispatch for git-branch mounts.
@@ -336,6 +341,11 @@ pub type GitBranchExportToBytesFn = fn(
     // mutations. The engine sources it (it holds the backend); the hook
     // only embeds, keeping git history-walking out of the fn-pointer.
     provenance_bytes: Option<&[u8]>,
+    // Engine-sourced anchors sidecar bytes (from the mount's
+    // `read_anchors_sidecar`) to embed at `.memstead/anchors.json`. `None`
+    // when the mem carried no anchors. Symmetric with `provenance_bytes`:
+    // the engine reads the branch tip, the hook only embeds.
+    anchors_bytes: Option<&[u8]>,
 ) -> Result<crate::ops::MemExportBytes, BackendError>;
 
 /// `Engine::diff` dispatch for git-branch mounts. Walks the two refs

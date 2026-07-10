@@ -520,6 +520,42 @@ mod tests {
         );
     }
 
+    /// Transport leg (criterion 5): the anchors sidecar rides the mem branch
+    /// as an ordinary tree blob, so push→pull round-trips it verbatim — no
+    /// transport code reads or filters `.memstead/anchors.json`.
+    #[test]
+    fn push_pull_round_trips_the_anchors_sidecar() {
+        let tmp = TempDir::new().unwrap();
+        let local = init_local(&tmp, "local");
+        let remote = init_bare_remote(&tmp, "remote.git");
+        add_remote(&local, "origin", &remote);
+
+        // Commit an entity + an anchors sidecar to `refs/heads/specs` in one
+        // commit (the atomicity the mutation path relies on).
+        let sidecar = br#"{"version":1,"entities":{"specs--a":[{"artifact":"src/lib.rs","grain":"file","class":"anchored","hash_stability":"stable","hash":"h1"}]}}"#;
+        {
+            let writer = GitTreeMemWriter::new(local.to_path_buf(), "refs/heads/specs".to_string());
+            writer
+                .write_entity(Path::new("a.md"), body("A").as_bytes())
+                .unwrap();
+            writer
+                .write_entity(Path::new(".memstead/anchors.json"), sidecar)
+                .unwrap();
+            writer.commit("seed", &CommitContext::internal()).unwrap();
+        }
+
+        push_in_gitdir(&local, "origin", "specs", false).unwrap();
+
+        let second = init_local(&tmp, "second");
+        add_remote(&second, "origin", &remote);
+        pull_in_gitdir(&second, "origin", "specs").unwrap();
+
+        // The pulled branch carries the sidecar blob byte-for-byte.
+        let reader = GitTreeMemWriter::new(second.to_path_buf(), "refs/heads/specs".to_string());
+        let pulled = memstead_base::backend::MemBackend::read_anchors_sidecar(&reader).unwrap();
+        assert_eq!(pulled.as_deref(), Some(&sidecar[..]));
+    }
+
     #[test]
     fn pull_happy_path_fast_forwards_local_branch() {
         let tmp = TempDir::new().unwrap();

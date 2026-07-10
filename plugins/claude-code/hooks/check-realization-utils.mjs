@@ -1,60 +1,53 @@
-// Pure utility functions for check-realization hook — no side effects, testable.
+// Pure, side-effect-free helpers for the check-realization hook — testable
+// without process.exit, stdin, or a subprocess.
+//
+// The hook is now anchor-based (E3a): it asks the engine which entities
+// anchored the file an agent just edited (via `memstead anchors --artifact`)
+// and surfaces a fail-open notice. These helpers shape that engine reply into
+// the notice. The old regex reader (`schema.drift.realizationPatterns.*`) is
+// retired — the plugin never loads schema-derived scan patterns anymore.
 
 /**
- * Extract realization file paths from an entity's specifies field.
+ * Entity ids that anchored the edited artifact with a *span*- or *file*-grain
+ * anchor — the grains that name a single file the edit could invalidate.
+ * `tree` / `url` / `entity` grains are deliberately excluded: a tree anchor
+ * covers many files and would be noisy on any edit beneath it, and url/entity
+ * anchors don't reference a filesystem path at all.
  *
- * Recognizes two patterns:
- * 1. File headers:  ### File: `path`  or  ### Files: `path1`, `path2`
- * 2. Inline backtick paths with file extensions (only outside code blocks)
+ * Deduplicated, in first-seen order. Tolerant of any malformed reply — a
+ * missing/!array `anchors` yields `[]` (the hook then stays silent).
  *
- * Returns a deduplicated array of relative paths (e.g. ['packages/core/lib/store.js']).
+ * @param {unknown} result - Parsed `memstead anchors --artifact --json` reply,
+ *   shaped `{ count, anchors: [{ grain, entity_id, ... }], composition }`.
+ * @returns {string[]}
  */
-export function extractRealizationPaths(specifies, schema) {
-  if (!specifies) return [];
-  const FILE_HEADER_RE = schema.drift.realizationPatterns.fileHeader;
-  const BACKTICK_PATH_RE = schema.drift.realizationPatterns.backtickPath;
-  const paths = new Set();
-
-  // 1. File headers: ### File: `path` or ### Files: `p1`, `p2`
-  for (const match of specifies.matchAll(FILE_HEADER_RE)) {
-    const line = match[1];
-    for (const tick of line.matchAll(/`([^`]+)`/g)) {
-      const p = tick[1].trim();
-      if (p && !/<[^>]+>/.test(p)) paths.add(p);
+export function pickReferencedEntityIds(result) {
+  const anchors = result && Array.isArray(result.anchors) ? result.anchors : [];
+  const seen = new Set();
+  const ids = [];
+  for (const a of anchors) {
+    if (!a || (a.grain !== 'span' && a.grain !== 'file')) continue;
+    const id = a.entity_id;
+    if (typeof id === 'string' && id.length > 0 && !seen.has(id)) {
+      seen.add(id);
+      ids.push(id);
     }
   }
-
-  // 2. Inline backtick paths (strip code blocks first)
-  const stripped = specifies.replace(/^```[\s\S]*?^```/gm, '');
-  for (const match of stripped.matchAll(BACKTICK_PATH_RE)) {
-    const p = match[1].trim();
-    if (p.includes('/') && !/<[^>]+>/.test(p)) paths.add(p);
-  }
-
-  return [...paths];
+  return ids;
 }
 
 /**
- * Convert an entity file path (relative to memRoot) to an entity ID.
- * E.g. "test-engine/markdown-parser.md" → "test-engine--markdown-parser"
- * Defensive: takes the last path segment as slug, so a stray nested
- * file from a pre-flat-layout mem still maps to a usable ID.
+ * The single-line notice the hook writes when an edited file is anchored.
+ * References only living surfaces — `memstead_entity` — never the retired
+ * `/audit` skill.
+ *
+ * @param {string} relPath - Edited path, workspace-relative (the form anchors store).
+ * @param {string[]} ids - Non-empty referencing entity ids.
+ * @returns {string}
  */
-export function fileToId(relPath) {
-  const parts = relPath.replace(/\\/g, '/').replace(/\.md$/, '').split('/');
-  if (parts.length < 2) return null;
-  const mem = parts[0];
-  const name = parts[parts.length - 1];
-  return `${mem}--${name}`;
-}
-
-/**
- * Check if an edited file path matches a realization path.
- */
-export function pathMatches(editedRelPath, realizationPath) {
+export function formatRealizationNotice(relPath, ids) {
   return (
-    editedRelPath === realizationPath ||
-    editedRelPath.endsWith('/' + realizationPath) ||
-    realizationPath.endsWith('/' + editedRelPath)
+    `REALIZATION EDIT: \`${relPath}\` is anchored by: ${ids.join(', ')}. ` +
+    `Review them with memstead_entity to check the entities still describe the file.\n`
   );
 }

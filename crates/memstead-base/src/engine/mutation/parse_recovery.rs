@@ -290,6 +290,51 @@ mod tests {
         );
     }
 
+    /// Recover leg (criterion 5): `apply_parse_recovery` re-renders the
+    /// source entity but leaves its anchors sidecar bit-intact — the
+    /// re-render is an anchorless update, which never stages the sidecar.
+    #[test]
+    fn apply_parse_recovery_leaves_anchors_bit_intact() {
+        let tmp = TempDir::new().unwrap();
+        let mem_dir = tmp.path().to_path_buf();
+        let target = "---\ntype: spec\n---\n# Target\n\n## Identity\n\nTarget body.\n";
+        let source = "---\ntype: spec\n---\n# Source\n\n## Identity\n\nSource body.\n\n## Relationships\n\n- **MADE_UP_TYPE**: [[specs--target]]\n";
+        std::fs::write(mem_dir.join("target.md"), target).unwrap();
+        std::fs::write(mem_dir.join("source.md"), source).unwrap();
+
+        // Seed an anchors sidecar for the source entity directly on disk (the
+        // recovery path must not touch it).
+        std::fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
+        let sidecar_path = mem_dir.join(".memstead").join("anchors.json");
+        let sidecar = br#"{"version":1,"entities":{"specs--source":[{"artifact":"src/lib.rs","grain":"file","class":"anchored","hash_stability":"stable","hash":"h1"}]}}"#;
+        std::fs::write(&sidecar_path, sidecar).unwrap();
+        let before = std::fs::read(&sidecar_path).unwrap();
+
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let mut engine = Engine::from_mounts(vec![(
+            folder_mount("specs", mem_dir.clone()),
+            Box::new(writer) as Box<dyn MemBackend>,
+        )])
+        .unwrap();
+
+        let (actor, client) = cli_actor();
+        let report = engine
+            .apply_parse_recovery(actor, Some(&client), Some("recovery"))
+            .expect("recovery succeeds");
+        assert_eq!(report.entries.len(), 1);
+        assert_eq!(
+            report.entries[0].outcome,
+            ParseRecoveryEntry::OUTCOME_REMOVED
+        );
+
+        // The sidecar file is byte-identical, and the anchor still resolves.
+        let after = std::fs::read(&sidecar_path).unwrap();
+        assert_eq!(before, after, "recovery must leave anchors bit-intact");
+        let anchors = engine.entity_anchors(&crate::EntityId::new("specs", "source"));
+        assert_eq!(anchors.len(), 1);
+        assert_eq!(anchors[0].artifact, "src/lib.rs");
+    }
+
     /// Read-only-origin drops are reported as `skipped` with
     /// `reason: "readonly_mount"`. The engine cannot rewrite an
     /// archive, so the warning survives the call.

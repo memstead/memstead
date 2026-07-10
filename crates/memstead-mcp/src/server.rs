@@ -1947,17 +1947,21 @@ impl McpServer {
             // Provenance anchors (E3a). Additive, emitted only when the
             // entity has anchors so a pre-E3a reader is unaffected. Carries
             // the stored anchor records plus their class/grain composition
-            // (derived inputs; tree-grain fan-out on its own axis). The
-            // live per-anchor state (resolves / drifted / recheck /
-            // orphaned) requires observing the source artifacts and lands
-            // with E3b's verify pipeline; this read exposes the durable
-            // data and composition the resolution model keys on.
-            let anchors = engine.entity_anchors(&id);
-            if !anchors.is_empty() {
+            // (derived inputs; tree-grain fan-out on its own axis) and, for a
+            // path-medium mem, each anchor's live resolution `state`
+            // (resolves / recheck / orphaned — additive per-anchor field).
+            // Distinguishing `drifted` from `recheck` on a present hash-bearing
+            // anchor needs E3b's prepared-content hashing, so this pass never
+            // emits `drifted`; `state` is absent when the source is unobserved
+            // (non-path medium), never fabricated.
+            let resolved = engine.entity_anchors_resolved(&id);
+            if !resolved.is_empty() {
+                let anchors: Vec<memstead_base::anchor::Anchor> =
+                    resolved.iter().map(|r| r.anchor.clone()).collect();
                 let composition = memstead_base::anchor::compose_entity_anchors(&anchors);
                 obj.insert(
                     "anchors".into(),
-                    serde_json::to_value(&anchors).unwrap_or(serde_json::Value::Null),
+                    serde_json::to_value(&resolved).unwrap_or(serde_json::Value::Null),
                 );
                 obj.insert(
                     "anchor_composition".into(),

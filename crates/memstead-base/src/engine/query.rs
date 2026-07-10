@@ -300,6 +300,74 @@ impl Engine {
         }
     }
 
+    /// The stored anchors for `id`, each paired with its **live** resolution
+    /// state when the engine could observe the source artifact this pass.
+    ///
+    /// Additive over [`Self::entity_anchors`]: the durable data is unchanged;
+    /// `state` is the [`crate::anchor::resolve_anchor`] outcome against an
+    /// observation the engine produces here. It is produced **only** for a
+    /// `path`-namespace, single-medium mem (codebase / filesystem) whose
+    /// medium root resolves from the workspace — the engine observes
+    /// working-tree existence at the current HEAD:
+    ///
+    /// - artifact absent ⇒ [`AnchorState::Orphaned`](crate::anchor::AnchorState::Orphaned);
+    /// - artifact present, non-hash class (`authored` / `informed-by`) ⇒
+    ///   [`Resolves`](crate::anchor::AnchorState::Resolves);
+    /// - artifact present, hash-bearing class (`anchored` / `derived`) ⇒
+    ///   [`Recheck`](crate::anchor::AnchorState::Recheck).
+    ///
+    /// `state` is `None` (unobserved — never a fabricated state) when the mem
+    /// has no single path-medium, no workspace root, or the grain/namespace is
+    /// not a filesystem path. Distinguishing `drifted` from `recheck` on a
+    /// present hash-bearing anchor needs the **prepared-content** hash the
+    /// producer used — a canonical transform E3b's verify pipeline owns — so
+    /// this pass never fabricates `drifted`; it reports `recheck` and defers
+    /// the hash adjudication (and non-`path` mediums / commit-pinned reads)
+    /// to E3b.
+    pub fn entity_anchors_resolved(&self, id: &EntityId) -> Vec<ResolvedAnchor> {
+        let anchors = self.entity_anchors(id);
+        let root = self.single_path_medium_root(id.mem());
+        anchors
+            .into_iter()
+            .map(|anchor| {
+                let state = root
+                    .as_deref()
+                    .and_then(|r| observe_path_anchor(r, &anchor));
+                ResolvedAnchor { anchor, state }
+            })
+            .collect()
+    }
+
+    /// The filesystem root of `mem`'s single `path`-namespace medium
+    /// (codebase / filesystem), or `None` when the mem has zero / several
+    /// mediums, no workspace root, or its lone medium is not path-shaped
+    /// (`path+commit` / `entity` / `url` — those need commit-pinned or
+    /// non-filesystem observation, E3b). The root is
+    /// `workspace_root.join(pointer)` (or the workspace root when the pointer
+    /// is empty), matching how facet scopes interpret paths.
+    fn single_path_medium_root(&self, mem: &str) -> Option<PathBuf> {
+        let workspace_root = self.workspace_root.as_deref()?;
+        let mut mediums = self
+            .pipeline_configs()
+            .mediums
+            .iter()
+            .filter(|r| r.mem == mem);
+        let first = mediums.next()?;
+        if mediums.next().is_some() {
+            return None; // ambiguous — an anchor names no medium
+        }
+        let caps = crate::binding::medium_capabilities(first.config.medium_type);
+        if caps.anchor_namespace != "path" {
+            return None; // only plain working-tree path mediums are observable here
+        }
+        let pointer = first.config.pointer.trim();
+        Some(if pointer.is_empty() {
+            workspace_root.to_path_buf()
+        } else {
+            workspace_root.join(pointer)
+        })
+    }
+
     /// Reverse anchor lookup: every `(entity_id, anchor)` across all mems
     /// whose anchor references `artifact_path`. This is the query the
     /// rebuilt check-realization hook consumes — given the file an agent
@@ -1188,6 +1256,46 @@ fn anchor_base_path(artifact: &str) -> &str {
 /// Whether `anchor` references `path`. `tree`-grain anchors match `path`
 /// itself and anything beneath the tree; every other grain matches by
 /// exact base-path equality.
+/// A stored anchor paired with its live resolution state, when observable.
+/// See [`Engine::entity_anchors_resolved`] for how `state` is produced and
+/// when it is `None` (unobserved, never fabricated).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct ResolvedAnchor {
+    /// The durable anchor record (flattened on the wire so the resolved shape
+    /// is the stored anchor plus a `state` field).
+    #[serde(flatten)]
+    pub anchor: crate::anchor::Anchor,
+    /// The live resolution state, or `None` when the engine could not observe
+    /// the source artifact this pass (non-path medium, ambiguous / absent
+    /// medium, no workspace root, or a non-filesystem grain).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub state: Option<crate::anchor::AnchorState>,
+}
+
+/// Observe a single path-namespace anchor against `root` (its medium's
+/// filesystem root) and resolve its live state, or `None` when the anchor's
+/// grain does not reference a filesystem path. Existence-only: the prepared-
+/// content hash comparison that separates `drifted` from `recheck` is E3b's,
+/// so a present hash-bearing anchor observes `current_hash: None` and resolves
+/// `recheck` — never a fabricated `drifted`.
+fn observe_path_anchor(
+    root: &Path,
+    anchor: &crate::anchor::Anchor,
+) -> Option<crate::anchor::AnchorState> {
+    use crate::anchor::AnchorGrain;
+    match anchor.grain {
+        AnchorGrain::Span | AnchorGrain::File | AnchorGrain::Tree => {}
+        AnchorGrain::Url | AnchorGrain::Entity => return None,
+    }
+    let base = anchor_base_path(&anchor.artifact);
+    let observation = if root.join(base).exists() {
+        crate::anchor::ArtifactObservation::Present { current_hash: None }
+    } else {
+        crate::anchor::ArtifactObservation::Absent
+    };
+    Some(crate::anchor::resolve_anchor(anchor, &observation))
+}
+
 fn anchor_references_path(anchor: &crate::anchor::Anchor, path: &str) -> bool {
     let base = anchor_base_path(&anchor.artifact);
     if base == path {

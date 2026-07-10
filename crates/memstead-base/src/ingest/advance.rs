@@ -26,14 +26,25 @@
 //! the engine never presented refuses the **whole call atomically** — validated
 //! before any disk write, so a refused call leaves the store byte-identical.
 //!
-//! ## E2 scope — every disposition is explicit
+//! ## Auto-`worked` from anchors (E3a — closes plan 03 D7's deferral)
 //!
-//! Auto-derived `worked` (from anchored writes) is an **E3a** capability, not
-//! E2: a destination-mem commit diff yields entity ids, not source-artifact
-//! ids, so there is nothing to derive from in this window. Until anchors land,
-//! agents supply a disposition for **every** artifact explicitly — the brief and
-//! this module's help say so. AC9's non-stalling property rests on the persisted
-//! dispositions + slice subtraction built here, not on auto-`worked`.
+//! With anchors live, a mutation that carried `anchors[]` during a run records,
+//! in the destination mem's anchors sidecar, which source artifacts an entity
+//! now describes. [`advance_baseline`] reads that sidecar and marks any
+//! **frozen-slice** artifact referenced by such an anchor `worked`
+//! automatically, so the advance gate requires an explicit disposition only for
+//! the residue. Two invariants keep this honest:
+//!
+//! - the derivation reads **anchors, never a commit diff** — the inference-from-
+//!   diffs mechanism D7 rejected stays rejected; a write without `anchors[]`
+//!   marks nothing;
+//! - only the intersection with the frozen slice is ever marked — an anchored
+//!   write referencing an artifact outside the presented slice fabricates no
+//!   slice entry.
+//!
+//! AC9's non-stalling property still rests on the persisted dispositions + slice
+//! subtraction; auto-`worked` only removes the explicit-disposition burden for
+//! artifacts anchored during the same pass.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -335,11 +346,32 @@ pub fn advance_baseline(
         });
     }
 
-    // Accumulate the new dispositions.
+    // Accumulate the new (agent-supplied) dispositions.
     for (artifact, disposition) in dispositions {
         state
             .dispositions
             .insert(artifact.clone(), disposition.clone());
+    }
+
+    // Auto-`worked` (E3a): mark every frozen-slice artifact that an anchor in
+    // the destination mem now references. Reads the anchors sidecar, never a
+    // commit diff (D7's rejected mechanism stays rejected); scoped to the
+    // frozen slice (`printed`) so an anchored write outside the slice
+    // fabricates no entry; skips artifacts already carrying an explicit
+    // disposition (the agent's judgement wins).
+    let auto_worked: Vec<String> = printed
+        .iter()
+        .filter(|art| !state.dispositions.contains_key(art.as_str()))
+        .filter(|art| {
+            engine
+                .anchors_referencing_artifact(art)
+                .iter()
+                .any(|(eid, _)| eid.mem() == resolved.destination_mem.as_str())
+        })
+        .cloned()
+        .collect();
+    for art in auto_worked {
+        state.dispositions.insert(art, "worked".to_string());
     }
 
     // Re-present the remainder (disposed absent).
@@ -677,5 +709,113 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+    }
+
+    /// AC9a — an anchored write auto-marks its referenced frozen-slice
+    /// artifacts `worked`, so `advance` needs an explicit disposition only for
+    /// the residue, held across a HEAD move. Refusals: an artifact with no
+    /// anchor is never auto-worked, and an anchor referencing an artifact
+    /// OUTSIDE the presented slice fabricates no slice entry.
+    #[test]
+    fn advance_auto_worked_from_anchors_subtracts_slice_and_never_fabricates() {
+        use crate::vcs::Actor;
+        use indexmap::IndexMap;
+
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+
+        // Baseline: a commit carrying no `.rs` files. `#synced` pins it, so the
+        // moved slice below is purely the added `.rs` sources.
+        git(root, &["init", "-q"]);
+        std::fs::write(root.join(".keep"), "x").unwrap();
+        git(root, &["add", ".keep"]);
+        git(root, &["commit", "-qm", "base"]);
+        let baseline = head_sha(root);
+
+        let resolved = resolved_engine_graph();
+        {
+            let mut engine = engine_at(root);
+            engine
+                .set_mem_sync_state("engine", synced_key(), &baseline, None)
+                .unwrap();
+        }
+
+        // head1: add a.rs + b.rs → slice = added [a.rs, b.rs].
+        std::fs::write(root.join("a.rs"), "one").unwrap();
+        std::fs::write(root.join("b.rs"), "bee").unwrap();
+        git(root, &["add", "a.rs", "b.rs"]);
+        git(root, &["commit", "-qm", "head1"]);
+
+        // An anchored write into the destination mem `engine`: entity
+        // `covers-a` file-anchors `a.rs` (inside the slice) AND `zzz.rs`
+        // (outside it — must fabricate nothing).
+        let make_anchor = |artifact: &str| crate::anchor::AnchorInput {
+            artifact: Some(artifact.to_string()),
+            grain: Some("file".to_string()),
+            class: Some("anchored".to_string()),
+            hash: Some("h".to_string()),
+            hash_stability: Some("stable".to_string()),
+            ..Default::default()
+        };
+        let mut sections = IndexMap::new();
+        sections.insert("identity".to_string(), "Covers a.".to_string());
+        sections.insert("purpose".to_string(), "Track a.rs.".to_string());
+        {
+            let mut engine = engine_at(root);
+            engine
+                .create_entity(
+                    crate::CreateEntityArgs {
+                        mem: "engine".to_string(),
+                        title: "Covers A".to_string(),
+                        entity_type: "spec".to_string(),
+                        sections,
+                        metadata: IndexMap::new(),
+                        relations: Vec::new(),
+                        anchors: vec![make_anchor("a.rs"), make_anchor("zzz.rs")],
+                        dry_run: false,
+                    },
+                    Actor::Agent,
+                    None,
+                    Some("anchored write"),
+                )
+                .unwrap();
+        }
+
+        // (1) Advance with NO explicit dispositions → a.rs auto-worked from the
+        // anchor; b.rs (no anchor) stays pending; zzz.rs (outside the slice)
+        // fabricates nothing.
+        {
+            let mut engine = engine_at(root);
+            let out = advance_baseline(&mut engine, root, &resolved, &BTreeMap::new()).unwrap();
+            assert!(!out.completed, "b.rs still pending");
+            assert_eq!(
+                out.remainder,
+                slice(&["b.rs"], &[], &[]),
+                "a.rs auto-worked from its anchor; zzz.rs never became a slice member"
+            );
+            assert_eq!(out.disposed, 1, "only a.rs auto-worked");
+            assert_eq!(out.pending, 1);
+        }
+
+        // (2) HEAD moves (add c.rs). Re-present with no dispositions → old
+        // remainder [b.rs] + new delta [c.rs]; a.rs stays absent (its
+        // auto-`worked` persisted); c.rs is unanchored so it is NOT auto-worked.
+        std::fs::write(root.join("c.rs"), "cee").unwrap();
+        git(root, &["add", "-A"]);
+        git(root, &["commit", "-qm", "head2"]);
+        {
+            let mut engine = engine_at(root);
+            let out = advance_baseline(&mut engine, root, &resolved, &BTreeMap::new()).unwrap();
+            assert_eq!(
+                out.remainder,
+                slice(&["b.rs", "c.rs"], &[], &[]),
+                "auto-worked a.rs absent; unanchored b.rs + new c.rs pending"
+            );
+            assert_eq!(
+                out.disposed, 1,
+                "still only a.rs auto-worked; c.rs unanchored"
+            );
+            assert!(!out.completed);
+        }
     }
 }

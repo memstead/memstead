@@ -43,8 +43,10 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     }
 
     // Collect the anchor rows off whichever engine backs the workspace.
-    // Both variants expose the same read surface.
-    let rows: Vec<(String, memstead_base::anchor::Anchor)> = match ctx.cli_engine()? {
+    // Both variants expose the same read surface. `state` carries the live
+    // resolution (present only for a by-entity lookup on a path-medium mem;
+    // `None` for the reverse `--artifact` lookup, which spans mems).
+    let rows: Vec<AnchorRow> = match ctx.cli_engine()? {
         #[cfg(feature = "mem-repo")]
         CliEngine::MemRepo(engine) => collect(&engine, &args),
         CliEngine::Filesystem(engine) => collect(&engine, &args),
@@ -53,16 +55,19 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     if ctx.json {
         let anchors_json: Vec<serde_json::Value> = rows
             .iter()
-            .map(|(id, a)| {
+            .map(|(id, a, state)| {
                 let mut v = serde_json::to_value(a).unwrap_or(serde_json::Value::Null);
                 if let Some(obj) = v.as_object_mut() {
                     obj.insert("entity_id".into(), serde_json::json!(id));
+                    if let Some(s) = state {
+                        obj.insert("state".into(), serde_json::json!(s.as_wire()));
+                    }
                 }
                 v
             })
             .collect();
         let anchors_only: Vec<memstead_base::anchor::Anchor> =
-            rows.iter().map(|(_, a)| a.clone()).collect();
+            rows.iter().map(|(_, a, _)| a.clone()).collect();
         let composition = memstead_base::anchor::compose_entity_anchors(&anchors_only);
         print_json(&serde_json::json!({
             "count": rows.len(),
@@ -79,10 +84,13 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         print_markdown(&format!("# Anchors\n\nNo anchors for {subject}."));
     } else {
         let mut body = format!("# Anchors ({})\n", rows.len());
-        for (id, a) in &rows {
+        for (id, a, state) in &rows {
             let hash = a.hash.as_deref().unwrap_or("-");
+            let state_str = state
+                .map(|s| format!(", state: {}", s.as_wire()))
+                .unwrap_or_default();
             body.push_str(&format!(
-                "\n- `{id}` — {} {} `{}` (hash: {hash})",
+                "\n- `{id}` — {} {} `{}` (hash: {hash}{state_str})",
                 a.class.as_wire(),
                 a.grain.as_wire(),
                 a.artifact,
@@ -93,23 +101,29 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Gather anchor rows from an engine per the requested mode.
-fn collect(
-    engine: &memstead_base::Engine,
-    args: &Args,
-) -> Vec<(String, memstead_base::anchor::Anchor)> {
+/// One anchor row: `(entity_id, anchor, live_state)`.
+type AnchorRow = (
+    String,
+    memstead_base::anchor::Anchor,
+    Option<memstead_base::anchor::AnchorState>,
+);
+
+/// Gather anchor rows from an engine per the requested mode. The by-entity
+/// lookup carries the live resolution state; the reverse `--artifact` lookup
+/// spans mems and carries none.
+fn collect(engine: &memstead_base::Engine, args: &Args) -> Vec<AnchorRow> {
     if let Some(path) = args.artifact.as_deref() {
         engine
             .anchors_referencing_artifact(path)
             .into_iter()
-            .map(|(id, a)| (id.to_string(), a))
+            .map(|(id, a)| (id.to_string(), a, None))
             .collect()
     } else if let Some(id) = args.id.as_deref() {
         let eid = EntityId::canonical(id);
         engine
-            .entity_anchors(&eid)
+            .entity_anchors_resolved(&eid)
             .into_iter()
-            .map(|a| (eid.to_string(), a))
+            .map(|r| (eid.to_string(), r.anchor, r.state))
             .collect()
     } else {
         Vec::new()

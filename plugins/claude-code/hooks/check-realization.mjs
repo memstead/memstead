@@ -1,115 +1,145 @@
 #!/usr/bin/env node
-// PostToolUse hook: checks if an edited file is referenced by any entity.
-// Fires on Write/Edit tools. Outputs a reminder to review relevant entities.
+// PostToolUse hook (Write/Edit): when the edited file is anchored by an
+// entity, surface a cheap notice naming those entities so the agent can
+// re-check that the entity still describes the file.
 //
-// The direct-edit warning always runs (guard behavior).
-// The realization scan is conditional on schema drift support — if the mem's
-// schema has no drift section, realization scanning is skipped silently.
+// How it works (E3a): the engine owns provenance anchors. This hook shells
+// the CLI — `memstead anchors --artifact <edited-path> --json` — and, when a
+// span/file-grain anchor references that path, emits a one-line notice naming
+// the referencing entity ids. Resolution stays engine-side; the hook is a thin
+// subprocess call. It never mutates anything.
 //
-// Schema is loaded from the mem's .memstead/config.json "schema" field.
+// ACCEPTED FAIL-OPEN POSTURE (deliberate): this hook must never block or error
+// a Write/Edit. Every failure mode — the `memstead` binary is absent from PATH
+// (the standing case for external plugin users who installed the plugin but
+// never ran setup's binary install, so the hook is permanently inert by
+// design), the engine is unavailable, the query times out, or the reply isn't
+// parseable JSON — results in silent pass-through (no output, exit 0). A hook
+// that fires on *every* edit cannot afford to be noisy or slow, so it also
+// hard-caps the subprocess with a timeout and never loads any code from a
+// workspace-controlled path (no dynamic module import).
+//
+// A backup direct-entity-edit warning (the PreToolUse guard is the primary
+// gate) is preserved for folder-backed mems.
 
-import { readFileSync, existsSync, readdirSync } from 'node:fs';
-import { basename, resolve, join, relative } from 'node:path';
-import { extractRealizationPaths, fileToId, pathMatches } from './check-realization-utils.mjs';
+import { spawn } from 'node:child_process';
+import { basename, resolve, relative } from 'node:path';
 import { isEntityFilename } from './guard-entity-edit-utils.mjs';
-import { resolveMemDirsFromCwd } from './workspace-resolve-utils.mjs';
+import { resolveMemDirsFromCwd, findWorkspaceRoot } from './workspace-resolve-utils.mjs';
+import { pickReferencedEntityIds, formatRealizationNotice } from './check-realization-utils.mjs';
+
+// Hard subprocess cap. Warm invocations complete in well under this; the cap
+// only bounds a pathological hang so the edit is never visibly delayed.
+const ANCHOR_QUERY_TIMEOUT_MS = 2000;
 
 const input = JSON.parse(await readStdin());
 
-// Extract the file path from the tool input
 const filePath = input.tool_input?.file_path;
 if (!filePath) process.exit(0);
 
-// Resolve folder-backed mem dirs the engine way (walk up for
-// .memstead/workspace.toml, read the mount list). Empty on a git-branch
-// workspace — entities are branch blobs, nothing to scan on disk.
-const absFilePath = resolve(filePath);
-for (const memDir of resolveMemDirsFromCwd()) {
-  if (!existsSync(memDir)) continue;
+const cwd = input.cwd || process.cwd();
+const absFilePath = resolve(cwd, filePath);
 
-  // Normalize edited path to relative (from project root = parent of mem dir)
+// --- Backup direct-entity-edit guard (folder-backed mems only) ---
+// The PreToolUse guard-entity-edit hook blocks these first; this is a
+// belt-and-suspenders warning. A direct edit of an entity markdown is the one
+// case we short-circuit on.
+for (const memDir of resolveMemDirsFromCwd(cwd)) {
   const projectRoot = resolve(memDir, '..');
-  const relPath = relative(projectRoot, absFilePath);
+  const relToMem = relative(projectRoot, absFilePath);
   const dirName = memDir.split('/').pop() || 'specs';
-  const insideMem = relPath.startsWith(dirName + '/') || relPath.startsWith(dirName + '\\');
-
-  // --- Guard behavior (always active) ---
-  // Warn if an entity markdown was edited directly (backup check — the
-  // PreToolUse guard should block this first).
-  if (insideMem && isEntityFilename(basename(relPath))) {
+  const insideMem =
+    relToMem.startsWith(dirName + '/') || relToMem.startsWith(dirName + '\\');
+  if (insideMem && isEntityFilename(basename(relToMem))) {
     process.stdout.write(
-      `WARNING: Entity file \`${relPath}\` was edited directly. Always use Memstead MCP tools (memstead_create, memstead_update) to mutate entities.\n`,
+      `WARNING: Entity file \`${relToMem}\` was edited directly. Always use Memstead MCP tools (memstead_create, memstead_update) to mutate entities.\n`,
     );
     process.exit(0);
   }
-  // A non-entity file inside the mem dir is this mem's concern but needs
-  // no realization scan; stop here.
+  // A non-entity file inside the mem dir is this mem's own concern; the
+  // anchor realization query below targets source artifacts, not mem files.
   if (insideMem) process.exit(0);
-
-  // --- Realization scan (conditional on this mem's schema drift support) ---
-  const SCHEMA = await loadMemSchema(memDir);
-  if (!SCHEMA?.drift) continue;
-
-  const matches = [];
-  for (const file of findMarkdownFiles(memDir)) {
-    const paths = extractRealizationPaths(readFileSync(file, 'utf-8'), SCHEMA);
-    for (const p of paths) {
-      if (pathMatches(relPath, p)) {
-        const entityId = fileToId(relative(memDir, file));
-        if (entityId) matches.push(entityId);
-        break;
-      }
-    }
-  }
-
-  if (matches.length > 0) {
-    process.stdout.write(
-      `REALIZATION EDIT: You changed \`${relPath}\`. These entities reference it: ${matches.join(', ')}. Consider reviewing them with memstead_entity or /audit.\n`,
-    );
-    process.exit(0);
-  }
 }
+
+// --- Anchor realization query ---
+// Resolve the workspace root the engine way (walk up for the marker), then ask
+// the engine which entities anchored the edited path. Anchors store
+// workspace-relative artifact paths, so we query with the same form.
+const workspaceRoot = findWorkspaceRoot(cwd);
+if (!workspaceRoot) process.exit(0);
+
+const relPath = relative(workspaceRoot, absFilePath);
+
+let reply;
+try {
+  reply = await queryAnchors(relPath, workspaceRoot);
+} catch {
+  // Fail-open: no binary / spawn error / timeout / nonzero / non-JSON.
+  process.exit(0);
+}
+
+const ids = pickReferencedEntityIds(reply);
+if (ids.length > 0) {
+  process.stdout.write(formatRealizationNotice(relPath, ids));
+}
+process.exit(0);
 
 // --- Helpers ---
 
-// The realization scan needs a schema carrying `drift.realizationPatterns`.
-// This USED to obtain it by `import()`-ing the string in a workspace's
-// `.memstead/config.json` "schema" field — but that field is an engine
-// schema REF (e.g. `"default@1.0.0"`), never a loadable JS module, so the
-// scan was dead on every real workspace. Worse, `import()` of a
-// workspace-controlled string was an arbitrary-module-load surface: a cloned
-// hostile repo whose config named `"./evil.mjs"` (or a bare specifier
-// resolvable from its node_modules) would execute code on the first
-// Write/Edit that fired this PostToolUse hook. The engine owns schemas; a
-// plugin hook must never load code from a workspace-controlled path. Until a
-// trusted, engine-sourced drift-pattern channel exists, the scan yields no
-// schema and stays inert — the always-on direct-edit guard above is unaffected.
-async function loadMemSchema(_memDir) {
-  return null;
-}
-
-function findMarkdownFiles(dir) {
-  const results = [];
-  try {
-    const entries = readdirSync(dir, { withFileTypes: true });
-    for (const e of entries) {
-      if (e.name.startsWith('.')) continue;
-      const full = join(dir, e.name);
-      if (e.isDirectory()) {
-        results.push(...findMarkdownFiles(full));
-      } else if (e.name.endsWith('.md')) {
-        results.push(full);
+// Shell `memstead anchors --artifact <relPath> --json` in the workspace root
+// with a hard timeout. Resolves the parsed JSON reply, or rejects on any
+// failure (the caller treats every rejection as silent pass-through). The
+// binary is looked up on PATH by bare name — absent ⇒ ENOENT ⇒ reject.
+function queryAnchors(relPath, cwdRoot) {
+  return new Promise((resolvePromise, rejectPromise) => {
+    const child = spawn('memstead', ['anchors', '--artifact', relPath, '--json'], {
+      cwd: cwdRoot,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    let out = '';
+    let settled = false;
+    const finish = (fn, arg) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      fn(arg);
+    };
+    const timer = setTimeout(() => {
+      try {
+        child.kill('SIGKILL');
+      } catch {
+        // ignore
       }
-    }
-  } catch { /* silent */ }
-  return results;
+      finish(rejectPromise, new Error('memstead anchors timed out'));
+    }, ANCHOR_QUERY_TIMEOUT_MS);
+
+    child.on('error', (err) => finish(rejectPromise, err));
+    child.stdout.setEncoding('utf-8');
+    child.stdout.on('data', (chunk) => {
+      out += chunk;
+    });
+    child.on('close', (code) => {
+      if (code !== 0) {
+        finish(rejectPromise, new Error(`memstead anchors exited ${code}`));
+        return;
+      }
+      try {
+        finish(resolvePromise, JSON.parse(out));
+      } catch (err) {
+        finish(rejectPromise, err);
+      }
+    });
+  });
 }
 
 function readStdin() {
-  return new Promise((resolve) => {
+  return new Promise((resolvePromise) => {
     let data = '';
     process.stdin.setEncoding('utf-8');
-    process.stdin.on('data', chunk => { data += chunk; });
-    process.stdin.on('end', () => resolve(data));
+    process.stdin.on('data', (chunk) => {
+      data += chunk;
+    });
+    process.stdin.on('end', () => resolvePromise(data || '{}'));
+    process.stdin.on('error', () => resolvePromise('{}'));
   });
 }

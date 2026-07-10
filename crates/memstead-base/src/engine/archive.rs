@@ -189,6 +189,9 @@ impl Engine {
                     .ok()
                     .and_then(|records| crate::ops::export::build_archive_provenance(&records))
                     .and_then(|prov| prov.to_archive_bytes().ok());
+                // Source the anchors sidecar from the branch tip so the
+                // git-branch `.mem` carries anchors like the other backends.
+                let anchors_bytes = mount.backend.read_anchors_sidecar().ok().flatten();
                 (hook.export_to_bytes)(
                     gitdir,
                     branch,
@@ -197,6 +200,7 @@ impl Engine {
                     workspace_root,
                     workspace_schemas_dir,
                     provenance_bytes.as_deref(),
+                    anchors_bytes.as_deref(),
                 )
                 .map(|out| out.bytes)
                 .map_err(EngineError::Backend)
@@ -223,6 +227,12 @@ impl Engine {
                     .read_provenance(None)
                     .ok()
                     .and_then(|records| crate::ops::export::build_archive_provenance(&records));
+                // Source the anchors sidecar from the in-memory backend so a
+                // sketch-session mem exports a `.mem` carrying its anchors —
+                // the serve session-export → re-import round-trip.
+                let anchors_bytes = backend
+                    .read_anchors_sidecar()
+                    .map_err(EngineError::Backend)?;
                 crate::ops::export::export_entries_to_bytes(
                     config,
                     workspace_root,
@@ -230,6 +240,7 @@ impl Engine {
                     mem_name,
                     md_entries,
                     provenance.as_ref(),
+                    anchors_bytes.as_deref(),
                 )
                 .map(|out| out.bytes)
                 .map_err(|e| {
@@ -413,10 +424,10 @@ mod tests {
     }
 
     /// Inject an extra member into a zip archive, returning fresh bytes.
-    /// Used to add an anchors sidecar to an exported `.mem` for the
-    /// archive-survival test (the export leg does not yet embed anchors —
-    /// deferred — so the test synthesises the member the registry path
-    /// must round-trip).
+    /// Export now embeds anchors natively (see
+    /// [`export_embeds_anchors_that_install_reads_back`]); this helper still
+    /// synthesises the member in isolation so the canonical-repack survival
+    /// test exercises the registry path independent of the export producer.
     fn inject_zip_member(archive: &[u8], name: &str, content: &[u8]) -> Vec<u8> {
         use std::io::{Read, Write};
         let mut src = zip::ZipArchive::new(std::io::Cursor::new(archive)).unwrap();
@@ -474,6 +485,139 @@ mod tests {
         let ids = installed.entity_anchors(&crate::EntityId::new("specs", "alpha"));
         assert_eq!(ids.len(), 1);
         assert_eq!(ids[0].artifact, "src/lib.rs");
+    }
+
+    /// End-to-end export leg (criterion 5): an entity created with an
+    /// `anchors[]` payload exports the anchors sidecar *natively* inside the
+    /// `.mem` archive (no injection), the canonical re-pack preserves it, and
+    /// a fresh engine that installs the bytes reads the anchor back — matching
+    /// the source. A mem with no anchors embeds no member.
+    #[test]
+    fn export_embeds_anchors_that_install_reads_back() {
+        let tmp = TempDir::new().unwrap();
+        let mem_dir = tmp.path().join("specs");
+        std::fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
+        std::fs::write(
+            mem_dir.join(".memstead").join("config.json"),
+            r#"{"format":1,"schema":"default@1.0.0","version":"1.0.0"}"#,
+        )
+        .unwrap();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let mut engine = Engine::from_mounts(vec![(
+            folder_mount("specs", mem_dir.clone()),
+            Box::new(writer) as Box<dyn MemBackend>,
+        )])
+        .unwrap();
+        let (actor, client) = cli_actor();
+
+        // Alpha carries a file anchor; Beta carries none.
+        let mut alpha = empty_create_args("specs", "Alpha");
+        alpha.anchors = vec![crate::anchor::AnchorInput {
+            artifact: Some("src/lib.rs".to_string()),
+            grain: Some("file".to_string()),
+            class: Some("anchored".to_string()),
+            hash: Some("h1".to_string()),
+            hash_stability: Some("stable".to_string()),
+            ..Default::default()
+        }];
+        engine
+            .create_entity(alpha, actor, Some(&client), None)
+            .unwrap();
+        engine
+            .create_entity(
+                empty_create_args("specs", "Beta"),
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap();
+
+        // Export embeds the anchors sidecar natively (producer half of the
+        // recognised-member contract).
+        let bytes = engine.export_mem_to_bytes("specs").unwrap();
+        let entries = extract_entries(&bytes, &ValidatorLimits::DEFAULT).unwrap();
+        assert!(
+            entries.anchors_bytes.is_some(),
+            "export must embed the anchors sidecar when the mem has anchors"
+        );
+
+        // Canonical re-pack (publish store path) preserves it.
+        let validated =
+            crate::validator::validate_and_normalize_archive(&bytes).expect("archive re-validates");
+        let canonical =
+            extract_entries(&validated.canonical_bytes, &ValidatorLimits::DEFAULT).unwrap();
+        assert!(
+            canonical.anchors_bytes.is_some(),
+            "normalize must preserve the exported anchors member"
+        );
+
+        // Install into a fresh engine and read the anchor back.
+        let installed = Engine::from_archive_bytes(validated.canonical_bytes).unwrap();
+        let alpha_anchors = installed.entity_anchors(&crate::EntityId::new("specs", "alpha"));
+        assert_eq!(alpha_anchors.len(), 1);
+        assert_eq!(alpha_anchors[0].artifact, "src/lib.rs");
+        assert_eq!(alpha_anchors[0].hash.as_deref(), Some("h1"));
+        // Beta had no anchors — none fabricated.
+        assert!(
+            installed
+                .entity_anchors(&crate::EntityId::new("specs", "beta"))
+                .is_empty(),
+            "an entity with no anchors exposes none after install"
+        );
+    }
+
+    /// Serve sketch-session leg (criterion 5): an anchored write into an
+    /// in-memory mem round-trips through session export → re-import. The
+    /// in-memory backend is exactly what serve mounts, so this proves the
+    /// serve session-export path carries anchors without a serve dependency.
+    #[test]
+    fn in_memory_mem_export_round_trips_anchors() {
+        use crate::storage::InMemoryBackend;
+        // A session-style in-memory mem is self-describing: a versioned config
+        // is written to the backend before boot so export can project it.
+        let backend = InMemoryBackend::new();
+        backend
+            .write_mem_config(br#"{"version":"0.1.0","schema":"default@1.0.0"}"#)
+            .unwrap();
+        let mount = Mount {
+            mem: "sketch".to_string(),
+            schema: Some("default@1.0.0".parse().unwrap()),
+            storage: MountStorage::InMemory,
+            capability: MountCapability::Write,
+            lifecycle: MountLifecycle::Eager,
+            cross_linkable: false,
+            migration_target: None,
+        };
+        let mut engine =
+            Engine::from_mounts(vec![(mount, Box::new(backend) as Box<dyn MemBackend>)]).unwrap();
+        let (actor, client) = cli_actor();
+
+        let mut args = empty_create_args("sketch", "Idea");
+        args.anchors = vec![crate::anchor::AnchorInput {
+            artifact: Some("notes/idea.md".to_string()),
+            grain: Some("file".to_string()),
+            class: Some("informed-by".to_string()),
+            ..Default::default()
+        }];
+        engine
+            .create_entity(args, actor, Some(&client), None)
+            .unwrap();
+
+        let bytes = engine.export_mem_to_bytes("sketch").unwrap();
+        let entries = extract_entries(&bytes, &ValidatorLimits::DEFAULT).unwrap();
+        assert!(
+            entries.anchors_bytes.is_some(),
+            "in-memory session export must carry the anchors sidecar"
+        );
+
+        let reimported = Engine::from_archive_bytes(bytes).unwrap();
+        let anchors = reimported.entity_anchors(&crate::EntityId::new("sketch", "idea"));
+        assert_eq!(anchors.len(), 1);
+        assert_eq!(anchors[0].artifact, "notes/idea.md");
+        assert_eq!(
+            anchors[0].class,
+            crate::anchor::AnchorProvenanceClass::InformedBy
+        );
     }
 
     /// Size discipline: provenance scales with entity count (one current

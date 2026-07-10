@@ -782,6 +782,9 @@ impl Engine {
                     .ok()
                     .and_then(|records| crate::ops::export::build_archive_provenance(&records))
                     .and_then(|prov| prov.to_archive_bytes().ok());
+                // Source the anchors sidecar from the branch tip — symmetric
+                // with the bytes-export path so the disk `.mem` carries anchors.
+                let anchors_bytes = mount.backend.read_anchors_sidecar().ok().flatten();
                 (hook.export)(
                     gitdir,
                     branch,
@@ -791,6 +794,7 @@ impl Engine {
                     workspace_root,
                     workspace_schemas_dir,
                     provenance_bytes.as_deref(),
+                    anchors_bytes.as_deref(),
                 )
                 .map_err(EngineError::Backend)
             }
