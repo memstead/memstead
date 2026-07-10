@@ -249,8 +249,10 @@ pub enum Command {
     /// Binding (projection-promotion) tooling. `memstead projection init`
     /// scaffolds a fresh v1 binding non-interactively; `memstead projection
     /// migrate` promotes gen-2 four-primitive configs (per-mem projection +
-    /// flat ingest) into v1 bindings — one versioned record per source→mem
-    /// obligation, with an `operations { build, sync, verify }` block.
+    /// flat ingest) into v1 bindings; `memstead projection enable
+    /// <build|sync|verify> <binding>` adds a missing operation block — one
+    /// versioned record per source→mem obligation, with an
+    /// `operations { build, sync, verify }` block.
     Projection(commands::projection::Args),
 
     /// Engine-side ingest orchestration. `memstead ingest brief <name>`

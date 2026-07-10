@@ -23,6 +23,7 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::binding::{BindingV1, ResolvedBinding};
 use crate::pipeline::{Facet, Ingest, IngestMode, IngestTrigger, Medium, MediumType, PatternEntry};
 use crate::pipeline_store::PipelineConfigs;
 
@@ -302,6 +303,86 @@ pub fn resolve_ingest(
         destination_mem: projection.destination_mem.clone(),
         rules: projection.rules.clone(),
         post_actions: ingest.post_actions.clone(),
+    })
+}
+
+/// Resolve a v1 [`BindingV1`]'s **primary** sources (facet + medium) against
+/// the loaded [`PipelineConfigs`], producing a [`ResolvedBinding`] ready for
+/// [`crate::binding::hash_binding`] / [`crate::binding::validate_binding`].
+///
+/// The binding replaces the gen-2 projection, so — unlike [`resolve_ingest`] —
+/// there is no projection record to look up: the binding *is* the declaration.
+/// `binding_id` is the canonical `<mem>/<stem>` (D3); its `<mem>` half is the
+/// tier the facets/mediums live under (the same mem `resolve_ingest` joins in).
+/// Reference mems are not resolved here (only primary facets carry capability
+/// constraints), matching [`crate::binding_migrate::resolve_migrated_binding`].
+///
+/// Every lookup failure is a located [`ResolveError`] (reusing the ingest
+/// resolver's variants); a malformed `binding_id` is
+/// [`ResolveError::MalformedProjectionRef`]. Pure — no I/O.
+pub fn resolve_binding(
+    configs: &PipelineConfigs,
+    binding_id: &str,
+    binding: &BindingV1,
+) -> Result<ResolvedBinding, ResolveError> {
+    let (mem, _name) = binding_id
+        .split_once('/')
+        .filter(|(m, n)| !m.is_empty() && !n.is_empty())
+        .ok_or_else(|| ResolveError::MalformedProjectionRef {
+            ingest: binding_id.to_string(),
+            projection: binding_id.to_string(),
+        })?;
+
+    let mut primary_sources = Vec::with_capacity(binding.source_facets.len());
+    for facet_name in &binding.source_facets {
+        let facet: &Facet = configs
+            .facets
+            .iter()
+            .find(|r| r.mem == mem && r.name == *facet_name)
+            .map(|r| &r.config)
+            .ok_or_else(|| ResolveError::FacetNotFound {
+                projection_ref: binding_id.to_string(),
+                facet: facet_name.clone(),
+                mem: mem.to_string(),
+                available: configs
+                    .facets
+                    .iter()
+                    .filter(|r| r.mem == mem)
+                    .map(|r| r.name.clone())
+                    .collect(),
+            })?;
+
+        let medium: &Medium = configs
+            .mediums
+            .iter()
+            .find(|r| r.mem == mem && r.name == facet.medium)
+            .map(|r| &r.config)
+            .ok_or_else(|| ResolveError::MediumNotFound {
+                facet: facet_name.clone(),
+                medium: facet.medium.clone(),
+                mem: mem.to_string(),
+                available: configs
+                    .mediums
+                    .iter()
+                    .filter(|r| r.mem == mem)
+                    .map(|r| r.name.clone())
+                    .collect(),
+            })?;
+
+        primary_sources.push(ResolvedPrimarySource {
+            facet_ref: facet_name.clone(),
+            medium: facet.medium.clone(),
+            medium_type: medium.medium_type,
+            medium_pointer: medium.pointer.clone(),
+            declared_change_detection: medium.change_detection.clone(),
+            scope: facet.scope.clone(),
+            preparation: facet.preparation.clone(),
+        });
+    }
+
+    Ok(ResolvedBinding {
+        binding: binding.clone(),
+        primary_sources,
     })
 }
 
@@ -614,6 +695,79 @@ mod tests {
             err,
             ResolveError::MediumNotFound { ref medium, .. } if medium == "missing-medium"
         ));
+    }
+
+    fn v1_binding(dest: &str, facets: &[&str]) -> BindingV1 {
+        use crate::binding::{
+            BINDING_VERSION, BuildMode, BuildOperation, CoverageSemantics, Operations,
+        };
+        BindingV1 {
+            version: BINDING_VERSION,
+            intent: Some("prose".to_string()),
+            source_facets: facets.iter().map(|s| s.to_string()).collect(),
+            reference_mems: vec![],
+            destination_mem: dest.to_string(),
+            deny_paths: vec![],
+            coverage_semantics: CoverageSemantics::Exhaustive,
+            rules: None,
+            operations: Operations {
+                build: BuildOperation {
+                    mode: BuildMode::Discovery,
+                    trigger: IngestTrigger::Loop,
+                    batch_size: 20,
+                    post_actions: None,
+                },
+                sync: None,
+                verify: None,
+            },
+        }
+    }
+
+    /// `resolve_binding` joins each of the binding's source facets to the
+    /// medium it engages, in the binding-id's `<mem>` tier — no projection
+    /// record needed (the binding is the declaration).
+    #[test]
+    fn resolves_a_v1_binding() {
+        let configs = PipelineConfigs {
+            mediums: vec![medium("engine", "src", MediumType::Codebase, "../public")],
+            facets: vec![facet(
+                "engine",
+                "source-tree",
+                "src",
+                vec![allow("../public/**/*.rs")],
+            )],
+            ..Default::default()
+        };
+        let binding = v1_binding("engine", &["source-tree"]);
+        let resolved = resolve_binding(&configs, "engine/graph", &binding).unwrap();
+        assert_eq!(resolved.primary_sources.len(), 1);
+        let p = &resolved.primary_sources[0];
+        assert_eq!(p.facet_ref, "source-tree");
+        assert_eq!(p.medium, "src");
+        assert_eq!(p.medium_type, MediumType::Codebase);
+        assert_eq!(p.medium_pointer, "../public");
+        assert_eq!(p.scope, vec![allow("../public/**/*.rs")]);
+    }
+
+    /// A binding whose source facet does not exist in its mem errors, located.
+    #[test]
+    fn resolve_binding_dangling_facet_errors() {
+        let configs = PipelineConfigs::default();
+        let binding = v1_binding("engine", &["missing-facet"]);
+        let err = resolve_binding(&configs, "engine/graph", &binding).unwrap_err();
+        assert!(matches!(
+            err,
+            ResolveError::FacetNotFound { ref facet, .. } if facet == "missing-facet"
+        ));
+    }
+
+    /// A malformed binding id (no `/`) is a located error.
+    #[test]
+    fn resolve_binding_malformed_id_errors() {
+        let configs = PipelineConfigs::default();
+        let binding = v1_binding("engine", &[]);
+        let err = resolve_binding(&configs, "noslash", &binding).unwrap_err();
+        assert!(matches!(err, ResolveError::MalformedProjectionRef { .. }));
     }
 
     /// A graph-typed medium always resolves to the graph strategy,

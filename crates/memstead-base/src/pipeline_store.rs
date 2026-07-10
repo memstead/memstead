@@ -334,6 +334,24 @@ pub fn write_binding(
     )
 }
 
+/// Read the v1 binding at `<root>/.memstead/projections/<mem>/<name>.json`.
+///
+/// The read counterpart of [`write_binding`] — reads the *same* per-mem
+/// projections tier and file identity, parsed as a [`BindingV1`]. A missing
+/// file surfaces [`StoreError::Io`] (kind `NotFound`); a file present but not a
+/// v1 binding (e.g. a not-yet-migrated gen-2 projection) surfaces
+/// [`StoreError::Parse`]. Callers wanting a friendly "no such binding" message
+/// pre-check existence and keep the two apart. Additive; the live loader does
+/// not consult this yet (that gate is a later slice).
+pub fn read_binding(workspace_root: &Path, mem: &str, name: &str) -> Result<BindingV1, StoreError> {
+    read_json(&mem_scoped_path(
+        workspace_root,
+        PROJECTIONS_DIR,
+        mem,
+        name,
+    )?)
+}
+
 /// Delete a medium file. Missing → [`StoreError::Io`]; callers that want a
 /// friendly "no such medium" pre-check existence via [`load_pipeline_configs`].
 pub fn delete_medium(workspace_root: &Path, mem: &str, name: &str) -> Result<(), StoreError> {

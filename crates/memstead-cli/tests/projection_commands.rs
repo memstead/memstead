@@ -532,3 +532,229 @@ fn init_outside_workspace_is_typed() {
     assert_eq!(env["code"], "WORKSPACE_NOT_INITIALISED");
     assert_ne!(env["code"], "INTERNAL");
 }
+
+// ---------------------------------------------------------------------------
+// projection enable (D6 — the remedy a refused mutating op cites)
+// ---------------------------------------------------------------------------
+
+/// A gen-2 fixture migrated to a build-only v1 `engine/graph` binding — the
+/// substrate for `enable` tests (migrate produces no sync/verify block).
+fn migrated_build_only_workspace() -> TempDir {
+    let tmp = fixture("discovery", "");
+    memstead()
+        .current_dir(tmp.path())
+        .args(["projection", "migrate"])
+        .assert()
+        .success();
+    tmp
+}
+
+/// Enabling `sync` on a codebase binding that lacked it adds the block (with
+/// sensible defaults) and round-trips; every other field is untouched, and
+/// `verify` stays absent.
+#[test]
+fn enable_sync_adds_block_to_codebase_binding() {
+    let tmp = migrated_build_only_workspace();
+    let root = tmp.path();
+
+    let before = read_binding(root);
+    assert!(
+        before.operations.sync.is_none(),
+        "precondition: no sync block"
+    );
+
+    let output = memstead()
+        .current_dir(root)
+        .args(["--json", "projection", "enable", "sync", "engine/graph"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&output).expect("--json enable must emit JSON");
+    assert_eq!(env["binding"], "engine/graph");
+    assert_eq!(env["enabled"], "sync");
+    assert_eq!(env["operations"], serde_json::json!(["build", "sync"]));
+
+    let after = read_binding(root);
+    // The sync block appeared, with the manual trigger and build's batch_size.
+    let sync = after
+        .operations
+        .sync
+        .as_ref()
+        .expect("sync block was added");
+    assert_eq!(sync.trigger, IngestTrigger::Manual);
+    assert_eq!(sync.batch_size, before.operations.build.batch_size);
+    // verify stays absent — enable adds only the named operation.
+    assert!(after.operations.verify.is_none());
+    // Every other field is the same declaration.
+    assert_eq!(after.version, before.version);
+    assert_eq!(after.intent, before.intent);
+    assert_eq!(after.source_facets, before.source_facets);
+    assert_eq!(after.reference_mems, before.reference_mems);
+    assert_eq!(after.destination_mem, before.destination_mem);
+    assert_eq!(after.deny_paths, before.deny_paths);
+    assert_eq!(after.coverage_semantics, before.coverage_semantics);
+    assert_eq!(after.rules, before.rules);
+    assert_eq!(after.operations.build, before.operations.build);
+
+    // Round-trips losslessly.
+    let json = serde_json::to_string(&after).unwrap();
+    let back: BindingV1 = serde_json::from_str(&json).unwrap();
+    assert_eq!(back, after);
+}
+
+/// Enabling `sync` on a `web`-medium binding refuses with the capability error
+/// and leaves the binding file byte-identical (no partial write).
+#[test]
+fn enable_sync_on_web_refuses_and_leaves_file_identical() {
+    let tmp = bare_workspace();
+    let root = tmp.path();
+    // Scaffold a build-only web binding (init strips sync/verify over web).
+    memstead()
+        .current_dir(root)
+        .args([
+            "projection",
+            "init",
+            "--mem",
+            "research",
+            "--source",
+            "https://example.com/docs",
+            "--medium-type",
+            "web",
+        ])
+        .assert()
+        .success();
+
+    let path = root.join(".memstead/projections/research/docs.json");
+    let before = std::fs::read(&path).unwrap();
+
+    let output = memstead()
+        .current_dir(root)
+        .args(["--json", "projection", "enable", "sync", "research/docs"])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(env["code"], "PROJECTION_CAPABILITY_UNSUPPORTED");
+    assert!(
+        env["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("out of scope"),
+        "capability refusal must state the gap: {env}"
+    );
+
+    // The file is untouched by the refused enable.
+    let after = std::fs::read(&path).unwrap();
+    assert_eq!(before, after, "refused enable must not touch disk");
+}
+
+/// Enabling an already-present operation refuses `PROJECTION_OP_ALREADY_ENABLED`
+/// and does not corrupt the binding. `build` is always present, so enabling it
+/// always lands here.
+#[test]
+fn enable_already_present_op_refuses() {
+    let tmp = migrated_build_only_workspace();
+    let root = tmp.path();
+
+    // `build` is always present on any binding.
+    let path = root.join(".memstead/projections/engine/graph.json");
+    let before = std::fs::read(&path).unwrap();
+    let output = memstead()
+        .current_dir(root)
+        .args(["--json", "projection", "enable", "build", "engine/graph"])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(env["code"], "PROJECTION_OP_ALREADY_ENABLED");
+    assert_eq!(env["details"]["operation"], "build");
+    assert_eq!(std::fs::read(&path).unwrap(), before, "refusal is a no-op");
+
+    // Enable sync once (succeeds), then again → already-enabled, still clean.
+    memstead()
+        .current_dir(root)
+        .args(["projection", "enable", "sync", "engine/graph"])
+        .assert()
+        .success();
+    let with_sync = std::fs::read(&path).unwrap();
+    let output = memstead()
+        .current_dir(root)
+        .args(["--json", "projection", "enable", "sync", "engine/graph"])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(env["code"], "PROJECTION_OP_ALREADY_ENABLED");
+    assert_eq!(
+        std::fs::read(&path).unwrap(),
+        with_sync,
+        "re-enable is a no-op and does not corrupt the binding"
+    );
+    // Still a valid v1 binding with exactly one sync block.
+    let b = read_binding(root);
+    assert!(b.operations.sync.is_some());
+    assert!(b.operations.verify.is_none());
+}
+
+/// Enabling an operation on a missing binding refuses `PROJECTION_NOT_FOUND`
+/// (exit 3, NotFound) — never a generic/internal leak.
+#[test]
+fn enable_missing_binding_is_not_found() {
+    let tmp = bare_workspace();
+    let root = tmp.path();
+    let output = memstead()
+        .current_dir(root)
+        .args(["--json", "projection", "enable", "sync", "engine/nope"])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(env["code"], "PROJECTION_NOT_FOUND");
+    assert_eq!(env["details"]["binding"], "engine/nope");
+}
+
+/// A malformed binding id (no `/`) refuses `PROJECTION_INVALID_NAME` before any
+/// disk access.
+#[test]
+fn enable_malformed_binding_id_refuses() {
+    let tmp = bare_workspace();
+    let root = tmp.path();
+    let output = memstead()
+        .current_dir(root)
+        .args(["--json", "projection", "enable", "verify", "noslash"])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(env["code"], "PROJECTION_INVALID_NAME");
+}
+
+/// `enable` outside a workspace refuses with the shared, single-sourced
+/// `WORKSPACE_NOT_INITIALISED` code — never a generic/internal leak.
+#[test]
+fn enable_outside_workspace_is_typed() {
+    let tmp = TempDir::new().unwrap();
+    let output = memstead()
+        .current_dir(tmp.path())
+        .args(["--json", "projection", "enable", "sync", "engine/graph"])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(env["code"], "WORKSPACE_NOT_INITIALISED");
+    assert_ne!(env["code"], "INTERNAL");
+}

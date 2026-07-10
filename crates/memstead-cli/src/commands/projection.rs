@@ -1,11 +1,13 @@
 //! `memstead projection` — the binding (projection-promotion) command tree.
 //!
 //! The projection is the unit: one versioned binding per source→mem obligation
-//! (bundle plan `03-projection-promotion`). This slice ships the **`init`** and
-//! **`migrate`** leaves — `init` scaffolds a fresh v1 binding non-interactively
-//! (D8), `migrate` promotes gen-2 four-primitive configs (`Projection` + flat
-//! `Ingest`) into v1 bindings (D10, gen-2 path). The `brief` / `advance` /
-//! `enable` leaves land in later sessions; `memstead ingest` and
+//! (bundle plan `03-projection-promotion`). This slice ships the **`init`**,
+//! **`migrate`**, and **`enable`** leaves — `init` scaffolds a fresh v1 binding
+//! non-interactively (D8), `migrate` promotes gen-2 four-primitive configs
+//! (`Projection` + flat `Ingest`) into v1 bindings (D10, gen-2 path), and
+//! `enable` adds a missing `build` / `sync` / `verify` operation block to an
+//! existing binding (D6 — the remedy a refused mutating op cites). The `brief`
+//! / `advance` leaves land in later sessions; `memstead ingest` and
 //! `memstead pipeline` stay for now and retire with them.
 //!
 //! Errors carry `PROJECTION_*` wire tokens (D12); the missing-workspace path is
@@ -21,12 +23,12 @@ use memstead_base::binding::{
 use memstead_base::binding_migrate::{
     BindingMigrateError, migrate_gen2_bindings, resolve_migrated_binding,
 };
-use memstead_base::ingest::resolve::ResolvedPrimarySource;
+use memstead_base::ingest::resolve::{ResolvedPrimarySource, resolve_binding};
 use memstead_base::pipeline::{
     Facet, IngestTrigger, Medium, MediumType, PatternEntry, PatternMode,
 };
 use memstead_base::pipeline_store::{
-    delete_ingest, load_pipeline_configs, write_binding, write_facet, write_medium,
+    delete_ingest, load_pipeline_configs, read_binding, write_binding, write_facet, write_medium,
 };
 use memstead_base::workspace_store::StoreError;
 
@@ -57,6 +59,16 @@ pub enum ProjectionCommand {
     /// is removed. `refinement` mode and dangling projection refs refuse with a
     /// typed error. Use `--dry-run` to preview without writing.
     Migrate(MigrateArgs),
+    /// Enable a `build` / `sync` / `verify` operation on an existing binding by
+    /// adding its block (with sensible defaults) if absent. This is the remedy
+    /// a refused *mutating* operation cites (D6): `projection enable sync
+    /// <binding>`. Before writing, the operation is checked against the
+    /// medium-capability matrix (D6) — enabling `sync`/`verify` over a medium
+    /// that cannot support it (e.g. a `web` source) refuses with the capability
+    /// gap and writes nothing. Enabling an already-present operation refuses
+    /// `PROJECTION_OP_ALREADY_ENABLED`; a missing binding refuses
+    /// `PROJECTION_NOT_FOUND`.
+    Enable(EnableArgs),
 }
 
 /// The medium type flag for `projection init` — the CLI-facing mirror of
@@ -120,10 +132,44 @@ pub struct MigrateArgs {
     pub dry_run: bool,
 }
 
+/// The operation `projection enable` adds to a binding. Mirror of the binding's
+/// operations block: `build` is always present (required), so enabling it
+/// always refuses as already-enabled; `sync` / `verify` are the enableable
+/// blocks.
+#[derive(Clone, Copy, Debug, ValueEnum, PartialEq, Eq)]
+pub enum EnableOperationArg {
+    /// The build operation (always present — enabling refuses as already-enabled).
+    Build,
+    /// The sync (maintenance-write) operation.
+    Sync,
+    /// The verify (measurement) operation.
+    Verify,
+}
+
+impl EnableOperationArg {
+    fn name(self) -> &'static str {
+        match self {
+            EnableOperationArg::Build => "build",
+            EnableOperationArg::Sync => "sync",
+            EnableOperationArg::Verify => "verify",
+        }
+    }
+}
+
+#[derive(ClapArgs, Debug)]
+pub struct EnableArgs {
+    /// The operation to enable: `build` | `sync` | `verify`.
+    #[arg(value_enum)]
+    pub operation: EnableOperationArg,
+    /// The binding id `<mem>/<stem>` (D3) — e.g. `engine/graph`.
+    pub binding: String,
+}
+
 pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     match args.command {
         ProjectionCommand::Init(a) => init(ctx, a),
         ProjectionCommand::Migrate(a) => migrate(ctx, a),
+        ProjectionCommand::Enable(a) => enable(ctx, a),
     }
 }
 
@@ -486,6 +532,178 @@ fn migrate(ctx: &CliContext, args: MigrateArgs) -> anyhow::Result<()> {
             );
         }
         print_markdown(&out);
+    }
+    Ok(())
+}
+
+/// A malformed binding id (not `<mem>/<stem>`, or a half that is not a single
+/// plain path component) — the same shape guard `init` applies to its
+/// scaffolded id, spelled here so the failure is typed before any disk touch.
+fn invalid_binding_id(binding_id: &str) -> CliError {
+    CliError::new(
+        ExitKind::Validation,
+        "PROJECTION_INVALID_NAME",
+        format!(
+            "invalid binding id '{}': expected `<mem>/<stem>` with each half a single path \
+             component (no extra separators, traversal segments, ':' or NUL)",
+            binding_id.escape_default()
+        ),
+    )
+    .with_details(json!({ "binding": binding_id }))
+}
+
+/// Map a store IO/parse failure while enabling to a typed CLI error. The
+/// missing-binding case is handled separately (existence pre-check →
+/// `PROJECTION_NOT_FOUND`); this covers a present-but-unreadable/unparseable
+/// binding file and write failures.
+fn enable_failed(binding_id: &str, err: StoreError) -> CliError {
+    CliError::new(
+        ExitKind::Generic,
+        "PROJECTION_ENABLE_FAILED",
+        format!("could not enable operation on binding `{binding_id}`: {err}"),
+    )
+    .with_details(json!({ "binding": binding_id, "error": err.to_string() }))
+}
+
+fn enable(ctx: &CliContext, args: EnableArgs) -> anyhow::Result<()> {
+    let (_shape, root) = ctx.workspace_shape().ok_or_else(|| {
+        workspace_not_initialised_error(
+            "not inside a Memstead workspace (no `.memstead/workspace.toml` in any ancestor)",
+        )
+    })?;
+
+    let binding_id = args.binding;
+    let op = args.operation;
+
+    // Parse the binding id `<mem>/<stem>`; refuse a malformed shape (or a half
+    // that is not a single plain path component) before touching disk. Own the
+    // halves so `binding_id` is free to move into JSON payloads later.
+    let (mem, stem) = binding_id
+        .split_once('/')
+        .filter(|(m, n)| !m.is_empty() && !n.is_empty())
+        .filter(|(m, n)| is_single_component(m) && is_single_component(n))
+        .ok_or_else(|| invalid_binding_id(&binding_id))?;
+    let mem = mem.to_string();
+    let stem = stem.to_string();
+
+    // Missing binding file → PROJECTION_NOT_FOUND (NotFound exit). A present-
+    // but-unparseable file is kept apart (→ PROJECTION_ENABLE_FAILED) by this
+    // existence pre-check.
+    let binding_path = root
+        .join(".memstead")
+        .join("projections")
+        .join(&mem)
+        .join(format!("{stem}.json"));
+    if !binding_path.exists() {
+        return Err(CliError::new(
+            ExitKind::NotFound,
+            "PROJECTION_NOT_FOUND",
+            format!(
+                "no binding `{binding_id}` at .memstead/projections/{mem}/{stem}.json — \
+                 scaffold one with `projection init` or migrate a legacy workspace with \
+                 `projection migrate`"
+            ),
+        )
+        .with_details(json!({ "binding": binding_id }))
+        .into());
+    }
+    let mut binding =
+        read_binding(&root, &mem, &stem).map_err(|e| enable_failed(&binding_id, e))?;
+
+    // Already present? Refuse without a partial write. `build` is required, so
+    // it is always present — enabling it always lands here.
+    let already = match op {
+        EnableOperationArg::Build => true,
+        EnableOperationArg::Sync => binding.operations.sync.is_some(),
+        EnableOperationArg::Verify => binding.operations.verify.is_some(),
+    };
+    if already {
+        return Err(CliError::new(
+            ExitKind::Validation,
+            "PROJECTION_OP_ALREADY_ENABLED",
+            format!(
+                "operation `{}` is already enabled on binding `{binding_id}` — nothing to do",
+                op.name()
+            ),
+        )
+        .with_details(json!({ "binding": binding_id, "operation": op.name() }))
+        .into());
+    }
+
+    // Add the operation block with sensible defaults: `trigger: manual`,
+    // `batch_size` mirroring the build op's. `build` is unreachable here (it is
+    // always already-enabled above).
+    let batch_size = binding.operations.build.batch_size;
+    match op {
+        EnableOperationArg::Sync => {
+            binding.operations.sync = Some(SyncOperation {
+                trigger: IngestTrigger::Manual,
+                batch_size,
+            });
+        }
+        EnableOperationArg::Verify => {
+            binding.operations.verify = Some(VerifyOperation {
+                trigger: IngestTrigger::Manual,
+                batch_size,
+            });
+        }
+        EnableOperationArg::Build => unreachable!("build is always already-enabled"),
+    }
+
+    // Matrix validation (D6): resolve the candidate binding (facets → mediums,
+    // in the binding-id's `<mem>` tier) and refuse if the medium cannot support
+    // the operation being enabled — e.g. `sync`/`verify` over a `web` source.
+    // Refusals about *other* operations reflect pre-existing config and do not
+    // block this enable (mirrors `migrate`'s treat-as-warning posture). No write
+    // on refusal — the file stays byte-identical.
+    let configs = load_pipeline_configs(&root).map_err(|e| enable_failed(&binding_id, e))?;
+    let resolved = resolve_binding(&configs, &binding_id, &binding).map_err(|e| {
+        CliError::new(
+            ExitKind::Generic,
+            "PROJECTION_ENABLE_FAILED",
+            format!("could not resolve binding `{binding_id}` for validation: {e}"),
+        )
+        .with_details(json!({ "binding": binding_id, "error": e.to_string() }))
+    })?;
+    if let Err(refusals) = validate_binding(&resolved)
+        && let Some(err) = refusals.iter().find(|r| {
+            matches!(
+                r,
+                CapabilityError::OperationOutOfScope { operation, .. } if *operation == op.name()
+            )
+        })
+    {
+        return Err(CliError::new(
+            ExitKind::Validation,
+            "PROJECTION_CAPABILITY_UNSUPPORTED",
+            err.to_string(),
+        )
+        .with_details(json!({ "binding": binding_id, "operation": op.name() }))
+        .into());
+    }
+
+    write_binding(&root, &mem, &stem, &binding).map_err(|e| enable_failed(&binding_id, e))?;
+
+    let mut operations: Vec<&str> = vec!["build"];
+    if binding.operations.sync.is_some() {
+        operations.push("sync");
+    }
+    if binding.operations.verify.is_some() {
+        operations.push("verify");
+    }
+
+    if ctx.json {
+        print_json(&json!({
+            "binding": binding_id,
+            "enabled": op.name(),
+            "operations": operations,
+        }))?;
+    } else {
+        print_markdown(&format!(
+            "# Projection enable\n\nEnabled `{}` on binding `{binding_id}`.\n\nOperations: {}\n",
+            op.name(),
+            operations.join(", ")
+        ));
     }
     Ok(())
 }
