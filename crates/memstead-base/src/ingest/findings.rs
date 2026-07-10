@@ -32,7 +32,7 @@
 //! is structurally incapable of a destination-mem mutation. Any repair routes
 //! through the sync brief (group C), never through findings recording/reading.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -40,12 +40,17 @@ use serde::{Deserialize, Serialize};
 
 use crate::Engine;
 use crate::anchor::{Anchor, AnchorState};
-use crate::binding::{BindingV1, ResolvedBinding, hash_binding};
+use crate::binding::{
+    BindingV1, DEFAULT_ADJUDICATION_CAP, DEFAULT_FULL_RESYNC_EVERY, ResolvedBinding, hash_binding,
+    medium_capabilities,
+};
 use crate::workspace_store::{StoreError, WORKSPACE_STORE_DIR};
 
 use super::advance::is_single_component;
-use super::cursor::compute_source_cursor;
-use super::refinement::next_batch;
+use super::cursor::{compute_source_cursor, enumerate_facet_files};
+use super::refinement::{
+    ROTATION_ANCHOR_ADJUDICATION, bump_verify_runs, next_batch, next_rotation_batch,
+};
 use super::resolve::{ResolvedIngest, ResolvedSource};
 
 /// The engine-owned state directory root, under the workspace store:
@@ -353,6 +358,10 @@ pub struct VerifyOutcome {
     pub superseded: usize,
     /// The tier-3 backlog depth — findings queued for adjudication.
     pub backlog: usize,
+    /// The full-enumeration scheduling decision for this run (D3) — whether a
+    /// scheduled full walk fired, is not yet due, is disabled, and any typed
+    /// non-enumerable refusals. Surfaced (never a silent skip) to the caller.
+    pub full_resync: FullResyncDecision,
 }
 
 /// Split a canonical binding id `<mem>/<stem>` into its two path-safe halves,
@@ -542,6 +551,181 @@ pub fn adjudicate_anchor(
     })
 }
 
+// ---------------------------------------------------------------------------
+// Tier-3 caps + scheduling (group D)
+// ---------------------------------------------------------------------------
+
+/// One source facet's enumerability — the input the full-resync scheduler
+/// reasons over (D3). Built from the capability matrix per primary facet.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FacetEnumerability {
+    /// The source facet.
+    pub facet: String,
+    /// The medium type wire string.
+    pub medium_type: String,
+    /// Whether the medium's scope is enumerable (`S(D)` computable).
+    pub enumerable: bool,
+}
+
+/// A typed refusal from the scheduled full-enumeration walk (D3): a source facet
+/// whose medium the capability matrix marks **non-enumerable**, which the walk
+/// cannot cover. Emitted instead of a silent skip or a fabricated full-coverage
+/// claim.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FullResyncRefusal {
+    /// The refused facet.
+    pub facet: String,
+    /// The non-enumerable medium type.
+    pub medium_type: String,
+    /// Why the scheduled walk refuses this facet.
+    pub reason: String,
+}
+
+/// The full-enumeration scheduling decision for a verify run (D3). A closed,
+/// serialized vocabulary so the caller (and the fidelity report) can render the
+/// outcome without inferring it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "kebab-case")]
+pub enum FullResyncDecision {
+    /// `full_resync_every == 0` — scheduled full walks are disabled; the run
+    /// uses the rotating sample only.
+    Disabled,
+    /// Scheduled but not due this run — the rotating sample runs; the counter
+    /// advances toward the next full walk.
+    NotDue {
+        /// This run's 1-based verify-run count.
+        run_count: u64,
+        /// The configured cadence.
+        every: u32,
+        /// How many further runs until the next scheduled full walk.
+        runs_until_due: u32,
+    },
+    /// Due this run: a full-enumeration walk fires for the **enumerable** facets
+    /// (guaranteeing a complete coverage picture), and every **non-enumerable**
+    /// facet is refused with a typed signal — never a silent skip, never a
+    /// fabricated full-coverage claim.
+    Due {
+        /// This run's 1-based verify-run count.
+        run_count: u64,
+        /// The configured cadence.
+        every: u32,
+        /// The facets a full enumeration walk covers this run.
+        walked_facets: Vec<String>,
+        /// The non-enumerable facets the walk refuses (typed).
+        refused: Vec<FullResyncRefusal>,
+    },
+}
+
+impl FullResyncDecision {
+    /// Whether this run performs a full-enumeration walk (a scheduled sweep is
+    /// due). `false` for `Disabled` / `NotDue`.
+    pub fn is_full_walk(&self) -> bool {
+        matches!(self, FullResyncDecision::Due { .. })
+    }
+}
+
+/// Decide the `full_resync_every` scheduling outcome for a verify run (D3) —
+/// pure and level-triggered on the persisted run counter. `every == 0` disables
+/// scheduled walks; otherwise the walk is **due** when `run_count` is a multiple
+/// of `every`. When due, enumerable facets are walked and non-enumerable facets
+/// are refused with a typed [`FullResyncRefusal`] (never silently skipped).
+pub fn schedule_full_resync(
+    every: u32,
+    run_count: u64,
+    facets: &[FacetEnumerability],
+) -> FullResyncDecision {
+    if every == 0 {
+        return FullResyncDecision::Disabled;
+    }
+    let modulo = run_count % u64::from(every);
+    if modulo != 0 {
+        return FullResyncDecision::NotDue {
+            run_count,
+            every,
+            runs_until_due: (u64::from(every) - modulo) as u32,
+        };
+    }
+    let mut walked_facets = Vec::new();
+    let mut refused = Vec::new();
+    for f in facets {
+        if f.enumerable {
+            walked_facets.push(f.facet.clone());
+        } else {
+            refused.push(FullResyncRefusal {
+                facet: f.facet.clone(),
+                medium_type: f.medium_type.clone(),
+                reason: format!(
+                    "medium type '{}' is non-enumerable — a full-enumeration walk cannot cover \
+                     it; the scheduled full resync refuses rather than claim full coverage",
+                    f.medium_type
+                ),
+            });
+        }
+    }
+    FullResyncDecision::Due {
+        run_count,
+        every,
+        walked_facets,
+        refused,
+    }
+}
+
+/// The rotation item key a drift-adjudication candidate is selected under (D2) —
+/// stable across runs for a given `(entity, artifact)` so the rotating window
+/// covers a reproducible sequence.
+fn candidate_key(entity: &str, anchor: &Anchor) -> String {
+    format!("{entity}\u{1f}{}", anchor.artifact)
+}
+
+/// Adjudicate the hash-drift **candidates** under the per-run cap (D1). Each
+/// candidate is an anchor observation that hash-drift adjudication applies to
+/// (a hash-bearing anchor in a `drifted` / `recheck` state). `window` is the
+/// rotation-selected key set this run adjudicates (D2); a candidate whose
+/// [`candidate_key`] is **not** in the window is **queued** as
+/// `queued-for-adjudication` (the tier-3 backlog remainder) rather than
+/// adjudicated. `window = None` means uncapped — every candidate is adjudicated.
+///
+/// Existence failures (`orphaned`) are **not** candidates: they are cheap
+/// existence checks, always reported by [`verify_binding`] regardless of the
+/// cap. Non-hash-bearing classes never reach here (they produce no adjudication).
+fn adjudicate_candidates(
+    key: &FindingKey,
+    facet: &str,
+    candidates: &[(String, Anchor, AnchorState)],
+    window: Option<&BTreeSet<String>>,
+    created_at: &str,
+) -> Vec<Finding> {
+    let mut out = Vec::new();
+    for (entity, anchor, state) in candidates {
+        let ck = candidate_key(entity, anchor);
+        let adjudicate_now = window.is_none_or(|w| w.contains(&ck));
+        if adjudicate_now {
+            if let Some(f) = adjudicate_anchor(key, facet, entity, anchor, *state, created_at) {
+                out.push(f);
+            }
+        } else {
+            // Beyond the per-run cap: queue the remainder (D1) — it re-presents
+            // in a later run's rotation window (D2), so the whole candidate set
+            // is covered over a full rotation.
+            out.push(Finding {
+                key: key.clone(),
+                facet: facet.to_string(),
+                target: FindingTarget::Anchor {
+                    entity: entity.clone(),
+                    artifact: anchor.artifact.clone(),
+                },
+                class: FindingClass::QueuedForAdjudication,
+                detail: format!(
+                    "adjudication of '{}' deferred (per-run adjudication cap reached); queued",
+                    anchor.artifact
+                ),
+                created_at: created_at.to_string(),
+            });
+        }
+    }
+    out
+}
+
 /// The thin `projection verify` write path (group A). Measures a binding's
 /// fidelity and records durable findings under the current `(hash(D),
 /// source_head)` key; **read-only on the destination mem** — the `&Engine`
@@ -567,45 +751,137 @@ pub fn verify_binding(
     let key = current_key(engine, workspace_root, binding, resolved);
     let now = now_seconds();
     let facet = source_facet_label(resolved);
+    let cache_root = workspace_root.join(".memstead.cache").join("ingest");
+
+    // Tier-3 operations knobs (group D): the per-run adjudication cap (D1), the
+    // scheduled full-walk cadence (D3), and the sample window size. All come off
+    // the `verify` block, defaulting to the dogfood-tuned engine defaults when it
+    // is absent (verify is read-only — an absent block is defaults, never a
+    // refusal).
+    let verify_op = binding.operations.verify.as_ref();
+    let cap = verify_op.map_or(DEFAULT_ADJUDICATION_CAP, |v| v.adjudication_cap);
+    let full_resync_every = verify_op.map_or(DEFAULT_FULL_RESYNC_EVERY, |v| v.full_resync_every);
+    let sample_batch = verify_op
+        .map_or(resolved.batch_size, |v| v.batch_size)
+        .max(1) as usize;
+
+    // Level-trigger clock + full-resync schedule (D3) — the counter ticks every
+    // run (even a non-enumerable one) so the schedule can refuse on time.
+    let run_count = bump_verify_runs(&cache_root, &binding_id);
+    let facet_enum: Vec<FacetEnumerability> = resolved
+        .sources
+        .iter()
+        .filter_map(|s| match s {
+            ResolvedSource::Primary(p) => Some(FacetEnumerability {
+                facet: p.facet_ref.clone(),
+                medium_type: medium_type_wire(p.medium_type),
+                enumerable: medium_capabilities(p.medium_type).enumerable,
+            }),
+            ResolvedSource::Reference { .. } => None,
+        })
+        .collect();
+    let full_resync = schedule_full_resync(full_resync_every, run_count, &facet_enum);
 
     let mut findings: Vec<Finding> = Vec::new();
 
-    // 1. Adjudicate the destination mem's anchors against the live source.
+    // 1. Adjudicate the destination mem's anchors against the live source, under
+    //    the per-run cap (D1) with a rotating window (D2). Existence failures
+    //    (orphaned) are cheap and always reported; hash-drift candidates are
+    //    bounded — the cap-sized rotation window is adjudicated, the remainder
+    //    queued, and successive runs rotate the window so the whole anchor set is
+    //    covered over a full rotation.
+    let mut existence: Vec<(String, Anchor, AnchorState)> = Vec::new();
+    let mut candidates: Vec<(String, Anchor, AnchorState)> = Vec::new();
     for (eid, resolved_anchor) in engine.mem_anchors_resolved(&resolved.destination_mem) {
-        if let Some(state) = resolved_anchor.state
-            && let Some(finding) = adjudicate_anchor(
-                &key,
-                &facet,
-                eid.as_ref(),
-                &resolved_anchor.anchor,
-                state,
-                &now,
-            )
-        {
-            findings.push(finding);
+        let Some(state) = resolved_anchor.state else {
+            continue;
+        };
+        let anchor = resolved_anchor.anchor;
+        match state {
+            AnchorState::Resolves => {}
+            AnchorState::Orphaned => existence.push((eid.as_ref().to_string(), anchor, state)),
+            AnchorState::Drifted | AnchorState::Recheck => {
+                // Only hash-bearing anchors are hash-drift candidates (A2); a
+                // non-hash-bearing class yields no adjudication.
+                if anchor.class.is_hash_bearing() {
+                    candidates.push((eid.as_ref().to_string(), anchor, state));
+                }
+            }
         }
     }
+    for (entity, anchor, state) in &existence {
+        if let Some(f) = adjudicate_anchor(&key, &facet, entity, anchor, *state, &now) {
+            findings.push(f);
+        }
+    }
+    // `cap == 0` disables the cap (adjudicate every candidate); otherwise a
+    // cap-sized rotation window selects this run's adjudicated set (D1/D2).
+    let window: Option<BTreeSet<String>> = if cap == 0 {
+        None
+    } else {
+        let mut keys: Vec<String> = candidates
+            .iter()
+            .map(|(e, a, _)| candidate_key(e, a))
+            .collect();
+        keys.sort();
+        keys.dedup();
+        next_rotation_batch(
+            &cache_root,
+            &binding_id,
+            ROTATION_ANCHOR_ADJUDICATION,
+            keys,
+            cap as usize,
+        )
+        .map(|b| b.files.into_iter().collect())
+    };
+    findings.extend(adjudicate_candidates(
+        &key,
+        &facet,
+        &candidates,
+        window.as_ref(),
+        &now,
+    ));
 
-    // 2. Sample in-scope source artifacts via the retained rotation machinery
-    //    (scheduling only) and flag those with no anchor in the destination mem.
-    let cache_root = workspace_root.join(".memstead.cache").join("ingest");
-    if let Some(batch) = next_batch(resolved, workspace_root, &cache_root) {
-        for file in batch.files {
-            let covered = engine
-                .anchors_referencing_artifact(&file)
-                .iter()
-                .any(|(eid, _)| eid.mem() == resolved.destination_mem.as_str());
-            if !covered {
-                findings.push(Finding {
-                    key: key.clone(),
-                    facet: facet.clone(),
-                    target: FindingTarget::Artifact { artifact: file },
-                    class: FindingClass::Uncovered,
-                    detail: "source artifact in scope has no anchor in the destination mem"
-                        .to_string(),
-                    created_at: now.clone(),
-                });
+    // 2. Sample in-scope source artifacts for coverage. When a full walk is due
+    //    (D3), enumerate the WHOLE source of every enumerable facet — guaranteeing
+    //    complete coverage this run; otherwise sample a bounded rotating window
+    //    (D2). Non-enumerable facets are refused (the typed refusal rides on
+    //    `full_resync`), never silently claimed as covered.
+    let sample_files: Vec<String> = if full_resync.is_full_walk() {
+        let mut all: Vec<String> = Vec::new();
+        for source in &resolved.sources {
+            if let ResolvedSource::Primary(p) = source
+                && medium_capabilities(p.medium_type).enumerable
+            {
+                all.extend(enumerate_facet_files(
+                    p,
+                    &resolved.deny_paths,
+                    workspace_root,
+                ));
             }
+        }
+        all.sort();
+        all.dedup();
+        all
+    } else {
+        next_batch(resolved, workspace_root, &cache_root, sample_batch)
+            .map(|b| b.files)
+            .unwrap_or_default()
+    };
+    for file in sample_files {
+        let covered = engine
+            .anchors_referencing_artifact(&file)
+            .iter()
+            .any(|(eid, _)| eid.mem() == resolved.destination_mem.as_str());
+        if !covered {
+            findings.push(Finding {
+                key: key.clone(),
+                facet: facet.clone(),
+                target: FindingTarget::Artifact { artifact: file },
+                class: FindingClass::Uncovered,
+                detail: "source artifact in scope has no anchor in the destination mem".to_string(),
+                created_at: now.clone(),
+            });
         }
     }
 
@@ -633,7 +909,17 @@ pub fn verify_binding(
         recorded,
         superseded,
         backlog,
+        full_resync,
     })
+}
+
+/// The medium type's wire string (`codebase` / `web` / …) — the serde form the
+/// capability matrix and reports use.
+fn medium_type_wire(t: crate::pipeline::MediumType) -> String {
+    serde_json::to_value(t)
+        .ok()
+        .and_then(|v| v.as_str().map(str::to_string))
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -853,7 +1139,8 @@ mod tests {
 
     use crate::anchor::AnchorSidecar;
     use crate::binding::{
-        BINDING_VERSION, BuildMode, BuildOperation, CoverageSemantics, Operations, VerifyOperation,
+        BINDING_VERSION, BuildMode, BuildOperation, CoverageSemantics, DEFAULT_ADJUDICATION_CAP,
+        DEFAULT_FULL_RESYNC_EVERY, Operations, VerifyOperation,
     };
     use crate::ingest::resolve::resolve_binding_run;
     use crate::pipeline::{Facet, IngestTrigger, Medium, MediumType, PatternEntry, PatternMode};
@@ -1003,6 +1290,8 @@ mod tests {
                     verify: Some(VerifyOperation {
                         trigger: IngestTrigger::Manual,
                         batch_size: 20,
+                        adjudication_cap: DEFAULT_ADJUDICATION_CAP,
+                        full_resync_every: DEFAULT_FULL_RESYNC_EVERY,
                     }),
                 },
             },
@@ -1052,5 +1341,291 @@ mod tests {
         );
         // The covered file is not flagged uncovered.
         assert!(!has(FindingClass::Uncovered, "src/present.rs"));
+    }
+
+    // ---- D1: per-run adjudication cap -----------------------------------
+
+    /// D1 — the per-run cap queues the remainder. A rotation window covering
+    /// only a subset of drift candidates adjudicates the in-window ones and
+    /// QUEUES every out-of-window candidate as `queued-for-adjudication` (the
+    /// tier-3 backlog). Uncapped (`window = None`) adjudicates every candidate.
+    #[test]
+    fn adjudication_cap_queues_the_remainder() {
+        let k = key("h", "s");
+        let mk = |art: &str| {
+            let mut a = anchor(AnchorProvenanceClass::Anchored);
+            a.artifact = art.to_string();
+            a
+        };
+        let candidates = vec![
+            (
+                "engine--a".to_string(),
+                mk("src/a.rs"),
+                AnchorState::Drifted,
+            ),
+            (
+                "engine--b".to_string(),
+                mk("src/b.rs"),
+                AnchorState::Drifted,
+            ),
+            (
+                "engine--c".to_string(),
+                mk("src/c.rs"),
+                AnchorState::Drifted,
+            ),
+        ];
+        // A cap-1 window selects only src/a.rs.
+        let window: BTreeSet<String> = [candidate_key("engine--a", &mk("src/a.rs"))]
+            .into_iter()
+            .collect();
+        let out = adjudicate_candidates(&k, "f", &candidates, Some(&window), "1");
+        let drifted = out
+            .iter()
+            .filter(|f| f.class == FindingClass::Drifted)
+            .count();
+        let queued = out
+            .iter()
+            .filter(|f| f.class == FindingClass::QueuedForAdjudication)
+            .count();
+        assert_eq!(drifted, 1, "only the in-window candidate is adjudicated");
+        assert_eq!(queued, 2, "the remainder is queued as the tier-3 backlog");
+        // A queued remainder finding carries the queued detail, not a drift claim.
+        assert!(
+            out.iter()
+                .any(|f| f.class == FindingClass::QueuedForAdjudication
+                    && f.detail.contains("cap reached")),
+            "capped remainder states it was deferred by the cap"
+        );
+
+        // Uncapped: every candidate adjudicated, none queued.
+        let uncapped = adjudicate_candidates(&k, "f", &candidates, None, "1");
+        assert_eq!(
+            uncapped
+                .iter()
+                .filter(|f| f.class == FindingClass::Drifted)
+                .count(),
+            3,
+            "uncapped adjudicates every candidate"
+        );
+        assert_eq!(
+            uncapped
+                .iter()
+                .filter(|f| f.class == FindingClass::QueuedForAdjudication)
+                .count(),
+            0
+        );
+    }
+
+    // ---- D3: full_resync scheduling + non-enumerable refusal ------------
+
+    /// D3 — `schedule_full_resync`: disabled at cadence 0; not-due off-cadence
+    /// (with a countdown); due on-cadence for an enumerable facet (walked, no
+    /// refusal).
+    #[test]
+    fn full_resync_schedule_disabled_notdue_due() {
+        let codebase = FacetEnumerability {
+            facet: "src".to_string(),
+            medium_type: "codebase".to_string(),
+            enumerable: true,
+        };
+        assert_eq!(
+            schedule_full_resync(0, 5, std::slice::from_ref(&codebase)),
+            FullResyncDecision::Disabled
+        );
+        match schedule_full_resync(3, 2, std::slice::from_ref(&codebase)) {
+            FullResyncDecision::NotDue { runs_until_due, .. } => assert_eq!(runs_until_due, 1),
+            other => panic!("expected NotDue, got {other:?}"),
+        }
+        match schedule_full_resync(3, 3, std::slice::from_ref(&codebase)) {
+            FullResyncDecision::Due {
+                walked_facets,
+                refused,
+                ..
+            } => {
+                assert_eq!(walked_facets, vec!["src".to_string()]);
+                assert!(refused.is_empty(), "enumerable facet is not refused");
+            }
+            other => panic!("expected Due, got {other:?}"),
+        }
+    }
+
+    /// D3 REFUSAL — a scheduled full walk over a NON-enumerable medium refuses
+    /// with a typed signal: it never claims coverage and is never a silent skip.
+    #[test]
+    fn full_resync_refuses_non_enumerable_medium() {
+        let web = FacetEnumerability {
+            facet: "manual".to_string(),
+            medium_type: "web".to_string(),
+            enumerable: false,
+        };
+        let d = schedule_full_resync(1, 1, &[web]);
+        assert!(
+            d.is_full_walk(),
+            "a due sweep is a full walk even when refused"
+        );
+        match d {
+            FullResyncDecision::Due {
+                walked_facets,
+                refused,
+                ..
+            } => {
+                assert!(walked_facets.is_empty(), "nothing enumerable to walk");
+                assert_eq!(refused.len(), 1, "the non-enumerable facet is refused");
+                assert_eq!(refused[0].facet, "manual");
+                assert_eq!(refused[0].medium_type, "web");
+                assert!(
+                    refused[0].reason.contains("non-enumerable"),
+                    "the refusal is typed and states why"
+                );
+            }
+            other => panic!("expected Due with a refusal, got {other:?}"),
+        }
+    }
+
+    /// D3 — a scheduled full walk fires the WHOLE-source enumeration this run:
+    /// with `full_resync_every = 1` (due every run) and a sample `batch_size` of
+    /// 1, all three uncovered source files are flagged, not just one — the full
+    /// walk overrides the bounded rotating sample for an enumerable medium.
+    #[test]
+    fn full_resync_full_walk_covers_whole_source() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let mem_dir = root.join("mem");
+        std::fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
+        std::fs::write(
+            mem_dir.join(".memstead").join("config.json"),
+            r#"{"format":1,"schema":"default@1.0.0","version":"1.0.0"}"#,
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join(".memstead")).unwrap();
+        std::fs::write(
+            root.join(".memstead").join("workspace.toml"),
+            "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+        )
+        .unwrap();
+        let mount = Mount {
+            mem: "engine".to_string(),
+            schema: Some("default@1.0.0".parse().unwrap()),
+            storage: MountStorage::Folder {
+                path: mem_dir.clone(),
+            },
+            capability: MountCapability::Write,
+            lifecycle: MountLifecycle::Eager,
+            cross_linkable: false,
+            migration_target: None,
+        };
+        crate::FileWorkspaceStore::new()
+            .save_state(
+                root,
+                &Workspace {
+                    mounts: vec![mount],
+                    settings: WorkspaceSettings::default(),
+                },
+            )
+            .unwrap();
+        let out = std::process::Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(root)
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        for f in ["a.rs", "b.rs", "c.rs"] {
+            std::fs::write(root.join("src").join(f), "fn x() {}\n").unwrap();
+        }
+
+        write_medium(
+            root,
+            "engine",
+            "graph",
+            &Medium {
+                name: "graph".to_string(),
+                medium_type: MediumType::Codebase,
+                pointer: String::new(),
+                change_detection: Some("git".to_string()),
+            },
+        )
+        .unwrap();
+        write_facet(
+            root,
+            "engine",
+            "graph",
+            &Facet {
+                name: "graph".to_string(),
+                medium: "graph".to_string(),
+                scope: vec![PatternEntry {
+                    path: "src/**/*.rs".to_string(),
+                    mode: PatternMode::Allow,
+                }],
+                engagement: None,
+                preparation: None,
+            },
+        )
+        .unwrap();
+        write_binding(
+            root,
+            "engine",
+            "graph",
+            &BindingV1 {
+                version: BINDING_VERSION,
+                intent: None,
+                source_facets: vec!["graph".to_string()],
+                reference_mems: Vec::new(),
+                destination_mem: "engine".to_string(),
+                deny_paths: Vec::new(),
+                coverage_semantics: CoverageSemantics::Exhaustive,
+                rules: None,
+                operations: Operations {
+                    build: Some(BuildOperation {
+                        mode: BuildMode::Discovery,
+                        trigger: IngestTrigger::Loop,
+                        batch_size: 20,
+                        post_actions: None,
+                    }),
+                    sync: None,
+                    verify: Some(VerifyOperation {
+                        trigger: IngestTrigger::Manual,
+                        batch_size: 1, // a tiny rotating sample …
+                        adjudication_cap: DEFAULT_ADJUDICATION_CAP,
+                        full_resync_every: 1, // … but a full walk fires EVERY run
+                    }),
+                },
+            },
+        )
+        .unwrap();
+
+        let engine = Engine::from_workspace_root(root).unwrap();
+        let configs = load_pipeline_configs(root).unwrap();
+        let binding = &configs.bindings[0].config;
+        let resolved = resolve_binding_run(&configs, "engine/graph", binding).unwrap();
+
+        let outcome = verify_binding(&engine, root, binding, &resolved).unwrap();
+        // The full walk is due on run 1 and covers the enumerable facet.
+        match &outcome.full_resync {
+            FullResyncDecision::Due {
+                walked_facets,
+                refused,
+                run_count,
+                ..
+            } => {
+                assert_eq!(*run_count, 1);
+                assert_eq!(walked_facets, &vec!["graph".to_string()]);
+                assert!(refused.is_empty());
+            }
+            other => panic!("expected a due full walk, got {other:?}"),
+        }
+        // All three uncovered files flagged despite the batch_size-1 sample.
+        let store = read_findings_store(root, "engine", "graph")
+            .unwrap()
+            .unwrap();
+        let uncovered = store
+            .current(&outcome.key)
+            .iter()
+            .filter(|f| f.class == FindingClass::Uncovered)
+            .count();
+        assert_eq!(
+            uncovered, 3,
+            "the scheduled full walk covers the whole source, not a batch of one"
+        );
     }
 }

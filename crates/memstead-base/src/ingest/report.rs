@@ -1187,7 +1187,8 @@ mod tests {
 
     use crate::anchor::{Anchor, AnchorHashStability, AnchorProvenanceClass, AnchorSidecar};
     use crate::binding::{
-        BINDING_VERSION, BindingV1, BuildMode, BuildOperation, Operations, VerifyOperation,
+        BINDING_VERSION, BindingV1, BuildMode, BuildOperation, DEFAULT_ADJUDICATION_CAP,
+        DEFAULT_FULL_RESYNC_EVERY, Operations, VerifyOperation,
     };
     use crate::ingest::findings::verify_binding;
     use crate::ingest::resolve::resolve_binding_run;
@@ -1348,6 +1349,8 @@ mod tests {
                     verify: Some(VerifyOperation {
                         trigger: IngestTrigger::Manual,
                         batch_size: 20,
+                        adjudication_cap: DEFAULT_ADJUDICATION_CAP,
+                        full_resync_every: DEFAULT_FULL_RESYNC_EVERY,
                     }),
                 },
             },

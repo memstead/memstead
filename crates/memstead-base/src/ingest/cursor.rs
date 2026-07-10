@@ -1393,7 +1393,7 @@ mod tests {
             rules: None,
             post_actions: None,
         };
-        let batch = next_batch(&resolved, root, &cache).unwrap();
+        let batch = next_batch(&resolved, root, &cache, 20).unwrap();
         assert!(
             batch.files.contains(&"keep.rs".to_string()),
             "keep.rs batched"
@@ -1505,7 +1505,7 @@ mod tests {
             post_actions: None,
         };
         assert!(
-            next_batch(&resolved, root, &cache).is_none(),
+            next_batch(&resolved, root, &cache, 20).is_none(),
             "an all-unscoped ingest emits no refinement batch"
         );
     }

@@ -18,6 +18,7 @@
 //! behaviour preserved is "each rotation covers the whole source set in a
 //! different batch order"; the exact permutation is not load-bearing.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -25,15 +26,50 @@ use serde::{Deserialize, Serialize};
 use super::cursor::enumerate_facet_files;
 use super::resolve::{ResolvedIngest, ResolvedSource};
 
-/// Per-binding rotation batch state (persisted as JSON).
+/// The rotation key the verify uncovered-artifact sampler walks under. Named so
+/// independent verify samples (uncovered files, anchor spot-checks) each get
+/// their own rotation cursor within one binding's state without interfering.
+pub const ROTATION_UNCOVERED_FILES: &str = "uncovered-files";
+
+/// The rotation key the verify anchor-adjudication sampler walks under (D2) — a
+/// distinct cursor from [`ROTATION_UNCOVERED_FILES`], so the cap-sized
+/// adjudication window rotates over the anchor set independently of the
+/// uncovered-file sample.
+pub const ROTATION_ANCHOR_ADJUDICATION: &str = "anchor-adjudication";
+
+/// One named rotation's cursor over a set: the shuffled item order plus its
+/// rotation counter and position. One rotation covers the whole set once before
+/// reshuffling.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-struct RefinementState {
+struct RotationCursor {
     #[serde(default)]
     rotation: u64,
     #[serde(default)]
     cursor: usize,
     #[serde(default)]
-    file_order: Vec<String>,
+    order: Vec<String>,
+}
+
+/// Per-binding verify-scheduling state (persisted as JSON under the engine cache
+/// tier). Holds the level-trigger run clock (`verify_runs`, for `full_resync_every`,
+/// D3) and the set of named rotation cursors the verify samplers walk (D2).
+///
+/// The prior flat single-rotation shape (a bare `rotation`/`cursor`/`file_order`
+/// triple) is superseded by `rotations`; because this lives under the recomputable
+/// `.memstead.cache/` tier, a state file in the old shape simply fails to parse
+/// and reseeds — no migration needed.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct RefinementState {
+    /// The verify-run counter — the `full_resync_every` level-trigger clock (D3).
+    /// Ticks every verify run, including a run whose source enumerates to nothing
+    /// (a non-enumerable medium), so the schedule refuses *on time* rather than
+    /// silently never firing.
+    #[serde(default)]
+    verify_runs: u64,
+    /// Named rotation cursors, keyed by sample kind
+    /// ([`ROTATION_UNCOVERED_FILES`], [`ROTATION_ANCHOR_ADJUDICATION`]).
+    #[serde(default)]
+    rotations: BTreeMap<String, RotationCursor>,
 }
 
 /// One batch: the files to review plus its position in the rotation.
@@ -108,47 +144,89 @@ fn save_state(cache_root: &Path, binding_name: &str, state: &RefinementState) {
     }
 }
 
-/// Advance to the next batch, starting (and shuffling) a new rotation when the
-/// current one is exhausted. `None` when the binding has no source files.
-/// Unrendered in E2 — the verify sampler (E3b) is its consumer.
+/// Increment and return the persisted verify-run counter for a binding — the
+/// level-trigger clock the `full_resync_every` schedule reads (D3). Independent
+/// of the rotation cursors: it ticks every verify run, including a run whose
+/// source enumerates to nothing (a non-enumerable medium), so the schedule can
+/// **refuse on time** rather than silently never firing. Returns the new
+/// (post-increment, 1-based) run count.
+pub fn bump_verify_runs(cache_root: &Path, binding_name: &str) -> u64 {
+    let mut state = load_state(cache_root, binding_name).unwrap_or_default();
+    state.verify_runs = state.verify_runs.saturating_add(1);
+    let n = state.verify_runs;
+    save_state(cache_root, binding_name, &state);
+    n
+}
+
+/// Advance one **named** rotation over an arbitrary item set — the generalized
+/// rotation core the verify samplers (D2) repurpose. `items` is the full set to
+/// cover (sorted + de-duplicated by the caller for determinism); `rotation_key`
+/// namespaces this rotation within the binding's state file so independent
+/// samples rotate on their own cursor. One rotation walks the whole set once in
+/// a reproducibly-shuffled order before reshuffling for the next; same persisted
+/// state → same sequence. `None` when `items` is empty.
+pub fn next_rotation_batch(
+    cache_root: &Path,
+    binding_name: &str,
+    rotation_key: &str,
+    items: Vec<String>,
+    batch_size: usize,
+) -> Option<Batch> {
+    let batch_size = batch_size.max(1);
+    if items.is_empty() {
+        return None;
+    }
+
+    let mut state = load_state(cache_root, binding_name).unwrap_or_default();
+    let mut cursor = state.rotations.remove(rotation_key).unwrap_or_default();
+    if cursor.order.is_empty() || cursor.cursor >= cursor.order.len() {
+        // New rotation: bump the counter (only after a completed prior rotation)
+        // and reshuffle the whole set.
+        let rotation = cursor.rotation + u64::from(!cursor.order.is_empty());
+        let mut order = items;
+        shuffle(&mut order, rotation);
+        cursor = RotationCursor {
+            rotation,
+            cursor: 0,
+            order,
+        };
+    }
+
+    let end = (cursor.cursor + batch_size).min(cursor.order.len());
+    let files = cursor.order[cursor.cursor..end].to_vec();
+    let batch_index = cursor.cursor / batch_size + 1;
+    let total_batches = cursor.order.len().div_ceil(batch_size);
+    cursor.cursor += files.len();
+    let rotation = cursor.rotation;
+    state.rotations.insert(rotation_key.to_string(), cursor);
+    save_state(cache_root, binding_name, &state);
+
+    Some(Batch {
+        files,
+        rotation,
+        batch_index,
+        total_batches,
+    })
+}
+
+/// Advance the uncovered-artifact file sample (D2) — the retained rotation over
+/// a source facet's enumerated files, one `batch_size` window at a time. A thin
+/// wrapper over [`next_rotation_batch`] keyed [`ROTATION_UNCOVERED_FILES`].
+/// `None` when the binding has no source files (e.g. a non-enumerable medium).
 pub fn next_batch(
     resolved: &ResolvedIngest,
     workspace_root: &Path,
     cache_root: &Path,
+    batch_size: usize,
 ) -> Option<Batch> {
-    let batch_size = (resolved.batch_size as usize).max(1);
     let all_files = enumerate_source_files(resolved, workspace_root);
-    if all_files.is_empty() {
-        return None;
-    }
-
-    let mut state = load_state(cache_root, &resolved.name).unwrap_or_default();
-    if state.file_order.is_empty() || state.cursor >= state.file_order.len() {
-        // New rotation: bump the counter (only after a completed prior rotation)
-        // and reshuffle the whole source set.
-        let rotation = state.rotation + u64::from(!state.file_order.is_empty());
-        let mut file_order = all_files;
-        shuffle(&mut file_order, rotation);
-        state = RefinementState {
-            rotation,
-            cursor: 0,
-            file_order,
-        };
-    }
-
-    let end = (state.cursor + batch_size).min(state.file_order.len());
-    let files = state.file_order[state.cursor..end].to_vec();
-    let batch_index = state.cursor / batch_size + 1;
-    let total_batches = state.file_order.len().div_ceil(batch_size);
-    state.cursor += files.len();
-    save_state(cache_root, &resolved.name, &state);
-
-    Some(Batch {
-        files,
-        rotation: state.rotation,
-        batch_index,
-        total_batches,
-    })
+    next_rotation_batch(
+        cache_root,
+        &resolved.name,
+        ROTATION_UNCOVERED_FILES,
+        all_files,
+        batch_size,
+    )
 }
 
 #[cfg(test)]
@@ -199,20 +277,20 @@ mod tests {
         }
         let r = resolved("ref", 2);
 
-        let b1 = next_batch(&r, root, cache.path()).unwrap();
+        let b1 = next_batch(&r, root, cache.path(), 2).unwrap();
         assert_eq!(b1.rotation, 0);
         assert_eq!(b1.batch_index, 1);
         assert_eq!(b1.total_batches, 3); // ceil(5/2)
         assert_eq!(b1.files.len(), 2);
 
-        let b2 = next_batch(&r, root, cache.path()).unwrap();
+        let b2 = next_batch(&r, root, cache.path(), 2).unwrap();
         assert_eq!(b2.batch_index, 2);
-        let b3 = next_batch(&r, root, cache.path()).unwrap();
+        let b3 = next_batch(&r, root, cache.path(), 2).unwrap();
         assert_eq!(b3.batch_index, 3);
         assert_eq!(b3.files.len(), 1); // remainder
 
         // Rotation exhausted → next batch starts rotation 1.
-        let b4 = next_batch(&r, root, cache.path()).unwrap();
+        let b4 = next_batch(&r, root, cache.path(), 2).unwrap();
         assert_eq!(b4.rotation, 1);
         assert_eq!(b4.batch_index, 1);
 
@@ -221,5 +299,90 @@ mod tests {
         seen.sort();
         seen.dedup();
         assert_eq!(seen.len(), 5, "the rotation covers all files");
+    }
+
+    /// D2 — a named rotation over an arbitrary item set is deterministic
+    /// (same persisted state → same sequence), covers the whole set over a full
+    /// rotation, and reshuffles the next rotation into a different order.
+    #[test]
+    fn named_rotation_is_deterministic_and_covers_the_whole_set() {
+        let cache = tempfile::tempdir().unwrap();
+        let items: Vec<String> = (0..6).map(|i| format!("id{i}")).collect();
+        let key = ROTATION_ANCHOR_ADJUDICATION;
+
+        // Walk a full rotation of batch 2 → three windows covering all six ids.
+        let mut covered: Vec<String> = Vec::new();
+        let mut order_r0: Vec<String> = Vec::new();
+        for i in 0..3 {
+            let b = next_rotation_batch(cache.path(), "m/b", key, items.clone(), 2).unwrap();
+            assert_eq!(b.rotation, 0);
+            assert_eq!(b.batch_index, i + 1);
+            assert_eq!(b.total_batches, 3);
+            covered.extend(b.files.clone());
+            order_r0.extend(b.files);
+        }
+        let mut uniq = covered.clone();
+        uniq.sort();
+        uniq.dedup();
+        assert_eq!(uniq.len(), 6, "one rotation covers the whole set");
+
+        // Next rotation reshuffles (different order, same coverage).
+        let b = next_rotation_batch(cache.path(), "m/b", key, items.clone(), 2).unwrap();
+        assert_eq!(
+            b.rotation, 1,
+            "a new rotation starts once the prior is done"
+        );
+
+        // Reproducibility: re-running from a fresh cache with the same seed
+        // (rotation 0) yields the identical first-rotation order.
+        let cache2 = tempfile::tempdir().unwrap();
+        let mut order_repro: Vec<String> = Vec::new();
+        for _ in 0..3 {
+            let b = next_rotation_batch(cache2.path(), "m/b", key, items.clone(), 2).unwrap();
+            order_repro.extend(b.files);
+        }
+        assert_eq!(order_r0, order_repro, "same seed/state → same sequence");
+    }
+
+    /// D2 — two named rotations under one binding advance on independent cursors:
+    /// walking one does not consume the other.
+    #[test]
+    fn named_rotations_are_independent() {
+        let cache = tempfile::tempdir().unwrap();
+        let a: Vec<String> = (0..4).map(|i| format!("a{i}")).collect();
+        let files =
+            next_rotation_batch(cache.path(), "m/b", ROTATION_UNCOVERED_FILES, a.clone(), 2)
+                .unwrap();
+        let anchors = next_rotation_batch(
+            cache.path(),
+            "m/b",
+            ROTATION_ANCHOR_ADJUDICATION,
+            a.clone(),
+            2,
+        )
+        .unwrap();
+        // Both are the first window of their own rotation.
+        assert_eq!(files.batch_index, 1);
+        assert_eq!(anchors.batch_index, 1);
+        // Advancing the file rotation again does not touch the anchor cursor.
+        let files2 =
+            next_rotation_batch(cache.path(), "m/b", ROTATION_UNCOVERED_FILES, a.clone(), 2)
+                .unwrap();
+        assert_eq!(files2.batch_index, 2);
+        let anchors_again =
+            next_rotation_batch(cache.path(), "m/b", ROTATION_ANCHOR_ADJUDICATION, a, 2).unwrap();
+        assert_eq!(anchors_again.batch_index, 2, "anchor cursor is independent");
+    }
+
+    /// D3 — the verify-run counter ticks every call and persists across a fresh
+    /// load (the level-trigger clock survives process restarts).
+    #[test]
+    fn verify_run_counter_ticks_and_persists() {
+        let cache = tempfile::tempdir().unwrap();
+        assert_eq!(bump_verify_runs(cache.path(), "m/b"), 1);
+        assert_eq!(bump_verify_runs(cache.path(), "m/b"), 2);
+        assert_eq!(bump_verify_runs(cache.path(), "m/b"), 3);
+        // A different binding has its own counter.
+        assert_eq!(bump_verify_runs(cache.path(), "m/other"), 1);
     }
 }

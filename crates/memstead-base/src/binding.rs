@@ -104,15 +104,64 @@ pub struct SyncOperation {
     pub batch_size: u32,
 }
 
+/// Default per-run tier-3 adjudication cap (bundle plan `05-verify-sync-engine`,
+/// D1/D4). Dogfood-tuned against the live `engine/graph` binding (524 source
+/// artifacts): a fully-drifted mem of that scale clears its adjudication backlog
+/// in ~11 verify runs while each run's asserted-drift work stays bounded and its
+/// token cost predictable. `0` disables the cap (adjudicate every candidate).
+pub const DEFAULT_ADJUDICATION_CAP: u32 = 50;
+
+/// Default `full_resync_every` (bundle plan `05-verify-sync-engine`, D3/D4):
+/// fire a guaranteed full-enumeration coverage sweep every N verify runs.
+/// Dogfood-tuned against `engine/graph` (524 artifacts, sample batch 20 → a
+/// rotation completes in ~27 runs): a sweep every 20 runs guarantees a complete
+/// coverage picture without waiting on the rotation to happen to finish. `0`
+/// disables scheduled full walks (rotating sample only).
+pub const DEFAULT_FULL_RESYNC_EVERY: u32 = 20;
+
+fn default_adjudication_cap() -> u32 {
+    DEFAULT_ADJUDICATION_CAP
+}
+
+fn default_full_resync_every() -> u32 {
+    DEFAULT_FULL_RESYNC_EVERY
+}
+
 /// The **verify** operation — read-only measurement. Optional: an absent
 /// `verify` block means engine defaults, never a refusal (verify is
 /// read-only). Carries no mode.
+///
+/// `adjudication_cap` and `full_resync_every` are the tier-3 operations knobs
+/// (bundle plan `05-verify-sync-engine`, group D): scheduling attributes on the
+/// measurement side only — like `trigger` / `batch_size`, they never change what
+/// the mem claims, so they are excluded from [`hash_binding`] (the whole
+/// `verify` block is). Both are additive: an older `verify` block without them
+/// deserializes to the dogfood-tuned defaults.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VerifyOperation {
     /// What sets a verify running.
     pub trigger: IngestTrigger,
     /// How many artifacts a single run processes.
     pub batch_size: u32,
+    /// Per-run tier-3 adjudication cap (D1): the maximum number of hash-drift
+    /// adjudications a single verify run asserts. Once the cap is reached the
+    /// run **stops adjudicating** and queues the remaining drift candidates as
+    /// `queued-for-adjudication` findings (the tier-3 backlog the fidelity
+    /// report renders). Combined with the rotating sample (D2), successive runs
+    /// adjudicate different windows, so the whole anchor set is covered over a
+    /// full rotation. `0` disables the cap. Defaults to
+    /// [`DEFAULT_ADJUDICATION_CAP`].
+    #[serde(default = "default_adjudication_cap")]
+    pub adjudication_cap: u32,
+    /// Scheduled full-enumeration walk cadence (D3): every N verify runs, a full
+    /// coverage sweep enumerates the whole source set (`S(D)`) for **enumerable**
+    /// mediums, guaranteeing eventual complete coverage rather than relying on
+    /// the rotating sample to finish. For a medium the capability matrix marks
+    /// **non-enumerable**, the scheduled walk refuses with a typed signal — never
+    /// a silent skip, never a fabricated full-coverage claim. `0` disables
+    /// scheduled full walks. Defaults to [`DEFAULT_FULL_RESYNC_EVERY`].
+    #[serde(default = "default_full_resync_every")]
+    pub full_resync_every: u32,
 }
 
 /// The operations block of a [`BindingV1`]: every operation is **optional**
@@ -548,6 +597,8 @@ mod tests {
                 verify: Some(VerifyOperation {
                     trigger: IngestTrigger::Manual,
                     batch_size: 20,
+                    adjudication_cap: DEFAULT_ADJUDICATION_CAP,
+                    full_resync_every: DEFAULT_FULL_RESYNC_EVERY,
                 }),
             },
         }
@@ -668,6 +719,55 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&BuildMode::OneShot).unwrap(),
             r#""one-shot""#
+        );
+    }
+
+    /// D4 — the tier-3 knobs are additive: a `verify` block written before they
+    /// existed (only `trigger` + `batch_size`) deserializes to the dogfood-tuned
+    /// defaults, and a block that sets them round-trips its values.
+    #[test]
+    fn verify_tier3_knobs_default_and_round_trip() {
+        // Legacy verify block — no adjudication_cap / full_resync_every.
+        let src = r#"{
+          "version": 1,
+          "destination_mem": "m",
+          "operations": {
+            "build": { "mode": "discovery", "trigger": "loop", "batch_size": 20 },
+            "verify": { "trigger": "manual", "batch_size": 20 }
+          }
+        }"#;
+        let b: BindingV1 = serde_json::from_str(src).unwrap();
+        let v = b.operations.verify.as_ref().unwrap();
+        assert_eq!(v.adjudication_cap, DEFAULT_ADJUDICATION_CAP);
+        assert_eq!(v.full_resync_every, DEFAULT_FULL_RESYNC_EVERY);
+
+        // Explicit values round-trip.
+        let explicit = VerifyOperation {
+            trigger: IngestTrigger::Manual,
+            batch_size: 10,
+            adjudication_cap: 7,
+            full_resync_every: 3,
+        };
+        let json = serde_json::to_string(&explicit).unwrap();
+        let back: VerifyOperation = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, explicit);
+        assert!(json.contains("adjudication_cap"));
+        assert!(json.contains("full_resync_every"));
+    }
+
+    /// The tier-3 scheduling knobs never change `hash(D)` — they are excluded
+    /// with the rest of the `verify` block (scheduling never changes the claim).
+    #[test]
+    fn tier3_knobs_do_not_change_the_hash() {
+        let base = hash_binding(&resolved(binding(), one_codebase_source()));
+        let mut tuned = binding();
+        let v = tuned.operations.verify.as_mut().unwrap();
+        v.adjudication_cap = 999;
+        v.full_resync_every = 1;
+        assert_eq!(
+            base,
+            hash_binding(&resolved(tuned, one_codebase_source())),
+            "tier-3 verify knobs are excluded from hash(D)"
         );
     }
 

@@ -56,14 +56,18 @@ pub use cursor::{
     compute_source_cursor, enumerate_facet_files, source_moved, write_active_deny_file,
 };
 pub use findings::{
-    Finding, FindingClass, FindingKey, FindingTarget, FindingsBatch, FindingsError, FindingsStore,
-    VerifyOutcome, adjudicate_anchor, current_findings, delete_findings_store, findings_store_path,
-    read_findings_store, verify_binding, write_findings_store,
+    FacetEnumerability, Finding, FindingClass, FindingKey, FindingTarget, FindingsBatch,
+    FindingsError, FindingsStore, FullResyncDecision, FullResyncRefusal, VerifyOutcome,
+    adjudicate_anchor, current_findings, delete_findings_store, findings_store_path,
+    read_findings_store, schedule_full_resync, verify_binding, write_findings_store,
 };
 pub use guidance::{
     GuidanceDefaults, MemGuidance, ResolvedGuidance, merge_guidance_block, resolve_writing_guidance,
 };
-pub use refinement::{Batch, next_batch};
+pub use refinement::{
+    Batch, ROTATION_ANCHOR_ADJUDICATION, ROTATION_UNCOVERED_FILES, bump_verify_runs, next_batch,
+    next_rotation_batch,
+};
 pub use render::{
     RenderBriefError, mode_name, render_ingest_brief, render_sync_brief_for,
     render_verify_brief_for,

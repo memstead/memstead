@@ -27,13 +27,14 @@ use serde_json::json;
 
 use memstead_base::binding::{
     BINDING_VERSION, BindingV1, BuildMode, BuildOperation, CapabilityError, CoverageSemantics,
-    Operations, ResolvedBinding, SyncOperation, VerifyOperation, validate_binding,
+    DEFAULT_ADJUDICATION_CAP, DEFAULT_FULL_RESYNC_EVERY, Operations, ResolvedBinding,
+    SyncOperation, VerifyOperation, validate_binding,
 };
 use memstead_base::binding_migrate::{
     BindingMigrateError, migrate_gen2_bindings, resolve_migrated_binding,
 };
 use memstead_base::ingest::advance::{AdvanceError, advance_baseline};
-use memstead_base::ingest::findings::verify_binding;
+use memstead_base::ingest::findings::{FullResyncDecision, verify_binding};
 use memstead_base::ingest::report::{
     DEFAULT_REPORT_BUDGET, compute_fidelity_report, render_fidelity_report,
 };
@@ -575,6 +576,8 @@ fn init(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
             verify: Some(VerifyOperation {
                 trigger: IngestTrigger::Manual,
                 batch_size: 20,
+                adjudication_cap: DEFAULT_ADJUDICATION_CAP,
+                full_resync_every: DEFAULT_FULL_RESYNC_EVERY,
             }),
         },
     };
@@ -1091,6 +1094,8 @@ fn enable(ctx: &CliContext, args: EnableArgs) -> anyhow::Result<()> {
             binding.operations.verify = Some(VerifyOperation {
                 trigger: IngestTrigger::Manual,
                 batch_size,
+                adjudication_cap: DEFAULT_ADJUDICATION_CAP,
+                full_resync_every: DEFAULT_FULL_RESYNC_EVERY,
             });
         }
     }
@@ -1321,6 +1326,41 @@ fn advance(ctx: &CliContext, args: AdvanceArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Render a one-block human note for the full-enumeration scheduling decision
+/// (D3), prepended to the verify report so the typed signal is never silent: a
+/// scheduled full walk that fired, a not-yet-due countdown, disabled scheduling,
+/// and — critically — any non-enumerable refusal. Empty for the quiet cases
+/// keeps a rotating-sample run byte-clean.
+fn render_full_resync_note(decision: &FullResyncDecision) -> String {
+    match decision {
+        FullResyncDecision::Disabled => String::new(),
+        FullResyncDecision::NotDue { .. } => String::new(),
+        FullResyncDecision::Due {
+            walked_facets,
+            refused,
+            ..
+        } => {
+            let mut s = String::from("> **Scheduled full resync (D3)** — ");
+            if walked_facets.is_empty() {
+                s.push_str("no enumerable facet to walk this run.");
+            } else {
+                s.push_str(&format!(
+                    "full-enumeration coverage walk fired for: {}.",
+                    walked_facets.join(", ")
+                ));
+            }
+            for r in refused {
+                s.push_str(&format!(
+                    "\n> **Refused (non-enumerable):** `{}` ({}) — {}",
+                    r.facet, r.medium_type, r.reason
+                ));
+            }
+            s.push_str("\n\n");
+            s
+        }
+    }
+}
+
 /// `projection verify <binding>` — measure fidelity and record durable findings
 /// (group A). Read-only on the destination mem.
 fn verify(ctx: &CliContext, args: VerifyArgs) -> anyhow::Result<()> {
@@ -1393,13 +1433,23 @@ fn verify(ctx: &CliContext, args: VerifyArgs) -> anyhow::Result<()> {
             "recorded": outcome.recorded,
             "superseded": outcome.superseded,
             "backlog": outcome.backlog,
+            // The tier-3 full-enumeration scheduling decision (D3) — surfaced
+            // (never a silent skip): whether a scheduled full walk fired, is not
+            // yet due, is disabled, and any typed non-enumerable refusals.
+            "full_resync": outcome.full_resync,
             "report": report,
             "report_mode": rendered.mode,
             "report_markdown": rendered.markdown,
         }))?;
     } else {
-        // The rendered report IS the stdout content (agent-consumable brief).
-        print_markdown(&rendered.markdown);
+        // The rendered report IS the stdout content (agent-consumable brief);
+        // prepend the scheduled full-walk decision so D3's typed signal (a full
+        // sweep, or a non-enumerable refusal) is never silent in human mode.
+        print_markdown(&format!(
+            "{}{}",
+            render_full_resync_note(&outcome.full_resync),
+            rendered.markdown
+        ));
     }
     Ok(())
 }
