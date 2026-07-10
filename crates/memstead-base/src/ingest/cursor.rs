@@ -14,10 +14,22 @@
 //!     `:(glob,exclude)` pathspecs.
 //!   - **graph** — diff the source mem's snapshot token via the engine's own
 //!     [`Engine::changes_since`]; reference mems are graph-detected too.
-//!   - **mtime** — enumerate the facet's files, compute a stat-map digest,
-//!     memoise it under `.memstead.cache/ingest/source-cursor/`, and diff the
-//!     current digest against the memoised baseline via the pure
+//!   - **mtime** — enumerate the facet's files (minus the facet scope's own
+//!     denies *and* the ingest `deny_paths`, applied identically to the git
+//!     strategy's exclude pathspecs — see [`enumerate_facet_files`]), compute a
+//!     stat-map digest, memoise it under `.memstead.cache/ingest/source-cursor/`,
+//!     and diff the current digest against the memoised baseline via the pure
 //!     [`super::slice::mtime_slice_outcome`] core (precise, incl. deletions).
+//!
+//! **Deny invariance.** Ingest `deny_paths` are enforced identically by every
+//! strategy that reads a file tree — git, mtime, and refinement's enumeration,
+//! plus both token computations ([`current_primary_token`] / [`source_moved`]).
+//! A file matching a `deny_paths` entry appears in no changed slice, no
+//! refinement batch, and never influences the mtime digest or the
+//! `source_moved` token. The **graph** strategy is exempt *by definition*:
+//! `deny_paths` entries are file-path globs, but a graph source's artifacts are
+//! entities (entity-granular), so a file-path glob can never select one. This
+//! exemption is designed, not an omission.
 //!
 //! Load-bearing invariant: the new baseline `token` is only *collected* here
 //! (into `write_commands` / `reseed`); the agent records it via
@@ -139,7 +151,18 @@ fn build_glob_set(patterns: &[&str]) -> Option<GlobSet> {
 /// allow globs minus its deny globs, evaluated over the medium's directory
 /// tree; empty when the facet has no allows. Returns a sorted, de-duplicated
 /// list.
-pub fn enumerate_facet_files(source: &ResolvedPrimarySource, workspace_root: &Path) -> Vec<String> {
+///
+/// `deny_paths` are the ingest-level denies (`ResolvedIngest::deny_paths`),
+/// applied on top of the facet's own scope denies with the *same*
+/// workspace-relative glob grammar the git strategy pushes down as
+/// `:(glob,exclude)` pathspecs — so a denied file is excluded from the mtime
+/// input set exactly as it is from the git diff. Passing `&[]` yields the
+/// facet-scope-only behaviour.
+pub fn enumerate_facet_files(
+    source: &ResolvedPrimarySource,
+    deny_paths: &[String],
+    workspace_root: &Path,
+) -> Vec<String> {
     if !matches!(
         source.medium_type,
         MediumType::Codebase | MediumType::Filesystem
@@ -153,6 +176,13 @@ pub fn enumerate_facet_files(source: &ResolvedPrimarySource, workspace_root: &Pa
             PatternMode::Allow => allows.push(&rule.path),
             PatternMode::Deny => denies.push(&rule.path),
         }
+    }
+    // Ingest deny_paths deny on top of the facet's own denies, sharing the
+    // facet-scope glob grammar (workspace-relative, matched against each
+    // candidate's workspace-relative path) — the same entries the git strategy
+    // resolves as exclude pathspecs, so deny enforcement is strategy-invariant.
+    for dp in deny_paths {
+        denies.push(dp);
     }
     if allows.is_empty() {
         return Vec::new();
@@ -398,11 +428,12 @@ fn write_cursor_memo(cache_root: &Path, ingest: &str, facet: &str, aggregate: &s
 fn compute_mtime_slice(
     source: &ResolvedPrimarySource,
     ingest_name: &str,
+    deny_paths: &[String],
     workspace_root: &Path,
     cache_root: &Path,
     baseline: Option<&str>,
 ) -> SliceOutcome {
-    let files = enumerate_facet_files(source, workspace_root);
+    let files = enumerate_facet_files(source, deny_paths, workspace_root);
     let now_map = compute_stat_map(&files, workspace_root);
     let now_digest = digest_stat_map(&now_map);
     write_cursor_memo(
@@ -424,6 +455,7 @@ fn compute_mtime_slice(
 fn current_primary_token(
     engine: &Engine,
     source: &ResolvedPrimarySource,
+    deny_paths: &[String],
     workspace_root: &Path,
 ) -> Option<String> {
     match resolve_change_strategy(source, workspace_root) {
@@ -433,7 +465,7 @@ fn current_primary_token(
         ))?),
         ChangeStrategy::Graph => engine.mem_head_sha(&source.medium_pointer).ok().flatten(),
         ChangeStrategy::Mtime => {
-            let files = enumerate_facet_files(source, workspace_root);
+            let files = enumerate_facet_files(source, deny_paths, workspace_root);
             Some(serialize_digest_token(&digest_stat_map(&compute_stat_map(
                 &files,
                 workspace_root,
@@ -460,7 +492,7 @@ pub fn source_moved(engine: &Engine, resolved: &ResolvedIngest, workspace_root: 
         let (facet_ref, current) = match source {
             ResolvedSource::Primary(p) => (
                 p.facet_ref.clone(),
-                current_primary_token(engine, p, workspace_root),
+                current_primary_token(engine, p, &resolved.deny_paths, workspace_root),
             ),
             ResolvedSource::Reference { mem } => {
                 (mem.clone(), engine.mem_head_sha(mem).ok().flatten())
@@ -517,6 +549,7 @@ pub fn compute_source_cursor(
                     ChangeStrategy::Mtime => compute_mtime_slice(
                         p,
                         &resolved.name,
+                        &resolved.deny_paths,
                         workspace_root,
                         &cache_root,
                         baseline,
@@ -753,12 +786,12 @@ mod tests {
                 mode: PatternMode::Deny,
             },
         ]);
-        assert_eq!(enumerate_facet_files(&source, root), vec!["a.rs"]);
+        assert_eq!(enumerate_facet_files(&source, &[], root), vec!["a.rs"]);
 
         // A graph medium enumerates nothing (not a file tree).
         let mut graph_source = source.clone();
         graph_source.medium_type = MediumType::Graph;
-        assert!(enumerate_facet_files(&graph_source, root).is_empty());
+        assert!(enumerate_facet_files(&graph_source, &[], root).is_empty());
     }
 
     /// The mtime driver reseeds on the first pass (writing the memo), then
@@ -776,7 +809,7 @@ mod tests {
         }]);
 
         // First pass: no baseline → reseed at the current digest, memo written.
-        let token = match compute_mtime_slice(&source, "ing", root, &cache, None) {
+        let token = match compute_mtime_slice(&source, "ing", &[], root, &cache, None) {
             SliceOutcome::Reseed { token } => token,
             other => panic!("expected Reseed, got {other:?}"),
         };
@@ -787,7 +820,7 @@ mod tests {
         std::fs::write(root.join("new.rs"), "x").unwrap();
 
         // Second pass with the reseed token → precise diff from the memo.
-        match compute_mtime_slice(&source, "ing", root, &cache, Some(&token)) {
+        match compute_mtime_slice(&source, "ing", &[], root, &cache, Some(&token)) {
             SliceOutcome::Changed {
                 slice, degraded, ..
             } => {
@@ -811,10 +844,156 @@ mod tests {
         let stale = super::super::change_detection::serialize_digest_token(
             &super::super::change_detection::digest_stat_map(&stat_map_for(&["absent.rs"])),
         );
-        match compute_mtime_slice(&source, "ing", root, &cache, Some(&stale)) {
+        match compute_mtime_slice(&source, "ing", &[], root, &cache, Some(&stale)) {
             SliceOutcome::Changed { degraded, .. } => assert!(degraded, "memo miss → degraded"),
             other => panic!("expected degraded Changed, got {other:?}"),
         }
+    }
+
+    fn head_sha(repo: &Path) -> String {
+        String::from_utf8(
+            std::process::Command::new("git")
+                .args(["rev-parse", "HEAD"])
+                .current_dir(repo)
+                .output()
+                .unwrap()
+                .stdout,
+        )
+        .unwrap()
+        .trim()
+        .to_string()
+    }
+
+    fn slice_contains(slice: &Slice, path: &str) -> bool {
+        let p = path.to_string();
+        slice.added.contains(&p) || slice.modified.contains(&p) || slice.deleted.contains(&p)
+    }
+
+    /// The mtime `source_moved` / `current_primary_token` value: the digest
+    /// token over the deny-filtered enumeration — exactly what the mtime branch
+    /// of `current_primary_token` computes.
+    fn mtime_token(source: &ResolvedPrimarySource, deny: &[String], root: &Path) -> String {
+        let files = enumerate_facet_files(source, deny, root);
+        serialize_digest_token(&digest_stat_map(&compute_stat_map(&files, root)))
+    }
+
+    /// AC1 (deny invariance): a file matching an ingest `deny_paths` entry
+    /// appears in **no** changed slice (git, mtime), **no** refinement batch,
+    /// and does **not** influence the mtime digest / `source_moved` token —
+    /// exercising the *same* denied file across every strategy that reads a
+    /// file tree.
+    #[test]
+    fn deny_paths_excluded_from_every_strategy_and_token() {
+        use crate::ingest::refinement::next_batch;
+        use crate::pipeline::{IngestMode, IngestTrigger};
+
+        let repo = tempfile::tempdir().unwrap();
+        let root = repo.path();
+        let cache = root.join(".memstead.cache").join("ingest");
+
+        // One tree that is both the git work tree and the mtime/refinement
+        // workspace root (medium_pointer "" → base == root).
+        git(root, &["init", "-q"]);
+        std::fs::write(root.join("keep.rs"), "one").unwrap();
+        std::fs::write(root.join("denied.rs"), "secret-one").unwrap();
+        git(root, &["add", "-A"]);
+        git(root, &["commit", "-qm", "base"]);
+        let baseline = head_sha(root);
+
+        // Both files genuinely move — denied.rs must never surface anywhere.
+        std::fs::write(root.join("keep.rs"), "two").unwrap();
+        std::fs::write(root.join("denied.rs"), "secret-two").unwrap();
+        git(root, &["add", "-A"]);
+        git(root, &["commit", "-qm", "move"]);
+
+        // Scope allows every .rs; the ingest denies denied.rs by the same
+        // workspace-relative glob grammar the git strategy uses.
+        let source = primary(vec![PatternEntry {
+            path: "**/*.rs".to_string(),
+            mode: PatternMode::Allow,
+        }]);
+        let deny = vec!["denied.rs".to_string()];
+
+        // (1) git slice — with the deny, only keep.rs.
+        match compute_git_slice(&source, &deny, root, Some(&baseline)) {
+            SliceOutcome::Changed { slice, .. } => {
+                assert_eq!(slice.modified, vec!["keep.rs"]);
+                assert!(!slice_contains(&slice, "denied.rs"), "git deny leak");
+            }
+            other => panic!("git: expected Changed, got {other:?}"),
+        }
+        // Control: without the deny, denied.rs *is* a real change — proving the
+        // deny (not the scope) is what excludes it above.
+        match compute_git_slice(&source, &[], root, Some(&baseline)) {
+            SliceOutcome::Changed { slice, .. } => {
+                assert!(
+                    slice_contains(&slice, "denied.rs"),
+                    "un-denied, denied.rs is a genuine git change"
+                );
+            }
+            other => panic!("git(no-deny): expected Changed, got {other:?}"),
+        }
+
+        // (2) enumeration (mtime input set + refinement source set).
+        assert_eq!(enumerate_facet_files(&source, &deny, root), vec!["keep.rs"]);
+        assert!(
+            enumerate_facet_files(&source, &[], root).contains(&"denied.rs".to_string()),
+            "un-denied, denied.rs is enumerated"
+        );
+
+        // (2b) mtime slice — reseed, then move both files; only keep.rs surfaces.
+        let token = match compute_mtime_slice(&source, "ing", &deny, root, &cache, None) {
+            SliceOutcome::Reseed { token } => token,
+            other => panic!("mtime reseed expected, got {other:?}"),
+        };
+        std::fs::write(root.join("keep.rs"), "three-longer").unwrap();
+        std::fs::write(root.join("denied.rs"), "secret-three-longer").unwrap();
+        match compute_mtime_slice(&source, "ing", &deny, root, &cache, Some(&token)) {
+            SliceOutcome::Changed { slice, .. } => {
+                assert_eq!(slice.modified, vec!["keep.rs"]);
+                assert!(!slice_contains(&slice, "denied.rs"), "mtime deny leak");
+            }
+            other => panic!("mtime: expected Changed, got {other:?}"),
+        }
+
+        // (3) mtime digest / source_moved token — invariant to denied.rs, since
+        // the token is the digest over the deny-filtered enumeration. Removing
+        // denied.rs from disk leaves the token unchanged; a leak would show it
+        // as a deletion and shift the digest.
+        let token_present = mtime_token(&source, &deny, root);
+        std::fs::remove_file(root.join("denied.rs")).unwrap();
+        let token_absent = mtime_token(&source, &deny, root);
+        assert_eq!(
+            token_present, token_absent,
+            "denied.rs must not influence the mtime digest / source_moved token"
+        );
+        std::fs::write(root.join("denied.rs"), "secret-restored").unwrap();
+
+        // (4) refinement batch — the denied file is never batched.
+        let resolved = ResolvedIngest {
+            name: "ing".to_string(),
+            mode: IngestMode::Refinement,
+            trigger: IngestTrigger::Loop,
+            batch_size: 50,
+            deny_paths: deny.clone(),
+            projection_ref: "m/p".to_string(),
+            projection_mem: "m".to_string(),
+            projection_name: "p".to_string(),
+            intent: None,
+            sources: vec![ResolvedSource::Primary(source.clone())],
+            destination_mem: "m".to_string(),
+            rules: None,
+            post_actions: None,
+        };
+        let batch = next_batch(&resolved, root, &cache).unwrap();
+        assert!(
+            batch.files.contains(&"keep.rs".to_string()),
+            "keep.rs batched"
+        );
+        assert!(
+            !batch.files.contains(&"denied.rs".to_string()),
+            "denied.rs must never enter a refinement batch"
+        );
     }
 
     fn stat_map_for(paths: &[&str]) -> super::super::change_detection::StatMap {

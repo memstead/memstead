@@ -98,11 +98,18 @@ fn medium_terms(resolved: &ResolvedIngest) -> (&'static str, &'static str) {
 }
 
 /// Enumerate the union of every source facet's files (sorted, de-duplicated).
+/// Each facet's enumeration applies the ingest's `deny_paths` (the same
+/// strategy-invariant deny set the git and mtime slices honour), so a denied
+/// file never lands in a refinement batch.
 fn enumerate_source_files(resolved: &ResolvedIngest, workspace_root: &Path) -> Vec<String> {
     let mut files: Vec<String> = Vec::new();
     for source in &resolved.sources {
         if let ResolvedSource::Primary(p) = source {
-            files.extend(enumerate_facet_files(p, workspace_root));
+            files.extend(enumerate_facet_files(
+                p,
+                &resolved.deny_paths,
+                workspace_root,
+            ));
         }
     }
     files.sort();
