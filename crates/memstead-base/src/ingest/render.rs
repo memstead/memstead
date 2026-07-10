@@ -17,8 +17,10 @@ use crate::pipeline_store::{BindingConfigs, load_pipeline_configs};
 
 use super::brief::{
     ProcessMemInfo, assemble_discovery_brief, assemble_one_shot_brief, render_changed_slice,
+    render_sync_brief, render_verify_brief,
 };
 use super::cursor::{compute_source_cursor, write_active_deny_file};
+use super::findings::{FindingClass, current_findings};
 use super::guidance::{GuidanceDefaults, MemGuidance, ResolvedGuidance, resolve_writing_guidance};
 use super::resolve::{ResolveError, ResolvedIngest, ResolvedSource, resolve_binding_run};
 
@@ -42,6 +44,16 @@ pub enum RenderBriefError {
     BuildOperationAbsent {
         /// The binding id whose build block is absent.
         binding: String,
+    },
+    /// The durable findings store could not be read while rendering a verify /
+    /// sync brief (group C). The brief needs the open findings; a malformed
+    /// store surfaces here rather than silently rendering an empty findings set.
+    #[error("could not read findings store for '{binding}': {detail}")]
+    FindingsRead {
+        /// The binding id whose findings store failed to read.
+        binding: String,
+        /// The underlying store error, stringified.
+        detail: String,
     },
 }
 
@@ -149,6 +161,89 @@ pub fn render_ingest_brief(
         BuildMode::Discovery => Ok(render_discovery(engine, &resolved, workspace_root)),
         BuildMode::OneShot => Ok(render_one_shot(engine, &resolved)),
     }
+}
+
+/// Render the **verify brief** (C1) for a binding — the measurement +
+/// capped-adjudication prompt an agent consumes. The one engine entry point the
+/// CLI (`projection brief --verify`) and UniFFI share, mirroring
+/// [`render_ingest_brief`]. Read-only on the destination mem: it borrows
+/// `&Engine` (shared), reads the durable findings store for the backlog count,
+/// and renders. It emits **no** destination-mutation instruction (C1) — the
+/// refusal is carried by [`render_verify_brief`] itself.
+pub fn render_verify_brief_for(
+    engine: &Engine,
+    workspace_root: &Path,
+    binding_id: &str,
+) -> Result<String, RenderBriefError> {
+    let configs = load_pipeline_configs(workspace_root)
+        .map_err(|e| RenderBriefError::ConfigLoad(e.to_string()))?;
+    let (binding_id, binding) = find_binding(&configs, binding_id)?;
+    let resolved = resolve_binding_run(&configs, &binding_id, binding)?;
+
+    let (_key, findings) =
+        current_findings(engine, workspace_root, binding, &resolved).map_err(|e| {
+            RenderBriefError::FindingsRead {
+                binding: binding_id.clone(),
+                detail: e.to_string(),
+            }
+        })?;
+    let backlog = findings
+        .iter()
+        .filter(|f| f.class == FindingClass::QueuedForAdjudication)
+        .count();
+    Ok(render_verify_brief(&resolved, backlog))
+}
+
+/// Render the **sync brief** (C2/C3) for a binding — the *single* channel
+/// through which maintenance-writing work reaches an agent. The one engine entry
+/// point the CLI (`projection brief --sync`) and UniFFI share. It assembles both
+/// inputs in one render: the live cursor slice ([`compute_source_cursor`]) and
+/// the open findings the verify pass recorded (`current(key)`), plus the adopt
+/// framing when the mem predates its binding (E1). Read-only on the destination
+/// mem (shared `&Engine`) — every repair happens only when an agent acts on this
+/// brief through the normal MCP mutation surface.
+pub fn render_sync_brief_for(
+    engine: &Engine,
+    workspace_root: &Path,
+    binding_id: &str,
+) -> Result<String, RenderBriefError> {
+    let configs = load_pipeline_configs(workspace_root)
+        .map_err(|e| RenderBriefError::ConfigLoad(e.to_string()))?;
+    let (binding_id, binding) = find_binding(&configs, binding_id)?;
+    let resolved = resolve_binding_run(&configs, &binding_id, binding)?;
+
+    let cursor = compute_source_cursor(engine, &resolved, workspace_root);
+    let (_key, findings) =
+        current_findings(engine, workspace_root, binding, &resolved).map_err(|e| {
+            RenderBriefError::FindingsRead {
+                binding: binding_id.clone(),
+                detail: e.to_string(),
+            }
+        })?;
+    let adopt = mem_predates_binding(engine, &resolved);
+    Ok(render_sync_brief(&resolved, &cursor, &findings, adopt))
+}
+
+/// Whether the destination mem predates its binding — the adopt / onboarding
+/// signal (E1). True when the mem carries **no** anchors and the binding has
+/// **no** recorded `#synced` baseline for any facet: there is nothing to diff
+/// against and nothing anchored yet, so 0% anchored is expected (a first sync),
+/// not drift. A genuinely-fresh mem legitimately gets the same first-sync
+/// framing — the signal is deliberately generic.
+fn mem_predates_binding(engine: &Engine, resolved: &ResolvedIngest) -> bool {
+    let no_anchors = engine
+        .mem_anchors_resolved(&resolved.destination_mem)
+        .is_empty();
+    let prefix = format!("{}/", resolved.name);
+    let never_synced = engine
+        .mem_config_for(&resolved.destination_mem)
+        .map(|c| {
+            !c.sync_state
+                .keys()
+                .any(|k| k.starts_with(&prefix) && k.ends_with("#synced"))
+        })
+        .unwrap_or(true);
+    no_anchors && never_synced
 }
 
 /// Resolve the destination mem's writing guidance (schema defaults + per-mem

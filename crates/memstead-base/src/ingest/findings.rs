@@ -458,6 +458,27 @@ fn current_key(
     }
 }
 
+/// The current `(hash(D), source_head)` key plus the open findings recorded
+/// under it for a binding — the read the **sync brief** (group C) consumes. It
+/// resolves the current key exactly as [`verify_binding`] does, reads the
+/// durable store, and returns the `current(key)` slice cloned. **Read-only** on
+/// the destination mem (shared `&Engine`): no findings recording, no mutation.
+/// A binding whose store does not exist yet yields the key and an empty vec.
+pub fn current_findings(
+    engine: &Engine,
+    workspace_root: &Path,
+    binding: &BindingV1,
+    resolved: &ResolvedIngest,
+) -> Result<(FindingKey, Vec<Finding>), FindingsError> {
+    let (mem, name) = split_binding_id(&resolved.name)?;
+    let key = current_key(engine, workspace_root, binding, resolved);
+    let findings = read_findings_store(workspace_root, &mem, &name)
+        .map_err(FindingsError::Store)?
+        .map(|s| s.current(&key).to_vec())
+        .unwrap_or_default();
+    Ok((key, findings))
+}
+
 /// Adjudicate one resolved anchor into a finding, or `None` when it resolves
 /// clean.
 ///

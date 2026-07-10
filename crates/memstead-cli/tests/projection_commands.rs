@@ -1085,6 +1085,137 @@ fn brief_renders_for_scaffolded_binding() {
     );
 }
 
+/// `projection brief <binding> --verify` renders the verify brief (group C):
+/// measurement + capped-adjudication instructions only, with the explicit
+/// no-mutation refusal and NO repair block. Read-only on the mem.
+#[cfg(feature = "mem-repo")]
+#[test]
+fn brief_verify_renders_measurement_only() {
+    let tmp = TempDir::new().unwrap();
+    let ws = tmp.path().join("ws");
+    memstead()
+        .args(["mem-repo", "init", ws.to_str().unwrap(), "--no-gitignore"])
+        .assert()
+        .success();
+    memstead()
+        .current_dir(&ws)
+        .args([
+            "projection",
+            "init",
+            "--mem",
+            "ws",
+            "--source",
+            "../src",
+            "--medium-type",
+            "codebase",
+            "--name",
+            "code",
+        ])
+        .assert()
+        .success();
+
+    let out = memstead()
+        .current_dir(&ws)
+        .args(["projection", "brief", "ws/code", "--verify"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let brief = String::from_utf8(out).unwrap();
+    assert!(brief.contains("## Verify — measure fidelity, do not mutate"));
+    assert!(
+        brief.contains("Verify writes **nothing** into the destination mem"),
+        "C1 refusal present; got:\n{brief}"
+    );
+    // C1/C2 refusal: the verify brief carries NO repair block.
+    assert!(
+        !brief.contains("## How to repair"),
+        "verify brief must not carry repair instructions; got:\n{brief}"
+    );
+    assert!(!brief.contains("## Open findings to repair"));
+}
+
+/// `projection brief <binding> --sync` renders the sync brief (group C): the
+/// sole-maintenance-writer prompt with the absorbed reconcile conservatism. A
+/// fresh mem (no anchors, never synced) triggers the adopt / first-sync framing.
+#[cfg(feature = "mem-repo")]
+#[test]
+fn brief_sync_renders_sole_writer_with_conservatism() {
+    let tmp = TempDir::new().unwrap();
+    let ws = tmp.path().join("ws");
+    memstead()
+        .args(["mem-repo", "init", ws.to_str().unwrap(), "--no-gitignore"])
+        .assert()
+        .success();
+    memstead()
+        .current_dir(&ws)
+        .args([
+            "projection",
+            "init",
+            "--mem",
+            "ws",
+            "--source",
+            "../src",
+            "--medium-type",
+            "codebase",
+            "--name",
+            "code",
+        ])
+        .assert()
+        .success();
+
+    let out = memstead()
+        .current_dir(&ws)
+        .args(["projection", "brief", "ws/code", "--sync"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let brief = String::from_utf8(out).unwrap();
+    assert!(brief.contains("## Sync — repair the graph to match the source"));
+    assert!(brief.contains("sole maintenance writer"));
+    assert!(brief.contains("Sync commits nothing."));
+    // Fresh mem → adopt / first-sync framing (E1 brief half).
+    assert!(
+        brief.contains("## First sync — adopting `ws`"),
+        "fresh mem gets adopt framing; got:\n{brief}"
+    );
+    // Absorbed reconcile conservatism (C3).
+    assert!(brief.contains("## How to repair — be conservative"));
+    assert!(brief.contains("A dropped dependency FLAGS, it does not auto-remove."));
+    assert!(brief.contains("`[commit <hash>]` log-style entries"));
+}
+
+/// `projection brief --verify` / `--sync` without a binding id refuses with a
+/// typed `PROJECTION_BRIEF_BINDING_REQUIRED` — they render one binding, never an
+/// `--all` rotation.
+#[cfg(feature = "mem-repo")]
+#[test]
+fn brief_verify_sync_require_a_binding() {
+    let tmp = TempDir::new().unwrap();
+    let ws = tmp.path().join("ws");
+    memstead()
+        .args(["mem-repo", "init", ws.to_str().unwrap(), "--no-gitignore"])
+        .assert()
+        .success();
+
+    for flag in ["--verify", "--sync"] {
+        let out = memstead()
+            .current_dir(&ws)
+            .args(["--json", "projection", "brief", flag])
+            .assert()
+            .failure()
+            .get_output()
+            .stdout
+            .clone();
+        let env: Value = serde_json::from_slice(&out).unwrap();
+        assert_eq!(env["code"], "PROJECTION_BRIEF_BINDING_REQUIRED");
+        assert_ne!(env["code"], "INTERNAL");
+    }
+}
+
 /// `projection brief` on an unknown binding id refuses `PROJECTION_NOT_FOUND`
 /// (NotFound exit) — never a generic/internal leak.
 #[cfg(feature = "mem-repo")]

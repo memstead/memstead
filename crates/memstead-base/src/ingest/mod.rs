@@ -46,6 +46,7 @@ pub use brief::{
     NoSignalNote, PROCESS_MEM_SCHEMA, ProcessMemInfo, SourceCursor, SyncCommand,
     assemble_discovery_brief, assemble_one_shot_brief, render_changed_slice, render_goal_and_avoid,
     render_intent, render_one_shot_lens, render_operative_data, render_situation,
+    render_sync_brief, render_verify_brief,
 };
 pub use change_detection::{
     Digest, StatDiff, StatEntry, StatMap, compute_stat_map, diff_stat_maps, digest_stat_map,
@@ -56,14 +57,17 @@ pub use cursor::{
 };
 pub use findings::{
     Finding, FindingClass, FindingKey, FindingTarget, FindingsBatch, FindingsError, FindingsStore,
-    VerifyOutcome, adjudicate_anchor, delete_findings_store, findings_store_path,
+    VerifyOutcome, adjudicate_anchor, current_findings, delete_findings_store, findings_store_path,
     read_findings_store, verify_binding, write_findings_store,
 };
 pub use guidance::{
     GuidanceDefaults, MemGuidance, ResolvedGuidance, merge_guidance_block, resolve_writing_guidance,
 };
 pub use refinement::{Batch, next_batch};
-pub use render::{RenderBriefError, mode_name, render_ingest_brief};
+pub use render::{
+    RenderBriefError, mode_name, render_ingest_brief, render_sync_brief_for,
+    render_verify_brief_for,
+};
 pub use report::{
     ALLOWED_REPORT_INCLUDE_KEYS, AnchorComposition, DEFAULT_REPORT_BUDGET, DenominatorBasis,
     FacetCapability, FacetFreshness, FidelityReport, GrainCoverage, RenderedFidelityReport,

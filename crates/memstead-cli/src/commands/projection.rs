@@ -40,7 +40,10 @@ use memstead_base::ingest::report::{
 use memstead_base::ingest::resolve::{
     ResolveError, ResolvedPrimarySource, ResolvedSource, resolve_binding, resolve_binding_run,
 };
-use memstead_base::ingest::{RenderBriefError, render_ingest_brief, select_next_due};
+use memstead_base::ingest::{
+    RenderBriefError, render_ingest_brief, render_sync_brief_for, render_verify_brief_for,
+    select_next_due,
+};
 use memstead_base::pipeline::{
     Facet, IngestTrigger, Medium, MediumType, PatternEntry, PatternMode,
 };
@@ -66,10 +69,19 @@ pub enum ProjectionCommand {
     /// Render a binding's run-brief — the Markdown prompt an agent consumes —
     /// on stdout. Takes the canonical binding id `<mem>/<stem>` (D3), e.g.
     /// `engine/graph`. Omit the id (or pass `--all`) to select the next due
-    /// binding by round-robin + backoff and render its brief. Reads the v1
+    /// binding by round-robin + backoff and render its build brief. Reads the v1
     /// binding store and the destination mem's schema / writing guidance; the
     /// assembly is shared with the UniFFI surface, so CLI and app briefs are
     /// byte-identical by construction.
+    ///
+    /// `--verify` renders the **verify brief** (group C) for the named binding:
+    /// measurement + capped-adjudication instructions only, with no
+    /// destination-mutation instruction. `--sync` renders the **sync brief** —
+    /// the sole maintenance-writer prompt, carrying both the cursor slice and the
+    /// open verify findings in one brief with the absorbed reconcile
+    /// conservatism. Both are read-only on the mem; the sync brief's repairs
+    /// reach the mem only when an agent acts on it through the MCP mutation
+    /// surface.
     Brief(BriefArgs),
     /// Scaffold a fresh v1 binding non-interactively: a `Medium`, a `Facet`,
     /// and a v1 binding under `.memstead/{mediums,facets,projections}/<mem>/`.
@@ -164,12 +176,27 @@ impl MediumTypeArg {
 pub struct BriefArgs {
     /// The canonical binding id `<mem>/<stem>` (D3) — e.g. `engine/graph`.
     /// Omit (or pass `--all`) to select the next due binding by round-robin +
-    /// backoff.
+    /// backoff. Required with `--verify` / `--sync` (those operate on one
+    /// binding's live findings/cursor, never a rotation).
     pub binding: Option<String>,
     /// Select the next due binding across all bindings (round-robin + backoff)
-    /// and render its brief, instead of naming one.
+    /// and render its (build) brief, instead of naming one. Ignored with
+    /// `--verify` / `--sync`.
     #[arg(long)]
     pub all: bool,
+    /// Render the **verify brief** (group C) for the named binding instead of
+    /// the build brief: measurement + capped-adjudication instructions only.
+    /// It carries no destination-mutation instruction — repairs route through
+    /// the sync brief. Read-only on the mem. Mutually exclusive with `--sync`.
+    #[arg(long, conflicts_with = "sync")]
+    pub verify: bool,
+    /// Render the **sync brief** (group C) for the named binding instead of the
+    /// build brief: the sole maintenance-writer prompt, carrying both the cursor
+    /// slice and the open verify findings in one brief, with the absorbed
+    /// reconcile conservatism. Read-only on the mem (the agent's writes route
+    /// through MCP). Mutually exclusive with `--verify`.
+    #[arg(long, conflicts_with = "verify")]
+    pub sync: bool,
 }
 
 #[derive(ClapArgs, Debug)]
@@ -295,6 +322,12 @@ fn map_brief_err(binding_id: &str, err: RenderBriefError) -> CliError {
             "PROJECTION_BUILD_NOT_ENABLED",
             message,
         ),
+        // A malformed findings store while rendering a verify / sync brief.
+        RenderBriefError::FindingsRead { .. } => CliError::new(
+            ExitKind::Generic,
+            "PROJECTION_FINDINGS_READ_FAILED",
+            message,
+        ),
         RenderBriefError::Resolve(inner) => match inner {
             ResolveError::BindingNotFound { .. } => {
                 CliError::new(ExitKind::NotFound, "PROJECTION_NOT_FOUND", message)
@@ -326,6 +359,36 @@ fn brief(ctx: &CliContext, args: BriefArgs) -> anyhow::Result<()> {
         CliEngine::MemRepo(e) => e,
         CliEngine::Filesystem(e) => e,
     };
+
+    // Group-C briefs: verify / sync render for one named binding (no rotation).
+    // Both are read-only on the destination mem — the sync brief's repairs reach
+    // the mem only when an agent acts on it through the MCP mutation surface.
+    if args.verify || args.sync {
+        let binding_id = args.binding.ok_or_else(|| {
+            CliError::new(
+                ExitKind::Validation,
+                "PROJECTION_BRIEF_BINDING_REQUIRED",
+                format!(
+                    "`projection brief --{}` needs a binding id `<mem>/<stem>` — it renders one \
+                     binding's brief, not an `--all` rotation",
+                    if args.verify { "verify" } else { "sync" }
+                ),
+            )
+        })?;
+        let rendered = if args.verify {
+            render_verify_brief_for(engine, &root, &binding_id)
+        } else {
+            render_sync_brief_for(engine, &root, &binding_id)
+        }
+        .map_err(|e| map_brief_err(&binding_id, e))?;
+
+        if ctx.json {
+            print_json(&json!({ "brief": rendered }))?;
+        } else {
+            print!("{rendered}");
+        }
+        return Ok(());
+    }
 
     // Resolve which binding to render: a named one (canonical `<mem>/<stem>`),
     // or the next due binding in a round-robin `--all` rotation (which advances

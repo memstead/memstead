@@ -675,6 +675,321 @@ pub fn assemble_one_shot_brief(
         .join("")
 }
 
+// ---------------------------------------------------------------------------
+// Verify + sync briefs (group C) — the measure/repair surface beside the build
+// briefs. Verify MEASURES (no destination mutation of any kind, C1); sync is the
+// SOLE maintenance writer, carrying BOTH the cursor slice and the open findings
+// in one brief (C2) with the whole of `/reconcile`'s absorbed judgment (C3). A
+// rule-by-rule absorption map records where each retired reconcile rule now
+// lives (bundle plan `05-verify-sync-engine`, C4).
+// ---------------------------------------------------------------------------
+
+use super::findings::{Finding, FindingClass, FindingTarget};
+
+/// Per-class cap on the rendered open-findings list — mirrors [`SLICE_CAP`].
+const FINDINGS_CAP: usize = SLICE_CAP;
+
+/// Render the **verify brief** (C1) — the measurement + capped-adjudication
+/// prompt an agent consumes to *measure* a binding's fidelity.
+///
+/// **Refusal (C1), structural:** this function emits **no destination-mutation
+/// instruction of any kind**. It tells the agent what to measure and adjudicate,
+/// never what to write into the destination mem — every repair is recorded as a
+/// finding for the sync brief ([`render_sync_brief`]) to act on. There is no
+/// create / update / relate / delete instruction anywhere in the rendered text.
+pub fn render_verify_brief(resolved: &ResolvedIngest, backlog: usize) -> String {
+    let mut lines: Vec<String> = vec![
+        "## Verify — measure fidelity, do not mutate".to_string(),
+        String::new(),
+    ];
+    lines.push(format!(
+        "You are measuring the fidelity of `{}` — how faithfully the destination mem \
+         `{}` still matches its source. This pass **only measures**: read the source \
+         and the mem's anchors, judge whether the graph still holds, and record what \
+         you find. Nothing here writes into the destination mem.",
+        resolved.name, resolved.destination_mem
+    ));
+    lines.push(String::new());
+
+    lines.push("### Adjudicate the queued findings (capped)".to_string());
+    lines.push(String::new());
+    if backlog == 0 {
+        lines.push(
+            "No findings are queued for adjudication this pass. Spot-check the resolving \
+             anchors and the uncovered-artifact sample the fidelity report lists, and \
+             record any drift you observe as a finding."
+                .to_string(),
+        );
+    } else {
+        lines.push(format!(
+            "{backlog} finding(s) are queued for adjudication. Working up to the per-run \
+             adjudication cap (an operations knob — the remainder stays queued and \
+             re-presents on a later pass), take each queued finding and compare the \
+             anchored source content against what the entity records. Classify it: still \
+             accurate, or drifted. **Record the verdict — this is a measurement, not a \
+             repair.** A drift you record becomes a finding the sync pass repairs; you do \
+             not fix it here."
+        ));
+    }
+    lines.push(String::new());
+
+    lines.push("### Out of scope for verify — no mutation".to_string());
+    lines.push(String::new());
+    lines.push(
+        "Verify writes **nothing** into the destination mem. Do not update a \
+         `specifies` / `constraints` section, do not create or delete an entity, do not \
+         add or remove a relationship. When measurement shows the graph is wrong, that \
+         is a **finding** — the sync brief (`memstead projection brief --sync`) is the \
+         one place those repairs are made. Leave every fix to it."
+            .to_string(),
+    );
+    lines.push(String::new());
+
+    format!("{}\n", lines.join("\n"))
+}
+
+/// A compact `entity → artifact` (or bare artifact) label for a finding target.
+fn finding_target_label(target: &FindingTarget) -> String {
+    match target {
+        FindingTarget::Anchor { entity, artifact } => format!("`{entity}` → `{artifact}`"),
+        FindingTarget::Artifact { artifact } => format!("`{artifact}`"),
+    }
+}
+
+/// Render one class-grouped findings section, capped at [`FINDINGS_CAP`] with a
+/// `…and N more` overflow line. Skips an empty group entirely.
+fn render_findings_group(
+    lines: &mut Vec<String>,
+    heading: &str,
+    guidance: &str,
+    items: &[&Finding],
+) {
+    if items.is_empty() {
+        return;
+    }
+    lines.push(format!("### {heading}"));
+    lines.push(String::new());
+    lines.push(guidance.to_string());
+    lines.push(String::new());
+    let shown = items.len().min(FINDINGS_CAP);
+    for f in &items[..shown] {
+        lines.push(format!(
+            "- {} — {}",
+            finding_target_label(&f.target),
+            f.detail
+        ));
+    }
+    if items.len() > shown {
+        lines.push(format!("- …and {} more", items.len() - shown));
+    }
+    lines.push(String::new());
+}
+
+/// Render the open-findings block for the sync brief (C2) — the findings
+/// `findings_store.current(key)` returned, grouped by class, each carrying the
+/// conservative repair guidance the reconcile rules (C3) mandate. Empty string
+/// when there are no open findings.
+fn render_open_findings(findings: &[Finding]) -> String {
+    if findings.is_empty() {
+        return String::new();
+    }
+    let mut lines: Vec<String> = vec![
+        "## Open findings to repair".to_string(),
+        String::new(),
+        "The verify pass recorded these against the current source state. Repair them \
+         conservatively (see the rules below); a finding you judge already correct needs \
+         no write."
+            .to_string(),
+        String::new(),
+    ];
+
+    let group = |class: FindingClass| -> Vec<&Finding> {
+        findings.iter().filter(|f| f.class == class).collect()
+    };
+
+    // Drifted / wrong — the anchored content changed: update only what moved
+    // (conservatism rule "never rewrite unchanged sections").
+    render_findings_group(
+        &mut lines,
+        "Drifted — the anchored content changed",
+        "The source the entity describes moved. Update the affected section to match — \
+         only the part that changed. If the entity is still accurate, leave it.",
+        &group(FindingClass::Drifted),
+    );
+    render_findings_group(
+        &mut lines,
+        "Wrong — an adjudicated content mismatch",
+        "Adjudication found the entity no longer matches its source. Correct the \
+         mismatched section; do not rewrite what still holds.",
+        &group(FindingClass::Wrong),
+    );
+    // Unresolvable anchor — the artifact is gone: delete only if the concept is
+    // removed entirely (conservatism rule "no deletion unless concept removed").
+    render_findings_group(
+        &mut lines,
+        "Unresolvable anchor — the artifact is gone",
+        "The source artifact an anchor references is no longer present. Delete the entity \
+         **only** if the concept is removed entirely; otherwise leave it. Concept-level \
+         removals are a prune concern with its own never-clobber / conflict-flag rules — \
+         do not delete on a hunch here.",
+        &group(FindingClass::UnresolvableAnchor),
+    );
+    // Uncovered — a source artifact with no entity: create only for a clearly-new
+    // concept (conservatism rule "no new entities unless clearly-new concept").
+    render_findings_group(
+        &mut lines,
+        "Uncovered — a source artifact with no entity",
+        "An in-scope source artifact has no anchor in the mem. Create an entity for it \
+         **only** if it is a clearly-new concept with no existing entity; otherwise \
+         extend the entity that already owns the concept, or leave it for a discovery \
+         build.",
+        &group(FindingClass::Uncovered),
+    );
+    // Queued — not yet adjudicated: verify owns these, not sync.
+    render_findings_group(
+        &mut lines,
+        "Queued for adjudication — not yet judged",
+        "These are not adjudicated yet — that is the verify pass's job, not sync's. \
+         **Skip them here**; they become repairable only after verify classifies them as \
+         drifted.",
+        &group(FindingClass::QueuedForAdjudication),
+    );
+
+    format!("{}\n", lines.join("\n"))
+}
+
+/// Render the sync brief's `## Situation` block — the sole-maintenance-writer
+/// mandate and the commits-nothing / engine-commits-per-mutation posture (C3).
+fn render_sync_situation(resolved: &ResolvedIngest) -> String {
+    format!(
+        "## Sync — repair the graph to match the source\n\n\
+         You are running the sync pass for `{}`. Sync is the graph's **sole maintenance \
+         writer**: the only place the destination mem `{}` is repaired to match its \
+         source. Two inputs steer this pass — the source changes since the last sync, and \
+         the open verify findings — both below. Work them: update, create, relate, and \
+         (rarely) delete entities so the graph again matches the source.\n\n\
+         Every mutation routes through the normal MCP mutation surface, and the engine \
+         commits each one **per-mutation** to the mem's own gitdir. You **stage nothing \
+         and commit nothing yourself** — not the graph, not the code. Sync commits \
+         nothing.\n\n",
+        resolved.name, resolved.destination_mem
+    )
+}
+
+/// Render the adopt / onboarding block (C3's first-sync/adopt framing; E1's
+/// brief half): a mem that predates its binding is onboarding, expected-0%, with
+/// the concrete backfill path — never a failure or red verdict.
+fn render_adopt_framing(resolved: &ResolvedIngest) -> String {
+    format!(
+        "## First sync — adopting `{}`\n\n\
+         This mem predates its binding: it has no anchors and no prior sync baseline, so \
+         **0% anchored is expected — this is onboarding, not a failure.** Do not read it \
+         as drift or a red verdict. There is no cursor to diff against, so the baseline is \
+         the **current** source HEAD — do **not** replay the whole history; treat the \
+         current source state as the starting point, and this is a **first sync**.\n\n\
+         **Backfill path:** run `memstead projection verify {}` to enumerate the in-scope \
+         source artifacts that carry no entity yet, then cover the clearly-new concepts \
+         among them through the normal MCP mutation surface — the same conservative rules \
+         below apply. Backfilling is incremental: a partial pass is fine, and the next \
+         sync continues where you left off.\n\n",
+        resolved.destination_mem, resolved.name
+    )
+}
+
+/// Render the sync brief's conservatism block — the whole of `/reconcile`'s
+/// absorbed judgment (C3): the five conservatism rules, edge-removal
+/// conservatism, and rationale-not-changelog.
+fn render_sync_conservatism() -> String {
+    let lines: Vec<&str> = vec![
+        "## How to repair — be conservative",
+        "",
+        "Repair only what the source changes and the findings above actually justify:",
+        "",
+        // The five conservatism rules.
+        "- **Unsure whether an entity is affected — skip it.** A missed update is a later \
+         finding; a wrong rewrite is damage.",
+        "- **Do not create a new entity unless the change clearly introduces a new concept \
+         with no existing entity.** Prefer updating the entity that already owns the \
+         concept.",
+        "- **Do not delete an entity unless the change removes the concept entirely.** \
+         Deletions a prune pass surfaces follow prune's own never-clobber / conflict-flag \
+         rules — never delete on a hunch here.",
+        "- **Never rewrite a section that has not changed** — touch only the part the \
+         change or finding actually affects.",
+        "- **No speculative edges — add only relationships the diff literally introduces** \
+         (a new `use` / `import` / dependency you can point at in the change).",
+        // Edge-removal conservatism.
+        "- **A dropped dependency FLAGS, it does not auto-remove.** If the change removes an \
+         import or dependency, leave the matching edge intact and note it for a later \
+         audit — removals are ambiguous (temporary refactor vs. permanent cut), and a \
+         stale edge is less damaging than an erased real one. **Edge removal is out of \
+         scope for sync.**",
+        // Rationale-not-changelog.
+        "- **Rationale is reasoning, not a changelog.** When you record why a change was \
+         made, append the *reasoning* (why this approach, which trade-offs) — never \
+         `[commit <hash>]` log-style entries.",
+        "",
+    ];
+
+    format!("{}\n", lines.join("\n"))
+}
+
+/// Render the **sync brief** (C2/C3) — the *single* channel through which
+/// maintenance-writing work reaches an agent.
+///
+/// One brief carries **both** inputs: the cursor slice (`cursor`, rendered via
+/// [`render_changed_slice`], which also carries the first-sync reseed framing and
+/// the disposition-recording step) and the open verify findings (`findings`, the
+/// store's `current(key)` slice). It absorbs the whole of `/reconcile`'s judgment
+/// (C3): the five conservatism rules, edge-removal conservatism,
+/// rationale-not-changelog, the commits-nothing / engine-commits-per-mutation
+/// posture, and — when `adopt` is set — the first-sync/adopt onboarding framing
+/// (E1's brief half). A rule-by-rule absorption map records where each retired
+/// reconcile rule now lives (bundle plan `05-verify-sync-engine`, C4).
+///
+/// When nothing has moved, no findings are open, and this is not an adopt pass,
+/// the brief renders a compact "nothing to sync" note instead of the repair
+/// machinery — a valid, silent outcome mirroring the build brief's no-op roam.
+pub fn render_sync_brief(
+    resolved: &ResolvedIngest,
+    cursor: &SourceCursor,
+    findings: &[Finding],
+    adopt: bool,
+) -> String {
+    let preface = render_changed_slice(cursor);
+    let open_findings = render_open_findings(findings);
+    let has_work = adopt || !preface.is_empty() || !open_findings.is_empty();
+
+    let mut parts: Vec<String> = vec![render_sync_situation(resolved)];
+
+    if !has_work {
+        parts.push(
+            "## Nothing to sync\n\nThe source has not moved since the last sync and no \
+             verify findings are open. There is nothing to repair this pass — reporting \
+             \"no changes\" is a valid outcome.\n\n"
+                .to_string(),
+        );
+        return parts
+            .into_iter()
+            .filter(|p| !p.is_empty())
+            .collect::<Vec<_>>()
+            .join("");
+    }
+
+    if adopt {
+        parts.push(render_adopt_framing(resolved));
+    }
+    parts.push(preface);
+    parts.push(open_findings);
+    parts.push(render_sync_conservatism());
+
+    parts
+        .into_iter()
+        .filter(|p| !p.is_empty())
+        .collect::<Vec<_>>()
+        .join("")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1229,5 +1544,237 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
         assert!(out.contains(
             r#"memstead projection advance d/p --dispositions '{"<artifact>": "<disposition>", ...}'"#
         ));
+    }
+
+    // ---- verify + sync briefs (group C) ----------------------------------
+
+    fn finding(class: FindingClass, target: FindingTarget, detail: &str) -> Finding {
+        Finding {
+            key: crate::ingest::findings::FindingKey {
+                binding_hash: "h".to_string(),
+                source_head: "s".to_string(),
+            },
+            facet: "src".to_string(),
+            target,
+            class,
+            detail: detail.to_string(),
+            created_at: "1".to_string(),
+        }
+    }
+
+    fn anchor_target(entity: &str, artifact: &str) -> FindingTarget {
+        FindingTarget::Anchor {
+            entity: entity.to_string(),
+            artifact: artifact.to_string(),
+        }
+    }
+
+    fn artifact_target(artifact: &str) -> FindingTarget {
+        FindingTarget::Artifact {
+            artifact: artifact.to_string(),
+        }
+    }
+
+    fn empty_cursor() -> SourceCursor {
+        SourceCursor {
+            union: slice(&[], &[], &[]),
+            write_commands: vec![],
+            reseed: vec![],
+            no_signal: vec![],
+            any_changes: false,
+            degraded: false,
+            dead_denies: vec![],
+            dest_mem: "engine".to_string(),
+            binding_id: "engine/graph".to_string(),
+        }
+    }
+
+    /// C1 — the verify brief measures + adjudicates, and carries NO
+    /// destination-mutation instruction of any kind. It names the sync brief as
+    /// the repair home and prints its explicit no-mutation refusal.
+    #[test]
+    fn verify_brief_measures_and_refuses_mutation() {
+        let r = resolved("engine", None, vec![]);
+        let out = render_verify_brief(&r, 3);
+        // Measurement + capped adjudication instructions.
+        assert!(out.starts_with("## Verify — measure fidelity, do not mutate"));
+        assert!(out.contains("3 finding(s) are queued for adjudication"));
+        assert!(out.contains("per-run adjudication cap"));
+        assert!(out.contains("this is a measurement, not a repair"));
+        // C1 REFUSAL: structurally no destination-mutation instruction. The
+        // brief never tells the agent to write into the mem — it says the
+        // opposite, and hands repairs to the sync brief.
+        assert!(out.contains("Verify writes **nothing** into the destination mem"));
+        assert!(out.contains("memstead projection brief --sync"));
+        // No create/update/relate/delete *instruction* — the only occurrences of
+        // those verbs are in the negated "do not …" refusal line.
+        assert!(out.contains("do not create or delete an entity"));
+        assert!(!out.contains("via `memstead_create`"));
+        assert!(!out.contains("Run `memstead_update`"));
+
+        // Backlog 0 → the spot-check phrasing, still no mutation instruction.
+        let zero = render_verify_brief(&r, 0);
+        assert!(zero.contains("No findings are queued for adjudication"));
+        assert!(zero.contains("record any drift you observe as a finding"));
+        assert!(zero.contains("Verify writes **nothing**"));
+    }
+
+    /// C2 — the sync brief carries BOTH inputs in ONE render: the cursor slice
+    /// (the changed artifacts) AND the open findings (`current(key)`), plus the
+    /// commits-nothing posture.
+    #[test]
+    fn sync_brief_carries_both_cursor_and_findings() {
+        let r = resolved("engine", None, vec![]);
+        let cursor = SourceCursor {
+            union: slice(&["gone.rs"], &["moved.rs"], &[]),
+            write_commands: vec![cmd("engine/graph/src#synced", "HEAD")],
+            reseed: vec![],
+            no_signal: vec![],
+            any_changes: true,
+            degraded: false,
+            dead_denies: vec![],
+            dest_mem: "engine".to_string(),
+            binding_id: "engine/graph".to_string(),
+        };
+        let findings = vec![
+            finding(
+                FindingClass::Drifted,
+                anchor_target("engine--e", "src/moved.rs"),
+                "prepared-content hash drifted",
+            ),
+            finding(
+                FindingClass::Uncovered,
+                artifact_target("src/new.rs"),
+                "in scope, no anchor",
+            ),
+        ];
+        let out = render_sync_brief(&r, &cursor, &findings, false);
+        // Both inputs present in one brief (C2).
+        assert!(out.contains("## Source changes since the last sync"));
+        assert!(out.contains("`moved.rs`"));
+        assert!(out.contains("## Open findings to repair"));
+        assert!(out.contains("`engine--e` → `src/moved.rs`"));
+        assert!(out.contains("`src/new.rs`"));
+        // Sole-writer + commits-nothing posture (C3).
+        assert!(out.contains("sole maintenance writer"));
+        assert!(out.contains("commits each one **per-mutation**"));
+        assert!(out.contains("Sync commits nothing."));
+    }
+
+    /// C3 — the sync brief carries the whole absorbed reconcile judgment: the
+    /// five conservatism rules, edge-removal conservatism, and
+    /// rationale-not-changelog. Each rule is quoted verbatim so absorption is
+    /// verifiable against the C4 diff artifact.
+    #[test]
+    fn sync_brief_absorbs_reconcile_conservatism() {
+        let r = resolved("engine", None, vec![]);
+        let findings = vec![finding(
+            FindingClass::Uncovered,
+            artifact_target("src/x.rs"),
+            "d",
+        )];
+        let out = render_sync_brief(&r, &empty_cursor(), &findings, false);
+        // Five conservatism rules.
+        assert!(out.contains("Unsure whether an entity is affected — skip it."));
+        assert!(out.contains(
+            "Do not create a new entity unless the change clearly introduces a new concept"
+        ));
+        assert!(
+            out.contains("Do not delete an entity unless the change removes the concept entirely.")
+        );
+        assert!(out.contains("Never rewrite a section that has not changed"));
+        assert!(out.contains(
+            "No speculative edges — add only relationships the diff literally introduces"
+        ));
+        // Edge-removal conservatism — flags, never auto-removes.
+        assert!(out.contains("A dropped dependency FLAGS, it does not auto-remove."));
+        assert!(out.contains("Edge removal is out of scope for sync."));
+        // Rationale-not-changelog.
+        assert!(out.contains("Rationale is reasoning, not a changelog."));
+        assert!(out.contains("`[commit <hash>]` log-style entries"));
+    }
+
+    /// C3 — the first-sync/adopt framing (E1's brief half): a mem predating its
+    /// binding is onboarding, expected-0%, with the backfill path — never a
+    /// failure. The changed-slice reseed carries the per-facet first-sync note.
+    #[test]
+    fn sync_brief_renders_adopt_framing() {
+        let mut r = resolved("engine", None, vec![]);
+        // In a real ResolvedIngest, `name` is the canonical binding id
+        // `<mem>/<stem>` while `destination_mem` is the mem — the header uses the
+        // mem, the backfill command uses the binding id.
+        r.name = "engine/graph".to_string();
+        let out = render_sync_brief(&r, &empty_cursor(), &[], true);
+        assert!(out.contains("## First sync — adopting `engine`"));
+        assert!(out.contains("0% anchored is expected — this is onboarding, not a failure."));
+        assert!(out.contains("do **not** replay the whole history"));
+        assert!(out.contains("**Backfill path:**"));
+        assert!(out.contains("memstead projection verify engine/graph"));
+    }
+
+    /// The reseed (first-sync, no cursor) framing lives in the embedded
+    /// changed-slice preface — the sync brief inherits it for free.
+    #[test]
+    fn sync_brief_inherits_first_sync_reseed_framing() {
+        let r = resolved("engine", None, vec![]);
+        let mut cursor = empty_cursor();
+        cursor.reseed = vec![cmd("engine/graph/src#synced", "TOK")];
+        let out = render_sync_brief(&r, &cursor, &[], false);
+        assert!(out.contains("No prior sync baseline exists for"));
+        assert!(out.contains("(first sync)"));
+    }
+
+    /// A no-work sync pass (nothing moved, no findings, not adopt) renders a
+    /// compact "nothing to sync" note and no repair machinery — a valid outcome.
+    #[test]
+    fn sync_brief_nothing_to_sync() {
+        let r = resolved("engine", None, vec![]);
+        let out = render_sync_brief(&r, &empty_cursor(), &[], false);
+        assert!(out.contains("## Nothing to sync"));
+        assert!(!out.contains("## How to repair"));
+        assert!(!out.contains("## Open findings"));
+    }
+
+    /// C2 REFUSAL complement — the sync brief is the ONLY render carrying repair
+    /// instructions; the verify brief carries none. The verify brief has no
+    /// "## How to repair" / "## Open findings to repair" block; the sync brief
+    /// has both.
+    #[test]
+    fn only_sync_brief_carries_repair_instructions() {
+        let r = resolved("engine", None, vec![]);
+        let findings = vec![finding(
+            FindingClass::Drifted,
+            anchor_target("engine--e", "src/a.rs"),
+            "d",
+        )];
+        let verify = render_verify_brief(&r, 1);
+        let sync = render_sync_brief(&r, &empty_cursor(), &findings, false);
+        // Verify: no repair section, no repair verbs as instructions.
+        assert!(!verify.contains("## How to repair"));
+        assert!(!verify.contains("Update the affected section"));
+        // Sync: both repair sections present.
+        assert!(sync.contains("## How to repair — be conservative"));
+        assert!(sync.contains("## Open findings to repair"));
+        assert!(sync.contains("Update the affected section to match"));
+    }
+
+    /// A large findings group caps at FINDINGS_CAP with an overflow line —
+    /// mirroring the changed-slice cap, so no facet renders unbounded.
+    #[test]
+    fn sync_brief_caps_large_findings_group() {
+        let r = resolved("engine", None, vec![]);
+        let findings: Vec<Finding> = (0..FINDINGS_CAP + 4)
+            .map(|i| {
+                finding(
+                    FindingClass::Uncovered,
+                    artifact_target(&format!("src/f{i}.rs")),
+                    "d",
+                )
+            })
+            .collect();
+        let out = render_sync_brief(&r, &empty_cursor(), &findings, false);
+        assert!(out.contains("- …and 4 more"));
+        // The last few beyond the cap are not rendered inline.
+        assert!(!out.contains(&format!("src/f{}.rs", FINDINGS_CAP + 3)));
     }
 }
