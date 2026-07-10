@@ -34,7 +34,7 @@ jobs:
         with:
           workspaces: . -> target
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@16b05812d776ae1dfaabc8277e421fb6d2506419 # v2
+        uses: taiki-e/install-action@c7eb1735f09259a5035e8e5d44b1406b1cddc0fb # v2
         with:
           tool: cargo-nextest
       - name: Run the full test surface
