@@ -389,7 +389,7 @@ fn apply_agent_notes_renames(
 
     let mut to_remove: Vec<usize> = Vec::new();
     let mut promotions: Vec<(usize, EntityDiff)> = Vec::new();
-    for (origin, _terminal) in forward.iter() {
+    for origin in forward.keys() {
         let Some(&del_idx) = deleted_idx.get(origin) else {
             continue;
         };
