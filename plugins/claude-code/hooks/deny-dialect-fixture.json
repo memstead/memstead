@@ -2,7 +2,7 @@
   "_comment": "Shared deny-dialect fixture — consumed by BOTH the engine (Rust: memstead-base ingest/cursor.rs) and the plugin hook (JS: deny-meta-files.test.js) to prove they resolve `deny_paths` identically. `entries` are workspace-relative glob patterns (facet-scope grammar); `blocked` paths must be excluded from an engine slice AND blocked by the hook; `allowed` paths must survive both. All paths are file-shaped and workspace-relative (no `..`) so both consumers can materialise/resolve them the same way. Keep in sync with any change to the shared dialect.",
   "entries": ["dev/**", "**/VISION.md", "docs/meta/CLAUDE.md"],
   "blocked": [
-    "dev/plans/a.md",
+    "dev/notes/a.md",
     "dev/x.rs",
     "dev/deep/nested/y.txt",
     "VISION.md",

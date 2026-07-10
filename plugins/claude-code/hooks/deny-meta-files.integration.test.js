@@ -51,7 +51,7 @@ after(() => {
 describe('deny hook — runtime enforcement (glob dialect)', () => {
   it('blocks a Read denied by the active list (exit 2)', () => {
     publishDeny('engine-graph', ['dev/**', '**/VISION.md']);
-    assert.equal(run({ file_path: join(ws, 'dev/plans/a.md') }).status, 2);
+    assert.equal(run({ file_path: join(ws, 'dev/notes/a.md') }).status, 2);
     assert.equal(run({ file_path: join(ws, 'VISION.md') }).status, 2);
   });
 
@@ -72,7 +72,7 @@ describe('deny hook — runtime enforcement (glob dialect)', () => {
 
   it('allows everything when the active list is empty (exit 0)', () => {
     publishDeny('project-graph', []); // an empty-deny ingest
-    assert.equal(run({ file_path: join(ws, 'dev/plans/a.md') }).status, 0);
+    assert.equal(run({ file_path: join(ws, 'dev/notes/a.md') }).status, 0);
     assert.equal(run({ file_path: join(ws, 'VISION.md') }).status, 0);
   });
 });
@@ -81,13 +81,13 @@ describe('deny hook — never stale (evidence 5 regression)', () => {
   it('after a render for Y, X’s entries are no longer enforced', () => {
     // Ingest X denied `dev/**`; its brief was rendered, publishing X's list.
     publishDeny('x-graph', ['dev/**']);
-    assert.equal(run({ file_path: join(ws, 'dev/plans/a.md') }).status, 2);
+    assert.equal(run({ file_path: join(ws, 'dev/notes/a.md') }).status, 2);
 
     // Now ingest Y renders — the engine OVERWRITES the cache with Y's list
     // (which denies something else). X's `dev/**` must no longer bite.
     publishDeny('y-graph', ['secrets/**']);
     assert.equal(
-      run({ file_path: join(ws, 'dev/plans/a.md') }).status,
+      run({ file_path: join(ws, 'dev/notes/a.md') }).status,
       0,
       "X's deny_paths must not survive a render for Y",
     );
