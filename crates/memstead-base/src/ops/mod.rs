@@ -2707,12 +2707,15 @@ pub enum Direction {
 }
 
 // ---------------------------------------------------------------------------
-// Stats
+// Status
 // ---------------------------------------------------------------------------
 
-/// Graph statistics.
+/// Graph status — node / edge counts and schema distribution. Renamed from
+/// the former `Stats` when the `stats` command became `status` (bundle plan
+/// `03-projection-promotion`, D11); the fields are unchanged so every caller's
+/// payload stays byte-compatible.
 #[derive(Debug, Clone, Serialize)]
-pub struct Stats {
+pub struct Status {
     pub entity_count: usize,
     pub edge_count: usize,
     pub edge_types: HashMap<String, usize>,

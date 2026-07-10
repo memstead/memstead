@@ -9,7 +9,7 @@ This document contains the help content for the `memstead` command-line program.
 **Command Overview:**
 
 * [`memstead`↴](#memstead)
-* [`memstead stats`↴](#memstead-stats)
+* [`memstead status`↴](#memstead-status)
 * [`memstead entity`↴](#memstead-entity)
 * [`memstead relations`↴](#memstead-relations)
 * [`memstead search`↴](#memstead-search)
@@ -105,7 +105,7 @@ Exit codes:
 
 ###### **Subcommands:**
 
-* `stats` — Node / edge counts and schema distribution
+* `status` — Node / edge counts, schema distribution, and per-binding projection state
 * `entity` — Read one entity as markdown
 * `relations` — List typed edges for an entity
 * `search` — Find entities by text or graph proximity
@@ -153,11 +153,11 @@ Exit codes:
 
 
 
-## `memstead stats`
+## `memstead status`
 
-Node / edge counts and schema distribution
+Node / edge counts, schema distribution, and per-binding projection state
 
-**Usage:** `memstead stats`
+**Usage:** `memstead status`
 
 
 

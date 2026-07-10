@@ -67,7 +67,7 @@ memstead mem-repo remote-add origin git@github.com:you/mem-backup.git
 memstead fetch knowledge                                  # refs arrive, nothing moves
 memstead branch-reset knowledge refs/remotes/origin/knowledge
 memstead reload --mem knowledge
-memstead stats                                            # your entities are back
+memstead status                                          # your entities are back
 ```
 
 `branch-reset` is the deliberate "adopt the remote state" move: the

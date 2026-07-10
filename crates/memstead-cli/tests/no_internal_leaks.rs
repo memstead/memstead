@@ -199,14 +199,14 @@ fn cold_start_returns_typed_code() {
     let tmp = TempDir::new().unwrap();
     let output = memstead()
         .current_dir(tmp.path())
-        .args(["--json", "stats"])
+        .args(["--json", "status"])
         .assert()
         .failure()
         .get_output()
         .stdout
         .clone();
     let env = parse_envelope(&output);
-    assert_typed_code(&env, "stats outside workspace");
+    assert_typed_code(&env, "status outside workspace");
 }
 
 /// `projection migrate` outside a workspace returns the single-sourced

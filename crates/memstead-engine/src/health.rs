@@ -73,7 +73,7 @@ pub fn compose_health(
     config: &HealthConfig,
 ) -> Result<serde_json::Value, ComposeHealthError> {
     let health = engine.health();
-    let stats = engine.stats();
+    let stats = engine.status();
     let include = args.include;
     const HEALTH_LIMIT_MAX: usize = 100;
     let requested_limit = args.limit.unwrap_or(10);

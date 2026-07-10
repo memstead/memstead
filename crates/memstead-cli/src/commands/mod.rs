@@ -241,7 +241,7 @@ pub mod reload;
 pub mod rename;
 pub mod schema;
 pub mod search;
-pub mod stats;
+pub mod status;
 pub mod type_cmd;
 pub mod unpublish;
 pub mod update;

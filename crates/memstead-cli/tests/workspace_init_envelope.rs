@@ -4,7 +4,7 @@
 //! Covers two behaviours of the workspace-config CLI:
 //!
 //! - Round-trip: `memstead mem-repo init <path>` followed by
-//!   `memstead stats` in the same workspace succeeds. Init writes
+//!   `memstead status` in the same workspace succeeds. Init writes
 //!   `.memstead/workspace.toml`, so the second invocation no longer
 //!   trips `StoreError::NotInitialised`.
 //!
@@ -65,11 +65,11 @@ fn mem_repo_init_json_stdout_is_single_document() {
     );
 }
 
-/// Round-trip: `mem-repo init` produces a workspace `memstead stats`
+/// Round-trip: `mem-repo init` produces a workspace `memstead status`
 /// can boot against. Full-only — `memstead mem-repo` is gated behind
 /// the `mem-repo` feature.
 #[test]
-fn mem_repo_init_followed_by_stats_succeeds() {
+fn mem_repo_init_followed_by_status_succeeds() {
     let tmp = TempDir::new().unwrap();
     let workspace = tmp.path().join("ws");
 
@@ -87,13 +87,13 @@ fn mem_repo_init_followed_by_stats_succeeds() {
     // no longer fails with `StoreError::NotInitialised`.
     memstead()
         .current_dir(&workspace)
-        .arg("stats")
+        .arg("status")
         .assert()
         .success()
-        .stdout(contains("# Graph stats"));
+        .stdout(contains("# Graph status"));
 }
 
-/// Typed envelope: stats from a directory without `.memstead/workspace.toml`
+/// Typed envelope: status from a directory without `.memstead/workspace.toml`
 /// returns a typed JSON envelope. Asserts on `code` and the structured
 /// `hint.recovery_command` field.
 #[test]
@@ -102,7 +102,7 @@ fn missing_workspace_emits_typed_envelope_json() {
 
     let output = memstead()
         .current_dir(tmp.path())
-        .args(["--json", "stats"])
+        .args(["--json", "status"])
         .assert()
         .failure()
         .get_output()
@@ -146,7 +146,7 @@ fn missing_workspace_prints_prose_to_stderr() {
 
     memstead()
         .current_dir(tmp.path())
-        .arg("stats")
+        .arg("status")
         .assert()
         .failure()
         .stderr(contains(".memstead/workspace.toml"));

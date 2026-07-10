@@ -43,8 +43,10 @@ cli = "overview"
 uniffi = "get_overview"
 
 [[operation]]
-name = "stats"
-cli = "stats"
+name = "status"
+cli = "status"
+# UniFFI keeps the `get_stats` method name this cycle — the UDL-surface
+# rename lands with the macOS floor in a later session.
 uniffi = "get_stats"
 
 [[operation]]

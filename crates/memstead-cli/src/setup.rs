@@ -204,7 +204,7 @@ impl CliContext {
                 kind: ExitKind::Generic,
                 code: "UNSUPPORTED_WORKSPACE_SHAPE",
                 message:
-                    "this subcommand is mem-repo-only and not yet supported on filesystem-mem workspaces — run from a mem-repo workspace, or use `memstead stats` / `memstead list` / `memstead search` / `memstead entity` / `memstead health` / `memstead create|update|delete|relate|rename` instead."
+                    "this subcommand is mem-repo-only and not yet supported on filesystem-mem workspaces — run from a mem-repo workspace, or use `memstead status` / `memstead list` / `memstead search` / `memstead entity` / `memstead health` / `memstead create|update|delete|relate|rename` instead."
                         .to_string(),
                 details: None,
             }
@@ -336,7 +336,7 @@ pub fn pro_engine(_ctx: &CliContext) -> anyhow::Result<BaseEngine> {
             code: "UNSUPPORTED_WORKSPACE_SHAPE",
             kind: ExitKind::Generic,
             message:
-                "this subcommand is mem-repo-only and not yet supported on filesystem-mem workspaces — run from a mem-repo workspace, or use `memstead stats` / `memstead list` / `memstead search` / `memstead entity` / `memstead health` / `memstead create|update|delete|relate|rename` instead."
+                "this subcommand is mem-repo-only and not yet supported on filesystem-mem workspaces — run from a mem-repo workspace, or use `memstead status` / `memstead list` / `memstead search` / `memstead entity` / `memstead health` / `memstead create|update|delete|relate|rename` instead."
                     .to_string(),
             details: None,
         }

@@ -124,7 +124,7 @@ async fn run(args: Args, workspace_root: PathBuf) -> anyhow::Result<()> {
     let engine = memstead_git_branch::workspace_store::engine_from_workspace_root(&workspace_root)
         .with_context(|| format!("failed to load workspace at {}", workspace_root.display()))?;
 
-    let stats = engine.stats();
+    let stats = engine.status();
     tracing::info!(
         "Engine ready: {} entities, {} edges, {} communities",
         stats.entity_count,

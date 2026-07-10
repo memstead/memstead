@@ -20,7 +20,8 @@
 //! `memstead_schema_list` + `memstead_schema_info` collapsed and re-emerged
 //! as a single `memstead_schema(name=...)` reader; `memstead_update_community`,
 //! `memstead_batch_update`, `memstead_export`, `memstead_stats`,
-//! `memstead_relations`, `memstead_context`, `memstead_type_info` are gone.
+//! `memstead_status`, `memstead_relations`, `memstead_context`,
+//! `memstead_type_info` are gone (`memstead_status` never minted — D11).
 //!
 //! Mem lifecycle is not workspace configuration, but both are on the
 //! MCP surface. The lifecycle family (`memstead_mem_create` /
@@ -77,6 +78,17 @@ const EXPECTED_TOOLS: &[&str] = &[
 
 fn current_tool_names() -> Vec<String> {
     McpServer::tool_router()
+        .list_all()
+        .iter()
+        .map(|t| t.name.to_string())
+        .collect()
+}
+
+/// The lean (filesystem) server flavour's tool names — the second surface the
+/// folded-tools ban must hold on (cross-plan rule c).
+fn filesystem_tool_names() -> Vec<String> {
+    use memstead_mcp::filesystem_server::FilesystemMcpServer;
+    FilesystemMcpServer::tool_router()
         .list_all()
         .iter()
         .map(|t| t.name.to_string())
@@ -162,18 +174,31 @@ fn mcp_does_not_expose_batch_update_or_export() {
 /// `memstead_entity` and `memstead_overview`; `memstead_type_info` is folded into
 /// `memstead_overview.schemas[]`. They must stay gone even if someone
 /// re-adds one by copy-paste.
+///
+/// `memstead_status` is banned here too (D11): the CLI/UniFFI `stats`→`status`
+/// rename mints **no** new MCP tool — health remains the single agent
+/// dashboard (a second status tool is the response-shape sprawl the
+/// tool-surface policy exists to prevent; the asymmetry is recorded in
+/// `agent-surfaces.md`). The ban holds on **both** server flavours (cross-plan
+/// rule c) — the full `McpServer` and the lean `FilesystemMcpServer`.
 #[test]
 fn mcp_does_not_expose_folded_stats_tools() {
-    let names = current_tool_names();
+    let full = current_tool_names();
+    let lean = filesystem_tool_names();
     for removed in [
         "memstead_stats",
+        "memstead_status",
         "memstead_relations",
         "memstead_context",
         "memstead_type_info",
     ] {
         assert!(
-            !names.iter().any(|n| n == removed),
-            "{removed} was folded into a sibling tool — do not re-expose."
+            !full.iter().any(|n| n == removed),
+            "{removed} was folded into a sibling tool — do not re-expose (full server)."
+        );
+        assert!(
+            !lean.iter().any(|n| n == removed),
+            "{removed} was folded into a sibling tool — do not re-expose (lean/filesystem server)."
         );
     }
 }

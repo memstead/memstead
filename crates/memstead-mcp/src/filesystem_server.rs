@@ -119,7 +119,7 @@ impl FilesystemMcpServer {
         self.engine
             .lock()
             .expect("filesystem MCP engine mutex poisoned")
-            .stats()
+            .status()
             .entity_count
     }
 

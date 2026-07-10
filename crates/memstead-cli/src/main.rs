@@ -50,7 +50,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
     };
 
     match cli.command {
-        Command::Stats => commands::stats::run(&ctx),
+        Command::Status => commands::status::run(&ctx),
         Command::Entity(args) => commands::entity::run(&ctx, args),
         Command::Relations(args) => commands::relations::run(&ctx, args),
         Command::Search(args) => commands::search::run(&ctx, args),

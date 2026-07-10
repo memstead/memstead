@@ -401,7 +401,7 @@ mod tests {
         // `memstead mem-repo init` must leave the workspace in a state
         // every subsequent command can boot from. Without
         // `.memstead/workspace.toml` the engine's loader bails with
-        // `StoreError::NotInitialised` and `memstead stats` fails.
+        // `StoreError::NotInitialised` and `memstead status` fails.
         let workspace_toml = workspace
             .canonicalize()
             .unwrap()

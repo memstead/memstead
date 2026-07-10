@@ -1769,9 +1769,9 @@ pattern = "exec-*"
 
         let engine = Engine::from_workspace_root(root)
             .expect("a bare folder mem must root as a one-mount workspace");
-        assert_eq!(engine.stats().mem_count, 1, "exactly one mount");
+        assert_eq!(engine.status().mem_count, 1, "exactly one mount");
         assert!(
-            engine.stats().entity_count >= 1,
+            engine.status().entity_count >= 1,
             "the standalone mem's entity must load"
         );
     }

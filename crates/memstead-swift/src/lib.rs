@@ -175,7 +175,10 @@ impl Engine {
             .inner
             .lock()
             .expect("memstead-swift engine mutex poisoned");
-        convert::stats_to_ffi(engine.stats(), engine.store(), engine.mem_router())
+        // The UDL/Swift-facing name stays `get_stats` / `Stats` (that surface
+        // rename is a later session); only the engine accessor moved to
+        // `status()` with the CLI/MCP rename (D11), so call it here.
+        convert::stats_to_ffi(engine.status(), engine.store(), engine.mem_router())
     }
 
     pub fn get_health(&self) -> HealthSummary {
@@ -1947,7 +1950,7 @@ mod tests {
         let mounted = memstead_base::Engine::from_archive_bytes(bytes)
             .expect("engine mounts the exported archive read-only");
         assert!(
-            mounted.stats().entity_count >= 2,
+            mounted.status().entity_count >= 2,
             "mounted archive must carry the exported entities"
         );
     }

@@ -48,8 +48,8 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Command {
-    /// Node / edge counts and schema distribution.
-    Stats,
+    /// Node / edge counts, schema distribution, and per-binding projection state.
+    Status,
 
     /// Read one entity as markdown.
     Entity(commands::entity::Args),

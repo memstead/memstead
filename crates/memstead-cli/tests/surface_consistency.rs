@@ -15,13 +15,13 @@ use memstead_cli::cli::{Cli, EXIT_CODES_HELP};
 #[test]
 fn quiet_is_accepted_in_trailing_position_like_json() {
     // Trailing: both flags after the subcommand.
-    let cli = Cli::try_parse_from(["memstead", "stats", "--quiet", "--json"])
+    let cli = Cli::try_parse_from(["memstead", "status", "--quiet", "--json"])
         .expect("--quiet must be accepted after the subcommand (global), like --json");
     assert!(cli.quiet, "--quiet must take effect in trailing position");
     assert!(cli.json, "--json parity baseline");
 
     // Leading still works (no regression).
-    let cli = Cli::try_parse_from(["memstead", "--quiet", "stats"])
+    let cli = Cli::try_parse_from(["memstead", "--quiet", "status"])
         .expect("--quiet must still be accepted before the subcommand");
     assert!(cli.quiet);
 }

@@ -109,7 +109,7 @@ _none_
 ## 4. Find it back
 
 ```bash
-memstead stats              # node / edge counts and type distribution
+memstead status             # node / edge counts, type distribution, projection state
 memstead search idempotency # ranked full-text search
 memstead entity my-graph--idempotency  # read one entity as markdown
 ```

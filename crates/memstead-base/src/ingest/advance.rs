@@ -69,6 +69,24 @@ pub struct AdvanceState {
     pub dispositions: BTreeMap<String, String>,
 }
 
+impl AdvanceState {
+    /// Count of accumulated dispositions — the `disposed` figure `memstead
+    /// status` reports for this binding (D11).
+    pub fn disposed(&self) -> usize {
+        self.dispositions.len()
+    }
+
+    /// Count of frozen-slice artifacts not yet disposed — the `pending`
+    /// remainder `memstead status` reports (D11). Same subtraction the
+    /// re-presentation applies ([`subtract_disposed`]), collapsed to a count.
+    pub fn pending(&self) -> usize {
+        artifact_set(&self.frozen_slice)
+            .iter()
+            .filter(|a| !self.dispositions.contains_key(a.as_str()))
+            .count()
+    }
+}
+
 /// The outcome of an [`advance_baseline`] call.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdvanceOutcome {

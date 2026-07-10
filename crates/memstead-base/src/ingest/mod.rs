@@ -34,6 +34,7 @@ pub mod render;
 pub mod resolve;
 pub mod selection;
 pub mod slice;
+pub mod status;
 
 pub use advance::{
     AdvanceError, AdvanceOutcome, AdvanceState, advance_baseline, advance_store_path,

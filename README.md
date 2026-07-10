@@ -50,7 +50,7 @@ memstead create --type concept \
   --section definition="An operation is idempotent when applying it twice has the same effect as applying it once." \
   --section explanation="It matters for retries — a client can safely resend a request without double-applying it."
 
-memstead stats              # node / edge counts and type distribution
+memstead status             # node / edge counts, type distribution, projection state
 memstead search idempotency # find it back
 ```
 
@@ -153,7 +153,7 @@ Stated here so you don't have to discover it:
 
 - **No semantic / embedding search.** `memstead_search` is exact and structural (content match, type/metadata filters) — there is no vector index. Agents navigate by structure: communities, types, relationships.
 - **No bulk import.** No command turns an existing folder of notes into a mem in one shot; content enters through schema-validated writes (the Claude Code plugin's ingest flows are agent-driven and write entity by entity).
-- **No built-in visualization.** The graph is queryable (stats, overview, relations) but ships no renderer; projections and exports are the extension point.
+- **No built-in visualization.** The graph is queryable (status, overview, relations) but ships no renderer; projections and exports are the extension point.
 - **Windows is untested.** Developed and CI-tested on macOS and Linux. Release archives include a Windows build, but no Windows CI gate exists yet — expect rough edges, path handling especially.
 
 ## Development

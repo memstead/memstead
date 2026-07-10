@@ -4,7 +4,7 @@
 //! per-mem path helpers (`gitdir_for` / `worktree_for`), aggregated
 //! views (`communities`, `orphans`, `stubs`, `most_connected`,
 //! `missing_required_outgoing`), per-mem summaries (`health`,
-//! `stats`, `context`), search (`list`, `search`,
+//! `status`, `context`), search (`list`, `search`,
 //! `search_indexes`), and the bytes-level read wrappers
 //! (`list_entities`, `read_entity`, `read_provenance`). Capability and
 //! cross-mem link gating live here too — they're consulted by
@@ -836,8 +836,10 @@ impl Engine {
         summary
     }
 
-    /// Engine-wide [`crate::ops::Stats`] across every mount.
-    pub fn stats(&self) -> crate::ops::Stats {
+    /// Engine-wide [`crate::ops::Status`] across every mount — the graph
+    /// counts behind `memstead status` (renamed from `stats` with the
+    /// command, D11; fields unchanged).
+    pub fn status(&self) -> crate::ops::Status {
         let mut types_in_use: Vec<String> = self
             .store
             .all_entities()
@@ -854,7 +856,7 @@ impl Engine {
             }
         }
 
-        crate::ops::Stats {
+        crate::ops::Status {
             entity_count: self.store.all_entities().filter(|e| !e.stub).count(),
             edge_count: self.store.edge_count(),
             edge_types,
@@ -2705,10 +2707,10 @@ community:
     }
 
     #[test]
-    fn stats_reports_per_engine_counts() {
+    fn status_reports_per_engine_counts() {
         let tmp = TempDir::new().unwrap();
         let engine = build_demo_engine(&tmp);
-        let stats = engine.stats();
+        let stats = engine.status();
         assert_eq!(stats.entity_count, 3);
         assert_eq!(stats.edge_count, 1);
         assert_eq!(stats.mem_count, 1);

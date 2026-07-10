@@ -92,27 +92,27 @@ fn memstead() -> Command {
 }
 
 #[test]
-fn stats_markdown() {
+fn status_markdown() {
     let tmp = TempDir::new().unwrap();
     let _mem = seed_cli_test_mem(tmp.path());
 
     memstead()
         .current_dir(tmp.path())
-        .arg("stats")
+        .arg("status")
         .assert()
         .success()
-        .stdout(contains("# Graph stats"))
+        .stdout(contains("# Graph status"))
         .stdout(contains("Nodes: 2"));
 }
 
-/// Smoke-test Bug 2 closure for `memstead stats` on a filesystem-mem
+/// Smoke-test Bug 2 closure for `memstead status` on a filesystem-mem
 /// workspace. Pre-CLI-parity, this command would error out with the
 /// "No mems found. Run `memstead mem-repo init`" message; post the
 /// `CliEngine` foundation the command dispatches into the unified
 /// `memstead_base::Engine` (lean path) and emits the same shape the
 /// mem-repo path produces.
 #[test]
-fn stats_works_on_filesystem_mem_workspace() {
+fn status_works_on_filesystem_mem_workspace() {
     let tmp = TempDir::new().unwrap();
     // `memstead init --name demo --schema default@1.0.0` lays down
     // `.memstead/config.json` plus the empty cache / memstead-io subdirs.
@@ -126,21 +126,21 @@ fn stats_works_on_filesystem_mem_workspace() {
     // still produce the canonical markdown layout, not bail.
     memstead()
         .current_dir(tmp.path())
-        .arg("stats")
+        .arg("status")
         .assert()
         .success()
-        .stdout(contains("# Graph stats"))
+        .stdout(contains("# Graph status"))
         .stdout(contains("Nodes: 0"));
 }
 
 #[test]
-fn stats_json() {
+fn status_json() {
     let tmp = TempDir::new().unwrap();
     let _mem = seed_cli_test_mem(tmp.path());
 
     let output = memstead()
         .current_dir(tmp.path())
-        .args(["--json", "stats"])
+        .args(["--json", "status"])
         .assert()
         .success()
         .get_output()

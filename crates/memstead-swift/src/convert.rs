@@ -76,8 +76,11 @@ pub(crate) fn entity_to_ffi(entity: &core_entity::Entity) -> Entity {
 // Stats.
 // ---------------------------------------------------------------------------
 
+// The engine payload is `core_ops::Status` (renamed from `Stats` with the CLI/
+// MCP `stats`→`status` rename, D11); the UDL/Swift-facing `Stats` dictionary
+// and this converter's name stay put until the later UDL-surface rename.
 pub(crate) fn stats_to_ffi(
-    stats: core_ops::Stats,
+    stats: core_ops::Status,
     store: &core_store::Store,
     mem_router: &core_mem::MemRouterSnapshot,
 ) -> Stats {

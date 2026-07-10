@@ -16,7 +16,7 @@ Every public engine operation across the four programmatic surfaces (MCP, CLI, U
 | `relations-read` | — | `relations` *(lean + full)* | `get_relations` | — |
 | `context` | — | `context` *(lean + full)* | — | — |
 | `overview` | `memstead_overview` *(lean + full)* | `overview` *(lean + full)* | `get_overview` | — |
-| `stats` | — | `stats` *(lean + full)* | `get_stats` | — |
+| `status` | — | `status` *(lean + full)* | `get_stats` | — |
 | `schema-describe` | `memstead_schema` *(lean + full)* | `type` *(lean + full)* | `schema_json` | — |
 | `health` | `memstead_health` *(lean + full)* | `health` *(lean + full)* | `get_health` | `health` |
 | `changes-since` | `memstead_changes_since` *(lean + full)* | `changes` *(lean + full)* | `changes_since` | — |
