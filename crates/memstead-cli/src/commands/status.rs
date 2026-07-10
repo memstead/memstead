@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 
 use memstead_base::Store;
-use memstead_base::ingest::status::{ProjectionStatus, projection_status};
+use memstead_base::ingest::status::{
+    ProjectionStatus, Rollup, projection_rollup, projection_status,
+};
 use serde::Serialize;
 use serde_json::json;
 
@@ -22,12 +24,14 @@ struct TypeCount<'a> {
     count: usize,
 }
 
-/// The `memstead status` JSON payload (D11). The graph-count fields are
+/// The `memstead status` JSON payload. The graph-count fields are
 /// byte-compatible with the former `stats` command's payload; `projections` is
-/// the additive per-binding array. The rollup verdict is a later additive E3b
-/// field — nothing reserved here.
+/// the additive per-binding array. `rollup` is the dashboard lead — one verdict
+/// plus the top-three concrete actions derived from the durable findings store
+/// and freshness; the graph counts and `projections` are the drill-down.
 #[derive(Serialize)]
 struct StatusPayload<'a> {
+    rollup: Rollup,
     total_nodes: usize,
     real_nodes: usize,
     stub_nodes: usize,
@@ -44,7 +48,7 @@ pub fn run(ctx: &CliContext) -> anyhow::Result<()> {
     // no projections" once we get past `cli_engine()?`.
     let root = ctx.workspace_shape().map(|(_, r)| r);
 
-    let (status, total, real, schema_counts, projections) = match ctx.cli_engine()? {
+    let (status, total, real, schema_counts, projections, rollup) = match ctx.cli_engine()? {
         #[cfg(feature = "mem-repo")]
         CliEngine::MemRepo(engine) => {
             let status = engine.status();
@@ -53,12 +57,17 @@ pub fn run(ctx: &CliContext) -> anyhow::Result<()> {
                 .as_deref()
                 .map(|r| projection_status(&engine, r))
                 .unwrap_or_default();
+            let rollup = root
+                .as_deref()
+                .map(|r| projection_rollup(&engine, r))
+                .unwrap_or_default();
             (
                 status,
                 store.len(),
                 store.all_entities().filter(|e| !e.stub).count(),
                 count_by_type(store),
                 projections,
+                rollup,
             )
         }
         CliEngine::Filesystem(engine) => {
@@ -68,12 +77,17 @@ pub fn run(ctx: &CliContext) -> anyhow::Result<()> {
                 .as_deref()
                 .map(|r| projection_status(&engine, r))
                 .unwrap_or_default();
+            let rollup = root
+                .as_deref()
+                .map(|r| projection_rollup(&engine, r))
+                .unwrap_or_default();
             (
                 status,
                 store.len(),
                 store.all_entities().filter(|e| !e.stub).count(),
                 count_by_type(store),
                 projections,
+                rollup,
             )
         }
     };
@@ -87,6 +101,7 @@ pub fn run(ctx: &CliContext) -> anyhow::Result<()> {
 
     if ctx.json {
         let payload = StatusPayload {
+            rollup,
             total_nodes: total,
             real_nodes: real,
             stub_nodes: stubs,
@@ -111,6 +126,25 @@ pub fn run(ctx: &CliContext) -> anyhow::Result<()> {
     }
 
     let mut lines = Vec::new();
+
+    // Lead with the dashboard rollup: one verdict + the top-three concrete
+    // actions. The graph counts and per-binding projection detail below are the
+    // drill-down.
+    lines.push("# Status".to_string());
+    lines.push(String::new());
+    lines.push(format!("**Verdict:** {}", rollup.verdict.as_wire()));
+    lines.push(String::new());
+    lines.push(rollup.headline.clone());
+    if !rollup.actions.is_empty() {
+        lines.push(String::new());
+        lines.push("## Do next".to_string());
+        lines.push(String::new());
+        for action in &rollup.actions {
+            lines.push(format!("- {action}"));
+        }
+    }
+    lines.push(String::new());
+
     lines.push("# Graph status".to_string());
     lines.push(String::new());
     lines.push(format!("- Nodes: {total} ({real} real, {stubs} stubs)"));

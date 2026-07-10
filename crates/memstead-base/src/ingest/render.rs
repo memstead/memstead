@@ -236,7 +236,13 @@ pub fn render_sync_brief_for(
 /// against and nothing anchored yet, so 0% anchored is expected (a first sync),
 /// not drift. A genuinely-fresh mem legitimately gets the same first-sync
 /// framing — the signal is deliberately generic.
-fn mem_predates_binding(engine: &Engine, resolved: &ResolvedIngest) -> bool {
+///
+/// The single canonical adopt predicate: the sync brief ([`render_sync_brief_for`]),
+/// the tier-1 fidelity report ([`super::report::compute_fidelity_report`]), and the
+/// status rollup ([`super::status::projection_rollup`]) all read it, so onboarding
+/// framing and the no-red-verdict-from-pre-binding-history refusal stay in lockstep
+/// across every surface.
+pub fn mem_predates_binding(engine: &Engine, resolved: &ResolvedIngest) -> bool {
     let no_anchors = engine
         .mem_anchors_resolved(&resolved.destination_mem)
         .is_empty();

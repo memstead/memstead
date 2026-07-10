@@ -19,7 +19,11 @@ use std::path::Path;
 use serde::Serialize;
 
 use crate::Engine;
+use crate::binding::CoverageSemantics;
 use crate::ingest::advance::read_advance_store;
+use crate::ingest::cursor::source_moved;
+use crate::ingest::findings::{FindingClass, current_findings};
+use crate::ingest::render::mem_predates_binding;
 use crate::ingest::resolve::{
     ChangeStrategy, ResolvedSource, resolve_binding_run, resolve_change_strategy,
 };
@@ -51,8 +55,9 @@ pub struct AdvanceCounts {
     pub disposed: usize,
 }
 
-/// One binding's status entry (D11). The `rollup` verdict is a later additive
-/// E3b field — deliberately absent here.
+/// One binding's status entry (D11) — the per-binding drill-down. The dashboard
+/// rollup verdict is workspace-level ([`Rollup`] / [`projection_rollup`]), not a
+/// field here.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ProjectionStatus {
     /// The canonical binding id `<mem>/<stem>` (D3).
@@ -167,6 +172,236 @@ pub fn projection_status(engine: &Engine, workspace_root: &Path) -> Vec<Projecti
         });
     }
     out
+}
+
+// ---------------------------------------------------------------------------
+// Rollup — the dashboard lead (G1)
+// ---------------------------------------------------------------------------
+
+/// The single dashboard verdict `memstead status` leads with (G1). One verdict
+/// summarising every projection binding; the per-binding numbers
+/// ([`projection_status`]) are the drill-down.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RollupVerdict {
+    /// No binding declares open findings and no source has moved past its
+    /// baseline — or there are no bindings at all.
+    Clean,
+    /// Onboarding only: one or more bindings predate their binding (adopt) and
+    /// nothing else needs a maintenance pass. **A pre-binding mem is never a red
+    /// verdict** — 0% anchored is expected onboarding, not a defect (E1).
+    Onboarding,
+    /// One or more bindings carry open findings (drift, unresolvable anchors,
+    /// uncovered artifacts under exhaustive coverage, adjudication backlog) or
+    /// have a source that moved past its `#synced` baseline.
+    ActionNeeded,
+}
+
+impl RollupVerdict {
+    /// Stable wire string.
+    pub fn as_wire(&self) -> &'static str {
+        match self {
+            RollupVerdict::Clean => "clean",
+            RollupVerdict::Onboarding => "onboarding",
+            RollupVerdict::ActionNeeded => "action-needed",
+        }
+    }
+}
+
+/// The dashboard rollup (G1): one verdict, a one-line headline, and up to three
+/// concrete, highest-severity actions derived from the durable findings store
+/// plus freshness. The full per-binding numbers ride [`projection_status`] as
+/// the drill-down.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Rollup {
+    /// The single lead verdict.
+    pub verdict: RollupVerdict,
+    /// A one-line human/agent summary of the workspace's projection health.
+    pub headline: String,
+    /// Up to three concrete next actions, highest-severity first (e.g. "3
+    /// entities describe source that no longer exists — run sync").
+    pub actions: Vec<String>,
+}
+
+impl Default for Rollup {
+    fn default() -> Self {
+        Rollup {
+            verdict: RollupVerdict::Clean,
+            headline: "No projection bindings declared.".to_string(),
+            actions: Vec::new(),
+        }
+    }
+}
+
+/// One candidate action with its severity — the higher, the more urgent. Used
+/// only to rank the top-three actions the rollup surfaces.
+struct Candidate {
+    severity: u8,
+    text: String,
+}
+
+/// Compute the dashboard rollup (G1) for every projection binding in the
+/// workspace: one verdict plus the top-three concrete actions, derived from the
+/// durable findings store and freshness (source movement vs. the `#synced`
+/// baseline). **Read-only** on every mem — it borrows `&Engine` (shared) and
+/// only reads the binding store, the findings store, and the live cursor.
+///
+/// Best-effort like [`projection_status`]: a workspace with no binding store, or
+/// one whose bindings fail to resolve, yields the default clean rollup rather
+/// than failing the whole status call.
+///
+/// A binding that predates its binding (no anchors, never synced) contributes an
+/// **onboarding** action, never a red one — its uncovered artifacts are the
+/// expected first-sync backfill worklist, so pre-binding history alone never
+/// drives an `action-needed` verdict (E1).
+pub fn projection_rollup(engine: &Engine, workspace_root: &Path) -> Rollup {
+    let Ok(configs) = load_pipeline_configs(workspace_root) else {
+        return Rollup::default();
+    };
+    if configs.bindings.is_empty() {
+        return Rollup::default();
+    }
+    let total = configs.bindings.len();
+
+    let mut candidates: Vec<Candidate> = Vec::new();
+    let mut action_bindings = 0usize;
+    let mut onboarding_bindings = 0usize;
+
+    for record in &configs.bindings {
+        let binding_id = format!("{}/{}", record.mem, record.name);
+        let binding = &record.config;
+        let Ok(resolved) = resolve_binding_run(&configs, &binding_id, binding) else {
+            continue;
+        };
+
+        // Adopt (E1): a mem that predates its binding is onboarding, never a red
+        // verdict. Its uncovered artifacts are the backfill worklist, so we skip
+        // the findings/freshness scan that would otherwise read them as defects.
+        if mem_predates_binding(engine, &resolved) {
+            onboarding_bindings += 1;
+            candidates.push(Candidate {
+                severity: 1,
+                text: format!(
+                    "`{binding_id}` predates its binding — 0% anchored is expected; run \
+                     `memstead projection sync {binding_id}` for a first-sync backfill"
+                ),
+            });
+            continue;
+        }
+
+        let mut binding_has_action = false;
+
+        // Freshness: a change-detectable source moved past its `#synced` baseline.
+        if source_moved(engine, &resolved, workspace_root) {
+            binding_has_action = true;
+            candidates.push(Candidate {
+                severity: 4,
+                text: format!(
+                    "`{binding_id}` source moved since the last sync — run `memstead projection \
+                     sync {binding_id}`"
+                ),
+            });
+        }
+
+        // Open findings under the current `(hash(D), source_head)` key.
+        if let Ok((_key, findings)) = current_findings(engine, workspace_root, binding, &resolved) {
+            let mut unresolvable = 0usize;
+            let mut drifted = 0usize;
+            let mut uncovered = 0usize;
+            let mut queued = 0usize;
+            for f in &findings {
+                match f.class {
+                    FindingClass::UnresolvableAnchor => unresolvable += 1,
+                    // An adjudicated content mismatch is drift for the dashboard.
+                    FindingClass::Drifted | FindingClass::Wrong => drifted += 1,
+                    FindingClass::Uncovered => uncovered += 1,
+                    FindingClass::QueuedForAdjudication => queued += 1,
+                }
+            }
+            if unresolvable > 0 {
+                binding_has_action = true;
+                candidates.push(Candidate {
+                    severity: 6,
+                    text: format!(
+                        "{unresolvable} entit{} in `{binding_id}` describe source that no longer \
+                         exists — run `memstead projection sync {binding_id}`",
+                        if unresolvable == 1 { "y" } else { "ies" }
+                    ),
+                });
+            }
+            if drifted > 0 {
+                binding_has_action = true;
+                candidates.push(Candidate {
+                    severity: 5,
+                    text: format!(
+                        "{drifted} anchor(s) in `{binding_id}` drifted from their source — run \
+                         `memstead projection sync {binding_id}`"
+                    ),
+                });
+            }
+            // Uncovered drives an action only under exhaustive coverage — a
+            // curated binding covers a deliberate slice, so uncovered is
+            // information, not a defect (B4).
+            if uncovered > 0 && matches!(binding.coverage_semantics, CoverageSemantics::Exhaustive)
+            {
+                binding_has_action = true;
+                candidates.push(Candidate {
+                    severity: 3,
+                    text: format!(
+                        "{uncovered} in-scope source artifact(s) in `{binding_id}` carry no entity \
+                         — run `memstead projection verify {binding_id}`, then sync"
+                    ),
+                });
+            }
+            if queued > 0 {
+                binding_has_action = true;
+                candidates.push(Candidate {
+                    severity: 2,
+                    text: format!(
+                        "{queued} finding(s) in `{binding_id}` queued for adjudication — run \
+                         `memstead projection verify {binding_id}`"
+                    ),
+                });
+            }
+        }
+
+        if binding_has_action {
+            action_bindings += 1;
+        }
+    }
+
+    // Highest severity first; the stable sort preserves insertion order within a
+    // severity so runs are reproducible.
+    candidates.sort_by_key(|c| std::cmp::Reverse(c.severity));
+    let actions: Vec<String> = candidates.into_iter().take(3).map(|c| c.text).collect();
+
+    let verdict = if action_bindings > 0 {
+        RollupVerdict::ActionNeeded
+    } else if onboarding_bindings > 0 {
+        RollupVerdict::Onboarding
+    } else {
+        RollupVerdict::Clean
+    };
+
+    let headline = match verdict {
+        RollupVerdict::ActionNeeded => format!(
+            "Action needed — {action_bindings} of {total} projection(s) have open findings or a \
+             moved source."
+        ),
+        RollupVerdict::Onboarding => format!(
+            "Onboarding — {onboarding_bindings} of {total} projection(s) predate their binding; a \
+             first-sync backfill is expected, not a defect."
+        ),
+        RollupVerdict::Clean => {
+            format!("All {total} projection(s) are in sync — no open findings, no moved sources.")
+        }
+    };
+
+    Rollup {
+        verdict,
+        headline,
+        actions,
+    }
 }
 
 #[cfg(test)]
@@ -340,5 +575,170 @@ mod tests {
         )])
         .unwrap();
         assert!(projection_status(&engine, root).is_empty());
+    }
+
+    // ---- G1: rollup verdict + top-3 actions -----------------------------
+
+    /// Build the same one-binding `engine/graph` workspace the status test uses,
+    /// returning the engine and root. Seeds **no** `#synced` baseline and **no**
+    /// anchors, so the mem predates its binding (the adopt case) unless the
+    /// caller seeds otherwise.
+    fn one_binding_workspace(tmp: &TempDir) -> Engine {
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join(".memstead")).unwrap();
+        std::fs::write(
+            root.join(".memstead").join("config.json"),
+            br#"{"format":1,"schema":"default@1.0.0"}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join(".memstead").join("workspace.toml"),
+            "[workspace]\n",
+        )
+        .unwrap();
+        let out = std::process::Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(root)
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+
+        write_medium(
+            root,
+            "engine",
+            "graph",
+            &Medium {
+                name: "graph".to_string(),
+                medium_type: MediumType::Codebase,
+                pointer: String::new(),
+                change_detection: Some("git".to_string()),
+            },
+        )
+        .unwrap();
+        write_facet(
+            root,
+            "engine",
+            "graph",
+            &Facet {
+                name: "graph".to_string(),
+                medium: "graph".to_string(),
+                scope: vec![PatternEntry {
+                    path: "**/*.rs".to_string(),
+                    mode: PatternMode::Allow,
+                }],
+                engagement: None,
+                preparation: None,
+            },
+        )
+        .unwrap();
+        write_binding(
+            root,
+            "engine",
+            "graph",
+            &BindingV1 {
+                version: BINDING_VERSION,
+                intent: None,
+                source_facets: vec!["graph".to_string()],
+                reference_mems: Vec::new(),
+                destination_mem: "engine".to_string(),
+                deny_paths: Vec::new(),
+                coverage_semantics: CoverageSemantics::Exhaustive,
+                rules: None,
+                prune: None,
+                operations: Operations {
+                    build: Some(BuildOperation {
+                        mode: BuildMode::Discovery,
+                        trigger: IngestTrigger::Loop,
+                        batch_size: 20,
+                        post_actions: None,
+                    }),
+                    sync: Some(SyncOperation {
+                        trigger: IngestTrigger::Manual,
+                        batch_size: 20,
+                    }),
+                    verify: None,
+                },
+            },
+        )
+        .unwrap();
+
+        let mount = Mount {
+            mem: "engine".to_string(),
+            schema: Some("default@1.0.0".parse().unwrap()),
+            storage: MountStorage::Folder {
+                path: root.to_path_buf(),
+            },
+            capability: MountCapability::Write,
+            lifecycle: MountLifecycle::Eager,
+            cross_linkable: false,
+            migration_target: None,
+        };
+        Engine::from_mounts(vec![(
+            mount,
+            Box::new(FilesystemMemWriter::new(root.to_path_buf()))
+                as Box<dyn crate::backend::MemBackend>,
+        )])
+        .unwrap()
+    }
+
+    /// G1 + E1 — a binding whose mem predates it (no anchors, never synced)
+    /// rolls up to an **onboarding** verdict, never `action-needed`: the
+    /// onboarding action is surfaced and pre-binding history alone drives no red
+    /// verdict (E1's refusal at the dashboard level).
+    #[test]
+    fn rollup_adopt_binding_is_onboarding_not_action_needed() {
+        let tmp = TempDir::new().unwrap();
+        let engine = one_binding_workspace(&tmp);
+        let rollup = projection_rollup(&engine, tmp.path());
+        assert_eq!(rollup.verdict, RollupVerdict::Onboarding);
+        assert_ne!(
+            rollup.verdict,
+            RollupVerdict::ActionNeeded,
+            "pre-binding history alone must never be a red verdict"
+        );
+        assert!(
+            rollup
+                .actions
+                .iter()
+                .any(|a| a.contains("predates its binding")),
+            "the onboarding action is surfaced: {:?}",
+            rollup.actions
+        );
+        assert!(rollup.headline.contains("Onboarding"));
+    }
+
+    /// G1 — a workspace with no bindings rolls up to the default **clean**
+    /// verdict with no actions.
+    #[test]
+    fn rollup_empty_without_bindings_is_clean() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join(".memstead")).unwrap();
+        std::fs::write(
+            root.join(".memstead").join("config.json"),
+            br#"{"format":1,"schema":"default@1.0.0"}"#,
+        )
+        .unwrap();
+        let mount = Mount {
+            mem: "engine".to_string(),
+            schema: Some("default@1.0.0".parse().unwrap()),
+            storage: MountStorage::Folder {
+                path: root.to_path_buf(),
+            },
+            capability: MountCapability::Write,
+            lifecycle: MountLifecycle::Eager,
+            cross_linkable: false,
+            migration_target: None,
+        };
+        let engine = Engine::from_mounts(vec![(
+            mount,
+            Box::new(FilesystemMemWriter::new(root.to_path_buf()))
+                as Box<dyn crate::backend::MemBackend>,
+        )])
+        .unwrap();
+        let rollup = projection_rollup(&engine, root);
+        assert_eq!(rollup.verdict, RollupVerdict::Clean);
+        assert!(rollup.actions.is_empty());
+        assert!(rollup.headline.contains("No projection bindings"));
     }
 }

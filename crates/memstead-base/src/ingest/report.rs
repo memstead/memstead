@@ -211,6 +211,13 @@ pub struct FidelityReport {
     pub binding: String,
     /// The destination mem.
     pub destination_mem: String,
+    /// Whether the destination mem predates its binding — the adopt / onboarding
+    /// case (E1). When `true`, the report leads with the expected-0%-anchored
+    /// onboarding framing and the concrete backfill path, and the coverage
+    /// section frames uncovered artifacts as the backfill worklist rather than
+    /// as defects: no failure/error framing and no red verdict is produced
+    /// **solely** by pre-binding history.
+    pub adopt: bool,
     /// Whether the binding claims exhaustive or curated coverage (B4).
     pub coverage_semantics: CoverageSemantics,
     /// Per-facet capability rows (B1 capability block).
@@ -287,6 +294,29 @@ fn render_hard_required(report: &FidelityReport) -> String {
             CoverageSemantics::Curated => "curated",
         }
     ));
+
+    // --- Adopt / onboarding framing (E1) ---
+    // When the mem predates its binding, the report LEADS with onboarding
+    // framing: the expected-0%-anchored statement plus the concrete backfill
+    // path. REFUSAL: this is never a failure/error framing and the report never
+    // produces a red verdict solely from pre-binding history — the coverage
+    // section below reframes uncovered artifacts as the backfill worklist.
+    if report.adopt {
+        md.push_str("## Adopting — first verify\n\n");
+        md.push_str(
+            "This mem predates its binding: it carries no anchors and has no prior sync \
+             baseline, so **0% anchored is expected — this is onboarding, not a failure.** \
+             Do not read the coverage numbers below as drift or a red verdict; the uncovered \
+             artifacts are the backfill worklist, not defects.\n\n",
+        );
+        md.push_str(&format!(
+            "**Backfill path:** run `memstead projection sync {}` to work through the in-scope \
+             source artifacts that carry no entity yet, covering the clearly-new concepts among \
+             them through the normal mutation surface. Backfilling is incremental — a partial \
+             pass is fine, and the next sync continues where you left off.\n\n",
+            report.binding
+        ));
+    }
 
     // --- Denominator provenance (B5) ---
     md.push_str("## Denominator provenance\n\n");
@@ -385,8 +415,24 @@ fn render_hard_required(report: &FidelityReport) -> String {
         report.coverage.uncovered.len()
     ));
 
-    // Coverage-semantics framing (B4).
+    // Coverage-semantics framing (B4). REFUSAL (E1): under adopt, the exhaustive
+    // branch must NOT frame the uncovered artifacts as defect findings — they are
+    // the expected backfill worklist of a mem that predates its binding, never a
+    // red verdict caused solely by pre-binding history.
     match report.coverage_semantics {
+        CoverageSemantics::Exhaustive if report.adopt => {
+            let backlog = report
+                .coverage
+                .uncovered
+                .len()
+                .saturating_sub(report.disposed_excluded);
+            md.push_str(&format!(
+                "**Exhaustive coverage (onboarding):** {backlog} in-scope artifact(s) carry no \
+                 entity yet ({} disposed excluded) — the expected first-sync backfill worklist \
+                 for a mem that predates its binding, not defects.\n\n",
+                report.disposed_excluded
+            ));
+        }
         CoverageSemantics::Exhaustive => {
             let findings = report
                 .coverage
@@ -892,9 +938,15 @@ pub fn compute_fidelity_report(
         ));
     }
 
+    // Adopt / onboarding signal (E1) — the single canonical predicate shared with
+    // the sync brief and the status rollup: a mem with no anchors and no recorded
+    // `#synced` baseline predates its binding, so 0% anchored is expected.
+    let adopt = super::render::mem_predates_binding(engine, resolved);
+
     FidelityReport {
         binding: binding_id,
         destination_mem: dest,
+        adopt,
         coverage_semantics: binding.coverage_semantics,
         capabilities,
         freshness,
@@ -940,6 +992,7 @@ mod tests {
         FidelityReport {
             binding: "engine/graph".to_string(),
             destination_mem: "engine".to_string(),
+            adopt: false,
             coverage_semantics: CoverageSemantics::Exhaustive,
             capabilities: vec![FacetCapability {
                 facet: "src".to_string(),
@@ -1175,6 +1228,40 @@ mod tests {
         assert!(md2.contains("not enumerable this cycle"));
     }
 
+    /// E1 (report half) — a mem that predates its binding renders the onboarding
+    /// framing: the expected-0%-anchored statement plus the concrete backfill
+    /// path. REFUSAL: no failure/error framing and no red "are findings" verdict
+    /// is produced solely by pre-binding history — the uncovered artifacts are
+    /// reframed as the backfill worklist.
+    #[test]
+    fn e1_adopt_report_renders_onboarding_no_red_verdict() {
+        let mut r = base_report();
+        r.adopt = true;
+        r.coverage_semantics = CoverageSemantics::Exhaustive;
+        r.coverage.uncovered = (0..5).map(|i| format!("src/file_{i}.rs")).collect();
+        let md = render_fidelity_report(&r, 8_000, &[]).markdown;
+
+        // Onboarding framing leads, with the expected-0% statement …
+        assert!(md.contains("## Adopting — first verify"));
+        assert!(md.contains("0% anchored is expected — this is onboarding, not a failure."));
+        // … and the concrete backfill path.
+        assert!(md.contains("**Backfill path:** run `memstead projection sync engine/graph`"));
+        // REFUSAL: the exhaustive branch never frames uncovered as red defect
+        // "findings" under adopt — it is the onboarding backfill worklist.
+        assert!(
+            !md.contains("are **findings**"),
+            "pre-binding history must not produce a red findings verdict"
+        );
+        assert!(md.contains("Exhaustive coverage (onboarding):"));
+        assert!(md.contains("backfill worklist"));
+
+        // Complement: without adopt, the same uncovered set IS framed as findings.
+        r.adopt = false;
+        let md2 = render_fidelity_report(&r, 8_000, &[]).markdown;
+        assert!(!md2.contains("## Adopting — first verify"));
+        assert!(md2.contains("are **findings**"));
+    }
+
     /// An unknown include key is surfaced as a warning, not silently dropped.
     #[test]
     fn unknown_include_key_warns() {
@@ -1406,5 +1493,142 @@ mod tests {
         // The rendered report is deterministic and carries the S(D) statement.
         let md = render_fidelity_report(&report, 8_000, &[]).markdown;
         assert!(md.contains("per-medium enumeration `S(D)` = **3**"));
+        // This mem carries anchors, so it does NOT predate its binding — no
+        // onboarding framing (the E1 complement).
+        assert!(!report.adopt);
+        assert!(!md.contains("## Adopting — first verify"));
+    }
+
+    /// E1 (report half) end-to-end — a mem with **no** anchors and no `#synced`
+    /// baseline predates its binding: `compute_fidelity_report` sets `adopt` from
+    /// the live engine, and the rendered report leads with onboarding framing
+    /// with no red findings verdict. Read-only on the mem (`&Engine`).
+    #[test]
+    fn compute_report_adopt_when_mem_predates_binding() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let mem_dir = root.join("mem");
+        std::fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
+        std::fs::write(
+            mem_dir.join(".memstead").join("config.json"),
+            r#"{"format":1,"schema":"default@1.0.0","version":"1.0.0"}"#,
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join(".memstead")).unwrap();
+        std::fs::write(
+            root.join(".memstead").join("workspace.toml"),
+            "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+        )
+        .unwrap();
+        let mount = Mount {
+            mem: "engine".to_string(),
+            schema: Some("default@1.0.0".parse().unwrap()),
+            storage: MountStorage::Folder {
+                path: mem_dir.clone(),
+            },
+            capability: MountCapability::Write,
+            lifecycle: MountLifecycle::Eager,
+            cross_linkable: false,
+            migration_target: None,
+        };
+        crate::FileWorkspaceStore::new()
+            .save_state(
+                root,
+                &Workspace {
+                    mounts: vec![mount],
+                    settings: WorkspaceSettings::default(),
+                },
+            )
+            .unwrap();
+        let out = std::process::Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(root)
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        // In-scope source with no anchor yet — the backfill worklist.
+        std::fs::write(root.join("src").join("a.rs"), "fn a() {}\n").unwrap();
+        std::fs::write(root.join("src").join("b.rs"), "fn b() {}\n").unwrap();
+
+        write_medium(
+            root,
+            "engine",
+            "graph",
+            &Medium {
+                name: "graph".to_string(),
+                medium_type: MediumType::Codebase,
+                pointer: String::new(),
+                change_detection: Some("git".to_string()),
+            },
+        )
+        .unwrap();
+        write_facet(
+            root,
+            "engine",
+            "graph",
+            &Facet {
+                name: "graph".to_string(),
+                medium: "graph".to_string(),
+                scope: vec![PatternEntry {
+                    path: "src/**/*.rs".to_string(),
+                    mode: PatternMode::Allow,
+                }],
+                engagement: None,
+                preparation: None,
+            },
+        )
+        .unwrap();
+        write_binding(
+            root,
+            "engine",
+            "graph",
+            &BindingV1 {
+                version: BINDING_VERSION,
+                intent: None,
+                source_facets: vec!["graph".to_string()],
+                reference_mems: Vec::new(),
+                destination_mem: "engine".to_string(),
+                deny_paths: Vec::new(),
+                coverage_semantics: CoverageSemantics::Exhaustive,
+                rules: None,
+                prune: None,
+                operations: Operations {
+                    build: Some(BuildOperation {
+                        mode: BuildMode::Discovery,
+                        trigger: IngestTrigger::Loop,
+                        batch_size: 20,
+                        post_actions: None,
+                    }),
+                    sync: None,
+                    verify: Some(VerifyOperation {
+                        trigger: IngestTrigger::Manual,
+                        batch_size: 20,
+                        adjudication_cap: DEFAULT_ADJUDICATION_CAP,
+                        full_resync_every: DEFAULT_FULL_RESYNC_EVERY,
+                    }),
+                },
+            },
+        )
+        .unwrap();
+
+        let engine = Engine::from_workspace_root(root).unwrap();
+        let configs = load_pipeline_configs(root).unwrap();
+        let binding = &configs.bindings[0].config;
+        let resolved = resolve_binding_run(&configs, "engine/graph", binding).unwrap();
+        let outcome = verify_binding(&engine, root, binding, &resolved).unwrap();
+        let report = compute_fidelity_report(&engine, root, binding, &resolved, &outcome.key);
+
+        // No anchors + no baseline → the mem predates its binding (E1).
+        assert!(
+            report.adopt,
+            "a no-anchor, never-synced mem predates its binding"
+        );
+        let md = render_fidelity_report(&report, 8_000, &[]).markdown;
+        assert!(md.contains("## Adopting — first verify"));
+        assert!(md.contains("0% anchored is expected"));
+        // REFUSAL: the uncovered source is NOT a red findings verdict here.
+        assert!(!md.contains("are **findings**"));
+        assert!(md.contains("Exhaustive coverage (onboarding):"));
     }
 }
