@@ -74,10 +74,7 @@ fn find_workspace_root(cwd: &std::path::Path) -> Option<PathBuf> {
         if memstead_base::is_workspace_root(current) {
             return Some(current.to_path_buf());
         }
-        match current.parent() {
-            Some(p) => current = p,
-            None => return None,
-        }
+        current = current.parent()?;
     }
 }
 
