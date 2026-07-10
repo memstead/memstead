@@ -4,9 +4,10 @@
 //! The legacy configs live at the *workspace root* (not under `.memstead/`):
 //! `<root>/scopes/<mem>/<name>.json`, `<root>/projections/<mem>/<name>.json`,
 //! `<root>/ingests/<name>.json`. This module reads them and converts to the
-//! [`crate::pipeline`] four-primitive model — the shared core of both the
-//! `memstead pipeline migrate` command (read legacy → write the store) and the
-//! boot compatibility shim (read legacy on the fly while the store is empty).
+//! [`crate::pipeline`] four-primitive model — the gen-1 conversion core that
+//! `memstead projection migrate`'s gen-1 path drives (read legacy → write the
+//! store, then promote to v1 bindings). The old boot compatibility shim that
+//! read legacy on the fly is retired.
 //!
 //! ## Conversion
 //!

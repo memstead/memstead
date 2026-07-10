@@ -375,6 +375,36 @@ fn projection_advance_missing_binding_returns_typed_code() {
     assert_eq!(env["code"], "PROJECTION_NOT_FOUND", "got: {env}");
 }
 
+/// `projection brief` on a missing binding returns the typed
+/// PROJECTION_NOT_FOUND code (NotFound exit), not INTERNAL — the brief leaf is
+/// walked here like every other recoverable path.
+#[test]
+fn projection_brief_missing_binding_returns_typed_code() {
+    let tmp = TempDir::new().unwrap();
+    let workspace = tmp.path().join("ws");
+    memstead()
+        .args([
+            "mem-repo",
+            "init",
+            workspace.to_str().unwrap(),
+            "--no-gitignore",
+        ])
+        .assert()
+        .success();
+
+    let output = memstead()
+        .current_dir(&workspace)
+        .args(["--json", "projection", "brief", "engine/nope"])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let env = parse_envelope(&output);
+    assert_typed_code(&env, "projection brief missing binding");
+    assert_eq!(env["code"], "PROJECTION_NOT_FOUND", "got: {env}");
+}
+
 /// `projection migrate` over a dangling ingest→projection ref returns the
 /// typed PROJECTION_MIGRATE_DANGLING_REF code, not INTERNAL.
 #[test]

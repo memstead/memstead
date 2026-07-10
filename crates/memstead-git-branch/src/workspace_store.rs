@@ -169,7 +169,7 @@ pub fn engine_from_workspace_root(workspace_root: &Path) -> Result<Engine, BootE
     // the lean boot path. A malformed config surfaces a typed parse error.
     // Pipeline configs from the workspace store — the legacy folders are no
     // longer read at boot (the compat shim retired with the 2026-06-14 bundled
-    // migration; `memstead pipeline migrate` is the only path from old-shape
+    // migration; `memstead projection migrate` is the only path from old-shape
     // configs).
     engine.set_pipeline_configs(memstead_base::load_legacy_pipeline_configs(workspace_root)?);
     // Publish the authoring meta-schemas into `.memstead/meta-schemas/`

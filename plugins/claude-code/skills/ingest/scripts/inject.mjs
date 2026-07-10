@@ -3,9 +3,9 @@
  *
  * The ingest orchestration now lives in the engine: selection (round-robin),
  * backoff, change-detection (git/graph/mtime + source cursor), and the whole
- * run-brief assembly are `memstead ingest brief` / `memstead ingest brief
- * --all`. This script only **routes the operator arguments** to the engine and
- * emits its output as the agent prompt — no selection, backoff,
+ * run-brief assembly are `memstead projection brief` / `memstead projection
+ * brief --all`. This script only **routes the operator arguments** to the
+ * engine and emits its output as the agent prompt — no selection, backoff,
  * change-detection, or brief-assembly logic of its own.
  *
  * Operator arguments (unchanged contract):
@@ -59,8 +59,8 @@ if (clearMode) {
   process.exit(0);
 }
 
-// ── brief: named ingest, or --all round-robin selection ──────────────────────
-const briefArgs = allMode ? ['ingest', 'brief', '--all'] : ['ingest', 'brief', name];
+// ── brief: named binding, or --all round-robin selection ─────────────────────
+const briefArgs = allMode ? ['projection', 'brief', '--all'] : ['projection', 'brief', name];
 const r = memstead(briefArgs);
 if (r.stdout) process.stdout.write(r.stdout);
 if (r.status !== 0) {

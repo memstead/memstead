@@ -482,7 +482,7 @@ Four primitives compose the pipeline:
 
 The pipeline is **per-mem** (each mem declares its own mediums, facets, projections, ingests — different mems have different territory) but **persisted centrally in the [workspace store](#workspace-store)** because the configuration changes with workspace lifecycle, not with mem content. The engine persists the four primitives under `.memstead/{mediums,facets,projections,ingests}/`.
 
-**History.** An earlier single `Scope` primitive conflated territory-selection and engagement; the four-primitive model separates territory (medium), engagement (facet), and obligation (projection). The legacy `scopes|projections|ingests/` folders are retired (`memstead pipeline migrate` converts them).
+**History.** An earlier single `Scope` primitive conflated territory-selection and engagement; the four-primitive model separates territory (medium), engagement (facet), and obligation (projection). The legacy `scopes|projections|ingests/` folders are retired (`memstead projection migrate` converts them).
 
 The `Facet.preparation` slot is reserved for non-text mediums (PDF, DOCX, audio); no preparation implementation ships today — an ingest whose facet declares one is reported unsupported rather than run.
 

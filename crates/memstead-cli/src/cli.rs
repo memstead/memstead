@@ -241,23 +241,14 @@ pub enum Command {
     /// without touching a workspace.
     Schema(commands::schema::Args),
 
-    /// Pipeline-config tooling. `memstead pipeline migrate` converts the
-    /// legacy `scopes|projections|ingests/` JSON folders into the
-    /// `.memstead/` workspace store's four-primitive shape.
-    Pipeline(commands::pipeline::Args),
-
-    /// Binding (projection-promotion) tooling. `memstead projection init`
-    /// scaffolds a fresh v1 binding non-interactively; `memstead projection
-    /// migrate` promotes gen-2 four-primitive configs (per-mem projection +
-    /// flat ingest) into v1 bindings; `memstead projection enable
-    /// <build|sync|verify> <binding>` adds a missing operation block — one
-    /// versioned record per source→mem obligation, with an
-    /// `operations { build, sync, verify }` block.
+    /// Binding (projection-promotion) tooling — the projection is the unit,
+    /// one versioned binding per source→mem obligation. `memstead projection
+    /// brief <binding>` renders a binding's run-brief (the Markdown prompt an
+    /// agent consumes); `memstead projection init` scaffolds a fresh v1 binding
+    /// non-interactively; `memstead projection migrate` promotes both legacy
+    /// generations (root-folder `scopes|projections|ingests/` and the gen-2
+    /// four-primitive store) into v1 bindings; `memstead projection advance`
+    /// records disposition-gated sync-baseline advances; `memstead projection
+    /// enable <build|sync|verify> <binding>` adds a missing operation block.
     Projection(commands::projection::Args),
-
-    /// Engine-side ingest orchestration. `memstead ingest brief <name>`
-    /// renders an ingest's run-brief — the Markdown prompt an agent
-    /// consumes — from the four-primitive config and the destination mem's
-    /// schema / writing guidance.
-    Ingest(commands::ingest::Args),
 }

@@ -1,6 +1,6 @@
 ---
 title: Declare an ingest
-description: "Hand-author the four-file declaration that tells memstead ingest what source to read and where to write it — the current pre-v1 format, with a worked codebase example."
+description: "Hand-author the four-file declaration that tells the ingest skill what source to read and where to write it — the current pre-v1 format, with a worked codebase example."
 sidebar:
   order: 5
 ---
@@ -129,12 +129,12 @@ a first full pass; `batch_size` bounds how much source one run works through;
 
 ## Run it
 
-The ingest name is the `ingests/` file stem — here `myapp-code`. Render its
-run-brief (the prompt the ingest agent consumes) and confirm the declaration
-resolves:
+Once migrated to a v1 binding, the obligation is addressed by its canonical
+binding id `<mem>/<name>` — here `myapp/graph`. Render its run-brief (the prompt
+the ingest agent consumes) and confirm the declaration resolves:
 
 ```bash
-memstead ingest brief myapp-code
+memstead projection brief myapp/graph
 ```
 
 If the four files are consistent, this prints the Markdown brief for the run. In

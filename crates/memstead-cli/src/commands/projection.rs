@@ -1,14 +1,23 @@
 //! `memstead projection` — the binding (projection-promotion) command tree.
 //!
 //! The projection is the unit: one versioned binding per source→mem obligation
-//! (bundle plan `03-projection-promotion`). This slice ships the **`init`**,
-//! **`migrate`**, and **`enable`** leaves — `init` scaffolds a fresh v1 binding
-//! non-interactively (D8), `migrate` promotes gen-2 four-primitive configs
-//! (`Projection` + flat `Ingest`) into v1 bindings (D10, gen-2 path), and
-//! `enable` adds a missing `build` / `sync` / `verify` operation block to an
-//! existing binding (D6 — the remedy a refused mutating op cites). The `brief`
-//! / `advance` leaves land in later sessions; `memstead ingest` and
-//! `memstead pipeline` stay for now and retire with them.
+//! (bundle plan `03-projection-promotion`). The tree ships five leaves —
+//! `brief`, `init`, `migrate`, `advance`, `enable`:
+//!
+//! - `brief` renders a binding's run-brief — the Markdown prompt an agent
+//!   consumes — for a canonical binding id `<mem>/<stem>` (D3/D9), or the next
+//!   due binding under `--all` (round-robin + backoff selection).
+//! - `init` scaffolds a fresh v1 binding non-interactively (D8).
+//! - `migrate` promotes both legacy generations into v1 bindings (D10): the
+//!   root-folder `scopes|projections|ingests/` layout (gen-1) and the gen-2
+//!   four-primitive store (`Projection` + flat `Ingest`).
+//! - `advance` records disposition-gated sync-baseline advances (D7).
+//! - `enable` adds a missing `build` / `sync` / `verify` operation block to an
+//!   existing binding (D6 — the remedy a refused mutating op cites).
+//!
+//! This tree is the sole binding surface: the retired `ingest` and `pipeline`
+//! command trees folded in here (`ingest brief` → `projection brief`,
+//! `pipeline migrate` → `projection migrate`'s gen-1 path).
 //!
 //! Errors carry `PROJECTION_*` wire tokens (D12); the missing-workspace path is
 //! single-sourced through [`crate::setup::workspace_not_initialised_error`].
@@ -27,6 +36,7 @@ use memstead_base::ingest::advance::{AdvanceError, advance_baseline};
 use memstead_base::ingest::resolve::{
     ResolveError, ResolvedPrimarySource, resolve_binding, resolve_binding_run,
 };
+use memstead_base::ingest::{RenderBriefError, render_ingest_brief, select_next_due};
 use memstead_base::pipeline::{
     Facet, IngestTrigger, Medium, MediumType, PatternEntry, PatternMode,
 };
@@ -35,6 +45,7 @@ use memstead_base::pipeline_store::{
     write_binding, write_facet, write_medium,
 };
 use memstead_base::workspace_store::StoreError;
+use memstead_base::{migrate_legacy_pipeline, read_legacy_pipeline_configs};
 
 use crate::CliError;
 use crate::output::{ExitKind, print_json, print_markdown};
@@ -48,6 +59,14 @@ pub struct Args {
 
 #[derive(Subcommand, Debug)]
 pub enum ProjectionCommand {
+    /// Render a binding's run-brief — the Markdown prompt an agent consumes —
+    /// on stdout. Takes the canonical binding id `<mem>/<stem>` (D3), e.g.
+    /// `engine/graph`. Omit the id (or pass `--all`) to select the next due
+    /// binding by round-robin + backoff and render its brief. Reads the v1
+    /// binding store and the destination mem's schema / writing guidance; the
+    /// assembly is shared with the UniFFI surface, so CLI and app briefs are
+    /// byte-identical by construction.
+    Brief(BriefArgs),
     /// Scaffold a fresh v1 binding non-interactively: a `Medium`, a `Facet`,
     /// and a v1 binding under `.memstead/{mediums,facets,projections}/<mem>/`.
     /// All inputs are flags — no prompts ever (parity across callers). The
@@ -56,12 +75,16 @@ pub enum ProjectionCommand {
     /// `warnings[]`. Refuses `PROJECTION_EXISTS` (without touching disk) when a
     /// binding of the same id already exists — never overwrites.
     Init(InitArgs),
-    /// Migrate gen-2 four-primitive configs (per-mem `Projection` + flat
-    /// `Ingest`) into v1 bindings, merging each ingest into the projection its
-    /// `projection` ref names. The binding takes the projection's file
-    /// identity (`.memstead/projections/<mem>/<stem>.json`); the merged ingest
-    /// is removed. `refinement` mode and dangling projection refs refuse with a
-    /// typed error. Use `--dry-run` to preview without writing.
+    /// Migrate both legacy generations into v1 bindings (D10). Gen-1 — the
+    /// root-folder `scopes|projections|ingests/` JSON layout the retired
+    /// `pipeline migrate` command handled — is first materialized into the
+    /// gen-2 `.memstead/` store, then promoted. Gen-2 — the four-primitive
+    /// store (per-mem `Projection` + flat `Ingest`) — merges each ingest into
+    /// the projection its `projection` ref names; the binding takes the
+    /// projection's file identity (`.memstead/projections/<mem>/<stem>.json`)
+    /// and the merged ingest is removed. `refinement` mode and dangling
+    /// projection refs refuse with a typed error. Use `--dry-run` to preview
+    /// without writing.
     Migrate(MigrateArgs),
     /// Enable a `build` / `sync` / `verify` operation on an existing binding by
     /// adding its block (with sensible defaults) if absent. This is the remedy
@@ -115,6 +138,18 @@ impl MediumTypeArg {
             MediumTypeArg::Web => MediumType::Web,
         }
     }
+}
+
+#[derive(ClapArgs, Debug)]
+pub struct BriefArgs {
+    /// The canonical binding id `<mem>/<stem>` (D3) — e.g. `engine/graph`.
+    /// Omit (or pass `--all`) to select the next due binding by round-robin +
+    /// backoff.
+    pub binding: Option<String>,
+    /// Select the next due binding across all bindings (round-robin + backoff)
+    /// and render its brief, instead of naming one.
+    #[arg(long)]
+    pub all: bool,
 }
 
 #[derive(ClapArgs, Debug)]
@@ -197,11 +232,101 @@ pub struct AdvanceArgs {
 
 pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     match args.command {
+        ProjectionCommand::Brief(a) => brief(ctx, a),
         ProjectionCommand::Init(a) => init(ctx, a),
         ProjectionCommand::Migrate(a) => migrate(ctx, a),
         ProjectionCommand::Enable(a) => enable(ctx, a),
         ProjectionCommand::Advance(a) => advance(ctx, a),
     }
+}
+
+/// Map a [`RenderBriefError`] to a typed CLI error (D12). Not-found bindings /
+/// facets / mediums exit `NotFound`; a malformed id is a `Validation` name
+/// error; config-load and mode-unsupported failures are generic. Codes are
+/// spelled as literals at each construction site so the generated error index
+/// (xtask) picks them up.
+fn map_brief_err(binding_id: &str, err: RenderBriefError) -> CliError {
+    let message = err.to_string();
+    let mapped = match &err {
+        RenderBriefError::ConfigLoad(_) => {
+            CliError::new(ExitKind::Generic, "PROJECTION_LOAD_FAILED", message)
+        }
+        RenderBriefError::ModeUnsupported { .. } => {
+            CliError::new(ExitKind::Validation, "PROJECTION_MODE_UNSUPPORTED", message)
+        }
+        RenderBriefError::Resolve(inner) => match inner {
+            ResolveError::IngestNotFound { .. } | ResolveError::ProjectionNotFound { .. } => {
+                CliError::new(ExitKind::NotFound, "PROJECTION_NOT_FOUND", message)
+            }
+            ResolveError::FacetNotFound { .. } => {
+                CliError::new(ExitKind::NotFound, "PROJECTION_FACET_NOT_FOUND", message)
+            }
+            ResolveError::MediumNotFound { .. } => {
+                CliError::new(ExitKind::NotFound, "PROJECTION_MEDIUM_NOT_FOUND", message)
+            }
+            ResolveError::MalformedProjectionRef { .. } => {
+                CliError::new(ExitKind::Validation, "PROJECTION_INVALID_NAME", message)
+            }
+        },
+    };
+    mapped.with_details(json!({ "binding": binding_id }))
+}
+
+fn brief(ctx: &CliContext, args: BriefArgs) -> anyhow::Result<()> {
+    let (_shape, root) = ctx.workspace_shape().ok_or_else(|| {
+        workspace_not_initialised_error(
+            "not inside a Memstead workspace (no `.memstead/workspace.toml` in any ancestor)",
+        )
+    })?;
+
+    let cli_engine = ctx.cli_engine_at(&root)?;
+    let engine = match &cli_engine {
+        #[cfg(feature = "mem-repo")]
+        CliEngine::MemRepo(e) => e,
+        CliEngine::Filesystem(e) => e,
+    };
+
+    // Resolve which binding to render: a named one (canonical `<mem>/<stem>`),
+    // or the next due binding in a round-robin `--all` rotation (which advances
+    // the cursor + backoff state).
+    let selected = match args.binding {
+        Some(binding) if !args.all => Some(binding),
+        _ => {
+            let configs = load_pipeline_configs(&root).map_err(|e| {
+                CliError::new(
+                    ExitKind::Generic,
+                    "PROJECTION_LOAD_FAILED",
+                    format!("could not load binding store: {e}"),
+                )
+                .with_details(json!({ "error": e.to_string() }))
+            })?;
+            select_next_due(engine, &root, &configs)
+        }
+    };
+
+    let Some(binding_id) = selected else {
+        // Every eligible binding is backing off this pass — a valid outcome.
+        if ctx.json {
+            print_json(&json!({ "skipped": true }))?;
+        } else {
+            println!(
+                "> **[projection] Skipped — every eligible binding is backing off this pass.**"
+            );
+        }
+        return Ok(());
+    };
+
+    let rendered = render_ingest_brief(engine, &root, &binding_id)
+        .map_err(|e| map_brief_err(&binding_id, e))?;
+
+    if ctx.json {
+        print_json(&json!({ "brief": rendered }))?;
+    } else {
+        // The brief *is* the stdout content (the skill pipes it as the agent
+        // prompt) — write it verbatim, no added trailing newline.
+        print!("{rendered}");
+    }
+    Ok(())
 }
 
 /// Is `value` a single, plain path component — safe to use verbatim as a `<mem>`
@@ -447,6 +572,27 @@ fn map_migrate_err(err: BindingMigrateError) -> CliError {
     }
 }
 
+/// Does the workspace root carry a gen-1 legacy pipeline layout — the
+/// pre-four-primitive `scopes|projections|ingests/` JSON folders at the root
+/// (not under `.memstead/`)? Presence of any of the three marks it. This is the
+/// trigger for folding the retired `pipeline migrate` conversion into
+/// `projection migrate` (D10, gen-1 path).
+fn has_legacy_root_layout(root: &std::path::Path) -> bool {
+    ["scopes", "projections", "ingests"]
+        .iter()
+        .any(|d| root.join(d).is_dir())
+}
+
+/// Map a store load failure during migrate to the typed generic code.
+fn migrate_load_err(err: StoreError) -> CliError {
+    CliError::new(
+        ExitKind::Generic,
+        "PROJECTION_MIGRATE_FAILED",
+        format!("could not load pipeline config: {err}"),
+    )
+    .with_details(json!({ "error": err.to_string() }))
+}
+
 fn migrate(ctx: &CliContext, args: MigrateArgs) -> anyhow::Result<()> {
     let (_shape, root) = ctx.workspace_shape().ok_or_else(|| {
         workspace_not_initialised_error(
@@ -454,14 +600,29 @@ fn migrate(ctx: &CliContext, args: MigrateArgs) -> anyhow::Result<()> {
         )
     })?;
 
-    let configs = load_legacy_pipeline_configs(&root).map_err(|e| {
-        CliError::new(
-            ExitKind::Generic,
-            "PROJECTION_MIGRATE_FAILED",
-            format!("could not load pipeline config: {e}"),
-        )
-        .with_details(json!({ "error": e.to_string() }))
-    })?;
+    // Gen-1 root-folder layout (`scopes|projections|ingests/` at the workspace
+    // root) — the pre-four-primitive generation the retired `pipeline migrate`
+    // command handled. Fold it in (D10, gen-1 path): materialize it into the
+    // gen-2 `.memstead/` store first (mediums + facets + projections + ingests),
+    // then promote to v1 below in the same pass. `--dry-run` reads the
+    // root-folder configs directly without writing anything.
+    let gen1 = has_legacy_root_layout(&root);
+    if gen1 && !args.dry_run {
+        migrate_legacy_pipeline(&root).map_err(|e| {
+            CliError::new(
+                ExitKind::Generic,
+                "PROJECTION_MIGRATE_FAILED",
+                format!("could not convert root-folder (gen-1) pipeline layout: {e}"),
+            )
+            .with_details(json!({ "error": e.to_string() }))
+        })?;
+    }
+
+    let configs = if gen1 && args.dry_run {
+        read_legacy_pipeline_configs(&root).map_err(migrate_load_err)?
+    } else {
+        load_legacy_pipeline_configs(&root).map_err(migrate_load_err)?
+    };
 
     // Pure transform first: any refusal (refinement / dangling / malformed)
     // aborts before a single file is touched — the migration is all-or-nothing.

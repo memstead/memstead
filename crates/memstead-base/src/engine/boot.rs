@@ -362,7 +362,7 @@ impl Engine {
         // from the workspace store. The legacy `scopes|projections|ingests/`
         // JSON folders are no longer read at boot — the migration-window
         // compatibility shim retired once the bundled pipelines migrated
-        // (2026-06-14). `memstead pipeline migrate` is the only path from
+        // (2026-06-14). `memstead projection migrate` is the only path from
         // old-shape configs into the store. A malformed config surfaces a
         // typed `StoreError::Parse` naming the file.
         // The engine's stored `pipeline_configs` is the four-primitive

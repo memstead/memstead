@@ -1,7 +1,8 @@
 //! Integration tests for the `memstead projection` command tree.
 //!
-//! Two leaves ship here: `init` (D8 — non-interactive v1 scaffold) and
-//! `migrate` (D10 gen-2 path — four-primitive → v1 bindings).
+//! Leaves covered: `brief` (D9 — render a binding's run-brief, and its
+//! typed-refusal paths), `init` (D8 — non-interactive v1 scaffold), `migrate`
+//! (D10 — four-primitive → v1 bindings), `enable`, and `advance`.
 //!
 //! `init` tests assert: a codebase/filesystem source scaffolds all three files
 //! (`mediums`/`facets`/`projections`) with `operations:[build,sync,verify]` and
@@ -1020,4 +1021,196 @@ fn advance_outside_workspace_is_typed() {
     let env: Value = serde_json::from_slice(&out).unwrap();
     assert_eq!(env["code"], "WORKSPACE_NOT_INITIALISED");
     assert_ne!(env["code"], "INTERNAL");
+}
+
+// ── brief (D9) ───────────────────────────────────────────────────────────────
+
+/// `projection brief <mem>/<stem>` renders a binding's discovery run-brief,
+/// headed by the canonical binding id (D3/D9). Scaffold a binding with
+/// `projection init`, then render it.
+#[cfg(feature = "mem-repo")]
+#[test]
+fn brief_renders_for_scaffolded_binding() {
+    let tmp = TempDir::new().unwrap();
+    let ws = tmp.path().join("ws");
+    memstead()
+        .args(["mem-repo", "init", ws.to_str().unwrap(), "--no-gitignore"])
+        .assert()
+        .success();
+    memstead()
+        .current_dir(&ws)
+        .args([
+            "projection",
+            "init",
+            "--mem",
+            "ws",
+            "--source",
+            "../src",
+            "--medium-type",
+            "codebase",
+            "--name",
+            "code",
+        ])
+        .assert()
+        .success();
+
+    let out = memstead()
+        .current_dir(&ws)
+        .args(["projection", "brief", "ws/code"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let brief = String::from_utf8(out).unwrap();
+    assert!(
+        brief.contains("ws/code"),
+        "brief must name the canonical binding id; got:\n{brief}"
+    );
+    assert!(
+        brief.contains("## Situation"),
+        "a discovery brief carries the Situation block; got:\n{brief}"
+    );
+}
+
+/// `projection brief` on an unknown binding id refuses `PROJECTION_NOT_FOUND`
+/// (NotFound exit) — never a generic/internal leak.
+#[cfg(feature = "mem-repo")]
+#[test]
+fn brief_missing_binding_refuses() {
+    let tmp = TempDir::new().unwrap();
+    let ws = tmp.path().join("ws");
+    memstead()
+        .args(["mem-repo", "init", ws.to_str().unwrap(), "--no-gitignore"])
+        .assert()
+        .success();
+
+    let out = memstead()
+        .current_dir(&ws)
+        .args(["--json", "projection", "brief", "engine/nope"])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(env["code"], "PROJECTION_NOT_FOUND");
+    assert_ne!(env["code"], "INTERNAL");
+}
+
+/// `projection brief` outside a workspace refuses with the shared,
+/// single-sourced `WORKSPACE_NOT_INITIALISED` code — never a generic/internal
+/// leak. Runs on both build flavours (no engine is built before the check).
+#[test]
+fn brief_outside_workspace_is_typed() {
+    let tmp = TempDir::new().unwrap();
+    let out = memstead()
+        .current_dir(tmp.path())
+        .args(["--json", "projection", "brief", "engine/graph"])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(env["code"], "WORKSPACE_NOT_INITIALISED");
+    assert_ne!(env["code"], "INTERNAL");
+}
+
+// ── migrate: gen-1 root-folder path (folded from the retired `pipeline migrate`) ──
+
+/// A gen-1 root-folder workspace (`scopes|projections|ingests/` at the root)
+/// migrates straight to a v1 binding in one `projection migrate` pass (D10,
+/// gen-1 path — folded from the retired `pipeline migrate` command).
+#[test]
+fn migrate_gen1_root_folder_promotes_to_v1_binding() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    write_store(root, "workspace.toml", "");
+
+    let write_root = |rel: &str, contents: &str| {
+        let path = root.join(rel);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, contents).unwrap();
+    };
+    write_root(
+        "scopes/engine/src.json",
+        r#"{"type":"codebase","scope":{"tree":[{"path":"../public/**/*.rs","mode":"allow"}]}}"#,
+    );
+    write_root(
+        "projections/engine/graph.json",
+        r#"{"intent":"the engine graph","sources":[{"scope_ref":"src"}],"destinations":[{"mem":"engine"}]}"#,
+    );
+    write_root(
+        "ingests/engine-graph.json",
+        r#"{"projection":"engine/graph","mode":"discovery","trigger":"loop","batch_size":20,"deny_paths":[]}"#,
+    );
+
+    let output = memstead()
+        .current_dir(root)
+        .args(["--json", "projection", "migrate"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(env["migrated"], 1);
+    assert_eq!(env["bindings"][0], "engine/graph");
+
+    // The projection was promoted to a v1 binding in the `.memstead/` store.
+    let b = read_binding(root);
+    assert_eq!(b.version, 1);
+    assert_eq!(b.destination_mem, "engine");
+    assert_eq!(b.source_facets, vec!["src".to_string()]);
+    assert_eq!(b.operations.build.mode, BuildMode::Discovery);
+    // The merged flat ingest was consumed; medium + facet were materialized.
+    assert!(!root.join(".memstead/ingests/engine-graph.json").exists());
+    assert!(root.join(".memstead/mediums/engine/src.json").exists());
+    assert!(root.join(".memstead/facets/engine/src.json").exists());
+}
+
+/// `--dry-run` on a gen-1 root-folder workspace previews the promotion without
+/// materializing the gen-2 store or touching the root-folder layout.
+#[test]
+fn migrate_gen1_dry_run_writes_nothing() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    write_store(root, "workspace.toml", "");
+    let write_root = |rel: &str, contents: &str| {
+        let path = root.join(rel);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, contents).unwrap();
+    };
+    write_root(
+        "scopes/engine/src.json",
+        r#"{"type":"codebase","scope":{"tree":[{"path":"../public/**/*.rs","mode":"allow"}]}}"#,
+    );
+    write_root(
+        "projections/engine/graph.json",
+        r#"{"intent":"the engine graph","sources":[{"scope_ref":"src"}],"destinations":[{"mem":"engine"}]}"#,
+    );
+    write_root(
+        "ingests/engine-graph.json",
+        r#"{"projection":"engine/graph","mode":"discovery","trigger":"loop","batch_size":20,"deny_paths":[]}"#,
+    );
+
+    let output = memstead()
+        .current_dir(root)
+        .args(["--json", "projection", "migrate", "--dry-run"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(env["dry_run"], true);
+    assert_eq!(env["migrated"], 1);
+    // Nothing materialized under `.memstead/` (no gen-2 store written).
+    assert!(
+        !root
+            .join(".memstead/projections/engine/graph.json")
+            .exists()
+    );
+    assert!(!root.join(".memstead/mediums/engine/src.json").exists());
 }

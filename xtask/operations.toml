@@ -171,6 +171,35 @@ name = "workspace-revoke-cross-link"
 mcp = "memstead_workspace_revoke_cross_link"
 cli = "workspace"
 
+# Binding (projection-promotion) surface — the `memstead projection` tree.
+# The projection is the unit: one versioned binding per source→mem
+# obligation. `brief` has a UniFFI counterpart (`ingest_brief` this cycle —
+# the UDL rename to `projection_brief` lands with the macOS floor in a later
+# session); the scaffold / migrate / advance / enable leaves are CLI-only
+# (like the mem / workspace lifecycle rows, several operations share one
+# top-level `projection` subcommand).
+
+[[operation]]
+name = "projection-brief"
+cli = "projection"
+uniffi = "ingest_brief"
+
+[[operation]]
+name = "projection-init"
+cli = "projection"
+
+[[operation]]
+name = "projection-migrate"
+cli = "projection"
+
+[[operation]]
+name = "projection-advance"
+cli = "projection"
+
+[[operation]]
+name = "projection-enable"
+cli = "projection"
+
 # Parse-time-drift recovery. Reaches both the CLI (`memstead recover`)
 # and UniFFI (`Engine.apply_parse_recovery`, the first disk-mutating
 # UniFFI method); no MCP tool (operator-initiated maintenance sweep).

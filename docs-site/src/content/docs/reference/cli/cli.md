@@ -73,15 +73,12 @@ This document contains the help content for the `memstead` command-line program.
 * [`memstead schema new`↴](#memstead-schema-new)
 * [`memstead schema validate`↴](#memstead-schema-validate)
 * [`memstead schema install`↴](#memstead-schema-install)
-* [`memstead pipeline`↴](#memstead-pipeline)
-* [`memstead pipeline migrate`↴](#memstead-pipeline-migrate)
 * [`memstead projection`↴](#memstead-projection)
+* [`memstead projection brief`↴](#memstead-projection-brief)
 * [`memstead projection init`↴](#memstead-projection-init)
 * [`memstead projection migrate`↴](#memstead-projection-migrate)
 * [`memstead projection enable`↴](#memstead-projection-enable)
 * [`memstead projection advance`↴](#memstead-projection-advance)
-* [`memstead ingest`↴](#memstead-ingest)
-* [`memstead ingest brief`↴](#memstead-ingest-brief)
 
 ## `memstead`
 
@@ -142,9 +139,7 @@ Exit codes:
 * `mem-repo` — Mem-repo-git lifecycle commands
 * `workspace` — Introspect and configure workspace policy — `dump` reads the effective config; `allow-create`/`revoke-create`/`allow-delete`/ `revoke-delete`/`grant-cross-link`/`revoke-cross-link`/`set-mutations` write the mem-lifecycle allowlist, cross-mem link grants, and mutation policy
 * `schema` — Author-time schema tooling. `memstead schema validate <path>` checks a schema package directory against the engine's loader without touching a workspace
-* `pipeline` — Pipeline-config tooling. `memstead pipeline migrate` converts the legacy `scopes|projections|ingests/` JSON folders into the `.memstead/` workspace store's four-primitive shape
-* `projection` — Binding (projection-promotion) tooling. `memstead projection init` scaffolds a fresh v1 binding non-interactively; `memstead projection migrate` promotes gen-2 four-primitive configs (per-mem projection + flat ingest) into v1 bindings; `memstead projection enable <build|sync|verify> <binding>` adds a missing operation block — one versioned record per source→mem obligation, with an `operations { build, sync, verify }` block
-* `ingest` — Engine-side ingest orchestration. `memstead ingest brief <name>` renders an ingest's run-brief — the Markdown prompt an agent consumes — from the four-primitive config and the destination mem's schema / writing guidance
+* `projection` — Binding (projection-promotion) tooling — the projection is the unit, one versioned binding per source→mem obligation. `memstead projection brief <binding>` renders a binding's run-brief (the Markdown prompt an agent consumes); `memstead projection init` scaffolds a fresh v1 binding non-interactively; `memstead projection migrate` promotes both legacy generations (root-folder `scopes|projections|ingests/` and the gen-2 four-primitive store) into v1 bindings; `memstead projection advance` records disposition-gated sync-baseline advances; `memstead projection enable <build|sync|verify> <binding>` adds a missing operation block
 
 ###### **Options:**
 
@@ -1286,38 +1281,35 @@ Install a schema package into the current folder workspace's `.memstead/schemas/
 
 
 
-## `memstead pipeline`
-
-Pipeline-config tooling. `memstead pipeline migrate` converts the legacy `scopes|projections|ingests/` JSON folders into the `.memstead/` workspace store's four-primitive shape
-
-**Usage:** `memstead pipeline <COMMAND>`
-
-###### **Subcommands:**
-
-* `migrate` — Migrate the legacy `scopes|projections|ingests/` JSON folders at the workspace root into the four-primitive workspace-store shape under `.memstead/`. A legacy scope splits into a Medium (territory) and a Facet (engagement). Idempotent — re-running reproduces identical files. The legacy folders are left in place; remove them when ready
-
-
-
-## `memstead pipeline migrate`
-
-Migrate the legacy `scopes|projections|ingests/` JSON folders at the workspace root into the four-primitive workspace-store shape under `.memstead/`. A legacy scope splits into a Medium (territory) and a Facet (engagement). Idempotent — re-running reproduces identical files. The legacy folders are left in place; remove them when ready
-
-**Usage:** `memstead pipeline migrate`
-
-
-
 ## `memstead projection`
 
-Binding (projection-promotion) tooling. `memstead projection init` scaffolds a fresh v1 binding non-interactively; `memstead projection migrate` promotes gen-2 four-primitive configs (per-mem projection + flat ingest) into v1 bindings; `memstead projection enable <build|sync|verify> <binding>` adds a missing operation block — one versioned record per source→mem obligation, with an `operations { build, sync, verify }` block
+Binding (projection-promotion) tooling — the projection is the unit, one versioned binding per source→mem obligation. `memstead projection brief <binding>` renders a binding's run-brief (the Markdown prompt an agent consumes); `memstead projection init` scaffolds a fresh v1 binding non-interactively; `memstead projection migrate` promotes both legacy generations (root-folder `scopes|projections|ingests/` and the gen-2 four-primitive store) into v1 bindings; `memstead projection advance` records disposition-gated sync-baseline advances; `memstead projection enable <build|sync|verify> <binding>` adds a missing operation block
 
 **Usage:** `memstead projection <COMMAND>`
 
 ###### **Subcommands:**
 
+* `brief` — Render a binding's run-brief — the Markdown prompt an agent consumes — on stdout. Takes the canonical binding id `<mem>/<stem>` (D3), e.g. `engine/graph`. Omit the id (or pass `--all`) to select the next due binding by round-robin + backoff and render its brief. Reads the v1 binding store and the destination mem's schema / writing guidance; the assembly is shared with the UniFFI surface, so CLI and app briefs are byte-identical by construction
 * `init` — Scaffold a fresh v1 binding non-interactively: a `Medium`, a `Facet`, and a v1 binding under `.memstead/{mediums,facets,projections}/<mem>/`. All inputs are flags — no prompts ever (parity across callers). The default binding declares build+sync+verify capability-permitting (D6): a `web` source scaffolds build-only, with the deferral named in `warnings[]`. Refuses `PROJECTION_EXISTS` (without touching disk) when a binding of the same id already exists — never overwrites
-* `migrate` — Migrate gen-2 four-primitive configs (per-mem `Projection` + flat `Ingest`) into v1 bindings, merging each ingest into the projection its `projection` ref names. The binding takes the projection's file identity (`.memstead/projections/<mem>/<stem>.json`); the merged ingest is removed. `refinement` mode and dangling projection refs refuse with a typed error. Use `--dry-run` to preview without writing
+* `migrate` — Migrate both legacy generations into v1 bindings (D10). Gen-1 — the root-folder `scopes|projections|ingests/` JSON layout the retired `pipeline migrate` command handled — is first materialized into the gen-2 `.memstead/` store, then promoted. Gen-2 — the four-primitive store (per-mem `Projection` + flat `Ingest`) — merges each ingest into the projection its `projection` ref names; the binding takes the projection's file identity (`.memstead/projections/<mem>/<stem>.json`) and the merged ingest is removed. `refinement` mode and dangling projection refs refuse with a typed error. Use `--dry-run` to preview without writing
 * `enable` — Enable a `build` / `sync` / `verify` operation on an existing binding by adding its block (with sensible defaults) if absent. This is the remedy a refused *mutating* operation cites (D6): `projection enable sync <binding>`. Before writing, the operation is checked against the medium-capability matrix (D6) — enabling `sync`/`verify` over a medium that cannot support it (e.g. a `web` source) refuses with the capability gap and writes nothing. Enabling an already-present operation refuses `PROJECTION_OP_ALREADY_ENABLED`; a missing binding refuses `PROJECTION_NOT_FOUND`
 * `advance` — Advance a binding's sync baseline by recording per-artifact dispositions (D7). The engine freezes the presented changed slice, subtracts already-disposed artifacts on re-presentation, appends new-HEAD deltas when the source moves mid-pass, and — when the remainder empties — advances the destination mem's `#synced` token via the sync-state writer (provenance piggybacks that commit). Dispositions are durable (`.memstead/state/advance/`), so a partial pass resumes across process restarts. The gate accepts **only** artifact ids the engine presented — an unknown id refuses the whole call atomically (`PROJECTION_ADVANCE_UNKNOWN_ARTIFACT`). In this cycle the agent supplies a disposition for **every** artifact explicitly (auto-derivation lands later)
+
+
+
+## `memstead projection brief`
+
+Render a binding's run-brief — the Markdown prompt an agent consumes — on stdout. Takes the canonical binding id `<mem>/<stem>` (D3), e.g. `engine/graph`. Omit the id (or pass `--all`) to select the next due binding by round-robin + backoff and render its brief. Reads the v1 binding store and the destination mem's schema / writing guidance; the assembly is shared with the UniFFI surface, so CLI and app briefs are byte-identical by construction
+
+**Usage:** `memstead projection brief [OPTIONS] [BINDING]`
+
+###### **Arguments:**
+
+* `<BINDING>` — The canonical binding id `<mem>/<stem>` (D3) — e.g. `engine/graph`. Omit (or pass `--all`) to select the next due binding by round-robin + backoff
+
+###### **Options:**
+
+* `--all` — Select the next due binding across all bindings (round-robin + backoff) and render its brief, instead of naming one
 
 
 
@@ -1352,7 +1344,7 @@ Scaffold a fresh v1 binding non-interactively: a `Medium`, a `Facet`, and a v1 b
 
 ## `memstead projection migrate`
 
-Migrate gen-2 four-primitive configs (per-mem `Projection` + flat `Ingest`) into v1 bindings, merging each ingest into the projection its `projection` ref names. The binding takes the projection's file identity (`.memstead/projections/<mem>/<stem>.json`); the merged ingest is removed. `refinement` mode and dangling projection refs refuse with a typed error. Use `--dry-run` to preview without writing
+Migrate both legacy generations into v1 bindings (D10). Gen-1 — the root-folder `scopes|projections|ingests/` JSON layout the retired `pipeline migrate` command handled — is first materialized into the gen-2 `.memstead/` store, then promoted. Gen-2 — the four-primitive store (per-mem `Projection` + flat `Ingest`) — merges each ingest into the projection its `projection` ref names; the binding takes the projection's file identity (`.memstead/projections/<mem>/<stem>.json`) and the merged ingest is removed. `refinement` mode and dangling projection refs refuse with a typed error. Use `--dry-run` to preview without writing
 
 **Usage:** `memstead projection migrate [OPTIONS]`
 
@@ -1397,34 +1389,6 @@ Advance a binding's sync baseline by recording per-artifact dispositions (D7). T
 ###### **Options:**
 
 * `--dispositions <DISPOSITIONS>` — A JSON object mapping each judged artifact id to its disposition, e.g. `'{"src/lib.rs": "worked", "src/old.rs": "irrelevant"}'`. Only ids the engine presented in the brief's changed slice are accepted — an unknown id refuses the whole call. Pass `'{}'` to re-present the remainder without recording anything
-
-
-
-## `memstead ingest`
-
-Engine-side ingest orchestration. `memstead ingest brief <name>` renders an ingest's run-brief — the Markdown prompt an agent consumes — from the four-primitive config and the destination mem's schema / writing guidance
-
-**Usage:** `memstead ingest <COMMAND>`
-
-###### **Subcommands:**
-
-* `brief` — Render the run-brief for an ingest — the Markdown prompt an agent consumes — on stdout. Reads the four-primitive config and the destination mem's schema / writing guidance
-
-
-
-## `memstead ingest brief`
-
-Render the run-brief for an ingest — the Markdown prompt an agent consumes — on stdout. Reads the four-primitive config and the destination mem's schema / writing guidance
-
-**Usage:** `memstead ingest brief [OPTIONS] [NAME]`
-
-###### **Arguments:**
-
-* `<NAME>` — The ingest name (its `.memstead/ingests/<name>.json` file stem). Omit (or pass `--all`) to select the next due ingest by round-robin + backoff
-
-###### **Options:**
-
-* `--all` — Select the next due ingest across all ingests (round-robin + backoff) and render its brief, instead of naming one
 
 
 

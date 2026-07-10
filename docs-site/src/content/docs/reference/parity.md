@@ -39,6 +39,11 @@ Every public engine operation across the four programmatic surfaces (MCP, CLI, U
 | `workspace-revoke-delete` | `memstead_workspace_revoke_delete` *(full only)* | `workspace` *(full only)* | — | — |
 | `workspace-grant-cross-link` | `memstead_workspace_grant_cross_link` *(full only)* | `workspace` *(full only)* | — | — |
 | `workspace-revoke-cross-link` | `memstead_workspace_revoke_cross_link` *(full only)* | `workspace` *(full only)* | — | — |
+| `projection-brief` | — | `projection` *(lean + full)* | `ingest_brief` | — |
+| `projection-init` | — | `projection` *(lean + full)* | — | — |
+| `projection-migrate` | — | `projection` *(lean + full)* | — | — |
+| `projection-advance` | — | `projection` *(lean + full)* | — | — |
+| `projection-enable` | — | `projection` *(lean + full)* | — | — |
 | `parse-recovery` | — | `recover` *(full only)* | `apply_parse_recovery` | — |
 | `agent-notes` | — | — | `agent_notes` | — |
 | `mem-head-sha` | — | — | `mem_head_sha` | — |
@@ -62,15 +67,12 @@ Surface entries the registry does not pin to a logical operation. Either add a r
 - `batch-update`
 - `domain`
 - `export`
-- `ingest`
 - `init`
 - `install`
 - `link`
 - `login`
 - `logout`
 - `mem-repo`
-- `pipeline`
-- `projection`
 - `publish`
 - `quickstart`
 - `schema`
