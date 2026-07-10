@@ -56,7 +56,7 @@ pub use refinement::{
 pub use render::{RenderBriefError, mode_name, render_ingest_brief};
 pub use resolve::{
     ChangeStrategy, ResolveError, ResolvedIngest, ResolvedPrimarySource, ResolvedSource,
-    find_git_root, resolve_change_strategy, resolve_ingest,
+    find_git_root, resolve_binding_run, resolve_change_strategy, resolve_ingest,
 };
 pub use selection::{BackoffEntry, MAX_SKIP_LEVEL, apply_backoff, select_next_due, should_skip};
 pub use slice::{

@@ -23,9 +23,9 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::binding::{BindingV1, ResolvedBinding};
+use crate::binding::{BindingV1, BuildMode, ResolvedBinding};
 use crate::pipeline::{Facet, Ingest, IngestMode, IngestTrigger, Medium, MediumType, PatternEntry};
-use crate::pipeline_store::PipelineConfigs;
+use crate::pipeline_store::{BindingConfigs, PipelineConfigs};
 
 /// A projection source resolved to what the run needs: a **primary** facet
 /// joined to its medium (the territory to read and write back), or a
@@ -72,7 +72,10 @@ pub struct ResolvedPrimarySource {
 /// sources — the runtime shape the orchestration stages consume.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedIngest {
-    /// The ingest's name (its file stem in `.memstead/ingests/`).
+    /// The run's identity. For a v1 binding (via [`resolve_binding_run`]) this
+    /// is the canonical binding id `<mem>/<stem>` (D3) — the string every
+    /// downstream key (sync_state, selection cache, brief header) derives from.
+    /// For the legacy [`resolve_ingest`] path it is the flat ingest file stem.
     pub name: String,
     /// Discovery / refinement / one-shot.
     pub mode: IngestMode,
@@ -383,6 +386,114 @@ pub fn resolve_binding(
     Ok(ResolvedBinding {
         binding: binding.clone(),
         primary_sources,
+    })
+}
+
+/// Resolve a **v1 binding** (by canonical id) into the runtime
+/// [`ResolvedIngest`] shape the orchestration stages (cursor, brief,
+/// selection) consume — the binding-era counterpart of [`resolve_ingest`].
+///
+/// The binding *is* the declaration (no projection record to look up, no flat
+/// ingest to join): its `operations.build` supplies the run mode / trigger /
+/// batch / post-actions, and `deny_paths` / `intent` / `rules` come straight
+/// off the binding. `binding_id` is the canonical `<mem>/<stem>` (D3), which
+/// becomes the resolved ingest's `name` and `projection_ref` — every downstream
+/// key (sync_state, selection cache, brief header) is derived from it.
+///
+/// The binding's `build.mode` is [`BuildMode::Discovery`] or
+/// [`BuildMode::OneShot`] (`refinement` is deleted from the vocabulary, D1);
+/// it maps to the corresponding [`IngestMode`]. Facets and mediums are joined
+/// in the binding-id's `<mem>` tier, exactly as [`resolve_ingest`] joins them.
+/// Every lookup failure is a located [`ResolveError`]; a malformed `binding_id`
+/// is [`ResolveError::MalformedProjectionRef`]. Pure — no I/O.
+pub fn resolve_binding_run(
+    configs: &BindingConfigs,
+    binding_id: &str,
+    binding: &BindingV1,
+) -> Result<ResolvedIngest, ResolveError> {
+    let (mem, name) = binding_id
+        .split_once('/')
+        .filter(|(m, n)| !m.is_empty() && !n.is_empty())
+        .ok_or_else(|| ResolveError::MalformedProjectionRef {
+            ingest: binding_id.to_string(),
+            projection: binding_id.to_string(),
+        })?;
+    let mem = mem.to_string();
+    let name = name.to_string();
+
+    let mut sources =
+        Vec::with_capacity(binding.source_facets.len() + binding.reference_mems.len());
+    for facet_name in &binding.source_facets {
+        let facet: &Facet = configs
+            .facets
+            .iter()
+            .find(|r| r.mem == mem && r.name == *facet_name)
+            .map(|r| &r.config)
+            .ok_or_else(|| ResolveError::FacetNotFound {
+                projection_ref: binding_id.to_string(),
+                facet: facet_name.clone(),
+                mem: mem.clone(),
+                available: configs
+                    .facets
+                    .iter()
+                    .filter(|r| r.mem == mem)
+                    .map(|r| r.name.clone())
+                    .collect(),
+            })?;
+
+        let medium: &Medium = configs
+            .mediums
+            .iter()
+            .find(|r| r.mem == mem && r.name == facet.medium)
+            .map(|r| &r.config)
+            .ok_or_else(|| ResolveError::MediumNotFound {
+                facet: facet_name.clone(),
+                medium: facet.medium.clone(),
+                mem: mem.clone(),
+                available: configs
+                    .mediums
+                    .iter()
+                    .filter(|r| r.mem == mem)
+                    .map(|r| r.name.clone())
+                    .collect(),
+            })?;
+
+        sources.push(ResolvedSource::Primary(ResolvedPrimarySource {
+            facet_ref: facet_name.clone(),
+            medium: facet.medium.clone(),
+            medium_type: medium.medium_type,
+            medium_pointer: medium.pointer.clone(),
+            declared_change_detection: medium.change_detection.clone(),
+            scope: facet.scope.clone(),
+            preparation: facet.preparation.clone(),
+        }));
+    }
+    for reference_mem in &binding.reference_mems {
+        sources.push(ResolvedSource::Reference {
+            mem: reference_mem.clone(),
+        });
+    }
+
+    let build = &binding.operations.build;
+    let mode = match build.mode {
+        BuildMode::Discovery => IngestMode::Discovery,
+        BuildMode::OneShot => IngestMode::OneShot,
+    };
+
+    Ok(ResolvedIngest {
+        name: binding_id.to_string(),
+        mode,
+        trigger: build.trigger,
+        batch_size: build.batch_size,
+        deny_paths: binding.deny_paths.clone(),
+        projection_ref: binding_id.to_string(),
+        projection_mem: mem,
+        projection_name: name,
+        intent: binding.intent.clone(),
+        sources,
+        destination_mem: binding.destination_mem.clone(),
+        rules: binding.rules.clone(),
+        post_actions: build.post_actions.clone(),
     })
 }
 
@@ -768,6 +879,122 @@ mod tests {
         let binding = v1_binding("engine", &[]);
         let err = resolve_binding(&configs, "noslash", &binding).unwrap_err();
         assert!(matches!(err, ResolveError::MalformedProjectionRef { .. }));
+    }
+
+    /// `resolve_binding_run` produces the runtime shape from a binding: the id
+    /// becomes `name`/`projection_ref`, `build.mode` maps to the run mode,
+    /// deny_paths / trigger / batch / post_actions come off the build op, and
+    /// each facet joins its medium; reference mems follow the primaries.
+    #[test]
+    fn resolve_binding_run_produces_runtime_shape() {
+        use crate::binding::{
+            BINDING_VERSION, BuildMode, BuildOperation, CoverageSemantics, Operations,
+        };
+        let configs = BindingConfigs {
+            mediums: vec![MemPipelineRecord {
+                mem: "macos".to_string(),
+                name: "src".to_string(),
+                config: Medium {
+                    name: "src".to_string(),
+                    medium_type: MediumType::Codebase,
+                    pointer: "../macos".to_string(),
+                    change_detection: None,
+                },
+            }],
+            facets: vec![MemPipelineRecord {
+                mem: "macos".to_string(),
+                name: "source-tree".to_string(),
+                config: Facet {
+                    name: "source-tree".to_string(),
+                    medium: "src".to_string(),
+                    scope: vec![allow("../macos/**/*.swift")],
+                    engagement: None,
+                    preparation: None,
+                },
+            }],
+            bindings: vec![],
+        };
+        let binding = BindingV1 {
+            version: BINDING_VERSION,
+            intent: Some("swift".to_string()),
+            source_facets: vec!["source-tree".to_string()],
+            reference_mems: vec!["engine".to_string()],
+            destination_mem: "macos".to_string(),
+            deny_paths: vec!["**/VISION.md".to_string()],
+            coverage_semantics: CoverageSemantics::Exhaustive,
+            rules: None,
+            operations: Operations {
+                build: BuildOperation {
+                    mode: BuildMode::Discovery,
+                    trigger: IngestTrigger::Loop,
+                    batch_size: 20,
+                    post_actions: Some(serde_json::json!({ "archive_source": true })),
+                },
+                sync: None,
+                verify: None,
+            },
+        };
+
+        let r = resolve_binding_run(&configs, "macos/graph", &binding).unwrap();
+        assert_eq!(r.name, "macos/graph");
+        assert_eq!(r.projection_ref, "macos/graph");
+        assert_eq!(r.projection_mem, "macos");
+        assert_eq!(r.projection_name, "graph");
+        assert_eq!(r.mode, IngestMode::Discovery);
+        assert_eq!(r.batch_size, 20);
+        assert_eq!(r.deny_paths, ["**/VISION.md"]);
+        assert_eq!(r.destination_mem, "macos");
+        assert_eq!(r.intent.as_deref(), Some("swift"));
+        assert_eq!(
+            r.post_actions,
+            Some(serde_json::json!({ "archive_source": true }))
+        );
+        assert_eq!(r.sources.len(), 2);
+        match &r.sources[0] {
+            ResolvedSource::Primary(p) => {
+                assert_eq!(p.facet_ref, "source-tree");
+                assert_eq!(p.medium_type, MediumType::Codebase);
+                assert_eq!(p.medium_pointer, "../macos");
+            }
+            other => panic!("expected primary first, got {other:?}"),
+        }
+        assert_eq!(
+            r.sources[1],
+            ResolvedSource::Reference {
+                mem: "engine".to_string()
+            }
+        );
+    }
+
+    /// A one-shot binding maps to the one-shot run mode.
+    #[test]
+    fn resolve_binding_run_maps_one_shot() {
+        use crate::binding::{
+            BINDING_VERSION, BuildMode, BuildOperation, CoverageSemantics, Operations,
+        };
+        let configs = BindingConfigs::default();
+        let binding = BindingV1 {
+            version: BINDING_VERSION,
+            intent: None,
+            source_facets: vec![],
+            reference_mems: vec![],
+            destination_mem: "m".to_string(),
+            deny_paths: vec![],
+            coverage_semantics: CoverageSemantics::Exhaustive,
+            rules: None,
+            operations: Operations {
+                build: BuildOperation {
+                    mode: BuildMode::OneShot,
+                    trigger: IngestTrigger::Manual,
+                    batch_size: 5,
+                    post_actions: None,
+                },
+                sync: None,
+                verify: None,
+            },
+        };
+        let r = resolve_binding_run(&configs, "m/lens", &binding).unwrap();
+        assert_eq!(r.mode, IngestMode::OneShot);
     }
 
     /// A graph-typed medium always resolves to the graph strategy,

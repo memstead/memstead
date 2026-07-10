@@ -419,10 +419,10 @@ pub struct MemConfig {
     /// each token is opaque, its meaning owned by the medium-type
     /// layer that produced it (git → commit id, graph → snapshot
     /// token, filesystem → a small stat digest the plugin
-    /// JSON-stringifies). The key is likewise opaque — the ingest
-    /// layer keys per `(ingest, facet)` (conventionally
-    /// `"<ingest>/<facet>"`), but the engine treats it as an arbitrary
-    /// string. This is the durable, shared baseline against which a
+    /// JSON-stringifies). The key is likewise opaque — the binding
+    /// layer keys per `(binding, facet)` (conventionally
+    /// `"<binding-id>/<facet>#synced"`, D4), but the engine treats it as
+    /// an arbitrary string. This is the durable, shared baseline against which a
     /// fresh ingest iteration diffs "what changed since last time";
     /// it survives a skill-cache wipe and a machine change because it
     /// lives in engine-held mem config, not ephemeral plugin cache.

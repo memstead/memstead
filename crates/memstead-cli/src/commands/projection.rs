@@ -28,7 +28,8 @@ use memstead_base::pipeline::{
     Facet, IngestTrigger, Medium, MediumType, PatternEntry, PatternMode,
 };
 use memstead_base::pipeline_store::{
-    delete_ingest, load_pipeline_configs, read_binding, write_binding, write_facet, write_medium,
+    delete_ingest, load_legacy_pipeline_configs, read_binding, write_binding, write_facet,
+    write_medium,
 };
 use memstead_base::workspace_store::StoreError;
 
@@ -423,7 +424,7 @@ fn migrate(ctx: &CliContext, args: MigrateArgs) -> anyhow::Result<()> {
         )
     })?;
 
-    let configs = load_pipeline_configs(&root).map_err(|e| {
+    let configs = load_legacy_pipeline_configs(&root).map_err(|e| {
         CliError::new(
             ExitKind::Generic,
             "PROJECTION_MIGRATE_FAILED",
@@ -656,7 +657,7 @@ fn enable(ctx: &CliContext, args: EnableArgs) -> anyhow::Result<()> {
     // Refusals about *other* operations reflect pre-existing config and do not
     // block this enable (mirrors `migrate`'s treat-as-warning posture). No write
     // on refusal — the file stays byte-identical.
-    let configs = load_pipeline_configs(&root).map_err(|e| enable_failed(&binding_id, e))?;
+    let configs = load_legacy_pipeline_configs(&root).map_err(|e| enable_failed(&binding_id, e))?;
     let resolved = resolve_binding(&configs, &binding_id, &binding).map_err(|e| {
         CliError::new(
             ExitKind::Generic,

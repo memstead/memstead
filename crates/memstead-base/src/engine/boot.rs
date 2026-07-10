@@ -365,7 +365,16 @@ impl Engine {
         // (2026-06-14). `memstead pipeline migrate` is the only path from
         // old-shape configs into the store. A malformed config surfaces a
         // typed `StoreError::Parse` naming the file.
-        engine.set_pipeline_configs(crate::pipeline_store::load_pipeline_configs(
+        // The engine's stored `pipeline_configs` is the four-primitive
+        // (legacy) shape — it backs the referential-integrity edit layer and
+        // the macOS `pipeline_configs_json` surface, both of which still speak
+        // Projection + flat-Ingest. The **live** brief / selection path reloads
+        // the version-gated binding shape fresh (`load_pipeline_configs`); boot
+        // uses the legacy reader so a not-yet-migrated dependent (the editor)
+        // keeps working. A migrated (v1) workspace reads its bindings lossily
+        // as projections here (version/operations ignored), which the edit
+        // layer and JSON surface tolerate.
+        engine.set_pipeline_configs(crate::pipeline_store::load_legacy_pipeline_configs(
             workspace_root,
         )?);
         // Publish the authoring meta-schemas into `.memstead/meta-schemas/`

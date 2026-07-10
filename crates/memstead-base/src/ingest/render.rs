@@ -12,8 +12,9 @@
 use std::path::Path;
 
 use crate::Engine;
+use crate::binding::BindingV1;
 use crate::pipeline::IngestMode;
-use crate::pipeline_store::load_pipeline_configs;
+use crate::pipeline_store::{BindingConfigs, load_pipeline_configs};
 
 use super::brief::{
     ProcessMemInfo, assemble_discovery_brief, assemble_one_shot_brief, assemble_refinement_brief,
@@ -25,7 +26,7 @@ use super::refinement::{
     clear_findings, next_batch, read_pending_findings, render_refinement_scout,
     render_refinement_writer,
 };
-use super::resolve::{ResolveError, ResolvedIngest, ResolvedSource, resolve_ingest};
+use super::resolve::{ResolveError, ResolvedIngest, ResolvedSource, resolve_binding_run};
 
 /// Why [`render_ingest_brief`] could not produce a brief.
 #[derive(Debug, thiserror::Error)]
@@ -73,8 +74,47 @@ pub fn mode_name(mode: IngestMode) -> &'static str {
     }
 }
 
-/// Render the run-brief for an ingest — the Markdown prompt an agent
-/// consumes. The single engine entry point shared by the CLI and UniFFI.
+/// Locate a binding by the CLI/UniFFI argument. The canonical form is the
+/// binding id `<mem>/<stem>` (D3) — the shape `projection brief` / `--all`
+/// selection use. As a transition bridge, a slash-free legacy argument (the
+/// old flat ingest stem, e.g. `engine-graph`) is also matched against each
+/// binding's `<mem>-<stem>` dashed form, so `memstead ingest brief engine-graph`
+/// keeps rendering the migrated `engine/graph` binding without a router change.
+/// Returns the canonical binding id and the binding.
+fn find_binding<'a>(
+    configs: &'a BindingConfigs,
+    arg: &str,
+) -> Result<(String, &'a BindingV1), ResolveError> {
+    // Exact canonical id: `<mem>/<stem>`.
+    if let Some(r) = configs
+        .bindings
+        .iter()
+        .find(|r| format!("{}/{}", r.mem, r.name) == arg)
+    {
+        return Ok((format!("{}/{}", r.mem, r.name), &r.config));
+    }
+    // Transition bridge: a slash-free legacy stem → `<mem>-<stem>` dashed form.
+    if !arg.contains('/')
+        && let Some(r) = configs
+            .bindings
+            .iter()
+            .find(|r| format!("{}-{}", r.mem, r.name) == arg)
+    {
+        return Ok((format!("{}/{}", r.mem, r.name), &r.config));
+    }
+    Err(ResolveError::IngestNotFound {
+        name: arg.to_string(),
+        available: configs
+            .bindings
+            .iter()
+            .map(|r| format!("{}/{}", r.mem, r.name))
+            .collect(),
+    })
+}
+
+/// Render the run-brief for a binding — the Markdown prompt an agent consumes.
+/// The single engine entry point shared by the CLI and UniFFI. `ingest_name` is
+/// the canonical binding id (or a legacy flat-ingest stem — see [`find_binding`]).
 pub fn render_ingest_brief(
     engine: &Engine,
     workspace_root: &Path,
@@ -82,7 +122,8 @@ pub fn render_ingest_brief(
 ) -> Result<String, RenderBriefError> {
     let configs = load_pipeline_configs(workspace_root)
         .map_err(|e| RenderBriefError::ConfigLoad(e.to_string()))?;
-    let resolved = resolve_ingest(&configs, ingest_name)?;
+    let (binding_id, binding) = find_binding(&configs, ingest_name)?;
+    let resolved = resolve_binding_run(&configs, &binding_id, binding)?;
 
     // Publish this ingest's deny list for the plugin's PreToolUse deny hook —
     // stale-safe (remove-then-write), overwrite-always, before any mode branch

@@ -63,6 +63,12 @@ pub struct PipelineRecord<T> {
 }
 
 /// Every pipeline config in a workspace store, in the four-primitive shape.
+///
+/// This is the **legacy** (gen-2) shape — produced only by
+/// [`load_legacy_pipeline_configs`], consumed by the referential-integrity
+/// edit layer, the `projection migrate` transform, and the macOS
+/// `pipeline_configs_json` surface. The live loader
+/// ([`load_pipeline_configs`]) returns [`BindingConfigs`] instead.
 #[derive(Debug, Default, Clone, PartialEq, Serialize)]
 pub struct PipelineConfigs {
     /// Per-mem mediums.
@@ -73,6 +79,22 @@ pub struct PipelineConfigs {
     pub projections: Vec<MemPipelineRecord<Projection>>,
     /// Flat ingests.
     pub ingests: Vec<PipelineRecord<Ingest>>,
+}
+
+/// Every pipeline config in a workspace store, in the **binding v1** shape
+/// (D1/D2) — mediums, facets, and one [`BindingV1`] per source→mem obligation
+/// (the projection + flat-ingest split collapsed into a single versioned
+/// record). This is what the live loader [`load_pipeline_configs`] returns and
+/// the brief / selection / cursor paths consume.
+#[derive(Debug, Default, Clone, PartialEq, Serialize)]
+pub struct BindingConfigs {
+    /// Per-mem mediums.
+    pub mediums: Vec<MemPipelineRecord<Medium>>,
+    /// Per-mem facets.
+    pub facets: Vec<MemPipelineRecord<Facet>>,
+    /// Per-mem v1 bindings (occupying the `projections/<mem>/<name>.json` tier,
+    /// stem-identity preserved). Canonical id is `<mem>/<stem>` (D3).
+    pub bindings: Vec<MemPipelineRecord<BindingV1>>,
 }
 
 /// The `<root>/.memstead/<primitive>` directory for a given primitive.
@@ -411,14 +433,116 @@ pub fn rename_ingest(workspace_root: &Path, old: &str, new: &str) -> Result<(), 
     )
 }
 
-/// Load all four primitives from the workspace store. Absent directories
-/// resolve to empty; a malformed file surfaces a typed [`StoreError::Parse`].
-pub fn load_pipeline_configs(workspace_root: &Path) -> Result<PipelineConfigs, StoreError> {
+/// Load the **legacy** (gen-2) four-primitive store from the workspace.
+/// Absent directories resolve to empty; a malformed file surfaces a typed
+/// [`StoreError::Parse`]. This reader is the counterpart of the version-gated
+/// [`load_pipeline_configs`]: it deliberately reads the old
+/// `Projection` + flat-`Ingest` shape (parsing a v1 binding file lossily as a
+/// [`Projection`], which ignores `version`/`operations`), so
+/// `projection migrate`, the referential-integrity edit layer, and the macOS
+/// `pipeline_configs_json` surface keep working. It performs **no** version
+/// gate — it is the escape hatch the gate points migrations at.
+pub fn load_legacy_pipeline_configs(workspace_root: &Path) -> Result<PipelineConfigs, StoreError> {
     Ok(PipelineConfigs {
         mediums: load_mem_scoped(workspace_root, MEDIUMS_DIR)?,
         facets: load_mem_scoped(workspace_root, FACETS_DIR)?,
         projections: load_mem_scoped(workspace_root, PROJECTIONS_DIR)?,
         ingests: load_flat(workspace_root, INGESTS_DIR)?,
+    })
+}
+
+/// Load every `projections/<mem>/<name>.json` as a **v1 binding**, version-gated
+/// (D2). Absent directory → empty. For each file:
+///
+/// - no `version` field → [`StoreError::LegacyProjectionStore`] (the pre-v1
+///   layout the loader no longer serves; the message names
+///   `memstead projection migrate`);
+/// - `version` present but not `1` → [`StoreError::UnknownBindingVersion`];
+/// - `version: 1` → parsed as [`BindingV1`] (a malformed operations block etc.
+///   surfaces [`StoreError::Parse`] naming the file).
+///
+/// The gate refuses the whole load on the first offending file — a version-less
+/// workspace fails loudly (pointing at migrate) rather than loading half-served.
+fn load_bindings(workspace_root: &Path) -> Result<Vec<MemPipelineRecord<BindingV1>>, StoreError> {
+    let dir = primitive_dir(workspace_root, PROJECTIONS_DIR);
+    let mut out: Vec<MemPipelineRecord<BindingV1>> = Vec::new();
+    let mem_dirs = match std::fs::read_dir(&dir) {
+        Ok(rd) => rd,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(out),
+        Err(e) => {
+            return Err(StoreError::Io {
+                path: dir,
+                source: e,
+            });
+        }
+    };
+    for mem_entry in mem_dirs.flatten() {
+        let mem_path = mem_entry.path();
+        if !mem_path.is_dir() {
+            continue;
+        }
+        let mem = mem_entry.file_name().to_string_lossy().into_owned();
+        let files = match std::fs::read_dir(&mem_path) {
+            Ok(rd) => rd,
+            Err(e) => {
+                return Err(StoreError::Io {
+                    path: mem_path,
+                    source: e,
+                });
+            }
+        };
+        for file in files.flatten() {
+            let path = file.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+            let Some(name) = path.file_stem().map(|s| s.to_string_lossy().into_owned()) else {
+                continue;
+            };
+            // Peek at `version` before committing to the BindingV1 shape so a
+            // pre-v1 (version-less) file yields the migrate-naming error rather
+            // than an opaque "missing field `version`" parse error.
+            let value: serde_json::Value = read_json(&path)?;
+            match value.get("version") {
+                None => return Err(StoreError::LegacyProjectionStore { path }),
+                Some(v) => {
+                    let n = v.as_i64();
+                    if n != Some(i64::from(crate::binding::BINDING_VERSION)) {
+                        return Err(StoreError::UnknownBindingVersion {
+                            path,
+                            version: n.unwrap_or(-1),
+                        });
+                    }
+                }
+            }
+            let config: BindingV1 =
+                serde_json::from_value(value).map_err(|e| StoreError::Parse {
+                    path: path.clone(),
+                    message: e.to_string(),
+                })?;
+            out.push(MemPipelineRecord {
+                mem: mem.clone(),
+                name,
+                config,
+            });
+        }
+    }
+    out.sort_by(|a, b| (a.mem.as_str(), a.name.as_str()).cmp(&(b.mem.as_str(), b.name.as_str())));
+    Ok(out)
+}
+
+/// Load the live **binding v1** store from the workspace (D2). Mediums and
+/// facets load as before; `projections/` is read as version-gated v1 bindings
+/// via [`load_bindings`] — a version-less (pre-v1) `projections/` refuses with
+/// [`StoreError::LegacyProjectionStore`] naming `memstead projection migrate`.
+/// The flat `ingests/` directory is **never read** by this path (bindings carry
+/// their operations); it is served only by [`load_legacy_pipeline_configs`] for
+/// migration.
+pub fn load_pipeline_configs(workspace_root: &Path) -> Result<BindingConfigs, StoreError> {
+    Ok(BindingConfigs {
+        mediums: load_mem_scoped(workspace_root, MEDIUMS_DIR)?,
+        facets: load_mem_scoped(workspace_root, FACETS_DIR)?,
+        bindings: load_bindings(workspace_root)?,
     })
 }
 
@@ -523,7 +647,7 @@ mod tests {
     #[test]
     fn empty_store_loads_empty_configs() {
         let tmp = TempDir::new().unwrap();
-        let configs = load_pipeline_configs(tmp.path()).unwrap();
+        let configs = load_legacy_pipeline_configs(tmp.path()).unwrap();
         assert_eq!(configs, PipelineConfigs::default());
     }
 
@@ -553,7 +677,7 @@ mod tests {
         );
         assert!(root.join(".memstead/ingests/macos-graph.json").is_file());
 
-        let configs = load_pipeline_configs(root).unwrap();
+        let configs = load_legacy_pipeline_configs(root).unwrap();
         assert_eq!(configs.mediums.len(), 1);
         assert_eq!(configs.mediums[0].mem, "macos");
         assert_eq!(configs.mediums[0].name, "source-tree");
@@ -574,7 +698,7 @@ mod tests {
         write_medium(root, "engine", "a-medium", &medium).unwrap();
         write_medium(root, "macos", "m-medium", &medium).unwrap();
 
-        let configs = load_pipeline_configs(root).unwrap();
+        let configs = load_legacy_pipeline_configs(root).unwrap();
         let keys: Vec<_> = configs
             .mediums
             .iter()
@@ -598,7 +722,7 @@ mod tests {
         std::fs::create_dir_all(&bad).unwrap();
         std::fs::write(bad.join("broken.json"), b"{ not valid json").unwrap();
 
-        let err = load_pipeline_configs(root).unwrap_err();
+        let err = load_legacy_pipeline_configs(root).unwrap_err();
         match err {
             StoreError::Parse { path, .. } => {
                 assert!(path.ends_with("broken.json"), "got {path:?}");
@@ -624,7 +748,7 @@ mod tests {
                 .exists()
         );
         assert!(!root.join(".memstead/ingests/macos-graph.json").exists());
-        let configs = load_pipeline_configs(root).unwrap();
+        let configs = load_legacy_pipeline_configs(root).unwrap();
         assert!(configs.mediums.is_empty());
         assert!(configs.ingests.is_empty());
     }
@@ -655,7 +779,7 @@ mod tests {
                 .join(".memstead/projections/macos/old-name.json")
                 .exists()
         );
-        let configs = load_pipeline_configs(root).unwrap();
+        let configs = load_legacy_pipeline_configs(root).unwrap();
         assert_eq!(configs.projections.len(), 1);
         assert_eq!(configs.projections[0].name, "new-name");
         assert_eq!(configs.projections[0].config, projection);
@@ -681,5 +805,105 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let err = rename_ingest(tmp.path(), "missing", "whatever").unwrap_err();
         assert!(matches!(err, StoreError::Io { .. }), "got {err:?}");
+    }
+
+    // ── binding v1 loader (D2 version gate) ──────────────────────────────
+
+    fn sample_binding() -> BindingV1 {
+        use crate::binding::{
+            BINDING_VERSION, BuildMode, BuildOperation, CoverageSemantics, Operations,
+        };
+        use crate::pipeline::IngestTrigger;
+        BindingV1 {
+            version: BINDING_VERSION,
+            intent: Some("prose".to_string()),
+            source_facets: vec!["source-tree".to_string()],
+            reference_mems: vec![],
+            destination_mem: "engine".to_string(),
+            deny_paths: vec![],
+            coverage_semantics: CoverageSemantics::Exhaustive,
+            rules: None,
+            operations: Operations {
+                build: BuildOperation {
+                    mode: BuildMode::Discovery,
+                    trigger: IngestTrigger::Loop,
+                    batch_size: 20,
+                    post_actions: None,
+                },
+                sync: None,
+                verify: None,
+            },
+        }
+    }
+
+    #[test]
+    fn empty_store_loads_empty_binding_configs() {
+        let tmp = TempDir::new().unwrap();
+        let configs = load_pipeline_configs(tmp.path()).unwrap();
+        assert_eq!(configs, BindingConfigs::default());
+    }
+
+    #[test]
+    fn binding_loader_round_trips_a_v1_binding() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let binding = sample_binding();
+        write_binding(root, "engine", "graph", &binding).unwrap();
+
+        let configs = load_pipeline_configs(root).unwrap();
+        assert_eq!(configs.bindings.len(), 1);
+        assert_eq!(configs.bindings[0].mem, "engine");
+        assert_eq!(configs.bindings[0].name, "graph");
+        assert_eq!(configs.bindings[0].config, binding);
+    }
+
+    #[test]
+    fn version_less_projection_refuses_with_migrate_naming_error() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        // A gen-2 (version-less) projection file.
+        let projection = Projection {
+            intent: Some("legacy".to_string()),
+            source_facets: vec!["f".to_string()],
+            reference_mems: vec![],
+            destination_mem: "engine".to_string(),
+            rules: None,
+        };
+        write_projection(root, "engine", "graph", &projection).unwrap();
+
+        let err = load_pipeline_configs(root).unwrap_err();
+        match err {
+            StoreError::LegacyProjectionStore { path } => {
+                assert!(path.ends_with("graph.json"), "got {path:?}");
+                assert!(
+                    err_message(&StoreError::LegacyProjectionStore { path })
+                        .contains("memstead projection migrate")
+                );
+            }
+            other => panic!("expected LegacyProjectionStore, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unknown_binding_version_refuses() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let dir = root.join(".memstead/projections/engine");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("graph.json"),
+            br#"{"version": 99, "destination_mem": "engine", "operations": {"build": {"mode": "discovery", "trigger": "loop", "batch_size": 20}}}"#,
+        )
+        .unwrap();
+
+        let err = load_pipeline_configs(root).unwrap_err();
+        assert!(
+            matches!(err, StoreError::UnknownBindingVersion { version: 99, .. }),
+            "got {err:?}"
+        );
+    }
+
+    fn err_message(e: &StoreError) -> String {
+        e.to_string()
     }
 }

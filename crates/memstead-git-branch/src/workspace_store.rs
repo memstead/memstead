@@ -171,7 +171,7 @@ pub fn engine_from_workspace_root(workspace_root: &Path) -> Result<Engine, BootE
     // longer read at boot (the compat shim retired with the 2026-06-14 bundled
     // migration; `memstead pipeline migrate` is the only path from old-shape
     // configs).
-    engine.set_pipeline_configs(memstead_base::load_pipeline_configs(workspace_root)?);
+    engine.set_pipeline_configs(memstead_base::load_legacy_pipeline_configs(workspace_root)?);
     // Publish the authoring meta-schemas into `.memstead/meta-schemas/`
     // (best-effort) so editors validate authored schema YAML.
     let _ = memstead_schema::meta_schema::publish_meta_schemas(workspace_root);

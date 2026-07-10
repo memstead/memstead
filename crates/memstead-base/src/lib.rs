@@ -83,7 +83,8 @@ pub use pipeline::{
 pub use pipeline_edit::PipelineEditError;
 pub use pipeline_migrate::{migrate_legacy_pipeline, read_legacy_pipeline_configs};
 pub use pipeline_store::{
-    MemPipelineRecord, PipelineConfigs, PipelineRecord, load_pipeline_configs,
+    BindingConfigs, MemPipelineRecord, PipelineConfigs, PipelineRecord,
+    load_legacy_pipeline_configs, load_pipeline_configs,
 };
 pub use provenance::{Provenance, ProvenanceKind};
 pub use store::{Edge, EdgeSource, InEdge, Store};

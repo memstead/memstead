@@ -20,10 +20,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::Engine;
 use crate::pipeline::IngestMode;
-use crate::pipeline_store::PipelineConfigs;
+use crate::pipeline_store::BindingConfigs;
 
 use super::cursor::source_moved;
-use super::resolve::{ResolvedIngest, resolve_ingest};
+use super::resolve::{ResolvedIngest, resolve_binding_run};
 
 /// The backoff cooldown ceiling — after this many consecutive unproductive
 /// passes the skip count stops growing. Mirrors the plugin's `MAX_SKIP_LEVEL`.
@@ -132,16 +132,20 @@ fn read_one_shot_runs(cache_root: &Path) -> BTreeSet<String> {
 pub fn select_next_due(
     engine: &Engine,
     workspace_root: &Path,
-    configs: &PipelineConfigs,
+    configs: &BindingConfigs,
 ) -> Option<String> {
     let cache_root = workspace_root.join(".memstead.cache").join("ingest");
 
-    // Eligible = all resolvable ingests minus one-shots that already ran.
+    // Eligible = all resolvable bindings minus one-shots that already ran. The
+    // selection cache is keyed off the canonical binding id (`<mem>/<stem>`,
+    // D3/D9), which is the resolved run's `name`.
     let one_shot_ran = read_one_shot_runs(&cache_root);
     let mut eligible: Vec<ResolvedIngest> = configs
-        .ingests
+        .bindings
         .iter()
-        .filter_map(|r| resolve_ingest(configs, &r.name).ok())
+        .filter_map(|r| {
+            resolve_binding_run(configs, &format!("{}/{}", r.mem, r.name), &r.config).ok()
+        })
         .filter(|ri| !(ri.mode == IngestMode::OneShot && one_shot_ran.contains(&ri.name)))
         .collect();
     eligible.sort_by(|a, b| a.name.cmp(&b.name));

@@ -2,10 +2,11 @@
 //! state, so the brief's changed-slice preface can steer a pass at what moved.
 //!
 //! Engine-side port of the plugin's `computeSourceCursor` (`inject.mjs`). For
-//! each of a projection's source facets it resolves the change-detection
+//! each of a binding's source facets it resolves the change-detection
 //! strategy, reads the durable baseline from the **destination** mem's
-//! `sync_state` (keyed `"<ingest>/<facet-or-refmem>"`), computes the changed
-//! slice against the source's current state, and unions the per-facet slices.
+//! `sync_state` (keyed `"<binding-id>/<facet-or-refmem>#synced"`, D4), computes
+//! the changed slice against the source's current state, and unions the
+//! per-facet slices.
 //!
 //! Strategies:
 //!   - **git** — diff the stored commit id against the source tree's current
@@ -741,7 +742,7 @@ pub fn source_moved(engine: &Engine, resolved: &ResolvedIngest, workspace_root: 
                 (mem.clone(), engine.mem_head_sha(mem).ok().flatten())
             }
         };
-        let key = format!("{}/{}", resolved.name, facet_ref);
+        let key = format!("{}/{}#synced", resolved.name, facet_ref);
         let Some(baseline) = baseline_map.get(&key) else {
             continue; // no baseline ⇒ not "moved"
         };
@@ -780,7 +781,7 @@ pub fn compute_source_cursor(
         // reference sources — matching the plugin's sync_state keying.
         let (facet_ref, outcome) = match source {
             ResolvedSource::Primary(p) => {
-                let key = format!("{}/{}", resolved.name, p.facet_ref);
+                let key = format!("{}/{}#synced", resolved.name, p.facet_ref);
                 let baseline = baseline_map.get(&key).map(String::as_str);
                 let outcome = match resolve_change_strategy(p, workspace_root) {
                     ChangeStrategy::Git => {
@@ -806,13 +807,13 @@ pub fn compute_source_cursor(
                 (p.facet_ref.clone(), outcome)
             }
             ResolvedSource::Reference { mem } => {
-                let key = format!("{}/{}", resolved.name, mem);
+                let key = format!("{}/{}#synced", resolved.name, mem);
                 let baseline = baseline_map.get(&key).map(String::as_str);
                 (mem.clone(), compute_graph_slice(engine, mem, baseline))
             }
         };
 
-        let key = format!("{}/{}", resolved.name, facet_ref);
+        let key = format!("{}/{}#synced", resolved.name, facet_ref);
         match outcome {
             // Genuinely unchanged (baseline present, nothing moved) is the only
             // documented silence — it renders nothing, keeping an all-unchanged
@@ -1572,7 +1573,7 @@ mod tests {
         );
         assert_eq!(cursor.no_signal.len(), 2);
         // The reseed source still produced a reseed command.
-        assert!(cursor.reseed.iter().any(|c| c.key == "ing/watched"));
+        assert!(cursor.reseed.iter().any(|c| c.key == "ing/watched#synced"));
 
         // The rendered preface names signal:none and the unscoped reason.
         let out = crate::ingest::brief::render_changed_slice(&cursor);

@@ -108,6 +108,22 @@ pub enum StoreError {
          branch tree to mems/ — then retry"
     )]
     LegacyLayout { path: PathBuf, found: String },
+    /// A `projections/` directory holds a version-less (pre-v1) config —
+    /// the gen-2 four-primitive layout the loader no longer serves live
+    /// (D2). The message names the one-shot migration command; the CLI maps
+    /// it to the `PROJECTION_STORE_LEGACY` token. Legacy layouts are
+    /// migrated once (`memstead projection migrate`), never silently served.
+    #[error(
+        "legacy (pre-v1) projection config at {path}: this workspace predates binding format v1 \
+         — run `memstead projection migrate` to promote it to v1 bindings once"
+    )]
+    LegacyProjectionStore { path: PathBuf },
+    /// A binding file declares a `version` the loader does not understand
+    /// (only v1 = `1` is supported). Refused rather than reinterpreted.
+    #[error(
+        "unsupported binding format version {version} at {path}: this engine understands v1 (version 1)"
+    )]
+    UnknownBindingVersion { path: PathBuf, version: i64 },
     /// Catch-all for adapter-specific failures. Carries an
     /// agent-readable message; structured variants extend the enum.
     #[error("workspace store error: {0}")]

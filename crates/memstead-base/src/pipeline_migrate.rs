@@ -433,14 +433,14 @@ mod tests {
         assert_eq!(converted.ingests[0].config.mode, IngestMode::Discovery);
 
         // Written to the `.memstead/` store and reloadable by the loader.
-        let loaded = crate::pipeline_store::load_pipeline_configs(root).unwrap();
+        let loaded = crate::pipeline_store::load_legacy_pipeline_configs(root).unwrap();
         assert_eq!(loaded, converted);
 
         // Idempotent: a second run reproduces identical store content.
         let again = migrate_legacy_pipeline(root).unwrap();
         assert_eq!(again, converted);
         assert_eq!(
-            crate::pipeline_store::load_pipeline_configs(root).unwrap(),
+            crate::pipeline_store::load_legacy_pipeline_configs(root).unwrap(),
             converted
         );
     }

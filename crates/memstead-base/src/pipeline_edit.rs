@@ -133,7 +133,7 @@ pub fn add_medium(
     name: &str,
     medium: &Medium,
 ) -> Result<(), PipelineEditError> {
-    let configs = pipeline_store::load_pipeline_configs(root)?;
+    let configs = pipeline_store::load_legacy_pipeline_configs(root)?;
     if medium_exists(&configs, mem, name) {
         return Err(PipelineEditError::AlreadyExists {
             primitive: "medium",
@@ -151,7 +151,7 @@ pub fn update_medium(
     name: &str,
     medium: &Medium,
 ) -> Result<(), PipelineEditError> {
-    let configs = pipeline_store::load_pipeline_configs(root)?;
+    let configs = pipeline_store::load_legacy_pipeline_configs(root)?;
     if !medium_exists(&configs, mem, name) {
         return Err(PipelineEditError::NotFound {
             primitive: "medium",
@@ -164,7 +164,7 @@ pub fn update_medium(
 
 /// Delete a medium. Refuses if any facet in the same mem still references it.
 pub fn delete_medium(root: &Path, mem: &str, name: &str) -> Result<(), PipelineEditError> {
-    let configs = pipeline_store::load_pipeline_configs(root)?;
+    let configs = pipeline_store::load_legacy_pipeline_configs(root)?;
     if !medium_exists(&configs, mem, name) {
         return Err(PipelineEditError::NotFound {
             primitive: "medium",
@@ -194,7 +194,7 @@ pub fn rename_medium(
     if old == new {
         return Ok(());
     }
-    let configs = pipeline_store::load_pipeline_configs(root)?;
+    let configs = pipeline_store::load_legacy_pipeline_configs(root)?;
     let existing = configs
         .mediums
         .iter()
@@ -238,7 +238,7 @@ pub fn add_facet(
     name: &str,
     facet: &Facet,
 ) -> Result<(), PipelineEditError> {
-    let configs = pipeline_store::load_pipeline_configs(root)?;
+    let configs = pipeline_store::load_legacy_pipeline_configs(root)?;
     if facet_exists(&configs, mem, name) {
         return Err(PipelineEditError::AlreadyExists {
             primitive: "facet",
@@ -256,7 +256,7 @@ pub fn update_facet(
     name: &str,
     facet: &Facet,
 ) -> Result<(), PipelineEditError> {
-    let configs = pipeline_store::load_pipeline_configs(root)?;
+    let configs = pipeline_store::load_legacy_pipeline_configs(root)?;
     if !facet_exists(&configs, mem, name) {
         return Err(PipelineEditError::NotFound {
             primitive: "facet",
@@ -269,7 +269,7 @@ pub fn update_facet(
 
 /// Delete a facet. Refuses if any projection in the same mem references it.
 pub fn delete_facet(root: &Path, mem: &str, name: &str) -> Result<(), PipelineEditError> {
-    let configs = pipeline_store::load_pipeline_configs(root)?;
+    let configs = pipeline_store::load_legacy_pipeline_configs(root)?;
     if !facet_exists(&configs, mem, name) {
         return Err(PipelineEditError::NotFound {
             primitive: "facet",
@@ -294,7 +294,7 @@ pub fn rename_facet(root: &Path, mem: &str, old: &str, new: &str) -> Result<(), 
     if old == new {
         return Ok(());
     }
-    let configs = pipeline_store::load_pipeline_configs(root)?;
+    let configs = pipeline_store::load_legacy_pipeline_configs(root)?;
     let existing = configs
         .facets
         .iter()
@@ -340,7 +340,7 @@ pub fn add_projection(
     name: &str,
     projection: &Projection,
 ) -> Result<(), PipelineEditError> {
-    let configs = pipeline_store::load_pipeline_configs(root)?;
+    let configs = pipeline_store::load_legacy_pipeline_configs(root)?;
     if projection_exists(&configs, mem, name) {
         return Err(PipelineEditError::AlreadyExists {
             primitive: "projection",
@@ -358,7 +358,7 @@ pub fn update_projection(
     name: &str,
     projection: &Projection,
 ) -> Result<(), PipelineEditError> {
-    let configs = pipeline_store::load_pipeline_configs(root)?;
+    let configs = pipeline_store::load_legacy_pipeline_configs(root)?;
     if !projection_exists(&configs, mem, name) {
         return Err(PipelineEditError::NotFound {
             primitive: "projection",
@@ -371,7 +371,7 @@ pub fn update_projection(
 
 /// Delete a projection. Refuses if any ingest still runs it.
 pub fn delete_projection(root: &Path, mem: &str, name: &str) -> Result<(), PipelineEditError> {
-    let configs = pipeline_store::load_pipeline_configs(root)?;
+    let configs = pipeline_store::load_legacy_pipeline_configs(root)?;
     if !projection_exists(&configs, mem, name) {
         return Err(PipelineEditError::NotFound {
             primitive: "projection",
@@ -402,7 +402,7 @@ pub fn rename_projection(
     if old == new {
         return Ok(());
     }
-    let configs = pipeline_store::load_pipeline_configs(root)?;
+    let configs = pipeline_store::load_legacy_pipeline_configs(root)?;
     if !projection_exists(&configs, mem, old) {
         return Err(PipelineEditError::NotFound {
             primitive: "projection",
@@ -441,7 +441,7 @@ fn ingest_exists(c: &PipelineConfigs, name: &str) -> bool {
 
 /// Create an ingest. Refuses if `name` already holds one.
 pub fn add_ingest(root: &Path, name: &str, ingest: &Ingest) -> Result<(), PipelineEditError> {
-    let configs = pipeline_store::load_pipeline_configs(root)?;
+    let configs = pipeline_store::load_legacy_pipeline_configs(root)?;
     if ingest_exists(&configs, name) {
         return Err(PipelineEditError::AlreadyExists {
             primitive: "ingest",
@@ -454,7 +454,7 @@ pub fn add_ingest(root: &Path, name: &str, ingest: &Ingest) -> Result<(), Pipeli
 
 /// Overwrite an existing ingest. Refuses if `name` does not exist.
 pub fn update_ingest(root: &Path, name: &str, ingest: &Ingest) -> Result<(), PipelineEditError> {
-    let configs = pipeline_store::load_pipeline_configs(root)?;
+    let configs = pipeline_store::load_legacy_pipeline_configs(root)?;
     if !ingest_exists(&configs, name) {
         return Err(PipelineEditError::NotFound {
             primitive: "ingest",
@@ -467,7 +467,7 @@ pub fn update_ingest(root: &Path, name: &str, ingest: &Ingest) -> Result<(), Pip
 
 /// Delete an ingest. Nothing references an ingest, so no referrer gate.
 pub fn delete_ingest(root: &Path, name: &str) -> Result<(), PipelineEditError> {
-    let configs = pipeline_store::load_pipeline_configs(root)?;
+    let configs = pipeline_store::load_legacy_pipeline_configs(root)?;
     if !ingest_exists(&configs, name) {
         return Err(PipelineEditError::NotFound {
             primitive: "ingest",
@@ -484,7 +484,7 @@ pub fn rename_ingest(root: &Path, old: &str, new: &str) -> Result<(), PipelineEd
     if old == new {
         return Ok(());
     }
-    let configs = pipeline_store::load_pipeline_configs(root)?;
+    let configs = pipeline_store::load_legacy_pipeline_configs(root)?;
     if !ingest_exists(&configs, old) {
         return Err(PipelineEditError::NotFound {
             primitive: "ingest",
@@ -517,7 +517,10 @@ impl Engine {
     }
 
     fn refresh_pipeline_configs(&mut self, root: &Path) -> Result<(), PipelineEditError> {
-        self.set_pipeline_configs(pipeline_store::load_pipeline_configs(root)?);
+        // The referential-integrity edit layer operates on the four-primitive
+        // (legacy) shape — the version-gated binding loader is the live brief
+        // path's, not the editor's.
+        self.set_pipeline_configs(pipeline_store::load_legacy_pipeline_configs(root)?);
         Ok(())
     }
 
@@ -1151,7 +1154,7 @@ mod tests {
         // Removing the facet frees the medium.
         delete_facet(root, "v", "f").unwrap();
         delete_medium(root, "v", "m").unwrap();
-        let configs = pipeline_store::load_pipeline_configs(root).unwrap();
+        let configs = pipeline_store::load_legacy_pipeline_configs(root).unwrap();
         assert!(configs.mediums.is_empty() && configs.facets.is_empty());
     }
 
@@ -1164,7 +1167,7 @@ mod tests {
 
         rename_medium(root, "v", "old", "new").unwrap();
 
-        let configs = pipeline_store::load_pipeline_configs(root).unwrap();
+        let configs = pipeline_store::load_legacy_pipeline_configs(root).unwrap();
         assert_eq!(configs.mediums.len(), 1);
         assert_eq!(configs.mediums[0].name, "new");
         // Embedded name tracks the stem.
@@ -1185,7 +1188,7 @@ mod tests {
             "got {err:?}"
         );
         // Nothing lost.
-        let configs = pipeline_store::load_pipeline_configs(root).unwrap();
+        let configs = pipeline_store::load_legacy_pipeline_configs(root).unwrap();
         assert_eq!(configs.mediums.len(), 2);
     }
 
@@ -1195,7 +1198,7 @@ mod tests {
         let root = tmp.path();
         add_medium(root, "v", "m", &medium("m")).unwrap();
         rename_medium(root, "v", "m", "m").unwrap();
-        let configs = pipeline_store::load_pipeline_configs(root).unwrap();
+        let configs = pipeline_store::load_legacy_pipeline_configs(root).unwrap();
         assert_eq!(configs.mediums.len(), 1);
         assert_eq!(configs.mediums[0].config, medium("m"));
     }
@@ -1222,7 +1225,7 @@ mod tests {
 
         rename_facet(root, "v", "old", "new").unwrap();
 
-        let configs = pipeline_store::load_pipeline_configs(root).unwrap();
+        let configs = pipeline_store::load_legacy_pipeline_configs(root).unwrap();
         assert_eq!(configs.facets[0].name, "new");
         assert_eq!(configs.facets[0].config.name, "new");
         assert_eq!(
@@ -1276,7 +1279,7 @@ mod tests {
 
         rename_projection(root, "v", "old", "new").unwrap();
 
-        let configs = pipeline_store::load_pipeline_configs(root).unwrap();
+        let configs = pipeline_store::load_legacy_pipeline_configs(root).unwrap();
         assert_eq!(configs.projections[0].name, "new");
         assert_eq!(configs.ingests[0].config.projection, "v/new");
     }
@@ -1323,12 +1326,12 @@ mod tests {
         let mut changed = ingest("v/p");
         changed.batch_size = 99;
         update_ingest(root, "i", &changed).unwrap();
-        let configs = pipeline_store::load_pipeline_configs(root).unwrap();
+        let configs = pipeline_store::load_legacy_pipeline_configs(root).unwrap();
         assert_eq!(configs.ingests[0].config.batch_size, 99);
 
         // Nothing references an ingest — delete needs no referrer gate.
         delete_ingest(root, "i").unwrap();
-        let configs = pipeline_store::load_pipeline_configs(root).unwrap();
+        let configs = pipeline_store::load_legacy_pipeline_configs(root).unwrap();
         assert!(configs.ingests.is_empty());
     }
 
@@ -1338,7 +1341,7 @@ mod tests {
         let root = tmp.path();
         add_ingest(root, "old", &ingest("v/p")).unwrap();
         rename_ingest(root, "old", "new").unwrap();
-        let configs = pipeline_store::load_pipeline_configs(root).unwrap();
+        let configs = pipeline_store::load_legacy_pipeline_configs(root).unwrap();
         assert_eq!(configs.ingests.len(), 1);
         assert_eq!(configs.ingests[0].name, "new");
         // Existing target refuses.
