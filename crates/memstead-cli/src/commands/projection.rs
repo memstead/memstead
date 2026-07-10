@@ -407,6 +407,20 @@ fn brief(ctx: &CliContext, args: BriefArgs) -> anyhow::Result<()> {
                 )
                 .with_details(json!({ "error": e.to_string() }))
             })?;
+            // Distinguish "nothing is configured" from "everything is backing
+            // off". Both otherwise collapse into the same `None` from
+            // `select_next_due`, but the two outcomes want different caller
+            // responses: an empty store is a setup prompt, a backing-off pass
+            // is a no-op retry. Emit the empty-store signal explicitly so a
+            // caller (the plugin router, a status display) can branch on it.
+            if configs.bindings.is_empty() {
+                if ctx.json {
+                    print_json(&json!({ "no_bindings": true }))?;
+                } else {
+                    println!("> **[projection] No bindings configured in this workspace yet.**");
+                }
+                return Ok(());
+            }
             select_next_due(engine, &root, &configs)
         }
     };

@@ -2,7 +2,7 @@
 //
 // Unlike the pure-`checkCandidate` unit suite, these spawn the actual hook
 // against a temp workspace and the engine-written cache file
-// (`.memstead.cache/ingest/active-deny-paths.json`), asserting the runtime
+// (`.memstead.cache/projection/active-deny-paths.json`), asserting the runtime
 // exit codes AND the stale-file failure mode (evidence 5 of the fidelity plan)
 // is fixed: the hook enforces exactly the ingest whose brief was rendered LAST,
 // never a leftover from a previous ingest.
@@ -20,7 +20,7 @@ const HOOK = join(HOOKS_DIR, 'deny-meta-files.mjs');
 
 let ws; // temp workspace root
 const cacheFile = () =>
-  join(ws, '.memstead.cache', 'ingest', 'active-deny-paths.json');
+  join(ws, '.memstead.cache', 'projection', 'active-deny-paths.json');
 
 /** Write the engine-managed active-deny cache (simulates a brief render). */
 function publishDeny(ingest, denyPaths) {

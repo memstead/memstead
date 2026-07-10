@@ -531,11 +531,11 @@ fn write_cursor_memo(cache_root: &Path, ingest: &str, facet: &str, aggregate: &s
 // workspace-relative glob dialect the engine resolves here.
 
 /// The hook's active-deny cache path:
-/// `<workspace>/.memstead.cache/ingest/active-deny-paths.json`.
+/// `<workspace>/.memstead.cache/projection/active-deny-paths.json`.
 fn active_deny_path(workspace_root: &Path) -> PathBuf {
     workspace_root
         .join(".memstead.cache")
-        .join("ingest")
+        .join("projection")
         .join("active-deny-paths.json")
 }
 

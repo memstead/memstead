@@ -4,7 +4,7 @@
 //
 // The active deny list is sourced from a cache file the ENGINE writes during
 // brief rendering (memstead-base `write_active_deny_file`):
-//   <workspace>/.memstead.cache/ingest/active-deny-paths.json
+//   <workspace>/.memstead.cache/projection/active-deny-paths.json
 // Shape: { ingest: <name>, deny_paths: [ ...workspace-relative globs... ] }
 // Missing file or empty list → default-open (nothing blocked). The engine
 // overwrites this file (remove-then-write) on every render, so the list always
@@ -59,7 +59,7 @@ function loadActiveDenyPaths(workspaceRoot) {
   const cachePath = join(
     workspaceRoot,
     '.memstead.cache',
-    'ingest',
+    'projection',
     'active-deny-paths.json',
   );
   if (!existsSync(cachePath)) return [];

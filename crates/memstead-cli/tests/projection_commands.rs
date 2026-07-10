@@ -1091,6 +1091,57 @@ fn brief_renders_for_scaffolded_binding() {
     );
 }
 
+/// `projection brief --all` on a workspace with NO bindings configured reports
+/// a distinct `no_bindings` outcome (exit 0) — not the all-backing-off
+/// `skipped` outcome, which would otherwise collapse into the same `None`. A
+/// caller (the plugin's setup ramp, a status display) branches on this to
+/// prompt first-time setup rather than retry a no-op pass.
+#[cfg(feature = "mem-repo")]
+#[test]
+fn brief_all_empty_store_reports_no_bindings() {
+    let tmp = TempDir::new().unwrap();
+    let ws = tmp.path().join("ws");
+    memstead()
+        .args(["mem-repo", "init", ws.to_str().unwrap(), "--no-gitignore"])
+        .assert()
+        .success();
+
+    // JSON: the distinct `{ "no_bindings": true }` envelope.
+    let out = memstead()
+        .current_dir(&ws)
+        .args(["--json", "projection", "brief", "--all"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(env["no_bindings"], Value::Bool(true));
+    assert!(
+        env.get("skipped").is_none(),
+        "empty store must NOT report the backing-off `skipped` outcome; got:\n{env}"
+    );
+
+    // Markdown: a distinct, human-readable no-bindings line (not "backing off").
+    let out = memstead()
+        .current_dir(&ws)
+        .args(["projection", "brief", "--all"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let md = String::from_utf8(out).unwrap();
+    assert!(
+        md.contains("No bindings configured"),
+        "empty store gets a distinct no-bindings message; got:\n{md}"
+    );
+    assert!(
+        !md.contains("backing off"),
+        "empty store must not use the backing-off message; got:\n{md}"
+    );
+}
+
 /// `projection brief <binding> --verify` renders the verify brief (group C):
 /// measurement + capped-adjudication instructions only, with the explicit
 /// no-mutation refusal and NO repair block. Read-only on the mem.
