@@ -57,6 +57,10 @@ struct PreparedUpdate {
     modified_metadata: ModifiedMetadata,
     warnings: Vec<WarningHint>,
     relations_declared: Vec<RelationDeclared>,
+    /// Validated anchors to attach to this entity — staged into the same
+    /// commit as the disk write on the commit step. Empty when the update
+    /// carried no `anchors[]`.
+    anchors: Vec<crate::anchor::Anchor>,
 }
 
 /// The store-side results of applying a prepared write — filled in
@@ -121,6 +125,11 @@ impl Engine {
     ) -> Result<UpdateEntityOutcome, EngineError> {
         let backend = self.mounts[prepared.mount_idx].backend.as_ref();
         backend.write_entity(Path::new(&prepared.file_path), prepared.markdown.as_bytes())?;
+        // Stage the anchors sidecar into the same commit as the entity
+        // write. Only when the update carried anchors.
+        if !prepared.anchors.is_empty() {
+            super::stage_anchors_sidecar(backend, &prepared.id, prepared.anchors.clone())?;
+        }
         let commit_subject = format!("memstead: update {}", prepared.id);
         let ctx = CommitContext {
             actor,
@@ -281,9 +290,17 @@ impl Engine {
             && args.metadata_unset.is_empty()
             && args.declare_relations.is_empty()
             && args.relations_unset.is_empty()
+            && args.anchors.is_empty()
         {
             return Err(EngineError::EmptyUpdate { id: id.to_string() });
         }
+
+        // Validate any `anchors[]` payload up front — a malformed element
+        // refuses the whole update with a typed `INVALID_ANCHOR` envelope
+        // before any disk write, on every path (real / dry-run / no-op).
+        // Empty payload → empty vec (no sidecar write; byte-identical to a
+        // pre-anchor update).
+        let validated_anchors = self.validate_anchor_inputs(&mem, &args.anchors)?;
 
         let schema = self
             .schemas
@@ -633,7 +650,10 @@ impl Engine {
             // rather than `entity` avoids extending the `self.store`
             // immutable borrow past the mutable borrow taken by
             // `apply_declare_relations`.
-            if prospective_hash == next.content_hash {
+            // An update carrying `anchors[]` is never a no-op even when the
+            // entity content is unchanged — the anchors sidecar must be
+            // written, so fall through to the real-commit path.
+            if prospective_hash == next.content_hash && validated_anchors.is_empty() {
                 // No-op: report the preserved `last_modified` from
                 // the pre-stamp `next` (which still carries the
                 // entity's on-disk value because we haven't run the
@@ -782,6 +802,7 @@ impl Engine {
             // update path matches create's contract.
             warnings,
             relations_declared,
+            anchors: validated_anchors,
         }))
     }
 
@@ -928,6 +949,19 @@ impl Engine {
                 self.store = store_snapshot;
                 self.discard_all_pending();
                 return Err(e.into());
+            }
+            // Stage each item's anchors into the same per-mem pending
+            // buffer so they ride the batch commit atomically.
+            if !p.anchors.is_empty()
+                && let Err(e) = super::stage_anchors_sidecar(
+                    self.mounts[p.mount_idx].backend.as_ref(),
+                    &p.id,
+                    p.anchors.clone(),
+                )
+            {
+                self.store = store_snapshot;
+                self.discard_all_pending();
+                return Err(e);
             }
         }
 
@@ -1247,6 +1281,7 @@ mod tests {
 
         // Seed: create an entity.
         let create_args = CreateEntityArgs {
+            anchors: Vec::new(),
             mem: "specs".to_string(),
             title: "Seed".to_string(),
             entity_type: "spec".to_string(),
@@ -1264,6 +1299,7 @@ mod tests {
 
         // Batch: update the seed entity AND a missing id.
         let valid_update = UpdateEntityArgs {
+            anchors: Vec::new(),
             id: created.id.clone(),
             expected_hash: Some(created.content_hash.clone()),
             sections: IndexMap::from_iter([("identity".to_string(), "updated body".to_string())]),
@@ -1276,6 +1312,7 @@ mod tests {
             relations_unset: Vec::new(),
         };
         let missing_update = UpdateEntityArgs {
+            anchors: Vec::new(),
             id: EntityId("specs--nonexistent".to_string()),
             expected_hash: None,
             sections: IndexMap::new(),
@@ -1343,6 +1380,7 @@ mod tests {
         .unwrap();
 
         let mk = |title: &str| CreateEntityArgs {
+            anchors: Vec::new(),
             mem: "specs".to_string(),
             title: title.to_string(),
             entity_type: "spec".to_string(),
@@ -1362,6 +1400,7 @@ mod tests {
             .unwrap();
 
         let upd = |id: EntityId, hash: String, body: &str| UpdateEntityArgs {
+            anchors: Vec::new(),
             id,
             expected_hash: Some(hash),
             sections: IndexMap::from_iter([("identity".to_string(), body.to_string())]),
@@ -1444,6 +1483,7 @@ mod tests {
 
         let stub_target = EntityId::new("specs", "would-be-stub");
         let item1 = UpdateEntityArgs {
+            anchors: Vec::new(),
             relations_unset: Vec::new(),
             id: a.id.clone(),
             expected_hash: Some(a.content_hash.clone()),
@@ -1460,6 +1500,7 @@ mod tests {
             dry_run: false,
         };
         let item2 = UpdateEntityArgs {
+            anchors: Vec::new(),
             id: EntityId::new("specs", "nonexistent"),
             expected_hash: None,
             sections: IndexMap::from_iter([("identity".to_string(), "x".to_string())]),
@@ -1506,6 +1547,7 @@ mod tests {
         let outcome = engine
             .update_entity(
                 UpdateEntityArgs {
+                    anchors: Vec::new(),
                     id: seeded.id.clone(),
                     expected_hash: Some(seeded.content_hash.clone()),
                     sections,
@@ -1554,6 +1596,7 @@ mod tests {
         let err = engine
             .update_entity(
                 UpdateEntityArgs {
+                    anchors: Vec::new(),
                     id: seeded.id.clone(),
                     expected_hash: Some("wrong-hash".to_string()),
                     sections: IndexMap::new(),
@@ -1592,6 +1635,7 @@ mod tests {
         let err = engine
             .update_entity(
                 UpdateEntityArgs {
+                    anchors: Vec::new(),
                     id: crate::EntityId::new("specs", "ghost"),
                     expected_hash: None,
                     sections: IndexMap::new(),
@@ -1632,6 +1676,7 @@ mod tests {
         let err = engine
             .update_entity(
                 UpdateEntityArgs {
+                    anchors: Vec::new(),
                     id,
                     expected_hash: None,
                     sections: IndexMap::new(),
@@ -1664,6 +1709,7 @@ mod tests {
         let replaced = engine
             .update_entity(
                 UpdateEntityArgs {
+                    anchors: Vec::new(),
                     id: seeded.id.clone(),
                     expected_hash: Some(seeded.content_hash.clone()),
                     sections: replace,
@@ -1694,6 +1740,7 @@ mod tests {
         let outcome = engine
             .update_entity(
                 UpdateEntityArgs {
+                    anchors: Vec::new(),
                     id: seeded.id.clone(),
                     expected_hash: Some(replaced.content_hash.clone()),
                     sections: IndexMap::new(),
@@ -1738,6 +1785,7 @@ mod tests {
         let err = engine
             .update_entity(
                 UpdateEntityArgs {
+                    anchors: Vec::new(),
                     id: seeded.id.clone(),
                     expected_hash: Some(seeded.content_hash.clone()),
                     sections: IndexMap::new(),
@@ -1774,6 +1822,7 @@ mod tests {
         let outcome = engine
             .update_entity(
                 UpdateEntityArgs {
+                    anchors: Vec::new(),
                     id: seeded.id.clone(),
                     expected_hash: Some(seeded.content_hash.clone()),
                     sections: IndexMap::new(),
@@ -1838,6 +1887,7 @@ mod tests {
         let err = engine
             .update_entity(
                 UpdateEntityArgs {
+                    anchors: Vec::new(),
                     id: stub_id.clone(),
                     expected_hash: Some(String::new()),
                     sections: IndexMap::from_iter([("identity".to_string(), "body".to_string())]),
@@ -1874,6 +1924,7 @@ mod tests {
         let err = engine
             .update_entity(
                 UpdateEntityArgs {
+                    anchors: Vec::new(),
                     id: seeded.id.clone(),
                     expected_hash: Some(seeded.content_hash.clone()),
                     sections,
@@ -1919,6 +1970,7 @@ mod tests {
         let err = engine
             .update_entity(
                 UpdateEntityArgs {
+                    anchors: Vec::new(),
                     id: seeded.id.clone(),
                     expected_hash: Some(seeded.content_hash.clone()),
                     sections: IndexMap::new(),
@@ -1993,6 +2045,7 @@ mod tests {
         let outcome = engine
             .update_entity(
                 UpdateEntityArgs {
+                    anchors: Vec::new(),
                     id: source.id.clone(),
                     expected_hash: Some(source.content_hash.clone()),
                     sections,
@@ -2095,6 +2148,7 @@ mod tests {
         let outcome = engine
             .update_entity(
                 UpdateEntityArgs {
+                    anchors: Vec::new(),
                     relations_unset: Vec::new(),
                     id: source.id.clone(),
                     expected_hash: Some(source.content_hash.clone()),
@@ -2151,6 +2205,7 @@ mod tests {
         let outcome = engine
             .update_entity(
                 UpdateEntityArgs {
+                    anchors: Vec::new(),
                     relations_unset: Vec::new(),
                     id: source.id.clone(),
                     expected_hash: Some(source.content_hash.clone()),
@@ -2229,6 +2284,7 @@ mod tests {
         engine
             .update_entity(
                 UpdateEntityArgs {
+                    anchors: Vec::new(),
                     id: source.id.clone(),
                     expected_hash: Some(source.content_hash.clone()),
                     sections,
@@ -2269,6 +2325,7 @@ mod tests {
         let outcome = engine
             .update_entity(
                 UpdateEntityArgs {
+                    anchors: Vec::new(),
                     id: seeded.id.clone(),
                     // Stale-hash recovery path — dry_run skips the
                     // hash check, so a wrong expected_hash is OK.
@@ -2377,6 +2434,7 @@ mod tests {
         let probe = engine
             .create_entity(
                 CreateEntityArgs {
+                    anchors: Vec::new(),
                     mem: "specs".to_string(),
                     title: "Probe".to_string(),
                     entity_type: "spec".to_string(),
@@ -2426,6 +2484,7 @@ mod tests {
         let updated = engine
             .update_entity(
                 UpdateEntityArgs {
+                    anchors: Vec::new(),
                     id: probe.id.clone(),
                     expected_hash: Some(relate1.content_hash.clone()),
                     sections,
@@ -2520,6 +2579,7 @@ mod tests {
         let outcome = engine
             .update_entity(
                 UpdateEntityArgs {
+                    anchors: Vec::new(),
                     id: seeded.id.clone(),
                     expected_hash: Some(seeded.content_hash.clone()),
                     sections,
@@ -2593,6 +2653,7 @@ mod tests {
         let outcome = engine
             .update_entity(
                 UpdateEntityArgs {
+                    anchors: Vec::new(),
                     id: seeded.id.clone(),
                     expected_hash: Some(seeded.content_hash.clone()),
                     sections,
@@ -2666,6 +2727,7 @@ mod tests {
         let err = engine
             .update_entity(
                 UpdateEntityArgs {
+                    anchors: Vec::new(),
                     id: seeded.id.clone(),
                     expected_hash: Some(seeded.content_hash.clone()),
                     sections: IndexMap::new(),
@@ -2714,6 +2776,7 @@ mod tests {
         let outcome = engine
             .update_entity(
                 UpdateEntityArgs {
+                    anchors: Vec::new(),
                     id: seeded.id.clone(),
                     expected_hash: Some(seeded.content_hash.clone()),
                     sections,
@@ -2753,6 +2816,7 @@ mod tests {
         let outcome = engine
             .update_entity(
                 UpdateEntityArgs {
+                    anchors: Vec::new(),
                     id: seeded.id.clone(),
                     expected_hash: Some(seeded.content_hash.clone()),
                     sections: IndexMap::new(),
@@ -2794,6 +2858,7 @@ mod tests {
         let real = engine
             .update_entity(
                 UpdateEntityArgs {
+                    anchors: Vec::new(),
                     id: seeded.id.clone(),
                     expected_hash: Some(seeded.content_hash.clone()),
                     sections,
@@ -2833,6 +2898,7 @@ mod tests {
         let outcome = engine
             .update_entity(
                 UpdateEntityArgs {
+                    anchors: Vec::new(),
                     id: seeded.id.clone(),
                     expected_hash: Some(seeded.content_hash.clone()),
                     sections: IndexMap::new(),
@@ -2917,6 +2983,7 @@ mod tests {
         let outcome = engine
             .update_entity(
                 UpdateEntityArgs {
+                    anchors: Vec::new(),
                     relations_unset: Vec::new(),
                     id: source.id.clone(),
                     expected_hash: Some(after_relate.content_hash.clone()),
@@ -2968,6 +3035,7 @@ mod tests {
         let outcome = engine
             .update_entity(
                 UpdateEntityArgs {
+                    anchors: Vec::new(),
                     id: seeded.id.clone(),
                     expected_hash: Some(seeded.content_hash.clone()),
                     sections,
@@ -3016,6 +3084,7 @@ mod tests {
             let outcome = engine
                 .update_entity(
                     UpdateEntityArgs {
+                        anchors: Vec::new(),
                         id: seeded.id.clone(),
                         expected_hash: Some(seeded.content_hash.clone()),
                         sections: noop_sections.clone(),
@@ -3046,6 +3115,7 @@ mod tests {
         let real = engine
             .update_entity(
                 UpdateEntityArgs {
+                    anchors: Vec::new(),
                     id: seeded.id.clone(),
                     expected_hash: Some(seeded.content_hash.clone()),
                     sections,
@@ -3113,6 +3183,7 @@ mod tests {
         let source = engine
             .create_entity(
                 CreateEntityArgs {
+                    anchors: Vec::new(),
                     mem: "specs".to_string(),
                     title: "Source".to_string(),
                     entity_type: "spec".to_string(),
@@ -3143,6 +3214,7 @@ mod tests {
         engine
             .update_entity(
                 UpdateEntityArgs {
+                    anchors: Vec::new(),
                     id: source.id.clone(),
                     expected_hash: Some(source.content_hash.clone()),
                     sections: new_sections,
@@ -3204,6 +3276,7 @@ mod tests {
         let source = engine
             .create_entity(
                 CreateEntityArgs {
+                    anchors: Vec::new(),
                     mem: "specs".to_string(),
                     title: "Source".to_string(),
                     entity_type: "spec".to_string(),
@@ -3232,6 +3305,7 @@ mod tests {
         let outcome = engine
             .update_entity(
                 UpdateEntityArgs {
+                    anchors: Vec::new(),
                     id: source.id.clone(),
                     expected_hash: Some(source.content_hash.clone()),
                     sections: new_sections,
@@ -3310,6 +3384,7 @@ mod tests {
         let source = engine
             .create_entity(
                 CreateEntityArgs {
+                    anchors: Vec::new(),
                     mem: "specs".to_string(),
                     title: "Source".to_string(),
                     entity_type: "spec".to_string(),
@@ -3332,6 +3407,7 @@ mod tests {
         let outcome = engine
             .update_entity(
                 UpdateEntityArgs {
+                    anchors: Vec::new(),
                     id: source.id.clone(),
                     expected_hash: Some(source.content_hash.clone()),
                     sections: edit,
@@ -3385,6 +3461,7 @@ mod tests {
             sections.insert("identity".to_string(), format!("{title} identity"));
             sections.insert("purpose".to_string(), "see [[ghost]]".to_string());
             CreateEntityArgs {
+                anchors: Vec::new(),
                 mem: "specs".to_string(),
                 title: title.to_string(),
                 entity_type: "spec".to_string(),
@@ -3408,6 +3485,7 @@ mod tests {
         let outcome = engine
             .update_entity(
                 UpdateEntityArgs {
+                    anchors: Vec::new(),
                     id: source_a.id.clone(),
                     expected_hash: Some(source_a.content_hash.clone()),
                     sections: drop_link,
@@ -3501,6 +3579,7 @@ mod tests {
         engine
             .update_entity(
                 UpdateEntityArgs {
+                    anchors: Vec::new(),
                     id: source.id.clone(),
                     expected_hash: Some(relate.content_hash.clone()),
                     sections,
@@ -3572,6 +3651,7 @@ mod tests {
         engine
             .update_entity(
                 UpdateEntityArgs {
+                    anchors: Vec::new(),
                     id: source.id.clone(),
                     expected_hash: Some(source.content_hash.clone()),
                     sections,
@@ -3663,6 +3743,7 @@ mod tests {
         engine
             .update_entity(
                 UpdateEntityArgs {
+                    anchors: Vec::new(),
                     id: source.id.clone(),
                     expected_hash: Some(relate.content_hash.clone()),
                     sections,
@@ -3835,6 +3916,7 @@ community:
             let target = engine
                 .create_entity(
                     CreateEntityArgs {
+                        anchors: Vec::new(),
                         mem: "v".to_string(),
                         title: "Target".to_string(),
                         entity_type: "doc".to_string(),
@@ -3857,6 +3939,7 @@ community:
             let source = engine
                 .create_entity(
                     CreateEntityArgs {
+                        anchors: Vec::new(),
                         mem: "v".to_string(),
                         title: "Source".to_string(),
                         entity_type: "doc".to_string(),
@@ -3926,6 +4009,7 @@ community:
             let target = engine
                 .create_entity(
                     CreateEntityArgs {
+                        anchors: Vec::new(),
                         mem: "v".to_string(),
                         title: "Target".to_string(),
                         entity_type: "doc".to_string(),
@@ -3945,6 +4029,7 @@ community:
             let source = engine
                 .create_entity(
                     CreateEntityArgs {
+                        anchors: Vec::new(),
                         mem: "v".to_string(),
                         title: "Source".to_string(),
                         entity_type: "doc".to_string(),
@@ -3970,6 +4055,7 @@ community:
             let err = engine
                 .update_entity(
                     UpdateEntityArgs {
+                        anchors: Vec::new(),
                         id: source.id.clone(),
                         expected_hash: Some(source.content_hash.clone()),
                         sections,
@@ -4042,6 +4128,7 @@ community:
             let err = engine
                 .create_entity(
                     CreateEntityArgs {
+                        anchors: Vec::new(),
                         mem: "v".to_string(),
                         title: "Source".to_string(),
                         entity_type: "doc".to_string(),
@@ -4114,6 +4201,7 @@ community:
             let err = engine
                 .create_entity(
                     CreateEntityArgs {
+                        anchors: Vec::new(),
                         mem: "v".to_string(),
                         title: "Source".to_string(),
                         entity_type: "doc".to_string(),
@@ -4182,6 +4270,7 @@ community:
             let err = engine
                 .create_entity(
                     CreateEntityArgs {
+                        anchors: Vec::new(),
                         mem: "v".to_string(),
                         title: "Source".to_string(),
                         entity_type: "doc".to_string(),
@@ -4253,6 +4342,7 @@ community:
 
     fn repair_args(id: EntityId, hash: Option<String>) -> UpdateEntityArgs {
         UpdateEntityArgs {
+            anchors: Vec::new(),
             id,
             expected_hash: hash,
             sections: IndexMap::new(),

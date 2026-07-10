@@ -25,11 +25,12 @@ pub use archive_provenance::{
     ARCHIVE_PROVENANCE_FORMAT, ArchiveProvenance, EntityProvenance, History,
 };
 pub use config::{
-    ARCHIVE_CONFIG_PATH, ARCHIVE_EXTENSION, ARCHIVE_META_DIR, ARCHIVE_PROVENANCE_PATH,
-    ARCHIVE_SCHEMA_PREFIX, CommunityOverride, ConfigCheckResult, ConfigError, MEM_META_DIR,
-    MemConfig, PUBLISHED_MEM_FORMAT, PublishConfig, PublishConversionError, PublishedMemConfig,
-    ReadMemSource, ReadMemSpec, RoleConfig, SchemaRef, VcsConfig, check_config, load_and_validate,
-    load_config, parse_mem_config, published_config_from,
+    ARCHIVE_ANCHORS_PATH, ARCHIVE_CONFIG_PATH, ARCHIVE_EXTENSION, ARCHIVE_META_DIR,
+    ARCHIVE_PROVENANCE_PATH, ARCHIVE_SCHEMA_PREFIX, CommunityOverride, ConfigCheckResult,
+    ConfigError, MEM_META_DIR, MemConfig, PUBLISHED_MEM_FORMAT, PublishConfig,
+    PublishConversionError, PublishedMemConfig, ReadMemSource, ReadMemSpec, RoleConfig, SchemaRef,
+    VcsConfig, check_config, load_and_validate, load_config, parse_mem_config,
+    published_config_from,
 };
 pub use loader::{SchemaLoadError, load_schema_from_dir, load_schema_from_memory};
 pub use manifest::{

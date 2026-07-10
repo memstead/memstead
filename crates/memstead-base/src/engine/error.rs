@@ -913,6 +913,16 @@ pub enum EngineError {
         active_backend: String,
         supported_backends: Vec<String>,
     },
+    /// A `memstead_create` / `memstead_update` `anchors[]` element was
+    /// malformed — an unknown provenance class or grain, a missing artifact
+    /// reference, a content hash on a class without hash semantics, or a
+    /// grain the resolving medium's namespace cannot express. The whole
+    /// mutation refuses and the entity is not written; the wrapped
+    /// [`crate::anchor::AnchorValidationError`] carries the recovery
+    /// `details` (offending field, bad value, allowed set). Typed code
+    /// `INVALID_ANCHOR`.
+    #[error("invalid anchor: {0}")]
+    InvalidAnchor(#[from] crate::anchor::AnchorValidationError),
 }
 
 /// Typed payload for a single Write-Mem referrer in
@@ -1052,6 +1062,7 @@ impl EngineError {
             EngineError::MarkdownExportUnsupportedBackend { .. } => {
                 "MARKDOWN_EXPORT_UNSUPPORTED_BACKEND"
             }
+            EngineError::InvalidAnchor(_) => crate::anchor::INVALID_ANCHOR_CODE,
         }
     }
 
@@ -1364,6 +1375,9 @@ impl EngineError {
                 "pin": pin,
                 "sources": sources,
             }),
+            EngineError::InvalidAnchor(e) => {
+                serde_json::Value::Object(e.detail().into_iter().collect::<serde_json::Map<_, _>>())
+            }
             _ => serde_json::Value::Object(serde_json::Map::new()),
         }
     }

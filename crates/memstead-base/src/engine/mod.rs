@@ -590,6 +590,7 @@ write_rules: []
         sections.insert("identity".to_string(), "fixture identity body".to_string());
         sections.insert("purpose".to_string(), "fixture purpose body".to_string());
         CreateEntityArgs {
+            anchors: Vec::new(),
             mem: mem.to_string(),
             title: title.to_string(),
             entity_type: "spec".to_string(),

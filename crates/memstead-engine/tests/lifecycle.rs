@@ -1182,6 +1182,7 @@ fn delete_mem_refuses_when_cross_mem_incoming_edges_remain() {
     // crate as a direct dev-dep.
     let seed_sections = || {
         let mut sample = CreateEntityArgs {
+            anchors: Vec::new(),
             mem: String::new(),
             title: String::new(),
             entity_type: String::new(),
@@ -1201,6 +1202,7 @@ fn delete_mem_refuses_when_cross_mem_incoming_edges_remain() {
     engine
         .create_entity(
             CreateEntityArgs {
+                anchors: Vec::new(),
                 mem: "b".to_string(),
                 title: "Target".to_string(),
                 entity_type: "spec".to_string(),
@@ -1217,6 +1219,7 @@ fn delete_mem_refuses_when_cross_mem_incoming_edges_remain() {
     engine
         .create_entity(
             CreateEntityArgs {
+                anchors: Vec::new(),
                 mem: "a".to_string(),
                 title: "Source".to_string(),
                 entity_type: "spec".to_string(),
@@ -1378,6 +1381,7 @@ fn delete_mem_router_only_refuses_when_cross_mem_incoming_edges_remain() {
 
     let seed_sections = || {
         let mut sample = CreateEntityArgs {
+            anchors: Vec::new(),
             mem: String::new(),
             title: String::new(),
             entity_type: String::new(),
@@ -1397,6 +1401,7 @@ fn delete_mem_router_only_refuses_when_cross_mem_incoming_edges_remain() {
     engine
         .create_entity(
             CreateEntityArgs {
+                anchors: Vec::new(),
                 mem: "b".to_string(),
                 title: "Target".to_string(),
                 entity_type: "spec".to_string(),
@@ -1413,6 +1418,7 @@ fn delete_mem_router_only_refuses_when_cross_mem_incoming_edges_remain() {
     engine
         .create_entity(
             CreateEntityArgs {
+                anchors: Vec::new(),
                 mem: "a".to_string(),
                 title: "Source".to_string(),
                 entity_type: "spec".to_string(),
@@ -1530,6 +1536,7 @@ fn destructive_delete_scrubs_cross_links_but_keeps_allowlist_rules() {
     // walk. Sections are built via a sample `CreateEntityArgs` to
     // avoid taking `indexmap` as a direct dev-dep of this test target.
     let mut sample = CreateEntityArgs {
+        anchors: Vec::new(),
         mem: String::new(),
         title: String::new(),
         entity_type: String::new(),
@@ -1547,6 +1554,7 @@ fn destructive_delete_scrubs_cross_links_but_keeps_allowlist_rules() {
     engine
         .create_entity(
             CreateEntityArgs {
+                anchors: Vec::new(),
                 mem: "other".to_string(),
                 title: "Solo".to_string(),
                 entity_type: "spec".to_string(),

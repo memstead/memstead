@@ -9,7 +9,8 @@
 use std::io::{Cursor, Read};
 
 use memstead_schema::{
-    ARCHIVE_CONFIG_PATH, ARCHIVE_META_DIR, ARCHIVE_PROVENANCE_PATH, ARCHIVE_SCHEMA_PREFIX,
+    ARCHIVE_ANCHORS_PATH, ARCHIVE_CONFIG_PATH, ARCHIVE_META_DIR, ARCHIVE_PROVENANCE_PATH,
+    ARCHIVE_SCHEMA_PREFIX,
 };
 
 use super::{SizeCapKind, ValidationError, ValidatorLimits};
@@ -49,6 +50,14 @@ pub struct ArchiveEntries {
     /// unrecognised future meta member is tolerated-and-ignored (never
     /// surfaced here, never an error).
     pub provenance_bytes: Option<Vec<u8>>,
+    /// Raw bytes of the optional engine-owned anchors sidecar
+    /// (`.memstead/anchors.json`, E3a), or `None` when the archive carries
+    /// none. Recognised as a first-class member so the canonical re-pack
+    /// threads it through verbatim rather than dropping it; a
+    /// recognised-but-structurally-invalid payload is a typed validation
+    /// failure (unlike unknown future meta members, which stay
+    /// tolerate-and-ignore).
+    pub anchors_bytes: Option<Vec<u8>>,
 }
 
 /// Walk the archive, enforce archive-level rules, return entries in
@@ -82,6 +91,7 @@ pub fn extract_entries(
     let mut markdown_files: Vec<MarkdownEntry> = Vec::new();
     let mut schema_files: Vec<SchemaFile> = Vec::new();
     let mut provenance_bytes: Option<Vec<u8>> = None;
+    let mut anchors_bytes: Option<Vec<u8>> = None;
     let mut seen_paths: Vec<String> = Vec::new();
     let mut uncompressed_total: u64 = 0;
 
@@ -149,6 +159,7 @@ pub fn extract_entries(
         let is_config = path_string == ARCHIVE_CONFIG_PATH;
         let is_schema = is_schema_path(&path_string);
         let is_provenance = path_string == ARCHIVE_PROVENANCE_PATH;
+        let is_anchors = path_string == ARCHIVE_ANCHORS_PATH;
         // `.md` files inside the meta dir are NOT entities — without
         // this guard a `.memstead/notes.md` would slip past the
         // whitelist as markdown.
@@ -174,9 +185,16 @@ pub fn extract_entries(
             && !is_config
             && !is_schema
             && !is_provenance
+            && !is_anchors
             && !path_string.ends_with(".md")
             && !path_string.starts_with(ARCHIVE_SCHEMA_PREFIX);
-        if !is_config && !is_markdown && !is_schema && !is_provenance && !is_ignored_meta {
+        if !is_config
+            && !is_markdown
+            && !is_schema
+            && !is_provenance
+            && !is_anchors
+            && !is_ignored_meta
+        {
             return Err(ValidationError::UnknownFile(path_string));
         }
 
@@ -230,6 +248,19 @@ pub fn extract_entries(
             // payload (a malformed payload is the install path's call to
             // downgrade to "provenance absent", not an archive-shape error).
             provenance_bytes = Some(buf);
+        } else if is_anchors {
+            // Strict, unlike provenance: a recognised anchors member that
+            // does not parse as an `AnchorSidecar` is corruption, not
+            // forward-compat — silently dropping it is exactly the
+            // publish-strip failure E3a exists to close. Validate the
+            // structure here; thread the verbatim bytes through the
+            // canonical re-pack on success.
+            crate::anchor::AnchorSidecar::from_bytes(&buf).map_err(|e| {
+                ValidationError::InvalidAnchorsMember {
+                    reason: e.to_string(),
+                }
+            })?;
+            anchors_bytes = Some(buf);
         } else {
             let content = match std::str::from_utf8(&buf) {
                 Ok(s) => s.to_string(),
@@ -270,6 +301,7 @@ pub fn extract_entries(
         markdown_files,
         schema_files,
         provenance_bytes,
+        anchors_bytes,
     })
 }
 
@@ -336,6 +368,43 @@ mod tests {
         // A provenance-free archive surfaces no provenance — absent, not
         // an error.
         assert!(entries.provenance_bytes.is_none());
+    }
+
+    /// The engine-owned anchors sidecar (`.memstead/anchors.json`) is a
+    /// recognised member surfaced verbatim — not stripped as an unknown
+    /// meta member, not mistaken for an entity.
+    #[test]
+    fn recognises_valid_anchors_member() {
+        let anchors = br#"{"version":1,"entities":{"v--foo":[{"artifact":"src/lib.rs","grain":"file","class":"anchored","hash_stability":"stable","hash":"h1"}]}}"#;
+        let zip = build_archive(&[
+            (".memstead/config.json", ok_config()),
+            (".memstead/anchors.json", anchors),
+            ("foo.md", b"# Foo\n"),
+        ]);
+        let entries = extract_entries(&zip, &ValidatorLimits::DEFAULT).unwrap();
+        assert_eq!(
+            entries.anchors_bytes.as_deref(),
+            Some(&anchors[..]),
+            "anchors bytes surface verbatim"
+        );
+        assert_eq!(entries.markdown_files.len(), 1, "anchors is not an entity");
+    }
+
+    /// A recognised-but-structurally-invalid anchors member is a typed
+    /// failure — silent drop is exactly the publish-strip failure E3a
+    /// closes. (Unknown OTHER meta members keep tolerate-and-ignore.)
+    #[test]
+    fn rejects_malformed_anchors_member() {
+        let zip = build_archive(&[
+            (".memstead/config.json", ok_config()),
+            (".memstead/anchors.json", b"{ this is not valid json"),
+            ("foo.md", b"# Foo\n"),
+        ]);
+        let err = extract_entries(&zip, &ValidatorLimits::DEFAULT).unwrap_err();
+        assert!(
+            matches!(err, ValidationError::InvalidAnchorsMember { .. }),
+            "expected InvalidAnchorsMember, got {err:?}"
+        );
     }
 
     /// The optional `.memstead/provenance.json` payload is recognised and

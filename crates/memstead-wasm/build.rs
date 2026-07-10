@@ -77,6 +77,7 @@ fn build_fixture_bytes() -> Vec<u8> {
             "Exercises the wasm-bindgen hydrate path.".to_string(),
         );
         let args = memstead_base::engine::CreateEntityArgs {
+            anchors: Vec::new(),
             mem: "specs".to_string(),
             title: title.to_string(),
             entity_type: "spec".to_string(),

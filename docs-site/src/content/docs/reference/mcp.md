@@ -94,6 +94,102 @@ Create a new entity. Read the target mem's schema first via `memstead_schema` (s
 ```json
 {
   "$defs": {
+    "AnchorInputParam": {
+      "additionalProperties": false,
+      "description": "One `anchors[]` element on `memstead_create` / `memstead_update` — a\nprovenance record tying the entity to a source artifact. Permissive by\ndesign: every field is optional / string-typed so a malformed element\n(unknown class or grain, missing artifact, hash on a non-hash class,\ngrain the medium's namespace cannot express) refuses the whole mutation\nwith a typed `INVALID_ANCHOR` envelope carrying recovery `details` —\nrather than an opaque schema-deserialisation error. Converts to the\nengine's `AnchorInput` which validates it. Not folded into `_hash`.",
+      "properties": {
+        "artifact": {
+          "default": null,
+          "description": "Artifact reference in the medium's own namespace — a repo-relative path, `path@commit`, URL, or entity id, interpreted per `grain`. Required; a missing/empty value refuses INVALID_ANCHOR.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "at_version": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AnchorVersionParam"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Medium-typed pinned version this anchor was recorded against: `{ kind: \"commit\"|\"snapshot\"|\"etag\", value: \"<token>\" }`. Omit for a plain-path medium with no retrievable version."
+        },
+        "binding": {
+          "default": null,
+          "description": "`hash(D)` of the binding that produced this anchor, when a binding produced it. Omit for a manually-authored anchor.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "class": {
+          "default": null,
+          "description": "Provenance class — the entity's epistemic standing toward the artifact: `anchored` | `derived` | `authored` | `informed-by`. `anchored`/`derived` carry hash semantics (a `hash` is permitted and participates in drift adjudication); `authored`/`informed-by` do not (supplying `hash` refuses INVALID_ANCHOR). An unknown value refuses INVALID_ANCHOR.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "derived_from": {
+          "default": null,
+          "description": "For a `derived` class: the input artifact refs the entity was derived from. Empty/omitted for every other class.",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "grain": {
+          "default": null,
+          "description": "Granularity of the artifact reference: `span` | `file` | `tree` | `url` | `entity`. Must be expressible in the resolving medium's anchor namespace (path-shaped for span/file/tree, `url` for url, `entity` for entity) or the mutation refuses INVALID_ANCHOR. An unknown value refuses INVALID_ANCHOR.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hash": {
+          "default": null,
+          "description": "Content hash over the PREPARED artifact form (never raw bytes). Permitted only on hash-bearing classes (`anchored`/`derived`); supplying it on `authored`/`informed-by` refuses INVALID_ANCHOR.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hash_stability": {
+          "default": null,
+          "description": "Medium's declared hash stability: `stable` | `unstable` (defaults to `stable`). An unstable-source hash break resolves `recheck`, not `drifted`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "AnchorVersionParam": {
+      "additionalProperties": false,
+      "description": "The medium-typed pinned version sub-object of an [`AnchorInputParam`].",
+      "properties": {
+        "kind": {
+          "description": "Version kind: `commit` (git / path+commit) | `snapshot` (graph) | `etag` (web).",
+          "type": "string"
+        },
+        "value": {
+          "description": "The version token — commit id, graph snapshot token, or web ETag.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "value"
+      ],
+      "type": "object"
+    },
     "RelationInput": {
       "additionalProperties": false,
       "description": "A relationship input for create/batch tools.",
@@ -127,8 +223,18 @@ Create a new entity. Read the target mem's schema first via `memstead_schema` (s
   "additionalProperties": false,
   "description": "Parameters for memstead_create.",
   "properties": {
+    "anchors": {
+      "description": "Optional provenance anchors to attach to the new entity — durable records tying it to the source artifacts it describes (which artifact, at which grain, under which provenance class). Written into the mem-branch anchors sidecar in the SAME commit as the entity (atomic); omitting it is byte-identical to a create without anchors. A malformed element refuses the whole create with `INVALID_ANCHOR` (`details` carries the offending field + allowed set) and the entity is not written. Anchors do NOT participate in `_hash`.",
+      "items": {
+        "$ref": "#/$defs/AnchorInputParam"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
     "dry_run": {
-      "description": "Validate and preview the create without executing — no disk write, no store mutation, no VCS commit, no edges added. dry_run runs the SAME validation a real call runs; it is not a softer check. On a VALID entity the response carries the prospective `id`, `file_path`, and `_hash` (bit-identical to what a real call with the same arguments would produce, EXCEPT for engine-auto-stamped timestamps: the hash covers `created_date`, which is stamped from wall-clock `now()` independently in the dry-run and the real call, so the two `_hash` values diverge whenever a second ticks between them; the hash also covers `sections`, `metadata`, and `relations`, so a dry_run that omits `relations` will not match a real call that supplies them), plus any `warnings` and any `incoming` edges that would be adopted from a pre-existing stub at this id, with `commit_sha` empty. On an INVALID entity dry_run does NOT return a warnings-list preview: it refuses with the IDENTICAL typed envelope a real call would return (`MISSING_REQUIRED_SECTION`, `UNKNOWN_SECTION`, `UNKNOWN_METADATA_FIELD`, `INVALID_ENUM_VALUE`, `REQUIRED_FIELD_UNSET`, …), carrying the same recovery `details.*` (e.g. `details.sections[]`). That typed refusal IS the pre-flight signal — read its `details` to fix coverage, then retry. So dry_run never reports a problem entity as clean: it and a real write agree on validity. Use to verify the id slug, or to pre-flight required-section / field coverage and pre-existing references before committing.",
+      "description": "Validate and preview the create without executing — no disk write, no store mutation, no VCS commit, no edges added. dry_run runs the SAME validation a real call runs; it is not a softer check. On a VALID entity the response carries the prospective `id`, `file_path`, and `_hash` (bit-identical to what a real call with the same arguments would produce, EXCEPT for engine-auto-stamped timestamps: the hash covers `created_date`, which is stamped from wall-clock `now()` independently in the dry-run and the real call, so the two `_hash` values diverge whenever a second ticks between them; the hash also covers `sections`, `metadata`, and `relations`, so a dry_run that omits `relations` will not match a real call that supplies them; `_hash` does NOT cover `anchors` — the anchors sidecar persists on the mem branch under `.memstead/` and is never folded into content hashing, so attaching or refreshing anchors never changes `_hash` or invalidates a cached `expected_hash`), plus any `warnings` and any `incoming` edges that would be adopted from a pre-existing stub at this id, with `commit_sha` empty. On an INVALID entity dry_run does NOT return a warnings-list preview: it refuses with the IDENTICAL typed envelope a real call would return (`MISSING_REQUIRED_SECTION`, `UNKNOWN_SECTION`, `UNKNOWN_METADATA_FIELD`, `INVALID_ENUM_VALUE`, `REQUIRED_FIELD_UNSET`, …), carrying the same recovery `details.*` (e.g. `details.sections[]`). That typed refusal IS the pre-flight signal — read its `details` to fix coverage, then retry. So dry_run never reports a problem entity as clean: it and a real write agree on validity. Use to verify the id slug, or to pre-flight required-section / field coverage and pre-existing references before committing.",
       "type": [
         "boolean",
         "null"
@@ -200,7 +306,7 @@ Create a new entity. Read the target mem's schema first via `memstead_schema` (s
 
 **Flavour:** lean + full
 
-Remove an entity permanently. Deletes the entity's store record, every edge touching it (both directions), and its markdown file on disk. Requires `expected_hash` (read the entity via memstead_entity first — mirrors memstead_update / memstead_rename for optimistic locking); mismatch emits `HASH_MISMATCH` with `details.current` carrying the current on-disk hash. Binary semantics: any incoming reference from another entity in a Write-Mem refuses the delete with `HAS_INCOMING_REFS` and `details.referrers` listing each `{from_id, rel_types, mem}` (one entry per unique source, rel_types collapses multi-edge cases) — the agent removes the offending references via `memstead_relate --remove` (or `memstead_update` for body wiki-links) before retrying. There is no force flag. When the only incoming references come from ReadOnly mounts (archives), the delete proceeds: the on-disk file is removed and the in-memory entity is demoted to a stub at the same id so the surviving edges keep a valid target — the response carries a `RESIDUAL_STUB_FOR_READONLY_REFERRERS` warning naming the surviving referrers. PART_OF children survive the delete: their parent edge is removed; file paths are unaffected (every entity already lives at `{mem}/{slug}.md`). Stubs (`_hash` empty) are deleted with `expected_hash: ""` — the hash check is skipped because there is nothing to compare. Optional `note` (≤280 chars) — shared provenance contract, see memstead_create. Response carries `relations_removed` (edges removed by this delete), `orphan_stubs_removed` (ids of stub entities whose last incoming edge was this entity — they are GC'd in the same op so the graph stays tidy; field is serde-omitted when empty), `warnings` (residual-stub warning when the demote path applied), and `commit_sha` (per-mem git; gitdir via `memstead_health include_config=true`) for polling via memstead_changes_since.
+Remove an entity permanently. Deletes the entity's store record, every edge touching it (both directions), and its markdown file on disk. Requires `expected_hash` (read the entity via memstead_entity first — mirrors memstead_update / memstead_rename for optimistic locking); mismatch emits `HASH_MISMATCH` with `details.current` carrying the current on-disk hash. Binary semantics: any incoming reference from another entity in a Write-Mem refuses the delete with `HAS_INCOMING_REFS` and `details.referrers` listing each `{from_id, rel_types, mem}` (one entry per unique source, rel_types collapses multi-edge cases) — the agent removes the offending references via `memstead_relate --remove` (or `memstead_update` for body wiki-links) before retrying. There is no force flag. When the only incoming references come from ReadOnly mounts (archives), the delete proceeds: the on-disk file is removed and the in-memory entity is demoted to a stub at the same id so the surviving edges keep a valid target — the response carries a `RESIDUAL_STUB_FOR_READONLY_REFERRERS` warning naming the surviving referrers. PART_OF children survive the delete: their parent edge is removed; file paths are unaffected (every entity already lives at `{mem}/{slug}.md`). Stubs (`_hash` empty) are deleted with `expected_hash: ""` — the hash check is skipped because there is nothing to compare. Optional `note` (≤280 chars) — shared provenance contract, see memstead_create. Response carries `relations_removed` (edges removed by this delete), `orphan_stubs_removed` (ids of stub entities whose last incoming edge was this entity — they are GC'd in the same op so the graph stays tidy; field is serde-omitted when empty), `warnings` (residual-stub warning when the demote path applied), and `commit_sha` (per-mem git; gitdir via `memstead_health include_config=true`) for polling via memstead_changes_since. Provenance anchors, if any, are removed in the same commit (no orphaned anchor survives).
 
 **Hints:** `read_only` = false, `destructive` = true, `idempotent` = false, `open_world` = false
 
@@ -847,7 +953,7 @@ Reload one writable mem's slice of the in-memory store from its on-disk branch t
 
 **Flavour:** lean + full
 
-Rename an entity by changing its title. Updates the entity ID (mem prefix preserved) and its markdown file path (`{new_slug}.md` at mem root). Atomic referrer rewrite: every Write-Mem entity whose `relationships` or section bodies point at the old id has its `[[old-slug]]` tokens rewritten in one per-mem commit. Cross-mem referrers are gated by `cross_mem_links` policy in the propagated edge's actual direction (`referrer_mem → renamed_mem`) — a blocked direction aborts up-front with `RENAME_BLOCKED_BY_CROSS_MEM_POLICY` (`details.from_mem`, `details.blocked_referrers[{from_mem, to_mem, count}]`) before any write lands. Per-peer commits are parent-pinned; sibling-writer drift mid-rename surfaces `RENAME_PARTIAL_FAILURE` (`details.committed_mems`, `details.failed_mem`, `details.failure_cause`) so the agent retries the failed mem after reloading. Every per-mem commit in one rename shares a `logical_operation_id` in its provenance — correlate multi-mem renames via `memstead_changes_since`. ReadOnly referrers can't be rewritten; the old id is demoted to a stub in-memory holding the surviving incoming edges, and the response carries `RESIDUAL_STUB_FOR_READONLY_REFERRERS` naming each surviving referrer. Requires `expected_hash` (read via memstead_entity first); mismatch emits `HASH_MISMATCH` with `details.current` carrying the current on-disk hash. Slug-noop short-circuit: when the new title's slug matches the current one, `old_id` equals `new_id`, `commit_sha` is empty, and `warnings` carries `TITLE_NORMALIZED_TO_SLUG_NOOP`. ID collisions error — pick a different title. Stubs cannot be renamed (create a real entity instead). Optional `note` (≤280 chars) — shared provenance contract, see memstead_create. Response carries `old_id`, `new_id`, `_hash` (post-rename on-disk hash — pass as `expected_hash` on the next mutation, mirrors `memstead_relate`), `commit_sha` (per-mem git; gitdir via `memstead_health include_config=true`), and `warnings`.
+Rename an entity by changing its title. Updates the entity ID (mem prefix preserved) and its markdown file path (`{new_slug}.md` at mem root). Atomic referrer rewrite: every Write-Mem entity whose `relationships` or section bodies point at the old id has its `[[old-slug]]` tokens rewritten in one per-mem commit. Cross-mem referrers are gated by `cross_mem_links` policy in the propagated edge's actual direction (`referrer_mem → renamed_mem`) — a blocked direction aborts up-front with `RENAME_BLOCKED_BY_CROSS_MEM_POLICY` (`details.from_mem`, `details.blocked_referrers[{from_mem, to_mem, count}]`) before any write lands. Per-peer commits are parent-pinned; sibling-writer drift mid-rename surfaces `RENAME_PARTIAL_FAILURE` (`details.committed_mems`, `details.failed_mem`, `details.failure_cause`) so the agent retries the failed mem after reloading. Every per-mem commit in one rename shares a `logical_operation_id` in its provenance — correlate multi-mem renames via `memstead_changes_since`. ReadOnly referrers can't be rewritten; the old id is demoted to a stub in-memory holding the surviving incoming edges, and the response carries `RESIDUAL_STUB_FOR_READONLY_REFERRERS` naming each surviving referrer. Requires `expected_hash` (read via memstead_entity first); mismatch emits `HASH_MISMATCH` with `details.current` carrying the current on-disk hash. Slug-noop short-circuit: when the new title's slug matches the current one, `old_id` equals `new_id`, `commit_sha` is empty, and `warnings` carries `TITLE_NORMALIZED_TO_SLUG_NOOP`. ID collisions error — pick a different title. Stubs cannot be renamed (create a real entity instead). Optional `note` (≤280 chars) — shared provenance contract, see memstead_create. Response carries `old_id`, `new_id`, `_hash` (post-rename on-disk hash — pass as `expected_hash` on the next mutation, mirrors `memstead_relate`), `commit_sha` (per-mem git; gitdir via `memstead_health include_config=true`), and `warnings`. Provenance anchors, if any, move to the new id in the same commit.
 
 **Hints:** `read_only` = false, `destructive` = false, `idempotent` = false, `open_world` = false
 
@@ -1124,6 +1230,102 @@ Modify an existing entity. Pre-fetch the target mem's schema via `memstead_schem
 ```json
 {
   "$defs": {
+    "AnchorInputParam": {
+      "additionalProperties": false,
+      "description": "One `anchors[]` element on `memstead_create` / `memstead_update` — a\nprovenance record tying the entity to a source artifact. Permissive by\ndesign: every field is optional / string-typed so a malformed element\n(unknown class or grain, missing artifact, hash on a non-hash class,\ngrain the medium's namespace cannot express) refuses the whole mutation\nwith a typed `INVALID_ANCHOR` envelope carrying recovery `details` —\nrather than an opaque schema-deserialisation error. Converts to the\nengine's `AnchorInput` which validates it. Not folded into `_hash`.",
+      "properties": {
+        "artifact": {
+          "default": null,
+          "description": "Artifact reference in the medium's own namespace — a repo-relative path, `path@commit`, URL, or entity id, interpreted per `grain`. Required; a missing/empty value refuses INVALID_ANCHOR.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "at_version": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AnchorVersionParam"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Medium-typed pinned version this anchor was recorded against: `{ kind: \"commit\"|\"snapshot\"|\"etag\", value: \"<token>\" }`. Omit for a plain-path medium with no retrievable version."
+        },
+        "binding": {
+          "default": null,
+          "description": "`hash(D)` of the binding that produced this anchor, when a binding produced it. Omit for a manually-authored anchor.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "class": {
+          "default": null,
+          "description": "Provenance class — the entity's epistemic standing toward the artifact: `anchored` | `derived` | `authored` | `informed-by`. `anchored`/`derived` carry hash semantics (a `hash` is permitted and participates in drift adjudication); `authored`/`informed-by` do not (supplying `hash` refuses INVALID_ANCHOR). An unknown value refuses INVALID_ANCHOR.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "derived_from": {
+          "default": null,
+          "description": "For a `derived` class: the input artifact refs the entity was derived from. Empty/omitted for every other class.",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "grain": {
+          "default": null,
+          "description": "Granularity of the artifact reference: `span` | `file` | `tree` | `url` | `entity`. Must be expressible in the resolving medium's anchor namespace (path-shaped for span/file/tree, `url` for url, `entity` for entity) or the mutation refuses INVALID_ANCHOR. An unknown value refuses INVALID_ANCHOR.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hash": {
+          "default": null,
+          "description": "Content hash over the PREPARED artifact form (never raw bytes). Permitted only on hash-bearing classes (`anchored`/`derived`); supplying it on `authored`/`informed-by` refuses INVALID_ANCHOR.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hash_stability": {
+          "default": null,
+          "description": "Medium's declared hash stability: `stable` | `unstable` (defaults to `stable`). An unstable-source hash break resolves `recheck`, not `drifted`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "AnchorVersionParam": {
+      "additionalProperties": false,
+      "description": "The medium-typed pinned version sub-object of an [`AnchorInputParam`].",
+      "properties": {
+        "kind": {
+          "description": "Version kind: `commit` (git / path+commit) | `snapshot` (graph) | `etag` (web).",
+          "type": "string"
+        },
+        "value": {
+          "description": "The version token — commit id, graph snapshot token, or web ETag.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "value"
+      ],
+      "type": "object"
+    },
     "PatchInput": {
       "additionalProperties": false,
       "description": "Find-and-replace input.",
@@ -1202,6 +1404,16 @@ Modify an existing entity. Pre-fetch the target mem's schema via `memstead_schem
   "additionalProperties": false,
   "description": "Parameters for memstead_update.",
   "properties": {
+    "anchors": {
+      "description": "Optional provenance anchors to attach to this entity — durable records tying it to the source artifacts it describes. Written into the mem-branch anchors sidecar in the SAME commit as the update (atomic); omitting it is byte-identical to an update without anchors. An update carrying only `anchors` (no section/metadata change) still commits the sidecar. A malformed element refuses the whole update with `INVALID_ANCHOR` and nothing is written. Anchors do NOT participate in `_hash`.",
+      "items": {
+        "$ref": "#/$defs/AnchorInputParam"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
     "append_sections": {
       "additionalProperties": {
         "type": "string"

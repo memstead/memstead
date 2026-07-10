@@ -412,6 +412,70 @@ mod tests {
         );
     }
 
+    /// Inject an extra member into a zip archive, returning fresh bytes.
+    /// Used to add an anchors sidecar to an exported `.mem` for the
+    /// archive-survival test (the export leg does not yet embed anchors —
+    /// deferred — so the test synthesises the member the registry path
+    /// must round-trip).
+    fn inject_zip_member(archive: &[u8], name: &str, content: &[u8]) -> Vec<u8> {
+        use std::io::{Read, Write};
+        let mut src = zip::ZipArchive::new(std::io::Cursor::new(archive)).unwrap();
+        let mut out = Vec::new();
+        {
+            let mut w = zip::ZipWriter::new(std::io::Cursor::new(&mut out));
+            let opts = zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Deflated);
+            for i in 0..src.len() {
+                let mut f = src.by_index(i).unwrap();
+                let fname = f.name().to_string();
+                let mut buf = Vec::new();
+                f.read_to_end(&mut buf).unwrap();
+                w.start_file(fname, opts).unwrap();
+                w.write_all(&buf).unwrap();
+            }
+            w.start_file(name, opts).unwrap();
+            w.write_all(content).unwrap();
+            w.finish().unwrap();
+        }
+        out
+    }
+
+    /// Registry-leg survival: an anchors sidecar member threads verbatim
+    /// through `validate_and_normalize_archive`'s canonical re-pack (the
+    /// publish/install store path) rather than being silently stripped, and
+    /// the installed mem exposes the anchors.
+    #[test]
+    fn anchors_member_survives_canonical_repack_and_install() {
+        let tmp = TempDir::new().unwrap();
+        let (mut engine, _dir) = folder_mem_with_entities(&tmp, &["Alpha"]);
+        let _ = &mut engine;
+        let exported = engine.export_mem_to_bytes("specs").unwrap();
+
+        let anchors = br#"{"version":1,"entities":{"specs--alpha":[{"artifact":"src/lib.rs","grain":"file","class":"anchored","hash_stability":"stable","hash":"h1"}]}}"#;
+        let with_anchors = inject_zip_member(&exported, ".memstead/anchors.json", anchors);
+
+        // Recognised at extract time.
+        let entries = extract_entries(&with_anchors, &ValidatorLimits::DEFAULT).unwrap();
+        assert_eq!(entries.anchors_bytes.as_deref(), Some(&anchors[..]));
+
+        // Threaded through the canonical re-pack (what publish stores).
+        let validated = crate::validator::validate_and_normalize_archive(&with_anchors)
+            .expect("archive with anchors re-validates");
+        let canonical =
+            extract_entries(&validated.canonical_bytes, &ValidatorLimits::DEFAULT).unwrap();
+        assert_eq!(
+            canonical.anchors_bytes.as_deref(),
+            Some(&anchors[..]),
+            "normalize must preserve the anchors member through the canonical re-pack"
+        );
+
+        // Installing the canonical bytes exposes the anchors on the mem.
+        let installed = Engine::from_archive_bytes(validated.canonical_bytes).unwrap();
+        let ids = installed.entity_anchors(&crate::EntityId::new("specs", "alpha"));
+        assert_eq!(ids.len(), 1);
+        assert_eq!(ids[0].artifact, "src/lib.rs");
+    }
+
     /// Size discipline: provenance scales with entity count (one current
     /// rationale per entity, each ≤ the 280-char note cap), so for a
     /// representative mem (~60 noted entities, larger than the live engine
@@ -917,6 +981,7 @@ E
         engine
             .create_entity(
                 crate::engine::CreateEntityArgs {
+                    anchors: Vec::new(),
                     mem: "specs".to_string(),
                     title: "Rich".to_string(),
                     entity_type: "spec".to_string(),

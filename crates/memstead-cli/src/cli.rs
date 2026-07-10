@@ -171,6 +171,12 @@ pub enum Command {
     #[cfg(feature = "mem-repo")]
     Recover(commands::recover::Args),
 
+    /// Read provenance anchors (E3a): `memstead anchors <id>` lists an
+    /// entity's anchors + composition; `memstead anchors --artifact <path>`
+    /// reverse-looks-up every entity whose anchor references that path
+    /// (the query the check-realization hook consumes).
+    Anchors(commands::anchors::Args),
+
     /// Diff a mem's HEAD against a commit SHA. Pass `--since` = a
     /// prior `commit_sha` from a mutation, or the canonical empty-tree
     /// hash `4b825dc642cb6eb9a060e54bf8d69288fbee4904` for a first sync.

@@ -2917,6 +2917,7 @@ community:
         //    to the pinned mig-a but declared by mig-b — setting it
         //    must commit; an invalid enum value must refuse.
         let mut bad = crate::engine::UpdateEntityArgs {
+            anchors: Vec::new(),
             id: one.clone(),
             expected_hash: None,
             sections: indexmap::IndexMap::new(),
@@ -2948,6 +2949,7 @@ community:
         // 6. Repair the second entity, re-issue → atomic switch.
         let two = crate::entity::EntityId::new("specs", "two");
         let repair = crate::engine::UpdateEntityArgs {
+            anchors: Vec::new(),
             id: two.clone(),
             expected_hash: None,
             sections: indexmap::IndexMap::new(),
@@ -3002,6 +3004,7 @@ community:
         let shut = engine
             .update_entity(
                 crate::engine::UpdateEntityArgs {
+                    anchors: Vec::new(),
                     id: one.clone(),
                     expected_hash: None,
                     sections: indexmap::IndexMap::new(),
@@ -3032,6 +3035,7 @@ community:
         engine
             .update_entity(
                 crate::engine::UpdateEntityArgs {
+                    anchors: Vec::new(),
                     id: one.clone(),
                     expected_hash: None,
                     sections: indexmap::IndexMap::new(),

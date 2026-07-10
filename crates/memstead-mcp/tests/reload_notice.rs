@@ -28,6 +28,7 @@ fn create_args(mem: &str, title: &str) -> CreateEntityArgs {
     sections.insert("identity".to_string(), "identity body".to_string());
     sections.insert("purpose".to_string(), "purpose body".to_string());
     CreateEntityArgs {
+        anchors: Vec::new(),
         mem: mem.to_string(),
         title: title.to_string(),
         entity_type: "spec".to_string(),
@@ -50,6 +51,7 @@ fn update_purpose_args(id: EntityId, expected_hash: String, body: &str) -> Updat
     let mut sections = IndexMap::new();
     sections.insert("purpose".to_string(), body.to_string());
     UpdateEntityArgs {
+        anchors: Vec::new(),
         id,
         expected_hash: Some(expected_hash),
         sections,

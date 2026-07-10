@@ -35,6 +35,7 @@ fn spec_sections(identity: &str, purpose: &str) -> IndexMap<String, String> {
 
 fn spec_create(mem: &str, title: &str, sections: IndexMap<String, String>) -> CreateEntityArgs {
     CreateEntityArgs {
+        anchors: Vec::new(),
         mem: mem.to_string(),
         title: title.to_string(),
         entity_type: "spec".to_string(),
@@ -47,6 +48,7 @@ fn spec_create(mem: &str, title: &str, sections: IndexMap<String, String>) -> Cr
 
 fn empty_update(id: EntityId, expected_hash: Option<String>) -> UpdateEntityArgs {
     UpdateEntityArgs {
+        anchors: Vec::new(),
         id,
         expected_hash,
         sections: IndexMap::new(),

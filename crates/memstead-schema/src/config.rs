@@ -51,6 +51,14 @@ pub const ARCHIVE_SCHEMA_PREFIX: &str = ".memstead/schema/";
 /// predating provenance omit it, and an engine that does not recognise it
 /// tolerates it as an unknown meta member.
 pub const ARCHIVE_PROVENANCE_PATH: &str = ".memstead/provenance.json";
+/// Member path of the optional engine-owned anchors sidecar inside a
+/// sealed archive (the E3a provenance-anchor payload). Additive: archives
+/// with no anchors omit it. Recognised as a first-class member so the
+/// canonical re-pack threads it through verbatim rather than
+/// silently stripping it (a recognised-but-malformed member is a typed
+/// validation failure, unlike unknown future meta members which stay
+/// tolerate-and-ignore).
+pub const ARCHIVE_ANCHORS_PATH: &str = ".memstead/anchors.json";
 /// File extension (without dot) of a sealed archive — the sole spelling.
 /// The one deliberately-distinct token in a project that is otherwise
 /// "memstead" everywhere — short, and derived from the project name.

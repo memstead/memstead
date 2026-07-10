@@ -67,6 +67,148 @@ pub(crate) fn unknown_type_error(schema: &memstead_schema::Schema, attempted: &s
     }
 }
 
+/// The lowercase wire string for a [`crate::pipeline::MediumType`] — the
+/// value the `INVALID_ANCHOR` recovery detail carries so an agent sees
+/// which medium's namespace rejected the grain. Matches the enum's
+/// `#[serde(rename_all = "lowercase")]` form.
+pub(crate) fn medium_type_wire(t: crate::pipeline::MediumType) -> &'static str {
+    use crate::pipeline::MediumType::*;
+    match t {
+        Codebase => "codebase",
+        Filesystem => "filesystem",
+        Graph => "graph",
+        Git => "git",
+        Web => "web",
+    }
+}
+
+impl super::Engine {
+    /// Resolve the single-medium anchor-namespace context for `mem`, when
+    /// unambiguous. An `anchors[]` element carries no medium name, so the
+    /// grain/namespace refusal ([`crate::anchor::AnchorValidationError::GrainNamespaceUnsupported`])
+    /// can only be fired deterministically when the mem declares exactly
+    /// one medium; with zero or several the namespace check is skipped
+    /// (the vocabulary + hash-semantics rules still apply). Returns the
+    /// `(medium_type_wire, anchor_namespace)` pair the validator consumes.
+    pub(crate) fn resolve_anchor_medium(&self, mem: &str) -> Option<(String, &'static str)> {
+        let mut mediums = self
+            .pipeline_configs()
+            .mediums
+            .iter()
+            .filter(|r| r.mem == mem);
+        let first = mediums.next()?;
+        if mediums.next().is_some() {
+            // Ambiguous — the anchor does not name which medium it targets;
+            // skip the namespace refinement rather than guess.
+            return None;
+        }
+        let caps = crate::binding::medium_capabilities(first.config.medium_type);
+        Some((
+            medium_type_wire(first.config.medium_type).to_string(),
+            caps.anchor_namespace,
+        ))
+    }
+
+    /// Validate the permissive `anchors[]` inputs for a mutation against
+    /// `mem`'s medium context into strict [`crate::anchor::Anchor`]s, or
+    /// refuse the whole mutation with a typed
+    /// [`EngineError::InvalidAnchor`]. Empty input yields an empty vec (no
+    /// sidecar write); a single malformed element aborts before any state
+    /// change so the entity is never written.
+    pub(crate) fn validate_anchor_inputs(
+        &self,
+        mem: &str,
+        inputs: &[crate::anchor::AnchorInput],
+    ) -> Result<Vec<crate::anchor::Anchor>, EngineError> {
+        if inputs.is_empty() {
+            return Ok(Vec::new());
+        }
+        let medium = self.resolve_anchor_medium(mem);
+        let medium_ref = medium.as_ref().map(|(t, ns)| (t.as_str(), *ns));
+        inputs
+            .iter()
+            .map(|i| i.validate(medium_ref).map_err(EngineError::from))
+            .collect()
+    }
+}
+
+/// Stage a write of `entity_id`'s anchors into the mem's anchors sidecar
+/// through `backend`, merged over the existing sidecar and buffered into
+/// the SAME pending op set the entity write used — so the next
+/// [`crate::backend::MemBackend::commit`] carries entity + anchors as one
+/// atomic commit. An empty `anchors` vec prunes the entity's row (the
+/// delete / rename-residual legs lean on this). Reads honour pending-buffer
+/// precedence, so successive stages within one transaction compose.
+pub(crate) fn stage_anchors_sidecar(
+    backend: &dyn crate::backend::MemBackend,
+    entity_id: &EntityId,
+    anchors: Vec<crate::anchor::Anchor>,
+) -> Result<(), EngineError> {
+    let mut sidecar = match backend.read_anchors_sidecar()? {
+        Some(bytes) => crate::anchor::AnchorSidecar::from_bytes(&bytes).map_err(|e| {
+            EngineError::Backend(crate::backend::BackendError::Other(format!(
+                "anchors sidecar parse: {e}"
+            )))
+        })?,
+        None => crate::anchor::AnchorSidecar::default(),
+    };
+    sidecar.set(entity_id.as_ref(), anchors);
+    backend.write_anchors_sidecar(&sidecar.to_bytes())?;
+    Ok(())
+}
+
+/// Load the mem's anchors sidecar through `backend`, or the empty
+/// document when none exists yet. Shared by the delete / rename legs
+/// which must decide whether the entity actually has anchor rows before
+/// staging a sidecar write (so an entity with none stays byte-identical
+/// to a pre-anchor mutation).
+fn read_sidecar(
+    backend: &dyn crate::backend::MemBackend,
+) -> Result<crate::anchor::AnchorSidecar, EngineError> {
+    match backend.read_anchors_sidecar()? {
+        Some(bytes) => crate::anchor::AnchorSidecar::from_bytes(&bytes).map_err(|e| {
+            EngineError::Backend(crate::backend::BackendError::Other(format!(
+                "anchors sidecar parse: {e}"
+            )))
+        }),
+        None => Ok(crate::anchor::AnchorSidecar::default()),
+    }
+}
+
+/// Stage removal of `entity_id`'s anchor row into the same commit as an
+/// entity delete — a no-op (no sidecar write, so byte-identical to today)
+/// when the entity carries no anchors. Returns whether a write was staged.
+pub(crate) fn stage_anchors_removal(
+    backend: &dyn crate::backend::MemBackend,
+    entity_id: &EntityId,
+) -> Result<bool, EngineError> {
+    let mut sidecar = read_sidecar(backend)?;
+    if sidecar.get(entity_id.as_ref()).is_empty() {
+        return Ok(false);
+    }
+    sidecar.remove(entity_id.as_ref());
+    backend.write_anchors_sidecar(&sidecar.to_bytes())?;
+    Ok(true)
+}
+
+/// Stage a move of `from`'s anchor row to `to` into the same commit as an
+/// entity rename — leaving zero rows under the old id. A no-op (byte-
+/// identical to today) when the renamed entity carries no anchors. Returns
+/// whether a write was staged.
+pub(crate) fn stage_anchors_rename(
+    backend: &dyn crate::backend::MemBackend,
+    from: &EntityId,
+    to: &EntityId,
+) -> Result<bool, EngineError> {
+    let mut sidecar = read_sidecar(backend)?;
+    if sidecar.get(from.as_ref()).is_empty() {
+        return Ok(false);
+    }
+    sidecar.rename(from.as_ref(), to.as_ref());
+    backend.write_anchors_sidecar(&sidecar.to_bytes())?;
+    Ok(true)
+}
+
 /// Now as a full ISO-8601 datetime string `YYYY-MM-DDTHH:MM:SSZ`
 /// (UTC). Used by mutation paths that auto-stamp metadata fields
 /// (e.g. `last_modified` on update, `created_date` on create).
@@ -783,6 +925,7 @@ mod tests {
 
         // create_entity_with_ctx
         let create_args = CreateEntityArgs {
+            anchors: Vec::new(),
             mem: "specs".to_string(),
             title: "Seed".to_string(),
             entity_type: "spec".to_string(),
@@ -800,6 +943,7 @@ mod tests {
 
         // update_entity_with_ctx
         let update_args = UpdateEntityArgs {
+            anchors: Vec::new(),
             id: created.id.clone(),
             expected_hash: Some(created.content_hash.clone()),
             sections: IndexMap::from_iter([("identity".to_string(), "updated".to_string())]),

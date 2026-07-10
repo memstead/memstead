@@ -444,6 +444,11 @@ impl Engine {
         for (ref_markdown, ref_file_path, _) in &same_mem_writes {
             backend.write_entity(Path::new(ref_file_path), ref_markdown.as_bytes())?;
         }
+        // Move the renamed entity's anchor row old_id → new_id in the SAME
+        // commit as the file move so entity + anchors rewind together and
+        // resolution finds every anchor under the new id (zero under the
+        // old). A no-op when the entity had no anchors (byte-identical).
+        super::stage_anchors_rename(backend, id, &new_id)?;
         let commit_subject = format!("memstead: rename {} → {new_id}", id);
         let ctx = CommitContext {
             actor,
@@ -650,6 +655,56 @@ mod tests {
     use crate::storage::FilesystemMemWriter;
 
     #[test]
+    fn rename_moves_entity_anchors_to_new_id() {
+        let tmp = TempDir::new().unwrap();
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let mut engine = Engine::from_mounts(vec![(
+            folder_mount("specs", mem_dir.clone()),
+            Box::new(writer) as Box<dyn MemBackend>,
+        )])
+        .unwrap();
+        let (actor, client) = cli_actor();
+        let mut args = empty_create_args("specs", "Old Anchored");
+        args.anchors = vec![crate::anchor::AnchorInput {
+            artifact: Some("src/lib.rs".into()),
+            grain: Some("file".into()),
+            class: Some("anchored".into()),
+            hash: Some("h1".into()),
+            hash_stability: Some("stable".into()),
+            ..Default::default()
+        }];
+        let seeded = engine
+            .create_entity(args, actor, Some(&client), None)
+            .unwrap();
+        let old_id = seeded.id.clone();
+
+        let outcome = engine
+            .rename_entity(
+                RenameEntityArgs {
+                    id: old_id.clone(),
+                    expected_hash: Some(seeded.content_hash.clone()),
+                    new_title: "New Anchored".to_string(),
+                },
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap();
+
+        // Zero rows under the old id; all anchors resolve under the new id.
+        assert!(engine.entity_anchors(&old_id).is_empty());
+        assert_eq!(engine.entity_anchors(&outcome.new_id).len(), 1);
+        assert_eq!(
+            engine.anchors_referencing_artifact("src/lib.rs"),
+            vec![(
+                outcome.new_id.clone(),
+                engine.entity_anchors(&outcome.new_id)[0].clone()
+            )]
+        );
+    }
+
+    #[test]
     fn rename_entity_renames_file_and_id_persists_across_restart() {
         let tmp = TempDir::new().unwrap();
         let mem_dir = tmp.path().to_path_buf();
@@ -797,6 +852,7 @@ mod tests {
         let seeded = engine
             .create_entity(
                 crate::engine::CreateEntityArgs {
+                    anchors: Vec::new(),
                     mem: "specs".to_string(),
                     title: "Old Name".to_string(),
                     entity_type: "spec".to_string(),
@@ -976,6 +1032,7 @@ mod tests {
         let referrer_a = engine
             .create_entity(
                 CreateEntityArgs {
+                    anchors: Vec::new(),
                     mem: "specs".to_string(),
                     title: "Referrer Alpha".to_string(),
                     entity_type: "spec".to_string(),
@@ -1004,6 +1061,7 @@ mod tests {
         let referrer_b = engine
             .create_entity(
                 CreateEntityArgs {
+                    anchors: Vec::new(),
                     mem: "specs".to_string(),
                     title: "Referrer Bravo".to_string(),
                     entity_type: "spec".to_string(),
@@ -1179,6 +1237,7 @@ mod tests {
         let referrer = engine
             .create_entity(
                 CreateEntityArgs {
+                    anchors: Vec::new(),
                     mem: "memos".to_string(),
                     title: "Cross Note".to_string(),
                     entity_type: "memo".to_string(),
@@ -1384,6 +1443,7 @@ mod tests {
         let _referrer = engine
             .create_entity(
                 CreateEntityArgs {
+                    anchors: Vec::new(),
                     mem: "memos".to_string(),
                     title: "Cross Note".to_string(),
                     entity_type: "memo".to_string(),
@@ -1466,6 +1526,7 @@ mod tests {
         let _referrer = engine
             .create_entity(
                 CreateEntityArgs {
+                    anchors: Vec::new(),
                     mem: "memos".to_string(),
                     title: "Cross Note".to_string(),
                     entity_type: "memo".to_string(),
@@ -1567,6 +1628,7 @@ mod tests {
         let _referrer = engine
             .create_entity(
                 CreateEntityArgs {
+                    anchors: Vec::new(),
                     mem: "memos".to_string(),
                     title: "Cross Note".to_string(),
                     entity_type: "memo".to_string(),
@@ -1814,6 +1876,7 @@ mod tests {
         let referrer = engine
             .create_entity(
                 CreateEntityArgs {
+                    anchors: Vec::new(),
                     mem: "specs".to_string(),
                     title: "Referrer Full".to_string(),
                     entity_type: "spec".to_string(),
@@ -1945,6 +2008,7 @@ mod tests {
         let src = engine
             .create_entity(
                 CreateEntityArgs {
+                    anchors: Vec::new(),
                     mem: "test".to_string(),
                     title: "Src".to_string(),
                     entity_type: "spec".to_string(),
@@ -2067,6 +2131,7 @@ mod tests {
         let src = engine
             .create_entity(
                 CreateEntityArgs {
+                    anchors: Vec::new(),
                     mem: "test".to_string(),
                     title: "Src".to_string(),
                     entity_type: "spec".to_string(),

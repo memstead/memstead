@@ -145,6 +145,16 @@ impl Engine {
 
         // 3. Pre-write validators: section keys and metadata values.
         validate_section_keys(args.sections.keys().map(String::as_str), type_def.as_ref())?;
+        // 3a. Validate any `anchors[]` payload up front — a malformed
+        //     element (unknown class/grain, missing artifact, hash on a
+        //     non-hash class, grain unsupported by the resolving medium's
+        //     namespace) refuses the WHOLE create with a typed
+        //     `INVALID_ANCHOR` envelope BEFORE any disk write, so the
+        //     entity is never written. Empty payload → empty vec (no
+        //     sidecar write; byte-identical to a pre-anchor create). Runs
+        //     even on the dry_run path so validity agrees across preview
+        //     and real write.
+        let validated_anchors = self.validate_anchor_inputs(&args.mem, &args.anchors)?;
         // Refuse section content with embedded `^## ` headings — the
         // compose-then-reparse pipeline would split the value at the
         // heading and silently move the trailing content into another
@@ -524,6 +534,13 @@ impl Engine {
         //    canonical form is harmless there.
         let backend = self.mounts[mount_idx].backend.as_ref();
         backend.write_entity(Path::new(&file_path), markdown.as_bytes())?;
+        // Stage the anchors sidecar into the SAME pending buffer so it
+        // rides the entity's commit atomically. Only when the create
+        // carried anchors — an anchorless create writes no sidecar and is
+        // byte-identical to a pre-anchor create.
+        if !validated_anchors.is_empty() {
+            super::stage_anchors_sidecar(backend, &id, validated_anchors)?;
+        }
         let commit_subject = format!("memstead: create {id}");
         let ctx = CommitContext {
             actor,
@@ -835,6 +852,7 @@ mod tests {
 
         // `spec` requires `identity` + `purpose`. Supply neither.
         let args = CreateEntityArgs {
+            anchors: Vec::new(),
             mem: "specs".to_string(),
             title: "Half Done".to_string(),
             entity_type: "spec".to_string(),
@@ -900,6 +918,7 @@ mod tests {
         let (actor, client) = cli_actor();
 
         let args = CreateEntityArgs {
+            anchors: Vec::new(),
             mem: "specs".to_string(),
             title: "Half Done Dry".to_string(),
             entity_type: "spec".to_string(),
@@ -936,6 +955,7 @@ mod tests {
         sections.insert("identity".to_string(), "the identity body".to_string());
         sections.insert("purpose".to_string(), "the purpose body".to_string());
         let args = CreateEntityArgs {
+            anchors: Vec::new(),
             mem: "specs".to_string(),
             title: "Complete".to_string(),
             entity_type: "spec".to_string(),
@@ -1133,6 +1153,7 @@ mod tests {
             let mut metadata = IndexMap::new();
             metadata.insert(key.to_string(), value.to_string());
             crate::engine::UpdateEntityArgs {
+                anchors: Vec::new(),
                 id: outcome.id.clone(),
                 metadata,
                 metadata_unset: Vec::new(),
@@ -1270,6 +1291,7 @@ mod tests {
         let (actor, client) = cli_actor();
 
         let mut args = CreateEntityArgs {
+            anchors: Vec::new(),
             mem: "planning".to_string(),
             title: "Skip Postgres".to_string(),
             entity_type: "decision".to_string(),
@@ -1331,6 +1353,7 @@ mod tests {
         let outcome = engine
             .create_entity(
                 CreateEntityArgs {
+                    anchors: Vec::new(),
                     mem: "planning".to_string(),
                     title: "Complete Decision".to_string(),
                     entity_type: "decision".to_string(),
@@ -1432,6 +1455,7 @@ mod tests {
         let target = engine
             .create_entity(
                 CreateEntityArgs {
+                    anchors: Vec::new(),
                     mem: "code".to_string(),
                     title: "Target Requirement".to_string(),
                     entity_type: "requirement".to_string(),
@@ -1458,6 +1482,7 @@ mod tests {
         // supply both so the shape gate (not the missing-sections
         // gate) is what fires.
         let args = CreateEntityArgs {
+            anchors: Vec::new(),
             mem: "code".to_string(),
             title: "Misshape Source".to_string(),
             entity_type: "spec".to_string(),
@@ -2295,6 +2320,7 @@ mod tests {
         let outcome = engine
             .create_entity(
                 crate::engine::CreateEntityArgs {
+                    anchors: Vec::new(),
                     mem: "test".to_string(),
                     title: "Source".to_string(),
                     entity_type: "spec".to_string(),
@@ -2354,6 +2380,7 @@ mod tests {
         let err = engine
             .create_entity(
                 crate::engine::CreateEntityArgs {
+                    anchors: Vec::new(),
                     mem: "test".to_string(),
                     title: "Source".to_string(),
                     entity_type: "spec".to_string(),
@@ -2445,6 +2472,7 @@ mod tests {
         let updated = engine
             .update_entity(
                 UpdateEntityArgs {
+                    anchors: Vec::new(),
                     id: created.id.clone(),
                     expected_hash: Some(created.content_hash.clone()),
                     sections: edit,
@@ -2528,6 +2556,130 @@ mod tests {
             note_missing(&after_off.warnings),
             0,
             "no NOTE_MISSING when require_notes is unset",
+        );
+    }
+
+    // ---- E3a anchors: create/persist/reload/isolation ------------------
+
+    fn file_anchor(artifact: &str, hash: &str) -> crate::anchor::AnchorInput {
+        crate::anchor::AnchorInput {
+            artifact: Some(artifact.to_string()),
+            grain: Some("file".to_string()),
+            class: Some("anchored".to_string()),
+            hash: Some(hash.to_string()),
+            hash_stability: Some("stable".to_string()),
+            ..Default::default()
+        }
+    }
+
+    fn folder_engine(mem: &str) -> (Engine, TempDir) {
+        let tmp = TempDir::new().unwrap();
+        let dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(dir.clone());
+        let engine = Engine::from_mounts(vec![(
+            folder_mount(mem, dir.clone()),
+            Box::new(writer) as Box<dyn MemBackend>,
+        )])
+        .unwrap();
+        (engine, tmp)
+    }
+
+    #[test]
+    fn create_with_anchors_persists_and_survives_reload() {
+        let (mut engine, tmp) = folder_engine("specs");
+        let dir = tmp.path().to_path_buf();
+        let (actor, client) = cli_actor();
+        let mut args = empty_create_args("specs", "Anchored Entity");
+        args.anchors = vec![file_anchor("src/lib.rs", "h1")];
+        engine
+            .create_entity(args, actor, Some(&client), None)
+            .unwrap();
+
+        let id = crate::EntityId::new("specs", "anchored-entity");
+        let anchors = engine.entity_anchors(&id);
+        assert_eq!(anchors.len(), 1);
+        assert_eq!(anchors[0].artifact, "src/lib.rs");
+        assert_eq!(
+            anchors[0].class,
+            crate::anchor::AnchorProvenanceClass::Anchored
+        );
+
+        // Survives a fresh boot from the same on-disk mem.
+        let writer = FilesystemMemWriter::new(dir.clone());
+        let reloaded = Engine::from_mounts(vec![(
+            folder_mount("specs", dir.clone()),
+            Box::new(writer) as Box<dyn MemBackend>,
+        )])
+        .unwrap();
+        assert_eq!(reloaded.entity_anchors(&id).len(), 1);
+        // Reverse lookup finds it by artifact path.
+        assert_eq!(reloaded.anchors_referencing_artifact("src/lib.rs").len(), 1);
+    }
+
+    #[test]
+    fn malformed_anchor_refuses_and_entity_not_written() {
+        let (mut engine, tmp) = folder_engine("specs");
+        let (actor, client) = cli_actor();
+        let mut args = empty_create_args("specs", "Bad Anchor");
+        args.anchors = vec![crate::anchor::AnchorInput {
+            artifact: Some("x".into()),
+            grain: Some("paragraph".into()), // unknown grain
+            class: Some("anchored".into()),
+            ..Default::default()
+        }];
+        let err = engine
+            .create_entity(args, actor, Some(&client), None)
+            .unwrap_err();
+        assert_eq!(err.code(), crate::anchor::INVALID_ANCHOR_CODE);
+        // Entity was not written (refusal fires before the disk write).
+        assert!(
+            engine
+                .get_entity(&crate::EntityId::new("specs", "bad-anchor"))
+                .is_none()
+        );
+        assert!(!tmp.path().join("bad-anchor.md").exists());
+    }
+
+    #[test]
+    fn anchors_are_not_folded_into_content_hash() {
+        // Two identical creates — one anchored, one not — produce the same
+        // `_hash`: the anchors sidecar lives under `.memstead/` and never
+        // enters content hashing.
+        let (mut anchored, _t1) = folder_engine("specs");
+        let (mut plain, _t2) = folder_engine("specs");
+        let (actor, client) = cli_actor();
+
+        let mut a = empty_create_args("specs", "Same Title");
+        a.anchors = vec![file_anchor("src/lib.rs", "h1")];
+        let with = anchored
+            .create_entity(a, actor, Some(&client), None)
+            .unwrap();
+
+        let p = empty_create_args("specs", "Same Title");
+        let without = plain.create_entity(p, actor, Some(&client), None).unwrap();
+
+        assert_eq!(
+            with.content_hash, without.content_hash,
+            "anchors must not change the entity content hash"
+        );
+    }
+
+    #[test]
+    fn anchorless_create_writes_no_sidecar() {
+        let (mut engine, _tmp) = folder_engine("specs");
+        let (actor, client) = cli_actor();
+        engine
+            .create_entity(
+                empty_create_args("specs", "No Anchors"),
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap();
+        assert!(
+            engine
+                .entity_anchors(&crate::EntityId::new("specs", "no-anchors"))
+                .is_empty()
         );
     }
 }

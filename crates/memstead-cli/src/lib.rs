@@ -726,6 +726,16 @@ impl CliError {
                 ExitKind::Validation,
                 Some(serde_json::json!({ "mem": mem, "since": since })),
             ),
+            // A malformed `anchors[]` element on create/update — typed
+            // `INVALID_ANCHOR` (via `e.code()`) with the wrapped anchor
+            // error's recovery detail (offending field, bad value, allowed
+            // set).
+            InvalidAnchor(anchor_err) => (
+                ExitKind::Validation,
+                Some(serde_json::Value::Object(
+                    anchor_err.detail().into_iter().collect(),
+                )),
+            ),
         };
         // Route the CLI message through the rich-prose renderer so markdown-
         // default mode and `--json --message` consumers see the same

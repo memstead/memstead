@@ -93,6 +93,15 @@ pub struct Args {
     #[arg(long = "declare-relations", value_name = "REL_TYPE:TARGET_ID")]
     pub declare_relations: Vec<String>,
 
+    /// Provenance anchor: repeatable `--anchor '<json>'`, each a JSON
+    /// object of the anchor shape. Written into the mem-branch anchors
+    /// sidecar in the same commit as the update; a malformed anchor
+    /// refuses `INVALID_ANCHOR`. An update carrying only `--anchor` (no
+    /// section/metadata change) still commits the sidecar. Ignored when
+    /// `--from` is given (the file's `anchors[]` is authoritative).
+    #[arg(long = "anchor", value_name = "JSON")]
+    pub anchors: Vec<String>,
+
     /// Preview what would change without writing.
     #[arg(long)]
     pub dry_run: bool,
@@ -128,6 +137,11 @@ struct UpdatePayload {
     metadata_unset: Vec<String>,
     #[serde(default)]
     declare_relations: Vec<DeclareRelationPayload>,
+    /// Provenance anchors — matches the MCP `memstead_update` `anchors[]`
+    /// shape; validated engine-side into a typed `INVALID_ANCHOR` refusal
+    /// on malformed input.
+    #[serde(default)]
+    anchors: Vec<memstead_base::anchor::AnchorInput>,
     #[serde(default)]
     dry_run: bool,
 }
@@ -195,6 +209,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             metadata: parse_kv_list(&args.metadata, "--metadata")?,
             metadata_unset: args.metadata_unset.clone(),
             declare_relations: parse_declare_relations(&args.declare_relations)?,
+            anchors: super::create::parse_anchor_list(&args.anchors)?,
             dry_run: args.dry_run,
         }
     };
@@ -237,6 +252,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 })
                 .collect();
             let update_args = UpdateEntityArgs {
+                anchors: payload.anchors,
                 id: entity_id.clone(),
                 expected_hash: Some(expected_hash),
                 sections: payload.sections,
@@ -359,6 +375,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 })
                 .collect();
             let update_args = UpdateEntityArgs {
+                anchors: payload.anchors,
                 id: entity_id.clone(),
                 expected_hash: Some(expected_hash),
                 sections: payload.sections,

@@ -30,6 +30,15 @@ pub struct CreateEntityArgs {
     /// `warnings`. Empty default — callers omit when no inline
     /// edges are needed.
     pub relations: Vec<crate::ops::RelateArg>,
+    /// Permissive `anchors[]` provenance records to attach to the new
+    /// entity — validated ([`crate::anchor::AnchorInput::validate`]) and,
+    /// when non-empty, written into the mem-branch anchors sidecar in the
+    /// SAME commit as the entity so the two land atomically. Empty (the
+    /// default) writes no sidecar and leaves behaviour byte-identical to a
+    /// pre-anchor create. A malformed element refuses the whole create with
+    /// [`EngineError::InvalidAnchor`] (`INVALID_ANCHOR`) — the entity is not
+    /// written. Not folded into `_hash` (sidecar lives under `.memstead/`).
+    pub anchors: Vec<crate::anchor::AnchorInput>,
     /// When `true`, validate and compute the prospective hash but
     /// do not write to disk, mutate the store, create edges, or
     /// commit. Outcome carries `content_hash` = the prospective
@@ -162,6 +171,15 @@ pub struct UpdateEntityArgs {
     /// `memstead_relate` round-trip. Empty default — omit when no
     /// batched declarations are needed.
     pub declare_relations: Vec<crate::ops::RelateArg>,
+    /// Permissive `anchors[]` provenance records to attach to this entity
+    /// — validated ([`crate::anchor::AnchorInput::validate`]) and, when
+    /// non-empty, written into the mem-branch anchors sidecar in the SAME
+    /// commit as the update so entity + anchors land atomically. Empty (the
+    /// default) writes no sidecar and leaves the update byte-identical to a
+    /// pre-anchor call. A malformed element refuses the whole update with
+    /// [`EngineError::InvalidAnchor`] (`INVALID_ANCHOR`) — nothing is
+    /// written. Not folded into `_hash` (sidecar lives under `.memstead/`).
+    pub anchors: Vec<crate::anchor::AnchorInput>,
     /// Repair-shaped relation removals (`{ rel_type, target }`),
     /// applied atomically within this update. Accepted only when the
     /// entity currently FAILS the conformance check (against the

@@ -57,9 +57,18 @@ pub struct Args {
     #[arg(long = "relation", value_name = "TYPE:TARGET")]
     pub relations: Vec<String>,
 
+    /// Provenance anchor: repeatable `--anchor '<json>'`, each a JSON
+    /// object of the anchor shape (`{ "artifact": "...", "grain": "file",
+    /// "class": "anchored", "hash": "...", "hash_stability": "stable" }`).
+    /// Written into the mem-branch anchors sidecar in the same commit as
+    /// the entity. A malformed anchor refuses `INVALID_ANCHOR`. Ignored
+    /// when `--from` is given (the file's `anchors[]` is authoritative).
+    #[arg(long = "anchor", value_name = "JSON")]
+    pub anchors: Vec<String>,
+
     /// JSON file matching the MCP `memstead_create` args shape. If set,
     /// all `--title` / `--type` / `--section` / `--metadata` / `--relation`
-    /// flags are ignored (the file is the single source of truth).
+    /// / `--anchor` flags are ignored (the file is the single source of truth).
     /// The JSON type field is `entity_type` (not `type`), matching the
     /// response envelopes — a previous `--json` response pipes back in
     /// unchanged.
@@ -101,6 +110,11 @@ struct CreatePayload {
     metadata: IndexMap<String, String>,
     #[serde(default)]
     relations: Vec<RelationPayload>,
+    /// Provenance anchors — matches the MCP `memstead_create` `anchors[]`
+    /// shape. Each element is validated engine-side into a typed
+    /// `INVALID_ANCHOR` refusal on malformed input.
+    #[serde(default)]
+    anchors: Vec<memstead_base::anchor::AnchorInput>,
     /// Agent-authored provenance note — matches the MCP `memstead_create`
     /// shape's `note`. Optional; the command-line `--note` takes
     /// precedence when both are supplied.
@@ -162,6 +176,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             sections: parse_kv_list(&args.sections, "--section")?,
             metadata: parse_kv_list(&args.metadata, "--metadata")?,
             relations: parse_relation_list(&args.relations)?,
+            anchors: parse_anchor_list(&args.anchors)?,
             note: None,
         }
     };
@@ -179,6 +194,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             };
 
             let create_args = CreateEntityArgs {
+                anchors: payload.anchors,
                 title: payload.title,
                 mem,
                 entity_type: payload.entity_type,
@@ -298,6 +314,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             }
 
             let create_args = CreateEntityArgs {
+                anchors: payload.anchors,
                 mem: workspace_mem,
                 title: payload.title.clone(),
                 entity_type: payload.entity_type,
@@ -361,6 +378,29 @@ fn parse_kv_list(items: &[String], flag: &str) -> anyhow::Result<IndexMap<String
             )
         })?;
         out.insert(k.to_string(), v.to_string());
+    }
+    Ok(out)
+}
+
+/// Parse repeated `--anchor '<json>'` flag values into engine
+/// `AnchorInput`s. Each value is a JSON object of the anchor shape; a
+/// syntactically-broken JSON is a CLI input error, while a well-formed but
+/// semantically-invalid anchor (unknown class/grain, etc.) flows through
+/// to the engine's typed `INVALID_ANCHOR` refusal at mutation time.
+pub(crate) fn parse_anchor_list(
+    items: &[String],
+) -> anyhow::Result<Vec<memstead_base::anchor::AnchorInput>> {
+    let mut out = Vec::with_capacity(items.len());
+    for raw in items {
+        let anchor: memstead_base::anchor::AnchorInput =
+            serde_json::from_str(raw).map_err(|e| {
+                CliError::new(
+                    ExitKind::Validation,
+                    "INVALID_INPUT",
+                    format!("--anchor: expected a JSON anchor object, got `{raw}`: {e}"),
+                )
+            })?;
+        out.push(anchor);
     }
     Ok(out)
 }

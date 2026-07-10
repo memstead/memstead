@@ -663,6 +663,7 @@ mod tests {
         let a = engine
             .create_entity(
                 CreateEntityArgs {
+                    anchors: Vec::new(),
                     mem: "specs".to_string(),
                     title: "A".to_string(),
                     entity_type: "spec".to_string(),
@@ -682,6 +683,7 @@ mod tests {
         let b = engine
             .create_entity(
                 CreateEntityArgs {
+                    anchors: Vec::new(),
                     mem: "specs".to_string(),
                     title: "B".to_string(),
                     entity_type: "spec".to_string(),
@@ -1082,6 +1084,7 @@ mod tests {
         let source = engine
             .create_entity(
                 CreateEntityArgs {
+                    anchors: Vec::new(),
                     mem: "specs".to_string(),
                     title: "Source".to_string(),
                     entity_type: "spec".to_string(),
@@ -1935,6 +1938,7 @@ community:
             let src_entity = engine
                 .create_entity(
                     CreateEntityArgs {
+                        anchors: Vec::new(),
                         mem: "src".to_string(),
                         title: "Doc One".to_string(),
                         entity_type: "doc".to_string(),
@@ -1951,6 +1955,7 @@ community:
             let tgt_entity = engine
                 .create_entity(
                     CreateEntityArgs {
+                        anchors: Vec::new(),
                         mem: "tgt".to_string(),
                         title: "Req One".to_string(),
                         entity_type: "req".to_string(),
@@ -2071,6 +2076,7 @@ community:
                 engine
                     .create_entity(
                         CreateEntityArgs {
+                            anchors: Vec::new(),
                             mem: mem.to_string(),
                             title: title.to_string(),
                             entity_type: "doc".to_string(),
@@ -2269,6 +2275,7 @@ community:
             let src_entity = engine
                 .create_entity(
                     CreateEntityArgs {
+                        anchors: Vec::new(),
                         mem: "src".to_string(),
                         title: "D".to_string(),
                         entity_type: "doc".to_string(),
@@ -2285,6 +2292,7 @@ community:
             let other_entity = engine
                 .create_entity(
                     CreateEntityArgs {
+                        anchors: Vec::new(),
                         mem: "other".to_string(),
                         title: "T".to_string(),
                         entity_type: "thing".to_string(),
@@ -2344,6 +2352,7 @@ community:
             let intra_target = engine
                 .create_entity(
                     CreateEntityArgs {
+                        anchors: Vec::new(),
                         mem: "src".to_string(),
                         title: "Doc Two".to_string(),
                         entity_type: "doc".to_string(),
@@ -2658,6 +2667,7 @@ community:
             let src_entity = engine
                 .create_entity(
                     CreateEntityArgs {
+                        anchors: Vec::new(),
                         mem: "src".to_string(),
                         title: "Doc One".to_string(),
                         entity_type: "doc".to_string(),
@@ -2721,6 +2731,7 @@ community:
             let err = engine
                 .create_entity(
                     CreateEntityArgs {
+                        anchors: Vec::new(),
                         mem: "src".to_string(),
                         title: "Doc Two".to_string(),
                         entity_type: "doc".to_string(),
@@ -2751,6 +2762,7 @@ community:
             let err = engine
                 .create_entity(
                     CreateEntityArgs {
+                        anchors: Vec::new(),
                         mem: "src".to_string(),
                         title: "Doc Three".to_string(),
                         entity_type: "doc".to_string(),
@@ -2777,6 +2789,7 @@ community:
             let err = engine
                 .update_entity(
                     crate::engine::UpdateEntityArgs {
+                        anchors: Vec::new(),
                         id: src.id.clone(),
                         expected_hash: Some(src.content_hash.clone()),
                         sections: IndexMap::from_iter([(
@@ -2809,6 +2822,7 @@ community:
             let created = engine
                 .create_entity(
                     CreateEntityArgs {
+                        anchors: Vec::new(),
                         mem: "src".to_string(),
                         title: "Doc Four".to_string(),
                         entity_type: "doc".to_string(),
@@ -2843,6 +2857,7 @@ community:
             let created = engine
                 .create_entity(
                     CreateEntityArgs {
+                        anchors: Vec::new(),
                         mem: "src".to_string(),
                         title: "Doc Five".to_string(),
                         entity_type: "doc".to_string(),

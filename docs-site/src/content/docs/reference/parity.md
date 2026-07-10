@@ -64,6 +64,7 @@ Surface entries the registry does not pin to a logical operation. Either add a r
 ### Unaligned — CLI
 
 - `admin`
+- `anchors`
 - `batch-update`
 - `domain`
 - `export`

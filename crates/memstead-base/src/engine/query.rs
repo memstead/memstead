@@ -279,6 +279,58 @@ impl Engine {
         self.store.get(id)
     }
 
+    /// The stored provenance anchors for `id`, read from its mem's
+    /// anchors sidecar. Empty for an entity with none, an unknown mem, or
+    /// a backend that does not persist anchors (a pre-anchor archive / any
+    /// sealed read-only mount). Additive read surface (E3a): the
+    /// resolution *model* lives in [`crate::anchor`]
+    /// ([`crate::anchor::resolve_anchor`] / [`crate::anchor::compose_entity_anchors`]);
+    /// the live per-anchor *state* (which requires observing the source
+    /// artifacts through the medium/preparation pipeline) is E3b's concern.
+    pub fn entity_anchors(&self, id: &EntityId) -> Vec<crate::anchor::Anchor> {
+        let Some(mount) = self.mounts.iter().find(|m| m.mount.mem == id.mem()) else {
+            return Vec::new();
+        };
+        let Ok(Some(bytes)) = mount.backend.read_anchors_sidecar() else {
+            return Vec::new();
+        };
+        match crate::anchor::AnchorSidecar::from_bytes(&bytes) {
+            Ok(sc) => sc.get(id.as_ref()).to_vec(),
+            Err(_) => Vec::new(),
+        }
+    }
+
+    /// Reverse anchor lookup: every `(entity_id, anchor)` across all mems
+    /// whose anchor references `artifact_path`. This is the query the
+    /// rebuilt check-realization hook consumes — given the file an agent
+    /// just edited, which entities anchored to it. A `span`/`file`/`tree`
+    /// anchor references the path when its base path (locator suffix
+    /// `@commit` / `#span` stripped) equals the path, or — for a `tree`
+    /// grain — when the path lies under the tree. Path-shaped grains only;
+    /// `url` / `entity` anchors are matched by exact base equality.
+    pub fn anchors_referencing_artifact(
+        &self,
+        artifact_path: &str,
+    ) -> Vec<(EntityId, crate::anchor::Anchor)> {
+        let mut out = Vec::new();
+        for mount in &self.mounts {
+            let Ok(Some(bytes)) = mount.backend.read_anchors_sidecar() else {
+                continue;
+            };
+            let Ok(sc) = crate::anchor::AnchorSidecar::from_bytes(&bytes) else {
+                continue;
+            };
+            for (eid, anchors) in &sc.entities {
+                for a in anchors {
+                    if anchor_references_path(a, artifact_path) {
+                        out.push((EntityId(eid.clone()), a.clone()));
+                    }
+                }
+            }
+        }
+        out
+    }
+
     /// Mem names the engine knows about, in declaration order.
     /// Cheap; useful for callers that need to enumerate before
     /// dispatching by mem.
@@ -1123,6 +1175,29 @@ impl Engine {
             .find(|m| m.mount.mem == mem)
             .ok_or_else(|| EngineError::UnknownMem(mem.to_string()))
     }
+}
+
+/// The base path of an anchor artifact ref — the locator suffixes a
+/// medium may append (`@<commit>`, `#<span>`) stripped so the reverse
+/// lookup compares paths, not versioned/located refs.
+fn anchor_base_path(artifact: &str) -> &str {
+    let cut = artifact.find(['@', '#']).unwrap_or(artifact.len());
+    &artifact[..cut]
+}
+
+/// Whether `anchor` references `path`. `tree`-grain anchors match `path`
+/// itself and anything beneath the tree; every other grain matches by
+/// exact base-path equality.
+fn anchor_references_path(anchor: &crate::anchor::Anchor, path: &str) -> bool {
+    let base = anchor_base_path(&anchor.artifact);
+    if base == path {
+        return true;
+    }
+    if anchor.grain == crate::anchor::AnchorGrain::Tree {
+        let prefix = base.strip_suffix('/').unwrap_or(base);
+        return path.starts_with(&format!("{prefix}/"));
+    }
+    false
 }
 
 #[cfg(test)]
@@ -2941,6 +3016,7 @@ community:
             metadata.insert("deciders".to_string(), "alice".to_string());
             metadata.insert("decided_on".to_string(), "2026-05-19".to_string());
             let args = crate::engine::CreateEntityArgs {
+                anchors: Vec::new(),
                 mem: "planning".to_string(),
                 title: title.to_string(),
                 entity_type: "decision".to_string(),

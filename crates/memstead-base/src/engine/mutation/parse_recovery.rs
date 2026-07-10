@@ -197,6 +197,7 @@ impl Engine {
             sections.insert(key.clone(), body.clone());
         }
         let args = UpdateEntityArgs {
+            anchors: Vec::new(),
             id: source_id.clone(),
             expected_hash: Some(expected_hash),
             sections,

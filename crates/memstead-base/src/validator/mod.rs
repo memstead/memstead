@@ -134,6 +134,12 @@ pub struct ValidatedMem {
     /// none. Surfaced so the registry and other validation consumers can
     /// expose provenance without re-extracting the archive.
     pub provenance_bytes: Option<Vec<u8>>,
+    /// Raw bytes of the archive's engine-owned anchors sidecar
+    /// (`.memstead/anchors.json`, E3a), or `None` when the archive carries
+    /// none. Structurally validated at extract time and threaded verbatim
+    /// through the canonical re-pack so publish/normalize does not strip
+    /// provenance anchors.
+    pub anchors_bytes: Option<Vec<u8>>,
 }
 
 /// Every reason the validator can reject an archive. Each variant
@@ -174,6 +180,8 @@ pub enum ValidationError {
     // Config-level
     #[error("archive is missing .memstead/config.json")]
     MissingConfig,
+    #[error("invalid anchors sidecar (.memstead/anchors.json): {reason}")]
+    InvalidAnchorsMember { reason: String },
     #[error("invalid config: {reason}")]
     InvalidConfig { reason: String },
     #[error("invalid name: {reason}")]
@@ -442,6 +450,7 @@ fn validate_impl(
         &entries.schema_files,
         embedded_schema.as_ref(),
         entries.provenance_bytes.as_deref(),
+        entries.anchors_bytes.as_deref(),
     )?;
 
     Ok(ValidatedMem {
@@ -454,6 +463,7 @@ fn validate_impl(
         schema_files: entries.schema_files,
         dangling_cross_mem_edges: graph_result.dangling_cross_mem_edges,
         provenance_bytes: entries.provenance_bytes,
+        anchors_bytes: entries.anchors_bytes,
     })
 }
 

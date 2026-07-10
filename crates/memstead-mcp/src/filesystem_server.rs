@@ -964,6 +964,15 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
                 Some(serde_json::json!({ "mem": mem, "since": since })),
             )
         }
+        // Malformed `anchors[]` element on create/update: typed
+        // `INVALID_ANCHOR` with the wrapped anchor error's recovery detail.
+        ref err @ EngineError::InvalidAnchor(ref anchor_err) => tool_error_with_details(
+            memstead_base::anchor::INVALID_ANCHOR_CODE,
+            &err.to_string(),
+            Some(serde_json::Value::Object(
+                anchor_err.detail().into_iter().collect(),
+            )),
+        ),
     }
 }
 
@@ -1102,6 +1111,12 @@ impl FilesystemMcpServer {
                 .unwrap_or_default(),
         };
         let args = CreateEntityArgs {
+            anchors: p
+                .anchors
+                .unwrap_or_default()
+                .into_iter()
+                .map(|a| a.into_engine())
+                .collect(),
             mem,
             title: p.title,
             entity_type: p.entity_type,
@@ -1173,6 +1188,12 @@ impl FilesystemMcpServer {
         let mut engine = crate::lock_engine!(self.engine);
         let (actor, client) = self.actor_and_client();
         let args = UpdateEntityArgs {
+            anchors: p
+                .anchors
+                .unwrap_or_default()
+                .into_iter()
+                .map(|a| a.into_engine())
+                .collect(),
             relations_unset: p
                 .relations_unset
                 .unwrap_or_default()
@@ -1949,6 +1970,7 @@ mod tests {
         sections.insert("identity".to_string(), "first identity".to_string());
         sections.insert("purpose".to_string(), "first purpose".to_string());
         let create_params = CreateParams {
+            anchors: None,
             title: "First".to_string(),
             entity_type: "spec".to_string(),
             mem: None,
@@ -2038,6 +2060,7 @@ mod tests {
 
     fn create_params(title: &str, mem: Option<&str>) -> CreateParams {
         CreateParams {
+            anchors: None,
             title: title.to_string(),
             entity_type: "spec".to_string(),
             mem: mem.map(String::from),
@@ -2155,6 +2178,7 @@ mod tests {
 
         // update + each unsupported param → refused naming it.
         let base = || UpdateParams {
+            anchors: None,
             id: "demo--anything".into(),
             expected_hash: "deadbeef".into(),
             sections: None,
@@ -2226,6 +2250,7 @@ mod tests {
         let server = FilesystemMcpServer::from_workspace_root(tmp.path()).unwrap();
 
         let result = server.memstead_create(Parameters(CreateParams {
+            anchors: None,
             title: "X".into(),
             entity_type: "totally-not-a-type".into(),
             mem: None,
@@ -2255,6 +2280,7 @@ mod tests {
         sections.insert("purpose".to_string(), "Other text".to_string());
 
         let result = server.memstead_create(Parameters(CreateParams {
+            anchors: None,
             title: "Stray Memo".into(),
             entity_type: "memo".into(),
             mem: None,
@@ -2298,6 +2324,7 @@ mod tests {
         let server = FilesystemMcpServer::from_workspace_root(tmp.path()).unwrap();
 
         let result = server.memstead_create(Parameters(CreateParams {
+            anchors: None,
             title: "Empty Memo".into(),
             entity_type: "memo".into(),
             mem: None,
@@ -2337,6 +2364,7 @@ mod tests {
         metadata.insert("level".to_string(), "Z3".to_string());
 
         let result = server.memstead_create(Parameters(CreateParams {
+            anchors: None,
             title: "Bad Level".into(),
             entity_type: "spec".into(),
             mem: None,
@@ -2367,6 +2395,7 @@ mod tests {
         metadata.insert("nonsense".to_string(), "value".to_string());
 
         let result = server.memstead_create(Parameters(CreateParams {
+            anchors: None,
             title: "Stray Field".into(),
             entity_type: "spec".into(),
             mem: None,
@@ -2411,6 +2440,7 @@ mod tests {
         seeded_sections.insert("identity".to_string(), "seed identity".to_string());
         seeded_sections.insert("purpose".to_string(), "seed purpose".to_string());
         let result = server.memstead_create(Parameters(CreateParams {
+            anchors: None,
             title: title.into(),
             entity_type: "spec".into(),
             mem: None,
@@ -2442,6 +2472,7 @@ mod tests {
         let mut sections = indexmap::IndexMap::new();
         sections.insert("identity".to_string(), "Updated body.".to_string());
         let result = server.memstead_update(Parameters(UpdateParams {
+            anchors: None,
             relations_unset: None,
             id: id.clone(),
             expected_hash: hash.clone(),
@@ -2469,6 +2500,7 @@ mod tests {
         let (id, _hash) = seed_via_mcp(&server, "Pinned");
 
         let result = server.memstead_update(Parameters(UpdateParams {
+            anchors: None,
             relations_unset: None,
             id,
             expected_hash: "0000000000".into(),
@@ -2501,6 +2533,7 @@ mod tests {
             let mut metadata = IndexMap::new();
             metadata.insert(field.to_string(), "garbage".to_string());
             let result = server.memstead_update(Parameters(UpdateParams {
+                anchors: None,
                 relations_unset: None,
                 id: id.clone(),
                 expected_hash: hash.clone(),
@@ -2533,6 +2566,7 @@ mod tests {
         let (id, hash) = seed_via_mcp(&server, "Unsettable");
 
         let result = server.memstead_update(Parameters(UpdateParams {
+            anchors: None,
             relations_unset: None,
             id: id.clone(),
             expected_hash: hash,
@@ -2565,6 +2599,7 @@ mod tests {
         let mut sections = IndexMap::new();
         sections.insert("relationships".to_string(), "- KIND: target".to_string());
         let result = server.memstead_update(Parameters(UpdateParams {
+            anchors: None,
             relations_unset: None,
             id,
             expected_hash: hash,
@@ -3298,6 +3333,7 @@ mod tests {
         );
         secs.insert("purpose".to_string(), "match purpose".to_string());
         server.memstead_create(Parameters(CreateParams {
+            anchors: None,
             title: "Match".into(),
             entity_type: "spec".into(),
             mem: None,
@@ -3311,6 +3347,7 @@ mod tests {
         other_secs.insert("identity".to_string(), "other identity".to_string());
         other_secs.insert("purpose".to_string(), "other purpose".to_string());
         server.memstead_create(Parameters(CreateParams {
+            anchors: None,
             title: "Other".into(),
             entity_type: "spec".into(),
             mem: None,
@@ -3555,6 +3592,7 @@ mod tests {
             "Refers to [[gone]] in prose.".to_string(),
         );
         let upd = server.memstead_update(Parameters(UpdateParams {
+            anchors: None,
             relations_unset: None,
             id: id.clone(),
             expected_hash: hash,

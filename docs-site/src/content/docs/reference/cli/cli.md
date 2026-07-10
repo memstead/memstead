@@ -40,6 +40,7 @@ This document contains the help content for the `memstead` command-line program.
 * [`memstead rename`↴](#memstead-rename)
 * [`memstead batch-update`↴](#memstead-batch-update)
 * [`memstead recover`↴](#memstead-recover)
+* [`memstead anchors`↴](#memstead-anchors)
 * [`memstead changes`↴](#memstead-changes)
 * [`memstead reload`↴](#memstead-reload)
 * [`memstead fetch`↴](#memstead-fetch)
@@ -129,6 +130,7 @@ Exit codes:
 * `rename` — Rename an entity (changes ID, file path, and every incoming wiki-link)
 * `batch-update` — Update many entities in one atomic call. Input is a JSON file with a top-level `updates: [...]` array (one entry per entity, each with its own hash mode and mutation fields). All-or-nothing: if any entry fails (validation, hash mismatch, missing entity) the whole batch is refused and NOTHING is committed — fix the named entry and resubmit. On success the batch lands as one commit. Mirrors `memstead update` per entry
 * `recover` — Apply parse-time-drift recovery across writable mems. Walks `PARSED_RELATION_INVALID` warnings, re-renders affected source entities to drop the stale rows, and reports per-entry outcomes. Read-only-origin drops surface as skipped
+* `anchors` — Read provenance anchors (E3a): `memstead anchors <id>` lists an entity's anchors + composition; `memstead anchors --artifact <path>` reverse-looks-up every entity whose anchor references that path (the query the check-realization hook consumes)
 * `changes` — Diff a mem's HEAD against a commit SHA. Pass `--since` = a prior `commit_sha` from a mutation, or the canonical empty-tree hash `4b825dc642cb6eb9a060e54bf8d69288fbee4904` for a first sync
 * `reload` — Reload one writable mem's slice of the in-memory store from its on-disk branch tip — or every writable mem when `--mem` is omitted. CLI parity with the MCP `memstead_reload` tool
 * `fetch` — Fetch a mem's branch refs from a git remote into the mem-repo (no local branch moves — inspect first, then `pull`). Requires a git-branch-backed mem (`INVALID_INPUT` on folder mounts); refuses `UNKNOWN_REMOTE` when the remote is not configured
@@ -648,7 +650,8 @@ Slug derivation:
 * `--section <KEY=VALUE>` — Section content: repeatable `--section key=value`. Body wiki-links must take slug-form (`[[idempotency]]`, not the title-case `[[Idempotency]]`) — a non-slug target refuses with `INVALID_WIKI_LINK_TARGET` carrying a `proposed_slug` to retry with
 * `--metadata <KEY=VALUE>` — Metadata override: repeatable `--metadata key=value`
 * `--relation <TYPE:TARGET>` — Initial relationship: repeatable `--relation TYPE:target-id`. Mem-repo workspaces only — on filesystem mems this refuses; use `memstead relate` after creation there
-* `--from <FILE>` — JSON file matching the MCP `memstead_create` args shape. If set, all `--title` / `--type` / `--section` / `--metadata` / `--relation` flags are ignored (the file is the single source of truth). The JSON type field is `entity_type` (not `type`), matching the response envelopes — a previous `--json` response pipes back in unchanged
+* `--anchor <JSON>` — Provenance anchor: repeatable `--anchor '<json>'`, each a JSON object of the anchor shape (`{ "artifact": "...", "grain": "file", "class": "anchored", "hash": "...", "hash_stability": "stable" }`). Written into the mem-branch anchors sidecar in the same commit as the entity. A malformed anchor refuses `INVALID_ANCHOR`. Ignored when `--from` is given (the file's `anchors[]` is authoritative)
+* `--from <FILE>` — JSON file matching the MCP `memstead_create` args shape. If set, all `--title` / `--type` / `--section` / `--metadata` / `--relation` / `--anchor` flags are ignored (the file is the single source of truth). The JSON type field is `entity_type` (not `type`), matching the response envelopes — a previous `--json` response pipes back in unchanged
 * `--dry-run` — Preview only — validate and compute the result without writing to disk, mutating the store, or producing a commit. Response carries the prospective id / file_path / content_hash plus any warnings
 * `--note <NOTE>` — Agent-authored provenance note (≤280 chars, one sentence describing why this mutation happened). Lands in the per-mem commit body between the mechanical subject line and the provenance trailers. When `[mutations].require_notes = true` in workspace config a missing note adds a `NOTE_MISSING` warning to the response (the mutation still commits). When `--from` also carries a `note`, this flag takes precedence
 
@@ -676,6 +679,7 @@ Modify an existing entity. `--expected-hash` is required unless `--auto-hash` (r
 * `--metadata <KEY=VALUE>` — Metadata field: repeatable `--metadata key=value`
 * `--metadata-unset <KEY>` — Remove a metadata field: repeatable `--metadata-unset KEY`. Silent no-op if the key is absent; errors on read-only fields (mem/id/type plus the engine-stamped created_date/last_modified) or schema-required fields
 * `--declare-relations <REL_TYPE:TARGET_ID>` — Atomic batched relation declaration: repeatable `--declare-relations REL_TYPE:TARGET_ID`. Each entry is validated like an individual `memstead relate` call (schema-shape, cross-mem policy, target-id grammar) and appended to the entity's relations BEFORE the strict wiki-link/relation validator runs. Lets the agent add `[[target]]` body wiki-links AND declare the backing relation in one `memstead update` call without an interleaved `memstead relate`. Absent Write-mem targets are auto-stubbed identically to `memstead relate`'s add path. Each successful declaration is echoed in the response's `relations_declared` (with `target_was_stubbed` flagging the auto-stub case)
+* `--anchor <JSON>` — Provenance anchor: repeatable `--anchor '<json>'`, each a JSON object of the anchor shape. Written into the mem-branch anchors sidecar in the same commit as the update; a malformed anchor refuses `INVALID_ANCHOR`. An update carrying only `--anchor` (no section/metadata change) still commits the sidecar. Ignored when `--from` is given (the file's `anchors[]` is authoritative)
 * `--dry-run` — Preview what would change without writing
 * `--from <FILE>` — JSON file matching MCP `memstead_update` args shape. When set, flags above except the hash-mode flags are ignored
 * `--note <NOTE>` — Agent-authored provenance note (≤280 chars). When `[mutations].require_notes = true` a missing note adds a `NOTE_MISSING` warning
@@ -785,6 +789,22 @@ Apply parse-time-drift recovery across writable mems. Walks `PARSED_RELATION_INV
 ###### **Options:**
 
 * `--note <NOTE>` — Optional commit-body note recorded on every per-source re-render commit the recovery produces
+
+
+
+## `memstead anchors`
+
+Read provenance anchors (E3a): `memstead anchors <id>` lists an entity's anchors + composition; `memstead anchors --artifact <path>` reverse-looks-up every entity whose anchor references that path (the query the check-realization hook consumes)
+
+**Usage:** `memstead anchors [OPTIONS] [ID]`
+
+###### **Arguments:**
+
+* `<ID>` — Entity ID (e.g. `specs--my-entity`). Required unless `--artifact` is given
+
+###### **Options:**
+
+* `--artifact <PATH>` — Reverse lookup: list every entity whose anchor references this artifact path. Mutually exclusive with a positional entity id
 
 
 

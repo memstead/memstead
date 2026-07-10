@@ -220,6 +220,7 @@ impl From<EngineError> for MemsteadError {
             | EngineError::DescriptionNotPermitted { .. }
             | EngineError::RelationManualAuthoringForbidden { .. }
             | EngineError::MemConfigIncomplete { .. }
+            | EngineError::InvalidAnchor(_)
             | EngineError::MarkdownExportUnsupportedBackend { .. } => Self::ValidationFailed {
                 message: err.to_string(),
             },

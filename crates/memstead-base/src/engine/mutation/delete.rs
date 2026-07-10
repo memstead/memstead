@@ -196,6 +196,10 @@ impl Engine {
             String::new()
         } else {
             backend.delete_entity(Path::new(&file_path))?;
+            // Remove the entity's anchor row in the SAME commit as the
+            // delete so no orphaned anchor for a deleted entity survives.
+            // A no-op when the entity had no anchors (byte-identical).
+            super::stage_anchors_removal(backend, id)?;
             let commit_subject = format!("memstead: delete {id}");
             let ctx = CommitContext {
                 actor,
@@ -308,9 +312,63 @@ mod tests {
 
     use crate::backend::MemBackend;
     use crate::engine::test_helpers::*;
-    use crate::engine::{DeleteEntityArgs, Engine, EngineError, RelateEntityArgs};
+    use crate::engine::{
+        CreateEntityArgs, DeleteEntityArgs, Engine, EngineError, RelateEntityArgs,
+    };
     use crate::ops::WarningHint;
     use crate::storage::FilesystemMemWriter;
+
+    /// Seed a folder-backed engine with one anchored entity; return the
+    /// engine and the create outcome.
+    fn engine_with_anchored(
+        tmp: &TempDir,
+        title: &str,
+    ) -> (Engine, crate::engine::CreateEntityOutcome) {
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let mut engine = Engine::from_mounts(vec![(
+            folder_mount("specs", mem_dir),
+            Box::new(writer) as Box<dyn MemBackend>,
+        )])
+        .unwrap();
+        let (actor, client) = cli_actor();
+        let mut args: CreateEntityArgs = empty_create_args("specs", title);
+        args.anchors = vec![crate::anchor::AnchorInput {
+            artifact: Some("src/lib.rs".into()),
+            grain: Some("file".into()),
+            class: Some("anchored".into()),
+            hash: Some("h1".into()),
+            hash_stability: Some("stable".into()),
+            ..Default::default()
+        }];
+        let outcome = engine
+            .create_entity(args, actor, Some(&client), None)
+            .unwrap();
+        (engine, outcome)
+    }
+
+    #[test]
+    fn delete_removes_entity_anchors_no_orphan() {
+        let tmp = TempDir::new().unwrap();
+        let (mut engine, seeded) = engine_with_anchored(&tmp, "Anchored Doomed");
+        assert_eq!(engine.entity_anchors(&seeded.id).len(), 1);
+        let (actor, client) = cli_actor();
+        engine
+            .delete_entity(
+                DeleteEntityArgs {
+                    id: seeded.id.clone(),
+                    expected_hash: Some(seeded.content_hash.clone()),
+                },
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap();
+        // The entity's anchor row is gone — no orphaned anchor for a
+        // deleted entity.
+        assert!(engine.entity_anchors(&seeded.id).is_empty());
+        assert!(engine.anchors_referencing_artifact("src/lib.rs").is_empty());
+    }
 
     #[test]
     fn delete_entity_removes_file_and_store_entry() {

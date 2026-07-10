@@ -35,11 +35,107 @@ pub struct CreateParams {
     #[schemars(description = "Initial relationships to create after entity is created")]
     pub relations: Option<Vec<RelationInput>>,
     #[schemars(
-        description = "Validate and preview the create without executing — no disk write, no store mutation, no VCS commit, no edges added. dry_run runs the SAME validation a real call runs; it is not a softer check. On a VALID entity the response carries the prospective `id`, `file_path`, and `_hash` (bit-identical to what a real call with the same arguments would produce, EXCEPT for engine-auto-stamped timestamps: the hash covers `created_date`, which is stamped from wall-clock `now()` independently in the dry-run and the real call, so the two `_hash` values diverge whenever a second ticks between them; the hash also covers `sections`, `metadata`, and `relations`, so a dry_run that omits `relations` will not match a real call that supplies them), plus any `warnings` and any `incoming` edges that would be adopted from a pre-existing stub at this id, with `commit_sha` empty. On an INVALID entity dry_run does NOT return a warnings-list preview: it refuses with the IDENTICAL typed envelope a real call would return (`MISSING_REQUIRED_SECTION`, `UNKNOWN_SECTION`, `UNKNOWN_METADATA_FIELD`, `INVALID_ENUM_VALUE`, `REQUIRED_FIELD_UNSET`, …), carrying the same recovery `details.*` (e.g. `details.sections[]`). That typed refusal IS the pre-flight signal — read its `details` to fix coverage, then retry. So dry_run never reports a problem entity as clean: it and a real write agree on validity. Use to verify the id slug, or to pre-flight required-section / field coverage and pre-existing references before committing."
+        description = "Optional provenance anchors to attach to the new entity — durable records tying it to the source artifacts it describes (which artifact, at which grain, under which provenance class). Written into the mem-branch anchors sidecar in the SAME commit as the entity (atomic); omitting it is byte-identical to a create without anchors. A malformed element refuses the whole create with `INVALID_ANCHOR` (`details` carries the offending field + allowed set) and the entity is not written. Anchors do NOT participate in `_hash`."
+    )]
+    #[serde(default)]
+    pub anchors: Option<Vec<AnchorInputParam>>,
+    #[schemars(
+        description = "Validate and preview the create without executing — no disk write, no store mutation, no VCS commit, no edges added. dry_run runs the SAME validation a real call runs; it is not a softer check. On a VALID entity the response carries the prospective `id`, `file_path`, and `_hash` (bit-identical to what a real call with the same arguments would produce, EXCEPT for engine-auto-stamped timestamps: the hash covers `created_date`, which is stamped from wall-clock `now()` independently in the dry-run and the real call, so the two `_hash` values diverge whenever a second ticks between them; the hash also covers `sections`, `metadata`, and `relations`, so a dry_run that omits `relations` will not match a real call that supplies them; `_hash` does NOT cover `anchors` — the anchors sidecar persists on the mem branch under `.memstead/` and is never folded into content hashing, so attaching or refreshing anchors never changes `_hash` or invalidates a cached `expected_hash`), plus any `warnings` and any `incoming` edges that would be adopted from a pre-existing stub at this id, with `commit_sha` empty. On an INVALID entity dry_run does NOT return a warnings-list preview: it refuses with the IDENTICAL typed envelope a real call would return (`MISSING_REQUIRED_SECTION`, `UNKNOWN_SECTION`, `UNKNOWN_METADATA_FIELD`, `INVALID_ENUM_VALUE`, `REQUIRED_FIELD_UNSET`, …), carrying the same recovery `details.*` (e.g. `details.sections[]`). That typed refusal IS the pre-flight signal — read its `details` to fix coverage, then retry. So dry_run never reports a problem entity as clean: it and a real write agree on validity. Use to verify the id slug, or to pre-flight required-section / field coverage and pre-existing references before committing."
     )]
     pub dry_run: Option<bool>,
     #[schemars(description = NOTE_PARAM_DESCRIPTION)]
     pub note: Option<String>,
+}
+
+/// One `anchors[]` element on `memstead_create` / `memstead_update` — a
+/// provenance record tying the entity to a source artifact. Permissive by
+/// design: every field is optional / string-typed so a malformed element
+/// (unknown class or grain, missing artifact, hash on a non-hash class,
+/// grain the medium's namespace cannot express) refuses the whole mutation
+/// with a typed `INVALID_ANCHOR` envelope carrying recovery `details` —
+/// rather than an opaque schema-deserialisation error. Converts to the
+/// engine's `AnchorInput` which validates it. Not folded into `_hash`.
+#[derive(Debug, Clone, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AnchorInputParam {
+    #[schemars(
+        description = "Artifact reference in the medium's own namespace — a repo-relative path, `path@commit`, URL, or entity id, interpreted per `grain`. Required; a missing/empty value refuses INVALID_ANCHOR."
+    )]
+    #[serde(default)]
+    pub artifact: Option<String>,
+    #[schemars(
+        description = "Granularity of the artifact reference: `span` | `file` | `tree` | `url` | `entity`. Must be expressible in the resolving medium's anchor namespace (path-shaped for span/file/tree, `url` for url, `entity` for entity) or the mutation refuses INVALID_ANCHOR. An unknown value refuses INVALID_ANCHOR."
+    )]
+    #[serde(default)]
+    pub grain: Option<String>,
+    #[schemars(
+        description = "Provenance class — the entity's epistemic standing toward the artifact: `anchored` | `derived` | `authored` | `informed-by`. `anchored`/`derived` carry hash semantics (a `hash` is permitted and participates in drift adjudication); `authored`/`informed-by` do not (supplying `hash` refuses INVALID_ANCHOR). An unknown value refuses INVALID_ANCHOR."
+    )]
+    #[serde(default)]
+    pub class: Option<String>,
+    #[schemars(
+        description = "Medium-typed pinned version this anchor was recorded against: `{ kind: \"commit\"|\"snapshot\"|\"etag\", value: \"<token>\" }`. Omit for a plain-path medium with no retrievable version."
+    )]
+    #[serde(default)]
+    pub at_version: Option<AnchorVersionParam>,
+    #[schemars(
+        description = "Content hash over the PREPARED artifact form (never raw bytes). Permitted only on hash-bearing classes (`anchored`/`derived`); supplying it on `authored`/`informed-by` refuses INVALID_ANCHOR."
+    )]
+    #[serde(default)]
+    pub hash: Option<String>,
+    #[schemars(
+        description = "Medium's declared hash stability: `stable` | `unstable` (defaults to `stable`). An unstable-source hash break resolves `recheck`, not `drifted`."
+    )]
+    #[serde(default)]
+    pub hash_stability: Option<String>,
+    #[schemars(
+        description = "For a `derived` class: the input artifact refs the entity was derived from. Empty/omitted for every other class."
+    )]
+    #[serde(default)]
+    pub derived_from: Option<Vec<String>>,
+    #[schemars(
+        description = "`hash(D)` of the binding that produced this anchor, when a binding produced it. Omit for a manually-authored anchor."
+    )]
+    #[serde(default)]
+    pub binding: Option<String>,
+}
+
+/// The medium-typed pinned version sub-object of an [`AnchorInputParam`].
+#[derive(Debug, Clone, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AnchorVersionParam {
+    #[schemars(
+        description = "Version kind: `commit` (git / path+commit) | `snapshot` (graph) | `etag` (web)."
+    )]
+    pub kind: String,
+    #[schemars(description = "The version token — commit id, graph snapshot token, or web ETag.")]
+    pub value: String,
+}
+
+impl AnchorInputParam {
+    /// Lower the permissive wire element into the engine's `AnchorInput`
+    /// (which performs the typed `INVALID_ANCHOR` validation). An
+    /// unrecognised `at_version.kind` is dropped (best-effort — version
+    /// kind is not part of the anchor-validation contract this cut fires).
+    pub(crate) fn into_engine(self) -> memstead_base::anchor::AnchorInput {
+        use memstead_base::anchor::AnchorVersion;
+        let at_version = self.at_version.and_then(|v| match v.kind.as_str() {
+            "commit" => Some(AnchorVersion::Commit(v.value)),
+            "snapshot" => Some(AnchorVersion::Snapshot(v.value)),
+            "etag" => Some(AnchorVersion::Etag(v.value)),
+            _ => None,
+        });
+        memstead_base::anchor::AnchorInput {
+            artifact: self.artifact,
+            grain: self.grain,
+            class: self.class,
+            at_version,
+            hash: self.hash,
+            hash_stability: self.hash_stability,
+            derived_from: self.derived_from,
+            binding: self.binding,
+        }
+    }
 }
 
 /// A relationship input for create/batch tools.
@@ -98,6 +194,11 @@ pub struct UpdateParams {
         description = "Repair-shaped relation removals `[{ rel_type, target }]`, applied atomically within this update. Accepted only when the entity currently FAILS the conformance check (see memstead_health include=conformance) — on a conformant entity the call refuses with REPAIR_NOT_NEEDED and the entity is unmodified; use memstead_relate(remove=true) for everyday edge detachment. Absent pairs are silent no-ops (symmetric with metadata_unset). The strict-write post-condition is unchanged: the post-repair entity must validate or the whole update refuses with the relevant write-time code. During a schema migration every not-yet-repaired entity is non-conformant against the target, so this param works on exactly those entities with no mode flag."
     )]
     pub relations_unset: Option<Vec<RelationUnsetInput>>,
+    #[schemars(
+        description = "Optional provenance anchors to attach to this entity — durable records tying it to the source artifacts it describes. Written into the mem-branch anchors sidecar in the SAME commit as the update (atomic); omitting it is byte-identical to an update without anchors. An update carrying only `anchors` (no section/metadata change) still commits the sidecar. A malformed element refuses the whole update with `INVALID_ANCHOR` and nothing is written. Anchors do NOT participate in `_hash`."
+    )]
+    #[serde(default)]
+    pub anchors: Option<Vec<AnchorInputParam>>,
     #[schemars(description = NOTE_PARAM_DESCRIPTION)]
     pub note: Option<String>,
 }

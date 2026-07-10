@@ -518,6 +518,7 @@ fn seed_entity(target: &Path, mem: &str) -> anyhow::Result<String> {
     let outcome = engine
         .create_entity(
             CreateEntityArgs {
+                anchors: Vec::new(),
                 mem: mem.to_string(),
                 title: "Welcome to Memstead".to_string(),
                 entity_type: "concept".to_string(),

@@ -1596,6 +1596,19 @@ fn engine_err_unified(
                 serde_json::json!({ "mem": mem, "since": since }),
             ),
         ),
+        // Malformed `anchors[]` element on create/update: typed
+        // `INVALID_ANCHOR` with the wrapped anchor error's recovery detail
+        // (offending field, bad value, allowed set). The whole mutation
+        // refused and the entity was not written.
+        E::InvalidAnchor(anchor_err) => tool_error_with_payload(
+            memstead_base::anchor::INVALID_ANCHOR_CODE,
+            &message,
+            envelope(
+                memstead_base::anchor::INVALID_ANCHOR_CODE,
+                message.clone(),
+                serde_json::Value::Object(anchor_err.detail().into_iter().collect()),
+            ),
+        ),
     }
 }
 
@@ -1930,6 +1943,26 @@ impl McpServer {
                     }
                 }
                 obj.insert("provenance".into(), serde_json::Value::Object(block));
+            }
+            // Provenance anchors (E3a). Additive, emitted only when the
+            // entity has anchors so a pre-E3a reader is unaffected. Carries
+            // the stored anchor records plus their class/grain composition
+            // (derived inputs; tree-grain fan-out on its own axis). The
+            // live per-anchor state (resolves / drifted / recheck /
+            // orphaned) requires observing the source artifacts and lands
+            // with E3b's verify pipeline; this read exposes the durable
+            // data and composition the resolution model keys on.
+            let anchors = engine.entity_anchors(&id);
+            if !anchors.is_empty() {
+                let composition = memstead_base::anchor::compose_entity_anchors(&anchors);
+                obj.insert(
+                    "anchors".into(),
+                    serde_json::to_value(&anchors).unwrap_or(serde_json::Value::Null),
+                );
+                obj.insert(
+                    "anchor_composition".into(),
+                    serde_json::to_value(&composition).unwrap_or(serde_json::Value::Null),
+                );
             }
         }
 
@@ -2377,6 +2410,12 @@ impl McpServer {
                 description: r.description,
             })
             .collect();
+        let anchors: Vec<memstead_base::anchor::AnchorInput> = p
+            .anchors
+            .unwrap_or_default()
+            .into_iter()
+            .map(|a| a.into_engine())
+            .collect();
         let args = memstead_base::CreateEntityArgs {
             mem: mem.clone(),
             title: p.title.clone(),
@@ -2384,6 +2423,7 @@ impl McpServer {
             sections: p.sections.unwrap_or_default(),
             metadata: p.metadata.unwrap_or_default(),
             relations,
+            anchors,
             dry_run,
         };
         let client = self.client.get().cloned();
@@ -2488,7 +2528,14 @@ impl McpServer {
                 description: r.description,
             })
             .collect();
+        let anchors: Vec<memstead_base::anchor::AnchorInput> = p
+            .anchors
+            .unwrap_or_default()
+            .into_iter()
+            .map(|a| a.into_engine())
+            .collect();
         let args = memstead_base::UpdateEntityArgs {
+            anchors,
             id: id.clone(),
             expected_hash: Some(p.expected_hash.clone()),
             sections: p.sections.unwrap_or_default(),
@@ -2670,7 +2717,7 @@ impl McpServer {
 
     #[tool(
         name = "memstead_delete",
-        description = "Remove an entity permanently. Deletes the entity's store record, every edge touching it (both directions), and its markdown file on disk. Requires `expected_hash` (read the entity via memstead_entity first — mirrors memstead_update / memstead_rename for optimistic locking); mismatch emits `HASH_MISMATCH` with `details.current` carrying the current on-disk hash. Binary semantics: any incoming reference from another entity in a Write-Mem refuses the delete with `HAS_INCOMING_REFS` and `details.referrers` listing each `{from_id, rel_types, mem}` (one entry per unique source, rel_types collapses multi-edge cases) — the agent removes the offending references via `memstead_relate --remove` (or `memstead_update` for body wiki-links) before retrying. There is no force flag. When the only incoming references come from ReadOnly mounts (archives), the delete proceeds: the on-disk file is removed and the in-memory entity is demoted to a stub at the same id so the surviving edges keep a valid target — the response carries a `RESIDUAL_STUB_FOR_READONLY_REFERRERS` warning naming the surviving referrers. PART_OF children survive the delete: their parent edge is removed; file paths are unaffected (every entity already lives at `{mem}/{slug}.md`). Stubs (`_hash` empty) are deleted with `expected_hash: \"\"` — the hash check is skipped because there is nothing to compare. Optional `note` (≤280 chars) — shared provenance contract, see memstead_create. Response carries `relations_removed` (edges removed by this delete), `orphan_stubs_removed` (ids of stub entities whose last incoming edge was this entity — they are GC'd in the same op so the graph stays tidy; field is serde-omitted when empty), `warnings` (residual-stub warning when the demote path applied), and `commit_sha` (per-mem git; gitdir via `memstead_health include_config=true`) for polling via memstead_changes_since.",
+        description = "Remove an entity permanently. Deletes the entity's store record, every edge touching it (both directions), and its markdown file on disk. Requires `expected_hash` (read the entity via memstead_entity first — mirrors memstead_update / memstead_rename for optimistic locking); mismatch emits `HASH_MISMATCH` with `details.current` carrying the current on-disk hash. Binary semantics: any incoming reference from another entity in a Write-Mem refuses the delete with `HAS_INCOMING_REFS` and `details.referrers` listing each `{from_id, rel_types, mem}` (one entry per unique source, rel_types collapses multi-edge cases) — the agent removes the offending references via `memstead_relate --remove` (or `memstead_update` for body wiki-links) before retrying. There is no force flag. When the only incoming references come from ReadOnly mounts (archives), the delete proceeds: the on-disk file is removed and the in-memory entity is demoted to a stub at the same id so the surviving edges keep a valid target — the response carries a `RESIDUAL_STUB_FOR_READONLY_REFERRERS` warning naming the surviving referrers. PART_OF children survive the delete: their parent edge is removed; file paths are unaffected (every entity already lives at `{mem}/{slug}.md`). Stubs (`_hash` empty) are deleted with `expected_hash: \"\"` — the hash check is skipped because there is nothing to compare. Optional `note` (≤280 chars) — shared provenance contract, see memstead_create. Response carries `relations_removed` (edges removed by this delete), `orphan_stubs_removed` (ids of stub entities whose last incoming edge was this entity — they are GC'd in the same op so the graph stays tidy; field is serde-omitted when empty), `warnings` (residual-stub warning when the demote path applied), and `commit_sha` (per-mem git; gitdir via `memstead_health include_config=true`) for polling via memstead_changes_since. Provenance anchors, if any, are removed in the same commit (no orphaned anchor survives).",
         annotations(
             read_only_hint = false,
             destructive_hint = true,
@@ -2756,7 +2803,7 @@ impl McpServer {
 
     #[tool(
         name = "memstead_rename",
-        description = "Rename an entity by changing its title. Updates the entity ID (mem prefix preserved) and its markdown file path (`{new_slug}.md` at mem root). Atomic referrer rewrite: every Write-Mem entity whose `relationships` or section bodies point at the old id has its `[[old-slug]]` tokens rewritten in one per-mem commit. Cross-mem referrers are gated by `cross_mem_links` policy in the propagated edge's actual direction (`referrer_mem → renamed_mem`) — a blocked direction aborts up-front with `RENAME_BLOCKED_BY_CROSS_MEM_POLICY` (`details.from_mem`, `details.blocked_referrers[{from_mem, to_mem, count}]`) before any write lands. Per-peer commits are parent-pinned; sibling-writer drift mid-rename surfaces `RENAME_PARTIAL_FAILURE` (`details.committed_mems`, `details.failed_mem`, `details.failure_cause`) so the agent retries the failed mem after reloading. Every per-mem commit in one rename shares a `logical_operation_id` in its provenance — correlate multi-mem renames via `memstead_changes_since`. ReadOnly referrers can't be rewritten; the old id is demoted to a stub in-memory holding the surviving incoming edges, and the response carries `RESIDUAL_STUB_FOR_READONLY_REFERRERS` naming each surviving referrer. Requires `expected_hash` (read via memstead_entity first); mismatch emits `HASH_MISMATCH` with `details.current` carrying the current on-disk hash. Slug-noop short-circuit: when the new title's slug matches the current one, `old_id` equals `new_id`, `commit_sha` is empty, and `warnings` carries `TITLE_NORMALIZED_TO_SLUG_NOOP`. ID collisions error — pick a different title. Stubs cannot be renamed (create a real entity instead). Optional `note` (≤280 chars) — shared provenance contract, see memstead_create. Response carries `old_id`, `new_id`, `_hash` (post-rename on-disk hash — pass as `expected_hash` on the next mutation, mirrors `memstead_relate`), `commit_sha` (per-mem git; gitdir via `memstead_health include_config=true`), and `warnings`.",
+        description = "Rename an entity by changing its title. Updates the entity ID (mem prefix preserved) and its markdown file path (`{new_slug}.md` at mem root). Atomic referrer rewrite: every Write-Mem entity whose `relationships` or section bodies point at the old id has its `[[old-slug]]` tokens rewritten in one per-mem commit. Cross-mem referrers are gated by `cross_mem_links` policy in the propagated edge's actual direction (`referrer_mem → renamed_mem`) — a blocked direction aborts up-front with `RENAME_BLOCKED_BY_CROSS_MEM_POLICY` (`details.from_mem`, `details.blocked_referrers[{from_mem, to_mem, count}]`) before any write lands. Per-peer commits are parent-pinned; sibling-writer drift mid-rename surfaces `RENAME_PARTIAL_FAILURE` (`details.committed_mems`, `details.failed_mem`, `details.failure_cause`) so the agent retries the failed mem after reloading. Every per-mem commit in one rename shares a `logical_operation_id` in its provenance — correlate multi-mem renames via `memstead_changes_since`. ReadOnly referrers can't be rewritten; the old id is demoted to a stub in-memory holding the surviving incoming edges, and the response carries `RESIDUAL_STUB_FOR_READONLY_REFERRERS` naming each surviving referrer. Requires `expected_hash` (read via memstead_entity first); mismatch emits `HASH_MISMATCH` with `details.current` carrying the current on-disk hash. Slug-noop short-circuit: when the new title's slug matches the current one, `old_id` equals `new_id`, `commit_sha` is empty, and `warnings` carries `TITLE_NORMALIZED_TO_SLUG_NOOP`. ID collisions error — pick a different title. Stubs cannot be renamed (create a real entity instead). Optional `note` (≤280 chars) — shared provenance contract, see memstead_create. Response carries `old_id`, `new_id`, `_hash` (post-rename on-disk hash — pass as `expected_hash` on the next mutation, mirrors `memstead_relate`), `commit_sha` (per-mem git; gitdir via `memstead_health include_config=true`), and `warnings`. Provenance anchors, if any, move to the new id in the same commit.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -3737,7 +3784,7 @@ fn workspace_edit_err_to_envelope(
 #[tool_handler(
     name = "memstead",
     version = "0.1.0",
-    instructions = "Memstead: schema-agnostic graph engine for typed, interconnected markdown entities. Each mem is a typed model of a chosen subject — its modal flavour follows from its schema (knowledge / planning / inquiry / spec / hybrid). Each mem pins one schema; types and relationships are vocabulary-controlled. Granularity: a mem is the packaged unit — a whole typed model, designed for 1,000-5,000 entities; an entity is never called a mem (a mem is not one 'memory'/fact). Cold-start: call memstead_overview first for the schema catalogue (`{ref, description}` per schema), mem inventory, and communities (token-budgeted; drill via include/hints). Schema-discovery contract: each writable mem pins one schema (visible on overview's `## Mems` entries). Before any memstead_create / memstead_update / memstead_relate against mem X, call memstead_schema(name=<X.schema_ref>) once per session. The default reply is the lite structural skeleton — entity-type names with section keys and metadata-field shapes, relationship names with endpoint constraints, plus every legality flag (required sections/fields, alias_target_rel_type, manual-authoring posture, acyclic) — enough to plan a legal write. Pass verbosity: full for the prose layer (per-section write_rules, writing_guidance, system_context, when_to_use) before substantial authoring against an unfamiliar schema. Cache for the session — schema is workspace-stable. Schema-conformance errors carry recovery payloads as a fallback (UNKNOWN_SECTION, UNKNOWN_METADATA_FIELD, INVALID_ENUM_VALUE, REQUIRED_FIELD_UNSET, INVALID_REL_TYPE, INVALID_REL_SHAPE, MISSING_REQUIRED_SECTION) — fix from `details` rather than re-fetching the schema after every error. Edge model is alias: body wiki-links `[[X]]` are foreign-key references to entries in the auto-managed `## Relationships` section. Schemas with `alias_target_rel_type` auto-emit relations of that rel-type (e.g. REFERENCES) from each body wiki-link via the alias-synthesis pass; explicit author of the named rel-type refuses with RELATION_MANUAL_AUTHORING_FORBIDDEN. Schemas without the pointer refuse unbacked body wiki-links with WIKILINK_WITHOUT_RELATION. Removing a relation while body wiki-links to its target remain refuses only when no other relation to that target survives (RELATION_HAS_BODY_LINKS — set-membership semantics). Shared mutation contract: every mutation accepts an optional note (≤280 chars) landing in the commit body as provenance; when [mutations].require_notes=true a missing note refuses with NOTE_MISSING. Real writes return commit_sha (per-mem git; gitdir via memstead_health include_config=true) — use it as the since cursor for memstead_changes_since polling. Schema-conformance recovery payloads carry the fix material in place: details.declared / details.allowed with nearest-match suggestion, details.field_description, details.enum_values, and the type's details.type_write_rules. After a successful memstead_relate the touched entity's on-disk _hash advances; the relate response's _hash is the next valid expected_hash (no re-read needed) — no-op relates (duplicate add, remove-nonexistent) echo the unchanged _hash, which stays valid. Common workflows: search entities by content/structure (memstead_search — omit query for pure metadata filter); read one (memstead_entity — `_hash` is the optimistic-locking token for mutations); read one schema (memstead_schema); create/update/relate/rename/delete entities (memstead_create, memstead_update, memstead_relate, memstead_rename, memstead_delete); manage workspace mems including planning phases (memstead_mem_create, memstead_mem_delete); inspect drift and per-mem config (memstead_health); poll commit deltas for incremental sync (memstead_changes_since). Errors and warnings ship as { code, message, details } on structured_content; branch on the stable UPPER_SNAKE_CASE code. The text channel mirrors the same code inline as `ERROR [<CODE>]: <message>` so consumers that only read `result.content[0].text` still recover the code with a one-line regex. Never edit `.md` spec files directly — always go through Memstead tools. Error codes: ENTITY_NOT_FOUND, ENTITY_ALREADY_EXISTS, UNKNOWN_MEM, HASH_MISMATCH, RELATIONSHIP_CYCLE, UNKNOWN_SECTION, UNKNOWN_METADATA_FIELD, UNKNOWN_ENTITY_TYPE, INVALID_ENUM_VALUE, INVALID_REL_TYPE, INVALID_REL_SHAPE, READ_ONLY_FIELD, REQUIRED_FIELD_UNSET, SET_AND_UNSET_CONFLICT, CONFLICTING_SECTION_MODES, SECTION_NOT_UPDATABLE, PATCH_OLD_NOT_FOUND, PATCH_SECTION_EMPTY, CROSS_MEM_LINK_NOT_ALLOWED, CROSS_MEM_TARGET_NOT_FOUND, CROSS_MEM_EDGE_NOT_DECLARED, MEM_NOT_WRITABLE, MEM_NAME_COLLISION, MEM_PATH_NOT_ALLOWED, INVALID_MEM_NAME, MEM_SCHEMA_NOT_ALLOWED, MEM_BRANCH_MISSING, MEM_REFERENCED_BY_POLICY, HAS_INCOMING_REFS, STUB_NOT_UPDATABLE, STUB_NOT_RENAMABLE, STUB_CANNOT_RELATE, INVALID_ENTITY_ID, WIKILINK_WITHOUT_RELATION, RELATION_HAS_BODY_LINKS, MISSING_REQUIRED_DESCRIPTION, DESCRIPTION_NOT_PERMITTED, RELATION_MANUAL_AUTHORING_FORBIDDEN, SCHEMA_NOT_FOUND, SCHEMA_RESOLVER_INIT_FAILED, PARSE_ERROR, MEM_ERROR, INVALID_INPUT, VCS_ERROR, INTERNAL_IO_ERROR, CONFIG_ERROR, EXPORT_ERROR, WORKSPACE_SCHEMAS_ERROR, SCHEMA_CACHE_COLLISION, TOOL_DISABLED, INVALID_CURSOR. Health warnings: OUTER_REPO_NOT_IGNORING_MEM_REPO (workspace embedded in an outer git checkout that does not ignore mem-repo/), SUSPICIOUS_NESTED_PREFIX (nested-prefix drift — fix via memstead_update), DUPLICATE_SECTION_HEADING (a section key whose ## Heading appeared twice; first body kept). Drift warning on any tool: MEM_RELOADED (a sibling engine committed to this mem-repo; the engine auto-reloaded — response content is fresh but cached expected_hash values are stale; re-derive before the next mutation). Relate warnings: AUTO_STUB_CREATED. Delete warning: RESIDUAL_STUB_FOR_READONLY_REFERRERS. Boot warnings: PARSED_RELATION_INVALID, AMBIGUOUS_DESCRIPTION_DELIMITER, MISSING_REQUIRED_DESCRIPTION, DESCRIPTION_NOT_PERMITTED. Mutation warning: MISSING_REQUIRED_OUTGOING."
+    instructions = "Memstead: schema-agnostic graph engine for typed, interconnected markdown entities. Each mem is a typed model of a chosen subject — its modal flavour follows from its schema (knowledge / planning / inquiry / spec / hybrid). Each mem pins one schema; types and relationships are vocabulary-controlled. Granularity: a mem is the packaged unit — a whole typed model, designed for 1,000-5,000 entities; an entity is never called a mem (a mem is not one 'memory'/fact). Cold-start: call memstead_overview first for the schema catalogue (`{ref, description}` per schema), mem inventory, and communities (token-budgeted; drill via include/hints). Schema-discovery contract: each writable mem pins one schema (visible on overview's `## Mems` entries). Before any memstead_create / memstead_update / memstead_relate against mem X, call memstead_schema(name=<X.schema_ref>) once per session. The default reply is the lite structural skeleton — entity-type names with section keys and metadata-field shapes, relationship names with endpoint constraints, plus every legality flag (required sections/fields, alias_target_rel_type, manual-authoring posture, acyclic) — enough to plan a legal write. Pass verbosity: full for the prose layer (per-section write_rules, writing_guidance, system_context, when_to_use) before substantial authoring against an unfamiliar schema. Cache for the session — schema is workspace-stable. Schema-conformance errors carry recovery payloads as a fallback (UNKNOWN_SECTION, UNKNOWN_METADATA_FIELD, INVALID_ENUM_VALUE, REQUIRED_FIELD_UNSET, INVALID_REL_TYPE, INVALID_REL_SHAPE, MISSING_REQUIRED_SECTION) — fix from `details` rather than re-fetching the schema after every error. Edge model is alias: body wiki-links `[[X]]` are foreign-key references to entries in the auto-managed `## Relationships` section. Schemas with `alias_target_rel_type` auto-emit relations of that rel-type (e.g. REFERENCES) from each body wiki-link via the alias-synthesis pass; explicit author of the named rel-type refuses with RELATION_MANUAL_AUTHORING_FORBIDDEN. Schemas without the pointer refuse unbacked body wiki-links with WIKILINK_WITHOUT_RELATION. Removing a relation while body wiki-links to its target remain refuses only when no other relation to that target survives (RELATION_HAS_BODY_LINKS — set-membership semantics). Shared mutation contract: every mutation accepts an optional note (≤280 chars) landing in the commit body as provenance; when [mutations].require_notes=true a missing note refuses with NOTE_MISSING. memstead_create and memstead_update additionally accept an optional anchors[] — durable provenance records tying the entity to the source artifacts it describes (artifact, grain span|file|tree|url|entity, provenance class anchored|derived|authored|informed-by); they write into the mem-branch anchors sidecar in the SAME commit as the entity, a malformed element refuses the whole mutation with INVALID_ANCHOR (details carries the offending field + allowed set), and the sidecar never participates in _hash — attaching or refreshing anchors never invalidates a cached expected_hash and never surfaces as an entity delta in memstead_changes_since. memstead_delete removes the entity's anchors and memstead_rename moves them to the new id, both in the same commit as the operation. Real writes return commit_sha (per-mem git; gitdir via memstead_health include_config=true) — use it as the since cursor for memstead_changes_since polling. Schema-conformance recovery payloads carry the fix material in place: details.declared / details.allowed with nearest-match suggestion, details.field_description, details.enum_values, and the type's details.type_write_rules. After a successful memstead_relate the touched entity's on-disk _hash advances; the relate response's _hash is the next valid expected_hash (no re-read needed) — no-op relates (duplicate add, remove-nonexistent) echo the unchanged _hash, which stays valid. Common workflows: search entities by content/structure (memstead_search — omit query for pure metadata filter); read one (memstead_entity — `_hash` is the optimistic-locking token for mutations); read one schema (memstead_schema); create/update/relate/rename/delete entities (memstead_create, memstead_update, memstead_relate, memstead_rename, memstead_delete); manage workspace mems including planning phases (memstead_mem_create, memstead_mem_delete); inspect drift and per-mem config (memstead_health); poll commit deltas for incremental sync (memstead_changes_since). Errors and warnings ship as { code, message, details } on structured_content; branch on the stable UPPER_SNAKE_CASE code. The text channel mirrors the same code inline as `ERROR [<CODE>]: <message>` so consumers that only read `result.content[0].text` still recover the code with a one-line regex. Never edit `.md` spec files directly — always go through Memstead tools. Error codes: ENTITY_NOT_FOUND, ENTITY_ALREADY_EXISTS, UNKNOWN_MEM, HASH_MISMATCH, RELATIONSHIP_CYCLE, UNKNOWN_SECTION, UNKNOWN_METADATA_FIELD, UNKNOWN_ENTITY_TYPE, INVALID_ENUM_VALUE, INVALID_REL_TYPE, INVALID_REL_SHAPE, READ_ONLY_FIELD, REQUIRED_FIELD_UNSET, SET_AND_UNSET_CONFLICT, CONFLICTING_SECTION_MODES, SECTION_NOT_UPDATABLE, PATCH_OLD_NOT_FOUND, PATCH_SECTION_EMPTY, CROSS_MEM_LINK_NOT_ALLOWED, CROSS_MEM_TARGET_NOT_FOUND, CROSS_MEM_EDGE_NOT_DECLARED, MEM_NOT_WRITABLE, MEM_NAME_COLLISION, MEM_PATH_NOT_ALLOWED, INVALID_MEM_NAME, MEM_SCHEMA_NOT_ALLOWED, MEM_BRANCH_MISSING, MEM_REFERENCED_BY_POLICY, HAS_INCOMING_REFS, STUB_NOT_UPDATABLE, STUB_NOT_RENAMABLE, STUB_CANNOT_RELATE, INVALID_ENTITY_ID, WIKILINK_WITHOUT_RELATION, RELATION_HAS_BODY_LINKS, MISSING_REQUIRED_DESCRIPTION, DESCRIPTION_NOT_PERMITTED, RELATION_MANUAL_AUTHORING_FORBIDDEN, SCHEMA_NOT_FOUND, SCHEMA_RESOLVER_INIT_FAILED, PARSE_ERROR, MEM_ERROR, INVALID_INPUT, VCS_ERROR, INTERNAL_IO_ERROR, CONFIG_ERROR, EXPORT_ERROR, WORKSPACE_SCHEMAS_ERROR, SCHEMA_CACHE_COLLISION, TOOL_DISABLED, INVALID_CURSOR, INVALID_ANCHOR. Health warnings: OUTER_REPO_NOT_IGNORING_MEM_REPO (workspace embedded in an outer git checkout that does not ignore mem-repo/), SUSPICIOUS_NESTED_PREFIX (nested-prefix drift — fix via memstead_update), DUPLICATE_SECTION_HEADING (a section key whose ## Heading appeared twice; first body kept). Drift warning on any tool: MEM_RELOADED (a sibling engine committed to this mem-repo; the engine auto-reloaded — response content is fresh but cached expected_hash values are stale; re-derive before the next mutation). Relate warnings: AUTO_STUB_CREATED. Delete warning: RESIDUAL_STUB_FOR_READONLY_REFERRERS. Boot warnings: PARSED_RELATION_INVALID, AMBIGUOUS_DESCRIPTION_DELIMITER, MISSING_REQUIRED_DESCRIPTION, DESCRIPTION_NOT_PERMITTED. Mutation warning: MISSING_REQUIRED_OUTGOING."
 )]
 impl ServerHandler for McpServer {
     /// Capture the client's `clientInfo` from the initialize handshake so
@@ -4283,6 +4330,7 @@ mod tests {
 
         // HASH_MISMATCH via memstead_update with a stale hash.
         let stale = server.memstead_update(Parameters(crate::tools::mutation::UpdateParams {
+            anchors: None,
             relations_unset: None,
             id: "specs--entity-a".to_string(),
             expected_hash: "0000000000000000000000000000000000000000000000000000000000000000"
@@ -4549,6 +4597,7 @@ mod tests {
             sections.insert("identity".to_string(), "the identity".to_string());
             sections.insert("purpose".to_string(), "the purpose".to_string());
             let r = server.memstead_create(Parameters(CreateParams {
+                anchors: None,
                 mem: Some(mem.to_string()),
                 title: title.to_string(),
                 entity_type: "spec".to_string(),
@@ -4700,6 +4749,7 @@ mod tests {
             sections.insert("identity".to_string(), "the identity".to_string());
             sections.insert("purpose".to_string(), "the purpose".to_string());
             let r = server.memstead_create(Parameters(CreateParams {
+                anchors: None,
                 mem: Some(mem.to_string()),
                 title: title.to_string(),
                 entity_type: "spec".to_string(),
@@ -4842,6 +4892,7 @@ mod tests {
             sections.insert("identity".to_string(), "the identity".to_string());
             sections.insert("purpose".to_string(), "the purpose".to_string());
             let r = server.memstead_create(Parameters(CreateParams {
+                anchors: None,
                 mem: Some("specs".to_string()),
                 title: title.to_string(),
                 entity_type: "spec".to_string(),
@@ -7047,6 +7098,7 @@ community:
         let mut sections = IndexMap::new();
         sections.insert("totally-fake-section".to_string(), "x".to_string());
         let bad_section = server.memstead_update(Parameters(UpdateParams {
+            anchors: None,
             relations_unset: None,
             id: "specs--entity-a".to_string(),
             expected_hash: entity_hash,
@@ -7098,6 +7150,7 @@ community:
         let mut sections = IndexMap::new();
         sections.insert("identity".to_string(), "edited".to_string());
         let bad_hash = server.memstead_update(Parameters(UpdateParams {
+            anchors: None,
             relations_unset: None,
             id: "specs--entity-a".to_string(),
             expected_hash: "definitely-wrong".to_string(),
@@ -7231,6 +7284,7 @@ community:
 
         // UNKNOWN_MEM — create against a mem that isn't mounted.
         let unknown_mem = server.memstead_create(Parameters(CreateParams {
+            anchors: None,
             mem: Some("nonexistent-mem".to_string()),
             title: "Anything".to_string(),
             entity_type: "spec".to_string(),
@@ -7244,6 +7298,7 @@ community:
 
         // UNKNOWN_ENTITY_TYPE — create with an undeclared type.
         let unknown_type = server.memstead_create(Parameters(CreateParams {
+            anchors: None,
             mem: Some("specs".to_string()),
             title: "Misshapen".to_string(),
             entity_type: "definitely-not-a-real-type".to_string(),
@@ -7285,6 +7340,7 @@ community:
         let mut sections = IndexMap::new();
         sections.insert("identity".to_string(), "edited".to_string());
         let hash_mismatch = server.memstead_update(Parameters(UpdateParams {
+            anchors: None,
             relations_unset: None,
             id: "specs--entity-a".to_string(),
             expected_hash: "definitely-wrong".to_string(),
@@ -7329,6 +7385,7 @@ community:
         dup_sections.insert("identity".to_string(), "the identity".to_string());
         dup_sections.insert("purpose".to_string(), "the purpose".to_string());
         let _seed = server.memstead_create(Parameters(CreateParams {
+            anchors: None,
             mem: Some("specs".to_string()),
             title: "Duplicate Probe".to_string(),
             entity_type: "spec".to_string(),
@@ -7339,6 +7396,7 @@ community:
             note: None,
         }));
         let dup = server.memstead_create(Parameters(CreateParams {
+            anchors: None,
             mem: Some("specs".to_string()),
             title: "Duplicate Probe".to_string(),
             entity_type: "spec".to_string(),
@@ -7349,6 +7407,92 @@ community:
             note: None,
         }));
         assert_text_carries_code(&dup, "ENTITY_ALREADY_EXISTS");
+    }
+
+    /// E3a: create with `anchors[]` persists them, `memstead_entity`
+    /// surfaces them additively on `structured_content`, a malformed
+    /// anchor refuses `INVALID_ANCHOR` without writing the entity, and
+    /// `memstead_relate` rejects an `anchors` field (deny_unknown_fields).
+    #[test]
+    fn anchors_create_read_and_refuse_through_mcp_surface() {
+        let (server, _tmp) = setup_test_engine();
+
+        let ok: CreateParams = serde_json::from_value(serde_json::json!({
+            "mem": "specs",
+            "title": "Anchored Spec",
+            "entity_type": "spec",
+            "sections": { "identity": "id", "purpose": "purpose" },
+            "anchors": [{
+                "artifact": "src/lib.rs", "grain": "file", "class": "anchored",
+                "hash": "h1", "hash_stability": "stable"
+            }],
+        }))
+        .unwrap();
+        let created = server.memstead_create(Parameters(ok));
+        assert!(
+            !created.is_error.unwrap_or(false),
+            "create with anchors must succeed: {:?}",
+            created.structured_content
+        );
+
+        // Read back — structured_content carries anchors + composition.
+        let read = server.memstead_entity(Parameters(EntityParams {
+            id: "specs--anchored-spec".to_string(),
+            include_relations: None,
+            include_context: None,
+            sections: None,
+            token_budget: None,
+            chunk: None,
+        }));
+        let sc = read
+            .structured_content
+            .expect("entity ships structured_content");
+        let anchors = sc.get("anchors").expect("anchors field present");
+        assert_eq!(anchors.as_array().unwrap().len(), 1);
+        assert_eq!(anchors[0]["artifact"], "src/lib.rs");
+        assert_eq!(anchors[0]["class"], "anchored");
+        assert!(
+            sc.get("anchor_composition").is_some(),
+            "composition surfaces additively"
+        );
+
+        // Malformed anchor refuses INVALID_ANCHOR; entity not written.
+        let bad: CreateParams = serde_json::from_value(serde_json::json!({
+            "mem": "specs",
+            "title": "Bad Anchor Spec",
+            "entity_type": "spec",
+            "sections": { "identity": "id", "purpose": "purpose" },
+            "anchors": [{ "artifact": "x", "grain": "paragraph", "class": "anchored" }],
+        }))
+        .unwrap();
+        let refused = server.memstead_create(Parameters(bad));
+        assert!(refused.is_error.unwrap_or(false));
+        assert_eq!(
+            refused.structured_content.as_ref().unwrap()["code"],
+            "INVALID_ANCHOR"
+        );
+        let missing = server.memstead_entity(Parameters(EntityParams {
+            id: "specs--bad-anchor-spec".to_string(),
+            include_relations: None,
+            include_context: None,
+            sections: None,
+            token_budget: None,
+            chunk: None,
+        }));
+        assert!(missing.is_error.unwrap_or(false), "entity was not written");
+
+        // memstead_relate rejects an `anchors` field (deny_unknown_fields).
+        let relate_parse =
+            serde_json::from_value::<crate::tools::mutation::RelateParams>(serde_json::json!({
+                "from": "specs--anchored-spec",
+                "to": "specs--other",
+                "type": "REFERENCES",
+                "anchors": [],
+            }));
+        assert!(
+            relate_parse.is_err(),
+            "memstead_relate must reject an `anchors` field via deny_unknown_fields"
+        );
     }
 
     /// `memstead_relate(remove=true)` on a relation whose source body
@@ -7377,6 +7521,7 @@ community:
         // `manual_authoring: forbidden` posture, so the declaration
         // stays empty and the synthesis path produces the relation.
         let created = server.memstead_create(Parameters(CreateParams {
+            anchors: None,
             mem: Some("specs".to_string()),
             title: "Body Link Source".to_string(),
             entity_type: "spec".to_string(),
@@ -7453,6 +7598,7 @@ community:
         seed_sections.insert("identity".to_string(), "the identity".to_string());
         seed_sections.insert("purpose".to_string(), "the purpose".to_string());
         let ok = server.memstead_create(Parameters(CreateParams {
+            anchors: None,
             mem: Some(mem.to_string()),
             title: just_fits_title.clone(),
             entity_type: "spec".to_string(),
@@ -7486,6 +7632,7 @@ community:
         // One character over → INVALID_TITLE envelope with recovery payload.
         let over_title = "a".repeat(max - prefix_len + 1);
         let too_long = server.memstead_create(Parameters(CreateParams {
+            anchors: None,
             mem: Some(mem.to_string()),
             title: over_title.clone(),
             entity_type: "spec".to_string(),
@@ -7552,6 +7699,7 @@ community:
         bad.insert("identity".to_string(), "ok".to_string());
         bad.insert("purpose".to_string(), "line1\u{0}line2".to_string());
         let create = server.memstead_create(Parameters(CreateParams {
+            anchors: None,
             mem: Some("specs".to_string()),
             title: "Nul Carrier".to_string(),
             entity_type: "spec".to_string(),
@@ -7591,6 +7739,7 @@ community:
         clean.insert("identity".to_string(), "ok".to_string());
         clean.insert("purpose".to_string(), "clean body".to_string());
         let ok = server.memstead_create(Parameters(CreateParams {
+            anchors: None,
             mem: Some("specs".to_string()),
             title: "Clean Carrier".to_string(),
             entity_type: "spec".to_string(),
@@ -7622,6 +7771,7 @@ community:
             "tab\tok but bell\u{7}bad".to_string(),
         );
         let update = server.memstead_update(Parameters(crate::tools::mutation::UpdateParams {
+            anchors: None,
             relations_unset: None,
             id: "specs--clean-carrier".to_string(),
             expected_hash: hash,
@@ -7664,6 +7814,7 @@ community:
             native_sections.insert("identity".to_string(), "identity".to_string());
             native_sections.insert("purpose".to_string(), "purpose".to_string());
             let create = server.memstead_create(Parameters(CreateParams {
+                anchors: None,
                 mem: Some("specs".to_string()),
                 title: title.to_string(),
                 entity_type: "spec".to_string(),
@@ -7737,6 +7888,7 @@ community:
     fn all_emoji_title_refuses_with_invalid_title_envelope() {
         let (server, _tmp) = setup_test_engine();
         let create = server.memstead_create(Parameters(CreateParams {
+            anchors: None,
             mem: Some("specs".to_string()),
             title: "🚀✨".to_string(),
             entity_type: "spec".to_string(),
@@ -7782,6 +7934,7 @@ community:
     fn control_char_title_refuses_with_invalid_title_envelope() {
         let (server, _tmp) = setup_test_engine();
         let create = server.memstead_create(Parameters(CreateParams {
+            anchors: None,
             mem: Some("specs".to_string()),
             title: "Tab\tand\nnewline title".to_string(),
             entity_type: "spec".to_string(),
@@ -7935,6 +8088,7 @@ community:
         let mut sections = IndexMap::new();
         sections.insert("identity".to_string(), "edited body".to_string());
         let result = server.memstead_update(Parameters(UpdateParams {
+            anchors: None,
             relations_unset: None,
             id: "specs--entity-a".to_string(),
             expected_hash: entity_hash,
@@ -8009,6 +8163,7 @@ community:
         sections.insert("identity".to_string(), "the identity".to_string());
         sections.insert("purpose".to_string(), "the purpose".to_string());
         let result = server.memstead_create(Parameters(CreateParams {
+            anchors: None,
             title: "Brand New Spec".to_string(),
             entity_type: "spec".to_string(),
             mem: None,
@@ -8067,6 +8222,7 @@ community:
         adopt_sections.insert("identity".to_string(), "future identity".to_string());
         adopt_sections.insert("purpose".to_string(), "future purpose".to_string());
         let adopt = server.memstead_create(Parameters(CreateParams {
+            anchors: None,
             title: "Future Decision".to_string(),
             entity_type: "spec".to_string(),
             mem: None,
@@ -9871,6 +10027,7 @@ community:
         // valid types.
         let (server, _tmp) = setup_dual_test_engine();
         let result = server.memstead_create(Parameters(CreateParams {
+            anchors: None,
             title: "Bad Type Entity".to_string(),
             entity_type: "bogus".to_string(),
             mem: Some("specs".to_string()),
@@ -9905,6 +10062,7 @@ community:
     fn memstead_create_dry_run_preview() {
         let (server, _tmp) = setup_dual_test_engine();
         let result = server.memstead_create(Parameters(CreateParams {
+            anchors: None,
             title: "Große Änderung".to_string(),
             entity_type: "spec".to_string(),
             mem: Some("specs".to_string()),
@@ -9937,6 +10095,7 @@ community:
         // calls share the wall-clock second, so the `created_date`
         // stamp matches; see the test doc for the cross-second caveat).
         let real = server.memstead_create(Parameters(CreateParams {
+            anchors: None,
             title: "Große Änderung".to_string(),
             entity_type: "spec".to_string(),
             mem: Some("specs".to_string()),
@@ -10230,6 +10389,7 @@ community:
 
         // Create
         let result = server.memstead_create(Parameters(CreateParams {
+            anchors: None,
             title: "New Entity".to_string(),
             entity_type: "spec".to_string(),
             mem: Some("specs".to_string()),
@@ -10272,6 +10432,7 @@ community:
 
         // Update
         let result = server.memstead_update(Parameters(UpdateParams {
+            anchors: None,
             relations_unset: None,
             id: id.clone(),
             expected_hash: hash,
@@ -10488,6 +10649,7 @@ community:
         let mut metadata = IndexMap::new();
         metadata.insert("tags".to_string(), "x".to_string());
         let result = server.memstead_update(Parameters(UpdateParams {
+            anchors: None,
             relations_unset: None,
             id: "specs--entity-a".to_string(),
             expected_hash: hash,
@@ -10593,6 +10755,7 @@ community:
             },
         );
         let result = server.memstead_update(Parameters(UpdateParams {
+            anchors: None,
             relations_unset: None,
             id: "specs--entity-a".to_string(),
             expected_hash: hash,
@@ -10923,6 +11086,7 @@ community:
         // `constraints` section body so we have something to unset and
         // something to patch.
         let create = server.memstead_create(Parameters(CreateParams {
+            anchors: None,
             title: "Wire Shape".to_string(),
             entity_type: "spec".to_string(),
             mem: Some("specs".to_string()),
@@ -10947,6 +11111,7 @@ community:
         // Mixed-mode update: replace, append, patch, metadata-set,
         // metadata-unset all in one call.
         let result = server.memstead_update(Parameters(UpdateParams {
+            anchors: None,
             relations_unset: None,
             id,
             expected_hash: hash,
@@ -11065,6 +11230,7 @@ community:
 
         // Dry-run update.
         let dry_run = server.memstead_update(Parameters(UpdateParams {
+            anchors: None,
             relations_unset: None,
             id: id.clone(),
             expected_hash: initial_hash.clone(),
@@ -11110,6 +11276,7 @@ community:
         // hash) as the lock. This is the documented "preview → commit"
         // pattern.
         let real = server.memstead_update(Parameters(UpdateParams {
+            anchors: None,
             relations_unset: None,
             id: id.clone(),
             expected_hash: dry_current_hash,
@@ -11162,6 +11329,7 @@ community:
 
         let stale = "0".repeat(64);
         let dry_run = server.memstead_update(Parameters(UpdateParams {
+            anchors: None,
             relations_unset: None,
             id: id.clone(),
             expected_hash: stale.clone(),
@@ -11198,6 +11366,7 @@ community:
 
         // Follow-up real call with the recovered hash must succeed.
         let real = server.memstead_update(Parameters(UpdateParams {
+            anchors: None,
             relations_unset: None,
             id,
             expected_hash: recovered.to_string(),
@@ -11290,6 +11459,7 @@ community:
         // Bootstrap a fresh entity via memstead_create to get a known-valid hash
         // without parsing memstead_entity's markdown frontmatter.
         let create = server.memstead_create(Parameters(CreateParams {
+            anchors: None,
             title: "Rename Wire".to_string(),
             entity_type: "spec".to_string(),
             mem: Some("specs".to_string()),
@@ -12995,6 +13165,7 @@ community:
             sections.insert("identity".into(), "c".into());
             sections.insert("purpose".into(), "d".into());
             let result = server.memstead_create(Parameters(CreateParams {
+                anchors: None,
                 title: "Foo Invariant".into(),
                 entity_type: "spec".into(),
                 mem: None,
@@ -13048,6 +13219,7 @@ community:
         fn require_notes_without_note_adds_warning_but_commit_still_lands() {
             let (server, _tmp) = server_with_require_notes(true);
             let result = server.memstead_update(Parameters(UpdateParams {
+                anchors: None,
                 relations_unset: None,
                 id: "specs--entity-a".into(),
                 expected_hash: {
@@ -13128,6 +13300,7 @@ community:
             sections.insert("identity".into(), "c".into());
             sections.insert("purpose".into(), "d".into());
             let result = server.memstead_create(Parameters(CreateParams {
+                anchors: None,
                 title: "Blank Note Path".into(),
                 entity_type: "spec".into(),
                 mem: None,
@@ -13158,6 +13331,7 @@ community:
             sections.insert("purpose".into(), "d".into());
             let oversized: String = "x".repeat(memstead_engine::mem_management::NOTE_MAX_LEN + 1);
             let result = server.memstead_create(Parameters(CreateParams {
+                anchors: None,
                 title: "Oversized Note".into(),
                 entity_type: "spec".into(),
                 mem: None,
@@ -13204,6 +13378,7 @@ community:
         fn memstead_create_response_carries_anchor() {
             let (server, _tmp) = setup_dual_test_engine();
             let result = server.memstead_create(Parameters(CreateParams {
+                anchors: None,
                 title: "Anchor Probe".to_string(),
                 entity_type: "spec".to_string(),
                 mem: Some("specs".to_string()),
@@ -13251,6 +13426,7 @@ community:
             let mut sections = indexmap::IndexMap::new();
             sections.insert("identity".to_string(), "First test entity.".to_string());
             let result = server.memstead_update(Parameters(UpdateParams {
+                anchors: None,
                 relations_unset: None,
                 id: "specs--entity-a".to_string(),
                 expected_hash: expected_hash.to_string(),
@@ -13301,6 +13477,7 @@ community:
             let expected_hash = hash_line.trim_start_matches("_hash:").trim();
 
             let result = server.memstead_update(Parameters(UpdateParams {
+                anchors: None,
                 relations_unset: None,
                 id: "specs--entity-a".to_string(),
                 expected_hash: expected_hash.to_string(),
@@ -14524,6 +14701,7 @@ write_rules: []
         fn missing_required_section_carries_type_guidance_top_level() {
             let (server, _tmp) = setup_dual_test_engine();
             let result = server.memstead_create(Parameters(CreateParams {
+                anchors: None,
                 title: "Bare Spec".to_string(),
                 entity_type: "spec".to_string(),
                 mem: Some("specs".to_string()),
@@ -14585,6 +14763,7 @@ write_rules: []
         fn type_guidance_ships_empty_shape_when_no_warnings() {
             let (server, _tmp) = setup_dual_test_engine();
             let result = server.memstead_create(Parameters(CreateParams {
+                anchors: None,
                 title: "Complete Spec".to_string(),
                 entity_type: "spec".to_string(),
                 mem: Some("specs".to_string()),
@@ -14679,6 +14858,7 @@ write_rules: []
             let mut metadata = IndexMap::new();
             metadata.insert("level".to_string(), "M99".to_string());
             let result = server.memstead_create(Parameters(CreateParams {
+                anchors: None,
                 title: "Bad Level".to_string(),
                 entity_type: "spec".to_string(),
                 mem: Some("specs".to_string()),
@@ -14740,6 +14920,7 @@ write_rules: []
 
             // Try to unset `level` — required (default_value = M0, not optional).
             let result = server.memstead_update(Parameters(UpdateParams {
+                anchors: None,
                 relations_unset: None,
                 id: "specs--entity-a".to_string(),
                 expected_hash: hash,
@@ -14777,6 +14958,7 @@ write_rules: []
         fn unknown_section_regression() {
             let (server, _tmp) = setup_dual_test_engine();
             let result = server.memstead_create(Parameters(CreateParams {
+                anchors: None,
                 title: "Probe".to_string(),
                 entity_type: "spec".to_string(),
                 mem: Some("specs".to_string()),
@@ -14806,6 +14988,7 @@ write_rules: []
             let mut metadata = IndexMap::new();
             metadata.insert("levle".to_string(), "M0".to_string());
             let result = server.memstead_create(Parameters(CreateParams {
+                anchors: None,
                 title: "Probe".to_string(),
                 entity_type: "spec".to_string(),
                 mem: Some("specs".to_string()),
@@ -14849,6 +15032,7 @@ write_rules: []
                 "Example link form: [[ghost-target]] for documentation.".to_string(),
             );
             let result = server.memstead_create(Parameters(CreateParams {
+                anchors: None,
                 title: "Inline Demo".to_string(),
                 entity_type: "spec".to_string(),
                 mem: Some("specs".to_string()),
@@ -14895,6 +15079,7 @@ write_rules: []
                 "documents [[update-ghost]] usage".to_string(),
             );
             let create_res = server.memstead_create(Parameters(CreateParams {
+                anchors: None,
                 title: "Symmetry Create".to_string(),
                 entity_type: "spec".to_string(),
                 mem: Some("specs".to_string()),
@@ -14929,6 +15114,7 @@ write_rules: []
                 "documents [[update-ghost]] usage".to_string(),
             );
             let update_res = server.memstead_update(Parameters(UpdateParams {
+                anchors: None,
                 relations_unset: None,
                 id: "specs--entity-a".to_string(),
                 expected_hash: String::new(),
@@ -14983,6 +15169,7 @@ write_rules: []
                 "Real link: [[entity-a]] (already in store).".to_string(),
             );
             let result = server.memstead_create(Parameters(CreateParams {
+                anchors: None,
                 title: "Real Link Demo".to_string(),
                 entity_type: "spec".to_string(),
                 mem: Some("specs".to_string()),
@@ -15036,6 +15223,7 @@ write_rules: []
             sections.insert("identity".to_string(), "identity body".to_string());
             sections.insert("purpose".to_string(), "purpose body".to_string());
             let r = server.memstead_create(Parameters(CreateParams {
+                anchors: None,
                 title: title.to_string(),
                 entity_type: "spec".to_string(),
                 mem: Some("specs".to_string()),
@@ -15077,6 +15265,7 @@ write_rules: []
             sections.insert("purpose".to_string(), body.to_string());
             b.update_entity(
                 memstead_base::UpdateEntityArgs {
+                    anchors: Vec::new(),
                     id: id.clone(),
                     expected_hash: Some(expected_hash),
                     sections,
@@ -15210,6 +15399,7 @@ write_rules: []
             let mut sections = indexmap::IndexMap::new();
             sections.insert("purpose".to_string(), "A's racing edit".to_string());
             let r = server.memstead_update(Parameters(UpdateParams {
+                anchors: None,
                 relations_unset: None,
                 id: "specs--entity-x".to_string(),
                 expected_hash: stale_hash,

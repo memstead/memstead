@@ -2358,6 +2358,47 @@ mod tests {
     }
 
     #[test]
+    fn anchor_only_commit_yields_zero_entity_deltas_and_valid_cursor() {
+        // Seed an entity, then land an anchor-only commit (only the
+        // `.memstead/anchors.json` sidecar changed). changes_since from the
+        // seed head must report ZERO entity deltas — the sidecar lives under
+        // `.memstead/` which the entity-delta computation filters — while
+        // the anchor commit's SHA is a valid `since` cursor.
+        use memstead_base::backend::MemBackend;
+        let tmp = TempDir::new().unwrap();
+        let gitdir = fresh_repo_dir(tmp.path());
+        let writer = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/specs".to_string());
+
+        MemBackend::write_entity(&writer, Path::new("alpha.md"), b"# Alpha").unwrap();
+        let seed_sha = MemBackend::commit(&writer, "seed", &ctx_for_test()).unwrap();
+
+        // Anchor-only commit: no entity write, just the sidecar.
+        writer
+            .write_anchors_sidecar(
+                br#"{"version":1,"entities":{"specs--alpha":[{"artifact":"src/lib.rs","grain":"file","class":"anchored","hash_stability":"stable","hash":"h1"}]}}"#,
+            )
+            .unwrap();
+        let anchor_sha = MemBackend::commit(&writer, "anchors", &ctx_for_test()).unwrap();
+        assert_ne!(seed_sha, anchor_sha);
+
+        // Zero entity deltas across the anchor-only commit.
+        let from_seed = dispatch_changes(&gitdir, "specs", "specs", &seed_sha).unwrap();
+        assert_eq!(from_seed.head, anchor_sha);
+        assert_eq!(
+            from_seed.changes.len(),
+            0,
+            "an anchor-only commit must produce zero entity deltas, got {:?}",
+            from_seed.changes
+        );
+
+        // The anchor commit's SHA is itself a valid cursor (resolves; no
+        // deltas after it).
+        let from_anchor = dispatch_changes(&gitdir, "specs", "specs", &anchor_sha).unwrap();
+        assert_eq!(from_anchor.head, anchor_sha);
+        assert_eq!(from_anchor.changes.len(), 0);
+    }
+
+    #[test]
     fn changes_since_unknown_cursor_returns_typed_commit_not_found_marker() {
         // A `since` that
         // doesn't resolve is a recoverable caller-argument fault, not a

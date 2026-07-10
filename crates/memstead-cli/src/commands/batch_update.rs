@@ -50,6 +50,7 @@ const RECOGNISED_MUTATION_KEYS: &[&str] = &[
     "metadata",
     "metadata_unset",
     "declare_relations",
+    "anchors",
 ];
 
 #[derive(Debug, Deserialize)]
@@ -79,6 +80,11 @@ struct EntryPayload {
     /// `EMPTY_UPDATE` envelope cover this shape uniformly.
     #[serde(default)]
     declare_relations: Vec<RelationPayload>,
+    /// Provenance anchors for THIS entry — matches the MCP `memstead_update`
+    /// `anchors[]` shape. Written into the mem-branch anchors sidecar in
+    /// the same batch commit; malformed input refuses `INVALID_ANCHOR`.
+    #[serde(default)]
+    anchors: Vec<memstead_base::anchor::AnchorInput>,
     /// Agent-authored provenance note for THIS entry's commit — matches
     /// the MCP mutation shape's `note`. Per-entry: distinct notes across
     /// batch entries are expressible. Optional; omit for note-less
@@ -388,6 +394,7 @@ fn build_update_args(
 
     Ok((
         UpdateEntityArgs {
+            anchors: entry.anchors,
             id,
             expected_hash,
             sections: entry.sections,
