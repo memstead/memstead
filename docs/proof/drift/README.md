@@ -65,3 +65,14 @@ project's graph by a committed projection script, not hand-typed.
 Its source of record is the launch-claims register assertion
 *"The measured drift loop closed 79 percent of 153 findings at a 12-minute
 median."*
+
+## Since this was measured
+
+*2026-07-10.* The mechanism that produced these figures — the process-mem drift
+findings loop, where a set of ingest process-mems ran an issue-tracker lifecycle
+over destination-quality drift — has since been replaced by an engine-owned
+findings store. Verify now measures fidelity and records durable findings inside
+the engine, keyed to the binding declaration and the source head, rather than as
+a separate tracker mem. The figures above are a sealed measurement of the earlier
+mechanism at one point in time; they are preserved as-is and are not re-measured
+against the new store.
