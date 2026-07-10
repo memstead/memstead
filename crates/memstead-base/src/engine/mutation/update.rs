@@ -61,6 +61,17 @@ struct PreparedUpdate {
     /// commit as the disk write on the commit step. Empty when the update
     /// carried no `anchors[]`.
     anchors: Vec<crate::anchor::Anchor>,
+    /// True when this update's *sole* delta is the anchors sidecar —
+    /// sections, metadata, and relationships are byte-identical to the
+    /// on-disk entity. Such a commit earns the distinct
+    /// `memstead: anchor <id>` subject (parsed `tool_verb == "anchor"`)
+    /// so an anchor-only refresh — which the `_hash` excludes and which
+    /// therefore produces zero entity deltas — is still observable to an
+    /// `--include-notes` reader. A content-changing update (even one that
+    /// also carries anchors) keeps the `memstead: update <id>` subject:
+    /// its content change already bumps `_hash` and surfaces as a delta,
+    /// so the anchor activity riding it is already visible.
+    anchor_only: bool,
 }
 
 /// The store-side results of applying a prepared write — filled in
@@ -130,7 +141,16 @@ impl Engine {
         if !prepared.anchors.is_empty() {
             super::stage_anchors_sidecar(backend, &prepared.id, prepared.anchors.clone())?;
         }
-        let commit_subject = format!("memstead: update {}", prepared.id);
+        // Anchor-only commits carry the distinct `anchor` verb so their
+        // otherwise-invisible sidecar change is legible in the note log;
+        // every other update keeps `update`. The verb is a subject-only
+        // signal — delta computation reads the tree diff, not the
+        // subject, so the zero-entity-delta guarantee is untouched.
+        let commit_subject = if prepared.anchor_only {
+            format!("memstead: anchor {}", prepared.id)
+        } else {
+            format!("memstead: update {}", prepared.id)
+        };
         let ctx = CommitContext {
             actor,
             client: client.cloned(),
@@ -628,6 +648,19 @@ impl Engine {
         // below.
         let markdown_pre_stamp = generate_markdown(&next, type_def.as_ref());
 
+        // Whether the user-visible content (sections, user-set metadata,
+        // declared relations) is byte-identical to the on-disk entity —
+        // the pre-stamp markdown's hash matches the current
+        // `content_hash`. When this holds past the no-op guard below, the
+        // *only* remaining delta is the anchors sidecar (an anchor-only
+        // update). `_hash` excludes anchors, so an anchor-only commit
+        // produces zero entity deltas; the distinct `anchor` verb is the
+        // compensating signal that makes it observable. `next.content_hash`
+        // is the on-disk value (cloned from the source entity and never
+        // recomputed since — same rationale as the no-op branch reads it).
+        let content_unchanged =
+            crate::entity::parser::compute_hash(&markdown_pre_stamp) == next.content_hash;
+
         // No-op short-circuit. When the pre-stamp markdown's hash
         // matches the entity's current `content_hash`, the
         // post-mutation user-visible state equals the on-disk state.
@@ -643,17 +676,10 @@ impl Engine {
         // lose the prospective-hash channel callers use to chain a
         // follow-up real update with `expected_hash`.
         if !args.dry_run {
-            let prospective_hash = crate::entity::parser::compute_hash(&markdown_pre_stamp);
-            // `next` was cloned from `entity` at the top of this fn
-            // and its `content_hash` field has not been recomputed
-            // since — equals the on-disk value. Reading from `next`
-            // rather than `entity` avoids extending the `self.store`
-            // immutable borrow past the mutable borrow taken by
-            // `apply_declare_relations`.
             // An update carrying `anchors[]` is never a no-op even when the
             // entity content is unchanged — the anchors sidecar must be
             // written, so fall through to the real-commit path.
-            if prospective_hash == next.content_hash && validated_anchors.is_empty() {
+            if content_unchanged && validated_anchors.is_empty() {
                 // No-op: report the preserved `last_modified` from
                 // the pre-stamp `next` (which still carries the
                 // entity's on-disk value because we haven't run the
@@ -802,6 +828,13 @@ impl Engine {
             // update path matches create's contract.
             warnings,
             relations_declared,
+            // Anchor-only: content byte-identical to disk, so the sidecar
+            // is the sole delta. Reachable here only past the no-op guard,
+            // which already returned when content is unchanged AND no
+            // anchors — so `content_unchanged` here implies anchors are
+            // present. The explicit `!is_empty()` keeps the predicate
+            // self-evidently correct without leaning on that invariant.
+            anchor_only: content_unchanged && !validated_anchors.is_empty(),
             anchors: validated_anchors,
         }))
     }

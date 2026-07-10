@@ -65,6 +65,162 @@ fn update_purpose_args(id: EntityId, expected_hash: String, body: &str) -> Updat
     }
 }
 
+/// An anchor-only update: no section/metadata/relationship change, only
+/// an `anchors[]` payload. Content stays byte-identical to on-disk, so
+/// the sole delta is the anchors sidecar.
+fn anchor_only_args(id: EntityId, expected_hash: String, anchor_json: &str) -> UpdateEntityArgs {
+    let anchor: memstead_base::anchor::AnchorInput =
+        serde_json::from_str(anchor_json).expect("valid anchor json");
+    UpdateEntityArgs {
+        anchors: vec![anchor],
+        id,
+        expected_hash: Some(expected_hash),
+        sections: IndexMap::new(),
+        append_sections: IndexMap::new(),
+        patch_sections: IndexMap::new(),
+        metadata: IndexMap::new(),
+        metadata_unset: Vec::new(),
+        dry_run: false,
+        declare_relations: Vec::new(),
+        relations_unset: Vec::new(),
+    }
+}
+
+#[test]
+fn anchor_only_update_commits_with_distinct_anchor_verb() {
+    // Third clause of projection-pipeline/04 criterion 4: an anchor-only
+    // commit produces zero entity deltas, its SHA is a valid `since`
+    // cursor, AND — with notes surfaced (`include_notes`) — it appears as
+    // a note entry carrying a DISTINCT `tool_verb` ("anchor"). The verb
+    // fires only for anchor-only commits: a content update keeps "update"
+    // and a create keeps "create" (the refusal complement).
+    let tmp = TempDir::new().unwrap();
+    init_real_mem_repo(tmp.path(), &[("specs", "default@1.0.0")]);
+    let mut e = engine_from_workspace_root(tmp.path()).expect("engine boots");
+
+    // create → verb "create".
+    let created = e
+        .create_entity(
+            create_args("specs", "Alpha"),
+            Actor::Cli,
+            Some(&client()),
+            None,
+        )
+        .expect("create succeeds");
+    let c1 = created.commit_sha.clone();
+
+    // Anchor-only update. Anchors are excluded from `_hash`, so the
+    // content hash is unchanged even though a real commit lands.
+    let anchor_json = r#"{"artifact":"src/lib.rs","grain":"file","class":"anchored","hash_stability":"stable","hash":"h1"}"#;
+    let a = e
+        .update_entity(
+            anchor_only_args(
+                created.id.clone(),
+                created.content_hash.clone(),
+                anchor_json,
+            ),
+            Actor::Cli,
+            Some(&client()),
+            None,
+        )
+        .expect("anchor-only update succeeds");
+    let c2 = a.commit_sha.clone();
+    assert!(!c2.is_empty(), "anchor-only update lands a real commit");
+    assert_ne!(c1, c2, "anchor-only update produced a distinct commit");
+    assert_eq!(
+        a.content_hash, created.content_hash,
+        "anchors are excluded from `_hash` — the content hash is unchanged",
+    );
+
+    // Across just the anchor commit (since = c1, exclusive): ZERO entity
+    // deltas, exactly one note, verb "anchor".
+    let across_anchor = e
+        .changes_since("specs", &c1, None)
+        .expect("changes_since c1");
+    assert_eq!(across_anchor.head, c2);
+    assert!(
+        across_anchor.changes.is_empty(),
+        "an anchor-only commit yields zero entity deltas, got {:?}",
+        across_anchor.changes,
+    );
+    let notes = across_anchor.notes.expect("git-branch mem surfaces notes");
+    assert_eq!(notes.len(), 1, "exactly the anchor commit is in range");
+    assert_eq!(
+        notes[0].tool_verb.as_deref(),
+        Some("anchor"),
+        "the anchor-only commit's note carries the distinct `anchor` verb",
+    );
+
+    // c2 is itself a valid `since` cursor: it resolves and reports no
+    // deltas after it.
+    let from_anchor = e
+        .changes_since("specs", &c2, None)
+        .expect("c2 is a valid cursor");
+    assert_eq!(from_anchor.head, c2);
+    assert!(from_anchor.changes.is_empty());
+
+    // Refusal complement 1: an ordinary content update keeps verb
+    // "update" and surfaces a real entity delta.
+    let u = e
+        .update_entity(
+            update_purpose_args(
+                created.id.clone(),
+                created.content_hash.clone(),
+                "revised purpose",
+            ),
+            Actor::Cli,
+            Some(&client()),
+            None,
+        )
+        .expect("content update succeeds");
+    let c3 = u.commit_sha.clone();
+    assert_ne!(c3, c2);
+    let across_update = e
+        .changes_since("specs", &c2, None)
+        .expect("changes_since c2");
+    assert_eq!(
+        across_update.changes.len(),
+        1,
+        "a content update surfaces exactly one entity delta",
+    );
+    let unotes = across_update.notes.expect("notes");
+    assert_eq!(unotes.len(), 1);
+    assert_eq!(
+        unotes[0].tool_verb.as_deref(),
+        Some("update"),
+        "a content-changing update keeps the plain `update` verb",
+    );
+
+    // Refusal complement 2 + fires-only-once: walk the whole branch.
+    // create → "create", anchor-only → "anchor", content → "update", and
+    // "anchor" appears exactly once (only the anchor-only commit earns it).
+    let all = e
+        .changes_since("specs", memstead_base::ops::changes::EMPTY_TREE_SHA, None)
+        .expect("full walk");
+    let all_notes = all.notes.expect("notes");
+    let verbs: Vec<&str> = all_notes
+        .iter()
+        .filter_map(|n| n.tool_verb.as_deref())
+        .collect();
+    assert!(
+        verbs.contains(&"create"),
+        "create commit keeps `create`: {verbs:?}"
+    );
+    assert!(
+        verbs.contains(&"anchor"),
+        "anchor commit shows `anchor`: {verbs:?}"
+    );
+    assert!(
+        verbs.contains(&"update"),
+        "content update shows `update`: {verbs:?}"
+    );
+    assert_eq!(
+        verbs.iter().filter(|v| **v == "anchor").count(),
+        1,
+        "the `anchor` verb fires only for the anchor-only commit: {verbs:?}",
+    );
+}
+
 #[test]
 fn second_engine_reloads_and_surfaces_mem_changed_on_create() {
     let tmp = TempDir::new().unwrap();

@@ -9,7 +9,10 @@
 //! shelling out to `git log` and re-implementing the trailer parser.
 //!
 //! Subject shapes the engine emits (see callers of `format_commit_message`):
-//! - `memstead: <verb> <id>` (entity CRUD: `create`, `update`, `delete`)
+//! - `memstead: <verb> <id>` (entity CRUD: `create`, `update`, `delete`;
+//!   plus `anchor` for an anchor-only update — sole delta the anchors
+//!   sidecar, so it earns a distinct verb since it yields zero entity
+//!   deltas and is otherwise invisible in the note log)
 //! - `memstead: <verb> <from> → <to>` (`rename`, `relate`, `unrelate`)
 //! - `memstead: mem_<verb> <name>` (lifecycle, with optional ` (config)` /
 //!   ` (seal)` qualifier)
@@ -476,6 +479,20 @@ mod tests {
         assert!(parsed.note.is_none());
         assert!(parsed.tool.is_none());
         assert!(parsed.client.is_none());
+    }
+
+    #[test]
+    fn parser_recognises_anchor_verb() {
+        // An anchor-only update commits with the distinct `anchor` verb
+        // so an `--include-notes` reader can tell it apart from a content
+        // update. The subject shape is identical to `update` otherwise —
+        // `memstead: anchor <id>` — so the same `<verb> <id>` split
+        // applies and `entity_id` carries the id verbatim.
+        let raw = crate::vcs::format_commit_message("memstead: anchor specs--alpha", &ctx());
+        let parsed = parse_commit_message(&raw);
+        assert_eq!(parsed.subject, "memstead: anchor specs--alpha");
+        assert_eq!(parsed.tool_verb.as_deref(), Some("anchor"));
+        assert_eq!(parsed.entity_id.as_deref(), Some("specs--alpha"));
     }
 
     #[test]
