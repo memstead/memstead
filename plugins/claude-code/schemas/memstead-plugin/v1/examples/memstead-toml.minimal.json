@@ -1,0 +1,4 @@
+{
+  "format": "memstead-plugin/v1",
+  "mems": ["project_mems/sample"]
+}

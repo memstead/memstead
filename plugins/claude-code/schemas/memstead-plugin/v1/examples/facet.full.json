@@ -1,0 +1,10 @@
+{
+  "name": "source-tree",
+  "medium": "source-tree",
+  "scope": [
+    { "path": "**/*.rs", "mode": "allow" },
+    { "path": "**/target/**", "mode": "deny" }
+  ],
+  "engagement": { "readVerb": "Read source code" },
+  "preparation": "pdf-to-markdown"
+}

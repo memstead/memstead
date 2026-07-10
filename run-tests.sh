@@ -91,6 +91,29 @@ else
 fi
 
 echo ""
+echo "══════════════════════════════════"
+echo "  Testing: plugin format schemas (v0 + v1)"
+echo "══════════════════════════════════"
+# The two named consumers of the plugin-owned schemas, run in the
+# canonical suite: the per-version validator tests, and the version-generic
+# workspace walker over each version's examples (metaschema shape + every
+# example validates). Closes the pre-v1 gap where the schemas dir had zero
+# canonical-suite coverage. The round-trip pin (init output validates
+# against v1/binding.schema.json) is split: the JS half lives in the v1
+# validator test; the Rust half (init still emits that golden) is in
+# memstead-cli's suite.
+SCHEMAS=plugins/claude-code/schemas
+if (cd "$ROOT" \
+    && node --test "$SCHEMAS/memstead-plugin/v0/validator.test.mjs" "$SCHEMAS/memstead-plugin/v1/validator.test.mjs" "$SCHEMAS/versions.test.mjs" \
+    && node "$SCHEMAS/validate-live-workspace.mjs" --schemas-dir "$SCHEMAS/memstead-plugin/v0" \
+    && node "$SCHEMAS/validate-live-workspace.mjs" --schemas-dir "$SCHEMAS/memstead-plugin/v1"); then
+  echo "  ✓ plugin format schemas passed"
+else
+  FAILED+=("plugin-schemas")
+  echo "  ✗ plugin format schemas FAILED"
+fi
+
+echo ""
 if [ ${#FAILED[@]} -eq 0 ]; then
   echo "All passed."
   exit 0

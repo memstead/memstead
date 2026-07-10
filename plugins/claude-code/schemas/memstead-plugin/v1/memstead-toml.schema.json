@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://memstead.io/schemas/memstead-plugin/v1/memstead-toml",
+  "title": "memstead-plugin/v1 .memstead.toml",
+  "description": "Top-level workspace manifest for a memstead-plugin/v1 workspace. The plugin reads this file to discover the registered mems and any client- or plugin-namespaced configuration. The engine consumes only `mems`; the four-primitive configs live at fixed `.memstead/{mediums,facets,projections}/` paths rather than via directory-pointer keys (the retired `ingests/` dir and its `ingest` primitive are gone in v1 — a binding carries its operations inline). The remainder is plugin-owned. Validation gates the plugin loader on the `format` version key. Pass-through tables under `[clients.*]` and `[plugin.*]` are accepted without further constraint. The retired `schemas_dir` key is undocumented in v1 (workspace schemas load from the fixed `.memstead/schemas/` path).",
+  "type": "object",
+  "required": ["format", "mems"],
+  "properties": {
+    "format": {
+      "description": "Pinned format version. Producers must emit this exact string for v1; the plugin loader rejects any other value with a clear error listing supported versions.",
+      "type": "string",
+      "const": "memstead-plugin/v1"
+    },
+    "mems": {
+      "description": "Explicitly registered mem paths, relative to this file's directory. No auto-discovery. Runtime-created mems are appended here by `memstead_mem_create`.",
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
+    "mutations": {
+      "description": "Engine-owned mutation policy. See WorkspaceToml in memstead-schema for accepted keys.",
+      "type": "object"
+    },
+    "mem_management": {
+      "description": "Engine-owned mem lifecycle policy. Two array-of-tables — `[[mem_management.create]]` (per rule: `pattern` + `schemas[]`) and `[[mem_management.delete]]` (per rule: `pattern` only). Glob matching is gitignore-style over the composed candidate `<path>/<name>`.",
+      "type": "object",
+      "properties": {
+        "create": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "pattern": { "type": "string", "minLength": 1 },
+              "schemas": {
+                "type": "array",
+                "minItems": 1,
+                "items": { "type": "string", "minLength": 1 }
+              }
+            },
+            "required": ["pattern", "schemas"],
+            "additionalProperties": false
+          }
+        },
+        "delete": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "pattern": { "type": "string", "minLength": 1 }
+            },
+            "required": ["pattern"],
+            "additionalProperties": false
+          }
+        }
+      }
+    },
+    "drift": {
+      "description": "Engine-owned disk-drift policy. See WorkspaceToml. A v1 workspace never carries a `realizationPatterns` sub-key — provenance from source artifact → entity lives in engine-owned anchors, not schema regexes.",
+      "type": "object"
+    },
+    "clients": {
+      "description": "Pass-through namespace for client-specific configuration tables (e.g. `[clients.claude_code]`). Keys and shapes are owned by individual clients; the plugin loader does not constrain them.",
+      "type": "object",
+      "additionalProperties": true
+    },
+    "plugin": {
+      "description": "Pass-through namespace for plugin-specific configuration tables (e.g. `[plugin.claude_code.outer_vcs]`). Keys and shapes are owned by individual plugins; the loader does not constrain them.",
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

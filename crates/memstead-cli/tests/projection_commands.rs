@@ -394,6 +394,67 @@ fn init_codebase_scaffolds_all_three_with_full_operations() {
     assert_eq!(back, b);
 }
 
+/// Round-trip pin (Rust half): `projection init` still emits **exactly** the
+/// committed golden binding the plugin's v1 schema test validates against
+/// `binding.schema.json`. The JS half (in the v1 validator suite) proves the
+/// golden validates against the schema; this proves init still produces that
+/// golden. Together they keep the plugin's `memstead-plugin/v1` binding schema
+/// and the engine's emitter from drifting apart: change the emitter's shape and
+/// this fails until the golden (and thus the schema check) is revisited.
+#[test]
+fn init_output_matches_the_v1_schema_golden() {
+    let tmp = bare_workspace();
+    let root = tmp.path();
+
+    // Args chosen to match the committed golden's content (mem, intent, name;
+    // the source pointer lands only in the medium file, not the binding).
+    memstead()
+        .current_dir(root)
+        .args([
+            "projection",
+            "init",
+            "--mem",
+            "docs",
+            "--source",
+            "../src",
+            "--medium-type",
+            "codebase",
+            "--intent",
+            "Keep the reference mem true to the source tree",
+            "--name",
+            "guide",
+        ])
+        .assert()
+        .success();
+
+    let emitted: Value = serde_json::from_slice(
+        &std::fs::read(root.join(".memstead/projections/docs/guide.json")).unwrap(),
+    )
+    .unwrap();
+
+    // The golden ships with the plugin's v1 schema examples (repo-root-relative
+    // to the cli crate: two levels up to `public/`, then the schemas tree).
+    let golden_path = Path::new(env!("CARGO_MANIFEST_DIR")).join(
+        "../../plugins/claude-code/schemas/memstead-plugin/v1/examples/binding.from-init.json",
+    );
+    let golden: Value = serde_json::from_slice(&std::fs::read(&golden_path).unwrap_or_else(|e| {
+        panic!(
+            "golden fixture unreadable at {}: {e}",
+            golden_path.display()
+        )
+    }))
+    .unwrap();
+
+    assert_eq!(
+        emitted,
+        golden,
+        "`projection init` output drifted from the committed v1 binding golden \
+         ({}). Update the golden AND re-check binding.schema.json — the two must \
+         move together.",
+        golden_path.display()
+    );
+}
+
 /// A filesystem source likewise scaffolds build+sync+verify (the matrix marks
 /// it path-shaped with a change signal).
 #[test]

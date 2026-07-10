@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://memstead.io/schemas/memstead-plugin/v1/medium",
+  "title": "memstead-plugin/v1 medium",
+  "description": "A Medium is a passive, named, typed reference to a body of information the mem acknowledges as part of its territory — nothing more (no selection, no engagement metadata, no preparation). Each medium file lives at `.memstead/mediums/<mem>/<name>.json`; the filename stem is the medium's reference key, used by a facet's `medium` field. Unchanged from v0.",
+  "type": "object",
+  "required": ["name", "type", "pointer"],
+  "properties": {
+    "name": {
+      "description": "Stable reference name — facets reference a medium by this. Conventionally equal to the filename stem.",
+      "type": "string",
+      "minLength": 1
+    },
+    "type": {
+      "description": "What kind of surface this medium references. `codebase` = a source tree; `filesystem` = a non-code file tree; `graph` = another mem's graph (the reserved id `graph` is \"home\"); `git` = a commit history; `web` = web sources.",
+      "type": "string",
+      "enum": ["codebase", "filesystem", "graph", "git", "web"]
+    },
+    "pointer": {
+      "description": "Where the body of information lives — a path, URL, or mem id, interpreted per `type`. Opaque to the plugin. Workspace-relative paths may carry leading `../` to reach sibling code trees. May be empty when the territory base is the workspace root.",
+      "type": "string"
+    },
+    "change_detection": {
+      "description": "How the build loop detects what changed in this medium since the last synced pass. `auto` (default when omitted) probes for a git work tree over `pointer` — present → behave as `git`, absent → `mtime`. `git` = files differing between the stored commit id and the source's current HEAD. `mtime` = a per-file `{mtime,size}` stat-map diff. `none` = no reliable signal. `graph`-type mediums ignore this field — their signal is the source mem's snapshot token.",
+      "type": "string",
+      "enum": ["auto", "git", "mtime", "none"]
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,140 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://memstead.io/schemas/memstead-plugin/v1/binding",
+  "title": "memstead-plugin/v1 binding",
+  "description": "A Binding is one versioned record per source→mem obligation: the declaration (`intent`, `source_facets`, `reference_mems`, `destination_mem`, `deny_paths`, `coverage_semantics`, `rules`) plus an `operations { build, sync, verify }` block. It collapses the retired projection + ingest pair into a single file at `.memstead/projections/<mem>/<name>.json`. `source_facets` reference facets by name under the binding's own mem; `reference_mems` supply read-only cross-mem context; `destination_mem` is the mem the binding writes into. Every operation is optional: an absent build/sync makes that mutating operation refuse at run time with a `projection enable <op>` remedy; an absent verify means engine defaults (verify is read-only). The `prune` block, when present, requests a deletion-proposal guarantee validated against the source medium at binding time.",
+  "type": "object",
+  "required": ["version", "destination_mem", "operations"],
+  "properties": {
+    "version": {
+      "description": "Binding format version. v1 bindings carry the integer 1; a file without it is refused by the loader.",
+      "type": "integer",
+      "const": 1
+    },
+    "intent": {
+      "description": "What the binding is trying to accomplish — prose for the agent. Optional.",
+      "type": "string",
+      "minLength": 1
+    },
+    "source_facets": {
+      "description": "Facets (by name, resolved under the binding's own mem) the binding consumes.",
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "reference_mems": {
+      "description": "Read-only reference mems (by name) that supply cross-mem context.",
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "destination_mem": {
+      "description": "The mem this binding writes into.",
+      "type": "string",
+      "minLength": 1
+    },
+    "deny_paths": {
+      "description": "Paths excluded from the binding's scope (workspace-relative globs). Strategy-invariant — moved up from the per-ingest record. A glob deny list is legal only over a path-shaped medium namespace (codebase / filesystem / git); the engine refuses it at binding-validation time over a graph or web medium.",
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "coverage_semantics": {
+      "description": "Whether the binding claims to cover everything in its declared scope (`exhaustive`) or a deliberately partial slice (`curated`). Defaults to `exhaustive` when absent.",
+      "type": "string",
+      "enum": ["exhaustive", "curated"]
+    },
+    "rules": {
+      "description": "Free-form binding rules (e.g. a one-shot lens `routing` string). Opaque to the engine — consumed only by the one-shot brief renderer.",
+      "type": "object"
+    },
+    "prune": {
+      "description": "Prune policy — additive, optional. Absent means prune is disabled (no deletion proposals). Present means prune produces deletion proposals in the sync brief under the requested guarantee. Prune has no independent schedule: it rides the sync brief, so it carries no trigger/batch_size.",
+      "type": "object",
+      "properties": {
+        "guarantee": {
+          "description": "The guarantee the binding requests, validated against the medium's base-leg retrievability at binding-validation time. `never-clobber` is a full three-way merge, supportable only where the source base leg is retrievable (git-backed sources); `conflict-flag` (the default) presents both sides and never auto-writes over a model-side edit.",
+          "type": "string",
+          "enum": ["never-clobber", "conflict-flag"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "operations": {
+      "description": "The operations this binding declares. Every operation is optional; an absent mutating operation (build/sync) refuses at run time with a remedy, an absent verify means engine defaults.",
+      "type": "object",
+      "properties": {
+        "build": { "$ref": "#/$defs/buildOperation" },
+        "sync": { "$ref": "#/$defs/syncOperation" },
+        "verify": { "$ref": "#/$defs/verifyOperation" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "buildOperation": {
+      "description": "The build operation — the only operation carrying a mode. Grows new coverage (`discovery`) or runs a single bounded pass (`one-shot`). trigger / batch_size / post_actions are scheduling attributes.",
+      "type": "object",
+      "required": ["mode", "trigger", "batch_size"],
+      "properties": {
+        "mode": {
+          "description": "`discovery` builds out new coverage; `one-shot` runs a single bounded pass. The retired `refinement` value is not accepted.",
+          "type": "string",
+          "enum": ["discovery", "one-shot"]
+        },
+        "trigger": { "$ref": "#/$defs/trigger" },
+        "batch_size": { "$ref": "#/$defs/batchSize" },
+        "post_actions": {
+          "description": "Free-form post-run actions (e.g. a one-shot `archive_source` flag). Opaque to the engine — consumed only by the one-shot brief renderer.",
+          "type": "object",
+          "properties": {
+            "archive_source": {
+              "description": "When true, the one-shot brief instructs the agent to archive the source mem after every destination is processed.",
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "syncOperation": {
+      "description": "The sync operation — the sole maintenance writer. Carries no mode. An absent sync block makes that mutating operation refuse at run time.",
+      "type": "object",
+      "required": ["trigger", "batch_size"],
+      "properties": {
+        "trigger": { "$ref": "#/$defs/trigger" },
+        "batch_size": { "$ref": "#/$defs/batchSize" }
+      },
+      "additionalProperties": false
+    },
+    "verifyOperation": {
+      "description": "The verify operation — read-only measurement. Carries no mode. adjudication_cap and full_resync_every are additive tier-3 scheduling knobs that default to the engine's dogfood-tuned values when absent.",
+      "type": "object",
+      "required": ["trigger", "batch_size"],
+      "properties": {
+        "trigger": { "$ref": "#/$defs/trigger" },
+        "batch_size": { "$ref": "#/$defs/batchSize" },
+        "adjudication_cap": {
+          "description": "The maximum number of hash-drift adjudications a single verify run asserts before queueing the remainder as backlog. 0 disables the cap.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "full_resync_every": {
+          "description": "Every N verify runs, a full-enumeration coverage sweep runs (for enumerable mediums). 0 disables scheduled full walks.",
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "trigger": {
+      "description": "What sets an operation running. `loop` runs continuously under `/loop`; `manual` runs only when invoked; `on-event` is reserved for event-driven hooks.",
+      "type": "string",
+      "enum": ["loop", "manual", "on-event"]
+    },
+    "batchSize": {
+      "description": "How many artifacts a single run processes.",
+      "type": "integer",
+      "minimum": 1
+    }
+  }
+}

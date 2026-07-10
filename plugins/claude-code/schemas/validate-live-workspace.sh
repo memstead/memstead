@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
-# Validate plugin-format files in the live workspace against the
-# memstead-plugin/v0 schemas. Walks the four-primitive layout under
-# `.memstead/`: `mediums/<mem>/*.json`, `facets/<mem>/*.json`,
-# `projections/<mem>/*.json`, and `ingests/*.json`.
+# Validate plugin-format files in the live workspace against the current
+# memstead-plugin/v1 schemas. Walks the binding layout under `.memstead/`:
+# `mediums/<mem>/*.json`, `facets/<mem>/*.json`, and `projections/<mem>/*.json`
+# (validated against the v1 binding schema).
 #
-# Also validates each schema document against the JSON Schema 2020-12
-# metaschema (sanity check on the schema files themselves) and the
+# Also metaschema-shape-checks each schema document and validates the v1
 # example fixtures against their schemas.
 #
 # Uses Node built-ins only. No npm dependencies.
@@ -13,7 +12,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-SCHEMAS_DIR="$REPO_ROOT/plugins/claude-code/schemas/memstead-plugin/v0"
+SCHEMAS_DIR="$REPO_ROOT/plugins/claude-code/schemas/memstead-plugin/v1"
 WORKSPACE_DIR="$REPO_ROOT/graph"
 
 cd "$REPO_ROOT"

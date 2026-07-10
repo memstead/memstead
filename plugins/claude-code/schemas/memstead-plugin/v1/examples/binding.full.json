@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "intent": "Model the engine crates and keep the mem synced to the source",
+  "source_facets": ["source-tree", "public-api"],
+  "reference_mems": ["glossary"],
+  "destination_mem": "engine",
+  "deny_paths": ["VISION.md", "dev/**"],
+  "coverage_semantics": "curated",
+  "rules": { "routing": "route public-API items to the api mem, internals to engine" },
+  "prune": { "guarantee": "conflict-flag" },
+  "operations": {
+    "build": { "mode": "one-shot", "trigger": "loop", "batch_size": 20, "post_actions": { "archive_source": true } },
+    "sync": { "trigger": "manual", "batch_size": 15 },
+    "verify": { "trigger": "manual", "batch_size": 20, "adjudication_cap": 50, "full_resync_every": 20 }
+  }
+}

@@ -16,26 +16,40 @@ selects which version's schemas apply.
 schemas/
   README.md                              # this file
   memstead-plugin/
-    v0/
+    v0/                                  # frozen — do not edit
       memstead-toml.schema.json          # `.memstead.toml` (parsed-as-JSON)
       medium.schema.json                 # `.memstead/mediums/<mem>/<name>.json`
       facet.schema.json                  # `.memstead/facets/<mem>/<name>.json`
       projection.schema.json             # `.memstead/projections/<mem>/<name>.json`
       ingest.schema.json                 # `.memstead/ingests/<name>.json`
-      examples/
-        memstead-toml.minimal.json
-        memstead-toml.full.json
-        facet.minimal.json
-        facet.full.json
-        medium.minimal.json
-        projection.four-primitive.json
-        ingest.minimal.json
-        ingest.full.json
+      examples/ …                        # minimal + full per file type
       validator.mjs                      # hand-rolled validator
       validator.test.mjs                 # `node --test` suite
-    v1/                                  # (future) — added when v1 lands
-  validate-live-workspace.sh             # validates the live workspace's plugin files
+    v1/
+      memstead-toml.schema.json          # `.memstead.toml` — `format = memstead-plugin/v1`
+      medium.schema.json                 # `.memstead/mediums/<mem>/<name>.json` (unchanged from v0)
+      facet.schema.json                  # `.memstead/facets/<mem>/<name>.json`  (unchanged from v0)
+      binding.schema.json                # `.memstead/projections/<mem>/<name>.json` — replaces projection + ingest
+      examples/
+        binding.minimal.json
+        binding.full.json
+        binding.from-init.json           # the `projection init` golden (round-trip pin)
+        medium.minimal.json
+        facet.minimal.json / facet.full.json
+        memstead-toml.minimal.json / memstead-toml.full.json
+      validator.mjs                      # hand-rolled validator
+      validator.test.mjs                 # `node --test` suite (examples + round-trip pin + refusals)
+  validate-live-workspace.mjs            # version-generic walker (--schemas-dir picks the version)
+  validate-live-workspace.sh             # runs the walker over the live workspace
 ```
+
+**v1: the binding replaces the projection + ingest pair.** The retired
+four-primitive `projection` + flat-`ingest` split collapses into one versioned
+`binding` file at `.memstead/projections/<mem>/<name>.json` — the declaration
+(`intent`, `source_facets`, `reference_mems`, `destination_mem`, `deny_paths`,
+`coverage_semantics`, `rules`) plus an `operations { build, sync, verify }`
+block. There is no `ingests/` directory and no `ingest` schema in v1. `medium`
+and `facet` are unchanged. The retired `mode: refinement` value is not accepted.
 
 The `examples/` directory ships two examples per file type — one minimal
 (only the required fields) and one full-featured (every documented field
@@ -51,18 +65,22 @@ gates on `format` in `.memstead.toml`:
 |-------------------------------|-------------------------------------------------------|
 | absent                        | treat as legacy v0 (warn, validate against v0)        |
 | `memstead-plugin/v0`         | validate against v0 schemas; load                     |
+| `memstead-plugin/v1`         | validate against v1 schemas; load                     |
 | any other string              | reject with error listing supported versions          |
 
-A future v1 ships a parallel `memstead-plugin/v1/` directory with its
-own schemas and examples; the loader picks the directory whose name
-matches the `format` value. v0 and v1 coexist — producers pin one,
-consumers support both during a deprecation window. Breaking changes go
-in v1; v0 stays frozen.
+v1 ships as a parallel `memstead-plugin/v1/` directory with its own schemas
+and examples; the loader picks the directory whose name matches the `format`
+value. v0 and v1 coexist — producers pin one, consumers support both during a
+deprecation window. Breaking changes go in v1 (the projection + ingest pair
+became the single `binding`); **v0 stays frozen byte-for-byte** — never edit a
+file under `v0/`.
 
 ## Producers and consumers
 
-**Producer** today: humans editing `.memstead.toml`, medium/facet/projection/ingest
-files in their workspace.
+**Producer** today: humans editing `.memstead.toml` and medium/facet/binding
+files in their workspace, and `memstead projection init` (which scaffolds a v1
+binding triple non-interactively — its output is pinned against
+`v1/binding.schema.json` by the round-trip test).
 
 **Producer** tomorrow: the macOS app's workspace-export pipeline (per the
 App-DB-rework follow-up plan). The app's internal model is App-DB; its
@@ -70,9 +88,11 @@ export-to-plugin step writes files matching these schemas so a workspace
 authored in the app remains readable by the Claude-Code plugin without
 custom adapters.
 
-**Consumer**: the Claude-Code plugin (`plugins/claude-code/skills/ingest/scripts/workspace-loader.mjs`
-and dependents). The hand-rolled validator at `validator.mjs` is the
-runtime gate.
+**Consumer**: the engine's binding loader (`memstead-base`, read version-gated
+on `format`), reached from the plugin via the `memstead` CLI / MCP; the
+hand-rolled `validator.mjs` + the `validate-live-workspace.mjs` walker are the
+authoring-time gate. Both consumers run in the canonical test suite
+(`run-tests.sh`, the "plugin format schemas" leg).
 
 ## Engine vs. plugin ownership
 
@@ -83,10 +103,11 @@ is retired and ignored by the engine (workspace schemas load from the
 fixed `.memstead/schemas/` path); the namespaced `[clients.*]` and `[plugin.*]`
 tables are plugin-owned. Engine accepts plugin-owned keys as typed
 pass-throughs (so `#[serde(deny_unknown_fields)]` does not reject them)
-but does not consume them. The four-primitive configs (medium, facet,
-projection, ingest) live at fixed `.memstead/{mediums,facets,projections,ingests}/`
-paths — there are no directory-pointer keys — and their schema files are
-entirely plugin-owned.
+but does not consume them. The config files live at fixed
+`.memstead/{mediums,facets,projections}/` paths — there are no
+directory-pointer keys — and their schema files are entirely plugin-owned. (In
+v0 there was also a flat `.memstead/ingests/` directory; v1 folds it into the
+binding, so the `ingests/` dir is gone.)
 
 ### `drift.realizationPatterns` — deprecated (E3a)
 
@@ -103,16 +124,23 @@ engine-owned anchors, not in schema regexes.
 The frozen **v0** `memstead-toml.schema.json` keeps its generic
 `drift` description ("Engine-owned disk-drift policy") **byte-identical** — v0
 stays frozen (see Versioning above), so no realization-patterns removal happens
-in v0; the key is simply inert. A future **v1** never carries a
-`realizationPatterns` key.
+in v0; the key is simply inert. **v1** never carries a `realizationPatterns`
+key.
 
 ## Validation against the live workspace
 
 ```
-plugins/claude-code/schemas/validate-live-workspace.sh
+plugins/claude-code/schemas/validate-live-workspace.mjs --schemas-dir <version-dir> [--workspace-dir <dir>]
 ```
 
-walks the four-primitive layout under `.memstead/` (`mediums/`,
-`facets/`, `projections/`, `ingests/`) and validates every file against
-its corresponding schema using a Node script that loads only built-in
-modules and the shared `validator.mjs`.
+is a version-generic walker: it metaschema-shape-checks every `*.schema.json`
+in `--schemas-dir`, validates every fixture under that version's `examples/`
+against the schema its filename prefix names, and — when `--workspace-dir` is
+given — walks a live `.memstead/` layout (`mediums/`, `facets/`, `projections/`,
+plus `ingests/` for a v0 workspace) and validates each file. It adapts to the
+version by which schemas are present: for v1, `projections/` validates against
+`binding.schema.json` and there is no `ingests/` leg. The colocated
+`validator.mjs` (Node built-ins only) is the runtime validator. The convenience
+wrapper `validate-live-workspace.sh` runs it over the live workspace; the
+`run-tests.sh` "plugin format schemas" leg runs it (examples-only) over both
+versions.

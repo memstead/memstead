@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "destination_mem": "docs",
+  "operations": {
+    "build": { "mode": "discovery", "trigger": "manual", "batch_size": 10 }
+  }
+}

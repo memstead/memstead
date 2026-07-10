@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "intent": "Keep the reference mem true to the source tree",
+  "source_facets": [
+    "guide"
+  ],
+  "reference_mems": [],
+  "destination_mem": "docs",
+  "deny_paths": [],
+  "coverage_semantics": "exhaustive",
+  "prune": {
+    "guarantee": "never-clobber"
+  },
+  "operations": {
+    "build": {
+      "mode": "discovery",
+      "trigger": "loop",
+      "batch_size": 20
+    },
+    "sync": {
+      "trigger": "manual",
+      "batch_size": 20
+    },
+    "verify": {
+      "trigger": "manual",
+      "batch_size": 20,
+      "adjudication_cap": 50,
+      "full_resync_every": 20
+    }
+  }
+}
