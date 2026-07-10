@@ -758,3 +758,266 @@ fn enable_outside_workspace_is_typed() {
     assert_eq!(env["code"], "WORKSPACE_NOT_INITIALISED");
     assert_ne!(env["code"], "INTERNAL");
 }
+
+// ---------------------------------------------------------------------------
+// projection advance (D7)
+// ---------------------------------------------------------------------------
+
+/// Run `git` in `repo`, panicking on failure (deterministic committer identity).
+fn git(repo: &Path, args: &[&str]) {
+    let out = std::process::Command::new("git")
+        .args(args)
+        .current_dir(repo)
+        .env("GIT_AUTHOR_NAME", "t")
+        .env("GIT_AUTHOR_EMAIL", "t@example")
+        .env("GIT_COMMITTER_NAME", "t")
+        .env("GIT_COMMITTER_EMAIL", "t@example")
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+fn git_head(repo: &Path) -> String {
+    String::from_utf8(
+        std::process::Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(repo)
+            .output()
+            .unwrap()
+            .stdout,
+    )
+    .unwrap()
+    .trim()
+    .to_string()
+}
+
+/// Build a bootable **filesystem** workspace (no `mem-repo/.git`) with one
+/// writable folder mem `engine`, a v1 binding `engine/graph` over a git source
+/// tree at `<root>/src`, and the source moved from a base commit to `head1`
+/// (a.rs modified, b.rs deleted). The base commit's sha is pre-seeded into the
+/// mem's `syncState` so `advance` sees a real changed slice. Written directly
+/// into the mem config (not via `mem set-sync-state`) so the test is
+/// flavour-independent — the lean CLI has no `mem` subcommand.
+fn advance_workspace() -> TempDir {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+
+    // Workspace adapter + engine folder mount.
+    write_store(
+        root,
+        "workspace.toml",
+        "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+    );
+    write_store(
+        root,
+        "state/mounts.json",
+        r#"{"format":"memstead-mounts-3","mounts":[{"mem":"engine","schema":"default@1.0.0","storage":{"type":"folder","path":"engine-mem"},"capability":"write","lifecycle":"eager","cross_linkable":false}]}"#,
+    );
+
+    // v1 binding store: medium (git codebase at `src`), facet, binding.
+    write_store(
+        root,
+        "mediums/engine/graph.json",
+        r#"{"name":"graph","type":"codebase","pointer":"src","change_detection":"git"}"#,
+    );
+    write_store(
+        root,
+        "facets/engine/source-tree.json",
+        r#"{"name":"source-tree","medium":"graph","scope":[{"path":"src/**/*.rs","mode":"allow"}]}"#,
+    );
+    write_store(
+        root,
+        "projections/engine/graph.json",
+        r#"{"version":1,"intent":"model the engine","source_facets":["source-tree"],"reference_mems":[],"destination_mem":"engine","deny_paths":[],"coverage_semantics":"exhaustive","operations":{"build":{"mode":"discovery","trigger":"loop","batch_size":20}}}"#,
+    );
+
+    // The git source tree: base (a.rs + b.rs), then head1 (modify a.rs, delete b.rs).
+    let src = root.join("src");
+    std::fs::create_dir_all(&src).unwrap();
+    git(&src, &["init", "-q"]);
+    std::fs::write(src.join("a.rs"), "one").unwrap();
+    std::fs::write(src.join("b.rs"), "bee").unwrap();
+    git(&src, &["add", "a.rs", "b.rs"]);
+    git(&src, &["commit", "-qm", "base"]);
+    let baseline = git_head(&src);
+    std::fs::write(src.join("a.rs"), "one-longer").unwrap();
+    std::fs::remove_file(src.join("b.rs")).unwrap();
+    git(&src, &["add", "-A"]);
+    git(&src, &["commit", "-qm", "head1"]);
+
+    // The destination mem's config, with the sync baseline pre-seeded so the
+    // changed slice (a.rs modified, b.rs deleted) is presented.
+    let mem_meta = root.join("engine-mem").join(".memstead");
+    std::fs::create_dir_all(&mem_meta).unwrap();
+    std::fs::write(
+        mem_meta.join("config.json"),
+        format!(
+            r#"{{"format":1,"schema":"default@1.0.0","syncState":{{"engine/graph/source-tree#synced":"{baseline}"}}}}"#
+        ),
+    )
+    .unwrap();
+
+    tmp
+}
+
+/// End-to-end through the CLI (three separate processes, proving on-disk
+/// resumability): advance a partial disposition, refuse an unknown artifact
+/// atomically, then complete — the `#synced` token advancing.
+#[test]
+fn advance_records_dispositions_completes_and_gates_unknown() {
+    let tmp = advance_workspace();
+    let root = tmp.path();
+
+    // (1) Dispose a.rs → remainder = b.rs (deleted), not complete.
+    let out = memstead()
+        .current_dir(root)
+        .args([
+            "--json",
+            "projection",
+            "advance",
+            "engine/graph",
+            "--dispositions",
+            r#"{"src/a.rs": "worked"}"#,
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&out).expect("advance --json must emit JSON");
+    assert_eq!(env["binding"], "engine/graph");
+    assert_eq!(env["completed"], false);
+    assert_eq!(env["pending"], 1);
+    assert_eq!(env["disposed"], 1);
+    assert_eq!(env["remainder"]["deleted"], serde_json::json!(["src/b.rs"]));
+    assert_eq!(env["remainder"]["modified"], serde_json::json!([]));
+
+    // (2) An unknown artifact id refuses the whole call atomically.
+    let store_path = root.join(".memstead/state/advance/engine/graph.json");
+    let before = std::fs::read(&store_path).unwrap();
+    let out = memstead()
+        .current_dir(root)
+        .args([
+            "--json",
+            "projection",
+            "advance",
+            "engine/graph",
+            "--dispositions",
+            r#"{"src/never.rs": "worked"}"#,
+        ])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(env["code"], "PROJECTION_ADVANCE_UNKNOWN_ARTIFACT");
+    let after = std::fs::read(&store_path).unwrap();
+    assert_eq!(before, after, "refused advance must not touch the store");
+
+    // (3) Dispose the rest → complete → the `#synced` token advances. The a.rs
+    // disposition from step (1) persisted across processes (resumability).
+    let out = memstead()
+        .current_dir(root)
+        .args([
+            "--json",
+            "projection",
+            "advance",
+            "engine/graph",
+            "--dispositions",
+            r#"{"src/b.rs": "worked"}"#,
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(env["completed"], true);
+    assert_eq!(env["pending"], 0);
+    assert_eq!(env["disposed"], 2, "a.rs (persisted) + b.rs (this call)");
+    assert_eq!(
+        env["tokens_written"],
+        serde_json::json!(["engine/graph/source-tree#synced"])
+    );
+    // The durable store was dropped on completion.
+    assert!(!store_path.exists());
+}
+
+/// `advance` on a missing binding refuses with `PROJECTION_NOT_FOUND` (NotFound
+/// exit) — before any engine boot.
+#[test]
+fn advance_missing_binding_is_typed() {
+    let tmp = bare_workspace();
+    let out = memstead()
+        .current_dir(tmp.path())
+        .args([
+            "--json",
+            "projection",
+            "advance",
+            "engine/nope",
+            "--dispositions",
+            "{}",
+        ])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(env["code"], "PROJECTION_NOT_FOUND");
+    assert_ne!(env["code"], "INTERNAL");
+}
+
+/// `advance` with a malformed `--dispositions` payload refuses with
+/// `PROJECTION_INVALID_DISPOSITIONS` before touching configs or an engine.
+#[test]
+fn advance_invalid_dispositions_is_typed() {
+    let tmp = bare_workspace();
+    let out = memstead()
+        .current_dir(tmp.path())
+        .args([
+            "--json",
+            "projection",
+            "advance",
+            "engine/graph",
+            "--dispositions",
+            "not-json",
+        ])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(env["code"], "PROJECTION_INVALID_DISPOSITIONS");
+}
+
+/// `advance` outside a workspace refuses with the shared, single-sourced
+/// `WORKSPACE_NOT_INITIALISED` code — never a generic/internal leak.
+#[test]
+fn advance_outside_workspace_is_typed() {
+    let tmp = TempDir::new().unwrap();
+    let out = memstead()
+        .current_dir(tmp.path())
+        .args([
+            "--json",
+            "projection",
+            "advance",
+            "engine/graph",
+            "--dispositions",
+            "{}",
+        ])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(env["code"], "WORKSPACE_NOT_INITIALISED");
+    assert_ne!(env["code"], "INTERNAL");
+}

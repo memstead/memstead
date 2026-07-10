@@ -23,19 +23,22 @@ use memstead_base::binding::{
 use memstead_base::binding_migrate::{
     BindingMigrateError, migrate_gen2_bindings, resolve_migrated_binding,
 };
-use memstead_base::ingest::resolve::{ResolvedPrimarySource, resolve_binding};
+use memstead_base::ingest::advance::{AdvanceError, advance_baseline};
+use memstead_base::ingest::resolve::{
+    ResolveError, ResolvedPrimarySource, resolve_binding, resolve_binding_run,
+};
 use memstead_base::pipeline::{
     Facet, IngestTrigger, Medium, MediumType, PatternEntry, PatternMode,
 };
 use memstead_base::pipeline_store::{
-    delete_ingest, load_legacy_pipeline_configs, read_binding, write_binding, write_facet,
-    write_medium,
+    delete_ingest, load_legacy_pipeline_configs, load_pipeline_configs, read_binding,
+    write_binding, write_facet, write_medium,
 };
 use memstead_base::workspace_store::StoreError;
 
 use crate::CliError;
 use crate::output::{ExitKind, print_json, print_markdown};
-use crate::setup::{CliContext, workspace_not_initialised_error};
+use crate::setup::{CliContext, CliEngine, workspace_not_initialised_error};
 
 #[derive(ClapArgs, Debug)]
 pub struct Args {
@@ -70,6 +73,19 @@ pub enum ProjectionCommand {
     /// `PROJECTION_OP_ALREADY_ENABLED`; a missing binding refuses
     /// `PROJECTION_NOT_FOUND`.
     Enable(EnableArgs),
+    /// Advance a binding's sync baseline by recording per-artifact
+    /// dispositions (D7). The engine freezes the presented changed slice,
+    /// subtracts already-disposed artifacts on re-presentation, appends
+    /// new-HEAD deltas when the source moves mid-pass, and — when the
+    /// remainder empties — advances the destination mem's `#synced` token via
+    /// the sync-state writer (provenance piggybacks that commit). Dispositions
+    /// are durable (`.memstead/state/advance/`), so a partial pass resumes
+    /// across process restarts. The gate accepts **only** artifact ids the
+    /// engine presented — an unknown id refuses the whole call atomically
+    /// (`PROJECTION_ADVANCE_UNKNOWN_ARTIFACT`). In this cycle the agent supplies
+    /// a disposition for **every** artifact explicitly (auto-derivation lands
+    /// later).
+    Advance(AdvanceArgs),
 }
 
 /// The medium type flag for `projection init` — the CLI-facing mirror of
@@ -166,11 +182,25 @@ pub struct EnableArgs {
     pub binding: String,
 }
 
+#[derive(ClapArgs, Debug)]
+pub struct AdvanceArgs {
+    /// The binding id `<mem>/<stem>` (D3) — e.g. `engine/graph`.
+    pub binding: String,
+    /// A JSON object mapping each judged artifact id to its disposition, e.g.
+    /// `'{"src/lib.rs": "worked", "src/old.rs": "irrelevant"}'`. Only ids the
+    /// engine presented in the brief's changed slice are accepted — an unknown
+    /// id refuses the whole call. Pass `'{}'` to re-present the remainder
+    /// without recording anything.
+    #[arg(long)]
+    pub dispositions: String,
+}
+
 pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     match args.command {
         ProjectionCommand::Init(a) => init(ctx, a),
         ProjectionCommand::Migrate(a) => migrate(ctx, a),
         ProjectionCommand::Enable(a) => enable(ctx, a),
+        ProjectionCommand::Advance(a) => advance(ctx, a),
     }
 }
 
@@ -705,6 +735,154 @@ fn enable(ctx: &CliContext, args: EnableArgs) -> anyhow::Result<()> {
             op.name(),
             operations.join(", ")
         ));
+    }
+    Ok(())
+}
+
+/// Map a `resolve_binding_run` failure (dangling facet/medium, malformed id)
+/// to a typed CLI error. `IngestNotFound` / `ProjectionNotFound` cannot arise
+/// from the binding resolver (the binding *is* the declaration), so they fall
+/// through to the generic advance-failure code.
+fn map_resolve_err(binding_id: &str, err: ResolveError) -> CliError {
+    let message = err.to_string();
+    let mapped = match err {
+        ResolveError::FacetNotFound { .. } => {
+            CliError::new(ExitKind::NotFound, "PROJECTION_FACET_NOT_FOUND", message)
+        }
+        ResolveError::MediumNotFound { .. } => {
+            CliError::new(ExitKind::NotFound, "PROJECTION_MEDIUM_NOT_FOUND", message)
+        }
+        ResolveError::MalformedProjectionRef { .. } => {
+            CliError::new(ExitKind::Validation, "PROJECTION_INVALID_NAME", message)
+        }
+        _ => CliError::new(ExitKind::Generic, "PROJECTION_ADVANCE_FAILED", message),
+    };
+    mapped.with_details(json!({ "binding": binding_id }))
+}
+
+/// Map an [`AdvanceError`] to a typed CLI error. The unknown-artifact refusal
+/// is the D7 gate (Validation); a malformed id is a Validation-shaped name
+/// error; store / engine failures are generic. Codes are spelled as literals at
+/// each site so the generated error index picks them up.
+fn map_advance_err(binding_id: &str, err: AdvanceError) -> CliError {
+    let message = err.to_string();
+    match &err {
+        AdvanceError::MalformedId(_) => {
+            CliError::new(ExitKind::Validation, "PROJECTION_INVALID_NAME", message)
+                .with_details(json!({ "binding": binding_id }))
+        }
+        AdvanceError::UnknownArtifact { artifacts, .. } => CliError::new(
+            ExitKind::Validation,
+            "PROJECTION_ADVANCE_UNKNOWN_ARTIFACT",
+            message,
+        )
+        .with_details(json!({ "binding": binding_id, "unknown_artifacts": artifacts })),
+        AdvanceError::Store(_) | AdvanceError::Engine(_) => {
+            CliError::new(ExitKind::Generic, "PROJECTION_ADVANCE_FAILED", message)
+                .with_details(json!({ "binding": binding_id }))
+        }
+    }
+}
+
+fn advance(ctx: &CliContext, args: AdvanceArgs) -> anyhow::Result<()> {
+    let (_shape, root) = ctx.workspace_shape().ok_or_else(|| {
+        workspace_not_initialised_error(
+            "not inside a Memstead workspace (no `.memstead/workspace.toml` in any ancestor)",
+        )
+    })?;
+
+    let binding_id = args.binding;
+
+    // Parse the dispositions payload up front — a malformed `--dispositions`
+    // refuses cheaply (before loading configs or an engine) with a typed code.
+    let dispositions: std::collections::BTreeMap<String, String> =
+        serde_json::from_str(&args.dispositions).map_err(|e| {
+            CliError::new(
+                ExitKind::Validation,
+                "PROJECTION_INVALID_DISPOSITIONS",
+                format!(
+                    "--dispositions must be a JSON object mapping artifact id → disposition \
+                     string: {e}"
+                ),
+            )
+            .with_details(json!({ "error": e.to_string() }))
+        })?;
+
+    // Find the binding by canonical id in the v1 store.
+    let configs = load_pipeline_configs(&root).map_err(|e| {
+        CliError::new(
+            ExitKind::Generic,
+            "PROJECTION_ADVANCE_FAILED",
+            format!("could not load pipeline config: {e}"),
+        )
+        .with_details(json!({ "error": e.to_string() }))
+    })?;
+    let record = configs
+        .bindings
+        .iter()
+        .find(|r| format!("{}/{}", r.mem, r.name) == binding_id)
+        .ok_or_else(|| {
+            CliError::new(
+                ExitKind::NotFound,
+                "PROJECTION_NOT_FOUND",
+                format!(
+                    "no binding `{binding_id}` in this workspace — scaffold one with \
+                     `projection init` or migrate a legacy workspace with `projection migrate`"
+                ),
+            )
+            .with_details(json!({ "binding": binding_id }))
+        })?;
+    let resolved = resolve_binding_run(&configs, &binding_id, &record.config)
+        .map_err(|e| map_resolve_err(&binding_id, e))?;
+
+    // The engine is mutable — a completing advance writes the `#synced`
+    // baseline token through the sync-state writer.
+    let mut cli_engine = ctx.cli_engine_at(&root)?;
+    let engine = match &mut cli_engine {
+        #[cfg(feature = "mem-repo")]
+        CliEngine::MemRepo(e) => e,
+        CliEngine::Filesystem(e) => e,
+    };
+
+    let outcome = advance_baseline(engine, &root, &resolved, &dispositions)
+        .map_err(|e| map_advance_err(&binding_id, e))?;
+
+    if ctx.json {
+        print_json(&json!({
+            "binding": outcome.binding,
+            "completed": outcome.completed,
+            "disposed": outcome.disposed,
+            "pending": outcome.pending,
+            "remainder": outcome.remainder,
+            "tokens_written": outcome.tokens_written,
+            "warnings": outcome.warnings,
+        }))?;
+    } else {
+        let mut out = format!(
+            "# Projection advance\n\nBinding `{}`: {} artifact(s) disposed, {} remaining.\n",
+            outcome.binding, outcome.disposed, outcome.pending
+        );
+        if outcome.completed {
+            out.push_str("\nEvery presented artifact is disposed — the sync baseline advanced.\n");
+            if !outcome.tokens_written.is_empty() {
+                out.push_str("\nBaseline tokens written:\n");
+                for key in &outcome.tokens_written {
+                    out.push_str(&format!("- `{key}`\n"));
+                }
+            }
+        } else {
+            out.push_str(
+                "\nRemainder still pending — re-run `projection advance` after judging the rest \
+                 (a brief re-render shows what is left).\n",
+            );
+        }
+        if !outcome.warnings.is_empty() {
+            out.push_str("\n## Warnings\n\n");
+            for w in &outcome.warnings {
+                out.push_str(&format!("- {w}\n"));
+            }
+        }
+        print_markdown(&out);
     }
     Ok(())
 }

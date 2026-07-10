@@ -24,6 +24,7 @@
 //! and the UniFFI surface, which the plugin skill and macOS app consume as
 //! thin clients.
 
+pub mod advance;
 pub mod brief;
 pub mod change_detection;
 pub mod cursor;
@@ -34,6 +35,10 @@ pub mod resolve;
 pub mod selection;
 pub mod slice;
 
+pub use advance::{
+    AdvanceError, AdvanceOutcome, AdvanceState, advance_baseline, advance_store_path,
+    delete_advance_store, read_advance_store, write_advance_store,
+};
 pub use brief::{
     NoSignalNote, PROCESS_MEM_SCHEMA, ProcessMemInfo, SourceCursor, SyncCommand,
     assemble_discovery_brief, assemble_one_shot_brief, assemble_refinement_brief,

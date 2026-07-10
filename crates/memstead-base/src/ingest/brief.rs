@@ -282,11 +282,14 @@ pub fn render_operative_data(
     format!("{}\n", lines.join("\n"))
 }
 
-/// One `memstead mem set-sync-state` argument pair — the durable baseline a
-/// facet's cursor advances to after a full pass.
+/// One baseline token a facet's cursor advances to after a full pass — the
+/// `(sync_state key, medium-typed token)` pair the engine records via the
+/// `set_mem_sync_state` writer. Produced by the cursor; the brief no longer
+/// renders it as an operator command (the agent runs `projection advance`,
+/// which computes and records the token engine-side — D4/D7).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SyncCommand {
-    /// The sync-state key, conventionally `"<ingest>/<facet>"`.
+    /// The sync-state key, `"<binding-id>/<facet>#synced"` (D4).
     pub key: String,
     /// The opaque new-baseline token.
     pub token: String,
@@ -334,8 +337,12 @@ pub struct SourceCursor {
     /// un-migrated legacy bare names (which, as globs, match nothing). Never a
     /// hard error: the ingest still runs, the entry just does nothing.
     pub dead_denies: Vec<String>,
-    /// The destination mem the `set-sync-state` commands target.
+    /// The destination mem whose `sync_state` the baseline tokens live on.
     pub dest_mem: String,
+    /// The canonical binding id `<mem>/<stem>` (D3) — rendered into the
+    /// `memstead projection advance <binding-id> …` line the changed-slice
+    /// preface now emits instead of a raw `mem set-sync-state` command (D4/D7).
+    pub binding_id: String,
 }
 
 /// Single-quote a value for the emitted shell command, escaping embedded
@@ -390,8 +397,8 @@ fn no_signal_reason_text(reason: NoSignalReason) -> &'static str {
 }
 
 /// Render the `## Source changes since the last sync` preface — the changed
-/// slice to steer at first, any no-signal sources, plus the `set-sync-state`
-/// "record the baseline LAST" section. Extends the plugin's `changedSliceBlock`
+/// slice to steer at first, any no-signal sources, plus the `projection advance`
+/// "record your dispositions LAST" section. Extends the plugin's `changedSliceBlock`
 /// with the no-signal notes. Returns the empty string when nothing changed,
 /// nothing needs reseeding, and every source is genuinely unchanged (no
 /// no-signal notes) — making the brief byte-identical to a plain roam.
@@ -476,35 +483,41 @@ pub fn render_changed_slice(cursor: &SourceCursor) -> String {
         lines.push(String::new());
     }
 
-    // Cursor-write instruction — recorded by the agent as the FINAL step, so
-    // an interrupted pass leaves the baseline unchanged and re-presents the
-    // same slice next run. Routed through the engine CLI — never a raw write.
-    let all_commands: Vec<&SyncCommand> = cursor
-        .write_commands
-        .iter()
-        .chain(cursor.reseed.iter())
-        .collect();
-    if !all_commands.is_empty() {
-        lines.push("### Recording the new baseline (do this LAST)\n".to_string());
+    // Disposition-record instruction — the agent's FINAL step. The advance is
+    // resumable and non-stalling (D7): a partial pass is honored on disk, and a
+    // source that moves mid-pass re-presents (remaining + new) without losing
+    // recorded work. The agent runs `projection advance`, which computes and
+    // records the new baseline token engine-side — the brief no longer renders a
+    // raw `mem set-sync-state` command (D4). The block appears whenever there is
+    // a baseline to advance (a changed facet or a first-sync reseed).
+    let has_baseline_to_advance = !cursor.write_commands.is_empty() || !cursor.reseed.is_empty();
+    if has_baseline_to_advance {
+        lines.push("### Recording your dispositions (do this LAST)\n".to_string());
         lines.push(
-            "Only after you have fully worked the changed artifacts above — and only if this pass \
-             was not cut short — record the source state you synced against, so the next pass \
-             targets just what changes next. Run, exactly once each:\n"
+            "Only after you have worked the changed artifacts above — and only for the artifacts \
+             you actually judged — record a disposition for each, so the next pass targets just \
+             what changes next. This advance is resumable and non-stalling: a partial pass is \
+             honored, and if the source moves mid-pass the remaining slice re-presents \
+             (remaining + new) without losing your recorded work.\n"
+                .to_string(),
+        );
+        lines.push(
+            "In this window you supply a disposition for **every** artifact explicitly \
+             (auto-derivation lands in a later cycle). The gate accepts only artifact ids listed \
+             above — an unknown id refuses the whole call. When every artifact is disposed, the \
+             sync baseline advances automatically. Run:\n"
                 .to_string(),
         );
         lines.push("```sh".to_string());
-        for c in &all_commands {
-            lines.push(format!(
-                "memstead mem set-sync-state {} {} {}",
-                cursor.dest_mem,
-                shell_quote(&c.key),
-                shell_quote(&c.token)
-            ));
-        }
+        lines.push(format!(
+            "memstead projection advance {} --dispositions {}",
+            cursor.binding_id,
+            shell_quote(r#"{"<artifact>": "<disposition>", ...}"#)
+        ));
         lines.push("```".to_string());
         lines.push(
-            "If you were interrupted before finishing, skip this — leaving the baseline where it \
-             is re-presents the same slice next run.\n"
+            "If you were interrupted before finishing, that is fine — your recorded dispositions \
+             persist, and the next run re-presents only what is left.\n"
                 .to_string(),
         );
     }
@@ -985,6 +998,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
             degraded: false,
             dead_denies: vec![],
             dest_mem: "engine".to_string(),
+            binding_id: "engine/graph".to_string(),
         };
         assert_eq!(render_changed_slice(&cursor), "");
     }
@@ -1003,6 +1017,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
             degraded: false,
             dead_denies: vec!["dev".to_string(), "typo/**".to_string()],
             dest_mem: "engine".to_string(),
+            binding_id: "engine/graph".to_string(),
         };
         let out = render_changed_slice(&cursor);
         assert!(out.contains("deny_paths` entries match nothing"));
@@ -1024,6 +1039,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
             degraded: false,
             dead_denies: vec![],
             dest_mem: "engine".to_string(),
+            binding_id: "engine/graph".to_string(),
         };
         let expected_lines = [
             "## Source changes since the last sync\n",
@@ -1034,12 +1050,13 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
             "**Modified:**",
             "- `b.rs`",
             "",
-            "### Recording the new baseline (do this LAST)\n",
-            "Only after you have fully worked the changed artifacts above — and only if this pass was not cut short — record the source state you synced against, so the next pass targets just what changes next. Run, exactly once each:\n",
+            "### Recording your dispositions (do this LAST)\n",
+            "Only after you have worked the changed artifacts above — and only for the artifacts you actually judged — record a disposition for each, so the next pass targets just what changes next. This advance is resumable and non-stalling: a partial pass is honored, and if the source moves mid-pass the remaining slice re-presents (remaining + new) without losing your recorded work.\n",
+            "In this window you supply a disposition for **every** artifact explicitly (auto-derivation lands in a later cycle). The gate accepts only artifact ids listed above — an unknown id refuses the whole call. When every artifact is disposed, the sync baseline advances automatically. Run:\n",
             "```sh",
-            "memstead mem set-sync-state engine 'engine-graph/source' 'HEADSHA'",
+            r#"memstead projection advance engine/graph --dispositions '{"<artifact>": "<disposition>", ...}'"#,
             "```",
-            "If you were interrupted before finishing, skip this — leaving the baseline where it is re-presents the same slice next run.\n",
+            "If you were interrupted before finishing, that is fine — your recorded dispositions persist, and the next run re-presents only what is left.\n",
         ];
         assert_eq!(
             render_changed_slice(&cursor),
@@ -1060,13 +1077,16 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
             degraded: false,
             dead_denies: vec![],
             dest_mem: "d".to_string(),
+            binding_id: "d/p".to_string(),
         };
         let out = render_changed_slice(&cursor);
         assert!(out.starts_with("## Source changes since the last sync\n\n"));
         assert!(out.contains(
             "No prior sync baseline exists for `ing/f` — treating the current source state as the baseline (first sync). No priority slice from it this pass; proceed as usual."
         ));
-        assert!(out.contains("memstead mem set-sync-state d 'ing/f' 'TOK'"));
+        assert!(out.contains(
+            r#"memstead projection advance d/p --dispositions '{"<artifact>": "<disposition>", ...}'"#
+        ));
         assert!(
             !out.contains("The source moved"),
             "no 'moved' copy when only reseeding"
@@ -1094,6 +1114,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
             degraded: false,
             dead_denies: vec![],
             dest_mem: "d".to_string(),
+            binding_id: "d/p".to_string(),
         };
         let out = render_changed_slice(&cursor);
         assert!(out.starts_with("## Source changes since the last sync\n"));
@@ -1119,7 +1140,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
             }
         }
         // No baseline to advance → no recording block, no "moved" copy.
-        assert!(!out.contains("### Recording the new baseline"));
+        assert!(!out.contains("### Recording your dispositions"));
         assert!(!out.contains("The source moved"));
     }
 
@@ -1137,13 +1158,16 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
             degraded: false,
             dead_denies: vec![],
             dest_mem: "d".to_string(),
+            binding_id: "d/p".to_string(),
         };
         let out = render_changed_slice(&cursor);
         assert!(out.contains("The source moved"));
         assert!(out.contains("**Modified:**"));
         assert!(out.contains("- `other`: unscoped facet"));
-        assert!(out.contains("### Recording the new baseline"));
-        assert!(out.contains("memstead mem set-sync-state d 'ing/f' 'HEAD'"));
+        assert!(out.contains("### Recording your dispositions"));
+        assert!(out.contains(
+            r#"memstead projection advance d/p --dispositions '{"<artifact>": "<disposition>", ...}'"#
+        ));
     }
 
     /// The one-shot lens block: destination-set table, routing rule (when set),
@@ -1222,11 +1246,15 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
             degraded: true,
             dead_denies: vec![],
             dest_mem: "d".to_string(),
+            binding_id: "d/p".to_string(),
         };
         let out = render_changed_slice(&cursor);
         assert!(out.contains(&format!("- …and {} more added", 3)));
         assert!(out.contains("Precise change history for one or more facets was unavailable"));
-        // The JSON token is single-quoted; its embedded `"` survive unescaped.
-        assert!(out.contains(r#"'{"v":1,"aggregate":"x"}'"#));
+        // The brief renders the `projection advance` line (the token is no longer
+        // an operator command — the engine computes and records it, D4/D7).
+        assert!(out.contains(
+            r#"memstead projection advance d/p --dispositions '{"<artifact>": "<disposition>", ...}'"#
+        ));
     }
 }

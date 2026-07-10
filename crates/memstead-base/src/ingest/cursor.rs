@@ -62,8 +62,9 @@
 //! snapshot — is collected as a [`NoSignalNote`] and rendered distinguishably.
 //!
 //! Load-bearing invariant: the new baseline `token` is only *collected* here
-//! (into `write_commands` / `reseed`); the agent records it via
-//! `set-sync-state` as the last step of a full pass. The driver never writes it.
+//! (into `write_commands` / `reseed`); it is recorded by the engine's
+//! `set_mem_sync_state` writer when `projection advance` completes a full pass
+//! (D7). The driver never writes it.
 
 use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
@@ -854,6 +855,10 @@ pub fn compute_source_cursor(
         degraded,
         dead_denies: dead_deny_entries(resolved, workspace_root),
         dest_mem: dest.clone(),
+        // The resolved ingest's `name` is the canonical binding id `<mem>/<stem>`
+        // (via `resolve_binding_run`) — the id the `projection advance` line the
+        // brief renders (D4/D7) is keyed on.
+        binding_id: resolved.name.clone(),
     }
 }
 

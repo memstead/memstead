@@ -18,10 +18,12 @@
 //! normalization it needs — kept together rather than split here.
 //!
 //! Load-bearing invariant preserved from the plugin: the new baseline
-//! `token` is only ever *returned* here, never written. The agent records
-//! it (via `set-sync-state`) as the **last** step of a full pass, so an
-//! aborted pass leaves the baseline untouched and the next run re-presents
-//! the identical slice.
+//! `token` is only ever *returned* here, never written. It is recorded by the
+//! engine's `set_mem_sync_state` writer when `projection advance` completes a
+//! full pass (D7), so an aborted pass leaves the baseline untouched and the next
+//! run re-presents the identical slice.
+
+use serde::{Deserialize, Serialize};
 
 use crate::ops::ChangeEnvelope;
 
@@ -33,7 +35,11 @@ use super::change_detection::{
 /// The classified set of changed source artifacts in one pass. For the git
 /// and mtime strategies the entries are workspace-relative paths; for the
 /// graph strategy they are entity ids. Each class is kept sorted.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+///
+/// Serde-serializable so the [`super::advance`] durable store can freeze a
+/// presented slice to `.memstead/state/advance/` and re-present its remainder
+/// across process restarts (D7).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Slice {
     /// Newly present artifacts.
     pub added: Vec<String>,
