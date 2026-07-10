@@ -10,8 +10,8 @@
     {
       "name": "memstead",
       "source": "./plugins/claude-code",
-      "description": "Work with Memstead knowledge graphs from Claude Code — typed, schema-validated markdown graphs your agent reads and grows over MCP. Install, then run /setup once per workspace. Skills for setup, ingest, interview, reconcile, and everyday graph work.",
-      "version": "0.1.0"
+      "description": "Work with Memstead knowledge graphs from Claude Code — typed, schema-validated markdown graphs your agent reads and grows over MCP. Install, then run /setup once per workspace. Commands for setup, interview, bulk ingest, recall, and graph upkeep — or just talk to Claude; the MCP tools are always live.",
+      "version": "0.2.0"
     }
   ]
 }
