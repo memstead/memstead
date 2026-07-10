@@ -14,6 +14,7 @@
 //! `memstead-git-branch`, which builds on `memstead-base`.
 
 pub mod backend;
+pub mod binding;
 pub mod chunking;
 pub mod domain_authority_wire;
 pub mod engine;
