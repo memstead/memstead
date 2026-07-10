@@ -34,6 +34,9 @@ use memstead_base::binding_migrate::{
 };
 use memstead_base::ingest::advance::{AdvanceError, advance_baseline};
 use memstead_base::ingest::findings::verify_binding;
+use memstead_base::ingest::report::{
+    DEFAULT_REPORT_BUDGET, compute_fidelity_report, render_fidelity_report,
+};
 use memstead_base::ingest::resolve::{
     ResolveError, ResolvedPrimarySource, ResolvedSource, resolve_binding, resolve_binding_run,
 };
@@ -117,9 +120,14 @@ pub enum ProjectionCommand {
     /// (`.memstead/state/findings/`). A binding-declaration edit or a source-head
     /// move partitions the keyspace, so prior findings are segregated as
     /// superseded, never presented as current. Verify never mutates the mem —
-    /// any repair routes through the (later) sync brief. The full tier-1 fidelity
-    /// report is a later slice; this reports the recorded / superseded / backlog
-    /// counts.
+    /// any repair routes through the (later) sync brief. It then renders the
+    /// deterministic, token-budgeted **tier-1 fidelity report** (group B) over
+    /// the findings just recorded: grain-classed coverage with tree-anchor
+    /// fan-out on its own axis, anchor-resolution %, freshness vs. both
+    /// `sync_state` tokens (`signal: none` → freshness unknowable), the
+    /// capability-matrix block, and the tier-3 backlog depth — aggregates always
+    /// ship; heavy per-artifact lists greedy-fill under `--budget` and drop to
+    /// hints (forced back in with `--include`).
     Verify(VerifyArgs),
 }
 
@@ -246,6 +254,16 @@ pub struct AdvanceArgs {
 pub struct VerifyArgs {
     /// The binding id `<mem>/<stem>` (D3) — e.g. `engine/graph`.
     pub binding: String,
+    /// Token budget for the tier-1 fidelity report's **heavy** content
+    /// (per-artifact lists). Aggregated counts always ship in addition; heavy
+    /// lists greedy-fill and drop to `## Hints` when they do not fit. Defaults
+    /// to the house envelope budget.
+    #[arg(long)]
+    pub budget: Option<usize>,
+    /// Force a heavy report section in past the budget (repeatable):
+    /// `uncovered_artifacts` | `tree_fanout` | `superseded_findings`.
+    #[arg(long = "include")]
+    pub include: Vec<String>,
 }
 
 pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
@@ -1296,6 +1314,12 @@ fn verify(ctx: &CliContext, args: VerifyArgs) -> anyhow::Result<()> {
         .with_details(json!({ "binding": binding_id, "error": e.to_string() }))
     })?;
 
+    // Assemble + render the tier-1 fidelity report (group B) over the findings
+    // the pass just recorded. Read-only — no destination-mem mutation.
+    let budget = args.budget.unwrap_or(DEFAULT_REPORT_BUDGET);
+    let report = compute_fidelity_report(engine, &root, &record.config, &resolved, &outcome.key);
+    let rendered = render_fidelity_report(&report, budget, &args.include);
+
     if ctx.json {
         print_json(&json!({
             "binding": outcome.binding,
@@ -1306,23 +1330,13 @@ fn verify(ctx: &CliContext, args: VerifyArgs) -> anyhow::Result<()> {
             "recorded": outcome.recorded,
             "superseded": outcome.superseded,
             "backlog": outcome.backlog,
+            "report": report,
+            "report_mode": rendered.mode,
+            "report_markdown": rendered.markdown,
         }))?;
     } else {
-        let mut out = format!(
-            "# Projection verify\n\nBinding `{}`: {} finding(s) recorded under the current key.\n",
-            outcome.binding, outcome.recorded
-        );
-        out.push_str(&format!(
-            "\n- Tier-3 adjudication backlog: {}\n- Superseded findings (prior key): {}\n",
-            outcome.backlog, outcome.superseded
-        ));
-        if outcome.superseded > 0 {
-            out.push_str(
-                "\nSuperseded findings were recorded under a prior `(hash(D), source_head)` — a \
-                 declaration edit or source move segregated them; they are not current.\n",
-            );
-        }
-        print_markdown(&out);
+        // The rendered report IS the stdout content (agent-consumable brief).
+        print_markdown(&rendered.markdown);
     }
     Ok(())
 }

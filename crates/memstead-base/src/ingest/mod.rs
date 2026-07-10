@@ -32,6 +32,7 @@ pub mod findings;
 pub mod guidance;
 pub mod refinement;
 pub mod render;
+pub mod report;
 pub mod resolve;
 pub mod selection;
 pub mod slice;
@@ -63,6 +64,11 @@ pub use guidance::{
 };
 pub use refinement::{Batch, next_batch};
 pub use render::{RenderBriefError, mode_name, render_ingest_brief};
+pub use report::{
+    ALLOWED_REPORT_INCLUDE_KEYS, AnchorComposition, DEFAULT_REPORT_BUDGET, DenominatorBasis,
+    FacetCapability, FacetFreshness, FidelityReport, GrainCoverage, RenderedFidelityReport,
+    TreeFanout, compute_fidelity_report, render_fidelity_report,
+};
 pub use resolve::{
     ChangeStrategy, ResolveError, ResolvedIngest, ResolvedPrimarySource, ResolvedSource,
     find_git_root, resolve_binding, resolve_binding_run, resolve_change_strategy,
