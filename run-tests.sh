@@ -66,9 +66,24 @@ fi
 
 echo ""
 echo "══════════════════════════════════"
+echo "  Lint: plugin roster prose discipline"
+echo "══════════════════════════════════"
+# Its own named leg (not a glob inside the node-test leg): router line
+# caps, no mechanism-term narration, no retired vocabulary, medium-neutral
+# descriptions. reconcile/audit exempt (frozen interim). See the checker
+# header for the full rule/scope map.
+if (cd "$ROOT" && node plugins/claude-code/scripts/check-skill-prose.mjs); then
+  echo "  ✓ plugin roster prose lint passed"
+else
+  FAILED+=("plugin-skill-prose")
+  echo "  ✗ plugin roster prose lint FAILED"
+fi
+
+echo ""
+echo "══════════════════════════════════"
 echo "  Testing: plugin (node --test)"
 echo "══════════════════════════════════"
-if (cd "$ROOT" && node --test plugins/claude-code/hooks/*.test.js plugins/claude-code/skills/ingest/scripts/*.test.js); then
+if (cd "$ROOT" && node --test plugins/claude-code/hooks/*.test.js plugins/claude-code/skills/ingest/scripts/*.test.js plugins/claude-code/scripts/*.test.mjs); then
   echo "  ✓ plugin tests passed"
 else
   FAILED+=("plugin-tests")
