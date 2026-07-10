@@ -94,7 +94,7 @@ pub struct Entity {
 }
 
 // ---------------------------------------------------------------------------
-// Stats
+// Status (D11 `stats` → `status`; every field preserved — the D14 floor)
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone)]
@@ -104,7 +104,7 @@ pub struct EdgeTypeCount {
 }
 
 #[derive(Debug, Clone)]
-pub struct Stats {
+pub struct Status {
     pub entity_count: u64,
     pub stub_count: u64,
     pub edge_count: u64,

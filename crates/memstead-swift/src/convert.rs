@@ -19,7 +19,7 @@ use crate::types::{
     EdgeSource, EdgeTypeCount, Entity, EntityDiff, HealthFinding, HealthIssue, HealthSummary,
     IncomingRipple, ListResult, MemSchemaOutcome, MetadataEntry, MetadataValue, MissingField,
     ParseRecoveryEntry, ParseRecoveryReport, Query, RelationDirection, RelationEdge, Relations,
-    Relationship, ReloadResult, SearchHit, SearchResult, SearchScope, Section, StaleEntity, Stats,
+    Relationship, ReloadResult, SearchHit, SearchResult, SearchScope, Section, StaleEntity, Status,
 };
 
 // ---------------------------------------------------------------------------
@@ -73,17 +73,18 @@ pub(crate) fn entity_to_ffi(entity: &core_entity::Entity) -> Entity {
 }
 
 // ---------------------------------------------------------------------------
-// Stats.
+// Status.
 // ---------------------------------------------------------------------------
 
 // The engine payload is `core_ops::Status` (renamed from `Stats` with the CLI/
-// MCP `stats`→`status` rename, D11); the UDL/Swift-facing `Stats` dictionary
-// and this converter's name stay put until the later UDL-surface rename.
-pub(crate) fn stats_to_ffi(
+// MCP `stats`→`status` rename, D11); the UDL/Swift-facing dictionary and this
+// converter followed with the B4b UDL break — `Status`, every field preserved
+// (the rename-preserving floor, D14).
+pub(crate) fn status_to_ffi(
     stats: core_ops::Status,
     store: &core_store::Store,
     mem_router: &core_mem::MemRouterSnapshot,
-) -> Stats {
+) -> Status {
     let mut edge_types: Vec<EdgeTypeCount> = stats
         .edge_types
         .into_iter()
@@ -116,7 +117,7 @@ pub(crate) fn stats_to_ffi(
         .collect();
     read_mems.sort();
 
-    Stats {
+    Status {
         entity_count: real,
         stub_count,
         edge_count: stats.edge_count as u64,

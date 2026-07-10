@@ -1011,7 +1011,14 @@ impl Engine {
         self.update_facet(mem, name, &parse_json(facet_json, "facet")?, note)
     }
 
-    /// [`Self::add_projection`] from a JSON-encoded [`Projection`].
+    /// Add a projection from a JSON-encoded [`Projection`], scaffolding a v1
+    /// [`BindingV1`] around it (D14). The caller supplies the projection-level
+    /// fields (`intent` / `source_facets` / `reference_mems` /
+    /// `destination_mem` / `rules`); the engine wraps them in a fresh binding
+    /// with a default `operations.build` block (discovery / loop / batch 20)
+    /// and empty `deny_paths`, then writes the versioned binding file. This is
+    /// the projection-update path D14 routes operations-block edits through —
+    /// the app edits the projection fields, the engine owns the binding shape.
     pub fn add_projection_json(
         &mut self,
         mem: &str,
@@ -1019,10 +1026,36 @@ impl Engine {
         projection_json: &str,
         note: Option<&str>,
     ) -> Result<(), PipelineEditError> {
-        self.add_projection(mem, name, &parse_json(projection_json, "projection")?, note)
+        let root = self.pipeline_edit_root()?;
+        let incoming: Projection = parse_json(projection_json, "projection")?;
+        let binding = crate::binding::BindingV1 {
+            version: crate::binding::BINDING_VERSION,
+            intent: incoming.intent,
+            source_facets: incoming.source_facets,
+            reference_mems: incoming.reference_mems,
+            destination_mem: incoming.destination_mem,
+            deny_paths: Vec::new(),
+            coverage_semantics: crate::binding::CoverageSemantics::default(),
+            rules: incoming.rules,
+            operations: crate::binding::Operations {
+                build: crate::binding::BuildOperation {
+                    mode: crate::binding::BuildMode::Discovery,
+                    trigger: crate::pipeline::IngestTrigger::Loop,
+                    batch_size: 20,
+                    post_actions: None,
+                },
+                sync: None,
+                verify: None,
+            },
+        };
+        self.write_binding_edit(mem, name, &binding, &root, note, "add")
     }
 
-    /// [`Self::update_projection`] from a JSON-encoded [`Projection`].
+    /// Update a projection from a JSON-encoded [`Projection`], **preserving**
+    /// the binding's operations block, `deny_paths`, `coverage_semantics`, and
+    /// `version` (D14). Reads the existing v1 binding, overlays the incoming
+    /// projection-level fields, and writes it back — so a projection-field edit
+    /// never silently strips the operations that make the binding runnable.
     pub fn update_projection_json(
         &mut self,
         mem: &str,
@@ -1030,7 +1063,44 @@ impl Engine {
         projection_json: &str,
         note: Option<&str>,
     ) -> Result<(), PipelineEditError> {
-        self.update_projection(mem, name, &parse_json(projection_json, "projection")?, note)
+        let root = self.pipeline_edit_root()?;
+        let incoming: Projection = parse_json(projection_json, "projection")?;
+        let mut binding = pipeline_store::read_binding(&root, mem, name)?;
+        binding.intent = incoming.intent;
+        binding.source_facets = incoming.source_facets;
+        binding.reference_mems = incoming.reference_mems;
+        binding.destination_mem = incoming.destination_mem;
+        if incoming.rules.is_some() {
+            binding.rules = incoming.rules;
+        }
+        self.write_binding_edit(mem, name, &binding, &root, note, "update")
+    }
+
+    /// Shared binding writer for the projection edit path: persist the binding,
+    /// record provenance against `mem`, and refresh the in-memory snapshot.
+    fn write_binding_edit(
+        &mut self,
+        mem: &str,
+        name: &str,
+        binding: &crate::binding::BindingV1,
+        root: &Path,
+        note: Option<&str>,
+        verb: &str,
+    ) -> Result<(), PipelineEditError> {
+        pipeline_store::write_binding(root, mem, name, binding)?;
+        let bytes =
+            serde_json::to_vec_pretty(binding).map_err(|e| PipelineEditError::InvalidJson {
+                primitive: "config",
+                message: e.to_string(),
+            })?;
+        self.pipeline_provenance(
+            mem,
+            "projections",
+            &[(name.to_string(), Some(bytes))],
+            note,
+            verb,
+        )?;
+        self.refresh_pipeline_configs(root)
     }
 
     /// [`Self::add_ingest`] from a JSON-encoded [`Ingest`].

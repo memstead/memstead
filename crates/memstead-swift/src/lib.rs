@@ -32,7 +32,7 @@ pub use types::{
     MemRosterEntry, MemSchemaOutcome, MemVersionOutcome, MetadataEntry, MetadataValue,
     MissingField, ParseRecoveryEntry, ParseRecoveryReport, Query, RelationDirection, RelationEdge,
     Relations, Relationship, ReloadResult, SearchHit, SearchResult, SearchScope, Section,
-    StaleEntity, Stats, StrandedCrossMemRef,
+    StaleEntity, Status, StrandedCrossMemRef,
 };
 
 uniffi::include_scaffolding!("memstead");
@@ -114,12 +114,17 @@ pub fn init_filesystem_mem(
     Ok(())
 }
 
-/// Render an ingest's run-brief — the same Markdown prompt
-/// `memstead ingest brief <name>` emits, byte-identical because both call the
-/// one shared engine entry point [`memstead_base::ingest::render_ingest_brief`].
-/// Opens an engine at `workspace_root` (backend-agnostic) and renders the
-/// discovery-mode brief for `ingest_name`.
-pub fn ingest_brief(workspace_root: String, ingest_name: String) -> Result<String, MemsteadError> {
+/// Render a binding's run-brief — the same Markdown prompt
+/// `memstead projection brief <binding>` emits, byte-identical because both
+/// call the one shared engine entry point
+/// [`memstead_base::ingest::render_ingest_brief`]. Opens an engine at
+/// `workspace_root` (backend-agnostic) and renders the discovery-mode brief for
+/// the binding `binding_id` (the canonical `<mem>/<stem>` slash form, D3 — the
+/// same string the CLI's `projection brief` and the sync_state keys use).
+pub fn projection_brief(
+    workspace_root: String,
+    binding_id: String,
+) -> Result<String, MemsteadError> {
     let root = Path::new(&workspace_root);
     let engine =
         memstead_git_branch::workspace_store::engine_from_workspace_root(root).map_err(|e| {
@@ -127,7 +132,7 @@ pub fn ingest_brief(workspace_root: String, ingest_name: String) -> Result<Strin
                 message: format!("failed to load workspace at {}: {e}", root.display()),
             }
         })?;
-    memstead_base::ingest::render_ingest_brief(&engine, root, &ingest_name).map_err(|e| match &e {
+    memstead_base::ingest::render_ingest_brief(&engine, root, &binding_id).map_err(|e| match &e {
         memstead_base::ingest::RenderBriefError::Resolve(_) => MemsteadError::NotFound {
             message: e.to_string(),
         },
@@ -170,15 +175,15 @@ impl Engine {
         })
     }
 
-    pub fn get_stats(&self) -> Stats {
+    pub fn get_status(&self) -> Status {
         let engine = self
             .inner
             .lock()
             .expect("memstead-swift engine mutex poisoned");
-        // The UDL/Swift-facing name stays `get_stats` / `Stats` (that surface
-        // rename is a later session); only the engine accessor moved to
-        // `status()` with the CLI/MCP rename (D11), so call it here.
-        convert::stats_to_ffi(engine.status(), engine.store(), engine.mem_router())
+        // `status()` on the engine (D11 `stats` → `status`); the UDL/Swift
+        // surface followed with the B4b UDL break — `get_status` / `Status`,
+        // every field preserved (the rename-preserving floor, D14).
+        convert::status_to_ffi(engine.status(), engine.store(), engine.mem_router())
     }
 
     pub fn get_health(&self) -> HealthSummary {
@@ -534,8 +539,10 @@ impl Engine {
     //
     // The macOS pipeline editor routes medium/facet/projection edits here
     // instead of hand-writing `.memstead/` JSON, so the engine owns the
-    // four-primitive store (referential integrity, snapshot refresh). Create
-    // and update carry the primitive as a JSON string (the `Facet.engagement`
+    // pipeline store (referential integrity, snapshot refresh). A projection
+    // edit is binding-aware: the engine preserves the binding's `operations`
+    // block (D14). Create and update carry the primitive as a JSON string
+    // (the `Facet.engagement`
     // field is free-form JSON, so a typed FFI record would not round-trip);
     // delete and rename take plain identifiers. Each delegates to
     // `memstead_base::Engine`, whose methods refresh the in-memory snapshot.
@@ -666,7 +673,8 @@ impl Engine {
         Ok(())
     }
 
-    /// Create a projection from a JSON-encoded `Projection`. See `Engine::add_projection`.
+    /// Create a projection from a JSON-encoded `Projection`, scaffolded into a
+    /// v1 binding with a default build operation. See `Engine::add_projection_json`.
     pub fn add_projection(
         &self,
         mem: String,
@@ -682,7 +690,8 @@ impl Engine {
         Ok(())
     }
 
-    /// Overwrite a projection from a JSON-encoded `Projection`. See `Engine::update_projection`.
+    /// Overwrite a projection's fields from a JSON-encoded `Projection`,
+    /// preserving the binding's `operations` block. See `Engine::update_projection_json`.
     pub fn update_projection(
         &self,
         mem: String,
@@ -698,7 +707,7 @@ impl Engine {
         Ok(())
     }
 
-    /// Delete a projection (refused while an ingest runs it). See `Engine::delete_projection`.
+    /// Delete a projection binding. See `Engine::delete_projection`.
     pub fn delete_projection(
         &self,
         mem: String,
@@ -713,7 +722,7 @@ impl Engine {
         Ok(())
     }
 
-    /// Rename a projection, repointing dependent ingests. See `Engine::rename_projection`.
+    /// Rename a projection binding. See `Engine::rename_projection`.
     pub fn rename_projection(
         &self,
         mem: String,
@@ -726,62 +735,6 @@ impl Engine {
             .lock()
             .expect("memstead-swift engine mutex poisoned");
         engine.rename_projection(&mem, &old_name, &new_name, note.as_deref())?;
-        Ok(())
-    }
-
-    /// Create an ingest from a JSON-encoded `Ingest`. Ingests are flat
-    /// (workspace-level). See `Engine::add_ingest`.
-    pub fn add_ingest(
-        &self,
-        name: String,
-        ingest_json: String,
-        note: Option<String>,
-    ) -> Result<(), MemsteadError> {
-        let mut engine = self
-            .inner
-            .lock()
-            .expect("memstead-swift engine mutex poisoned");
-        engine.add_ingest_json(&name, &ingest_json, note.as_deref())?;
-        Ok(())
-    }
-
-    /// Overwrite an ingest from a JSON-encoded `Ingest`. See `Engine::update_ingest`.
-    pub fn update_ingest(
-        &self,
-        name: String,
-        ingest_json: String,
-        note: Option<String>,
-    ) -> Result<(), MemsteadError> {
-        let mut engine = self
-            .inner
-            .lock()
-            .expect("memstead-swift engine mutex poisoned");
-        engine.update_ingest_json(&name, &ingest_json, note.as_deref())?;
-        Ok(())
-    }
-
-    /// Delete an ingest (nothing references it). See `Engine::delete_ingest`.
-    pub fn delete_ingest(&self, name: String, note: Option<String>) -> Result<(), MemsteadError> {
-        let mut engine = self
-            .inner
-            .lock()
-            .expect("memstead-swift engine mutex poisoned");
-        engine.delete_ingest(&name, note.as_deref())?;
-        Ok(())
-    }
-
-    /// Rename an ingest. See `Engine::rename_ingest`.
-    pub fn rename_ingest(
-        &self,
-        old_name: String,
-        new_name: String,
-        note: Option<String>,
-    ) -> Result<(), MemsteadError> {
-        let mut engine = self
-            .inner
-            .lock()
-            .expect("memstead-swift engine mutex poisoned");
-        engine.rename_ingest(&old_name, &new_name, note.as_deref())?;
         Ok(())
     }
 
@@ -846,10 +799,10 @@ impl Engine {
         engine.note_missing_warning("pipeline_edit", None).is_some()
     }
 
-    /// The four-primitive pipeline store serialized as JSON — the read
-    /// counterpart of the edit methods, which the macOS pipeline editor
-    /// deserializes to display the store. See
-    /// `memstead_base::Engine::pipeline_configs_json`.
+    /// The pipeline store serialized as JSON — the read counterpart of the edit
+    /// methods, which the macOS pipeline editor deserializes to display the
+    /// store. Shape (D14): `{ mediums, facets, bindings }` — the v1 binding
+    /// shape, no `ingests` key. See `memstead_base::Engine::pipeline_configs_json`.
     pub fn pipeline_configs_json(&self) -> String {
         let engine = self
             .inner
@@ -1118,7 +1071,7 @@ mod tests {
     #[test]
     fn get_stats_counts_fixture_entities() {
         let (engine, _tmp) = setup_test_engine();
-        let stats = engine.get_stats();
+        let stats = engine.get_status();
         assert!(
             stats.entity_count >= 2,
             "entity_count: {}",
@@ -1142,7 +1095,7 @@ mod tests {
 
         let engine = engine_open(tmp.path().to_string_lossy().to_string())
             .expect("engine_open on a seeded workspace");
-        let stats = engine.get_stats();
+        let stats = engine.get_status();
         assert!(
             stats.entity_count >= 2,
             "entity_count: {}",
@@ -1182,7 +1135,7 @@ mod tests {
 
         let engine = engine_open(root.to_string_lossy().to_string())
             .expect("folder workspace opens through engine_open");
-        let stats = engine.get_stats();
+        let stats = engine.get_status();
         assert_eq!(stats.writable_mems, vec!["notes".to_string()]);
         assert!(
             stats.entity_count >= 1,
@@ -1657,21 +1610,22 @@ mod tests {
     }
 
     #[test]
-    fn pipeline_configs_json_returns_the_four_primitive_shape() {
+    fn pipeline_configs_json_returns_the_binding_shape() {
         // The read counterpart of the edit methods is wired through the FFI
-        // surface and returns the four-primitive shape. The canonical
-        // fixture seeds entities but no pipeline configs, so every array is
-        // empty — the keys must still be present.
+        // surface and returns the v1 binding shape (D14) — mediums / facets /
+        // bindings, no `ingests` key. The canonical fixture seeds entities but
+        // no pipeline configs, so every array is empty — the keys must still be
+        // present, and `ingests` must be absent (the wire canary the macOS
+        // `WorkspaceServiceTests` mirrors).
         let (engine, _tmp) = setup_test_engine();
         let json = engine.pipeline_configs_json();
-        for key in [
-            "\"mediums\"",
-            "\"facets\"",
-            "\"projections\"",
-            "\"ingests\"",
-        ] {
+        for key in ["\"mediums\"", "\"facets\"", "\"bindings\""] {
             assert!(json.contains(key), "missing {key} in: {json}");
         }
+        assert!(
+            !json.contains("\"ingests\""),
+            "the `ingests` key must be gone (bindings carry operations): {json}"
+        );
     }
 
     // --- Mem lifecycle through the FFI -----------------------------------
@@ -1769,7 +1723,7 @@ mod tests {
         );
 
         // The engine now lists the created mem without a restart.
-        let stats = engine.get_stats();
+        let stats = engine.get_status();
         assert!(
             stats.writable_mems.iter().any(|v| v == "fresh"),
             "created mem must appear in the roster: {:?}",
@@ -1783,7 +1737,7 @@ mod tests {
         assert!(deleted.deleted_from_router);
 
         // Gone from the roster after the delete.
-        let after = engine.get_stats();
+        let after = engine.get_status();
         assert!(
             !after.writable_mems.iter().any(|v| v == "fresh"),
             "deleted mem must be gone: {:?}",
@@ -1858,7 +1812,7 @@ mod tests {
             "one mount for the standalone mem: {roster:?}"
         );
         assert_eq!(roster[0].backend, MemBackendKind::Folder);
-        assert!(engine.get_stats().entity_count >= 1);
+        assert!(engine.get_status().entity_count >= 1);
     }
 
     #[test]

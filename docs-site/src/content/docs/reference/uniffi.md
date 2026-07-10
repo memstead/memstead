@@ -44,12 +44,13 @@ namespace memstead {
     [Throws=MemsteadError]
     void init_filesystem_mem(string root, string name, string schema);
 
-    // Render an ingest's run-brief — the Markdown prompt an ingest agent
-    // consumes — for the ingest named `ingest_name` in the workspace at
-    // `workspace_root`. Byte-identical to `memstead ingest brief <name>`:
-    // both call the one shared engine entry point. Discovery mode today.
+    // Render a binding's run-brief — the Markdown prompt a build agent
+    // consumes — for the binding `binding_id` (the canonical `<mem>/<stem>`
+    // slash form, D3) in the workspace at `workspace_root`. Byte-identical to
+    // `memstead projection brief <binding>`: both call the one shared engine
+    // entry point. Discovery mode today.
     [Throws=MemsteadError]
-    string ingest_brief(string workspace_root, string ingest_name);
+    string projection_brief(string workspace_root, string binding_id);
 };
 ```
 
@@ -189,7 +190,7 @@ dictionary Entity {
 
 ## `dictionary EdgeTypeCount`
 
-Stats. edge_types is a flat sequence rather than a map for Identifiable
+Status. edge_types is a flat sequence rather than a map for Identifiable
 SwiftUI list rendering and stable sort on the Swift side.
 
 ```idl
@@ -199,11 +200,15 @@ dictionary EdgeTypeCount {
 };
 ```
 
-## `dictionary Stats`
+## `dictionary Status`
 
+The status payload (D11: `stats` → `status`). Every field is preserved from
+the former `Stats` dictionary — the rename-preserving floor keeps the macOS
+app's data source unchanged, deferring the `mem_roster` + `get_health`
+rework to the editor-UI release.
 `stub_count` (and therefore `real_count = entity_count - stub_count`) is a
 UI staple the MCP surface also exposes (as top-level fields on
-`memstead_health`'s default response); carrying it on Stats avoids a second
+`memstead_health`'s default response); carrying it on Status avoids a second
 `get_health()` round-trip just to display the entity/stub split.
 `writable_mems` + `read_mems` mirror the same fields on
 `memstead_health`'s default response so the macOS app can render the mem
@@ -211,7 +216,7 @@ list from one call (write mems come from the router; read mems are
 the visible set minus the writable set).
 
 ```idl
-dictionary Stats {
+dictionary Status {
     u64 entity_count;
     u64 stub_count;
     u64 edge_count;
@@ -661,7 +666,7 @@ interface Engine {
     [Throws=MemsteadError]
     constructor();
 
-    Stats get_stats();
+    Status get_status();
     HealthSummary get_health();
     ListResult list_entities(SearchScope scope);
     SearchResult search(SearchScope scope);
@@ -733,12 +738,21 @@ interface Engine {
     [Throws=MemsteadError]
     ParseRecoveryReport apply_parse_recovery(string? note);
 
-    // Four-primitive pipeline edits (medium / facet / projection). The
-    // macOS pipeline editor routes here instead of hand-writing `.memstead/`
-    // JSON. Create/update carry the primitive as a JSON string (Facet's
-    // free-form `engagement` field rules out a typed record); delete/rename
-    // take identifiers. Referential integrity and snapshot refresh live in
-    // the engine. See `memstead_base::pipeline_edit`.
+    // Pipeline edits (medium / facet / projection). The macOS pipeline editor
+    // routes here instead of hand-writing `.memstead/` JSON. Create/update
+    // carry the primitive as a JSON string (Facet's free-form `engagement`
+    // field rules out a typed record); delete/rename take identifiers.
+    // Referential integrity and snapshot refresh live in the engine. See
+    // `memstead_base::pipeline_edit`.
+    //
+    // The **binding** is the unit (D1/D14): `add_projection` / `update_projection`
+    // carry the projection-level fields (intent / source_facets / reference_mems
+    // / destination_mem / rules); the engine wraps them in — or overlays them
+    // onto — a versioned binding, preserving the `operations` block. There is no
+    // separate ingest CRUD: the flat ingest record died, and operations-block
+    // edits route through the projection update path (deferred one release — the
+    // operations-block editor UI is not built here).
+    //
     // Every edit accepts an optional provenance note. Git-branch
     // workspaces commit the edit's mirror to __MEMSTEAD with the note on
     // the commit body; folder workspaces accept and drop it (no commit
@@ -770,17 +784,6 @@ interface Engine {
     [Throws=MemsteadError]
     void rename_projection(string mem, string old_name, string new_name, string? note);
 
-    // Ingests are flat (workspace-level, not mem-scoped) — no mem param;
-    // provenance records against the projection's destination mem.
-    [Throws=MemsteadError]
-    void add_ingest(string name, string ingest_json, string? note);
-    [Throws=MemsteadError]
-    void update_ingest(string name, string ingest_json, string? note);
-    [Throws=MemsteadError]
-    void delete_ingest(string name, string? note);
-    [Throws=MemsteadError]
-    void rename_ingest(string old_name, string new_name, string? note);
-
     // Resolved schema for a mem — the same JSON wire shape the MCP
     // memstead_schema tool serves (single-sourced builder). Typed
     // NotFound for an unknown mem or an unresolvable pin (message names
@@ -794,9 +797,11 @@ interface Engine {
     // engine itself only nudges (NOTE_MISSING warning), never blocks.
     boolean workspace_requires_notes();
 
-    // Read the four-primitive store as JSON (the edit methods' read
-    // counterpart). The macOS pipeline editor deserializes this to display
-    // mediums/facets/projections/ingests. Cannot fail.
+    // Read the pipeline store as JSON (the edit methods' read counterpart).
+    // The macOS pipeline editor deserializes this to display the store. Shape
+    // (D14): `{ mediums:[{mem,name,config}], facets:[...], bindings:[{mem,name,
+    // config}] }` — the v1 binding shape; `config` carries the binding's
+    // `operations` block. The `ingests` key is gone. Cannot fail.
     string pipeline_configs_json();
 
     // Mem lifecycle. The macOS roster routes create/delete/set-schema/

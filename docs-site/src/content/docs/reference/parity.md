@@ -81,28 +81,25 @@ Surface entries the registry does not pin to a logical operation. Either add a r
 ### Unaligned — UniFFI
 
 - `add_facet`
-- `add_ingest`
 - `add_medium`
 - `add_projection`
 - `branch_reset_stranded_refs`
 - `create_mem`
 - `delete_facet`
-- `delete_ingest`
 - `delete_medium`
 - `delete_mem`
 - `delete_projection`
 - `diff`
 - `export_mem`
+- `get_status`
 - `mem_roster`
 - `pipeline_configs_json`
 - `rename_facet`
-- `rename_ingest`
 - `rename_medium`
 - `rename_projection`
 - `set_mem_schema`
 - `set_mem_version`
 - `update_facet`
-- `update_ingest`
 - `update_medium`
 - `update_projection`
 - `workspace_requires_notes`

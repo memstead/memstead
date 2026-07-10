@@ -193,16 +193,26 @@ impl Engine {
 
     /// The pipeline configs serialized as a JSON string — the read
     /// counterpart of the `add_*_json` edit entry points. Serialization-
-    /// boundary callers (UniFFI, where serde does not live) get the
-    /// four-primitive store in one call and deserialize on their side.
-    /// Shape: `{ "mediums": [{ mem, name, config }], "facets": [...],
-    /// "projections": [...], "ingests": [{ name, config }] }`. Serializing
-    /// these plain records cannot fail; an empty store still yields the
-    /// fallback empty object.
+    /// boundary callers (UniFFI, where serde does not live) get the store
+    /// in one call and deserialize on their side.
+    ///
+    /// Shape (D14): `{ "mediums": [{ mem, name, config }], "facets": [...],
+    /// "bindings": [{ mem, name, config }] }` — the version-gated v1 binding
+    /// shape (`config` carries the binding's `operations` block). The `ingests`
+    /// key is **gone**; operations are attributes of the binding, not a peer
+    /// record. This reads the live binding store fresh (like the brief path)
+    /// rather than the legacy in-memory snapshot, so a projection edit that
+    /// preserves its operations shows them back immediately. A missing root or
+    /// a legacy/unreadable store yields the fallback empty object.
     pub fn pipeline_configs_json(&self) -> String {
-        serde_json::to_string(&self.pipeline_configs).unwrap_or_else(|_| {
-            "{\"mediums\":[],\"facets\":[],\"projections\":[],\"ingests\":[]}".to_string()
-        })
+        let empty = || "{\"mediums\":[],\"facets\":[],\"bindings\":[]}".to_string();
+        let Some(root) = self.workspace_root() else {
+            return empty();
+        };
+        match crate::pipeline_store::load_pipeline_configs(root) {
+            Ok(configs) => serde_json::to_string(&configs).unwrap_or_else(|_| empty()),
+            Err(_) => empty(),
+        }
     }
 
     /// Overwrite the in-memory pipeline configs. The workspace-root boot
