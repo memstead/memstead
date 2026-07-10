@@ -513,6 +513,7 @@ mod tests {
             deny_paths: vec![],
             coverage_semantics: CoverageSemantics::Exhaustive,
             rules: None,
+            prune: None,
             operations: Operations {
                 build: Some(BuildOperation {
                     mode: BuildMode::Discovery,
@@ -615,6 +616,7 @@ mod tests {
             deny_paths: vec!["**/VISION.md".to_string()],
             coverage_semantics: CoverageSemantics::Exhaustive,
             rules: None,
+            prune: None,
             operations: Operations {
                 build: Some(BuildOperation {
                     mode: BuildMode::Discovery,
@@ -674,6 +676,7 @@ mod tests {
             deny_paths: vec![],
             coverage_semantics: CoverageSemantics::Exhaustive,
             rules: None,
+            prune: None,
             operations: Operations {
                 build: Some(BuildOperation {
                     mode: BuildMode::OneShot,

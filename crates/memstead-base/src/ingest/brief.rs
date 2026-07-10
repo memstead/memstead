@@ -685,6 +685,7 @@ pub fn assemble_one_shot_brief(
 // ---------------------------------------------------------------------------
 
 use super::findings::{Finding, FindingClass, FindingTarget};
+use super::prune::{PruneDisposition, PruneProposal};
 
 /// Per-class cap on the rendered open-findings list — mirrors [`SLICE_CAP`].
 const FINDINGS_CAP: usize = SLICE_CAP;
@@ -858,6 +859,137 @@ fn render_open_findings(findings: &[Finding]) -> String {
     format!("{}\n", lines.join("\n"))
 }
 
+/// Render the prune-proposals block for the sync brief (group F) — the deletion
+/// proposals prune surfaced, each with its guarantee-appropriate treatment.
+/// Empty string when there are no proposals.
+///
+/// **F3 / A5, structural:** every proposal here is exactly that — a *proposal*.
+/// Nothing in this text (nor anywhere in the engine) deletes an entity; the
+/// removal reaches the mem **only** when the agent acts on this brief through the
+/// MCP mutation surface. `authored` entities never reach this block (prune
+/// excludes them upstream); `derived` entities are flagged with their inputs,
+/// never proposed for deletion.
+fn render_prune_proposals(proposals: &[PruneProposal]) -> String {
+    if proposals.is_empty() {
+        return String::new();
+    }
+    let mut lines: Vec<String> = vec![
+        "## Prune — proposed removals (you decide; nothing is auto-deleted)".to_string(),
+        String::new(),
+        "The source removed the artifacts these entities describe. Each item below is a \
+         **proposal**: prune writes nothing — you enact (or reject) the removal through the \
+         normal MCP mutation surface. An `authored` entity is never proposed here; a `derived` \
+         entity is flagged, never proposed for deletion."
+            .to_string(),
+        String::new(),
+    ];
+
+    let group = |d: PruneDisposition| -> Vec<&PruneProposal> {
+        proposals.iter().filter(|p| p.disposition == d).collect()
+    };
+
+    // Clean-delete — never-clobber, base retrieved, merge clean: a confident
+    // (still agent-enacted) delete proposal.
+    let clean = group(PruneDisposition::CleanDelete);
+    if !clean.is_empty() {
+        lines.push("### Clean delete — never-clobber three-way merge is clean".to_string());
+        lines.push(String::new());
+        lines.push(
+            "The source base leg was retrievable and the three-way merge found no model-side \
+             divergence, so removal is safe. **Confirm, then delete via the mutation surface** — \
+             this is still your call, not an auto-delete."
+                .to_string(),
+        );
+        lines.push(String::new());
+        let shown = clean.len().min(FINDINGS_CAP);
+        for p in &clean[..shown] {
+            lines.push(format!(
+                "- `{}` — source artifact(s) gone: {}",
+                p.entity,
+                artifact_list(&p.artifacts)
+            ));
+        }
+        if clean.len() > shown {
+            lines.push(format!("- …and {} more", clean.len() - shown));
+        }
+        lines.push(String::new());
+    }
+
+    // Conflict-flag — both sides presented, never an auto-write over an edit.
+    let conflict = group(PruneDisposition::ConflictFlag);
+    if !conflict.is_empty() {
+        lines.push("### Conflict-flag — decide, never overwrite a model-side edit".to_string());
+        lines.push(String::new());
+        lines.push(
+            "No retrievable base leg to merge against (a non-git source, or an anchor with no \
+             pinned version). **Both sides are shown — decide deliberately.** If the concept is \
+             truly gone, delete via the mutation surface; if the model side was edited on \
+             purpose, keep it. Prune never overwrites a model-side edit for you."
+                .to_string(),
+        );
+        lines.push(String::new());
+        let shown = conflict.len().min(FINDINGS_CAP);
+        for p in &conflict[..shown] {
+            lines.push(format!(
+                "- `{}` — **source side:** artifact(s) gone: {}; **model side:** the entity is \
+                 still present (may carry edits) — you decide.",
+                p.entity,
+                artifact_list(&p.artifacts)
+            ));
+        }
+        if conflict.len() > shown {
+            lines.push(format!("- …and {} more", conflict.len() - shown));
+        }
+        lines.push(String::new());
+    }
+
+    // Derived-flagged — flagged with inputs, never proposed for deletion (F3).
+    let derived = group(PruneDisposition::DerivedFlagged);
+    if !derived.is_empty() {
+        lines.push("### Derived — flagged, NOT proposed for deletion".to_string());
+        lines.push(String::new());
+        lines.push(
+            "These entities were **derived** from other inputs. A derived entity is flagged, \
+             never auto-proposed for deletion — its inputs may still hold even though one source \
+             artifact vanished. Re-examine the inputs before removing anything."
+                .to_string(),
+        );
+        lines.push(String::new());
+        let shown = derived.len().min(FINDINGS_CAP);
+        for p in &derived[..shown] {
+            let inputs = if p.derived_inputs.is_empty() {
+                "(no recorded inputs)".to_string()
+            } else {
+                artifact_list(&p.derived_inputs)
+            };
+            lines.push(format!(
+                "- `{}` — derived from: {}; source artifact(s) gone: {}.",
+                p.entity,
+                inputs,
+                artifact_list(&p.artifacts)
+            ));
+        }
+        if derived.len() > shown {
+            lines.push(format!("- …and {} more", derived.len() - shown));
+        }
+        lines.push(String::new());
+    }
+
+    format!("{}\n", lines.join("\n"))
+}
+
+/// A compact backtick-joined artifact list.
+fn artifact_list(artifacts: &[String]) -> String {
+    if artifacts.is_empty() {
+        return "(none)".to_string();
+    }
+    artifacts
+        .iter()
+        .map(|a| format!("`{a}`"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 /// Render the sync brief's `## Situation` block — the sole-maintenance-writer
 /// mandate and the commits-nothing / engine-commits-per-mutation posture (C3).
 fn render_sync_situation(resolved: &ResolvedIngest) -> String {
@@ -947,26 +1079,34 @@ fn render_sync_conservatism() -> String {
 /// (E1's brief half). A rule-by-rule absorption map records where each retired
 /// reconcile rule now lives (bundle plan `05-verify-sync-engine`, C4).
 ///
-/// When nothing has moved, no findings are open, and this is not an adopt pass,
-/// the brief renders a compact "nothing to sync" note instead of the repair
-/// machinery — a valid, silent outcome mirroring the build brief's no-op roam.
+/// Prune proposals (group F) ride this same brief — F3's single-writer
+/// invariant: every prune removal reaches the mem only via an agent acting on
+/// this sync brief. They are rendered as proposals only; nothing is auto-deleted.
+///
+/// When nothing has moved, no findings are open, no prune proposals exist, and
+/// this is not an adopt pass, the brief renders a compact "nothing to sync" note
+/// instead of the repair machinery — a valid, silent outcome mirroring the build
+/// brief's no-op roam.
 pub fn render_sync_brief(
     resolved: &ResolvedIngest,
     cursor: &SourceCursor,
     findings: &[Finding],
+    prune: &[PruneProposal],
     adopt: bool,
 ) -> String {
     let preface = render_changed_slice(cursor);
     let open_findings = render_open_findings(findings);
-    let has_work = adopt || !preface.is_empty() || !open_findings.is_empty();
+    let prune_block = render_prune_proposals(prune);
+    let has_work =
+        adopt || !preface.is_empty() || !open_findings.is_empty() || !prune_block.is_empty();
 
     let mut parts: Vec<String> = vec![render_sync_situation(resolved)];
 
     if !has_work {
         parts.push(
-            "## Nothing to sync\n\nThe source has not moved since the last sync and no \
-             verify findings are open. There is nothing to repair this pass — reporting \
-             \"no changes\" is a valid outcome.\n\n"
+            "## Nothing to sync\n\nThe source has not moved since the last sync, no \
+             verify findings are open, and no prune proposals stand. There is nothing to \
+             repair this pass — reporting \"no changes\" is a valid outcome.\n\n"
                 .to_string(),
         );
         return parts
@@ -981,6 +1121,7 @@ pub fn render_sync_brief(
     }
     parts.push(preface);
     parts.push(open_findings);
+    parts.push(prune_block);
     parts.push(render_sync_conservatism());
 
     parts
@@ -1648,7 +1789,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
                 "in scope, no anchor",
             ),
         ];
-        let out = render_sync_brief(&r, &cursor, &findings, false);
+        let out = render_sync_brief(&r, &cursor, &findings, &[], false);
         // Both inputs present in one brief (C2).
         assert!(out.contains("## Source changes since the last sync"));
         assert!(out.contains("`moved.rs`"));
@@ -1673,7 +1814,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
             artifact_target("src/x.rs"),
             "d",
         )];
-        let out = render_sync_brief(&r, &empty_cursor(), &findings, false);
+        let out = render_sync_brief(&r, &empty_cursor(), &findings, &[], false);
         // Five conservatism rules.
         assert!(out.contains("Unsure whether an entity is affected — skip it."));
         assert!(out.contains(
@@ -1704,7 +1845,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
         // `<mem>/<stem>` while `destination_mem` is the mem — the header uses the
         // mem, the backfill command uses the binding id.
         r.name = "engine/graph".to_string();
-        let out = render_sync_brief(&r, &empty_cursor(), &[], true);
+        let out = render_sync_brief(&r, &empty_cursor(), &[], &[], true);
         assert!(out.contains("## First sync — adopting `engine`"));
         assert!(out.contains("0% anchored is expected — this is onboarding, not a failure."));
         assert!(out.contains("do **not** replay the whole history"));
@@ -1719,7 +1860,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
         let r = resolved("engine", None, vec![]);
         let mut cursor = empty_cursor();
         cursor.reseed = vec![cmd("engine/graph/src#synced", "TOK")];
-        let out = render_sync_brief(&r, &cursor, &[], false);
+        let out = render_sync_brief(&r, &cursor, &[], &[], false);
         assert!(out.contains("No prior sync baseline exists for"));
         assert!(out.contains("(first sync)"));
     }
@@ -1729,7 +1870,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
     #[test]
     fn sync_brief_nothing_to_sync() {
         let r = resolved("engine", None, vec![]);
-        let out = render_sync_brief(&r, &empty_cursor(), &[], false);
+        let out = render_sync_brief(&r, &empty_cursor(), &[], &[], false);
         assert!(out.contains("## Nothing to sync"));
         assert!(!out.contains("## How to repair"));
         assert!(!out.contains("## Open findings"));
@@ -1748,7 +1889,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
             "d",
         )];
         let verify = render_verify_brief(&r, 1);
-        let sync = render_sync_brief(&r, &empty_cursor(), &findings, false);
+        let sync = render_sync_brief(&r, &empty_cursor(), &findings, &[], false);
         // Verify: no repair section, no repair verbs as instructions.
         assert!(!verify.contains("## How to repair"));
         assert!(!verify.contains("Update the affected section"));
@@ -1772,7 +1913,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
                 )
             })
             .collect();
-        let out = render_sync_brief(&r, &empty_cursor(), &findings, false);
+        let out = render_sync_brief(&r, &empty_cursor(), &findings, &[], false);
         assert!(out.contains("- …and 4 more"));
         // The last few beyond the cap are not rendered inline.
         assert!(!out.contains(&format!("src/f{}.rs", FINDINGS_CAP + 3)));

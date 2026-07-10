@@ -30,6 +30,7 @@ pub mod change_detection;
 pub mod cursor;
 pub mod findings;
 pub mod guidance;
+pub mod prune;
 pub mod refinement;
 pub mod render;
 pub mod report;
@@ -63,6 +64,10 @@ pub use findings::{
 };
 pub use guidance::{
     GuidanceDefaults, MemGuidance, ResolvedGuidance, merge_guidance_block, resolve_writing_guidance,
+};
+pub use prune::{
+    PruneDisposition, PruneMerge, PruneMode, PruneProposal, classify_prune_candidate,
+    prune_proposals,
 };
 pub use refinement::{
     Batch, ROTATION_ANCHOR_ADJUDICATION, ROTATION_UNCOVERED_FILES, bump_verify_runs, next_batch,

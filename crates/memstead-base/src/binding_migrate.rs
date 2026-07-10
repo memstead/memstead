@@ -192,6 +192,7 @@ pub(crate) fn binding_from_gen2(
         deny_paths,
         coverage_semantics: CoverageSemantics::Exhaustive,
         rules: projection.rules.clone(),
+        prune: None,
         operations: Operations {
             build: Some(BuildOperation {
                 mode,

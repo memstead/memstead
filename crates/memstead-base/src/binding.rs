@@ -164,6 +164,60 @@ pub struct VerifyOperation {
     pub full_resync_every: u32,
 }
 
+/// The prune guarantee a binding **requests** (bundle plan
+/// `05-verify-sync-engine`, F1). Prune produces deletion **proposals** surfaced
+/// in the sync brief (it never mutates the mem); the guarantee governs how a
+/// prune proposal treats a model-side edit that races a source removal.
+///
+/// The guarantee a medium can *support* is derived from its base-leg
+/// retrievability ([`prune_guarantee_for_medium`]): a git-backed source can
+/// retrieve the base leg for a real three-way merge ([`Self::NeverClobber`]);
+/// everything else degrades to conflict-flagging ([`Self::ConflictFlag`]).
+/// Requesting a guarantee the medium cannot support is refused at
+/// **binding-validation** time (never at run time) via
+/// [`CapabilityError::PruneGuaranteeUnsupported`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum PruneGuarantee {
+    /// Full never-clobber three-way merge — only where the source **base leg is
+    /// retrievable** (git-backed sources). The retrieved base lets the merge
+    /// tell a model-side edit apart from a clean removal, so a divergence is
+    /// never silently proposed as a clean delete.
+    NeverClobber,
+    /// Conflict-flag degradation (the default — always supportable): where the
+    /// base leg is **not** retrievable, prune presents **both** sides and never
+    /// auto-writes over a model-side edit. The decided posture for non-git
+    /// sources (span-snapshot base legs are out of scope — no current payer).
+    #[default]
+    ConflictFlag,
+}
+
+impl PruneGuarantee {
+    /// Stable wire form.
+    pub fn as_wire(&self) -> &'static str {
+        match self {
+            PruneGuarantee::NeverClobber => "never-clobber",
+            PruneGuarantee::ConflictFlag => "conflict-flag",
+        }
+    }
+}
+
+/// The **prune** configuration of a [`BindingV1`] (F1) — additive, optional. An
+/// absent `prune` block means prune is not enabled for the binding (no deletion
+/// proposals are produced). Prune has no independent schedule: it rides the sync
+/// brief (the sole maintenance-writer channel), so it carries no `trigger` /
+/// `batch_size` — only the requested [`PruneGuarantee`]. Like the `sync` /
+/// `verify` blocks it is **excluded from [`hash_binding`]**: a maintenance
+/// policy never changes what the mem claims.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PruneConfig {
+    /// The guarantee level the binding requests. Validated against the medium's
+    /// base-leg retrievability at binding-validation time (F1 refusal).
+    /// Defaults to [`PruneGuarantee::ConflictFlag`] when absent.
+    #[serde(default)]
+    pub guarantee: PruneGuarantee,
+}
+
 /// The operations block of a [`BindingV1`]: every operation is **optional**
 /// (D1/D6). An absent `build` / `sync` block makes that *mutating* operation
 /// refuse at run time with a `projection enable <op>` remedy; an absent
@@ -220,6 +274,14 @@ pub struct BindingV1 {
     /// Opaque to the engine — consumed only by the one-shot brief renderer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rules: Option<serde_json::Value>,
+    /// The **prune** policy (bundle plan `05-verify-sync-engine`, F1) — additive,
+    /// optional. Absent = prune disabled (no deletion proposals). Present = prune
+    /// produces deletion proposals in the sync brief under the requested
+    /// [`PruneGuarantee`], validated against the medium's base-leg
+    /// retrievability at binding-validation time. Excluded from [`hash_binding`]
+    /// (a maintenance policy, not content-defining).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prune: Option<PruneConfig>,
     /// The operations this binding declares (build required; sync/verify optional).
     pub operations: Operations,
 }
@@ -418,6 +480,19 @@ pub fn medium_capabilities(medium_type: MediumType) -> MediumCapabilities {
     }
 }
 
+/// The strongest prune guarantee a medium can **support** (F1), derived from
+/// the capability matrix: a base-leg-retrievable medium (git-backed —
+/// codebase / filesystem / git / graph) supports the full never-clobber
+/// three-way merge; a non-retrievable medium (`web`) supports only conflict-flag
+/// degradation. Validation refuses a request that exceeds this.
+pub fn prune_guarantee_for_medium(medium_type: MediumType) -> PruneGuarantee {
+    if medium_capabilities(medium_type).base_version_retrievable {
+        PruneGuarantee::NeverClobber
+    } else {
+        PruneGuarantee::ConflictFlag
+    }
+}
+
 /// A binding operation subject to capability validation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Operation {
@@ -489,6 +564,26 @@ pub enum CapabilityError {
         /// The current preparation-implementation version (`0` = none).
         impl_version: u32,
     },
+    /// The binding requests a `prune` guarantee the facet's medium cannot
+    /// support (F1) — `never-clobber` over a medium whose base leg is not
+    /// retrievable (`web`). Refused at binding-validation time with the
+    /// downgrade remedy, never discovered at run time.
+    #[error(
+        "prune guarantee '{requested}' is unsupported for facet '{facet}' over a \
+         '{medium_type}' medium: its base leg is not retrievable, so only '{supported}' \
+         degradation is possible — set the binding's prune guarantee to '{supported}', or \
+         point the facet at a git-backed medium"
+    )]
+    PruneGuaranteeUnsupported {
+        /// The source facet.
+        facet: String,
+        /// The medium type that cannot support the requested guarantee.
+        medium_type: String,
+        /// The requested guarantee wire string.
+        requested: &'static str,
+        /// The strongest guarantee this medium supports (the downgrade remedy).
+        supported: &'static str,
+    },
 }
 
 /// Validate a resolved binding against the medium-capability matrix (D6),
@@ -502,7 +597,9 @@ pub enum CapabilityError {
 /// - a glob `deny_paths` list over a non-path-namespace medium
 ///   ([`CapabilityError::GlobDenyIllegal`]);
 /// - any declared facet preparation
-///   ([`CapabilityError::PreparationUnsupported`]).
+///   ([`CapabilityError::PreparationUnsupported`]);
+/// - a `prune` block requesting `never-clobber` over a non-base-retrievable
+///   medium ([`CapabilityError::PruneGuaranteeUnsupported`], F1).
 ///
 /// A binding whose every declared operation the matrix marks legal validates
 /// clean (`Ok(())`). This is a new, callable entry point — it is not yet wired
@@ -512,6 +609,14 @@ pub fn validate_binding(resolved: &ResolvedBinding) -> Result<(), Vec<Capability
     let has_deny = !resolved.binding.deny_paths.is_empty();
     let sync_declared = resolved.binding.operations.sync.is_some();
     let verify_declared = resolved.binding.operations.verify.is_some();
+    // F1: a `prune` block requesting `never-clobber` needs a base-retrievable
+    // medium on every facet; refuse per-facet where it cannot be honoured.
+    let requested_prune = resolved
+        .binding
+        .prune
+        .as_ref()
+        .map(|p| p.guarantee)
+        .filter(|g| *g == PruneGuarantee::NeverClobber);
 
     for source in &resolved.primary_sources {
         let caps = medium_capabilities(source.medium_type);
@@ -553,6 +658,17 @@ pub fn validate_binding(resolved: &ResolvedBinding) -> Result<(), Vec<Capability
                 anchor_namespace: caps.anchor_namespace,
             });
         }
+
+        // F1: requested `never-clobber` prune over a non-base-retrievable medium
+        // is refused with the downgrade remedy — at validation, not run time.
+        if requested_prune.is_some() && !caps.base_version_retrievable {
+            refusals.push(CapabilityError::PruneGuaranteeUnsupported {
+                facet: source.facet_ref.clone(),
+                medium_type: medium_type.clone(),
+                requested: PruneGuarantee::NeverClobber.as_wire(),
+                supported: prune_guarantee_for_medium(source.medium_type).as_wire(),
+            });
+        }
     }
 
     if refusals.is_empty() {
@@ -588,6 +704,7 @@ mod tests {
             deny_paths: vec!["VISION.md".to_string(), "dev/**".to_string()],
             coverage_semantics: CoverageSemantics::Exhaustive,
             rules: Some(serde_json::json!({ "routing": "…" })),
+            prune: None,
             operations: Operations {
                 build: Some(build_op()),
                 sync: Some(SyncOperation {
@@ -1056,6 +1173,162 @@ mod tests {
             validate_binding(&resolved(graph_binding, graph_sources)).is_ok(),
             "graph build+sync+verify with no glob deny should validate clean"
         );
+    }
+
+    // ---- F1: prune guarantee -------------------------------------------
+
+    /// F1 — the `prune` block is additive: a binding written before it existed
+    /// deserializes to `prune: None`, and a block that sets a guarantee
+    /// round-trips (defaulting to `conflict-flag` when the guarantee is absent).
+    #[test]
+    fn prune_block_is_additive_and_round_trips() {
+        // Legacy binding — no `prune`.
+        let src = r#"{
+          "version": 1,
+          "destination_mem": "m",
+          "operations": { "build": { "mode": "discovery", "trigger": "loop", "batch_size": 20 } }
+        }"#;
+        let b: BindingV1 = serde_json::from_str(src).unwrap();
+        assert!(b.prune.is_none(), "absent prune parses to None");
+
+        // A prune block with no guarantee defaults to conflict-flag.
+        let with_default = r#"{
+          "version": 1,
+          "destination_mem": "m",
+          "prune": {},
+          "operations": { "build": { "mode": "discovery", "trigger": "loop", "batch_size": 20 } }
+        }"#;
+        let b: BindingV1 = serde_json::from_str(with_default).unwrap();
+        assert_eq!(
+            b.prune.as_ref().unwrap().guarantee,
+            PruneGuarantee::ConflictFlag
+        );
+
+        // Explicit never-clobber round-trips.
+        let explicit = PruneConfig {
+            guarantee: PruneGuarantee::NeverClobber,
+        };
+        let json = serde_json::to_string(&explicit).unwrap();
+        assert!(json.contains("never-clobber"));
+        assert_eq!(
+            serde_json::from_str::<PruneConfig>(&json).unwrap(),
+            explicit
+        );
+    }
+
+    /// F1 — the `prune` policy never changes `hash(D)` (it is a maintenance
+    /// policy, excluded like the sync/verify blocks).
+    #[test]
+    fn prune_does_not_change_the_hash() {
+        let base = hash_binding(&resolved(binding(), one_codebase_source()));
+        let mut pruned = binding();
+        pruned.prune = Some(PruneConfig {
+            guarantee: PruneGuarantee::NeverClobber,
+        });
+        assert_eq!(
+            base,
+            hash_binding(&resolved(pruned, one_codebase_source())),
+            "prune policy is excluded from hash(D)"
+        );
+    }
+
+    /// F1 — the strongest guarantee a medium supports is base-leg-retrievability:
+    /// git-backed mediums support never-clobber; `web` supports only conflict-flag.
+    #[test]
+    fn prune_guarantee_per_medium_matches_capability_matrix() {
+        for ty in [
+            MediumType::Codebase,
+            MediumType::Filesystem,
+            MediumType::Git,
+            MediumType::Graph,
+        ] {
+            assert_eq!(
+                prune_guarantee_for_medium(ty),
+                PruneGuarantee::NeverClobber,
+                "{ty:?} can retrieve a base leg → never-clobber"
+            );
+        }
+        assert_eq!(
+            prune_guarantee_for_medium(MediumType::Web),
+            PruneGuarantee::ConflictFlag,
+            "web has no retrievable base leg → conflict-flag only"
+        );
+    }
+
+    /// F1 REFUSAL — requesting `never-clobber` prune over a `web` medium (no
+    /// retrievable base leg) fails at binding validation with a remedy-bearing
+    /// error naming the downgrade, never a runtime surprise.
+    #[test]
+    fn never_clobber_prune_over_web_refuses_with_remedy() {
+        let mut b = binding();
+        b.operations.sync = None; // isolate the prune refusal from op-out-of-scope
+        b.operations.verify = None;
+        b.deny_paths.clear();
+        b.prune = Some(PruneConfig {
+            guarantee: PruneGuarantee::NeverClobber,
+        });
+        let sources = vec![primary(
+            "web-facet",
+            MediumType::Web,
+            "https://example.com",
+            vec![],
+            None,
+            None,
+        )];
+        let errs = validate_binding(&resolved(b, sources)).unwrap_err();
+        let refusal = errs
+            .iter()
+            .find_map(|e| match e {
+                CapabilityError::PruneGuaranteeUnsupported {
+                    requested,
+                    supported,
+                    ..
+                } => Some((*requested, *supported)),
+                _ => None,
+            })
+            .expect("expected a PruneGuaranteeUnsupported refusal");
+        assert_eq!(refusal, ("never-clobber", "conflict-flag"));
+        // The message carries the concrete downgrade remedy.
+        let msg = errs
+            .iter()
+            .find(|e| matches!(e, CapabilityError::PruneGuaranteeUnsupported { .. }))
+            .unwrap()
+            .to_string();
+        assert!(
+            msg.contains("conflict-flag"),
+            "remedy names the downgrade: {msg}"
+        );
+    }
+
+    /// F1 — `never-clobber` over a git-backed medium validates clean, and
+    /// `conflict-flag` (the always-supportable degradation) validates clean over
+    /// `web` — the guarantee the matrix marks legal is accepted.
+    #[test]
+    fn prune_guarantee_supported_validates_clean() {
+        // never-clobber over codebase — base retrievable, clean.
+        let mut nc = binding();
+        nc.prune = Some(PruneConfig {
+            guarantee: PruneGuarantee::NeverClobber,
+        });
+        assert!(validate_binding(&resolved(nc, one_codebase_source())).is_ok());
+
+        // conflict-flag over web — always supportable (build-only to isolate).
+        let mut cf = binding();
+        cf.operations.sync = None;
+        cf.operations.verify = None;
+        cf.deny_paths.clear();
+        cf.prune = Some(PruneConfig {
+            guarantee: PruneGuarantee::ConflictFlag,
+        });
+        let web = vec![primary(
+            "web-facet",
+            MediumType::Web,
+            "https://example.com",
+            vec![],
+            None,
+            None,
+        )];
+        assert!(validate_binding(&resolved(cf, web)).is_ok());
     }
 
     /// A `web` binding scaffolded build-only (no sync/verify, no deny, no prep)

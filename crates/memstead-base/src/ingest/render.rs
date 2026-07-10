@@ -22,6 +22,7 @@ use super::brief::{
 use super::cursor::{compute_source_cursor, write_active_deny_file};
 use super::findings::{FindingClass, current_findings};
 use super::guidance::{GuidanceDefaults, MemGuidance, ResolvedGuidance, resolve_writing_guidance};
+use super::prune::prune_proposals;
 use super::resolve::{ResolveError, ResolvedIngest, ResolvedSource, resolve_binding_run};
 
 /// Why [`render_ingest_brief`] could not produce a brief.
@@ -220,8 +221,13 @@ pub fn render_sync_brief_for(
                 detail: e.to_string(),
             }
         })?;
+    // Prune proposals (group F) ride the sync brief — the sole channel through
+    // which a prune removal reaches the mem (F3/A5). Read-only gather.
+    let prune = prune_proposals(engine, workspace_root, binding, &resolved);
     let adopt = mem_predates_binding(engine, &resolved);
-    Ok(render_sync_brief(&resolved, &cursor, &findings, adopt))
+    Ok(render_sync_brief(
+        &resolved, &cursor, &findings, &prune, adopt,
+    ))
 }
 
 /// Whether the destination mem predates its binding — the adopt / onboarding

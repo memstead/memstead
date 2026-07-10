@@ -844,6 +844,7 @@ impl Engine {
             deny_paths: Vec::new(),
             coverage_semantics: crate::binding::CoverageSemantics::default(),
             rules: incoming.rules,
+            prune: None,
             operations: crate::binding::Operations {
                 build: Some(crate::binding::BuildOperation {
                     mode: crate::binding::BuildMode::Discovery,

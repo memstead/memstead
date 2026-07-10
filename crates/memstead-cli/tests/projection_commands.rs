@@ -383,6 +383,12 @@ fn init_codebase_scaffolds_all_three_with_full_operations() {
     );
     assert!(b.operations.sync.is_some());
     assert!(b.operations.verify.is_some());
+    // F1 — a git-backed (codebase) source scaffolds a prune block with the
+    // strongest supported guarantee: never-clobber (base leg retrievable).
+    assert_eq!(
+        b.prune.as_ref().unwrap().guarantee,
+        memstead_base::binding::PruneGuarantee::NeverClobber
+    );
     let round = serde_json::to_string(&b).unwrap();
     let back: BindingV1 = serde_json::from_str(&round).unwrap();
     assert_eq!(back, b);

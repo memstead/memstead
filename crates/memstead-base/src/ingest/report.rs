@@ -1338,6 +1338,7 @@ mod tests {
                 deny_paths: Vec::new(),
                 coverage_semantics: CoverageSemantics::Exhaustive,
                 rules: None,
+                prune: None,
                 operations: Operations {
                     build: Some(BuildOperation {
                         mode: BuildMode::Discovery,

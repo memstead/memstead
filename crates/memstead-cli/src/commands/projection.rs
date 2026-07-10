@@ -27,8 +27,8 @@ use serde_json::json;
 
 use memstead_base::binding::{
     BINDING_VERSION, BindingV1, BuildMode, BuildOperation, CapabilityError, CoverageSemantics,
-    DEFAULT_ADJUDICATION_CAP, DEFAULT_FULL_RESYNC_EVERY, Operations, ResolvedBinding,
-    SyncOperation, VerifyOperation, validate_binding,
+    DEFAULT_ADJUDICATION_CAP, DEFAULT_FULL_RESYNC_EVERY, Operations, PruneConfig, ResolvedBinding,
+    SyncOperation, VerifyOperation, prune_guarantee_for_medium, validate_binding,
 };
 use memstead_base::binding_migrate::{
     BindingMigrateError, migrate_gen2_bindings, resolve_migrated_binding,
@@ -89,8 +89,10 @@ pub enum ProjectionCommand {
     /// All inputs are flags — no prompts ever (parity across callers). The
     /// default binding declares build+sync+verify capability-permitting (D6):
     /// a `web` source scaffolds build-only, with the deferral named in
-    /// `warnings[]`. Refuses `PROJECTION_EXISTS` (without touching disk) when a
-    /// binding of the same id already exists — never overwrites.
+    /// `warnings[]`. A `prune` block (F1) is scaffolded wherever sync survived,
+    /// with the strongest guarantee the medium supports (never-clobber for a
+    /// git-backed source). Refuses `PROJECTION_EXISTS` (without touching disk)
+    /// when a binding of the same id already exists — never overwrites.
     Init(InitArgs),
     /// Migrate both legacy generations into v1 bindings (D10). Gen-1 — the
     /// root-folder `scopes|projections|ingests/` JSON layout the retired
@@ -562,6 +564,7 @@ fn init(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
         deny_paths: Vec::new(),
         coverage_semantics: CoverageSemantics::Exhaustive,
         rules: None,
+        prune: None,
         operations: Operations {
             build: Some(BuildOperation {
                 mode: BuildMode::Discovery,
@@ -607,6 +610,17 @@ fn init(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
             }
             warnings.push(r.to_string());
         }
+    }
+
+    // Prune (F1) rides the sync path — scaffold it wherever sync survived the
+    // matrix filter, with the strongest guarantee the medium supports (a
+    // base-retrievable / git-backed medium gets never-clobber; every
+    // sync-capable medium is also base-retrievable, so this never refuses). A
+    // `web` binding (sync stripped) gets no prune block.
+    if binding.operations.sync.is_some() {
+        binding.prune = Some(PruneConfig {
+            guarantee: prune_guarantee_for_medium(medium_type),
+        });
     }
 
     let mut operations: Vec<&str> = vec!["build"];
