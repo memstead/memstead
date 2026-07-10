@@ -42,9 +42,8 @@ pub use advance::{
 };
 pub use brief::{
     NoSignalNote, PROCESS_MEM_SCHEMA, ProcessMemInfo, SourceCursor, SyncCommand,
-    assemble_discovery_brief, assemble_one_shot_brief, assemble_refinement_brief,
-    render_changed_slice, render_goal_and_avoid, render_intent, render_one_shot_lens,
-    render_operative_data, render_situation,
+    assemble_discovery_brief, assemble_one_shot_brief, render_changed_slice, render_goal_and_avoid,
+    render_intent, render_one_shot_lens, render_operative_data, render_situation,
 };
 pub use change_detection::{
     Digest, StatDiff, StatEntry, StatMap, compute_stat_map, diff_stat_maps, digest_stat_map,
@@ -56,13 +55,11 @@ pub use cursor::{
 pub use guidance::{
     GuidanceDefaults, MemGuidance, ResolvedGuidance, merge_guidance_block, resolve_writing_guidance,
 };
-pub use refinement::{
-    Batch, next_batch, read_pending_findings, render_refinement_scout, render_refinement_writer,
-};
+pub use refinement::{Batch, next_batch};
 pub use render::{RenderBriefError, mode_name, render_ingest_brief};
 pub use resolve::{
     ChangeStrategy, ResolveError, ResolvedIngest, ResolvedPrimarySource, ResolvedSource,
-    find_git_root, resolve_binding_run, resolve_change_strategy, resolve_ingest,
+    find_git_root, resolve_binding, resolve_binding_run, resolve_change_strategy,
 };
 pub use selection::{BackoffEntry, MAX_SKIP_LEVEL, apply_backoff, select_next_due, should_skip};
 pub use slice::{

@@ -11,14 +11,15 @@
 //! All three modes are assembled here: [`assemble_discovery_brief`] (with the
 //! header blocks [`render_situation`], [`render_intent`],
 //! [`render_goal_and_avoid`], [`render_operative_data`]),
-//! [`assemble_refinement_brief`], and [`assemble_one_shot_brief`] — plus the
+//! and [`assemble_one_shot_brief`] — plus the
 //! changed-slice preface ([`render_changed_slice`], rendered from a
 //! [`SourceCursor`]).
 
 use super::guidance::ResolvedGuidance;
 use super::resolve::{ResolvedIngest, ResolvedSource};
 use super::slice::{NoSignalReason, Slice};
-use crate::pipeline::{IngestMode, MediumType, PatternMode};
+use crate::binding::BuildMode;
+use crate::pipeline::{MediumType, PatternMode};
 
 /// Per-class cap on the rendered changed slice — mirrors the plugin's
 /// `SLICE_CAP`. Beyond it a `…and N more` line stands in.
@@ -48,11 +49,10 @@ pub struct ProcessMemInfo {
 
 /// The mode string the situation block prints (`discovery` / `refinement` /
 /// `one-shot`) — the same tokens the plugin uses.
-fn mode_label(mode: IngestMode) -> &'static str {
+fn mode_label(mode: BuildMode) -> &'static str {
     match mode {
-        IngestMode::Discovery => "discovery",
-        IngestMode::Refinement => "refinement",
-        IngestMode::OneShot => "one-shot",
+        BuildMode::Discovery => "discovery",
+        BuildMode::OneShot => "one-shot",
     }
 }
 
@@ -551,33 +551,6 @@ pub fn assemble_discovery_brief(
         .join("")
 }
 
-/// Assemble the refinement brief — the discovery-style header (situation,
-/// about-the-source, goal/avoid, operative-data, changed-slice) plus the
-/// scout-or-writer `phase_block` appended. Mirrors the plugin's refinement
-/// `parts`.
-pub fn assemble_refinement_brief(
-    resolved: &ResolvedIngest,
-    guidance: &ResolvedGuidance,
-    process_mem: &ProcessMemInfo,
-    destination_schema: Option<&str>,
-    changed_slice_preface: &str,
-    phase_block: &str,
-) -> String {
-    let parts = [
-        render_situation(resolved, process_mem),
-        render_intent(resolved),
-        render_goal_and_avoid(guidance),
-        render_operative_data(resolved, process_mem, destination_schema),
-        changed_slice_preface.to_string(),
-        phase_block.to_string(),
-    ];
-    parts
-        .into_iter()
-        .filter(|p| !p.is_empty())
-        .collect::<Vec<_>>()
-        .join("")
-}
-
 /// Render the `## Mode: one-shot — lens routing` block — the destination-set
 /// table, optional routing rule, idempotency contract, end-of-run report
 /// template, and optional archive note. Byte-for-byte the plugin's
@@ -768,7 +741,7 @@ mod tests {
     fn resolved(name: &str, intent: Option<&str>, sources: Vec<ResolvedSource>) -> ResolvedIngest {
         ResolvedIngest {
             name: name.to_string(),
-            mode: IngestMode::Discovery,
+            mode: BuildMode::Discovery,
             trigger: IngestTrigger::Loop,
             batch_size: 20,
             deny_paths: vec![],
@@ -840,7 +813,7 @@ mod tests {
     #[test]
     fn situation_process_mem_branches() {
         let mut r = resolved("os", None, vec![]);
-        r.mode = IngestMode::OneShot;
+        r.mode = BuildMode::OneShot;
         let skipped = ProcessMemInfo {
             present: false,
             skipped: true,
@@ -1208,7 +1181,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
             Some("src"),
             vec![primary(MediumType::Filesystem, vec![])],
         );
-        r.mode = IngestMode::OneShot;
+        r.mode = BuildMode::OneShot;
         let g = guidance(Some("goal"), None);
         let skipped = ProcessMemInfo {
             present: false,

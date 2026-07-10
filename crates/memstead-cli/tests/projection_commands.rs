@@ -105,11 +105,17 @@ fn migrate_promotes_projection_to_v1_binding() {
     assert_eq!(b.destination_mem, "engine");
     assert_eq!(b.intent.as_deref(), Some("the engine graph"));
     assert_eq!(b.reference_mems, vec!["plugin".to_string()]);
-    assert_eq!(b.operations.build.mode, BuildMode::Discovery);
-    assert_eq!(b.operations.build.trigger, IngestTrigger::Loop);
-    assert_eq!(b.operations.build.batch_size, 20);
     assert_eq!(
-        b.operations.build.post_actions,
+        b.operations.build.as_ref().unwrap().mode,
+        BuildMode::Discovery
+    );
+    assert_eq!(
+        b.operations.build.as_ref().unwrap().trigger,
+        IngestTrigger::Loop
+    );
+    assert_eq!(b.operations.build.as_ref().unwrap().batch_size, 20);
+    assert_eq!(
+        b.operations.build.as_ref().unwrap().post_actions,
         Some(serde_json::json!({ "archive_source": true }))
     );
     // Build-only: sync/verify are enabled later, never fabricated by migrate.
@@ -371,7 +377,10 @@ fn init_codebase_scaffolds_all_three_with_full_operations() {
     assert_eq!(b.destination_mem, "engine");
     assert_eq!(b.intent.as_deref(), Some("model the engine"));
     assert_eq!(b.source_facets, vec!["graph".to_string()]);
-    assert_eq!(b.operations.build.mode, BuildMode::Discovery);
+    assert_eq!(
+        b.operations.build.as_ref().unwrap().mode,
+        BuildMode::Discovery
+    );
     assert!(b.operations.sync.is_some());
     assert!(b.operations.verify.is_some());
     let round = serde_json::to_string(&b).unwrap();
@@ -585,7 +594,10 @@ fn enable_sync_adds_block_to_codebase_binding() {
         .as_ref()
         .expect("sync block was added");
     assert_eq!(sync.trigger, IngestTrigger::Manual);
-    assert_eq!(sync.batch_size, before.operations.build.batch_size);
+    assert_eq!(
+        sync.batch_size,
+        before.operations.build.as_ref().unwrap().batch_size
+    );
     // verify stays absent — enable adds only the named operation.
     assert!(after.operations.verify.is_none());
     // Every other field is the same declaration.
@@ -833,7 +845,7 @@ fn advance_workspace() -> TempDir {
     write_store(
         root,
         "projections/engine/graph.json",
-        r#"{"version":1,"intent":"model the engine","source_facets":["source-tree"],"reference_mems":[],"destination_mem":"engine","deny_paths":[],"coverage_semantics":"exhaustive","operations":{"build":{"mode":"discovery","trigger":"loop","batch_size":20}}}"#,
+        r#"{"version":1,"intent":"model the engine","source_facets":["source-tree"],"reference_mems":[],"destination_mem":"engine","deny_paths":[],"coverage_semantics":"exhaustive","operations":{"build":{"mode":"discovery","trigger":"loop","batch_size":20},"sync":{"trigger":"manual","batch_size":20}}}"#,
     );
 
     // The git source tree: base (a.rs + b.rs), then head1 (modify a.rs, delete b.rs).
@@ -1163,7 +1175,10 @@ fn migrate_gen1_root_folder_promotes_to_v1_binding() {
     assert_eq!(b.version, 1);
     assert_eq!(b.destination_mem, "engine");
     assert_eq!(b.source_facets, vec!["src".to_string()]);
-    assert_eq!(b.operations.build.mode, BuildMode::Discovery);
+    assert_eq!(
+        b.operations.build.as_ref().unwrap().mode,
+        BuildMode::Discovery
+    );
     // The merged flat ingest was consumed; medium + facet were materialized.
     assert!(!root.join(".memstead/ingests/engine-graph.json").exists());
     assert!(root.join(".memstead/mediums/engine/src.json").exists());
@@ -1213,4 +1228,227 @@ fn migrate_gen1_dry_run_writes_nothing() {
             .exists()
     );
     assert!(!root.join(".memstead/mediums/engine/src.json").exists());
+}
+
+// ── AC4: absent-operation-block refusal + `projection enable` remedy ─────────
+
+/// D6/AC4: `projection brief` on a binding with **no build block** refuses with
+/// the `projection enable build <binding>` remedy, and that command — run
+/// verbatim — makes the same brief succeed.
+#[test]
+fn brief_refuses_absent_build_then_enable_build_remedy_succeeds() {
+    let tmp = advance_workspace();
+    let root = tmp.path();
+    // Strip the build block — a verify-only binding (verify is read-only, never
+    // a refusal, so it is a legal build-less shape).
+    write_store(
+        root,
+        "projections/engine/graph.json",
+        r#"{"version":1,"intent":"model the engine","source_facets":["source-tree"],"reference_mems":[],"destination_mem":"engine","deny_paths":[],"coverage_semantics":"exhaustive","operations":{"verify":{"trigger":"manual","batch_size":20}}}"#,
+    );
+
+    // brief refuses with the one-command remedy.
+    let out = memstead()
+        .current_dir(root)
+        .args(["--json", "projection", "brief", "engine/graph"])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&out).expect("brief refusal must emit JSON");
+    assert_eq!(env["code"], "PROJECTION_BUILD_NOT_ENABLED");
+    assert!(
+        env["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("memstead projection enable build engine/graph"),
+        "message must carry the verbatim remedy: {env}",
+    );
+
+    // The cited command, run verbatim, enables build.
+    memstead()
+        .current_dir(root)
+        .args(["projection", "enable", "build", "engine/graph"])
+        .assert()
+        .success();
+
+    // The same brief now succeeds.
+    memstead()
+        .current_dir(root)
+        .args(["projection", "brief", "engine/graph"])
+        .assert()
+        .success();
+}
+
+/// D6/AC4: `projection advance` on a binding with **no sync block** refuses with
+/// the `projection enable sync <binding>` remedy, and that command — run
+/// verbatim — makes the same advance succeed.
+#[test]
+fn advance_refuses_absent_sync_then_enable_sync_remedy_succeeds() {
+    let tmp = advance_workspace();
+    let root = tmp.path();
+    // Strip the sync block so the advance (sync) path has none to run.
+    write_store(
+        root,
+        "projections/engine/graph.json",
+        r#"{"version":1,"intent":"model the engine","source_facets":["source-tree"],"reference_mems":[],"destination_mem":"engine","deny_paths":[],"coverage_semantics":"exhaustive","operations":{"build":{"mode":"discovery","trigger":"loop","batch_size":20}}}"#,
+    );
+    assert!(read_binding(root).operations.sync.is_none());
+
+    // advance (the sync path) refuses with the one-command remedy.
+    let out = memstead()
+        .current_dir(root)
+        .args([
+            "--json",
+            "projection",
+            "advance",
+            "engine/graph",
+            "--dispositions",
+            "{}",
+        ])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&out).expect("advance refusal must emit JSON");
+    assert_eq!(env["code"], "PROJECTION_SYNC_NOT_ENABLED");
+    assert!(
+        env["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("memstead projection enable sync engine/graph"),
+        "message must carry the verbatim remedy: {env}",
+    );
+
+    // The cited command, run verbatim, enables sync.
+    memstead()
+        .current_dir(root)
+        .args(["projection", "enable", "sync", "engine/graph"])
+        .assert()
+        .success();
+
+    // The same advance now succeeds (empty dispositions re-present the slice).
+    memstead()
+        .current_dir(root)
+        .args([
+            "projection",
+            "advance",
+            "engine/graph",
+            "--dispositions",
+            "{}",
+        ])
+        .assert()
+        .success();
+}
+
+/// Verify-path resolution succeeds with **no verify block** (defaults, never a
+/// refusal): a build-only binding renders its brief clean.
+#[test]
+fn brief_succeeds_with_no_verify_block() {
+    let tmp = advance_workspace();
+    // The migrated binding is build-only (no verify). Its brief renders.
+    memstead()
+        .current_dir(tmp.path())
+        .args(["projection", "brief", "engine/graph"])
+        .assert()
+        .success();
+}
+
+// ── AC12: `projection migrate` consumes reconcile-cursors.json (D10) ─────────
+
+/// D10/AC12: `projection migrate` seeds the destination binding's `#synced`
+/// token from a `reconcile-cursors.json` entry whose absolute-keyed path
+/// resolves to the binding's medium pointer, then deletes the cursor file.
+#[test]
+fn migrate_consumes_reconcile_cursors_seeds_synced_and_deletes_it() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+
+    // Workspace adapter + a folder-mounted `engine` mem (so set_mem_sync_state
+    // has a writable mem with a loaded config).
+    write_store(
+        root,
+        "workspace.toml",
+        "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+    );
+    write_store(
+        root,
+        "state/mounts.json",
+        r#"{"format":"memstead-mounts-3","mounts":[{"mem":"engine","schema":"default@1.0.0","storage":{"type":"folder","path":"engine-mem"},"capability":"write","lifecycle":"eager","cross_linkable":false}]}"#,
+    );
+    let mem_meta = root.join("engine-mem").join(".memstead");
+    std::fs::create_dir_all(&mem_meta).unwrap();
+    std::fs::write(
+        mem_meta.join("config.json"),
+        br#"{"format":1,"schema":"default@1.0.0"}"#,
+    )
+    .unwrap();
+
+    // A real source dir the medium pointer resolves to.
+    let src = root.join("src");
+    std::fs::create_dir_all(&src).unwrap();
+    std::fs::write(src.join("a.rs"), "x").unwrap();
+
+    // Gen-2 store: medium (codebase → `src`), facet, projection, flat ingest.
+    write_store(
+        root,
+        "mediums/engine/src.json",
+        r#"{"name":"src","type":"codebase","pointer":"src"}"#,
+    );
+    write_store(
+        root,
+        "facets/engine/source-tree.json",
+        r#"{"name":"source-tree","medium":"src","scope":[{"path":"src/**/*.rs","mode":"allow"}]}"#,
+    );
+    write_store(
+        root,
+        "projections/engine/graph.json",
+        r#"{"intent":"engine graph","source_facets":["source-tree"],"reference_mems":[],"destination_mem":"engine"}"#,
+    );
+    write_store(
+        root,
+        "ingests/engine-graph.json",
+        r#"{"projection":"engine/graph","mode":"discovery","trigger":"loop","batch_size":20}"#,
+    );
+
+    // A skill-written reconcile-cursors.json keyed to `src`'s absolute path.
+    let src_abs = std::fs::canonicalize(&src).unwrap();
+    write_store(
+        root,
+        "reconcile-cursors.json",
+        &format!(r#"{{"engine:{}":"cafebabe0000"}}"#, src_abs.display()),
+    );
+
+    // Migrate.
+    memstead()
+        .current_dir(root)
+        .args(["projection", "migrate"])
+        .assert()
+        .success();
+
+    // The `#synced` baseline was seeded from the cursor's sha, on the mem config.
+    let cfg: Value =
+        serde_json::from_slice(&std::fs::read(mem_meta.join("config.json")).unwrap()).unwrap();
+    assert_eq!(
+        cfg["syncState"]["engine/graph/source-tree#synced"], "cafebabe0000",
+        "migrate seeded #synced from the absolute-keyed cursor sha: {cfg}",
+    );
+
+    // The cursor file was consumed (deleted).
+    assert!(
+        !root.join(".memstead/reconcile-cursors.json").exists(),
+        "reconcile-cursors.json must be deleted by the migration",
+    );
+}
+
+/// A cursorless migrate leaves the binding never-synced and writes no baseline.
+#[test]
+fn migrate_without_cursor_leaves_never_synced() {
+    let tmp = migrated_build_only_workspace();
+    let root = tmp.path();
+    // No reconcile-cursors.json existed → no #synced token anywhere. The
+    // migrate succeeded (asserted by the helper) and left no cursor artifact.
+    assert!(!root.join(".memstead/reconcile-cursors.json").exists());
 }

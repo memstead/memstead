@@ -11,7 +11,7 @@
 //! Backoff shape (mirrors the plugin exactly): a **linear-ramp** per-ingest
 //! skip counter. A destination-snapshot change *or* a moved source resets it
 //! to zero and runs; otherwise each unproductive pass grows the cooldown by
-//! one (capped at [`MAX_SKIP_LEVEL`]). one-shot and refinement never skip.
+//! one (capped at [`MAX_SKIP_LEVEL`]). A one-shot build never skips.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -19,7 +19,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::Engine;
-use crate::pipeline::IngestMode;
+use crate::binding::BuildMode;
 use crate::pipeline_store::BindingConfigs;
 
 use super::cursor::source_moved;
@@ -80,20 +80,19 @@ pub fn apply_backoff(entry: &mut BackoffEntry, current: &str) -> bool {
     false
 }
 
-/// Whether an ingest should be skipped this rotation. one-shot and refinement
-/// never skip (one-shots are excluded from the eligible set once run;
-/// refinement runs to completion — batch-state-driven backoff is not yet
-/// ported, so refinement conservatively never skips). Discovery: a moved
-/// source overrides backoff; otherwise the destination-snapshot [`apply_backoff`].
+/// Whether a binding should be skipped this rotation. A one-shot build never
+/// skips (one-shots are excluded from the eligible set once run). Discovery: a
+/// moved source overrides backoff; otherwise the destination-snapshot
+/// [`apply_backoff`].
 pub fn should_skip(
-    mode: IngestMode,
+    mode: BuildMode,
     source_moved: bool,
     entry: &mut BackoffEntry,
     current: &str,
 ) -> bool {
     match mode {
-        IngestMode::OneShot | IngestMode::Refinement => return false,
-        IngestMode::Discovery => {}
+        BuildMode::OneShot => return false,
+        BuildMode::Discovery => {}
     }
     if source_moved {
         return false;
@@ -146,7 +145,7 @@ pub fn select_next_due(
         .filter_map(|r| {
             resolve_binding_run(configs, &format!("{}/{}", r.mem, r.name), &r.config).ok()
         })
-        .filter(|ri| !(ri.mode == IngestMode::OneShot && one_shot_ran.contains(&ri.name)))
+        .filter(|ri| !(ri.mode == BuildMode::OneShot && one_shot_ran.contains(&ri.name)))
         .collect();
     eligible.sort_by(|a, b| a.name.cmp(&b.name));
     let n = eligible.len();
@@ -235,7 +234,7 @@ mod tests {
         assert_eq!(e.skip_remaining, MAX_SKIP_LEVEL);
     }
 
-    /// one-shot and refinement never skip; a moved source overrides backoff for
+    /// A one-shot build never skips; a moved source overrides backoff for
     /// discovery; an unchanged discovery destination backs off.
     #[test]
     fn should_skip_honours_mode_and_source_movement() {
@@ -244,24 +243,13 @@ mod tests {
             skip_level: 3,
             snapshot: "s".to_string(),
         };
-        // one-shot / refinement never skip, regardless of backoff.
-        assert!(!should_skip(
-            IngestMode::OneShot,
-            false,
-            &mut e.clone(),
-            "s"
-        ));
-        assert!(!should_skip(
-            IngestMode::Refinement,
-            false,
-            &mut e.clone(),
-            "s"
-        ));
+        // A one-shot build never skips, regardless of backoff.
+        assert!(!should_skip(BuildMode::OneShot, false, &mut e.clone(), "s"));
         // Discovery with a moved source → run (backoff untouched).
         let mut e2 = e.clone();
-        assert!(!should_skip(IngestMode::Discovery, true, &mut e2, "s"));
+        assert!(!should_skip(BuildMode::Discovery, true, &mut e2, "s"));
         assert_eq!(e2.skip_remaining, 3, "moved source does not touch backoff");
         // Discovery, unchanged, cooling down → skip.
-        assert!(should_skip(IngestMode::Discovery, false, &mut e, "s"));
+        assert!(should_skip(BuildMode::Discovery, false, &mut e, "s"));
     }
 }

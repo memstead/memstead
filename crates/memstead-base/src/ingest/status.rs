@@ -98,7 +98,10 @@ pub fn projection_status(engine: &Engine, workspace_root: &Path) -> Vec<Projecti
         let binding_id = format!("{}/{}", record.mem, record.name);
         let binding = &record.config;
 
-        let mut operations = vec!["build".to_string()];
+        let mut operations = Vec::new();
+        if binding.operations.build.is_some() {
+            operations.push("build".to_string());
+        }
         if binding.operations.sync.is_some() {
             operations.push("sync".to_string());
         }
@@ -250,12 +253,12 @@ mod tests {
                 coverage_semantics: CoverageSemantics::Exhaustive,
                 rules: None,
                 operations: Operations {
-                    build: BuildOperation {
+                    build: Some(BuildOperation {
                         mode: BuildMode::Discovery,
                         trigger: IngestTrigger::Loop,
                         batch_size: 20,
                         post_actions: None,
-                    },
+                    }),
                     sync: Some(SyncOperation {
                         trigger: IngestTrigger::Manual,
                         batch_size: 20,

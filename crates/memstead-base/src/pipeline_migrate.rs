@@ -24,14 +24,16 @@
 //!   facet shares its name); a `mem` (role `reference`) becomes a
 //!   `reference_mems` entry. The first `destinations[].mem` becomes the
 //!   single `destination_mem`.
-//! - A legacy **ingest** is structurally identical to the new [`Ingest`] and
+//! - A legacy **ingest** is structurally identical to the migrate-local
+//!   [`crate::pipeline_store::LegacyIngest`] shape and
 //!   deserialises directly.
 
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
-use crate::pipeline::{Facet, Ingest, Medium, MediumType, PatternEntry, PatternMode, Projection};
+use crate::pipeline::{Facet, Medium, MediumType, PatternEntry, PatternMode, Projection};
+use crate::pipeline_store::LegacyIngest;
 use crate::pipeline_store::{MemPipelineRecord, PipelineConfigs, PipelineRecord};
 use crate::workspace_store::StoreError;
 
@@ -257,7 +259,7 @@ pub fn read_legacy_pipeline_configs(workspace_root: &Path) -> Result<PipelineCon
                     continue;
                 }
                 if let Some(name) = path.file_stem().map(|s| s.to_string_lossy().into_owned()) {
-                    let config: Ingest = read_legacy_json(&path)?;
+                    let config: LegacyIngest = read_legacy_json(&path)?;
                     ingests.push(PipelineRecord { name, config });
                 }
             }
@@ -304,7 +306,7 @@ pub fn migrate_legacy_pipeline(workspace_root: &Path) -> Result<PipelineConfigs,
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pipeline::IngestMode;
+    use crate::pipeline_store::LegacyIngestMode;
 
     #[test]
     fn common_dir_prefix_stops_at_first_glob() {
@@ -431,7 +433,10 @@ mod tests {
             converted.projections[0].config.reference_mems,
             vec!["engine".to_string()]
         );
-        assert_eq!(converted.ingests[0].config.mode, IngestMode::Discovery);
+        assert_eq!(
+            converted.ingests[0].config.mode,
+            LegacyIngestMode::Discovery
+        );
 
         // Written to the `.memstead/` store and reloadable by the loader.
         let loaded = crate::pipeline_store::load_legacy_pipeline_configs(root).unwrap();

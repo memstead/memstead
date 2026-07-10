@@ -1246,6 +1246,20 @@ impl Engine {
         // a full re-init.
         self.load_errors.extend(load_result.errors);
 
+        // Refresh the mem's config from the backend too (D13). `sync_state`
+        // (the projection baselines) and the schema pin / write guidance are
+        // mem-scoped state that rides the mem branch, so an out-of-band write
+        // — a sibling `projection advance` / `mem set-sync-state` — must become
+        // visible after a per-mem reload, not only entity changes. A missing or
+        // unparseable config leaves the cached value untouched (best-effort:
+        // the reload never fails on a config read hiccup).
+        if let Ok(Some(bytes)) = self.mounts[mount_idx].backend.read_mem_config()
+            && let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes)
+            && let Ok(cfg) = memstead_schema::config::parse_mem_config(&value)
+        {
+            self.mounts[mount_idx].mem_config = Some(cfg);
+        }
+
         // Diff post-reload against the snapshot.
         let mut added: Vec<EntityId> = Vec::new();
         let mut changed: Vec<EntityId> = Vec::new();

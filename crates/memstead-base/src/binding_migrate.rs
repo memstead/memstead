@@ -42,9 +42,9 @@ use crate::binding::{
     BINDING_VERSION, BindingV1, BuildMode, BuildOperation, CoverageSemantics, Operations,
     ResolvedBinding,
 };
-use crate::ingest::resolve::{ResolveError, ResolvedSource, resolve_ingest};
-use crate::pipeline::{Ingest, IngestMode, Projection};
-use crate::pipeline_store::PipelineConfigs;
+use crate::ingest::resolve::{ResolveError, resolve_binding};
+use crate::pipeline::Projection;
+use crate::pipeline_store::{LegacyIngest, LegacyIngestMode, PipelineConfigs};
 
 /// Why a gen-2 config could not be migrated to a v1 binding. Every variant
 /// names the offending ingest so the failure is diagnosable without
@@ -153,15 +153,15 @@ pub struct MigratedBinding {
 ///
 /// See the [module docs](self) for the full field mapping. `refinement` mode
 /// is a typed error; every other field carries over or defaults as documented.
-pub fn binding_from_gen2(
+pub(crate) fn binding_from_gen2(
     ingest_name: &str,
-    ingest: &Ingest,
+    ingest: &LegacyIngest,
     projection: &Projection,
 ) -> Result<(BindingV1, Vec<String>), BindingMigrateError> {
     let mode = match ingest.mode {
-        IngestMode::Discovery => BuildMode::Discovery,
-        IngestMode::OneShot => BuildMode::OneShot,
-        IngestMode::Refinement => {
+        LegacyIngestMode::Discovery => BuildMode::Discovery,
+        LegacyIngestMode::OneShot => BuildMode::OneShot,
+        LegacyIngestMode::Refinement => {
             return Err(BindingMigrateError::RefinementModeDeleted {
                 ingest: ingest_name.to_string(),
             });
@@ -193,12 +193,12 @@ pub fn binding_from_gen2(
         coverage_semantics: CoverageSemantics::Exhaustive,
         rules: projection.rules.clone(),
         operations: Operations {
-            build: BuildOperation {
+            build: Some(BuildOperation {
                 mode,
                 trigger: ingest.trigger,
                 batch_size: ingest.batch_size,
                 post_actions: ingest.post_actions.clone(),
-            },
+            }),
             // A gen-2 config declares only the build-equivalent schedule.
             // Sync/verify are enabled later via `projection enable`, never
             // fabricated by migration.
@@ -270,32 +270,20 @@ pub fn migrate_gen2_bindings(
 }
 
 /// Resolve a migrated binding's primary sources (facet + medium) via the
-/// existing resolve layer, so the produced binding can be validated against
-/// the D6 capability matrix ([`crate::binding::validate_binding`]).
+/// binding resolve layer, so the produced binding can be validated against the
+/// D6 capability matrix ([`crate::binding::validate_binding`]).
 ///
-/// Reuses [`resolve_ingest`] against the still-loaded gen-2 configs (the
-/// ingest whose merge produced this binding — passed by `ingest_name`);
-/// reference mems are dropped, since only primary facets carry capability
-/// constraints. This gives the D6 matrix its first real, config-derived
-/// consumer.
+/// Resolves the binding's own `source_facets` against the still-loaded gen-2
+/// configs (facets/mediums in the binding-id's `<mem>` tier) via
+/// [`resolve_binding`]; reference mems are not resolved (only primary facets
+/// carry capability constraints). This gives the D6 matrix a real,
+/// config-derived consumer.
 pub fn resolve_migrated_binding(
     configs: &PipelineConfigs,
-    ingest_name: &str,
+    binding_id: &str,
     binding: BindingV1,
 ) -> Result<ResolvedBinding, ResolveError> {
-    let resolved = resolve_ingest(configs, ingest_name)?;
-    let primary_sources = resolved
-        .sources
-        .into_iter()
-        .filter_map(|s| match s {
-            ResolvedSource::Primary(p) => Some(p),
-            ResolvedSource::Reference { .. } => None,
-        })
-        .collect();
-    Ok(ResolvedBinding {
-        binding,
-        primary_sources,
-    })
+    resolve_binding(configs, binding_id, &binding)
 }
 
 #[cfg(test)]
@@ -303,7 +291,9 @@ mod tests {
     use super::*;
     use crate::binding::{CapabilityError, validate_binding};
     use crate::pipeline::{Facet, IngestTrigger, Medium, MediumType, PatternEntry, PatternMode};
-    use crate::pipeline_store::{MemPipelineRecord, PipelineRecord};
+    use crate::pipeline_store::{
+        LegacyIngest, LegacyIngestMode, MemPipelineRecord, PipelineRecord,
+    };
 
     fn medium(mem: &str, name: &str, ty: MediumType, pointer: &str) -> MemPipelineRecord<Medium> {
         MemPipelineRecord {
@@ -358,12 +348,12 @@ mod tests {
     fn ingest(
         name: &str,
         projection: &str,
-        mode: IngestMode,
+        mode: LegacyIngestMode,
         deny: &[&str],
-    ) -> PipelineRecord<Ingest> {
+    ) -> PipelineRecord<LegacyIngest> {
         PipelineRecord {
             name: name.to_string(),
-            config: Ingest {
+            config: LegacyIngest {
                 projection: projection.to_string(),
                 mode,
                 trigger: IngestTrigger::Loop,
@@ -392,7 +382,7 @@ mod tests {
             ingests: vec![ingest(
                 "engine-graph",
                 "engine/graph",
-                IngestMode::Discovery,
+                LegacyIngestMode::Discovery,
                 &[],
             )],
         };
@@ -414,11 +404,17 @@ mod tests {
         assert_eq!(b.coverage_semantics, CoverageSemantics::Exhaustive);
         assert_eq!(b.rules, Some(serde_json::json!({ "routing": "r" })));
         // Operations: build carries the merged schedule; sync/verify absent.
-        assert_eq!(b.operations.build.mode, BuildMode::Discovery);
-        assert_eq!(b.operations.build.trigger, IngestTrigger::Loop);
-        assert_eq!(b.operations.build.batch_size, 20);
         assert_eq!(
-            b.operations.build.post_actions,
+            b.operations.build.as_ref().unwrap().mode,
+            BuildMode::Discovery
+        );
+        assert_eq!(
+            b.operations.build.as_ref().unwrap().trigger,
+            IngestTrigger::Loop
+        );
+        assert_eq!(b.operations.build.as_ref().unwrap().batch_size, 20);
+        assert_eq!(
+            b.operations.build.as_ref().unwrap().post_actions,
             Some(serde_json::json!({ "archive_source": true }))
         );
         assert!(b.operations.sync.is_none());
@@ -442,7 +438,7 @@ mod tests {
             ingests: vec![ingest(
                 "engine-graph",
                 "engine/graph",
-                IngestMode::Discovery,
+                LegacyIngestMode::Discovery,
                 &[],
             )],
         };
@@ -471,7 +467,7 @@ mod tests {
             ingests: vec![ingest(
                 "engine-graph",
                 "engine/graph",
-                IngestMode::Discovery,
+                LegacyIngestMode::Discovery,
                 &["dev", "VISION.md", "../public/target/**"],
             )],
         };
@@ -494,12 +490,12 @@ mod tests {
     fn one_shot_mode_maps() {
         let configs = PipelineConfigs {
             projections: vec![projection("m", "p", &[], &[], "m")],
-            ingests: vec![ingest("i", "m/p", IngestMode::OneShot, &[])],
+            ingests: vec![ingest("i", "m/p", LegacyIngestMode::OneShot, &[])],
             ..Default::default()
         };
         let migrated = migrate_gen2_bindings(&configs).unwrap();
         assert_eq!(
-            migrated[0].binding.operations.build.mode,
+            migrated[0].binding.operations.build.as_ref().unwrap().mode,
             BuildMode::OneShot
         );
     }
@@ -509,7 +505,7 @@ mod tests {
     fn refinement_mode_is_a_typed_error() {
         let configs = PipelineConfigs {
             projections: vec![projection("m", "p", &[], &[], "m")],
-            ingests: vec![ingest("i", "m/p", IngestMode::Refinement, &[])],
+            ingests: vec![ingest("i", "m/p", LegacyIngestMode::Refinement, &[])],
             ..Default::default()
         };
         let err = migrate_gen2_bindings(&configs).unwrap_err();
@@ -524,7 +520,7 @@ mod tests {
     fn dangling_projection_ref_is_a_typed_error() {
         let configs = PipelineConfigs {
             projections: vec![projection("m", "other", &[], &[], "m")],
-            ingests: vec![ingest("i", "m/missing", IngestMode::Discovery, &[])],
+            ingests: vec![ingest("i", "m/missing", LegacyIngestMode::Discovery, &[])],
             ..Default::default()
         };
         let err = migrate_gen2_bindings(&configs).unwrap_err();
@@ -548,7 +544,7 @@ mod tests {
     #[test]
     fn malformed_projection_ref_is_a_typed_error() {
         let configs = PipelineConfigs {
-            ingests: vec![ingest("i", "noslash", IngestMode::Discovery, &[])],
+            ingests: vec![ingest("i", "noslash", LegacyIngestMode::Discovery, &[])],
             ..Default::default()
         };
         let err = migrate_gen2_bindings(&configs).unwrap_err();
@@ -575,14 +571,13 @@ mod tests {
             ingests: vec![ingest(
                 "engine-graph",
                 "engine/graph",
-                IngestMode::Discovery,
+                LegacyIngestMode::Discovery,
                 &["../public/target/**"],
             )],
         };
         let migrated = migrate_gen2_bindings(&configs).unwrap();
         let m = &migrated[0];
-        let resolved =
-            resolve_migrated_binding(&configs, &m.ingest_name, m.binding.clone()).unwrap();
+        let resolved = resolve_migrated_binding(&configs, &m.id, m.binding.clone()).unwrap();
         assert!(validate_binding(&resolved).is_ok());
     }
 
@@ -597,14 +592,13 @@ mod tests {
             ingests: vec![ingest(
                 "docs-manual",
                 "docs/manual",
-                IngestMode::Discovery,
+                LegacyIngestMode::Discovery,
                 &[],
             )],
         };
         let migrated = migrate_gen2_bindings(&configs).unwrap();
         let m = &migrated[0];
-        let resolved =
-            resolve_migrated_binding(&configs, &m.ingest_name, m.binding.clone()).unwrap();
+        let resolved = resolve_migrated_binding(&configs, &m.id, m.binding.clone()).unwrap();
         let errs = validate_binding(&resolved).unwrap_err();
         assert!(
             errs.iter().any(|e| matches!(

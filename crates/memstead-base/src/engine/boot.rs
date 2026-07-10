@@ -1280,9 +1280,8 @@ community:
     /// queryable surface in the post-refactor shape.
     #[test]
     fn from_workspace_root_loads_pipeline_configs_into_queryable_surface() {
-        use crate::pipeline::{
-            Facet, Ingest, IngestMode, IngestTrigger, Medium, MediumType, Projection,
-        };
+        use crate::pipeline::{Facet, IngestTrigger, Medium, MediumType, Projection};
+        use crate::pipeline_store::{LegacyIngest, LegacyIngestMode};
         let tmp = TempDir::new().unwrap();
         let mem_dir = tmp.path().join("mem");
         std::fs::create_dir_all(&mem_dir).unwrap();
@@ -1347,9 +1346,9 @@ community:
         crate::pipeline_store::write_ingest(
             tmp.path(),
             "specs-graph",
-            &Ingest {
+            &LegacyIngest {
                 projection: "specs/graph".to_string(),
-                mode: IngestMode::Discovery,
+                mode: LegacyIngestMode::Discovery,
                 trigger: IngestTrigger::Loop,
                 batch_size: 10,
                 deny_paths: Vec::new(),
@@ -1368,7 +1367,7 @@ community:
         assert_eq!(pc.projections[0].config.destination_mem, "specs");
         assert_eq!(pc.ingests.len(), 1, "one ingest enumerated");
         assert_eq!(pc.ingests[0].name, "specs-graph");
-        assert_eq!(pc.ingests[0].config.mode, IngestMode::Discovery);
+        assert_eq!(pc.ingests[0].config.mode, LegacyIngestMode::Discovery);
     }
 
     /// The engine edit surface: a wrapper edit (`add_medium`) routes through

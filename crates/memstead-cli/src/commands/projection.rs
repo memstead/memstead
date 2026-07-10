@@ -34,7 +34,7 @@ use memstead_base::binding_migrate::{
 };
 use memstead_base::ingest::advance::{AdvanceError, advance_baseline};
 use memstead_base::ingest::resolve::{
-    ResolveError, ResolvedPrimarySource, resolve_binding, resolve_binding_run,
+    ResolveError, ResolvedPrimarySource, ResolvedSource, resolve_binding, resolve_binding_run,
 };
 use memstead_base::ingest::{RenderBriefError, render_ingest_brief, select_next_due};
 use memstead_base::pipeline::{
@@ -251,11 +251,15 @@ fn map_brief_err(binding_id: &str, err: RenderBriefError) -> CliError {
         RenderBriefError::ConfigLoad(_) => {
             CliError::new(ExitKind::Generic, "PROJECTION_LOAD_FAILED", message)
         }
-        RenderBriefError::ModeUnsupported { .. } => {
-            CliError::new(ExitKind::Validation, "PROJECTION_MODE_UNSUPPORTED", message)
-        }
+        // D6/AC4: the binding declares no build op — refuse with the
+        // `projection enable build` remedy the error message already carries.
+        RenderBriefError::BuildOperationAbsent { .. } => CliError::new(
+            ExitKind::Validation,
+            "PROJECTION_BUILD_NOT_ENABLED",
+            message,
+        ),
         RenderBriefError::Resolve(inner) => match inner {
-            ResolveError::IngestNotFound { .. } | ResolveError::ProjectionNotFound { .. } => {
+            ResolveError::BindingNotFound { .. } => {
                 CliError::new(ExitKind::NotFound, "PROJECTION_NOT_FOUND", message)
             }
             ResolveError::FacetNotFound { .. } => {
@@ -458,12 +462,12 @@ fn init(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
         coverage_semantics: CoverageSemantics::Exhaustive,
         rules: None,
         operations: Operations {
-            build: BuildOperation {
+            build: Some(BuildOperation {
                 mode: BuildMode::Discovery,
                 trigger: IngestTrigger::Loop,
                 batch_size: 20,
                 post_actions: None,
-            },
+            }),
             sync: Some(SyncOperation {
                 trigger: IngestTrigger::Manual,
                 batch_size: 20,
@@ -593,6 +597,119 @@ fn migrate_load_err(err: StoreError) -> CliError {
     .with_details(json!({ "error": err.to_string() }))
 }
 
+/// Does the binding's `medium_pointer` (resolved against the workspace root)
+/// point at the same location as a `reconcile-cursors.json` absolute key? Uses
+/// canonicalization where both paths exist, else a lexical comparison (D10 —
+/// "the binding whose medium pointer resolves to that path").
+fn pointer_resolves_to(root: &std::path::Path, medium_pointer: &str, abs_path: &str) -> bool {
+    let resolved = if medium_pointer.is_empty() {
+        root.to_path_buf()
+    } else {
+        root.join(medium_pointer)
+    };
+    match (
+        std::fs::canonicalize(&resolved),
+        std::fs::canonicalize(abs_path),
+    ) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => resolved == std::path::Path::new(abs_path),
+    }
+}
+
+/// Scan `workspace.toml` for retired pipeline/cursor vocabulary. `projection
+/// migrate` **never** writes `workspace.toml` (D10) — if it finds a stale
+/// reference it returns a proposal block for the operator (or the migrating
+/// session) to apply and commit explicitly, rather than rewriting it.
+fn propose_workspace_toml(root: &std::path::Path) -> Option<String> {
+    let path = root.join(".memstead").join("workspace.toml");
+    let content = std::fs::read_to_string(path).ok()?;
+    let hits: Vec<(usize, &str)> = content
+        .lines()
+        .enumerate()
+        .filter(|(_, l)| {
+            let low = l.to_lowercase();
+            low.contains("reconcile-cursors") || low.contains("ingests/") || low.contains("ingest ")
+        })
+        .collect();
+    if hits.is_empty() {
+        return None;
+    }
+    let mut block = String::from(
+        "## Proposal: workspace.toml (NOT applied)\n\n`projection migrate` never edits \
+         `workspace.toml`. It found references to retired pipeline vocabulary — review and \
+         update these lines by hand, then commit:\n\n",
+    );
+    for (i, line) in hits {
+        block.push_str(&format!("- L{}: `{}`\n", i + 1, line.trim()));
+    }
+    Some(block)
+}
+
+/// Consume a skill-written `reconcile-cursors.json` (D10/AC12): each
+/// machine-absolute `"<mem>:<abs-path>": <sha>` entry seeds the `#synced`
+/// baseline of every binding whose medium pointer resolves to that path (via
+/// the engine's `set_mem_sync_state` writer — the engine owns mem-repo state),
+/// then the file is **deleted** regardless of whether anything matched
+/// (cursorless / unmatched bindings stay never-synced). Returns the seeded keys.
+fn consume_reconcile_cursors(
+    ctx: &CliContext,
+    root: &std::path::Path,
+) -> anyhow::Result<Vec<String>> {
+    let cursor_path = root.join(".memstead").join("reconcile-cursors.json");
+    if !cursor_path.exists() {
+        return Ok(Vec::new());
+    }
+    let cursors: std::collections::BTreeMap<String, String> = std::fs::read(&cursor_path)
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default();
+
+    let mut seeded: Vec<String> = Vec::new();
+    if !cursors.is_empty() {
+        let configs = load_pipeline_configs(root).map_err(migrate_load_err)?;
+        let mut cli_engine = ctx.cli_engine_at(root)?;
+        let engine = match &mut cli_engine {
+            #[cfg(feature = "mem-repo")]
+            CliEngine::MemRepo(e) => e,
+            CliEngine::Filesystem(e) => e,
+        };
+        for (cursor_key, sha) in &cursors {
+            // Key is `"<mem>:<abs-path>"` — split on the first ':'.
+            let Some((_cursor_mem, abs_path)) = cursor_key.split_once(':') else {
+                continue;
+            };
+            for record in &configs.bindings {
+                let binding_id = format!("{}/{}", record.mem, record.name);
+                let Ok(resolved) = resolve_binding_run(&configs, &binding_id, &record.config)
+                else {
+                    continue;
+                };
+                for source in &resolved.sources {
+                    if let ResolvedSource::Primary(p) = source
+                        && pointer_resolves_to(root, &p.medium_pointer, abs_path)
+                    {
+                        let key = format!("{binding_id}/{}#synced", p.facet_ref);
+                        if engine
+                            .set_mem_sync_state(
+                                &resolved.destination_mem,
+                                &key,
+                                sha,
+                                Some("projection migrate: seeded from reconcile-cursors.json"),
+                            )
+                            .is_ok()
+                        {
+                            seeded.push(key);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // Consumed — delete regardless of matches (D10: the file is retired here).
+    let _ = std::fs::remove_file(&cursor_path);
+    Ok(seeded)
+}
+
 fn migrate(ctx: &CliContext, args: MigrateArgs) -> anyhow::Result<()> {
     let (_shape, root) = ctx.workspace_shape().ok_or_else(|| {
         workspace_not_initialised_error(
@@ -634,7 +751,7 @@ fn migrate(ctx: &CliContext, args: MigrateArgs) -> anyhow::Result<()> {
     // aborting the promotion.
     let mut warnings: Vec<serde_json::Value> = Vec::new();
     for m in &migrated {
-        match resolve_migrated_binding(&configs, &m.ingest_name, m.binding.clone()) {
+        match resolve_migrated_binding(&configs, &m.id, m.binding.clone()) {
             Ok(resolved) => {
                 if let Err(refusals) = validate_binding(&resolved) {
                     for r in refusals {
@@ -684,6 +801,18 @@ fn migrate(ctx: &CliContext, args: MigrateArgs) -> anyhow::Result<()> {
         }
     }
 
+    // AC12/D10: consume `reconcile-cursors.json` (seed `#synced` baselines, then
+    // delete it) and surface a `workspace.toml` proposal for any retired-vocab
+    // references — never rewriting workspace.toml. Both are no-ops in `--dry-run`.
+    let (seeded, proposal) = if args.dry_run {
+        (Vec::new(), None)
+    } else {
+        (
+            consume_reconcile_cursors(ctx, &root)?,
+            propose_workspace_toml(&root),
+        )
+    };
+
     let bindings: Vec<&str> = migrated.iter().map(|m| m.id.as_str()).collect();
     if ctx.json {
         print_json(&json!({
@@ -692,6 +821,8 @@ fn migrate(ctx: &CliContext, args: MigrateArgs) -> anyhow::Result<()> {
             "migrated": migrated.len(),
             "bindings": bindings,
             "warnings": warnings,
+            "cursors_seeded": seeded,
+            "workspace_toml_proposal": proposal,
         }))?;
     } else {
         let verb = if args.dry_run {
@@ -716,6 +847,16 @@ fn migrate(ctx: &CliContext, args: MigrateArgs) -> anyhow::Result<()> {
                     w["message"].as_str().unwrap_or(""),
                 ));
             }
+        }
+        if !seeded.is_empty() {
+            out.push_str("\n## Baselines seeded from reconcile-cursors.json\n\n");
+            for key in &seeded {
+                out.push_str(&format!("- `{key}`\n"));
+            }
+        }
+        if let Some(block) = &proposal {
+            out.push('\n');
+            out.push_str(block);
         }
         if !args.dry_run {
             out.push_str(
@@ -802,10 +943,11 @@ fn enable(ctx: &CliContext, args: EnableArgs) -> anyhow::Result<()> {
     let mut binding =
         read_binding(&root, &mem, &stem).map_err(|e| enable_failed(&binding_id, e))?;
 
-    // Already present? Refuse without a partial write. `build` is required, so
-    // it is always present — enabling it always lands here.
+    // Already present? Refuse without a partial write. Every operation block is
+    // optional now (D1/AC4), so `build` is enableable too (the remedy a
+    // build-less binding's brief refusal cites).
     let already = match op {
-        EnableOperationArg::Build => true,
+        EnableOperationArg::Build => binding.operations.build.is_some(),
         EnableOperationArg::Sync => binding.operations.sync.is_some(),
         EnableOperationArg::Verify => binding.operations.verify.is_some(),
     };
@@ -822,11 +964,23 @@ fn enable(ctx: &CliContext, args: EnableArgs) -> anyhow::Result<()> {
         .into());
     }
 
-    // Add the operation block with sensible defaults: `trigger: manual`,
-    // `batch_size` mirroring the build op's. `build` is unreachable here (it is
-    // always already-enabled above).
-    let batch_size = binding.operations.build.batch_size;
+    // Add the operation block with sensible defaults: `batch_size` mirrors the
+    // build op's when present, else 20. Sync/verify default `trigger: manual`;
+    // build defaults to a discovery/loop schedule (the common obligation shape).
+    let batch_size = binding
+        .operations
+        .build
+        .as_ref()
+        .map_or(20, |b| b.batch_size);
     match op {
+        EnableOperationArg::Build => {
+            binding.operations.build = Some(BuildOperation {
+                mode: BuildMode::Discovery,
+                trigger: IngestTrigger::Loop,
+                batch_size,
+                post_actions: None,
+            });
+        }
         EnableOperationArg::Sync => {
             binding.operations.sync = Some(SyncOperation {
                 trigger: IngestTrigger::Manual,
@@ -839,7 +993,6 @@ fn enable(ctx: &CliContext, args: EnableArgs) -> anyhow::Result<()> {
                 batch_size,
             });
         }
-        EnableOperationArg::Build => unreachable!("build is always already-enabled"),
     }
 
     // Matrix validation (D6): resolve the candidate binding (facets → mediums,
@@ -876,7 +1029,10 @@ fn enable(ctx: &CliContext, args: EnableArgs) -> anyhow::Result<()> {
 
     write_binding(&root, &mem, &stem, &binding).map_err(|e| enable_failed(&binding_id, e))?;
 
-    let mut operations: Vec<&str> = vec!["build"];
+    let mut operations: Vec<&str> = Vec::new();
+    if binding.operations.build.is_some() {
+        operations.push("build");
+    }
     if binding.operations.sync.is_some() {
         operations.push("sync");
     }
@@ -901,9 +1057,9 @@ fn enable(ctx: &CliContext, args: EnableArgs) -> anyhow::Result<()> {
 }
 
 /// Map a `resolve_binding_run` failure (dangling facet/medium, malformed id)
-/// to a typed CLI error. `IngestNotFound` / `ProjectionNotFound` cannot arise
-/// from the binding resolver (the binding *is* the declaration), so they fall
-/// through to the generic advance-failure code.
+/// to a typed CLI error. `BindingNotFound` cannot arise from the binding
+/// resolver (the binding *is* the declaration), so it falls through to the
+/// generic advance-failure code.
 fn map_resolve_err(binding_id: &str, err: ResolveError) -> CliError {
     let message = err.to_string();
     let mapped = match err {
@@ -993,6 +1149,23 @@ fn advance(ctx: &CliContext, args: AdvanceArgs) -> anyhow::Result<()> {
             )
             .with_details(json!({ "binding": binding_id }))
         })?;
+
+    // D6/AC4: advance is the sync (maintenance-write) path — refuse when the
+    // binding declares no `sync` operation, carrying the one-command remedy
+    // `projection enable sync <binding>` (which, run verbatim, makes it succeed).
+    if record.config.operations.sync.is_none() {
+        return Err(CliError::new(
+            ExitKind::Validation,
+            "PROJECTION_SYNC_NOT_ENABLED",
+            format!(
+                "binding `{binding_id}` has no sync operation — enable it with \
+                 `memstead projection enable sync {binding_id}`"
+            ),
+        )
+        .with_details(json!({ "binding": binding_id }))
+        .into());
+    }
+
     let resolved = resolve_binding_run(&configs, &binding_id, &record.config)
         .map_err(|e| map_resolve_err(&binding_id, e))?;
 

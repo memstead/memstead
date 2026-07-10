@@ -11,6 +11,8 @@
 //! two-instance scenario is exercised here at the engine boundary.
 
 use indexmap::IndexMap;
+use memstead_base::ingest::Slice;
+use memstead_base::ingest::advance::{AdvanceState, read_advance_store, write_advance_store};
 use memstead_base::ops::NoticeChanges;
 use memstead_base::vcs::{Actor, ClientId};
 use memstead_base::{CreateEntityArgs, EngineError, EntityId, UpdateEntityArgs};
@@ -352,4 +354,109 @@ fn unrelated_concurrent_write_proceeds_with_mem_changed() {
         }
         other => panic!("expected detailed notice, got {other:?}"),
     }
+}
+
+/// D13 / AC11 — `sync_state` is **mem-scoped** state: an out-of-band
+/// `sync_state` write by a sibling engine (here A's `set_mem_sync_state`) is
+/// picked up by the second engine's per-mem reload, and the reload surfaces the
+/// `mem_changed` drift notice like any other mem-branch change.
+#[test]
+fn sync_state_write_surfaces_via_per_mem_reload() {
+    let tmp = TempDir::new().unwrap();
+    init_real_mem_repo(tmp.path(), &[("specs", "default@1.0.0")]);
+
+    let mut a = engine_from_workspace_root(tmp.path()).expect("engine A boots");
+    // Seed one entity so both engines cache a common non-empty head.
+    a.create_entity(
+        create_args("specs", "Entity One"),
+        Actor::Cli,
+        Some(&client()),
+        None,
+    )
+    .expect("A create");
+    let mut b = engine_from_workspace_root(tmp.path()).expect("engine B boots");
+
+    // A writes a projection baseline into the mem's `sync_state`, out of band
+    // from B (advancing the shared mem ref with a config-only commit).
+    a.set_mem_sync_state("specs", "engine/graph/source-tree#synced", "deadbeef", None)
+        .expect("A writes sync_state");
+
+    // Before the reload B still holds its boot snapshot — no baseline.
+    assert!(
+        b.mem_config_for("specs")
+            .map(|c| c.sync_state.is_empty())
+            .unwrap_or(true),
+        "B has not yet observed A's out-of-band sync_state write",
+    );
+
+    // A per-mem reload of the destination mem picks up the new `sync_state`
+    // value: it is mem-scoped state that rides the destination mem's config.
+    b.reload_one_mem("specs").expect("B reloads specs");
+    let synced = b
+        .mem_config_for("specs")
+        .and_then(|c| c.sync_state.get("engine/graph/source-tree#synced").cloned());
+    assert_eq!(
+        synced.as_deref(),
+        Some("deadbeef"),
+        "per-mem reload picks up the sibling's out-of-band sync_state write",
+    );
+}
+
+/// D13 / AC11 — the advance/disposition store is **workspace-store** state read
+/// fresh from disk per call, so it is reload-independent: an out-of-band write
+/// to `.memstead/state/advance/` is visible via `read_advance_store` with no
+/// engine reload, and a re-write is picked up on the next read (per-call fresh),
+/// while the engine's reload machinery neither refreshes nor invalidates it.
+#[test]
+fn advance_store_is_reload_independent() {
+    let tmp = TempDir::new().unwrap();
+    init_real_mem_repo(tmp.path(), &[("specs", "default@1.0.0")]);
+    let mut engine = engine_from_workspace_root(tmp.path()).expect("engine boots");
+
+    // Absent → None, no reload involved.
+    assert!(
+        read_advance_store(tmp.path(), "specs", "graph")
+            .unwrap()
+            .is_none(),
+    );
+
+    // Out-of-band write (as a sibling `projection advance` would land it).
+    let state = AdvanceState {
+        binding: "specs/graph".to_string(),
+        frozen_slice: Slice {
+            added: vec!["a.rs".to_string()],
+            modified: vec![],
+            deleted: vec![],
+        },
+        dispositions: Default::default(),
+    };
+    write_advance_store(tmp.path(), "specs", "graph", &state).unwrap();
+
+    // Read fresh per call — visible immediately, with NO engine reload.
+    let read1 = read_advance_store(tmp.path(), "specs", "graph")
+        .unwrap()
+        .expect("store present without any reload");
+    assert_eq!(read1, state);
+
+    // A reload does not refresh/invalidate the workspace-store advance state.
+    engine.reload_if_stale(Some("specs"));
+    let read2 = read_advance_store(tmp.path(), "specs", "graph")
+        .unwrap()
+        .expect("store still present after a reload");
+    assert_eq!(
+        read2, state,
+        "advance store is independent of engine reload"
+    );
+
+    // A subsequent out-of-band rewrite is seen on the next per-call read —
+    // proving the store is read fresh from disk, never cached across reload.
+    let mut state2 = state.clone();
+    state2
+        .dispositions
+        .insert("a.rs".to_string(), "worked".to_string());
+    write_advance_store(tmp.path(), "specs", "graph", &state2).unwrap();
+    let read3 = read_advance_store(tmp.path(), "specs", "graph")
+        .unwrap()
+        .expect("rewritten store present");
+    assert_eq!(read3, state2, "per-call fresh read reflects the rewrite");
 }

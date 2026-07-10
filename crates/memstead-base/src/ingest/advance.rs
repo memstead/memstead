@@ -385,7 +385,8 @@ pub fn advance_baseline(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pipeline::{IngestMode, IngestTrigger, MediumType, PatternEntry, PatternMode};
+    use crate::binding::BuildMode;
+    use crate::pipeline::{IngestTrigger, MediumType, PatternEntry, PatternMode};
     use crate::storage::FilesystemMemWriter;
     use crate::workspace::{Mount, MountCapability, MountLifecycle, MountStorage};
     use tempfile::TempDir;
@@ -491,7 +492,7 @@ mod tests {
         use super::super::resolve::{ResolvedPrimarySource, ResolvedSource};
         ResolvedIngest {
             name: "engine/graph".to_string(),
-            mode: IngestMode::Discovery,
+            mode: BuildMode::Discovery,
             trigger: IngestTrigger::Loop,
             batch_size: 20,
             deny_paths: vec![],

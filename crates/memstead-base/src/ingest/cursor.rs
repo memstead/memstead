@@ -1291,8 +1291,9 @@ mod tests {
     /// file tree.
     #[test]
     fn deny_paths_excluded_from_every_strategy_and_token() {
+        use crate::binding::BuildMode;
         use crate::ingest::refinement::next_batch;
-        use crate::pipeline::{IngestMode, IngestTrigger};
+        use crate::pipeline::IngestTrigger;
 
         let repo = tempfile::tempdir().unwrap();
         let root = repo.path();
@@ -1379,7 +1380,7 @@ mod tests {
         // (4) refinement batch — the denied file is never batched.
         let resolved = ResolvedIngest {
             name: "ing".to_string(),
-            mode: IngestMode::Refinement,
+            mode: BuildMode::Discovery,
             trigger: IngestTrigger::Loop,
             batch_size: 50,
             deny_paths: deny.clone(),
@@ -1478,8 +1479,9 @@ mod tests {
     /// refinement batch — the refusal, not a silent empty batch.
     #[test]
     fn unscoped_facet_emits_no_refinement_batch() {
+        use crate::binding::BuildMode;
         use crate::ingest::refinement::next_batch;
-        use crate::pipeline::{IngestMode, IngestTrigger};
+        use crate::pipeline::IngestTrigger;
 
         let ws = tempfile::tempdir().unwrap();
         let root = ws.path();
@@ -1488,7 +1490,7 @@ mod tests {
 
         let resolved = ResolvedIngest {
             name: "ing".to_string(),
-            mode: IngestMode::Refinement,
+            mode: BuildMode::Discovery,
             trigger: IngestTrigger::Loop,
             batch_size: 50,
             deny_paths: vec![],
@@ -1515,7 +1517,8 @@ mod tests {
     /// unscoped reason distinctly.
     #[test]
     fn compute_source_cursor_notes_no_signal_reasons() {
-        use crate::pipeline::{IngestMode, IngestTrigger};
+        use crate::binding::BuildMode;
+        use crate::pipeline::IngestTrigger;
 
         let engine = crate::Engine::from_mounts(Vec::new()).unwrap();
         // No `.git` over the workspace → mtime strategy for `auto`/`mtime`.
@@ -1543,7 +1546,7 @@ mod tests {
 
         let resolved = ResolvedIngest {
             name: "ing".to_string(),
-            mode: IngestMode::Discovery,
+            mode: BuildMode::Discovery,
             trigger: IngestTrigger::Loop,
             batch_size: 20,
             deny_paths: vec![],

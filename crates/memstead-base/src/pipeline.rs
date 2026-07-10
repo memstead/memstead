@@ -1,10 +1,11 @@
-//! Pipeline primitives — **Medium · Facet · Projection · Ingest**.
+//! Pipeline primitives — **Medium · Facet · Projection**.
 //!
-//! The four-primitive model that replaces the conflated Scope / Projection /
-//! Ingest shape. The conceptual boundaries between the four
-//! primitives are normative; this module is the engine-side
-//! data shape that the workspace store persists and the pipeline loader
-//! exposes.
+//! The declarative shape the workspace store persists and the pipeline loader
+//! exposes. The obligation itself (source→mem, with its `operations` block) is
+//! the versioned [`crate::binding::BindingV1`] record; a binding occupies the
+//! projections tier and carries the schedule the retired `Ingest` primitive
+//! once held. `Medium` / `Facet` / `Projection` are the joinable declarative
+//! pieces a binding (or the legacy loader) references.
 //!
 //! - [`Medium`] — *territory*: a passive, named, typed reference to a body of
 //!   information (no selection logic, no engagement metadata, no preparation).
@@ -13,10 +14,14 @@
 //!   optional deterministic preparation step.
 //! - [`Projection`] — *obligation*: maps source facets (+ optional reference
 //!   mems) to a destination mem. The one place agent reasoning lives.
-//! - [`Ingest`] — *schedule*: runs a projection in a mode/trigger/batch.
 //!
 //! These are operator-edited configs. The loader's job is load + validate +
 //! expose read-only; nothing here fetches, transforms, or schedules.
+//!
+//! `Ingest` / `IngestMode` (the flat schedule record, including the deleted
+//! `refinement` mode) are gone — collapsed into the binding's `operations`
+//! block. The legacy four-primitive store is parsed by the migrate-local
+//! [`crate::pipeline_store::LegacyIngest`] shape, not this module.
 
 use serde::{Deserialize, Serialize};
 
@@ -142,19 +147,8 @@ pub struct Projection {
     pub rules: Option<serde_json::Value>,
 }
 
-/// How an [`Ingest`] run engages its projection.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum IngestMode {
-    /// Build out new coverage.
-    Discovery,
-    /// Improve existing coverage.
-    Refinement,
-    /// A single bounded pass.
-    OneShot,
-}
-
-/// What sets an [`Ingest`] running.
+/// What sets a binding's operation running — the `trigger` of a
+/// [`crate::binding::BuildOperation`] / `SyncOperation` / `VerifyOperation`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum IngestTrigger {
@@ -164,27 +158,6 @@ pub enum IngestTrigger {
     Manual,
     /// Fired by an external event.
     OnEvent,
-}
-
-/// An **Ingest** — a runnable schedule that runs a [`Projection`] in a given
-/// mode, on a trigger, in batches, with optional per-run deny-path overrides.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Ingest {
-    /// The projection (by name) this ingest runs.
-    pub projection: String,
-    /// Discovery / refinement / one-shot.
-    pub mode: IngestMode,
-    /// Loop / manual / on-event.
-    pub trigger: IngestTrigger,
-    /// How many artifacts a single run processes.
-    pub batch_size: u32,
-    /// Paths excluded for this ingest's runs, on top of facet scope.
-    #[serde(default)]
-    pub deny_paths: Vec<String>,
-    /// Free-form post-run actions (e.g. a one-shot `archive_source` flag).
-    /// Opaque to the engine — consumed only by the one-shot brief renderer.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub post_actions: Option<serde_json::Value>,
 }
 
 #[cfg(test)]
@@ -297,28 +270,13 @@ mod tests {
         assert_eq!(back.destination_mem, "macos");
     }
 
-    /// An ingest round-trips; `mode`/`trigger` use the kebab-case wire forms
-    /// (`one-shot`, `on-event`) the enum renames declare.
+    /// `IngestTrigger`'s kebab-case variants serialise as the doc names
+    /// (`on-event`) — the wire forms a binding's operation `trigger` uses.
     #[test]
-    fn ingest_round_trips_with_kebab_mode_and_trigger() {
-        let i = Ingest {
-            projection: "macos/graph".to_string(),
-            mode: IngestMode::Discovery,
-            trigger: IngestTrigger::Loop,
-            batch_size: 20,
-            deny_paths: vec!["VISION.md".to_string(), "dev".to_string()],
-            post_actions: None,
-        };
-        let json = serde_json::to_string(&i).unwrap();
-        assert!(json.contains(r#""mode":"discovery""#), "got {json}");
-        assert!(json.contains(r#""trigger":"loop""#), "got {json}");
-        let back: Ingest = serde_json::from_str(&json).unwrap();
-        assert_eq!(back, i);
-
-        // The kebab-case variants serialise as the doc names.
-        let one_shot = serde_json::to_string(&IngestMode::OneShot).unwrap();
-        assert_eq!(one_shot, r#""one-shot""#);
+    fn ingest_trigger_uses_kebab_wire_forms() {
         let on_event = serde_json::to_string(&IngestTrigger::OnEvent).unwrap();
         assert_eq!(on_event, r#""on-event""#);
+        let loop_ = serde_json::to_string(&IngestTrigger::Loop).unwrap();
+        assert_eq!(loop_, r#""loop""#);
     }
 }

@@ -1,13 +1,12 @@
 //! Binding format **v1** — the additive format foundation for the projection
 //! promotion (bundle plan `03-projection-promotion`, decisions D1/D5/D6).
 //!
-//! This module is deliberately **additive and un-wired**: it defines the v1
-//! binding data shape, the content hash `hash(D)`, the findings-store schema
-//! stub, and the medium-capability matrix as new, independently-testable
-//! engine primitives. It does **not** change how [`crate::pipeline_store`]
-//! loads or writes configs, does not retire [`crate::pipeline::Ingest`], and
-//! is not yet consulted by the live loader / resolve path. The integration
-//! (loader gate, store merge, CLI tree) lands in a later session.
+//! This is the **live** binding shape: [`crate::pipeline_store::load_pipeline_configs`]
+//! reads it (version-gated), the `projection` CLI tree writes it, and the
+//! resolve / brief / status / advance paths consume it. The legacy
+//! four-primitive `Projection` + flat-ingest store is parsed only by the
+//! migrate/legacy path (via [`crate::pipeline_store::LegacyIngest`]); the
+//! retired `Ingest` / `IngestMode` machinery is gone.
 //!
 //! Four things live here:
 //!
@@ -113,13 +112,20 @@ pub struct VerifyOperation {
     pub batch_size: u32,
 }
 
-/// The operations block of a [`BindingV1`]: `build` is required; `sync` and
-/// `verify` are optional.
+/// The operations block of a [`BindingV1`]: every operation is **optional**
+/// (D1/D6). An absent `build` / `sync` block makes that *mutating* operation
+/// refuse at run time with a `projection enable <op>` remedy; an absent
+/// `verify` block means engine defaults (verify is read-only — never a
+/// refusal). `build` is optional in serde so an absent block yields the
+/// remedy-bearing refusal rather than a generic "missing field" parse error.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Operations {
-    /// The build operation (required).
-    pub build: BuildOperation,
-    /// The sync operation (optional — absent = mutating op refuses at run time).
+    /// The build operation (optional — absent = mutating op refuses with the
+    /// `projection enable build` remedy at run time).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub build: Option<BuildOperation>,
+    /// The sync operation (optional — absent = mutating op refuses with the
+    /// `projection enable sync` remedy at run time).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sync: Option<SyncOperation>,
     /// The verify operation (optional — absent = engine defaults, never a refusal).
@@ -133,8 +139,8 @@ pub struct Operations {
 /// `rules`) plus an `operations { build, sync, verify }` block. Collapses the
 /// legacy projection + flat-ingest split into one record.
 ///
-/// This is a new type. The store still loads the legacy four-primitive shape;
-/// wiring the loader to this record is a later session.
+/// This is the live store record — [`crate::pipeline_store::load_pipeline_configs`]
+/// reads it version-gated and the `projection` CLI tree writes it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BindingV1 {
     /// Format version — required. v1 is [`BINDING_VERSION`]. A projection file
@@ -217,7 +223,10 @@ struct HashInput<'a> {
     deny_paths: &'a [String],
     coverage_semantics: CoverageSemantics,
     rules: &'a Option<serde_json::Value>,
-    build_mode: BuildMode,
+    /// The build mode participates in `hash(D)`; an absent build block simply
+    /// does not contribute it (skipped from the canonical JSON).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    build_mode: Option<BuildMode>,
 }
 
 /// Serialize a JSON value with **recursively sorted object keys** and no
@@ -283,7 +292,7 @@ pub fn hash_binding(resolved: &ResolvedBinding) -> String {
         deny_paths: &resolved.binding.deny_paths,
         coverage_semantics: resolved.binding.coverage_semantics,
         rules: &resolved.binding.rules,
-        build_mode: resolved.binding.operations.build.mode,
+        build_mode: resolved.binding.operations.build.as_ref().map(|b| b.mode),
     };
 
     let value = serde_json::to_value(&input).expect("hash input serializes to a JSON value");
@@ -570,7 +579,7 @@ mod tests {
             coverage_semantics: CoverageSemantics::Exhaustive,
             rules: Some(serde_json::json!({ "routing": "…" })),
             operations: Operations {
-                build: build_op(),
+                build: Some(build_op()),
                 sync: Some(SyncOperation {
                     trigger: IngestTrigger::Manual,
                     batch_size: 20,
@@ -661,10 +670,16 @@ mod tests {
         assert_eq!(b.version, 1);
         assert_eq!(b.destination_mem, "plugin");
         assert_eq!(b.coverage_semantics, CoverageSemantics::Exhaustive);
-        assert_eq!(b.operations.build.mode, BuildMode::Discovery);
-        assert_eq!(b.operations.build.trigger, IngestTrigger::Loop);
         assert_eq!(
-            b.operations.build.post_actions,
+            b.operations.build.as_ref().unwrap().mode,
+            BuildMode::Discovery
+        );
+        assert_eq!(
+            b.operations.build.as_ref().unwrap().trigger,
+            IngestTrigger::Loop
+        );
+        assert_eq!(
+            b.operations.build.as_ref().unwrap().post_actions,
             Some(serde_json::json!({ "archive_source": true }))
         );
         assert!(b.operations.sync.is_some());
@@ -682,7 +697,10 @@ mod tests {
         }"#;
         let b: BindingV1 = serde_json::from_str(src).unwrap();
         assert_eq!(b.coverage_semantics, CoverageSemantics::Exhaustive);
-        assert_eq!(b.operations.build.mode, BuildMode::OneShot);
+        assert_eq!(
+            b.operations.build.as_ref().unwrap().mode,
+            BuildMode::OneShot
+        );
         assert!(b.operations.sync.is_none());
         assert!(b.operations.verify.is_none());
         // one-shot serializes to the kebab form.
@@ -779,7 +797,7 @@ mod tests {
         let base = hash_binding(&resolved(binding(), one_codebase_source()));
 
         let mut b_trigger = binding();
-        b_trigger.operations.build.trigger = IngestTrigger::Manual;
+        b_trigger.operations.build.as_mut().unwrap().trigger = IngestTrigger::Manual;
         assert_eq!(
             base,
             hash_binding(&resolved(b_trigger, one_codebase_source())),
@@ -787,7 +805,7 @@ mod tests {
         );
 
         let mut b_batch = binding();
-        b_batch.operations.build.batch_size = 999;
+        b_batch.operations.build.as_mut().unwrap().batch_size = 999;
         assert_eq!(
             base,
             hash_binding(&resolved(b_batch, one_codebase_source())),
@@ -795,7 +813,8 @@ mod tests {
         );
 
         let mut b_post = binding();
-        b_post.operations.build.post_actions = Some(serde_json::json!({ "archive_source": false }));
+        b_post.operations.build.as_mut().unwrap().post_actions =
+            Some(serde_json::json!({ "archive_source": false }));
         assert_eq!(
             base,
             hash_binding(&resolved(b_post, one_codebase_source())),
@@ -818,8 +837,24 @@ mod tests {
     fn changing_build_mode_changes_the_hash() {
         let base = hash_binding(&resolved(binding(), one_codebase_source()));
         let mut b = binding();
-        b.operations.build.mode = BuildMode::OneShot;
+        b.operations.build.as_mut().unwrap().mode = BuildMode::OneShot;
         assert_ne!(base, hash_binding(&resolved(b, one_codebase_source())));
+    }
+
+    /// An absent `build` block deserializes (serde default) and still hashes —
+    /// the build mode simply does not participate in `hash(D)` (D1/AC4).
+    #[test]
+    fn absent_build_deserializes_and_hashes() {
+        let src = r#"{
+          "version": 1,
+          "destination_mem": "m",
+          "operations": { "verify": { "trigger": "manual", "batch_size": 5 } }
+        }"#;
+        let b: BindingV1 = serde_json::from_str(src).unwrap();
+        assert!(b.operations.build.is_none(), "absent build parses to None");
+        // Hashes without panicking; build_mode is omitted from the canonical JSON.
+        let h = hash_binding(&resolved(b, one_codebase_source()));
+        assert_eq!(h.len(), 64);
     }
 
     // ---- D5: findings-store schema stub ---------------------------------

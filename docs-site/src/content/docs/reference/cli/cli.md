@@ -900,7 +900,7 @@ Mem lifecycle commands
 * `set-version` — Update a mem's `version` field. The version is consumed by `memstead export --format mem` to stamp the archive filename and the `.mem` archive's published config. `version` is seeded at init (`0.1.0`); bump via this command before publishing
 * `set-schema` — Set a mem's schema pin — the integrity-driven schema-migration trigger. Already-integral mems switch immediately; otherwise the mem enters dual-pin migration (writes validate against the target) and the response lists the non-integral entities. Re-issue after repairing to complete the switch
 * `set-description` — Set a mem's one-line `description` — embedded in `.mem` archive exports and surfaced on the registry card at publish time. An empty string clears the field. Set it before `memstead export` / `memstead publish` so the shared archive carries its card text
-* `set-sync-state` — Set (or clear) one opaque sync-state token in a mem's config — the ingest layer's durable "last synced source state" baseline. `<KEY>` and `<TOKEN>` are opaque to the engine (the ingest layer keys per `(ingest, facet)` and owns the token's meaning). An empty `<TOKEN>` clears the key. Written into the per-mem config and surfaced verbatim on `memstead workspace dump`
+* `set-sync-state` — Set (or clear) one opaque sync-state token in a mem's config — the pipeline layer's durable "last synced source state" baseline. `<KEY>` and `<TOKEN>` are opaque to the engine (the binding layer keys per `<binding-id>/<facet>#synced` and owns the token's meaning). An empty `<TOKEN>` clears the key. Written into the per-mem config and surfaced verbatim on `memstead workspace dump`
 * `set-internal` — Mark (or unmark) a mem as internal — hidden from the default `memstead overview` roster and public projections, while staying a real, inspectable (`overview --mem <name>`), deletable mem. Ingest process-state mems are flagged this way
 * `list` — Enumerate every mounted mem in the workspace with its schema pin, version, entity count, and capability (writable vs read-only). Markdown by default; pass `--json` (root flag) for the structured envelope
 
@@ -1015,14 +1015,14 @@ Set a mem's one-line `description` — embedded in `.mem` archive exports and su
 
 ## `memstead mem set-sync-state`
 
-Set (or clear) one opaque sync-state token in a mem's config — the ingest layer's durable "last synced source state" baseline. `<KEY>` and `<TOKEN>` are opaque to the engine (the ingest layer keys per `(ingest, facet)` and owns the token's meaning). An empty `<TOKEN>` clears the key. Written into the per-mem config and surfaced verbatim on `memstead workspace dump`
+Set (or clear) one opaque sync-state token in a mem's config — the pipeline layer's durable "last synced source state" baseline. `<KEY>` and `<TOKEN>` are opaque to the engine (the binding layer keys per `<binding-id>/<facet>#synced` and owns the token's meaning). An empty `<TOKEN>` clears the key. Written into the per-mem config and surfaced verbatim on `memstead workspace dump`
 
 **Usage:** `memstead mem set-sync-state [OPTIONS] <NAME> <KEY> <TOKEN>`
 
 ###### **Arguments:**
 
 * `<NAME>` — Mem name (must be registered in the workspace)
-* `<KEY>` — Opaque sync-state key. The ingest layer keys per `(ingest, facet)`, conventionally `"<ingest>/<facet>"`, but the engine treats it as an arbitrary string
+* `<KEY>` — Opaque sync-state key. The binding layer keys per `<binding-id>/<facet>#synced` (and `#verified`), but the engine treats it as an arbitrary string
 * `<TOKEN>` — Opaque token recording the source state last synced under `<KEY>` (git → commit id, graph → snapshot token, filesystem → a JSON-stringified stat digest). An **empty** value clears the key. The engine never parses it
 
 ###### **Options:**

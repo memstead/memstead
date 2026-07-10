@@ -51,8 +51,7 @@ use memstead_schema::{TypeDefinition, type_by_name};
 
 pub use backend::{BackendError, MemBackend};
 pub use binding_migrate::{
-    BindingMigrateError, MigratedBinding, binding_from_gen2, migrate_gen2_bindings,
-    resolve_migrated_binding,
+    BindingMigrateError, MigratedBinding, migrate_gen2_bindings, resolve_migrated_binding,
 };
 pub use engine::{
     BackendFactory, BootError, CreateEntityArgs, CreateEntityOutcome, DeleteEntityArgs,
@@ -77,8 +76,7 @@ pub use ops::{
     SetMemVersionOutcome, UpdateArgs, UpdateResult, WarningHint,
 };
 pub use pipeline::{
-    Facet, Ingest, IngestMode, IngestTrigger, Medium, MediumType, PatternEntry, PatternMode,
-    Projection,
+    Facet, IngestTrigger, Medium, MediumType, PatternEntry, PatternMode, Projection,
 };
 pub use pipeline_edit::PipelineEditError;
 pub use pipeline_migrate::{migrate_legacy_pipeline, read_legacy_pipeline_configs};

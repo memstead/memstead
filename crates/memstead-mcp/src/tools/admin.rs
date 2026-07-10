@@ -40,7 +40,7 @@ pub struct HealthParams {
 #[serde(deny_unknown_fields)]
 pub struct ReloadParams {
     #[schemars(
-        description = "Writable mem name to reload. Omit to reload every writable mem. Use the per-mem form for cheap, targeted refreshes when you know which mem drifted; use the workspace-wide form (omit `mem`) when an out-of-band `git pull` may have advanced multiple branches at once, or to pick up CLI-driven workspace-policy edits (allowlist / cross-link / mutation policy) — per-mem reload skips that workspace-level settings refresh."
+        description = "Writable mem name to reload. Omit to reload every writable mem. Use the per-mem form for cheap, targeted refreshes when you know which mem drifted; use the workspace-wide form (omit `mem`) when an out-of-band `git pull` may have advanced multiple branches at once, or to pick up CLI-driven workspace-policy edits (allowlist / cross-link / mutation policy) — per-mem reload skips that workspace-level settings refresh. Reload scope covers **mem-scoped** state: a mem's `sync_state` (the projection baselines `#synced`/`#verified`) rides its destination mem's config, so an out-of-band `sync_state` write — e.g. from `memstead projection advance` / `mem set-sync-state` in a sibling process — is picked up by a per-mem (or workspace-wide) reload of that mem. The engine-owned advance/disposition store (`.memstead/state/advance/`) is **workspace-store** state read fresh from disk per operation — it is reload-independent by design and is neither refreshed nor invalidated by this call."
     )]
     pub mem: Option<String>,
 }

@@ -12,20 +12,14 @@
 use std::path::Path;
 
 use crate::Engine;
-use crate::binding::BindingV1;
-use crate::pipeline::IngestMode;
+use crate::binding::{BindingV1, BuildMode};
 use crate::pipeline_store::{BindingConfigs, load_pipeline_configs};
 
 use super::brief::{
-    ProcessMemInfo, assemble_discovery_brief, assemble_one_shot_brief, assemble_refinement_brief,
-    render_changed_slice,
+    ProcessMemInfo, assemble_discovery_brief, assemble_one_shot_brief, render_changed_slice,
 };
 use super::cursor::{compute_source_cursor, write_active_deny_file};
 use super::guidance::{GuidanceDefaults, MemGuidance, ResolvedGuidance, resolve_writing_guidance};
-use super::refinement::{
-    clear_findings, next_batch, read_pending_findings, render_refinement_scout,
-    render_refinement_writer,
-};
 use super::resolve::{ResolveError, ResolvedIngest, ResolvedSource, resolve_binding_run};
 
 /// Why [`render_ingest_brief`] could not produce a brief.
@@ -37,14 +31,17 @@ pub enum RenderBriefError {
     /// The ingest (or a reference it names) could not be resolved.
     #[error(transparent)]
     Resolve(#[from] ResolveError),
-    /// The ingest is not discovery mode; refinement / one-shot briefs are not
-    /// yet rendered by the engine.
-    #[error("ingest '{name}' is {mode} mode; only discovery-mode briefs are rendered so far")]
-    ModeUnsupported {
-        /// The ingest name.
-        name: String,
-        /// The unsupported mode (`refinement` / `one-shot`).
-        mode: String,
+    /// The binding declares no `build` operation, so the build path (brief) is
+    /// refused (D6/AC4). The message carries the one-command remedy
+    /// `memstead projection enable build <binding>`, which — run verbatim —
+    /// makes the same brief succeed.
+    #[error(
+        "binding '{binding}' has no build operation — enable it with \
+         `memstead projection enable build {binding}`"
+    )]
+    BuildOperationAbsent {
+        /// The binding id whose build block is absent.
+        binding: String,
     },
 }
 
@@ -65,12 +62,11 @@ fn preparation_refusal(resolved: &ResolvedIngest) -> Option<String> {
     })
 }
 
-/// The mode string used in messages (`discovery` / `refinement` / `one-shot`).
-pub fn mode_name(mode: IngestMode) -> &'static str {
+/// The mode string used in messages (`discovery` / `one-shot`).
+pub fn mode_name(mode: BuildMode) -> &'static str {
     match mode {
-        IngestMode::Discovery => "discovery",
-        IngestMode::Refinement => "refinement",
-        IngestMode::OneShot => "one-shot",
+        BuildMode::Discovery => "discovery",
+        BuildMode::OneShot => "one-shot",
     }
 }
 
@@ -102,7 +98,7 @@ fn find_binding<'a>(
     {
         return Ok((format!("{}/{}", r.mem, r.name), &r.config));
     }
-    Err(ResolveError::IngestNotFound {
+    Err(ResolveError::BindingNotFound {
         name: arg.to_string(),
         available: configs
             .bindings
@@ -123,6 +119,16 @@ pub fn render_ingest_brief(
     let configs = load_pipeline_configs(workspace_root)
         .map_err(|e| RenderBriefError::ConfigLoad(e.to_string()))?;
     let (binding_id, binding) = find_binding(&configs, ingest_name)?;
+
+    // D6/AC4: the build path (brief) refuses when the binding declares no build
+    // operation, carrying the one-command `projection enable build` remedy —
+    // rather than fabricating a default build the operator never declared.
+    if binding.operations.build.is_none() {
+        return Err(RenderBriefError::BuildOperationAbsent {
+            binding: binding_id,
+        });
+    }
+
     let resolved = resolve_binding_run(&configs, &binding_id, binding)?;
 
     // Publish this ingest's deny list for the plugin's PreToolUse deny hook —
@@ -140,9 +146,8 @@ pub fn render_ingest_brief(
     }
 
     match resolved.mode {
-        IngestMode::Discovery => Ok(render_discovery(engine, &resolved, workspace_root)),
-        IngestMode::OneShot => Ok(render_one_shot(engine, &resolved)),
-        IngestMode::Refinement => Ok(render_refinement(engine, &resolved, workspace_root)),
+        BuildMode::Discovery => Ok(render_discovery(engine, &resolved, workspace_root)),
+        BuildMode::OneShot => Ok(render_one_shot(engine, &resolved)),
     }
 }
 
@@ -223,42 +228,12 @@ fn render_one_shot(engine: &Engine, resolved: &ResolvedIngest) -> String {
     )
 }
 
-/// Assemble the refinement brief — the discovery-style header plus the
-/// scout-or-writer phase block. A pending findings file → writer pass (which
-/// consumes it); otherwise the next scout batch.
-fn render_refinement(engine: &Engine, resolved: &ResolvedIngest, workspace_root: &Path) -> String {
-    let dest = &resolved.destination_mem;
-    let guidance = dest_guidance(engine, dest);
-    let dest_schema = engine.schema_pin(dest).map(|r| r.as_display());
-    let process_mem = build_process_mem(engine, resolved);
-    let preface = render_changed_slice(&compute_source_cursor(engine, resolved, workspace_root));
-
-    let cache_root = workspace_root.join(".memstead.cache").join("ingest");
-    let phase = if let Some(findings) = read_pending_findings(&cache_root, &resolved.name) {
-        clear_findings(&cache_root, &resolved.name);
-        render_refinement_writer(resolved, &findings)
-    } else {
-        next_batch(resolved, workspace_root, &cache_root)
-            .map(|batch| render_refinement_scout(resolved, &batch, &cache_root))
-            .unwrap_or_default()
-    };
-
-    assemble_refinement_brief(
-        resolved,
-        &guidance,
-        &process_mem,
-        dest_schema.as_deref(),
-        &preface,
-        &phase,
-    )
-}
-
 /// Resolve the paired-process-mem view from live workspace state. Read-only:
 /// a missing process mem is reported absent rather than auto-created (mutation
 /// belongs to the orchestration layer, not brief rendering).
 fn build_process_mem(engine: &Engine, resolved: &ResolvedIngest) -> ProcessMemInfo {
     let leaf = resolved.name.clone();
-    let skipped = resolved.mode == IngestMode::OneShot;
+    let skipped = resolved.mode == BuildMode::OneShot;
     let present = !skipped && engine.mem_names().iter().any(|m| *m == leaf);
     ProcessMemInfo {
         present,
@@ -272,13 +247,14 @@ fn build_process_mem(engine: &Engine, resolved: &ResolvedIngest) -> ProcessMemIn
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::binding::BuildMode;
     use crate::ingest::resolve::ResolvedPrimarySource;
     use crate::pipeline::{IngestTrigger, MediumType};
 
     fn ingest_with(sources: Vec<ResolvedSource>) -> ResolvedIngest {
         ResolvedIngest {
             name: "ing".to_string(),
-            mode: IngestMode::Discovery,
+            mode: BuildMode::Discovery,
             trigger: IngestTrigger::Loop,
             batch_size: 20,
             deny_paths: vec![],

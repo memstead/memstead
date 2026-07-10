@@ -75,11 +75,11 @@ pub enum MemAction {
     #[command(name = "set-description")]
     SetDescription(SetDescriptionArgs),
     /// Set (or clear) one opaque sync-state token in a mem's config —
-    /// the ingest layer's durable "last synced source state" baseline.
-    /// `<KEY>` and `<TOKEN>` are opaque to the engine (the ingest layer
-    /// keys per `(ingest, facet)` and owns the token's meaning). An
-    /// empty `<TOKEN>` clears the key. Written into the per-mem config
-    /// and surfaced verbatim on `memstead workspace dump`.
+    /// the pipeline layer's durable "last synced source state" baseline.
+    /// `<KEY>` and `<TOKEN>` are opaque to the engine (the binding layer
+    /// keys per `<binding-id>/<facet>#synced` and owns the token's
+    /// meaning). An empty `<TOKEN>` clears the key. Written into the
+    /// per-mem config and surfaced verbatim on `memstead workspace dump`.
     #[command(name = "set-sync-state")]
     SetSyncState(SetSyncStateArgs),
     /// Mark (or unmark) a mem as internal — hidden from the default
@@ -145,8 +145,8 @@ pub struct SetSyncStateArgs {
     /// Mem name (must be registered in the workspace).
     pub name: String,
 
-    /// Opaque sync-state key. The ingest layer keys per `(ingest,
-    /// facet)`, conventionally `"<ingest>/<facet>"`, but the engine
+    /// Opaque sync-state key. The binding layer keys per
+    /// `<binding-id>/<facet>#synced` (and `#verified`), but the engine
     /// treats it as an arbitrary string.
     pub key: String,
 

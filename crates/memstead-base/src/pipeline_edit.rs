@@ -22,7 +22,7 @@
 use std::path::Path;
 
 use crate::engine::Engine;
-use crate::pipeline::{Facet, Ingest, Medium, Projection};
+use crate::pipeline::{Facet, Medium, Projection};
 use crate::pipeline_store::{self, PipelineConfigs};
 use crate::workspace_store::StoreError;
 
@@ -427,80 +427,6 @@ pub fn rename_projection(
     Ok(())
 }
 
-// --- Ingest ----------------------------------------------------------------
-//
-// Ingests are *flat* (workspace-level, not mem-scoped) and are the leaf of
-// the pipeline — nothing references an ingest — so add/update/delete only
-// check the ingest's own existence; there is no referrer gate on delete. An
-// ingest's `projection` field points at a `<mem>/<name>` projection key
-// (delete_projection enforces the inverse integrity).
-
-fn ingest_exists(c: &PipelineConfigs, name: &str) -> bool {
-    c.ingests.iter().any(|r| r.name == name)
-}
-
-/// Create an ingest. Refuses if `name` already holds one.
-pub fn add_ingest(root: &Path, name: &str, ingest: &Ingest) -> Result<(), PipelineEditError> {
-    let configs = pipeline_store::load_legacy_pipeline_configs(root)?;
-    if ingest_exists(&configs, name) {
-        return Err(PipelineEditError::AlreadyExists {
-            primitive: "ingest",
-            key: name.to_string(),
-        });
-    }
-    pipeline_store::write_ingest(root, name, ingest)?;
-    Ok(())
-}
-
-/// Overwrite an existing ingest. Refuses if `name` does not exist.
-pub fn update_ingest(root: &Path, name: &str, ingest: &Ingest) -> Result<(), PipelineEditError> {
-    let configs = pipeline_store::load_legacy_pipeline_configs(root)?;
-    if !ingest_exists(&configs, name) {
-        return Err(PipelineEditError::NotFound {
-            primitive: "ingest",
-            key: name.to_string(),
-        });
-    }
-    pipeline_store::write_ingest(root, name, ingest)?;
-    Ok(())
-}
-
-/// Delete an ingest. Nothing references an ingest, so no referrer gate.
-pub fn delete_ingest(root: &Path, name: &str) -> Result<(), PipelineEditError> {
-    let configs = pipeline_store::load_legacy_pipeline_configs(root)?;
-    if !ingest_exists(&configs, name) {
-        return Err(PipelineEditError::NotFound {
-            primitive: "ingest",
-            key: name.to_string(),
-        });
-    }
-    pipeline_store::delete_ingest(root, name)?;
-    Ok(())
-}
-
-/// Rename an ingest (file-stem identity; nothing depends on it). No-op when
-/// `old == new`.
-pub fn rename_ingest(root: &Path, old: &str, new: &str) -> Result<(), PipelineEditError> {
-    if old == new {
-        return Ok(());
-    }
-    let configs = pipeline_store::load_legacy_pipeline_configs(root)?;
-    if !ingest_exists(&configs, old) {
-        return Err(PipelineEditError::NotFound {
-            primitive: "ingest",
-            key: old.to_string(),
-        });
-    }
-    if ingest_exists(&configs, new) {
-        return Err(PipelineEditError::RenameTargetExists {
-            primitive: "ingest",
-            key: new.to_string(),
-        });
-    }
-    pipeline_store::rename_ingest(root, old, new)?;
-    Ok(())
-}
-
 // --- Engine surface --------------------------------------------------------
 //
 // Thin wrappers that route an edit through the free functions above (disk +
@@ -840,125 +766,6 @@ impl Engine {
         self.refresh_pipeline_configs(&root)
     }
 
-    /// Destination mem of an ingest: the `<mem>` half of its
-    /// `projection: "<mem>/<name>"` pointer. Ingests are
-    /// workspace-level; their provenance records against the mem the
-    /// runs would land in.
-    fn ingest_destination_mem(projection: &str) -> String {
-        projection
-            .split('/')
-            .next()
-            .unwrap_or(projection)
-            .to_string()
-    }
-
-    /// Create an ingest and refresh the snapshot. See [`add_ingest`].
-    pub fn add_ingest(
-        &mut self,
-        name: &str,
-        ingest: &Ingest,
-        note: Option<&str>,
-    ) -> Result<(), PipelineEditError> {
-        let root = self.pipeline_edit_root()?;
-        add_ingest(&root, name, ingest)?;
-        let bytes =
-            serde_json::to_vec_pretty(ingest).map_err(|e| PipelineEditError::InvalidJson {
-                primitive: "config",
-                message: e.to_string(),
-            })?;
-        let mem = Self::ingest_destination_mem(&ingest.projection);
-        self.pipeline_provenance(
-            &mem,
-            "ingests",
-            &[(name.to_string(), Some(bytes))],
-            note,
-            "add",
-        )?;
-        self.refresh_pipeline_configs(&root)
-    }
-
-    /// Overwrite an ingest and refresh the snapshot. See [`update_ingest`].
-    pub fn update_ingest(
-        &mut self,
-        name: &str,
-        ingest: &Ingest,
-        note: Option<&str>,
-    ) -> Result<(), PipelineEditError> {
-        let root = self.pipeline_edit_root()?;
-        update_ingest(&root, name, ingest)?;
-        let bytes =
-            serde_json::to_vec_pretty(ingest).map_err(|e| PipelineEditError::InvalidJson {
-                primitive: "config",
-                message: e.to_string(),
-            })?;
-        let mem = Self::ingest_destination_mem(&ingest.projection);
-        self.pipeline_provenance(
-            &mem,
-            "ingests",
-            &[(name.to_string(), Some(bytes))],
-            note,
-            "update",
-        )?;
-        self.refresh_pipeline_configs(&root)
-    }
-
-    /// Delete an ingest and refresh the snapshot. See [`delete_ingest`].
-    pub fn delete_ingest(
-        &mut self,
-        name: &str,
-        note: Option<&str>,
-    ) -> Result<(), PipelineEditError> {
-        let root = self.pipeline_edit_root()?;
-        // Snapshot still holds the record — resolve the destination mem
-        // before the delete lands.
-        let mem = self
-            .pipeline_configs()
-            .ingests
-            .iter()
-            .find(|r| r.name == name)
-            .map(|r| Self::ingest_destination_mem(&r.config.projection));
-        delete_ingest(&root, name)?;
-        if let Some(mem) = mem {
-            self.pipeline_provenance(&mem, "ingests", &[(name.to_string(), None)], note, "delete")?;
-        }
-        self.refresh_pipeline_configs(&root)
-    }
-
-    /// Rename an ingest and refresh the snapshot. See [`rename_ingest`].
-    pub fn rename_ingest(
-        &mut self,
-        old: &str,
-        new: &str,
-        note: Option<&str>,
-    ) -> Result<(), PipelineEditError> {
-        let root = self.pipeline_edit_root()?;
-        rename_ingest(&root, old, new)?;
-        // Pre-refresh snapshot: the record still lives under its old name.
-        let record = self
-            .pipeline_configs()
-            .ingests
-            .iter()
-            .find(|r| r.name == old);
-        let mem = record.map(|r| Self::ingest_destination_mem(&r.config.projection));
-        let bytes = record
-            .map(|r| serde_json::to_vec_pretty(&r.config))
-            .transpose()
-            .map_err(|e| PipelineEditError::InvalidJson {
-                primitive: "config",
-                message: e.to_string(),
-            })?;
-        if let Some(mem) = mem {
-            self.pipeline_provenance(
-                &mem,
-                "ingests",
-                &[(old.to_string(), None), (new.to_string(), bytes)],
-                note,
-                "rename",
-            )?;
-        }
-        self.refresh_pipeline_configs(&root)
-    }
-
     // JSON-string entry points for serialization-boundary callers (UniFFI,
     // CLI) that carry a primitive as JSON rather than a typed value. They
     // deserialize here — where serde already lives — and delegate to the
@@ -1038,12 +845,12 @@ impl Engine {
             coverage_semantics: crate::binding::CoverageSemantics::default(),
             rules: incoming.rules,
             operations: crate::binding::Operations {
-                build: crate::binding::BuildOperation {
+                build: Some(crate::binding::BuildOperation {
                     mode: crate::binding::BuildMode::Discovery,
                     trigger: crate::pipeline::IngestTrigger::Loop,
                     batch_size: 20,
                     post_actions: None,
-                },
+                }),
                 sync: None,
                 verify: None,
             },
@@ -1102,26 +909,6 @@ impl Engine {
         )?;
         self.refresh_pipeline_configs(root)
     }
-
-    /// [`Self::add_ingest`] from a JSON-encoded [`Ingest`].
-    pub fn add_ingest_json(
-        &mut self,
-        name: &str,
-        ingest_json: &str,
-        note: Option<&str>,
-    ) -> Result<(), PipelineEditError> {
-        self.add_ingest(name, &parse_json(ingest_json, "ingest")?, note)
-    }
-
-    /// [`Self::update_ingest`] from a JSON-encoded [`Ingest`].
-    pub fn update_ingest_json(
-        &mut self,
-        name: &str,
-        ingest_json: &str,
-        note: Option<&str>,
-    ) -> Result<(), PipelineEditError> {
-        self.update_ingest(name, &parse_json(ingest_json, "ingest")?, note)
-    }
 }
 
 /// Deserialize a pipeline primitive from JSON, mapping a parse failure to a
@@ -1139,9 +926,8 @@ fn parse_json<T: serde::de::DeserializeOwned>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pipeline::{
-        Ingest, IngestMode, IngestTrigger, MediumType, PatternEntry, PatternMode,
-    };
+    use crate::pipeline::{IngestTrigger, MediumType, PatternEntry, PatternMode};
+    use crate::pipeline_store::{LegacyIngest, LegacyIngestMode};
     use tempfile::TempDir;
 
     fn medium(name: &str) -> Medium {
@@ -1176,10 +962,10 @@ mod tests {
         }
     }
 
-    fn ingest(projection: &str) -> Ingest {
-        Ingest {
+    fn ingest(projection: &str) -> LegacyIngest {
+        LegacyIngest {
             projection: projection.to_string(),
-            mode: IngestMode::Discovery,
+            mode: LegacyIngestMode::Discovery,
             trigger: IngestTrigger::Loop,
             batch_size: 10,
             deny_paths: vec![],
@@ -1352,80 +1138,5 @@ mod tests {
         let configs = pipeline_store::load_legacy_pipeline_configs(root).unwrap();
         assert_eq!(configs.projections[0].name, "new");
         assert_eq!(configs.ingests[0].config.projection, "v/new");
-    }
-
-    #[test]
-    fn add_then_duplicate_ingest_refuses() {
-        let tmp = TempDir::new().unwrap();
-        let root = tmp.path();
-        add_ingest(root, "i", &ingest("v/p")).unwrap();
-        let err = add_ingest(root, "i", &ingest("v/p")).unwrap_err();
-        assert!(
-            matches!(
-                err,
-                PipelineEditError::AlreadyExists {
-                    primitive: "ingest",
-                    ..
-                }
-            ),
-            "got {err:?}"
-        );
-    }
-
-    #[test]
-    fn update_missing_ingest_refuses() {
-        let tmp = TempDir::new().unwrap();
-        let err = update_ingest(tmp.path(), "i", &ingest("v/p")).unwrap_err();
-        assert!(
-            matches!(
-                err,
-                PipelineEditError::NotFound {
-                    primitive: "ingest",
-                    ..
-                }
-            ),
-            "got {err:?}"
-        );
-    }
-
-    #[test]
-    fn update_ingest_overwrites_and_delete_removes() {
-        let tmp = TempDir::new().unwrap();
-        let root = tmp.path();
-        add_ingest(root, "i", &ingest("v/p")).unwrap();
-        let mut changed = ingest("v/p");
-        changed.batch_size = 99;
-        update_ingest(root, "i", &changed).unwrap();
-        let configs = pipeline_store::load_legacy_pipeline_configs(root).unwrap();
-        assert_eq!(configs.ingests[0].config.batch_size, 99);
-
-        // Nothing references an ingest — delete needs no referrer gate.
-        delete_ingest(root, "i").unwrap();
-        let configs = pipeline_store::load_legacy_pipeline_configs(root).unwrap();
-        assert!(configs.ingests.is_empty());
-    }
-
-    #[test]
-    fn rename_ingest_moves_the_record() {
-        let tmp = TempDir::new().unwrap();
-        let root = tmp.path();
-        add_ingest(root, "old", &ingest("v/p")).unwrap();
-        rename_ingest(root, "old", "new").unwrap();
-        let configs = pipeline_store::load_legacy_pipeline_configs(root).unwrap();
-        assert_eq!(configs.ingests.len(), 1);
-        assert_eq!(configs.ingests[0].name, "new");
-        // Existing target refuses.
-        add_ingest(root, "other", &ingest("v/p")).unwrap();
-        let err = rename_ingest(root, "other", "new").unwrap_err();
-        assert!(
-            matches!(
-                err,
-                PipelineEditError::RenameTargetExists {
-                    primitive: "ingest",
-                    ..
-                }
-            ),
-            "got {err:?}"
-        );
     }
 }

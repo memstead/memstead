@@ -23,8 +23,8 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::binding::{BindingV1, BuildMode, ResolvedBinding};
-use crate::pipeline::{Facet, Ingest, IngestMode, IngestTrigger, Medium, MediumType, PatternEntry};
+use crate::binding::{BindingV1, BuildMode, ResolvedBinding, medium_capabilities};
+use crate::pipeline::{Facet, IngestTrigger, Medium, MediumType, PatternEntry};
 use crate::pipeline_store::{BindingConfigs, PipelineConfigs};
 
 /// A projection source resolved to what the run needs: a **primary** facet
@@ -68,17 +68,17 @@ pub struct ResolvedPrimarySource {
     pub preparation: Option<String>,
 }
 
-/// An [`Ingest`] joined to its projection and the projection's resolved
-/// sources — the runtime shape the orchestration stages consume.
+/// A v1 binding joined to its resolved sources — the runtime shape the
+/// orchestration stages (cursor, brief, selection) consume.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedIngest {
-    /// The run's identity. For a v1 binding (via [`resolve_binding_run`]) this
-    /// is the canonical binding id `<mem>/<stem>` (D3) — the string every
-    /// downstream key (sync_state, selection cache, brief header) derives from.
-    /// For the legacy [`resolve_ingest`] path it is the flat ingest file stem.
+    /// The run's identity — the canonical binding id `<mem>/<stem>` (D3), the
+    /// string every downstream key (sync_state, selection cache, brief header)
+    /// derives from.
     pub name: String,
-    /// Discovery / refinement / one-shot.
-    pub mode: IngestMode,
+    /// The build mode — discovery / one-shot (`refinement` is deleted).
+    /// Defaults to discovery when the binding declares no `build` block.
+    pub mode: BuildMode,
     /// Loop / manual / on-event.
     pub trigger: IngestTrigger,
     /// How many artifacts a single run processes.
@@ -110,38 +110,21 @@ pub struct ResolvedIngest {
 /// available — so a config typo is diagnosable without re-reading the store.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ResolveError {
-    /// No ingest with the given name in the store.
-    #[error("ingest '{name}' not found; available: {}", fmt_list(available))]
-    IngestNotFound {
-        /// The requested ingest name.
+    /// No binding with the given id in the store.
+    #[error("binding '{name}' not found; available: {}", fmt_list(available))]
+    BindingNotFound {
+        /// The requested binding id.
         name: String,
-        /// The ingest names that do exist.
+        /// The binding ids that do exist.
         available: Vec<String>,
     },
-    /// The ingest's `projection` field is not the required `"<mem>/<name>"`.
-    #[error(
-        "ingest '{ingest}' has a malformed projection ref '{projection}'; expected \"<mem>/<name>\""
-    )]
+    /// The binding id is not the required `"<mem>/<name>"`.
+    #[error("malformed binding id '{projection}'; expected \"<mem>/<name>\"")]
     MalformedProjectionRef {
-        /// The ingest whose projection ref is malformed.
+        /// The binding whose id is malformed.
         ingest: String,
         /// The malformed value.
         projection: String,
-    },
-    /// The projection the ingest references does not exist.
-    #[error(
-        "ingest '{ingest}' references projection '{projection_ref}' not found in mem '{mem}'; available: {}",
-        fmt_list(available)
-    )]
-    ProjectionNotFound {
-        /// The referencing ingest.
-        ingest: String,
-        /// The full `"<mem>/<name>"` ref.
-        projection_ref: String,
-        /// The mem the projection was looked up in.
-        mem: String,
-        /// The projection names that do exist in that mem.
-        available: Vec<String>,
     },
     /// A projection source facet does not exist in the projection's mem.
     #[error(
@@ -182,131 +165,6 @@ fn fmt_list(names: &[String]) -> String {
     } else {
         names.join(", ")
     }
-}
-
-/// Resolve one ingest (by name) against the loaded [`PipelineConfigs`].
-///
-/// Mirrors the plugin's `assembleIngest`: parse the `"<mem>/<name>"`
-/// projection ref, find the projection in that mem, and join each of its
-/// `source_facets` to the facet (and the facet's medium) in the same mem,
-/// then append each `reference_mem` as a read-only source. Every lookup
-/// failure is a located [`ResolveError`].
-pub fn resolve_ingest(
-    configs: &PipelineConfigs,
-    ingest_name: &str,
-) -> Result<ResolvedIngest, ResolveError> {
-    let ingest: &Ingest = configs
-        .ingests
-        .iter()
-        .find(|r| r.name == ingest_name)
-        .map(|r| &r.config)
-        .ok_or_else(|| ResolveError::IngestNotFound {
-            name: ingest_name.to_string(),
-            available: configs.ingests.iter().map(|r| r.name.clone()).collect(),
-        })?;
-
-    // Projection ref is "<mem>/<name>" — split on the first '/'.
-    let projection_ref = ingest.projection.clone();
-    let (projection_mem, projection_name) = projection_ref
-        .split_once('/')
-        .filter(|(mem, name)| !mem.is_empty() && !name.is_empty())
-        .ok_or_else(|| ResolveError::MalformedProjectionRef {
-            ingest: ingest_name.to_string(),
-            projection: projection_ref.clone(),
-        })?;
-    let projection_mem = projection_mem.to_string();
-    let projection_name = projection_name.to_string();
-
-    let projection = configs
-        .projections
-        .iter()
-        .find(|r| r.mem == projection_mem && r.name == projection_name)
-        .map(|r| &r.config)
-        .ok_or_else(|| ResolveError::ProjectionNotFound {
-            ingest: ingest_name.to_string(),
-            projection_ref: projection_ref.clone(),
-            mem: projection_mem.clone(),
-            available: configs
-                .projections
-                .iter()
-                .filter(|r| r.mem == projection_mem)
-                .map(|r| r.name.clone())
-                .collect(),
-        })?;
-
-    // Primary sources: each source facet joined to the medium it engages,
-    // both looked up in the projection's owning mem.
-    let mut sources =
-        Vec::with_capacity(projection.source_facets.len() + projection.reference_mems.len());
-    for facet_name in &projection.source_facets {
-        let facet: &Facet = configs
-            .facets
-            .iter()
-            .find(|r| r.mem == projection_mem && r.name == *facet_name)
-            .map(|r| &r.config)
-            .ok_or_else(|| ResolveError::FacetNotFound {
-                projection_ref: projection_ref.clone(),
-                facet: facet_name.clone(),
-                mem: projection_mem.clone(),
-                available: configs
-                    .facets
-                    .iter()
-                    .filter(|r| r.mem == projection_mem)
-                    .map(|r| r.name.clone())
-                    .collect(),
-            })?;
-
-        let medium: &Medium = configs
-            .mediums
-            .iter()
-            .find(|r| r.mem == projection_mem && r.name == facet.medium)
-            .map(|r| &r.config)
-            .ok_or_else(|| ResolveError::MediumNotFound {
-                facet: facet_name.clone(),
-                medium: facet.medium.clone(),
-                mem: projection_mem.clone(),
-                available: configs
-                    .mediums
-                    .iter()
-                    .filter(|r| r.mem == projection_mem)
-                    .map(|r| r.name.clone())
-                    .collect(),
-            })?;
-
-        sources.push(ResolvedSource::Primary(ResolvedPrimarySource {
-            facet_ref: facet_name.clone(),
-            medium: facet.medium.clone(),
-            medium_type: medium.medium_type,
-            medium_pointer: medium.pointer.clone(),
-            declared_change_detection: medium.change_detection.clone(),
-            scope: facet.scope.clone(),
-            preparation: facet.preparation.clone(),
-        }));
-    }
-
-    // Reference sources: read-only mems, in projection order, after the
-    // primary facets.
-    for reference_mem in &projection.reference_mems {
-        sources.push(ResolvedSource::Reference {
-            mem: reference_mem.clone(),
-        });
-    }
-
-    Ok(ResolvedIngest {
-        name: ingest_name.to_string(),
-        mode: ingest.mode,
-        trigger: ingest.trigger,
-        batch_size: ingest.batch_size,
-        deny_paths: ingest.deny_paths.clone(),
-        projection_ref,
-        projection_mem,
-        projection_name,
-        intent: projection.intent.clone(),
-        sources,
-        destination_mem: projection.destination_mem.clone(),
-        rules: projection.rules.clone(),
-        post_actions: ingest.post_actions.clone(),
-    })
 }
 
 /// Resolve a v1 [`BindingV1`]'s **primary** sources (facet + medium) against
@@ -401,9 +259,9 @@ pub fn resolve_binding(
 /// key (sync_state, selection cache, brief header) is derived from it.
 ///
 /// The binding's `build.mode` is [`BuildMode::Discovery`] or
-/// [`BuildMode::OneShot`] (`refinement` is deleted from the vocabulary, D1);
-/// it maps to the corresponding [`IngestMode`]. Facets and mediums are joined
-/// in the binding-id's `<mem>` tier, exactly as [`resolve_ingest`] joins them.
+/// [`BuildMode::OneShot`] (`refinement` is deleted from the vocabulary, D1) and
+/// becomes the resolved run's `mode` directly; an absent build block defaults
+/// to discovery. Facets and mediums are joined in the binding-id's `<mem>` tier.
 /// Every lookup failure is a located [`ResolveError`]; a malformed `binding_id`
 /// is [`ResolveError::MalformedProjectionRef`]. Pure — no I/O.
 pub fn resolve_binding_run(
@@ -474,17 +332,21 @@ pub fn resolve_binding_run(
         });
     }
 
-    let build = &binding.operations.build;
-    let mode = match build.mode {
-        BuildMode::Discovery => IngestMode::Discovery,
-        BuildMode::OneShot => IngestMode::OneShot,
-    };
+    // The build op supplies mode / trigger / batch / post-actions. An absent
+    // build block (a not-yet-built obligation) resolves to sane defaults — the
+    // build-path refusal (D6/AC4) is enforced at the brief entry point, not
+    // here, so read-only callers (status) keep working.
+    let build = binding.operations.build.as_ref();
+    let mode = build.map_or(BuildMode::Discovery, |b| b.mode);
+    let trigger = build.map_or(IngestTrigger::Loop, |b| b.trigger);
+    let batch_size = build.map_or(20, |b| b.batch_size);
+    let post_actions = build.and_then(|b| b.post_actions.clone());
 
     Ok(ResolvedIngest {
         name: binding_id.to_string(),
         mode,
-        trigger: build.trigger,
-        batch_size: build.batch_size,
+        trigger,
+        batch_size,
         deny_paths: binding.deny_paths.clone(),
         projection_ref: binding_id.to_string(),
         projection_mem: mem,
@@ -493,7 +355,7 @@ pub fn resolve_binding_run(
         sources,
         destination_mem: binding.destination_mem.clone(),
         rules: binding.rules.clone(),
-        post_actions: build.post_actions.clone(),
+        post_actions,
     })
 }
 
@@ -529,6 +391,13 @@ pub fn resolve_change_strategy(
 ) -> ChangeStrategy {
     if source.medium_type == MediumType::Graph {
         return ChangeStrategy::Graph;
+    }
+    // A detection-less medium (per the D6 capability matrix — `web` this cycle)
+    // has no change signal: it resolves to the visible NoSignal (`none`), never
+    // a fabricated `mtime`/`git` token (E1 / AC16). This mirrors the graph
+    // special case above — the medium type overrides any declared value.
+    if !medium_capabilities(source.medium_type).change_signal {
+        return ChangeStrategy::None;
     }
     match source.declared_change_detection.as_deref() {
         Some("none") => ChangeStrategy::None,
@@ -573,8 +442,8 @@ pub fn find_git_root(start: &Path) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pipeline::{PatternMode, Projection};
-    use crate::pipeline_store::{MemPipelineRecord, PipelineRecord};
+    use crate::pipeline::PatternMode;
+    use crate::pipeline_store::MemPipelineRecord;
 
     fn medium(mem: &str, name: &str, ty: MediumType, pointer: &str) -> MemPipelineRecord<Medium> {
         MemPipelineRecord {
@@ -624,188 +493,11 @@ mod tests {
         }
     }
 
-    fn projection(
-        mem: &str,
-        name: &str,
-        source_facets: &[&str],
-        reference_mems: &[&str],
-        destination_mem: &str,
-    ) -> MemPipelineRecord<Projection> {
-        MemPipelineRecord {
-            mem: mem.to_string(),
-            name: name.to_string(),
-            config: Projection {
-                intent: Some(format!("intent of {name}")),
-                source_facets: source_facets.iter().map(|s| s.to_string()).collect(),
-                reference_mems: reference_mems.iter().map(|s| s.to_string()).collect(),
-                destination_mem: destination_mem.to_string(),
-                rules: None,
-            },
-        }
-    }
-
-    fn ingest(name: &str, projection: &str) -> PipelineRecord<Ingest> {
-        PipelineRecord {
-            name: name.to_string(),
-            config: Ingest {
-                projection: projection.to_string(),
-                mode: IngestMode::Discovery,
-                trigger: IngestTrigger::Loop,
-                batch_size: 20,
-                deny_paths: vec!["VISION.md".to_string()],
-                post_actions: None,
-            },
-        }
-    }
-
     fn allow(path: &str) -> PatternEntry {
         PatternEntry {
             path: path.to_string(),
             mode: PatternMode::Allow,
         }
-    }
-
-    /// A well-formed ingest resolves to its projection, joins each source
-    /// facet to its medium (type/pointer/scope/preparation), and appends
-    /// reference mems as read-only sources after the primaries.
-    #[test]
-    fn resolves_a_well_formed_ingest() {
-        let configs = PipelineConfigs {
-            mediums: vec![medium(
-                "studio",
-                "source-tree",
-                MediumType::Codebase,
-                "../studio",
-            )],
-            facets: vec![facet(
-                "studio",
-                "source-files",
-                "source-tree",
-                vec![allow("../studio/**/*.swift")],
-            )],
-            projections: vec![projection(
-                "studio",
-                "studio-graph",
-                &["source-files"],
-                &["engine"],
-                "studio",
-            )],
-            ingests: vec![ingest("studio", "studio/studio-graph")],
-        };
-
-        let r = resolve_ingest(&configs, "studio").unwrap();
-        assert_eq!(r.mode, IngestMode::Discovery);
-        assert_eq!(r.batch_size, 20);
-        assert_eq!(r.deny_paths, ["VISION.md"]);
-        assert_eq!(r.projection_mem, "studio");
-        assert_eq!(r.projection_name, "studio-graph");
-        assert_eq!(r.intent.as_deref(), Some("intent of studio-graph"));
-        assert_eq!(r.destination_mem, "studio");
-        assert_eq!(r.sources.len(), 2);
-        match &r.sources[0] {
-            ResolvedSource::Primary(p) => {
-                assert_eq!(p.facet_ref, "source-files");
-                assert_eq!(p.medium, "source-tree");
-                assert_eq!(p.medium_type, MediumType::Codebase);
-                assert_eq!(p.medium_pointer, "../studio");
-                assert_eq!(p.declared_change_detection, None);
-                assert_eq!(p.scope, vec![allow("../studio/**/*.swift")]);
-                assert_eq!(p.preparation, None);
-            }
-            other => panic!("expected primary source first, got {other:?}"),
-        }
-        assert_eq!(
-            r.sources[1],
-            ResolvedSource::Reference {
-                mem: "engine".to_string()
-            },
-            "reference mem follows the primary facets"
-        );
-    }
-
-    /// An unknown ingest name errors with the available list.
-    #[test]
-    fn unknown_ingest_errors_with_available() {
-        let configs = PipelineConfigs {
-            ingests: vec![ingest("a", "m/p"), ingest("b", "m/p")],
-            ..Default::default()
-        };
-        let err = resolve_ingest(&configs, "c").unwrap_err();
-        assert_eq!(
-            err,
-            ResolveError::IngestNotFound {
-                name: "c".to_string(),
-                available: vec!["a".to_string(), "b".to_string()],
-            }
-        );
-    }
-
-    /// A projection ref without a `/` (or with an empty half) is malformed.
-    #[test]
-    fn malformed_projection_ref_errors() {
-        for bad in ["noslash", "/name", "mem/"] {
-            let configs = PipelineConfigs {
-                ingests: vec![ingest("i", bad)],
-                ..Default::default()
-            };
-            let err = resolve_ingest(&configs, "i").unwrap_err();
-            assert!(
-                matches!(err, ResolveError::MalformedProjectionRef { .. }),
-                "'{bad}' should be malformed, got {err:?}"
-            );
-        }
-    }
-
-    /// A projection ref pointing at a missing projection errors with the
-    /// available projections in that mem.
-    #[test]
-    fn missing_projection_errors_with_available() {
-        let configs = PipelineConfigs {
-            projections: vec![projection("studio", "other", &[], &[], "studio")],
-            ingests: vec![ingest("i", "studio/studio-graph")],
-            ..Default::default()
-        };
-        let err = resolve_ingest(&configs, "i").unwrap_err();
-        assert_eq!(
-            err,
-            ResolveError::ProjectionNotFound {
-                ingest: "i".to_string(),
-                projection_ref: "studio/studio-graph".to_string(),
-                mem: "studio".to_string(),
-                available: vec!["other".to_string()],
-            }
-        );
-    }
-
-    /// A projection whose source facet does not exist errors, located.
-    #[test]
-    fn dangling_facet_errors() {
-        let configs = PipelineConfigs {
-            projections: vec![projection("studio", "p", &["missing-facet"], &[], "studio")],
-            ingests: vec![ingest("i", "studio/p")],
-            ..Default::default()
-        };
-        let err = resolve_ingest(&configs, "i").unwrap_err();
-        assert!(matches!(
-            err,
-            ResolveError::FacetNotFound { ref facet, .. } if facet == "missing-facet"
-        ));
-    }
-
-    /// A facet whose medium does not exist errors, located.
-    #[test]
-    fn dangling_medium_errors() {
-        let configs = PipelineConfigs {
-            facets: vec![facet("studio", "f", "missing-medium", vec![])],
-            projections: vec![projection("studio", "p", &["f"], &[], "studio")],
-            ingests: vec![ingest("i", "studio/p")],
-            ..Default::default()
-        };
-        let err = resolve_ingest(&configs, "i").unwrap_err();
-        assert!(matches!(
-            err,
-            ResolveError::MediumNotFound { ref medium, .. } if medium == "missing-medium"
-        ));
     }
 
     fn v1_binding(dest: &str, facets: &[&str]) -> BindingV1 {
@@ -822,12 +514,12 @@ mod tests {
             coverage_semantics: CoverageSemantics::Exhaustive,
             rules: None,
             operations: Operations {
-                build: BuildOperation {
+                build: Some(BuildOperation {
                     mode: BuildMode::Discovery,
                     trigger: IngestTrigger::Loop,
                     batch_size: 20,
                     post_actions: None,
-                },
+                }),
                 sync: None,
                 verify: None,
             },
@@ -924,12 +616,12 @@ mod tests {
             coverage_semantics: CoverageSemantics::Exhaustive,
             rules: None,
             operations: Operations {
-                build: BuildOperation {
+                build: Some(BuildOperation {
                     mode: BuildMode::Discovery,
                     trigger: IngestTrigger::Loop,
                     batch_size: 20,
                     post_actions: Some(serde_json::json!({ "archive_source": true })),
-                },
+                }),
                 sync: None,
                 verify: None,
             },
@@ -940,7 +632,7 @@ mod tests {
         assert_eq!(r.projection_ref, "app/graph");
         assert_eq!(r.projection_mem, "app");
         assert_eq!(r.projection_name, "graph");
-        assert_eq!(r.mode, IngestMode::Discovery);
+        assert_eq!(r.mode, BuildMode::Discovery);
         assert_eq!(r.batch_size, 20);
         assert_eq!(r.deny_paths, ["**/VISION.md"]);
         assert_eq!(r.destination_mem, "app");
@@ -983,18 +675,18 @@ mod tests {
             coverage_semantics: CoverageSemantics::Exhaustive,
             rules: None,
             operations: Operations {
-                build: BuildOperation {
+                build: Some(BuildOperation {
                     mode: BuildMode::OneShot,
                     trigger: IngestTrigger::Manual,
                     batch_size: 5,
                     post_actions: None,
-                },
+                }),
                 sync: None,
                 verify: None,
             },
         };
         let r = resolve_binding_run(&configs, "m/lens", &binding).unwrap();
-        assert_eq!(r.mode, IngestMode::OneShot);
+        assert_eq!(r.mode, BuildMode::OneShot);
     }
 
     /// A graph-typed medium always resolves to the graph strategy,
@@ -1010,6 +702,26 @@ mod tests {
         assert_eq!(
             resolve_change_strategy(&primary(MediumType::Graph, "", Some("mtime")), root),
             ChangeStrategy::Graph
+        );
+    }
+
+    /// A `web` medium (detection-less per the D6 matrix) resolves to the
+    /// visible NoSignal `None` regardless of any declared value — `status`
+    /// renders `signal: none`, never a fabricated `mtime`/`git` token (AC16).
+    #[test]
+    fn web_medium_resolves_to_none_signal() {
+        let root = Path::new("/nonexistent");
+        assert_eq!(
+            resolve_change_strategy(&primary(MediumType::Web, "https://example.com", None), root),
+            ChangeStrategy::None
+        );
+        // Even a declared override does not fabricate a signal for web.
+        assert_eq!(
+            resolve_change_strategy(
+                &primary(MediumType::Web, "https://example.com", Some("mtime")),
+                root
+            ),
+            ChangeStrategy::None
         );
     }
 

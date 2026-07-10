@@ -1,7 +1,8 @@
-//! File-adapter persistence for the four pipeline primitives.
+//! File-adapter persistence for the pipeline configs.
 //!
-//! Reads and writes [`Medium`] / [`Facet`] / [`Projection`] / [`Ingest`] JSON
-//! under the workspace store ([`WORKSPACE_STORE_DIR`]):
+//! Reads and writes [`Medium`] / [`Facet`] / [`Projection`] / v1
+//! [`BindingV1`] (and, for the legacy path, the crate-local [`LegacyIngest`])
+//! JSON under the workspace store ([`WORKSPACE_STORE_DIR`]):
 //!
 //! - `<root>/.memstead/mediums/<mem>/<name>.json`
 //! - `<root>/.memstead/facets/<mem>/<name>.json`
@@ -28,9 +29,55 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
+use serde::Deserialize;
+
 use crate::binding::BindingV1;
-use crate::pipeline::{Facet, Ingest, Medium, Projection};
+use crate::pipeline::{Facet, IngestTrigger, Medium, Projection};
 use crate::workspace_store::{StoreError, WORKSPACE_STORE_DIR};
+
+/// The legacy (gen-2) flat **ingest** record — the schedule primitive the
+/// binding model retired (its `mode`/`trigger`/`batch_size`/`deny_paths`/
+/// `post_actions` collapsed into a binding's `operations.build` block).
+///
+/// This shape is **migrate-local**: it is parsed only by the legacy path —
+/// [`load_legacy_pipeline_configs`], `projection migrate` (which reads it to
+/// merge each ingest into its projection), the referential-integrity edit
+/// layer, and the gen-1 root-folder converter. No live surface constructs or
+/// runs it; the live loader speaks [`BindingV1`]. Kept `pub(crate)` and minimal
+/// so the retired `Ingest`/`IngestMode` machinery no longer lives on any public
+/// or live surface.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct LegacyIngest {
+    /// The projection (by name, `"<mem>/<name>"`) this ingest ran.
+    pub projection: String,
+    /// Discovery / refinement / one-shot — including the deleted `refinement`
+    /// value, parsed so `projection migrate` can *detect and refuse* it (D1).
+    pub mode: LegacyIngestMode,
+    /// Loop / manual / on-event.
+    pub trigger: IngestTrigger,
+    /// How many artifacts a single run processed.
+    pub batch_size: u32,
+    /// Paths excluded for this ingest's runs, on top of facet scope.
+    #[serde(default)]
+    pub deny_paths: Vec<String>,
+    /// Free-form post-run actions (e.g. a one-shot `archive_source` flag).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub post_actions: Option<serde_json::Value>,
+}
+
+/// The legacy ingest mode, including the deleted `refinement` value. Parsed so
+/// `projection migrate` can detect and refuse it (D1) — never carried forward
+/// into a v1 binding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum LegacyIngestMode {
+    /// Build out new coverage.
+    Discovery,
+    /// Improve existing coverage — the deleted refinement-as-writer mode.
+    Refinement,
+    /// A single bounded pass.
+    OneShot,
+}
 
 /// Per-primitive subdirectory names under the workspace store.
 pub const MEDIUMS_DIR: &str = "mediums";
@@ -77,8 +124,9 @@ pub struct PipelineConfigs {
     pub facets: Vec<MemPipelineRecord<Facet>>,
     /// Per-mem projections.
     pub projections: Vec<MemPipelineRecord<Projection>>,
-    /// Flat ingests.
-    pub ingests: Vec<PipelineRecord<Ingest>>,
+    /// Flat legacy ingests (crate-local — the migrate/edit path reads them; no
+    /// live or external surface does).
+    pub(crate) ingests: Vec<PipelineRecord<LegacyIngest>>,
 }
 
 /// Every pipeline config in a workspace store, in the **binding v1** shape
@@ -332,8 +380,14 @@ pub fn write_projection(
     )
 }
 
-/// Write an ingest to `<root>/.memstead/ingests/<name>.json` (flat).
-pub fn write_ingest(workspace_root: &Path, name: &str, ingest: &Ingest) -> Result<(), StoreError> {
+/// Write a legacy ingest to `<root>/.memstead/ingests/<name>.json` (flat).
+/// Crate-local dumb file op — used by the gen-1 root-folder converter and the
+/// projection-rename repoint; the live path writes bindings, not ingests.
+pub(crate) fn write_ingest(
+    workspace_root: &Path,
+    name: &str,
+    ingest: &LegacyIngest,
+) -> Result<(), StoreError> {
     write_json(&flat_path(workspace_root, INGESTS_DIR, name)?, ingest)
 }
 
@@ -549,10 +603,10 @@ pub fn load_pipeline_configs(workspace_root: &Path) -> Result<BindingConfigs, St
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pipeline::{IngestMode, IngestTrigger, MediumType, PatternEntry, PatternMode};
+    use crate::pipeline::{MediumType, PatternEntry, PatternMode};
     use tempfile::TempDir;
 
-    fn sample() -> (Medium, Facet, Projection, Ingest) {
+    fn sample() -> (Medium, Facet, Projection, LegacyIngest) {
         let medium = Medium {
             name: "source-tree".to_string(),
             medium_type: MediumType::Codebase,
@@ -576,9 +630,9 @@ mod tests {
             destination_mem: "macos".to_string(),
             rules: None,
         };
-        let ingest = Ingest {
+        let ingest = LegacyIngest {
             projection: "macos/graph".to_string(),
-            mode: IngestMode::Discovery,
+            mode: LegacyIngestMode::Discovery,
             trigger: IngestTrigger::Loop,
             batch_size: 20,
             deny_paths: vec!["VISION.md".to_string()],
@@ -824,12 +878,12 @@ mod tests {
             coverage_semantics: CoverageSemantics::Exhaustive,
             rules: None,
             operations: Operations {
-                build: BuildOperation {
+                build: Some(BuildOperation {
                     mode: BuildMode::Discovery,
                     trigger: IngestTrigger::Loop,
                     batch_size: 20,
                     post_actions: None,
-                },
+                }),
                 sync: None,
                 verify: None,
             },
