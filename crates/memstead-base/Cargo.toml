@@ -41,7 +41,7 @@ tokio = { version = "1", default-features = false, features = ["sync"], optional
 # Used by `watch_mem_repo` to surface `MemChangedEvent`s for
 # cross-process consumers (bridge HEAD-watcher, macOS live-update,
 # audit-log workers) that don't share the writer's `Engine` instance.
-notify = { version = "7", optional = true }
+notify = { version = "8", optional = true }
 
 # Tantivy (full-text search) and its native-only transitive chain
 # (getrandom 0.2.x without the `js` feature, memmap2, rayon, zstd-sys)
