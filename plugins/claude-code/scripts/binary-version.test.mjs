@@ -13,6 +13,7 @@ import {
   recordBinaryVersion,
   readRecordedVersion,
   anchorsGate,
+  resolveWorkspaceRootFrom,
 } from './binary-version.mjs';
 
 function ws() {
@@ -69,6 +70,41 @@ test('gate FAILS CLOSED with no record — degraded, with a printable reason', (
   assert.match(g.reason, /no recorded binary version/);
   assert.match(g.reason, /without anchors/);
   rmSync(root, { recursive: true, force: true });
+});
+
+test('resolveWorkspaceRootFrom walks up to the workspace marker', () => {
+  const root = ws();
+  mkdirSync(join(root, '.memstead'), { recursive: true });
+  writeFileSync(join(root, '.memstead', 'workspace.toml'), '');
+  const sub = join(root, 'a', 'b');
+  mkdirSync(sub, { recursive: true });
+  assert.equal(resolveWorkspaceRootFrom(sub), root);
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('resolveWorkspaceRootFrom follows an .mcp.json cd-target into a subdirectory workspace', () => {
+  // The loop-session case: pwd is the project root, the workspace lives in
+  // graph/ — a plain walk-up never descends, so the gate must probe the
+  // `.mcp.json` `cd <dir>` launch target (same resolution the hooks use).
+  const project = ws();
+  const graph = join(project, 'graph');
+  mkdirSync(join(graph, '.memstead'), { recursive: true });
+  writeFileSync(join(graph, '.memstead', 'workspace.toml'), '');
+  writeFileSync(
+    join(project, '.mcp.json'),
+    JSON.stringify({ mcpServers: { memstead: { command: 'sh', args: ['-c', 'cd graph && exec memstead-mcp'] } } }),
+  );
+  assert.equal(resolveWorkspaceRootFrom(project), graph);
+  // gate/record therefore land in the subdirectory workspace:
+  recordBinaryVersion(graph, { run: () => ({ status: 0, stdout: 'memstead 0.3.0' }) });
+  assert.equal(anchorsGate(resolveWorkspaceRootFrom(project)).capable, true);
+  rmSync(project, { recursive: true, force: true });
+});
+
+test('resolveWorkspaceRootFrom falls back to the given directory when nothing resolves', () => {
+  const dir = ws();
+  assert.equal(resolveWorkspaceRootFrom(dir), dir);
+  rmSync(dir, { recursive: true, force: true });
 });
 
 test('gate FAILS CLOSED for a below-threshold recorded version', () => {

@@ -30,8 +30,10 @@ verbatim — never work around it.
 
    No bindings configured → say so and stop. Nothing due → say so and stop.
    Otherwise execute each returned brief faithfully per its named operation:
-   verify is report-only measurement; build grows the mem (steps 2 and 4
-   apply); sync maintains it (steps 2–5).
+   verify is report-only measurement; build grows the mem — a build brief IS
+   the sanctioned backfill channel, so cover the batch it asks for rather
+   than declining it as out-of-scope (steps 2 and 4 apply); sync maintains
+   it (steps 2–5).
 
 2. Check the anchors capability once:
 

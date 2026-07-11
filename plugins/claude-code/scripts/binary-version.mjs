@@ -16,11 +16,39 @@
 import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
+import {
+  findWorkspaceRoot,
+  hasWorkspaceMarker,
+  mcpConfigCdTargets,
+} from '../hooks/workspace-resolve-utils.mjs';
 
 /** First `memstead` release whose mutation tools accept the `anchors[]` param. */
 export const ANCHORS_MIN = { major: 0, minor: 3, patch: 0 };
 
 const RECORD_REL = '.memstead.cache/plugin/binary-version.json';
+
+/**
+ * Resolve the workspace root the record belongs to, from any directory in
+ * the project. A skill runs `record`/`gate` with `$(pwd)` — which may be the
+ * project root while the workspace lives in a subdirectory (the common
+ * `cd <dir>` `.mcp.json` layout). Resolution mirrors the path-aware hooks:
+ * (1) walk up for the engine's workspace marker; (2) probe `.mcp.json`
+ * `cd <dir>` launch targets for a marker-bearing subdirectory; (3) fall back
+ * to the given directory unchanged (the pre-resolution behavior).
+ */
+export function resolveWorkspaceRootFrom(dir) {
+  const walked = findWorkspaceRoot(dir);
+  if (walked) return walked;
+  try {
+    const mcpConfig = JSON.parse(readFileSync(join(dir, '.mcp.json'), 'utf-8'));
+    for (const target of mcpConfigCdTargets(mcpConfig, dir)) {
+      if (hasWorkspaceMarker(target)) return target;
+    }
+  } catch {
+    /* no or malformed .mcp.json — fall through */
+  }
+  return dir;
+}
 
 /** Parse a `memstead --version` line ("memstead 0.2.0") to {major,minor,patch} or null. */
 export function parseVersion(text) {
@@ -81,12 +109,16 @@ export function anchorsGate(workspaceRoot) {
   return { capable: true, version, reason: `recorded binary ${v} supports anchors` };
 }
 
-// CLI: `record <workspace-root>` (used by /setup) writes the record;
-// `gate <workspace-root>` (used by capability-gated routers) prints the
-// `{capable, version, reason}` gate as JSON on stdout and always exits 0 —
-// the caller branches on `capable`, never on the exit code.
+// CLI: `record <dir>` (used by /setup) writes the record; `gate <dir>`
+// (used by capability-gated routers) prints the `{capable, version, reason}`
+// gate as JSON on stdout and always exits 0 — the caller branches on
+// `capable`, never on the exit code. `<dir>` may be any directory in the
+// project: both commands resolve the actual workspace root from it (walk-up
+// + `.mcp.json` cd-target probe), so `$(pwd)` is safe even when the
+// workspace lives in a subdirectory.
 function main() {
-  const [cmd, root] = process.argv.slice(2);
+  const [cmd, dir] = process.argv.slice(2);
+  const root = dir ? resolveWorkspaceRootFrom(dir) : null;
   if (cmd === 'record' && root) {
     const r = recordBinaryVersion(root);
     if (r.ok) {
@@ -100,7 +132,7 @@ function main() {
     console.log(JSON.stringify(anchorsGate(root)));
     process.exit(0);
   }
-  console.error('usage: binary-version.mjs (record|gate) <workspace-root>');
+  console.error('usage: binary-version.mjs (record|gate) <dir-anywhere-in-project>');
   process.exit(2);
 }
 
