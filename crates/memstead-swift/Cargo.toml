@@ -31,6 +31,9 @@ memstead-engine.workspace = true
 memstead-git-branch.workspace = true
 memstead-schema.workspace = true
 semver.workspace = true
+# Serializes the engine's in-memory MemConfig for the `mem_config_json`
+# read (the on-disk config.json shape, backend-uniform).
+serde_json.workspace = true
 thiserror.workspace = true
 uniffi = { version = "0.32", features = ["cli"] }
 
@@ -39,8 +42,6 @@ uniffi = { version = "0.32", features = ["build"] }
 
 [dev-dependencies]
 tempfile.workspace = true
-# JSON validity assertion over the widened health-finding `detail_json`.
-serde_json.workspace = true
 # Pull in `memstead-git-branch::test_support::init_mem_repo_stub` so integration
 # tests can satisfy the `mem-repo/.git/` fail-fast under the
 # `GitObject` default (Phase 2 Session 6).

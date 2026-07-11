@@ -751,6 +751,28 @@ impl Engine {
     /// with the roster when the mem isn't mounted, `NotFound` naming the
     /// pin when it fails to resolve — the app renders that resolution
     /// error rather than an empty browser.
+    /// A mem's declared config as JSON — the engine's in-memory `MemConfig`
+    /// serialized in the on-disk `config.json` shape (camelCase; `syncState`
+    /// carries the engine-recorded `#synced`/`#verified` baselines).
+    /// Backend-uniform: folder and git-branch mems serve identically (a
+    /// git-branch mem's config lives on the `__MEMSTEAD` ref, unreachable
+    /// by file path). Read-only.
+    pub fn mem_config_json(&self, mem: String) -> Result<String, MemsteadError> {
+        let engine = self
+            .inner
+            .lock()
+            .expect("memstead-swift engine mutex poisoned");
+        let config = engine.mem_config_for(&mem).ok_or_else(|| {
+            let known: Vec<String> = engine.mounts().iter().map(|m| m.mem.clone()).collect();
+            MemsteadError::NotFound {
+                message: format!("unknown mem: \"{mem}\" (mounted: {})", known.join(", ")),
+            }
+        })?;
+        serde_json::to_string(config).map_err(|e| MemsteadError::Internal {
+            message: format!("mem config for \"{mem}\" did not serialize: {e}"),
+        })
+    }
+
     pub fn schema_json(&self, mem: String) -> Result<String, MemsteadError> {
         let engine = self
             .inner
@@ -1071,6 +1093,30 @@ mod tests {
     #[test]
     fn version_matches_cargo_pkg_version() {
         assert_eq!(version(), env!("CARGO_PKG_VERSION"));
+    }
+
+    #[test]
+    fn mem_config_json_serves_sync_state_and_refuses_unknown_mem() {
+        let (engine, _tmp) = setup_test_engine();
+        // No FFI setter exists (the app displays, never writes sync state);
+        // seed through the inner engine's lifecycle writer directly.
+        engine
+            .inner
+            .lock()
+            .unwrap()
+            .set_mem_sync_state("specs", "specs/graph/src#synced", "deadbeef", None)
+            .expect("seed a sync-state token");
+        let json = engine
+            .mem_config_json("specs".to_string())
+            .expect("config JSON for a mounted mem");
+        let v: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
+        assert_eq!(
+            v["syncState"]["specs/graph/src#synced"],
+            serde_json::json!("deadbeef"),
+            "the on-disk camelCase shape carries the recorded baseline"
+        );
+        let err = engine.mem_config_json("nope".to_string()).unwrap_err();
+        assert!(matches!(err, MemsteadError::NotFound { .. }), "got {err:?}");
     }
 
     #[test]

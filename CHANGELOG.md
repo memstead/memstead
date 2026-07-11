@@ -55,6 +55,13 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   ride `get_health` (the deferred data-source rework, macos-deferred-ui).
   CLI `memstead status` and every MCP surface are untouched.
 
+- **New UniFFI read `mem_config_json(mem)`** — a mem's declared config as
+  JSON in the on-disk `config.json` shape (camelCase; `syncState` carries
+  the engine-recorded `#synced`/`#verified` baselines). Backend-uniform: a
+  git-branch mem's config lives on the `__MEMSTEAD` ref and was previously
+  unreachable from any FFI consumer by file path. Read-only; typed
+  NotFound for an unknown mem.
+
 ### Fixed
 - **The `#verified` baseline is now written.** `projection verify` records
   `<binding>/<facet>#verified = <observed facet head>` on every completed
