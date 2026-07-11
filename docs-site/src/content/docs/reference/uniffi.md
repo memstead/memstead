@@ -773,6 +773,15 @@ interface Engine {
     [Throws=MemsteadError]
     string schema_json(string mem);
 
+    // A mem's declared config as JSON — the engine's in-memory MemConfig
+    // serialized in the on-disk `config.json` shape (camelCase; `syncState`
+    // carries the engine-recorded `#synced`/`#verified` baselines). A raw
+    // config read, backend-uniform: folder mems and git-branch mems (whose
+    // config lives on the __MEMSTEAD ref, unreachable by file path) serve
+    // identically. Read-only; typed NotFound for an unknown mem.
+    [Throws=MemsteadError]
+    string mem_config_json(string mem);
+
     // Whether the workspace's mutation policy requires provenance notes
     // ([mutations].require_notes). The app reads this to collect a note
     // up front and refuse an empty one with the policy named — the

@@ -93,6 +93,7 @@ Surface entries the registry does not pin to a logical operation. Either add a r
 - `diff`
 - `export_mem`
 - `get_status`
+- `mem_config_json`
 - `mem_roster`
 - `pipeline_configs_json`
 - `rename_facet`
