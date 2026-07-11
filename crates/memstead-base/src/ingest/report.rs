@@ -247,8 +247,14 @@ pub struct FidelityReport {
     /// segregated as superseded (the heavy detail list is the count's backing).
     pub superseded: Vec<String>,
     /// Persisted dispositions that exclude an otherwise-uncovered artifact from
-    /// the exhaustive findings set (B4) — count only.
+    /// the exhaustive findings set (B4) — the count (`= disposed_excluded_rationales.len()`).
     pub disposed_excluded: usize,
+    /// The durable authored-exclusion ledger consulted under exhaustive coverage
+    /// (B4): `(artifact, rationale)` for each uncovered artifact a persisted
+    /// disposition marks deliberately excluded. Removed from the findings /
+    /// backfill denominator and rendered with its reasoning so the editorial
+    /// decision stays visible.
+    pub disposed_excluded_rationales: Vec<(String, String)>,
     /// Degradation flags (B1) — typed, human/agent-readable strings.
     pub degradations: Vec<String>,
 }
@@ -460,6 +466,21 @@ fn render_hard_required(report: &FidelityReport) -> String {
                 report.coverage.uncovered.len()
             ));
         }
+    }
+
+    // Authored exclusion ledger (B4) — surface the reasoning behind each
+    // deliberately-excluded artifact so an editorial decision stays visible and
+    // auditable, not just subtracted from a denominator.
+    if !report.disposed_excluded_rationales.is_empty() {
+        md.push_str("**Excluded on purpose (persisted dispositions):**\n");
+        for (artifact, rationale) in &report.disposed_excluded_rationales {
+            if rationale.is_empty() {
+                md.push_str(&format!("- `{artifact}`\n"));
+            } else {
+                md.push_str(&format!("- `{artifact}` — {rationale}\n"));
+            }
+        }
+        md.push('\n');
     }
 
     // --- Anchors (B1) ---
@@ -895,19 +916,24 @@ pub fn compute_fidelity_report(
         }
     }
 
-    // --- Persisted dispositions that exclude uncovered artifacts (B4) ---
-    let mut disposed_excluded = 0usize;
+    // --- Durable authored-exclusion ledger (B4) ---
+    // The advance store's `exclusions` map survives advance completion (unlike
+    // its transient `dispositions`), so an artifact mined-and-deliberately-
+    // excluded no longer re-surfaces as `uncovered` on every verify — and keeps
+    // its reasoning. Consult it for every uncovered artifact.
+    let mut disposed_excluded_rationales: Vec<(String, String)> = Vec::new();
     if let Some((mem, name)) = binding_id.split_once('/')
         && let Ok(Some(state)) = read_advance_store(workspace_root, mem, name)
     {
         let uncovered_set: std::collections::BTreeSet<&str> =
             uncovered.iter().map(String::as_str).collect();
-        disposed_excluded = state
-            .dispositions
-            .keys()
-            .filter(|a| uncovered_set.contains(a.as_str()))
-            .count();
+        for (artifact, rationale) in &state.exclusions {
+            if uncovered_set.contains(artifact.as_str()) {
+                disposed_excluded_rationales.push((artifact.clone(), rationale.clone()));
+            }
+        }
     }
+    let disposed_excluded = disposed_excluded_rationales.len();
 
     // --- Degradation flags (B1) ---
     let mut degradations: Vec<String> = Vec::new();
@@ -964,6 +990,7 @@ pub fn compute_fidelity_report(
         backlog,
         superseded,
         disposed_excluded,
+        disposed_excluded_rationales,
         degradations,
     }
 }
@@ -1062,6 +1089,7 @@ mod tests {
             backlog: 1,
             superseded: Vec::new(),
             disposed_excluded: 0,
+            disposed_excluded_rationales: Vec::new(),
             degradations: vec!["hash-adjudication-deferred — 1 anchor(s) recheck".to_string()],
         }
     }
@@ -1291,6 +1319,21 @@ mod tests {
         // 2 uncovered − 1 disposed = 1 finding.
         assert!(md.contains("1 unaccounted artifact(s)"));
         assert!(md.contains("(1 disposed excluded)"));
+    }
+
+    /// B4 — the authored-exclusion ledger renders each excluded artifact with
+    /// its reasoning, so the editorial decision stays visible (not just counted).
+    #[test]
+    fn b4_authored_exclusion_rationale_is_rendered() {
+        let mut r = base_report();
+        r.coverage_semantics = CoverageSemantics::Exhaustive;
+        r.coverage.uncovered = vec!["src/gen.rs".to_string()];
+        r.disposed_excluded = 1;
+        r.disposed_excluded_rationales =
+            vec![("src/gen.rs".to_string(), "generated; no entity".to_string())];
+        let md = render_fidelity_report(&r, 8_000, &[]).markdown;
+        assert!(md.contains("Excluded on purpose (persisted dispositions):"));
+        assert!(md.contains("`src/gen.rs` — generated; no entity"));
     }
 
     /// B5 — the denominator provenance is stated; a non-enumerable medium says

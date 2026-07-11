@@ -78,6 +78,65 @@ pub struct AdvanceState {
     pub frozen_slice: Slice,
     /// artifact id → agent-supplied disposition, accumulated across calls.
     pub dispositions: BTreeMap<String, String>,
+    /// The **durable authored-exclusion ledger**: artifact id → the agent's
+    /// rationale for deliberately excluding it (mined, warrants no destination
+    /// entity). Unlike [`Self::dispositions`] and [`Self::frozen_slice`] — the
+    /// transient advance progress dropped on completion — this survives
+    /// completion so the fidelity report consults it under exhaustive coverage:
+    /// an excluded-on-purpose artifact stops re-surfacing as `uncovered` and
+    /// keeps its reasoning. Generic across every binding and medium.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub exclusions: BTreeMap<String, String>,
+}
+
+/// The verdict marking an artifact **deliberately excluded** from coverage —
+/// mined, warrants no destination entity. When supplied with a rationale (the
+/// [`DispositionInput::Reasoned`] form) it lands in the durable authored
+/// exclusion ledger ([`AdvanceState::exclusions`]) and persists past advance
+/// completion; any other verdict clears a prior exclusion for that artifact.
+pub const EXCLUDED_VERDICT: &str = "excluded";
+
+/// An agent-supplied disposition for one artifact: either a bare verdict
+/// (`"worked"`, `"skipped"`, …) or a verdict carrying an authored rationale.
+///
+/// The rationale-bearing form exists for the durable authored-exclusion record
+/// the option-(a) design names — `(artifact, disposition = "excluded",
+/// rationale)`. It is generic: any verdict may carry reasoning, but only the
+/// [`EXCLUDED_VERDICT`] one is retained past completion (an excluded artifact
+/// has no anchor, so under exhaustive coverage it would otherwise re-surface as
+/// `uncovered` on every subsequent verify). Serde is `untagged` so the common
+/// `"worked"` form and the `{"disposition": "...", "rationale": "..."}` form
+/// both parse from the same `--dispositions` payload.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(untagged)]
+pub enum DispositionInput {
+    /// A bare verdict string, e.g. `"worked"`.
+    Verdict(String),
+    /// A verdict with an authored rationale.
+    Reasoned {
+        /// The verdict proper (e.g. `"excluded"`).
+        disposition: String,
+        /// The agent's reasoning for this disposition.
+        rationale: String,
+    },
+}
+
+impl DispositionInput {
+    /// The verdict string (the disposition proper).
+    pub fn verdict(&self) -> &str {
+        match self {
+            DispositionInput::Verdict(v) => v,
+            DispositionInput::Reasoned { disposition, .. } => disposition,
+        }
+    }
+
+    /// The authored rationale, if the reasoned form was supplied.
+    pub fn rationale(&self) -> Option<&str> {
+        match self {
+            DispositionInput::Verdict(_) => None,
+            DispositionInput::Reasoned { rationale, .. } => Some(rationale),
+        }
+    }
 }
 
 impl AdvanceState {
@@ -302,13 +361,16 @@ fn subtract_disposed(frozen: &Slice, dispositions: &BTreeMap<String, String>) ->
 ///
 /// `resolved.name` must be the canonical binding id `<mem>/<stem>` (D3), as
 /// produced by [`super::resolve::resolve_binding_run`]; `dispositions` maps each
-/// judged artifact id to an agent-supplied disposition string (in E2 the agent
-/// supplies one for **every** artifact — see the module docs).
+/// judged artifact id to an agent-supplied [`DispositionInput`] — a bare verdict
+/// or a verdict with an authored rationale (in E2 the agent supplies one for
+/// **every** artifact — see the module docs). An `excluded` verdict with a
+/// rationale is recorded in the durable authored-exclusion ledger; any other
+/// verdict clears a prior exclusion for that artifact.
 pub fn advance_baseline(
     engine: &mut Engine,
     workspace_root: &Path,
     resolved: &ResolvedIngest,
-    dispositions: &BTreeMap<String, String>,
+    dispositions: &BTreeMap<String, DispositionInput>,
 ) -> Result<AdvanceOutcome, AdvanceError> {
     let binding_id = resolved.name.clone();
     let (mem, name) = split_binding_id(&binding_id)?;
@@ -346,11 +408,22 @@ pub fn advance_baseline(
         });
     }
 
-    // Accumulate the new (agent-supplied) dispositions.
-    for (artifact, disposition) in dispositions {
+    // Accumulate the new (agent-supplied) dispositions. An `excluded` verdict
+    // with a rationale lands in the durable exclusion ledger (survives
+    // completion); any other verdict clears a prior exclusion for that artifact
+    // (a re-judged artifact must not keep stale "excluded" reasoning).
+    for (artifact, input) in dispositions {
         state
             .dispositions
-            .insert(artifact.clone(), disposition.clone());
+            .insert(artifact.clone(), input.verdict().to_string());
+        if input.verdict() == EXCLUDED_VERDICT {
+            state.exclusions.insert(
+                artifact.clone(),
+                input.rationale().unwrap_or("").to_string(),
+            );
+        } else {
+            state.exclusions.remove(artifact);
+        }
     }
 
     // Auto-`worked` (E3a): mark every frozen-slice artifact that an anchor in
@@ -396,8 +469,23 @@ pub fn advance_baseline(
             warnings.extend(outcome.warnings.iter().map(ToString::to_string));
             tokens_written.push(c.key.clone());
         }
-        // Dispositions consumed — drop the durable store (completion idempotent).
-        delete_advance_store(workspace_root, &mem, &name).map_err(AdvanceError::Store)?;
+        // Transient progress (frozen slice + per-run dispositions) is consumed.
+        // If any durable authored exclusions accumulated, retain a slimmed store
+        // holding only them (empty slice, no transient dispositions) so the
+        // fidelity report keeps consulting them; otherwise drop the store
+        // entirely (completion idempotent — the no-exclusion path is unchanged).
+        if state.exclusions.is_empty() {
+            delete_advance_store(workspace_root, &mem, &name).map_err(AdvanceError::Store)?;
+        } else {
+            let durable = AdvanceState {
+                binding: binding_id.clone(),
+                frozen_slice: Slice::default(),
+                dispositions: BTreeMap::new(),
+                exclusions: state.exclusions.clone(),
+            };
+            write_advance_store(workspace_root, &mem, &name, &durable)
+                .map_err(AdvanceError::Store)?;
+        }
     } else {
         // Persist the accumulated frozen slice + dispositions for resumability.
         write_advance_store(workspace_root, &mem, &name, &state).map_err(AdvanceError::Store)?;
@@ -440,6 +528,15 @@ mod tests {
             .collect()
     }
 
+    /// The [`DispositionInput`] map an `advance_baseline` call takes: bare
+    /// verdicts (the common form).
+    fn input(pairs: &[(&str, &str)]) -> BTreeMap<String, DispositionInput> {
+        pairs
+            .iter()
+            .map(|(a, d)| (a.to_string(), DispositionInput::Verdict(d.to_string())))
+            .collect()
+    }
+
     /// The store round-trips and `delete` is idempotent.
     #[test]
     fn advance_store_round_trips_and_delete_is_idempotent() {
@@ -455,6 +552,7 @@ mod tests {
             binding: "engine/graph".to_string(),
             frozen_slice: slice(&["c.rs"], &["a.rs"], &["b.rs"]),
             dispositions: disp(&[("a.rs", "worked")]),
+            exclusions: BTreeMap::new(),
         };
         write_advance_store(root, "engine", "graph", &state).unwrap();
         assert!(
@@ -629,7 +727,7 @@ mod tests {
         // (1) Freeze + dispose part (a.rs). Remainder = the rest (b.rs deleted).
         {
             let mut engine = engine_at(root);
-            let out = advance_baseline(&mut engine, root, &resolved, &disp(&[("a.rs", "worked")]))
+            let out = advance_baseline(&mut engine, root, &resolved, &input(&[("a.rs", "worked")]))
                 .unwrap();
             assert!(!out.completed, "one artifact still pending");
             assert_eq!(out.remainder, slice(&[], &[], &["b.rs"]));
@@ -651,7 +749,7 @@ mod tests {
                 &mut engine,
                 root,
                 &resolved,
-                &disp(&[("never-presented.rs", "worked")]),
+                &input(&[("never-presented.rs", "worked")]),
             )
             .unwrap_err();
             assert!(
@@ -690,7 +788,7 @@ mod tests {
                 &mut engine,
                 root,
                 &resolved,
-                &disp(&[("b.rs", "worked"), ("c.rs", "worked")]),
+                &input(&[("b.rs", "worked"), ("c.rs", "worked")]),
             )
             .unwrap();
             assert!(out.completed, "every artifact disposed → complete");
@@ -709,6 +807,100 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+    }
+
+    /// The durable authored-exclusion ledger survives completion (unlike the
+    /// transient dispositions/frozen slice), and a later non-excluded verdict for
+    /// the same artifact clears it — dropping the store when nothing durable is
+    /// left. This is the persistence the fidelity report relies on so an
+    /// excluded-on-purpose artifact stops re-surfacing as `uncovered`.
+    #[test]
+    fn advance_retains_authored_exclusions_past_completion_and_clears_on_rejudge() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+
+        // Baseline a.rs; move to head1 (modify a.rs) so the slice = {modified a.rs}.
+        git(root, &["init", "-q"]);
+        std::fs::write(root.join("a.rs"), "one").unwrap();
+        git(root, &["add", "a.rs"]);
+        git(root, &["commit", "-qm", "base"]);
+        let baseline = head_sha(root);
+        std::fs::write(root.join("a.rs"), "one-longer").unwrap();
+        git(root, &["add", "-A"]);
+        git(root, &["commit", "-qm", "head1"]);
+
+        let resolved = resolved_engine_graph();
+        {
+            let mut engine = engine_at(root);
+            engine
+                .set_mem_sync_state("engine", synced_key(), &baseline, None)
+                .unwrap();
+        }
+
+        // Dispose a.rs as EXCLUDED with a rationale → the only slice artifact is
+        // disposed → the advance completes. Exclusions are non-empty, so the
+        // store is RETAINED (not dropped) holding only the exclusion.
+        let excluded = {
+            let mut m = BTreeMap::new();
+            m.insert(
+                "a.rs".to_string(),
+                DispositionInput::Reasoned {
+                    disposition: EXCLUDED_VERDICT.to_string(),
+                    rationale: "mined; warrants no destination entity".to_string(),
+                },
+            );
+            m
+        };
+        {
+            let mut engine = engine_at(root);
+            let out = advance_baseline(&mut engine, root, &resolved, &excluded).unwrap();
+            assert!(out.completed, "the sole slice artifact was disposed");
+        }
+        let retained = read_advance_store(root, "engine", "graph")
+            .unwrap()
+            .expect("an authored exclusion keeps the store alive past completion");
+        assert!(
+            retained.frozen_slice == Slice::default() && retained.dispositions.is_empty(),
+            "transient progress is dropped on completion"
+        );
+        assert_eq!(
+            retained.exclusions.get("a.rs").map(String::as_str),
+            Some("mined; warrants no destination entity"),
+            "the durable exclusion + its rationale persist"
+        );
+
+        // Move to head2 (modify a.rs again) → a.rs re-enters the slice → re-judge
+        // it as `worked`. The non-excluded verdict clears the stale exclusion, and
+        // with nothing durable left the store is dropped.
+        std::fs::write(root.join("a.rs"), "one-longer-still").unwrap();
+        git(root, &["add", "-A"]);
+        git(root, &["commit", "-qm", "head2"]);
+        {
+            let mut engine = engine_at(root);
+            let out = advance_baseline(&mut engine, root, &resolved, &input(&[("a.rs", "worked")]))
+                .unwrap();
+            assert!(out.completed);
+        }
+        assert!(
+            read_advance_store(root, "engine", "graph")
+                .unwrap()
+                .is_none(),
+            "re-judging the artifact cleared the exclusion; nothing durable remains"
+        );
+    }
+
+    /// `DispositionInput` parses both the bare-verdict and the reasoned forms
+    /// from one `--dispositions` payload (serde `untagged`).
+    #[test]
+    fn disposition_input_parses_bare_and_reasoned_forms() {
+        let map: BTreeMap<String, DispositionInput> = serde_json::from_str(
+            r#"{"a.rs": "worked", "b.rs": {"disposition": "excluded", "rationale": "generated"}}"#,
+        )
+        .unwrap();
+        assert_eq!(map["a.rs"].verdict(), "worked");
+        assert_eq!(map["a.rs"].rationale(), None);
+        assert_eq!(map["b.rs"].verdict(), EXCLUDED_VERDICT);
+        assert_eq!(map["b.rs"].rationale(), Some("generated"));
     }
 
     /// AC9a — an anchored write auto-marks its referenced frozen-slice

@@ -587,6 +587,7 @@ fn advance_store_is_reload_independent() {
             deleted: vec![],
         },
         dispositions: Default::default(),
+        exclusions: Default::default(),
     };
     write_advance_store(tmp.path(), "specs", "graph", &state).unwrap();
 

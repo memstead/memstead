@@ -33,7 +33,7 @@ use memstead_base::binding::{
 use memstead_base::binding_migrate::{
     BindingMigrateError, migrate_gen2_bindings, resolve_migrated_binding,
 };
-use memstead_base::ingest::advance::{AdvanceError, advance_baseline};
+use memstead_base::ingest::advance::{AdvanceError, DispositionInput, advance_baseline};
 use memstead_base::ingest::findings::{FullResyncDecision, verify_binding};
 use memstead_base::ingest::report::{
     DEFAULT_REPORT_BUDGET, compute_fidelity_report, render_fidelity_report,
@@ -272,10 +272,14 @@ pub struct AdvanceArgs {
     /// The binding id `<mem>/<stem>` (D3) — e.g. `engine/graph`.
     pub binding: String,
     /// A JSON object mapping each judged artifact id to its disposition, e.g.
-    /// `'{"src/lib.rs": "worked", "src/old.rs": "irrelevant"}'`. Only ids the
-    /// engine presented in the brief's changed slice are accepted — an unknown
-    /// id refuses the whole call. Pass `'{}'` to re-present the remainder
-    /// without recording anything.
+    /// `'{"src/lib.rs": "worked", "src/old.rs": "irrelevant"}'`. A value may
+    /// instead be an object carrying an authored rationale —
+    /// `'{"src/gen.rs": {"disposition": "excluded", "rationale": "generated, no entity"}}'`
+    /// — and an `excluded` verdict with a rationale is retained in the durable
+    /// exclusion ledger so the artifact stops re-surfacing as `uncovered` and
+    /// keeps its reasoning. Only ids the engine presented in the brief's changed
+    /// slice are accepted — an unknown id refuses the whole call. Pass `'{}'` to
+    /// re-present the remainder without recording anything.
     #[arg(long)]
     pub dispositions: String,
 }
@@ -1245,14 +1249,15 @@ fn advance(ctx: &CliContext, args: AdvanceArgs) -> anyhow::Result<()> {
 
     // Parse the dispositions payload up front — a malformed `--dispositions`
     // refuses cheaply (before loading configs or an engine) with a typed code.
-    let dispositions: std::collections::BTreeMap<String, String> =
+    let dispositions: std::collections::BTreeMap<String, DispositionInput> =
         serde_json::from_str(&args.dispositions).map_err(|e| {
             CliError::new(
                 ExitKind::Validation,
                 "PROJECTION_INVALID_DISPOSITIONS",
                 format!(
-                    "--dispositions must be a JSON object mapping artifact id → disposition \
-                     string: {e}"
+                    "--dispositions must be a JSON object mapping artifact id → either a \
+                     disposition string (e.g. \"worked\") or an object \
+                     {{\"disposition\": \"excluded\", \"rationale\": \"...\"}}: {e}"
                 ),
             )
             .with_details(json!({ "error": e.to_string() }))

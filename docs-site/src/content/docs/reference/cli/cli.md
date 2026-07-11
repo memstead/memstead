@@ -1414,7 +1414,7 @@ Advance a binding's sync baseline by recording per-artifact dispositions (D7). T
 
 ###### **Options:**
 
-* `--dispositions <DISPOSITIONS>` — A JSON object mapping each judged artifact id to its disposition, e.g. `'{"src/lib.rs": "worked", "src/old.rs": "irrelevant"}'`. Only ids the engine presented in the brief's changed slice are accepted — an unknown id refuses the whole call. Pass `'{}'` to re-present the remainder without recording anything
+* `--dispositions <DISPOSITIONS>` — A JSON object mapping each judged artifact id to its disposition, e.g. `'{"src/lib.rs": "worked", "src/old.rs": "irrelevant"}'`. A value may instead be an object carrying an authored rationale — `'{"src/gen.rs": {"disposition": "excluded", "rationale": "generated, no entity"}}'` — and an `excluded` verdict with a rationale is retained in the durable exclusion ledger so the artifact stops re-surfacing as `uncovered` and keeps its reasoning. Only ids the engine presented in the brief's changed slice are accepted — an unknown id refuses the whole call. Pass `'{}'` to re-present the remainder without recording anything
 
 
 
