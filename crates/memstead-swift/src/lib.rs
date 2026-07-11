@@ -26,13 +26,13 @@ mod types;
 pub use error::MemsteadError;
 pub use types::{
     AgentNotesReport, BranchResetOutcome, ChangeEnvelope, ChangesReport, ClusterInfo, CommitNote,
-    DanglingCrossMemEdge, Diff, DiffConfig, EdgeSource, EdgeTypeCount, Entity, EntityDiff,
-    HealthFinding, HealthIssue, HealthSummary, IncomingRipple, ListResult, MemBackendKind,
-    MemCreateOutcome, MemCreateRequest, MemDeleteOutcome, MemExportOutcome, MemInit,
-    MemRosterEntry, MemSchemaOutcome, MemVersionOutcome, MetadataEntry, MetadataValue,
-    MissingField, ParseRecoveryEntry, ParseRecoveryReport, Query, RelationDirection, RelationEdge,
-    Relations, Relationship, ReloadResult, SearchHit, SearchResult, SearchScope, Section,
-    StaleEntity, Status, StrandedCrossMemRef,
+    DanglingCrossMemEdge, Diff, DiffConfig, EdgeSource, Entity, EntityDiff, HealthFinding,
+    HealthIssue, HealthSummary, IncomingRipple, ListResult, MemBackendKind, MemCreateOutcome,
+    MemCreateRequest, MemDeleteOutcome, MemExportOutcome, MemInit, MemRosterEntry,
+    MemSchemaOutcome, MemVersionOutcome, MetadataEntry, MetadataValue, MissingField,
+    ParseRecoveryEntry, ParseRecoveryReport, Query, RelationDirection, RelationEdge, Relations,
+    Relationship, ReloadResult, SearchHit, SearchResult, SearchScope, Section, StaleEntity, Status,
+    StrandedCrossMemRef,
 };
 
 uniffi::include_scaffolding!("memstead");
@@ -180,10 +180,10 @@ impl Engine {
             .inner
             .lock()
             .expect("memstead-swift engine mutex poisoned");
-        // `status()` on the engine (D11 `stats` → `status`); the UDL/Swift
-        // surface followed with the B4b UDL break — `get_status` / `Status`,
-        // every field preserved (the rename-preserving floor, D14).
-        convert::status_to_ffi(engine.status(), engine.store(), engine.mem_router())
+        // `status()` on the engine (D11 `stats` → `status`) — the graph-counts
+        // rollup only. Roster facts ride `mem_roster`, health facts
+        // `get_health` (the macos-deferred-ui data-source switch).
+        convert::status_to_ffi(engine.status())
     }
 
     pub fn get_health(&self) -> HealthSummary {
@@ -1083,11 +1083,11 @@ mod tests {
             stats.entity_count
         );
         assert!(stats.edge_count >= 1, "edge_count: {}", stats.edge_count);
-        assert_eq!(stats.mem_count, 1);
-        assert!(stats.types_in_use.iter().any(|t| t == "spec"));
-        assert_eq!(stats.stub_count, 0);
-        assert_eq!(stats.writable_mems, vec!["specs".to_string()]);
-        assert!(stats.read_mems.is_empty());
+        // Roster facts ride `mem_roster`, not Status (data-source switch).
+        let roster = engine.mem_roster();
+        assert_eq!(roster.len(), 1);
+        assert_eq!(roster[0].mem, "specs");
+        assert!(roster[0].writable);
     }
 
     #[test]
@@ -1106,7 +1106,13 @@ mod tests {
             "entity_count: {}",
             stats.entity_count
         );
-        assert_eq!(stats.writable_mems, vec!["specs".to_string()]);
+        assert!(
+            engine
+                .mem_roster()
+                .iter()
+                .any(|r| r.mem == "specs" && r.writable),
+            "seeded mem in the roster"
+        );
     }
 
     #[test]
@@ -1140,12 +1146,17 @@ mod tests {
 
         let engine = engine_open(root.to_string_lossy().to_string())
             .expect("folder workspace opens through engine_open");
-        let stats = engine.get_status();
-        assert_eq!(stats.writable_mems, vec!["notes".to_string()]);
         assert!(
-            stats.entity_count >= 1,
+            engine
+                .mem_roster()
+                .iter()
+                .any(|r| r.mem == "notes" && r.writable),
+            "folder mem in the roster"
+        );
+        assert!(
+            engine.get_status().entity_count >= 1,
             "entity_count: {}",
-            stats.entity_count
+            engine.get_status().entity_count
         );
     }
 
@@ -1728,11 +1739,9 @@ mod tests {
         );
 
         // The engine now lists the created mem without a restart.
-        let stats = engine.get_status();
         assert!(
-            stats.writable_mems.iter().any(|v| v == "fresh"),
-            "created mem must appear in the roster: {:?}",
-            stats.writable_mems
+            engine.mem_roster().iter().any(|r| r.mem == "fresh"),
+            "created mem must appear in the roster"
         );
 
         let deleted = engine
@@ -1742,11 +1751,9 @@ mod tests {
         assert!(deleted.deleted_from_router);
 
         // Gone from the roster after the delete.
-        let after = engine.get_status();
         assert!(
-            !after.writable_mems.iter().any(|v| v == "fresh"),
-            "deleted mem must be gone: {:?}",
-            after.writable_mems
+            !engine.mem_roster().iter().any(|r| r.mem == "fresh"),
+            "deleted mem must be gone"
         );
     }
 

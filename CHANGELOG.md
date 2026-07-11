@@ -47,6 +47,14 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `/setup` when the `memstead` binary is missing instead of handing the
   agent an empty prompt.
 
+- **UniFFI `Status` shrunk to its consumer-backed graph counts**
+  (`entity_count`, `edge_count`) — a UDL break for the macOS app only.
+  The rename-preserving superset fields (`stub_count`, `edge_types`,
+  `community_count`, `mem_count`, `types_in_use`, `writable_mems`,
+  `read_mems`) are gone: roster facts ride `mem_roster`, health facts
+  ride `get_health` (the deferred data-source rework, macos-deferred-ui).
+  CLI `memstead status` and every MCP surface are untouched.
+
 ### Fixed
 - **The `#verified` baseline is now written.** `projection verify` records
   `<binding>/<facet>#verified = <observed facet head>` on every completed

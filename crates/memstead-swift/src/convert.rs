@@ -4,22 +4,21 @@
 //! Flattens insertion-ordered maps (`IndexMap<String, _>`) into
 //! `sequence<Entry>` on the FFI side, widens `usize` to `u64`, stringifies
 //! `EntityId`, and collapses `HashMap<String, usize>` into
-//! `Vec<EdgeTypeCount>` for SwiftUI-friendly identifiability.
+//! flat FFI-friendly shapes.
 //!
 //! No business logic — only type translation. Anything that needs to decide
 //! something (e.g. how to compose `Relations`) belongs in `lib.rs`.
 
 use memstead_base::{
-    entity as core_entity, graph as core_graph, mem as core_mem, ops as core_ops,
-    store as core_store,
+    entity as core_entity, graph as core_graph, ops as core_ops, store as core_store,
 };
 
 use crate::types::{
     AgentNotesReport, ChangeEnvelope, ChangesReport, ClusterInfo, CommitNote, Diff, DiffConfig,
-    EdgeSource, EdgeTypeCount, Entity, EntityDiff, HealthFinding, HealthIssue, HealthSummary,
-    IncomingRipple, ListResult, MemSchemaOutcome, MetadataEntry, MetadataValue, MissingField,
-    ParseRecoveryEntry, ParseRecoveryReport, Query, RelationDirection, RelationEdge, Relations,
-    Relationship, ReloadResult, SearchHit, SearchResult, SearchScope, Section, StaleEntity, Status,
+    EdgeSource, Entity, EntityDiff, HealthFinding, HealthIssue, HealthSummary, IncomingRipple,
+    ListResult, MemSchemaOutcome, MetadataEntry, MetadataValue, MissingField, ParseRecoveryEntry,
+    ParseRecoveryReport, Query, RelationDirection, RelationEdge, Relations, Relationship,
+    ReloadResult, SearchHit, SearchResult, SearchScope, Section, StaleEntity, Status,
 };
 
 // ---------------------------------------------------------------------------
@@ -77,56 +76,16 @@ pub(crate) fn entity_to_ffi(entity: &core_entity::Entity) -> Entity {
 // ---------------------------------------------------------------------------
 
 // The engine payload is `core_ops::Status` (renamed from `Stats` with the CLI/
-// MCP `stats`→`status` rename, D11); the UDL/Swift-facing dictionary and this
-// converter followed with the B4b UDL break — `Status`, every field preserved
-// (the rename-preserving floor, D14).
-pub(crate) fn status_to_ffi(
-    stats: core_ops::Status,
-    store: &core_store::Store,
-    mem_router: &core_mem::MemRouterSnapshot,
-) -> Status {
-    let mut edge_types: Vec<EdgeTypeCount> = stats
-        .edge_types
-        .into_iter()
-        .map(|(rel_type, count)| EdgeTypeCount {
-            rel_type,
-            count: count as u64,
-        })
-        .collect();
-    // Stable order for SwiftUI lists — HashMap iteration is
-    // nondeterministic, and Identifiable views flicker if rows reshuffle
-    // between reloads.
-    edge_types.sort_by(|a, b| a.rel_type.cmp(&b.rel_type));
-
-    // `stats.entity_count` is already the non-stub count (see `Engine::stats`).
-    // Derive stubs from `store.len()` so the Swift app gets the MCP-parity
-    // split (total = entity_count + stub_count) without a second call.
-    let real = stats.entity_count as u64;
-    let stub_count = (store.len() as u64).saturating_sub(real);
-
-    let mut writable_mems: Vec<String> = mem_router.writable_mems().iter().cloned().collect();
-    writable_mems.sort();
-
-    let writable_set: std::collections::HashSet<&String> =
-        mem_router.writable_mems().iter().collect();
-    let mut read_mems: Vec<String> = mem_router
-        .visible_mems()
-        .iter()
-        .filter(|n| !writable_set.contains(*n))
-        .cloned()
-        .collect();
-    read_mems.sort();
-
+// MCP `stats`→`status` rename, D11). The UDL/Swift-facing dictionary carries
+// only the consumer-backed graph counts — the rename-preserving superset
+// (stub/roster/type fields) died with the macos-deferred-ui data-source
+// switch: roster facts come from `mem_roster`, health facts from `get_health`.
+//
+// `stats.entity_count` is already the non-stub count (see `Engine::stats`).
+pub(crate) fn status_to_ffi(stats: core_ops::Status) -> Status {
     Status {
-        entity_count: real,
-        stub_count,
+        entity_count: stats.entity_count as u64,
         edge_count: stats.edge_count as u64,
-        edge_types,
-        community_count: stats.community_count as u64,
-        mem_count: stats.mem_count as u64,
-        types_in_use: stats.types_in_use,
-        writable_mems,
-        read_mems,
     }
 }
 

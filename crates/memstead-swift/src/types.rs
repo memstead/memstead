@@ -94,26 +94,15 @@ pub struct Entity {
 }
 
 // ---------------------------------------------------------------------------
-// Status (D11 `stats` → `status`; every field preserved — the D14 floor)
+// Status (D11 `stats` → `status`) — the graph-counts rollup, shrunk to its
+// consumer-backed fields. Roster facts come from `mem_roster`, health facts
+// from `get_health` (the deferred data-source rework, macos-deferred-ui).
 // ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone)]
-pub struct EdgeTypeCount {
-    pub rel_type: String,
-    pub count: u64,
-}
 
 #[derive(Debug, Clone)]
 pub struct Status {
     pub entity_count: u64,
-    pub stub_count: u64,
     pub edge_count: u64,
-    pub edge_types: Vec<EdgeTypeCount>,
-    pub community_count: u64,
-    pub mem_count: u64,
-    pub types_in_use: Vec<String>,
-    pub writable_mems: Vec<String>,
-    pub read_mems: Vec<String>,
 }
 
 // ---------------------------------------------------------------------------
