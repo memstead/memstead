@@ -5,7 +5,7 @@
 // (mem-drift-notify.mjs) only flags HEAD advances the agent did not
 // author.
 //
-// MCP layer is mocked via `withEngineFn` (mirrors auto-commit's
+// MCP layer is mocked via `withEngineFn` (the hook family's
 // pattern) — the mock reads from a real `git init`'d mem-repo to
 // synthesise the `memstead_health` response, so the test fixture stays
 // realistic without requiring a built `memstead-mcp` binary at test time.

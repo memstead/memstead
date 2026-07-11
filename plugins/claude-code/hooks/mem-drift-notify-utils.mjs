@@ -225,7 +225,7 @@ export function entityIdsFromChangesReport(report) {
  *   - 'no-drift'      — prior state matched current HEADs
  *   - 'drift'         — drift detected ({ drifted, reminder, statePath })
  *
- * Mocking surface mirrors `runDriftSnapshot` and `produceOuterCommit`:
+ * Mocking surface mirrors `runDriftSnapshot`:
  *   - `engineCommand` lets a test bypass `resolveEngineCommand`
  *   - `withEngineFn` lets a test inject a fake MCP client. The mock
  *     must answer two tools: `memstead_health` (writable_mems / mems

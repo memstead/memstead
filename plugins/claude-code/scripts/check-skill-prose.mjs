@@ -13,9 +13,9 @@
 //
 // Four rules (scope per rule, exclusions honoured exactly):
 //
-//   (1) Router line cap — a thin router (ingest, commit) shells out to a
-//       script; its SKILL.md body stays under ROUTER_BODY_MAX lines. The
-//       cap is defined once here.
+//   (1) Router line cap — a thin router (ingest, sync, verify) drives an
+//       engine-rendered brief; its SKILL.md body stays under
+//       ROUTER_BODY_MAX lines. The cap is defined once here.
 //
 //   (2) Mechanism terms — `_hash`-suffixed names, `dry_run`, "envelope"
 //       are banned in roster SKILL.md prose. The engine's MCP/CLI text
@@ -35,10 +35,9 @@
 //
 //   (4) Description medium-noun rule — a roster skill's `description:`
 //       must not presume the source medium is code / a repo / files.
-//       An allowlist carries the non-medium senses: "commit" is the
-//       graph-commit verb in /commit's own description; "files" as a
-//       verb is pre-seeded for the verify router that joins later.
-//       Scope: the `description:` frontmatter of the six roster skills.
+//       An allowlist carries the non-medium senses: "files" as a verb
+//       in the verify description ("files findings").
+//       Scope: the `description:` frontmatter of the roster skills.
 //
 // Exempt from ALL rules: reconcile, audit — frozen interim survivors
 // scheduled for removal; linting their prose now would enforce
@@ -58,12 +57,13 @@ import { dirname, join } from 'node:path';
 // ── Policy (single source of truth) ─────────────────────────────────
 
 export const ROUTER_BODY_MAX = 60;
-export const THIN_ROUTERS = ['ingest', 'commit', 'sync', 'verify'];
+export const THIN_ROUTERS = ['ingest', 'sync', 'verify'];
 
-// The roster skills subject to rules (1), (2) and (4). The full eight-skill
-// roster is now linted — reconcile + audit (the former frozen interim
-// survivors) were deleted at S1b, so nothing is exempt.
-export const ROSTER = ['setup', 'interview', 'learn', 'ingest', 'tidy', 'commit', 'verify', 'sync'];
+// The roster skills subject to rules (1), (2) and (4). The full seven-skill
+// roster is linted — reconcile + audit were deleted at S1b, and the commit
+// skill was retired 2026-07-11 with the outer-repo versioning concept
+// (operator decision), so nothing is exempt.
+export const ROSTER = ['setup', 'interview', 'learn', 'ingest', 'tidy', 'verify', 'sync'];
 export const EXEMPT = [];
 
 const MECHANISM_TERMS = [
@@ -86,10 +86,8 @@ const MEDIUM_NOUNS = [
 ];
 
 // (skill, term) pairs whose medium-noun sense is legitimate. Keyed
-// "<skill>:<term>". commit → the graph-commit verb in /commit's own
-// description; verify → "files" as a verb (pre-seeded so that router's
-// draft lands lint-clean when it joins the roster).
-const MEDIUM_ALLOW = new Set(['commit:commit', 'verify:file']);
+// "<skill>:<term>". verify → "files" as a verb ("files findings").
+const MEDIUM_ALLOW = new Set(['verify:file']);
 
 // ── Parsing ─────────────────────────────────────────────────────────
 

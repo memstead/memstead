@@ -45,7 +45,6 @@ Every command below is one you type. Pick by the job:
 | build a mem in bulk from a body of source — code, docs, a git history | **`/ingest`** |
 | load what a mem already knows into context before I start working | **`/learn`** |
 | tidy a mem's structure — orphans, stubs, thin or missing links | **`/tidy`** |
-| commit pending graph changes by hand | **`/commit`** |
 | bring a mem up to date after its source changed | **`/sync`** |
 | measure how faithfully a mem still matches its source | **`/verify`** |
 
@@ -79,8 +78,11 @@ changes. Everything in this loop is operable today:
 4. **Measure — `/verify`.** A read-only fidelity report — coverage, accuracy,
    freshness — that leads with a verdict and the top actions, and files findings
    for `/sync` to act on. It changes nothing itself.
-5. **Commit — `/commit`.** The recovery path for pending graph changes when
-   auto-commit is off or a previous session's commit didn't land.
+
+The engine records every mutation with provenance (and, on the git-backed mem
+flavour, commits it to the mem's own history). Your project repo stays yours:
+the plugin never commits to it — a mem folder living inside your repo is
+versioned like any other files, by you, on your terms.
 
 ## How mutations work
 

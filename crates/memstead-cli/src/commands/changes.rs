@@ -36,7 +36,7 @@ pub struct Args {
     /// Fold per-commit agent-notes (subject, note, actor, tool, client)
     /// and the workspace-level schema/registry ref tip (unified schemas +
     /// per-mem configs) into the response. Default off — entity-
-    /// delta only. Outer-repo auto-commit consumers turn this on so
+    /// delta only. Commit-mirroring clients turn this on so
     /// they get notes + the registry-ref sha in one round-trip without
     /// re-walking the gitdir.
     #[arg(long)]

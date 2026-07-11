@@ -96,7 +96,7 @@ pub struct ChangesSinceParams {
     )]
     pub rename_similarity: Option<f32>,
     #[schemars(
-        description = "Fold per-commit agent-notes into the response. When true, the report carries a `notes[]` array (one entry per commit between `since` and `head`, with `sha`, `subject`, `tool_verb`, `entity_id`, `note`, `actor`, `tool`, `client`, `timestamp`) plus `memstead_ref` — the SHA of the unified schema + per-mem-config registry, absent when the workspace has not been migrated yet. Default false (entity-delta only). Outer-repo auto-commit consumers turn this on to receive notes and the registry-ref sha in one round-trip; agents that just need entity events leave it off."
+        description = "Fold per-commit agent-notes into the response. When true, the report carries a `notes[]` array (one entry per commit between `since` and `head`, with `sha`, `subject`, `tool_verb`, `entity_id`, `note`, `actor`, `tool`, `client`, `timestamp`) plus `memstead_ref` — the SHA of the unified schema + per-mem-config registry, absent when the workspace has not been migrated yet. Default false (entity-delta only). Commit-mirroring clients turn this on to receive notes and the registry-ref sha in one round-trip; agents that just need entity events leave it off."
     )]
     #[serde(default)]
     pub include_notes: bool,

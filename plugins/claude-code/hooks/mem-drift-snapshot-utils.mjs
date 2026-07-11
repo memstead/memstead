@@ -80,7 +80,7 @@ export function extractCurrentHeads(healthResponse) {
  *   - 'snapshot-empty' — health returned but no writable mems to track
  *   - 'snapshotted'    — state file refreshed ({ heads, statePath })
  *
- * Mocking surface mirrors `produceOuterCommit` in `auto-commit-utils.mjs`:
+ * Mocking surface (an injectable `withEngineFn`):
  *   - `engineCommand` lets a test bypass `resolveEngineCommand`
  *   - `withEngineFn` lets a test inject a fake MCP client
  */

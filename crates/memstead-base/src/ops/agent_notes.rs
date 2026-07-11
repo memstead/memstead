@@ -62,7 +62,7 @@ pub struct CommitNote {
 /// branch tip so callers record it as the next polling cursor without
 /// a follow-up `memstead_health` round-trip. `memstead_ref` carries the
 /// workspace-level `__MEMSTEAD` ref tip (unified schemas + per-mem
-/// configs) so consumers — today the outer-repo auto-commit cursor
+/// configs) so commit-mirroring consumers — e.g. an outer-repo cursor
 /// block — anchor it alongside the per-mem head without a second
 /// round-trip. `None` when the workspace has not been migrated to the
 /// unified layout yet.

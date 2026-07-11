@@ -1,4 +1,5 @@
-// Minimal stdio-transport MCP client used by the auto-commit hook family.
+// Minimal stdio-transport MCP client used by the plugin hook family
+// (mem-drift snapshot/notify and any hook that probes the engine).
 // Spawns the engine binary named in `.mcp.json`, completes the `initialize`
 // handshake, invokes one or more `tools/call` requests, and shuts the
 // child down. No npm deps — plain Node, shelling out to the binary the
@@ -9,7 +10,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { resolve, dirname, isAbsolute, join, sep } from 'node:path';
 import { homedir } from 'node:os';
 
-const CLIENT_NAME = 'memstead-plugin-auto-commit';
+const CLIENT_NAME = 'memstead-plugin-hooks';
 const CLIENT_VERSION = '0.1.0';
 const PROTOCOL_VERSION = '2024-11-05';
 
@@ -23,7 +24,7 @@ const PROTOCOL_VERSION = '2024-11-05';
  *
  * The previous unconditional `resolve(workspaceRoot, command)` mangled a bare
  * `"sh"` into `<root>/sh` (ENOENT) — so the real `sh -c "cd <dir> && exec
- * <binary>"` launch form never spawned and the auto-commit Stop hook produced
+ * <binary>"` launch form never spawned and the then-live auto-commit Stop hook produced
  * zero commits. Both real launch forms (this shell form, and the bare-absolute
  * binary a fresh `quickstart` writes) now resolve correctly.
  */

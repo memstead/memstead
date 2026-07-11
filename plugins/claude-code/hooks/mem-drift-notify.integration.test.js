@@ -2,7 +2,7 @@
 // Each test stands up a real `git init`'d mem-repo under a tempdir
 // laid out as a workspace (with `.memstead.toml`), drives the drift
 // pipeline against it via mocked MCP, and inspects the returned
-// reminder block plus the state file. Mirrors auto-commit's pattern:
+// reminder block plus the state file. The hook family's shared pattern:
 // MCP is mocked through `withEngineFn` so tests don't need a built
 // `memstead-mcp` binary, while the test fixture still uses real git for
 // mem-repo state (test-fixture infrastructure, exempt from the

@@ -821,7 +821,7 @@ Diff a mem's HEAD against a commit SHA. Pass `--since` = a prior `commit_sha` fr
 * `--mem <MEM>` — Writable mem name. Defaults to the first loaded mem
 * `--since <SINCE>` — Commit SHA to diff against. Pass a prior mutation's `commit_sha`, or the git canonical empty-tree hash `4b825dc642cb6eb9a060e54bf8d69288fbee4904` for a fresh-client first sync
 * `--rename-similarity <RENAME_SIMILARITY>` — Rename detection threshold in [0.1, 1.0]; mirrors the MCP `rename_similarity` parameter. Default 0.6. Engine-authored renames pair via commit-note provenance and bypass this threshold; the value drives the rename-similarity fallback for non-engine renames (external `git mv`, pre-provenance migrations). Lower widens the recall window at the cost of false-positive pairing on that path
-* `--include-notes` — Fold per-commit agent-notes (subject, note, actor, tool, client) and the workspace-level schema/registry ref tip (unified schemas + per-mem configs) into the response. Default off — entity- delta only. Outer-repo auto-commit consumers turn this on so they get notes + the registry-ref sha in one round-trip without re-walking the gitdir
+* `--include-notes` — Fold per-commit agent-notes (subject, note, actor, tool, client) and the workspace-level schema/registry ref tip (unified schemas + per-mem configs) into the response. Default off — entity- delta only. Commit-mirroring clients turn this on so they get notes + the registry-ref sha in one round-trip without re-walking the gitdir
 
 
 

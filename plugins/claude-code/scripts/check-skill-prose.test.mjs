@@ -88,22 +88,22 @@ test('rule 3 flags the retired store-layout dir but NOT the live ingest verb', (
 
 // ── rule 4: description medium nouns ─────────────────────────────────
 
-for (const term of ['code', 'repo', 'repository', 'file', 'files']) {
-  test(`rule 4 flags medium noun "${term}" in a non-commit description`, () => {
+for (const term of ['code', 'repo', 'repository', 'file', 'files', 'commit', 'commits']) {
+  test(`rule 4 flags medium noun "${term}" in an unallowlisted description`, () => {
     const out = checkDescriptionMediumNouns({ name: 'ingest', description: `Build a mem from your ${term}.` });
     assert.ok(out.length >= 1, `expected a violation for "${term}"`);
   });
 }
 
-test('rule 4 allowlists "commit" in /commit and stays medium-neutral otherwise', () => {
-  // /commit's own graph-commit verb is allowlisted.
+test('rule 4 allowlist is per-skill and stays medium-neutral otherwise', () => {
+  // verify's "files" verb is allowlisted ("files findings for /sync").
   assert.deepEqual(
-    checkDescriptionMediumNouns({ name: 'commit', description: 'Commit pending graph changes; a previous commit failed.' }),
+    checkDescriptionMediumNouns({ name: 'verify', description: 'It changes nothing itself and files findings.' }),
     [],
   );
-  // the same word in another skill is not allowlisted.
+  // an allowlisted term does not leak to another skill.
   assert.equal(
-    checkDescriptionMediumNouns({ name: 'ingest', description: 'Auto-commit your entities.' }).length,
+    checkDescriptionMediumNouns({ name: 'ingest', description: 'It files findings for later.' }).length,
     1,
   );
   // a genuinely medium-neutral description passes.

@@ -592,7 +592,7 @@ impl Engine {
 
     /// Resolve the gitdir for a writable mem. Used by `memstead_health
     /// { include_config: true }` to surface per-mem `vcs.gitdir`
-    /// so outer-repo auto-commit hooks can `git -C <gitdir>` per
+    /// so outer-repo bookkeeping clients can `git -C <gitdir>` per
     /// mem without hardcoding the layout.
     ///
     /// - `EngineError::UnknownMem` when the name does not resolve.

@@ -18,12 +18,12 @@
 //    duplicate H1, and points the repo-relative VISION.md links at
 //    GitHub.
 //
-// 3. Skills roster: render the eight-skill plugin roster page at
+// 3. Skills roster: render the seven-skill plugin roster page at
 //    `/skills/` from the SKILL.md frontmatter — the shipped skill
 //    descriptions ARE the job map (adversarially reviewed as a plugin
 //    gate), so the page is generated from them rather than hand-copied,
 //    and cannot drift. The generator reads the live skill directories,
-//    asserts the roster is exactly the expected eight (an added or
+//    asserts the roster is exactly the expected set (an added or
 //    removed skill fails the build), and derives each skill's invocation
 //    posture from its frontmatter keys.
 
@@ -76,7 +76,7 @@ const families = [
   {
     title: "The mem lifecycle",
     blurb: "Building a mem from sources, then keeping it true.",
-    skills: ["ingest", "sync", "verify", "tidy", "commit"],
+    skills: ["ingest", "sync", "verify", "tidy"],
   },
 ];
 
@@ -97,7 +97,7 @@ function readSkill(name) {
   return { name, description, posture };
 }
 
-// Fail the build if the live roster is not exactly the expected eight — an added
+// Fail the build if the live roster is not exactly the expected roster — an added
 // or removed skill must be reflected here, so the page can never claim a stale set.
 const expected = families.flatMap((f) => f.skills).sort();
 const actual = readdirSync(skillsDir, { withFileTypes: true })
@@ -112,12 +112,12 @@ if (JSON.stringify(expected) !== JSON.stringify(actual)) {
 
 let skillsBody = `---
 title: Skills
-description: "The eight-skill Memstead plugin roster in two families — onboarding & context and the mem lifecycle — with each skill's invocation posture and its shipped description."
+description: "The seven-skill Memstead plugin roster in two families — onboarding & context and the mem lifecycle — with each skill's invocation posture and its shipped description."
 ---
 
 > This page is generated from the plugin \`SKILL.md\` frontmatter at build time — the shipped skill descriptions are the source of truth, so the roster here cannot drift from the installed plugin.
 
-The Claude Code plugin ships **eight skills in two families**. \`/setup\` and \`/interview\` are the human-driven front doors; the rest are both-invocable — usable from the \`/\` menu and auto-invocable by the model. There is no command for everyday graph work: once a workspace exists, you just talk to Claude and the \`memstead_*\` MCP tools stay live.
+The Claude Code plugin ships **seven skills in two families**. \`/setup\` and \`/interview\` are the human-driven front doors; the rest are both-invocable — usable from the \`/\` menu and auto-invocable by the model. There is no command for everyday graph work: once a workspace exists, you just talk to Claude and the \`memstead_*\` MCP tools stay live.
 
 `;
 for (const family of families) {
