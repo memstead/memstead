@@ -64,7 +64,7 @@ predicates = "3"
 zip = { version = "8", default-features = false, features = ["deflate-flate2-zlib-rs", "time"] }
 semver = { version = "1", features = ["serde"] }
 dirs = "5"
-toml = "0.8"
+toml = "1.1"
 toml_edit = "0.22"
 gix = { version = "0.85", default-features = false, features = ["revision", "tree-editor", "blob-diff", "max-performance-safe", "sha1"] }
 tantivy = "0.26"
