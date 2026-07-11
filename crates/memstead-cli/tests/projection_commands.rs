@@ -432,10 +432,10 @@ fn init_output_matches_the_v1_schema_golden() {
     )
     .unwrap();
 
-    // The golden ships with the plugin's v1 schema examples (repo-root-relative
+    // The golden lives with the v1 format schemas under docs/ (repo-root-relative
     // to the cli crate: two levels up to `public/`, then the schemas tree).
     let golden_path = Path::new(env!("CARGO_MANIFEST_DIR")).join(
-        "../../plugins/claude-code/schemas/memstead-plugin/v1/examples/binding.from-init.json",
+        "../../docs/schemas/memstead-plugin/v1/examples/binding.from-init.json",
     );
     let golden: Value = serde_json::from_slice(&std::fs::read(&golden_path).unwrap_or_else(|e| {
         panic!(

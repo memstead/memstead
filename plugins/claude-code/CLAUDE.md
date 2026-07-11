@@ -12,7 +12,7 @@ Two **inverse** frontmatter keys control how a skill is invoked. They are not re
 
 - `user-invocable: false` → **model-only**: hidden from the `/` menu, but the model may auto-invoke it. Reserved for internal/power-user skills — none in the current roster.
 - `disable-model-invocation: true` → **human-only**: stays visible in the `/` menu, but the model never auto-triggers it. Used for the front-door skills the human drives (setup, interview).
-- **neither key** → **both**: visible in `/` and model-invocable (learn, ingest, sync, verify, tidy).
+- **neither key** → **both**: visible in `/` and model-invocable (learn, ingest, sync, tidy).
 
 The front-door / hidden-rest split of the `/` menu is derivable from `user-invocable` alone. Per-skill state files (e.g. `interview`'s mode flag) live at `<mem-dir>/.memstead/<name>` — the same per-mem location the hooks resolve and read; the writer (SKILL) and reader (hook) must name the same path.
 
@@ -32,8 +32,6 @@ Plugin hooks (e.g. the guard that blocks direct entity edits) do NOT fire inside
   ```
 - **Never** instruct a subagent to edit entity `.md` files — always route mutations through Memstead MCP tools in the main session
 
-## Reacting to mem-drift system reminders
+## Reacting to concurrent mem changes
 
-The `mem-drift-notify` hook injects a `<system-reminder>` block at the start of a turn when one or more writable mems advanced under your feet between the previous prompt and this one (parallel terminal, forked subagent, macOS app + chat subprocess). The block names each drifted mem, the short old/new HEAD SHAs, and the entity ids that changed.
-
-Treat it the same way you'd treat a `MEM_RELOADED` warning during a tool call: the engine snapshot is honest at the next read, but anything you currently have *in your conversation context* about those entities is stale. Before answering any question whose answer depends on the prior content of a listed entity, re-read it via `memstead_entity`. Cached `_hash` values for those entities are likely invalid — a follow-up `memstead_update` will trip `HASH_MISMATCH` if so; refetch first. Entities outside the listed set are unaffected.
+The engine self-defends against a sibling instance advancing a mem under your feet (parallel terminal, forked subagent, macOS app + chat subprocess): a `MEM_RELOADED` marker in a tool response means the affected mem was reloaded, and a stale `expected_hash` trips `HASH_MISMATCH`. When either appears, anything you currently have *in your conversation context* about entities of that mem is suspect — re-read via `memstead_entity` before answering questions that depend on prior content, and refetch before a follow-up `memstead_update`. (The former `mem-drift-notify`/`mem-drift-snapshot` hook pair that pre-announced drift per turn was removed in the 2026-07-11 plugin diet — it cost two engine boots per turn to improve only the latency of noticing an event the engine already handles correctly.)

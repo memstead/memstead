@@ -85,6 +85,13 @@ function setupWorkspace(fakeReplyJson) {
     // Ignores its args; echoes a fixed anchors --json reply and exits 0.
     writeFileSync(script, `#!/bin/sh\ncat <<'JSON'\n${fakeReplyJson}\nJSON\n`);
     chmodSync(script, 0o755);
+    // The binary gate: the hook only queries anchors when /setup has recorded
+    // an installed binary. Plant the record alongside the fake binary.
+    mkdirSync(join(root, '.memstead.cache', 'plugin'), { recursive: true });
+    writeFileSync(
+      join(root, '.memstead.cache', 'plugin', 'binary-version.json'),
+      JSON.stringify({ version: '0.5.0', raw: 'memstead 0.5.0' }),
+    );
   }
   return { root, binDir };
 }
@@ -144,12 +151,29 @@ describe('integration: unreferenced edit is silent', () => {
 describe('integration: no memstead on PATH is fail-open', () => {
   let ws;
   before(() => {
-    ws = setupWorkspace(null); // no fake binary planted
+    ws = setupWorkspace(null); // no fake binary planted, no version record
   });
   after(() => rmSync(ws.root, { recursive: true, force: true }));
 
   it('passes through silently (exit 0, no output) when the binary is absent', () => {
     const r = runHook(ws.root, null, join(ws.root, 'src', 'lib.rs'));
+    assert.strictEqual(r.status, 0);
+    assert.strictEqual(r.stdout.trim(), '');
+  });
+});
+
+describe('integration: the binary gate skips the anchor query without a record', () => {
+  let ws;
+  before(() => {
+    // Fake binary IS on PATH, but the recorded-version cache is removed —
+    // the gate must exit silently before any spawn.
+    ws = setupWorkspace(JSON.stringify({ count: 1, anchors: [], composition: {} }));
+    rmSync(join(ws.root, '.memstead.cache'), { recursive: true, force: true });
+  });
+  after(() => rmSync(ws.root, { recursive: true, force: true }));
+
+  it('emits nothing when /setup never recorded a binary', () => {
+    const r = runHook(ws.root, ws.binDir, join(ws.root, 'src', 'lib.rs'));
     assert.strictEqual(r.status, 0);
     assert.strictEqual(r.stdout.trim(), '');
   });

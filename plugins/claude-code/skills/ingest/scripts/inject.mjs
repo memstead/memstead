@@ -83,6 +83,17 @@ const briefArgs = allMode
   : ['--json', 'projection', 'brief', target];
 const r = memstead(briefArgs);
 
+if (r.error) {
+  // The spawn itself failed — most likely the `memstead` binary is not on
+  // PATH (ENOENT). Without this branch the agent would receive an empty
+  // prompt; point at /setup instead.
+  process.stdout.write(
+    `> **[${LABEL}] Could not run \`${MEMSTEAD_BIN}\` (${r.error.code || r.error.message}). ` +
+      `The memstead binary is not available — run /setup first, then try /ingest again.**\n`,
+  );
+  process.exit(0);
+}
+
 if (r.status !== 0) {
   // Unknown binding, unsupported mode, load failure — surface the engine's
   // own message so the agent sees the refusal, not an empty prompt.

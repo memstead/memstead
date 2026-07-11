@@ -1,9 +1,8 @@
-// Hand-rolled JSON Schema 2020-12 validator for the memstead-plugin/v0
-// schemas. Node built-ins only — no npm dependencies (the plugin is
-// self-contained by policy and ships without a node_modules tree).
+// Hand-rolled JSON Schema 2020-12 validator for the memstead-plugin/v1
+// schemas. Node built-ins only — no npm dependencies by policy.
 //
 // Covers the keywords actually used by the schemas under
-// `plugins/claude-code/schemas/memstead-plugin/v0/`:
+// `docs/schemas/memstead-plugin/v1/`:
 //   - type (including integer as number subtype)
 //   - required, properties, additionalProperties
 //   - items, minItems, uniqueItems
@@ -14,10 +13,9 @@
 //   - $ref (to local $defs only — no remote resolution)
 //
 // This is a strict subset, not a fully conformant 2020-12 implementation.
-// The trade-off is documented in the schemas/README.md: producers should
-// run schema authoring through `validate-live-workspace.mjs` (which uses
-// this same module + a metaschema shape check) before relying on the
-// runtime validator.
+// The trade-off is documented in the schemas/README.md: the validator's
+// job is CI fixtures (examples + round-trip pin), not runtime validation —
+// the engine's Rust loader is authoritative.
 //
 // Public API:
 //   validate(schema, instance) → { valid: boolean, errors: Array<{path, message}> }

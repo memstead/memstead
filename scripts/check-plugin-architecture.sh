@@ -4,10 +4,8 @@
 # Plugin code MUST NOT call `git` against `mem-repo/.git/` or read
 # `mem-repo/{schemas,configs}/` directly. All mem-repo reads go
 # through `memstead-cli` (subprocess) or `memstead-mcp` (MCP); writes go through
-# MCP. The single allowed exception is outer-repo operations on the
-# user's project repo (the cwd containing the workspace) — those land in
-# `auto-commit-utils.mjs` as `git add` / `git commit` / `git log` with
-# `cwd: workspaceRoot` and never carry `--git-dir` / `mem-repo` markers.
+# MCP. (There is no carve-out: the outer-repo auto-commit concept was
+# retired 2026-07-11 — plugin code runs no git at all.)
 #
 # This check fails if any of those guardrails are broken. Patterns:
 #   - `'--git-dir'` / `"--git-dir"` (quoted argv tokens) anywhere in
@@ -26,14 +24,15 @@
 # The rule: the plugin must reach mem-repo via memstead-cli or
 # memstead-mcp, never via direct git. These patterns enforce it.
 #
-# Run locally: `plugins/claude-code/scripts/check-architecture.sh`. It
-# is also invoked from the workspace `run-tests.sh`. Return code 0 =
-# clean, 1 = violation.
+# Lives in the repo's `scripts/` (dev tooling — deliberately OUTSIDE the
+# plugin directory, which ships whole to marketplace installers). Run
+# locally: `scripts/check-plugin-architecture.sh`. It is also invoked
+# from the workspace `run-tests.sh`. Return code 0 = clean, 1 = violation.
 
 set -u
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-plugin_root="$(cd "$script_dir/.." && pwd)"
+plugin_root="$(cd "$script_dir/../plugins/claude-code" && pwd)"
 
 if [[ ! -d "$plugin_root" ]]; then
     echo "check-architecture: could not locate plugin root from $script_dir" >&2

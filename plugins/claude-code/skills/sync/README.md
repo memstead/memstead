@@ -5,6 +5,12 @@ engine-rendered sync brief — what changed in the source since the last sync pl
 any open verify findings, with the conservatism rules baked in — and applies only
 the updates the brief calls for, inside the destination mem.
 
+`/sync --verify <binding>` is the read-only measurement mode (absorbed from the
+former standalone `/verify` skill, 2026-07-11): it runs `memstead projection
+verify`, presents the engine's deterministic fidelity report verdict-first, and
+frames a near-zero first report on an adopted mem as onboarding, not failure.
+It mutates nothing; the findings it records are input for the next `/sync` run.
+
 - Reads your source, writes your mem — never the reverse. Not a version-control
   operation.
 - Conservative by default: a drift finding on an unchanged claim is an

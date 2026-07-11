@@ -2,7 +2,7 @@
 //!
 //! Two authoritative sources, never hand-copied field lists:
 //! - the committed v1 binding JSON Schema
-//!   (`plugins/claude-code/schemas/memstead-plugin/v1/binding.schema.json`)
+//!   (`docs/schemas/memstead-plugin/v1/binding.schema.json`)
 //!   supplies every field, its type, allowed values, and required-ness;
 //! - the engine's own capability matrix
 //!   ([`memstead_base::binding::medium_capabilities`]) supplies which fields

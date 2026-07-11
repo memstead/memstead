@@ -46,7 +46,7 @@ Every command below is one you type. Pick by the job:
 | load what a mem already knows into context before I start working | **`/learn`** |
 | tidy a mem's structure — orphans, stubs, thin or missing links | **`/tidy`** |
 | bring a mem up to date after its source changed | **`/sync`** |
-| measure how faithfully a mem still matches its source | **`/verify`** |
+| measure how faithfully a mem still matches its source | **`/sync --verify`** |
 
 **Everyday graph work has no command — just talk to Claude.** The `memstead_*`
 MCP tools are always live, and Claude reaches for them on its own whenever you
@@ -75,9 +75,10 @@ changes. Everything in this loop is operable today:
    sync brief (what changed since the last sync plus any open findings) and
    updates only the affected entities, conservatively. Reads your source, writes
    your mem — never the reverse, and commits nothing itself.
-4. **Measure — `/verify`.** A read-only fidelity report — coverage, accuracy,
-   freshness — that leads with a verdict and the top actions, and files findings
-   for `/sync` to act on. It changes nothing itself.
+4. **Measure — `/sync --verify`.** A read-only fidelity report — coverage,
+   accuracy, freshness — that leads with a verdict and the top actions, and
+   records findings for the next `/sync` run to act on. It changes nothing
+   itself.
 
 The engine records every mutation with provenance (and, on the git-backed mem
 flavour, commits it to the mem's own history). Your project repo stays yours:

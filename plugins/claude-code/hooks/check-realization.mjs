@@ -10,22 +10,23 @@
 // subprocess call. It never mutates anything.
 //
 // ACCEPTED FAIL-OPEN POSTURE (deliberate): this hook must never block or error
-// a Write/Edit. Every failure mode — the `memstead` binary is absent from PATH
-// (the standing case for external plugin users who installed the plugin but
-// never ran setup's binary install, so the hook is permanently inert by
-// design), the engine is unavailable, the query times out, or the reply isn't
-// parseable JSON — results in silent pass-through (no output, exit 0). A hook
-// that fires on *every* edit cannot afford to be noisy or slow, so it also
-// hard-caps the subprocess with a timeout and never loads any code from a
-// workspace-controlled path (no dynamic module import).
+// a Write/Edit. Every failure mode — the engine is unavailable, the query
+// times out, or the reply isn't parseable JSON — results in silent
+// pass-through (no output, exit 0). A hook that fires on *every* edit cannot
+// afford to be noisy or slow, so it also hard-caps the subprocess with a
+// timeout and never loads any code from a workspace-controlled path (no
+// dynamic module import).
 //
-// A backup direct-entity-edit warning (the PreToolUse guard is the primary
-// gate) is preserved for folder-backed mems.
+// BINARY GATE: the anchor query only runs when /setup has recorded an
+// installed `memstead` binary (the workspace-local recorded-binary-version
+// cache). Without a record the hook exits after one cheap file read — it
+// never spawns a doomed subprocess per edit for users who installed the
+// plugin but not the CLI.
 
 import { spawn } from 'node:child_process';
-import { basename, resolve, relative } from 'node:path';
-import { isEntityFilename } from './guard-entity-edit-utils.mjs';
+import { resolve, relative } from 'node:path';
 import { resolveMemDirsFromCwd, findWorkspaceRoot } from './workspace-resolve-utils.mjs';
+import { readRecordedVersion } from '../scripts/binary-version.mjs';
 import { pickReferencedEntityIds, formatRealizationNotice } from './check-realization-utils.mjs';
 
 // Hard subprocess cap. Warm invocations complete in well under this; the cap
@@ -40,25 +41,19 @@ if (!filePath) process.exit(0);
 const cwd = input.cwd || process.cwd();
 const absFilePath = resolve(cwd, filePath);
 
-// --- Backup direct-entity-edit guard (folder-backed mems only) ---
-// The PreToolUse guard-entity-edit hook blocks these first; this is a
-// belt-and-suspenders warning. A direct edit of an entity markdown is the one
-// case we short-circuit on.
+// A file inside a mem dir is the mem's own concern; the anchor realization
+// query targets source artifacts, not mem files. (Direct entity edits are the
+// PreToolUse guard's job — a blocked edit never reaches this PostToolUse hook.)
 for (const memDir of resolveMemDirsFromCwd(cwd)) {
   const projectRoot = resolve(memDir, '..');
   const relToMem = relative(projectRoot, absFilePath);
-  const dirName = memDir.split('/').pop() || 'specs';
-  const insideMem =
-    relToMem.startsWith(dirName + '/') || relToMem.startsWith(dirName + '\\');
-  if (insideMem && isEntityFilename(basename(relToMem))) {
-    process.stdout.write(
-      `WARNING: Entity file \`${relToMem}\` was edited directly. Always use Memstead MCP tools (memstead_create, memstead_update) to mutate entities.\n`,
-    );
+  const dirName = memDir.split('/').pop();
+  if (
+    dirName &&
+    (relToMem.startsWith(dirName + '/') || relToMem.startsWith(dirName + '\\'))
+  ) {
     process.exit(0);
   }
-  // A non-entity file inside the mem dir is this mem's own concern; the
-  // anchor realization query below targets source artifacts, not mem files.
-  if (insideMem) process.exit(0);
 }
 
 // --- Anchor realization query ---
@@ -67,6 +62,10 @@ for (const memDir of resolveMemDirsFromCwd(cwd)) {
 // workspace-relative artifact paths, so we query with the same form.
 const workspaceRoot = findWorkspaceRoot(cwd);
 if (!workspaceRoot) process.exit(0);
+
+// Binary gate: no recorded `memstead` binary (setup never ran or the cache was
+// wiped) means no CLI to query — exit after this one file read, no spawn.
+if (!readRecordedVersion(workspaceRoot)) process.exit(0);
 
 const relPath = relative(workspaceRoot, absFilePath);
 

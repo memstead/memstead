@@ -13,7 +13,7 @@
 //
 // Four rules (scope per rule, exclusions honoured exactly):
 //
-//   (1) Router line cap — a thin router (ingest, sync, verify) drives an
+//   (1) Router line cap — a thin router (ingest, sync) drives an
 //       engine-rendered brief; its SKILL.md body stays under
 //       ROUTER_BODY_MAX lines. The cap is defined once here.
 //
@@ -21,7 +21,7 @@
 //       are banned in roster SKILL.md prose. The engine's MCP/CLI text
 //       teaches these to the caller; a skill that re-narrates them adds
 //       noise at best and tempts a forbidden "I'll edit that" path at
-//       worst. Scope: the six non-exempt roster SKILL.md files. NOT the
+//       worst. Scope: the roster SKILL.md files. NOT the
 //       plugin CLAUDE.md / README — those legitimately teach the agent
 //       to react to `_hash` / HASH_MISMATCH (drift guidance), which is
 //       action the agent takes, not mechanism narration in a skill.
@@ -30,25 +30,25 @@
 //       unit-noun rename ("vault" → mem) and the retired store-layout
 //       dir (`ingests/`, collapsed into the binding). The LIVE skill
 //       verb "ingest" / "ingesting" is not retired; only the plural
-//       store-dir form is. Scope: the six roster SKILL.md files + the
+//       store-dir form is. Scope: the roster SKILL.md files + the
 //       plugin README + the plugin CLAUDE.md + public/examples/.
 //
 //   (4) Description medium-noun rule — a roster skill's `description:`
 //       must not presume the source medium is code / a repo / files.
-//       An allowlist carries the non-medium senses: "files" as a verb
-//       in the verify description ("files findings").
+//       An allowlist (MEDIUM_ALLOW) carries legitimate non-medium senses,
+//       keyed "<skill>:<term>" (currently empty).
 //       Scope: the `description:` frontmatter of the roster skills.
 //
-// Exempt from ALL rules: reconcile, audit — frozen interim survivors
-// scheduled for removal; linting their prose now would enforce
-// discipline on skills already on their way out. Excluded from ALL rules:
-// dev/handbook/ (operator digest), serve/ (`graph_projection`),
-// registry/ (manifest projection) — noun collisions with the binding
-// format, not drift; those live outside every path this guard walks.
+// Excluded from ALL rules: dev/handbook/ (operator digest), serve/
+// (`graph_projection`), registry/ (manifest projection) — noun
+// collisions with the binding format, not drift; those live outside
+// every path this guard walks.
 //
-// Run locally: `plugins/claude-code/scripts/check-skill-prose.mjs`. Also
-// invoked as its own named leg from the workspace `run-tests.sh`. Exit
-// 0 = clean, 1 = at least one violation (printed), 2 = wiring error.
+// Lives in the repo's `scripts/` (dev tooling — deliberately OUTSIDE the
+// plugin directory, which ships whole to marketplace installers). Run
+// locally: `node scripts/check-skill-prose.mjs`. Also invoked as its own
+// named leg from the workspace `run-tests.sh`. Exit 0 = clean, 1 = at
+// least one violation (printed), 2 = wiring error.
 
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -56,14 +56,19 @@ import { dirname, join } from 'node:path';
 
 // ── Policy (single source of truth) ─────────────────────────────────
 
-export const ROUTER_BODY_MAX = 60;
-export const THIN_ROUTERS = ['ingest', 'sync', 'verify'];
+// Raised 60 → 70 with the 2026-07-11 plugin diet: /verify folded into /sync
+// as its `--verify` mode (net roster prose fell — the standalone verify skill
+// was deleted whole). The cap still bans manual-growth; it is per-router, and
+// the folded sync body carries two skills' worth of protocol.
+export const ROUTER_BODY_MAX = 70;
+export const THIN_ROUTERS = ['ingest', 'sync'];
 
-// The roster skills subject to rules (1), (2) and (4). The full seven-skill
-// roster is linted — reconcile + audit were deleted at S1b, and the commit
-// skill was retired 2026-07-11 with the outer-repo versioning concept
-// (operator decision), so nothing is exempt.
-export const ROSTER = ['setup', 'interview', 'learn', 'ingest', 'tidy', 'verify', 'sync'];
+// The roster skills subject to rules (1), (2) and (4). The full six-skill
+// roster is linted — reconcile + audit were deleted at S1b, the commit skill
+// was retired 2026-07-11 with the outer-repo versioning concept (operator
+// decision), and verify folded into sync in the same-day plugin diet — so
+// nothing is exempt.
+export const ROSTER = ['setup', 'interview', 'learn', 'ingest', 'tidy', 'sync'];
 export const EXEMPT = [];
 
 const MECHANISM_TERMS = [
@@ -86,8 +91,8 @@ const MEDIUM_NOUNS = [
 ];
 
 // (skill, term) pairs whose medium-noun sense is legitimate. Keyed
-// "<skill>:<term>". verify → "files" as a verb ("files findings").
-const MEDIUM_ALLOW = new Set(['verify:file']);
+// "<skill>:<term>" (e.g. "files" as a verb, not the medium noun).
+const MEDIUM_ALLOW = new Set([]);
 
 // ── Parsing ─────────────────────────────────────────────────────────
 
@@ -217,8 +222,8 @@ function relLabel(path) {
 
 function main() {
   const scriptDir = dirname(fileURLToPath(import.meta.url));
-  const pluginRoot = join(scriptDir, '..');
-  const examplesDir = join(pluginRoot, '..', '..', 'examples');
+  const pluginRoot = join(scriptDir, '..', 'plugins', 'claude-code');
+  const examplesDir = join(scriptDir, '..', 'examples');
 
   if (!existsSync(join(pluginRoot, 'skills'))) {
     console.error(`check-skill-prose: could not locate plugin skills/ from ${scriptDir}`);

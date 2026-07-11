@@ -96,14 +96,10 @@ for (const term of ['code', 'repo', 'repository', 'file', 'files', 'commit', 'co
 }
 
 test('rule 4 allowlist is per-skill and stays medium-neutral otherwise', () => {
-  // verify's "files" verb is allowlisted ("files findings for /sync").
-  assert.deepEqual(
-    checkDescriptionMediumNouns({ name: 'verify', description: 'It changes nothing itself and files findings.' }),
-    [],
-  );
-  // an allowlisted term does not leak to another skill.
+  // the allowlist is currently empty — even a verb sense of "files" flags
+  // until a skill explicitly allowlists "<skill>:file".
   assert.equal(
-    checkDescriptionMediumNouns({ name: 'ingest', description: 'It files findings for later.' }).length,
+    checkDescriptionMediumNouns({ name: 'sync', description: 'It files findings for later.' }).length,
     1,
   );
   // a genuinely medium-neutral description passes.

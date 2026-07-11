@@ -101,6 +101,16 @@ describe('ingest router — brief routing', () => {
     const { stdout } = runRouter(['x/y'], 'brief-error');
     assert.match(stdout, /binding "x\/y" not found/);
   });
+
+  it('points at /setup when the memstead binary is missing (never an empty prompt)', () => {
+    if (existsSync(logFile)) rmSync(logFile);
+    const res = spawnSync('node', [ROUTER, '--all'], {
+      encoding: 'utf-8',
+      env: { ...process.env, MEMSTEAD_BIN: join(dir, 'no-such-binary') },
+    });
+    assert.match(res.stdout, /run \/setup first/);
+    assert.notEqual(res.stdout.trim(), '', 'the agent must never receive an empty prompt');
+  });
 });
 
 describe('ingest router — no-source setup ramp', () => {

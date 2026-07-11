@@ -30,11 +30,11 @@
 import { copyFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-// The plugin's own frontmatter reader — the source of truth for how a skill's
+// The prose lint's frontmatter reader — the source of truth for how a skill's
 // `description:` is resolved (handles `>` block scalars and colons inside plain
 // scalars that strict YAML rejects), so the rendered roster stays byte-identical
 // to what the plugin ships.
-import { extractDescription } from "../../plugins/claude-code/scripts/check-skill-prose.mjs";
+import { extractDescription } from "../../scripts/check-skill-prose.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -76,7 +76,7 @@ const families = [
   {
     title: "The mem lifecycle",
     blurb: "Building a mem from sources, then keeping it true.",
-    skills: ["ingest", "sync", "verify", "tidy"],
+    skills: ["ingest", "sync", "tidy"],
   },
 ];
 
@@ -112,12 +112,12 @@ if (JSON.stringify(expected) !== JSON.stringify(actual)) {
 
 let skillsBody = `---
 title: Skills
-description: "The seven-skill Memstead plugin roster in two families — onboarding & context and the mem lifecycle — with each skill's invocation posture and its shipped description."
+description: "The six-skill Memstead plugin roster in two families — onboarding & context and the mem lifecycle — with each skill's invocation posture and its shipped description."
 ---
 
 > This page is generated from the plugin \`SKILL.md\` frontmatter at build time — the shipped skill descriptions are the source of truth, so the roster here cannot drift from the installed plugin.
 
-The Claude Code plugin ships **seven skills in two families**. \`/setup\` and \`/interview\` are the human-driven front doors; the rest are both-invocable — usable from the \`/\` menu and auto-invocable by the model. There is no command for everyday graph work: once a workspace exists, you just talk to Claude and the \`memstead_*\` MCP tools stay live.
+The Claude Code plugin ships **six skills in two families**. \`/setup\` and \`/interview\` are the human-driven front doors; the rest are both-invocable — usable from the \`/\` menu and auto-invocable by the model. Fidelity measurement is \`/sync --verify\`. There is no command for everyday graph work: once a workspace exists, you just talk to Claude and the \`memstead_*\` MCP tools stay live.
 
 `;
 for (const family of families) {

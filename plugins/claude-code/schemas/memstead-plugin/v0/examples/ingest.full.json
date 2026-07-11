@@ -1,6 +1,0 @@
-{
-  "projection": "engine/graph",
-  "mode": "refinement",
-  "trigger": "loop",
-  "batch_size": 20
-}

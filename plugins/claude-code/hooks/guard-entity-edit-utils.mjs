@@ -31,10 +31,12 @@ export function isEntityFilename(filename) {
 export function checkEditTarget(filePath, memDir, memDirExists) {
   if (!filePath) return { action: 'allow' };
 
-  // Fail-closed: if mem dir doesn't exist, block potential entity files
+  // Fail-closed: if mem dir doesn't exist, block potential entity files whose
+  // path mentions the resolved mem dir's name (not a hardcoded legacy name).
   if (!memDirExists) {
+    const dirName = memDir.split('/').pop() || '';
     const absPath = resolve(filePath);
-    if (absPath.includes('specs') && isEntityFilename(basename(absPath))) {
+    if (dirName && absPath.includes(dirName) && isEntityFilename(basename(absPath))) {
       return {
         action: 'block',
         reason: `Cannot verify mem dir at ${memDir} — refusing edit on potential entity file as precaution. File: ${filePath}`,

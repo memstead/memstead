@@ -55,9 +55,9 @@ echo "════════════════════════�
 echo "  Gate: plugin must not call git against mem-repo"
 echo "══════════════════════════════════"
 # Plugin code must reach mem-repo via memstead-cli (subprocess) or
-# memstead-mcp (MCP); writes go through MCP. Outer-repo git operations on
-# the user's project repo are explicitly carved out.
-if "$ROOT/plugins/claude-code/scripts/check-architecture.sh"; then
+# memstead-mcp (MCP); writes go through MCP. No carve-outs — plugin code
+# runs no git at all (outer-repo auto-commit retired 2026-07-11).
+if "$ROOT/scripts/check-plugin-architecture.sh"; then
   echo "  ✓ plugin architecture guard passed"
 else
   FAILED+=("plugin-architecture")
@@ -70,9 +70,8 @@ echo "  Lint: plugin roster prose discipline"
 echo "══════════════════════════════════"
 # Its own named leg (not a glob inside the node-test leg): router line
 # caps, no mechanism-term narration, no retired vocabulary, medium-neutral
-# descriptions. reconcile/audit exempt (frozen interim). See the checker
-# header for the full rule/scope map.
-if (cd "$ROOT" && node plugins/claude-code/scripts/check-skill-prose.mjs); then
+# descriptions. See the checker header for the full rule/scope map.
+if (cd "$ROOT" && node scripts/check-skill-prose.mjs); then
   echo "  ✓ plugin roster prose lint passed"
 else
   FAILED+=("plugin-skill-prose")
@@ -83,7 +82,7 @@ echo ""
 echo "══════════════════════════════════"
 echo "  Testing: plugin (node --test)"
 echo "══════════════════════════════════"
-if (cd "$ROOT" && node --test plugins/claude-code/hooks/*.test.js plugins/claude-code/skills/ingest/scripts/*.test.js plugins/claude-code/scripts/*.test.mjs); then
+if (cd "$ROOT" && node --test plugins/claude-code/hooks/*.test.js plugins/claude-code/skills/ingest/scripts/*.test.js plugins/claude-code/scripts/*.test.mjs scripts/*.test.mjs); then
   echo "  ✓ plugin tests passed"
 else
   FAILED+=("plugin-tests")
@@ -92,25 +91,19 @@ fi
 
 echo ""
 echo "══════════════════════════════════"
-echo "  Testing: plugin format schemas (v0 + v1)"
+echo "  Testing: workspace format schemas (v1)"
 echo "══════════════════════════════════"
-# The two named consumers of the plugin-owned schemas, run in the
-# canonical suite: the per-version validator tests, and the version-generic
-# workspace walker over each version's examples (metaschema shape + every
-# example validates). Closes the pre-v1 gap where the schemas dir had zero
-# canonical-suite coverage. The round-trip pin (init output validates
-# against v1/binding.schema.json) is split: the JS half lives in the v1
-# validator test; the Rust half (init still emits that golden) is in
-# memstead-cli's suite.
-SCHEMAS=plugins/claude-code/schemas
-if (cd "$ROOT" \
-    && node --test "$SCHEMAS/memstead-plugin/v0/validator.test.mjs" "$SCHEMAS/memstead-plugin/v1/validator.test.mjs" "$SCHEMAS/versions.test.mjs" \
-    && node "$SCHEMAS/validate-live-workspace.mjs" --schemas-dir "$SCHEMAS/memstead-plugin/v0" \
-    && node "$SCHEMAS/validate-live-workspace.mjs" --schemas-dir "$SCHEMAS/memstead-plugin/v1"); then
-  echo "  ✓ plugin format schemas passed"
+# The v1 format schemas live under docs/schemas (dev/docs tooling, not
+# plugin payload). The validator test covers metaschema shape + every
+# example. The round-trip pin (init output validates against
+# v1/binding.schema.json) is split: the JS half lives in the v1 validator
+# test; the Rust half (init still emits that golden) is in memstead-cli's
+# suite.
+if (cd "$ROOT" && node --test docs/schemas/memstead-plugin/v1/validator.test.mjs); then
+  echo "  ✓ workspace format schemas passed"
 else
-  FAILED+=("plugin-schemas")
-  echo "  ✗ plugin format schemas FAILED"
+  FAILED+=("format-schemas")
+  echo "  ✗ workspace format schemas FAILED"
 fi
 
 echo ""
