@@ -52,8 +52,8 @@ use std::path::{Path, PathBuf};
 use crate::Engine;
 use crate::workspace_store::{StoreError, WORKSPACE_STORE_DIR};
 
-use super::cursor::compute_source_cursor;
-use super::resolve::ResolvedIngest;
+use super::cursor::{compute_source_cursor, enumerate_facet_files};
+use super::resolve::{ResolvedIngest, ResolvedSource};
 use super::slice::Slice;
 
 /// The engine-owned state directory for advance stores, under the workspace
@@ -502,6 +502,119 @@ pub fn advance_baseline(
     })
 }
 
+/// The outcome of a [`record_exclusions`] call.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExcludeOutcome {
+    /// The binding id whose exclusion ledger was written.
+    pub binding: String,
+    /// Total authored exclusions in the ledger after this call (this call + prior).
+    pub excluded: usize,
+    /// How many supplied artifacts were newly added (not already in the ledger).
+    pub added: usize,
+}
+
+/// Why [`record_exclusions`] could not complete.
+#[derive(Debug, thiserror::Error)]
+pub enum ExcludeError {
+    /// The binding id is not the canonical `<mem>/<stem>` shape.
+    #[error("malformed binding id '{0}': expected `<mem>/<stem>`")]
+    MalformedId(String),
+    /// One or more artifacts are not members of the binding's enumerable source
+    /// `S(D)` — the gate refuses the whole call (no partial write). Names each.
+    #[error(
+        "exclusion names {} artifact id(s) not in the binding's enumerable source S(D): {}; \
+         only an in-scope source member can be declared excluded ({printed} enumerated)",
+        artifacts.len(),
+        fmt_list(artifacts)
+    )]
+    NotSourceMember {
+        /// The offending, non-member ids (sorted).
+        artifacts: Vec<String>,
+        /// How many artifacts `S(D)` did enumerate (the accepted set size).
+        printed: usize,
+    },
+    /// Reading or writing the durable advance store failed.
+    #[error("advance store error: {0}")]
+    Store(#[source] StoreError),
+}
+
+/// Declare **authored exclusions** for in-scope source artifacts — the direct
+/// write path for the durable exclusion ledger [`advance_baseline`] also feeds.
+///
+/// Unlike the advance gate (which accepts only artifacts in the *changed slice*),
+/// this gates on **enumerable `S(D)` membership**: an artifact must be a real
+/// in-scope member of the binding's source, and a *stable, unchanged* artifact
+/// qualifies. That is what a deliberate editorial exclusion is — "this in-scope
+/// artifact is mined and warrants no destination entity, because …" — a decision
+/// independent of change detection. Each accepted `(artifact, rationale)` lands
+/// in the ledger the fidelity report consults, so the artifact stops re-surfacing
+/// as `uncovered` under exhaustive coverage and keeps its reasoning. Atomic: an
+/// artifact outside `S(D)` refuses the whole call before any write. Merges into
+/// any in-flight advance store rather than clobbering it. Generic across every
+/// enumerable binding and medium.
+pub fn record_exclusions(
+    workspace_root: &Path,
+    resolved: &ResolvedIngest,
+    exclusions: &BTreeMap<String, String>,
+) -> Result<ExcludeOutcome, ExcludeError> {
+    let binding_id = resolved.name.clone();
+    let (mem, name) =
+        split_binding_id(&binding_id).map_err(|_| ExcludeError::MalformedId(binding_id.clone()))?;
+
+    // Enumerate S(D) — the in-scope source-artifact set, the same enumeration the
+    // fidelity report uses for its coverage denominator.
+    let mut s_d: BTreeSet<String> = BTreeSet::new();
+    for source in &resolved.sources {
+        if let ResolvedSource::Primary(p) = source {
+            for f in enumerate_facet_files(p, &resolved.deny_paths, workspace_root) {
+                s_d.insert(f);
+            }
+        }
+    }
+
+    // Gate (atomic): every exclusion id must be an S(D) member. Validate BEFORE
+    // any disk write so a refusal leaves the store untouched.
+    let mut not_member: Vec<String> = exclusions
+        .keys()
+        .filter(|a| !s_d.contains(a.as_str()))
+        .cloned()
+        .collect();
+    if !not_member.is_empty() {
+        not_member.sort();
+        not_member.dedup();
+        return Err(ExcludeError::NotSourceMember {
+            artifacts: not_member,
+            printed: s_d.len(),
+        });
+    }
+
+    // Merge into the durable exclusion ledger, preserving any in-flight advance
+    // progress already in the same store.
+    let mut state = read_advance_store(workspace_root, &mem, &name)
+        .map_err(ExcludeError::Store)?
+        .unwrap_or_else(|| AdvanceState {
+            binding: binding_id.clone(),
+            ..Default::default()
+        });
+    let mut added = 0usize;
+    for (artifact, rationale) in exclusions {
+        if state
+            .exclusions
+            .insert(artifact.clone(), rationale.clone())
+            .is_none()
+        {
+            added += 1;
+        }
+    }
+    write_advance_store(workspace_root, &mem, &name, &state).map_err(ExcludeError::Store)?;
+
+    Ok(ExcludeOutcome {
+        binding: binding_id,
+        excluded: state.exclusions.len(),
+        added,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -887,6 +1000,72 @@ mod tests {
                 .is_none(),
             "re-judging the artifact cleared the exclusion; nothing durable remains"
         );
+    }
+
+    /// `record_exclusions` gates on enumerable `S(D)` membership (not the changed
+    /// slice), so a **stable, unchanged** in-scope artifact can be declared
+    /// excluded — the direct write path the option-(a) migration needs. A
+    /// non-member refuses the whole call atomically; a re-declare merges.
+    #[test]
+    fn record_exclusions_gates_on_source_membership_and_merges() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+
+        // A source tree with two in-scope `.rs` members. No commits move after
+        // this — the artifacts are stable, never in a changed slice.
+        git(root, &["init", "-q"]);
+        std::fs::write(root.join("a.rs"), "one").unwrap();
+        std::fs::write(root.join("b.rs"), "two").unwrap();
+        git(root, &["add", "-A"]);
+        git(root, &["commit", "-qm", "base"]);
+
+        let resolved = resolved_engine_graph();
+
+        // Declare a.rs excluded with a rationale — accepted (S(D) member).
+        let out = record_exclusions(
+            root,
+            &resolved,
+            &BTreeMap::from([("a.rs".to_string(), "mined; no entity".to_string())]),
+        )
+        .unwrap();
+        assert_eq!((out.added, out.excluded), (1, 1));
+        let state = read_advance_store(root, "engine", "graph")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            state.exclusions.get("a.rs").map(String::as_str),
+            Some("mined; no entity")
+        );
+
+        // An artifact outside S(D) refuses the whole call — the store is untouched.
+        let err = record_exclusions(
+            root,
+            &resolved,
+            &BTreeMap::from([("does-not-exist.rs".to_string(), "x".to_string())]),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(err, ExcludeError::NotSourceMember { .. }),
+            "got {err:?}"
+        );
+        assert_eq!(
+            read_advance_store(root, "engine", "graph")
+                .unwrap()
+                .unwrap()
+                .exclusions
+                .len(),
+            1,
+            "refused call left the ledger unchanged"
+        );
+
+        // Re-declaring merges (b.rs added alongside a.rs).
+        let out2 = record_exclusions(
+            root,
+            &resolved,
+            &BTreeMap::from([("b.rs".to_string(), "also mined".to_string())]),
+        )
+        .unwrap();
+        assert_eq!((out2.added, out2.excluded), (1, 2));
     }
 
     /// `DispositionInput` parses both the bare-verdict and the reasoned forms

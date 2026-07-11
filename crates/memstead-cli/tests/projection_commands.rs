@@ -1077,6 +1077,84 @@ fn advance_invalid_dispositions_is_typed() {
     assert_eq!(env["code"], "PROJECTION_INVALID_DISPOSITIONS");
 }
 
+/// `projection exclude` records an authored exclusion for a **stable in-scope**
+/// artifact (not in any changed slice), gates a non-member atomically, and
+/// rejects a malformed payload — the direct write path for the exclusion ledger.
+#[test]
+fn exclude_records_authored_exclusion_and_gates_non_member() {
+    let tmp = advance_workspace();
+    let root = tmp.path();
+    // S(D) for this binding = files on disk matching `src/**/*.rs` = {src/a.rs}
+    // (b.rs was deleted at head1). a.rs is a stable member — declarable excluded.
+    let out = memstead()
+        .current_dir(root)
+        .args([
+            "--json",
+            "projection",
+            "exclude",
+            "engine/graph",
+            "--exclusions",
+            r#"{"src/a.rs": "mined; warrants no entity"}"#,
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&out).expect("exclude --json must emit JSON");
+    assert_eq!(env["binding"], "engine/graph");
+    assert_eq!(env["added"], 1);
+    assert_eq!(env["excluded"], 1);
+
+    // The exclusion + rationale persisted to the durable ledger.
+    let store: Value = serde_json::from_slice(
+        &std::fs::read(root.join(".memstead/state/advance/engine/graph.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(store["exclusions"]["src/a.rs"], "mined; warrants no entity");
+
+    // An artifact outside S(D) refuses the whole call atomically.
+    let before = std::fs::read(root.join(".memstead/state/advance/engine/graph.json")).unwrap();
+    let out = memstead()
+        .current_dir(root)
+        .args([
+            "--json",
+            "projection",
+            "exclude",
+            "engine/graph",
+            "--exclusions",
+            r#"{"src/not-a-file.rs": "x"}"#,
+        ])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(env["code"], "PROJECTION_EXCLUDE_NOT_SOURCE_MEMBER");
+    let after = std::fs::read(root.join(".memstead/state/advance/engine/graph.json")).unwrap();
+    assert_eq!(before, after, "refused call must not touch the ledger");
+
+    // A malformed payload refuses with the typed parse code.
+    let out = memstead()
+        .current_dir(root)
+        .args([
+            "--json",
+            "projection",
+            "exclude",
+            "engine/graph",
+            "--exclusions",
+            "not-json",
+        ])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(env["code"], "PROJECTION_INVALID_EXCLUSIONS");
+}
+
 /// `advance` outside a workspace refuses with the shared, single-sourced
 /// `WORKSPACE_NOT_INITIALISED` code — never a generic/internal leak.
 #[test]

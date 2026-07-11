@@ -80,6 +80,7 @@ This document contains the help content for the `memstead` command-line program.
 * [`memstead projection migrate`↴](#memstead-projection-migrate)
 * [`memstead projection enable`↴](#memstead-projection-enable)
 * [`memstead projection advance`↴](#memstead-projection-advance)
+* [`memstead projection exclude`↴](#memstead-projection-exclude)
 * [`memstead projection verify`↴](#memstead-projection-verify)
 
 ## `memstead`
@@ -1315,6 +1316,7 @@ Binding (projection-promotion) tooling — the projection is the unit, one versi
 * `migrate` — Migrate both legacy generations into v1 bindings (D10). Gen-1 — the root-folder `scopes|projections|ingests/` JSON layout the retired `pipeline migrate` command handled — is first materialized into the gen-2 `.memstead/` store, then promoted. Gen-2 — the four-primitive store (per-mem `Projection` + flat `Ingest`) — merges each ingest into the projection its `projection` ref names; the binding takes the projection's file identity (`.memstead/projections/<mem>/<stem>.json`) and the merged ingest is removed. `refinement` mode and dangling projection refs refuse with a typed error. Use `--dry-run` to preview without writing
 * `enable` — Enable a `build` / `sync` / `verify` operation on an existing binding by adding its block (with sensible defaults) if absent. This is the remedy a refused *mutating* operation cites (D6): `projection enable sync <binding>`. Before writing, the operation is checked against the medium-capability matrix (D6) — enabling `sync`/`verify` over a medium that cannot support it (e.g. a `web` source) refuses with the capability gap and writes nothing. Enabling an already-present operation refuses `PROJECTION_OP_ALREADY_ENABLED`; a missing binding refuses `PROJECTION_NOT_FOUND`
 * `advance` — Advance a binding's sync baseline by recording per-artifact dispositions (D7). The engine freezes the presented changed slice, subtracts already-disposed artifacts on re-presentation, appends new-HEAD deltas when the source moves mid-pass, and — when the remainder empties — advances the destination mem's `#synced` token via the sync-state writer (provenance piggybacks that commit). Dispositions are durable (`.memstead/state/advance/`), so a partial pass resumes across process restarts. The gate accepts **only** artifact ids the engine presented — an unknown id refuses the whole call atomically (`PROJECTION_ADVANCE_UNKNOWN_ARTIFACT`). In this cycle the agent supplies a disposition for **every** artifact explicitly (auto-derivation lands later)
+* `exclude` — Declare authored **exclusions** for in-scope source artifacts. Unlike `advance` (whose gate accepts only artifacts in the changed slice), this gates on enumerable `S(D)` membership, so a stable, unchanged artifact can be recorded as deliberately not-modeled with a rationale. Each accepted `(artifact, rationale)` lands in the durable exclusion ledger the fidelity report consults, so the artifact stops re-surfacing as `uncovered` under exhaustive coverage and keeps its reasoning. An artifact outside `S(D)` refuses the whole call atomically (`PROJECTION_EXCLUDE_NOT_SOURCE_MEMBER`); re-declaring merges into the ledger. The write path for the option-(a) process-mem judgment migration, and the general "this in-scope artifact is mined and warrants no destination entity, because …" capability
 * `verify` — Measure a binding's fidelity and record durable findings (E3b, group A). Read-only on the destination mem: verify adjudicates the mem's anchors against the live source and samples in-scope artifacts, writing findings keyed `(hash(D), source_head)` into the engine-owned findings store (`.memstead/state/findings/`). A binding-declaration edit or a source-head move partitions the keyspace, so prior findings are segregated as superseded, never presented as current. Verify never mutates the mem — any repair routes through the (later) sync brief. It then renders the deterministic, token-budgeted **tier-1 fidelity report** (group B) over the findings just recorded: grain-classed coverage with tree-anchor fan-out on its own axis, anchor-resolution %, freshness vs. both `sync_state` tokens (`signal: none` → freshness unknowable), the capability-matrix block, and the tier-3 backlog depth — aggregates always ship; heavy per-artifact lists greedy-fill under `--budget` and drop to hints (forced back in with `--include`)
 
 
@@ -1415,6 +1417,22 @@ Advance a binding's sync baseline by recording per-artifact dispositions (D7). T
 ###### **Options:**
 
 * `--dispositions <DISPOSITIONS>` — A JSON object mapping each judged artifact id to its disposition, e.g. `'{"src/lib.rs": "worked", "src/old.rs": "irrelevant"}'`. A value may instead be an object carrying an authored rationale — `'{"src/gen.rs": {"disposition": "excluded", "rationale": "generated, no entity"}}'` — and an `excluded` verdict with a rationale is retained in the durable exclusion ledger so the artifact stops re-surfacing as `uncovered` and keeps its reasoning. Only ids the engine presented in the brief's changed slice are accepted — an unknown id refuses the whole call. Pass `'{}'` to re-present the remainder without recording anything
+
+
+
+## `memstead projection exclude`
+
+Declare authored **exclusions** for in-scope source artifacts. Unlike `advance` (whose gate accepts only artifacts in the changed slice), this gates on enumerable `S(D)` membership, so a stable, unchanged artifact can be recorded as deliberately not-modeled with a rationale. Each accepted `(artifact, rationale)` lands in the durable exclusion ledger the fidelity report consults, so the artifact stops re-surfacing as `uncovered` under exhaustive coverage and keeps its reasoning. An artifact outside `S(D)` refuses the whole call atomically (`PROJECTION_EXCLUDE_NOT_SOURCE_MEMBER`); re-declaring merges into the ledger. The write path for the option-(a) process-mem judgment migration, and the general "this in-scope artifact is mined and warrants no destination entity, because …" capability
+
+**Usage:** `memstead projection exclude --exclusions <EXCLUSIONS> <BINDING>`
+
+###### **Arguments:**
+
+* `<BINDING>` — The binding id `<mem>/<stem>` (D3) — e.g. `project/graph`
+
+###### **Options:**
+
+* `--exclusions <EXCLUSIONS>` — A JSON object mapping each in-scope source artifact id to the authored rationale for excluding it, e.g. `'{"docs/legacy.md": "superseded; no entity", "vendor/x.rs": "generated"}'`. Every id must be a member of the binding's enumerable source `S(D)` — an id outside scope refuses the whole call
 
 
 

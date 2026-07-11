@@ -33,7 +33,9 @@ use memstead_base::binding::{
 use memstead_base::binding_migrate::{
     BindingMigrateError, migrate_gen2_bindings, resolve_migrated_binding,
 };
-use memstead_base::ingest::advance::{AdvanceError, DispositionInput, advance_baseline};
+use memstead_base::ingest::advance::{
+    AdvanceError, DispositionInput, ExcludeError, advance_baseline, record_exclusions,
+};
 use memstead_base::ingest::findings::{FullResyncDecision, verify_binding};
 use memstead_base::ingest::report::{
     DEFAULT_REPORT_BUDGET, compute_fidelity_report, render_fidelity_report,
@@ -128,6 +130,18 @@ pub enum ProjectionCommand {
     /// a disposition for **every** artifact explicitly (auto-derivation lands
     /// later).
     Advance(AdvanceArgs),
+    /// Declare authored **exclusions** for in-scope source artifacts. Unlike
+    /// `advance` (whose gate accepts only artifacts in the changed slice), this
+    /// gates on enumerable `S(D)` membership, so a stable, unchanged artifact can
+    /// be recorded as deliberately not-modeled with a rationale. Each accepted
+    /// `(artifact, rationale)` lands in the durable exclusion ledger the fidelity
+    /// report consults, so the artifact stops re-surfacing as `uncovered` under
+    /// exhaustive coverage and keeps its reasoning. An artifact outside `S(D)`
+    /// refuses the whole call atomically (`PROJECTION_EXCLUDE_NOT_SOURCE_MEMBER`);
+    /// re-declaring merges into the ledger. The write path for the option-(a)
+    /// process-mem judgment migration, and the general "this in-scope artifact is
+    /// mined and warrants no destination entity, because …" capability.
+    Exclude(ExcludeArgs),
     /// Measure a binding's fidelity and record durable findings (E3b, group A).
     /// Read-only on the destination mem: verify adjudicates the mem's anchors
     /// against the live source and samples in-scope artifacts, writing findings
@@ -285,6 +299,19 @@ pub struct AdvanceArgs {
 }
 
 #[derive(ClapArgs, Debug)]
+pub struct ExcludeArgs {
+    /// The binding id `<mem>/<stem>` (D3) — e.g. `project/graph`.
+    pub binding: String,
+    /// A JSON object mapping each in-scope source artifact id to the authored
+    /// rationale for excluding it, e.g.
+    /// `'{"docs/legacy.md": "superseded; no entity", "vendor/x.rs": "generated"}'`.
+    /// Every id must be a member of the binding's enumerable source `S(D)` — an
+    /// id outside scope refuses the whole call.
+    #[arg(long)]
+    pub exclusions: String,
+}
+
+#[derive(ClapArgs, Debug)]
 pub struct VerifyArgs {
     /// The binding id `<mem>/<stem>` (D3) — e.g. `engine/graph`.
     pub binding: String,
@@ -307,6 +334,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         ProjectionCommand::Migrate(a) => migrate(ctx, a),
         ProjectionCommand::Enable(a) => enable(ctx, a),
         ProjectionCommand::Advance(a) => advance(ctx, a),
+        ProjectionCommand::Exclude(a) => exclude(ctx, a),
         ProjectionCommand::Verify(a) => verify(ctx, a),
     }
 }
@@ -1355,6 +1383,101 @@ fn advance(ctx: &CliContext, args: AdvanceArgs) -> anyhow::Result<()> {
             }
         }
         print_markdown(&out);
+    }
+    Ok(())
+}
+
+/// Map an [`ExcludeError`] to a typed CLI error. The non-member refusal is the
+/// S(D)-membership gate (Validation); a malformed id is a Validation-shaped name
+/// error; store failures are generic. Codes are spelled as literals at each site
+/// so the generated error index picks them up.
+fn map_exclude_err(binding_id: &str, err: ExcludeError) -> CliError {
+    let message = err.to_string();
+    match &err {
+        ExcludeError::MalformedId(_) => {
+            CliError::new(ExitKind::Validation, "PROJECTION_INVALID_NAME", message)
+                .with_details(json!({ "binding": binding_id }))
+        }
+        ExcludeError::NotSourceMember { artifacts, .. } => CliError::new(
+            ExitKind::Validation,
+            "PROJECTION_EXCLUDE_NOT_SOURCE_MEMBER",
+            message,
+        )
+        .with_details(json!({ "binding": binding_id, "not_source_members": artifacts })),
+        ExcludeError::Store(_) => {
+            CliError::new(ExitKind::Generic, "PROJECTION_EXCLUDE_FAILED", message)
+                .with_details(json!({ "binding": binding_id }))
+        }
+    }
+}
+
+fn exclude(ctx: &CliContext, args: ExcludeArgs) -> anyhow::Result<()> {
+    let (_shape, root) = ctx.workspace_shape().ok_or_else(|| {
+        workspace_not_initialised_error(
+            "not inside a Memstead workspace (no `.memstead/workspace.toml` in any ancestor)",
+        )
+    })?;
+
+    let binding_id = args.binding;
+
+    // Parse the exclusions payload up front — a malformed `--exclusions` refuses
+    // cheaply (before loading configs) with a typed code.
+    let exclusions: std::collections::BTreeMap<String, String> =
+        serde_json::from_str(&args.exclusions).map_err(|e| {
+            CliError::new(
+                ExitKind::Validation,
+                "PROJECTION_INVALID_EXCLUSIONS",
+                format!(
+                    "--exclusions must be a JSON object mapping in-scope artifact id → \
+                     rationale string: {e}"
+                ),
+            )
+            .with_details(json!({ "error": e.to_string() }))
+        })?;
+
+    // Find the binding by canonical id in the v1 store.
+    let configs = load_pipeline_configs(&root).map_err(|e| {
+        CliError::new(
+            ExitKind::Generic,
+            "PROJECTION_EXCLUDE_FAILED",
+            format!("could not load pipeline config: {e}"),
+        )
+        .with_details(json!({ "error": e.to_string() }))
+    })?;
+    let record = configs
+        .bindings
+        .iter()
+        .find(|r| format!("{}/{}", r.mem, r.name) == binding_id)
+        .ok_or_else(|| {
+            CliError::new(
+                ExitKind::NotFound,
+                "PROJECTION_NOT_FOUND",
+                format!(
+                    "no binding `{binding_id}` in this workspace — scaffold one with \
+                     `projection init` or migrate a legacy workspace with `projection migrate`"
+                ),
+            )
+            .with_details(json!({ "binding": binding_id }))
+        })?;
+
+    let resolved = resolve_binding_run(&configs, &binding_id, &record.config)
+        .map_err(|e| map_resolve_err(&binding_id, e))?;
+
+    let outcome = record_exclusions(&root, &resolved, &exclusions)
+        .map_err(|e| map_exclude_err(&binding_id, e))?;
+
+    if ctx.json {
+        print_json(&json!({
+            "binding": outcome.binding,
+            "excluded": outcome.excluded,
+            "added": outcome.added,
+        }))?;
+    } else {
+        print_markdown(&format!(
+            "# Projection exclude\n\nBinding `{}`: {} artifact(s) newly excluded, \
+             {} in the ledger.\n",
+            outcome.binding, outcome.added, outcome.excluded
+        ));
     }
     Ok(())
 }
