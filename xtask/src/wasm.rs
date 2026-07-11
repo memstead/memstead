@@ -394,6 +394,42 @@ fn render_entry(out: &mut String, entry: &WasmEntry, js_prefix: &str) {
 mod tests {
     use super::*;
 
+    /// Completeness guard (plan 08, AC6): the forward-walk `parse` must capture
+    /// **every** JS-visible entry point in the live `memstead-wasm` source, so a
+    /// new `#[wasm_bindgen]` shape the narrow parser fails to follow to its
+    /// `pub fn` cannot silently drop the entry from `wasm.md`. The cross-check is
+    /// independent of `parse`: it counts, attribute-first, how many
+    /// `#[wasm_bindgen…]` attributes annotate a `pub fn` (an entry point) rather
+    /// than a `struct` / `impl` container, and asserts `parse` found exactly that
+    /// many.
+    #[test]
+    fn parse_captures_every_wasm_bindgen_entry_point() {
+        let src = include_str!("../../crates/memstead-wasm/src/lib.rs");
+        let lines: Vec<&str> = src.lines().collect();
+        let mut entry_points = 0usize;
+        for (i, line) in lines.iter().enumerate() {
+            if !line.trim_start().starts_with("#[wasm_bindgen") {
+                continue;
+            }
+            // The annotated item is the next line that opens a Rust item —
+            // `pub fn` / `impl` / `struct`. Scanning for those keywords skips
+            // multi-line attribute continuations and doc lines without reusing
+            // any of `parse`'s internal walk.
+            let item = lines[i + 1..].iter().map(|l| l.trim()).find(|t| {
+                t.starts_with("pub ") || t.starts_with("impl ") || t.starts_with("struct ")
+            });
+            if item.is_some_and(|t| t.starts_with("pub fn ")) {
+                entry_points += 1;
+            }
+        }
+        assert_eq!(
+            parse(src).len(),
+            entry_points,
+            "parse() dropped a #[wasm_bindgen] pub fn entry point — the parser is too narrow for a \
+             pattern in lib.rs; extend it so wasm.md stays complete",
+        );
+    }
+
     #[test]
     fn parses_free_fn_with_js_name() {
         let src = r#"
