@@ -48,7 +48,6 @@ Per-mem commit-delta feed — reads the mem's own git repo (gitdir via `memstead
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "Parameters for memstead_changes_since.",
   "properties": {
     "include_notes": {
       "default": false,
@@ -76,7 +75,6 @@ Per-mem commit-delta feed — reads the mem's own git repo (gitdir via `memstead
     "mem",
     "since"
   ],
-  "title": "ChangesSinceParams",
   "type": "object"
 }
 ```
@@ -221,7 +219,6 @@ Create a new entity. Read the target mem's schema first via `memstead_schema` (s
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "Parameters for memstead_create.",
   "properties": {
     "anchors": {
       "description": "Optional provenance anchors to attach to the new entity — durable records tying it to the source artifacts it describes (which artifact, at which grain, under which provenance class). Written into the mem-branch anchors sidecar in the SAME commit as the entity (atomic); omitting it is byte-identical to a create without anchors. A malformed element refuses the whole create with `INVALID_ANCHOR` (`details` carries the offending field + allowed set) and the entity is not written. Anchors do NOT participate in `_hash`.",
@@ -297,7 +294,6 @@ Create a new entity. Read the target mem's schema first via `memstead_schema` (s
     "title",
     "entity_type"
   ],
-  "title": "CreateParams",
   "type": "object"
 }
 ```
@@ -316,7 +312,6 @@ Remove an entity permanently. Deletes the entity's store record, every edge touc
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "Parameters for memstead_delete.",
   "properties": {
     "expected_hash": {
       "description": "Hash from memstead_entity response (_hash field). Required for real entities — read first. Mirrors memstead_update / memstead_rename. Mismatch returns code HASH_MISMATCH with details.current carrying the current on-disk hash. Stubs carry an empty `_hash` (they have no on-disk file); pass the empty string to delete a stub — the hash check is skipped because there is nothing to compare.",
@@ -338,7 +333,6 @@ Remove an entity permanently. Deletes the entity's store record, every edge touc
     "id",
     "expected_hash"
   ],
-  "title": "DeleteParams",
   "type": "object"
 }
 ```
@@ -357,7 +351,6 @@ Return a two-ref structural diff at entity granularity. Walks the tree at `ref_a
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "Parameters for memstead_diff. Two-ref structural diff at entity\ngranularity; the response wire shape is `Diff` / `EntityDiff` from\n`memstead_base::ops::diff`.",
   "properties": {
     "include_content": {
       "default": true,
@@ -395,7 +388,6 @@ Return a two-ref structural diff at entity granularity. Walks the tree at `ref_a
     "ref_a",
     "ref_b"
   ],
-  "title": "DiffParams",
   "type": "object"
 }
 ```
@@ -414,7 +406,6 @@ Read one entity. Dual channel: text carries rendered markdown for direct prose c
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "Parameters for memstead_entity.",
   "properties": {
     "chunk": {
       "description": "Which chunk to read (1-based). Only needed for entities that exceed the token budget.",
@@ -466,7 +457,6 @@ Read one entity. Dual channel: text carries rendered markdown for direct prose c
   "required": [
     "id"
   ],
-  "title": "EntityParams",
   "type": "object"
 }
 ```
@@ -485,7 +475,6 @@ Return graph health metrics. Typed payload on `structured_content` (always whole
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "Parameters for memstead_health.",
   "properties": {
     "chunk": {
       "description": "Which chunk of the rendered-markdown text channel to read (1-based). Only needed when a multi-include report exceeds the token budget. `structured_content` is whole regardless.",
@@ -544,7 +533,6 @@ Return graph health metrics. Typed payload on `structured_content` (always whole
       ]
     }
   },
-  "title": "HealthParams",
   "type": "object"
 }
 ```
@@ -604,7 +592,6 @@ Create and register a new writable mem at runtime. Requires workspace opt-in via
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "Parameters for `memstead_mem_create`.",
   "properties": {
     "include_schema": {
       "default": false,
@@ -671,7 +658,6 @@ Create and register a new writable mem at runtime. Requires workspace opt-in via
     "location",
     "schema"
   ],
-  "title": "MemCreateParams",
   "type": "object"
 }
 ```
@@ -690,7 +676,6 @@ Remove a writable mem at runtime — always destructive: removes the mem and pru
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "Parameters for `memstead_mem_delete`.\n\nThe MCP surface collapses to one verb that always means destructive.\nThe earlier `delete_files: bool` parameter retired — agents have no legitimate\nneed to \"preserve storage but unregister\"; the router-only\nunregister-preserve-storage workflow stays reachable via the CLI's\n`memstead mem unregister` verb (operator-only). The MCP wrapper\nhardcodes `delete_files: true` when invoking the engine, so the\npromised refusals (`MEM_REFERENCED_BY_POLICY`,\n`MEM_HAS_INCOMING_REFS`) and the policy scrub on success always\nfire.",
   "properties": {
     "name": {
       "description": "Name of the mem to destroy.",
@@ -707,7 +692,6 @@ Remove a writable mem at runtime — always destructive: removes the mem and pru
   "required": [
     "name"
   ],
-  "title": "MemDeleteParams",
   "type": "object"
 }
 ```
@@ -726,7 +710,6 @@ Update a mem's schema pin — the integrity-driven schema-migration trigger. Sta
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "Parameters for `memstead_mem_set_schema` — the integrity-driven\nschema-migration trigger.",
   "properties": {
     "mem": {
       "description": "Name of the writable mem whose schema pin is being set.",
@@ -748,7 +731,6 @@ Update a mem's schema pin — the integrity-driven schema-migration trigger. Sta
     "mem",
     "schema"
   ],
-  "title": "MemSetSchemaParams",
   "type": "object"
 }
 ```
@@ -767,7 +749,6 @@ Update a registered mem's `version` field. The version is consumed by `memstead_
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "Parameters for `memstead_mem_set_version`. F1.",
   "properties": {
     "name": {
       "description": "Name of the mem whose `version` field is being updated.",
@@ -789,7 +770,6 @@ Update a registered mem's `version` field. The version is consumed by `memstead_
     "name",
     "version"
   ],
-  "title": "MemSetVersionParams",
   "type": "object"
 }
 ```
@@ -808,7 +788,6 @@ Start here. Returns the schema catalogue, mem inventory, and community clusters 
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "Parameters for memstead_overview.",
   "properties": {
     "chunk": {
       "description": "Which chunk to read (1-based). Only needed if overview exceeds the MCP response cap.",
@@ -853,7 +832,6 @@ Start here. Returns the schema catalogue, mem inventory, and community clusters 
       ]
     }
   },
-  "title": "OverviewParams",
   "type": "object"
 }
 ```
@@ -872,7 +850,6 @@ Connect two entities with a typed edge. Pre-fetch the mem's schema via `memstead
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "Parameters for memstead_relate.",
   "properties": {
     "description": {
       "default": null,
@@ -915,7 +892,6 @@ Connect two entities with a typed edge. Pre-fetch the mem's schema via `memstead
     "to",
     "type"
   ],
-  "title": "RelateParams",
   "type": "object"
 }
 ```
@@ -934,7 +910,6 @@ Reload one writable mem's slice of the in-memory store from its on-disk branch t
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "Parameters for memstead_reload.",
   "properties": {
     "mem": {
       "description": "Writable mem name to reload. Omit to reload every writable mem. Use the per-mem form for cheap, targeted refreshes when you know which mem drifted; use the workspace-wide form (omit `mem`) when an out-of-band `git pull` may have advanced multiple branches at once, or to pick up CLI-driven workspace-policy edits (allowlist / cross-link / mutation policy) — per-mem reload skips that workspace-level settings refresh. Reload scope covers **mem-scoped** state: a mem's `sync_state` (the projection baselines `#synced`/`#verified`) rides its destination mem's config, so an out-of-band `sync_state` write — e.g. from `memstead projection advance` / `mem set-sync-state` in a sibling process — is picked up by a per-mem (or workspace-wide) reload of that mem. The engine-owned advance/disposition store (`.memstead/state/advance/`) is **workspace-store** state read fresh from disk per operation — it is reload-independent by design and is neither refreshed nor invalidated by this call.",
@@ -944,7 +919,6 @@ Reload one writable mem's slice of the in-memory store from its on-disk branch t
       ]
     }
   },
-  "title": "ReloadParams",
   "type": "object"
 }
 ```
@@ -963,7 +937,6 @@ Rename an entity by changing its title. Updates the entity ID (mem prefix preser
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "Parameters for memstead_rename.",
   "properties": {
     "expected_hash": {
       "description": "Hash from memstead_entity (_hash). Required. Mismatch returns code HASH_MISMATCH with details.current carrying the current on-disk hash.",
@@ -990,7 +963,6 @@ Rename an entity by changing its title. Updates the entity ID (mem prefix preser
     "new_title",
     "expected_hash"
   ],
-  "title": "RenameParams",
   "type": "object"
 }
 ```
@@ -1009,7 +981,6 @@ Read one schema. Default `verbosity` is "lite": a structural skeleton — entity
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "Parameters for memstead_schema. Exactly one of `name` or `mem`\nmust be supplied; passing both is an `INVALID_INPUT` error.",
   "properties": {
     "mem": {
       "description": "Mem name as listed in memstead_overview's `## Mems` section. The engine resolves the mem's pinned `schema_ref` from the workspace's mount roster and proceeds identically to the `name`-driven path. Mutually exclusive with `name`. Returns `UNKNOWN_MEM` when the mem is not mounted.",
@@ -1033,7 +1004,6 @@ Read one schema. Default `verbosity` is "lite": a structural skeleton — entity
       ]
     }
   },
-  "title": "SchemaParams",
   "type": "object"
 }
 ```
@@ -1088,7 +1058,6 @@ Search entities by lexical content + structural filters. Dual channel: rendered-
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "Parameters for memstead_search.",
   "properties": {
     "depth": {
       "description": "Max hops from related_to (default: 1, ignored without related_to)",
@@ -1212,7 +1181,6 @@ Search entities by lexical content + structural filters. Dual channel: rendered-
       ]
     }
   },
-  "title": "SearchParams",
   "type": "object"
 }
 ```
@@ -1402,7 +1370,6 @@ Modify an existing entity. Pre-fetch the target mem's schema via `memstead_schem
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "Parameters for memstead_update.",
   "properties": {
     "anchors": {
       "description": "Optional provenance anchors to attach to this entity — durable records tying it to the source artifacts it describes. Written into the mem-branch anchors sidecar in the SAME commit as the update (atomic); omitting it is byte-identical to an update without anchors. An update carrying only `anchors` (no section/metadata change) still commits the sidecar. A malformed element refuses the whole update with `INVALID_ANCHOR` and nothing is written. Anchors do NOT participate in `_hash`.",
@@ -1511,7 +1478,6 @@ Modify an existing entity. Pre-fetch the target mem's schema via `memstead_schem
     "id",
     "expected_hash"
   ],
-  "title": "UpdateParams",
   "type": "object"
 }
 ```
@@ -1530,7 +1496,6 @@ Append a `[[mem_management.create]]` rule admitting mem names matching `pattern`
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "Parameters for `memstead_workspace_allow_create`.",
   "properties": {
     "before": {
       "description": "Existing pattern to insert before — lifts the new rule above the named pattern in the priority list. Omit to append at the end (lowest priority).",
@@ -1565,7 +1530,6 @@ Append a `[[mem_management.create]]` rule admitting mem names matching `pattern`
     "pattern",
     "schemas"
   ],
-  "title": "WorkspaceAllowCreateParams",
   "type": "object"
 }
 ```
@@ -1584,7 +1548,6 @@ Append a `[[mem_management.delete]]` rule admitting deletes of mem names matchin
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "Parameters for `memstead_workspace_allow_delete`.",
   "properties": {
     "pattern": {
       "description": "Glob pattern matched against composed mem candidates. Appended to `[[mem_management.delete]]` — the symmetric allowlist for `memstead_mem_delete`. Agent-creatable equals agent-deletable in spirit; mirror the create-side `pattern` to keep parity.",
@@ -1594,7 +1557,6 @@ Append a `[[mem_management.delete]]` rule admitting deletes of mem names matchin
   "required": [
     "pattern"
   ],
-  "title": "WorkspaceAllowDeleteParams",
   "type": "object"
 }
 ```
@@ -1613,7 +1575,6 @@ Grant mem `from` permission to author cross-mem links into mem `to`. Mutates the
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "Parameters for `memstead_workspace_grant_cross_link`.",
   "properties": {
     "from": {
       "description": "Source mem. The grantee — the mem permitted to author cross-mem edges into `to`.",
@@ -1628,7 +1589,6 @@ Grant mem `from` permission to author cross-mem links into mem `to`. Mutates the
     "from",
     "to"
   ],
-  "title": "WorkspaceGrantCrossLinkParams",
   "type": "object"
 }
 ```
@@ -1647,7 +1607,6 @@ Remove a `[[mem_management.create]]` rule by `pattern`. Counterpart to `memstead
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "Parameters for `memstead_workspace_revoke_create`.",
   "properties": {
     "pattern": {
       "description": "Glob pattern of the `[[mem_management.create]]` rule to drop. Matched exactly against the rule's `pattern` field.",
@@ -1657,7 +1616,6 @@ Remove a `[[mem_management.create]]` rule by `pattern`. Counterpart to `memstead
   "required": [
     "pattern"
   ],
-  "title": "WorkspaceRevokeCreateParams",
   "type": "object"
 }
 ```
@@ -1676,7 +1634,6 @@ Revoke mem `from`'s permission to author cross-mem links into mem `to`. Mutates 
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "Parameters for `memstead_workspace_revoke_cross_link`.",
   "properties": {
     "from": {
       "description": "Source mem. The grantee whose existing grant is being revoked.",
@@ -1691,7 +1648,6 @@ Revoke mem `from`'s permission to author cross-mem links into mem `to`. Mutates 
     "from",
     "to"
   ],
-  "title": "WorkspaceRevokeCrossLinkParams",
   "type": "object"
 }
 ```
@@ -1710,7 +1666,6 @@ Remove a `[[mem_management.delete]]` rule by `pattern`. Counterpart to `memstead
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "Parameters for `memstead_workspace_revoke_delete`.",
   "properties": {
     "pattern": {
       "description": "Glob pattern of the `[[mem_management.delete]]` rule to drop. Matched exactly against the rule's `pattern` field.",
@@ -1720,7 +1675,6 @@ Remove a `[[mem_management.delete]]` rule by `pattern`. Counterpart to `memstead
   "required": [
     "pattern"
   ],
-  "title": "WorkspaceRevokeDeleteParams",
   "type": "object"
 }
 ```
