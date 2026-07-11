@@ -152,6 +152,19 @@ impl Engine {
         // already knows the mem and doesn't need the count.
         let _removed = self.store.remove_entities_by_mem(mem_name);
 
+        // Purge load-time warnings attributed to the removed mem.
+        // `health()` merges `self.load_warnings` unconditionally, so
+        // a skipped purge leaves phantom warnings citing entities the
+        // store no longer holds — for the whole engine lifetime, since
+        // nothing else clears the accumulator on the MCP path.
+        // Attribution is by SOURCE mem only (`WarningHint::source_mem`):
+        // a warning whose source entity lives in a surviving mem stays
+        // even when its target pointed into the deleted mem — the
+        // invalid row still exists in that survivor's markdown and
+        // remains visible drift (recover-worthy), not stale state.
+        self.load_warnings
+            .retain(|w| w.source_mem() != Some(mem_name));
+
         // COW snapshot swap on the mem_router. `Arc::make_mut`
         // clones the inner snapshot when other Arcs exist; if this
         // is the only handle (typical for the engine's lifetime),
@@ -1144,14 +1157,30 @@ impl Engine {
     ///
     /// Invalidates community + search-index memos on success.
     pub fn reload_one_mem(&mut self, mem: &str) -> Result<crate::ops::ReloadResult, EngineError> {
-        // Per-mem reload is intentionally silent on the engine-
-        // wide `load_warnings` accumulator — matches full's
-        // `reload_one_mem`. A LOCAL sink absorbs any warnings
-        // the parser emits during this reload and is discarded.
-        // Drift events still surface as `MemReloaded` warnings
-        // via `reload_if_stale`.
+        // Per-mem reload refreshes THIS mem's slice of the engine-wide
+        // `load_warnings` accumulator: stale boot-time warnings for the
+        // mem drop, fresh re-parse warnings take their place, other
+        // mems' entries stay untouched. (The earlier "intentionally
+        // silent" contract let a reload heal drift on disk while
+        // `health()` kept reporting the healed warning forever — the
+        // same class of stale-state lie the mem-delete purge closes.)
+        //
+        // The sink is filtered by source-mem attribution before it
+        // merges: `validate_loaded_relations` scans the whole store, so
+        // in principle the sink can carry other mems' warnings. In the
+        // common case those mems' invalid rows were already dropped
+        // from the in-memory store at their own load, so the filter is
+        // a no-op guard against cross-mem duplicates, not a routine
+        // trim. Failure leaves the accumulator untouched (`?` fires
+        // before the merge), matching the inner fn's no-mutation-on-
+        // failed-read fence. Drift events still surface as
+        // `MemReloaded` warnings via `reload_if_stale`.
         let mut sink: Vec<WarningHint> = Vec::new();
-        self.reload_one_mem_inner(mem, &mut sink)
+        let result = self.reload_one_mem_inner(mem, &mut sink)?;
+        self.load_warnings.retain(|w| w.source_mem() != Some(mem));
+        self.load_warnings
+            .extend(sink.into_iter().filter(|w| w.source_mem() == Some(mem)));
+        Ok(result)
     }
 
     /// Inner per-mem body shared by [`Self::reload_one_mem`]
@@ -1409,6 +1438,16 @@ impl Engine {
     /// (slim) that the `memstead_reload` MCP tool's no-mem path
     /// consumes.
     ///
+    /// `load_warnings` semantics ride on the per-mem contract: each
+    /// [`Self::reload_one_mem`] in the sweep refreshes its own mem's
+    /// slice of the engine-wide accumulator, so a full sweep leaves
+    /// the accumulator equivalent to a fresh boot. (Earlier this
+    /// variant discarded every reload warning while its slim
+    /// counterpart repopulated — the MCP workspace-wide reload could
+    /// never clear a stale warning.) On first-error-abort, mems
+    /// reloaded before the failure carry refreshed slices and the
+    /// rest keep their boot-time entries — no slice is lost.
+    ///
     /// Also re-reads `.memstead/workspace.toml` and refreshes
     /// [`crate::workspace::WorkspaceSettings`] before sweeping the
     /// mems — this is the pairing with the CLI's
@@ -1617,32 +1656,194 @@ mod tests {
     }
 
     #[test]
-    fn reload_one_mem_keeps_engine_load_warnings_pristine() {
-        // Boot with a duplicate-heading file so the accumulator
-        // starts non-empty. Single-mem reload should NOT clear
-        // or repopulate the engine-wide accumulator (mirrors full's
-        // contract: per-mem reload is silent on the engine-wide
-        // sink). The engine field stays as the boot-time snapshot.
+    fn reload_one_mem_refreshes_own_slice_and_keeps_other_mems() {
+        // Boot two mems, each with a duplicate-heading file, so the
+        // accumulator carries one warning per mem. Fix alpha's file on
+        // disk, reload ONLY alpha: alpha's stale warning must drop
+        // (reload heals drift — health() must stop reporting it) while
+        // beta's untouched warning survives (per-mem reload never
+        // clears other mems' slices).
+        let tmp = TempDir::new().unwrap();
+        let dup_body = "---\ntype: spec\n---\n# Dup\n\n## Identity\n\na.\n\n## Identity\n\nb.\n";
+        let a_dir = tmp.path().join("a");
+        std::fs::create_dir_all(&a_dir).unwrap();
+        std::fs::write(a_dir.join("dup.md"), dup_body).unwrap();
+        let b_dir = tmp.path().join("b");
+        std::fs::create_dir_all(&b_dir).unwrap();
+        std::fs::write(b_dir.join("dup.md"), dup_body).unwrap();
+        let mut engine = Engine::from_mounts(vec![
+            (
+                folder_mount("alpha", a_dir.clone()),
+                Box::new(FilesystemMemWriter::new(a_dir.clone())) as Box<dyn MemBackend>,
+            ),
+            (
+                folder_mount("beta", b_dir.clone()),
+                Box::new(FilesystemMemWriter::new(b_dir.clone())) as Box<dyn MemBackend>,
+            ),
+        ])
+        .unwrap();
+        let mem_of = |w: &WarningHint| w.source_mem().map(str::to_string);
+        let pre: Vec<_> = engine.load_warnings().iter().filter_map(mem_of).collect();
+        assert!(
+            pre.contains(&"alpha".to_string()) && pre.contains(&"beta".to_string()),
+            "boot must populate one warning per mem: {pre:?}"
+        );
+
+        // Heal alpha's file on disk, then reload only alpha.
+        let clean_body = "---\ntype: spec\n---\n# Dup\n\n## Identity\n\na.\n";
+        std::fs::write(a_dir.join("dup.md"), clean_body).unwrap();
+        engine.reload_one_mem("alpha").unwrap();
+
+        let post: Vec<_> = engine.load_warnings().iter().filter_map(mem_of).collect();
+        assert!(
+            !post.contains(&"alpha".to_string()),
+            "reload must drop the healed mem's stale warning: {post:?}"
+        );
+        assert!(
+            post.contains(&"beta".to_string()),
+            "reload of alpha must not clear beta's slice: {post:?}"
+        );
+    }
+
+    #[test]
+    fn unregister_writable_mem_purges_load_warnings_for_that_mem_only() {
+        // Two mems, each contributing a boot-time warning. Deleting
+        // alpha must purge alpha's warnings from the accumulator
+        // (health() merges it unconditionally — leftovers would cite
+        // entities the store no longer holds) while beta's survive.
+        let tmp = TempDir::new().unwrap();
+        let dup_body = "---\ntype: spec\n---\n# Dup\n\n## Identity\n\na.\n\n## Identity\n\nb.\n";
+        let a_dir = tmp.path().join("a");
+        std::fs::create_dir_all(&a_dir).unwrap();
+        std::fs::write(a_dir.join("dup.md"), dup_body).unwrap();
+        let b_dir = tmp.path().join("b");
+        std::fs::create_dir_all(&b_dir).unwrap();
+        std::fs::write(b_dir.join("dup.md"), dup_body).unwrap();
+        let mut engine = Engine::from_mounts(vec![
+            (
+                folder_mount("alpha", a_dir.clone()),
+                Box::new(FilesystemMemWriter::new(a_dir)) as Box<dyn MemBackend>,
+            ),
+            (
+                folder_mount("beta", b_dir.clone()),
+                Box::new(FilesystemMemWriter::new(b_dir)) as Box<dyn MemBackend>,
+            ),
+        ])
+        .unwrap();
+        assert!(
+            engine
+                .load_warnings()
+                .iter()
+                .any(|w| w.source_mem() == Some("alpha")),
+            "boot must carry alpha-sourced warnings"
+        );
+
+        engine.unregister_writable_mem("alpha").unwrap();
+
+        let post = engine.load_warnings();
+        assert!(
+            !post.iter().any(|w| w.source_mem() == Some("alpha")),
+            "delete must purge the removed mem's warnings: {post:?}"
+        );
+        assert!(
+            post.iter().any(|w| w.source_mem() == Some("beta")),
+            "delete of alpha must keep beta's warnings: {post:?}"
+        );
+    }
+
+    #[test]
+    fn unregister_writable_mem_keeps_warnings_sourced_in_surviving_mems() {
+        // Complement to the purge: a warning SOURCED in a surviving
+        // mem whose TARGET pointed into the deleted mem must survive.
+        // The invalid row still exists in the survivor's markdown —
+        // it is live drift (recover-worthy), not stale state, so
+        // purging by target would hide a real finding.
+        let tmp = TempDir::new().unwrap();
+        let a_dir = tmp.path().join("a");
+        std::fs::create_dir_all(&a_dir).unwrap();
+        let source_body = "---\ntype: spec\n---\n# Source\n\n## Identity\n\nThe source.\n\n## Relationships\n\n- **MADE_UP_TYPE**: [[beta--b1]]\n";
+        std::fs::write(a_dir.join("source.md"), source_body).unwrap();
+        let b_dir = tmp.path().join("b");
+        std::fs::create_dir_all(&b_dir).unwrap();
+        let target_body = "---\ntype: spec\n---\n# B1\n\n## Identity\n\nThe target.\n";
+        std::fs::write(b_dir.join("b1.md"), target_body).unwrap();
+        let mut engine = Engine::from_mounts(vec![
+            (
+                folder_mount("alpha", a_dir.clone()),
+                Box::new(FilesystemMemWriter::new(a_dir)) as Box<dyn MemBackend>,
+            ),
+            (
+                folder_mount("beta", b_dir.clone()),
+                Box::new(FilesystemMemWriter::new(b_dir)) as Box<dyn MemBackend>,
+            ),
+        ])
+        .unwrap();
+        let alpha_sourced = |engine: &Engine| {
+            engine
+                .load_warnings()
+                .iter()
+                .any(|w| matches!(w, WarningHint::ParsedRelationInvalid { entity_id, .. } if entity_id.mem() == "alpha"))
+        };
+        assert!(
+            alpha_sourced(&engine),
+            "boot must flag alpha's invalid row: {:?}",
+            engine.load_warnings()
+        );
+
+        engine.unregister_writable_mem("beta").unwrap();
+
+        assert!(
+            alpha_sourced(&engine),
+            "deleting the TARGET mem must not purge the survivor-sourced warning: {:?}",
+            engine.load_warnings()
+        );
+    }
+
+    /// The `memstead_reload` MCP tool's no-mem path consumes the
+    /// reports variant — it must refresh `load_warnings` like its slim
+    /// counterpart, not discard the sweep's warnings. Regression for
+    /// the split-brain where the slim variant repopulated and the
+    /// reports variant silently kept the boot-time snapshot forever
+    /// (observed live 2026-07-11: warnings for deleted mems survived a
+    /// workspace-wide MCP reload).
+    #[test]
+    fn reload_each_writable_mem_reports_refreshes_load_warnings() {
         let tmp = TempDir::new().unwrap();
         let mem_dir = tmp.path().to_path_buf();
-        let body = "---\ntype: spec\n---\n# Dup\n\n## Identity\n\na.\n\n## Identity\n\nb.\n";
-        std::fs::write(mem_dir.join("dup.md"), body).unwrap();
+        let dup_body = "---\ntype: spec\n---\n# Dup\n\n## Identity\n\na.\n\n## Identity\n\nb.\n";
+        std::fs::write(mem_dir.join("dup.md"), dup_body).unwrap();
         let writer = FilesystemMemWriter::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
             folder_mount("specs", mem_dir.clone()),
             Box::new(writer) as Box<dyn MemBackend>,
         )])
         .unwrap();
-        let pre = engine.load_warnings().to_vec();
-        assert!(!pre.is_empty(), "boot must populate load_warnings");
+        assert!(
+            !engine.load_warnings().is_empty(),
+            "boot must populate load_warnings"
+        );
 
-        engine.reload_one_mem("specs").unwrap();
-        let post = engine.load_warnings();
-        // Pristine: same as boot snapshot.
-        assert_eq!(
-            post.len(),
-            pre.len(),
-            "single-mem reload must not touch sink"
+        // Heal the file on disk; the reports sweep must clear the
+        // stale warning.
+        let clean_body = "---\ntype: spec\n---\n# Dup\n\n## Identity\n\na.\n";
+        std::fs::write(mem_dir.join("dup.md"), clean_body).unwrap();
+        engine.reload_each_writable_mem_reports().unwrap();
+        assert!(
+            engine.load_warnings().is_empty(),
+            "reports sweep must drop healed warnings: {:?}",
+            engine.load_warnings()
+        );
+
+        // And the inverse: fresh drift surfaces through the same sweep.
+        std::fs::write(mem_dir.join("dup.md"), dup_body).unwrap();
+        engine.reload_each_writable_mem_reports().unwrap();
+        assert!(
+            engine
+                .load_warnings()
+                .iter()
+                .any(|w| matches!(w, WarningHint::DuplicateSectionHeading { .. })),
+            "reports sweep must surface fresh drift: {:?}",
+            engine.load_warnings()
         );
     }
 
