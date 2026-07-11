@@ -456,8 +456,7 @@ fn generate_docs(args: GenerateDocsArgs) -> Result<()> {
 }
 
 fn write_binding_reference(output: &Path) -> Result<()> {
-    let schema_path =
-        workspace_root().join("docs/schemas/memstead-plugin/v1/binding.schema.json");
+    let schema_path = workspace_root().join("docs/schemas/memstead-plugin/v1/binding.schema.json");
     let rendered = binding_ref::render_from_file(&schema_path)?;
     write_if_changed(
         &output.join("binding.md"),

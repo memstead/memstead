@@ -36,7 +36,9 @@ use memstead_base::binding_migrate::{
 use memstead_base::ingest::advance::{
     AdvanceError, DispositionInput, ExcludeError, advance_baseline, record_exclusions,
 };
-use memstead_base::ingest::findings::{FullResyncDecision, verify_binding};
+use memstead_base::ingest::findings::{
+    FullResyncDecision, record_verified_baseline, verify_binding,
+};
 use memstead_base::ingest::report::{
     DEFAULT_REPORT_BUDGET, compute_fidelity_report, render_fidelity_report,
 };
@@ -1573,7 +1575,10 @@ fn render_full_resync_note(decision: &FullResyncDecision) -> String {
 }
 
 /// `projection verify <binding>` — measure fidelity and record durable findings
-/// (group A). Read-only on the destination mem.
+/// (group A). Read-only on the destination mem's *entities*; a completed run
+/// records its `#verified` baseline through the engine's sync-state writer
+/// (the one sanctioned post-run write — an aborted or failed run never
+/// advances the token).
 fn verify(ctx: &CliContext, args: VerifyArgs) -> anyhow::Result<()> {
     let (_shape, root) = ctx.workspace_shape().ok_or_else(|| {
         workspace_not_initialised_error(
@@ -1610,10 +1615,11 @@ fn verify(ctx: &CliContext, args: VerifyArgs) -> anyhow::Result<()> {
     let resolved = resolve_binding_run(&configs, &binding_id, &record.config)
         .map_err(|e| map_resolve_err(&binding_id, e))?;
 
-    // Verify is read-only — a shared engine borrow makes a mem mutation
-    // structurally impossible (A5).
-    let cli_engine = ctx.cli_engine_at(&root)?;
-    let engine = match &cli_engine {
+    // The measurement pass takes a shared engine borrow (A5 — structurally
+    // incapable of a mem mutation); the mutable binding exists only for the
+    // completed-run baseline write below.
+    let mut cli_engine = ctx.cli_engine_at(&root)?;
+    let engine = match &mut cli_engine {
         #[cfg(feature = "mem-repo")]
         CliEngine::MemRepo(e) => e,
         CliEngine::Filesystem(e) => e,
@@ -1634,6 +1640,27 @@ fn verify(ctx: &CliContext, args: VerifyArgs) -> anyhow::Result<()> {
     let report = compute_fidelity_report(engine, &root, &record.config, &resolved, &outcome.key);
     let rendered = render_fidelity_report(&report, budget, &args.include);
 
+    // The run completed — record its `#verified` baseline per observed facet
+    // head through the engine's sync-state writer (the backlog-prescribed
+    // writer; a failed run returned above and never reaches this).
+    let verified_baseline = record_verified_baseline(
+        engine,
+        &resolved.destination_mem,
+        &outcome,
+        Some("projection verify: completed-run #verified baseline"),
+    )
+    .map_err(|e| {
+        CliError::new(
+            ExitKind::Generic,
+            "PROJECTION_VERIFY_BASELINE_FAILED",
+            format!(
+                "verify completed and findings were recorded for `{binding_id}`, but writing \
+                 the `#verified` baseline failed: {e}"
+            ),
+        )
+        .with_details(json!({ "binding": binding_id, "error": e.to_string() }))
+    })?;
+
     if ctx.json {
         print_json(&json!({
             "binding": outcome.binding,
@@ -1648,6 +1675,9 @@ fn verify(ctx: &CliContext, args: VerifyArgs) -> anyhow::Result<()> {
             // (never a silent skip): whether a scheduled full walk fired, is not
             // yet due, is disabled, and any typed non-enumerable refusals.
             "full_resync": outcome.full_resync,
+            // The completed run's `#verified` baseline keys, written through
+            // the engine's sync-state writer.
+            "verified_baseline": verified_baseline,
             "report": report,
             "report_mode": rendered.mode,
             "report_markdown": rendered.markdown,
@@ -1655,11 +1685,26 @@ fn verify(ctx: &CliContext, args: VerifyArgs) -> anyhow::Result<()> {
     } else {
         // The rendered report IS the stdout content (agent-consumable brief);
         // prepend the scheduled full-walk decision so D3's typed signal (a full
-        // sweep, or a non-enumerable refusal) is never silent in human mode.
+        // sweep, or a non-enumerable refusal) is never silent in human mode,
+        // and append the recorded `#verified` baseline so the completed-run
+        // write is visible.
+        let baseline_note = if verified_baseline.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "\n> **Verified baseline recorded** — {}\n",
+                verified_baseline
+                    .iter()
+                    .map(|k| format!("`{k}`"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        };
         print_markdown(&format!(
-            "{}{}",
+            "{}{}{}",
             render_full_resync_note(&outcome.full_resync),
-            rendered.markdown
+            rendered.markdown,
+            baseline_note
         ));
     }
     Ok(())

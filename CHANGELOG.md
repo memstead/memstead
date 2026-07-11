@@ -47,6 +47,15 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `/setup` when the `memstead` binary is missing instead of handing the
   agent an empty prompt.
 
+### Fixed
+- **The `#verified` baseline is now written.** `projection verify` records
+  `<binding>/<facet>#verified = <observed facet head>` on every completed
+  run, through the engine's sync-state writer — previously nothing wrote
+  the token, so `status`/report rendered "never verified" forever and a
+  `trigger: loop` verify was due on every `--all` pass. A failed or
+  aborted run never advances the token; the recorded keys surface in the
+  verify output (`verified_baseline` in `--json`).
+
 ### Removed
 - The accidental `memstead-schema` release app: Cargo auto-detected the
   repo-internal `emit_json_schemas` dev tool as a binary, so cargo-dist

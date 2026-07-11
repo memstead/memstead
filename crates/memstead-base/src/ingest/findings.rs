@@ -31,6 +31,11 @@
 //! verify samples. [`verify_binding`] takes `&Engine` (shared, not mutable): it
 //! is structurally incapable of a destination-mem mutation. Any repair routes
 //! through the sync brief (group C), never through findings recording/reading.
+//! The one sanctioned post-run write is the **verified baseline**: after a
+//! pass returns `Ok`, the caller records `<binding>/<facet>#verified` per
+//! observed facet head via [`record_verified_baseline`] (the lifecycle
+//! sync-state writer) — a separate, explicit step, so an aborted or failed
+//! run never advances the token.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -362,6 +367,39 @@ pub struct VerifyOutcome {
     /// scheduled full walk fired, is not yet due, is disabled, and any typed
     /// non-enumerable refusals. Surfaced (never a silent skip) to the caller.
     pub full_resync: FullResyncDecision,
+    /// Each source facet's current head token as observed by this run — the
+    /// per-facet decomposition of `key.source_head`. The completed-run
+    /// baseline [`record_verified_baseline`] writes as `#verified`.
+    pub facet_heads: BTreeMap<String, String>,
+}
+
+/// Record a **completed** verify run's baseline: for each facet head the run
+/// observed, `<binding>/<facet>#verified = <token>` on the destination mem,
+/// through the engine's lifecycle sync-state writer (the backlog-prescribed
+/// `#verified` writer — the counterpart of the advance path's `#synced`).
+///
+/// Deliberately a separate step from [`verify_binding`], which keeps its
+/// shared `&Engine` borrow (A5 — measurement is structurally incapable of a
+/// mem mutation): the caller invokes this **only after** a verify pass
+/// returned `Ok`, so an aborted or failed run never advances the token. The
+/// selection loop reads the token to decide when a verify is due again; the
+/// CLI `status`/report paths and the macOS panel render it.
+///
+/// Returns the written sync-state keys. A binding whose run observed no facet
+/// head (nothing recorded, nothing moved) writes nothing.
+pub fn record_verified_baseline(
+    engine: &mut Engine,
+    destination_mem: &str,
+    outcome: &VerifyOutcome,
+    note: Option<&str>,
+) -> Result<Vec<String>, crate::engine::EngineError> {
+    let mut written = Vec::with_capacity(outcome.facet_heads.len());
+    for (facet, token) in &outcome.facet_heads {
+        let key = format!("{}/{facet}#verified", outcome.binding);
+        engine.set_mem_sync_state(destination_mem, &key, token, note)?;
+        written.push(key);
+    }
+    Ok(written)
 }
 
 /// Split a canonical binding id `<mem>/<stem>` into its two path-safe halves,
@@ -399,17 +437,18 @@ fn now_seconds() -> String {
     secs.to_string()
 }
 
-/// The composite current source-head token: each source facet's current
-/// baseline token, joined deterministically. Starts from the destination mem's
-/// recorded `#synced` tokens for the binding, then overlays the cursor's
-/// current-head tokens for any facet that has moved or is newly seen — so the
-/// value reflects the source's current state and changes iff any facet's head
-/// changes (the A3 "source head moved" trigger).
-fn current_source_head(
+/// Each source facet's **current head token**, keyed by facet. Starts from the
+/// destination mem's recorded `#synced` tokens for the binding, then overlays
+/// the cursor's current-head tokens for any facet that has moved or is newly
+/// seen — so the map reflects the source's current state. These are the tokens
+/// [`current_source_head`] joins into the composite key, and the per-facet
+/// values [`record_verified_baseline`] writes as `#verified` after a completed
+/// verify run.
+fn current_facet_heads(
     engine: &Engine,
     workspace_root: &Path,
     resolved: &ResolvedIngest,
-) -> String {
+) -> BTreeMap<String, String> {
     let binding_id = &resolved.name;
     let prefix = format!("{binding_id}/");
     let mut tokens: BTreeMap<String, String> = BTreeMap::new();
@@ -436,19 +475,31 @@ fn current_source_head(
     }
 
     tokens
+}
+
+/// Join a facet-head map into the composite source-head token,
+/// deterministically (`facet=token;facet=token`).
+fn join_facet_heads(tokens: &BTreeMap<String, String>) -> String {
+    tokens
         .iter()
         .map(|(facet, token)| format!("{facet}={token}"))
         .collect::<Vec<_>>()
         .join(";")
 }
 
-/// The current recording key for a binding: `(hash(D), source_head)`.
-fn current_key(
+/// The composite current source-head token: each source facet's current
+/// baseline token, joined deterministically — the value changes iff any
+/// facet's head changes (the A3 "source head moved" trigger).
+fn current_source_head(
     engine: &Engine,
     workspace_root: &Path,
-    binding: &BindingV1,
     resolved: &ResolvedIngest,
-) -> FindingKey {
+) -> String {
+    join_facet_heads(&current_facet_heads(engine, workspace_root, resolved))
+}
+
+/// `hash(D)` for a binding joined to its resolved primary sources.
+fn binding_hash_of(binding: &BindingV1, resolved: &ResolvedIngest) -> String {
     let primary_sources = resolved
         .sources
         .iter()
@@ -461,8 +512,18 @@ fn current_key(
         binding: binding.clone(),
         primary_sources,
     };
+    hash_binding(&rb)
+}
+
+/// The current recording key for a binding: `(hash(D), source_head)`.
+fn current_key(
+    engine: &Engine,
+    workspace_root: &Path,
+    binding: &BindingV1,
+    resolved: &ResolvedIngest,
+) -> FindingKey {
     FindingKey {
-        binding_hash: hash_binding(&rb),
+        binding_hash: binding_hash_of(binding, resolved),
         source_head: current_source_head(engine, workspace_root, resolved),
     }
 }
@@ -748,7 +809,14 @@ pub fn verify_binding(
     let binding_id = resolved.name.clone();
     let (mem, name) = split_binding_id(&binding_id)?;
 
-    let key = current_key(engine, workspace_root, binding, resolved);
+    // The facet-head map is the key's per-facet decomposition: computed once,
+    // joined into `key.source_head`, and returned on the outcome so a
+    // completed run's baseline write records exactly what this run observed.
+    let facet_heads = current_facet_heads(engine, workspace_root, resolved);
+    let key = FindingKey {
+        binding_hash: binding_hash_of(binding, resolved),
+        source_head: join_facet_heads(&facet_heads),
+    };
     let now = now_seconds();
     let facet = source_facet_label(resolved);
     let cache_root = workspace_root.join(".memstead.cache").join("ingest");
@@ -910,6 +978,7 @@ pub fn verify_binding(
         superseded,
         backlog,
         full_resync,
+        facet_heads,
     })
 }
 
@@ -1342,6 +1411,176 @@ mod tests {
         );
         // The covered file is not flagged uncovered.
         assert!(!has(FindingClass::Uncovered, "src/present.rs"));
+    }
+
+    /// The completed-run `#verified` writer (backlog 2026-07-11): a verify
+    /// pass surfaces its observed facet heads on the outcome (the per-facet
+    /// decomposition of `key.source_head`), and [`record_verified_baseline`]
+    /// records them as `<binding>/<facet>#verified` through the engine's
+    /// sync-state writer — durable on disk, visible to the same config read
+    /// `report`/`status` (and the macOS app) consume. A failed pass returns
+    /// `Err` before any caller reaches the writer, so the token never
+    /// advances on an aborted run.
+    #[test]
+    fn completed_verify_records_the_verified_baseline() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let mem_dir = root.join("mem");
+        std::fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
+        std::fs::write(
+            mem_dir.join(".memstead").join("config.json"),
+            r#"{"format":1,"schema":"default@1.0.0","version":"1.0.0"}"#,
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join(".memstead")).unwrap();
+        std::fs::write(
+            root.join(".memstead").join("workspace.toml"),
+            "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+        )
+        .unwrap();
+        let mount = Mount {
+            mem: "engine".to_string(),
+            schema: Some("default@1.0.0".parse().unwrap()),
+            storage: MountStorage::Folder {
+                path: mem_dir.clone(),
+            },
+            capability: MountCapability::Write,
+            lifecycle: MountLifecycle::Eager,
+            cross_linkable: false,
+            migration_target: None,
+        };
+        crate::FileWorkspaceStore::new()
+            .save_state(
+                root,
+                &Workspace {
+                    mounts: vec![mount],
+                    settings: WorkspaceSettings::default(),
+                },
+            )
+            .unwrap();
+        let out = std::process::Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(root)
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+
+        write_medium(
+            root,
+            "engine",
+            "graph",
+            &Medium {
+                name: "graph".to_string(),
+                medium_type: MediumType::Codebase,
+                pointer: String::new(),
+                change_detection: Some("git".to_string()),
+            },
+        )
+        .unwrap();
+        write_facet(
+            root,
+            "engine",
+            "graph",
+            &Facet {
+                name: "graph".to_string(),
+                medium: "graph".to_string(),
+                scope: vec![PatternEntry {
+                    path: "src/**/*.rs".to_string(),
+                    mode: PatternMode::Allow,
+                }],
+                engagement: None,
+                preparation: None,
+            },
+        )
+        .unwrap();
+        write_binding(
+            root,
+            "engine",
+            "graph",
+            &BindingV1 {
+                version: BINDING_VERSION,
+                intent: None,
+                source_facets: vec!["graph".to_string()],
+                reference_mems: Vec::new(),
+                destination_mem: "engine".to_string(),
+                deny_paths: Vec::new(),
+                coverage_semantics: CoverageSemantics::Exhaustive,
+                rules: None,
+                prune: None,
+                operations: Operations {
+                    build: Some(BuildOperation {
+                        mode: BuildMode::Discovery,
+                        trigger: IngestTrigger::Loop,
+                        batch_size: 20,
+                        post_actions: None,
+                    }),
+                    sync: None,
+                    verify: Some(VerifyOperation {
+                        trigger: IngestTrigger::Manual,
+                        batch_size: 20,
+                        adjudication_cap: DEFAULT_ADJUDICATION_CAP,
+                        full_resync_every: DEFAULT_FULL_RESYNC_EVERY,
+                    }),
+                },
+            },
+        )
+        .unwrap();
+
+        let mut engine = Engine::from_workspace_root(root).unwrap();
+        // A recorded `#synced` baseline is this facet's current head (the git
+        // work tree has no commits, so the cursor contributes no newer token).
+        engine
+            .set_mem_sync_state("engine", "engine/graph/graph#synced", "deadbeef", None)
+            .unwrap();
+
+        let configs = load_pipeline_configs(root).unwrap();
+        let binding = &configs.bindings[0].config;
+        let resolved = resolve_binding_run(&configs, "engine/graph", binding).unwrap();
+
+        let outcome = verify_binding(&engine, root, binding, &resolved).unwrap();
+        // The outcome decomposes its own key: joined facet heads == source_head.
+        assert_eq!(
+            outcome.facet_heads.get("graph").map(String::as_str),
+            Some("deadbeef")
+        );
+        assert_eq!(outcome.key.source_head, "graph=deadbeef");
+        assert_eq!(
+            join_facet_heads(&outcome.facet_heads),
+            outcome.key.source_head
+        );
+
+        // No `#verified` token exists before the writer runs.
+        assert!(
+            engine
+                .mem_config_for("engine")
+                .unwrap()
+                .sync_state
+                .get("engine/graph/graph#verified")
+                .is_none()
+        );
+
+        let written = record_verified_baseline(&mut engine, "engine", &outcome, None).unwrap();
+        assert_eq!(written, vec!["engine/graph/graph#verified".to_string()]);
+
+        // Visible to the engine's config read (the app's sync_state source)…
+        assert_eq!(
+            engine
+                .mem_config_for("engine")
+                .unwrap()
+                .sync_state
+                .get("engine/graph/graph#verified")
+                .map(String::as_str),
+            Some("deadbeef")
+        );
+        // …and durable on disk (what a fresh CLI process reads).
+        let disk: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(mem_dir.join(".memstead").join("config.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            disk["syncState"]["engine/graph/graph#verified"],
+            serde_json::json!("deadbeef")
+        );
     }
 
     // ---- D1: per-run adjudication cap -----------------------------------

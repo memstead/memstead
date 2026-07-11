@@ -434,9 +434,8 @@ fn init_output_matches_the_v1_schema_golden() {
 
     // The golden lives with the v1 format schemas under docs/ (repo-root-relative
     // to the cli crate: two levels up to `public/`, then the schemas tree).
-    let golden_path = Path::new(env!("CARGO_MANIFEST_DIR")).join(
-        "../../docs/schemas/memstead-plugin/v1/examples/binding.from-init.json",
-    );
+    let golden_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../docs/schemas/memstead-plugin/v1/examples/binding.from-init.json");
     let golden: Value = serde_json::from_slice(&std::fs::read(&golden_path).unwrap_or_else(|e| {
         panic!(
             "golden fixture unreadable at {}: {e}",
