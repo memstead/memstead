@@ -39,6 +39,7 @@ Turn the findings into a short, concrete plan. For each one, name the specific e
 - **Missing field** → fill the required field from what the entity already states.
 - **Stale** → flag for review; propose an actual update only when the newer truth is already available in the graph.
 - **Thin or incoherent cluster** → propose the relationships that would tie it together, or the split that would separate two concerns.
+- **Oversized or fragmentary entity** → an entity carrying several distinct concepts (many headings, unrelated sections) is a candidate **split** — one entity per concept; a stub-thin entity that only means anything as part of a broader neighbor is a candidate **merge** into that neighbor. Prefer merging a fragment over leaving it stranded, and splitting an overloaded entity over letting two concerns share one identity.
 
 Present the plan and ask which items to apply. Never apply a speculative or judgement-dependent change without approval.
 

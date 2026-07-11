@@ -46,7 +46,8 @@ Every command below is one you type. Pick by the job:
 | load what a mem already knows into context before I start working | **`/learn`** |
 | tidy a mem's structure — orphans, stubs, thin or missing links | **`/tidy`** |
 | commit pending graph changes by hand | **`/commit`** |
-| catch a mem up to code changes since last time *(interim)* | **`/reconcile`** |
+| bring a mem up to date after its source changed | **`/sync`** |
+| measure how faithfully a mem still matches its source | **`/verify`** |
 
 **Everyday graph work has no command — just talk to Claude.** The `memstead_*`
 MCP tools are always live, and Claude reaches for them on its own whenever you
@@ -71,15 +72,15 @@ changes. Everything in this loop is operable today:
 2. **Check freshness — `memstead status`.** Shows, per mem, what has moved in
    the source since the mem last kept pace — so you know when a mem has fallen
    behind before you rely on it.
-3. **Catch up — `/reconcile` *(interim)*.** Reads the changed source and writes
-   the graph forward (it commits nothing itself). This is the interim
-   maintenance path; a dedicated **`/sync`** command replaces it next release.
-4. **Commit — `/commit`.** The recovery path for pending graph changes when
+3. **Catch up — `/sync`.** The sole maintenance writer: it runs the engine's
+   sync brief (what changed since the last sync plus any open findings) and
+   updates only the affected entities, conservatively. Reads your source, writes
+   your mem — never the reverse, and commits nothing itself.
+4. **Measure — `/verify`.** A read-only fidelity report — coverage, accuracy,
+   freshness — that leads with a verdict and the top actions, and files findings
+   for `/sync` to act on. It changes nothing itself.
+5. **Commit — `/commit`.** The recovery path for pending graph changes when
    auto-commit is off or a previous session's commit didn't land.
-
-> **Landing next release:** **`/sync`** (continuous maintenance, superseding the
-> interim `/reconcile`) and **`/verify`** (fidelity measurement). Until then the
-> maintenance job is covered by `/reconcile` and `memstead status` above.
 
 ## How mutations work
 

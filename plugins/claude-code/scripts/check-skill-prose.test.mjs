@@ -115,8 +115,8 @@ test('rule 4 allowlists "commit" in /commit and stays medium-neutral otherwise',
 
 // ── exemption ────────────────────────────────────────────────────────
 
-test('reconcile and audit are the declared exemptions', () => {
-  // Documents the frozen-interim exemption honoured by lint(): these two
-  // are never iterated, so their prose is never scanned.
-  assert.deepEqual([...EXEMPT].sort(), ['audit', 'reconcile']);
+test('nothing is exempt — the full roster is linted after the S1b retirement', () => {
+  // reconcile + audit (the former frozen interim survivors) were deleted at
+  // S1b, so the exemption list is now empty and every roster skill is scanned.
+  assert.deepEqual([...EXEMPT], []);
 });

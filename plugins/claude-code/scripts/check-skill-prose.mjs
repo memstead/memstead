@@ -60,10 +60,11 @@ import { dirname, join } from 'node:path';
 export const ROUTER_BODY_MAX = 60;
 export const THIN_ROUTERS = ['ingest', 'commit', 'sync', 'verify'];
 
-// The roster skills subject to rules (1), (2) and (4). reconcile + audit
-// are the frozen interim survivors — exempt everywhere.
+// The roster skills subject to rules (1), (2) and (4). The full eight-skill
+// roster is now linted — reconcile + audit (the former frozen interim
+// survivors) were deleted at S1b, so nothing is exempt.
 export const ROSTER = ['setup', 'interview', 'learn', 'ingest', 'tidy', 'commit', 'verify', 'sync'];
-export const EXEMPT = ['reconcile', 'audit'];
+export const EXEMPT = [];
 
 const MECHANISM_TERMS = [
   { re: /\b\w*_hash\b/i, label: '`_hash`-suffixed mechanism name' },

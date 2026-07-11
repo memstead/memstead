@@ -38,8 +38,8 @@ export function pickReferencedEntityIds(result) {
 
 /**
  * The single-line notice the hook writes when an edited file is anchored.
- * References only living surfaces — `memstead_entity` — never the retired
- * `/audit` skill.
+ * References only living surfaces — `memstead_entity` — never a now-retired
+ * skill command.
  *
  * @param {string} relPath - Edited path, workspace-relative (the form anchors store).
  * @param {string[]} ids - Non-empty referencing entity ids.
