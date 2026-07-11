@@ -746,12 +746,18 @@ interface Engine {
     // `memstead_base::pipeline_edit`.
     //
     // The **binding** is the unit (D1/D14): `add_projection` / `update_projection`
-    // carry the projection-level fields (intent / source_facets / reference_mems
-    // / destination_mem / rules); the engine wraps them in — or overlays them
-    // onto — a versioned binding, preserving the `operations` block. There is no
-    // separate ingest CRUD: the flat ingest record died, and operations-block
-    // edits route through the projection update path (deferred one release — the
-    // operations-block editor UI is not built here).
+    // carry a JSON **patch over the full author-editable binding record** —
+    // intent / source_facets / reference_mems / destination_mem / deny_paths /
+    // coverage_semantics / rules / prune / the whole `operations` block. Patch
+    // semantics: an absent field is preserved from the stored record; explicit
+    // `null` clears intent / rules / prune; a present `operations` block
+    // replaces the block as a unit. `version` is engine-managed (ignored in the
+    // payload, preserved on update), and unknown additive keys are tolerated.
+    // Candidate records are validated against the medium-capability matrix
+    // before anything is written; only refusals the edit *introduces* block it
+    // (typed ValidationFailed, message + remedy verbatim from the engine).
+    // There is no separate ingest CRUD: the flat ingest record died, and
+    // operations-block edits ride this one update seam.
     //
     // Every edit accepts an optional provenance note. Git-branch
     // workspaces commit the edit's mirror to __MEMSTEAD with the note on
