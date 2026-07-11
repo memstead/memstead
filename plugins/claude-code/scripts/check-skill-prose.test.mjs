@@ -1,8 +1,8 @@
 // Tests for the roster-prose lint (check-skill-prose.mjs).
 //
-// A seeded violation of EACH rule class must be caught, and the
-// reconcile/audit exemption must hold. These exercise the pure rule
-// functions directly (the CLI `lint()` composes them over the real
+// A seeded violation of EACH rule class must be caught, and no skill is
+// exempt (the roster carries no router exemptions). These exercise the pure
+// rule functions directly (the CLI `lint()` composes them over the real
 // filesystem; here we feed synthetic inputs so a green run proves the
 // rules bite, not merely that today's surfaces happen to be clean).
 
