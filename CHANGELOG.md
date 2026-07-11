@@ -7,6 +7,13 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Removed
+- The accidental `memstead-schema` release app: Cargo auto-detected the
+  repo-internal `emit_json_schemas` dev tool as a binary, so cargo-dist
+  shipped it — installer and Homebrew formula included — in v0.2.0 and
+  v0.3.0. The crate is now dist-opted-out; the stray tap formula is
+  removed separately.
+
 ## [0.3.0] - 2026-07-11
 
 The projection-pipeline release. This is a breaking pre-1.0 release: it

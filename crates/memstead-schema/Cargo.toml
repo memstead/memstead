@@ -11,6 +11,14 @@ readme = "README.md"
 keywords = ["agent-memory", "knowledge-graph", "schema", "markdown", "validation"]
 categories = ["data-structures"]
 
+# `src/bin/emit_json_schemas.rs` is a repo-internal dev tool (regenerates the
+# IDE-validation JSON Schemas the drift test pins; it writes into repo paths).
+# Cargo auto-detects `src/bin/*.rs`, so without this opt-out cargo-dist shipped
+# it as a third "memstead-schema" app — own installer + Homebrew formula — in
+# the v0.2.0/v0.3.0 releases. Never a user-facing binary; keep dist off.
+[package.metadata.dist]
+dist = false
+
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
