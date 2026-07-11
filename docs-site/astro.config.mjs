@@ -23,7 +23,7 @@ export default defineConfig({
     starlight({
       title: "Memstead Docs",
       description:
-        "Guides plus auto-generated reference for the Memstead engine's MCP, CLI, UniFFI, WASM, and Registry HTTP surfaces.",
+        "Guides plus auto-generated reference for the Memstead engine's binding format, MCP, CLI, UniFFI, WASM, and Registry HTTP surfaces.",
       components: {
         Footer: "./src/components/Footer.astro",
       },

@@ -1,8 +1,9 @@
 //! `xtask` — internal command runner for build-tooling tasks against the
 //! engine workspace. Today the only subcommand is `generate-docs`,
 //! which regenerates the deterministic API-docs Markdown tree from the
-//! live MCP / CLI / UniFFI / WASM source. (The Registry HTTP reference is
-//! generated separately by the private `memstead-registry` crate.)
+//! live MCP / CLI / UniFFI / WASM source and the v1 binding schema +
+//! medium-capability matrix. (The Registry HTTP reference is generated
+//! separately by the private `memstead-registry` crate.)
 //!
 //! Invocation: `cargo run -p xtask -- generate-docs --output <DIR>`.
 
