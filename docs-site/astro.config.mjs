@@ -54,6 +54,7 @@ export default defineConfig({
           items: [
             // Built from ../GLOSSARY.md at prebuild (scripts/copy-openapi.mjs).
             { label: "Glossary", link: "/glossary/" },
+            { label: "The fidelity contract", link: "/concepts/fidelity-contract/" },
           ],
         },
         {
