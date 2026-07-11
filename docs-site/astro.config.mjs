@@ -45,7 +45,6 @@ export default defineConfig({
             { label: "Getting started", link: "/guides/getting-started/" },
             { label: "Author a schema", link: "/guides/author-a-schema/" },
             { label: "Publish a mem", link: "/guides/publish-a-mem/" },
-            { label: "Declare an ingest", link: "/guides/declare-an-ingest/" },
             { label: "Agent recipes", link: "/guides/agent-recipes/" },
           ],
         },
@@ -61,6 +60,7 @@ export default defineConfig({
           label: "Reference",
           items: [
             { label: "Skills", link: "/skills/" },
+            { label: "Binding format", link: "/reference/binding/" },
             { label: "MCP tools", link: "/reference/mcp/" },
             { label: "CLI", link: "/reference/cli/cli/" },
             { label: "UniFFI surface", link: "/reference/uniffi/" },

@@ -6,6 +6,7 @@
 //!
 //! Invocation: `cargo run -p xtask -- generate-docs --output <DIR>`.
 
+mod binding_ref;
 mod errors;
 mod eval;
 mod mcp;
@@ -439,7 +440,18 @@ fn generate_docs(args: GenerateDocsArgs) -> Result<()> {
     write_mcp_reference(&args.output)?;
     write_parity_matrix(&args.output)?;
     write_error_index(&args.output)?;
+    write_binding_reference(&args.output)?;
     Ok(())
+}
+
+fn write_binding_reference(output: &Path) -> Result<()> {
+    let schema_path =
+        workspace_root().join("plugins/claude-code/schemas/memstead-plugin/v1/binding.schema.json");
+    let rendered = binding_ref::render_from_file(&schema_path)?;
+    write_if_changed(
+        &output.join("binding.md"),
+        &with_frontmatter("Binding format", &rendered),
+    )
 }
 
 fn write_error_index(output: &Path) -> Result<()> {

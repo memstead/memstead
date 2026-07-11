@@ -5226,6 +5226,7 @@ dependencies = [
  "anyhow",
  "clap",
  "clap-markdown",
+ "memstead-base",
  "memstead-cli",
  "memstead-mcp",
  "regex",
