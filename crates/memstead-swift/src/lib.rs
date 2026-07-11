@@ -673,8 +673,10 @@ impl Engine {
         Ok(())
     }
 
-    /// Create a projection from a JSON-encoded `Projection`, scaffolded into a
-    /// v1 binding with a default build operation. See `Engine::add_projection_json`.
+    /// Create a binding from a JSON patch over the full author-editable
+    /// record, applied to the default scaffold (a default build operation
+    /// when no `operations` block is supplied). See
+    /// `Engine::add_projection_json`.
     pub fn add_projection(
         &self,
         mem: String,
@@ -690,8 +692,11 @@ impl Engine {
         Ok(())
     }
 
-    /// Overwrite a projection's fields from a JSON-encoded `Projection`,
-    /// preserving the binding's `operations` block. See `Engine::update_projection_json`.
+    /// Patch a binding from a JSON patch over the full author-editable
+    /// record: absent fields are preserved (operations included), explicit
+    /// `null` clears `intent` / `rules` / `prune`, a present `operations`
+    /// block replaces the block, `version` stays engine-managed. See
+    /// `Engine::update_projection_json`.
     pub fn update_projection(
         &self,
         mem: String,

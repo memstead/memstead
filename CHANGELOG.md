@@ -8,6 +8,22 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Changed
+- The binding edit layer (`memstead-base::pipeline_edit`, reached via the
+  UniFFI `add_projection` / `update_projection` methods) now carries the
+  **full author-editable binding record** instead of the five
+  projection-level fields: the `operations` block, `deny_paths`,
+  `coverage_semantics`, `rules`, and `prune` are all authorable through
+  the one update seam. Payloads are patches — an absent field is
+  preserved (the preserve-operations guarantee, extended to every field),
+  explicit `null` clears `intent` / `rules` / `prune` (rules were
+  previously set-only), a present `operations` block replaces the block,
+  and `version` stays engine-managed. Candidate records are validated
+  against the medium-capability matrix before anything is written —
+  e.g. declaring `sync` over a `web` medium refuses with the typed
+  remedy-bearing message; refusals a stored record already produces
+  never block an unrelated edit. Edits that would introduce a dangling
+  facet/medium reference are refused; creates refuse duplicates and a
+  missing `destination_mem`.
 - MCP SDK (`rmcp`) upgraded 1.4 → 2.2, aligning with the MCP 2025-11-25
   spec types. The JSON wire format is unchanged — tool responses,
   envelopes, and `structuredContent` shapes are byte-identical (the

@@ -286,10 +286,16 @@ impl From<PipelineEditError> for MemsteadError {
             },
             // Caller-actionable shape problems collapse into ValidationFailed;
             // the message carries the specifics (which key, which referrers).
+            // Capability carries the matrix's typed refusal messages with
+            // their remedies; Dangling names the unresolvable reference —
+            // both are caller-actionable, so they ride ValidationFailed
+            // with the message intact (the app renders it verbatim).
             PipelineEditError::AlreadyExists { .. }
             | PipelineEditError::Referenced { .. }
             | PipelineEditError::RenameTargetExists { .. }
-            | PipelineEditError::InvalidJson { .. } => Self::ValidationFailed {
+            | PipelineEditError::InvalidJson { .. }
+            | PipelineEditError::Capability { .. }
+            | PipelineEditError::Dangling { .. } => Self::ValidationFailed {
                 message: err.to_string(),
             },
             PipelineEditError::NotFound { .. } => Self::NotFound {
