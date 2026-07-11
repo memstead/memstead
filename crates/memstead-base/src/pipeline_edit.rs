@@ -1475,7 +1475,10 @@ mod tests {
             }"#,
         )
         .unwrap();
-        assert_eq!(b.operations.build.as_ref().unwrap().mode, BuildMode::OneShot);
+        assert_eq!(
+            b.operations.build.as_ref().unwrap().mode,
+            BuildMode::OneShot
+        );
         assert_eq!(b.operations.sync.as_ref().unwrap().batch_size, 7);
         assert!(b.operations.verify.is_none());
         assert_eq!(b.deny_paths, vec!["dev/**"]);
@@ -1645,8 +1648,14 @@ mod tests {
         )
         .unwrap();
         assert_eq!(after.operations.build.as_ref().unwrap().batch_size, 9);
-        assert!(after.operations.sync.is_none(), "sync removed with the block");
-        assert!(after.operations.verify.is_none(), "verify removed with the block");
+        assert!(
+            after.operations.sync.is_none(),
+            "sync removed with the block"
+        );
+        assert!(
+            after.operations.verify.is_none(),
+            "verify removed with the block"
+        );
         assert_eq!(after.rules, Some(serde_json::json!({ "routing": "r" })));
     }
 
@@ -1724,7 +1733,10 @@ mod tests {
 
         let after = update_binding_json(root, "v", "p", r#"{"intent":"fixed"}"#).unwrap();
         assert_eq!(after.intent.as_deref(), Some("fixed"));
-        assert!(after.operations.sync.is_some(), "pre-existing sync survives");
+        assert!(
+            after.operations.sync.is_some(),
+            "pre-existing sync survives"
+        );
     }
 
     /// A patch introducing a dangling facet reference refuses; a patch that
@@ -1787,7 +1799,10 @@ mod tests {
             r#"{"version": 99, "future_key": { "x": 1 }, "intent": "i2"}"#,
         )
         .unwrap();
-        assert_eq!(after.version, BINDING_VERSION, "version stays engine-managed");
+        assert_eq!(
+            after.version, BINDING_VERSION,
+            "version stays engine-managed"
+        );
         assert_eq!(after.intent.as_deref(), Some("i2"));
     }
 }
