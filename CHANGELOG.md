@@ -7,6 +7,56 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-11
+
+The projection-pipeline release. This is a breaking pre-1.0 release: it
+retires the four-primitive ingest config store in favour of a first-class,
+versioned **binding**, adds **anchors** as the provenance primitive, and
+replaces `memstead stats` with `memstead status`. It ships the binaries the
+repo and docs already describe — the shipped Claude Code plugin's ingest
+front door calls `memstead projection`, a command that did not exist in the
+0.2.0 binaries.
+
+### Added
+- `memstead projection` — binding (projection-promotion) tooling. One
+  versioned binding file per source→mem obligation replaces the
+  `projections/` + `ingests/` store. Subcommands: `projection init`
+  (scaffold a fresh v1 binding non-interactively), `projection brief` /
+  `projection brief --all` (render the Markdown run-brief an agent
+  consumes; `--all` selects the next due binding by round-robin + backoff),
+  `projection advance` (record disposition-gated sync-baseline advances),
+  `projection migrate` (promote both legacy declaration generations — the
+  root-folder layout and the gen-2 four-primitive store — into v1
+  bindings), and `projection enable <build|sync|verify>` (add a missing
+  operation block).
+- **Anchors** — the provenance primitive. `memstead create` and
+  `memstead update` accept `--anchor` (and `anchors[]` via `--from`); the
+  MCP `memstead_create` / `memstead_update` tools gain an optional
+  `anchors[]` parameter on both server flavours. New read-only
+  `memstead anchors <id>` lists an entity's anchors and composition, and
+  `memstead anchors --artifact <path>` reverse-looks-up every entity whose
+  anchor references a path. Anchor sidecars survive `.mem` archive export
+  and canonical repack. `memstead_entity` surfaces `anchors` and
+  `anchor_composition` as additive fields.
+- `memstead status` — node/edge counts, schema distribution, and
+  per-binding projection state.
+- Typed `INVALID_ANCHOR` error with recovery details across the CLI and
+  both MCP flavours.
+
+### Changed
+- `memstead status` **replaces** `memstead stats`. Health stays
+  lint-focused; on the MCP surface the former stats data is folded into
+  `memstead_health` (there is no MCP stats tool).
+- Binding format **v1**: one versioned binding file carries `intent`,
+  `source_facets`, `reference_mems`, `destination_mem`, `deny_paths`,
+  `coverage_semantics`, `rules`, and `operations{build,sync,verify}`.
+- The Claude Code plugin's anchors capability gate now keys on the first
+  anchors-capable binary (`0.3.0`); a recorded pre-0.3.0 binary fails
+  closed to the degraded (no-anchors) path rather than probing by error.
+
+### Removed
+- `memstead stats` — superseded by `memstead status`.
+
 ## [0.2.0] - 2026-07-04
 
 This release ships the binaries the public documentation already
@@ -50,6 +100,7 @@ First tagged release, with pre-built binaries for macOS, Linux, and Windows
   store, the folder and git-branch storage backends, the `memstead` CLI, and the
   `memstead-mcp` MCP server.
 
-[Unreleased]: https://github.com/memstead/memstead/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/memstead/memstead/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/memstead/memstead/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/memstead/memstead/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/memstead/memstead/releases/tag/v0.1.0

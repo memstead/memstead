@@ -18,7 +18,7 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 
 /** First `memstead` release whose mutation tools accept the `anchors[]` param. */
-export const ANCHORS_MIN = { major: 0, minor: 2, patch: 0 };
+export const ANCHORS_MIN = { major: 0, minor: 3, patch: 0 };
 
 const RECORD_REL = '.memstead.cache/plugin/binary-version.json';
 
