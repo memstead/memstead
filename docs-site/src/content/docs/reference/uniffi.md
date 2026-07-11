@@ -188,44 +188,20 @@ dictionary Entity {
 };
 ```
 
-## `dictionary EdgeTypeCount`
-
-Status. edge_types is a flat sequence rather than a map for Identifiable
-SwiftUI list rendering and stable sort on the Swift side.
-
-```idl
-dictionary EdgeTypeCount {
-    string rel_type;
-    u64 count;
-};
-```
-
 ## `dictionary Status`
 
-The status payload (D11: `stats` → `status`). Every field is preserved from
-the former `Stats` dictionary — the rename-preserving floor keeps the macOS
-app's data source unchanged, deferring the `mem_roster` + `get_health`
-rework to the editor-UI release.
-`stub_count` (and therefore `real_count = entity_count - stub_count`) is a
-UI staple the MCP surface also exposes (as top-level fields on
-`memstead_health`'s default response); carrying it on Status avoids a second
-`get_health()` round-trip just to display the entity/stub split.
-`writable_mems` + `read_mems` mirror the same fields on
-`memstead_health`'s default response so the macOS app can render the mem
-list from one call (write mems come from the router; read mems are
-the visible set minus the writable set).
+Status.
+The status payload (D11: `stats` → `status`) — the graph-counts rollup,
+shrunk to its consumer-backed fields (macos-deferred-ui data-source
+switch). Roster facts (writable/read mems, per-mem counts) ride
+`mem_roster`; health facts (stub/orphan/finding counts) ride `get_health`.
+The former rename-preserving superset fields are gone — nothing ships
+"reserved for later".
 
 ```idl
 dictionary Status {
     u64 entity_count;
-    u64 stub_count;
     u64 edge_count;
-    sequence<EdgeTypeCount> edge_types;
-    u64 community_count;
-    u64 mem_count;
-    sequence<string> types_in_use;
-    sequence<string> writable_mems;
-    sequence<string> read_mems;
 };
 ```
 
