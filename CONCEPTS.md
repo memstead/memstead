@@ -58,6 +58,6 @@ boundaries, rationale, and worked details. Read top to bottom once
 
 > An append-only structured record of every mutation an entity in a mem undergoes — who, when, what, and optionally why.
 
-## [Pipeline (medium · facet · projection · ingest)](GLOSSARY.md#pipeline-medium--facet--projection--ingest)
+## [Pipeline (medium · facet · projection)](GLOSSARY.md#pipeline-medium--facet--projection)
 
 > The workspace-level mechanism that populates a mem's content from external bodies of information rather than from direct agent writes.

@@ -67,7 +67,7 @@ The workspace is persisted in a single configuration file at the workspace root.
 - **Mem mounts** — which mems the workspace mounts, where each is sourced from (folder path, branch reference inside a mem-repo, `.mem` archive), and how each is attached (read / write, eager / lazy, cross-linkable / isolated).
 - **Cross-mem permissions** — the directed allowlist for wikilinks between mounted mems.
 - **Workspace-level policy** — mutation requirements (mandatory notes, expected-hash discipline), drift behaviour, mem lifecycle allowlists, plugin hooks.
-- **Pipeline configuration** — mediums, facets, projections, ingests; persisted centrally.
+- **Pipeline configuration** — mediums, facets, projections; persisted centrally.
 
 Schema definitions and per-mem configs are **not** workspace-level — they live with each mount's [storage backend](#storage-backend). The workspace just mounts backends and dispatches schema resolution through them in a fixed order (local → built-in → registry). See [Schema](#schema).
 
@@ -157,7 +157,7 @@ The workspace store is logical, not physical. Its content is fixed; the form on 
 - **Mount list** — one entry per mounted mem, each carrying the mem's storage reference and attachment properties (capability, lifecycle, cross-linkable). The schema pin lives in per-mem config in the storage backend, not in the mount entry.
 - **Cross-mem permissions** — directed allowlist for wikilinks between mounted mems.
 - **Workspace-level policy** — mutation requirements (mandatory notes, expected-hash discipline), drift behaviour, mem lifecycle allowlists, plugin hooks.
-- **Pipeline configuration** — mediums, facets, projections, ingests. Per-mem primitives, persisted centrally because they change with workspace lifecycle, not with mem content.
+- **Pipeline configuration** — mediums, facets, projections. Per-mem primitives, persisted centrally because they change with workspace lifecycle, not with mem content.
 
 **Role.**
 
@@ -175,8 +175,7 @@ The workspace store is logical, not physical. Its content is fixed; the form on 
   │   ├── state/mounts.json     ← engine-managed mount records
   │   ├── mediums/              ← pipeline configs (workspace-level)
   │   ├── facets/
-  │   ├── projections/
-  │   └── ingests/
+  │   └── projections/          ← versioned bindings (declaration + operations)
   ├── <mem folders or storage containers like mem-repo/>
   └── ...
   ```
@@ -467,26 +466,25 @@ Why two realizations look so different on disk: git already has commit-message p
 
 ---
 
-## Pipeline (medium · facet · projection · ingest)
+## Pipeline (medium · facet · projection)
 
 ### Definition
 
 > The workspace-level mechanism that populates a mem's content from external bodies of information rather than from direct agent writes.
 
-Four primitives compose the pipeline:
+Three primitives compose the pipeline:
 
 - **Medium** — a named reference to a body of information the mem acknowledges as part of its territory (a codebase, a filesystem, another mem, a git repo, a web resource). Passive: a medium does not fetch, transform, or filter. It only names what's out there.
 - **Facet** — a specific perspective from which a projection engages with a medium: a scope (allow / deny patterns), an engagement contract (verbs, tools, discipline), and an optional preparation step (PDF→markdown, audio→transcript, codebase→code-map).
-- **Projection** — a declared mapping from sources (one or more facets over mediums, plus optional reference mems) into a destination mem. Defines *what* the projection produces.
-- **Ingest** — operational configuration for running a projection: mode (`discovery` / `one-shot`), trigger (`loop` / `manual` / `on-event`), batch size, deny-path overrides. Defines *how and when* the projection runs.
+- **Projection** — the versioned binding: one declared, hash-keyed object carrying both the mapping (one or more facets over mediums, plus optional reference mems, into a destination mem) *and* its operations (`build`, `sync`, `verify`). It defines what feeds the mem and how the mem is built, measured, and maintained — a single durable relationship, not a declaration plus a detachable run-config.
 
-The pipeline is **per-mem** (each mem declares its own mediums, facets, projections, ingests — different mems have different territory) but **persisted centrally in the [workspace store](#workspace-store)** because the configuration changes with workspace lifecycle, not with mem content. The engine persists the four primitives under `.memstead/{mediums,facets,projections,ingests}/`.
+The pipeline is **per-mem** (each mem declares its own mediums, facets, projections — different mems have different territory) but **persisted centrally in the [workspace store](#workspace-store)** because the configuration changes with workspace lifecycle, not with mem content. The engine persists the three primitives under `.memstead/{mediums,facets,projections}/`.
 
 **Build, then measure and maintain.** Populating a mem is only the first half. Once a projection has built content, the engine can **verify** it — deterministically measure how faithfully the destination mem still reflects its sources (grain-classed coverage, anchor resolution, freshness), recording durable findings into an engine-owned store keyed to the projection declaration and the source head. Verify never mutates the destination: it measures and records only. **Sync** is the single maintenance writer — it consumes those findings and the changed-source slice through one brief an agent acts on. **Prune** proposes removing destination entities whose source is gone, presenting both sides and never overwriting a model-side edit. Every repair reaches the mem through the normal mutation surface, driven by the sync brief, not by the measurement path.
 
-**History.** An earlier single `Scope` primitive conflated territory-selection and engagement; the four-primitive model separates territory (medium), engagement (facet), and obligation (projection). The legacy `scopes|projections|ingests/` folders are retired (`memstead projection migrate` converts them).
+**History.** An earlier single `Scope` primitive conflated territory-selection and engagement. A later four-primitive model split territory (medium), engagement (facet), and obligation (projection), but kept a separate **Ingest** run-config carrying a write-mode (`discovery` / `refinement` / `one-shot`), trigger, and batch size. Both are retired: the projection is now one versioned binding that folds those operations in, and `refinement`-as-writer is replaced by verify + sync. `memstead projection migrate` converts both legacy generations forward to the binding — the original root-folder `scopes|projections|ingests/` layout and the four-primitive `.memstead/{…,projections,ingests}/` store.
 
-The `Facet.preparation` slot is reserved for non-text mediums (PDF, DOCX, audio); no preparation implementation ships today — an ingest whose facet declares one is reported unsupported rather than run.
+The `Facet.preparation` slot is reserved for non-text mediums (PDF, DOCX, audio); no preparation implementation ships today. A facet that declares a preparation step its medium cannot support is refused at **binding validation** with a capability error naming the unsupported operation — it fails at declaration time, not mid-run.
 
 ### Rationale
 
@@ -494,4 +492,4 @@ Why the pipeline lives at workspace level even though its declarations are per-m
 
 Why mediums are passive: a medium can be reused across facets without inheriting any one engagement's preparation logic. The medium is "the engine codebase here" or "the filesystem there"; how a particular projection engages with it is the facet's job.
 
-Why ingest is separate from projection: a projection declares what feeds what; the same projection may be run in different modes (a full discovery pass vs a targeted one-shot run) at different times. Ingest carries the mode / trigger / batch — the operational layer over the declarative projection.
+Why the binding replaced the projection/ingest split: the old model kept a projection's declaration and its operational config in two objects. That let the run-config drift from the declaration it operated on; it made a projection with no ingest a silent dead end — declared but never runnable; and it treated `build` / `sync` / `verify` as run-modes of an anonymous mapping instead of operations on one durable relationship. Folding declaration and operations into a single versioned, hash-keyed binding gives fidelity accounting one object to key on: `hash(D)` invalidates cleanly when the declaration changes, the `#synced` / `#verified` baselines attach to the very object they measure, and there is no half-configured state left to be in. Declaration and operations are one object because fidelity accounting needs one object to key on.
