@@ -62,6 +62,7 @@ pub fn run(args: ReleaseArgs) -> Result<()> {
              (--allow-dirty for testing/recovery):\n{status}"
         );
     }
+    assert_dist_app_set(&root)?;
 
     // 2. Current version from the single source of truth.
     let cargo_toml_path = root.join("Cargo.toml");
@@ -189,6 +190,89 @@ fn workspace_root() -> PathBuf {
         .parent()
         .expect("xtask has a parent directory")
         .to_path_buf()
+}
+
+/// The dist-app set this workspace intends to release. cargo-dist ships
+/// every *publishable* crate that carries any binary target unless the
+/// crate opts out (`[package.metadata.dist] dist = false`) — and Cargo
+/// auto-detects `src/bin/*.rs` and `src/main.rs` as binary targets. That
+/// pair of defaults is exactly how the internal `emit_json_schemas` dev
+/// tool shipped as a third "memstead-schema" app (installer + Homebrew
+/// formula) in v0.2.0/v0.3.0, unnoticed for two releases. Growing this
+/// list is a product decision — never an accident.
+const EXPECTED_DIST_APPS: [&str; 2] = ["memstead-cli", "memstead-mcp"];
+
+/// Mirror cargo-dist's app selection over the workspace members and
+/// refuse when the derived set differs from [`EXPECTED_DIST_APPS`]. The
+/// mirror is intentionally simple (publishable + has a binary target +
+/// not opted out); if it ever diverges from real dist behaviour, the
+/// failure mode is a loud false alarm at release time — never a silent
+/// extra app in the release.
+fn assert_dist_app_set(root: &Path) -> Result<()> {
+    let manifest: toml::Value = fs::read_to_string(root.join("Cargo.toml"))?
+        .parse()
+        .context("parsing workspace Cargo.toml")?;
+    let members = manifest
+        .get("workspace")
+        .and_then(|w| w.get("members"))
+        .and_then(|m| m.as_array())
+        .context("workspace Cargo.toml has no members list")?;
+
+    let mut apps = Vec::new();
+    for member in members {
+        let rel = member.as_str().context("non-string workspace member")?;
+        let dir = root.join(rel);
+        let pkg: toml::Value = fs::read_to_string(dir.join("Cargo.toml"))
+            .with_context(|| format!("reading {rel}/Cargo.toml"))?
+            .parse()
+            .with_context(|| format!("parsing {rel}/Cargo.toml"))?;
+        let package = pkg.get("package").context("member without [package]")?;
+
+        let publishable = package
+            .get("publish")
+            .and_then(|p| p.as_bool())
+            .unwrap_or(true);
+        let dist_opted_out = package
+            .get("metadata")
+            .and_then(|m| m.get("dist"))
+            .and_then(|d| d.get("dist"))
+            .and_then(|v| v.as_bool())
+            == Some(false);
+        let has_bin_target = pkg.get("bin").is_some()
+            || dir.join("src/main.rs").is_file()
+            || fs::read_dir(dir.join("src/bin")).is_ok_and(|entries| {
+                entries
+                    .flatten()
+                    .any(|e| e.path().extension().and_then(|x| x.to_str()) == Some("rs"))
+            });
+
+        if publishable && !dist_opted_out && has_bin_target {
+            apps.push(
+                package
+                    .get("name")
+                    .and_then(|n| n.as_str())
+                    .context("member package without name")?
+                    .to_owned(),
+            );
+        }
+    }
+    apps.sort();
+    let mut expected: Vec<&str> = EXPECTED_DIST_APPS.to_vec();
+    expected.sort_unstable();
+    ensure!(
+        apps == expected,
+        "dist-app set changed: the release would ship {apps:?}, expected \
+         {expected:?}. A new binary target in a publishable crate becomes its \
+         own installer + Homebrew formula (the v0.2.0 emit_json_schemas \
+         accident). If intended, grow EXPECTED_DIST_APPS deliberately; if not, \
+         opt the crate out with `[package.metadata.dist] dist = false` or make \
+         the binary non-publishable."
+    );
+    println!(
+        "release: dist-app set OK ({})",
+        EXPECTED_DIST_APPS.join(", ")
+    );
+    Ok(())
 }
 
 fn semver_shape(v: &str) -> bool {
@@ -410,6 +494,14 @@ fn run_streamed(cwd: &Path, cmd: &str, args: &[&str]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dist_app_set_is_exactly_the_intended_two() {
+        // Runs against the live workspace on every test run, so a new
+        // accidental binary target fails CI on the push that adds it —
+        // not two releases later (the emit_json_schemas lesson).
+        assert_dist_app_set(&workspace_root()).unwrap();
+    }
 
     #[test]
     fn civil_from_days_matches_known_dates() {
