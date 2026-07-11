@@ -1779,3 +1779,188 @@ fn migrate_without_cursor_leaves_never_synced() {
     // migrate succeeded (asserted by the helper) and left no cursor artifact.
     assert!(!root.join(".memstead/reconcile-cursors.json").exists());
 }
+
+// ── `brief --all --operation` (operation-aware rotation) ────────────────────
+
+/// A mem-repo workspace with one scaffolded binding `ws/code` over a real
+/// sibling `src/` dir (init defaults: build `trigger: loop`, sync + verify
+/// `trigger: manual`). Returns the TempDir and the workspace path.
+#[cfg(feature = "mem-repo")]
+fn operation_workspace() -> (TempDir, std::path::PathBuf) {
+    let tmp = TempDir::new().unwrap();
+    let src = tmp.path().join("src");
+    std::fs::create_dir_all(&src).unwrap();
+    std::fs::write(src.join("a.rs"), "x").unwrap();
+    let ws = tmp.path().join("ws");
+    memstead()
+        .args(["mem-repo", "init", ws.to_str().unwrap(), "--no-gitignore"])
+        .assert()
+        .success();
+    memstead()
+        .current_dir(&ws)
+        .args([
+            "projection",
+            "init",
+            "--mem",
+            "ws",
+            "--source",
+            "../src",
+            "--medium-type",
+            "codebase",
+            "--name",
+            "code",
+        ])
+        .assert()
+        .success();
+    (tmp, ws)
+}
+
+/// Rewrite one operation block's `trigger` on the scaffolded `ws/code` binding.
+#[cfg(feature = "mem-repo")]
+fn set_trigger(ws: &Path, op: &str, trigger: &str) {
+    let path = ws.join(".memstead/projections/ws/code.json");
+    let mut v: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    v["operations"][op]["trigger"] = Value::String(trigger.to_string());
+    std::fs::write(&path, serde_json::to_vec(&v).unwrap()).unwrap();
+}
+
+/// `brief --all` without `--operation` keeps the classic build rotation
+/// (back-compat for the ingest router) and the JSON output gains the additive
+/// `operation` field next to `brief` — explicit `--operation build` behaves
+/// identically.
+#[cfg(feature = "mem-repo")]
+#[test]
+fn brief_all_defaults_to_build_and_names_the_operation() {
+    let (_tmp, ws) = operation_workspace();
+
+    let out = memstead()
+        .current_dir(&ws)
+        .args(["--json", "projection", "brief", "--all"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(env["operation"], "build", "additive operation field: {env}");
+    let brief = env["brief"].as_str().expect("brief must stay a string");
+    assert!(
+        brief.contains("## Situation"),
+        "default rotation renders the build brief; got:\n{brief}"
+    );
+
+    // Explicit `--operation build` — same rotation, same brief shape.
+    let out = memstead()
+        .current_dir(&ws)
+        .args([
+            "--json",
+            "projection",
+            "brief",
+            "--all",
+            "--operation",
+            "build",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(env["operation"], "build");
+    assert!(env["brief"].as_str().unwrap().contains("## Situation"));
+}
+
+/// `--operation any` honours the per-operation eligibility gate (`trigger:
+/// loop` in the declaration): with build flipped to manual and verify to loop,
+/// the rotation selects the verify pair and dispatches to the verify renderer,
+/// naming the operation in the JSON output.
+#[cfg(feature = "mem-repo")]
+#[test]
+fn brief_all_any_dispatches_to_the_loop_declared_operation() {
+    let (_tmp, ws) = operation_workspace();
+    set_trigger(&ws, "build", "manual");
+    set_trigger(&ws, "verify", "loop");
+
+    let out = memstead()
+        .current_dir(&ws)
+        .args([
+            "--json",
+            "projection",
+            "brief",
+            "--all",
+            "--operation",
+            "any",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(
+        env["operation"], "verify",
+        "manual build is ineligible; loop verify is due (never verified): {env}"
+    );
+    assert!(
+        env["brief"]
+            .as_str()
+            .unwrap()
+            .contains("## Verify — measure fidelity, do not mutate"),
+        "the verify renderer produced the brief: {env}"
+    );
+}
+
+/// A loop-declared sync pair with an unmoved source and no open findings is
+/// not due — the rotation yields the quiet `skipped` outcome, not a brief.
+#[cfg(feature = "mem-repo")]
+#[test]
+fn brief_all_sync_yields_quietly_when_nothing_due() {
+    let (_tmp, ws) = operation_workspace();
+    set_trigger(&ws, "sync", "loop");
+
+    let out = memstead()
+        .current_dir(&ws)
+        .args([
+            "--json",
+            "projection",
+            "brief",
+            "--all",
+            "--operation",
+            "sync",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(
+        env["skipped"],
+        Value::Bool(true),
+        "never-synced + no findings → sync is not due: {env}"
+    );
+}
+
+/// `--operation` binds to the `--all` rotation: without `--all` it is a usage
+/// error, and it conflicts with the single-binding `--sync` / `--verify` modes.
+#[cfg(feature = "mem-repo")]
+#[test]
+fn brief_operation_flag_requires_all_and_conflicts_with_group_c() {
+    let (_tmp, ws) = operation_workspace();
+
+    // Named binding + --operation, no --all → clap usage error.
+    memstead()
+        .current_dir(&ws)
+        .args(["projection", "brief", "ws/code", "--operation", "any"])
+        .assert()
+        .failure();
+
+    // --operation conflicts with --sync / --verify.
+    for flag in ["--sync", "--verify"] {
+        memstead()
+            .current_dir(&ws)
+            .args(["projection", "brief", "--all", "--operation", "any", flag])
+            .assert()
+            .failure();
+    }
+}

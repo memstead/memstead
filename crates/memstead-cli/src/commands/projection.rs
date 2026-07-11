@@ -44,8 +44,8 @@ use memstead_base::ingest::resolve::{
     ResolveError, ResolvedPrimarySource, ResolvedSource, resolve_binding, resolve_binding_run,
 };
 use memstead_base::ingest::{
-    RenderBriefError, render_ingest_brief, render_sync_brief_for, render_verify_brief_for,
-    select_next_due,
+    OperationFilter, OperationKind, RenderBriefError, render_ingest_brief, render_sync_brief_for,
+    render_verify_brief_for, select_next_due_operation,
 };
 use memstead_base::pipeline::{
     Facet, IngestTrigger, Medium, MediumType, PatternEntry, PatternMode,
@@ -72,7 +72,11 @@ pub enum ProjectionCommand {
     /// Render a binding's run-brief — the Markdown prompt an agent consumes —
     /// on stdout. Takes the canonical binding id `<mem>/<stem>` (D3), e.g.
     /// `engine/graph`. Omit the id (or pass `--all`) to select the next due
-    /// binding by round-robin + backoff and render its build brief. Reads the v1
+    /// (binding, operation) pair by round-robin + backoff and render that
+    /// operation's brief; `--operation` picks which operations rotate (default
+    /// `build` — the classic build-only rotation; `any` rotates every
+    /// loop-declared build / sync / verify pair). An operation participates
+    /// only where its binding block declares `trigger: loop`. Reads the v1
     /// binding store and the destination mem's schema / writing guidance; the
     /// assembly is shared with the UniFFI surface, so CLI and app briefs are
     /// byte-identical by construction.
@@ -196,11 +200,20 @@ pub struct BriefArgs {
     /// backoff. Required with `--verify` / `--sync` (those operate on one
     /// binding's live findings/cursor, never a rotation).
     pub binding: Option<String>,
-    /// Select the next due binding across all bindings (round-robin + backoff)
-    /// and render its (build) brief, instead of naming one. Ignored with
-    /// `--verify` / `--sync`.
+    /// Select the next due (binding, operation) pair across all bindings
+    /// (round-robin + backoff) and render its brief, instead of naming one.
+    /// Which operations rotate is decided by `--operation` (default: build
+    /// only). Ignored with `--verify` / `--sync`.
     #[arg(long)]
     pub all: bool,
+    /// Which operations the `--all` rotation considers. An operation
+    /// participates only where the binding declares its block with
+    /// `trigger: loop` — consent lives in the declaration. `build` (the
+    /// default) keeps the classic build-only rotation; `any` rotates across
+    /// every loop-declared build / sync / verify pair and renders the matching
+    /// brief (the `--json` output names the picked operation).
+    #[arg(long, value_enum, default_value_t = BriefOperationArg::Build, requires = "all", conflicts_with_all = ["verify", "sync"])]
+    pub operation: BriefOperationArg,
     /// Render the **verify brief** (group C) for the named binding instead of
     /// the build brief: measurement + capped-adjudication instructions only.
     /// It carries no destination-mutation instruction — repairs route through
@@ -214,6 +227,32 @@ pub struct BriefArgs {
     /// through MCP). Mutually exclusive with `--verify`.
     #[arg(long, conflicts_with = "verify")]
     pub sync: bool,
+}
+
+/// The `--operation` value for `projection brief --all` — which operations the
+/// rotation considers. CLI-facing mirror of the engine's [`OperationFilter`]
+/// (which carries no clap derives).
+#[derive(Clone, Copy, Debug, ValueEnum, PartialEq, Eq)]
+pub enum BriefOperationArg {
+    /// Rotate over build pairs only (the default — the classic rotation).
+    Build,
+    /// Rotate over sync pairs only.
+    Sync,
+    /// Rotate over verify pairs only.
+    Verify,
+    /// Rotate over every loop-declared build / sync / verify pair.
+    Any,
+}
+
+impl BriefOperationArg {
+    fn to_filter(self) -> OperationFilter {
+        match self {
+            BriefOperationArg::Build => OperationFilter::Only(OperationKind::Build),
+            BriefOperationArg::Sync => OperationFilter::Only(OperationKind::Sync),
+            BriefOperationArg::Verify => OperationFilter::Only(OperationKind::Verify),
+            BriefOperationArg::Any => OperationFilter::Any,
+        }
+    }
 }
 
 #[derive(ClapArgs, Debug)]
@@ -410,26 +449,34 @@ fn brief(ctx: &CliContext, args: BriefArgs) -> anyhow::Result<()> {
                 ),
             )
         })?;
-        let rendered = if args.verify {
-            render_verify_brief_for(engine, &root, &binding_id)
+        let (rendered, operation) = if args.verify {
+            (
+                render_verify_brief_for(engine, &root, &binding_id),
+                OperationKind::Verify,
+            )
         } else {
-            render_sync_brief_for(engine, &root, &binding_id)
-        }
-        .map_err(|e| map_brief_err(&binding_id, e))?;
+            (
+                render_sync_brief_for(engine, &root, &binding_id),
+                OperationKind::Sync,
+            )
+        };
+        let rendered = rendered.map_err(|e| map_brief_err(&binding_id, e))?;
 
         if ctx.json {
-            print_json(&json!({ "brief": rendered }))?;
+            print_json(&json!({ "brief": rendered, "operation": operation.as_wire() }))?;
         } else {
             print!("{rendered}");
         }
         return Ok(());
     }
 
-    // Resolve which binding to render: a named one (canonical `<mem>/<stem>`),
-    // or the next due binding in a round-robin `--all` rotation (which advances
-    // the cursor + backoff state).
+    // Resolve which (binding, operation) pair to render: a named binding
+    // (canonical `<mem>/<stem>`, build), or the next due pair in a round-robin
+    // `--all` rotation (which advances the cursor + backoff state). The
+    // rotation's operation set is `--operation` (default: build only — the
+    // classic rotation, byte-stable for existing callers).
     let selected = match args.binding {
-        Some(binding) if !args.all => Some(binding),
+        Some(binding) if !args.all => Some((binding, OperationKind::Build)),
         _ => {
             let configs = load_pipeline_configs(&root).map_err(|e| {
                 CliError::new(
@@ -441,10 +488,11 @@ fn brief(ctx: &CliContext, args: BriefArgs) -> anyhow::Result<()> {
             })?;
             // Distinguish "nothing is configured" from "everything is backing
             // off". Both otherwise collapse into the same `None` from
-            // `select_next_due`, but the two outcomes want different caller
-            // responses: an empty store is a setup prompt, a backing-off pass
-            // is a no-op retry. Emit the empty-store signal explicitly so a
-            // caller (the plugin router, a status display) can branch on it.
+            // `select_next_due_operation`, but the two outcomes want different
+            // caller responses: an empty store is a setup prompt, a
+            // backing-off pass is a no-op retry. Emit the empty-store signal
+            // explicitly so a caller (the plugin router, a status display) can
+            // branch on it.
             if configs.bindings.is_empty() {
                 if ctx.json {
                     print_json(&json!({ "no_bindings": true }))?;
@@ -453,12 +501,13 @@ fn brief(ctx: &CliContext, args: BriefArgs) -> anyhow::Result<()> {
                 }
                 return Ok(());
             }
-            select_next_due(engine, &root, &configs)
+            select_next_due_operation(engine, &root, &configs, args.operation.to_filter())
         }
     };
 
-    let Some(binding_id) = selected else {
-        // Every eligible binding is backing off this pass — a valid outcome.
+    let Some((binding_id, operation)) = selected else {
+        // Every eligible pair is backing off (or not due) this pass — a valid
+        // outcome, the loop's quiet yield.
         if ctx.json {
             print_json(&json!({ "skipped": true }))?;
         } else {
@@ -469,11 +518,17 @@ fn brief(ctx: &CliContext, args: BriefArgs) -> anyhow::Result<()> {
         return Ok(());
     };
 
-    let rendered = render_ingest_brief(engine, &root, &binding_id)
-        .map_err(|e| map_brief_err(&binding_id, e))?;
+    // Dispatch to the selected operation's renderer: the rotation hands back
+    // build / sync / verify pairs, each with its own brief.
+    let rendered = match operation {
+        OperationKind::Build => render_ingest_brief(engine, &root, &binding_id),
+        OperationKind::Sync => render_sync_brief_for(engine, &root, &binding_id),
+        OperationKind::Verify => render_verify_brief_for(engine, &root, &binding_id),
+    }
+    .map_err(|e| map_brief_err(&binding_id, e))?;
 
     if ctx.json {
-        print_json(&json!({ "brief": rendered }))?;
+        print_json(&json!({ "brief": rendered, "operation": operation.as_wire() }))?;
     } else {
         // The brief *is* the stdout content (the skill pipes it as the agent
         // prompt) — write it verbatim, no added trailing newline.

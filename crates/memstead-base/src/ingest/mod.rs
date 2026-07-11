@@ -55,7 +55,8 @@ pub use change_detection::{
     digests_equal, parse_digest_token, serialize_digest_token,
 };
 pub use cursor::{
-    compute_source_cursor, enumerate_facet_files, source_moved, write_active_deny_file,
+    compute_source_cursor, enumerate_facet_files, source_moved, source_moved_since,
+    write_active_deny_file,
 };
 pub use findings::{
     FacetEnumerability, Finding, FindingClass, FindingKey, FindingTarget, FindingsBatch,
@@ -87,7 +88,10 @@ pub use resolve::{
     ChangeStrategy, ResolveError, ResolvedIngest, ResolvedPrimarySource, ResolvedSource,
     find_git_root, resolve_binding, resolve_binding_run, resolve_change_strategy,
 };
-pub use selection::{BackoffEntry, MAX_SKIP_LEVEL, apply_backoff, select_next_due, should_skip};
+pub use selection::{
+    BackoffEntry, MAX_SKIP_LEVEL, OperationFilter, OperationKind, apply_backoff, select_next_due,
+    select_next_due_operation, should_skip,
+};
 pub use slice::{
     Slice, SliceOutcome, graph_changes_to_slice, graph_slice_outcome, is_git_token,
     mtime_slice_outcome,

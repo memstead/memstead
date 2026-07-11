@@ -727,6 +727,27 @@ fn current_primary_token(
 /// (a first sync does not by itself defeat backoff). Mirrors the plugin's
 /// `sourceChangedSince`.
 pub fn source_moved(engine: &Engine, resolved: &ResolvedIngest, workspace_root: &Path) -> bool {
+    source_moved_since(engine, resolved, workspace_root, "synced", false)
+}
+
+/// The generalized form of [`source_moved`]: compare each source's current
+/// change-detection token against the baseline stored under
+/// `"<binding>/<facet>#<state>"` in the destination mem's `sync_state`. The
+/// `state` suffix selects the baseline family — `"synced"` (the build/sync
+/// baseline [`source_moved`] reads) or `"verified"` (the verify baseline).
+///
+/// `missing_baseline_is_moved` decides the never-recorded case: `false`
+/// preserves [`source_moved`]'s posture (no baseline ⇒ not "moved" — a first
+/// sync does not by itself defeat backoff); `true` treats a source with a live
+/// current token but no recorded baseline as moved — the verify due-check's
+/// posture, where "never verified" means the first verify is due.
+pub fn source_moved_since(
+    engine: &Engine,
+    resolved: &ResolvedIngest,
+    workspace_root: &Path,
+    state: &str,
+    missing_baseline_is_moved: bool,
+) -> bool {
     let dest = &resolved.destination_mem;
     let baseline_map = engine
         .mem_config_for(dest)
@@ -743,9 +764,13 @@ pub fn source_moved(engine: &Engine, resolved: &ResolvedIngest, workspace_root: 
                 (mem.clone(), engine.mem_head_sha(mem).ok().flatten())
             }
         };
-        let key = format!("{}/{}#synced", resolved.name, facet_ref);
+        let key = format!("{}/{}#{state}", resolved.name, facet_ref);
         let Some(baseline) = baseline_map.get(&key) else {
-            continue; // no baseline ⇒ not "moved"
+            // No baseline recorded for this state family.
+            if missing_baseline_is_moved && current.as_deref().is_some_and(|c| !c.is_empty()) {
+                return true;
+            }
+            continue;
         };
         if let Some(current) = current
             && !current.is_empty()

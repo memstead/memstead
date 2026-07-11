@@ -1311,7 +1311,7 @@ Binding (projection-promotion) tooling — the projection is the unit, one versi
 
 ###### **Subcommands:**
 
-* `brief` — Render a binding's run-brief — the Markdown prompt an agent consumes — on stdout. Takes the canonical binding id `<mem>/<stem>` (D3), e.g. `engine/graph`. Omit the id (or pass `--all`) to select the next due binding by round-robin + backoff and render its build brief. Reads the v1 binding store and the destination mem's schema / writing guidance; the assembly is shared with the UniFFI surface, so CLI and app briefs are byte-identical by construction
+* `brief` — Render a binding's run-brief — the Markdown prompt an agent consumes — on stdout. Takes the canonical binding id `<mem>/<stem>` (D3), e.g. `engine/graph`. Omit the id (or pass `--all`) to select the next due (binding, operation) pair by round-robin + backoff and render that operation's brief; `--operation` picks which operations rotate (default `build` — the classic build-only rotation; `any` rotates every loop-declared build / sync / verify pair). An operation participates only where its binding block declares `trigger: loop`. Reads the v1 binding store and the destination mem's schema / writing guidance; the assembly is shared with the UniFFI surface, so CLI and app briefs are byte-identical by construction
 * `init` — Scaffold a fresh v1 binding non-interactively: a `Medium`, a `Facet`, and a v1 binding under `.memstead/{mediums,facets,projections}/<mem>/`. All inputs are flags — no prompts ever (parity across callers). The default binding declares build+sync+verify where the medium permits: a `web` source scaffolds build-only, with the deferral named in `warnings[]`. A `prune` block is scaffolded wherever sync survived, with the strongest guarantee the medium supports (never-clobber for a git-backed source). Refuses `PROJECTION_EXISTS` (without touching disk) when a binding of the same id already exists — never overwrites
 * `migrate` — Migrate both legacy generations into v1 bindings (D10). Gen-1 — the root-folder `scopes|projections|ingests/` JSON layout the retired `pipeline migrate` command handled — is first materialized into the gen-2 `.memstead/` store, then promoted. Gen-2 — the four-primitive store (per-mem `Projection` + flat `Ingest`) — merges each ingest into the projection its `projection` ref names; the binding takes the projection's file identity (`.memstead/projections/<mem>/<stem>.json`) and the merged ingest is removed. `refinement` mode and dangling projection refs refuse with a typed error. Use `--dry-run` to preview without writing
 * `enable` — Enable a `build` / `sync` / `verify` operation on an existing binding by adding its block (with sensible defaults) if absent. This is the remedy a refused *mutating* operation cites (D6): `projection enable sync <binding>`. Before writing, the operation is checked against the medium-capability matrix (D6) — enabling `sync`/`verify` over a medium that cannot support it (e.g. a `web` source) refuses with the capability gap and writes nothing. Enabling an already-present operation refuses `PROJECTION_OP_ALREADY_ENABLED`; a missing binding refuses `PROJECTION_NOT_FOUND`
@@ -1323,7 +1323,7 @@ Binding (projection-promotion) tooling — the projection is the unit, one versi
 
 ## `memstead projection brief`
 
-Render a binding's run-brief — the Markdown prompt an agent consumes — on stdout. Takes the canonical binding id `<mem>/<stem>` (D3), e.g. `engine/graph`. Omit the id (or pass `--all`) to select the next due binding by round-robin + backoff and render its build brief. Reads the v1 binding store and the destination mem's schema / writing guidance; the assembly is shared with the UniFFI surface, so CLI and app briefs are byte-identical by construction.
+Render a binding's run-brief — the Markdown prompt an agent consumes — on stdout. Takes the canonical binding id `<mem>/<stem>` (D3), e.g. `engine/graph`. Omit the id (or pass `--all`) to select the next due (binding, operation) pair by round-robin + backoff and render that operation's brief; `--operation` picks which operations rotate (default `build` — the classic build-only rotation; `any` rotates every loop-declared build / sync / verify pair). An operation participates only where its binding block declares `trigger: loop`. Reads the v1 binding store and the destination mem's schema / writing guidance; the assembly is shared with the UniFFI surface, so CLI and app briefs are byte-identical by construction.
 
 `--verify` renders the **verify brief** (group C) for the named binding: measurement + capped-adjudication instructions only, with no destination-mutation instruction. `--sync` renders the **sync brief** — the sole maintenance-writer prompt, carrying both the cursor slice and the open verify findings in one brief with the absorbed reconcile conservatism. Both are read-only on the mem; the sync brief's repairs reach the mem only when an agent acts on it through the MCP mutation surface.
 
@@ -1335,7 +1335,21 @@ Render a binding's run-brief — the Markdown prompt an agent consumes — on st
 
 ###### **Options:**
 
-* `--all` — Select the next due binding across all bindings (round-robin + backoff) and render its (build) brief, instead of naming one. Ignored with `--verify` / `--sync`
+* `--all` — Select the next due (binding, operation) pair across all bindings (round-robin + backoff) and render its brief, instead of naming one. Which operations rotate is decided by `--operation` (default: build only). Ignored with `--verify` / `--sync`
+* `--operation <OPERATION>` — Which operations the `--all` rotation considers. An operation participates only where the binding declares its block with `trigger: loop` — consent lives in the declaration. `build` (the default) keeps the classic build-only rotation; `any` rotates across every loop-declared build / sync / verify pair and renders the matching brief (the `--json` output names the picked operation)
+
+  Default value: `build`
+
+  Possible values:
+  - `build`:
+    Rotate over build pairs only (the default — the classic rotation)
+  - `sync`:
+    Rotate over sync pairs only
+  - `verify`:
+    Rotate over verify pairs only
+  - `any`:
+    Rotate over every loop-declared build / sync / verify pair
+
 * `--verify` — Render the **verify brief** (group C) for the named binding instead of the build brief: measurement + capped-adjudication instructions only. It carries no destination-mutation instruction — repairs route through the sync brief. Read-only on the mem. Mutually exclusive with `--sync`
 * `--sync` — Render the **sync brief** (group C) for the named binding instead of the build brief: the sole maintenance-writer prompt, carrying both the cursor slice and the open verify findings in one brief, with the absorbed reconcile conservatism. Read-only on the mem (the agent's writes route through MCP). Mutually exclusive with `--verify`
 

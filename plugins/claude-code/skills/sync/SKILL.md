@@ -3,24 +3,31 @@ name: sync
 description: >
   Your source changed — bring the mem up to date. Reads what changed since the
   last run plus any open findings, and updates only the affected entities,
-  conservatively. The single maintenance writer for bound mems. Not a
-  version-control operation: changes flow from your source into your mem, never
-  the reverse.
+  conservatively. The single maintenance writer for bound mems; run `--all` on
+  a loop to keep every bound mem current. Not a version-control operation:
+  changes flow from your source into your mem, never the reverse.
 allowed-tools: Bash, Read, mcp__memstead__memstead_search, mcp__memstead__memstead_entity, mcp__memstead__memstead_create, mcp__memstead__memstead_update, mcp__memstead__memstead_relate, mcp__memstead__memstead_delete
-argument-hint: "<binding>"
+argument-hint: "[--all | <binding>]"
 ---
 
 # Memstead Sync
 
 Bring a bound mem up to date with its source — the **sole maintenance writer**.
-The engine renders a sync brief (what changed since the last sync plus any open
-findings, with the conservatism baked in); this skill runs it and applies what
-it calls for. Read-only on your source; write-only on the mem.
+The engine renders a brief (changed slice plus open findings, conservatism
+baked in); this skill runs it. Read-only on your source; write-only on the mem.
 
 ## Steps
 
-1. Resolve the binding id from `$ARGUMENTS` (`<mem>/<stem>`, e.g. `docs/guide`).
-   None given? Ask which bound mem to sync rather than guessing.
+1. Parse `$ARGUMENTS`. A binding id (`<mem>/<stem>`) → step 2. `--all` → run
+
+   ```sh
+   memstead --json projection brief --all --operation any
+   ```
+
+   No bindings configured → say so and stop. Nothing due → say "nothing due"
+   and stop. Otherwise execute the returned brief faithfully per its named
+   operation: verify is report-only measurement; build grows the mem (steps 2
+   and 4 apply); sync maintains it (steps 2–5). No argument at all? Ask.
 
 2. Check the anchors capability once:
 
@@ -28,10 +35,9 @@ it calls for. Read-only on your source; write-only on the mem.
    node "${CLAUDE_PLUGIN_ROOT}/scripts/binary-version.mjs" gate "$(pwd)"
    ```
 
-   It prints `{ "capable": …, "reason": … }`. **Capable** → include an `anchors`
-   list on each create/update naming the source artifact(s) the entity is drawn
-   from. **Not capable** → omit `anchors` and say so in your closing note (use
-   the printed reason). Never send anchors just to probe whether they work.
+   **Capable** → include an `anchors` list on each create/update naming the
+   source artifact(s) the entity is drawn from. **Not capable** → omit
+   `anchors` and say so (with the printed reason) in your closing note.
 
 3. Render and read the sync brief, then follow it:
 
@@ -40,17 +46,13 @@ it calls for. Read-only on your source; write-only on the mem.
    ```
 
    It carries the changed slice, the open findings, and the conservatism rules.
-   If the engine refuses (sync not enabled, unsupported medium), surface its
-   remedy verbatim (`memstead projection enable sync <binding>`) — don't work
-   around a refusal.
+   If the engine refuses, surface its remedy verbatim — never work around it.
 
 4. Apply only what the brief calls for, via the MCP mutation tools, inside the
-   destination mem only. Judgment the brief can't encode: a drift finding on a
-   claim whose meaning didn't change is an **annotation**, not a rewrite; only a
-   section whose content actually changed is rewritten; when a change is
-   genuinely ambiguous, **skip it and leave the finding open** rather than
-   guess. For a source with no retrievable base version (mtime/web), a removal
-   is **conflict-flagged** — present both sides, never auto-delete over an edit.
+   destination mem only. A drift finding whose meaning didn't change is an
+   **annotation**, not a rewrite; a genuinely ambiguous change is **skipped,
+   finding left open**, never guessed; a removal with no retrievable base
+   version is **conflict-flagged** — present both sides, never auto-delete.
 
 5. Record what you did so the baseline advances:
 
