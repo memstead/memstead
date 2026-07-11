@@ -1,17 +1,20 @@
 //! `xtask` — internal command runner for build-tooling tasks against the
-//! engine workspace. Today the only subcommand is `generate-docs`,
-//! which regenerates the deterministic API-docs Markdown tree from the
-//! live MCP / CLI / UniFFI / WASM source and the v1 binding schema +
-//! medium-capability matrix. (The Registry HTTP reference is generated
-//! separately by the private `memstead-registry` crate.)
+//! engine workspace: `generate-docs` regenerates the deterministic
+//! API-docs Markdown tree from the live MCP / CLI / UniFFI / WASM source
+//! and the v1 binding schema + medium-capability matrix (the Registry
+//! HTTP reference is generated separately by the private
+//! `memstead-registry` crate); `release` runs the mechanical leg of
+//! cutting a release (see `release.rs`); `eval` is the compounding-proof
+//! harness.
 //!
-//! Invocation: `cargo run -p xtask -- generate-docs --output <DIR>`.
+//! Invocation: `cargo run -p xtask -- <subcommand>`.
 
 mod binding_ref;
 mod errors;
 mod eval;
 mod mcp;
 mod parity;
+mod release;
 mod udl;
 mod wasm;
 
@@ -41,6 +44,12 @@ enum Command {
     /// deterministic stubs (no `claude`, no real mem) and writes a chart-ready
     /// data series — proving the pipeline wires up end-to-end.
     Eval(EvalArgs),
+    /// The mechanical leg of cutting a release: version bump across the
+    /// workspace + inter-crate pins, changelog cut, docs-vs-binary guard,
+    /// API-docs regeneration, and the test/lint matrix. Prints the outward
+    /// steps (commit → push → CI green → tag → gitlink bump) — it never
+    /// runs `git` mutations itself.
+    Release(release::ReleaseArgs),
 }
 
 #[derive(clap::Args, Debug)]
@@ -157,6 +166,7 @@ fn main() -> Result<()> {
     match cli.command {
         Command::GenerateDocs(args) => generate_docs(args),
         Command::Eval(args) => run_eval(args),
+        Command::Release(args) => release::run(args),
     }
 }
 

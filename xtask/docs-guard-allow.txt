@@ -1,0 +1,13 @@
+# docs-vs-binary guard allowlist (`cargo run -p xtask -- release`).
+#
+# Phrases in the flagship docs that START with "memstead" but are prose,
+# not CLI invocations — the guard would otherwise flag them as documented
+# commands missing from the binary. One phrase per line: either the first
+# token after "memstead", or "first second" for a two-token phrase.
+# Review on every addition: an entry here is a claim that the phrase is
+# prose — never use it to silence a genuinely missing command.
+
+# "the memstead binaries run …" (install-the-memstead-binaries.md)
+binaries
+# "the memstead tools appear …" (connect-an-agent-over-mcp.md)
+tools
