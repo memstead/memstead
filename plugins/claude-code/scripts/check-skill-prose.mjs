@@ -62,7 +62,7 @@ export const THIN_ROUTERS = ['ingest', 'commit', 'sync', 'verify'];
 
 // The roster skills subject to rules (1), (2) and (4). reconcile + audit
 // are the frozen interim survivors — exempt everywhere.
-export const ROSTER = ['setup', 'interview', 'learn', 'ingest', 'tidy', 'commit', 'verify'];
+export const ROSTER = ['setup', 'interview', 'learn', 'ingest', 'tidy', 'commit', 'verify', 'sync'];
 export const EXEMPT = ['reconcile', 'audit'];
 
 const MECHANISM_TERMS = [

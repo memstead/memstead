@@ -81,7 +81,10 @@ export function anchorsGate(workspaceRoot) {
   return { capable: true, version, reason: `recorded binary ${v} supports anchors` };
 }
 
-// CLI: `node binary-version.mjs record <workspace-root>` — used by /setup.
+// CLI: `record <workspace-root>` (used by /setup) writes the record;
+// `gate <workspace-root>` (used by capability-gated routers) prints the
+// `{capable, version, reason}` gate as JSON on stdout and always exits 0 —
+// the caller branches on `capable`, never on the exit code.
 function main() {
   const [cmd, root] = process.argv.slice(2);
   if (cmd === 'record' && root) {
@@ -93,7 +96,11 @@ function main() {
     console.error(`binary-version: ${r.reason}`);
     process.exit(1);
   }
-  console.error('usage: binary-version.mjs record <workspace-root>');
+  if (cmd === 'gate' && root) {
+    console.log(JSON.stringify(anchorsGate(root)));
+    process.exit(0);
+  }
+  console.error('usage: binary-version.mjs (record|gate) <workspace-root>');
   process.exit(2);
 }
 
