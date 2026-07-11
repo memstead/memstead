@@ -578,16 +578,26 @@ mod tests {
             )
             .unwrap();
 
-        let t0 = std::time::Instant::now();
-        engine
-            .create_entity(
-                empty_create_args("specs", "Bare One"),
-                actor,
-                Some(&client),
-                None,
-            )
-            .unwrap();
-        let bare_us = t0.elapsed().as_micros();
+        // Measure each arm as the MINIMUM elapsed over several iterations.
+        // The minimum is the least scheduler-preempted sample, so the fanout
+        // signal survives CI contention that would inflate any single
+        // wall-clock reading — this test previously flaked as a one-shot
+        // measurement when a runner preempted the timed region.
+        const ITERS: u32 = 8;
+
+        let mut bare_min = u128::MAX;
+        for i in 0..ITERS {
+            let t = std::time::Instant::now();
+            engine
+                .create_entity(
+                    empty_create_args("specs", &format!("Bare {i}")),
+                    actor,
+                    Some(&client),
+                    None,
+                )
+                .unwrap();
+            bare_min = bare_min.min(t.elapsed().as_micros());
+        }
 
         let mut handles = Vec::new();
         for _ in 0..9 {
@@ -595,23 +605,26 @@ mod tests {
             handles.push(engine.subscribe_mem_changes("specs", cb).unwrap());
         }
 
-        let t1 = std::time::Instant::now();
-        engine
-            .create_entity(
-                empty_create_args("specs", "Subscribed One"),
-                actor,
-                Some(&client),
-                None,
-            )
-            .unwrap();
-        let subscribed_us = t1.elapsed().as_micros();
+        let mut subscribed_min = u128::MAX;
+        for i in 0..ITERS {
+            let t = std::time::Instant::now();
+            engine
+                .create_entity(
+                    empty_create_args("specs", &format!("Subscribed {i}")),
+                    actor,
+                    Some(&client),
+                    None,
+                )
+                .unwrap();
+            subscribed_min = subscribed_min.min(t.elapsed().as_micros());
+        }
 
-        // Delta — the subscriber fanout contribution — should be
-        // well under a millisecond.
-        let delta = subscribed_us.saturating_sub(bare_us);
+        // Delta of the best-case samples — the subscriber fanout contribution —
+        // should be well under a millisecond.
+        let delta = subscribed_min.saturating_sub(bare_min);
         assert!(
             delta < 1_000,
-            "emit fanout cost too high: bare={bare_us}µs subscribed={subscribed_us}µs delta={delta}µs",
+            "emit fanout cost too high: bare_min={bare_min}µs subscribed_min={subscribed_min}µs delta={delta}µs",
         );
     }
 
