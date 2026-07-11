@@ -67,7 +67,7 @@ metadata_fields:
     description: When mode=loop, the interval between fires (e.g. "1m", "10m"). Empty for autonomous and interactive modes.
     field_type: string
   - key: replaces_skill
-    description: Name of the prompt-based skill this program replaces, if any (e.g. "memstead:reconcile"). Empty for net-new programs.
+    description: Name of the prompt-based skill this program replaces, if any (e.g. "memstead:ingest"). Empty for net-new programs.
     field_type: string
   - key: status
     description: Lifecycle of the program. Draft programs are not run; deprecated programs have been superseded.
@@ -90,5 +90,5 @@ write_rules:
   - "Every program has exactly one entry edge. Zero entries cannot run; multiple entries are ambiguous."
   - "Exit criteria are concrete and checkable. 'Task complete' is not exit criteria; 'all proposed entities created OR escalation node reached' is."
   - "When mode=loop, loop_interval must be set. When mode is autonomous or interactive, loop_interval must be empty."
-  - "Replacing an existing skill: set replaces_skill to the slash-command name (e.g. 'memstead:reconcile'). The reconcile skill prompt body becomes the seed for the program's nodes."
+  - "Replacing an existing skill: set replaces_skill to the slash-command name (e.g. 'memstead:ingest'). That skill's prompt body becomes the seed for the program's nodes."
   - "Constraints that apply program-wide attach via governed_by from the program. Constraints that apply only at one node attach via governed_by from that node. Don't duplicate."

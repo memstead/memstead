@@ -508,7 +508,7 @@ Return graph health metrics. Typed payload on `structured_content` (always whole
     },
     "include_config": {
       "default": false,
-      "description": "When true, the response carries the `[mutations]` posture (`mutations.require_notes`), the opaque `[plugin.*]` pass-through map, and a per-writable-mem `mems` detail array with `{ name, origin, vcs: { gitdir, worktree, head } }` — absolute canonical paths plus the cached branch-tip SHA (omitted on fresh mems with no commits yet) for the Stop-hook / reconcile flows so they never hardcode a layout or peel refs themselves. Defaults to false — the absence of these fields is the default-posture signal. **Lifecycle policy** (`[[mem_management.create]]` / `[[mem_management.delete]]`) is surfaced via `memstead_overview`, not here — `memstead_health` is drift/diagnostics.",
+      "description": "When true, the response carries the `[mutations]` posture (`mutations.require_notes`), the opaque `[plugin.*]` pass-through map, and a per-writable-mem `mems` detail array with `{ name, origin, vcs: { gitdir, worktree, head } }` — absolute canonical paths plus the cached branch-tip SHA (omitted on fresh mems with no commits yet) for the Stop-hook / sync flows so they never hardcode a layout or peel refs themselves. Defaults to false — the absence of these fields is the default-posture signal. **Lifecycle policy** (`[[mem_management.create]]` / `[[mem_management.delete]]`) is surfaced via `memstead_overview`, not here — `memstead_health` is drift/diagnostics.",
       "type": "boolean"
     },
     "limit": {
