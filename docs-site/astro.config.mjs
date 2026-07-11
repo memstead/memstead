@@ -60,6 +60,7 @@ export default defineConfig({
         {
           label: "Reference",
           items: [
+            { label: "Skills", link: "/skills/" },
             { label: "MCP tools", link: "/reference/mcp/" },
             { label: "CLI", link: "/reference/cli/cli/" },
             { label: "UniFFI surface", link: "/reference/uniffi/" },

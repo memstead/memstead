@@ -13,3 +13,7 @@ public/openapi.json
 # Built from ../GLOSSARY.md (the normative source) by
 # scripts/copy-openapi.mjs (runs as `prebuild`).
 src/content/docs/glossary.md
+
+# Generated from the plugin SKILL.md frontmatter by
+# scripts/copy-openapi.mjs (runs as `prebuild`).
+src/content/docs/skills.md
