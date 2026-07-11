@@ -53,7 +53,8 @@ pub fn generate(domain: &str, force: bool) -> Result<String> {
              (this rotates the key — update the hosted manifest to the new public key)"
         );
     }
-    let mut rng = rand_core::OsRng;
+    use getrandom::{SysRng, rand_core::UnwrapErr};
+    let mut rng = UnwrapErr(SysRng);
     let signing = SigningKey::generate(&mut rng);
     save(domain, &signing)?;
     Ok(public_key_string(&signing))

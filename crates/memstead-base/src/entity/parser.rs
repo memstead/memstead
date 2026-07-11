@@ -871,7 +871,7 @@ pub fn compute_hash(content: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(content.as_bytes());
     let result = hasher.finalize();
-    format!("{:x}", result)[..16].to_string()
+    crate::hex_lower(&result)[..16].to_string()
 }
 
 // ---------------------------------------------------------------------------

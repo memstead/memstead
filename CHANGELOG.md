@@ -13,6 +13,11 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   envelopes, and `structuredContent` shapes are byte-identical (the
   wire-shape suite passes unmodified); the migration is Rust-API-level
   only (`Content` → `ContentBlock`).
+- Crypto dependencies upgraded across the digest-0.11 ecosystem: `sha2`
+  0.10 → 0.11 and `ed25519-dalek` 2 → 3 (key generation now seeds from
+  `getrandom::SysRng`). Hash strings and signature bytes are unchanged —
+  entity `_hash` values, ingest change-detection digests, and publish
+  signatures stay byte-identical.
 
 ### Removed
 - The accidental `memstead-schema` release app: Cargo auto-detected the

@@ -158,7 +158,7 @@ pub fn digest_stat_map(map: &StatMap) -> Digest {
         }
         hasher.update(format!("{path}\0{}\0{}\n", entry.mtime, entry.size).as_bytes());
     }
-    let aggregate = format!("{:x}", hasher.finalize())[..16].to_string();
+    let aggregate = crate::hex_lower(&hasher.finalize())[..16].to_string();
     Digest {
         count: map.len() as u64,
         watermark,

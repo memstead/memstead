@@ -412,7 +412,7 @@ pub fn hash_binding(resolved: &ResolvedBinding) -> String {
     let value = serde_json::to_value(&input).expect("hash input serializes to a JSON value");
     let canonical = canonical_json(&value);
     let digest = Sha256::digest(canonical.as_bytes());
-    format!("{digest:x}")
+    crate::hex_lower(&digest)
 }
 
 // ---------------------------------------------------------------------------

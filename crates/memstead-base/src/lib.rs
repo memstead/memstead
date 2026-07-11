@@ -103,6 +103,19 @@ pub use workspace_store::{
     standalone_workspace,
 };
 
+/// Lowercase hex encoding of a digest. Byte-identical to the `{:x}`
+/// formatting that `sha2 < 0.11` digests carried; hash strings persisted
+/// under the old encoding must keep matching.
+pub fn hex_lower(bytes: &[u8]) -> String {
+    use std::fmt::Write;
+    bytes
+        .iter()
+        .fold(String::with_capacity(bytes.len() * 2), |mut s, b| {
+            let _ = write!(s, "{b:02x}");
+            s
+        })
+}
+
 /// Engine-wide sentinel type. Used by ops that need a shared reference
 /// type at the Engine level (search, health, list) — always resolves to
 /// `default@1.0.0::spec`. Per-entity resolution still goes through
