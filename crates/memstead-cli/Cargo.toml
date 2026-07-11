@@ -35,7 +35,7 @@ toml = "1.1"
 toml_edit.workspace = true
 time = { version = "0.3", features = ["formatting", "parsing", "serde-well-known", "serde"] }
 # Domain-authority publishing: generate a signing keypair and sign a publish.
-ed25519-dalek = { version = "2", features = ["rand_core"] }
+ed25519-dalek = { version = "3", features = ["rand_core"] }
 rand_core = { version = "0.6", features = ["getrandom"] }
 base64 = "0.22"
 sha2.workspace = true
