@@ -7,7 +7,7 @@
 //! surfaces — same variant set, same payload field names, same codes —
 //! so factoring it into one helper keeps the wire shape from drifting.
 
-use rmcp::model::{CallToolResult, Content};
+use rmcp::model::{CallToolResult, ContentBlock};
 
 use memstead_base::runtime_validator::ValidationError;
 
@@ -45,7 +45,7 @@ pub fn validation_envelope(err: ValidationError) -> CallToolResult {
         "details": details,
     });
     let text = format!("ERROR [{code}]: {message}");
-    let mut result = CallToolResult::error(vec![Content::text(text)]);
+    let mut result = CallToolResult::error(vec![ContentBlock::text(text)]);
     result.structured_content = Some(payload);
     result
 }

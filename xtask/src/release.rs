@@ -209,7 +209,7 @@ const EXPECTED_DIST_APPS: [&str; 2] = ["memstead-cli", "memstead-mcp"];
 /// failure mode is a loud false alarm at release time — never a silent
 /// extra app in the release.
 fn assert_dist_app_set(root: &Path) -> Result<()> {
-    let manifest: toml::Value = fs::read_to_string(root.join("Cargo.toml"))?
+    let manifest: toml::Table = fs::read_to_string(root.join("Cargo.toml"))?
         .parse()
         .context("parsing workspace Cargo.toml")?;
     let members = manifest
@@ -222,7 +222,7 @@ fn assert_dist_app_set(root: &Path) -> Result<()> {
     for member in members {
         let rel = member.as_str().context("non-string workspace member")?;
         let dir = root.join(rel);
-        let pkg: toml::Value = fs::read_to_string(dir.join("Cargo.toml"))
+        let pkg: toml::Table = fs::read_to_string(dir.join("Cargo.toml"))
             .with_context(|| format!("reading {rel}/Cargo.toml"))?
             .parse()
             .with_context(|| format!("parsing {rel}/Cargo.toml"))?;
@@ -284,7 +284,7 @@ fn semver_shape(v: &str) -> bool {
 
 /// Read `[workspace.package] version` — the single source of truth.
 fn current_workspace_version(cargo_toml: &str) -> Result<String> {
-    let value: toml::Value = cargo_toml.parse().context("parsing Cargo.toml")?;
+    let value: toml::Table = cargo_toml.parse().context("parsing Cargo.toml")?;
     value
         .get("workspace")
         .and_then(|w| w.get("package"))

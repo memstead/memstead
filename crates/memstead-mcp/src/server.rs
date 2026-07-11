@@ -337,7 +337,7 @@ fn validate_note(note: Option<&str>) -> Option<CallToolResult> {
 fn json_response<T: serde::Serialize>(data: &T) -> CallToolResult {
     let text =
         serde_json::to_string_pretty(data).unwrap_or_else(|e| format!("{{\"error\": \"{e}\"}}"));
-    let mut r = CallToolResult::success(vec![rmcp::model::Content::text(text)]);
+    let mut r = CallToolResult::success(vec![rmcp::model::ContentBlock::text(text)]);
     r.structured_content = serde_json::to_value(data).ok();
     r
 }
@@ -368,7 +368,7 @@ fn finalize_health_text(
     let md = memstead_engine::health::render_health_markdown(sc);
     match apply_chunking(&md, budget, chunk, &[]) {
         Ok(text) => {
-            res.content = vec![rmcp::model::Content::text(text)];
+            res.content = vec![rmcp::model::ContentBlock::text(text)];
             res
         }
         Err(e) => tool_error("INVALID_INPUT", &e),
@@ -413,14 +413,14 @@ fn append_warning_hint(mut res: CallToolResult, warning: &WarningHint) -> CallTo
     // existing text — a stale-but-readable mismatch beats an empty
     // body.
     if let Ok(text) = serde_json::to_string_pretty(&*sc) {
-        res.content = vec![rmcp::model::Content::text(text)];
+        res.content = vec![rmcp::model::ContentBlock::text(text)];
     }
     res
 }
 
 /// Helper: create a markdown tool response.
 fn md_response(markdown: String) -> CallToolResult {
-    CallToolResult::success(vec![rmcp::model::Content::text(markdown)])
+    CallToolResult::success(vec![rmcp::model::ContentBlock::text(markdown)])
 }
 
 /// Tool response that pairs rendered markdown on the text channel with
@@ -431,7 +431,7 @@ fn md_response(markdown: String) -> CallToolResult {
 /// one call, with no extra round-trip. The agent contract: branch on
 /// `structured_content`; read the text channel for prose.
 fn md_with_structured(markdown: String, structured: serde_json::Value) -> CallToolResult {
-    let mut r = CallToolResult::success(vec![rmcp::model::Content::text(markdown)]);
+    let mut r = CallToolResult::success(vec![rmcp::model::ContentBlock::text(markdown)]);
     r.structured_content = Some(structured);
     r
 }
@@ -568,7 +568,7 @@ fn prepend_drift_warnings_to_result_text(
         return res;
     };
     let prefixed = prepend_drift_warnings_md(existing, drift_warnings);
-    res.content[0] = rmcp::model::Content::text(prefixed);
+    res.content[0] = rmcp::model::ContentBlock::text(prefixed);
     res
 }
 
@@ -668,7 +668,7 @@ fn with_mem_schema_anchor(mut res: CallToolResult, schema_ref: &str) -> CallTool
         serde_json::Value::String(schema_ref.to_string()),
     );
     if let Ok(text) = serde_json::to_string_pretty(&*sc) {
-        res.content = vec![rmcp::model::Content::text(text)];
+        res.content = vec![rmcp::model::ContentBlock::text(text)];
     }
     res
 }
@@ -3396,7 +3396,7 @@ impl McpServer {
                     {
                         obj.insert("schema".to_string(), payload);
                         if let Ok(text) = serde_json::to_string_pretty(&*sc) {
-                            res.content = vec![rmcp::model::Content::text(text)];
+                            res.content = vec![rmcp::model::ContentBlock::text(text)];
                         }
                     }
                     res

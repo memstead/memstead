@@ -16,7 +16,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
-    CallToolRequestParams, CallToolResult, Content, InitializeRequestParams, InitializeResult,
+    CallToolRequestParams, CallToolResult, ContentBlock, InitializeRequestParams, InitializeResult,
     ListToolsResult, PaginatedRequestParams, Tool,
 };
 use rmcp::service::RequestContext;
@@ -174,13 +174,13 @@ fn tool_error_with_details(
         None => serde_json::json!({ "code": code, "message": message }),
     };
     let text = format!("ERROR [{code}]: {message}");
-    let mut result = CallToolResult::error(vec![Content::text(text)]);
+    let mut result = CallToolResult::error(vec![ContentBlock::text(text)]);
     result.structured_content = Some(payload);
     result
 }
 
 fn md_response(markdown: String) -> CallToolResult {
-    CallToolResult::success(vec![Content::text(markdown)])
+    CallToolResult::success(vec![ContentBlock::text(markdown)])
 }
 
 /// Pair rendered markdown on the text channel with a structured
@@ -189,7 +189,7 @@ fn md_response(markdown: String) -> CallToolResult {
 /// search) ship the markdown to terminal/inline consumers and the
 /// typed JSON to branching agents in one call.
 fn md_with_structured(markdown: String, structured: serde_json::Value) -> CallToolResult {
-    let mut result = CallToolResult::success(vec![Content::text(markdown)]);
+    let mut result = CallToolResult::success(vec![ContentBlock::text(markdown)]);
     result.structured_content = Some(structured);
     result
 }
@@ -197,7 +197,7 @@ fn md_with_structured(markdown: String, structured: serde_json::Value) -> CallTo
 fn json_response<T: serde::Serialize>(data: &T) -> CallToolResult {
     let value = serde_json::to_value(data).unwrap_or(serde_json::Value::Null);
     let text = serde_json::to_string_pretty(&value).unwrap_or_default();
-    let mut result = CallToolResult::success(vec![Content::text(text)]);
+    let mut result = CallToolResult::success(vec![ContentBlock::text(text)]);
     result.structured_content = Some(value);
     result
 }
@@ -378,7 +378,7 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
             // `ERROR [<CODE>]: <message>`. Pre-Item-01 this site emitted
             // a JSON-stringified payload on the text channel.
             let text = format!("ERROR [HASH_MISMATCH]: {message}");
-            let mut result = CallToolResult::error(vec![Content::text(text)]);
+            let mut result = CallToolResult::error(vec![ContentBlock::text(text)]);
             result.structured_content = Some(payload);
             result
         }
@@ -401,7 +401,7 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
                 "details": { "id": id, "referrers": referrers_json },
             });
             let text = format!("ERROR [HAS_INCOMING_REFS]: {message}");
-            let mut result = CallToolResult::error(vec![Content::text(text)]);
+            let mut result = CallToolResult::error(vec![ContentBlock::text(text)]);
             result.structured_content = Some(payload);
             result
         }
@@ -429,7 +429,7 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
                 "details": { "mem": mem, "referrers": referrers_json },
             });
             let text = format!("ERROR [MEM_HAS_INCOMING_REFS]: {message}");
-            let mut result = CallToolResult::error(vec![Content::text(text)]);
+            let mut result = CallToolResult::error(vec![ContentBlock::text(text)]);
             result.structured_content = Some(payload);
             result
         }
@@ -468,7 +468,7 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
                 },
             });
             let text = format!("ERROR [CROSS_MEM_EDGE_NOT_DECLARED]: {message}");
-            let mut result = CallToolResult::error(vec![Content::text(text)]);
+            let mut result = CallToolResult::error(vec![ContentBlock::text(text)]);
             result.structured_content = Some(payload);
             result
         }
@@ -480,7 +480,7 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
                 "details": { "id": id, "recovery": recovery },
             });
             let text = format!("ERROR [REPAIR_NOT_NEEDED]: {message}");
-            let mut result = CallToolResult::error(vec![Content::text(text)]);
+            let mut result = CallToolResult::error(vec![ContentBlock::text(text)]);
             result.structured_content = Some(payload);
             result
         }
@@ -501,7 +501,7 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
                 },
             });
             let text = format!("ERROR [WIKILINK_WITHOUT_RELATION]: {message}");
-            let mut result = CallToolResult::error(vec![Content::text(text)]);
+            let mut result = CallToolResult::error(vec![ContentBlock::text(text)]);
             result.structured_content = Some(payload);
             result
         }
@@ -523,7 +523,7 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
                 },
             });
             let text = format!("ERROR [RELATION_HAS_BODY_LINKS]: {message}");
-            let mut result = CallToolResult::error(vec![Content::text(text)]);
+            let mut result = CallToolResult::error(vec![ContentBlock::text(text)]);
             result.structured_content = Some(payload);
             result
         }
@@ -545,7 +545,7 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
                 },
             });
             let text = format!("ERROR [RENAME_PARTIAL_FAILURE]: {message}");
-            let mut result = CallToolResult::error(vec![Content::text(text)]);
+            let mut result = CallToolResult::error(vec![ContentBlock::text(text)]);
             result.structured_content = Some(payload);
             result
         }
@@ -573,7 +573,7 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
                 },
             });
             let text = format!("ERROR [RENAME_BLOCKED_BY_CROSS_MEM_POLICY]: {message}");
-            let mut result = CallToolResult::error(vec![Content::text(text)]);
+            let mut result = CallToolResult::error(vec![ContentBlock::text(text)]);
             result.structured_content = Some(payload);
             result
         }
@@ -587,7 +587,7 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
                 "details": { "id": id },
             });
             let text = format!("ERROR [STUB_CANNOT_RELATE]: {message}");
-            let mut result = CallToolResult::error(vec![Content::text(text)]);
+            let mut result = CallToolResult::error(vec![ContentBlock::text(text)]);
             result.structured_content = Some(payload);
             result
         }
@@ -601,7 +601,7 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
                 "details": { "id": id },
             });
             let text = format!("ERROR [STUB_NOT_UPDATABLE]: {message}");
-            let mut result = CallToolResult::error(vec![Content::text(text)]);
+            let mut result = CallToolResult::error(vec![ContentBlock::text(text)]);
             result.structured_content = Some(payload);
             result
         }
@@ -615,7 +615,7 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
                 "details": { "id": id },
             });
             let text = format!("ERROR [STUB_NOT_RENAMABLE]: {message}");
-            let mut result = CallToolResult::error(vec![Content::text(text)]);
+            let mut result = CallToolResult::error(vec![ContentBlock::text(text)]);
             result.structured_content = Some(payload);
             result
         }

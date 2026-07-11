@@ -13,7 +13,7 @@
 //! text-channel prefix or the structured payload would trip those
 //! tests.
 
-use rmcp::model::{CallToolResult, Content};
+use rmcp::model::{CallToolResult, ContentBlock};
 
 /// Build a typed-code tool-error response without a structured details
 /// payload. Text channel reads `"ERROR [<CODE>]: <msg>"` and
@@ -30,7 +30,7 @@ use rmcp::model::{CallToolResult, Content};
 /// promise on the simple form.
 pub fn tool_error(code: &str, msg: &str) -> CallToolResult {
     let payload = serde_json::json!({ "code": code, "message": msg });
-    let mut r = CallToolResult::success(vec![Content::text(format!("ERROR [{code}]: {msg}"))]);
+    let mut r = CallToolResult::success(vec![ContentBlock::text(format!("ERROR [{code}]: {msg}"))]);
     r.is_error = Some(true);
     r.structured_content = Some(payload);
     r
@@ -57,7 +57,7 @@ pub fn tool_error_with_payload(
     msg: &str,
     payload: serde_json::Value,
 ) -> CallToolResult {
-    let mut r = CallToolResult::success(vec![Content::text(format!("ERROR [{code}]: {msg}"))]);
+    let mut r = CallToolResult::success(vec![ContentBlock::text(format!("ERROR [{code}]: {msg}"))]);
     r.is_error = Some(true);
     r.structured_content = Some(payload);
     r

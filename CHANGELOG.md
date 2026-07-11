@@ -7,6 +7,13 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Changed
+- MCP SDK (`rmcp`) upgraded 1.4 → 2.2, aligning with the MCP 2025-11-25
+  spec types. The JSON wire format is unchanged — tool responses,
+  envelopes, and `structuredContent` shapes are byte-identical (the
+  wire-shape suite passes unmodified); the migration is Rust-API-level
+  only (`Content` → `ContentBlock`).
+
 ### Removed
 - The accidental `memstead-schema` release app: Cargo auto-detected the
   repo-internal `emit_json_schemas` dev tool as a binary, so cargo-dist

@@ -53,7 +53,7 @@ unicode-normalization = "0.1"
 sha2 = "0.10"
 indexmap = { version = "2", features = ["serde"] }
 schemars = { version = "1.0", features = ["derive", "indexmap2", "semver1"] }
-rmcp = { version = "1.4", features = ["server", "transport-io", "macros", "schemars"] }
+rmcp = { version = "2.2", features = ["server", "transport-io", "macros", "schemars"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-std"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
