@@ -79,7 +79,7 @@ The engine, the schema system, the relationship vocabulary, and the MCP interfac
 
 ### Two modes of truth
 
-- **Code-bound mems:** code is the source of truth, specs are an abstraction layer that helps LLMs reason about the codebase. Drift detection and reconcile workflows keep the spec layer current.
+- **Code-bound mems:** code is the source of truth, specs are an abstraction layer that helps LLMs reason about the codebase. Verify measures where the specs have diverged from the code they describe, and sync writes the corrections that keep the spec layer current.
 - **Knowledge-only mems:** the spec *is* the source of truth. There is no other hard reality. Direct authoring; freshness is measured against authorial commitment, not external code.
 
 The engine handles both with the same primitives — what changes is which features carry weight.
@@ -119,7 +119,7 @@ This pairs with the *constraints become capabilities* principle: that principle 
 
 Keeping specs in sync with reality is the hardest problem the engine has to solve. Current approaches, all complementary:
 
-- **Reconcile workflows** — code changes → specs regenerate to match.
+- **Sync + verify workflows** — verify measures the specs against the source they describe; sync, the maintenance writer fed by change slices and verify findings, brings the specs back into agreement.
 - **Projection loops** — rebuild specs from sources periodically.
 - **Drift detection** — flag entities that reference parts of reality which have moved since the entity was last updated.
 - **Section-level provenance** — preserve who authored what at section granularity so LLM-invented content stays distinguishable from human-endorsed claims, and stale assumptions surface against fresh decisions.
