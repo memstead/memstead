@@ -1551,12 +1551,11 @@ mod tests {
 
         // No `#verified` token exists before the writer runs.
         assert!(
-            engine
+            !engine
                 .mem_config_for("engine")
                 .unwrap()
                 .sync_state
-                .get("engine/graph/graph#verified")
-                .is_none()
+                .contains_key("engine/graph/graph#verified")
         );
 
         let written = record_verified_baseline(&mut engine, "engine", &outcome, None).unwrap();
