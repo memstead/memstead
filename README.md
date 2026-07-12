@@ -145,7 +145,7 @@ The schema drives all engine behaviour — there are no hardcoded field names. A
 | `plugins/claude-code/` | The Claude Code plugin (skills + guard hooks). Self-contained, no npm dependencies |
 | [`docs/`](docs/), [`examples/`](examples/) | [Documentation](docs/) (organized by Diátaxis: tutorial / how-to / reference / explanation) and [example schemas](examples/) (`agent-program`, and the paired `reimpl-source`/`reimpl-target`) |
 
-Memstead also has a native macOS app and a hosted registry; those are separate, closed-source products and are not part of this open repository.
+Memstead also has a native macOS app and a hosted registry; those are separate, closed-source parts of the project and are not part of this open repository.
 
 ## What Memstead does not do (yet)
 
@@ -179,7 +179,7 @@ pkill -f memstead-mcp
 
 ## Built in the open, on itself
 
-Memstead is built by one person — Björn Bösenberg, a full-stack developer of ~25 years, independent since 2026 — on a single thesis: *correctness enforced at boundaries replaces trust in the author.* That is why the engine is Rust — the compiler and borrow-checker stand in for the human code review a solo builder gives up — and why every write to a mem is validated at the boundary rather than trusted after the fact. The same thesis, applied to knowledge instead of code, *is* the product. The platform — roughly 138K lines of Rust, none written by hand, about 3,100 agent commits against 4 human ones — was built across roughly 4.5 **calendar** months of **part-time** work as an AI-orchestration project, and it keeps its own project knowledge as live Memstead mems, in the open, gaps included.
+Memstead is built by one person — Björn Bösenberg, a Berlin-based full-stack developer of ~25 years, building Memstead in the open — on a single thesis: *correctness enforced at boundaries replaces trust in the author.* That is why the engine is Rust — the compiler and borrow-checker stand in for the human code review a solo builder gives up — and why every write to a mem is validated at the boundary rather than trusted after the fact. The same thesis, applied to knowledge instead of code, *is* the product. The platform — roughly 138K lines of Rust, none written by hand, about 3,100 agent commits against 4 human ones — was built across roughly 4.5 **calendar** months of **part-time** work as an AI-orchestration project, and it keeps its own project knowledge as live Memstead mems, in the open, gaps included.
 
 ## License
 
