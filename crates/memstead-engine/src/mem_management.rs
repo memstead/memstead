@@ -184,6 +184,18 @@ pub struct MemDeleteParams {
     /// (`memstead-mcp --operator-mode`); never accepted as a wire-shape
     /// input from agents. Defaults to `false` — agent-mode.
     pub operator_mode: bool,
+    /// Mem-replacement affordance. When `true`, incoming cross-mem
+    /// edges from surviving Write-Mems do not refuse the delete
+    /// (`MEM_HAS_INCOMING_REFS` is skipped): the referrers' files
+    /// stay untouched, their edges degrade to unresolved stub
+    /// targets in the in-memory index, and a later same-name
+    /// re-creation re-adopts them — the intended flow when a mem is
+    /// re-homed (backend or location change) under a stable name.
+    /// The detached referrers are reported on
+    /// [`MemDeleteResponse::detached_referrers`] so the caller can
+    /// verify re-adoption after the successor mem mounts. Default
+    /// `false` — the refusal stands.
+    pub detach_incoming: bool,
 }
 
 /// Response shape from [`delete_mem`].
@@ -215,6 +227,15 @@ pub struct MemDeleteResponse {
     /// fresh `allow-create`. Empty `[]` when no cross-link grant named
     /// the deleted mem.
     pub allowlist_entries_removed: Vec<AllowlistEntryRemoved>,
+    /// Write-Mem referrers whose cross-mem edges into the deleted mem
+    /// were deliberately left dangling under
+    /// [`MemDeleteParams::detach_incoming`] — one entry per source
+    /// entity, `rel_types` aggregating every detached edge type. The
+    /// referrers' files are untouched; their edges resolve to stubs
+    /// until a same-name re-creation re-adopts them. Always empty
+    /// when `detach_incoming` was `false` (the refusal fires
+    /// instead).
+    pub detached_referrers: Vec<memstead_base::ReferrerInfo>,
 }
 
 /// One scrubbed `.memstead/workspace.toml` entry surfaced on
@@ -315,6 +336,9 @@ pub fn delete_mem(
         ))
         .into());
     }
+
+    // Populated only under `detach_incoming: true` — see Step 3a.
+    let mut detached_referrers: Vec<memstead_base::ReferrerInfo> = Vec::new();
 
     // ---- Step 1: resolve name ----
     if !engine.mem_router().is_writable(&params.name) {
@@ -501,11 +525,20 @@ pub fn delete_mem(
                     mem: from.mem().to_string(),
                 })
                 .collect();
-            return Err(memstead_base::EngineError::MemHasIncomingRefs {
-                mem: params.name,
-                referrers,
+            if params.detach_incoming {
+                // Mem-replacement affordance: the caller intends a
+                // same-name re-creation, so the referrers' edges stay
+                // in their files and degrade to stubs until the
+                // successor mem re-adopts them. Report the detached
+                // set so the caller can verify re-adoption.
+                detached_referrers = referrers;
+            } else {
+                return Err(memstead_base::EngineError::MemHasIncomingRefs {
+                    mem: params.name,
+                    referrers,
+                }
+                .into());
             }
-            .into());
         }
     }
 
@@ -732,6 +765,7 @@ pub fn delete_mem(
         files_deleted,
         warnings,
         allowlist_entries_removed,
+        detached_referrers,
     })
 }
 

@@ -17,6 +17,15 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   with a typed `INVALID_INPUT` in a workspace without `mem-repo/.git/`.
   The mount loader and runtime already dispatched per-mount — only the
   creation surface was missing. MCP and UniFFI wire shapes are unchanged.
+- **`--detach-incoming` on `memstead mem delete` — the mem-replacement
+  affordance.** Deleting a mem that other Write-Mems still link into
+  normally refuses `MEM_HAS_INCOMING_REFS`; with the flag, the delete
+  proceeds, the referrers' files stay untouched, their edges degrade to
+  unresolved stubs, and a later same-name `memstead mem init` re-adopts
+  them — the intended flow when re-homing a mem (backend or location
+  change) under a stable name. The response lists every detached referrer
+  (`detached_referrers`) so re-adoption can be verified. CLI-only; MCP and
+  UniFFI wire shapes are unchanged.
 - **`software@0.1.0` declares its outbound knowledge-side cross-mem
   vocabulary, additively.** Two new `cross_mem_relationships` blocks let a
   software mem's entities anchor into their knowledge-side companions:

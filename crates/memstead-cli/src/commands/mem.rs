@@ -348,6 +348,16 @@ pub struct DeleteArgs {
     /// full design rationale. Also settable via `MEMSTEAD_OPERATOR_MODE=1`.
     #[arg(long = "operator-mode")]
     pub operator_mode: bool,
+
+    /// Mem-replacement affordance: skip the `MEM_HAS_INCOMING_REFS`
+    /// refusal and leave surviving Write-Mems' cross-mem edges into
+    /// this mem dangling as stubs. The referrers' files stay
+    /// untouched; a later `memstead mem init <same name>` re-adopts
+    /// the edges. Use when re-homing a mem (backend or location
+    /// change) under a stable name — the response lists every
+    /// detached referrer so re-adoption can be verified.
+    #[arg(long = "detach-incoming")]
+    pub detach_incoming: bool,
 }
 
 /// `memstead mem unregister <name>` arguments — router-only removal,
@@ -579,6 +589,7 @@ pub fn run_delete(ctx: &CliContext, args: DeleteArgs) -> anyhow::Result<()> {
         /* delete_files */ true,
         "delete",
         resolve_operator_mode(args.operator_mode),
+        args.detach_incoming,
     )
 }
 
@@ -590,6 +601,7 @@ pub fn run_unregister(ctx: &CliContext, args: UnregisterArgs) -> anyhow::Result<
         /* delete_files */ false,
         "unregister",
         resolve_operator_mode(args.operator_mode),
+        /* detach_incoming */ false,
     )
 }
 
@@ -615,6 +627,7 @@ fn run_delete_inner(
     delete_files: bool,
     verb: &str,
     operator_mode: bool,
+    detach_incoming: bool,
 ) -> anyhow::Result<()> {
     let cwd = std::env::current_dir()
         .map_err(|e| generic_error(format!("determine current directory: {e}")))?;
@@ -631,6 +644,7 @@ fn run_delete_inner(
         delete_files,
         note: note.clone(),
         operator_mode,
+        detach_incoming,
     };
     let mut engine = match ctx.cli_engine()? {
         CliEngine::MemRepo(e) => e,
@@ -656,6 +670,13 @@ fn run_delete_inner(
             // Surface scrubbed `.memstead/workspace.toml` entries so the
             // agent sees every policy side effect in one round-trip.
             "allowlist_entries_removed": &response.allowlist_entries_removed,
+            // Referrers deliberately left dangling under
+            // `--detach-incoming` — empty without the flag.
+            "detached_referrers": response
+                .detached_referrers
+                .iter()
+                .map(|r| serde_json::json!({"from_id": r.from_id, "rel_types": r.rel_types, "mem": r.mem}))
+                .collect::<Vec<_>>(),
         }))?;
     } else {
         crate::output::print_markdown(&render_mem_delete_markdown(&response, verb));
@@ -711,6 +732,17 @@ fn render_mem_delete_markdown(r: &MemDeleteResponse, verb: &str) -> String {
         r.deleted_from_router,
     ));
     out.push_str(&format!("- Files deleted: {}\n", r.files_deleted));
+    if !r.detached_referrers.is_empty() {
+        out.push_str("\n## Detached referrers (edges now dangle as stubs)\n\n");
+        for referrer in &r.detached_referrers {
+            out.push_str(&format!(
+                "- `{}` ({}) — {}\n",
+                referrer.from_id,
+                referrer.mem,
+                referrer.rel_types.join(", "),
+            ));
+        }
+    }
     // Surface every scrubbed `.memstead/workspace.toml` entry so the
     // operator sees what the destructive delete just cleaned up.
     if !r.allowlist_entries_removed.is_empty() {

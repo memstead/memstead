@@ -364,6 +364,131 @@ fn engineering_schema_refuses_current_state_types_at_write() {
     );
 }
 
+/// The mem-replacement affordance: `delete_mem` with
+/// `detach_incoming: true` succeeds despite live incoming cross-mem
+/// edges (reporting the detached referrers), the referrer's file
+/// keeps its relationship row, and a same-name re-creation re-adopts
+/// the edge — the re-homing flow under a stable name. Without the
+/// flag the same delete refuses `MEM_HAS_INCOMING_REFS`.
+#[test]
+fn detach_incoming_delete_supports_same_name_rehoming() {
+    let tmp = TempDir::new().unwrap();
+    // Static cross-link grant so the referrer may edge into the
+    // target; both mems seeded at boot (static entries must name
+    // existing mems).
+    std::fs::create_dir_all(tmp.path().join(".memstead")).unwrap();
+    std::fs::write(
+        tmp.path().join(".memstead/workspace.toml"),
+        "format = \"memstead-git-branch-2\"\n\n\
+         [persistence_adapter]\nname = \"file-two-layer\"\n\n\
+         [cross_mem_links]\nreferrer = [\"target-mem\"]\n",
+    )
+    .unwrap();
+    init_real_mem_repo(
+        tmp.path(),
+        &[("target-mem", "default@1.0.0"), ("referrer", "default@1.0.0")],
+    );
+    let mut engine = engine_from_workspace_root(tmp.path()).expect("engine boots");
+    create_entity_in(&mut engine, "target-mem", "Anchor Spec");
+    create_entity_in(&mut engine, "referrer", "Pointing Spec");
+    engine
+        .relate_entity(
+            memstead_base::RelateEntityArgs {
+                source: memstead_base::EntityId::new("referrer", "pointing-spec"),
+                expected_hash: None,
+                rel_type: "DEPENDS_ON".to_string(),
+                target: memstead_base::EntityId::new("target-mem", "anchor-spec"),
+                remove: false,
+                description: None,
+            },
+            Actor::Cli,
+            None,
+            None,
+        )
+        .expect("cross-mem edge lands under the grant");
+    drop(engine);
+
+    // Revoke the grant on disk (policy gate would otherwise fire
+    // first and mask the incoming-refs axis), reboot, and assert the
+    // edge-graph refusal without the flag.
+    memstead_engine::workspace_config_edit::revoke_cross_link(
+        tmp.path(),
+        "referrer",
+        &memstead_engine::workspace_config_edit::CrossLinkTarget::Named("target-mem".to_string()),
+    )
+    .expect("revoke grant");
+    let mut engine = engine_from_workspace_root(tmp.path()).expect("reboot after revoke");
+    let err = mem_management::delete_mem(
+        &mut engine,
+        mem_management::MemDeleteParams {
+            name: "target-mem".to_string(),
+            delete_files: true,
+            note: None,
+            operator_mode: true,
+            detach_incoming: false,
+        },
+    )
+    .expect_err("live incoming edge must refuse without detach");
+    assert_eq!(err.code(), "MEM_HAS_INCOMING_REFS");
+
+    let response = mem_management::delete_mem(
+        &mut engine,
+        mem_management::MemDeleteParams {
+            name: "target-mem".to_string(),
+            delete_files: true,
+            note: None,
+            operator_mode: true,
+            detach_incoming: true,
+        },
+    )
+    .expect("detach-incoming delete succeeds despite the live edge");
+    assert_eq!(response.detached_referrers.len(), 1);
+    assert_eq!(
+        response.detached_referrers[0].from_id,
+        "referrer--pointing-spec"
+    );
+    assert!(
+        response.detached_referrers[0]
+            .rel_types
+            .contains(&"DEPENDS_ON".to_string())
+    );
+
+    // Same-name re-creation (folder backend this time — the re-homing
+    // case) + same-slug entity; the referrer's file was never touched,
+    // so a fresh boot re-adopts the edge.
+    mem_management::create_mem(
+        &mut engine,
+        mem_management::MemCreateParams {
+            name: "target-mem".to_string(),
+            location: std::path::PathBuf::from("target-mem"),
+            schema_ref: "default@1.0.0".parse().unwrap(),
+            vcs: None,
+            note: None,
+            operator_mode: true,
+            recovery: None,
+            write_guidance: Default::default(),
+            storage: Some(StorageKind::Folder),
+        },
+    )
+    .expect("same-name re-creation succeeds");
+    create_entity_in(&mut engine, "target-mem", "Anchor Spec");
+    drop(engine);
+
+    let rebooted = engine_from_workspace_root(tmp.path()).expect("reboot succeeds");
+    let incoming: Vec<String> = rebooted
+        .store()
+        .incoming(&memstead_base::EntityId::new("target-mem", "anchor-spec"))
+        .iter()
+        .map(|e| format!("{} {}", e.rel_type, e.from))
+        .collect();
+    assert!(
+        incoming
+            .iter()
+            .any(|s| s == "DEPENDS_ON referrer--pointing-spec"),
+        "the detached edge must re-adopt onto the re-homed same-name mem; got {incoming:?}"
+    );
+}
+
 /// Out-of-root placement stays operator-gated: an agent-mode create
 /// whose location resolves outside the workspace root refuses with
 /// `MEM_PATH_NOT_ALLOWED` / `outside_workspace` even when the name

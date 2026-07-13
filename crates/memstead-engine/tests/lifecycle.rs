@@ -561,6 +561,7 @@ fn delete_mem_rejects_when_no_allowlist_configured() {
             name: "specs".to_string(),
             delete_files: false,
             note: None,
+            detach_incoming: false,
             operator_mode: false,
         },
     )
@@ -596,6 +597,7 @@ fn delete_mem_rejects_unknown_name() {
             name: "missing".to_string(),
             delete_files: false,
             note: None,
+            detach_incoming: false,
             operator_mode: false,
         },
     )
@@ -625,6 +627,7 @@ fn delete_mem_rejects_overlong_note() {
             name: "specs".to_string(),
             delete_files: false,
             note: Some(long_note),
+            detach_incoming: false,
             operator_mode: false,
         },
     )
@@ -666,6 +669,7 @@ fn delete_mem_unregisters_when_allowlist_matches() {
             name: "specs".to_string(),
             delete_files: false,
             note: None,
+            detach_incoming: false,
             operator_mode: false,
         },
     )
@@ -732,6 +736,7 @@ fn create_delete_round_trip_flat_namespace() {
             name: "exec-foo".to_string(),
             delete_files: false,
             note: None,
+            detach_incoming: false,
             operator_mode: false,
         },
     )
@@ -797,6 +802,7 @@ fn create_delete_round_trip_hierarchical_namespace() {
             name: "planning/plan-foo".to_string(),
             delete_files: false,
             note: None,
+            detach_incoming: false,
             operator_mode: false,
         },
     )
@@ -857,6 +863,7 @@ fn delete_mem_hierarchical_name_in_path_not_allowed_envelope() {
             name: "planning/plan-foo".to_string(),
             delete_files: false,
             note: None,
+            detach_incoming: false,
             operator_mode: false,
         },
     )
@@ -901,6 +908,7 @@ fn delete_mem_with_delete_files_removes_directory() {
             name: "specs".to_string(),
             delete_files: true,
             note: None,
+            detach_incoming: false,
             operator_mode: false,
         },
     )
@@ -1041,6 +1049,7 @@ fn delete_mem_operator_mode_bypasses_empty_allowlist() {
             name: "specs".to_string(),
             delete_files: false,
             note: None,
+            detach_incoming: false,
             operator_mode: false,
         },
     )
@@ -1059,6 +1068,7 @@ fn delete_mem_operator_mode_bypasses_empty_allowlist() {
             name: "specs".to_string(),
             delete_files: false,
             note: None,
+            detach_incoming: false,
             operator_mode: true,
         },
     )
@@ -1121,6 +1131,7 @@ fn delete_mem_policy_check_gates_on_delete_files() {
             name: "target".to_string(),
             delete_files: true,
             note: None,
+            detach_incoming: false,
             operator_mode: false,
         },
     )
@@ -1148,6 +1159,7 @@ fn delete_mem_policy_check_gates_on_delete_files() {
             name: "target".to_string(),
             delete_files: true,
             note: None,
+            detach_incoming: false,
             operator_mode: true,
         },
     )
@@ -1169,6 +1181,7 @@ fn delete_mem_policy_check_gates_on_delete_files() {
             name: "target".to_string(),
             delete_files: false,
             note: None,
+            detach_incoming: false,
             operator_mode: false,
         },
     )
@@ -1313,6 +1326,7 @@ fn delete_mem_refuses_when_cross_mem_incoming_edges_remain() {
             name: "b".to_string(),
             delete_files: true,
             note: None,
+            detach_incoming: false,
             operator_mode: false,
         },
     )
@@ -1377,6 +1391,7 @@ fn delete_mem_refuses_when_cross_mem_incoming_edges_remain() {
             name: "b".to_string(),
             delete_files: true,
             note: None,
+            detach_incoming: false,
             operator_mode: false,
         },
     )
@@ -1504,6 +1519,7 @@ fn delete_mem_router_only_refuses_when_cross_mem_incoming_edges_remain() {
             name: "b".to_string(),
             delete_files: false,
             note: None,
+            detach_incoming: false,
             operator_mode: false,
         },
     )
@@ -1631,6 +1647,7 @@ fn destructive_delete_scrubs_cross_links_but_keeps_allowlist_rules() {
             name: "other".to_string(),
             delete_files: true,
             note: None,
+            detach_incoming: false,
             operator_mode: false,
         },
     )
@@ -1714,6 +1731,7 @@ fn router_only_unregister_leaves_policy_intact() {
             name: "other".to_string(),
             delete_files: false,
             note: None,
+            detach_incoming: false,
             operator_mode: false,
         },
     )
@@ -1842,6 +1860,7 @@ fn delete_mem_succeeds_when_no_cross_mem_incoming_edges() {
             name: "b".to_string(),
             delete_files: true,
             note: None,
+            detach_incoming: false,
             operator_mode: false,
         },
     )

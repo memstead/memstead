@@ -3432,6 +3432,7 @@ impl McpServer {
             delete_files: true,
             note: p.note,
             operator_mode: self.operator_mode,
+            detach_incoming: false,
         };
 
         // Snapshot the schema-ref BEFORE the delete so the response

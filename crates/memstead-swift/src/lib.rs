@@ -907,6 +907,7 @@ impl Engine {
             delete_files: true,
             note,
             operator_mode,
+            detach_incoming: false,
         };
         let mut engine = self
             .inner
