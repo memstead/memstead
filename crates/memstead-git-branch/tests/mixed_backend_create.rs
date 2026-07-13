@@ -7,9 +7,9 @@
 //! that used to be heuristic-only, plus the reboot round-trip that
 //! proves both backends coexist in one workspace.
 
+use memstead_base::CreateEntityArgs;
 use memstead_base::vcs::Actor;
 use memstead_base::workspace::MountStorage;
-use memstead_base::CreateEntityArgs;
 use memstead_engine::mem_management::{self, StorageKind};
 use memstead_git_branch::test_support::init_real_mem_repo;
 use memstead_git_branch::workspace_store::engine_from_workspace_root;
