@@ -958,6 +958,7 @@ Register a new mem via the engine's mem-management orchestrator
   - `git-branch`:
     Per-mem branch in the workspace's mem-repo. Refuses when the workspace has no `mem-repo/.git/`
 
+* `--location <LOCATION>` — Explicit on-disk location for the new mem, overriding the default `<workspace_root>/<name>`. Relative paths anchor at the workspace root and may leave it (`--location ../public/engineering` — the monorepo/submodule case); the expressed form is preserved in `mounts.json`, so a relative location stays clone-portable while an absolute one stays machine-pinned. The location's basename must equal the mem name's last segment (engine-enforced). Meaningful for folder-backed mems only — git-branch storage derives its identity from the mem name and ignores location. Out-of-root locations refuse for agent-mode calls (`MEM_PATH_NOT_ALLOWED` / `outside_workspace`); pass `--operator-mode` when the operator is placing the mem
 * `--write-guidance <WRITE_GUIDANCE>` — Optional per-instance writing guidance as a JSON object, written verbatim into the new mem's config `writeGuidance` map — e.g. `--write-guidance '{"phase_context":"early design","stack":"Rust"}'`. Opaque to the engine (schema-strictness D8 — the keys are client-owned vocabulary); a wrapper that read the schema package's `mem-template.json` fills the instance keys. Omit to seed no guidance. Must be a JSON object; anything else refuses with `INVALID_INPUT`
 
 
@@ -993,6 +994,7 @@ Storage-destroying removal — unregisters the mem AND deletes its stored conten
 
 * `--note <NOTE>` — Optional provenance note (≤280 chars). Captured on the engine trace surface; surfaces via the outer-repo Stop hook. No per-mem commit is produced by delete
 * `--operator-mode` — Bypass the workspace `[[mem_management.delete]]` allowlist for this invocation. See `InitArgs::operator_mode` for the full design rationale. Also settable via `MEMSTEAD_OPERATOR_MODE=1`
+* `--detach-incoming` — Mem-replacement affordance: skip the `MEM_HAS_INCOMING_REFS` refusal and leave surviving Write-Mems' cross-mem edges into this mem dangling as stubs. The referrers' files stay untouched; a later `memstead mem init <same name>` re-adopts the edges. Use when re-homing a mem (backend or location change) under a stable name — the response lists every detached referrer so re-adoption can be verified
 
 
 
