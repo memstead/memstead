@@ -19,6 +19,15 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   creation surface was missing. MCP and UniFFI wire shapes are unchanged.
 
 ### Fixed
+- `projection advance` now answers a medium-relative artifact id (the form
+  agents naturally type, e.g. `a.rs` where the slice printed `src/a.rs`)
+  with a remedy-bearing refusal: the `PROJECTION_ADVANCE_UNKNOWN_ARTIFACT`
+  message names the expected workspace-relative dialect and carries the
+  concrete corrected id when prefixing the medium root yields a presented
+  id (machine-readable as `corrected_artifacts` in the error details). The
+  accepted dialect does not widen — the medium-relative form is still
+  refused, keeping one id dialect across enumeration, anchors, coverage,
+  and advance.
 - `update --from` silently dropped `--dry-run` and `--expected-hash` while
   its help text promised the hash-mode flags were respected. Both now apply
   exactly as on the inline path — `--dry-run` forces a dry run (validated,

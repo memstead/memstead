@@ -1027,6 +1027,54 @@ fn advance_records_dispositions_completes_and_gates_unknown() {
     assert!(!store_path.exists());
 }
 
+/// A medium-relative artifact id (`a.rs` where the slice printed `src/a.rs`)
+/// refuses with the corrected workspace-relative id in the message AND the
+/// `corrected_artifacts` details map — and the dialect never widens: the
+/// medium-relative form is refused, never accepted.
+#[test]
+fn advance_medium_relative_id_refuses_with_corrected_id() {
+    let tmp = advance_workspace();
+    let root = tmp.path();
+
+    let out = memstead()
+        .current_dir(root)
+        .args([
+            "--json",
+            "projection",
+            "advance",
+            "engine/graph",
+            "--dispositions",
+            r#"{"a.rs": "worked"}"#,
+        ])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(env["code"], "PROJECTION_ADVANCE_UNKNOWN_ARTIFACT");
+    let message = env["message"].as_str().unwrap();
+    assert!(
+        message.contains("workspace-relative"),
+        "message names the expected dialect: {message}"
+    );
+    assert!(
+        message.contains("`a.rs` → `src/a.rs`"),
+        "message carries the concrete corrected id: {message}"
+    );
+    assert_eq!(
+        env["details"]["corrected_artifacts"]["a.rs"], "src/a.rs",
+        "the remedy is machine-readable in details"
+    );
+    // Nothing was written — the refused medium-relative id was not accepted
+    // in any form (the gate did not widen).
+    assert!(
+        !root
+            .join(".memstead/state/advance/engine/graph.json")
+            .exists()
+    );
+}
+
 /// `advance` on a missing binding refuses with `PROJECTION_NOT_FOUND` (NotFound
 /// exit) — before any engine boot.
 #[test]

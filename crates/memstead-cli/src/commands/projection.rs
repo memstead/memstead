@@ -1302,12 +1302,34 @@ fn map_advance_err(binding_id: &str, err: AdvanceError) -> CliError {
             CliError::new(ExitKind::Validation, "PROJECTION_INVALID_NAME", message)
                 .with_details(json!({ "binding": binding_id }))
         }
-        AdvanceError::UnknownArtifact { artifacts, .. } => CliError::new(
-            ExitKind::Validation,
-            "PROJECTION_ADVANCE_UNKNOWN_ARTIFACT",
-            message,
-        )
-        .with_details(json!({ "binding": binding_id, "unknown_artifacts": artifacts })),
+        AdvanceError::UnknownArtifact {
+            artifacts,
+            suggestions,
+            ..
+        } => {
+            // `corrected_artifacts` maps each medium-relative-looking id to
+            // the workspace-relative id the slice actually presented — the
+            // machine-readable half of the message's remedy.
+            let corrected: serde_json::Map<String, serde_json::Value> = suggestions
+                .iter()
+                .map(|(supplied, corrected)| {
+                    (
+                        supplied.clone(),
+                        serde_json::Value::String(corrected.clone()),
+                    )
+                })
+                .collect();
+            CliError::new(
+                ExitKind::Validation,
+                "PROJECTION_ADVANCE_UNKNOWN_ARTIFACT",
+                message,
+            )
+            .with_details(json!({
+                "binding": binding_id,
+                "unknown_artifacts": artifacts,
+                "corrected_artifacts": corrected,
+            }))
+        }
         AdvanceError::Store(_) | AdvanceError::Engine(_) => {
             CliError::new(ExitKind::Generic, "PROJECTION_ADVANCE_FAILED", message)
                 .with_details(json!({ "binding": binding_id }))

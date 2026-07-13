@@ -187,18 +187,30 @@ pub enum AdvanceError {
     #[error("malformed binding id '{0}': expected `<mem>/<stem>`")]
     MalformedId(String),
     /// One or more disposition ids were never presented by the engine — the
-    /// gate refuses the whole call (no partial write). Names each offending id.
+    /// gate refuses the whole call (no partial write). Names each offending
+    /// id, states the expected id dialect (workspace-relative, exactly as the
+    /// slice printed), and — when prefixing a supplied id with its medium
+    /// root yields an id that IS in the presented slice — carries the
+    /// concrete corrected id. The medium-relative form is never accepted:
+    /// one id dialect holds across enumeration, anchors, coverage, and
+    /// advance.
     #[error(
         "disposition names {} artifact id(s) the engine did not present: {}; the advance gate \
-         accepts only ids from the presented slice ({printed} presented)",
+         accepts only ids from the presented slice, verbatim in their workspace-relative form \
+         ({printed} presented){}",
         artifacts.len(),
-        fmt_list(artifacts)
+        fmt_list(artifacts),
+        fmt_suggestions(suggestions)
     )]
     UnknownArtifact {
         /// The offending, never-presented ids (sorted).
         artifacts: Vec<String>,
         /// How many ids the engine did present (the accepted set size).
         printed: usize,
+        /// `(supplied, corrected)` pairs for supplied ids that look
+        /// medium-relative: prefixing the binding's medium root yields an id
+        /// the slice DID present. The remedy — never an acceptance.
+        suggestions: Vec<(String, String)>,
     },
     /// Reading or writing the durable advance store failed.
     #[error("advance store error: {0}")]
@@ -215,6 +227,56 @@ fn fmt_list(names: &[String]) -> String {
     } else {
         names.join(", ")
     }
+}
+
+/// Render the medium-relative-dialect remedy for an unknown-artifact refusal:
+/// empty when no correction is derivable, else a `supplied → corrected` list
+/// telling the agent the exact ids to retry with.
+fn fmt_suggestions(suggestions: &[(String, String)]) -> String {
+    if suggestions.is_empty() {
+        return String::new();
+    }
+    let pairs = suggestions
+        .iter()
+        .map(|(supplied, corrected)| format!("`{supplied}` → `{corrected}`"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        ". Some supplied ids look medium-relative; the slice presents them workspace-relative — \
+         retry with {pairs} (the medium-relative form is never accepted)"
+    )
+}
+
+/// For each unknown disposition id, derive the corrected workspace-relative id
+/// when possible: prefix the id with a primary source's medium root and accept
+/// the candidate iff it is in the presented set (`printed`). Purely a remedy
+/// computation — it never widens the gate.
+fn derive_corrected_ids(
+    unknown: &[String],
+    resolved: &ResolvedIngest,
+    printed: &BTreeSet<String>,
+) -> Vec<(String, String)> {
+    let medium_roots: Vec<&str> = resolved
+        .sources
+        .iter()
+        .filter_map(|s| match s {
+            ResolvedSource::Primary(p) if !p.medium_pointer.is_empty() => {
+                Some(p.medium_pointer.as_str())
+            }
+            _ => None,
+        })
+        .collect();
+    unknown
+        .iter()
+        .filter_map(|id| {
+            medium_roots.iter().find_map(|root| {
+                let candidate = format!("{}/{id}", root.trim_end_matches('/'));
+                printed
+                    .contains(candidate.as_str())
+                    .then(|| (id.clone(), candidate))
+            })
+        })
+        .collect()
 }
 
 /// Split a canonical binding id `<mem>/<stem>` into its two single-component
@@ -410,9 +472,15 @@ pub fn advance_baseline(
     if !unknown.is_empty() {
         unknown.sort();
         unknown.dedup();
+        // Remedy, not acceptance: when a supplied id resolves to a presented
+        // one once prefixed with its medium root (the medium-relative-dialect
+        // mistake agents naturally make), the refusal carries the corrected
+        // id — the gate itself never widens.
+        let suggestions = derive_corrected_ids(&unknown, resolved, &printed);
         return Err(AdvanceError::UnknownArtifact {
             artifacts: unknown,
             printed: printed.len(),
+            suggestions,
         });
     }
 
@@ -1008,6 +1076,103 @@ mod tests {
                 .is_none(),
             "re-judging the artifact cleared the exclusion; nothing durable remains"
         );
+    }
+
+    /// Criterion: a **medium-relative** artifact id (the form agents naturally
+    /// type — `a.rs` when the engine printed `sub/a.rs`) refuses with a typed,
+    /// remedy-bearing message that names the workspace-relative dialect and
+    /// the concrete corrected id when derivable. REFUSALS: the gate never
+    /// widens — the medium-relative form is never accepted, nothing is
+    /// written; an unknown id with no derivable correction carries no
+    /// suggestion.
+    #[test]
+    fn advance_unknown_artifact_names_dialect_and_suggests_corrected_id() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+
+        // Source files live under the medium subtree `sub/` — artifact ids in
+        // the slice are workspace-relative (`sub/a.rs`).
+        git(root, &["init", "-q"]);
+        std::fs::create_dir_all(root.join("sub")).unwrap();
+        std::fs::write(root.join("sub").join("a.rs"), "one").unwrap();
+        git(root, &["add", "-A"]);
+        git(root, &["commit", "-qm", "base"]);
+        let baseline = head_sha(root);
+        std::fs::write(root.join("sub").join("a.rs"), "one-longer").unwrap();
+        git(root, &["add", "-A"]);
+        git(root, &["commit", "-qm", "head1"]);
+
+        let mut resolved = resolved_engine_graph();
+        if let ResolvedSource::Primary(p) = &mut resolved.sources[0] {
+            p.medium_pointer = "sub".to_string();
+        }
+        {
+            let mut engine = engine_at(root);
+            engine
+                .set_mem_sync_state("engine", synced_key(), &baseline, None)
+                .unwrap();
+        }
+
+        // The medium-relative id refuses; the message names the dialect and
+        // the corrected id; the details pair maps supplied → corrected. An id
+        // with no derivable correction rides the same refusal suggestion-free.
+        {
+            let mut engine = engine_at(root);
+            let err = advance_baseline(
+                &mut engine,
+                root,
+                &resolved,
+                &input(&[("a.rs", "worked"), ("zzz.rs", "worked")]),
+            )
+            .unwrap_err();
+            let AdvanceError::UnknownArtifact {
+                artifacts,
+                suggestions,
+                ..
+            } = &err
+            else {
+                panic!("expected UnknownArtifact, got {err:?}");
+            };
+            assert_eq!(artifacts, &vec!["a.rs".to_string(), "zzz.rs".to_string()]);
+            assert_eq!(
+                suggestions,
+                &vec![("a.rs".to_string(), "sub/a.rs".to_string())],
+                "only the medium-relative id gets a corrected form; zzz.rs has none"
+            );
+            let msg = err.to_string();
+            assert!(
+                msg.contains("workspace-relative"),
+                "names the dialect: {msg}"
+            );
+            assert!(
+                msg.contains("`a.rs` → `sub/a.rs`"),
+                "carries the concrete corrected id: {msg}"
+            );
+            assert!(
+                msg.contains("never accepted"),
+                "states the dialect does not widen: {msg}"
+            );
+        }
+        // The refusal wrote nothing (the gate stayed atomic).
+        assert!(
+            read_advance_store(root, "engine", "graph")
+                .unwrap()
+                .is_none(),
+            "a refused call must not create the advance store"
+        );
+
+        // The corrected workspace-relative id is the one the gate accepts.
+        {
+            let mut engine = engine_at(root);
+            let out = advance_baseline(
+                &mut engine,
+                root,
+                &resolved,
+                &input(&[("sub/a.rs", "worked")]),
+            )
+            .unwrap();
+            assert!(out.completed, "the sole slice artifact was disposed");
+        }
     }
 
     /// `record_exclusions` gates on enumerable `S(D)` membership (not the changed
