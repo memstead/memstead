@@ -64,7 +64,7 @@
       "additionalProperties": true
     },
     "plugin": {
-      "description": "Pass-through namespace for plugin-specific configuration tables (e.g. `[plugin.claude_code.outer_vcs]`). Keys and shapes are owned by individual plugins; the loader does not constrain them.",
+      "description": "Pass-through namespace for plugin-specific configuration tables (e.g. `[plugin.claude_code]` sub-tables). Keys and shapes are owned by individual plugins; the loader does not constrain them.",
       "type": "object",
       "additionalProperties": true
     }

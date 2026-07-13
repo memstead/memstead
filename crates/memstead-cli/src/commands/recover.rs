@@ -33,7 +33,7 @@ pub struct Args {
 }
 
 pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
-    let mut engine = crate::setup::pro_engine(ctx)?;
+    let mut engine = crate::setup::full_engine(ctx)?;
     let note_ref = args.note.as_deref();
     let report = engine
         .apply_parse_recovery(Actor::Cli, None, note_ref)

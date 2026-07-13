@@ -37,7 +37,7 @@ use memstead_base::ingest::advance::{
     AdvanceError, DispositionInput, ExcludeError, advance_baseline, record_exclusions,
 };
 use memstead_base::ingest::findings::{
-    FullResyncDecision, record_verified_baseline, verify_binding,
+    FindingsError, FullResyncDecision, record_verified_baseline, verify_binding,
 };
 use memstead_base::ingest::report::{
     DEFAULT_REPORT_BUDGET, compute_fidelity_report, render_fidelity_report,
@@ -61,7 +61,7 @@ use memstead_base::{migrate_legacy_pipeline, read_legacy_pipeline_configs};
 
 use crate::CliError;
 use crate::output::{ExitKind, print_json, print_markdown};
-use crate::setup::{CliContext, CliEngine, workspace_not_initialised_error};
+use crate::setup::{CliContext, workspace_not_initialised_error};
 
 #[derive(ClapArgs, Debug)]
 pub struct Args {
@@ -430,11 +430,7 @@ fn brief(ctx: &CliContext, args: BriefArgs) -> anyhow::Result<()> {
     })?;
 
     let cli_engine = ctx.cli_engine_at(&root)?;
-    let engine = match &cli_engine {
-        #[cfg(feature = "mem-repo")]
-        CliEngine::MemRepo(e) => e,
-        CliEngine::Filesystem(e) => e,
-    };
+    let engine = cli_engine.base();
 
     // Group-C briefs: verify / sync render for one named binding (no rotation).
     // Both are read-only on the destination mem — the sync brief's repairs reach
@@ -888,11 +884,7 @@ fn consume_reconcile_cursors(
     if !cursors.is_empty() {
         let configs = load_pipeline_configs(root).map_err(migrate_load_err)?;
         let mut cli_engine = ctx.cli_engine_at(root)?;
-        let engine = match &mut cli_engine {
-            #[cfg(feature = "mem-repo")]
-            CliEngine::MemRepo(e) => e,
-            CliEngine::Filesystem(e) => e,
-        };
+        let engine = cli_engine.base_mut();
         for (cursor_key, sha) in &cursors {
             // Key is `"<mem>:<abs-path>"` — split on the first ':'.
             let Some((_cursor_mem, abs_path)) = cursor_key.split_once(':') else {
@@ -1395,11 +1387,7 @@ fn advance(ctx: &CliContext, args: AdvanceArgs) -> anyhow::Result<()> {
     // The engine is mutable — a completing advance writes the `#synced`
     // baseline token through the sync-state writer.
     let mut cli_engine = ctx.cli_engine_at(&root)?;
-    let engine = match &mut cli_engine {
-        #[cfg(feature = "mem-repo")]
-        CliEngine::MemRepo(e) => e,
-        CliEngine::Filesystem(e) => e,
-    };
+    let engine = cli_engine.base_mut();
 
     let outcome = advance_baseline(engine, &root, &resolved, &dispositions)
         .map_err(|e| map_advance_err(&binding_id, e))?;
@@ -1619,20 +1607,41 @@ fn verify(ctx: &CliContext, args: VerifyArgs) -> anyhow::Result<()> {
     // incapable of a mem mutation); the mutable binding exists only for the
     // completed-run baseline write below.
     let mut cli_engine = ctx.cli_engine_at(&root)?;
-    let engine = match &mut cli_engine {
-        #[cfg(feature = "mem-repo")]
-        CliEngine::MemRepo(e) => e,
-        CliEngine::Filesystem(e) => e,
-    };
+    let engine = cli_engine.base_mut();
 
-    let outcome = verify_binding(engine, &root, &record.config, &resolved).map_err(|e| {
-        CliError::new(
-            ExitKind::Generic,
-            "PROJECTION_VERIFY_FAILED",
-            format!("verify failed for `{binding_id}`: {e}"),
-        )
-        .with_details(json!({ "binding": binding_id, "error": e.to_string() }))
-    })?;
+    let outcome =
+        verify_binding(engine, &root, &record.config, &resolved).map_err(|e| match &e {
+            // A vanished/unmounted source is a typed refusal, not a failed
+            // measurement: nothing was observed, no findings were recorded,
+            // and the `#verified` baseline is deliberately left untouched
+            // (a transient unmount must never clobber real recorded state).
+            FindingsError::SourceUnreachable {
+                facet,
+                medium,
+                path,
+            } => CliError::new(
+                ExitKind::Validation,
+                "SOURCE_UNREACHABLE",
+                format!(
+                    "verify refused for `{binding_id}`: source facet '{facet}' (medium \
+                 '{medium}') resolves to `{path}`, which does not exist — restore or \
+                 remount the source (or repoint the medium); the recorded `#verified` \
+                 baseline was left untouched"
+                ),
+            )
+            .with_details(json!({
+                "binding": binding_id,
+                "facet": facet,
+                "medium": medium,
+                "path": path,
+            })),
+            _ => CliError::new(
+                ExitKind::Generic,
+                "PROJECTION_VERIFY_FAILED",
+                format!("verify failed for `{binding_id}`: {e}"),
+            )
+            .with_details(json!({ "binding": binding_id, "error": e.to_string() })),
+        })?;
 
     // Assemble + render the tier-1 fidelity report (group B) over the findings
     // the pass just recorded. Read-only — no destination-mem mutation.

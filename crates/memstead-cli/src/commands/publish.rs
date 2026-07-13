@@ -35,7 +35,7 @@ use crate::CliError;
 use crate::auth::{credentials, device_flow, resolve_token};
 use crate::output::{ExitKind, print_json, print_markdown};
 use crate::registry::{self, ApiErrorBody, PublishError};
-use crate::setup::{CliContext, CliEngine};
+use crate::setup::CliContext;
 
 #[derive(Parser, Debug)]
 pub struct Args {
@@ -142,11 +142,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             (p, None)
         } else if let Some(mem_name) = args.mem.as_deref() {
             let workspace_root = resolve_workspace_root(args.workspace.as_deref())?;
-            let mut engine = match ctx.cli_engine_at(&workspace_root)? {
-                #[cfg(feature = "mem-repo")]
-                CliEngine::MemRepo(e) => e,
-                CliEngine::Filesystem(e) => e,
-            };
+            let mut engine = ctx.cli_engine_at(&workspace_root)?.into_base();
             // Persist the version bump before exporting — but never
             // under --dry-run, which must leave the workspace untouched.
             if let Some(ver) = target_version.clone()

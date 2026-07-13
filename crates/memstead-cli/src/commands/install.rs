@@ -59,7 +59,7 @@ pub struct Args {
 }
 
 pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
-    let engine = crate::setup::pro_engine(ctx)?;
+    let engine = crate::setup::full_engine(ctx)?;
 
     let mem_name = resolve_mem_name(&engine, args.mem_name.clone())?;
     // Resolve target shape: mem-repo-backed mems have `dir: None`

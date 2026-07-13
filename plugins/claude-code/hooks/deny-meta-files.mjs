@@ -22,7 +22,10 @@ import {
   checkCandidate,
   extractCandidates,
 } from './deny-meta-files-utils.mjs';
-import { hasWorkspaceMarker } from './workspace-resolve-utils.mjs';
+import {
+  findWorkspaceRoot,
+  hasWorkspaceMarker,
+} from './workspace-resolve-utils.mjs';
 
 const input = JSON.parse(await readStdin());
 const candidates = extractCandidates(input.tool_input);
@@ -78,17 +81,7 @@ function loadActiveDenyPaths(workspaceRoot) {
 // level beneath (walk-up fails; fall back to a depth-1 scan from the `.git`
 // parent).
 function findWorkspaceDir(start) {
-  return findWorkspaceDirUp(start) ?? findGraphDirBelowProjectRoot(start);
-}
-
-function findWorkspaceDirUp(start) {
-  let dir = resolve(start);
-  while (true) {
-    if (hasWorkspaceMarker(dir)) return dir;
-    const parent = dirname(dir);
-    if (parent === dir) return null;
-    dir = parent;
-  }
+  return findWorkspaceRoot(start) ?? findGraphDirBelowProjectRoot(start);
 }
 
 function findGraphDirBelowProjectRoot(start) {

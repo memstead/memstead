@@ -586,7 +586,7 @@ fn expected_hints(tool_name: &str) -> HintTriple {
         },
         "memstead_workspace_revoke_cross_link" => HintTriple {
             read_only: Some(false),
-            destructive: Some(false),
+            destructive: Some(true),
             idempotent: Some(true),
             open_world: Some(false),
         },

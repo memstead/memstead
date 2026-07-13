@@ -47,8 +47,8 @@ pub struct ProcessMemInfo {
     pub mem_label: String,
 }
 
-/// The mode string the situation block prints (`discovery` / `refinement` /
-/// `one-shot`) — the same tokens the plugin uses.
+/// The mode string the situation block prints (`discovery` / `one-shot`) —
+/// the same tokens the plugin uses.
 fn mode_label(mode: BuildMode) -> &'static str {
     match mode {
         BuildMode::Discovery => "discovery",

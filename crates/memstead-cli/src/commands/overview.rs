@@ -5,7 +5,7 @@ use memstead_base::chunking::apply_chunking;
 
 use crate::CliError;
 use crate::output::{ExitKind, print_json, print_markdown};
-use crate::setup::{CliContext, CliEngine};
+use crate::setup::CliContext;
 
 // Lean build: renders the simple in-process cluster overview and defers
 // rich heavy-content to the MCP tool.
@@ -73,12 +73,7 @@ pub struct Args {
 
 #[cfg(feature = "mem-repo")]
 pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
-    // The full build always activates the mem-repo feature, so both
-    // engine arms are present.
-    let mut engine = match ctx.cli_engine()? {
-        CliEngine::MemRepo(e) => e,
-        CliEngine::Filesystem(e) => e,
-    };
+    let mut engine = ctx.cli_engine()?.into_base();
 
     let composer_args = OverviewArgs {
         include: &args.include,
@@ -215,9 +210,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         }
     }
 
-    let mut engine = match ctx.cli_engine()? {
-        CliEngine::Filesystem(e) => e,
-    };
+    let mut engine = ctx.cli_engine()?.into_base();
     if args.rebuild && args.chunk.unwrap_or(1) <= 1 {
         engine.invalidate_communities();
     }
@@ -243,12 +236,12 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     // the simple cluster summary only; the rich heavy-content
     // composer lives in `memstead-engine` (reached by the full
     // `memstead overview` and the MCP `memstead_overview` tool).
-    let pro_only_warning = (!args.include.is_empty()
+    let full_only_warning = (!args.include.is_empty()
         || args.token_budget.is_some()
         || args.mem.is_some())
         .then(|| {
             (
-                "OVERVIEW_RICH_CONTENT_PRO_ONLY",
+                "OVERVIEW_RICH_CONTENT_FULL_ONLY",
                 "the lean build renders the simple cluster overview only — rich content (`--mem` scoping, `--include community_bridges` / `mem_distribution` / `dangling_links`, non-default `--token-budget`) requires the full `memstead` build or the `memstead_overview` MCP tool".to_string(),
             )
         });
@@ -264,7 +257,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 })
             })
             .collect();
-        if let Some((code, message)) = pro_only_warning.as_ref() {
+        if let Some((code, message)) = full_only_warning.as_ref() {
             warnings_json.push(json!({
                 "code": code,
                 "message": message,
@@ -285,7 +278,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 allowed,
             ));
         }
-        if let Some((code, message)) = pro_only_warning.as_ref() {
+        if let Some((code, message)) = full_only_warning.as_ref() {
             out.push_str(&format!("\n\n_WARNING [{code}]: {message}._"));
         }
         print_markdown(&out);

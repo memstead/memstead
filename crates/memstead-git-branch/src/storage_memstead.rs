@@ -1341,7 +1341,7 @@ mod tests {
     }
 
     #[test]
-    fn pro_git_branch_ops_write_schema_hook_writes_to_ref() {
+    fn full_git_branch_ops_write_schema_hook_writes_to_ref() {
         // The engine reaches the ref-write through the
         // `GitBranchOps.write_schema` dispatcher; this pins that the const
         // is wired to `write_schema_to_memstead_ref` and returns a sha.

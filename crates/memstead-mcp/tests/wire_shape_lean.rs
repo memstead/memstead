@@ -239,7 +239,7 @@ impl Drop for WireHarness {
 /// pinned text. Pre-extraction the two server files own independent
 /// mappers (`FilesystemMcpServer::engine_op_error` vs
 /// `McpServer::engine_err_unified`) — message text DRIFTS between them
-/// today (see `lean_memstead_entity_*` vs `pro_memstead_entity_*`). The plan's
+/// today (see `lean_memstead_entity_*` vs `full_memstead_entity_*`). The plan's
 /// wire-byte-identity contract is *per-flavor*, not inter-flavor, so
 /// each pin records its own server's current bytes.
 fn assert_error_envelope(result: &Value, expected_code: &str, expected_message: &str) {
@@ -724,7 +724,7 @@ fn lean_memstead_delete_succeeds_and_entity_becomes_unreadable() {
 /// `content_hash`. (REFERENCES would be refused under the default
 /// schema's `alias_target_rel_type` pointer; this test pins the
 /// wire shape, not the rel-type specifically.) The full flavor uses different field names — see
-/// `pro_memstead_relate_returns_typed_success_envelope` for the
+/// `full_memstead_relate_returns_typed_success_envelope` for the
 /// inter-flavor drift recorded below.
 #[test]
 fn lean_memstead_relate_returns_typed_success_envelope() {

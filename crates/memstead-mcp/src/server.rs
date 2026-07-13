@@ -66,10 +66,8 @@ pub struct McpServer {
     /// Resolved `[plugin.*]` namespace from the workspace's
     /// `.memstead/workspace.toml`. Surfaced verbatim under `memstead_health
     /// { include_config: true }`. Each value is an opaque
-    /// `toml::Table`; the engine never inspects the contents.
-    /// Consumed by outer-repo bookkeeping clients (historically the retired auto-commit Stop hook)
-    /// (`plugin.claude_code.outer_vcs`) and any future plugin
-    /// pass-through.
+    /// `toml::Table`; the engine never inspects the contents — named
+    /// plugins read their own sub-table (e.g. `[plugin.claude_code]`).
     plugin: Arc<HashMap<String, toml::Table>>,
     /// Process-scoped operator-mode posture. When `true`, the
     /// `memstead_mem_create` / `memstead_mem_delete` orchestrators bypass
@@ -1620,7 +1618,7 @@ fn engine_err_unified(
 /// bit-identical to what `engine_err_unified` produced for the same
 /// variants before the lifecycle variants moved off
 /// `memstead_base::EngineError`; the move is pure plumbing.
-fn pro_engine_err_unified(
+fn full_engine_err_unified(
     e: memstead_engine::FullEngineError,
     engine: &memstead_base::Engine,
 ) -> CallToolResult {
@@ -3408,7 +3406,7 @@ impl McpServer {
                     None => res,
                 }
             }
-            Err(e) => pro_engine_err_unified(e, &engine),
+            Err(e) => full_engine_err_unified(e, &engine),
         }
     }
 
@@ -3463,7 +3461,7 @@ impl McpServer {
                 }
                 res
             }
-            Err(e) => pro_engine_err_unified(e, &engine),
+            Err(e) => full_engine_err_unified(e, &engine),
         }
     }
 
@@ -3522,7 +3520,7 @@ impl McpServer {
         description = "Revoke mem `from`'s permission to author cross-mem links into mem `to`. Mutates the `[cross_mem_links]` workspace policy; when the underlying list becomes empty, the `from` key is dropped entirely. Dynamic-mem-lifecycle workflow: revoke before `memstead_mem_delete` to clear the `MEM_REFERENCED_BY_POLICY` refusal. Idempotent: re-revoke of an absent grant returns success with `GRANT_NOT_FOUND` warning, file unchanged. Refuses with `WORKSPACE_NOT_INITIALISED` when the workspace config is missing, `INVALID_TOML` when the file fails to parse, `IO_ERROR` on write failure. Response carries `{from, to, warnings}`.",
         annotations(
             read_only_hint = false,
-            destructive_hint = false,
+            destructive_hint = true,
             idempotent_hint = true,
             open_world_hint = false
         )
@@ -5884,11 +5882,13 @@ community:
             require_notes: Some(true),
         };
         let mut plugin = HashMap::new();
-        let mut outer_vcs = toml::Table::new();
-        outer_vcs.insert("enabled".into(), toml::Value::Boolean(true));
-        outer_vcs.insert("mode".into(), toml::Value::String("session_bundle".into()));
+        // Any opaque sub-table proves the pass-through — the engine
+        // never inspects the keys.
+        let mut sub_table = toml::Table::new();
+        sub_table.insert("enabled".into(), toml::Value::Boolean(true));
+        sub_table.insert("mode".into(), toml::Value::String("session_bundle".into()));
         let mut claude_code = toml::Table::new();
-        claude_code.insert("outer_vcs".into(), toml::Value::Table(outer_vcs));
+        claude_code.insert("custom_setting".into(), toml::Value::Table(sub_table));
         plugin.insert("claude_code".into(), claude_code);
 
         let server = McpServer::new_with_config(
@@ -5912,11 +5912,11 @@ community:
         let json: serde_json::Value = serde_json::from_str(&text).unwrap();
         assert_eq!(json["mutations"]["require_notes"], serde_json::json!(true));
         assert_eq!(
-            json["plugin"]["claude_code"]["outer_vcs"]["enabled"],
+            json["plugin"]["claude_code"]["custom_setting"]["enabled"],
             serde_json::json!(true)
         );
         assert_eq!(
-            json["plugin"]["claude_code"]["outer_vcs"]["mode"],
+            json["plugin"]["claude_code"]["custom_setting"]["mode"],
             serde_json::json!("session_bundle")
         );
     }
@@ -11822,7 +11822,7 @@ community:
         // values when mounted on a mem-repo (backend factory +
         // storage heuristic). Use the git-branch test-engine helper
         // so memstead_mem_create asserts against real commit shas.
-        let pro_settings = memstead_git_branch::test_support::auto_seed_with_settings(
+        let full_settings = memstead_git_branch::test_support::auto_seed_with_settings(
             tmp.path(),
             WorkspaceSettings {
                 mem_create_rules: vec![
@@ -11841,7 +11841,7 @@ community:
                 ..Default::default()
             },
         );
-        let unified_settings = pro_settings.clone();
+        let unified_settings = full_settings.clone();
         let mut unified = setup_unified_test_engine_git_branch(tmp.path());
         unified.set_settings(unified_settings);
         let canonical_root =
@@ -12304,7 +12304,7 @@ community:
     /// delete allowlists rooted at the given TempDir, so `memstead_mem_delete`
     /// can actually unregister what a prior `memstead_mem_create` set up.
     fn setup_lifecycle_server_with_delete(tmp: &TempDir) -> McpServer {
-        let pro_settings = memstead_git_branch::test_support::auto_seed_with_settings(
+        let full_settings = memstead_git_branch::test_support::auto_seed_with_settings(
             tmp.path(),
             WorkspaceSettings {
                 mem_create_rules: vec![memstead_base::CreateRuleSetting {
@@ -12318,7 +12318,7 @@ community:
                 ..Default::default()
             },
         );
-        let unified_settings = pro_settings.clone();
+        let unified_settings = full_settings.clone();
         let mut unified = setup_unified_test_engine_git_branch(tmp.path());
         unified.set_settings(unified_settings);
         let canonical_root =
@@ -12753,7 +12753,7 @@ community:
     #[test]
     fn memstead_mem_delete_hierarchical_path_prunes_branch_and_config() {
         let tmp = TempDir::new().unwrap();
-        let pro_settings = memstead_git_branch::test_support::auto_seed_with_settings(
+        let full_settings = memstead_git_branch::test_support::auto_seed_with_settings(
             tmp.path(),
             WorkspaceSettings {
                 mem_create_rules: vec![memstead_base::CreateRuleSetting {
@@ -12768,7 +12768,7 @@ community:
             },
         );
         let mut unified = setup_unified_test_engine_git_branch(tmp.path());
-        unified.set_settings(pro_settings);
+        unified.set_settings(full_settings);
         let canonical_root =
             std::fs::canonicalize(tmp.path()).unwrap_or_else(|_| tmp.path().to_path_buf());
         unified.set_workspace_root(canonical_root);

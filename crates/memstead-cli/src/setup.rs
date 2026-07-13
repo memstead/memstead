@@ -100,6 +100,61 @@ pub enum CliEngine {
     Filesystem(BaseEngine),
 }
 
+impl CliEngine {
+    /// The unified base engine behind whichever flavour booted. Both
+    /// variants wrap [`BaseEngine`]; commands that treat the flavours
+    /// identically destructure here instead of carrying a per-site
+    /// match (which, in the lean build's single-variant enum, is the
+    /// `infallible_destructuring_match` shape the isolated lean clippy
+    /// leg flags).
+    pub fn base(&self) -> &BaseEngine {
+        #[cfg(feature = "mem-repo")]
+        {
+            match self {
+                CliEngine::MemRepo(e) => e,
+                CliEngine::Filesystem(e) => e,
+            }
+        }
+        #[cfg(not(feature = "mem-repo"))]
+        {
+            let CliEngine::Filesystem(e) = self;
+            e
+        }
+    }
+
+    /// Mutable twin of [`Self::base`].
+    pub fn base_mut(&mut self) -> &mut BaseEngine {
+        #[cfg(feature = "mem-repo")]
+        {
+            match self {
+                CliEngine::MemRepo(e) => e,
+                CliEngine::Filesystem(e) => e,
+            }
+        }
+        #[cfg(not(feature = "mem-repo"))]
+        {
+            let CliEngine::Filesystem(e) = self;
+            e
+        }
+    }
+
+    /// Owning twin of [`Self::base`].
+    pub fn into_base(self) -> BaseEngine {
+        #[cfg(feature = "mem-repo")]
+        {
+            match self {
+                CliEngine::MemRepo(e) => e,
+                CliEngine::Filesystem(e) => e,
+            }
+        }
+        #[cfg(not(feature = "mem-repo"))]
+        {
+            let CliEngine::Filesystem(e) = self;
+            e
+        }
+    }
+}
+
 impl CliContext {
     /// Resolve the workspace flavour by walking up from cwd. Returns
     /// `None` when no `.memstead/workspace.toml` is found in any ancestor.
@@ -315,7 +370,7 @@ pub fn cli_ctx_with_note(note: Option<String>) -> CommitContext<'static> {
 /// snapshots, `batch-update` commit envelopes) that have no analogue
 /// on a folder-mount-only workspace.
 #[cfg(feature = "mem-repo")]
-pub fn pro_engine(_ctx: &CliContext) -> anyhow::Result<BaseEngine> {
+pub fn full_engine(_ctx: &CliContext) -> anyhow::Result<BaseEngine> {
     let cwd = std::env::current_dir().map_err(|e| {
         CliError::new(
             ExitKind::Generic,

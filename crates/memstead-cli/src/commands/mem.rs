@@ -412,7 +412,7 @@ pub fn run(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
         }
     };
     let response =
-        mem_management::create_mem(&mut engine, params).map_err(pro_engine_err_to_cli)?;
+        mem_management::create_mem(&mut engine, params).map_err(full_engine_err_to_cli)?;
     if ctx.json {
         crate::output::print_json(&serde_json::json!({
             "name": response.name,
@@ -585,7 +585,7 @@ fn run_delete_inner(
         }
     };
     let response =
-        mem_management::delete_mem(&mut engine, params).map_err(pro_engine_err_to_cli)?;
+        mem_management::delete_mem(&mut engine, params).map_err(full_engine_err_to_cli)?;
     if ctx.json {
         crate::output::print_json(&serde_json::json!({
             "name": response.name,
@@ -696,7 +696,7 @@ fn render_mem_delete_markdown(r: &MemDeleteResponse, verb: &str) -> String {
 /// Sourcing from the engine error directly means any new engine code
 /// automatically reaches the CLI envelope without a hand-maintained
 /// translation table to update.
-fn pro_engine_err_to_cli(err: memstead_engine::FullEngineError) -> anyhow::Error {
+fn full_engine_err_to_cli(err: memstead_engine::FullEngineError) -> anyhow::Error {
     match err {
         memstead_engine::FullEngineError::Lean(inner) => CliError::from_engine_op(inner).into(),
         lifecycle => {
@@ -986,7 +986,7 @@ pub fn run_list(ctx: &CliContext, _args: ListArgs) -> anyhow::Result<()> {
         json: ctx.json,
         quiet: ctx.quiet,
     };
-    let engine = crate::setup::pro_engine(&setup_ctx)
+    let engine = crate::setup::full_engine(&setup_ctx)
         .map_err(|e| generic_error(format!("mem list: could not initialize engine: {e}")))?;
 
     let mut rows: Vec<serde_json::Value> = Vec::new();
@@ -1047,9 +1047,9 @@ mod tests {
     use std::path::PathBuf;
 
     fn lifted_cli_error(err: FullEngineError) -> CliError {
-        let any = pro_engine_err_to_cli(err);
+        let any = full_engine_err_to_cli(err);
         any.downcast::<CliError>()
-            .expect("pro_engine_err_to_cli must lift to a CliError")
+            .expect("full_engine_err_to_cli must lift to a CliError")
     }
 
     /// The client-side mem-template consumer surfaces a built-in

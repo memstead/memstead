@@ -84,8 +84,8 @@ test('resolveWorkspaceRootFrom walks up to the workspace marker', () => {
 
 test('resolveWorkspaceRootFrom follows an .mcp.json cd-target into a subdirectory workspace', () => {
   // The loop-session case: pwd is the project root, the workspace lives in
-  // graph/ — a plain walk-up never descends, so the gate must probe the
-  // `.mcp.json` `cd <dir>` launch target (same resolution the hooks use).
+  // a subdirectory — a plain walk-up never descends, so the gate must probe
+  // the `.mcp.json` `cd <dir>` launch target (same resolution the hooks use).
   const project = ws();
   const graph = join(project, 'graph');
   mkdirSync(join(graph, '.memstead'), { recursive: true });

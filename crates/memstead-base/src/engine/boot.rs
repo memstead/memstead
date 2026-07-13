@@ -261,6 +261,21 @@ impl Engine {
         // set is schema-clean before the labeling pass.
         crate::entity::store_builder::remap_alias_target_edge_sources(&mut store, &schemas);
 
+        // The nested-prefix drift scan runs per mount, so a cross-mem
+        // link into a mem loaded LATER in the mount order probes an
+        // incomplete store and false-positives on a perfectly valid id
+        // (e.g. `registry--registry-service` referenced from a mem that
+        // mounts before `registry`). Now that every mount is loaded,
+        // drop any hit whose resolved target exists as a real entity —
+        // the same legitimate-cross-mem-reference exemption the
+        // in-batch scan already applies when load order permits.
+        load_warnings.retain(|w| match w {
+            WarningHint::SuspiciousNestedPrefix { resolved_id, .. } => {
+                store.get(resolved_id).is_none_or(|e| e.stub)
+            }
+            _ => true,
+        });
+
         // Derive the runtime mem router from the mount list.
         // Mirrors full's `Engine::from_init` step that registers every
         // mount with `MemRouterSnapshot` so handlers reach a
@@ -859,6 +874,63 @@ mod tests {
             (&surviving[0].0, &surviving[0].1),
             (dropped_from, dropped_to),
             "surviving edge must differ from the dropped one",
+        );
+    }
+
+    /// The per-mount nested-prefix drift scan probes an incomplete
+    /// store: a cross-mem link into a mem loaded LATER in the mount
+    /// order can't see the real target yet and would false-positive on
+    /// a perfectly valid id whose slug repeats its mem name (the
+    /// `registry--registry-service` case). The post-load sweep must
+    /// drop that hit — while a genuine drift link (target never
+    /// materialises as a real entity) keeps its warning.
+    #[test]
+    fn nested_prefix_warning_exempts_real_cross_mem_target_loaded_later() {
+        let tmp = TempDir::new().unwrap();
+        let project_dir = tmp.path().join("project");
+        let registry_dir = tmp.path().join("registry");
+        std::fs::create_dir_all(&project_dir).unwrap();
+        std::fs::create_dir_all(&registry_dir).unwrap();
+
+        // Mount 1 (loads first) links both a real later-loaded entity
+        // and a genuinely missing one.
+        let source = "---\ntype: spec\n---\n# Source\n\n## Identity\n\nReal: [[registry--registry-service]]. Drifted: [[registry--never-created]].\n";
+        std::fs::write(project_dir.join("source.md"), source).unwrap();
+
+        // Mount 2 (loads second) carries the real target whose slug
+        // repeats its mem name — the shape the heuristic suspects.
+        let service = "---\ntype: spec\n---\n# Registry Service\n\n## Identity\n\nA real entity.\n";
+        std::fs::write(registry_dir.join("registry-service.md"), service).unwrap();
+
+        let engine = Engine::from_mounts(vec![
+            (
+                folder_mount("project", project_dir.clone()),
+                Box::new(FilesystemMemWriter::new(project_dir)) as Box<dyn MemBackend>,
+            ),
+            (
+                folder_mount("registry", registry_dir.clone()),
+                Box::new(FilesystemMemWriter::new(registry_dir)) as Box<dyn MemBackend>,
+            ),
+        ])
+        .unwrap();
+
+        let nested: Vec<_> = engine
+            .load_warnings()
+            .iter()
+            .filter_map(|w| match w {
+                WarningHint::SuspiciousNestedPrefix { resolved_id, .. } => {
+                    Some(resolved_id.to_string())
+                }
+                _ => None,
+            })
+            .collect();
+        assert!(
+            !nested.contains(&"registry--registry-service".to_string()),
+            "a valid cross-mem id resolving to a real entity must not warn, got {nested:?}",
+        );
+        assert!(
+            nested.contains(&"registry--never-created".to_string()),
+            "a genuinely unresolved nested-prefix link must keep its warning, got {nested:?}",
         );
     }
 

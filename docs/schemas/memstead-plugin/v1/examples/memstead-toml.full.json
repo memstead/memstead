@@ -20,7 +20,7 @@
   },
   "plugin": {
     "claude_code": {
-      "outer_vcs": {
+      "custom_setting": {
         "enabled": true
       }
     }

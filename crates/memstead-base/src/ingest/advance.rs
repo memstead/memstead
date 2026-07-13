@@ -280,6 +280,14 @@ pub fn write_advance_store(
     name: &str,
     state: &AdvanceState,
 ) -> Result<(), StoreError> {
+    // Self-ignoring subtree: this store is per-checkout engine state
+    // inside a possibly-tracked workspace (see the findings twin).
+    super::findings::ensure_selfignoring_store_dir(
+        &workspace_root
+            .join(WORKSPACE_STORE_DIR)
+            .join(STATE_DIR)
+            .join(ADVANCE_DIR),
+    )?;
     let path = advance_store_path(workspace_root, mem, name);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| StoreError::Io {

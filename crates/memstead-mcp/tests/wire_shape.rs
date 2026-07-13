@@ -266,7 +266,7 @@ impl Drop for WireHarness {
 /// pinned text. Pre-extraction the two server files own independent
 /// mappers (`FilesystemMcpServer::engine_op_error` vs
 /// `McpServer::engine_err_unified`) — message text DRIFTS between them
-/// today (see `lean_memstead_entity_*` vs `pro_memstead_entity_*`). The
+/// today (see `lean_memstead_entity_*` vs `full_memstead_entity_*`). The
 /// wire-byte-identity contract is *per-flavor*, not inter-flavor, so
 /// each pin records its own server's current bytes.
 fn assert_error_envelope(result: &Value, expected_code: &str, expected_message: &str) {
@@ -307,7 +307,7 @@ fn assert_error_envelope(result: &Value, expected_code: &str, expected_message: 
 /// for `ENTITY_NOT_FOUND`. These strings DIVERGE — the snapshot suite
 /// captures both as today's truth until the casing is reconciled.
 #[test]
-fn pro_memstead_entity_emits_typed_envelope_for_missing_id() {
+fn full_memstead_entity_emits_typed_envelope_for_missing_id() {
     let tmp = TempDir::new().unwrap();
     seed_empty_workspace(tmp.path());
     // Full boot checks `<workspace>/mem-repo/.git` shape on startup —
@@ -369,7 +369,7 @@ fn assert_success_envelope(result: &Value) -> String {
 /// via the git-branch refs in `mem-repo/.git/`, so the seed seeds a
 /// `demo` branch with the default schema pinned in `__SYSTEM`.
 #[test]
-fn pro_memstead_search_succeeds_on_empty_seeded_workspace() {
+fn full_memstead_search_succeeds_on_empty_seeded_workspace() {
     let tmp = TempDir::new().unwrap();
     seed_full_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
 
@@ -391,7 +391,7 @@ fn pro_memstead_search_succeeds_on_empty_seeded_workspace() {
 /// entirely — lean has no mem-creation rules) is part of the pin so
 /// the test trips if full accidentally drops that section.
 #[test]
-fn pro_memstead_overview_succeeds_on_empty_seeded_workspace() {
+fn full_memstead_overview_succeeds_on_empty_seeded_workspace() {
     let tmp = TempDir::new().unwrap();
     seed_full_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
 
@@ -428,7 +428,7 @@ fn pro_memstead_overview_succeeds_on_empty_seeded_workspace() {
 /// emits only `"schema not found: \"<name>\""`. Recorded drift, pending
 /// reconciliation.
 #[test]
-fn pro_memstead_schema_unknown_name_emits_entity_not_found() {
+fn full_memstead_schema_unknown_name_emits_entity_not_found() {
     let tmp = TempDir::new().unwrap();
     seed_full_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
 
@@ -478,7 +478,7 @@ fn assert_create_success_shape(result: &Value, expected_id: &str, expected_mem: 
 /// Full pin: same as lean. The slug rule (`<mem>--<lower-kebab>`) is
 /// engine-internal so the expected id matches the lean pin.
 #[test]
-fn pro_memstead_create_returns_typed_success_envelope() {
+fn full_memstead_create_returns_typed_success_envelope() {
     let tmp = TempDir::new().unwrap();
     seed_full_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
 
@@ -498,7 +498,7 @@ fn pro_memstead_create_returns_typed_success_envelope() {
 /// (`engine_err_unified`) also wraps `UNKNOWN_ENTITY_TYPE`; this pin
 /// trips if full drops the recovery payload during the lift.
 #[test]
-fn pro_memstead_create_unknown_type_emits_typed_envelope() {
+fn full_memstead_create_unknown_type_emits_typed_envelope() {
     let tmp = TempDir::new().unwrap();
     seed_full_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
 
@@ -542,7 +542,7 @@ fn pro_memstead_create_unknown_type_emits_typed_envelope() {
 /// Full pin: full `memstead_health` returns a richer envelope with
 /// `writable_mems` populated when the engine sees writable mounts.
 #[test]
-fn pro_memstead_health_succeeds_on_seeded_workspace() {
+fn full_memstead_health_succeeds_on_seeded_workspace() {
     let tmp = TempDir::new().unwrap();
     seed_full_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
 
@@ -563,7 +563,7 @@ fn pro_memstead_health_succeeds_on_seeded_workspace() {
 /// — not the `MEM_ERROR` catch-all — with the offending SHA untruncated
 /// in `details.since`, so a sync loop branches cleanly (typed → re-seed).
 #[test]
-fn pro_memstead_changes_since_bad_cursor_returns_invalid_cursor() {
+fn full_memstead_changes_since_bad_cursor_returns_invalid_cursor() {
     let tmp = TempDir::new().unwrap();
     seed_full_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
     let mut harness = WireHarness::start(tmp.path());
@@ -605,7 +605,7 @@ fn pro_memstead_changes_since_bad_cursor_returns_invalid_cursor() {
 /// off an unordered `HashSet`, so the second mem silently retargeted
 /// the default.
 #[test]
-fn pro_default_writable_mem_is_stable_after_second_mem() {
+fn full_default_writable_mem_is_stable_after_second_mem() {
     const TOML: &str = "\
 format = \"memstead-git-branch-2\"\n\
 \n\
@@ -747,7 +747,7 @@ fn assert_hash_mismatch_envelope(result: &Value, expected_id: &str, expected_cur
 
 /// Full pin: same multi-step flow exercises full's mapper.
 #[test]
-fn pro_memstead_update_stale_hash_emits_typed_envelope() {
+fn full_memstead_update_stale_hash_emits_typed_envelope() {
     let tmp = TempDir::new().unwrap();
     seed_full_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
 
@@ -769,7 +769,7 @@ fn pro_memstead_update_stale_hash_emits_typed_envelope() {
 /// Full pin: same. Full response shape may differ subtly (extra fields
 /// like commit_sha) — the pin only requires the rotated hash.
 #[test]
-fn pro_memstead_update_succeeds_and_rotates_hash() {
+fn full_memstead_update_succeeds_and_rotates_hash() {
     let tmp = TempDir::new().unwrap();
     seed_full_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
 
@@ -801,7 +801,7 @@ fn pro_memstead_update_succeeds_and_rotates_hash() {
 /// Full pin: same flow; full's ENTITY_NOT_FOUND message text uses
 /// capital "Entity" per the previously-recorded inter-flavor drift.
 #[test]
-fn pro_memstead_delete_succeeds_and_entity_becomes_unreadable() {
+fn full_memstead_delete_succeeds_and_entity_becomes_unreadable() {
     let tmp = TempDir::new().unwrap();
     seed_full_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
 
@@ -833,7 +833,7 @@ fn pro_memstead_delete_succeeds_and_entity_becomes_unreadable() {
 /// shapes are pinned per-flavor, pending reconciliation of which schema
 /// wins.
 #[test]
-fn pro_memstead_relate_returns_typed_success_envelope() {
+fn full_memstead_relate_returns_typed_success_envelope() {
     let tmp = TempDir::new().unwrap();
     seed_full_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
 
@@ -885,7 +885,7 @@ fn pro_memstead_relate_returns_typed_success_envelope() {
 
 /// Full pin: same flow.
 #[test]
-fn pro_memstead_rename_returns_typed_success_envelope() {
+fn full_memstead_rename_returns_typed_success_envelope() {
     let tmp = TempDir::new().unwrap();
     seed_full_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
 
@@ -917,7 +917,7 @@ fn pro_memstead_rename_returns_typed_success_envelope() {
 /// can detect the degenerate case from `details.warnings[]`. The lean
 /// surface omits the warning entirely (see the lean pin above).
 #[test]
-fn pro_memstead_rename_same_slug_emits_typed_warning() {
+fn full_memstead_rename_same_slug_emits_typed_warning() {
     let tmp = TempDir::new().unwrap();
     seed_full_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
 
@@ -967,7 +967,7 @@ fn pro_memstead_rename_same_slug_emits_typed_warning() {
 /// engine-state-dependent; the pin is on the envelope's success flag
 /// and presence of the report on `structured_content`.
 #[test]
-fn pro_memstead_reload_returns_typed_success_envelope() {
+fn full_memstead_reload_returns_typed_success_envelope() {
     let tmp = TempDir::new().unwrap();
     seed_full_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
 
@@ -1049,7 +1049,7 @@ fn assert_has_incoming_refs_envelope(result: &Value, expected_target: &str, expe
 
 /// Full pin: same multi-step flow.
 #[test]
-fn pro_memstead_delete_with_incoming_refs_emits_typed_envelope() {
+fn full_memstead_delete_with_incoming_refs_emits_typed_envelope() {
     let tmp = TempDir::new().unwrap();
     seed_full_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
 
@@ -1086,7 +1086,7 @@ fn pro_memstead_delete_with_incoming_refs_emits_typed_envelope() {
 /// entries}` shape. **Drift recorded** — neither shape is canonical
 /// yet.
 #[test]
-fn pro_memstead_changes_since_returns_typed_success_envelope() {
+fn full_memstead_changes_since_returns_typed_success_envelope() {
     let tmp = TempDir::new().unwrap();
     seed_full_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
 
@@ -1136,7 +1136,7 @@ fn pro_memstead_changes_since_returns_typed_success_envelope() {
 /// correct from/to pair must surface, regardless of any
 /// content-similarity coincidences across the other commits.
 #[test]
-fn pro_memstead_changes_since_wide_window_uses_authoritative_rename_map() {
+fn full_memstead_changes_since_wide_window_uses_authoritative_rename_map() {
     let tmp = TempDir::new().unwrap();
     seed_full_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
 
@@ -1297,7 +1297,7 @@ fn pro_memstead_changes_since_wide_window_uses_authoritative_rename_map() {
 /// unconditionally — the parameter is renderer-side filtering, not
 /// an engine-side trigger.
 #[test]
-fn pro_memstead_changes_since_include_notes_false_strips_notes_and_memstead_ref() {
+fn full_memstead_changes_since_include_notes_false_strips_notes_and_memstead_ref() {
     let tmp = TempDir::new().unwrap();
     seed_full_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
 
@@ -1329,7 +1329,7 @@ fn pro_memstead_changes_since_include_notes_false_strips_notes_and_memstead_ref(
 /// channel, agents wanting `_hash`, sections, or
 /// relations would parse the text-channel markdown by string-scraping.
 #[test]
-fn pro_memstead_entity_returns_structured_envelope_alongside_markdown() {
+fn full_memstead_entity_returns_structured_envelope_alongside_markdown() {
     let tmp = TempDir::new().unwrap();
     seed_full_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
 
@@ -1392,7 +1392,7 @@ fn pro_memstead_entity_returns_structured_envelope_alongside_markdown() {
 /// agents would have to parse the markdown prose to recover scores,
 /// score breakdowns, or facet counts.
 #[test]
-fn pro_memstead_search_returns_structured_envelope_alongside_markdown() {
+fn full_memstead_search_returns_structured_envelope_alongside_markdown() {
     let tmp = TempDir::new().unwrap();
     seed_full_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
 
@@ -1457,7 +1457,7 @@ fn pro_memstead_search_returns_structured_envelope_alongside_markdown() {
 /// `relationships` carry typed shape — `rel_type`, `target`,
 /// `source: explicit`, plus optional `description` per posture.
 #[test]
-fn pro_memstead_entity_structured_relationships_carry_typed_shape() {
+fn full_memstead_entity_structured_relationships_carry_typed_shape() {
     let tmp = TempDir::new().unwrap();
     seed_full_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
 
@@ -1495,7 +1495,7 @@ fn pro_memstead_entity_structured_relationships_carry_typed_shape() {
 /// rename note must surface alongside the renamed change event,
 /// proving the engine populates both from the same walk.
 #[test]
-fn pro_memstead_changes_since_include_notes_true_carries_notes_and_rename_note() {
+fn full_memstead_changes_since_include_notes_true_carries_notes_and_rename_note() {
     let tmp = TempDir::new().unwrap();
     seed_full_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
 
@@ -1546,7 +1546,7 @@ fn pro_memstead_changes_since_include_notes_true_carries_notes_and_rename_note()
 
 /// Full pin: same multi-step flow.
 #[test]
-fn pro_auto_stub_then_update_emits_typed_envelope() {
+fn full_auto_stub_then_update_emits_typed_envelope() {
     let tmp = TempDir::new().unwrap();
     seed_full_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
 
@@ -1600,7 +1600,7 @@ fn pro_auto_stub_then_update_emits_typed_envelope() {
 
 /// Full pin: same.
 #[test]
-fn pro_rename_stub_emits_typed_envelope() {
+fn full_rename_stub_emits_typed_envelope() {
     let tmp = TempDir::new().unwrap();
     seed_full_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
 
@@ -1643,7 +1643,7 @@ fn pro_rename_stub_emits_typed_envelope() {
 
 /// Full pin.
 #[test]
-fn pro_relate_from_stub_emits_typed_envelope() {
+fn full_relate_from_stub_emits_typed_envelope() {
     let tmp = TempDir::new().unwrap();
     seed_full_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
 
@@ -1684,7 +1684,7 @@ fn pro_relate_from_stub_emits_typed_envelope() {
 /// mem. Response shape carries the new mem's identity so the agent
 /// can chain follow-up mutations.
 #[test]
-fn pro_memstead_mem_create_returns_typed_success_envelope() {
+fn full_memstead_mem_create_returns_typed_success_envelope() {
     // The mem-management matcher tests the candidate against the
     // pattern. The candidate is the mem NAME (not the location
     // path) so a wildcard pattern admits any name. The location lives
@@ -1734,7 +1734,7 @@ schemas = [\"default@1.0.0\"]\n\
 /// envelope. The pin checks the success flag and presence of
 /// `structured_content` — exact response fields are engine-derived.
 #[test]
-fn pro_memstead_mem_delete_returns_typed_success_envelope() {
+fn full_memstead_mem_delete_returns_typed_success_envelope() {
     const WORKSPACE_TOML_WITH_LIFECYCLE_RULES: &str = "\
 format = \"memstead-git-branch-2\"\n\
 \n\
@@ -1792,7 +1792,7 @@ pattern = \"*\"\n\
 /// gate (which fires only when another mem grants the target) stays
 /// clear.
 #[test]
-fn pro_mem_delete_preserves_allowlist_rules_so_recreate_succeeds() {
+fn full_mem_delete_preserves_allowlist_rules_so_recreate_succeeds() {
     const WORKSPACE_TOML: &str = "\
 format = \"memstead-git-branch-2\"\n\
 \n\
@@ -1863,7 +1863,7 @@ pattern = \"ephemeral\"\n\
 /// a server booted without the flag against the same workspace
 /// returns `MEM_PATH_NOT_ALLOWED` reason=`no_allowlist_configured`.
 #[test]
-fn pro_operator_mode_bypasses_empty_allowlist_via_mcp() {
+fn full_operator_mode_bypasses_empty_allowlist_via_mcp() {
     // Workspace.toml carries no `[mem_management]` section at all —
     // every agent-mode lifecycle call rejects with the
     // `no_allowlist_configured` envelope. Operator-mode admits the
@@ -1944,7 +1944,7 @@ name = \"file-two-layer\"\n\
 /// the allowlist policy itself is rendered — colocating the policy
 /// and its bypass posture keeps the surface coherent.
 #[test]
-fn pro_memstead_overview_surfaces_operator_mode_bypass() {
+fn full_memstead_overview_surfaces_operator_mode_bypass() {
     const WORKSPACE_TOML: &str = "\
 format = \"memstead-git-branch-2\"\n\
 \n\
@@ -1992,7 +1992,7 @@ name = \"file-two-layer\"\n\
 /// every fresh-workspace rebuild produce noise-only diffs against the
 /// legacy shape).
 #[test]
-fn pro_memstead_mem_create_writes_refs_heads_branch_in_mounts_json() {
+fn full_memstead_mem_create_writes_refs_heads_branch_in_mounts_json() {
     const WORKSPACE_TOML_WITH_CREATE_RULE: &str = "\
 format = \"memstead-git-branch-2\"\n\
 \n\
@@ -2075,7 +2075,7 @@ schemas = [\"default@1.0.0\"]\n\
 /// description ships `code: DESCRIPTION_NOT_PERMITTED` + structured
 /// `details.{rel_type,from_id,to_id}` — not a bare `INTERNAL`.
 #[test]
-fn pro_memstead_relate_with_forbidden_description_emits_typed_envelope() {
+fn full_memstead_relate_with_forbidden_description_emits_typed_envelope() {
     let tmp = TempDir::new().unwrap();
     seed_full_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
 
@@ -2134,7 +2134,7 @@ fn pro_memstead_relate_with_forbidden_description_emits_typed_envelope() {
 /// A bare `INTERNAL` here would train agents to treat the
 /// recoverable input error as an engine bug.
 #[test]
-fn pro_memstead_update_body_wikilink_auto_synthesises_alias_relation() {
+fn full_memstead_update_body_wikilink_auto_synthesises_alias_relation() {
     // Under the default schema's `alias_target_rel_type: REFERENCES`
     // pointer, a body wiki-link no longer trips `WIKILINK_WITHOUT_RELATION`:
     // the alias-synthesis pass emits the REFERENCES relation first,
@@ -2211,7 +2211,7 @@ pattern = \"*\"\n\
 /// `[cross_mem_links]` section. Round-trip: invoke the tool, read
 /// `.memstead/workspace.toml` back, assert the grant appears.
 #[test]
-fn pro_memstead_workspace_grant_cross_link_round_trip() {
+fn full_memstead_workspace_grant_cross_link_round_trip() {
     let tmp = TempDir::new().unwrap();
     seed_full_workspace_with_toml(
         tmp.path(),
@@ -2242,7 +2242,7 @@ fn pro_memstead_workspace_grant_cross_link_round_trip() {
 /// Re-granting an existing grant returns success with
 /// `GRANT_ALREADY_PRESENT` warning and leaves the file unchanged.
 #[test]
-fn pro_memstead_workspace_grant_cross_link_idempotent_with_warning() {
+fn full_memstead_workspace_grant_cross_link_idempotent_with_warning() {
     let tmp = TempDir::new().unwrap();
     seed_full_workspace_with_toml(
         tmp.path(),
@@ -2285,7 +2285,7 @@ fn pro_memstead_workspace_grant_cross_link_idempotent_with_warning() {
 /// `memstead_workspace_revoke_cross_link` of an absent grant
 /// is idempotent: returns success with `GRANT_NOT_FOUND` warning.
 #[test]
-fn pro_memstead_workspace_revoke_cross_link_idempotent_when_absent() {
+fn full_memstead_workspace_revoke_cross_link_idempotent_when_absent() {
     let tmp = TempDir::new().unwrap();
     seed_full_workspace_with_toml(
         tmp.path(),
@@ -2317,7 +2317,7 @@ fn pro_memstead_workspace_revoke_cross_link_idempotent_when_absent() {
 /// Round-trip: invoke the tool, parse the workspace TOML, assert
 /// the new rule appears in `[[mem_management.create]]`.
 #[test]
-fn pro_memstead_workspace_allow_create_round_trip() {
+fn full_memstead_workspace_allow_create_round_trip() {
     // Seed with empty rules — exercise the "append first rule" path.
     const EMPTY_TOML: &str = "\
 format = \"memstead-git-branch-2\"\n\
@@ -2355,7 +2355,7 @@ name = \"file-two-layer\"\n\
 /// (not a deceptive success echoing a change that did not land); the
 /// stored pins are unchanged, and an identical re-add stays the no-op.
 #[test]
-fn pro_allow_create_differing_schemas_refused_stored_unchanged() {
+fn full_allow_create_differing_schemas_refused_stored_unchanged() {
     const EMPTY_TOML: &str = "\
 format = \"memstead-git-branch-2\"\n\
 \n\
@@ -2436,7 +2436,7 @@ name = \"file-two-layer\"\n\
 /// source mem permission to link into it, revoke the grant, then
 /// delete the target. No CLI calls.
 #[test]
-fn pro_f7_dynamic_mem_lifecycle_completes_via_mcp_only() {
+fn full_f7_dynamic_mem_lifecycle_completes_via_mcp_only() {
     let tmp = TempDir::new().unwrap();
     seed_full_workspace_with_toml(
         tmp.path(),

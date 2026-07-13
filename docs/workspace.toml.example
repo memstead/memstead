@@ -109,4 +109,4 @@ require_notes = true                  # mutations without a `note` get a
 # `memstead_health { include_config: true }`.
 
 # [plugin.claude_code]
-# outer_vcs = "auto"
+# custom_setting = "value"

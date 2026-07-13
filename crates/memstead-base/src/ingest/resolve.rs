@@ -405,19 +405,27 @@ pub fn resolve_change_strategy(
         Some("mtime") => ChangeStrategy::Mtime,
         // `auto`, unset, or any unrecognized value: probe the filesystem.
         _ => {
-            let base = if source.medium_pointer.is_empty() {
-                workspace_root.to_path_buf()
-            } else {
-                // `Path::join` yields the pointer verbatim when it is
-                // absolute, matching the plugin's `resolve(root, pointer)`.
-                workspace_root.join(&source.medium_pointer)
-            };
-            if find_git_root(&base).is_some() {
+            if find_git_root(&source_base_path(source, workspace_root)).is_some() {
                 ChangeStrategy::Git
             } else {
                 ChangeStrategy::Mtime
             }
         }
+    }
+}
+
+/// The on-disk base directory a path-based primary source resolves to: the
+/// medium pointer joined onto the workspace root (`Path::join` yields the
+/// pointer verbatim when it is absolute, matching the plugin's
+/// `resolve(root, pointer)`), or the workspace root itself for an empty
+/// pointer. Only meaningful for path-namespaced mediums
+/// (codebase / filesystem / git) — a graph pointer is a mem id and a web
+/// pointer a URL.
+pub fn source_base_path(source: &ResolvedPrimarySource, workspace_root: &Path) -> PathBuf {
+    if source.medium_pointer.is_empty() {
+        workspace_root.to_path_buf()
+    } else {
+        workspace_root.join(&source.medium_pointer)
     }
 }
 

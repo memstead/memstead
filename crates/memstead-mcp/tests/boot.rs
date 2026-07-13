@@ -101,7 +101,7 @@ fn assert_initialize_envelope(response: &serde_json::Value) {
 }
 
 #[test]
-fn pro_binary_boots_against_new_layout_workspace() {
+fn full_binary_boots_against_new_layout_workspace() {
     let tmp = TempDir::new().unwrap();
     seed_workspace(tmp.path());
 

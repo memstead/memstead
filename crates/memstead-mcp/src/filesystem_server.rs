@@ -1307,7 +1307,7 @@ impl FilesystemMcpServer {
         // idempotent_hint = true: relate's duplicate-add and
         // remove-nonexistent paths are typed-warning no-ops, so a retry
         // converges. Matches the mem-repo server's annotation —
-        // `relate_annotation_is_idempotent_on_both_flavours` pins parity.
+        // `relate_annotation_is_idempotent_on_lean` pins parity.
         annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = true, open_world_hint = false)
     )]
     fn memstead_relate(&self, Parameters(p): Parameters<RelateParams>) -> CallToolResult {

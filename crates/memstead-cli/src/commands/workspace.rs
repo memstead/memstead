@@ -415,7 +415,7 @@ fn grant_cross_link(ctx: &CliContext, args: CrossLinkArgs) -> anyhow::Result<()>
     // in the shared engine policy-edit layer — same warnings the MCP
     // surface emits. Building the engine mirrors `workspace dump`.
     let known_mems: Vec<String> = {
-        let engine = crate::setup::pro_engine(ctx)?;
+        let engine = crate::setup::full_engine(ctx)?;
         engine.mem_names().iter().map(|s| s.to_string()).collect()
     };
     let target = CrossLinkTarget::parse(&args.to);
@@ -729,7 +729,7 @@ fn dump(_ctx: &CliContext, _args: DumpArgs) -> anyhow::Result<()> {
     // is the dominant one for cold-start usage and the only one the test
     // contract pins. Pre-fix the boot error was wrapped under a generic
     // INTERNAL string — wire envelope drifted from the typed code.
-    let engine = crate::setup::pro_engine(&setup_ctx).map_err(|e| {
+    let engine = crate::setup::full_engine(&setup_ctx).map_err(|e| {
         CliError::new(
             ExitKind::Generic,
             "WORKSPACE_NOT_INITIALISED",

@@ -8,7 +8,7 @@ use memstead_schema::Schema;
 
 use crate::CliError;
 use crate::output::{ExitKind, print_json, print_markdown};
-use crate::setup::{CliContext, CliEngine};
+use crate::setup::CliContext;
 
 /// Describe one type, or list all types when no name is given.
 ///
@@ -101,11 +101,7 @@ fn resolve_schema(ctx: &CliContext, mem: Option<&str>) -> anyhow::Result<Arc<Sch
         // built-in default.
         Err(_) => return Ok(Schema::builtin_default()),
     };
-    let engine: memstead_base::Engine = match engine {
-        #[cfg(feature = "mem-repo")]
-        CliEngine::MemRepo(e) => e,
-        CliEngine::Filesystem(e) => e,
-    };
+    let engine: memstead_base::Engine = engine.into_base();
     let writable: Vec<&str> = engine.writable_mem_names();
     let all_loaded: Vec<&str> = engine.mem_names();
     let resolved_mem: &str = match mem {

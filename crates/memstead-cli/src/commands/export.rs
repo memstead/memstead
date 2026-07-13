@@ -313,7 +313,14 @@ fn run_mem_filesystem(
             format!("write {}: {e}", output.display()),
         )
     })?;
-    let entity_count = engine.store().all_entities().filter(|e| !e.stub).count();
+    // Count only the exported mem's entities — the store also holds
+    // mounted sibling mems (the multi-mount setup), which do not travel
+    // in this archive.
+    let entity_count = engine
+        .store()
+        .all_entities()
+        .filter(|e| !e.stub && e.id.mem() == workspace_mem)
+        .count();
 
     if ctx.json {
         print_json(&json!({

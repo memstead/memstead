@@ -190,7 +190,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         }
     }
 
-    let mut engine = crate::setup::pro_engine(ctx)?;
+    let mut engine = crate::setup::full_engine(ctx)?;
 
     let updates: Vec<(UpdateEntityArgs, Option<String>)> = entries
         .into_iter()

@@ -7,7 +7,7 @@ use memstead_base::{EntityId, RelateEntityArgs};
 
 use crate::CliError;
 use crate::output::{ExitKind, print_json, print_markdown};
-use crate::setup::{CliContext, CliEngine};
+use crate::setup::CliContext;
 
 /// `memstead relate` accepts each argument as a positional OR as a
 /// named flag — the named forms (`--from`, `--rel-type`, `--to`)
@@ -93,11 +93,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     let to = EntityId::canonical(&to_str);
     let remove = args.remove;
 
-    let mut engine = match ctx.cli_engine()? {
-        #[cfg(feature = "mem-repo")]
-        CliEngine::MemRepo(engine) => engine,
-        CliEngine::Filesystem(engine) => engine,
-    };
+    let mut engine = ctx.cli_engine()?.into_base();
     // Pass the `memstead-cli@<version>` client identity so the relate
     // commit body carries the same `Client:` provenance trailer as
     // create / update / rename (which set it via `cli_ctx_with_note`).

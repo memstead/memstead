@@ -490,10 +490,10 @@ fn overview_runs() {
 /// bridges, mem distribution, dangling links) via the shared
 /// `memstead-engine::overview::compose_overview` composer. The full CLI
 /// renders the content directly: when `--include` is passed the
-/// `OVERVIEW_RICH_CONTENT_PRO_ONLY` (formerly `mcp_only_notice`)
+/// `OVERVIEW_RICH_CONTENT_FULL_ONLY` (formerly `mcp_only_notice`)
 /// warning string must not appear in the response.
 #[test]
-fn overview_with_include_renders_rich_content_without_pro_only_warning() {
+fn overview_with_include_renders_rich_content_without_full_only_warning() {
     let tmp = TempDir::new().unwrap();
     let _mem = seed_cli_test_mem(tmp.path());
 
@@ -510,7 +510,7 @@ fn overview_with_include_renders_rich_content_without_pro_only_warning() {
         .stdout(contains("## Mems"))
         // The lean CLI's pre-lift output would have included this
         // warning code; the full CLI's shared-composer path does NOT.
-        .stdout(predicates::str::contains("OVERVIEW_RICH_CONTENT_PRO_ONLY").not())
+        .stdout(predicates::str::contains("OVERVIEW_RICH_CONTENT_FULL_ONLY").not())
         // Full CLI uses `memstead type <name>` for the schema-lookup hint,
         // not the MCP-flavour `memstead_schema(name=...)`.
         .stdout(contains("`memstead type <name>`"));

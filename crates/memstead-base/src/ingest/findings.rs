@@ -298,6 +298,25 @@ pub fn read_findings_store(
     }
 }
 
+/// Create an engine-owned store subtree and drop a self-ignoring
+/// `.gitignore` (`*`) at its root if none exists. The `state/findings/`
+/// and `state/advance/` stores are per-checkout ephemeral engine state
+/// living inside a possibly-tracked workspace (where `state/mounts.json`
+/// IS tracked) — without the ignore they surface as untracked noise and
+/// would churn if committed. Best-effort: an ignore-write failure never
+/// fails the store write itself.
+pub(crate) fn ensure_selfignoring_store_dir(subtree_root: &Path) -> Result<(), StoreError> {
+    std::fs::create_dir_all(subtree_root).map_err(|e| StoreError::Io {
+        path: subtree_root.to_path_buf(),
+        source: e,
+    })?;
+    let gitignore = subtree_root.join(".gitignore");
+    if !gitignore.exists() {
+        let _ = std::fs::write(&gitignore, "*\n");
+    }
+    Ok(())
+}
+
 /// Persist the durable findings store for a binding (pretty JSON), creating
 /// parent directories.
 pub fn write_findings_store(
@@ -306,6 +325,12 @@ pub fn write_findings_store(
     name: &str,
     store: &FindingsStore,
 ) -> Result<(), StoreError> {
+    ensure_selfignoring_store_dir(
+        &workspace_root
+            .join(WORKSPACE_STORE_DIR)
+            .join(STATE_DIR)
+            .join(FINDINGS_DIR),
+    )?;
     let path = findings_store_path(workspace_root, mem, name);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| StoreError::Io {
@@ -348,6 +373,21 @@ pub enum FindingsError {
     /// Reading or writing the durable findings store failed.
     #[error("findings store error: {0}")]
     Store(#[source] StoreError),
+    /// A path-based primary source's base directory does not exist — a
+    /// vanished or unmounted source. Verify refuses rather than measures:
+    /// enumerating a missing tree yields an empty stat map whose aggregate
+    /// (the hash of nothing) is indistinguishable from a genuinely empty
+    /// source and would overwrite a real `#verified` baseline with fake
+    /// state. Typed and visible, mirroring the D3 non-enumerable refusal.
+    #[error("source unreachable for facet '{facet}' (medium '{medium}'): `{path}` does not exist")]
+    SourceUnreachable {
+        /// The facet whose medium resolved to the missing path.
+        facet: String,
+        /// The medium's name.
+        medium: String,
+        /// The resolved base path that does not exist.
+        path: String,
+    },
 }
 
 /// The outcome of a [`verify_binding`] pass.
@@ -809,6 +849,31 @@ pub fn verify_binding(
     let binding_id = resolved.name.clone();
     let (mem, name) = split_binding_id(&binding_id)?;
 
+    // Refuse a vanished or unmounted path-based source before observing
+    // anything: a missing tree would otherwise degrade to an empty
+    // enumeration whose head token (the digest of nothing) masquerades as
+    // a real observation — and the caller's completed-run baseline write
+    // would clobber a genuine `#verified` token with it.
+    for source in &resolved.sources {
+        if let ResolvedSource::Primary(p) = source
+            && matches!(
+                p.medium_type,
+                crate::pipeline::MediumType::Codebase
+                    | crate::pipeline::MediumType::Filesystem
+                    | crate::pipeline::MediumType::Git
+            )
+        {
+            let base = super::resolve::source_base_path(p, workspace_root);
+            if !base.exists() {
+                return Err(FindingsError::SourceUnreachable {
+                    facet: p.facet_ref.clone(),
+                    medium: p.medium.clone(),
+                    path: base.display().to_string(),
+                });
+            }
+        }
+    }
+
     // The facet-head map is the key's per-facet decomposition: computed once,
     // joined into `key.source_head`, and returned on the outcome so a
     // completed run's baseline write records exactly what this run observed.
@@ -1053,6 +1118,15 @@ mod tests {
         );
         write_findings_store(root, "engine", "graph", &store).unwrap();
         assert!(findings_store_path(root, "engine", "graph").exists());
+
+        // The store subtree self-ignores: per-checkout engine state must
+        // not surface as untracked noise in a tracked workspace.
+        let ignore = root
+            .join(WORKSPACE_STORE_DIR)
+            .join(STATE_DIR)
+            .join(FINDINGS_DIR)
+            .join(".gitignore");
+        assert_eq!(std::fs::read_to_string(&ignore).unwrap(), "*\n");
 
         // Fresh read from disk (a later process) sees the findings (A1).
         let back = read_findings_store(root, "engine", "graph")
@@ -1421,6 +1495,144 @@ mod tests {
     /// `report`/`status` (and the macOS app) consume. A failed pass returns
     /// `Err` before any caller reaches the writer, so the token never
     /// advances on an aborted run.
+    /// A vanished source directory must refuse verify with the typed
+    /// `SourceUnreachable` error instead of degrading to an empty
+    /// enumeration: pre-fix, the missing tree produced an empty stat map
+    /// whose aggregate (the digest of nothing) completed the run and let
+    /// the caller overwrite a genuine `#verified` baseline with fake
+    /// state. The engine mem itself stays loadable — only the binding's
+    /// source is gone.
+    #[test]
+    fn verify_refuses_unreachable_source_with_typed_error() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let mem_dir = root.join("mem");
+        std::fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
+        std::fs::write(
+            mem_dir.join(".memstead").join("config.json"),
+            r#"{"format":1,"schema":"default@1.0.0","version":"1.0.0"}"#,
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join(".memstead")).unwrap();
+        std::fs::write(
+            root.join(".memstead").join("workspace.toml"),
+            "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+        )
+        .unwrap();
+        let mount = Mount {
+            mem: "engine".to_string(),
+            schema: Some("default@1.0.0".parse().unwrap()),
+            storage: MountStorage::Folder {
+                path: mem_dir.clone(),
+            },
+            capability: MountCapability::Write,
+            lifecycle: MountLifecycle::Eager,
+            cross_linkable: false,
+            migration_target: None,
+        };
+        crate::FileWorkspaceStore::new()
+            .save_state(
+                root,
+                &Workspace {
+                    mounts: vec![mount],
+                    settings: WorkspaceSettings::default(),
+                },
+            )
+            .unwrap();
+
+        // The medium points at a subdirectory that does NOT exist — the
+        // vanished-source case (`git` declared, so pre-fix the strategy
+        // layer silently degraded instead of refusing).
+        write_medium(
+            root,
+            "engine",
+            "gone",
+            &Medium {
+                name: "gone".to_string(),
+                medium_type: MediumType::Codebase,
+                pointer: "vanished-src".to_string(),
+                change_detection: Some("git".to_string()),
+            },
+        )
+        .unwrap();
+        write_facet(
+            root,
+            "engine",
+            "gone",
+            &Facet {
+                name: "gone".to_string(),
+                medium: "gone".to_string(),
+                scope: vec![PatternEntry {
+                    path: "**/*.rs".to_string(),
+                    mode: PatternMode::Allow,
+                }],
+                engagement: None,
+                preparation: None,
+            },
+        )
+        .unwrap();
+        write_binding(
+            root,
+            "engine",
+            "gone",
+            &BindingV1 {
+                version: BINDING_VERSION,
+                intent: None,
+                source_facets: vec!["gone".to_string()],
+                reference_mems: Vec::new(),
+                destination_mem: "engine".to_string(),
+                deny_paths: Vec::new(),
+                coverage_semantics: CoverageSemantics::Exhaustive,
+                rules: None,
+                prune: None,
+                operations: Operations {
+                    build: None,
+                    sync: None,
+                    verify: Some(VerifyOperation {
+                        trigger: IngestTrigger::Manual,
+                        batch_size: 20,
+                        adjudication_cap: DEFAULT_ADJUDICATION_CAP,
+                        full_resync_every: DEFAULT_FULL_RESYNC_EVERY,
+                    }),
+                },
+            },
+        )
+        .unwrap();
+
+        let engine = Engine::from_workspace_root(root).unwrap();
+        let configs = load_pipeline_configs(root).unwrap();
+        let binding = &configs.bindings[0].config;
+        let resolved = resolve_binding_run(&configs, "engine/gone", binding).unwrap();
+
+        match verify_binding(&engine, root, binding, &resolved) {
+            Err(FindingsError::SourceUnreachable {
+                facet,
+                medium,
+                path,
+            }) => {
+                assert_eq!(facet, "gone");
+                assert_eq!(medium, "gone");
+                assert!(
+                    path.ends_with("vanished-src"),
+                    "refusal must name the resolved missing path, got `{path}`",
+                );
+            }
+            other => panic!("expected SourceUnreachable refusal, got {other:?}"),
+        }
+
+        // Nothing was observed → no `#verified` token exists (the caller
+        // never reaches its baseline write on an Err).
+        assert!(
+            !engine
+                .mem_config_for("engine")
+                .unwrap()
+                .sync_state
+                .keys()
+                .any(|k| k.ends_with("#verified")),
+            "a refused verify must not leave any #verified token",
+        );
+    }
+
     #[test]
     fn completed_verify_records_the_verified_baseline() {
         let tmp = tempfile::tempdir().unwrap();

@@ -249,7 +249,7 @@ impl FullEngineError {
     /// variant payload at the CLI surface.
     ///
     /// `Lean(inner)` delegates to `EngineError::details()`. Lifecycle
-    /// variants return the same JSON object shape `pro_engine_err_unified`
+    /// variants return the same JSON object shape `full_engine_err_unified`
     /// builds on the MCP wire — both surfaces share the payload here
     /// so they cannot drift.
     pub fn details(&self) -> serde_json::Value {

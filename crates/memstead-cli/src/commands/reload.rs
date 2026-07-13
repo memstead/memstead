@@ -11,7 +11,7 @@ use clap::Parser;
 
 use crate::CliError;
 use crate::output::{print_json, print_markdown};
-use crate::setup::{CliContext, CliEngine};
+use crate::setup::CliContext;
 
 #[derive(Parser, Debug)]
 pub struct Args {
@@ -26,11 +26,7 @@ pub struct Args {
 }
 
 pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
-    let mut engine = match ctx.cli_engine()? {
-        #[cfg(feature = "mem-repo")]
-        CliEngine::MemRepo(engine) => engine,
-        CliEngine::Filesystem(engine) => engine,
-    };
+    let mut engine = ctx.cli_engine()?.into_base();
     let reports = match args.mem.as_deref() {
         Some(name) => engine
             .reload_one_mem_report(name)

@@ -19,9 +19,9 @@
 //! still falls Tier 3 syntax back to Tier 1 silently — preserving
 //! existing mem-repo behaviour. This module is the
 //! filesystem-mem-only counterpart that surfaces resolution
-//! warnings as a separate validation pass over loaded entities,
-//! consumed via the unified [`crate::Engine`] when a folder mount
-//! is present.
+//! warnings as a separate validation pass over loaded entities.
+//! No engine path consumes it yet — wiring it into the unified
+//! [`crate::Engine`] folder-mount load is the pending step.
 //!
 //! ## What this module does NOT do (yet)
 //!
