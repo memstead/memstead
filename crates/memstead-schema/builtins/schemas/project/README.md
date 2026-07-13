@@ -1,8 +1,8 @@
 # `project@0.1.0` — knowledge-graph schema for a running project
 
 A copy-paste-ready memstead schema for **one running project** modeled
-as a queryable whole. Ten types in five clusters capture identity,
-holdings, motion, surroundings, and rules:
+as a queryable whole. Twelve types in six clusters capture identity,
+holdings, motion, surroundings, rules, and knowledge:
 
 | Cluster | Type | Purpose |
 |---|---|---|
@@ -16,6 +16,8 @@ holdings, motion, surroundings, and rules:
 | Surroundings | `competitor` | Outside party doing something close |
 | Surroundings | `market_signal` | External trend with a source |
 | Rules | `principle` | Project-level rule that constrains design or strategy |
+| Knowledge | `decision` | One settled choice, with the alternatives it beat |
+| Knowledge | `memo` | Reasoning that isn't a decision yet |
 
 The graph carries durable project posture — not phase-scoped plans
 (use `planning@0.1.0`) and not code state (use `software@0.1.0`).
@@ -148,6 +150,19 @@ high-value.
 | Type | Purpose | Key test |
 |---|---|---|
 | `principle` | Project-level rule | Must GOVERNS or CONSTRAINS at least one bet/milestone/positioning to be active |
+
+### Knowledge — what was settled and what is still open
+
+| Type | Purpose | Key test |
+|---|---|---|
+| `decision` | One settled choice — strategic or engineering | Can you name the rejected alternatives? |
+| `memo` | Reasoning that might harden into a decision | Not yet a choice, not empirical evidence |
+
+Field shapes match the `software@` / `engineering@` namesakes, so
+decisions and memos migrate between those schemas and this one with
+metadata intact. Where a subsystem has its own standing-knowledge mem,
+its engineering knowledge lives there; where it does not, it lives
+here (knowledge lives in the repo of its subject).
 
 ## Relationship vocabulary
 

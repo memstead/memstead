@@ -9,12 +9,13 @@
 # software@0.1.0) that the project mem references via cross-mem links;
 # the code mems stay autonomous and unaware of the project layer.
 #
-# Ten types in five clusters:
+# Twelve types in six clusters:
 #   Identity      → vision, positioning, brand
 #   Holdings      → pillar, evidence
 #   Motion        → bet, milestone
 #   Surroundings  → competitor, market_signal
 #   Rules         → principle
+#   Knowledge     → decision, memo
 #
 # Strict relationship vocabulary: a curated subset of the default edges
 # plus three project-specific (STRENGTHENS, WEAKENS, THREATENS).
@@ -24,13 +25,15 @@ name: project
 version: 0.1.0
 
 description: |
-  Project-level knowledge-graph schema. Ten types model the strategic,
-  operational, and competitive view of a running project — identity
-  (vision, positioning, brand), holdings (pillar, evidence), motion
-  (bet, milestone), surroundings (competitor, market_signal), and
-  rules (principle). The graph's value comes from the interaction
-  between strategic and operational entities — evidence STRENGTHENS
-  bets, competitors THREATEN pillars, signals VALIDATE positioning.
+  Project-level knowledge-graph schema. Twelve types model the
+  strategic, operational, and competitive view of a running project —
+  identity (vision, positioning, brand), holdings (pillar, evidence),
+  motion (bet, milestone), surroundings (competitor, market_signal),
+  rules (principle), and knowledge (decision, memo). The graph's value
+  comes from the interaction between strategic and operational
+  entities — evidence STRENGTHENS bets, competitors THREATEN pillars,
+  signals VALIDATE positioning, decisions record what those forces
+  settled.
 
 when_to_use: |
   Use to model a project as a queryable whole when the strategic,
@@ -44,7 +47,7 @@ when_to_use: |
   phase-scoped plans.
 
 system_message: |
-  A project knowledge graph answers five questions, and each cluster
+  A project knowledge graph answers six questions, and each cluster
   of types exists to carry one of them:
 
     Identity     → vision      (durable north star)
@@ -58,6 +61,16 @@ system_message: |
                    market_signal (external trend with a source)
     Rules        → principle   (project-level rule constraining design
                                 or strategy)
+    Knowledge    → decision    (one settled choice, with the
+                                alternatives it beat)
+                   memo        (reasoning that isn't a decision yet)
+
+  The knowledge cluster carries settled choices and open reasoning —
+  strategic or engineering. Where a subsystem has its own
+  standing-knowledge mem, its engineering knowledge lives there;
+  where it does not, it lives here (knowledge lives in the repo of
+  its subject). A `bet` is a wager still being won or lost; a
+  `decision` records a choice already made.
 
   Edges carry the strategic posture:
     bet --MOTIVATED_BY--> vision           (why the bet)
@@ -93,6 +106,8 @@ types:
   - competitor
   - market_signal
   - principle
+  - decision
+  - memo
 
 # Relationship vocabulary. Curated subset of the default edges + three
 # project-specific (STRENGTHENS, WEAKENS, THREATENS).
@@ -173,6 +188,25 @@ relationships:
       default_weight: 2.0
       acyclic: true
 
+    # ── Knowledge lineage (decision / memo cluster) ─────────────────────
+    - name: DERIVED_FROM
+      description: The source is derived from, or based upon, the target.
+      when_to_use: Prior art, source material, inspiration that concretely shaped the source. decision → the memo or decision it grew out of.
+      default_weight: 1.5
+      acyclic: true
+    - name: SPECIALIZES
+      description: The source is a narrower, more concrete form of the target.
+      default_weight: 2.0
+      acyclic: true
+    - name: GENERALIZES
+      description: The source is a broader, more abstract form of the target.
+      default_weight: 2.0
+      acyclic: true
+    - name: DEFINES
+      description: The source defines the target concept or term.
+      default_weight: 1.5
+      acyclic: true
+
     - name: _default
       description: Fallback weight for any relationship not otherwise specified. Required by the engine.
       default_weight: 1.0
@@ -187,10 +221,50 @@ cross_mem_relationships:
   - to_schema: software
     definitions:
       - name: REFERENCES
-        description: Soft reference from a project entity into a code-side (software) entity — the cross-mem anchor that ties pillars and evidence to their realization in code.
-        when_to_use: Auto-emitted from inline wiki-links into a software-schema mem (engine/macos/plugin/registry). Do not author manually. Anchors a pillar (or evidence) to the code-mem entity that realizes it.
+        description: Soft reference from a project entity into a code-side (software) entity — the cross-mem anchor that ties pillars, evidence, and knowledge entities to their realization in code.
+        when_to_use: Auto-emitted from inline wiki-links into a software-schema mem (engine/macos/plugin/registry). Do not author manually. Anchors a pillar, evidence entry, decision, principle, or memo to the code-mem entity it is about.
         default_weight: 0.5
-        source_types: [pillar, evidence]
+        source_types: [pillar, evidence, decision, principle, memo]
+      - name: GOVERNS
+        description: The source principle governs or constrains the code-side target.
+        when_to_use: principle → the code-side surfaces the rule binds. A principle with no GOVERNS edges constrains nothing.
+        default_weight: 2.5
+        source_types: [principle]
+      - name: MOTIVATED_BY
+        description: The code-side target motivated the knowledge entity.
+        when_to_use: decision/memo → the code-side surface or event that precipitated it.
+        default_weight: 2.0
+        source_types: [decision, memo, principle]
+      - name: MOTIVATES
+        description: The source knowledge entity motivates the code-side target.
+        default_weight: 1.5
+        source_types: [decision, memo, principle]
+      - name: CONSTRAINS
+        description: The source constrains the permissible states of the code-side target.
+        default_weight: 2.0
+        source_types: [principle, decision]
+      - name: DEFINES
+        description: The source defines the code-side target concept or term.
+        default_weight: 1.5
+        source_types: [decision, principle, memo]
+  - to_schema: engineering
+    definitions:
+      - name: REFERENCES
+        description: Soft reference from a project entity into a standing-knowledge (engineering) entity.
+        when_to_use: Auto-emitted from inline wiki-links into an engineering-schema mem. Do not author manually.
+        default_weight: 0.5
+      - name: DERIVED_FROM
+        description: The source is derived from, or based upon, the engineering-side target.
+        default_weight: 1.5
+      - name: MOTIVATED_BY
+        description: The engineering-side target motivated the source.
+        default_weight: 2.0
+      - name: MOTIVATES
+        description: The source motivates the engineering-side target.
+        default_weight: 1.5
+      - name: SPECIALIZES
+        description: The source is a narrower, more concrete form of the engineering-side target.
+        default_weight: 2.0
 
 # Body wiki-links `[[target]]` auto-emit as REFERENCES relations via the
 # alias-synthesis pass.

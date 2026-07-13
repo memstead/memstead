@@ -148,6 +148,39 @@ relationships:
       description: Fallback weight for any relationship not otherwise specified. Required by the engine.
       default_weight: 1.0
 
+# Cross-mem relationship vocabulary. Source-owned: this schema declares
+# which rel-types its entities may emit into a differently-schema'd
+# target mem. The whole point of a standing-knowledge mem is anchoring
+# WHY into the software mems that model WHAT — census-driven from live
+# standing-knowledge content (REFERENCES, GOVERNS, MOTIVATED_BY,
+# IMPLEMENTS) plus the rule/reasoning pairs (CONSTRAINS, MOTIVATES).
+# Shapes are left source/target-free: any knowledge type may anchor
+# into any software-side type.
+cross_mem_relationships:
+  - to_schema: software
+    definitions:
+      - name: REFERENCES
+        description: Soft reference from a knowledge entity into a software-side entity — the cross-mem anchor that ties decisions, principles, and memos to the surfaces they are about.
+        when_to_use: Auto-emitted from inline wiki-links into a software-schema mem. Do not author manually.
+        default_weight: 0.5
+      - name: GOVERNS
+        description: The source principle governs or constrains the software-side target.
+        when_to_use: principle → the software-side surfaces the rule binds. A principle with no GOVERNS edges constrains nothing.
+        default_weight: 2.5
+      - name: MOTIVATED_BY
+        description: The software-side target motivated the knowledge entity.
+        when_to_use: decision/memo → the software-side surface or incident that precipitated it.
+        default_weight: 2.0
+      - name: MOTIVATES
+        description: The source knowledge entity motivates the software-side target.
+        default_weight: 1.5
+      - name: IMPLEMENTS
+        description: The source decision realizes or fulfills the software-side target.
+        default_weight: 2.0
+      - name: CONSTRAINS
+        description: The source constrains the permissible states of the software-side target.
+        default_weight: 2.0
+
 # Body wiki-links `[[target]]` auto-emit as REFERENCES relations via the
 # alias-synthesis pass.
 alias_target_rel_type: REFERENCES

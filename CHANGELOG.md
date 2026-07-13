@@ -17,6 +17,20 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   with a typed `INVALID_INPUT` in a workspace without `mem-repo/.git/`.
   The mount loader and runtime already dispatched per-mount — only the
   creation surface was missing. MCP and UniFFI wire shapes are unchanged.
+- **`project@0.1.0` gains the knowledge cluster — `decision` and `memo`,
+  additively.** Field shapes are structurally identical to the `software@` /
+  `engineering@` namesakes (decisions and memos migrate between the three
+  schemas with metadata verbatim). `principle` additively gains an optional
+  `justification` section and optional `authority`/`universality`
+  engineering-lineage fields — no existing type, section, or field changes
+  shape. The relationship vocabulary gains DERIVED_FROM / SPECIALIZES /
+  GENERALIZES / DEFINES; the cross-mem vocabulary widens REFERENCES sources
+  to the knowledge types and adds GOVERNS / MOTIVATED_BY / MOTIVATES /
+  CONSTRAINS / DEFINES toward software mems plus a new `engineering` block.
+  The `engineering@0.1.0` builtin gains its own outbound cross-mem block
+  toward software mems (REFERENCES / GOVERNS / MOTIVATED_BY / MOTIVATES /
+  IMPLEMENTS / CONSTRAINS) — census-driven from live standing-knowledge
+  content.
 - **New builtin schema `engineering@0.1.0` — standing engineering
   knowledge.** The knowledge-only counterpart of `software@0.1.0`: three
   types (`decision`, `principle`, `memo`) answering WHY the system is the

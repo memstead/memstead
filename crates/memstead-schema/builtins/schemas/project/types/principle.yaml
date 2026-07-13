@@ -19,7 +19,7 @@ when_to_use: |
 boundaries:
   - Not a `bet` — bets are choices; principles are rules that constrain choices.
   - Not a `vision` — visions are destinations; principles are rules that govern how the project moves toward the destination.
-  - Not a code-side principle — code-side rules ("the macOS app does not open an in-process MCP client") live in the paired code mem.
+  - Not a current-state description — what a system currently is belongs in the code mem modelling it. Engineering rules whose subject's knowledge lives in THIS mem (knowledge lives in the repo of its subject) are principles here; rules whose subject has its own standing-knowledge mem belong there.
 system_message: |
   A principle records a project-level rule. Statement names the rule
   imperatively. Scope names where the rule applies — the surfaces,
@@ -44,6 +44,12 @@ sections:
     search_weight: 15.0
     write_rules:
       - "Where the rule applies — surfaces, pillars, or kinds of choice it governs. A principle without scope is unbounded and likely vague."
+  - key: justification
+    heading: Justification
+    required: false
+    search_weight: 5.0
+    write_rules:
+      - "Why this principle holds. Evidence, reasoning, authority. Link supporting entities via wiki-links."
   - key: exceptions
     heading: Exceptions
     required: false
@@ -73,14 +79,26 @@ metadata_fields:
     field_type: string
     enum_values: [strategy, operations, architecture, audience, brand, other]
     filterable: equality
+  - key: authority
+    description: How settled the principle is in practice. Engineering-lineage field (matches the software@/engineering@ principle) — carried by principles migrated from those schemas; optional for natively authored ones.
+    field_type: string
+    enum_values: [proposed, accepted, established, deprecated]
+    optional: true
+    filterable: equality
+  - key: universality
+    description: The breadth of the principle's applicability. Engineering-lineage field (matches the software@/engineering@ principle) — carried by principles migrated from those schemas; optional for natively authored ones.
+    field_type: string
+    enum_values: [contextual, domain-wide, universal]
+    optional: true
+    filterable: equality
 title_weight: 100.0
-text_fields: [statement, scope, exceptions, consequences, notes]
+text_fields: [statement, scope, justification, exceptions, consequences, notes]
 hierarchy_relationship: PART_OF
 edge_weight_overrides:
   GOVERNS: 3.0
   CONSTRAINS: 2.5
 propagating_relationships: [GOVERNS, CONSTRAINS, SUPERSEDES]
-updatable_fields: [title, statement, scope, exceptions, consequences, notes, status, category, tags]
+updatable_fields: [title, statement, scope, justification, exceptions, consequences, notes, status, category, authority, universality, tags]
 health_required_fields: [statement, scope, consequences]
 staleness_threshold_days: 365
 write_rules:
