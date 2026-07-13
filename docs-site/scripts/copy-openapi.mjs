@@ -117,7 +117,7 @@ description: "The six-skill Memstead plugin roster in two families — onboardin
 
 > This page is generated from the plugin \`SKILL.md\` frontmatter at build time — the shipped skill descriptions are the source of truth, so the roster here cannot drift from the installed plugin.
 
-The Claude Code plugin ships **six skills in two families**. \`/setup\` and \`/interview\` are the human-driven front doors; the rest are both-invocable — usable from the \`/\` menu and auto-invocable by the model. Fidelity measurement is \`/sync --verify\`. There is no command for everyday graph work: once a workspace exists, you just talk to Claude and the \`memstead_*\` MCP tools stay live.
+The Claude Code plugin ships **six skills in two families**. \`/setup\` and \`/interview\` are the human-driven front doors; the rest are both-invocable — usable from the \`/\` menu and auto-invocable by the model. Fidelity measurement is \`/sync --verify\`; the on-demand full stock-take is \`/sync --inventory\`. There is no command for everyday graph work: once a workspace exists, you just talk to Claude and the \`memstead_*\` MCP tools stay live.
 
 `;
 for (const family of families) {

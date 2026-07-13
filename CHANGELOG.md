@@ -47,6 +47,24 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   with the typed `PROJECTION_CAPABILITY_UNSUPPORTED` error instead of
   rendering a fabricated-complete report. Without the flag, the
   capped/sampled loop economics are byte-compatible with before.
+- **`/sync --inventory <binding>` — the full stock-take as a sync mode.**
+  The plugin's sync skill gains the inventory operation's skill leg: run
+  the complete measurement (`projection verify --full`), then repair in
+  passes off the rendered sync brief (mutations via the normal MCP
+  surface, dispositions via `projection advance`) with a re-verify after
+  each, until the brief reports nothing to sync and the re-verify is
+  clean or every remaining finding carries a disposition — closing with
+  the fidelity report, verdict first. Termination is a hard skill rule:
+  the open work (open findings plus artifacts awaiting disposition) must
+  strictly shrink every pass; a pass that shrinks nothing ends the run
+  with an honest "did not converge" report naming the stuck items, never
+  a silent loop. The skill keeps no state of its own — the engine's
+  recorded dispositions are the resume point — and engine refusals (sync
+  not enabled, non-enumerable medium) are relayed with their remedies,
+  never pre-checked or worked around. The default (non-inventory) loop
+  path is asserted untouched: renderer-level tests lock the sync brief's
+  block sequence and sweep every build/verify/sync brief shape for
+  inventory machinery.
 
 ### Fixed
 - **Verify findings survive source-head movement.** The findings store now

@@ -60,7 +60,12 @@ import { dirname, join } from 'node:path';
 // as its `--verify` mode (net roster prose fell — the standalone verify skill
 // was deleted whole). The cap still bans manual-growth; it is per-router, and
 // the folded sync body carries two skills' worth of protocol.
-export const ROUTER_BODY_MAX = 70;
+// Raised 70 → 90 with the 2026-07-13 inventory fold: `--inventory <binding>`
+// (fidelity-completion criterion 7) is a third sync mode on the same router —
+// one measure-repair-to-quiescence step whose monotone-progress termination
+// rule the plan makes binding skill prose. The cap sits exactly at the folded
+// body, as before: any further growth is a deliberate decision, not drift.
+export const ROUTER_BODY_MAX = 90;
 export const THIN_ROUTERS = ['ingest', 'sync'];
 
 // The roster skills subject to rules (1), (2) and (4). The full six-skill

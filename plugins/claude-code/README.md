@@ -47,6 +47,7 @@ Every command below is one you type. Pick by the job:
 | tidy a mem's structure — orphans, stubs, thin or missing links | **`/tidy`** |
 | bring a mem up to date after its source changed | **`/sync`** |
 | measure how faithfully a mem still matches its source | **`/sync --verify`** |
+| take a full stock-take — measure a binding completely, repair until clean | **`/sync --inventory`** |
 
 **Everyday graph work has no command — just talk to Claude.** The `memstead_*`
 MCP tools are always live, and Claude reaches for them on its own whenever you
@@ -79,6 +80,11 @@ changes. Everything in this loop is operable today:
    accuracy, freshness — that leads with a verdict and the top actions, and
    records findings for the next `/sync` run to act on. It changes nothing
    itself.
+5. **Stock-take — `/sync --inventory`.** The on-demand full measurement: a
+   complete, unsampled verify of the whole binding, then repair passes until
+   nothing remains to sync — closing with a fidelity report whose numbers are
+   computed, not sampled. If a pass stops making progress, it ends with an
+   honest "did not converge" report instead of looping.
 
 The engine records every mutation with provenance (and, on the git-backed mem
 flavour, commits it to the mem's own history). Your project repo stays yours:

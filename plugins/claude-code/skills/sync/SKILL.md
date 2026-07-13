@@ -4,12 +4,14 @@ description: >
   Your source changed — bring the mem up to date. Reads what changed since the
   last run plus any open findings, and updates only the affected entities,
   conservatively. The single maintenance writer for bound mems; run `--all` on
-  a loop to keep every bound mem current, or `--verify <binding>` for a
+  a loop to keep every bound mem current, `--verify <binding>` for a
   read-only fidelity report (coverage, accuracy, freshness) that changes
-  nothing. Not a version-control operation: changes flow from your source into
-  your mem, never the reverse.
+  nothing, or `--inventory <binding>` for the on-demand full stock-take —
+  measure the whole binding, repair to quiescence, report. Not a
+  version-control operation: changes flow from your source into your mem,
+  never the reverse.
 allowed-tools: Bash, Read, mcp__memstead__memstead_schema, mcp__memstead__memstead_search, mcp__memstead__memstead_entity, mcp__memstead__memstead_create, mcp__memstead__memstead_update, mcp__memstead__memstead_relate, mcp__memstead__memstead_delete
-argument-hint: "[--all | <binding> | --verify <binding>]"
+argument-hint: "[--all | <binding> | --verify <binding> | --inventory <binding>]"
 ---
 
 # Memstead Sync
@@ -22,7 +24,8 @@ verbatim — never work around it.
 ## Steps
 
 1. Parse `$ARGUMENTS`. A binding id (`<mem>/<stem>`) → step 2. `--verify
-   <binding>` → step 6. No argument? Ask. `--all` → run
+   <binding>` → step 6. `--inventory <binding>` → step 7. No argument? Ask.
+   `--all` → run
 
    ```sh
    memstead --json projection brief --all --operation any
@@ -74,6 +77,25 @@ verbatim — never work around it.
    verdict and top actions first, never re-ranked. A near-zero first report on
    a mem older than its binding is onboarding, not failure — name the backfill
    route (`/ingest` to grow coverage, then `/sync` to keep it current).
+
+7. `--inventory <binding>`: the full stock-take — measure completely, then
+   repair to quiescence. Start with the complete measurement:
+
+   ```sh
+   memstead projection verify <binding> --full
+   ```
+
+   Then repair in passes: steps 2–5 off the rendered sync brief, then
+   re-run the verify above, and repeat. Done when the brief reports nothing
+   to sync AND the re-verify is clean or every remaining finding carries a
+   disposition. **Hard rule — progress must be monotone.** Count the open
+   work before each pass (open findings plus artifacts still awaiting
+   disposition); a pass that does not strictly shrink that count ends the
+   run with an honest "did not converge" report naming the stuck items —
+   never another pass over them, never a silent loop. Keep no notes or
+   state of your own between passes: the engine's recorded dispositions are
+   the only resume point an interrupted run needs. Close with the final
+   fidelity report presented as in step 6 — verdict first.
 
 ## Rules
 
