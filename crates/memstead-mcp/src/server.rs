@@ -3348,6 +3348,10 @@ impl McpServer {
             // Optional per-instance writing guidance from the wire
             // shape, forwarded opaquely into the seed config.
             write_guidance: p.write_guidance,
+            // The MCP wire shape does not expose the storage override
+            // yet — the workspace-shape heuristic keeps behaviour
+            // identical.
+            storage: None,
         };
 
         match memstead_engine::mem_management::create_mem(&mut engine, params) {

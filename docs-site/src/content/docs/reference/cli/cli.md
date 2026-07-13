@@ -950,6 +950,14 @@ Register a new mem via the engine's mem-management orchestrator
 * `--force-overwrite` — Destroy residual storage at this mem's path and proceed with a fresh create. **Not yet implemented** — currently refuses with `INVALID_INPUT` pointing at `memstead mem delete <name>`. Mutually exclusive with `--reattach` and `--hard-cleanup-first`
 * `--hard-cleanup-first` — Refuse with `MEM_STORAGE_RESIDUE_DETECTED` instructing the caller to run `memstead mem delete <name>` first — a hard barrier that keeps residue cleanup a separate, named operation rather than destructive auto-recovery. Mutually exclusive with `--reattach` and `--force-overwrite`
 * `--operator-mode` — Bypass the workspace `[[mem_management.create]]` allowlist for this invocation. The CLI honours the allowlist by default (matching the MCP-surface posture); operator-mode is explicit opt-in. Also settable via the `MEMSTEAD_OPERATOR_MODE=1` env var for script convenience; the flag wins when both are set. Use this when the CLI invocation is the operator administering the workspace itself (initial scaffold, recovery flows) rather than scripted/agent usage
+* `--storage <STORAGE>` — Explicit storage backend for the new mem. Omit to use the workspace-shape default (git-branch in a mem-repo workspace, folder otherwise). `folder` creates a plain-markdown folder mem at the mem's location even inside a mem-repo workspace — its files sit visibly in the outer tree; `git-branch` requires a mem-repo and refuses without one
+
+  Possible values:
+  - `folder`:
+    Plain-markdown folder mount at the mem's location — files visible in the outer tree, even inside a mem-repo workspace
+  - `git-branch`:
+    Per-mem branch in the workspace's mem-repo. Refuses when the workspace has no `mem-repo/.git/`
+
 * `--write-guidance <WRITE_GUIDANCE>` — Optional per-instance writing guidance as a JSON object, written verbatim into the new mem's config `writeGuidance` map — e.g. `--write-guidance '{"phase_context":"early design","stack":"Rust"}'`. Opaque to the engine (schema-strictness D8 — the keys are client-owned vocabulary); a wrapper that read the schema package's `mem-template.json` fills the instance keys. Omit to seed no guidance. Must be a JSON object; anything else refuses with `INVALID_INPUT`
 
 

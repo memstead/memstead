@@ -24,7 +24,7 @@
 
 use std::path::PathBuf;
 
-use clap::{Args, Subcommand};
+use clap::{Args, Subcommand, ValueEnum};
 
 use crate::CliError;
 use crate::outer_gitignore::{OuterRepoOutcome, apply_outer_gitignore};
@@ -255,6 +255,15 @@ pub struct InitArgs {
     #[arg(long = "operator-mode")]
     pub operator_mode: bool,
 
+    /// Explicit storage backend for the new mem. Omit to use the
+    /// workspace-shape default (git-branch in a mem-repo workspace,
+    /// folder otherwise). `folder` creates a plain-markdown folder mem
+    /// at the mem's location even inside a mem-repo workspace — its
+    /// files sit visibly in the outer tree; `git-branch` requires a
+    /// mem-repo and refuses without one.
+    #[arg(long, value_enum)]
+    pub storage: Option<StorageArg>,
+
     /// Optional per-instance writing guidance as a JSON object, written
     /// verbatim into the new mem's config `writeGuidance` map — e.g.
     /// `--write-guidance '{"phase_context":"early design","stack":"Rust"}'`.
@@ -265,6 +274,28 @@ pub struct InitArgs {
     /// with `INVALID_INPUT`.
     #[arg(long = "write-guidance")]
     pub write_guidance: Option<String>,
+}
+
+/// `--storage` values for `memstead mem init` — the CLI face of
+/// [`mem_management::StorageKind`]. Kebab-case on the wire
+/// (`folder` / `git-branch`).
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StorageArg {
+    /// Plain-markdown folder mount at the mem's location — files
+    /// visible in the outer tree, even inside a mem-repo workspace.
+    Folder,
+    /// Per-mem branch in the workspace's mem-repo. Refuses when the
+    /// workspace has no `mem-repo/.git/`.
+    GitBranch,
+}
+
+impl From<StorageArg> for mem_management::StorageKind {
+    fn from(arg: StorageArg) -> Self {
+        match arg {
+            StorageArg::Folder => mem_management::StorageKind::Folder,
+            StorageArg::GitBranch => mem_management::StorageKind::GitBranch,
+        }
+    }
 }
 
 /// `memstead mem delete <name>` arguments — full destruction. The
@@ -400,6 +431,9 @@ pub fn run(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
         // wins) or `MEMSTEAD_OPERATOR_MODE=1` (env-var fallback).
         operator_mode: resolve_operator_mode(args.operator_mode),
         recovery: recovery_from_flags(args.reattach, args.force_overwrite, args.hard_cleanup_first),
+        // Explicit storage override (`--storage folder|git-branch`);
+        // omitted flag keeps the engine's workspace-shape heuristic.
+        storage: args.storage.map(Into::into),
     };
 
     let mut engine = match ctx.cli_engine()? {
@@ -435,8 +469,10 @@ pub fn run(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
     // Outer-repo gitignore handling. Append `mem-repo/` (the post-cutover
     // gitignore target — every mem's content lives inside that one
     // directory) to the outer repo's `.gitignore`. Idempotent on re-run;
-    // refuses when the outer is `$HOME`.
-    if !args.no_gitignore {
+    // refuses when the outer is `$HOME`. Skipped for an explicit-folder
+    // create: a folder mem's visibility in the outer tree is the point,
+    // and `mem-repo/` is unrelated to it.
+    if !args.no_gitignore && args.storage != Some(StorageArg::Folder) {
         let mem_repo_path = workspace_root.join("mem-repo");
         let walk_start = workspace_root
             .parent()

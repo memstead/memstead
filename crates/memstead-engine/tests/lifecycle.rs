@@ -64,6 +64,7 @@ fn create_mem_rejects_overlong_note() {
             note: Some("x".repeat(mem_management::NOTE_MAX_LEN + 1)),
             operator_mode: false,
             recovery: None,
+            storage: None,
         },
     )
     .unwrap_err();
@@ -98,6 +99,7 @@ fn create_mem_rejects_when_no_allowlist_configured() {
             note: None,
             operator_mode: false,
             recovery: None,
+            storage: None,
         },
     )
     .unwrap_err();
@@ -145,6 +147,7 @@ fn create_mem_rejects_name_collision() {
             note: None,
             operator_mode: false,
             recovery: None,
+            storage: None,
         },
     )
     .unwrap_err();
@@ -192,6 +195,7 @@ fn create_mem_succeeds_with_wildcard_rule() {
             note: Some("seed".to_string()),
             operator_mode: false,
             recovery: None,
+            storage: None,
         },
     )
     .unwrap();
@@ -260,6 +264,7 @@ fn create_mem_persists_write_guidance_into_seed_config() {
             note: Some("seed".to_string()),
             operator_mode: false,
             recovery: None,
+            storage: None,
         },
     )
     .unwrap();
@@ -312,6 +317,7 @@ fn create_mem_with_hierarchical_name_matches_path_rule() {
             note: None,
             operator_mode: false,
             recovery: None,
+            storage: None,
         },
     )
     .unwrap();
@@ -359,6 +365,7 @@ fn create_mem_rejects_double_underscore_segment() {
             note: None,
             operator_mode: false,
             recovery: None,
+            storage: None,
         },
     )
     .unwrap_err();
@@ -423,6 +430,7 @@ fn create_mem_structural_invalid_name_matrix() {
                 note: None,
                 operator_mode: false,
                 recovery: None,
+                storage: None,
             },
         )
         .unwrap_err();
@@ -478,12 +486,54 @@ fn create_mem_rejects_basename_mismatch() {
             note: None,
             operator_mode: false,
             recovery: None,
+            storage: None,
         },
     )
     .unwrap_err();
     match err {
         FullEngineError::Lean(EngineError::InvalidInput(msg)) => {
             assert!(msg.contains("does not match the basename"));
+        }
+        other => panic!("expected InvalidInput, got {other:?}"),
+    }
+}
+
+/// Explicit `storage: Some(GitBranch)` in a folder-shaped workspace
+/// (no `<workspace_root>/mem-repo/.git/`) refuses with a typed
+/// `InvalidInput` — there is no gitdir to host the branch.
+#[test]
+fn create_mem_rejects_explicit_git_branch_without_mem_repo() {
+    let tmp = TempDir::new().unwrap();
+    let mem_dir = tmp.path().join("seed");
+    std::fs::create_dir_all(&mem_dir).unwrap();
+    let writer = FilesystemMemWriter::new(mem_dir.clone());
+    let mut engine = Engine::from_mounts(vec![(
+        folder_mount("seed", mem_dir),
+        Box::new(writer) as Box<dyn MemBackend>,
+    )])
+    .unwrap();
+
+    let err = mem_management::create_mem(
+        &mut engine,
+        mem_management::MemCreateParams {
+            write_guidance: Default::default(),
+            name: "alpha".to_string(),
+            vcs: None,
+            location: tmp.path().join("alpha"),
+            schema_ref: "default@1.0.0".parse().unwrap(),
+            note: None,
+            operator_mode: true,
+            recovery: None,
+            storage: Some(mem_management::StorageKind::GitBranch),
+        },
+    )
+    .unwrap_err();
+    match err {
+        FullEngineError::Lean(EngineError::InvalidInput(msg)) => {
+            assert!(
+                msg.contains("mem-repo/.git"),
+                "refusal must name the missing mem-repo/.git, got: {msg}"
+            );
         }
         other => panic!("expected InvalidInput, got {other:?}"),
     }
@@ -670,6 +720,7 @@ fn create_delete_round_trip_flat_namespace() {
             note: None,
             operator_mode: false,
             recovery: None,
+            storage: None,
         },
     )
     .unwrap();
@@ -731,6 +782,7 @@ fn create_delete_round_trip_hierarchical_namespace() {
             note: None,
             operator_mode: false,
             recovery: None,
+            storage: None,
         },
     )
     .unwrap();
@@ -794,6 +846,7 @@ fn delete_mem_hierarchical_name_in_path_not_allowed_envelope() {
             note: None,
             operator_mode: false,
             recovery: None,
+            storage: None,
         },
     )
     .unwrap();
@@ -893,6 +946,7 @@ fn create_mem_operator_mode_bypasses_empty_allowlist() {
             note: None,
             operator_mode: false,
             recovery: None,
+            storage: None,
         },
     )
     .unwrap_err();
@@ -915,6 +969,7 @@ fn create_mem_operator_mode_bypasses_empty_allowlist() {
             note: None,
             operator_mode: true,
             recovery: None,
+            storage: None,
         },
     )
     .unwrap();
@@ -949,6 +1004,7 @@ fn create_mem_operator_mode_still_enforces_input_validation() {
             note: Some("x".repeat(mem_management::NOTE_MAX_LEN + 1)),
             operator_mode: true,
             recovery: None,
+            storage: None,
         },
     )
     .unwrap_err();

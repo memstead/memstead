@@ -875,6 +875,9 @@ impl Engine {
             operator_mode: request.operator_mode,
             recovery: None,
             write_guidance: std::collections::HashMap::new(),
+            // UniFFI does not expose the storage override yet — the
+            // workspace-shape heuristic keeps behaviour identical.
+            storage: None,
         };
         let mut engine = self
             .inner

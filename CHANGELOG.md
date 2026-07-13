@@ -7,6 +7,17 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+- **Explicit `--storage folder|git-branch` override on `memstead mem init` /
+  `create_mem`**, enabling mixed-backend workspaces (folder mems beside
+  git-branch mems). Omitted, the workspace-shape heuristic is unchanged;
+  `folder` forces a plain-markdown folder mem at the mem's location even
+  inside a mem-repo workspace — its files sit visibly in the outer tree,
+  and the outer-repo `.gitignore` append is skipped; `git-branch` refuses
+  with a typed `INVALID_INPUT` in a workspace without `mem-repo/.git/`.
+  The mount loader and runtime already dispatched per-mount — only the
+  creation surface was missing. MCP and UniFFI wire shapes are unchanged.
+
 ### Fixed
 - Three projection-pipeline defects found by a controlled sync campaign
   (every binding with a non-root medium pointer was affected):

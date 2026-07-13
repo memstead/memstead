@@ -739,6 +739,23 @@ pub fn delete_mem(
 // `memstead_mem_create` orchestration
 // ---------------------------------------------------------------------------
 
+/// Explicit storage-backend override for [`create_mem`]. The default
+/// (`MemCreateParams.storage: None`) keeps the workspace-shape
+/// heuristic: git-branch when `<workspace_root>/mem-repo/.git/`
+/// exists, folder otherwise. Passing `Some(_)` pins the backend
+/// regardless of workspace shape — the mount loader and runtime
+/// already handle mixed-backend workspaces (per-mount backend
+/// dispatch), so a folder mem can live beside git-branch mems.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StorageKind {
+    /// Plain-markdown folder mount — the mem's files live at
+    /// `location`, visible in the outer tree.
+    Folder,
+    /// Per-mem branch in the workspace's `mem-repo/.git/`. Requires
+    /// a mem-repo workspace; refused with `InvalidInput` otherwise.
+    GitBranch,
+}
+
 /// Parameters for [`create_mem`]. Mirrors the `memstead_mem_create`
 /// MCP tool's wire shape 1:1.
 ///
@@ -804,6 +821,16 @@ pub struct MemCreateParams {
     /// here. Empty map (the default) seeds no guidance, identical to
     /// pre-parameter behaviour.
     pub write_guidance: std::collections::HashMap<String, serde_json::Value>,
+    /// Explicit storage-backend override. `None` (default) keeps the
+    /// workspace-shape heuristic — git-branch when
+    /// `<workspace_root>/mem-repo/.git/` exists, folder otherwise.
+    /// `Some(StorageKind::Folder)` forces a folder mount even in a
+    /// mem-repo workspace: the mem's markdown files live at
+    /// `location`, visible in the outer tree.
+    /// `Some(StorageKind::GitBranch)` in a workspace WITHOUT
+    /// `mem-repo/.git/` refuses with `EngineError::InvalidInput` —
+    /// there is no gitdir to host the branch.
+    pub storage: Option<StorageKind>,
 }
 
 /// Response shape from [`create_mem`].
@@ -885,9 +912,12 @@ fn classify_invalid_mem_name(name: &str) -> Option<&'static str> {
 ///    surfaces collisions through the snapshot probe with the
 ///    same `EngineError::MemNameCollision` discriminant.
 /// 3. Build [`memstead_schema::config::MemConfig`] bytes.
-///    - 3b. Pick the storage variant by workspace shape: git-branch
-///      when `<workspace_root>/mem-repo/.git/` exists; folder
-///      otherwise. The branch leaf composes as `<path>/<name>`.
+///    - 3b. Pick the storage variant: `params.storage` when set
+///      (explicit [`StorageKind`] override — folder mems beside
+///      git-branch mems in one workspace), else by workspace shape
+///      (git-branch when `<workspace_root>/mem-repo/.git/` exists,
+///      folder otherwise). The branch leaf composes as
+///      `<path>/<name>`.
 /// 4. Write `<location>/.memstead/config.json` for folder mounts
 ///    only. Git-branch mounts skip the on-disk write — the
 ///    per-mem config travels in the workspace's `__MEMSTEAD` registry
@@ -1089,8 +1119,8 @@ pub fn create_mem(
     }
 
     // ---- Step 1c: basename invariant ----
-    // Skipped on the git-branch path (mem-repo workspaces) because
-    // the equivalent invariant is implicit there: `params.name` IS
+    // Enforced for folder creates only, because the equivalent
+    // invariant is implicit on the git-branch path: `params.name` IS
     // the branch identifier, and `params.location` is ignored at
     // runtime (the mem has no on-disk identity beyond the gitdir).
     //
@@ -1103,7 +1133,31 @@ pub fn create_mem(
         .as_ref()
         .map(|root| root.join("mem-repo").join(".git").is_dir())
         .unwrap_or(false);
-    if !workspace_has_mem_repo {
+    // Resolve the effective storage kind once: the explicit override
+    // wins; `None` keeps the workspace-shape heuristic (behaviour-
+    // preserving for existing callers). An explicit git-branch
+    // request without a mem-repo has no gitdir to host the branch —
+    // typed refusal rather than a downstream instantiate failure.
+    let storage_kind = match params.storage {
+        Some(k) => k,
+        None => {
+            if workspace_has_mem_repo {
+                StorageKind::GitBranch
+            } else {
+                StorageKind::Folder
+            }
+        }
+    };
+    if storage_kind == StorageKind::GitBranch && !workspace_has_mem_repo {
+        return Err(memstead_base::EngineError::InvalidInput(
+            "storage: git-branch requires a mem-repo workspace \
+             (<workspace_root>/mem-repo/.git/ not found) — omit the \
+             override or pass storage: folder"
+                .to_string(),
+        )
+        .into());
+    }
+    if storage_kind == StorageKind::Folder {
         let target_basename = canonical
             .file_name()
             .and_then(|n| n.to_str())
@@ -1162,7 +1216,8 @@ pub fn create_mem(
     // is too permissive (would match `other-team/<name>` for
     // `team/<name>`).
     //
-    // Folder-backed workspaces don't have a branch-residue concept;
+    // Folder creates don't have a branch-residue concept (even in a
+    // mem-repo workspace where the explicit override forces folder);
     // their analogous probe is "does `<location>/.memstead/config.json`
     // already exist?" — which Step 4 below already enforces via
     // `ConfigAlreadyExists`. The residue refusal is git-branch-only.
@@ -1173,13 +1228,17 @@ pub fn create_mem(
     // reattach + force-overwrite arm shapes that still need a
     // `&str` reference.
     let composed_branch_leaf = params.name.clone();
-    let residue_probe = residue_probe_for_workspace(
-        engine,
-        workspace_root.as_deref(),
-        &composed_branch_leaf,
-        &params.name,
-        &canonical_schema_ref,
-    );
+    let residue_probe = if storage_kind == StorageKind::Folder {
+        ResidueProbe::None
+    } else {
+        residue_probe_for_workspace(
+            engine,
+            workspace_root.as_deref(),
+            &composed_branch_leaf,
+            &params.name,
+            &canonical_schema_ref,
+        )
+    };
     // The match discriminates the residue routes: `None` / fresh-create
     // and `ForceOverwrite` fall through to Step 3 below; `Reattach`
     // early-returns with the warning surfaced via the response's
@@ -1372,11 +1431,11 @@ pub fn create_mem(
     })?;
 
     // ---- Step 3b: pick storage variant ----
-    // Workspace-shape heuristic. When
-    // `<workspace_root>/mem-repo/.git/` exists, the new mem gets
-    // a git-branch mount; otherwise folder. The probe is gix-free so
-    // the heuristic works in lean builds (lean builds never have a
-    // mem-repo, so the probe always returns false there).
+    // `storage_kind` was resolved at Step 1c: the explicit
+    // `params.storage` override when set, else the workspace-shape
+    // heuristic (git-branch when `<workspace_root>/mem-repo/.git/`
+    // exists, folder otherwise — gix-free, so the heuristic works in
+    // lean builds, which never have a mem-repo).
     //
     // The git-branch storage requires the engine to have the full
     // backend factory installed (`engine_from_workspace_root` does
@@ -1387,23 +1446,28 @@ pub fn create_mem(
     // The branch leaf IS `params.name` — no separate composition step.
     // Hierarchical identity lives directly in the mem name.
     let branch_leaf = params.name.clone();
-    let storage = if let Some(root) = workspace_root.as_ref() {
-        let probe = root.join("mem-repo").join(".git");
-        if probe.is_dir() {
+    let storage = match storage_kind {
+        StorageKind::GitBranch => {
+            // Step 1c refused git-branch without a mem-repo, and the
+            // mem-repo probe requires a workspace_root — this arm
+            // always has one. The `ok_or_else` is defence in depth.
+            let root = workspace_root.as_ref().ok_or_else(|| {
+                memstead_base::EngineError::InvalidInput(
+                    "storage: git-branch requires a workspace_root \
+                     to locate mem-repo/.git/"
+                        .to_string(),
+                )
+            })?;
+            let probe = root.join("mem-repo").join(".git");
             let gitdir = probe.canonicalize().unwrap_or(probe);
             memstead_base::workspace::MountStorage::GitBranch {
                 gitdir,
                 branch: format!("refs/heads/{branch_leaf}"),
             }
-        } else {
-            memstead_base::workspace::MountStorage::Folder {
-                path: canonical.clone(),
-            }
         }
-    } else {
-        memstead_base::workspace::MountStorage::Folder {
+        StorageKind::Folder => memstead_base::workspace::MountStorage::Folder {
             path: canonical.clone(),
-        }
+        },
     };
     let is_git_branch = matches!(
         storage,
