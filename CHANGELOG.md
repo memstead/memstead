@@ -48,6 +48,16 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   walkers, two answers).
 
 ### Changed
+- The sync brief for a changed slice now carries a bounded **stale-claim
+  search** step: extract the changed facts from the changed artifacts,
+  search the destination mem for claims about them (`memstead_search`
+  variants), and judge only entities whose claims mention a changed fact —
+  closing the slice-blinkering blind spot where a falsified claim stood
+  because its entity's anchors never intersected the slice. The step is
+  bound to the changed facts (a cosmetic change yields an empty fact set
+  and instructs nothing — no whole-mem sweep, no live-verify, no rewrite
+  license), renders only when the cursor carries actual changed artifacts,
+  and the never-rewrite-unchanged-sections rule stays in the brief.
 - Build briefs (discovery and one-shot) now carry a **provenance
   instruction**: attach `anchors[]` to every entity mutation, naming the
   source artifact(s) the entity is drawn from. Rendered engine-side so it

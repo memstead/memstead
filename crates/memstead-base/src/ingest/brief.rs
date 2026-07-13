@@ -1050,6 +1050,37 @@ fn render_adopt_framing(resolved: &ResolvedIngest) -> String {
     )
 }
 
+/// Render the **stale-claim search** block — the bounded step that closes the
+/// slice-blinkering blind spot: a changed fact can be claimed by entities
+/// whose anchors lie entirely outside the changed slice, so steering repairs
+/// at slice-anchored entities alone leaves those claims standing falsified.
+///
+/// The shape is deliberately bounded, and the prose binds itself to **the
+/// changed facts extracted from the slice**: a cosmetic change (formatting,
+/// comments, moves that alter no fact) yields an empty fact set, and an empty
+/// fact set instructs nothing — no whole-mem sweep, no live-verify of every
+/// entity, no rewrite license. Rendered only when the cursor carries actual
+/// changed artifacts (never for reseed-only / no-signal-only passes).
+fn render_stale_claim_search(resolved: &ResolvedIngest) -> String {
+    format!(
+        "## Stale claims beyond the slice — search, then judge\n\n\
+         A changed fact can be claimed by an entity whose anchors are all outside the \
+         changed slice — anchor-steered repairs alone would leave that claim standing \
+         falsified. Extract the **changed facts** from the changed artifacts above: \
+         renamed identifiers, changed values or defaults, changed behaviors (e.g. an \
+         exit code, a flag's meaning), removed or moved concepts. For each changed \
+         fact, search the destination mem `{}` for claims about it (`memstead_search` \
+         and its variants — try the new name, the old name/value, and close synonyms), \
+         and judge **only** the entities whose claims actually mention a changed fact: \
+         repair a claim the change falsifies, leave everything else untouched.\n\n\
+         This is a bounded fact-search, not a live-verify of every entity and not a \
+         rewrite license. If the changes carry no factual claims (formatting, \
+         comments, cosmetic moves), the fact set is empty and this step ends with no \
+         search and no edits.\n\n",
+        resolved.destination_mem
+    )
+}
+
 /// Render the sync brief's conservatism block — the whole of `/reconcile`'s
 /// absorbed judgment (C3): the five conservatism rules, edge-removal
 /// conservatism, and rationale-not-changelog.
@@ -1101,6 +1132,11 @@ fn render_sync_conservatism() -> String {
 /// (E1's brief half). A rule-by-rule absorption map records where each retired
 /// reconcile rule now lives (bundle plan `05-verify-sync-engine`, C4).
 ///
+/// A slice that carries actual changed artifacts additionally renders the
+/// bounded **stale-claim search** step ([`render_stale_claim_search`]) — the
+/// beyond-the-slice fact search that catches claims falsified by the change in
+/// entities whose anchors never intersect the slice.
+///
 /// Prune proposals (group F) ride this same brief — F3's single-writer
 /// invariant: every prune removal reaches the mem only via an agent acting on
 /// this sync brief. They are rendered as proposals only; nothing is auto-deleted.
@@ -1142,6 +1178,12 @@ pub fn render_sync_brief(
         parts.push(render_adopt_framing(resolved));
     }
     parts.push(preface);
+    // The stale-claim search rides only a slice that carries actual changed
+    // artifacts — its facts are extracted FROM those artifacts, so a pass
+    // with no changes (findings-only, reseed-only, prune-only) renders none.
+    if cursor.any_changes {
+        parts.push(render_stale_claim_search(resolved));
+    }
     parts.push(open_findings);
     parts.push(prune_block);
     parts.push(render_sync_conservatism());
@@ -1924,6 +1966,68 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
         assert!(sync.contains("## How to repair — be conservative"));
         assert!(sync.contains("## Open findings to repair"));
         assert!(sync.contains("Update the affected section to match"));
+    }
+
+    /// Criterion — a changed slice renders the bounded **stale-claim search**
+    /// step: extract the changed facts, search the destination mem for claims
+    /// about them, judge only entities whose claims mention a changed fact.
+    #[test]
+    fn sync_brief_changed_slice_renders_stale_claim_search() {
+        let r = resolved("engine", None, vec![]);
+        let cursor = SourceCursor {
+            union: slice(&[], &["moved.rs"], &[]),
+            write_commands: vec![cmd("engine/graph/src#synced", "HEAD")],
+            reseed: vec![],
+            no_signal: vec![],
+            any_changes: true,
+            degraded: false,
+            dead_denies: vec![],
+            dest_mem: "engine".to_string(),
+            binding_id: "engine/graph".to_string(),
+        };
+        let out = render_sync_brief(&r, &cursor, &[], &[], false);
+        assert!(out.contains("## Stale claims beyond the slice — search, then judge"));
+        // The search is bound to the changed facts and the destination mem.
+        assert!(out.contains("Extract the **changed facts** from the changed artifacts above"));
+        assert!(out.contains("search the destination mem `engine`"));
+        assert!(out.contains("`memstead_search`"));
+        assert!(out.contains("judge **only** the entities whose claims actually mention"));
+        // Bounded shape, spelled out: not a live-verify, not a rewrite license,
+        // and an empty fact set (cosmetic change) instructs nothing.
+        assert!(out.contains("not a live-verify of every entity"));
+        assert!(out.contains("not a rewrite license"));
+        assert!(out.contains("the fact set is empty and this step ends with no"));
+        // REFUSAL complement: the never-rewrite-unchanged-sections rule still
+        // rides the same brief — idempotence stays protected.
+        assert!(out.contains("Never rewrite a section that has not changed"));
+    }
+
+    /// REFUSAL — the stale-claim search is absent from every pass whose cursor
+    /// carries no changed artifacts: findings-only, reseed-only (first sync),
+    /// and nothing-to-sync briefs instruct no fact search and no mem sweep.
+    #[test]
+    fn sync_brief_without_changes_renders_no_stale_claim_search() {
+        let r = resolved("engine", None, vec![]);
+        let heading = "## Stale claims beyond the slice";
+
+        // Findings-only pass (source unmoved).
+        let findings = vec![finding(
+            FindingClass::Uncovered,
+            artifact_target("src/x.rs"),
+            "d",
+        )];
+        let out = render_sync_brief(&r, &empty_cursor(), &findings, &[], false);
+        assert!(!out.contains(heading), "findings-only pass must not search");
+
+        // Reseed-only pass (first sync, no diffable slice).
+        let mut reseed_cursor = empty_cursor();
+        reseed_cursor.reseed = vec![cmd("engine/graph/src#synced", "TOK")];
+        let out = render_sync_brief(&r, &reseed_cursor, &[], &[], false);
+        assert!(!out.contains(heading), "reseed-only pass must not search");
+
+        // Nothing-to-sync pass.
+        let out = render_sync_brief(&r, &empty_cursor(), &[], &[], false);
+        assert!(!out.contains(heading));
     }
 
     /// A large findings group caps at FINDINGS_CAP with an overflow line —
