@@ -4,7 +4,8 @@ description: >
   Your source changed — bring the mem up to date. Reads what changed since the
   last run plus any open findings, and updates only the affected entities,
   conservatively. The single maintenance writer for bound mems; run `--all` on
-  a loop to keep every bound mem current, `--verify <binding>` for a
+  a loop to keep every bound mem current (the loop ends itself once every
+  binding reports quiescence), `--verify <binding>` for a
   read-only fidelity report (coverage, accuracy, freshness) that changes
   nothing, or `--inventory <binding>` for the on-demand full stock-take —
   measure the whole binding, repair to quiescence, report. Not a
