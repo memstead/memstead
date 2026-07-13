@@ -1472,6 +1472,7 @@ Measure a binding's fidelity and record durable findings (E3b, group A). Read-on
 
 * `--budget <BUDGET>` — Token budget for the tier-1 fidelity report's **heavy** content (per-artifact lists). Aggregated counts always ship in addition; heavy lists greedy-fill and drop to `## Hints` when they do not fit. Defaults to the house envelope budget
 * `--include <INCLUDE>` — Force a heavy report section in past the budget (repeatable): `uncovered_artifacts` | `tree_fanout` | `superseded_findings`
+* `--full` — Full measurement: walk the entire enumerable source `S(D)` (the rotating sample scheduler is bypassed), treat the per-run adjudication cap as unlimited, and perform the prepared-hash backfill — the report's coverage and accuracy figures are computed over everything, with no sampling or truncation caveat. Refuses (typed) when a facet's medium is non-enumerable rather than render a fabricated-complete report. Without this flag the capped/sampled loop economics are unchanged
 
 
 

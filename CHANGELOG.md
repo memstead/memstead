@@ -36,6 +36,17 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   prepared form this cycle and still resolves `recheck`. Anchor-less mems
   are unaffected (no hashes are computed where no hash-bearing anchor
   exists).
+- **`projection verify --full` — the complete measurement.** Walks the
+  entire enumerable source `S(D)` (the rotating sample scheduler is
+  bypassed and its state untouched), treats the per-run adjudication cap
+  as unlimited, and performs the prepared-hash backfill, so the tier-1
+  report's coverage and accuracy figures are computed over everything —
+  the output leads with the full-measurement statement and carries no
+  sampling or truncation caveat, and the JSON `full_resync` decision is
+  `forced`. A facet over a non-enumerable medium refuses the whole run
+  with the typed `PROJECTION_CAPABILITY_UNSUPPORTED` error instead of
+  rendering a fabricated-complete report. Without the flag, the
+  capped/sampled loop economics are byte-compatible with before.
 
 ### Fixed
 - **Verify findings survive source-head movement.** The findings store now

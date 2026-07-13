@@ -441,6 +441,19 @@ pub enum FindingsError {
         /// The resolved base path that does not exist.
         path: String,
     },
+    /// A full measurement ([`verify_binding_full`]) was requested over a
+    /// facet whose medium the capability matrix marks **non-enumerable**: the
+    /// full `S(D)` walk cannot cover it, so the whole run refuses — typed,
+    /// carrying the same [`FullResyncRefusal`] shape the scheduled walk emits
+    /// — rather than render a report with fabricated completeness. (The
+    /// *scheduled* walk refuses per facet and walks the rest; an explicit
+    /// full measurement promises complete figures, so a partial walk is not
+    /// an answer.)
+    #[error(
+        "full verify refused: facet '{}' resolves over non-enumerable medium type '{}' — {}",
+        .0.facet, .0.medium_type, .0.reason
+    )]
+    FullWalkNonEnumerable(FullResyncRefusal),
 }
 
 /// The outcome of a [`verify_binding`] pass.
@@ -806,13 +819,28 @@ pub enum FullResyncDecision {
         /// The non-enumerable facets the walk refuses (typed).
         refused: Vec<FullResyncRefusal>,
     },
+    /// A full walk was **explicitly requested** ([`verify_binding_full`] —
+    /// the CLI's `--full`), not schedule-triggered: the whole enumerable
+    /// `S(D)` is walked, the sampling scheduler is bypassed, and the
+    /// adjudication cap is treated as unlimited. Only ever constructed after
+    /// the every-facet-enumerable gate, so it carries no per-facet refusal
+    /// list — a non-enumerable facet refuses the entire run instead
+    /// ([`FindingsError::FullWalkNonEnumerable`]).
+    Forced {
+        /// The facets the full enumeration walk covers.
+        walked_facets: Vec<String>,
+    },
 }
 
 impl FullResyncDecision {
-    /// Whether this run performs a full-enumeration walk (a scheduled sweep is
-    /// due). `false` for `Disabled` / `NotDue`.
+    /// Whether this run performs a full-enumeration walk (a scheduled sweep
+    /// is due, or an explicit full measurement was requested). `false` for
+    /// `Disabled` / `NotDue`.
     pub fn is_full_walk(&self) -> bool {
-        matches!(self, FullResyncDecision::Due { .. })
+        matches!(
+            self,
+            FullResyncDecision::Due { .. } | FullResyncDecision::Forced { .. }
+        )
     }
 }
 
@@ -1032,8 +1060,67 @@ pub fn verify_binding(
     binding: &BindingV1,
     resolved: &ResolvedIngest,
 ) -> Result<VerifyOutcome, FindingsError> {
+    run_verify(engine, workspace_root, binding, resolved, false)
+}
+
+/// [`verify_binding`]'s **full-measurement** mode (the CLI's `--full`):
+/// enumerate the whole `S(D)` (the sampling scheduler is bypassed — the
+/// rotation state is neither consulted nor advanced), treat the per-run
+/// adjudication cap as unlimited, and observe every anchor — so the recorded
+/// findings, and the tier-1 report computed over them, carry no
+/// sampling/truncation caveat: coverage and accuracy are computed, not
+/// sampled. The prepared-hash backfill worklist rides the outcome exactly as
+/// on a sampled pass.
+///
+/// REFUSAL: a facet whose medium the capability matrix marks non-enumerable
+/// refuses the **whole** run with the typed
+/// [`FindingsError::FullWalkNonEnumerable`] — an explicit full measurement
+/// promises complete figures, so a partial walk is never silently substituted
+/// and a fabricated-complete report is never rendered. The sampled path
+/// ([`verify_binding`]) is untouched by this mode's existence.
+pub fn verify_binding_full(
+    engine: &Engine,
+    workspace_root: &Path,
+    binding: &BindingV1,
+    resolved: &ResolvedIngest,
+) -> Result<VerifyOutcome, FindingsError> {
+    run_verify(engine, workspace_root, binding, resolved, true)
+}
+
+/// The shared verify pass behind [`verify_binding`] (`full = false`, the
+/// capped/sampled loop economics) and [`verify_binding_full`] (`full = true`,
+/// the uncapped whole-`S(D)` measurement).
+fn run_verify(
+    engine: &Engine,
+    workspace_root: &Path,
+    binding: &BindingV1,
+    resolved: &ResolvedIngest,
+    full: bool,
+) -> Result<VerifyOutcome, FindingsError> {
     let binding_id = resolved.name.clone();
     let (mem, name) = split_binding_id(&binding_id)?;
+
+    // Full measurement requires every primary facet to be enumerable — refuse
+    // the whole run typed before observing anything (never a fake-complete
+    // report over a partially-walkable source).
+    if full {
+        for source in &resolved.sources {
+            if let ResolvedSource::Primary(p) = source {
+                let medium_type = medium_type_wire(p.medium_type);
+                if !medium_capabilities(p.medium_type).enumerable {
+                    return Err(FindingsError::FullWalkNonEnumerable(FullResyncRefusal {
+                        facet: p.facet_ref.clone(),
+                        medium_type: medium_type.clone(),
+                        reason: format!(
+                            "medium type '{medium_type}' is non-enumerable — a full-enumeration \
+                             walk cannot cover it; the full measurement refuses rather than \
+                             render a report with fabricated completeness"
+                        ),
+                    }));
+                }
+            }
+        }
+    }
 
     // Refuse a vanished or unmounted path-based source before observing
     // anything: a missing tree would otherwise degrade to an empty
@@ -1085,7 +1172,10 @@ pub fn verify_binding(
         .max(1) as usize;
 
     // Level-trigger clock + full-resync schedule (D3) — the counter ticks every
-    // run (even a non-enumerable one) so the schedule can refuse on time.
+    // run (even a non-enumerable one) so the schedule can refuse on time. An
+    // explicit full measurement ticks the same clock (it is a verify run) but
+    // its walk decision is `Forced`, not schedule-derived: the every-facet-
+    // enumerable gate above already held, so no per-facet refusal list exists.
     let run_count = bump_verify_runs(&cache_root, &binding_id);
     let facet_enum: Vec<FacetEnumerability> = resolved
         .sources
@@ -1099,7 +1189,13 @@ pub fn verify_binding(
             ResolvedSource::Reference { .. } => None,
         })
         .collect();
-    let full_resync = schedule_full_resync(full_resync_every, run_count, &facet_enum);
+    let full_resync = if full {
+        FullResyncDecision::Forced {
+            walked_facets: facet_enum.iter().map(|f| f.facet.clone()).collect(),
+        }
+    } else {
+        schedule_full_resync(full_resync_every, run_count, &facet_enum)
+    };
 
     let mut findings: Vec<Finding> = Vec::new();
 
@@ -1169,9 +1265,12 @@ pub fn verify_binding(
             findings.push(f);
         }
     }
-    // `cap == 0` disables the cap (adjudicate every candidate); otherwise a
+    // `cap == 0` disables the cap (adjudicate every candidate), and a full
+    // measurement treats any configured cap as unlimited — its rotation state
+    // is neither consulted nor advanced (the scheduler is bypassed, so the
+    // sampled loop's window sequence is untouched by a full run). Otherwise a
     // cap-sized rotation window selects this run's adjudicated set (D1/D2).
-    let window: Option<BTreeSet<String>> = if cap == 0 {
+    let window: Option<BTreeSet<String>> = if full || cap == 0 {
         None
     } else {
         let mut keys: Vec<String> = candidates
@@ -1198,10 +1297,12 @@ pub fn verify_binding(
     ));
 
     // 2. Sample in-scope source artifacts for coverage. When a full walk is due
-    //    (D3), enumerate the WHOLE source of every enumerable facet — guaranteeing
-    //    complete coverage this run; otherwise sample a bounded rotating window
-    //    (D2). Non-enumerable facets are refused (the typed refusal rides on
-    //    `full_resync`), never silently claimed as covered.
+    //    (D3) or explicitly requested (`Forced`), enumerate the WHOLE source of
+    //    every enumerable facet — guaranteeing complete coverage this run;
+    //    otherwise sample a bounded rotating window (D2). Non-enumerable facets
+    //    are refused (scheduled: the typed refusal rides on `full_resync`;
+    //    explicit: the whole run refused before observing), never silently
+    //    claimed as covered.
     let sample_files: Vec<String> = if full_resync.is_full_walk() {
         let mut all: Vec<String> = Vec::new();
         for source in &resolved.sources {
@@ -3203,5 +3304,326 @@ mod tests {
             uncovered, 3,
             "the scheduled full walk covers the whole source, not a batch of one"
         );
+    }
+
+    // ---- explicit full measurement (`verify_binding_full`) ----------------
+
+    /// An explicit full measurement walks the whole `S(D)` and treats the
+    /// adjudication cap as unlimited — every drift candidate adjudicates and
+    /// every uncovered artifact is flagged in ONE run, with nothing deferred
+    /// to a cap or a rotating sample, and the decision reports `Forced`.
+    /// REFUSAL half (byte-compat): a no-flag run over the same binding keeps
+    /// today's capped/sampled behavior exactly — cap-1 adjudicates one
+    /// candidate and queues the remainder with the cap-reached detail, and
+    /// the batch-1 sample flags at most one uncovered file.
+    #[test]
+    fn full_verify_uncaps_adjudication_and_walks_whole_source() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let mem_dir = root.join("mem");
+        std::fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
+        std::fs::write(
+            mem_dir.join(".memstead").join("config.json"),
+            r#"{"format":1,"schema":"default@1.0.0","version":"1.0.0"}"#,
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join(".memstead")).unwrap();
+        std::fs::write(
+            root.join(".memstead").join("workspace.toml"),
+            "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+        )
+        .unwrap();
+        crate::FileWorkspaceStore::new()
+            .save_state(
+                root,
+                &Workspace {
+                    mounts: vec![Mount {
+                        mem: "engine".to_string(),
+                        schema: Some("default@1.0.0".parse().unwrap()),
+                        storage: MountStorage::Folder {
+                            path: mem_dir.clone(),
+                        },
+                        capability: MountCapability::Write,
+                        lifecycle: MountLifecycle::Eager,
+                        cross_linkable: false,
+                        migration_target: None,
+                    }],
+                    settings: WorkspaceSettings::default(),
+                },
+            )
+            .unwrap();
+        let out = std::process::Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(root)
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        // Three anchored (drift-candidate) files + three uncovered files.
+        for f in ["a.rs", "b.rs", "c.rs", "d.rs", "e.rs", "f.rs"] {
+            std::fs::write(root.join("src").join(f), "fn x() {}\n").unwrap();
+        }
+        let mk = |art: &str| Anchor {
+            artifact: art.to_string(),
+            grain: AnchorGrain::File,
+            class: AnchorProvenanceClass::Anchored,
+            at_version: None,
+            hash: Some("stale-recorded-hash".to_string()), // mismatches → drift candidate
+            hash_stability: AnchorHashStability::Stable,
+            derived_from: Vec::new(),
+            binding: None,
+        };
+        let mut sidecar = AnchorSidecar::default();
+        sidecar.set(
+            "engine--e",
+            vec![mk("src/a.rs"), mk("src/b.rs"), mk("src/c.rs")],
+        );
+        std::fs::write(
+            mem_dir.join(crate::anchor::ANCHOR_SIDECAR_PATH),
+            sidecar.to_bytes(),
+        )
+        .unwrap();
+
+        write_medium(
+            root,
+            "engine",
+            "graph",
+            &Medium {
+                name: "graph".to_string(),
+                medium_type: MediumType::Codebase,
+                pointer: String::new(),
+                change_detection: Some("git".to_string()),
+            },
+        )
+        .unwrap();
+        write_facet(
+            root,
+            "engine",
+            "graph",
+            &Facet {
+                name: "graph".to_string(),
+                medium: "graph".to_string(),
+                scope: vec![PatternEntry {
+                    path: "src/**/*.rs".to_string(),
+                    mode: PatternMode::Allow,
+                }],
+                engagement: None,
+                preparation: None,
+            },
+        )
+        .unwrap();
+        write_binding(
+            root,
+            "engine",
+            "graph",
+            &BindingV1 {
+                version: BINDING_VERSION,
+                intent: None,
+                source_facets: vec!["graph".to_string()],
+                reference_mems: Vec::new(),
+                destination_mem: "engine".to_string(),
+                deny_paths: Vec::new(),
+                coverage_semantics: CoverageSemantics::Exhaustive,
+                rules: None,
+                prune: None,
+                operations: Operations {
+                    build: None,
+                    sync: None,
+                    verify: Some(VerifyOperation {
+                        trigger: IngestTrigger::Manual,
+                        batch_size: 1,        // tiny rotating sample …
+                        adjudication_cap: 1,  // … and a tiny cap
+                        full_resync_every: 0, // scheduled walks disabled
+                    }),
+                },
+            },
+        )
+        .unwrap();
+
+        let engine = Engine::from_workspace_root(root).unwrap();
+        let configs = load_pipeline_configs(root).unwrap();
+        let binding = &configs.bindings[0].config;
+        let resolved = resolve_binding_run(&configs, "engine/graph", binding).unwrap();
+
+        // Byte-compat leg — the no-flag run keeps today's capped/sampled
+        // economics: one candidate adjudicated, two queued by the cap, at
+        // most one uncovered file from the batch-1 sample, no full walk.
+        let sampled = verify_binding(&engine, root, binding, &resolved).unwrap();
+        assert_eq!(sampled.full_resync, FullResyncDecision::Disabled);
+        let store = read_findings_store(root, "engine", "graph")
+            .unwrap()
+            .unwrap();
+        let current = store.current(&sampled.key);
+        let count = |c: FindingClass| current.iter().filter(|f| f.class == c).count();
+        assert_eq!(count(FindingClass::Drifted), 1, "cap-1 adjudicates one");
+        assert_eq!(
+            count(FindingClass::QueuedForAdjudication),
+            2,
+            "the remainder queues"
+        );
+        assert!(
+            current
+                .iter()
+                .any(|f| f.class == FindingClass::QueuedForAdjudication
+                    && f.detail.contains("cap reached")),
+            "the sampled deferral states the cap"
+        );
+        assert!(
+            count(FindingClass::Uncovered) <= 1,
+            "batch-1 sample looks at one artifact"
+        );
+
+        // Full measurement: everything adjudicates, everything is walked,
+        // nothing deferred — no sampling/truncation residue anywhere.
+        let full = verify_binding_full(&engine, root, binding, &resolved).unwrap();
+        assert_eq!(
+            full.full_resync,
+            FullResyncDecision::Forced {
+                walked_facets: vec!["graph".to_string()]
+            }
+        );
+        assert_eq!(full.backlog, 0, "cap treated as unlimited — no backlog");
+        let store = read_findings_store(root, "engine", "graph")
+            .unwrap()
+            .unwrap();
+        let current = store.current(&full.key);
+        let count = |c: FindingClass| current.iter().filter(|f| f.class == c).count();
+        assert_eq!(
+            count(FindingClass::Drifted),
+            3,
+            "every candidate adjudicated"
+        );
+        assert_eq!(count(FindingClass::QueuedForAdjudication), 0);
+        assert_eq!(
+            count(FindingClass::Uncovered),
+            3,
+            "the whole S(D) walked — every uncovered file flagged"
+        );
+        assert!(
+            current.iter().all(|f| !f.detail.contains("cap reached")),
+            "a full run's findings carry no cap-deferral caveat"
+        );
+    }
+
+    /// REFUSAL — an explicit full measurement over a non-enumerable medium
+    /// refuses the whole run with the typed capability error (nothing
+    /// observed, nothing recorded — never a fabricated-complete report),
+    /// while the no-flag sampled verify over the same binding still runs.
+    #[test]
+    fn full_verify_refuses_non_enumerable_medium_typed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let mem_dir = root.join("mem");
+        std::fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
+        std::fs::write(
+            mem_dir.join(".memstead").join("config.json"),
+            r#"{"format":1,"schema":"default@1.0.0","version":"1.0.0"}"#,
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join(".memstead")).unwrap();
+        std::fs::write(
+            root.join(".memstead").join("workspace.toml"),
+            "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+        )
+        .unwrap();
+        crate::FileWorkspaceStore::new()
+            .save_state(
+                root,
+                &Workspace {
+                    mounts: vec![Mount {
+                        mem: "engine".to_string(),
+                        schema: Some("default@1.0.0".parse().unwrap()),
+                        storage: MountStorage::Folder {
+                            path: mem_dir.clone(),
+                        },
+                        capability: MountCapability::Write,
+                        lifecycle: MountLifecycle::Eager,
+                        cross_linkable: false,
+                        migration_target: None,
+                    }],
+                    settings: WorkspaceSettings::default(),
+                },
+            )
+            .unwrap();
+
+        // A web medium — the capability matrix marks it non-enumerable.
+        write_medium(
+            root,
+            "engine",
+            "manual",
+            &Medium {
+                name: "manual".to_string(),
+                medium_type: MediumType::Web,
+                pointer: "https://example.com/docs".to_string(),
+                change_detection: None,
+            },
+        )
+        .unwrap();
+        write_facet(
+            root,
+            "engine",
+            "manual",
+            &Facet {
+                name: "manual".to_string(),
+                medium: "manual".to_string(),
+                scope: Vec::new(),
+                engagement: None,
+                preparation: None,
+            },
+        )
+        .unwrap();
+        write_binding(
+            root,
+            "engine",
+            "manual",
+            &BindingV1 {
+                version: BINDING_VERSION,
+                intent: None,
+                source_facets: vec!["manual".to_string()],
+                reference_mems: Vec::new(),
+                destination_mem: "engine".to_string(),
+                deny_paths: Vec::new(),
+                coverage_semantics: CoverageSemantics::Curated,
+                rules: None,
+                prune: None,
+                operations: Operations {
+                    build: None,
+                    sync: None,
+                    verify: Some(VerifyOperation {
+                        trigger: IngestTrigger::Manual,
+                        batch_size: 20,
+                        adjudication_cap: DEFAULT_ADJUDICATION_CAP,
+                        full_resync_every: DEFAULT_FULL_RESYNC_EVERY,
+                    }),
+                },
+            },
+        )
+        .unwrap();
+
+        let engine = Engine::from_workspace_root(root).unwrap();
+        let configs = load_pipeline_configs(root).unwrap();
+        let binding = &configs.bindings[0].config;
+        let resolved = resolve_binding_run(&configs, "engine/manual", binding).unwrap();
+
+        // Full: typed refusal naming the facet and medium type; nothing recorded.
+        let err = verify_binding_full(&engine, root, binding, &resolved).unwrap_err();
+        match &err {
+            FindingsError::FullWalkNonEnumerable(refusal) => {
+                assert_eq!(refusal.facet, "manual");
+                assert_eq!(refusal.medium_type, "web");
+                assert!(refusal.reason.contains("non-enumerable"));
+            }
+            other => panic!("expected FullWalkNonEnumerable, got {other:?}"),
+        }
+        assert!(
+            read_findings_store(root, "engine", "manual")
+                .unwrap()
+                .is_none(),
+            "a refused full run records nothing"
+        );
+
+        // No-flag: the sampled verify over the same binding still runs.
+        let sampled = verify_binding(&engine, root, binding, &resolved).unwrap();
+        assert_eq!(sampled.binding, "engine/manual");
     }
 }

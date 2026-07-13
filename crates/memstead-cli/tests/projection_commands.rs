@@ -2113,3 +2113,114 @@ fn verify_backfills_hashless_anchor_then_adjudicates_drift() {
         "nothing queued — the hash leg needs no sampling: {env}"
     );
 }
+
+/// `projection verify --full` measures completely: the JSON decision is
+/// `forced` (full-enumeration walk, scheduler bypassed, cap unlimited), the
+/// criterion-level backfill still happens, nothing queues, and the rendered
+/// report states the full measurement with no sampling caveat. Without the
+/// flag, the sampled behavior over the same workspace is what it was.
+#[test]
+fn verify_full_walks_everything_and_reports_forced() {
+    let tmp = verify_workspace();
+    let root = tmp.path();
+
+    let out = memstead()
+        .current_dir(root)
+        .args(["--json", "projection", "verify", "engine/graph", "--full"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(
+        env["full_resync"]["state"], "forced",
+        "an explicit full measurement reports the forced walk: {env}"
+    );
+    assert_eq!(
+        env["hash_backfilled"], 1,
+        "--full includes the prepared-hash backfill: {env}"
+    );
+    assert_eq!(env["backlog"], 0, "cap unlimited — nothing queued: {env}");
+
+    // Human-readable mode states the full measurement up front.
+    let out = memstead()
+        .current_dir(root)
+        .args(["projection", "verify", "engine/graph", "--full"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let text = String::from_utf8(out).unwrap();
+    assert!(
+        text.contains("Full measurement (`--full`)"),
+        "the rendered report leads with the full-measurement statement: {text}"
+    );
+    assert!(
+        text.contains("not sampled"),
+        "no sampling caveat — the figures are stated as computed: {text}"
+    );
+
+    // A no-flag run over the same workspace still succeeds on the sampled
+    // path (byte-compatible economics; the scheduled decision, not forced).
+    let out = memstead()
+        .current_dir(root)
+        .args(["--json", "projection", "verify", "engine/graph"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&out).unwrap();
+    assert_ne!(
+        env["full_resync"]["state"], "forced",
+        "a no-flag run never reports a forced walk: {env}"
+    );
+}
+
+/// REFUSAL — `verify --full` over a non-enumerable (web) medium refuses with
+/// the existing typed capability error, exit-coded as validation, and renders
+/// no report: a fabricated-complete report is never an answer.
+#[test]
+fn verify_full_refuses_non_enumerable_medium() {
+    let tmp = verify_workspace();
+    let root = tmp.path();
+    write_store(
+        root,
+        "mediums/engine/manual.json",
+        r#"{"name":"manual","type":"web","pointer":"https://example.com/docs"}"#,
+    );
+    write_store(
+        root,
+        "facets/engine/manual.json",
+        r#"{"name":"manual","medium":"manual","scope":[]}"#,
+    );
+    write_store(
+        root,
+        "projections/engine/manual.json",
+        r#"{"version":1,"intent":"the manual","source_facets":["manual"],"reference_mems":[],"destination_mem":"engine","deny_paths":[],"coverage_semantics":"curated","operations":{"verify":{"trigger":"manual","batch_size":20}}}"#,
+    );
+
+    let out = memstead()
+        .current_dir(root)
+        .args(["--json", "projection", "verify", "engine/manual", "--full"])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(
+        env["code"], "PROJECTION_CAPABILITY_UNSUPPORTED",
+        "the existing typed capability error: {env}"
+    );
+    assert_eq!(env["details"]["medium_type"], "web");
+    assert!(
+        env["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("non-enumerable"),
+        "the refusal states why: {env}"
+    );
+}

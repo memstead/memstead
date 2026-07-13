@@ -38,7 +38,7 @@ use memstead_base::ingest::advance::{
 };
 use memstead_base::ingest::findings::{
     FindingsError, FullResyncDecision, record_anchor_hash_backfill, record_verified_baseline,
-    verify_binding,
+    verify_binding, verify_binding_full,
 };
 use memstead_base::ingest::report::{
     DEFAULT_REPORT_BUDGET, compute_fidelity_report, render_fidelity_report,
@@ -367,6 +367,16 @@ pub struct VerifyArgs {
     /// `uncovered_artifacts` | `tree_fanout` | `superseded_findings`.
     #[arg(long = "include")]
     pub include: Vec<String>,
+    /// Full measurement: walk the entire enumerable source `S(D)` (the
+    /// rotating sample scheduler is bypassed), treat the per-run adjudication
+    /// cap as unlimited, and perform the prepared-hash backfill — the
+    /// report's coverage and accuracy figures are computed over everything,
+    /// with no sampling or truncation caveat. Refuses (typed) when a facet's
+    /// medium is non-enumerable rather than render a fabricated-complete
+    /// report. Without this flag the capped/sampled loop economics are
+    /// unchanged.
+    #[arg(long)]
+    pub full: bool,
 }
 
 pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
@@ -1559,6 +1569,21 @@ fn render_full_resync_note(decision: &FullResyncDecision) -> String {
     match decision {
         FullResyncDecision::Disabled => String::new(),
         FullResyncDecision::NotDue { .. } => String::new(),
+        // An explicit full measurement (`--full`): every facet walked in
+        // full, scheduler bypassed, cap unlimited — stated up front so the
+        // report below reads as computed, not sampled.
+        FullResyncDecision::Forced { walked_facets } => {
+            let facets = if walked_facets.is_empty() {
+                "(no primary facets)".to_string()
+            } else {
+                walked_facets.join(", ")
+            };
+            format!(
+                "> **Full measurement (`--full`)** — full-enumeration walk over: {facets}. \
+                 Sampling scheduler bypassed; adjudication cap unlimited. Coverage and \
+                 accuracy figures below are computed over the whole source, not sampled.\n\n"
+            )
+        }
         FullResyncDecision::Due {
             walked_facets,
             refused,
@@ -1632,39 +1657,59 @@ fn verify(ctx: &CliContext, args: VerifyArgs) -> anyhow::Result<()> {
     let mut cli_engine = ctx.cli_engine_at(&root)?;
     let engine = cli_engine.base_mut();
 
-    let outcome =
-        verify_binding(engine, &root, &record.config, &resolved).map_err(|e| match &e {
-            // A vanished/unmounted source is a typed refusal, not a failed
-            // measurement: nothing was observed, no findings were recorded,
-            // and the `#verified` baseline is deliberately left untouched
-            // (a transient unmount must never clobber real recorded state).
-            FindingsError::SourceUnreachable {
-                facet,
-                medium,
-                path,
-            } => CliError::new(
-                ExitKind::Validation,
-                "SOURCE_UNREACHABLE",
-                format!(
-                    "verify refused for `{binding_id}`: source facet '{facet}' (medium \
+    let run = if args.full {
+        verify_binding_full
+    } else {
+        verify_binding
+    };
+    let outcome = run(engine, &root, &record.config, &resolved).map_err(|e| match &e {
+        // A vanished/unmounted source is a typed refusal, not a failed
+        // measurement: nothing was observed, no findings were recorded,
+        // and the `#verified` baseline is deliberately left untouched
+        // (a transient unmount must never clobber real recorded state).
+        FindingsError::SourceUnreachable {
+            facet,
+            medium,
+            path,
+        } => CliError::new(
+            ExitKind::Validation,
+            "SOURCE_UNREACHABLE",
+            format!(
+                "verify refused for `{binding_id}`: source facet '{facet}' (medium \
                  '{medium}') resolves to `{path}`, which does not exist — restore or \
                  remount the source (or repoint the medium); the recorded `#verified` \
                  baseline was left untouched"
-                ),
-            )
-            .with_details(json!({
-                "binding": binding_id,
-                "facet": facet,
-                "medium": medium,
-                "path": path,
-            })),
-            _ => CliError::new(
-                ExitKind::Generic,
-                "PROJECTION_VERIFY_FAILED",
-                format!("verify failed for `{binding_id}`: {e}"),
-            )
-            .with_details(json!({ "binding": binding_id, "error": e.to_string() })),
-        })?;
+            ),
+        )
+        .with_details(json!({
+            "binding": binding_id,
+            "facet": facet,
+            "medium": medium,
+            "path": path,
+        })),
+        // `--full` over a non-enumerable medium: the existing typed
+        // capability refusal — a full measurement promises complete
+        // figures, so the run refuses instead of rendering a report
+        // with fabricated completeness. Nothing was observed or
+        // recorded.
+        FindingsError::FullWalkNonEnumerable(refusal) => CliError::new(
+            ExitKind::Validation,
+            "PROJECTION_CAPABILITY_UNSUPPORTED",
+            format!("verify --full refused for `{binding_id}`: {e}"),
+        )
+        .with_details(json!({
+            "binding": binding_id,
+            "facet": refusal.facet,
+            "medium_type": refusal.medium_type,
+            "reason": refusal.reason,
+        })),
+        _ => CliError::new(
+            ExitKind::Generic,
+            "PROJECTION_VERIFY_FAILED",
+            format!("verify failed for `{binding_id}`: {e}"),
+        )
+        .with_details(json!({ "binding": binding_id, "error": e.to_string() })),
+    })?;
 
     // The run completed — record its prepared-hash backfill: every hash the
     // pass observed for a hash-less hash-bearing anchor lands on that anchor
