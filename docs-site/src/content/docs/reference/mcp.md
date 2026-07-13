@@ -1626,7 +1626,7 @@ Remove a `[[mem_management.create]]` rule by `pattern`. Counterpart to `memstead
 
 Revoke mem `from`'s permission to author cross-mem links into mem `to`. Mutates the `[cross_mem_links]` workspace policy; when the underlying list becomes empty, the `from` key is dropped entirely. Dynamic-mem-lifecycle workflow: revoke before `memstead_mem_delete` to clear the `MEM_REFERENCED_BY_POLICY` refusal. Idempotent: re-revoke of an absent grant returns success with `GRANT_NOT_FOUND` warning, file unchanged. Refuses with `WORKSPACE_NOT_INITIALISED` when the workspace config is missing, `INVALID_TOML` when the file fails to parse, `IO_ERROR` on write failure. Response carries `{from, to, warnings}`.
 
-**Hints:** `read_only` = false, `destructive` = false, `idempotent` = true, `open_world` = false
+**Hints:** `read_only` = false, `destructive` = true, `idempotent` = true, `open_world` = false
 
 **Input schema:**
 
