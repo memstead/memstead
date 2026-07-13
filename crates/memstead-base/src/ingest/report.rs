@@ -1603,11 +1603,13 @@ mod tests {
         // `authored` is its own excluded bucket, never in the resolution tally.
         assert_eq!(report.anchors.authored, 1);
         assert_eq!(report.anchors.by_class.get("authored"), Some(&1));
-        // Two hash-bearing anchors present (file + tree) → both recheck (no
-        // prepared hash this pass), never drift; observed excludes authored.
+        // Two hash-bearing anchors present: the file anchor's recorded hash
+        // mismatches the observed prepared form → deterministic drift; the
+        // tree anchor has no prepared form this cycle → recheck (honest
+        // deferral, never fabricated drift). Observed excludes authored.
         assert_eq!(report.anchors.observed, 2);
-        assert_eq!(report.anchors.recheck, 2);
-        assert_eq!(report.anchors.drifted, 0);
+        assert_eq!(report.anchors.recheck, 1);
+        assert_eq!(report.anchors.drifted, 1);
         // Backlog reads from the store the verify pass populated.
         assert_eq!(report.backlog, outcome.backlog);
         // A degradation flag for the deferred hash adjudication.

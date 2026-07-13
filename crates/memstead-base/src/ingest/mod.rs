@@ -62,7 +62,8 @@ pub use findings::{
     FacetEnumerability, Finding, FindingClass, FindingKey, FindingTarget, FindingsBatch,
     FindingsError, FindingsStore, FullResyncDecision, FullResyncRefusal, VerifyOutcome,
     adjudicate_anchor, current_findings, delete_findings_store, findings_store_path,
-    read_findings_store, schedule_full_resync, verify_binding, write_findings_store,
+    read_findings_store, record_anchor_hash_backfill, record_verified_baseline,
+    schedule_full_resync, verify_binding, write_findings_store,
 };
 pub use guidance::{
     GuidanceDefaults, MemGuidance, ResolvedGuidance, merge_guidance_block, resolve_writing_guidance,

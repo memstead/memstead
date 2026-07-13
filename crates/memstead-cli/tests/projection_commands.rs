@@ -2011,3 +2011,105 @@ fn brief_operation_flag_requires_all_and_conflicts_with_group_c() {
             .failure();
     }
 }
+
+// ── verify: prepared-hash backfill + deterministic drift ─────────────────────
+
+/// `advance_workspace` plus a verify operation on the binding and an anchors
+/// sidecar carrying one HASH-LESS `anchored` anchor on `src/a.rs` — the
+/// fixture for the verify command's backfill/adjudication legs.
+fn verify_workspace() -> TempDir {
+    let tmp = advance_workspace();
+    let root = tmp.path();
+    write_store(
+        root,
+        "projections/engine/graph.json",
+        r#"{"version":1,"intent":"model the engine","source_facets":["source-tree"],"reference_mems":[],"destination_mem":"engine","deny_paths":[],"coverage_semantics":"exhaustive","operations":{"build":{"mode":"discovery","trigger":"loop","batch_size":20},"sync":{"trigger":"manual","batch_size":20},"verify":{"trigger":"manual","batch_size":20,"adjudication_cap":50,"full_resync_every":20}}}"#,
+    );
+    std::fs::write(
+        root.join("engine-mem").join(".memstead").join("anchors.json"),
+        r#"{"version":1,"entities":{"engine--covers-a":[{"artifact":"src/a.rs","grain":"file","class":"anchored","hash_stability":"stable"}]}}"#,
+    )
+    .unwrap();
+    tmp
+}
+
+/// End-to-end through the CLI (separate processes): the first `projection
+/// verify` backfills the hash-less anchor's prepared-content hash into the
+/// sidecar (`hash_backfilled: 1`); a re-run backfills nothing (idempotent);
+/// after a source change a verify adjudicates `drifted` deterministically —
+/// no queued deferral, no LLM leg.
+#[test]
+fn verify_backfills_hashless_anchor_then_adjudicates_drift() {
+    let tmp = verify_workspace();
+    let root = tmp.path();
+
+    // (1) First verify: the hash-less anchored anchor gains its prepared hash.
+    let out = memstead()
+        .current_dir(root)
+        .args(["--json", "projection", "verify", "engine/graph"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(
+        env["hash_backfilled"], 1,
+        "one hash-less anchor backfilled: {env}"
+    );
+    assert_eq!(env["backlog"], 0, "backfill queues nothing: {env}");
+    let sidecar = std::fs::read_to_string(root.join("engine-mem/.memstead/anchors.json")).unwrap();
+    assert!(
+        sidecar.contains("\"hash\""),
+        "the sidecar now records the prepared-content hash: {sidecar}"
+    );
+
+    // (2) Idempotent: a second verify observes an empty worklist.
+    let out = memstead()
+        .current_dir(root)
+        .args(["--json", "projection", "verify", "engine/graph"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(env["hash_backfilled"], 0, "backfill happens once: {env}");
+    assert_eq!(
+        env["report"]["anchors"]["resolves"], 1,
+        "the recorded hash matches the source — the anchor resolves: {env}"
+    );
+
+    // (3) The anchored artifact changes; verify adjudicates drift
+    //     deterministically from the hash comparison alone.
+    let src = root.join("src");
+    std::fs::write(src.join("a.rs"), "one-drifted").unwrap();
+    git(&src, &["add", "-A"]);
+    git(&src, &["commit", "-qm", "drift"]);
+
+    let out = memstead()
+        .current_dir(root)
+        .args(["--json", "projection", "verify", "engine/graph"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(
+        env["hash_backfilled"], 0,
+        "a recorded hash is never overwritten: {env}"
+    );
+    assert_eq!(
+        env["report"]["anchors"]["drifted"], 1,
+        "stable-medium hash mismatch → deterministic drifted: {env}"
+    );
+    assert_eq!(
+        env["report"]["findings_by_class"]["drifted"], 1,
+        "the drift lands as a durable finding: {env}"
+    );
+    assert_eq!(
+        env["backlog"], 0,
+        "nothing queued — the hash leg needs no sampling: {env}"
+    );
+}

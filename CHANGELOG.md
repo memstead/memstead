@@ -17,6 +17,25 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   with a typed `INVALID_INPUT` in a workspace without `mem-repo/.git/`.
   The mount loader and runtime already dispatched per-mount — only the
   creation surface was missing. MCP and UniFFI wire shapes are unchanged.
+- **Prepared-content hashing, hash backfill, and deterministic drift
+  adjudication.** Anchor observation on a `path`-medium mem now computes
+  the **prepared-content hash** of each present hash-bearing (`anchored` /
+  `derived`) `file`/`span` artifact — SHA-256 (house 16-hex form) over a
+  minimal canonical form (BOM stripped, CRLF/CR → LF, trailing newlines
+  trimmed; binary bytes hash raw) — so a recorded hash adjudicates
+  `resolves` / `drifted` (stable medium) / `recheck` (unstable medium)
+  deterministically, with no LLM sampling on the hash leg. On first
+  observation of a **hash-less** hash-bearing anchor whose artifact
+  resolves, `projection verify` records the computed hash onto the anchor
+  in the engine-owned anchors sidecar (a completed-run bookkeeping write,
+  like the `#verified` baseline — never entity content), reported as
+  `hash_backfilled` in the CLI output; the backfill is idempotent and the
+  tier-3 recheck queue for such anchors drains instead of re-queueing
+  forever. Class semantics hold: `authored` / `informed-by` anchors never
+  gain hashes and never adjudicate `drifted`; a `tree`-grain anchor has no
+  prepared form this cycle and still resolves `recheck`. Anchor-less mems
+  are unaffected (no hashes are computed where no hash-bearing anchor
+  exists).
 
 ### Fixed
 - **Verify findings survive source-head movement.** The findings store now
@@ -35,6 +54,7 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   edit still supersedes. The on-disk format is unchanged: existing stores
   in live workspaces load without loss (legacy same-hash per-head batches
   collapse to the latest on the next verify).
+- `projection advance` now answers a medium-relative artifact id (the form
   agents naturally type, e.g. `a.rs` where the slice printed `src/a.rs`)
   with a remedy-bearing refusal: the `PROJECTION_ADVANCE_UNKNOWN_ARTIFACT`
   message names the expected workspace-relative dialect and carries the

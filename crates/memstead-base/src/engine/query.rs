@@ -313,27 +313,36 @@ impl Engine {
     /// - artifact absent ⇒ [`AnchorState::Orphaned`](crate::anchor::AnchorState::Orphaned);
     /// - artifact present, non-hash class (`authored` / `informed-by`) ⇒
     ///   [`Resolves`](crate::anchor::AnchorState::Resolves);
-    /// - artifact present, hash-bearing class (`anchored` / `derived`) ⇒
-    ///   [`Recheck`](crate::anchor::AnchorState::Recheck).
+    /// - artifact present, hash-bearing class (`anchored` / `derived`) ⇒ the
+    ///   prepared-content hash comparison decides:
+    ///   [`Resolves`](crate::anchor::AnchorState::Resolves) on a match,
+    ///   [`Drifted`](crate::anchor::AnchorState::Drifted) on a stable-medium
+    ///   mismatch, [`Recheck`](crate::anchor::AnchorState::Recheck) on an
+    ///   unstable medium or when a hash is unavailable on either side (a
+    ///   hash-less anchor, a `tree` grain, an unreadable artifact).
     ///
     /// `state` is `None` (unobserved — never a fabricated state) when the mem
     /// has no single path-medium, no workspace root, or the grain/namespace is
-    /// not a filesystem path. Distinguishing `drifted` from `recheck` on a
-    /// present hash-bearing anchor needs the **prepared-content** hash the
-    /// producer used — a canonical transform E3b's verify pipeline owns — so
-    /// this pass never fabricates `drifted`; it reports `recheck` and defers
-    /// the hash adjudication (and non-`path` mediums / commit-pinned reads)
-    /// to E3b.
+    /// not a filesystem path. Non-`path` mediums / commit-pinned reads stay
+    /// deferred (E3b's remaining leg).
     pub fn entity_anchors_resolved(&self, id: &EntityId) -> Vec<ResolvedAnchor> {
         let anchors = self.entity_anchors(id);
         let root = self.single_path_medium_root(id.mem());
         anchors
             .into_iter()
             .map(|anchor| {
-                let state = root
+                let observed = root
                     .as_deref()
                     .and_then(|r| observe_path_anchor(r, &anchor));
-                ResolvedAnchor { anchor, state }
+                let (state, observed_hash) = match observed {
+                    Some((state, hash)) => (Some(state), hash),
+                    None => (None, None),
+                };
+                ResolvedAnchor {
+                    anchor,
+                    state,
+                    observed_hash,
+                }
             })
             .collect()
     }
@@ -422,12 +431,17 @@ impl Engine {
         let mut out = Vec::new();
         for (eid, anchors) in &sc.entities {
             for anchor in anchors {
-                let state = root.as_deref().and_then(|r| observe_path_anchor(r, anchor));
+                let observed = root.as_deref().and_then(|r| observe_path_anchor(r, anchor));
+                let (state, observed_hash) = match observed {
+                    Some((state, hash)) => (Some(state), hash),
+                    None => (None, None),
+                };
                 out.push((
                     EntityId(eid.clone()),
                     ResolvedAnchor {
                         anchor: anchor.clone(),
                         state,
+                        observed_hash,
                     },
                 ));
             }
@@ -1306,30 +1320,65 @@ pub struct ResolvedAnchor {
     /// medium, no workspace root, or a non-filesystem grain).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub state: Option<crate::anchor::AnchorState>,
+    /// The prepared-content hash the observation computed this pass —
+    /// present only for a hash-bearing (`anchored` / `derived`) `file` /
+    /// `span` anchor whose artifact resolved to a readable file. The verify
+    /// pass's backfill leg records it onto a hash-less anchor. Engine-internal
+    /// observation detail, deliberately not serialized: the wire shape stays
+    /// the stored anchor plus `state`.
+    #[serde(skip)]
+    pub observed_hash: Option<String>,
 }
 
 /// Observe a single path-namespace anchor against `root` (its medium's
-/// filesystem root) and resolve its live state, or `None` when the anchor's
-/// grain does not reference a filesystem path. Existence-only: the prepared-
-/// content hash comparison that separates `drifted` from `recheck` is E3b's,
-/// so a present hash-bearing anchor observes `current_hash: None` and resolves
-/// `recheck` — never a fabricated `drifted`.
+/// filesystem root) and resolve its live state plus — for a present
+/// hash-bearing (`anchored` / `derived`) `file` / `span` anchor — the
+/// artifact's **prepared-content hash**
+/// ([`crate::anchor::prepared_content_hash`]). `None` when the anchor's
+/// grain does not reference a filesystem path.
+///
+/// The computed hash is what lets [`crate::anchor::resolve_anchor`]
+/// adjudicate `drifted` vs `resolves` deterministically against the recorded
+/// hash. A `span` anchor hashes its whole containing file (the span locator
+/// selects within it; the file is the hashed unit); a `tree` grain has no
+/// prepared form this cycle and observes no hash; a read failure likewise
+/// observes no hash — those resolve `recheck`, never a fabricated `drifted`.
+/// Non-hash classes (`authored` / `informed-by`) skip the read entirely, so
+/// an anchor-less or hash-free mem pays no observation cost.
 fn observe_path_anchor(
     root: &Path,
     anchor: &crate::anchor::Anchor,
-) -> Option<crate::anchor::AnchorState> {
+) -> Option<(crate::anchor::AnchorState, Option<String>)> {
     use crate::anchor::AnchorGrain;
     match anchor.grain {
         AnchorGrain::Span | AnchorGrain::File | AnchorGrain::Tree => {}
         AnchorGrain::Url | AnchorGrain::Entity => return None,
     }
     let base = anchor_base_path(&anchor.artifact);
-    let observation = if root.join(base).exists() {
-        crate::anchor::ArtifactObservation::Present { current_hash: None }
+    let path = root.join(base);
+    if !path.exists() {
+        return Some((
+            crate::anchor::resolve_anchor(anchor, &crate::anchor::ArtifactObservation::Absent),
+            None,
+        ));
+    }
+    let current_hash = if anchor.class.is_hash_bearing()
+        && matches!(anchor.grain, AnchorGrain::File | AnchorGrain::Span)
+        && path.is_file()
+    {
+        std::fs::read(&path)
+            .ok()
+            .map(|bytes| crate::anchor::prepared_content_hash(&bytes))
     } else {
-        crate::anchor::ArtifactObservation::Absent
+        None
     };
-    Some(crate::anchor::resolve_anchor(anchor, &observation))
+    let observation = crate::anchor::ArtifactObservation::Present {
+        current_hash: current_hash.clone(),
+    };
+    Some((
+        crate::anchor::resolve_anchor(anchor, &observation),
+        current_hash,
+    ))
 }
 
 fn anchor_references_path(anchor: &crate::anchor::Anchor, path: &str) -> bool {

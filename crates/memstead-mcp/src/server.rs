@@ -1947,11 +1947,11 @@ impl McpServer {
             // the stored anchor records plus their class/grain composition
             // (derived inputs; tree-grain fan-out on its own axis) and, for a
             // path-medium mem, each anchor's live resolution `state`
-            // (resolves / recheck / orphaned — additive per-anchor field).
-            // Distinguishing `drifted` from `recheck` on a present hash-bearing
-            // anchor needs E3b's prepared-content hashing, so this pass never
-            // emits `drifted`; `state` is absent when the source is unobserved
-            // (non-path medium), never fabricated.
+            // (resolves / drifted / recheck / orphaned — additive per-anchor
+            // field). A present hash-bearing anchor adjudicates its recorded
+            // prepared-content hash against the observed one, so `drifted` is
+            // deterministic on a stable medium; `state` is absent when the
+            // source is unobserved (non-path medium), never fabricated.
             let resolved = engine.entity_anchors_resolved(&id);
             if !resolved.is_empty() {
                 let anchors: Vec<memstead_base::anchor::Anchor> =

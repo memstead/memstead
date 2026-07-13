@@ -130,6 +130,80 @@ impl super::Engine {
             .map(|i| i.validate(medium_ref).map_err(EngineError::from))
             .collect()
     }
+
+    /// Record verify-observed prepared-content hashes onto **hash-less
+    /// hash-bearing** anchors in `mem_name`'s anchors sidecar — the
+    /// measurement-bookkeeping backfill the verify pass hands over via
+    /// [`crate::ingest::VerifyOutcome::hash_backfill`].
+    ///
+    /// This mutates **only** the engine-owned sidecar
+    /// ([`crate::anchor::ANCHOR_SIDECAR_PATH`]): no entity content, no
+    /// section, no `_hash` is touched — an anchor-only commit yields zero
+    /// entity deltas by construction. Guards enforced at this write seam,
+    /// not left to callers:
+    ///
+    /// - only a hash-bearing class (`anchored` / `derived`) may gain a hash —
+    ///   an `authored` / `informed-by` anchor is never written, whatever the
+    ///   caller observed;
+    /// - an anchor that already carries a hash is never overwritten — the
+    ///   recorded hash is the drift baseline, so the backfill is idempotent
+    ///   (a second identical call stages nothing and produces no commit).
+    ///
+    /// Returns how many anchors gained a hash. Zero writes ⇒ no commit.
+    pub fn record_anchor_observed_hashes(
+        &mut self,
+        mem_name: &str,
+        observed: &[crate::anchor::ObservedArtifactHash],
+        note: Option<&str>,
+    ) -> Result<usize, EngineError> {
+        if observed.is_empty() {
+            return Ok(0);
+        }
+        let mount_idx = self
+            .mounts
+            .iter()
+            .position(|m| m.mount.mem == mem_name)
+            .ok_or_else(|| EngineError::UnknownMem(mem_name.to_string()))?;
+        if self.mounts[mount_idx].mount.capability != crate::workspace::MountCapability::Write {
+            return Err(EngineError::ReadOnlyMount(mem_name.to_string()));
+        }
+        // Same posture as every other commit-producing write: probe for
+        // sibling-engine drift so the sidecar merge runs against current truth.
+        let _warnings = self.reload_if_stale(Some(mem_name));
+
+        let backend = self.mounts[mount_idx].backend.as_ref();
+        let mut sidecar = read_sidecar(backend)?;
+        let mut written = 0usize;
+        for obs in observed {
+            let Some(anchors) = sidecar.entities.get_mut(&obs.entity) else {
+                continue;
+            };
+            for a in anchors {
+                if a.class.is_hash_bearing() && a.hash.is_none() && a.artifact == obs.artifact {
+                    a.hash = Some(obs.hash.clone());
+                    written += 1;
+                }
+            }
+        }
+        if written == 0 {
+            return Ok(0);
+        }
+        backend.write_anchors_sidecar(&sidecar.to_bytes())?;
+        let ctx = crate::vcs::CommitContext {
+            actor: crate::vcs::Actor::Agent,
+            client: None,
+            tool: Some("record_anchor_observed_hashes"),
+            note: note.map(String::from),
+            logical_operation_id: None,
+            entity_ids: None,
+        };
+        let commit_sha = backend.commit(
+            &format!("memstead: anchor-hash backfill ({written} anchor(s))"),
+            &ctx,
+        )?;
+        self.record_self_write(mount_idx, &commit_sha);
+        Ok(written)
+    }
 }
 
 /// Stage a write of `entity_id`'s anchors into the mem's anchors sidecar

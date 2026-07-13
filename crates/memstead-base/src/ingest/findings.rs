@@ -49,11 +49,15 @@
 //! verify samples. [`verify_binding`] takes `&Engine` (shared, not mutable): it
 //! is structurally incapable of a destination-mem mutation. Any repair routes
 //! through the sync brief (group C), never through findings recording/reading.
-//! The one sanctioned post-run write is the **verified baseline**: after a
-//! pass returns `Ok`, the caller records `<binding>/<facet>#verified` per
-//! observed facet head via [`record_verified_baseline`] (the lifecycle
-//! sync-state writer) — a separate, explicit step, so an aborted or failed
-//! run never advances the token.
+//! Two sanctioned post-run writes exist, both explicit separate steps the
+//! caller performs only after a pass returns `Ok` (so an aborted or failed
+//! run never records either), and both measurement bookkeeping — never entity
+//! content: the **verified baseline** ([`record_verified_baseline`] records
+//! `<binding>/<facet>#verified` per observed facet head through the lifecycle
+//! sync-state writer) and the **prepared-hash backfill**
+//! ([`record_anchor_hash_backfill`] records this pass's observed
+//! prepared-content hashes onto hash-less hash-bearing anchors in the
+//! engine-owned anchors sidecar).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -62,7 +66,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 
 use crate::Engine;
-use crate::anchor::{Anchor, AnchorState};
+use crate::anchor::{Anchor, AnchorState, ObservedArtifactHash};
 use crate::binding::{
     BindingV1, DEFAULT_ADJUDICATION_CAP, DEFAULT_FULL_RESYNC_EVERY, ResolvedBinding, hash_binding,
     medium_capabilities,
@@ -460,6 +464,16 @@ pub struct VerifyOutcome {
     /// per-facet decomposition of `key.source_head`. The completed-run
     /// baseline [`record_verified_baseline`] writes as `#verified`.
     pub facet_heads: BTreeMap<String, String>,
+    /// Prepared-content hashes this pass observed for **hash-less**
+    /// hash-bearing (`anchored` / `derived`) anchors whose artifact resolved —
+    /// the backfill worklist. The caller records them onto the anchors via
+    /// [`record_anchor_hash_backfill`] after the pass returns `Ok` (the same
+    /// sanctioned post-run-write pattern as [`record_verified_baseline`]);
+    /// once recorded, subsequent verifies adjudicate those anchors
+    /// deterministically and this list comes back empty. `authored` /
+    /// `informed-by` anchors never appear here — the observation computes no
+    /// hash for them.
+    pub hash_backfill: Vec<ObservedArtifactHash>,
 }
 
 /// Record a **completed** verify run's baseline: for each facet head the run
@@ -489,6 +503,31 @@ pub fn record_verified_baseline(
         written.push(key);
     }
     Ok(written)
+}
+
+/// Record a **completed** verify run's prepared-hash backfill: every hash the
+/// pass observed for a hash-less hash-bearing anchor
+/// ([`VerifyOutcome::hash_backfill`]) is written onto that anchor in the
+/// destination mem's engine-owned anchors sidecar, through
+/// [`Engine::record_anchor_observed_hashes`].
+///
+/// Measurement bookkeeping only: the write touches the sidecar and nothing
+/// else — no entity content, no section, no `_hash`. Deliberately a separate
+/// step from [`verify_binding`] (which keeps its shared `&Engine` borrow —
+/// A5), mirroring [`record_verified_baseline`]: the caller invokes this only
+/// after a verify pass returned `Ok`, so an aborted or failed run never
+/// records a hash. Idempotent — the engine writer skips anchors that already
+/// carry a hash, and a pass over fully-backfilled anchors observes an empty
+/// worklist, so re-verifying stages nothing and produces no commit.
+///
+/// Returns how many anchors gained a recorded hash.
+pub fn record_anchor_hash_backfill(
+    engine: &mut Engine,
+    destination_mem: &str,
+    outcome: &VerifyOutcome,
+    note: Option<&str>,
+) -> Result<usize, crate::engine::EngineError> {
+    engine.record_anchor_observed_hashes(destination_mem, &outcome.hash_backfill, note)
 }
 
 /// Split a canonical binding id `<mem>/<stem>` into its two path-safe halves,
@@ -1072,6 +1111,16 @@ pub fn verify_binding(
     //    covered over a full rotation.
     let mut existence: Vec<(String, Anchor, AnchorState)> = Vec::new();
     let mut candidates: Vec<(String, Anchor, AnchorState)> = Vec::new();
+    // First-observation backfill worklist: a hash-less hash-bearing anchor
+    // whose artifact resolved and yielded a prepared-content hash is not a
+    // drift candidate (there is no recorded hash to compare — recorded ==
+    // observed by construction once the backfill lands); it resolves clean
+    // this pass and the observed hash rides the outcome for the caller's
+    // [`record_anchor_hash_backfill`] write. From the next pass on the
+    // anchor adjudicates deterministically — the recheck queue drains
+    // instead of re-queueing forever.
+    let mut hash_backfill: Vec<ObservedArtifactHash> = Vec::new();
+    let mut backfill_seen: BTreeSet<(String, String)> = BTreeSet::new();
     // Observation bookkeeping for the head-durable merge: which anchor
     // targets exist, and which of them this pass actually resolved.
     let mut anchors_existing: BTreeSet<String> = BTreeSet::new();
@@ -1086,6 +1135,7 @@ pub fn verify_binding(
             continue;
         };
         anchors_observed.insert(tkey);
+        let observed_hash = resolved_anchor.observed_hash;
         let anchor = resolved_anchor.anchor;
         match state {
             AnchorState::Resolves => {}
@@ -1093,9 +1143,24 @@ pub fn verify_binding(
             AnchorState::Drifted | AnchorState::Recheck => {
                 // Only hash-bearing anchors are hash-drift candidates (A2); a
                 // non-hash-bearing class yields no adjudication.
-                if anchor.class.is_hash_bearing() {
-                    candidates.push((eid.as_ref().to_string(), anchor, state));
+                if !anchor.class.is_hash_bearing() {
+                    continue;
                 }
+                if anchor.hash.is_none()
+                    && let Some(hash) = observed_hash
+                {
+                    // First observation of a hash-less anchor on a resolvable
+                    // artifact: backfill, not adjudication.
+                    if backfill_seen.insert((eid.as_ref().to_string(), anchor.artifact.clone())) {
+                        hash_backfill.push(ObservedArtifactHash {
+                            entity: eid.as_ref().to_string(),
+                            artifact: anchor.artifact.clone(),
+                            hash,
+                        });
+                    }
+                    continue;
+                }
+                candidates.push((eid.as_ref().to_string(), anchor, state));
             }
         }
     }
@@ -1232,6 +1297,7 @@ pub fn verify_binding(
         backlog,
         full_resync,
         facet_heads,
+        hash_backfill,
     })
 }
 
@@ -1388,7 +1454,7 @@ mod tests {
 
         // The head moved; the finding is still presented, with its observed
         // head intact, and it is not "superseded".
-        assert_eq!(store.current(&after), &[f.clone()]);
+        assert_eq!(store.current(&after), std::slice::from_ref(&f));
         assert_eq!(store.current(&after)[0].key.source_head, "head1");
         assert!(store.superseded(&after).is_empty());
 
@@ -1705,7 +1771,8 @@ mod tests {
 
     /// A full verify pass over a folder mem: it adjudicates the mem's anchors
     /// against the live source (orphaned → unresolvable-anchor; present
-    /// hash-bearing → queued; informed-by → no finding, A2) and flags an
+    /// hash-bearing whose recorded hash mismatches the observed prepared form
+    /// → deterministic `drifted`; informed-by → no finding, A2) and flags an
     /// uncovered source file, then persists the findings to the durable state
     /// tier. A **fresh** read from disk (a later process) sees them (A1). The
     /// pass runs on a shared `&Engine` — structurally read-only on the mem (A5).
@@ -1779,7 +1846,7 @@ mod tests {
         sidecar.set(
             "engine--e",
             vec![
-                mk("src/present.rs", AnchorProvenanceClass::Anchored), // present, hash-bearing → recheck → queued
+                mk("src/present.rs", AnchorProvenanceClass::Anchored), // recorded hash mismatches prepared form → drifted
                 mk("src/gone.rs", AnchorProvenanceClass::Anchored), // absent → unresolvable-anchor
                 mk("src/present.rs", AnchorProvenanceClass::InformedBy), // present, non-hash → no finding (A2)
             ],
@@ -1862,10 +1929,17 @@ mod tests {
         let outcome = verify_binding(&engine, root, binding, &resolved).unwrap();
         assert!(
             outcome.recorded >= 3,
-            "orphan + queued + uncovered at least"
+            "orphan + drifted + uncovered at least"
         );
         assert_eq!(outcome.superseded, 0, "no prior key yet");
-        assert_eq!(outcome.backlog, 1, "the present hash-bearing anchor queued");
+        assert_eq!(
+            outcome.backlog, 0,
+            "the mismatching hash adjudicated deterministically — nothing queued"
+        );
+        assert!(
+            outcome.hash_backfill.is_empty(),
+            "every hash-bearing anchor already carries a recorded hash — nothing to backfill"
+        );
 
         // Fresh read from disk — a later process / sync-brief render (A1).
         let store = read_findings_store(root, "engine", "graph")
@@ -1884,14 +1958,20 @@ mod tests {
             })
         };
         assert!(has(FindingClass::UnresolvableAnchor, "src/gone.rs"));
-        assert!(has(FindingClass::QueuedForAdjudication, "src/present.rs"));
+        assert!(
+            has(FindingClass::Drifted, "src/present.rs"),
+            "recorded-hash mismatch on a stable medium adjudicates drifted deterministically"
+        );
         assert!(has(FindingClass::Uncovered, "src/uncovered.rs"));
-        // A2: the informed-by anchor on the present file produced no finding.
+        // A2: the informed-by anchor on the present file produced no finding —
+        // the one drifted finding above belongs to the anchored (hash-bearing)
+        // anchor, and nothing queued.
         assert!(
             !current
                 .iter()
-                .any(|f| f.class == FindingClass::Drifted || f.class == FindingClass::Wrong),
-            "no drift finding from a non-hash / present-clean anchor"
+                .any(|f| f.class == FindingClass::QueuedForAdjudication
+                    || f.class == FindingClass::Wrong),
+            "deterministic adjudication leaves nothing queued"
         );
         // The covered file is not flagged uncovered.
         assert!(!has(FindingClass::Uncovered, "src/present.rs"));
@@ -2102,6 +2182,432 @@ mod tests {
                     .all(|f| f.class != FindingClass::UnresolvableAnchor),
                 "the resolved orphan finding must not re-present: {findings:?}"
             );
+        }
+    }
+
+    /// Prepared-hash backfill + deterministic drift, end-to-end over real git
+    /// heads and fresh engines:
+    ///
+    /// 1. a hash-less `anchored`/`derived` anchor on a resolvable artifact is
+    ///    backfilled by the first verify (once — a re-verify observes an empty
+    ///    worklist and the recorded hash is never overwritten);
+    /// 2. after a source change, a subsequent verify adjudicates `drifted`
+    ///    deterministically — no LLM sampling, no queued deferral;
+    /// 3. the tier-3 recheck queue for such anchors drains: post-backfill
+    ///    clean passes queue nothing, instead of re-queueing forever.
+    ///
+    /// REFUSAL half: `authored` / `informed-by` anchors never gain hashes and
+    /// never adjudicate `drifted`; an `unstable` hash-stability medium
+    /// resolves `recheck` (queued), never `drifted`.
+    #[test]
+    fn hashless_anchor_backfills_once_then_drift_adjudicates_deterministically() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let mem_dir = root.join("mem");
+        std::fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
+        std::fs::write(
+            mem_dir.join(".memstead").join("config.json"),
+            r#"{"format":1,"schema":"default@1.0.0","version":"1.0.0"}"#,
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join(".memstead")).unwrap();
+        std::fs::write(
+            root.join(".memstead").join("workspace.toml"),
+            "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+        )
+        .unwrap();
+        let mount = Mount {
+            mem: "engine".to_string(),
+            schema: Some("default@1.0.0".parse().unwrap()),
+            storage: MountStorage::Folder {
+                path: mem_dir.clone(),
+            },
+            capability: MountCapability::Write,
+            lifecycle: MountLifecycle::Eager,
+            cross_linkable: false,
+            migration_target: None,
+        };
+        crate::FileWorkspaceStore::new()
+            .save_state(
+                root,
+                &Workspace {
+                    mounts: vec![mount],
+                    settings: WorkspaceSettings::default(),
+                },
+            )
+            .unwrap();
+
+        // Git source tree at head A: two committed source files.
+        let git = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .args(args)
+                .current_dir(root)
+                .env("GIT_AUTHOR_NAME", "t")
+                .env("GIT_AUTHOR_EMAIL", "t@t")
+                .env("GIT_COMMITTER_NAME", "t")
+                .env("GIT_COMMITTER_EMAIL", "t@t")
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+        git(&["init", "-q"]);
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src").join("present.rs"), "fn a() {}\n").unwrap();
+        std::fs::write(root.join("src").join("other.rs"), "fn o() {}\n").unwrap();
+        git(&["add", "-A"]);
+        git(&["commit", "-qm", "head-a"]);
+
+        // Anchors, all HASH-LESS: `anchored` (stable) + `derived` (stable) on
+        // present.rs, `anchored` but UNSTABLE on other.rs, and the two
+        // non-hash classes that must never gain a hash.
+        let mk = |artifact: &str, class: AnchorProvenanceClass, stab: AnchorHashStability| Anchor {
+            artifact: artifact.to_string(),
+            grain: AnchorGrain::File,
+            class,
+            at_version: None,
+            hash: None,
+            hash_stability: stab,
+            derived_from: if class == AnchorProvenanceClass::Derived {
+                vec!["src/present.rs".to_string()]
+            } else {
+                Vec::new()
+            },
+            binding: None,
+        };
+        use AnchorHashStability::{Stable, Unstable};
+        let mut sidecar = AnchorSidecar::default();
+        sidecar.set(
+            "engine--e",
+            vec![
+                mk("src/present.rs", AnchorProvenanceClass::Anchored, Stable),
+                mk("src/present.rs", AnchorProvenanceClass::Derived, Stable),
+                mk("src/other.rs", AnchorProvenanceClass::Anchored, Unstable),
+                mk("src/present.rs", AnchorProvenanceClass::Authored, Stable),
+                mk("src/present.rs", AnchorProvenanceClass::InformedBy, Stable),
+            ],
+        );
+        std::fs::write(
+            mem_dir.join(crate::anchor::ANCHOR_SIDECAR_PATH),
+            sidecar.to_bytes(),
+        )
+        .unwrap();
+
+        write_medium(
+            root,
+            "engine",
+            "graph",
+            &Medium {
+                name: "graph".to_string(),
+                medium_type: MediumType::Codebase,
+                pointer: String::new(),
+                change_detection: Some("git".to_string()),
+            },
+        )
+        .unwrap();
+        write_facet(
+            root,
+            "engine",
+            "graph",
+            &Facet {
+                name: "graph".to_string(),
+                medium: "graph".to_string(),
+                scope: vec![PatternEntry {
+                    path: "src/**/*.rs".to_string(),
+                    mode: PatternMode::Allow,
+                }],
+                engagement: None,
+                preparation: None,
+            },
+        )
+        .unwrap();
+        write_binding(
+            root,
+            "engine",
+            "graph",
+            &BindingV1 {
+                version: BINDING_VERSION,
+                intent: None,
+                source_facets: vec!["graph".to_string()],
+                reference_mems: Vec::new(),
+                destination_mem: "engine".to_string(),
+                deny_paths: Vec::new(),
+                coverage_semantics: CoverageSemantics::Exhaustive,
+                rules: None,
+                prune: None,
+                operations: Operations {
+                    build: None,
+                    sync: None,
+                    verify: Some(VerifyOperation {
+                        trigger: IngestTrigger::Manual,
+                        batch_size: 20,
+                        adjudication_cap: DEFAULT_ADJUDICATION_CAP,
+                        full_resync_every: DEFAULT_FULL_RESYNC_EVERY,
+                    }),
+                },
+            },
+        )
+        .unwrap();
+
+        let configs = load_pipeline_configs(root).unwrap();
+        let binding = &configs.bindings[0].config;
+        let resolved = resolve_binding_run(&configs, "engine/graph", binding).unwrap();
+
+        // --- Pass 1: first observation backfills, once. ---
+        {
+            let mut engine = Engine::from_workspace_root(root).unwrap();
+            let outcome = verify_binding(&engine, root, binding, &resolved).unwrap();
+            // Every hash-less hash-bearing anchor is on the worklist —
+            // including the unstable one; the non-hash classes are not.
+            let mut backfilled: Vec<(&str, &str)> = outcome
+                .hash_backfill
+                .iter()
+                .map(|b| (b.entity.as_str(), b.artifact.as_str()))
+                .collect();
+            backfilled.sort();
+            backfilled.dedup();
+            assert_eq!(
+                backfilled,
+                vec![
+                    ("engine--e", "src/other.rs"),
+                    ("engine--e", "src/present.rs"),
+                ],
+                "hash-bearing anchors backfill; authored/informed-by never appear"
+            );
+            // Backfill candidates are clean-by-construction this pass —
+            // nothing queued, nothing drifted (the recheck queue drains).
+            assert_eq!(
+                outcome.backlog, 0,
+                "no recheck queue for backfilled anchors"
+            );
+            let store = read_findings_store(root, "engine", "graph")
+                .unwrap()
+                .unwrap();
+            assert!(
+                store
+                    .current(&outcome.key)
+                    .iter()
+                    .all(|f| !matches!(f.target, FindingTarget::Anchor { .. })),
+                "no anchor finding on the backfill pass: {:?}",
+                store.current(&outcome.key)
+            );
+
+            // The sanctioned post-run write records the hashes.
+            let written =
+                record_anchor_hash_backfill(&mut engine, "engine", &outcome, None).unwrap();
+            assert_eq!(
+                written, 3,
+                "anchored + derived + unstable-anchored gain hashes"
+            );
+        }
+
+        // The sidecar now carries the observed prepared-form hashes — and the
+        // non-hash classes still carry none (class semantics preserved).
+        let expected_present = crate::anchor::prepared_content_hash(
+            &std::fs::read(root.join("src").join("present.rs")).unwrap(),
+        );
+        {
+            let sc = AnchorSidecar::from_bytes(
+                &std::fs::read(mem_dir.join(crate::anchor::ANCHOR_SIDECAR_PATH)).unwrap(),
+            )
+            .unwrap();
+            for a in sc.get("engine--e") {
+                if a.class.is_hash_bearing() {
+                    assert!(a.hash.is_some(), "hash-bearing anchor backfilled: {a:?}");
+                } else {
+                    assert!(a.hash.is_none(), "non-hash class never gains a hash: {a:?}");
+                }
+                if a.artifact == "src/present.rs" && a.class.is_hash_bearing() {
+                    assert_eq!(a.hash.as_deref(), Some(expected_present.as_str()));
+                }
+            }
+        }
+
+        // --- Pass 2 (fresh engine): idempotent — nothing to backfill, clean. ---
+        {
+            let mut engine = Engine::from_workspace_root(root).unwrap();
+            let outcome = verify_binding(&engine, root, binding, &resolved).unwrap();
+            assert!(
+                outcome.hash_backfill.is_empty(),
+                "backfill happens once — a re-verify observes an empty worklist"
+            );
+            assert_eq!(outcome.backlog, 0, "steady state: nothing re-queues");
+            let store = read_findings_store(root, "engine", "graph")
+                .unwrap()
+                .unwrap();
+            assert!(
+                store
+                    .current(&outcome.key)
+                    .iter()
+                    .all(|f| !matches!(f.target, FindingTarget::Anchor { .. })),
+                "recorded hashes match the source — no anchor finding"
+            );
+            let written =
+                record_anchor_hash_backfill(&mut engine, "engine", &outcome, None).unwrap();
+            assert_eq!(written, 0, "no write, no commit on the idempotent pass");
+        }
+
+        // --- Source change: both anchored artifacts move (head B). ---
+        std::fs::write(
+            root.join("src").join("present.rs"),
+            "fn a() { /* changed */ }\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("src").join("other.rs"),
+            "fn o() { /* changed */ }\n",
+        )
+        .unwrap();
+        git(&["add", "-A"]);
+        git(&["commit", "-qm", "head-b"]);
+
+        // --- Pass 3: deterministic adjudication — stable drifts, unstable
+        //     rechecks, non-hash classes stay silent. ---
+        {
+            let engine = Engine::from_workspace_root(root).unwrap();
+            let outcome = verify_binding(&engine, root, binding, &resolved).unwrap();
+            assert!(
+                outcome.hash_backfill.is_empty(),
+                "recorded hashes are never overwritten by observation"
+            );
+            let store = read_findings_store(root, "engine", "graph")
+                .unwrap()
+                .unwrap();
+            let current = store.current(&outcome.key);
+            let drifted: Vec<&Finding> = current
+                .iter()
+                .filter(|f| f.class == FindingClass::Drifted)
+                .collect();
+            // The stable `anchored` + `derived` anchors on present.rs drift —
+            // deterministically, from the hash comparison alone.
+            assert_eq!(
+                drifted.len(),
+                2,
+                "stable-medium mismatch → drifted: {current:?}"
+            );
+            assert!(drifted.iter().all(|f| matches!(
+                &f.target,
+                FindingTarget::Anchor { artifact, .. } if artifact == "src/present.rs"
+            )));
+            // REFUSAL: the unstable anchor on other.rs resolves recheck →
+            // queued, never drifted.
+            assert!(
+                current
+                    .iter()
+                    .any(|f| f.class == FindingClass::QueuedForAdjudication
+                        && matches!(
+                            &f.target,
+                            FindingTarget::Anchor { artifact, .. } if artifact == "src/other.rs"
+                        )),
+                "unstable medium resolves recheck (queued), not drifted: {current:?}"
+            );
+            assert!(
+                !current.iter().any(|f| f.class == FindingClass::Drifted
+                    && matches!(
+                        &f.target,
+                        FindingTarget::Anchor { artifact, .. } if artifact == "src/other.rs"
+                    )),
+                "an unstable hash break must never assert drift"
+            );
+        }
+    }
+
+    /// The engine's backfill writer enforces the class guard at the write
+    /// seam: an `authored` / `informed-by` anchor never gains a hash even if
+    /// a (buggy or malicious) caller hands one in, and a recorded hash is
+    /// never overwritten.
+    #[test]
+    fn backfill_writer_refuses_non_hash_classes_and_never_overwrites() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let mem_dir = root.join("mem");
+        std::fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
+        std::fs::write(
+            mem_dir.join(".memstead").join("config.json"),
+            r#"{"format":1,"schema":"default@1.0.0","version":"1.0.0"}"#,
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join(".memstead")).unwrap();
+        std::fs::write(
+            root.join(".memstead").join("workspace.toml"),
+            "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+        )
+        .unwrap();
+        crate::FileWorkspaceStore::new()
+            .save_state(
+                root,
+                &Workspace {
+                    mounts: vec![Mount {
+                        mem: "engine".to_string(),
+                        schema: Some("default@1.0.0".parse().unwrap()),
+                        storage: MountStorage::Folder {
+                            path: mem_dir.clone(),
+                        },
+                        capability: MountCapability::Write,
+                        lifecycle: MountLifecycle::Eager,
+                        cross_linkable: false,
+                        migration_target: None,
+                    }],
+                    settings: WorkspaceSettings::default(),
+                },
+            )
+            .unwrap();
+
+        let anchor = |class: AnchorProvenanceClass, hash: Option<&str>| Anchor {
+            artifact: "src/a.rs".to_string(),
+            grain: AnchorGrain::File,
+            class,
+            at_version: None,
+            hash: hash.map(str::to_string),
+            hash_stability: AnchorHashStability::Stable,
+            derived_from: Vec::new(),
+            binding: None,
+        };
+        let mut sidecar = AnchorSidecar::default();
+        sidecar.set(
+            "engine--e",
+            vec![
+                anchor(AnchorProvenanceClass::Authored, None),
+                anchor(AnchorProvenanceClass::InformedBy, None),
+                anchor(AnchorProvenanceClass::Anchored, Some("recorded")),
+            ],
+        );
+        std::fs::write(
+            mem_dir.join(crate::anchor::ANCHOR_SIDECAR_PATH),
+            sidecar.to_bytes(),
+        )
+        .unwrap();
+
+        let mut engine = Engine::from_workspace_root(root).unwrap();
+        let written = engine
+            .record_anchor_observed_hashes(
+                "engine",
+                &[crate::anchor::ObservedArtifactHash {
+                    entity: "engine--e".to_string(),
+                    artifact: "src/a.rs".to_string(),
+                    hash: "observed".to_string(),
+                }],
+                None,
+            )
+            .unwrap();
+        assert_eq!(
+            written, 0,
+            "non-hash classes refuse the hash; a recorded hash is never overwritten"
+        );
+        let sc = AnchorSidecar::from_bytes(
+            &std::fs::read(mem_dir.join(crate::anchor::ANCHOR_SIDECAR_PATH)).unwrap(),
+        )
+        .unwrap();
+        for a in sc.get("engine--e") {
+            match a.class {
+                AnchorProvenanceClass::Anchored => {
+                    assert_eq!(a.hash.as_deref(), Some("recorded"), "baseline stands")
+                }
+                _ => assert!(a.hash.is_none(), "non-hash class stays hash-less: {a:?}"),
+            }
         }
     }
 

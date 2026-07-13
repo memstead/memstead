@@ -37,7 +37,8 @@ use memstead_base::ingest::advance::{
     AdvanceError, DispositionInput, ExcludeError, advance_baseline, record_exclusions,
 };
 use memstead_base::ingest::findings::{
-    FindingsError, FullResyncDecision, record_verified_baseline, verify_binding,
+    FindingsError, FullResyncDecision, record_anchor_hash_backfill, record_verified_baseline,
+    verify_binding,
 };
 use memstead_base::ingest::report::{
     DEFAULT_REPORT_BUDGET, compute_fidelity_report, render_fidelity_report,
@@ -1665,6 +1666,30 @@ fn verify(ctx: &CliContext, args: VerifyArgs) -> anyhow::Result<()> {
             .with_details(json!({ "binding": binding_id, "error": e.to_string() })),
         })?;
 
+    // The run completed — record its prepared-hash backfill: every hash the
+    // pass observed for a hash-less hash-bearing anchor lands on that anchor
+    // in the engine-owned anchors sidecar (measurement bookkeeping — no
+    // entity content is touched). Before the report, so the rendered
+    // anchor-resolution figures reflect the recorded hashes. Idempotent: a
+    // pass over fully-backfilled anchors observes an empty worklist.
+    let hashes_backfilled = record_anchor_hash_backfill(
+        engine,
+        &resolved.destination_mem,
+        &outcome,
+        Some("projection verify: prepared-hash backfill onto hash-less anchors"),
+    )
+    .map_err(|e| {
+        CliError::new(
+            ExitKind::Generic,
+            "PROJECTION_VERIFY_BACKFILL_FAILED",
+            format!(
+                "verify completed and findings were recorded for `{binding_id}`, but \
+                 recording the prepared-hash backfill onto the anchors sidecar failed: {e}"
+            ),
+        )
+        .with_details(json!({ "binding": binding_id, "error": e.to_string() }))
+    })?;
+
     // Assemble + render the tier-1 fidelity report (group B) over the findings
     // the pass just recorded. Read-only — no destination-mem mutation.
     let budget = args.budget.unwrap_or(DEFAULT_REPORT_BUDGET);
@@ -1709,6 +1734,11 @@ fn verify(ctx: &CliContext, args: VerifyArgs) -> anyhow::Result<()> {
             // The completed run's `#verified` baseline keys, written through
             // the engine's sync-state writer.
             "verified_baseline": verified_baseline,
+            // How many hash-less hash-bearing anchors gained a recorded
+            // prepared-content hash this run (the completed-run backfill
+            // write into the engine-owned anchors sidecar). 0 once every
+            // anchor carries its hash — the backfill is idempotent.
+            "hash_backfilled": hashes_backfilled,
             "report": report,
             "report_mode": rendered.mode,
             "report_markdown": rendered.markdown,
@@ -1731,10 +1761,20 @@ fn verify(ctx: &CliContext, args: VerifyArgs) -> anyhow::Result<()> {
                     .join(", ")
             )
         };
+        let backfill_note = if hashes_backfilled == 0 {
+            String::new()
+        } else {
+            format!(
+                "\n> **Prepared-hash backfill recorded** — {hashes_backfilled} hash-less \
+                 anchor(s) now carry their observed prepared-content hash; subsequent \
+                 verifies adjudicate them deterministically.\n"
+            )
+        };
         print_markdown(&format!(
-            "{}{}{}",
+            "{}{}{}{}",
             render_full_resync_note(&outcome.full_resync),
             rendered.markdown,
+            backfill_note,
             baseline_note
         ));
     }

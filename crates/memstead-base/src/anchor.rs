@@ -544,6 +544,59 @@ impl AnchorInput {
 }
 
 // ---------------------------------------------------------------------------
+// Prepared-content hash
+// ---------------------------------------------------------------------------
+
+/// Compute the **prepared-content hash** of a path-grain artifact's bytes —
+/// the value [`Anchor::hash`] records and hash-drift adjudication compares.
+///
+/// The prepared form is a deliberate, minimal canonicalization that keeps the
+/// hash stable across meaningless byte noise while preserving every
+/// content-bearing byte. For UTF-8 text:
+///
+/// - a leading BOM (U+FEFF) is stripped;
+/// - CRLF / lone-CR line endings normalize to LF;
+/// - trailing newlines are trimmed (final-newline presence is noise).
+///
+/// Interior whitespace is untouched — trailing spaces inside a line can be
+/// content (markdown hard breaks), so only the two classic cross-tool noise
+/// sources (encoding marks, line-ending convention) and the final-newline
+/// question are canonicalized. Non-UTF-8 (binary) bytes hash as-is — no text
+/// canonicalization applies to them.
+///
+/// The hash form reuses the house convention — SHA-256, lowercase hex,
+/// truncated to 16 characters — shared by entity content hashes
+/// ([`crate::entity::parser::compute_hash`]) and the change-detection digest
+/// aggregate, so the engine keeps one hash shape rather than growing a
+/// second normalization.
+pub fn prepared_content_hash(bytes: &[u8]) -> String {
+    use sha2::{Digest as _, Sha256};
+    let digest = match std::str::from_utf8(bytes) {
+        Ok(text) => {
+            let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+            let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
+            Sha256::digest(normalized.trim_end_matches('\n').as_bytes())
+        }
+        Err(_) => Sha256::digest(bytes),
+    };
+    crate::hex_lower(&digest)[..16].to_string()
+}
+
+/// One verify-observed prepared-content hash, addressed to the anchor(s) it
+/// backfills: the `(entity, artifact)` pair a hash-less hash-bearing anchor
+/// is keyed by in the sidecar, plus the hash the observation computed. The
+/// verify pass collects these; the engine's sidecar writer records them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ObservedArtifactHash {
+    /// The entity id (`mem--slug`) whose anchor the hash belongs to.
+    pub entity: String,
+    /// The anchor's artifact reference, exactly as stored.
+    pub artifact: String,
+    /// The prepared-content hash observed for the artifact.
+    pub hash: String,
+}
+
+// ---------------------------------------------------------------------------
 // Resolution
 // ---------------------------------------------------------------------------
 
@@ -934,6 +987,56 @@ mod tests {
         let mut i = valid_input();
         i.grain = Some("span".into());
         assert!(i.validate(None).is_ok());
+    }
+
+    // -- prepared-content hash ----------------------------------------------
+
+    /// The prepared form is stable across meaningless byte noise: BOM,
+    /// line-ending convention, and final-newline presence never move the
+    /// hash — a real content change always does.
+    #[test]
+    fn prepared_hash_is_stable_across_byte_noise() {
+        let base = prepared_content_hash(b"fn a() {}\nfn b() {}\n");
+        // CRLF and lone-CR line endings normalize away.
+        assert_eq!(prepared_content_hash(b"fn a() {}\r\nfn b() {}\r\n"), base);
+        assert_eq!(prepared_content_hash(b"fn a() {}\rfn b() {}\r"), base);
+        // Final-newline presence (missing, single, several) is noise.
+        assert_eq!(prepared_content_hash(b"fn a() {}\nfn b() {}"), base);
+        assert_eq!(prepared_content_hash(b"fn a() {}\nfn b() {}\n\n\n"), base);
+        // A leading UTF-8 BOM is stripped.
+        assert_eq!(
+            prepared_content_hash("\u{feff}fn a() {}\nfn b() {}\n".as_bytes()),
+            base
+        );
+        // A real content change moves the hash.
+        assert_ne!(prepared_content_hash(b"fn a() {}\nfn c() {}\n"), base);
+        // House hash shape: 16 lowercase hex chars.
+        assert_eq!(base.len(), 16);
+        assert!(
+            base.chars()
+                .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+        );
+    }
+
+    /// Interior whitespace is content, not noise: a trailing space inside a
+    /// line (markdown hard break) changes the hash.
+    #[test]
+    fn prepared_hash_preserves_interior_whitespace() {
+        assert_ne!(
+            prepared_content_hash(b"line one  \nline two\n"),
+            prepared_content_hash(b"line one\nline two\n")
+        );
+    }
+
+    /// Non-UTF-8 bytes hash raw — no text canonicalization is applied, and
+    /// any byte change moves the hash.
+    #[test]
+    fn prepared_hash_hashes_binary_bytes_raw() {
+        let bin_a = [0xff_u8, 0xfe, 0x00, 0x0d, 0x0a];
+        let bin_b = [0xff_u8, 0xfe, 0x00, 0x0a];
+        assert_ne!(prepared_content_hash(&bin_a), prepared_content_hash(&bin_b));
+        // Deterministic.
+        assert_eq!(prepared_content_hash(&bin_a), prepared_content_hash(&bin_a));
     }
 
     // -- resolution --------------------------------------------------------

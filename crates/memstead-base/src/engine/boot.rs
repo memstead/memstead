@@ -1445,8 +1445,10 @@ community:
     /// Live per-anchor state (criteria 1, 9 — path-medium subset): a
     /// single-medium `path` mem observes working-tree existence at the current
     /// HEAD. Absent artifact ⇒ `orphaned`; present + non-hash class ⇒
-    /// `resolves`; present + hash-bearing class ⇒ `recheck` (never a
-    /// fabricated `drifted` — the prepared-content hash adjudication is E3b's).
+    /// `resolves`; present + hash-bearing class ⇒ the prepared-content hash
+    /// comparison adjudicates deterministically — a recorded hash matching
+    /// the observed prepared form `resolves`, a stable-medium mismatch is
+    /// `drifted` (a real content drift, no longer deferred to `recheck`).
     #[test]
     fn entity_anchors_resolve_live_state_for_path_medium() {
         use crate::anchor::{AnchorInput, AnchorState};
@@ -1513,6 +1515,11 @@ community:
         let mut sections = IndexMap::new();
         sections.insert("identity".to_string(), "Covers src.".to_string());
         sections.insert("purpose".to_string(), "Track sources.".to_string());
+        // The prepared-form hash of the present artifact, as the observation
+        // computes it — an anchor recording it must resolve clean.
+        let present_hash = crate::anchor::prepared_content_hash(
+            &std::fs::read(tmp.path().join("src").join("present.rs")).unwrap(),
+        );
         let created = engine
             .create_entity(
                 crate::CreateEntityArgs {
@@ -1523,9 +1530,10 @@ community:
                     metadata: IndexMap::new(),
                     relations: Vec::new(),
                     anchors: vec![
-                        anchor("src/present.rs", "anchored", Some("h1")), // present + hash → recheck
+                        anchor("src/present.rs", "anchored", Some(&present_hash)), // hash matches → resolves
                         anchor("src/present.rs", "informed-by", None), // present + non-hash → resolves
                         anchor("src/gone.rs", "anchored", Some("h2")), // absent → orphaned
+                        anchor("src/present.rs", "derived", Some("stale")), // hash mismatch, stable → drifted
                     ],
                     dry_run: false,
                 },
@@ -1536,7 +1544,7 @@ community:
             .unwrap();
 
         let resolved = engine.entity_anchors_resolved(&created.id);
-        assert_eq!(resolved.len(), 3);
+        assert_eq!(resolved.len(), 4);
         let state_of = |artifact: &str, class: crate::anchor::AnchorProvenanceClass| {
             resolved
                 .iter()
@@ -1548,8 +1556,16 @@ community:
                 "src/present.rs",
                 crate::anchor::AnchorProvenanceClass::Anchored
             ),
-            Some(AnchorState::Recheck),
-            "present hash-bearing anchor cannot adjudicate the prepared hash here → recheck"
+            Some(AnchorState::Resolves),
+            "recorded hash matches the observed prepared form → resolves"
+        );
+        assert_eq!(
+            state_of(
+                "src/present.rs",
+                crate::anchor::AnchorProvenanceClass::Derived
+            ),
+            Some(AnchorState::Drifted),
+            "recorded hash mismatches the observed prepared form on a stable medium → drifted"
         );
         assert_eq!(
             state_of(
