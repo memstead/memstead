@@ -3,11 +3,29 @@
 //!
 //! Verify **measures** fidelity and records durable findings; it never mutates
 //! the destination mem. The store is the real home behind plan 03's findings
-//! schema stub ([`crate::binding`]'s removed `FindingKey` / `FindingRecord`):
-//! findings are keyed `(hash(D), source_head)` so a binding-declaration edit or
-//! a source-head move **mechanically** partitions them into a fresh keyspace —
-//! prior findings are never presented as current, only segregated as superseded
-//! (A3).
+//! schema stub ([`crate::binding`]'s removed `FindingKey` / `FindingRecord`).
+//!
+//! ## Keying: `hash(D)` alone — findings survive head movement
+//!
+//! The store keys on the binding's **`hash(D)` alone**: a binding-declaration
+//! edit still mechanically partitions findings into a fresh keyspace (prior
+//! findings are never presented as current, only segregated as superseded —
+//! A3), but a **source-head move does not**. Each finding records the
+//! `source_head` it was observed at as metadata (its [`Finding::key`]), and
+//! sync briefs present **all** open findings under the current `hash(D)`
+//! regardless of recorded head — an open finding survives source movement and
+//! keeps appearing until an agent's repair lets a verify observe it clean, or
+//! a verify supersedes it. (Originally the key was `(hash(D), source_head)`,
+//! which leaked exactly the findings sync exists to consume: once the source
+//! advanced, open findings recorded at the previous head went invisible to
+//! every subsequent brief.) The store does not grow unboundedly: verify
+//! re-observes every anchor each pass and closes what resolves clean, and a
+//! carried coverage finding whose artifact left `S(D)` or gained an anchor is
+//! closed, not carried (see [`merge_with_prior`]). On-disk format is unchanged
+//! — pre-re-key stores (batches keyed `(hash(D), source_head)`) load as-is;
+//! same-hash batches from different heads collapse under the hash-alone view
+//! (the latest-recorded batch is current, the rest superseded until the next
+//! verify rewrites the hash's batch).
 //!
 //! ## Durability & location (A1, engine-state convention)
 //!
@@ -68,21 +86,26 @@ const FINDINGS_DIR: &str = "findings";
 // Key
 // ---------------------------------------------------------------------------
 
-/// The key a batch of findings is recorded under: a binding's `hash(D)` plus
-/// the `source_head` the findings were observed at. A changed `hash(D)` (a
-/// binding-declaration edit) or a moved `source_head` (the source advanced)
-/// yields a different key, so prior findings are invalidated by construction —
+/// A binding's `hash(D)` plus the `source_head` a finding was observed at.
+///
+/// Only the **`binding_hash` half keys the store**: a changed `hash(D)` (a
+/// binding-declaration edit) invalidates prior findings by construction —
 /// segregated as superseded, never silently mixed into the current view (A3).
+/// The `source_head` half is **observation metadata**, carried on every
+/// finding so it stays self-describing about when it was observed — a moved
+/// head does NOT invalidate a finding (findings survive head movement; see
+/// the module docs).
 ///
 /// The real key behind plan 03's schema stub (which lived, IO-less, in
 /// [`crate::binding`]).
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct FindingKey {
     /// The binding's `hash(D)` (lowercase hex SHA-256; see
-    /// [`crate::binding::hash_binding`]).
+    /// [`crate::binding::hash_binding`]) — the store key.
     pub binding_hash: String,
-    /// The composite source-head token the findings were observed at — the
-    /// current per-facet baseline tokens, so it moves iff any source moves.
+    /// The composite source-head token the finding was observed at — the
+    /// per-facet baseline tokens current at observation time. Metadata, not
+    /// part of the store key.
     pub source_head: String,
 }
 
@@ -195,13 +218,17 @@ pub struct Finding {
 // Store
 // ---------------------------------------------------------------------------
 
-/// One batch of findings recorded under a single [`FindingKey`] in one verify
-/// pass. A new pass under the same key replaces the batch; a pass under a
-/// different key (changed `hash(D)` or moved `source_head`) lands as a separate
-/// batch — the prior one is retained, segregated, never overwritten (A3).
+/// One batch of findings recorded for a single `hash(D)` in one verify pass.
+/// A new pass under the same `hash(D)` replaces the batch (after
+/// [`verify_binding`]'s merge carried forward what stays open); a pass under a
+/// different `hash(D)` lands as a separate batch — the prior one is retained,
+/// segregated, never overwritten (A3). The batch's `key.source_head` is the
+/// head the batch was last **recorded** at; each finding's own key records the
+/// head *it* was observed at (a carried finding keeps its original).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FindingsBatch {
-    /// The key this batch was recorded under.
+    /// The key this batch was recorded under (`binding_hash` is the store
+    /// key; `source_head` is the recording head, metadata).
     pub key: FindingKey,
     /// When the batch was last recorded (opaque timestamp string).
     pub recorded_at: String,
@@ -211,9 +238,17 @@ pub struct FindingsBatch {
 
 /// One binding's durable findings store (A1). Persisted at
 /// `.memstead/state/findings/<mem>/<name>.json`, read fresh per call. Holds
-/// findings grouped by the key they were recorded under so invalidation is
-/// mechanical: [`Self::current`] presents only the batch under the current key;
-/// [`Self::superseded`] surfaces everything under prior keys, segregated (A3).
+/// findings grouped by the `hash(D)` they were recorded under so declaration
+/// invalidation is mechanical: [`Self::current`] presents the current hash's
+/// batch — regardless of source head; [`Self::superseded`] surfaces everything
+/// else, segregated (A3).
+///
+/// The on-disk shape predates the hash-alone re-key and is unchanged: a store
+/// written when batches were keyed `(hash(D), source_head)` loads without loss.
+/// Such a legacy store may hold several batches sharing one `binding_hash`
+/// (recorded at different heads); the hash-alone view treats the
+/// latest-recorded of them as current and the next [`Self::record`] collapses
+/// them into one.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FindingsStore {
     /// The canonical binding id `<mem>/<stem>` this store belongs to.
@@ -225,40 +260,54 @@ pub struct FindingsStore {
 }
 
 impl FindingsStore {
-    /// Record `findings` under `key`, replacing any prior batch recorded under
-    /// the **exact** same key and leaving every other key's batch untouched
-    /// (A3 segregation — a changed key never overwrites the old batch).
-    pub fn record(&mut self, key: FindingKey, recorded_at: String, findings: Vec<Finding>) {
-        if let Some(batch) = self.batches.iter_mut().find(|b| b.key == key) {
-            batch.recorded_at = recorded_at;
-            batch.findings = findings;
-        } else {
-            self.batches.push(FindingsBatch {
-                key,
-                recorded_at,
-                findings,
-            });
-        }
-    }
-
-    /// The findings recorded under `key` — the **only** findings ever presented
-    /// as current (A3). Empty when nothing was recorded under this exact key.
-    pub fn current(&self, key: &FindingKey) -> &[Finding] {
+    /// Index of the store's current batch for `binding_hash`: the
+    /// latest-recorded batch carrying that hash (ties break toward the later
+    /// entry — [`Self::record`] appends). Usually unique; a legacy per-head
+    /// store may hold several.
+    fn current_batch_index(&self, binding_hash: &str) -> Option<usize> {
         self.batches
             .iter()
-            .find(|b| &b.key == key)
-            .map(|b| b.findings.as_slice())
+            .enumerate()
+            .filter(|(_, b)| b.key.binding_hash == binding_hash)
+            .max_by_key(|(i, b)| (b.recorded_at.parse::<u64>().unwrap_or(0), *i))
+            .map(|(i, _)| i)
+    }
+
+    /// Record `findings` under `key.binding_hash`, replacing **every** prior
+    /// batch recorded under that hash (including legacy per-head siblings) and
+    /// leaving every other hash's batch untouched (A3 segregation — a changed
+    /// `hash(D)` never overwrites the old batch).
+    pub fn record(&mut self, key: FindingKey, recorded_at: String, findings: Vec<Finding>) {
+        self.batches
+            .retain(|b| b.key.binding_hash != key.binding_hash);
+        self.batches.push(FindingsBatch {
+            key,
+            recorded_at,
+            findings,
+        });
+    }
+
+    /// The findings recorded under `key.binding_hash` — the **only** findings
+    /// ever presented as current (A3), **regardless of `key.source_head`**: an
+    /// open finding recorded at a previous head stays presented after the
+    /// source advances. Empty when nothing was recorded under this hash.
+    pub fn current(&self, key: &FindingKey) -> &[Finding] {
+        self.current_batch_index(&key.binding_hash)
+            .map(|i| self.batches[i].findings.as_slice())
             .unwrap_or(&[])
     }
 
-    /// Every finding recorded under a key **other** than `key` — superseded by
-    /// a `hash(D)` change or a source-head move, segregated so a consumer can
-    /// show them as stale without mixing them into the current view (A3).
+    /// Every finding **outside** the current view of `key.binding_hash` —
+    /// superseded by a `hash(D)` change (or stranded in an older legacy
+    /// per-head batch of the same hash), segregated so a consumer can show
+    /// them as stale without mixing them into the current view (A3).
     pub fn superseded(&self, key: &FindingKey) -> Vec<&Finding> {
+        let current = self.current_batch_index(&key.binding_hash);
         self.batches
             .iter()
-            .filter(|b| &b.key != key)
-            .flat_map(|b| b.findings.iter())
+            .enumerate()
+            .filter(|(i, _)| Some(*i) != current)
+            .flat_map(|(_, b)| b.findings.iter())
             .collect()
     }
 }
@@ -568,12 +617,15 @@ fn current_key(
     }
 }
 
-/// The current `(hash(D), source_head)` key plus the open findings recorded
-/// under it for a binding — the read the **sync brief** (group C) consumes. It
-/// resolves the current key exactly as [`verify_binding`] does, reads the
-/// durable store, and returns the `current(key)` slice cloned. **Read-only** on
-/// the destination mem (shared `&Engine`): no findings recording, no mutation.
-/// A binding whose store does not exist yet yields the key and an empty vec.
+/// The current `(hash(D), source_head)` key plus the open findings under the
+/// key's `hash(D)` for a binding — the read the **sync brief** (group C)
+/// consumes. It resolves the current key exactly as [`verify_binding`] does,
+/// reads the durable store, and returns the `current(key)` slice cloned —
+/// which presents **all open findings regardless of the head they were
+/// recorded at** (findings survive source movement; each carries its observed
+/// head on its own key). **Read-only** on the destination mem (shared
+/// `&Engine`): no findings recording, no mutation. A binding whose store does
+/// not exist yet yields the key and an empty vec.
 pub fn current_findings(
     engine: &Engine,
     workspace_root: &Path,
@@ -827,6 +879,101 @@ fn adjudicate_candidates(
     out
 }
 
+/// Stable identity of a finding's subject, class-independent — the unit the
+/// head-durable merge ([`merge_with_prior`]) matches prior and fresh findings
+/// on.
+fn target_key(target: &FindingTarget) -> String {
+    match target {
+        FindingTarget::Anchor { entity, artifact } => format!("a\u{1f}{entity}\u{1f}{artifact}"),
+        FindingTarget::Artifact { artifact } => format!("f\u{1f}{artifact}"),
+    }
+}
+
+/// What one verify pass **observed** and what still exists — the inputs the
+/// head-durable merge judges prior findings against.
+struct PassObservation {
+    /// Anchor targets ([`target_key`] form) whose live state this pass
+    /// resolved (`Some(state)`).
+    anchors_observed: BTreeSet<String>,
+    /// Anchor targets still present in the mem's sidecar — any state,
+    /// observed or not.
+    anchors_existing: BTreeSet<String>,
+    /// Artifact ids the coverage leg looked at this pass (the sample window,
+    /// or the whole of `S(D)` on a full walk).
+    files_observed: BTreeSet<String>,
+    /// The binding's enumerable source set `S(D)`.
+    s_d: BTreeSet<String>,
+}
+
+/// Merge this pass's fresh findings with the prior open batch — the write half
+/// of head-durable findings (the store keys on `hash(D)` alone; see the module
+/// docs).
+///
+/// A **re-observed** target's outcome is this pass's: a prior finding for it
+/// is closed (observed clean — no fresh finding) or replaced (observed still
+/// wrong — fresh finding wins). One exception keeps supersession honest: a
+/// fresh `queued-for-adjudication` entry is a scheduling deferral, not an
+/// observation, so it never downgrades a prior substantive adjudication —
+/// a prior `drifted`/`wrong` verdict stands in its place.
+///
+/// An **unobserved** prior finding carries forward iff its subject is still
+/// open:
+/// - an anchor finding carries while its anchor still exists but was
+///   unobservable this pass; a vanished anchor closes it;
+/// - a coverage (artifact) finding carries while the artifact is still in
+///   `S(D)` and still carries no covering anchor (`covered_now`); departure
+///   from `S(D)` or gained coverage closes it.
+///
+/// Carried findings keep their original [`Finding::key`] (the head they were
+/// observed at). The carry rules are the growth bound: nothing is carried
+/// whose subject left the source or re-adjudicated clean, so the open set
+/// cannot grow without bound — and a closed/superseded finding is never
+/// resurrected (it is simply absent from the recorded batch).
+fn merge_with_prior(
+    mut fresh: Vec<Finding>,
+    prior: &[Finding],
+    obs: &PassObservation,
+    covered_now: impl Fn(&str) -> bool,
+) -> Vec<Finding> {
+    let fresh_idx: BTreeMap<String, usize> = fresh
+        .iter()
+        .enumerate()
+        .map(|(i, f)| (target_key(&f.target), i))
+        .collect();
+    let mut carried: Vec<Finding> = Vec::new();
+    for f in prior {
+        let tkey = target_key(&f.target);
+        let observed = match &f.target {
+            FindingTarget::Anchor { .. } => obs.anchors_observed.contains(&tkey),
+            FindingTarget::Artifact { artifact } => obs.files_observed.contains(artifact),
+        };
+        if observed {
+            // Deferral must not supersede a substantive prior verdict.
+            if matches!(f.class, FindingClass::Drifted | FindingClass::Wrong)
+                && let Some(&i) = fresh_idx.get(&tkey)
+                && fresh[i].class == FindingClass::QueuedForAdjudication
+            {
+                fresh[i] = f.clone();
+            }
+            continue;
+        }
+        if fresh_idx.contains_key(&tkey) {
+            continue; // a fresh outcome exists for this target anyway
+        }
+        let still_open = match &f.target {
+            FindingTarget::Anchor { .. } => obs.anchors_existing.contains(&tkey),
+            FindingTarget::Artifact { artifact } => {
+                obs.s_d.contains(artifact) && !covered_now(artifact)
+            }
+        };
+        if still_open {
+            carried.push(f.clone());
+        }
+    }
+    fresh.extend(carried);
+    fresh
+}
+
 /// The thin `projection verify` write path (group A). Measures a binding's
 /// fidelity and records durable findings under the current `(hash(D),
 /// source_head)` key; **read-only on the destination mem** — the `&Engine`
@@ -925,10 +1072,20 @@ pub fn verify_binding(
     //    covered over a full rotation.
     let mut existence: Vec<(String, Anchor, AnchorState)> = Vec::new();
     let mut candidates: Vec<(String, Anchor, AnchorState)> = Vec::new();
+    // Observation bookkeeping for the head-durable merge: which anchor
+    // targets exist, and which of them this pass actually resolved.
+    let mut anchors_existing: BTreeSet<String> = BTreeSet::new();
+    let mut anchors_observed: BTreeSet<String> = BTreeSet::new();
     for (eid, resolved_anchor) in engine.mem_anchors_resolved(&resolved.destination_mem) {
+        let tkey = target_key(&FindingTarget::Anchor {
+            entity: eid.as_ref().to_string(),
+            artifact: resolved_anchor.anchor.artifact.clone(),
+        });
+        anchors_existing.insert(tkey.clone());
         let Some(state) = resolved_anchor.state else {
             continue;
         };
+        anchors_observed.insert(tkey);
         let anchor = resolved_anchor.anchor;
         match state {
             AnchorState::Resolves => {}
@@ -1001,16 +1158,20 @@ pub fn verify_binding(
             .map(|b| b.files)
             .unwrap_or_default()
     };
-    for file in sample_files {
-        let covered = engine
-            .anchors_referencing_artifact(&file)
+    let covered_now = |artifact: &str| {
+        engine
+            .anchors_referencing_artifact(artifact)
             .iter()
-            .any(|(eid, _)| eid.mem() == resolved.destination_mem.as_str());
-        if !covered {
+            .any(|(eid, _)| eid.mem() == resolved.destination_mem.as_str())
+    };
+    for file in &sample_files {
+        if !covered_now(file) {
             findings.push(Finding {
                 key: key.clone(),
                 facet: facet.clone(),
-                target: FindingTarget::Artifact { artifact: file },
+                target: FindingTarget::Artifact {
+                    artifact: file.clone(),
+                },
                 class: FindingClass::Uncovered,
                 detail: "source artifact in scope has no anchor in the destination mem".to_string(),
                 created_at: now.clone(),
@@ -1018,19 +1179,46 @@ pub fn verify_binding(
         }
     }
 
-    let backlog = findings
-        .iter()
-        .filter(|f| f.class == FindingClass::QueuedForAdjudication)
-        .count();
-
-    // Load-or-init, record under the current key (prior-key batches retained,
-    // segregated — A3), persist to the durable state tier (A1).
+    // 3. Head-durable merge (the store keys on hash(D) alone): fold the prior
+    //    open batch into this pass's findings — re-observed targets take this
+    //    pass's outcome; unobserved-but-still-open ones carry forward with
+    //    their original observed head; departed/covered/vanished subjects
+    //    close. Sync briefs thus keep presenting an open finding across
+    //    source-head movement until a pass observes it clean.
     let mut store = read_findings_store(workspace_root, &mem, &name)
         .map_err(FindingsError::Store)?
         .unwrap_or_else(|| FindingsStore {
             binding: binding_id.clone(),
             ..Default::default()
         });
+    let mut s_d: BTreeSet<String> = BTreeSet::new();
+    for source in &resolved.sources {
+        if let ResolvedSource::Primary(p) = source
+            && medium_capabilities(p.medium_type).enumerable
+        {
+            s_d.extend(enumerate_facet_files(
+                p,
+                &resolved.deny_paths,
+                workspace_root,
+            ));
+        }
+    }
+    let obs = PassObservation {
+        anchors_observed,
+        anchors_existing,
+        files_observed: sample_files.into_iter().collect(),
+        s_d,
+    };
+    let prior = store.current(&key).to_vec();
+    let findings = merge_with_prior(findings, &prior, &obs, covered_now);
+
+    let backlog = findings
+        .iter()
+        .filter(|f| f.class == FindingClass::QueuedForAdjudication)
+        .count();
+
+    // Record under the current key (prior-hash batches retained, segregated —
+    // A3), persist to the durable state tier (A1).
     let recorded = findings.len();
     store.record(key.clone(), now, findings);
     let superseded = store.superseded(&key).len();
@@ -1174,10 +1362,14 @@ mod tests {
         assert!(!store.current(&new).contains(&f_old));
     }
 
-    /// A3 — a moved `source_head` segregates the prior batch the same way (the
-    /// key differs in its `source_head` component, not its `hash(D)`).
+    /// Criterion — findings survive head movement: the store keys on `hash(D)`
+    /// alone, so a finding recorded at head1 stays `current` when read at
+    /// head2 (the sync brief's read is head-agnostic), still carrying the head
+    /// it was observed at as metadata. REFUSAL half: recording the hash's next
+    /// batch (verify's post-merge write) replaces it — a finding absent from
+    /// that batch (resolved) never re-presents, at any head.
     #[test]
-    fn moved_source_head_supersedes_prior_findings() {
+    fn moved_source_head_keeps_findings_current_until_superseded() {
         let mut store = FindingsStore::default();
         let before = key("hashA", "head1");
         let after = key("hashA", "head2");
@@ -1193,13 +1385,231 @@ mod tests {
             created_at: "1".to_string(),
         };
         store.record(before.clone(), "1".to_string(), vec![f.clone()]);
-        store.record(after.clone(), "2".to_string(), Vec::new());
 
+        // The head moved; the finding is still presented, with its observed
+        // head intact, and it is not "superseded".
+        assert_eq!(store.current(&after), &[f.clone()]);
+        assert_eq!(store.current(&after)[0].key.source_head, "head1");
+        assert!(store.superseded(&after).is_empty());
+
+        // A verify at head2 records the hash's next batch WITHOUT the finding
+        // (its target observed clean) → resolved, never re-presented.
+        store.record(after.clone(), "2".to_string(), Vec::new());
         assert!(store.current(&after).is_empty());
-        assert_eq!(store.superseded(&after), vec![&f]);
-        // Recording the same key again replaces in place (no duplicate batch).
-        store.record(after.clone(), "3".to_string(), Vec::new());
-        assert_eq!(store.batches.len(), 2, "one batch per distinct key");
+        assert!(store.current(&before).is_empty(), "at the old head too");
+        assert_eq!(store.batches.len(), 1, "one batch per hash(D)");
+    }
+
+    /// Migration/compat — a store written by the pre-re-key engine (batches
+    /// keyed `(hash(D), source_head)`; the exact on-disk shape live dogfood
+    /// workspaces carry) loads without loss: the other-hash batch stays
+    /// segregated as superseded, the current-hash batch presents at ANY head,
+    /// and a legacy same-hash pair collapses to its latest-recorded batch —
+    /// never resurrecting the older (superseded-at-write-time) one. The next
+    /// `record` folds the same-hash siblings into one batch.
+    #[test]
+    fn legacy_per_head_store_loads_and_presents_head_agnostically() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let path = findings_store_path(root, "engine", "graph");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        // Trimmed replica of the live on-disk format: `{binding, batches:[{key:
+        // {binding_hash, source_head}, recorded_at, findings:[{key, facet,
+        // target:{kind,...}, class, detail, created_at}]}]}` — one batch under
+        // an old hash, two batches under the current hash at different heads.
+        std::fs::write(
+            &path,
+            r#"{
+              "binding": "engine/graph",
+              "batches": [
+                {
+                  "key": { "binding_hash": "hashOLD", "source_head": "src=aaa" },
+                  "recorded_at": "100",
+                  "findings": [
+                    {
+                      "key": { "binding_hash": "hashOLD", "source_head": "src=aaa" },
+                      "facet": "src",
+                      "target": { "kind": "artifact", "artifact": "src/old.rs" },
+                      "class": "uncovered",
+                      "detail": "old declaration",
+                      "created_at": "100"
+                    }
+                  ]
+                },
+                {
+                  "key": { "binding_hash": "hashCUR", "source_head": "src=bbb" },
+                  "recorded_at": "200",
+                  "findings": [
+                    {
+                      "key": { "binding_hash": "hashCUR", "source_head": "src=bbb" },
+                      "facet": "src",
+                      "target": { "kind": "artifact", "artifact": "src/resolved-at-ccc.rs" },
+                      "class": "uncovered",
+                      "detail": "was open at bbb, absent from the ccc batch",
+                      "created_at": "200"
+                    }
+                  ]
+                },
+                {
+                  "key": { "binding_hash": "hashCUR", "source_head": "src=ccc" },
+                  "recorded_at": "300",
+                  "findings": [
+                    {
+                      "key": { "binding_hash": "hashCUR", "source_head": "src=ccc" },
+                      "facet": "src",
+                      "target": { "kind": "anchor", "entity": "engine--e", "artifact": "src/x.rs" },
+                      "class": "unresolvable-anchor",
+                      "detail": "gone",
+                      "created_at": "300"
+                    }
+                  ]
+                }
+              ]
+            }"#,
+        )
+        .unwrap();
+
+        let mut store = read_findings_store(root, "engine", "graph")
+            .unwrap()
+            .expect("the legacy on-disk format loads as-is");
+        assert_eq!(store.binding, "engine/graph");
+        assert_eq!(store.batches.len(), 3, "loaded without loss");
+
+        // Head-agnostic current view: reading at a NEWLY moved head (ddd —
+        // recorded nowhere) presents the latest current-hash batch.
+        let now = key("hashCUR", "src=ddd");
+        let current = store.current(&now);
+        assert_eq!(current.len(), 1);
+        assert_eq!(current[0].detail, "gone");
+        assert_eq!(
+            current[0].key.source_head, "src=ccc",
+            "the finding keeps the head it was observed at"
+        );
+        // The pre-re-key superseded batches (old hash + the older same-hash
+        // head) stay segregated — never mixed into the current view.
+        let superseded = store.superseded(&now);
+        assert_eq!(superseded.len(), 2);
+        assert!(
+            !current.iter().any(|f| f.detail.contains("was open at bbb")),
+            "the older same-hash batch was superseded at write time and is not resurrected"
+        );
+
+        // The next record under the current hash collapses the legacy
+        // same-hash pair into one batch; the old-hash batch is untouched.
+        store.record(now.clone(), "400".to_string(), Vec::new());
+        assert_eq!(store.batches.len(), 2, "hashCUR collapsed, hashOLD kept");
+        assert_eq!(store.superseded(&now).len(), 1);
+    }
+
+    /// The head-durable merge: an unobserved-but-still-open prior finding
+    /// carries forward (original observed head intact); a prior finding whose
+    /// artifact left `S(D)`, gained coverage, or whose anchor vanished closes;
+    /// a re-observed target takes this pass's outcome (clean → closed).
+    #[test]
+    fn merge_carries_unobserved_open_findings_and_closes_departed() {
+        let k_old = key("h", "head1");
+        let mk_artifact = |artifact: &str, detail: &str| Finding {
+            key: k_old.clone(),
+            facet: "src".to_string(),
+            target: FindingTarget::Artifact {
+                artifact: artifact.to_string(),
+            },
+            class: FindingClass::Uncovered,
+            detail: detail.to_string(),
+            created_at: "1".to_string(),
+        };
+        let anchor_finding = Finding {
+            key: k_old.clone(),
+            facet: "src".to_string(),
+            target: FindingTarget::Anchor {
+                entity: "engine--gone".to_string(),
+                artifact: "src/gone.rs".to_string(),
+            },
+            class: FindingClass::UnresolvableAnchor,
+            detail: "anchor since removed from the mem".to_string(),
+            created_at: "1".to_string(),
+        };
+        let prior = vec![
+            mk_artifact("src/unsampled.rs", "still open, not in this window"),
+            mk_artifact("src/departed.rs", "left S(D)"),
+            mk_artifact("src/now-covered.rs", "gained an anchor since"),
+            mk_artifact("src/observed-clean.rs", "re-sampled and now covered"),
+            anchor_finding,
+        ];
+        let obs = PassObservation {
+            anchors_observed: BTreeSet::new(),
+            anchors_existing: BTreeSet::new(), // the anchor vanished
+            files_observed: ["src/observed-clean.rs".to_string()].into(),
+            s_d: [
+                "src/unsampled.rs".to_string(),
+                "src/now-covered.rs".to_string(),
+                "src/observed-clean.rs".to_string(),
+            ]
+            .into(),
+        };
+        let merged = merge_with_prior(Vec::new(), &prior, &obs, |artifact| {
+            artifact == "src/now-covered.rs" || artifact == "src/observed-clean.rs"
+        });
+        assert_eq!(merged.len(), 1, "only the still-open unsampled one carries");
+        assert_eq!(
+            merged[0].target,
+            FindingTarget::Artifact {
+                artifact: "src/unsampled.rs".to_string()
+            }
+        );
+        assert_eq!(
+            merged[0].key.source_head, "head1",
+            "a carried finding keeps the head it was observed at"
+        );
+    }
+
+    /// Supersession honesty: a fresh `queued-for-adjudication` entry is a
+    /// scheduling deferral, not an observation — it never downgrades a prior
+    /// substantive `drifted` verdict for the same target. A fresh substantive
+    /// outcome (or a clean observation) still supersedes normally.
+    #[test]
+    fn merge_deferral_never_downgrades_prior_adjudication() {
+        let k_old = key("h", "head1");
+        let k_new = key("h", "head2");
+        let target = FindingTarget::Anchor {
+            entity: "engine--e".to_string(),
+            artifact: "src/x.rs".to_string(),
+        };
+        let prior_drifted = Finding {
+            key: k_old.clone(),
+            facet: "src".to_string(),
+            target: target.clone(),
+            class: FindingClass::Drifted,
+            detail: "adjudicated drifted at head1".to_string(),
+            created_at: "1".to_string(),
+        };
+        let fresh_queued = Finding {
+            key: k_new.clone(),
+            facet: "src".to_string(),
+            target: target.clone(),
+            class: FindingClass::QueuedForAdjudication,
+            detail: "deferred by the cap this run".to_string(),
+            created_at: "2".to_string(),
+        };
+        let obs = PassObservation {
+            anchors_observed: [target_key(&target)].into(),
+            anchors_existing: [target_key(&target)].into(),
+            files_observed: BTreeSet::new(),
+            s_d: BTreeSet::new(),
+        };
+        let merged = merge_with_prior(
+            vec![fresh_queued],
+            std::slice::from_ref(&prior_drifted),
+            &obs,
+            |_| true,
+        );
+        assert_eq!(merged.len(), 1);
+        assert_eq!(
+            merged[0].class,
+            FindingClass::Drifted,
+            "the prior verdict stands over a deferral"
+        );
+        assert_eq!(merged[0].key.source_head, "head1");
     }
 
     /// A2 — hash-drift adjudication is excluded for `informed-by` (and every
@@ -1485,6 +1895,214 @@ mod tests {
         );
         // The covered file is not flagged uncovered.
         assert!(!has(FindingClass::Uncovered, "src/present.rs"));
+    }
+
+    /// Criterion, end-to-end — **findings survive head movement**: a finding
+    /// recorded at head H keeps presenting through the sync brief's read
+    /// (`current_findings` / `render_sync_brief_for`) after the source
+    /// advances to H′, until a verify observes its subject clean — and once
+    /// resolved it never re-presents, at any head.
+    #[test]
+    fn finding_recorded_at_old_head_presents_in_brief_at_new_head() {
+        use crate::ingest::render::render_sync_brief_for;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let mem_dir = root.join("mem");
+        std::fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
+        std::fs::write(
+            mem_dir.join(".memstead").join("config.json"),
+            r#"{"format":1,"schema":"default@1.0.0","version":"1.0.0"}"#,
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join(".memstead")).unwrap();
+        std::fs::write(
+            root.join(".memstead").join("workspace.toml"),
+            "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+        )
+        .unwrap();
+        let mount = Mount {
+            mem: "engine".to_string(),
+            schema: Some("default@1.0.0".parse().unwrap()),
+            storage: MountStorage::Folder {
+                path: mem_dir.clone(),
+            },
+            capability: MountCapability::Write,
+            lifecycle: MountLifecycle::Eager,
+            cross_linkable: false,
+            migration_target: None,
+        };
+        crate::FileWorkspaceStore::new()
+            .save_state(
+                root,
+                &Workspace {
+                    mounts: vec![mount],
+                    settings: WorkspaceSettings::default(),
+                },
+            )
+            .unwrap();
+
+        // Git source tree at head A: src/present.rs committed.
+        let git = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .args(args)
+                .current_dir(root)
+                .env("GIT_AUTHOR_NAME", "t")
+                .env("GIT_AUTHOR_EMAIL", "t@t")
+                .env("GIT_COMMITTER_NAME", "t")
+                .env("GIT_COMMITTER_EMAIL", "t@t")
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+        git(&["init", "-q"]);
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src").join("present.rs"), "fn a() {}\n").unwrap();
+        git(&["add", "-A"]);
+        git(&["commit", "-qm", "head-a"]);
+
+        // Anchors: `informed-by` on the present file (clean, non-hash — no
+        // finding) and on the ABSENT src/gone.rs (orphaned → the finding).
+        let mk = |artifact: &str| Anchor {
+            artifact: artifact.to_string(),
+            grain: AnchorGrain::File,
+            class: AnchorProvenanceClass::InformedBy,
+            at_version: None,
+            hash: None,
+            hash_stability: AnchorHashStability::Stable,
+            derived_from: Vec::new(),
+            binding: None,
+        };
+        let mut sidecar = AnchorSidecar::default();
+        sidecar.set("engine--e", vec![mk("src/present.rs"), mk("src/gone.rs")]);
+        std::fs::write(
+            mem_dir.join(crate::anchor::ANCHOR_SIDECAR_PATH),
+            sidecar.to_bytes(),
+        )
+        .unwrap();
+
+        write_medium(
+            root,
+            "engine",
+            "graph",
+            &Medium {
+                name: "graph".to_string(),
+                medium_type: MediumType::Codebase,
+                pointer: String::new(),
+                change_detection: Some("git".to_string()),
+            },
+        )
+        .unwrap();
+        write_facet(
+            root,
+            "engine",
+            "graph",
+            &Facet {
+                name: "graph".to_string(),
+                medium: "graph".to_string(),
+                scope: vec![PatternEntry {
+                    path: "src/**/*.rs".to_string(),
+                    mode: PatternMode::Allow,
+                }],
+                engagement: None,
+                preparation: None,
+            },
+        )
+        .unwrap();
+        write_binding(
+            root,
+            "engine",
+            "graph",
+            &BindingV1 {
+                version: BINDING_VERSION,
+                intent: None,
+                source_facets: vec!["graph".to_string()],
+                reference_mems: Vec::new(),
+                destination_mem: "engine".to_string(),
+                deny_paths: Vec::new(),
+                coverage_semantics: CoverageSemantics::Exhaustive,
+                rules: None,
+                prune: None,
+                operations: Operations {
+                    build: None,
+                    sync: Some(crate::binding::SyncOperation {
+                        trigger: IngestTrigger::Manual,
+                        batch_size: 20,
+                    }),
+                    verify: Some(VerifyOperation {
+                        trigger: IngestTrigger::Manual,
+                        batch_size: 20,
+                        adjudication_cap: DEFAULT_ADJUDICATION_CAP,
+                        full_resync_every: DEFAULT_FULL_RESYNC_EVERY,
+                    }),
+                },
+            },
+        )
+        .unwrap();
+
+        // Verify at head A — records the orphaned-anchor finding.
+        let configs = load_pipeline_configs(root).unwrap();
+        let binding = &configs.bindings[0].config;
+        let resolved = resolve_binding_run(&configs, "engine/graph", binding).unwrap();
+        let head_a_outcome = {
+            let engine = Engine::from_workspace_root(root).unwrap();
+            verify_binding(&engine, root, binding, &resolved).unwrap()
+        };
+        assert!(
+            head_a_outcome.key.source_head.contains("graph="),
+            "the run observed a facet head"
+        );
+
+        // The source moves to head B.
+        std::fs::write(root.join("src").join("present.rs"), "fn a() {} // more\n").unwrap();
+        git(&["add", "-A"]);
+        git(&["commit", "-qm", "head-b"]);
+
+        // A fresh process at head B: the finding recorded at head A is still
+        // presented — by the brief's read AND in the rendered sync brief.
+        {
+            let engine = Engine::from_workspace_root(root).unwrap();
+            let (key_b, findings) = current_findings(&engine, root, binding, &resolved).unwrap();
+            assert_ne!(
+                key_b.source_head, head_a_outcome.key.source_head,
+                "the head really moved"
+            );
+            assert_eq!(findings.len(), 1);
+            assert_eq!(findings[0].class, FindingClass::UnresolvableAnchor);
+            assert_eq!(
+                findings[0].key.source_head, head_a_outcome.key.source_head,
+                "the finding still records the head it was observed at"
+            );
+
+            let brief = render_sync_brief_for(&engine, root, "engine/graph").unwrap();
+            assert!(brief.contains("## Open findings to repair"));
+            assert!(brief.contains("src/gone.rs"));
+        }
+
+        // The repair lands: src/gone.rs exists again (head C). A verify
+        // observes the anchor clean → the finding closes…
+        std::fs::write(root.join("src").join("gone.rs"), "fn g() {}\n").unwrap();
+        git(&["add", "-A"]);
+        git(&["commit", "-qm", "head-c"]);
+        {
+            let engine = Engine::from_workspace_root(root).unwrap();
+            verify_binding(&engine, root, binding, &resolved).unwrap();
+        }
+        // …and never re-presents (REFUSAL: resolved findings stay resolved).
+        {
+            let engine = Engine::from_workspace_root(root).unwrap();
+            let (_key, findings) = current_findings(&engine, root, binding, &resolved).unwrap();
+            assert!(
+                findings
+                    .iter()
+                    .all(|f| f.class != FindingClass::UnresolvableAnchor),
+                "the resolved orphan finding must not re-present: {findings:?}"
+            );
+        }
     }
 
     /// The completed-run `#verified` writer (backlog 2026-07-11): a verify

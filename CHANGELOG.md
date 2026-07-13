@@ -19,7 +19,22 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   creation surface was missing. MCP and UniFFI wire shapes are unchanged.
 
 ### Fixed
-- `projection advance` now answers a medium-relative artifact id (the form
+- **Verify findings survive source-head movement.** The findings store now
+  keys on the binding's `hash(D)` alone; the `source_head` a finding was
+  observed at rides as metadata on the finding. Sync briefs present all
+  open findings regardless of recorded head, so an open finding keeps
+  appearing after the source advances — previously the `(hash(D),
+  source_head)` key made every head move hide the open findings from all
+  subsequent briefs (a campaign-confirmed leak: an orphan finding hid from
+  4+ consecutive briefs). Verify merges each pass: re-observed targets take
+  the pass's outcome (clean closes, a cap deferral never downgrades a
+  prior `drifted`/`wrong` verdict), unobserved-but-still-open findings
+  carry forward, and findings whose artifacts left `S(D)`, gained
+  coverage, or whose anchors vanished are closed — resolved findings never
+  re-present and the store cannot grow unboundedly. A binding-declaration
+  edit still supersedes. The on-disk format is unchanged: existing stores
+  in live workspaces load without loss (legacy same-hash per-head batches
+  collapse to the latest on the next verify).
   agents naturally type, e.g. `a.rs` where the slice printed `src/a.rs`)
   with a remedy-bearing refusal: the `PROJECTION_ADVANCE_UNKNOWN_ARTIFACT`
   message names the expected workspace-relative dialect and carries the

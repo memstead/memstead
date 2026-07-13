@@ -713,8 +713,9 @@ pub fn render_fidelity_report(
 ///
 /// `key` is the current `(hash(D), source_head)` the verify pass recorded
 /// under (from [`super::findings::VerifyOutcome::key`]); the report's findings
-/// tally is the store's `current(key)` slice, and the superseded count is
-/// everything under prior keys.
+/// tally is the store's `current(key)` slice — all open findings under the
+/// key's `hash(D)`, regardless of the head each was observed at — and the
+/// superseded count is everything under prior binding hashes.
 pub fn compute_fidelity_report(
     engine: &Engine,
     workspace_root: &Path,
