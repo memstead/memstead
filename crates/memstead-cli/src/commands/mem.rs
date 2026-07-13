@@ -264,6 +264,21 @@ pub struct InitArgs {
     #[arg(long, value_enum)]
     pub storage: Option<StorageArg>,
 
+    /// Explicit on-disk location for the new mem, overriding the
+    /// default `<workspace_root>/<name>`. Relative paths anchor at the
+    /// workspace root and may leave it (`--location ../public/engineering`
+    /// — the monorepo/submodule case); the expressed form is preserved
+    /// in `mounts.json`, so a relative location stays clone-portable
+    /// while an absolute one stays machine-pinned. The location's
+    /// basename must equal the mem name's last segment
+    /// (engine-enforced). Meaningful for folder-backed mems only —
+    /// git-branch storage derives its identity from the mem name and
+    /// ignores location. Out-of-root locations refuse for agent-mode
+    /// calls (`MEM_PATH_NOT_ALLOWED` / `outside_workspace`); pass
+    /// `--operator-mode` when the operator is placing the mem.
+    #[arg(long)]
+    pub location: Option<PathBuf>,
+
     /// Optional per-instance writing guidance as a JSON object, written
     /// verbatim into the new mem's config `writeGuidance` map — e.g.
     /// `--write-guidance '{"phase_context":"early design","stack":"Rust"}'`.
@@ -395,7 +410,13 @@ pub fn run(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
             args.path.display(),
         ))
     })?;
-    let location = mem_name.clone();
+    // `--location` overrides the default `<name>` location (both are
+    // workspace-root-relative unless absolute); the engine's basename
+    // invariant keeps name leaf and on-disk basename aligned.
+    let location: PathBuf = args
+        .location
+        .clone()
+        .unwrap_or_else(|| PathBuf::from(&mem_name));
 
     let schema_ref: memstead_schema::SchemaRef = args
         .schema
@@ -420,7 +441,7 @@ pub fn run(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
     };
     let params = MemCreateParams {
         name: mem_name.clone(),
-        location: PathBuf::from(&location),
+        location,
         schema_ref,
         vcs: vcs_config,
         note: args.note.clone(),

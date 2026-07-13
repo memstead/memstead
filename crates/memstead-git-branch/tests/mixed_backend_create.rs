@@ -154,3 +154,180 @@ fn explicit_folder_create_lands_beside_git_branch_mems() {
     create_entity_in(&mut rebooted, "notes", "Folder Note");
     create_entity_in(&mut rebooted, "specs", "Branch Spec");
 }
+
+/// Minimal recursive tree copy for the clone-portability assertion —
+/// mirrors `cp -R` for regular files and directories (the only node
+/// kinds these fixtures produce).
+fn copy_dir_recursive(from: &std::path::Path, to: &std::path::Path) {
+    std::fs::create_dir_all(to).unwrap();
+    for entry in std::fs::read_dir(from).unwrap() {
+        let entry = entry.unwrap();
+        let target = to.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            copy_dir_recursive(&entry.path(), &target);
+        } else {
+            std::fs::copy(entry.path(), &target).unwrap();
+        }
+    }
+}
+
+/// A folder mem whose location lies OUTSIDE the workspace root
+/// (`../side/<name>`, the monorepo/submodule case): the expressed
+/// relative form round-trips through `mounts.json` unchanged, the
+/// mount survives reboot, and — the portability contract — the whole
+/// tree copied to a different absolute prefix still resolves the
+/// mount and stays writable there.
+#[test]
+fn out_of_root_folder_mount_round_trips_relative_and_survives_clone() {
+    let tmp = TempDir::new().unwrap();
+    let ws = tmp.path().join("ws");
+    std::fs::create_dir_all(&ws).unwrap();
+    init_real_mem_repo(&ws, &[("specs", "default@1.0.0")]);
+    let mut engine = engine_from_workspace_root(&ws).expect("engine boots");
+
+    mem_management::create_mem(
+        &mut engine,
+        mem_management::MemCreateParams {
+            name: "oor-notes".to_string(),
+            location: std::path::PathBuf::from("../side/oor-notes"),
+            schema_ref: "default@1.0.0".parse().unwrap(),
+            vcs: None,
+            note: None,
+            operator_mode: true,
+            recovery: None,
+            write_guidance: Default::default(),
+            storage: Some(StorageKind::Folder),
+        },
+    )
+    .expect("operator-mode out-of-root folder create succeeds");
+
+    // The physical mem landed outside the workspace root, beside it.
+    assert!(
+        tmp.path()
+            .join("side/oor-notes/.memstead/config.json")
+            .is_file(),
+        "mem config must land at <parent>/side/oor-notes/, outside the workspace root"
+    );
+
+    // `mounts.json` records the caller's expressed relative form —
+    // not an absolute path — so the record survives a clone to a
+    // different absolute prefix.
+    let mounts_text =
+        std::fs::read_to_string(ws.join(".memstead/state/mounts.json")).expect("mounts.json");
+    assert!(
+        mounts_text.contains("../side/oor-notes"),
+        "mounts.json must carry the relative out-of-root path, got:\n{mounts_text}"
+    );
+    let parsed: serde_json::Value = serde_json::from_str(&mounts_text).unwrap();
+    let oor_path = parsed["mounts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["mem"] == "oor-notes")
+        .expect("oor-notes mount present")["storage"]["path"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(
+        oor_path, "../side/oor-notes",
+        "the serialised mount path must be exactly the expressed relative form"
+    );
+
+    create_entity_in(&mut engine, "oor-notes", "Out Of Root Note");
+
+    // Reboot from the same root resolves the out-of-root mount.
+    drop(engine);
+    let mut rebooted = engine_from_workspace_root(&ws).expect("reboot succeeds");
+    let mount = rebooted.mount("oor-notes").expect("mount survives reboot");
+    assert!(
+        matches!(mount.storage, MountStorage::Folder { .. }),
+        "oor-notes must reload as MountStorage::Folder, got {:?}",
+        mount.storage
+    );
+    create_entity_in(&mut rebooted, "oor-notes", "Post Reboot Note");
+    drop(rebooted);
+
+    // Clone-portability: copy the WHOLE tree (workspace + sibling
+    // mem dir) to a different absolute prefix; the relative anchor
+    // must resolve there with no path rewriting.
+    let clone = TempDir::new().unwrap();
+    copy_dir_recursive(tmp.path(), clone.path());
+    let ws2 = clone.path().join("ws");
+    let mut cloned = engine_from_workspace_root(&ws2).expect("cloned workspace boots");
+    cloned
+        .mount("oor-notes")
+        .expect("out-of-root mount resolves at the new absolute prefix");
+    create_entity_in(&mut cloned, "oor-notes", "Cloned Tree Note");
+    // The write landed in the CLONE's sibling dir, not the original's.
+    let cloned_md: Vec<_> = std::fs::read_dir(clone.path().join("side/oor-notes"))
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().is_some_and(|x| x == "md"))
+        .collect();
+    assert!(
+        cloned_md
+            .iter()
+            .any(|e| std::fs::read_to_string(e.path()).unwrap().contains("Cloned Tree Note")),
+        "the cloned workspace's write must land in the cloned side dir"
+    );
+    assert!(
+        !std::fs::read_dir(tmp.path().join("side/oor-notes"))
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .any(|e| {
+                e.path().extension().is_some_and(|x| x == "md")
+                    && std::fs::read_to_string(e.path())
+                        .unwrap()
+                        .contains("Cloned Tree Note")
+            }),
+        "the original tree must not receive the clone's write"
+    );
+}
+
+/// Out-of-root placement stays operator-gated: an agent-mode create
+/// whose location resolves outside the workspace root refuses with
+/// `MEM_PATH_NOT_ALLOWED` / `outside_workspace` even when the name
+/// matches a create rule.
+#[test]
+fn agent_mode_out_of_root_location_refuses_outside_workspace() {
+    let tmp = TempDir::new().unwrap();
+    let ws = tmp.path().join("ws");
+    std::fs::create_dir_all(ws.join(".memstead")).unwrap();
+    // Allowlist admits the name, so the refusal below is attributable
+    // to the location, not to a missing rule.
+    std::fs::write(
+        ws.join(".memstead/workspace.toml"),
+        "format = \"memstead-git-branch-2\"\n\n\
+         [persistence_adapter]\nname = \"file-two-layer\"\n\n\
+         [[mem_management.create]]\npattern = \"oor-*\"\nschemas = [\"default@1.0.0\"]\n",
+    )
+    .unwrap();
+    init_real_mem_repo(&ws, &[("specs", "default@1.0.0")]);
+    let mut engine = engine_from_workspace_root(&ws).expect("engine boots");
+
+    let err = mem_management::create_mem(
+        &mut engine,
+        mem_management::MemCreateParams {
+            name: "oor-escape".to_string(),
+            location: std::path::PathBuf::from("../side/oor-escape"),
+            schema_ref: "default@1.0.0".parse().unwrap(),
+            vcs: None,
+            note: None,
+            operator_mode: false,
+            recovery: None,
+            write_guidance: Default::default(),
+            storage: Some(StorageKind::Folder),
+        },
+    )
+    .expect_err("agent-mode out-of-root create must refuse");
+    match err {
+        memstead_engine::error::FullEngineError::MemPathNotAllowed { reason, .. } => {
+            assert_eq!(reason, "outside_workspace");
+        }
+        other => panic!("expected MemPathNotAllowed/outside_workspace, got {other:?}"),
+    }
+    assert!(
+        !tmp.path().join("side").exists(),
+        "the refused create must leave no disk residue outside the root"
+    );
+}

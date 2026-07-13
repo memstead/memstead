@@ -132,6 +132,62 @@ fn memstead_mem_init_hierarchical_name_lands_full_path() {
     );
 }
 
+/// `--location` places a folder mem somewhere other than
+/// `<workspace_root>/<name>` — including OUTSIDE the workspace root
+/// (the monorepo/submodule case). The expressed relative form lands
+/// in `mounts.json` verbatim (clone-portable anchoring), and a fresh
+/// CLI process (the follow-up `mem delete`) resolves the mount.
+#[test]
+fn memstead_mem_init_location_places_folder_mem_out_of_root() {
+    let tmp = TempDir::new().unwrap();
+    let workspace = seed_workspace(tmp.path());
+
+    let mut cmd = memstead();
+    cmd.current_dir(&workspace).args([
+        "mem",
+        "init",
+        "oor-cli",
+        "--storage",
+        "folder",
+        "--location",
+        "../side/oor-cli",
+        "--no-gitignore",
+    ]);
+    cmd.assert().success();
+
+    // Physical mem dir sits beside the workspace root.
+    assert!(
+        tmp.path()
+            .join("side/oor-cli/.memstead/config.json")
+            .is_file(),
+        "mem must land at <parent>/side/oor-cli/, outside the workspace root",
+    );
+    // The serialised mount keeps the expressed relative form.
+    let raw = fs::read_to_string(
+        workspace
+            .join(".memstead")
+            .join("state")
+            .join("mounts.json"),
+    )
+    .unwrap();
+    assert!(
+        raw.contains("../side/oor-cli"),
+        "mounts.json must carry the relative out-of-root path; got:\n{raw}",
+    );
+
+    // A fresh process boots the workspace and resolves the
+    // out-of-root mount (delete doubles as the reboot probe).
+    let mut delete = memstead();
+    delete
+        .current_dir(&workspace)
+        .args(["mem", "delete", "oor-cli"]);
+    delete.assert().success();
+    assert!(
+        !tmp.path().join("side/oor-cli").exists(),
+        "delete must remove the out-of-root mem directory",
+    );
+}
+
 /// The `--org-path` flag is retired alongside the `params.path` engine
 /// field. The CLI refuses the legacy flag with a clap parse error (so
 /// scripts that still pass it fail loudly rather than silently dropping

@@ -1008,6 +1008,24 @@ pub fn create_mem(
         params.location.clone()
     };
     let canonical = canonicalize_maybe_missing(&absolute);
+    // The mount record keeps the caller's *expressed* anchoring: a
+    // relative `location` stays the lexical workspace-root join (no
+    // `..` resolution, no symlink normalisation), so
+    // `relativize_mount_path`'s lexical strip_prefix recovers the
+    // same relative form at serialisation time — an out-of-root
+    // location like `../public/engineering` lands in `mounts.json`
+    // as that relative path and survives cloning the tree to a
+    // different absolute prefix. An absolute `location` stays
+    // absolute — machine-pinned by expression. Every validation
+    // below (basename invariant, outside-workspace check, residue
+    // probes) still runs on `canonical`. Without a workspace_root
+    // there is nothing to anchor portability against, so the
+    // canonical form is the honest record.
+    let mount_path = if workspace_root.is_some() {
+        absolute.clone()
+    } else {
+        canonical.clone()
+    };
 
     // ---- Step 1a: allowlist match ----
     // Compose the allowlist candidate from the optional `<path>`
@@ -1466,7 +1484,7 @@ pub fn create_mem(
             }
         }
         StorageKind::Folder => memstead_base::workspace::MountStorage::Folder {
-            path: canonical.clone(),
+            path: mount_path.clone(),
         },
     };
     let is_git_branch = matches!(

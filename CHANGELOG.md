@@ -17,6 +17,18 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   with a typed `INVALID_INPUT` in a workspace without `mem-repo/.git/`.
   The mount loader and runtime already dispatched per-mount — only the
   creation surface was missing. MCP and UniFFI wire shapes are unchanged.
+- **Out-of-root folder mounts with portable anchoring: `--location` on
+  `memstead mem init`.** A folder mem can now live at any path a config can
+  express — including outside the workspace root (`--location
+  ../public/engineering`, the monorepo/submodule case). The mount record
+  keeps the caller's *expressed* form: a relative location serialises into
+  `mounts.json` as that relative path, so a clone of the whole tree to a
+  different absolute prefix still resolves the mount; an absolute location
+  stays absolute (machine-pinned by expression). The location's basename
+  must match the mem name's last segment (existing invariant); agent-mode
+  creates outside the workspace root still refuse with
+  `MEM_PATH_NOT_ALLOWED` / `outside_workspace` — out-of-root placement is
+  operator-mode only. MCP and UniFFI wire shapes are unchanged.
 - **Prepared-content hashing, hash backfill, and deterministic drift
   adjudication.** Anchor observation on a `path`-medium mem now computes
   the **prepared-content hash** of each present hash-bearing (`anchored` /
