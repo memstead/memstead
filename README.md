@@ -152,7 +152,7 @@ Memstead also has a native macOS app and a hosted registry; those are separate, 
 Stated here so you don't have to discover it:
 
 - **No semantic / embedding search.** `memstead_search` is exact and structural (content match, type/metadata filters) — there is no vector index. Agents navigate by structure: communities, types, relationships.
-- **No bulk import.** No command turns an existing folder of notes into a mem in one shot; content enters through schema-validated writes (the Claude Code plugin's ingest flows are agent-driven and write entity by entity).
+- **No one-shot import command.** Nothing turns a folder of notes into a mem in a single command — every entity enters through a schema-validated write. Bulk ingestion is a declared path instead: bind a source (a codebase, a docs tree, a URL) to a mem as a [projection](GLOSSARY.md), and the Claude Code plugin's `/ingest` and `/sync` skills build the graph from the binding's brief and keep it current, batch by batch.
 - **No built-in visualization.** The graph is queryable (status, overview, relations) but ships no renderer; projections and exports are the extension point.
 - **Windows is untested.** Developed and CI-tested on macOS and Linux. Release archives include a Windows build, but no Windows CI gate exists yet — expect rough edges, path handling especially.
 
