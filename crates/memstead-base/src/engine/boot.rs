@@ -1544,7 +1544,10 @@ community:
                 .and_then(|r| r.state)
         };
         assert_eq!(
-            state_of("src/present.rs", crate::anchor::AnchorProvenanceClass::Anchored),
+            state_of(
+                "src/present.rs",
+                crate::anchor::AnchorProvenanceClass::Anchored
+            ),
             Some(AnchorState::Recheck),
             "present hash-bearing anchor cannot adjudicate the prepared hash here → recheck"
         );
@@ -1557,7 +1560,10 @@ community:
             "present non-hash anchor resolves on existence"
         );
         assert_eq!(
-            state_of("src/gone.rs", crate::anchor::AnchorProvenanceClass::Anchored),
+            state_of(
+                "src/gone.rs",
+                crate::anchor::AnchorProvenanceClass::Anchored
+            ),
             Some(AnchorState::Orphaned),
             "absent artifact is orphaned"
         );
