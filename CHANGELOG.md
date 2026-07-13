@@ -17,6 +17,10 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   with a typed `INVALID_INPUT` in a workspace without `mem-repo/.git/`.
   The mount loader and runtime already dispatched per-mount — only the
   creation surface was missing. MCP and UniFFI wire shapes are unchanged.
+- **Folder mems skip `README.md` at load.** A folder mem living visibly
+  in a repository tree carries a human-facing README beside its entity
+  files; the loader no longer parses it as an entity (quickstart already
+  tolerated README-grade files at init — the load side now matches).
 - **`--detach-incoming` on `memstead mem delete` — the mem-replacement
   affordance.** Deleting a mem that other Write-Mems still link into
   normally refuses `MEM_HAS_INCOMING_REFS`; with the flag, the delete

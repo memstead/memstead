@@ -209,6 +209,12 @@ fn read_zip_archive(
 /// - `.git/` — external git metadata, never entity territory.
 /// - `.memstead/` — engine-internal (config, schemas cache). Always
 ///   hidden at every depth.
+/// - `README.md` — repository documentation, never an entity. A
+///   folder mem living visibly in a repo tree carries a human-facing
+///   README beside its entity files (quickstart already tolerates
+///   README-grade files at init; the load side matches). Entities are
+///   slug-named after their titles, so no legitimate entity file
+///   carries this name.
 ///
 /// All other directories (including unrelated dot-prefixed dirs like
 /// `.obsidian/`, `.idea/`) are walked.
@@ -226,7 +232,7 @@ fn find_markdown_files(dir: &Path, files: &mut Vec<PathBuf>) -> Result<(), LoadE
                 continue;
             }
             find_markdown_files(&path, files)?;
-        } else if name.ends_with(".md") {
+        } else if name.ends_with(".md") && name.as_ref() != "README.md" {
             files.push(path);
         }
     }
@@ -263,6 +269,9 @@ mod tests {
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join("keep.md"), "k").unwrap();
         fs::write(dir.path().join("ignore.txt"), "i").unwrap();
+        // README.md is repo documentation beside the entity files —
+        // never loaded as an entity.
+        fs::write(dir.path().join("README.md"), "docs").unwrap();
         fs::create_dir_all(dir.path().join(".git")).unwrap();
         fs::write(dir.path().join(".git/secret.md"), "s").unwrap();
         fs::create_dir_all(dir.path().join(".memstead")).unwrap();
