@@ -1482,6 +1482,17 @@ pub fn build_schema_payload(
             "when_to_use".into(),
             serde_json::Value::String(manifest.when_to_use.clone()),
         );
+        // Schema-level `system_message`, wire-named `system_context` to
+        // match the per-type key. Without this the manifest's voice/
+        // posture prose is unreachable from the agent surface entirely
+        // (its only other consumer is the `memstead type` CLI markdown).
+        // Omitted when undeclared so existing schemas render unchanged.
+        if let Some(msg) = &manifest.system_message {
+            obj.insert(
+                "system_context".into(),
+                serde_json::Value::String(msg.clone()),
+            );
+        }
     }
 
     // Schema-level `alias_target_rel_type` pointer — names the rel-type

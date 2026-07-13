@@ -8,6 +8,13 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Added
+- **Schema-level `system_context` in the full `memstead_schema` payload.**
+  A schema manifest's `system_message` — the author's voice/posture prose —
+  was previously unreachable from the agent surface (its only consumer was
+  the `memstead type` CLI markdown). `verbosity: "full"` now serves it as
+  top-level `system_context`, wire-named to match the per-type key; schemas
+  without the field render unchanged (key omitted). Third-party schemas
+  remain structural-only.
 - **Explicit `--storage folder|git-branch` override on `memstead mem init` /
   `create_mem`**, enabling mixed-backend workspaces (folder mems beside
   git-branch mems). Omitted, the workspace-shape heuristic is unchanged;
