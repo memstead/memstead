@@ -2049,4 +2049,153 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
         // The last few beyond the cap are not rendered inline.
         assert!(!out.contains(&format!("src/f{}.rs", FINDINGS_CAP + 3)));
     }
+
+    /// Criterion 8 (loop economics) — the default loop path's sync brief is
+    /// **locked block-by-block** for a representative changed-slice pass: the
+    /// heading sequence below is the whole brief, in this order, and nothing
+    /// else. The only blocks this plan added to the loop path are the
+    /// stale-claim search (criterion 1) and the head-durable findings
+    /// presentation (criterion 2) — both locked here in place. The inventory
+    /// operation (`projection verify --full` + the `/sync --inventory` repair
+    /// loop) added NO block and NO line to this render, so a new block
+    /// appearing (or one moving) fails this test and must be a deliberate
+    /// loop-economics decision.
+    #[test]
+    fn sync_brief_block_sequence_locked_for_changed_slice() {
+        let r = resolved("engine", None, vec![]);
+        let cursor = SourceCursor {
+            union: slice(&["gone.rs"], &["moved.rs"], &["new.rs"]),
+            write_commands: vec![cmd("engine/graph/src#synced", "HEAD")],
+            reseed: vec![],
+            no_signal: vec![],
+            any_changes: true,
+            degraded: false,
+            dead_denies: vec![],
+            dest_mem: "engine".to_string(),
+            binding_id: "engine/graph".to_string(),
+        };
+        let findings = vec![
+            finding(
+                FindingClass::Drifted,
+                anchor_target("engine--e", "src/moved.rs"),
+                "prepared-content hash drifted",
+            ),
+            finding(
+                FindingClass::Uncovered,
+                artifact_target("src/new.rs"),
+                "in scope, no anchor",
+            ),
+        ];
+        let out = render_sync_brief(&r, &cursor, &findings, &[], false);
+        let headings: Vec<&str> = out
+            .lines()
+            .filter(|l| l.starts_with("## ") || l.starts_with("### "))
+            .collect();
+        assert_eq!(
+            headings,
+            vec![
+                "## Sync — repair the graph to match the source",
+                "## Source changes since the last sync",
+                "### Recording your dispositions (do this LAST)",
+                "## Stale claims beyond the slice — search, then judge",
+                "## Open findings to repair",
+                "### Drifted — the anchored content changed",
+                "### Uncovered — a source artifact with no entity",
+                "## How to repair — be conservative",
+            ],
+            "the loop-path sync brief carries exactly these blocks, in this order"
+        );
+        // The brief closes on the conservatism block's final rule — nothing
+        // (inventory or otherwise) rides after it.
+        assert!(out.ends_with("`[commit <hash>]` log-style entries.\n\n"));
+    }
+
+    /// Criterion 8 REFUSAL — no brief on the default (non-inventory) path
+    /// carries any inventory machinery: not the build briefs (discovery /
+    /// one-shot), not the verify brief, not the sync brief in any of its
+    /// shapes (changed slice, findings-only, nothing-to-sync, adopt). The
+    /// inventory operation lives entirely in `projection verify --full` and
+    /// the `/sync --inventory` skill routing; the engine-side byte-compat of
+    /// the no-flag sampled verify is asserted in
+    /// `findings::tests::full_verify_uncaps_adjudication_and_walks_whole_source`
+    /// (extended there, not duplicated here). The minute-loop pays nothing
+    /// for inventory.
+    #[test]
+    fn no_default_path_brief_carries_inventory_machinery() {
+        // Terms that exist only on the inventory surface (flag, skill mode,
+        // report framing, termination rule). Matched case-insensitively.
+        let inventory_terms = [
+            "--full",
+            "inventory",
+            "full measurement",
+            "did not converge",
+            "quiescence",
+        ];
+        let assert_clean = |label: &str, text: &str| {
+            let lower = text.to_lowercase();
+            for term in inventory_terms {
+                assert!(
+                    !lower.contains(term),
+                    "{label} must carry no inventory machinery (found {term:?})"
+                );
+            }
+        };
+
+        let r = resolved("engine", None, vec![]);
+        let g = guidance(Some("build coverage"), None);
+        let pm = process_present("engine");
+
+        // Build briefs — with and without a changed-slice preface.
+        let changed_cursor = SourceCursor {
+            union: slice(&[], &["moved.rs"], &[]),
+            write_commands: vec![cmd("engine/graph/src#synced", "HEAD")],
+            reseed: vec![],
+            no_signal: vec![],
+            any_changes: true,
+            degraded: false,
+            dead_denies: vec![],
+            dest_mem: "engine".to_string(),
+            binding_id: "engine/graph".to_string(),
+        };
+        let preface = render_changed_slice(&changed_cursor);
+        assert_clean(
+            "discovery build brief (plain roam)",
+            &assemble_discovery_brief(&r, &g, &pm, Some("s@1"), ""),
+        );
+        assert_clean(
+            "discovery build brief (changed slice)",
+            &assemble_discovery_brief(&r, &g, &pm, Some("s@1"), &preface),
+        );
+        assert_clean(
+            "one-shot build brief",
+            &assemble_one_shot_brief(&r, &g, &pm, Some("s@1"), Some("purpose")),
+        );
+
+        // Verify brief — with and without an adjudication backlog.
+        assert_clean("verify brief (backlog)", &render_verify_brief(&r, 3));
+        assert_clean("verify brief (no backlog)", &render_verify_brief(&r, 0));
+
+        // Sync brief — every shape the loop renders.
+        let findings = vec![finding(
+            FindingClass::Drifted,
+            anchor_target("engine--e", "src/moved.rs"),
+            "d",
+        )];
+        assert_clean(
+            "sync brief (changed slice + findings)",
+            &render_sync_brief(&r, &changed_cursor, &findings, &[], false),
+        );
+        assert_clean(
+            "sync brief (findings-only)",
+            &render_sync_brief(&r, &empty_cursor(), &findings, &[], false),
+        );
+        assert_clean(
+            "sync brief (nothing to sync)",
+            &render_sync_brief(&r, &empty_cursor(), &[], &[], false),
+        );
+        assert_clean(
+            "sync brief (adopt)",
+            &render_sync_brief(&r, &empty_cursor(), &[], &[], true),
+        );
+    }
 }
