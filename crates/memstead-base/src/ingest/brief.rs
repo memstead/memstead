@@ -502,10 +502,13 @@ pub fn render_changed_slice(cursor: &SourceCursor) -> String {
                 .to_string(),
         );
         lines.push(
-            "In this window you supply a disposition for **every** artifact explicitly \
-             (auto-derivation lands in a later cycle). The gate accepts only artifact ids listed \
-             above — an unknown id refuses the whole call. When every artifact is disposed, the \
-             sync baseline advances automatically. Run:\n"
+            "Anchored work disposes itself: at advance time, every listed artifact that an \
+             anchor in the destination mem references is marked `worked` automatically (an \
+             explicit disposition you pass wins over the auto-mark). Supply dispositions only \
+             for the residue — artifacts you skipped, judged out of intent, or worked without \
+             anchors. The gate accepts only artifact ids listed above — an unknown id refuses \
+             the whole call. When every artifact is disposed, the sync baseline advances \
+             automatically. Run:\n"
                 .to_string(),
         );
         lines.push("```sh".to_string());
@@ -530,6 +533,23 @@ pub fn render_changed_slice(cursor: &SourceCursor) -> String {
 /// blocks, matching the plugin's `parts.filter(Boolean).join('')`.
 /// `changed_slice_preface` is the rendered changed-slice block (empty when
 /// the source has not moved, making the brief byte-identical to a plain roam).
+/// Render the `## Provenance — anchor your writes` block — the build-brief
+/// instruction to attach `anchors[]` to every entity mutation. Rendered by the
+/// engine, never by skill prose: a binary old enough to reject the parameter
+/// never renders the instruction, so the brief cannot version-skew against its
+/// own mutation surface (the reason the plugin-side capability gate exists for
+/// skill-carried prose). The element shape is taught by the mutation tools'
+/// own descriptions; the brief carries only the job.
+pub fn render_anchor_instruction() -> String {
+    "## Provenance — anchor your writes\n\n\
+     Attach an `anchors` list to every `memstead_create` / `memstead_update`, naming the \
+     source artifact(s) the entity is drawn from (the mutation tools document the element \
+     shape). Anchored writes are what verify measures coverage and drift against, and — on \
+     cursor-driven passes — what the advance gate auto-marks `worked`; an unanchored write \
+     leaves the fidelity report and the disposition window blind to your work.\n\n"
+        .to_string()
+}
+
 pub fn assemble_discovery_brief(
     resolved: &ResolvedIngest,
     guidance: &ResolvedGuidance,
@@ -542,6 +562,7 @@ pub fn assemble_discovery_brief(
         render_intent(resolved),
         render_goal_and_avoid(guidance),
         render_operative_data(resolved, process_mem, destination_schema),
+        render_anchor_instruction(),
         changed_slice_preface.to_string(),
     ];
     parts
@@ -666,6 +687,7 @@ pub fn assemble_one_shot_brief(
         render_intent(resolved),
         render_goal_and_avoid(guidance),
         render_operative_data(resolved, process_mem, destination_schema),
+        render_anchor_instruction(),
         render_one_shot_lens(resolved, destination_schema, destination_purpose),
     ];
     parts
@@ -1378,8 +1400,9 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
         let src = brief.find("## About the source").unwrap();
         let goal = brief.find("## Goal").unwrap();
         let op = brief.find("## Operative data").unwrap();
+        let anchors = brief.find("## Provenance — anchor your writes").unwrap();
         assert!(
-            sit < src && src < goal && goal < op,
+            sit < src && src < goal && goal < op && op < anchors,
             "blocks in brief order"
         );
         assert!(
@@ -1481,7 +1504,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
             "",
             "### Recording your dispositions (do this LAST)\n",
             "Only after you have worked the changed artifacts above — and only for the artifacts you actually judged — record a disposition for each, so the next pass targets just what changes next. This advance is resumable and non-stalling: a partial pass is honored, and if the source moves mid-pass the remaining slice re-presents (remaining + new) without losing your recorded work.\n",
-            "In this window you supply a disposition for **every** artifact explicitly (auto-derivation lands in a later cycle). The gate accepts only artifact ids listed above — an unknown id refuses the whole call. When every artifact is disposed, the sync baseline advances automatically. Run:\n",
+            "Anchored work disposes itself: at advance time, every listed artifact that an anchor in the destination mem references is marked `worked` automatically (an explicit disposition you pass wins over the auto-mark). Supply dispositions only for the residue — artifacts you skipped, judged out of intent, or worked without anchors. The gate accepts only artifact ids listed above — an unknown id refuses the whole call. When every artifact is disposed, the sync baseline advances automatically. Run:\n",
             "```sh",
             r#"memstead projection advance engine/graph --dispositions '{"<artifact>": "<disposition>", ...}'"#,
             "```",
@@ -1650,6 +1673,10 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
         assert!(brief.contains("(one-shot mode)"));
         assert!(brief.contains("No process mem is paired with this ingest (mode=one-shot;"));
         assert!(brief.contains("## Mode: one-shot — lens routing"));
+        assert!(
+            brief.contains("## Provenance — anchor your writes"),
+            "one-shot carries the anchor instruction"
+        );
         assert!(
             !brief.contains("## Source changes"),
             "one-shot has no changed-slice"

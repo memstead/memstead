@@ -8,6 +8,21 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Changed
+- Build briefs (discovery and one-shot) now carry a **provenance
+  instruction**: attach `anchors[]` to every entity mutation, naming the
+  source artifact(s) the entity is drawn from. Rendered engine-side so it
+  appears exactly when the running binary accepts the parameter — `/ingest`
+  runs stop producing unanchored entities that surface as false coverage
+  gaps and defeat the advance gate's auto-`worked`.
+- The sync brief's disposition window now states the **live auto-`worked`
+  behavior** (anchored writes dispose themselves; agents supply
+  dispositions only for the residue), replacing the stale
+  "auto-derivation lands in a later cycle" note that predated its own
+  implementation. The `/sync` skill's advance step aligns.
+- The `/sync` skill may now call `memstead_schema` — the schema-discovery
+  contract requires it before any create/update, and the absorption of
+  `/reconcile`'s write recipes explicitly deferred section/rel-type
+  vocabulary to schema lookup at write time.
 - The binding edit layer (`memstead-base::pipeline_edit`, reached via the
   UniFFI `add_projection` / `update_projection` methods) now carries the
   **full author-editable binding record** instead of the five

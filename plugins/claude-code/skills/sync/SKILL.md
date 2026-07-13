@@ -8,7 +8,7 @@ description: >
   read-only fidelity report (coverage, accuracy, freshness) that changes
   nothing. Not a version-control operation: changes flow from your source into
   your mem, never the reverse.
-allowed-tools: Bash, Read, mcp__memstead__memstead_search, mcp__memstead__memstead_entity, mcp__memstead__memstead_create, mcp__memstead__memstead_update, mcp__memstead__memstead_relate, mcp__memstead__memstead_delete
+allowed-tools: Bash, Read, mcp__memstead__memstead_schema, mcp__memstead__memstead_search, mcp__memstead__memstead_entity, mcp__memstead__memstead_create, mcp__memstead__memstead_update, mcp__memstead__memstead_relate, mcp__memstead__memstead_delete
 argument-hint: "[--all | <binding> | --verify <binding>]"
 ---
 
@@ -64,8 +64,9 @@ verbatim — never work around it.
    memstead projection advance <binding> --dispositions '{"<artifact-id>":"worked", …}'
    ```
 
-   Map every artifact the brief presented to its disposition; pass only ids the
-   brief listed. The baseline advances once the slice is fully dispositioned.
+   Anchored writes count as worked on their own; supply dispositions only for
+   the rest (skipped or out-of-intent artifacts), using only ids the brief
+   listed. The baseline advances once the slice is fully dispositioned.
 
 6. `--verify <binding>`: run `memstead projection verify <binding>` —
    report-only, nothing changes; it measures the mem, not your project's
