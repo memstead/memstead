@@ -441,6 +441,59 @@ fn builtin_default_loads_ten_types() {
     }
 }
 
+/// The `engineering@0.1.0` builtin: knowledge-only vocabulary. The
+/// three types load, the current-state types are ABSENT (write-time
+/// class-boundary enforcement — a `spec` in a mem pinned to this
+/// schema refuses `UNKNOWN_ENTITY_TYPE`), and the relationship
+/// vocabulary admits every edge type live standing-knowledge content
+/// carries (census-driven: REFERENCES, GOVERNS, MOTIVATED_BY,
+/// SUPERSEDES, IMPLEMENTS, GENERALIZES) plus the type files' own
+/// references (PART_OF hierarchy, DERIVED_FROM overrides, CONSTRAINS
+/// propagation).
+#[test]
+fn builtin_engineering_is_knowledge_only() {
+    let all = memstead_schema::builtins::load_builtin_schemas().expect("builtins load");
+    let s = all
+        .iter()
+        .find(|s| s.manifest.name == "engineering")
+        .expect("engineering builtin present");
+    assert_eq!(s.version, semver::Version::new(0, 1, 0));
+    assert_eq!(s.mode(), RelationshipMode::Strict);
+
+    for name in ["decision", "principle", "memo"] {
+        assert!(s.get_type(name).is_some(), "missing knowledge type: {name}");
+    }
+    assert_eq!(
+        s.types.len(),
+        3,
+        "knowledge-only catalogue: exactly three types"
+    );
+    for absent in ["spec", "contract", "requirement", "actor", "incident", "concept"] {
+        assert!(
+            s.get_type(absent).is_none(),
+            "current-state type {absent} must be absent — the class boundary is a gate"
+        );
+    }
+
+    for rel in [
+        "REFERENCES",
+        "GOVERNS",
+        "MOTIVATED_BY",
+        "SUPERSEDES",
+        "IMPLEMENTS",
+        "GENERALIZES",
+        "PART_OF",
+        "DERIVED_FROM",
+        "CONSTRAINS",
+        "_default",
+    ] {
+        assert!(
+            s.relationship_known(rel),
+            "census-required relationship {rel} must be in the vocabulary"
+        );
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Example schema (authoring-tutorial reference)
 // ---------------------------------------------------------------------------

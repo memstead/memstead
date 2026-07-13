@@ -17,6 +17,17 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   with a typed `INVALID_INPUT` in a workspace without `mem-repo/.git/`.
   The mount loader and runtime already dispatched per-mount — only the
   creation surface was missing. MCP and UniFFI wire shapes are unchanged.
+- **New builtin schema `engineering@0.1.0` — standing engineering
+  knowledge.** The knowledge-only counterpart of `software@0.1.0`: three
+  types (`decision`, `principle`, `memo`) answering WHY the system is the
+  way it is, with field shapes identical to their `software@0.1.0`
+  namesakes so entities migrate between the two schemas with metadata
+  intact. Current-state types are deliberately absent — a `spec` in a mem
+  pinned to this schema refuses `UNKNOWN_ENTITY_TYPE`, making the
+  knowledge/system-model class boundary a write-time gate. Census-driven
+  strict relationship vocabulary (structural, reasoning, lifecycle, rule,
+  abstraction, evidence groups); body wiki-links alias-emit `REFERENCES`.
+  `software@0.1.0` is untouched.
 - **Out-of-root folder mounts with portable anchoring: `--location` on
   `memstead mem init`.** A folder mem can now live at any path a config can
   express — including outside the workspace root (`--location

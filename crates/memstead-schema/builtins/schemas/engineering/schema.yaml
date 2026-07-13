@@ -1,0 +1,196 @@
+# yaml-language-server: $schema=../../../generated/schema-manifest.schema.json
+
+# ─────────────────────────────────────────────────────────────────────────────
+# engineering@0.1.0 — standing engineering knowledge for a software project.
+#
+# Three types, one question: WHY is the system the way it is?
+#   decision  — one choice, with the alternatives it beat
+#   principle — a rule that holds across the project
+#   memo      — reasoning that isn't (yet) a decision
+#
+# The knowledge-only counterpart of software@0.1.0: that schema models
+# WHAT a system is (specs, contracts, actors, incidents); this one keeps
+# the durable WHY beside it. Pin it on a standing-knowledge mem that
+# lives next to one or more software mems — the current-state entities
+# stay in those mems, and this schema's write-time vocabulary refuses
+# them here (UNKNOWN_ENTITY_TYPE), keeping the class boundary a gate
+# rather than a convention.
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: engineering
+version: 0.1.0
+
+description: |
+  Standing engineering knowledge: decisions, principles, and memos —
+  the durable WHY of a software project, kept as its own mem beside
+  the mems that model the system itself. Knowledge-only vocabulary:
+  current-state types (specs, contracts, actors, incidents) are
+  deliberately absent, so the class boundary between knowledge and
+  system-model is enforced at write time, not by convention.
+
+when_to_use: |
+  Use for a standing-knowledge mem: the graph-authoritative record of
+  engineering decisions, project-wide rules, and reasoning that
+  outlives any one change — typically maintained beside one or more
+  software@0.1.0 mems that model the system's current state. Prefer
+  software@0.1.0 when one mem should carry both the system model and
+  its rationale; prefer this schema when knowledge is curated as its
+  own unit (own home, own versioning, own review gate).
+
+system_message: |
+  This mem answers one question: WHY is the system the way it is?
+
+    decision  — one choice, with context, consequences, and the
+                alternatives it beat
+    principle — a rule that holds across the project, with scope
+                and exceptions
+    memo      — reasoning that isn't a decision yet: observations,
+                lessons, plans, goals, constraints
+
+  What the system currently IS — components, surfaces, ownership,
+  operational history — belongs in the software mems this knowledge
+  sits beside, not here; those types do not exist in this schema and
+  refuse at write time. Cross-mem wiki-links into those mems are the
+  intended way to anchor knowledge to the system it is about.
+
+  Edges are how the graph answers queries. A decision without
+  MOTIVATED_BY is history with no cause; a principle without GOVERNS
+  constrains nothing; a superseded decision without SUPERSEDES from
+  its successor is a trap for the reader. Relationships are
+  UPPER_SNAKE_CASE, strict mode — unknown edges are rejected.
+
+types:
+  - decision
+  - principle
+  - memo
+
+# Relationship vocabulary — census-driven from live standing-knowledge
+# content plus the natural pairs: structural (PART_OF, REFERENCES),
+# reasoning (DERIVED_FROM, MOTIVATED_BY/MOTIVATES, INFORMED_BY),
+# lifecycle (SUPERSEDES, ENABLES, BLOCKS), rule (GOVERNS, CONSTRAINS,
+# OVERRIDES), abstraction (GENERALIZES/SPECIALIZES, IMPLEMENTS), and
+# evidence (VALIDATES, CONTRADICTS). Deliberately not the full
+# software vocabulary — an honest catalogue over dead types.
+relationships:
+  mode: strict
+  definitions:
+    - name: PART_OF
+      description: Hierarchical containment — the source is structurally part of the target and meaningless without it.
+      when_to_use: Taxonomy. Parent owns the child as a structural part. Pure graph edge — files stay flat at the mem root.
+      default_weight: 3.0
+      acyclic: true
+    - name: REFERENCES
+      description: Soft reference without ownership or dependency.
+      when_to_use: Emitted automatically from inline wiki-links — do not author manually.
+      default_weight: 0.5
+    - name: DERIVED_FROM
+      description: The source is derived from, or based upon, the target.
+      when_to_use: Prior art, source material, inspiration that concretely shaped the source.
+      default_weight: 1.5
+      acyclic: true
+    - name: MOTIVATED_BY
+      description: The target motivated the creation or change described by the source.
+      default_weight: 2.0
+      acyclic: true
+    - name: MOTIVATES
+      description: The source motivates or drives the target.
+      default_weight: 1.5
+      acyclic: true
+    - name: INFORMED_BY
+      description: The source is informed by the target — partial input, not a hard dependency.
+      default_weight: 1.0
+    - name: SUPERSEDES
+      description: The source replaces the target — the target is no longer current.
+      when_to_use: Versioning and replacement. Keep the old entity for history; link the new one via SUPERSEDES.
+      default_weight: 1.5
+      acyclic: true
+    - name: ENABLES
+      description: The source enables the target to happen or exist.
+      default_weight: 1.0
+      acyclic: true
+    - name: BLOCKS
+      description: The source blocks the target from happening or progressing.
+      default_weight: 1.0
+      acyclic: true
+    - name: GOVERNS
+      description: The source principle governs or constrains the target.
+      default_weight: 2.5
+      acyclic: true
+    - name: CONSTRAINS
+      description: The source constrains the permissible states of the target.
+      default_weight: 2.0
+      acyclic: true
+    - name: OVERRIDES
+      description: The source overrides the target principle in overlapping scope.
+      default_weight: 1.5
+      acyclic: true
+    - name: IMPLEMENTS
+      description: The source realizes or fulfills the target.
+      when_to_use: A concrete decision or mechanism realizing a more abstract one.
+      default_weight: 2.0
+      acyclic: true
+    - name: GENERALIZES
+      description: The source is a broader, more abstract form of the target.
+      default_weight: 2.0
+      acyclic: true
+    - name: SPECIALIZES
+      description: The source is a narrower, more concrete form of the target.
+      default_weight: 2.0
+      acyclic: true
+    - name: VALIDATES
+      description: The source validates the target claim, pattern, or principle.
+      default_weight: 1.5
+    - name: CONTRADICTS
+      description: The source contradicts or disputes the target claim.
+      default_weight: 2.5
+
+    - name: _default
+      description: Fallback weight for any relationship not otherwise specified. Required by the engine.
+      default_weight: 1.0
+
+# Body wiki-links `[[target]]` auto-emit as REFERENCES relations via the
+# alias-synthesis pass.
+alias_target_rel_type: REFERENCES
+
+community:
+  resolution: 1.0
+  seed: 42
+
+default_writing_guidance:
+  goal: |
+    The standing-knowledge mem is the durable WHY of a project: a
+    reader of this mem alone should understand which choices were made
+    and what they beat, which rules bind and where, and which
+    reasoning is still open — without re-deriving any of it from code
+    or history. It is graph-authoritative: conversation and review are
+    its intake, no source of truth sits behind it. The graph carries
+    settled knowledge, not in-flight work state or session commentary;
+    an entity earns its place by outliving the change that produced it.
+
+  avoid: |
+    The schema defines the types, their boundaries, and their
+    relationship vocabulary — trust it. The failure modes worth naming
+    explicitly:
+
+    - Current-state description smuggled into a decision or memo. What
+      the system IS belongs in the software mems this knowledge sits
+      beside; entities here link into those mems rather than
+      restating them. The types for current state are absent from this
+      schema on purpose.
+    - A `decision` without MOTIVATED_BY, or with an empty Options
+      section. A decision with no surfaced motivation and no rejected
+      alternatives reads as preference — record what it beat and why.
+    - Editing an accepted decision's body to reflect a later change.
+      Author the successor and link SUPERSEDES — the old entity is
+      history, and rewriting it destroys exactly the value this mem
+      exists to keep.
+    - A `principle` scoped to one module. Project-wide rules only; a
+      per-module convention belongs in that module's documentation or
+      its software mem.
+    - Session commentary and process notes ("decided to model X as a
+      memo", "revisit next sprint"). The mem records knowledge, not
+      the act of recording.
+    - Cross-mem wiki-links that are not also relations. Body
+      wiki-links into other mems must alias an explicit relation in
+      `## Relationships`; the workspace `cross_mem_links` policy gates
+      which directions are allowed.

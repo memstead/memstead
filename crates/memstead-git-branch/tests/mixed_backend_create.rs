@@ -284,6 +284,86 @@ fn out_of_root_folder_mount_round_trips_relative_and_survives_clone() {
     );
 }
 
+/// The `engineering@0.1.0` builtin enforces the knowledge/system-model
+/// class boundary at write time: a mem pinned to it accepts `decision`
+/// / `principle` / `memo` and refuses a current-state type (`spec`)
+/// with `UNKNOWN_ENTITY_TYPE`.
+#[test]
+fn engineering_schema_refuses_current_state_types_at_write() {
+    let tmp = TempDir::new().unwrap();
+    init_real_mem_repo(tmp.path(), &[]);
+    let mut engine = engine_from_workspace_root(tmp.path()).expect("engine boots");
+
+    mem_management::create_mem(
+        &mut engine,
+        mem_management::MemCreateParams {
+            name: "knowledge".to_string(),
+            location: std::path::PathBuf::from("knowledge"),
+            schema_ref: "engineering@0.1.0".parse().unwrap(),
+            vcs: None,
+            note: None,
+            operator_mode: true,
+            recovery: None,
+            write_guidance: Default::default(),
+            storage: Some(StorageKind::Folder),
+        },
+    )
+    .expect("mem pinned to the engineering builtin creates");
+
+    // The knowledge types write.
+    let mut sections = indexmap::IndexMap::new();
+    sections.insert("decision".to_string(), "We chose the gate.".to_string());
+    sections.insert("context".to_string(), "Boundary test.".to_string());
+    sections.insert("consequences".to_string(), "- enforced".to_string());
+    let mut metadata: indexmap::IndexMap<String, String> = Default::default();
+    metadata.insert("decided_on".to_string(), "2026-07-13".to_string());
+    metadata.insert("deciders".to_string(), "test".to_string());
+    engine
+        .create_entity(
+            CreateEntityArgs {
+                anchors: Vec::new(),
+                mem: "knowledge".to_string(),
+                title: "Gate The Boundary".to_string(),
+                entity_type: "decision".to_string(),
+                sections,
+                metadata,
+                relations: Vec::new(),
+                dry_run: false,
+            },
+            Actor::Cli,
+            None,
+            None,
+        )
+        .expect("decision entity writes into the engineering mem");
+
+    // A current-state type refuses — the class boundary is a gate.
+    let mut spec_sections = indexmap::IndexMap::new();
+    spec_sections.insert("identity".to_string(), "x".to_string());
+    spec_sections.insert("purpose".to_string(), "x".to_string());
+    let err = engine
+        .create_entity(
+            CreateEntityArgs {
+                anchors: Vec::new(),
+                mem: "knowledge".to_string(),
+                title: "Smuggled Spec".to_string(),
+                entity_type: "spec".to_string(),
+                sections: spec_sections,
+                metadata: Default::default(),
+                relations: Vec::new(),
+                dry_run: false,
+            },
+            Actor::Cli,
+            None,
+            None,
+        )
+        .expect_err("spec must refuse in an engineering-pinned mem");
+    assert_eq!(
+        err.code(),
+        "UNKNOWN_ENTITY_TYPE",
+        "the refusal must be the typed class-boundary gate, got {err:?}"
+    );
+}
+
 /// Out-of-root placement stays operator-gated: an agent-mode create
 /// whose location resolves outside the workspace root refuses with
 /// `MEM_PATH_NOT_ALLOWED` / `outside_workspace` even when the name

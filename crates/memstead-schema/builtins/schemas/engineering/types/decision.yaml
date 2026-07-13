@@ -1,0 +1,99 @@
+# yaml-language-server: $schema=../../../../generated/type-definition.schema.json
+
+name: decision
+description: |
+  An Architecture Decision Record (ADR). Captures one design choice —
+  the context that forced it, the options considered, the chosen option,
+  and the consequences. Forms a chain via SUPERSEDES when a later
+  decision replaces it.
+when_to_use: |
+  Use when recording a non-trivial design choice that should persist for
+  future agents and engineers. The defining test: can you name the
+  rejected alternatives? If yes, `decision`. If it's reasoning without
+  alternatives, use `memo`. If it's a rule rather than a choice, use
+  `principle`.
+boundaries:
+  - Not lightweight reasoning without rejected alternatives — use `memo` (and migrate later if alternatives accumulate).
+  - Not a project-wide policy — use `principle`.
+  - Not a current-state description — that belongs in the software mem modelling the system, not in the standing-knowledge mem.
+system_message: |
+  A decision records one choice. Lifecycle: proposed → accepted →
+  superseded / retired. When a later decision replaces an earlier one,
+  link SUPERSEDES from the new one and flip the old status to
+  superseded — never edit the old body retroactively. The Options
+  section is the highest-value part of any ADR: it prevents the same
+  alternatives from being re-litigated in six months. Link MOTIVATED_BY
+  to the memo, principle, or external trigger that precipitated the
+  choice.
+sections:
+  - key: decision
+    heading: Decision
+    required: true
+    search_weight: 40.0
+    write_rules:
+      - "One paragraph stating the chosen option and its essential properties. Starts with 'We will …' or 'We chose …'."
+      - "The punch line of the ADR — weighted highest in search so this section anchors every query hit."
+  - key: context
+    heading: Context
+    required: true
+    search_weight: 20.0
+    write_rules:
+      - "What forced this decision: constraints, goals, precipitating event. Enough that a reader understands WHY this choice had to be made now."
+  - key: consequences
+    heading: Consequences
+    required: true
+    search_weight: 15.0
+    write_rules:
+      - "Bullet list of direct effects: what this enables, what it blocks, what it costs, what follow-up work it triggers."
+      - "Include negative consequences — the tradeoff you accepted, not the benefits alone."
+  - key: options
+    heading: Options
+    required: false
+    search_weight: 10.0
+    write_rules:
+      - "One bullet per alternative considered. For each: one-sentence description, then rejection reason (or 'chosen')."
+      - "Negative knowledge is the highest-value part of an ADR — always record what was rejected and why."
+  - key: notes
+    heading: Notes
+    required: false
+    search_weight: 3.0
+    catch_all: true
+    write_rules:
+      - "Free-form addendum: later observations, revisit conditions, pointers to related work."
+metadata_fields:
+  - key: status
+    description: Lifecycle state of the decision.
+    field_type: string
+    default_value: proposed
+    enum_values: [proposed, accepted, superseded, retired]
+    filterable: equality
+  - key: decided_on
+    description: Date the decision was accepted. ISO YYYY-MM-DD.
+    field_type: date
+    filterable: range
+  - key: deciders
+    description: Who made the call. Comma-separated names or team handles.
+    field_type: string
+    serialization: csv_array
+  - key: scope
+    description: Breadth of impact — narrow (one module) to org-wide.
+    field_type: string
+    default_value: component
+    enum_values: [component, subsystem, system, org]
+    filterable: equality
+title_weight: 100.0
+text_fields: [context, options, decision, consequences, notes]
+hierarchy_relationship: PART_OF
+edge_weight_overrides:
+  SUPERSEDES: 3.0
+  DERIVED_FROM: 2.5
+propagating_relationships: [SUPERSEDES, DERIVED_FROM, MOTIVATED_BY]
+updatable_fields: [title, context, options, decision, consequences, status, decided_on, deciders, scope, tags, notes]
+health_required_fields: [context, decision, consequences]
+staleness_threshold_days: 365
+write_rules:
+  - "Status transitions: proposed → accepted when committed, accepted → superseded when replaced, any → retired when the decision no longer applies."
+  - "Never edit the body of an accepted decision to reflect a later change. Author a new decision with SUPERSEDES instead — the old one is history."
+  - "Options is optional in the schema but strongly encouraged. An ADR without rejected alternatives is half an ADR."
+  - "Title states the decision imperatively ('Use gRPC for internal services' beats 'gRPC decision')."
+  - "Link MOTIVATED_BY to the memo, principle, or external trigger that precipitated the choice. Link SUPERSEDES to any predecessor."
