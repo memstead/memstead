@@ -157,14 +157,23 @@ fn git_head(git_root: &Path) -> Option<String> {
 
 /// Translate a workspace-relative facet pattern into a git pathspec relative
 /// to `git_root`, with `:(glob)` magic (or `:(glob,exclude)` for a deny).
+///
+/// A `**`-prefixed pattern is prefix-free — it matches under any directory,
+/// in particular the medium subtree — so it is emitted verbatim as a
+/// git-root-relative glob. Lexically re-rooting it (join + relativize) would
+/// produce `../**/…` for any non-root medium pointer, and git *fatals* on an
+/// out-of-tree pathspec, sinking the whole diff into a no-signal degrade.
 fn to_git_pathspec(pattern: &str, git_root: &Path, workspace_root: &Path, exclude: bool) -> String {
-    let resolved = normalize_lexical(&workspace_root.join(pattern));
-    let git_rel = relative_path(git_root, &resolved);
     let magic = if exclude {
         ":(glob,exclude)"
     } else {
         ":(glob)"
     };
+    if pattern.starts_with("**") {
+        return format!("{magic}{pattern}");
+    }
+    let resolved = normalize_lexical(&workspace_root.join(pattern));
+    let git_rel = relative_path(git_root, &resolved);
     format!("{magic}{}", git_rel.to_string_lossy())
 }
 
@@ -178,6 +187,10 @@ fn in_repo_pathspec(
     workspace_root: &Path,
     exclude: bool,
 ) -> Option<String> {
+    // Prefix-free glob — same verbatim re-anchoring as `to_git_pathspec`.
+    if pattern.starts_with("**") {
+        return Some(to_git_pathspec(pattern, git_root, workspace_root, exclude));
+    }
     let resolved = normalize_lexical(&workspace_root.join(pattern));
     let git_rel = relative_path(git_root, &resolved);
     if git_rel
@@ -271,7 +284,9 @@ pub fn enumerate_facet_files(
 
     // Walk the medium's directory tree; the facet patterns are
     // workspace-relative, so each candidate is matched by its
-    // workspace-relative path.
+    // workspace-relative path. VCS internals are never source artifacts —
+    // they are pruned here so `.git/**` plumbing cannot enter `S(D)`,
+    // matching the git strategy (whose diffs never name `.git` files).
     let base = medium_base(&source.medium_pointer, workspace_root);
     let mut out: Vec<String> = Vec::new();
     let mut stack = vec![base];
@@ -285,7 +300,13 @@ pub fn enumerate_facet_files(
             };
             let path = entry.path();
             if file_type.is_dir() {
-                stack.push(path);
+                let vcs_internal = path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| VCS_INTERNAL_DIRS.contains(&n));
+                if !vcs_internal {
+                    stack.push(path);
+                }
             } else if file_type.is_file() {
                 let rel = relative_path(workspace_root, &normalize_lexical(&path))
                     .to_string_lossy()
@@ -568,8 +589,13 @@ pub fn write_active_deny_file(workspace_root: &Path, ingest_name: &str, deny_pat
     }
 }
 
+/// VCS metadata directories — never source artifacts. Pruned from source
+/// enumeration (`S(D)`, mtime slices, advance) and from the dead-deny scan.
+const VCS_INTERNAL_DIRS: &[&str] = &[".git", ".svn", ".hg"];
+
 /// Directory names never worth walking for the dead-deny scan — build output,
-/// VCS metadata, dependency caches, and the engine's own cache.
+/// VCS metadata ([`VCS_INTERNAL_DIRS`]), dependency caches, and the engine's
+/// own cache.
 const DEAD_DENY_SKIP_DIRS: &[&str] = &[
     ".git",
     "node_modules",
@@ -941,6 +967,22 @@ mod tests {
         assert_eq!(
             to_git_pathspec("../public/target/**", git_root, ws, true),
             ":(glob,exclude)target/**"
+        );
+    }
+
+    /// A `**`-prefixed pattern (the scaffolded facet default `**/*`) is
+    /// prefix-free and re-anchors verbatim onto the git root. Lexical
+    /// re-rooting would yield `:(glob)../**/*` for any sub-medium — an
+    /// out-of-tree pathspec git fatals on, degrading every diff to
+    /// no-signal.
+    #[test]
+    fn wildcard_prefixed_pathspec_reanchors_verbatim() {
+        let ws = Path::new("/m/ws");
+        let git_root = Path::new("/m/ws/src");
+        assert_eq!(to_git_pathspec("**/*", git_root, ws, false), ":(glob)**/*");
+        assert_eq!(
+            in_repo_pathspec("**/__pycache__/**", git_root, ws, true).as_deref(),
+            Some(":(glob,exclude)**/__pycache__/**")
         );
     }
 

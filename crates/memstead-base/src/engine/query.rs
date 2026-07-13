@@ -338,13 +338,16 @@ impl Engine {
             .collect()
     }
 
-    /// The filesystem root of `mem`'s single `path`-namespace medium
+    /// The observation root for `mem`'s single `path`-namespace medium
     /// (codebase / filesystem), or `None` when the mem has zero / several
     /// mediums, no workspace root, or its lone medium is not path-shaped
     /// (`path+commit` / `entity` / `url` — those need commit-pinned or
-    /// non-filesystem observation, E3b). The root is
-    /// `workspace_root.join(pointer)` (or the workspace root when the pointer
-    /// is empty), matching how facet scopes interpret paths.
+    /// non-filesystem observation, E3b). The root is the **workspace root**:
+    /// anchor artifact ids are workspace-relative (pointer-prefixed) — the
+    /// same dialect enumeration, deny_paths, coverage matching, and the
+    /// advance auto-`worked` derivation share — so observation joins them
+    /// onto the workspace root, never onto the medium pointer (which the
+    /// ids already embed).
     fn single_path_medium_root(&self, mem: &str) -> Option<PathBuf> {
         let workspace_root = self.workspace_root.as_deref()?;
         let mut mediums = self
@@ -360,12 +363,7 @@ impl Engine {
         if caps.anchor_namespace != "path" {
             return None; // only plain working-tree path mediums are observable here
         }
-        let pointer = first.config.pointer.trim();
-        Some(if pointer.is_empty() {
-            workspace_root.to_path_buf()
-        } else {
-            workspace_root.join(pointer)
-        })
+        Some(workspace_root.to_path_buf())
     }
 
     /// Reverse anchor lookup: every `(entity_id, anchor)` across all mems

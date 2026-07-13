@@ -1481,9 +1481,10 @@ community:
             )
             .unwrap();
 
-        // A single `path` medium rooted at `<workspace>/src`; a file exists
-        // there, so `present.rs` observes present and `gone.rs` observes
-        // absent.
+        // A single `path` medium rooted at `<workspace>/src`. Anchor artifact
+        // ids are workspace-relative (pointer-prefixed) — the dialect
+        // enumeration / coverage / advance share — so `src/present.rs`
+        // observes present and `src/gone.rs` observes absent.
         crate::pipeline_store::write_medium(
             tmp.path(),
             "specs",
@@ -1522,9 +1523,9 @@ community:
                     metadata: IndexMap::new(),
                     relations: Vec::new(),
                     anchors: vec![
-                        anchor("present.rs", "anchored", Some("h1")), // present + hash → recheck
-                        anchor("present.rs", "informed-by", None), // present + non-hash → resolves
-                        anchor("gone.rs", "anchored", Some("h2")), // absent → orphaned
+                        anchor("src/present.rs", "anchored", Some("h1")), // present + hash → recheck
+                        anchor("src/present.rs", "informed-by", None), // present + non-hash → resolves
+                        anchor("src/gone.rs", "anchored", Some("h2")), // absent → orphaned
                     ],
                     dry_run: false,
                 },
@@ -1543,20 +1544,20 @@ community:
                 .and_then(|r| r.state)
         };
         assert_eq!(
-            state_of("present.rs", crate::anchor::AnchorProvenanceClass::Anchored),
+            state_of("src/present.rs", crate::anchor::AnchorProvenanceClass::Anchored),
             Some(AnchorState::Recheck),
             "present hash-bearing anchor cannot adjudicate the prepared hash here → recheck"
         );
         assert_eq!(
             state_of(
-                "present.rs",
+                "src/present.rs",
                 crate::anchor::AnchorProvenanceClass::InformedBy
             ),
             Some(AnchorState::Resolves),
             "present non-hash anchor resolves on existence"
         );
         assert_eq!(
-            state_of("gone.rs", crate::anchor::AnchorProvenanceClass::Anchored),
+            state_of("src/gone.rs", crate::anchor::AnchorProvenanceClass::Anchored),
             Some(AnchorState::Orphaned),
             "absent artifact is orphaned"
         );

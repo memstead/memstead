@@ -7,6 +7,17 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Fixed
+- Three projection-pipeline defects found by a controlled sync campaign
+  (every binding with a non-root medium pointer was affected):
+  anchor observation double-prefixed workspace-relative artifact ids and
+  reported every such anchor `orphaned`; the default-scaffolded `**/*`
+  facet scope was lexically re-rooted onto the medium git root, fataling
+  git and silently degrading all change detection to no-signal; and
+  source enumeration walked `.git`/`.svn`/`.hg` internals into the
+  coverage denominator while the dead-deny scan pruned them (two
+  walkers, two answers).
+
 ### Changed
 - Build briefs (discovery and one-shot) now carry a **provenance
   instruction**: attach `anchors[]` to every entity mutation, naming the
