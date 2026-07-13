@@ -355,8 +355,10 @@ fn posix_path(path: &Path) -> String {
         .join("/")
 }
 
-/// Recursively collect `.md` files. Skips hidden directories (same
-/// policy as the entity loader).
+/// Recursively collect `.md` files. Skips hidden directories and
+/// `README.md` (same policy as the entity loaders — a folder mem living
+/// visibly in a repository tree carries a human-facing README beside its
+/// entity files, and what load skips, export must skip too).
 fn collect_markdown(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), std::io::Error> {
     let mut children: Vec<_> = fs::read_dir(dir)?.collect::<Result<_, _>>()?;
     children.sort_by_key(|e| e.file_name());
@@ -371,7 +373,7 @@ fn collect_markdown(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), std::io::E
                 continue;
             }
             collect_markdown(&path, out)?;
-        } else if name.ends_with(".md") {
+        } else if name.ends_with(".md") && name.as_ref() != "README.md" {
             out.push(path);
         }
     }

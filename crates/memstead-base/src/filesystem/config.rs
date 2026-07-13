@@ -116,8 +116,13 @@ impl<'de> Deserialize<'de> for DepRef {
 
 /// Workspace-shape `.memstead/config.json` for a filesystem mem. Distinct
 /// from [`PublishedMemConfig`] (the archive shape).
+///
+/// Unknown fields are preserved, not refused: the engine's own runtime
+/// machinery writes fields this struct does not model (`syncState` from
+/// the projection sync baseline, `writeGuidance` from per-mem guidance
+/// additions), and a strict reader would both break export for any
+/// projection-maintained mem and drop those fields on rewrite.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
 pub struct WorkspaceConfig {
     /// Format integer. Always [`FILESYSTEM_WORKSPACE_FORMAT`] on
     /// successful load.
@@ -146,6 +151,11 @@ pub struct WorkspaceConfig {
     /// at parse time.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub deps: Vec<DepRef>,
+    /// Engine-owned runtime fields this shape does not model
+    /// (`syncState`, `writeGuidance`, …) — carried verbatim so a
+    /// read-modify-write round-trip never destroys them.
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
 impl WorkspaceConfig {
@@ -164,6 +174,7 @@ impl WorkspaceConfig {
             description: None,
             authors: None,
             deps: Vec::new(),
+            extra: serde_json::Map::new(),
         }
     }
 
@@ -547,11 +558,20 @@ mod tests {
     }
 
     #[test]
-    fn rejects_unknown_top_level_field() {
+    fn preserves_unknown_top_level_fields() {
+        // Engine-owned runtime fields (`syncState`, `writeGuidance`, …)
+        // land in the same file this shape reads; they must survive a
+        // read-modify-write round-trip instead of refusing the parse
+        // (a strict reader broke export for projection-maintained mems).
         let mut v = ok_config_value();
-        v["surprise"] = serde_json::json!(true);
-        let err = parse(v).unwrap_err();
-        assert!(matches!(err, WorkspaceConfigError::Malformed(_)));
+        v["syncState"] = serde_json::json!({"public-docs": "abc123"});
+        let cfg = parse(v).unwrap();
+        assert_eq!(
+            cfg.extra.get("syncState"),
+            Some(&serde_json::json!({"public-docs": "abc123"}))
+        );
+        let back = serde_json::to_value(&cfg).unwrap();
+        assert_eq!(back["syncState"]["public-docs"], "abc123");
     }
 
     #[test]

@@ -36,6 +36,17 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   in a repository tree carries a human-facing README beside its entity
   files; the loader no longer parses it as an entity (quickstart already
   tolerated README-grade files at init — the load side now matches).
+- **`memstead export` skips `README.md` too.** The export walker still
+  collected it, so exporting a folder mem that carries a README failed
+  strict validation with `missing frontmatter at README.md` — what load
+  skips, export now skips as well.
+- **`WorkspaceConfig` preserves unknown fields instead of refusing.** The
+  engine's own runtime machinery writes fields the workspace-shape config
+  struct did not model (`syncState` from the projection sync baseline,
+  `writeGuidance`), so exporting any projection-maintained folder mem
+  failed with `workspace config malformed: unknown field syncState` — and
+  a rewrite would have dropped the fields. Unknown fields now flow through
+  a flattened extra map and survive read-modify-write round-trips.
 - **`--detach-incoming` on `memstead mem delete` — the mem-replacement
   affordance.** Deleting a mem that other Write-Mems still link into
   normally refuses `MEM_HAS_INCOMING_REFS`; with the flag, the delete
