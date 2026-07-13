@@ -7,6 +7,14 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Changed
+- `/sync --all` under a recurring loop now **ends the loop on quiescence**:
+  a second consecutive nothing-due rotation means the catch-up job is done —
+  the skill cancels the schedule driving it and reports quiescence, instead
+  of ticking no-ops forever. A standing watch is a deliberate restart at a
+  slower cadence. Matches the operator mental model "run until the graph is
+  back in sync, then stop".
+
 ### Added
 - **Schema-level `system_context` in the full `memstead_schema` payload.**
   A schema manifest's `system_message` — the author's voice/posture prose —
