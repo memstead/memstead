@@ -305,6 +305,160 @@ fn update_wrong_hash_json_mode_carries_current() {
         .stdout(contains("\"current\""));
 }
 
+/// Create a `--from`-shaped update payload file and return its path.
+fn update_payload(tmp: &Path, name: &str, json: &str) -> PathBuf {
+    let path = tmp.join(name);
+    fs::write(&path, json).unwrap();
+    path
+}
+
+/// Seed one entity for the `--from` matrix tests and return its hash.
+fn seed_from_entity(tmp: &Path, title: &str, slug: &str) -> String {
+    memstead()
+        .current_dir(tmp)
+        .args([
+            "create",
+            "--title",
+            title,
+            "--type",
+            "spec",
+            "--section",
+            "identity=x",
+            "--section",
+            "purpose=original",
+        ])
+        .assert()
+        .success();
+    entity_hash(tmp, &format!("cli-write--{slug}"))
+}
+
+/// `--from` × `--dry-run`: the flag forces a dry run even when the file's
+/// `dry_run` field is absent — validated, echoed as a dry-run, and NOTHING
+/// written (the entity hash is unchanged). Pre-fix the flag was silently
+/// dropped on the `--from` path and the update committed.
+#[test]
+fn update_from_honors_dry_run_flag() {
+    let tmp = TempDir::new().unwrap();
+    let _mem = make_mem(tmp.path());
+    let hash = seed_from_entity(tmp.path(), "Fromdry", "fromdry");
+
+    let payload = update_payload(
+        tmp.path(),
+        "payload.json",
+        &format!(
+            r#"{{ "id": "cli-write--fromdry", "expected_hash": "{hash}",
+                  "sections": {{ "purpose": "would change" }} }}"#
+        ),
+    );
+    memstead()
+        .current_dir(tmp.path())
+        .args(["update", "--from"])
+        .arg(&payload)
+        .arg("--dry-run")
+        .assert()
+        .success()
+        .stdout(contains("Dry-run `cli-write--fromdry`"));
+
+    // Side-effect-free: the entity is byte-identical (same hash).
+    assert_eq!(entity_hash(tmp.path(), "cli-write--fromdry"), hash);
+}
+
+/// `--from` × `--expected-hash`: the flag enforces CAS identically to the
+/// inline path — a wrong hash refuses with the hash-mismatch exit (4), a
+/// correct one writes. Pre-fix the flag was silently dropped and the file's
+/// (absent) field decided.
+#[test]
+fn update_from_enforces_expected_hash_flag() {
+    let tmp = TempDir::new().unwrap();
+    let _mem = make_mem(tmp.path());
+    let hash = seed_from_entity(tmp.path(), "Fromcas", "fromcas");
+
+    // The file carries NO expected_hash — the flag is the only CAS input.
+    let payload = update_payload(
+        tmp.path(),
+        "payload.json",
+        r#"{ "id": "cli-write--fromcas", "sections": { "purpose": "changed" } }"#,
+    );
+
+    // Wrong hash → the same hash-mismatch refusal as the inline path.
+    memstead()
+        .current_dir(tmp.path())
+        .args(["update", "--from"])
+        .arg(&payload)
+        .args(["--expected-hash", "deadbeef"])
+        .assert()
+        .code(4)
+        .stderr(contains("current:"));
+
+    // Correct hash → the update commits.
+    memstead()
+        .current_dir(tmp.path())
+        .args(["update", "--from"])
+        .arg(&payload)
+        .args(["--expected-hash", &hash])
+        .assert()
+        .success()
+        .stdout(contains("Updated `cli-write--fromcas`"));
+    assert_ne!(entity_hash(tmp.path(), "cli-write--fromcas"), hash);
+}
+
+/// When both the file's `expected_hash` field and the `--expected-hash` flag
+/// are present, the flag wins (command line overrides file) — a stale file
+/// hash does not defeat an explicit fresh one.
+#[test]
+fn update_from_flag_overrides_file_expected_hash() {
+    let tmp = TempDir::new().unwrap();
+    let _mem = make_mem(tmp.path());
+    let hash = seed_from_entity(tmp.path(), "Fromwins", "fromwins");
+
+    let payload = update_payload(
+        tmp.path(),
+        "payload.json",
+        r#"{ "id": "cli-write--fromwins", "expected_hash": "deadbeef",
+             "sections": { "purpose": "changed" } }"#,
+    );
+    memstead()
+        .current_dir(tmp.path())
+        .args(["update", "--from"])
+        .arg(&payload)
+        .args(["--expected-hash", &hash])
+        .assert()
+        .success()
+        .stdout(contains("Updated `cli-write--fromwins`"));
+}
+
+/// The content flags conflict with `--from` at parse time — never silently
+/// ignored. One representative per content-flag family.
+#[test]
+fn update_from_refuses_content_flags() {
+    let tmp = TempDir::new().unwrap();
+    let _mem = make_mem(tmp.path());
+    let payload = update_payload(
+        tmp.path(),
+        "payload.json",
+        r#"{ "id": "cli-write--x", "sections": { "purpose": "y" } }"#,
+    );
+
+    for conflicting in [
+        vec!["--section", "purpose=inline"],
+        vec!["--append", "purpose=inline"],
+        vec!["--patch", "purpose=a=>b"],
+        vec!["--metadata", "status=active"],
+        vec!["--metadata-unset", "status"],
+        vec!["--declare-relations", "USES:cli-write--y"],
+        vec!["--anchor", "{}"],
+    ] {
+        memstead()
+            .current_dir(tmp.path())
+            .args(["update", "--from"])
+            .arg(&payload)
+            .args(&conflicting)
+            .assert()
+            .code(2)
+            .stderr(contains("cannot be used with"));
+    }
+}
+
 #[test]
 fn relate_adds_edge_visible_from_relations() {
     let tmp = TempDir::new().unwrap();

@@ -19,6 +19,15 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   creation surface was missing. MCP and UniFFI wire shapes are unchanged.
 
 ### Fixed
+- `update --from` silently dropped `--dry-run` and `--expected-hash` while
+  its help text promised the hash-mode flags were respected. Both now apply
+  exactly as on the inline path — `--dry-run` forces a dry run (validated,
+  nothing written), `--expected-hash` enforces CAS and overrides the file's
+  `expected_hash` field — and the content flags (`--section`, `--append`,
+  `--patch`/`--patch-all`, `--metadata`/`--metadata-unset`,
+  `--declare-relations`, `--anchor`) now conflict with `--from` at parse
+  time instead of being silently ignored. The `--from` help states exactly
+  which flags apply.
 - Three projection-pipeline defects found by a controlled sync campaign
   (every binding with a non-root medium pointer was affected):
   anchor observation double-prefixed workspace-relative artifact ids and

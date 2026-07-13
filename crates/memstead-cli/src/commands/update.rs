@@ -31,7 +31,9 @@ pub struct Args {
     pub id: Option<String>,
 
     /// Hash from `memstead entity <id>` (the `_hash` field). Required unless
-    /// `--auto-hash` or `--force` is given.
+    /// `--auto-hash` or `--force` is given. With `--from`, this flag
+    /// overrides the file's `expected_hash` field and enforces CAS exactly
+    /// as on the inline path.
     #[arg(long = "expected-hash", value_name = "HASH")]
     pub expected_hash: Option<String>,
 
@@ -49,33 +51,37 @@ pub struct Args {
     /// wiki-links must take slug-form (`[[idempotency]]`, not the
     /// title-case `[[Idempotency]]`) — a non-slug target refuses with
     /// `INVALID_WIKI_LINK_TARGET` carrying a `proposed_slug` to retry with.
-    #[arg(long = "section", value_name = "KEY=VALUE")]
+    #[arg(long = "section", value_name = "KEY=VALUE", conflicts_with = "from")]
     pub sections: Vec<String>,
 
     /// Append to section content: repeatable `--append key=value`.
-    #[arg(long = "append", value_name = "KEY=VALUE")]
+    #[arg(long = "append", value_name = "KEY=VALUE", conflicts_with = "from")]
     pub append: Vec<String>,
 
     /// Find-and-replace inside a section: repeatable `--patch key=OLD=>NEW`.
     /// Use `=>` (two chars) as the separator between old and new. Exact match
     /// of the first occurrence; use `--patch-all` to replace every occurrence.
-    #[arg(long = "patch", value_name = "KEY=OLD=>NEW")]
+    #[arg(long = "patch", value_name = "KEY=OLD=>NEW", conflicts_with = "from")]
     pub patch: Vec<String>,
 
     /// Replace every occurrence of OLD in the section — sibling of `--patch`.
     /// Repeatable `--patch-all key=OLD=>NEW`.
-    #[arg(long = "patch-all", value_name = "KEY=OLD=>NEW")]
+    #[arg(
+        long = "patch-all",
+        value_name = "KEY=OLD=>NEW",
+        conflicts_with = "from"
+    )]
     pub patch_all: Vec<String>,
 
     /// Metadata field: repeatable `--metadata key=value`.
-    #[arg(long = "metadata", value_name = "KEY=VALUE")]
+    #[arg(long = "metadata", value_name = "KEY=VALUE", conflicts_with = "from")]
     pub metadata: Vec<String>,
 
     /// Remove a metadata field: repeatable `--metadata-unset KEY`. Silent
     /// no-op if the key is absent; errors on read-only fields (mem/id/type
     /// plus the engine-stamped created_date/last_modified) or
     /// schema-required fields.
-    #[arg(long = "metadata-unset", value_name = "KEY")]
+    #[arg(long = "metadata-unset", value_name = "KEY", conflicts_with = "from")]
     pub metadata_unset: Vec<String>,
 
     /// Atomic batched relation declaration: repeatable
@@ -90,24 +96,37 @@ pub struct Args {
     /// `memstead relate`'s add path. Each successful declaration is
     /// echoed in the response's `relations_declared` (with
     /// `target_was_stubbed` flagging the auto-stub case).
-    #[arg(long = "declare-relations", value_name = "REL_TYPE:TARGET_ID")]
+    #[arg(
+        long = "declare-relations",
+        value_name = "REL_TYPE:TARGET_ID",
+        conflicts_with = "from"
+    )]
     pub declare_relations: Vec<String>,
 
     /// Provenance anchor: repeatable `--anchor '<json>'`, each a JSON
     /// object of the anchor shape. Written into the mem-branch anchors
     /// sidecar in the same commit as the update; a malformed anchor
     /// refuses `INVALID_ANCHOR`. An update carrying only `--anchor` (no
-    /// section/metadata change) still commits the sidecar. Ignored when
-    /// `--from` is given (the file's `anchors[]` is authoritative).
-    #[arg(long = "anchor", value_name = "JSON")]
+    /// section/metadata change) still commits the sidecar. Conflicts with
+    /// `--from` (the file's `anchors[]` is authoritative there).
+    #[arg(long = "anchor", value_name = "JSON", conflicts_with = "from")]
     pub anchors: Vec<String>,
 
-    /// Preview what would change without writing.
+    /// Preview what would change without writing. Applies on both the
+    /// inline and `--from` paths; with `--from` it forces a dry run even
+    /// when the file's `dry_run` field is absent or `false`.
     #[arg(long)]
     pub dry_run: bool,
 
-    /// JSON file matching MCP `memstead_update` args shape. When set, flags
-    /// above except the hash-mode flags are ignored.
+    /// JSON file matching MCP `memstead_update` args shape. The file is the
+    /// single source of the mutation content — the content flags
+    /// (`--section` / `--append` / `--patch` / `--patch-all` / `--metadata` /
+    /// `--metadata-unset` / `--declare-relations` / `--anchor`) conflict with
+    /// `--from` rather than being silently ignored. The flags that DO apply
+    /// alongside `--from`: the hash-mode flags (`--expected-hash`, which
+    /// overrides the file's `expected_hash` field; `--auto-hash`; `--force`),
+    /// `--dry-run` (forces a dry run even when the file says otherwise), and
+    /// `--note`.
     #[arg(long = "from", value_name = "FILE")]
     pub from: Option<PathBuf>,
 
@@ -180,7 +199,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 format!("failed to read {}: {e}", file.display()),
             )
         })?;
-        let parsed: UpdatePayload = serde_json::from_slice(&bytes).map_err(|e| {
+        let mut parsed: UpdatePayload = serde_json::from_slice(&bytes).map_err(|e| {
             CliError::new(
                 ExitKind::Validation,
                 "INVALID_INPUT",
@@ -191,6 +210,14 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 "parser_error": e.to_string(),
             }))
         })?;
+        // The non-content flags apply on the `--from` path exactly as on the
+        // inline path (the content flags conflict at parse time): `--dry-run`
+        // forces a dry run, and an explicit `--expected-hash` overrides the
+        // file's `expected_hash` field. Neither is ever silently dropped.
+        parsed.dry_run |= args.dry_run;
+        if args.expected_hash.is_some() {
+            parsed.expected_hash = args.expected_hash.clone();
+        }
         parsed
     } else {
         let id = args.id.clone().ok_or_else(|| {
