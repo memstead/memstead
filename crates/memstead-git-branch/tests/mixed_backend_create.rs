@@ -265,9 +265,9 @@ fn out_of_root_folder_mount_round_trips_relative_and_survives_clone() {
         .filter(|e| e.path().extension().is_some_and(|x| x == "md"))
         .collect();
     assert!(
-        cloned_md
-            .iter()
-            .any(|e| std::fs::read_to_string(e.path()).unwrap().contains("Cloned Tree Note")),
+        cloned_md.iter().any(|e| std::fs::read_to_string(e.path())
+            .unwrap()
+            .contains("Cloned Tree Note")),
         "the cloned workspace's write must land in the cloned side dir"
     );
     assert!(
@@ -386,7 +386,10 @@ fn detach_incoming_delete_supports_same_name_rehoming() {
     .unwrap();
     init_real_mem_repo(
         tmp.path(),
-        &[("target-mem", "default@1.0.0"), ("referrer", "default@1.0.0")],
+        &[
+            ("target-mem", "default@1.0.0"),
+            ("referrer", "default@1.0.0"),
+        ],
     );
     let mut engine = engine_from_workspace_root(tmp.path()).expect("engine boots");
     create_entity_in(&mut engine, "target-mem", "Anchor Spec");

@@ -468,7 +468,14 @@ fn builtin_engineering_is_knowledge_only() {
         3,
         "knowledge-only catalogue: exactly three types"
     );
-    for absent in ["spec", "contract", "requirement", "actor", "incident", "concept"] {
+    for absent in [
+        "spec",
+        "contract",
+        "requirement",
+        "actor",
+        "incident",
+        "concept",
+    ] {
         assert!(
             s.get_type(absent).is_none(),
             "current-state type {absent} must be absent — the class boundary is a gate"
@@ -519,15 +526,23 @@ fn builtin_project_knowledge_extension_is_migration_compatible() {
 
     // decision/memo shapes match software's, structurally.
     for ty in ["decision", "memo"] {
-        let p = project.get_type(ty).unwrap_or_else(|| panic!("project lacks {ty}"));
-        let s = software.get_type(ty).unwrap_or_else(|| panic!("software lacks {ty}"));
+        let p = project
+            .get_type(ty)
+            .unwrap_or_else(|| panic!("project lacks {ty}"));
+        let s = software
+            .get_type(ty)
+            .unwrap_or_else(|| panic!("software lacks {ty}"));
         let sec = |t: &memstead_schema::TypeDefinition| {
             t.sections
                 .iter()
                 .map(|d| (d.key.clone(), d.heading.clone(), d.required, d.catch_all))
                 .collect::<Vec<_>>()
         };
-        assert_eq!(sec(&p), sec(&s), "{ty}: section shapes must match software's");
+        assert_eq!(
+            sec(&p),
+            sec(&s),
+            "{ty}: section shapes must match software's"
+        );
         let meta = |t: &memstead_schema::TypeDefinition| {
             t.metadata_fields
                 .iter()
@@ -543,14 +558,21 @@ fn builtin_project_knowledge_extension_is_migration_compatible() {
                 })
                 .collect::<Vec<_>>()
         };
-        assert_eq!(meta(&p), meta(&s), "{ty}: metadata shapes must match software's");
+        assert_eq!(
+            meta(&p),
+            meta(&s),
+            "{ty}: metadata shapes must match software's"
+        );
     }
 
     // principle: additive extension only — every software-lineage
     // field/section present, existing project fields untouched.
     let principle = project.get_type("principle").expect("principle");
     assert!(
-        principle.sections.iter().any(|s| s.key == "justification" && !s.required),
+        principle
+            .sections
+            .iter()
+            .any(|s| s.key == "justification" && !s.required),
         "principle gains optional justification"
     );
     for (key, required_absent_default) in [("authority", true), ("universality", true)] {
@@ -563,30 +585,64 @@ fn builtin_project_knowledge_extension_is_migration_compatible() {
     }
     for (key, still) in [("status", "active"), ("category", "")] {
         let f = principle.metadata_fields.iter().find(|f| f.key == key);
-        assert!(f.is_some(), "existing project principle field {key} must survive ({still})");
+        assert!(
+            f.is_some(),
+            "existing project principle field {key} must survive ({still})"
+        );
     }
 
     // Vocabulary: the migrated content's census edges resolve.
-    for rel in ["DERIVED_FROM", "SPECIALIZES", "GENERALIZES", "DEFINES", "SUPERSEDES", "MOTIVATED_BY", "GOVERNS"] {
-        assert!(project.relationship_known(rel), "project vocabulary must admit {rel}");
+    for rel in [
+        "DERIVED_FROM",
+        "SPECIALIZES",
+        "GENERALIZES",
+        "DEFINES",
+        "SUPERSEDES",
+        "MOTIVATED_BY",
+        "GOVERNS",
+    ] {
+        assert!(
+            project.relationship_known(rel),
+            "project vocabulary must admit {rel}"
+        );
     }
 
     // Cross-mem: knowledge sources into software mems; the
     // engineering block exists for split-crossing lineage edges.
-    let sw = project.cross_mem_entry("software").expect("to_schema: software");
-    let refs = sw.definitions.iter().find(|d| d.name == "REFERENCES").expect("REFERENCES");
+    let sw = project
+        .cross_mem_entry("software")
+        .expect("to_schema: software");
+    let refs = sw
+        .definitions
+        .iter()
+        .find(|d| d.name == "REFERENCES")
+        .expect("REFERENCES");
     for src in ["decision", "principle", "memo", "pillar", "evidence"] {
         assert!(
             refs.source_types.iter().any(|t| t == src),
             "cross-mem REFERENCES must admit source {src}"
         );
     }
-    for rel in ["GOVERNS", "MOTIVATED_BY", "MOTIVATES", "CONSTRAINS", "DEFINES"] {
-        assert!(sw.definitions.iter().any(|d| d.name == rel), "software block lacks {rel}");
+    for rel in [
+        "GOVERNS",
+        "MOTIVATED_BY",
+        "MOTIVATES",
+        "CONSTRAINS",
+        "DEFINES",
+    ] {
+        assert!(
+            sw.definitions.iter().any(|d| d.name == rel),
+            "software block lacks {rel}"
+        );
     }
-    let eng = project.cross_mem_entry("engineering").expect("to_schema: engineering");
+    let eng = project
+        .cross_mem_entry("engineering")
+        .expect("to_schema: engineering");
     for rel in ["REFERENCES", "DERIVED_FROM", "MOTIVATED_BY", "SPECIALIZES"] {
-        assert!(eng.definitions.iter().any(|d| d.name == rel), "engineering block lacks {rel}");
+        assert!(
+            eng.definitions.iter().any(|d| d.name == rel),
+            "engineering block lacks {rel}"
+        );
     }
 
     // The engineering builtin declares its own outbound software
@@ -595,24 +651,50 @@ fn builtin_project_knowledge_extension_is_migration_compatible() {
         .iter()
         .find(|s| s.manifest.name == "engineering")
         .expect("engineering builtin present");
-    let eng_sw = engineering.cross_mem_entry("software").expect("engineering → software block");
+    let eng_sw = engineering
+        .cross_mem_entry("software")
+        .expect("engineering → software block");
     for rel in ["REFERENCES", "GOVERNS", "MOTIVATED_BY", "IMPLEMENTS"] {
-        assert!(eng_sw.definitions.iter().any(|d| d.name == rel), "engineering→software lacks {rel}");
+        assert!(
+            eng_sw.definitions.iter().any(|d| d.name == rel),
+            "engineering→software lacks {rel}"
+        );
     }
 
     // software declares its outbound knowledge-side vocabulary —
     // census-driven from live paired-mem content (the KEEP /
     // REPOINT edge sets of the knowledge-home split).
-    let sw_eng = software.cross_mem_entry("engineering").expect("software → engineering block");
+    let sw_eng = software
+        .cross_mem_entry("engineering")
+        .expect("software → engineering block");
     for rel in ["REFERENCES", "MOTIVATED_BY", "DERIVED_FROM", "VALIDATES"] {
-        assert!(sw_eng.definitions.iter().any(|d| d.name == rel), "software→engineering lacks {rel}");
+        assert!(
+            sw_eng.definitions.iter().any(|d| d.name == rel),
+            "software→engineering lacks {rel}"
+        );
     }
-    let sw_pr = software.cross_mem_entry("project").expect("software → project block");
-    for rel in ["REFERENCES", "MOTIVATED_BY", "DEPENDS_ON", "IMPLEMENTS", "SUPERSEDES", "OWNS"] {
-        assert!(sw_pr.definitions.iter().any(|d| d.name == rel), "software→project lacks {rel}");
+    let sw_pr = software
+        .cross_mem_entry("project")
+        .expect("software → project block");
+    for rel in [
+        "REFERENCES",
+        "MOTIVATED_BY",
+        "DEPENDS_ON",
+        "IMPLEMENTS",
+        "SUPERSEDES",
+        "OWNS",
+    ] {
+        assert!(
+            sw_pr.definitions.iter().any(|d| d.name == rel),
+            "software→project lacks {rel}"
+        );
     }
     let owns = sw_pr.definitions.iter().find(|d| d.name == "OWNS").unwrap();
-    assert_eq!(owns.source_types, vec!["actor"], "cross-mem OWNS stays actor-sourced");
+    assert_eq!(
+        owns.source_types,
+        vec!["actor"],
+        "cross-mem OWNS stays actor-sourced"
+    );
 }
 
 // ---------------------------------------------------------------------------
