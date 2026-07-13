@@ -415,7 +415,10 @@ impl crate::backend::MemBackend for FilesystemMemWriter {
 /// Walk `dir` for `.md` files, accumulating mem-relative paths in
 /// `out`. Skips the mem's `.memstead/` umbrella so the engine never
 /// confuses changelog / config / schema files with entity-bearing
-/// markdown.
+/// markdown, and `README.md` — repository documentation beside the
+/// entity files, never an entity (mirrors the entity-source walker's
+/// skip; entities are slug-named after their titles, so no legitimate
+/// entity file carries this name).
 fn walk_for_md(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), BackendError> {
     let entries = match std::fs::read_dir(dir) {
         Ok(e) => e,
@@ -434,6 +437,7 @@ fn walk_for_md(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), Ba
             walk_for_md(root, &path, out)?;
         } else if file_type.is_file()
             && path.extension().and_then(|s| s.to_str()) == Some("md")
+            && entry.file_name() != "README.md"
             && let Ok(rel) = path.strip_prefix(root)
         {
             out.push(rel.to_path_buf());
