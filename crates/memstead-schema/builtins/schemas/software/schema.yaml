@@ -267,6 +267,54 @@ relationships:
       description: Fallback weight for any relationship not otherwise specified. Required by the engine.
       default_weight: 1.0
 
+# Cross-mem relationship vocabulary. Source-owned: this schema declares
+# which rel-types its entities may emit into a differently-schema'd
+# target mem. A software mem pairs with knowledge-side companions —
+# an `engineering@` standing-knowledge mem and/or a `project@` mem —
+# and its entities anchor into the knowledge that explains them:
+# census-driven from live paired-mem content. Shapes are left free
+# except OWNS (actor-sourced, as intra-mem).
+cross_mem_relationships:
+  - to_schema: engineering
+    definitions:
+      - name: REFERENCES
+        description: Soft reference from a software-side entity into a standing-knowledge entity — the anchor that ties a surface to the decision, principle, or memo explaining it.
+        when_to_use: Auto-emitted from inline wiki-links into an engineering-schema mem. Do not author manually.
+        default_weight: 0.5
+      - name: MOTIVATED_BY
+        description: The knowledge-side target motivated the software-side source.
+        when_to_use: spec/contract → the decision or principle that shaped it.
+        default_weight: 2.0
+      - name: DERIVED_FROM
+        description: The source is derived from, or based upon, the knowledge-side target.
+        default_weight: 1.5
+      - name: VALIDATES
+        description: The source validates the knowledge-side target claim, decision, or principle.
+        default_weight: 1.5
+  - to_schema: project
+    definitions:
+      - name: REFERENCES
+        description: Soft reference from a software-side entity into a project-mem entity — the anchor that ties a surface to the strategic or knowledge entity explaining it.
+        when_to_use: Auto-emitted from inline wiki-links into a project-schema mem. Do not author manually.
+        default_weight: 0.5
+      - name: MOTIVATED_BY
+        description: The project-side target motivated the software-side source.
+        default_weight: 2.0
+      - name: DEPENDS_ON
+        description: The source requires the project-side target to exist or complete first.
+        default_weight: 2.0
+      - name: IMPLEMENTS
+        description: The source realizes or fulfills the project-side target.
+        default_weight: 2.0
+      - name: SUPERSEDES
+        description: The source replaces the project-side target — the target is no longer current.
+        default_weight: 1.5
+      - name: OWNS
+        description: An actor owns the project-side target — final authority and accountability.
+        when_to_use: actor → any project-side entity, typically a decision or memo the team is accountable for.
+        default_weight: 3.0
+        source_types: [actor]
+
 # Body wiki-links `[[target]]` auto-emit as REFERENCES relations via the
 # alias-synthesis pass.
 alias_target_rel_type: REFERENCES

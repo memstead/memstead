@@ -599,6 +599,20 @@ fn builtin_project_knowledge_extension_is_migration_compatible() {
     for rel in ["REFERENCES", "GOVERNS", "MOTIVATED_BY", "IMPLEMENTS"] {
         assert!(eng_sw.definitions.iter().any(|d| d.name == rel), "engineering→software lacks {rel}");
     }
+
+    // software declares its outbound knowledge-side vocabulary —
+    // census-driven from live paired-mem content (the KEEP /
+    // REPOINT edge sets of the knowledge-home split).
+    let sw_eng = software.cross_mem_entry("engineering").expect("software → engineering block");
+    for rel in ["REFERENCES", "MOTIVATED_BY", "DERIVED_FROM", "VALIDATES"] {
+        assert!(sw_eng.definitions.iter().any(|d| d.name == rel), "software→engineering lacks {rel}");
+    }
+    let sw_pr = software.cross_mem_entry("project").expect("software → project block");
+    for rel in ["REFERENCES", "MOTIVATED_BY", "DEPENDS_ON", "IMPLEMENTS", "SUPERSEDES", "OWNS"] {
+        assert!(sw_pr.definitions.iter().any(|d| d.name == rel), "software→project lacks {rel}");
+    }
+    let owns = sw_pr.definitions.iter().find(|d| d.name == "OWNS").unwrap();
+    assert_eq!(owns.source_types, vec!["actor"], "cross-mem OWNS stays actor-sourced");
 }
 
 // ---------------------------------------------------------------------------

@@ -17,6 +17,14 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   with a typed `INVALID_INPUT` in a workspace without `mem-repo/.git/`.
   The mount loader and runtime already dispatched per-mount — only the
   creation surface was missing. MCP and UniFFI wire shapes are unchanged.
+- **`software@0.1.0` declares its outbound knowledge-side cross-mem
+  vocabulary, additively.** Two new `cross_mem_relationships` blocks let a
+  software mem's entities anchor into their knowledge-side companions:
+  `engineering` (REFERENCES / MOTIVATED_BY / DERIVED_FROM / VALIDATES) and
+  `project` (REFERENCES / MOTIVATED_BY / DEPENDS_ON / IMPLEMENTS /
+  SUPERSEDES / OWNS, OWNS staying actor-sourced) — census-driven from live
+  paired-mem content. Intra-mem vocabulary, types, and every existing
+  definition are untouched.
 - **`project@0.1.0` gains the knowledge cluster — `decision` and `memo`,
   additively.** Field shapes are structurally identical to the `software@` /
   `engineering@` namesakes (decisions and memos migrate between the three
