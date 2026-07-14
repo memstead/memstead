@@ -8,6 +8,8 @@
   "writer_allowance_full_tokens": 8000,
   "writer_allowance_hurry_tokens": 4000,
   "reader_budget_tokens": 8000,
+  "$comment_allowance": "Amendment A1 (2026-07-14, pre-first-run): writer allowances are enforced as proportional cost budgets via `claude -p --max-budget-usd`, budget_usd(round) = allowance_tokens * usd_per_output_token. usd_per_output_token is the pinned model's list output price — claude-opus-4-8 at $25.00 per 1M output tokens = 0.000025 USD/token. Full round -> $0.20, hurry round -> $0.10. Smoke-run verification + documentary fallback per README.md amendment A1.",
+  "usd_per_output_token": 0.000025,
   "contamination_threshold": 0.5,
   "cost_cap_tokens": 20000000,
   "bands": {

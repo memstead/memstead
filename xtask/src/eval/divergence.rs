@@ -34,6 +34,11 @@ pub struct Campaign {
     pub writer_allowance_full_tokens: usize,
     pub writer_allowance_hurry_tokens: usize,
     pub reader_budget_tokens: usize,
+    /// The pinned model's list output price in USD per token, recorded in
+    /// `campaign.json` (amendment A1). The conversion constant behind
+    /// [`Campaign::budget_usd`] — for `claude-opus-4-8` this is `$25 / 1M =
+    /// 0.000025`.
+    pub usd_per_output_token: f64,
     pub contamination_threshold: f64,
     pub cost_cap_tokens: u64,
 }
@@ -100,6 +105,17 @@ impl Campaign {
         in_range(&self.reader_checkpoints, "reader_checkpoints")?;
         in_range(&self.integrity_audit_rounds, "integrity_audit_rounds")?;
         Ok(())
+    }
+
+    /// The dollar budget for a session with `token_allowance` tokens (amendment
+    /// A1): allowances are enforced as proportional cost budgets via
+    /// `claude -p --max-budget-usd`, `budget_usd = allowance_tokens *
+    /// usd_per_output_token` — the pinned model's list output price recorded in
+    /// `campaign.json`. Hurry rounds carry half the token allowance, so they
+    /// receive literally half the budget.
+    #[allow(dead_code)]
+    pub fn budget_usd(&self, token_allowance: usize) -> f64 {
+        token_allowance as f64 * self.usd_per_output_token
     }
 }
 
@@ -707,9 +723,14 @@ pub fn parse_session(stdout: &str) -> Result<SessionOutput> {
 /// [`parse_session`] can read it), the pinned model, non-interactive permission,
 /// and strict MCP config. The per-session prompt and the per-arm tool/MCP flags
 /// are added by the arg-builders.
+///
+/// `budget_usd`, when set, adds `--max-budget-usd` — the proportional cost budget
+/// that operationalises the pre-registered token allowance (amendment A1). Both
+/// arms receive the flag identically per round; only the substrate access surface
+/// differs (criterion 5), so the budget is not an arm-distinguishing variable.
 #[allow(dead_code)]
-fn base_session_args(model: &str, prompt: &str) -> Vec<String> {
-    vec![
+fn base_session_args(model: &str, prompt: &str, budget_usd: Option<f64>) -> Vec<String> {
+    let mut args = vec![
         "-p".to_string(),
         prompt.to_string(),
         "--output-format".to_string(),
@@ -720,7 +741,12 @@ fn base_session_args(model: &str, prompt: &str) -> Vec<String> {
         "--permission-mode".to_string(),
         "dontAsk".to_string(),
         "--strict-mcp-config".to_string(),
-    ]
+    ];
+    if let Some(budget) = budget_usd {
+        args.push("--max-budget-usd".to_string());
+        args.push(format!("{budget:.4}"));
+    }
+    args
 }
 
 /// Build the `claude -p` argument vector for a **writer** session.
@@ -729,18 +755,20 @@ fn base_session_args(model: &str, prompt: &str) -> Vec<String> {
 /// treatment under test: Arm A writes markdown files with the filesystem tools;
 /// Arm B mutates the mem through `mcp__memstead__*` over the supplied MCP config.
 /// The pinned `model` is passed explicitly in every case (criterion 3). The
-/// writer allowance is deliberately *not* a flag here: `claude -p` cannot cap a
-/// session's output tokens (confirmed 2026-07-14), so the allowance is handled
-/// per the operator's chosen operationalisation (see plan handover), not baked
-/// into arg-building.
+/// writer allowance is operationalised as `budget_usd` (amendment A1) — a
+/// proportional `--max-budget-usd` cap computed by the caller via
+/// [`Campaign::budget_usd`]; `claude -p` cannot cap a session's output tokens
+/// directly (confirmed 2026-07-14). Pass `None` to omit the cap (the documentary
+/// fallback of amendment A1).
 #[allow(dead_code)]
 fn build_writer_args(
     arm: Arm,
     model: &str,
     prompt: &str,
+    budget_usd: Option<f64>,
     mcp_config: Option<&Path>,
 ) -> Vec<String> {
-    let mut args = base_session_args(model, prompt);
+    let mut args = base_session_args(model, prompt, budget_usd);
     args.push("--allowedTools".to_string());
     match (arm, mcp_config) {
         // Arm A: filesystem write tools, no MCP.
@@ -765,15 +793,18 @@ fn build_writer_args(
 /// Build the `claude -p` argument vector for a **reader** session — read-only
 /// access to the arm's substrate. Arm A gets filesystem *read* tools (no
 /// Write/Edit); Arm B gets only the memstead *read* tools (overview / search /
-/// entity — never the mutation tools). Pinned `model` explicit, as for writers.
+/// entity — never the mutation tools). Pinned `model` explicit, as for writers;
+/// `budget_usd` is the reader's proportional `--max-budget-usd` cap (from the
+/// fixed reader budget via [`Campaign::budget_usd`]), or `None` to omit it.
 #[allow(dead_code)]
 fn build_reader_args(
     arm: Arm,
     model: &str,
     prompt: &str,
+    budget_usd: Option<f64>,
     mcp_config: Option<&Path>,
 ) -> Vec<String> {
-    let mut args = base_session_args(model, prompt);
+    let mut args = base_session_args(model, prompt, budget_usd);
     args.push("--allowedTools".to_string());
     match (arm, mcp_config) {
         (Arm::A, _) => {
@@ -1134,8 +1165,8 @@ mod tests {
             r#"{ "rounds": 10, "hurry_rounds": [3,6,9], "reader_checkpoints": [1,3,5,10],
                  "integrity_audit_rounds": [5,10], "trials": 3,
                  "writer_allowance_full_tokens": 8000, "writer_allowance_hurry_tokens": 4000,
-                 "reader_budget_tokens": 8000, "contamination_threshold": 0.5,
-                 "cost_cap_tokens": 20000000 }"#,
+                 "reader_budget_tokens": 8000, "usd_per_output_token": 0.000025,
+                 "contamination_threshold": 0.5, "cost_cap_tokens": 20000000 }"#,
         )
         .unwrap();
         fs::write(
@@ -1318,8 +1349,8 @@ mod tests {
             r#"{ "rounds": 10, "hurry_rounds": [3], "reader_checkpoints": [1, 11],
                  "integrity_audit_rounds": [10], "trials": 3,
                  "writer_allowance_full_tokens": 8000, "writer_allowance_hurry_tokens": 4000,
-                 "reader_budget_tokens": 8000, "contamination_threshold": 0.5,
-                 "cost_cap_tokens": 20000000 }"#,
+                 "reader_budget_tokens": 8000, "usd_per_output_token": 0.000025,
+                 "contamination_threshold": 0.5, "cost_cap_tokens": 20000000 }"#,
         )
         .unwrap();
         let err = Package::load(&dir).unwrap_err().to_string();
@@ -1340,6 +1371,7 @@ mod tests {
             writer_allowance_full_tokens: 8000,
             writer_allowance_hurry_tokens: 4000,
             reader_budget_tokens: 8000,
+            usd_per_output_token: 0.000025,
             contamination_threshold: 0.5,
             cost_cap_tokens: 20_000_000,
         };
@@ -1395,8 +1427,8 @@ mod tests {
     #[test]
     fn writer_args_carry_the_pinned_model_and_arm_tools() {
         let cfg = std::path::Path::new("/tmp/mem.json");
-        let a = build_writer_args(Arm::A, "claude-opus-4-8", "PROMPT", None);
-        let b = build_writer_args(Arm::B, "claude-opus-4-8", "PROMPT", Some(cfg));
+        let a = build_writer_args(Arm::A, "claude-opus-4-8", "PROMPT", None, None);
+        let b = build_writer_args(Arm::B, "claude-opus-4-8", "PROMPT", None, Some(cfg));
 
         // Criterion 3: both sessions are invoked with the pinned model.
         assert_eq!(arg_pairs(&a).get("--model").unwrap(), "claude-opus-4-8");
@@ -1417,8 +1449,8 @@ mod tests {
     #[test]
     fn reader_args_are_read_only_per_arm() {
         let cfg = std::path::Path::new("/tmp/mem.json");
-        let a = build_reader_args(Arm::A, "m", "Q", None);
-        let b = build_reader_args(Arm::B, "m", "Q", Some(cfg));
+        let a = build_reader_args(Arm::A, "m", "Q", None, None);
+        let b = build_reader_args(Arm::B, "m", "Q", None, Some(cfg));
 
         // Arm A reader has read tools but not Write/Edit.
         let a_tools = arg_pairs(&a).get("--allowedTools").unwrap().clone();
@@ -1449,8 +1481,8 @@ mod tests {
     fn writer_and_reader_args_differ_only_in_access_surface() {
         // The prompt, model, and base flags are shared; the tools/MCP differ.
         let cfg = std::path::Path::new("/tmp/mem.json");
-        let wb = build_writer_args(Arm::B, "m", "P", Some(cfg));
-        let rb = build_reader_args(Arm::B, "m", "P", Some(cfg));
+        let wb = build_writer_args(Arm::B, "m", "P", None, Some(cfg));
+        let rb = build_reader_args(Arm::B, "m", "P", None, Some(cfg));
         assert_eq!(arg_pairs(&wb).get("-p"), arg_pairs(&rb).get("-p"));
         assert_eq!(arg_pairs(&wb).get("--model"), arg_pairs(&rb).get("--model"));
         // Writer can mutate; reader cannot.
@@ -1459,6 +1491,45 @@ mod tests {
             "mcp__memstead__*"
         );
         assert!(!arg_pairs(&rb).get("--allowedTools").unwrap().contains('*'));
+    }
+
+    #[test]
+    fn allowance_maps_to_a_proportional_max_budget_usd_flag() {
+        // Amendment A1: the writer allowance is enforced as a proportional
+        // `--max-budget-usd` cap, budget_usd = allowance_tokens * usd_per_output_token.
+        let dir = tmp();
+        write_fixture_package(&dir);
+        let campaign = Package::load(&dir).unwrap().campaign;
+
+        // claude-opus-4-8 output price (0.000025 USD/token) turns the pinned
+        // allowances into $0.20 (full) and $0.10 (hurry) — hurry is literally half.
+        let full = campaign.budget_usd(campaign.writer_allowance_full_tokens);
+        let hurry = campaign.budget_usd(campaign.writer_allowance_hurry_tokens);
+        assert!((full - 0.20).abs() < 1e-9, "full budget: {full}");
+        assert!((hurry - 0.10).abs() < 1e-9, "hurry budget: {hurry}");
+        assert!(
+            (full - 2.0 * hurry).abs() < 1e-9,
+            "hurry is half the full budget"
+        );
+
+        // The flag is emitted only when a budget is supplied; the value is the
+        // dollar figure to four decimals. Both arms carry it identically — it is
+        // not an arm-distinguishing variable.
+        let with = build_writer_args(Arm::A, "m", "P", Some(full), None);
+        assert_eq!(arg_pairs(&with).get("--max-budget-usd").unwrap(), "0.2000");
+        let with_b = build_writer_args(
+            Arm::B,
+            "m",
+            "P",
+            Some(full),
+            Some(std::path::Path::new("/tmp/mem.json")),
+        );
+        assert_eq!(
+            arg_pairs(&with_b).get("--max-budget-usd").unwrap(),
+            "0.2000"
+        );
+        let without = build_writer_args(Arm::A, "m", "P", None, None);
+        assert!(!without.iter().any(|x| x == "--max-budget-usd"));
     }
 
     #[test]
