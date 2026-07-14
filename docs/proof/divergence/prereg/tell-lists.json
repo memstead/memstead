@@ -51,7 +51,7 @@
       { "token": "schema", "reason": "kara uses 'schema' (56 occurrences) in the JSON-schema / protobuf / db.schema sense; generic, not the Memstead schema concept." },
       { "token": "relationship", "reason": "kara uses 'relationship' generically (22 occurrences)." },
       { "token": "frontmatter", "reason": "kara documents a module-frontmatter feature (5 occurrences); the Arm-A tell is narrowed to the phrase 'the yaml frontmatter block', which does not occur in kara." },
-      { "token": "grep", "reason": "kara docs say 'grep the codebase' (62 occurrences); bare 'grep' is not disjoint. Arm-A retrieval-method leakage is handled by the reader-prompt 'answer directly' instruction instead." },
+      { "token": "grep", "reason": "kara's source tree contains 'grep' as a substring 175 times (e.g. 'grep the codebase'); bare 'grep' is not disjoint. Arm-A retrieval-method leakage is handled by the reader-prompt 'answer directly' instruction instead." },
       { "token": "[[", "reason": "kara uses '[[' for nested arrays/indexing (88 occurrences); the double-bracket wikilink tell is narrowed to the whole tokens 'wikilink' / 'wiki-link' (0 occurrences)." }
     ]
   }
