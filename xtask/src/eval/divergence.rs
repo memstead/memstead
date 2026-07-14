@@ -390,7 +390,7 @@ fn hex(bytes: &[u8]) -> String {
 /// Vocabulary-entropy counts over a substrate — a secondary, judge-free metric
 /// (reported, never band-moving). Higher counts mean a richer typed vocabulary.
 #[allow(dead_code)]
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize)]
 pub struct EntropyCounts {
     /// Distinct frontmatter `type:` values.
     pub distinct_types: usize,
@@ -555,6 +555,39 @@ impl Ledger {
         }
         Ok(())
     }
+
+    /// A serialisable breakdown of the cost book for the published campaign
+    /// result — the ledger's own fields are private, so this is how it leaves the
+    /// harness.
+    pub fn summary(&self) -> LedgerSummary {
+        LedgerSummary {
+            total_tokens: self.total(),
+            cap_tokens: self.cap_tokens,
+            arm_a_writer: self.total_role(Arm::A, Role::Writer),
+            arm_a_reader: self.total_role(Arm::A, Role::Reader),
+            arm_b_writer: self.total_role(Arm::B, Role::Writer),
+            arm_b_reader: self.total_role(Arm::B, Role::Reader),
+            judge: self.total_role(Arm::A, Role::Judge) + self.total_role(Arm::B, Role::Judge),
+            auditor: self.total_role(Arm::A, Role::Auditor)
+                + self.total_role(Arm::B, Role::Auditor),
+        }
+    }
+}
+
+/// The published, serialisable form of the cost book: totals against the cap and
+/// the per-arm/role breakdown, including Arm B's refusal-repair retries inside
+/// `arm_b_writer`.
+#[allow(dead_code)]
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct LedgerSummary {
+    pub total_tokens: u64,
+    pub cap_tokens: u64,
+    pub arm_a_writer: u64,
+    pub arm_a_reader: u64,
+    pub arm_b_writer: u64,
+    pub arm_b_reader: u64,
+    pub judge: u64,
+    pub auditor: u64,
 }
 
 /// What a writer session produced: the tokens it spent and the tools it called.
@@ -890,7 +923,7 @@ fn drive_writers<R: DivergenceRunner>(
 /// One reader checkpoint's scored results: per query, `trials` reader sessions per
 /// arm, blinded and judged, aggregated into a signed `B − A` delta per query.
 #[allow(dead_code)]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct Checkpoint {
     pub round: usize,
     pub results: Vec<super::TaskResult>,
@@ -900,7 +933,7 @@ pub struct Checkpoint {
 /// judge-free divergence signal, computed from substrate bytes after the round's
 /// writers ran.
 #[allow(dead_code)]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct RoundEntropy {
     pub round: usize,
     pub arm_a: EntropyCounts,
@@ -916,6 +949,36 @@ pub struct CampaignResult {
     pub checkpoints: Vec<Checkpoint>,
     pub entropy_series: Vec<RoundEntropy>,
     pub ledger: Ledger,
+}
+
+/// The published, serialisable campaign artifact: the per-checkpoint scored
+/// results, the per-round entropy series, and the cost book. `Ledger` itself is
+/// not serialisable (private fields), so it enters as its [`LedgerSummary`].
+#[allow(dead_code)]
+#[derive(serde::Serialize)]
+pub struct CampaignReport<'a> {
+    pub checkpoints: &'a [Checkpoint],
+    pub entropy_series: &'a [RoundEntropy],
+    pub cost: LedgerSummary,
+}
+
+impl CampaignResult {
+    /// The serialisable view of this result.
+    #[allow(dead_code)]
+    pub fn report(&self) -> CampaignReport<'_> {
+        CampaignReport {
+            checkpoints: &self.checkpoints,
+            entropy_series: &self.entropy_series,
+            cost: self.ledger.summary(),
+        }
+    }
+
+    /// Serialise the result to pretty JSON — the campaign artifact plan 03
+    /// publishes.
+    #[allow(dead_code)]
+    pub fn to_json(&self) -> Result<String> {
+        Ok(serde_json::to_string_pretty(&self.report())?)
+    }
 }
 
 /// Resume state, persisted between rounds so a killed campaign continues without
@@ -1879,6 +1942,41 @@ not-json-skip-me
             2_000 + 48 * 10 + 48 * 5,
             "writers + readers + judges"
         );
+    }
+
+    #[test]
+    fn campaign_result_serialises_to_a_report_artifact() {
+        let dir = tmp();
+        write_fixture_package(&dir);
+        let pkg = Package::load(&dir).unwrap();
+        let result = run_campaign(
+            &StubRunner::new(100),
+            &StubJudge,
+            &pkg,
+            &ten_slices(),
+            &two_queries(),
+            None,
+        )
+        .unwrap();
+
+        let json = result.to_json().unwrap();
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        // Four checkpoints, each with two scored queries carrying the B-A delta.
+        assert_eq!(v["checkpoints"].as_array().unwrap().len(), 4);
+        assert_eq!(v["checkpoints"][0]["results"].as_array().unwrap().len(), 2);
+        assert!((v["checkpoints"][0]["results"][0]["delta"].as_f64().unwrap() - 0.3).abs() < 1e-9);
+        // Ten entropy samples.
+        assert_eq!(v["entropy_series"].as_array().unwrap().len(), 10);
+        assert_eq!(
+            v["entropy_series"][9]["arm_b"]["distinct_types"]
+                .as_u64()
+                .unwrap(),
+            10
+        );
+        // The cost book: writers + readers + judges = 2720.
+        assert_eq!(v["cost"]["total_tokens"].as_u64().unwrap(), 2_720);
+        assert_eq!(v["cost"]["arm_b_writer"].as_u64().unwrap(), 1_000);
     }
 
     #[test]
