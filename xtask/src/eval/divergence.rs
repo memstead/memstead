@@ -574,6 +574,11 @@ pub trait DivergenceRunner {
         prompt: &str,
         token_budget: usize,
     ) -> Result<ReaderOutcome>;
+
+    /// The on-disk directory holding `arm`'s current substrate (Arm A the loose
+    /// markdown directory, Arm B the mem's rendered entity files). The loop reads
+    /// it to compute [`vocabulary_entropy`] after each round.
+    fn substrate_dir(&self, arm: Arm) -> &Path;
 }
 
 /// Scores a blinded answer against a reference and reports its own token cost, so
@@ -675,13 +680,25 @@ pub struct Checkpoint {
     pub results: Vec<super::TaskResult>,
 }
 
-/// The whole campaign's output: the per-checkpoint scored results and the cost
-/// ledger. The per-query delta orientation is `B − A` (engine-gated minus
-/// tolerant), matching the package's accuracy band.
+/// One round's vocabulary-entropy sample for both arms — the secondary,
+/// judge-free divergence signal, computed from substrate bytes after the round's
+/// writers ran.
+#[allow(dead_code)]
+#[derive(Clone, Debug)]
+pub struct RoundEntropy {
+    pub round: usize,
+    pub arm_a: EntropyCounts,
+    pub arm_b: EntropyCounts,
+}
+
+/// The whole campaign's output: the per-checkpoint scored results, the per-round
+/// entropy series, and the cost ledger. The per-query delta orientation is
+/// `B − A` (engine-gated minus tolerant), matching the package's accuracy band.
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub struct CampaignResult {
     pub checkpoints: Vec<Checkpoint>,
+    pub entropy_series: Vec<RoundEntropy>,
     pub ledger: Ledger,
 }
 
@@ -735,6 +752,7 @@ pub fn run_campaign<R: DivergenceRunner, J: DivergenceJudge>(
     let tells = package.tell_lists.combined();
     let mut ledger = Ledger::new(package.campaign.cost_cap_tokens);
     let mut checkpoints = Vec::new();
+    let mut entropy_series = Vec::new();
 
     // Determine where to start. A resume verifies the package pin and picks up
     // after the last completed round; a fresh run seeds the state at round 0.
@@ -768,6 +786,13 @@ pub fn run_campaign<R: DivergenceRunner, J: DivergenceJudge>(
             &slices[rp.round - 1],
             &mut ledger,
         )?;
+        // Vocabulary entropy from each arm's substrate bytes, after this round's
+        // writers ran — the secondary divergence signal (criterion 6).
+        entropy_series.push(RoundEntropy {
+            round: rp.round,
+            arm_a: vocabulary_entropy(runner.substrate_dir(Arm::A))?,
+            arm_b: vocabulary_entropy(runner.substrate_dir(Arm::B))?,
+        });
         if rp.reader_checkpoint {
             let mut results = Vec::with_capacity(queries.len());
             for query in queries {
@@ -812,6 +837,7 @@ pub fn run_campaign<R: DivergenceRunner, J: DivergenceJudge>(
     }
     Ok(CampaignResult {
         checkpoints,
+        entropy_series,
         ledger,
     })
 }
@@ -1216,6 +1242,9 @@ mod tests {
         b_quality: f64,
         arm_b_omits_mutation: bool,
         seen: RefCell<Vec<(Arm, String, usize)>>,
+        writes: RefCell<usize>,
+        arm_a_dir: tempfile::TempDir,
+        arm_b_dir: tempfile::TempDir,
     }
 
     impl StubRunner {
@@ -1227,6 +1256,9 @@ mod tests {
                 b_quality: 0.9,
                 arm_b_omits_mutation: false,
                 seen: RefCell::new(Vec::new()),
+                writes: RefCell::new(0),
+                arm_a_dir: tempfile::tempdir().unwrap(),
+                arm_b_dir: tempfile::tempdir().unwrap(),
             }
         }
     }
@@ -1242,11 +1274,32 @@ mod tests {
             self.seen
                 .borrow_mut()
                 .push((arm, model.to_string(), allowance));
-            let tool_calls = match arm {
-                Arm::A => vec!["Write".to_string()],
-                Arm::B if self.arm_b_omits_mutation => vec!["memstead_search".to_string()],
-                Arm::B => vec!["memstead_create".to_string()],
+            let n = {
+                let mut w = self.writes.borrow_mut();
+                *w += 1;
+                *w
             };
+            // Simulate substrate growth: Arm B writes a typed entity with a fresh
+            // type + status + relation label (rich, growing vocabulary); Arm A
+            // writes an untyped note (one type, no relation labels).
+            let (dir, content, tool_calls) = match arm {
+                Arm::A => (
+                    &self.arm_a_dir,
+                    "---\ntype: note\n---\n\nSee [[other]].".to_string(),
+                    vec!["Write".to_string()],
+                ),
+                Arm::B if self.arm_b_omits_mutation => (
+                    &self.arm_b_dir,
+                    format!("---\ntype: t{n}\nstatus: accepted\n---\n\nREFERENCES x."),
+                    vec!["memstead_search".to_string()],
+                ),
+                Arm::B => (
+                    &self.arm_b_dir,
+                    format!("---\ntype: t{n}\nstatus: accepted\n---\n\nREFERENCES x."),
+                    vec!["memstead_create".to_string()],
+                ),
+            };
+            std::fs::write(dir.path().join(format!("{n}.md")), content)?;
             Ok(WriterOutcome {
                 tokens: self.writer_tokens,
                 tool_calls,
@@ -1269,6 +1322,13 @@ mod tests {
                 tokens: self.reader_tokens,
                 tool_calls: vec![],
             })
+        }
+
+        fn substrate_dir(&self, arm: Arm) -> &Path {
+            match arm {
+                Arm::A => self.arm_a_dir.path(),
+                Arm::B => self.arm_b_dir.path(),
+            }
         }
     }
 
@@ -1393,6 +1453,35 @@ mod tests {
                 assert!((r.off_mean - 0.6).abs() < 1e-9); // off = A
             }
         }
+
+        // The entropy series has one sample per round, and shows the divergence:
+        // Arm B's typed vocabulary grows while Arm A's untyped notes stay flat.
+        assert_eq!(
+            result.entropy_series.len(),
+            10,
+            "one entropy sample per round"
+        );
+        let first = &result.entropy_series[0];
+        let last = result.entropy_series.last().unwrap();
+        assert_eq!(first.round, 1);
+        assert_eq!(last.round, 10);
+        assert_eq!(first.arm_b.distinct_types, 1);
+        assert_eq!(
+            last.arm_b.distinct_types, 10,
+            "Arm B type vocabulary grew each round"
+        );
+        assert_eq!(
+            last.arm_a.distinct_types, 1,
+            "Arm A stayed a single untyped 'note'"
+        );
+        assert_eq!(
+            last.arm_b.distinct_relation_labels, 1,
+            "Arm B entities carry a typed relation label"
+        );
+        assert_eq!(
+            last.arm_a.distinct_relation_labels, 0,
+            "untyped links carry no labels"
+        );
 
         // Ledger spans writers, readers, and judges.
         // Writers: 10 rounds x 2 arms x 100 = 2000.
