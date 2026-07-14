@@ -659,7 +659,12 @@ pub struct Ledger {
 struct Charge {
     arm: Arm,
     role: Role,
+    /// Raw usage for this session (all four token categories) — published in the
+    /// ledger for transparency.
     tokens: u64,
+    /// The non-cache portion (fresh input + output) — what the cost cap counts
+    /// (amendment A4).
+    non_cache_tokens: u64,
 }
 
 #[allow(dead_code)]
@@ -671,15 +676,28 @@ impl Ledger {
         }
     }
 
-    /// Attribute `tokens` to `(arm, role)`. The only way tokens enter the ledger,
-    /// so every recorded token has an arm and a role.
-    pub fn record(&mut self, arm: Arm, role: Role, tokens: u64) {
-        self.charges.push(Charge { arm, role, tokens });
+    /// Attribute a session's `tokens` (raw) and `non_cache_tokens` to `(arm,
+    /// role)`. The only way tokens enter the ledger, so every recorded token has an
+    /// arm and a role. The raw figure is published; the non-cache figure is what the
+    /// cap counts (amendment A4).
+    pub fn record(&mut self, arm: Arm, role: Role, tokens: u64, non_cache_tokens: u64) {
+        self.charges.push(Charge {
+            arm,
+            role,
+            tokens,
+            non_cache_tokens,
+        });
     }
 
-    /// Every token recorded, both arms, all roles.
+    /// Every raw token recorded, both arms, all roles — the published grand total.
     pub fn total(&self) -> u64 {
         self.charges.iter().map(|c| c.tokens).sum()
+    }
+
+    /// Every non-cache token recorded — the figure the cost cap counts (amendment
+    /// A4). Always `≤ total()`.
+    pub fn total_non_cache(&self) -> u64 {
+        self.charges.iter().map(|c| c.non_cache_tokens).sum()
     }
 
     /// Every token recorded for one arm.
@@ -701,21 +719,24 @@ impl Ledger {
             .sum()
     }
 
-    /// Would recording `next` more tokens push the running total past the cap?
-    /// Checked *before* a session so the campaign can abort cleanly with its
-    /// state intact for resume, rather than overspending the cap.
+    /// Would recording `next` more non-cache tokens push the running non-cache
+    /// total past the cap? Checked *before* a session so the campaign can abort
+    /// cleanly with its state intact for resume, rather than overspending the cap.
+    /// The cap counts non-cache tokens only (amendment A4).
     pub fn would_exceed(&self, next: u64) -> bool {
-        self.total().saturating_add(next) > self.cap_tokens
+        self.total_non_cache().saturating_add(next) > self.cap_tokens
     }
 
-    /// Refuse once the recorded total has passed the cap — the between-sessions
-    /// guard that aborts the campaign cleanly (state preserved for resume) rather
-    /// than continuing to spend.
+    /// Refuse once the recorded non-cache total has passed the cap — the
+    /// between-sessions guard that aborts the campaign cleanly (state preserved for
+    /// resume) rather than continuing to spend. The cap counts non-cache tokens only
+    /// (amendment A4); the raw total is reported alongside for context.
     pub fn check_cap(&self) -> Result<()> {
-        let total = self.total();
-        if total > self.cap_tokens {
+        let non_cache = self.total_non_cache();
+        if non_cache > self.cap_tokens {
             bail!(
-                "campaign cost cap exceeded: {total} tokens spent, cap {} — aborting (state preserved for resume)",
+                "campaign cost cap exceeded: {non_cache} non-cache tokens spent ({} raw), cap {} — aborting (state preserved for resume)",
+                self.total(),
                 self.cap_tokens
             );
         }
@@ -726,8 +747,12 @@ impl Ledger {
     /// result — the ledger's own fields are private, so this is how it leaves the
     /// harness.
     pub fn summary(&self) -> LedgerSummary {
+        let total = self.total();
+        let non_cache = self.total_non_cache();
         LedgerSummary {
-            total_tokens: self.total(),
+            total_tokens: total,
+            non_cache_tokens: non_cache,
+            cache_tokens: total.saturating_sub(non_cache),
             cap_tokens: self.cap_tokens,
             arm_a_writer: self.total_role(Arm::A, Role::Writer),
             arm_a_reader: self.total_role(Arm::A, Role::Reader),
@@ -746,7 +771,16 @@ impl Ledger {
 #[allow(dead_code)]
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct LedgerSummary {
+    /// Raw grand total across both arms and all roles (all four token categories).
     pub total_tokens: u64,
+    /// The non-cache portion of `total_tokens` (fresh input + output) — the figure
+    /// the cost cap counts (amendment A4). `cap_tokens` bounds this, not
+    /// `total_tokens`.
+    pub non_cache_tokens: u64,
+    /// The cache portion (`total_tokens − non_cache_tokens`) — published for
+    /// transparency but not counted by the cap (amendment A4).
+    pub cache_tokens: u64,
+    /// The non-cache cost cap (amendment A4: 40,000,000).
     pub cap_tokens: u64,
     pub arm_a_writer: u64,
     pub arm_a_reader: u64,
@@ -765,6 +799,8 @@ pub struct LedgerSummary {
 #[derive(Clone, Debug, Default)]
 pub struct WriterOutcome {
     pub tokens: u64,
+    /// The non-cache portion of `tokens` — what the cost cap counts (amendment A4).
+    pub non_cache_tokens: u64,
     pub tool_calls: Vec<String>,
     pub executed_model: String,
 }
@@ -777,6 +813,8 @@ pub struct WriterOutcome {
 pub struct ReaderOutcome {
     pub answer: String,
     pub tokens: u64,
+    /// The non-cache portion of `tokens` — what the cost cap counts (amendment A4).
+    pub non_cache_tokens: u64,
     pub tool_calls: Vec<String>,
     pub executed_model: String,
 }
@@ -790,6 +828,8 @@ pub struct ReaderOutcome {
 pub struct JudgeOutcome {
     pub score: f64,
     pub tokens: u64,
+    /// The non-cache portion of `tokens` — what the cost cap counts (amendment A4).
+    pub non_cache_tokens: u64,
     pub executed_model: String,
 }
 
@@ -805,6 +845,8 @@ pub struct AuditOutcome {
     pub duplicates: usize,
     pub contradictions: usize,
     pub tokens: u64,
+    /// The non-cache portion of `tokens` — what the cost cap counts (amendment A4).
+    pub non_cache_tokens: u64,
     pub executed_model: String,
 }
 
@@ -817,7 +859,15 @@ pub struct AuditOutcome {
 pub struct SessionOutput {
     pub text: String,
     pub tool_calls: Vec<String>,
+    /// Raw grand-total usage: fresh input + output + both cache categories. This
+    /// is what the ledger publishes for transparency.
     pub tokens: u64,
+    /// The non-cache portion of `tokens`: fresh `input_tokens + output_tokens`
+    /// only, excluding `cache_read_input_tokens` and `cache_creation_input_tokens`.
+    /// This is what the cost cap counts (amendment A4, 2026-07-14): cache reads
+    /// cost ~a tenth of fresh tokens, so a raw-count cap fires ~10× too early
+    /// relative to real cost. `non_cache_tokens ≤ tokens` always.
+    pub non_cache_tokens: u64,
     /// The model the session reported running on — read from the stream's
     /// `model` field (the assistant `message.model`, or a top-level `model` on
     /// the `system`/`result` events). Feeds the outcome's `executed_model` so the
@@ -840,25 +890,31 @@ pub fn parse_session(stdout: &str) -> Result<SessionOutput> {
     let mut tool_calls: Vec<String> = Vec::new();
     let mut result_text: Option<String> = None;
     // The `result` event carries the session's grand-total usage on a clean run.
+    // We track the raw total (all four categories) and its non-cache portion (fresh
+    // input + output) in lockstep — the ledger publishes the raw total but the cost
+    // cap counts only the non-cache portion (amendment A4).
     let mut result_tokens: u64 = 0;
+    let mut result_non_cache: u64 = 0;
     // Assistant events carry a running cumulative usage snapshot. On a
     // `--max-budget-usd` cutoff (amendment A1) the `result` event errors with zero
     // usage, so the last assistant snapshot is the only record of what was spent —
-    // taking the max recovers a budget-cut session's real cost for the ledger. On a
-    // clean run the result total dominates, so `max` leaves it unchanged.
+    // taking the snapshot with the largest raw total recovers a budget-cut session's
+    // real cost for the ledger. On a clean run the result total dominates. We keep
+    // the non-cache figure of the *same* snapshot we take the raw total from, so the
+    // two never mix across sources.
     let mut max_assistant_tokens: u64 = 0;
+    let mut max_assistant_non_cache: u64 = 0;
     let mut model: Option<String> = None;
 
-    let sum_usage = |usage: &serde_json::Map<String, serde_json::Value>| -> u64 {
-        [
-            "input_tokens",
-            "output_tokens",
-            "cache_creation_input_tokens",
-            "cache_read_input_tokens",
-        ]
-        .iter()
-        .map(|key| usage.get(*key).and_then(|t| t.as_u64()).unwrap_or(0))
-        .sum()
+    // Returns `(raw, non_cache)` for a usage block: raw is all four token
+    // categories; non_cache is fresh `input_tokens + output_tokens` only. Cache
+    // reads/creations are excluded from non_cache because they cost a fraction of
+    // fresh tokens (amendment A4).
+    let split_usage = |usage: &serde_json::Map<String, serde_json::Value>| -> (u64, u64) {
+        let get = |key: &str| usage.get(key).and_then(|t| t.as_u64()).unwrap_or(0);
+        let non_cache = get("input_tokens") + get("output_tokens");
+        let raw = non_cache + get("cache_creation_input_tokens") + get("cache_read_input_tokens");
+        (raw, non_cache)
     };
 
     for line in stdout.lines() {
@@ -889,7 +945,11 @@ pub fn parse_session(stdout: &str) -> Result<SessionOutput> {
                     .and_then(|m| m.get("usage"))
                     .and_then(|u| u.as_object())
                 {
-                    max_assistant_tokens = max_assistant_tokens.max(sum_usage(usage));
+                    let (raw, non_cache) = split_usage(usage);
+                    if raw > max_assistant_tokens {
+                        max_assistant_tokens = raw;
+                        max_assistant_non_cache = non_cache;
+                    }
                 }
                 if let Some(content) = v
                     .get("message")
@@ -920,7 +980,9 @@ pub fn parse_session(stdout: &str) -> Result<SessionOutput> {
                     result_text = Some(r.to_string());
                 }
                 if let Some(usage) = v.get("usage").and_then(|u| u.as_object()) {
-                    result_tokens += sum_usage(usage);
+                    let (raw, non_cache) = split_usage(usage);
+                    result_tokens += raw;
+                    result_non_cache += non_cache;
                 }
             }
             _ => {}
@@ -932,12 +994,20 @@ pub fn parse_session(stdout: &str) -> Result<SessionOutput> {
     } else {
         texts.join("\n")
     };
+    // The result-event grand total on a clean run; the last assistant snapshot when
+    // a budget cutoff zeroed the result usage. We pick the snapshot with the larger
+    // raw total and take *its* non-cache figure, so raw and non-cache never come
+    // from different sources.
+    let (tokens, non_cache_tokens) = if result_tokens >= max_assistant_tokens {
+        (result_tokens, result_non_cache)
+    } else {
+        (max_assistant_tokens, max_assistant_non_cache)
+    };
     Ok(SessionOutput {
         text,
         tool_calls,
-        // The result-event grand total on a clean run; the last assistant snapshot
-        // when a budget cutoff zeroed the result usage. `max` picks the right one.
-        tokens: result_tokens.max(max_assistant_tokens),
+        tokens,
+        non_cache_tokens,
         model: model.unwrap_or_default(),
     })
 }
@@ -1200,7 +1270,7 @@ fn drive_writers<R: DivergenceRunner>(
         let out = runner.write(arm, model, &prompt, rp.writer_allowance_tokens)?;
         ensure_model_honored("writer", model, &out.executed_model)?;
         validate_writer_evidence(arm, &out.tool_calls)?;
-        ledger.record(arm, Role::Writer, out.tokens);
+        ledger.record(arm, Role::Writer, out.tokens, out.non_cache_tokens);
         ledger.check_cap()?;
     }
     Ok(())
@@ -1407,11 +1477,11 @@ pub fn run_campaign<R: DivergenceRunner, J: DivergenceJudge, A: DivergenceAudito
                             package.campaign.reader_budget_tokens,
                         )?;
                         ensure_model_honored("reader", &model, &out.executed_model)?;
-                        ledger.record(arm, Role::Reader, out.tokens);
+                        ledger.record(arm, Role::Reader, out.tokens, out.non_cache_tokens);
                         let blinded = super::grade::strip_tells_with(&out.answer, &tells);
                         let jout = judge.score(&judge_model, &query.reference, &blinded)?;
                         ensure_model_honored("judge", &judge_model, &jout.executed_model)?;
-                        ledger.record(arm, Role::Judge, jout.tokens);
+                        ledger.record(arm, Role::Judge, jout.tokens, jout.non_cache_tokens);
                         ledger.check_cap()?;
                         match arm {
                             Arm::A => a_scores.push(jout.score),
@@ -1450,7 +1520,7 @@ pub fn run_campaign<R: DivergenceRunner, J: DivergenceJudge, A: DivergenceAudito
                 for _ in 0..package.campaign.trials {
                     let out = auditor.audit(&auditor_model, &prompt)?;
                     ensure_model_honored("auditor", &auditor_model, &out.executed_model)?;
-                    ledger.record(arm, Role::Auditor, out.tokens);
+                    ledger.record(arm, Role::Auditor, out.tokens, out.non_cache_tokens);
                     ledger.check_cap()?;
                     let dp100 = defects_per_100_items(out.duplicates + out.contradictions, items);
                     match arm {
@@ -1674,6 +1744,7 @@ impl DivergenceRunner for ClaudeDivergenceRunner {
         let out = spawn_claude_session(&self.executable, &args, cwd)?;
         Ok(WriterOutcome {
             tokens: out.tokens,
+            non_cache_tokens: out.non_cache_tokens,
             tool_calls: out.tool_calls,
             executed_model: out.model,
         })
@@ -1701,6 +1772,7 @@ impl DivergenceRunner for ClaudeDivergenceRunner {
         Ok(ReaderOutcome {
             answer: out.text,
             tokens: out.tokens,
+            non_cache_tokens: out.non_cache_tokens,
             tool_calls: out.tool_calls,
             executed_model: out.model,
         })
@@ -1735,6 +1807,7 @@ impl DivergenceJudge for ClaudeDivergenceJudge {
         Ok(JudgeOutcome {
             score,
             tokens: out.tokens,
+            non_cache_tokens: out.non_cache_tokens,
             executed_model: out.model,
         })
     }
@@ -1760,6 +1833,7 @@ impl DivergenceAuditor for ClaudeDivergenceAuditor {
             duplicates,
             contradictions,
             tokens: out.tokens,
+            non_cache_tokens: out.non_cache_tokens,
             executed_model: out.model,
         })
     }
@@ -2340,6 +2414,11 @@ not-json-skip-me
         assert_eq!(out.text, "Recorded the change.");
         assert_eq!(out.tool_calls, vec!["mcp__memstead__memstead_create"]);
         assert_eq!(out.tokens, 1200 + 300 + 50, "usage tokens summed");
+        assert_eq!(
+            out.non_cache_tokens,
+            1200 + 300,
+            "non-cache excludes the 50 cache_read tokens (amendment A4)"
+        );
     }
 
     #[test]
@@ -2358,6 +2437,10 @@ not-json-skip-me
             out.tokens,
             2 + 2 + 17047 + 2931,
             "budget-cut usage recovered from the assistant snapshot, not the zeroed result"
+        );
+        assert_eq!(
+            out.non_cache_tokens, 2 + 2,
+            "budget-cut non-cache is the assistant snapshot's fresh input + output, excluding its cache tokens"
         );
         assert_eq!(out.text, "Partial essay…");
     }
@@ -2509,14 +2592,16 @@ not-json-skip-me
     #[test]
     fn ledger_attributes_tokens_by_arm_and_role() {
         let mut led = Ledger::new(1_000);
-        led.record(Arm::A, Role::Writer, 100);
-        led.record(Arm::B, Role::Writer, 120);
+        led.record(Arm::A, Role::Writer, 100, 40);
+        led.record(Arm::B, Role::Writer, 120, 50);
         // Arm B's refusal-repair retry is charged to Arm B's writer cost.
-        led.record(Arm::B, Role::Writer, 30);
-        led.record(Arm::A, Role::Reader, 50);
-        led.record(Arm::A, Role::Judge, 10);
+        led.record(Arm::B, Role::Writer, 30, 10);
+        led.record(Arm::A, Role::Reader, 50, 20);
+        led.record(Arm::A, Role::Judge, 10, 5);
 
         assert_eq!(led.total(), 310);
+        // The cap-counted figure is the non-cache sum, always ≤ the raw total.
+        assert_eq!(led.total_non_cache(), 40 + 50 + 10 + 20 + 5);
         assert_eq!(led.total_for(Arm::B), 150);
         assert_eq!(led.total_for(Arm::A), 160);
         assert_eq!(led.total_role(Arm::B, Role::Writer), 150);
@@ -2527,17 +2612,41 @@ not-json-skip-me
     #[test]
     fn ledger_cost_cap_guards_before_and_after() {
         let mut led = Ledger::new(1_000);
-        led.record(Arm::A, Role::Writer, 900);
+        led.record(Arm::A, Role::Writer, 900, 900);
         // Before a session: a 200-token session would exceed; a 100-token one fits.
         assert!(led.would_exceed(200));
         assert!(!led.would_exceed(100));
         // Still within cap after 900.
         assert!(led.check_cap().is_ok());
         // Overspend, then the between-sessions check refuses.
-        led.record(Arm::B, Role::Writer, 200);
+        led.record(Arm::B, Role::Writer, 200, 200);
         assert_eq!(led.total(), 1_100);
         let err = led.check_cap().unwrap_err().to_string();
         assert!(err.contains("cost cap exceeded"), "{err}");
+    }
+
+    #[test]
+    fn cost_cap_counts_non_cache_only() {
+        // Amendment A4: the brake counts fresh input + output, never cache reads —
+        // a session that is almost all cache is cheap in real money and must not
+        // trip a cap sized for real cost.
+        let mut led = Ledger::new(1_000);
+        // Raw 5,000 tokens but only 500 non-cache (the other 4,500 are cache reads).
+        led.record(Arm::A, Role::Writer, 5_000, 500);
+        assert_eq!(led.total(), 5_000, "raw total published as-is");
+        assert_eq!(led.total_non_cache(), 500, "cap counts the non-cache portion");
+        assert!(
+            led.check_cap().is_ok(),
+            "5,000 raw but only 500 non-cache is well under the 1,000 cap"
+        );
+        assert!(!led.would_exceed(400), "500 + 400 = 900 fits");
+        assert!(led.would_exceed(600), "500 + 600 = 1,100 exceeds");
+        // The published summary carries the raw total, the cap-counted non-cache
+        // figure, and the cache split.
+        let s = led.summary();
+        assert_eq!(s.total_tokens, 5_000);
+        assert_eq!(s.non_cache_tokens, 500);
+        assert_eq!(s.cache_tokens, 4_500);
     }
 
     /// A deterministic runner stub. Writers record the (arm, model, allowance) of
@@ -2643,6 +2752,7 @@ not-json-skip-me
             std::fs::write(dir.path().join(format!("{n}.md")), content)?;
             Ok(WriterOutcome {
                 tokens: self.writer_tokens,
+                non_cache_tokens: self.writer_tokens,
                 tool_calls,
                 executed_model: self.reported_model(model),
             })
@@ -2669,6 +2779,7 @@ not-json-skip-me
             Ok(ReaderOutcome {
                 answer,
                 tokens: self.reader_tokens,
+                non_cache_tokens: self.reader_tokens,
                 tool_calls: vec![],
                 executed_model: self.reported_model(model),
             })
@@ -2708,6 +2819,7 @@ not-json-skip-me
             Ok(JudgeOutcome {
                 score: 0.5,
                 tokens: 5,
+                non_cache_tokens: 5,
                 executed_model: model.to_string(),
             })
         }
@@ -2730,6 +2842,7 @@ not-json-skip-me
             Ok(JudgeOutcome {
                 score: x,
                 tokens: 5,
+                non_cache_tokens: 5,
                 executed_model: model.to_string(),
             })
         }
@@ -2748,6 +2861,7 @@ not-json-skip-me
             Ok(JudgeOutcome {
                 score: 0.5,
                 tokens: 5,
+                non_cache_tokens: 5,
                 executed_model: "ambient-model".to_string(),
             })
         }
@@ -2776,6 +2890,7 @@ not-json-skip-me
                 duplicates,
                 contradictions: 0,
                 tokens: 7,
+                non_cache_tokens: 7,
                 executed_model: model.to_string(),
             })
         }
@@ -2803,6 +2918,7 @@ not-json-skip-me
                 duplicates: 1,
                 contradictions: 0,
                 tokens: 7,
+                non_cache_tokens: 7,
                 executed_model: model.to_string(),
             })
         }
@@ -2817,6 +2933,7 @@ not-json-skip-me
                 duplicates: 3,
                 contradictions: 0,
                 tokens: 7,
+                non_cache_tokens: 7,
                 executed_model: "ambient-model".to_string(),
             })
         }
