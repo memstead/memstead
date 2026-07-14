@@ -670,6 +670,97 @@ pub fn parse_session(stdout: &str) -> Result<SessionOutput> {
     })
 }
 
+/// The `claude -p` flags every divergence session shares: stream-json output (so
+/// [`parse_session`] can read it), the pinned model, non-interactive permission,
+/// and strict MCP config. The per-session prompt and the per-arm tool/MCP flags
+/// are added by the arg-builders.
+#[allow(dead_code)]
+fn base_session_args(model: &str, prompt: &str) -> Vec<String> {
+    vec![
+        "-p".to_string(),
+        prompt.to_string(),
+        "--output-format".to_string(),
+        "stream-json".to_string(),
+        "--verbose".to_string(),
+        "--model".to_string(),
+        model.to_string(),
+        "--permission-mode".to_string(),
+        "dontAsk".to_string(),
+        "--strict-mcp-config".to_string(),
+    ]
+}
+
+/// Build the `claude -p` argument vector for a **writer** session.
+///
+/// The only difference between the arms is the substrate access surface — the
+/// treatment under test: Arm A writes markdown files with the filesystem tools;
+/// Arm B mutates the mem through `mcp__memstead__*` over the supplied MCP config.
+/// The pinned `model` is passed explicitly in every case (criterion 3). The
+/// writer allowance is deliberately *not* a flag here: `claude -p` cannot cap a
+/// session's output tokens (confirmed 2026-07-14), so the allowance is handled
+/// per the operator's chosen operationalisation (see plan handover), not baked
+/// into arg-building.
+#[allow(dead_code)]
+fn build_writer_args(
+    arm: Arm,
+    model: &str,
+    prompt: &str,
+    mcp_config: Option<&Path>,
+) -> Vec<String> {
+    let mut args = base_session_args(model, prompt);
+    args.push("--allowedTools".to_string());
+    match (arm, mcp_config) {
+        // Arm A: filesystem write tools, no MCP.
+        (Arm::A, _) => {
+            args.push("Read,Write,Edit,MultiEdit,Grep,Glob,LS".to_string());
+        }
+        // Arm B: the full memstead mutation surface, over the mem's MCP config.
+        (Arm::B, Some(cfg)) => {
+            args.push("mcp__memstead__*".to_string());
+            args.push("--mcp-config".to_string());
+            args.push(cfg.display().to_string());
+        }
+        // Arm B with no MCP config is a misconfiguration — the real runner
+        // provisions the mem and supplies it before calling this.
+        (Arm::B, None) => {
+            args.push(String::new());
+        }
+    }
+    args
+}
+
+/// Build the `claude -p` argument vector for a **reader** session — read-only
+/// access to the arm's substrate. Arm A gets filesystem *read* tools (no
+/// Write/Edit); Arm B gets only the memstead *read* tools (overview / search /
+/// entity — never the mutation tools). Pinned `model` explicit, as for writers.
+#[allow(dead_code)]
+fn build_reader_args(
+    arm: Arm,
+    model: &str,
+    prompt: &str,
+    mcp_config: Option<&Path>,
+) -> Vec<String> {
+    let mut args = base_session_args(model, prompt);
+    args.push("--allowedTools".to_string());
+    match (arm, mcp_config) {
+        (Arm::A, _) => {
+            args.push("Read,Grep,Glob,LS".to_string());
+        }
+        (Arm::B, Some(cfg)) => {
+            args.push(
+                "mcp__memstead__memstead_overview,mcp__memstead__memstead_search,mcp__memstead__memstead_entity"
+                    .to_string(),
+            );
+            args.push("--mcp-config".to_string());
+            args.push(cfg.display().to_string());
+        }
+        (Arm::B, None) => {
+            args.push(String::new());
+        }
+    }
+    args
+}
+
 /// Drives writer and reader sessions against each arm's materialised substrate.
 /// The real impl shells to `claude -p` with the pinned model against a temp
 /// markdown directory (Arm A) or a throwaway mem over MCP (Arm B); tests use a
@@ -1229,6 +1320,82 @@ mod tests {
         }
         // A known query id is present with its reference intact.
         assert!(queries.iter().any(|q| q.id == "A2-ledger-totals"));
+    }
+
+    fn arg_pairs(args: &[String]) -> std::collections::HashMap<String, String> {
+        args.windows(2)
+            .filter(|w| w[0].starts_with("--") || w[0] == "-p")
+            .map(|w| (w[0].clone(), w[1].clone()))
+            .collect()
+    }
+
+    #[test]
+    fn writer_args_carry_the_pinned_model_and_arm_tools() {
+        let cfg = std::path::Path::new("/tmp/mem.json");
+        let a = build_writer_args(Arm::A, "claude-opus-4-8", "PROMPT", None);
+        let b = build_writer_args(Arm::B, "claude-opus-4-8", "PROMPT", Some(cfg));
+
+        // Criterion 3: both sessions are invoked with the pinned model.
+        assert_eq!(arg_pairs(&a).get("--model").unwrap(), "claude-opus-4-8");
+        assert_eq!(arg_pairs(&b).get("--model").unwrap(), "claude-opus-4-8");
+
+        // Arm A writes files, no MCP; Arm B mutates the mem over MCP (criterion 5).
+        let a_tools = arg_pairs(&a).get("--allowedTools").unwrap().clone();
+        assert!(
+            a_tools.contains("Write") && a_tools.contains("Edit"),
+            "{a_tools}"
+        );
+        assert!(!a.iter().any(|x| x == "--mcp-config"));
+        let b_tools = arg_pairs(&b).get("--allowedTools").unwrap().clone();
+        assert_eq!(b_tools, "mcp__memstead__*");
+        assert_eq!(arg_pairs(&b).get("--mcp-config").unwrap(), "/tmp/mem.json");
+    }
+
+    #[test]
+    fn reader_args_are_read_only_per_arm() {
+        let cfg = std::path::Path::new("/tmp/mem.json");
+        let a = build_reader_args(Arm::A, "m", "Q", None);
+        let b = build_reader_args(Arm::B, "m", "Q", Some(cfg));
+
+        // Arm A reader has read tools but not Write/Edit.
+        let a_tools = arg_pairs(&a).get("--allowedTools").unwrap().clone();
+        assert!(
+            a_tools.contains("Read") && a_tools.contains("Grep"),
+            "{a_tools}"
+        );
+        assert!(
+            !a_tools.contains("Write") && !a_tools.contains("Edit"),
+            "{a_tools}"
+        );
+
+        // Arm B reader has the memstead read tools, never the mutation tools.
+        let b_tools = arg_pairs(&b).get("--allowedTools").unwrap().clone();
+        assert!(
+            b_tools.contains("memstead_overview") && b_tools.contains("memstead_search"),
+            "{b_tools}"
+        );
+        assert!(
+            !b_tools.contains("memstead_create")
+                && !b_tools.contains("memstead_update")
+                && !b_tools.contains("memstead_relate"),
+            "reader must not be able to mutate: {b_tools}"
+        );
+    }
+
+    #[test]
+    fn writer_and_reader_args_differ_only_in_access_surface() {
+        // The prompt, model, and base flags are shared; the tools/MCP differ.
+        let cfg = std::path::Path::new("/tmp/mem.json");
+        let wb = build_writer_args(Arm::B, "m", "P", Some(cfg));
+        let rb = build_reader_args(Arm::B, "m", "P", Some(cfg));
+        assert_eq!(arg_pairs(&wb).get("-p"), arg_pairs(&rb).get("-p"));
+        assert_eq!(arg_pairs(&wb).get("--model"), arg_pairs(&rb).get("--model"));
+        // Writer can mutate; reader cannot.
+        assert_eq!(
+            arg_pairs(&wb).get("--allowedTools").unwrap(),
+            "mcp__memstead__*"
+        );
+        assert!(!arg_pairs(&rb).get("--allowedTools").unwrap().contains('*'));
     }
 
     #[test]
