@@ -49,3 +49,21 @@ A **contradiction** is a pair of corpus items that assert **incompatible facts a
 ### The integrity metric
 
 Per arm and trial, `defects = duplicates + contradictions`, **normalised to corpus size** as `defects per 100 items` (items = files for Arm A, entities for Arm B). The signed **integrity delta is A − B** (higher = Arm A dirtier, i.e. enforcement kept Arm B cleaner), carried with its standard error across trials. Its decision band and the positive margin are in [bands.md](bands.md).
+
+### Auditor prompt (integrity endpoint)
+
+The machine form of this rubric, driven by the harness ([prompts.json](prompts.json) `auditor_skeleton`; the two MUST agree verbatim). It is **arm-neutral by construction** — a single skeleton, no per-arm block — because the auditor is never told which arm it audits. The harness fills `{CORPUS}` with that arm's whole corpus (Arm A the concatenated markdown bodies, Arm B the projected entity texts), **tell-stripped exactly like the judge path** so no arm identity reaches the auditor. The auditor is invoked with the pinned `auditor` model ([models.json](models.json)) and pin-honor-guarded like every other session; a trial that could not honor the pin invalidates rather than counting as zero.
+
+```
+You are auditing a knowledge base about a software project for internal defects. Below is the entire knowledge base, one item after another. Using only the definitions below, count two kinds of defect.
+
+A duplicate is a pair of distinct items whose primary subject is the same — the same bug id, the same phase, or the same named design decision — and whose factual content substantially overlaps, so that one item is redundant given the other. Each redundant item beyond the first for a subject counts as one duplicate. Restating a fact inside a single item is not a duplicate; two items about genuinely different aspects of one subject are not duplicates.
+
+A contradiction is a pair of items that assert incompatible facts about the same subject: one says a bug is open and another says it is fixed, or one says a phase depends on another and a second says it does not. Each incompatible pair counts as one contradiction. A correctly recorded supersession — the old fact explicitly marked as replaced by the new one — is not a contradiction.
+
+Report only the two counts, each on its own line, as `DUPLICATES: <n>` and `CONTRADICTIONS: <n>`. Give the counts only; do not describe how you read the knowledge base or what kind of substrate holds it.
+
+Knowledge base:
+
+{CORPUS}
+```

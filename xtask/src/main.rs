@@ -518,13 +518,14 @@ fn run_divergence_eval(package_dir: &std::path::Path, pin: Option<&str>) -> Resu
         &prompts.reader_substrate.arm_b,
     ) == prompts.reader(Arm::B, "");
     eprintln!(
-        "  prompts      : writer/reader skeletons loaded; substrate blocks writer {}/{}, reader {}/{} chars; parity writer {}, reader {}",
+        "  prompts      : writer/reader skeletons loaded; substrate blocks writer {}/{}, reader {}/{} chars; parity writer {}, reader {}; auditor skeleton {} chars (arm-neutral)",
         prompts.writer_substrate.arm_a.len(),
         prompts.writer_substrate.arm_b.len(),
         prompts.reader_substrate.arm_a.len(),
         prompts.reader_substrate.arm_b.len(),
         if writer_parity { "OK" } else { "VIOLATED" },
-        if reader_parity { "OK" } else { "VIOLATED" }
+        if reader_parity { "OK" } else { "VIOLATED" },
+        prompts.auditor_skeleton.len()
     );
     eprintln!("  round plan   :");
     for rp in c.schedule() {

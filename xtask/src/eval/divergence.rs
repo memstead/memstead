@@ -158,6 +158,12 @@ pub struct Prompts {
     pub reader_skeleton: String,
     pub writer_substrate: ArmText,
     pub reader_substrate: ArmText,
+    /// The arm-neutral integrity-auditor skeleton (criterion 10): a single
+    /// skeleton with a `{CORPUS}` placeholder, no per-arm block — the auditor is
+    /// never told which arm it audits, so the same prompt drives both arms and
+    /// only the (tell-stripped) corpus differs. Machine-encodes `rubrics.md`'s
+    /// integrity counting rubric.
+    pub auditor_skeleton: String,
 }
 
 impl Prompts {
@@ -181,6 +187,15 @@ impl Prompts {
             .replace("{QUERY}", query)
     }
 
+    /// Assemble the integrity-auditor prompt, with the arm's tell-stripped corpus
+    /// substituted in. There is deliberately no `arm` parameter: the skeleton is
+    /// arm-neutral, so the auditor cannot learn which arm it is scoring from its
+    /// prompt (criterion 10's blinding guarantee — the corpus is stripped
+    /// separately, exactly like the judge path).
+    pub fn auditor(&self, corpus: &str) -> String {
+        self.auditor_skeleton.replace("{CORPUS}", corpus)
+    }
+
     /// Refuse a skeleton missing a placeholder the harness must substitute — the
     /// prompt would silently omit the substrate block, the round slice, or the
     /// query, which would break the run rather than fail loudly.
@@ -198,6 +213,7 @@ impl Prompts {
             "reader_skeleton",
         )?;
         require(&self.reader_skeleton, "{QUERY}", "reader_skeleton")?;
+        require(&self.auditor_skeleton, "{CORPUS}", "auditor_skeleton")?;
         Ok(())
     }
 }
@@ -552,6 +568,59 @@ pub fn vocabulary_entropy(dir: &Path) -> Result<EntropyCounts> {
     })
 }
 
+/// The item-boundary token the auditor corpus uses to separate one corpus item
+/// from the next. Applied identically to both arms, so it is never an
+/// arm-distinguishing tell; it carries no filename (a filename would leak the
+/// substrate), only the concatenated item contents in a deterministic order. The
+/// token is deliberately **whitespace-free** so it survives the judge-path
+/// blinder's whitespace collapse ([`super::grade::strip_tells_with`] ends with
+/// `collapse_ws`) intact — the item boundaries are still recoverable after the
+/// corpus is tell-stripped exactly like a reader answer.
+pub const CORPUS_ITEM_DELIM: &str = "<<<ITEM_BOUNDARY>>>";
+
+/// Read a substrate directory into `(corpus, item_count)` for the integrity audit
+/// (criterion 10): every `.md` file's full contents, concatenated in sorted
+/// filename order (deterministic, arm-neutral) and joined by [`CORPUS_ITEM_DELIM`],
+/// and the number of items (files for Arm A, rendered entities for Arm B — the
+/// normalisation base the rubric divides defects by). Filenames are used only to
+/// order the items, never emitted into the corpus, so the auditor cannot infer the
+/// arm from a naming convention. The corpus is tell-stripped by the caller before
+/// it reaches the auditor, exactly as the judge path blinds a reader answer.
+#[allow(dead_code)]
+pub fn read_corpus(dir: &Path) -> Result<(String, usize)> {
+    let mut items: Vec<(String, String)> = Vec::new();
+    for entry in std::fs::read_dir(dir).with_context(|| format!("reading {}", dir.display()))? {
+        let path = entry?.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("md") {
+            continue;
+        }
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        items.push((name, std::fs::read_to_string(&path)?));
+    }
+    items.sort_by(|a, b| a.0.cmp(&b.0));
+    let count = items.len();
+    let corpus = items
+        .into_iter()
+        .map(|(_, content)| content)
+        .collect::<Vec<_>>()
+        .join(&format!("\n\n{CORPUS_ITEM_DELIM}\n\n"));
+    Ok((corpus, count))
+}
+
+/// The integrity metric for one auditor trial: `defects = duplicates +
+/// contradictions`, normalised to corpus size as `defects per 100 items`
+/// (rubrics.md). An empty corpus scores 0 rather than dividing by zero.
+fn defects_per_100_items(defects: usize, items: usize) -> f64 {
+    if items == 0 {
+        0.0
+    } else {
+        defects as f64 * 100.0 / items as f64
+    }
+}
+
 /// The role a session played, for cost attribution in the [`Ledger`]. Staged
 /// with the ledger ahead of the round-loop driver that constructs these.
 #[allow(dead_code)]
@@ -720,6 +789,21 @@ pub struct ReaderOutcome {
 #[derive(Clone, Debug, Default)]
 pub struct JudgeOutcome {
     pub score: f64,
+    pub tokens: u64,
+    pub executed_model: String,
+}
+
+/// What one integrity-auditor trial produced (criterion 10): the two defect counts
+/// under the package's counting rubric, the tokens it spent (charged to
+/// [`Role::Auditor`]), and the model it ran on. `executed_model` carries criterion
+/// 3's refusal complement onto the auditor session too — an auditor that ran on an
+/// ambient model invalidates its trial ([`ensure_model_honored`]) rather than
+/// contributing a silent count.
+#[allow(dead_code)]
+#[derive(Clone, Debug, Default)]
+pub struct AuditOutcome {
+    pub duplicates: usize,
+    pub contradictions: usize,
     pub tokens: u64,
     pub executed_model: String,
 }
@@ -990,6 +1074,20 @@ pub trait DivergenceJudge {
     fn score(&self, model: &str, reference: &str, blinded_answer: &str) -> Result<JudgeOutcome>;
 }
 
+/// Scores one arm's whole corpus for internal defects under the package's counting
+/// rubric and reports its own token cost (criterion 10, the integrity co-primary
+/// endpoint). Like [`DivergenceJudge`], it is a parallel trait to the mount-mode
+/// judge because it reports tokens and an executed model. The `auditor_prompt` it
+/// receives is the arm-neutral auditor skeleton assembled around the arm's
+/// already-tell-stripped corpus (no arm label anywhere), so the auditor scores
+/// blind — it is invoked with the pinned `model` explicitly (criterion 3) and
+/// reports the model it ran on so a trial that could not honor the pin invalidates
+/// rather than counting as zero.
+#[allow(dead_code)]
+pub trait DivergenceAuditor {
+    fn audit(&self, model: &str, auditor_prompt: &str) -> Result<AuditOutcome>;
+}
+
 /// Criterion 3's refusal complement: a session that ran on a model other than
 /// its pinned `requested` id invalidates its round rather than silently
 /// contributing an ambient-model result. Applied to every writer, reader, and
@@ -1096,6 +1194,23 @@ pub struct Checkpoint {
     pub results: Vec<super::TaskResult>,
 }
 
+/// One integrity-audit checkpoint's scored result (criterion 10): `trials`
+/// blinded auditor sessions per arm score the corpus for defects, normalised to
+/// `defects per 100 items`, aggregated with the same mean/stderr treatment as the
+/// reader battery. The delta orientation is **A − B** (tolerant minus engine-gated,
+/// so a positive delta means Arm A is dirtier — enforcement kept Arm B cleaner),
+/// mirroring the package's integrity band, and opposite the accuracy checkpoint's
+/// `B − A`. `arm_a_items` / `arm_b_items` publish the normalisation base.
+#[allow(dead_code)]
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct IntegrityCheckpoint {
+    pub round: usize,
+    pub arm_a_items: usize,
+    pub arm_b_items: usize,
+    /// `on` = Arm A per-trial defects-per-100, `off` = Arm B, so `delta = A − B`.
+    pub result: super::TaskResult,
+}
+
 /// One round's vocabulary-entropy sample for both arms — the secondary,
 /// judge-free divergence signal, computed from substrate bytes after the round's
 /// writers ran.
@@ -1114,6 +1229,12 @@ pub struct RoundEntropy {
 #[derive(Clone, Debug)]
 pub struct CampaignResult {
     pub checkpoints: Vec<Checkpoint>,
+    /// The integrity co-primary endpoint (criterion 10): one entry per audit
+    /// checkpoint. Every entry is produced by real auditor sessions — there is no
+    /// code path that fabricates a zero-filled integrity delta, so a scheduled
+    /// audit that produced no result refuses the whole campaign rather than
+    /// emitting silent zeros (see [`run_campaign`]).
+    pub integrity_checkpoints: Vec<IntegrityCheckpoint>,
     pub entropy_series: Vec<RoundEntropy>,
     pub ledger: Ledger,
 }
@@ -1125,6 +1246,7 @@ pub struct CampaignResult {
 #[derive(serde::Serialize)]
 pub struct CampaignReport<'a> {
     pub checkpoints: &'a [Checkpoint],
+    pub integrity_checkpoints: &'a [IntegrityCheckpoint],
     pub entropy_series: &'a [RoundEntropy],
     pub cost: LedgerSummary,
 }
@@ -1135,6 +1257,7 @@ impl CampaignResult {
     pub fn report(&self) -> CampaignReport<'_> {
         CampaignReport {
             checkpoints: &self.checkpoints,
+            integrity_checkpoints: &self.integrity_checkpoints,
             entropy_series: &self.entropy_series,
             cost: self.ledger.summary(),
         }
@@ -1184,9 +1307,10 @@ impl CampaignState {
 /// completed (refusing if the package was edited since it was pinned). Passing
 /// `None` runs a fresh, non-resumable campaign.
 #[allow(dead_code)]
-pub fn run_campaign<R: DivergenceRunner, J: DivergenceJudge>(
+pub fn run_campaign<R: DivergenceRunner, J: DivergenceJudge, A: DivergenceAuditor>(
     runner: &R,
     judge: &J,
+    auditor: &A,
     package: &Package,
     slices: &[String],
     queries: &[super::TaskSpec],
@@ -1198,11 +1322,14 @@ pub fn run_campaign<R: DivergenceRunner, J: DivergenceJudge>(
     // to equal the writer/reader pin in the committed package, but it is read
     // from `models.judge` rather than assumed equal.
     let judge_model = package.models.judge.clone();
+    // The auditor is pinned likewise (criterion 10 reuses criterion 3's posture).
+    let auditor_model = package.models.auditor.clone();
     let schedule = package.campaign.schedule();
     require_slice_count(slices.len(), schedule.len())?;
     let tells = package.tell_lists.combined();
     let mut ledger = Ledger::new(package.campaign.cost_cap_tokens);
     let mut checkpoints = Vec::new();
+    let mut integrity_checkpoints = Vec::new();
     let mut entropy_series = Vec::new();
 
     // Determine where to start. A resume verifies the package pin and picks up
@@ -1279,6 +1406,48 @@ pub fn run_campaign<R: DivergenceRunner, J: DivergenceJudge>(
                 results,
             });
         }
+        if rp.integrity_audit {
+            // Blinded integrity audit (criterion 10, co-primary endpoint). Per
+            // arm: read the corpus once, tell-strip it exactly like the judge
+            // path (so arm identity never reaches the auditor), then run `trials`
+            // auditor sessions and normalise each to defects-per-100-items.
+            let mut a_defects = Vec::with_capacity(package.campaign.trials);
+            let mut b_defects = Vec::with_capacity(package.campaign.trials);
+            let mut a_items = 0usize;
+            let mut b_items = 0usize;
+            for arm in [Arm::A, Arm::B] {
+                let (corpus, items) = read_corpus(runner.substrate_dir(arm))?;
+                let blinded = super::grade::strip_tells_with(&corpus, &tells);
+                // Assemble the arm-neutral auditor prompt around the tell-stripped
+                // corpus — the harness owns prompt assembly here as it does for the
+                // writer/reader paths.
+                let prompt = package.prompts.auditor(&blinded);
+                match arm {
+                    Arm::A => a_items = items,
+                    Arm::B => b_items = items,
+                }
+                for _ in 0..package.campaign.trials {
+                    let out = auditor.audit(&auditor_model, &prompt)?;
+                    ensure_model_honored("auditor", &auditor_model, &out.executed_model)?;
+                    ledger.record(arm, Role::Auditor, out.tokens);
+                    ledger.check_cap()?;
+                    let dp100 = defects_per_100_items(out.duplicates + out.contradictions, items);
+                    match arm {
+                        Arm::A => a_defects.push(dp100),
+                        Arm::B => b_defects.push(dp100),
+                    }
+                }
+            }
+            // on = A, off = B, so TaskResult.delta = A − B (higher = Arm A dirtier).
+            let result =
+                super::TaskResult::new(format!("integrity@{}", rp.round), a_defects, b_defects);
+            integrity_checkpoints.push(IntegrityCheckpoint {
+                round: rp.round,
+                arm_a_items: a_items,
+                arm_b_items: b_items,
+                result,
+            });
+        }
         // Persist progress so a kill after this round resumes past it.
         if let Some(path) = state_path {
             CampaignState {
@@ -1288,8 +1457,26 @@ pub fn run_campaign<R: DivergenceRunner, J: DivergenceJudge>(
             .save(path)?;
         }
     }
+    // Criterion 10's refusal complement: every audit checkpoint executed this run
+    // must have produced an integrity result. Integrity checkpoints are only ever
+    // created by the real auditor sessions above (which record `Role::Auditor`
+    // tokens), so a count mismatch means a scheduled audit silently produced
+    // nothing — refuse the whole campaign rather than emit a result with missing
+    // integrity deltas. This makes the old always-zero `Role::Auditor` aggregation
+    // structurally impossible.
+    let expected_audits = schedule
+        .iter()
+        .filter(|rp| rp.integrity_audit && rp.round >= start_round)
+        .count();
+    if integrity_checkpoints.len() != expected_audits {
+        bail!(
+            "campaign incomplete: {expected_audits} integrity-audit checkpoint(s) scheduled from round {start_round} but {} produced — refusing to emit a result with missing integrity deltas",
+            integrity_checkpoints.len()
+        );
+    }
     Ok(CampaignResult {
         checkpoints,
+        integrity_checkpoints,
         entropy_series,
         ledger,
     })
@@ -1331,7 +1518,8 @@ mod tests {
                 "writer_hurry_skeleton": "Quickly update.\n\n{SUBSTRATE_BLOCK}\n\nMaterial:\n\n{ROUND_SLICE_CONTENT}",
                 "reader_skeleton": "Answer directly.\n\n{SUBSTRATE_BLOCK}\n\nQuestion: {QUERY}",
                 "writer_substrate": { "arm_a": "Use files.", "arm_b": "Use the mem tools." },
-                "reader_substrate": { "arm_a": "Read files.", "arm_b": "Read the mem." }
+                "reader_substrate": { "arm_a": "Read files.", "arm_b": "Read the mem." },
+                "auditor_skeleton": "{CORPUS}"
             }"#,
         )
         .unwrap();
@@ -1439,7 +1627,8 @@ mod tests {
                 "writer_hurry_skeleton": "{SUBSTRATE_BLOCK} {ROUND_SLICE_CONTENT}",
                 "reader_skeleton": "{SUBSTRATE_BLOCK} {QUERY}",
                 "writer_substrate": { "arm_a": "a", "arm_b": "b" },
-                "reader_substrate": { "arm_a": "a", "arm_b": "b" }
+                "reader_substrate": { "arm_a": "a", "arm_b": "b" },
+                "auditor_skeleton": "{CORPUS}"
             }"#,
         )
         .unwrap();
@@ -1904,6 +2093,15 @@ not-json-skip-me
                 .next()
                 .unwrap(),
         );
+
+        // The arm-neutral auditor skeleton must appear verbatim in rubrics.md (its
+        // prose home is the integrity counting rubric, not arms.md), placeholder
+        // included — it lives there in a fenced block, so the whole string matches.
+        let rubrics = std::fs::read_to_string(pkg_dir.join("rubrics.md")).unwrap();
+        assert!(
+            rubrics.contains(&prompts.auditor_skeleton),
+            "rubrics.md does not contain the auditor_skeleton verbatim — prompts.json has drifted from rubrics.md"
+        );
     }
 
     #[test]
@@ -1996,6 +2194,11 @@ not-json-skip-me
         b_quality: f64,
         arm_b_omits_mutation: bool,
         reader_emits_tells: bool,
+        /// When set, writer sessions plant arm-identifying tells into the substrate
+        /// they write, so the integrity-audit corpus carries them and the blinder
+        /// must strip them before the auditor sees the corpus (criterion 10's
+        /// blinding complement).
+        writer_emits_tells: bool,
         /// When set, every writer/reader session reports this model instead of the
         /// pinned one it was invoked with — simulating a session that silently ran
         /// on an ambient model, which the pin-honor guard must reject.
@@ -2015,6 +2218,7 @@ not-json-skip-me
                 b_quality: 0.9,
                 arm_b_omits_mutation: false,
                 reader_emits_tells: false,
+                writer_emits_tells: false,
                 executed_model_override: None,
                 seen: RefCell::new(Vec::new()),
                 writes: RefCell::new(0),
@@ -2067,6 +2271,15 @@ not-json-skip-me
                     format!("---\ntype: t{n}\nstatus: accepted\n---\n\nREFERENCES x."),
                     vec!["memstead_create".to_string()],
                 ),
+            };
+            // Optionally plant arm-identifying tells the audit-path blinder must
+            // strip before the corpus reaches the auditor.
+            let content = if self.writer_emits_tells {
+                format!(
+                    "{content}\n\nRecorded in the mounted mem via memstead_create; see the notes directory wikilink."
+                )
+            } else {
+                content
             };
             std::fs::write(dir.path().join(format!("{n}.md")), content)?;
             Ok(WriterOutcome {
@@ -2181,6 +2394,75 @@ not-json-skip-me
         }
     }
 
+    /// Counts corpus defects deterministically and blind: `duplicates` = items
+    /// beyond the first that share an identical body (redundant items), so a corpus
+    /// of identical notes (Arm A in the stub substrate) scores dirtier than one of
+    /// distinct typed entities (Arm B) — arranged so the integrity delta A − B is
+    /// positive without the auditor ever being told the arm. Spends 7 tokens per
+    /// trial and honors the pin.
+    struct StubAuditor;
+    impl DivergenceAuditor for StubAuditor {
+        fn audit(&self, model: &str, auditor_prompt: &str) -> Result<AuditOutcome> {
+            use std::collections::BTreeSet;
+            // The corpus reached us through the judge-path blinder, which collapses
+            // whitespace — so split on the whitespace-free boundary token and trim
+            // each item before counting identical (redundant) items.
+            let items: Vec<&str> = auditor_prompt
+                .split(CORPUS_ITEM_DELIM)
+                .map(|s| s.trim())
+                .collect();
+            let distinct: BTreeSet<&str> = items.iter().copied().collect();
+            let duplicates = items.len().saturating_sub(distinct.len());
+            Ok(AuditOutcome {
+                duplicates,
+                contradictions: 0,
+                tokens: 7,
+                executed_model: model.to_string(),
+            })
+        }
+    }
+
+    /// Records every (blinded) corpus AND every model id it is invoked with, so a
+    /// test can prove no tell reached the auditor and that it is pinned.
+    struct RecordingAuditor {
+        seen: RefCell<Vec<String>>,
+        models: RefCell<Vec<String>>,
+    }
+    impl RecordingAuditor {
+        fn new() -> Self {
+            Self {
+                seen: RefCell::new(Vec::new()),
+                models: RefCell::new(Vec::new()),
+            }
+        }
+    }
+    impl DivergenceAuditor for RecordingAuditor {
+        fn audit(&self, model: &str, auditor_prompt: &str) -> Result<AuditOutcome> {
+            self.seen.borrow_mut().push(auditor_prompt.to_string());
+            self.models.borrow_mut().push(model.to_string());
+            Ok(AuditOutcome {
+                duplicates: 1,
+                contradictions: 0,
+                tokens: 7,
+                executed_model: model.to_string(),
+            })
+        }
+    }
+
+    /// An auditor that silently runs on a different model than the pin — its trial
+    /// must be invalidated by the pin-honor guard rather than counted as zero.
+    struct WrongModelAuditor;
+    impl DivergenceAuditor for WrongModelAuditor {
+        fn audit(&self, _model: &str, _blinded_corpus: &str) -> Result<AuditOutcome> {
+            Ok(AuditOutcome {
+                duplicates: 3,
+                contradictions: 0,
+                tokens: 7,
+                executed_model: "ambient-model".to_string(),
+            })
+        }
+    }
+
     fn two_queries() -> Vec<crate::eval::TaskSpec> {
         vec![
             crate::eval::TaskSpec {
@@ -2274,8 +2556,16 @@ not-json-skip-me
         let pkg = Package::load(&dir).unwrap();
         let runner = StubRunner::new(100);
         let judge = StubJudge;
-        let result =
-            run_campaign(&runner, &judge, &pkg, &ten_slices(), &two_queries(), None).unwrap();
+        let result = run_campaign(
+            &runner,
+            &judge,
+            &StubAuditor,
+            &pkg,
+            &ten_slices(),
+            &two_queries(),
+            None,
+        )
+        .unwrap();
 
         // Reader checkpoints at rounds 1, 3, 5, 10.
         let rounds: Vec<usize> = result.checkpoints.iter().map(|c| c.round).collect();
@@ -2328,10 +2618,11 @@ not-json-skip-me
             result.ledger.total_role(Arm::B, Role::Reader),
             4 * 2 * 3 * 10
         );
+        // Auditor sessions: 2 audit rounds x 2 arms x 3 trials = 12, at 7 tokens.
         assert_eq!(
             result.ledger.total(),
-            2_000 + 48 * 10 + 48 * 5,
-            "writers + readers + judges"
+            2_000 + 48 * 10 + 48 * 5 + 12 * 7,
+            "writers + readers + judges + auditors"
         );
     }
 
@@ -2343,6 +2634,7 @@ not-json-skip-me
         let result = run_campaign(
             &StubRunner::new(100),
             &StubJudge,
+            &StubAuditor,
             &pkg,
             &ten_slices(),
             &two_queries(),
@@ -2365,9 +2657,18 @@ not-json-skip-me
                 .unwrap(),
             10
         );
-        // The cost book: writers + readers + judges = 2720.
-        assert_eq!(v["cost"]["total_tokens"].as_u64().unwrap(), 2_720);
+        // Two integrity checkpoints (audit rounds 5 and 10), each carrying the
+        // A − B integrity delta and the per-arm item counts.
+        let ic = v["integrity_checkpoints"].as_array().unwrap();
+        assert_eq!(ic.len(), 2);
+        assert_eq!(ic[0]["round"].as_u64().unwrap(), 5);
+        assert_eq!(ic[1]["round"].as_u64().unwrap(), 10);
+        assert!((ic[1]["result"]["delta"].as_f64().unwrap() - 90.0).abs() < 1e-9);
+        assert_eq!(ic[1]["arm_a_items"].as_u64().unwrap(), 10);
+        // The cost book: writers + readers + judges + auditors = 2720 + 84.
+        assert_eq!(v["cost"]["total_tokens"].as_u64().unwrap(), 2_804);
         assert_eq!(v["cost"]["arm_b_writer"].as_u64().unwrap(), 1_000);
+        assert_eq!(v["cost"]["auditor"].as_u64().unwrap(), 84);
     }
 
     #[test]
@@ -2381,6 +2682,7 @@ not-json-skip-me
         run_campaign(
             &StubRunner::new(100),
             &judge,
+            &StubAuditor,
             &pkg,
             &ten_slices(),
             &two_queries(),
@@ -2409,6 +2711,7 @@ not-json-skip-me
         let err = run_campaign(
             &runner,
             &StubJudge,
+            &StubAuditor,
             &pkg,
             &ten_slices(),
             &two_queries(),
@@ -2431,6 +2734,7 @@ not-json-skip-me
         let err = run_campaign(
             &StubRunner::new(100),
             &WrongModelJudge,
+            &StubAuditor,
             &pkg,
             &ten_slices(),
             &two_queries(),
@@ -2474,7 +2778,16 @@ not-json-skip-me
         let mut runner = StubRunner::new(100);
         runner.reader_emits_tells = true;
         let judge = RecordingJudge::new();
-        run_campaign(&runner, &judge, &pkg, &ten_slices(), &two_queries(), None).unwrap();
+        run_campaign(
+            &runner,
+            &judge,
+            &StubAuditor,
+            &pkg,
+            &ten_slices(),
+            &two_queries(),
+            None,
+        )
+        .unwrap();
 
         let seen = judge.seen.borrow();
         assert!(!seen.is_empty(), "the judge scored at least one answer");
@@ -2515,6 +2828,7 @@ not-json-skip-me
         run_campaign(
             &runner,
             &judge,
+            &StubAuditor,
             &pkg,
             &ten_slices(),
             &two_queries(),
@@ -2560,6 +2874,7 @@ not-json-skip-me
         let err = run_campaign(
             &runner,
             &judge,
+            &StubAuditor,
             &pkg,
             &ten_slices(),
             &two_queries(),
@@ -2583,6 +2898,7 @@ not-json-skip-me
         run_campaign(
             &runner,
             &judge,
+            &StubAuditor,
             &pkg,
             &ten_slices(),
             &two_queries(),
@@ -2606,5 +2922,140 @@ not-json-skip-me
         .unwrap();
         let pkg = Package::load(&dir).unwrap();
         assert!(pkg.single_model().is_err());
+    }
+
+    #[test]
+    fn integrity_audit_produces_an_a_minus_b_delta_and_bills_the_auditor() {
+        // Criterion 10: at each audit checkpoint, per arm, n-trial auditor sessions
+        // score the corpus; the campaign result carries the per-checkpoint integrity
+        // delta (A − B). The stub substrate is dirtier on Arm A (identical notes,
+        // all duplicates) than Arm B (distinct typed entities), so A − B is positive.
+        let dir = tmp();
+        write_fixture_package(&dir);
+        let pkg = Package::load(&dir).unwrap();
+        let runner = StubRunner::new(100);
+        let result = run_campaign(
+            &runner,
+            &StubJudge,
+            &StubAuditor,
+            &pkg,
+            &ten_slices(),
+            &two_queries(),
+            None,
+        )
+        .unwrap();
+
+        // Audit checkpoints at rounds 5 and 10 (integrity_audit_rounds).
+        let ic = &result.integrity_checkpoints;
+        assert_eq!(
+            ic.iter().map(|c| c.round).collect::<Vec<_>>(),
+            vec![5, 10],
+            "one integrity checkpoint per audit round"
+        );
+
+        // Round 5: 5 items per arm. Arm A's five identical notes → 4 duplicates →
+        // 80 defects/100; Arm B's five distinct entities → 0. Delta A − B = 80.
+        let r5 = &ic[0];
+        assert_eq!(r5.arm_a_items, 5);
+        assert_eq!(r5.arm_b_items, 5);
+        assert!(
+            (r5.result.on_mean - 80.0).abs() < 1e-9,
+            "{}",
+            r5.result.on_mean
+        ); // A
+        assert!((r5.result.off_mean - 0.0).abs() < 1e-9); // B
+        assert!(
+            (r5.result.delta - 80.0).abs() < 1e-9,
+            "integrity delta A − B = {}",
+            r5.result.delta
+        );
+
+        // Round 10: 10 items per arm → 9 duplicates on Arm A → 90; Arm B still 0.
+        let r10 = &ic[1];
+        assert_eq!(r10.arm_a_items, 10);
+        assert!(
+            (r10.result.delta - 90.0).abs() < 1e-9,
+            "{}",
+            r10.result.delta
+        );
+
+        // The auditor is billed — the old always-zero Role::Auditor is impossible now.
+        // 2 audit rounds x 3 trials x 7 tokens per arm = 42 each.
+        assert_eq!(result.ledger.total_role(Arm::A, Role::Auditor), 42);
+        assert_eq!(result.ledger.total_role(Arm::B, Role::Auditor), 42);
+        assert!(result.ledger.summary().auditor > 0);
+    }
+
+    #[test]
+    fn auditor_input_is_blinded_before_the_auditor() {
+        // Criterion 10's blinding complement: the auditor's input is tell-stripped
+        // exactly like the judge path — arm identity never reaches it. The writer
+        // plants both arms' substrate vocabulary into the corpus; none survives.
+        let dir = tmp();
+        write_fixture_package(&dir);
+        let pkg = Package::load(&dir).unwrap();
+        let mut runner = StubRunner::new(100);
+        runner.writer_emits_tells = true;
+        let auditor = RecordingAuditor::new();
+        run_campaign(
+            &runner,
+            &StubJudge,
+            &auditor,
+            &pkg,
+            &ten_slices(),
+            &two_queries(),
+            None,
+        )
+        .unwrap();
+
+        let seen = auditor.seen.borrow();
+        assert!(!seen.is_empty(), "the auditor scored at least one corpus");
+        for corpus in seen.iter() {
+            let low = corpus.to_lowercase();
+            for tell in [
+                "the mounted mem",
+                "memstead",
+                "the notes directory",
+                "wikilink",
+            ] {
+                assert!(
+                    !low.contains(tell),
+                    "tell {tell:?} reached the auditor: {corpus}"
+                );
+            }
+        }
+        // And every auditor invocation carried the pinned auditor model.
+        let models = auditor.models.borrow();
+        assert!(
+            models.iter().all(|m| m == &pkg.models.auditor),
+            "every auditor invocation carried the pinned auditor model {:?}, got {:?}",
+            pkg.models.auditor,
+            models
+        );
+    }
+
+    #[test]
+    fn an_auditor_on_the_wrong_model_invalidates_the_trial() {
+        // Criterion 10's pin-honor complement: an auditor session that ran on an
+        // ambient model instead of the pin invalidates its trial rather than
+        // contributing a silent count.
+        let dir = tmp();
+        write_fixture_package(&dir);
+        let pkg = Package::load(&dir).unwrap();
+        let err = run_campaign(
+            &StubRunner::new(100),
+            &StubJudge,
+            &WrongModelAuditor,
+            &pkg,
+            &ten_slices(),
+            &two_queries(),
+            None,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            err.contains("auditor") && err.contains("not honored"),
+            "{err}"
+        );
     }
 }
