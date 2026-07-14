@@ -31,11 +31,30 @@ pub fn strip_tells(text: &str) -> String {
         "querying the mem",
         "the mem",
     ];
+    let owned: Vec<String> = TELLS.iter().map(|t| (*t).to_string()).collect();
+    strip_tells_with(text, &owned)
+}
+
+/// Blind an answer against a caller-supplied tell list — the general form behind
+/// [`strip_tells`], and the divergence mode's per-arm extension of it.
+///
+/// [`strip_tells`] carries a hardcoded Arm-B-only list; the divergence campaign
+/// reads both arms' tell lists from the pre-registration package and must strip
+/// **both** directions from every answer, since the judge is blind to which arm
+/// produced it. The tells are removed longest-first so a longer phrase is taken
+/// whole before a shorter one nested inside it (`memstead_search` before
+/// `memstead`, `the mounted mem` before `the mem`) — the same ordering guarantee
+/// the hardcoded path relies on, reconstructed here because a package-supplied
+/// list arrives in package order, not length order. The `memstead_*` token drop
+/// is always applied as a backstop, so an Arm-B tool token leaks through neither
+/// the phrase list nor a missing package entry.
+pub fn strip_tells_with(text: &str, tells: &[String]) -> String {
+    let mut ordered: Vec<&String> = tells.iter().collect();
+    ordered.sort_by_key(|t| std::cmp::Reverse(t.len()));
     let mut out = text.to_string();
-    for tell in TELLS {
+    for tell in ordered {
         out = remove_ci(&out, tell);
     }
-    // Drop any explicit memstead_* / mcp__memstead__* token wherever it appears.
     out = strip_memstead_tokens(&out);
     collapse_ws(&out)
 }
@@ -157,6 +176,56 @@ mod tests {
         let leaked = "The answer is the mem here.";
         let clean = strip_tells(leaked);
         assert!(!clean.contains("  "), "double space remained: {clean:?}");
+    }
+
+    #[test]
+    fn strip_tells_with_strips_both_arm_directions() {
+        // A single combined list carrying both Arm B (mem/tool) and Arm A
+        // (substrate) vocabulary — the reader-path blinder strips both.
+        let tells: Vec<String> = [
+            "the mounted mem",
+            "memstead_search",
+            "memstead",
+            "wikilink",
+            "index.md",
+            "the notes directory",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+
+        let arm_b_leak = "According to the mounted mem I ran memstead_search and found it.";
+        let cleaned_b = strip_tells_with(arm_b_leak, &tells);
+        assert!(!cleaned_b.to_lowercase().contains("mounted mem"), "{cleaned_b}");
+        assert!(!cleaned_b.to_lowercase().contains("memstead"), "{cleaned_b}");
+        assert!(cleaned_b.contains("found it."), "{cleaned_b}");
+
+        let arm_a_leak = "The wikilink in index.md under the notes directory points to it.";
+        let cleaned_a = strip_tells_with(arm_a_leak, &tells);
+        assert!(!cleaned_a.to_lowercase().contains("wikilink"), "{cleaned_a}");
+        assert!(!cleaned_a.to_lowercase().contains("index.md"), "{cleaned_a}");
+        assert!(!cleaned_a.to_lowercase().contains("notes directory"), "{cleaned_a}");
+        assert!(cleaned_a.contains("points to it."), "{cleaned_a}");
+    }
+
+    #[test]
+    fn strip_tells_with_removes_longer_phrase_whole() {
+        // "the mounted mem" must be taken whole even though "mem" is also a tell,
+        // regardless of the order the package lists them in.
+        let tells: Vec<String> = ["mem", "the mounted mem"].iter().map(|s| s.to_string()).collect();
+        let cleaned = strip_tells_with("stored in the mounted mem today", &tells);
+        assert!(!cleaned.to_lowercase().contains("mounted"), "{cleaned}");
+        assert!(cleaned.contains("stored in"), "{cleaned}");
+        assert!(cleaned.contains("today"), "{cleaned}");
+    }
+
+    #[test]
+    fn strip_tells_with_drops_memstead_tokens_not_in_list() {
+        // Backstop: a memstead_* tool token leaks through even if the package
+        // list happened to omit it.
+        let cleaned = strip_tells_with("I used mcp__memstead__memstead_entity here.", &[]);
+        assert!(!cleaned.contains("memstead"), "{cleaned}");
+        assert!(cleaned.contains("here."), "{cleaned}");
     }
 
     #[test]
