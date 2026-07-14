@@ -19,6 +19,7 @@ _(none — no campaign run has occurred)_
 | `source-repo.md` | The source repository record: `karalang/kara`, pinned HEAD, per-criterion selection evidence, rejected alternatives. | **Committed** |
 | `slices.json` | The slice manifest: ten SHA-pinned chronological slices, the boundary rule, and the structural events (rename / revert / supersession) named per slice. | **Committed** |
 | `models.json` | The model pins, captured from the authoring session and frozen. | **Committed** |
+| `campaign.json` | Machine-readable campaign parameters (schedule, hurry rounds, trials, allowances, cost cap, contamination threshold, band thresholds) — the harness's config interface; the machine encoding of `bands.md`, which stays the human exposition. | **Committed** |
 | `arms.md` | Arm A / Arm B definitions, the Arm-A toolset justification, and the two writer + two reader prompts (shared skeleton + substrate block; diff only in substrate/access mechanics). | **Committed** |
 | `tell-lists.json` | Both arms' judge tell lists (Arm B mem/tool vocabulary; Arm A substrate vocabulary), for two-directional blinding — every active tell verified substring-disjoint from the source. | **Committed** |
 | `queries.json` | The twelve-query battery: per-query ground truth (source citations only) + tell-free reference answers. | **Committed** |

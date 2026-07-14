@@ -1,0 +1,19 @@
+{
+  "$comment": "Machine-readable campaign parameters for the divergence mode of the eval harness (plan 02). This is the authoritative machine encoding of the fixed values that bands.md states in prose and models.json pins; the two MUST agree — bands.md is the human exposition, this file is what the harness reads (criterion 6: schedule and hurry rounds are read from the package, not hardcoded). Added pre-first-run (no campaign has run); immutable after the first real run except by a dated amendment note (see README.md). Model pins live in models.json and are referenced, not duplicated.",
+  "rounds": 10,
+  "hurry_rounds": [3, 6, 9],
+  "reader_checkpoints": [1, 3, 5, 10],
+  "integrity_audit_rounds": [5, 10],
+  "trials": 3,
+  "writer_allowance_full_tokens": 8000,
+  "writer_allowance_hurry_tokens": 4000,
+  "reader_budget_tokens": 8000,
+  "contamination_threshold": 0.5,
+  "cost_cap_tokens": 20000000,
+  "bands": {
+    "$comment": "Numeric thresholds applied mechanically in plan 03; the combined verdict table and the qualifier prose stay in bands.md.",
+    "accuracy_positive_min": 0.10,
+    "accuracy_negative_max": -0.05,
+    "integrity_margin_per_100_items": 1.0
+  }
+}
