@@ -196,15 +196,30 @@ mod tests {
 
         let arm_b_leak = "According to the mounted mem I ran memstead_search and found it.";
         let cleaned_b = strip_tells_with(arm_b_leak, &tells);
-        assert!(!cleaned_b.to_lowercase().contains("mounted mem"), "{cleaned_b}");
-        assert!(!cleaned_b.to_lowercase().contains("memstead"), "{cleaned_b}");
+        assert!(
+            !cleaned_b.to_lowercase().contains("mounted mem"),
+            "{cleaned_b}"
+        );
+        assert!(
+            !cleaned_b.to_lowercase().contains("memstead"),
+            "{cleaned_b}"
+        );
         assert!(cleaned_b.contains("found it."), "{cleaned_b}");
 
         let arm_a_leak = "The wikilink in index.md under the notes directory points to it.";
         let cleaned_a = strip_tells_with(arm_a_leak, &tells);
-        assert!(!cleaned_a.to_lowercase().contains("wikilink"), "{cleaned_a}");
-        assert!(!cleaned_a.to_lowercase().contains("index.md"), "{cleaned_a}");
-        assert!(!cleaned_a.to_lowercase().contains("notes directory"), "{cleaned_a}");
+        assert!(
+            !cleaned_a.to_lowercase().contains("wikilink"),
+            "{cleaned_a}"
+        );
+        assert!(
+            !cleaned_a.to_lowercase().contains("index.md"),
+            "{cleaned_a}"
+        );
+        assert!(
+            !cleaned_a.to_lowercase().contains("notes directory"),
+            "{cleaned_a}"
+        );
         assert!(cleaned_a.contains("points to it."), "{cleaned_a}");
     }
 
@@ -212,7 +227,10 @@ mod tests {
     fn strip_tells_with_removes_longer_phrase_whole() {
         // "the mounted mem" must be taken whole even though "mem" is also a tell,
         // regardless of the order the package lists them in.
-        let tells: Vec<String> = ["mem", "the mounted mem"].iter().map(|s| s.to_string()).collect();
+        let tells: Vec<String> = ["mem", "the mounted mem"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
         let cleaned = strip_tells_with("stored in the mounted mem today", &tells);
         assert!(!cleaned.to_lowercase().contains("mounted"), "{cleaned}");
         assert!(cleaned.contains("stored in"), "{cleaned}");

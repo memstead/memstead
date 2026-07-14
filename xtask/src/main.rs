@@ -465,16 +465,26 @@ fn run_substrate_eval(args: &EvalArgs, subject: &str, tasks: &[eval::TaskSpec]) 
 /// package (so the pinning guard and the config surface are exercised) and then
 /// reports the round loop as not yet implemented rather than pretending to run.
 fn run_divergence_eval(package_dir: &std::path::Path, pin: Option<&str>) -> Result<()> {
-    let pkg = eval::divergence::Package::load(package_dir)
-        .with_context(|| format!("loading pre-registration package at {}", package_dir.display()))?;
+    let pkg = eval::divergence::Package::load(package_dir).with_context(|| {
+        format!(
+            "loading pre-registration package at {}",
+            package_dir.display()
+        )
+    })?;
     if let Some(expected) = pin {
         pkg.verify_pin(expected)?;
     }
     let model = pkg.single_model()?;
     let c = &pkg.campaign;
-    eprintln!("loaded pre-registration package at {}", package_dir.display());
+    eprintln!(
+        "loaded pre-registration package at {}",
+        package_dir.display()
+    );
     eprintln!("  content hash : {}", pkg.content_hash);
-    eprintln!("  model        : {model} (judge {}, auditor {})", pkg.models.judge, pkg.models.auditor);
+    eprintln!(
+        "  model        : {model} (judge {}, auditor {})",
+        pkg.models.judge, pkg.models.auditor
+    );
     eprintln!(
         "  schedule     : {} rounds, hurry {:?}, reader checkpoints {:?}, integrity audits {:?}",
         c.rounds, c.hurry_rounds, c.reader_checkpoints, c.integrity_audit_rounds
@@ -499,14 +509,14 @@ fn run_divergence_eval(package_dir: &std::path::Path, pin: Option<&str>) -> Resu
     // (criterion 5). A violation would mean the skeleton is not shared.
     use eval::divergence::Arm;
     let prompts = &pkg.prompts;
-    let writer_parity = prompts
-        .writer(Arm::A, false, "")
-        .replace(&prompts.writer_substrate.arm_a, &prompts.writer_substrate.arm_b)
-        == prompts.writer(Arm::B, false, "");
-    let reader_parity = prompts
-        .reader(Arm::A, "")
-        .replace(&prompts.reader_substrate.arm_a, &prompts.reader_substrate.arm_b)
-        == prompts.reader(Arm::B, "");
+    let writer_parity = prompts.writer(Arm::A, false, "").replace(
+        &prompts.writer_substrate.arm_a,
+        &prompts.writer_substrate.arm_b,
+    ) == prompts.writer(Arm::B, false, "");
+    let reader_parity = prompts.reader(Arm::A, "").replace(
+        &prompts.reader_substrate.arm_a,
+        &prompts.reader_substrate.arm_b,
+    ) == prompts.reader(Arm::B, "");
     eprintln!(
         "  prompts      : writer/reader skeletons loaded; substrate blocks writer {}/{}, reader {}/{} chars; parity writer {}, reader {}",
         prompts.writer_substrate.arm_a.len(),
