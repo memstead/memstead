@@ -1,0 +1,32 @@
+{
+  "$comment": "Pre-registered slice manifest for the divergence campaign. SHA-pinned, chronological, immutable after the first real run except by a dated amendment note (see README.md). Consumed by plan 02's harness; auditable stand-alone. All SHAs are from the pinned source snapshot recorded in source-repo.md.",
+  "source_repo": "karalang/kara",
+  "source_head": "349066162dbfef551861d21c44c63a53260f79b5",
+  "slice_boundary_rule": "Each slice is the set of commits on the first-parent-inclusive chronological history (git log --reverse) whose author/commit date (git --date=short) falls in [date_start, date_end] inclusive. first_commit/last_commit are the earliest/latest commit in that window. Slices are contiguous and gapless: slice 1 begins at the repository root commit, slice 10 ends at source_head, and the ten commit_counts sum to the full history (3685).",
+  "slices": [
+    { "index": 1,  "date_start": "2026-05-04", "date_end": "2026-05-11", "first_commit": "47460e75ba838cc632a2084077ea88cdbe68769e", "last_commit": "661e0dfa64f03e2fb4882d5f5360c5ac4247b20c", "commit_count": 372 },
+    { "index": 2,  "date_start": "2026-05-12", "date_end": "2026-05-19", "first_commit": "c2b398cdf353388ed81deb122bfbbe78a1b14f99", "last_commit": "b15280eb5530b535471160d29f45d8c8e6bc2026", "commit_count": 432 },
+    { "index": 3,  "date_start": "2026-05-20", "date_end": "2026-05-27", "first_commit": "8afdde7faa4a0ef1fc0b8e5214e89e5e8ed6f787", "last_commit": "2fe0d4f953ab38cb5d5c1ba2257dc266249d025b", "commit_count": 270 },
+    { "index": 4,  "date_start": "2026-05-28", "date_end": "2026-06-04", "first_commit": "4d3c0b084780e367561755e64426ac12931a9166", "last_commit": "7464b771f887d853623e396bcd002c8748b90959", "commit_count": 335 },
+    { "index": 5,  "date_start": "2026-06-05", "date_end": "2026-06-12", "first_commit": "e8d026cb196f5c82c9af25247191cef1707e5b92", "last_commit": "24389340fce670914fa5a78c9dbd4f6a18e00086", "commit_count": 539 },
+    { "index": 6,  "date_start": "2026-06-13", "date_end": "2026-06-20", "first_commit": "df639e5eb6179f4260bb302889b5ff2258871ac4", "last_commit": "3d3de74cd89e8aa84fd1cfc72e95858fb52f368e", "commit_count": 454 },
+    { "index": 7,  "date_start": "2026-06-21", "date_end": "2026-06-28", "first_commit": "5d03e64efedcb9125196ca84adfd0db9f95141ae", "last_commit": "037d407e56f2888d74b39a36dd81ba3e6f7a48dd", "commit_count": 86 },
+    { "index": 8,  "date_start": "2026-06-29", "date_end": "2026-07-05", "first_commit": "c11f3492a7908027e6b0e037b02e436bc2249c97", "last_commit": "d6846cb0fdd06460e6b787502056346601e38375", "commit_count": 386 },
+    { "index": 9,  "date_start": "2026-07-06", "date_end": "2026-07-10", "first_commit": "37dd8c414cc9c4ba0302b74a2cf75806c6463d19", "last_commit": "bf998a32f14b2c413027ceedf38720aa90e59542", "commit_count": 328 },
+    { "index": 10, "date_start": "2026-07-11", "date_end": "2026-07-14", "first_commit": "39e849d1483e0b3c8f4b482aa8cec02a521eff41", "last_commit": "349066162dbfef551861d21c44c63a53260f79b5", "commit_count": 483 }
+  ],
+  "structural_events": {
+    "$comment": "Criterion-2 requirement: the sliced history jointly contains at least one rename, one revert, and one supersession/deprecation. Each event is named here with the slice it falls in and the commit that carries it, verified against the pinned snapshot.",
+    "rename": [
+      { "slice": 5, "commit": "523661e1e184838fb6ce333ffc45364402e5b0f6", "date": "2026-06-06", "kind": "file-rename", "detail": "git rename-detection R086: docs/demo_ideas.md renamed to docs/dogfooding.md" },
+      { "slice": 9, "commit": "930adcdb9b6bb5e49ea6301aff2a29b3f4f35e05", "date": "2026-07-07", "kind": "symbol-rename", "detail": "continue-label machine rename (ledger B-2026-07-07-3)" }
+    ],
+    "revert": [
+      { "slice": 9, "commit": "948d552783df40e3eca368e3120ad938312395e3", "date": "2026-07-10", "kind": "git-revert", "detail": "Revert \"fix(codegen): rc-inc nested bare-shared field in callee-owned entry-copy (B-2026-07-09-12 render UAF)\"; the reverted commit is af97e03eaafadef852b64f4d57dc0c3a2cc8d4c2" }
+    ],
+    "supersession": [
+      { "slice": 4, "commit": "0cb76707cc4590c1d7f55d2a4d7c8c93225436c5", "date": "2026-05-30", "kind": "deprecation-mechanism", "detail": "feat(typechecker): #[unstable]/#[deprecated] lint at method/assoc-fn calls — introduces the deprecation surface" },
+      { "slice": 5, "commit": "f2df625c80151f4d54a858fec868936d1d78c5dd", "date": "2026-06-06", "kind": "supersession", "detail": "refactor(cli): remove the paired component form, superseded by the embedded-WIT component default landed in ad2ef65142182f907cb944247e4572b6b0e26963 (same day)" }
+    ]
+  }
+}

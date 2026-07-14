@@ -1,0 +1,10 @@
+{
+  "$comment": "Model pins for the divergence campaign. Captured at package-authoring time from the executing session's model and FROZEN (pre-registration plan 01: inherit once, then frozen; no model name lives in the plan). The campaign runners MUST pass these model ids explicitly so a later ambient-model change cannot drift a running campaign. One model for writers and readers across both arms; judge and auditor recorded likewise. Immutable after the first real run except by a dated amendment note (see README.md).",
+  "captured_on": "2026-07-14",
+  "writer": "claude-opus-4-8",
+  "reader": "claude-opus-4-8",
+  "judge": "claude-opus-4-8",
+  "auditor": "claude-opus-4-8",
+  "training_cutoff": "2026-01",
+  "note": "Writers and readers share one model across both arms (parity requirement). The judge and auditor share that model too; because judging is blind (grade::strip_tells) and the auditor scores label-stripped corpora, a shared model is acceptable and keeps the pin single-valued. The training cutoff is recorded because criterion 1 of the source-repo record (all sliced history postdates it) and the contamination screen both depend on it."
+}
