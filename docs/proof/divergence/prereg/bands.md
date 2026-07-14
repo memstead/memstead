@@ -59,3 +59,5 @@ Every reachable combination of the two band outcomes maps to exactly one bound v
 ## Allowance operationalisation
 
 The token allowances above are enforced as proportional cost budgets via `claude -p --max-budget-usd` (conversion constant in `campaign.json`), with a smoke-run verification and a pre-declared documentary fallback — the binding definition is amendment **A1** in `README.md`.
+
+**Amendment note (2026-07-14, pre-first-run):** amendment **A3** (README) moves allowance enforcement to the documentary fallback (`--no-budget`; the token allowances above are targets, not enforced caps), and amendment **A4** redefines the cost-cap accounting to **non-cache tokens** with a threshold of **40,000,000** — the run session mirrors both into `campaign.json` and keeps the machine/prose consistency test green.
