@@ -1241,6 +1241,7 @@ mod tests {
         a_quality: f64,
         b_quality: f64,
         arm_b_omits_mutation: bool,
+        reader_emits_tells: bool,
         seen: RefCell<Vec<(Arm, String, usize)>>,
         writes: RefCell<usize>,
         arm_a_dir: tempfile::TempDir,
@@ -1255,6 +1256,7 @@ mod tests {
                 a_quality: 0.6,
                 b_quality: 0.9,
                 arm_b_omits_mutation: false,
+                reader_emits_tells: false,
                 seen: RefCell::new(Vec::new()),
                 writes: RefCell::new(0),
                 arm_a_dir: tempfile::tempdir().unwrap(),
@@ -1317,8 +1319,15 @@ mod tests {
                 Arm::A => self.a_quality,
                 Arm::B => self.b_quality,
             };
+            // Optionally leak arm-identifying tells the blinder must strip before
+            // the answer reaches the judge.
+            let answer = if self.reader_emits_tells {
+                format!("According to the mounted mem, via memstead_search, q={q}")
+            } else {
+                format!("q={q}")
+            };
             Ok(ReaderOutcome {
-                answer: format!("q={q}"),
+                answer,
                 tokens: self.reader_tokens,
                 tool_calls: vec![],
             })
@@ -1329,6 +1338,25 @@ mod tests {
                 Arm::A => self.arm_a_dir.path(),
                 Arm::B => self.arm_b_dir.path(),
             }
+        }
+    }
+
+    /// A judge that records every (blinded) answer it is handed, so a test can
+    /// prove no tell reached it.
+    struct RecordingJudge {
+        seen: RefCell<Vec<String>>,
+    }
+    impl RecordingJudge {
+        fn new() -> Self {
+            Self {
+                seen: RefCell::new(Vec::new()),
+            }
+        }
+    }
+    impl DivergenceJudge for RecordingJudge {
+        fn score(&self, _reference: &str, blinded_answer: &str) -> Result<(f64, u64)> {
+            self.seen.borrow_mut().push(blinded_answer.to_string());
+            Ok((0.5, 5))
         }
     }
 
@@ -1497,6 +1525,38 @@ mod tests {
             2_000 + 48 * 10 + 48 * 5,
             "writers + readers + judges"
         );
+    }
+
+    #[test]
+    fn reader_answers_are_blinded_before_the_judge() {
+        // Criterion 4: an answer embedding either arm's substrate vocabulary is
+        // stripped before it reaches the judge — it never arrives raw.
+        let dir = tmp();
+        write_fixture_package(&dir);
+        let pkg = Package::load(&dir).unwrap();
+        let mut runner = StubRunner::new(100);
+        runner.reader_emits_tells = true;
+        let judge = RecordingJudge::new();
+        run_campaign(&runner, &judge, &pkg, &ten_slices(), &two_queries(), None).unwrap();
+
+        let seen = judge.seen.borrow();
+        assert!(!seen.is_empty(), "the judge scored at least one answer");
+        for input in seen.iter() {
+            let low = input.to_lowercase();
+            assert!(
+                !low.contains("mounted mem"),
+                "Arm-B phrase reached the judge: {input}"
+            );
+            assert!(
+                !low.contains("memstead"),
+                "tool token reached the judge: {input}"
+            );
+            // The substantive content survived the scrub.
+            assert!(
+                input.contains("q="),
+                "the answer content was preserved: {input}"
+            );
+        }
     }
 
     #[test]
