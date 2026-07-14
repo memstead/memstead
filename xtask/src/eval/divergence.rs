@@ -394,6 +394,87 @@ pub fn load_queries(dir: &Path) -> Result<Vec<super::TaskSpec>> {
         .collect())
 }
 
+/// The mechanical round-slice digest (amendment A2): the byte-identical material
+/// both arms' writers ingest for one round, assembled from `git` alone with no
+/// LLM pre-summarisation. Four sections computed between the slice's boundary
+/// commits (`first_commit`..`last_commit`, author-date-pinned in `slices.json`):
+/// the `git log --oneline` commit subjects, the `git diff --stat` diffstat, the
+/// `CHANGELOG.md` delta, and the bug-ledger delta. The same string feeds Arm A
+/// and Arm B, so the digest is never an arm-distinguishing variable (criterion
+/// 5's parity contract is preserved at the call site, structurally).
+///
+/// Range convention: changes are taken from the commit *before* `first_commit`
+/// (`first_commit^`) through `last_commit`, so the slice's own first commit is
+/// included and the previous slice's is not. For the repository-root slice
+/// (`first_commit` has no parent) the diff base is the empty tree and the log is
+/// the full ancestry of `last_commit`. kara's history is linear, so this
+/// ancestry range equals the author-date window `slices.json` defines. Staged
+/// ahead of the CLI wiring that feeds it to the round loop.
+#[allow(dead_code)]
+pub fn slice_digest(
+    repo: &Path,
+    first_commit: &str,
+    last_commit: &str,
+    changelog_path: &str,
+    ledger_path: &str,
+) -> Result<String> {
+    // The SHA-1 empty-tree object — the diff base for the root slice, whose
+    // first commit has no parent to diff against.
+    const EMPTY_TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+
+    let parent = format!("{first_commit}^");
+    let has_parent = git(repo, &["rev-parse", "--verify", "--quiet", &parent]).is_ok();
+    let base = if has_parent { &parent } else { EMPTY_TREE };
+    let range = format!("{base}..{last_commit}");
+
+    // Commit subjects for the slice's own commits. The empty tree is not a valid
+    // log endpoint, so the root slice logs the full ancestry of `last_commit`.
+    let log = if has_parent {
+        git(repo, &["log", "--oneline", &range])?
+    } else {
+        git(repo, &["log", "--oneline", last_commit])?
+    };
+    let stat = git(repo, &["diff", "--stat", &range])?;
+    let changelog = git(repo, &["diff", &range, "--", changelog_path])?;
+    let ledger = git(repo, &["diff", &range, "--", ledger_path])?;
+
+    fn or_none(body: &str) -> &str {
+        let t = body.trim();
+        if t.is_empty() { "(no changes)" } else { t }
+    }
+
+    Ok(format!(
+        "## Round slice — {first_commit}..{last_commit}\n\n\
+         ### Commit log\n{}\n\n\
+         ### Diffstat\n{}\n\n\
+         ### {changelog_path} changes\n{}\n\n\
+         ### Bug ledger changes ({ledger_path})\n{}\n",
+        or_none(&log),
+        or_none(&stat),
+        or_none(&changelog),
+        or_none(&ledger),
+    ))
+}
+
+/// Run `git -C <repo> <args>` and return stdout, or an error carrying stderr —
+/// the subprocess style of `replay.rs`.
+fn git(repo: &Path, args: &[&str]) -> Result<String> {
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(args)
+        .output()
+        .with_context(|| format!("git {} in {}", args.join(" "), repo.display()))?;
+    if !out.status.success() {
+        bail!(
+            "git {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
 fn hex(bytes: &[u8]) -> String {
     let mut s = String::with_capacity(bytes.len() * 2);
     for b in bytes {
@@ -1530,6 +1611,129 @@ mod tests {
         );
         let without = build_writer_args(Arm::A, "m", "P", None, None);
         assert!(!without.iter().any(|x| x == "--max-budget-usd"));
+    }
+
+    /// Build a tiny fixture git repo with three commits touching a changelog, a
+    /// JSONL bug ledger, and a source file. Returns the repo dir and the three
+    /// commit SHAs (root first). No timestamps reach the digest (the git
+    /// invocations read subjects/diffstats only), so it is deterministic.
+    fn fixture_git_repo() -> (PathBuf, String, String, String) {
+        let repo = tmp();
+        let run = |args: &[&str]| -> String {
+            let out = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&repo)
+                .args(args)
+                .env("GIT_AUTHOR_NAME", "t")
+                .env("GIT_AUTHOR_EMAIL", "t@t")
+                .env("GIT_COMMITTER_NAME", "t")
+                .env("GIT_COMMITTER_EMAIL", "t@t")
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        };
+        run(&["init", "-q"]);
+        fs::create_dir(repo.join("docs")).unwrap();
+
+        // c1 (root): seed the changelog and ledger.
+        fs::write(repo.join("CHANGELOG.md"), "# Changelog\n\n## v1\n- seed\n").unwrap();
+        fs::write(
+            repo.join("docs/bug-ledger.jsonl"),
+            "{\"id\":\"B-1\",\"status\":\"open\"}\n",
+        )
+        .unwrap();
+        run(&["add", "-A"]);
+        run(&["commit", "-q", "-m", "seed the ledger and changelog"]);
+        let c1 = run(&["rev-parse", "HEAD"]);
+
+        // c2: a code change, a changelog entry, ledger B-1 fixed + B-2 opened.
+        fs::write(repo.join("src.rs"), "fn main() {}\n").unwrap();
+        fs::write(
+            repo.join("CHANGELOG.md"),
+            "# Changelog\n\n## v2\n- fixed B-1\n\n## v1\n- seed\n",
+        )
+        .unwrap();
+        fs::write(
+            repo.join("docs/bug-ledger.jsonl"),
+            "{\"id\":\"B-1\",\"status\":\"fixed\"}\n{\"id\":\"B-2\",\"status\":\"open\"}\n",
+        )
+        .unwrap();
+        run(&["add", "-A"]);
+        run(&["commit", "-q", "-m", "fix(codegen): resolve B-1"]);
+        let c2 = run(&["rev-parse", "HEAD"]);
+
+        // c3: another change; ledger B-2 fixed.
+        fs::write(repo.join("src.rs"), "fn main() { let x = 1; }\n").unwrap();
+        fs::write(
+            repo.join("docs/bug-ledger.jsonl"),
+            "{\"id\":\"B-1\",\"status\":\"fixed\"}\n{\"id\":\"B-2\",\"status\":\"fixed\"}\n",
+        )
+        .unwrap();
+        run(&["add", "-A"]);
+        run(&["commit", "-q", "-m", "fix(parser): resolve B-2"]);
+        let c3 = run(&["rev-parse", "HEAD"]);
+
+        (repo, c1, c2, c3)
+    }
+
+    #[test]
+    fn slice_digest_assembles_the_four_mechanical_sections() {
+        let (repo, c1, c2, c3) = fixture_git_repo();
+
+        // Slice [c2, c3] — a mid-history slice, the common case: base is c2^ = c1.
+        let d = slice_digest(&repo, &c2, &c3, "CHANGELOG.md", "docs/bug-ledger.jsonl").unwrap();
+
+        // All four sections present.
+        assert!(d.contains("### Commit log"), "{d}");
+        assert!(d.contains("### Diffstat"), "{d}");
+        assert!(d.contains("### CHANGELOG.md changes"), "{d}");
+        assert!(
+            d.contains("### Bug ledger changes (docs/bug-ledger.jsonl)"),
+            "{d}"
+        );
+
+        // The commit log carries the slice's OWN commits (c2, c3) and excludes
+        // the base commit c1 — proving the first^..last range boundary.
+        assert!(
+            d.contains("resolve B-1") && d.contains("resolve B-2"),
+            "{d}"
+        );
+        assert!(
+            !d.contains("seed the ledger and changelog"),
+            "base commit c1 must be excluded from the slice log: {d}"
+        );
+
+        // Diffstat names the files that changed across the slice.
+        assert!(d.contains("src.rs") && d.contains("CHANGELOG.md"), "{d}");
+        // The ledger delta shows B-2 flipping to fixed within the slice.
+        assert!(d.contains("B-2"), "ledger delta present: {d}");
+
+        // Pure function of (repo, range): the identical string feeds both arms,
+        // so the digest can never diverge between Arm A and Arm B.
+        let again = slice_digest(&repo, &c2, &c3, "CHANGELOG.md", "docs/bug-ledger.jsonl").unwrap();
+        assert_eq!(d, again, "digest is deterministic / arm-neutral");
+
+        // Sanity: c1 exists and is distinct (guards the fixture).
+        assert_ne!(c1, c2);
+    }
+
+    #[test]
+    fn slice_digest_handles_the_repository_root_slice() {
+        // The root slice's first commit has no parent, so the diff base is the
+        // empty tree and the log is the full ancestry — here just c1 itself.
+        let (repo, c1, _c2, _c3) = fixture_git_repo();
+        let d = slice_digest(&repo, &c1, &c1, "CHANGELOG.md", "docs/bug-ledger.jsonl").unwrap();
+        assert!(
+            d.contains("seed the ledger and changelog"),
+            "root slice logs its own commit: {d}"
+        );
+        // The whole seeded changelog/ledger is the delta against the empty tree.
+        assert!(d.contains("# Changelog") && d.contains("B-1"), "{d}");
     }
 
     #[test]
