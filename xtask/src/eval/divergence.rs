@@ -346,6 +346,38 @@ fn read_json<T: serde::de::DeserializeOwned>(dir: &Path, name: &str) -> Result<T
     serde_json::from_slice(&bytes).with_context(|| format!("parsing {name}"))
 }
 
+/// Load the query battery from `queries.json` into the harness's shared
+/// [`super::TaskSpec`] shape (the reader battery scores against these). Each
+/// query's `prompt` is the question the reader answers; its `reference` is the
+/// query's `reference_answer` — the blind judge's target. The ground-truth
+/// derivation and per-class metadata in the file are not needed by the harness
+/// and are ignored here.
+///
+/// Staged ahead of the CLI wiring that feeds it to `run_campaign`.
+#[allow(dead_code)]
+pub fn load_queries(dir: &Path) -> Result<Vec<super::TaskSpec>> {
+    #[derive(serde::Deserialize)]
+    struct QueryFile {
+        queries: Vec<QueryRecord>,
+    }
+    #[derive(serde::Deserialize)]
+    struct QueryRecord {
+        id: String,
+        prompt: String,
+        reference_answer: String,
+    }
+    let file: QueryFile = read_json(dir, "queries.json")?;
+    Ok(file
+        .queries
+        .into_iter()
+        .map(|q| super::TaskSpec {
+            id: q.id,
+            prompt: q.prompt,
+            reference: q.reference_answer,
+        })
+        .collect())
+}
+
 fn hex(bytes: &[u8]) -> String {
     let mut s = String::with_capacity(bytes.len() * 2);
     for b in bytes {
@@ -1087,6 +1119,43 @@ mod tests {
     /// pre-registration exposition lives in (`bands.md`, `arms.md`): the two must
     /// agree, and nothing else enforces it. Skips when the package is not in this
     /// checkout (e.g. a published crate without the docs tree).
+    #[test]
+    fn load_queries_reads_the_committed_battery_into_taskspecs() {
+        let pkg_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../docs/proof/divergence/prereg");
+        if !pkg_dir.join("queries.json").exists() {
+            return; // package not in this checkout; nothing to load
+        }
+        let queries = load_queries(&pkg_dir).unwrap();
+        // The battery is twelve queries, four classes x three.
+        assert_eq!(queries.len(), 12, "twelve-query battery");
+        for q in &queries {
+            assert!(!q.id.is_empty());
+            assert!(!q.prompt.is_empty(), "{} has a question", q.id);
+            assert!(!q.reference.is_empty(), "{} has a reference answer", q.id);
+        }
+        // A known query id is present with its reference intact.
+        assert!(queries.iter().any(|q| q.id == "A2-ledger-totals"));
+    }
+
+    #[test]
+    fn load_queries_from_a_fixture() {
+        let dir = tmp();
+        fs::write(
+            dir.join("queries.json"),
+            r#"{ "queries": [
+                { "id": "S1", "class": "status-filter", "prompt": "which open?",
+                  "ground_truth": { "x": 1 }, "reference_answer": "these are open" }
+            ] }"#,
+        )
+        .unwrap();
+        let queries = load_queries(&dir).unwrap();
+        assert_eq!(queries.len(), 1);
+        assert_eq!(queries[0].id, "S1");
+        assert_eq!(queries[0].prompt, "which open?");
+        assert_eq!(queries[0].reference, "these are open");
+    }
+
     #[test]
     fn committed_package_machine_files_match_their_prose_sources() {
         let pkg_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
