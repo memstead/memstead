@@ -594,6 +594,16 @@ fn run_divergence_eval(args: &EvalArgs) -> Result<()> {
         .context("divergence mode needs --output <campaign output directory>")?;
     std::fs::create_dir_all(out_dir)
         .with_context(|| format!("creating campaign output dir {}", out_dir.display()))?;
+    // Absolutise the output dir before deriving any child path from it. Every
+    // per-arm path below (arm-a dir, arm-b mem + its `capture.mcp.json`, the sandbox
+    // the writer/reader run inside) is passed to `claude`, which runs with
+    // `current_dir(sandbox)` — so a relative `--output` makes the `--mcp-config`
+    // path resolve against the sandbox cwd and doubles (`sandbox/<relative-config>`),
+    // failing before the first Arm B write. Canonicalising here (the dir now exists)
+    // keeps a relative `--output` working, which the published rerun kit needs to
+    // resolve on a clean checkout.
+    let out_dir = &std::fs::canonicalize(out_dir)
+        .with_context(|| format!("canonicalising campaign output dir {}", out_dir.display()))?;
 
     // Every round's mechanical digest, assembled from the pinned source (A2).
     let manifest = package_dir.join("slices.json");
