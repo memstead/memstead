@@ -80,3 +80,7 @@ Run at `n = 3` trials per query per arm under the fixed reader token budget ([ba
 > The knowledge base is a Memstead mem. Read it with `memstead_overview`, `memstead_search`, and `memstead_entity`.
 
 The instruction to **answer directly and not describe how or where the answer was found** is the primary defence against retrieval-method tells (a reader narrating "I searched the files" or "I queried the mem"); the tell lists in [tell-lists.json](tell-lists.json) are the backstop for leaks that survive it. This instruction is in the shared skeleton, so it applies identically to both arms.
+
+## Round input (what fills `{ROUND_SLICE_CONTENT}`)
+
+Per round, both arms receive the identical mechanical slice digest — changelog delta, bug-ledger delta, `git log --oneline` subjects, diffstat; no LLM pre-summarisation — as defined bindingly in amendment **A2** in `README.md`.

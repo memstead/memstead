@@ -55,3 +55,7 @@ Every reachable combination of the two band outcomes maps to exactly one bound v
 | negative (either endpoint) | any | Reported as a loss on that endpoint, verbatim, whatever the other endpoint shows. |
 
 **Reachability.** The two bands each take one of {positive, negative, null}, and accuracy additionally distinguishes static-advantage; the negative row absorbs any combination containing a negative on either endpoint, so every one of the remaining positive/null/static combinations is assigned by one of the first four rows. No reachable combination is left without a verdict.
+
+## Allowance operationalisation
+
+The token allowances above are enforced as proportional cost budgets via `claude -p --max-budget-usd` (conversion constant in `campaign.json`), with a smoke-run verification and a pre-declared documentary fallback — the binding definition is amendment **A1** in `README.md`.
