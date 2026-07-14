@@ -1,0 +1,58 @@
+{
+  "$comment": "Pre-registered judge/auditor tell lists for two-directional blinding. Before the judge (or the integrity auditor) sees an answer or a corpus excerpt, every listed phrase/token is removed case-insensitively so the scorer cannot infer which arm produced it. Immutable after the first real run except by a dated amendment note (see README.md). Consumed by plan 02's harness, which extends the current Arm-B-only strip_tells (public/xtask/src/eval/grade.rs) to strip BOTH lists.",
+  "blinding_rule": "Case-insensitive substring removal, longest phrases first (so 'the mounted mem' is removed whole before 'the mem'), followed by whitespace collapse — matching the existing grade::strip_tells contract. A tell must be arm-DIAGNOSTIC (it appears because of the arm's substrate/tooling, not because of the subject) AND disjoint from the source's answer-space vocabulary (so stripping never mutilates a correct subject answer).",
+  "arm_b_tells": {
+    "$comment": "Arm B = the engine-gated Memstead mem accessed through the MCP read tools. These phrases/tokens reveal that the answer came from the typed engine. All verified to occur ZERO times in the source repo (karalang/kara) at the pinned snapshot, so stripping them cannot damage a correct answer about the compiler.",
+    "tokens": [
+      "memstead",
+      "memstead_overview",
+      "memstead_search",
+      "memstead_entity",
+      "memstead_create",
+      "memstead_update",
+      "memstead_relate",
+      "memstead_health",
+      "memstead_reload",
+      "mcp__memstead__"
+    ],
+    "phrases": [
+      "according to the mounted mem",
+      "from the mounted mem",
+      "the mounted mem",
+      "the mounted graph",
+      "mounted mem",
+      "the memstead mem",
+      "the knowledge mem",
+      "the mem tells",
+      "querying the mem"
+    ]
+  },
+  "arm_a_tells": {
+    "$comment": "Arm A = the tolerant markdown directory accessed with filesystem read tools. These phrases reveal that the answer came from browsing a notes directory. Verified to occur ZERO times in the source repo at the pinned snapshot. The primary defence against Arm-A retrieval-method tells is the reader prompt instruction to answer the question directly without narrating how the substrate was searched (arms.md); this list is the backstop for leaks that survive that instruction.",
+    "tokens": [
+      "wikilink",
+      "wiki-link",
+      "index.md"
+    ],
+    "phrases": [
+      "the notes directory",
+      "the notes folder",
+      "the markdown notes",
+      "the markdown file",
+      "the yaml frontmatter block"
+    ]
+  },
+  "excluded_tokens": {
+    "$comment": "Candidate tells DELIBERATELY EXCLUDED because they collide with the source repo's own vocabulary. Including them would either mutilate correct subject prose or break criterion 5's disjointness. This list documents the collision so the exclusion is auditable and the criterion-5 finding is explicit.",
+    "excluded": [
+      { "token": "mem", "reason": "kara uses 'mem' as the abbreviation for memory (std.mem, memory management) 307 times; bare 'mem' is memory, not the Memstead unit noun." },
+      { "token": "the mem", "reason": "As a SUBSTRING (the blinding contract is substring removal) 'the mem' matches inside kara's 'the memory' / 'the member' 71 times, so stripping it would mutilate correct compiler answers. Dropped from the active Arm-B list; the longer, unambiguous Memstead phrases ('the mounted mem', 'the memstead mem', 'querying the mem', 'the mem tells') and the memstead_* tokens carry the Arm-B blinding instead. If plan 02 switches the matcher to word-boundary semantics, 'the mem' as a whole phrase could be restored — but this package is correct under the current substring contract." },
+      { "token": "entity / entities", "reason": "kara uses these generically (48 / 35 occurrences) for named program entities; not arm-diagnostic and would mutilate subject prose." },
+      { "token": "schema", "reason": "kara uses 'schema' (56 occurrences) in the JSON-schema / protobuf / db.schema sense; generic, not the Memstead schema concept." },
+      { "token": "relationship", "reason": "kara uses 'relationship' generically (22 occurrences)." },
+      { "token": "frontmatter", "reason": "kara documents a module-frontmatter feature (5 occurrences); the Arm-A tell is narrowed to the phrase 'the yaml frontmatter block', which does not occur in kara." },
+      { "token": "grep", "reason": "kara docs say 'grep the codebase' (62 occurrences); bare 'grep' is not disjoint. Arm-A retrieval-method leakage is handled by the reader-prompt 'answer directly' instruction instead." },
+      { "token": "[[", "reason": "kara uses '[[' for nested arrays/indexing (88 occurrences); the double-bracket wikilink tell is narrowed to the whole tokens 'wikilink' / 'wiki-link' (0 occurrences)." }
+    ]
+  }
+}

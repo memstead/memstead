@@ -1,0 +1,135 @@
+{
+  "$comment": "Pre-registered query battery for the divergence campaign. Twelve queries, four classes, three per class. Immutable after the first real run except by a dated amendment note (see README.md). Each query's ground truth is derived ONLY from the source repo (karalang/kara) at the pinned snapshot; no query is answerable from either writer prompt, either reader prompt, or the package README alone.",
+  "ground_truth_convention": "Ground truth is fixed at the round-10 / HEAD state of the source (slice 10 last_commit 349066162dbfef551861d21c44c63a53260f79b5). The same battery is asked at every checkpoint (rounds 1, 3, 5, 10). Earlier checkpoints therefore score lower for BOTH arms because the corresponding facts are not yet in the ingested slices — this is intended: the checkpoint scores measure how much of the final knowledge each substrate has accumulated, the round-10 delta is the primary endpoint, and the round-1/3/5 points establish the slope. Because the ground truth is the same fixed target for both arms at every round, this convention introduces no A-vs-B bias; it only penalises both arms symmetrically for facts not yet visible.",
+  "sources": {
+    "ledger": "docs/bug-ledger.jsonl (450 records at HEAD)",
+    "roadmap": "docs/roadmap.md (phase statuses, Phase Dependency Graph, resequence notes)",
+    "changelog": "CHANGELOG.md (language redesign / supersession)"
+  },
+  "queries": [
+    {
+      "id": "S1-open-bugs",
+      "class": "status-filter",
+      "prompt": "Which bugs in the project are currently open (status not fixed)?",
+      "ground_truth": {
+        "answer_ids": ["B-2026-07-10-5", "B-2026-07-14-6", "B-2026-07-14-8", "B-2026-07-14-10", "B-2026-07-14-11", "B-2026-07-14-14", "B-2026-07-14-15"],
+        "derivation": "ledger records with status == 'open' (7 of 450). Records with status not-reproduced/invalid/partial-fixed are NOT open and excluded."
+      },
+      "reference_answer": "Seven bugs are open: B-2026-07-10-5 (kāra slowest of five compiled mirrors on a substring benchmark), B-2026-07-14-6 (several Option/Result combinators unimplemented across the stack), B-2026-07-14-8 (lowering for the full family of iterator for-loop adaptors), B-2026-07-14-10 (end-to-end iter_mut support), B-2026-07-14-11 (nested collection element-type lost during lowering), B-2026-07-14-14 (slice-pattern binding-type and exhaustiveness gaps), and B-2026-07-14-15 (a crash when binding a non-shared heap value fetched from a map). Everything else in the tracker is fixed or resolved."
+    },
+    {
+      "id": "S2-open-high-sev",
+      "class": "status-filter",
+      "prompt": "Among the currently-open bugs, which one is high-severity, and what does it describe?",
+      "ground_truth": {
+        "answer_ids": ["B-2026-07-14-15"],
+        "derivation": "of the 7 open records, exactly one has severity == 'high': B-2026-07-14-15. The other six are severity 'low'."
+      },
+      "reference_answer": "Exactly one open bug is high-severity: B-2026-07-14-15. It is a crash: binding a non-shared heap value obtained from a map lookup and then unwrapping it corrupts ownership, ending in a crash. The other six open bugs are all low-severity."
+    },
+    {
+      "id": "S3-phase-status",
+      "class": "status-filter",
+      "prompt": "Of the implementation phases numbered 8, 9, 10, 11, and 12, which are documented as complete and which are not?",
+      "ground_truth": {
+        "complete": ["9", "10"],
+        "not_complete": ["8", "11", "12"],
+        "derivation": "roadmap.md contents list and phase headings: Phase 9 (Verification) marked DONE/✅, Phase 10 (Targets) marked ✅ (mostly done). Phase 8 (Stdlib Floor) carries no completion marker (~195/288 items). Phase 11 (Stdlib Long-Tail) is future work built on the self-hosted compiler. Phase 12 (Self-Hosting) is the pending v1 pivot, not marked complete. The roadmap's [x]/[ ] checkbox marks are explicitly flagged stale; the prose status labels and the implementation_checklist are authoritative."
+      },
+      "reference_answer": "Complete: Phase 9 (gradual verification enforcement — semantics frozen) and Phase 10 (additional compilation targets — WASM and the GPU gate, mostly done). Not complete: Phase 8 (the standard-library floor, roughly two-thirds done), Phase 11 (the long-tail standard library, built on the self-hosted compiler), and Phase 12 (self-hosting, the pending v1 pivot). Note that the checkbox marks in the roadmap are stale; the prose status labels and the per-phase checklists are the reliable signal."
+    },
+    {
+      "id": "T1-selfhost-transitive-deps",
+      "class": "transitive-structure",
+      "prompt": "List the full set of implementation phases that Phase 12 (self-hosting) depends on, directly or transitively.",
+      "ground_truth": {
+        "answer_set": ["1", "2", "3", "4", "5", "6", "7.1", "7.2", "8", "LLJIT-productionization"],
+        "excluded": ["9", "10", "11"],
+        "derivation": "The Phase Dependency Graph states Phase 12's direct prerequisites are Phase 8 (the stdlib floor) plus the non-phase LLJIT-productionization spike; the notes say 'Phase 8 is the only phase self-hosting depends on'. Phase 8 sits atop the linear chain 1→2→3→4→5→6→7.1→7.2, so the transitive closure adds those. Phases 9, 10, 11 are NOT dependencies: 9 and 10 execute before 12 in the resequenced order but are not prerequisites, and 11 is built ON the self-hosted compiler (downstream of 12)."
+      },
+      "reference_answer": "Phase 12 depends, directly or transitively, on Phases 1, 2, 3, 4, 5, 6, 7.1, 7.2, and 8, plus the LLJIT-productionization spike. Its only direct prerequisites are the standard-library floor (Phase 8) and LLJIT-productionization; the floor in turn sits atop the linear chain from the lexer up through compiled-stdlib codegen. Phases 9 and 10 are not prerequisites — they run before Phase 12 in execution order but the pivot does not depend on them — and Phase 11 is downstream of self-hosting, not upstream."
+    },
+    {
+      "id": "T2-floor-transitive-deps",
+      "class": "transitive-structure",
+      "prompt": "What does Phase 8 (the standard-library floor) depend on, directly or transitively?",
+      "ground_truth": {
+        "answer_set": ["1", "2", "3", "4", "5", "6", "7.1", "7.2"],
+        "derivation": "Phase 8 sits at the top of the linear dependency chain in the Phase Dependency Graph: 1 (Lexer) → 2 (Parser) → 3 (Semantic Analysis) → 4 (Interpreter) → 5 (Query API) → 6 (Concurrency Runtime) → 7.1 (Core Codegen) → 7.2 (Compiled Stdlib Codegen) → 8. All eight earlier stages are transitive dependencies."
+      },
+      "reference_answer": "Phase 8 depends transitively on the whole linear chain beneath it: Phase 1 (lexer), Phase 2 (parser and AST), Phase 3 (semantic analysis), Phase 4 (tree-walk interpreter), Phase 5 (compiler query API and tooling), Phase 6 (auto-concurrency runtime), Phase 7.1 (core code generation), and Phase 7.2 (compiled standard-library types and layout codegen)."
+    },
+    {
+      "id": "T3-selfhost-deps-on-9-10",
+      "class": "transitive-structure",
+      "prompt": "Does Phase 12 (self-hosting) depend on Phase 9 (verification) or Phase 10 (targets)? Explain.",
+      "ground_truth": {
+        "answer": "No.",
+        "derivation": "The Phase Dependency Graph notes state 'Phase 8 is the only phase self-hosting depends on' (plus the non-phase LLJIT-productionization spike). Phases 9 and 10 precede Phase 12 in the resequenced execution order (8→9→10→LLJIT→12→11) but execution order is explicitly distinguished from dependency: 'numeric order ≠ execution order'. Neither 9 nor 10 is a prerequisite of the self-hosting pivot."
+      },
+      "reference_answer": "No. Self-hosting depends only on the standard-library floor (Phase 8) and the LLJIT-productionization spike. Phases 9 and 10 happen to run before Phase 12 in the resequenced execution order, but running-before is not the same as being-depended-on: the roadmap explicitly separates execution order from the dependency graph and names Phase 8 as the sole phase the pivot requires."
+    },
+    {
+      "id": "C1-interpreter-role",
+      "class": "currency-supersession",
+      "prompt": "What is the current role of the tree-walk interpreter, and what superseded it as the execution backend?",
+      "ground_truth": {
+        "answer": "Retained as a dev/debug tool; superseded as the runtime backend by always-JIT via LLJIT.",
+        "derivation": "roadmap.md Core Strategy point 2: the tree-walk interpreter 'served its original purpose as a semantic-validation step before codegen and is retained as a dev/debug tool ... It is not the runtime backend for user-facing karac repl/test workflows. Those workflows use always-JIT via LLJIT.' Locked 2026-05-05."
+      },
+      "reference_answer": "The tree-walk interpreter is no longer the execution backend. It was originally the semantic-validation step before code generation, and it is now kept only as a development and debugging tool — for stepping through compiler internals and validating semantics during compiler work. User-facing run, repl, and test workflows were moved to always-JIT execution through LLJIT, so there is a single execution model across building, the REPL, and tests. This was settled early, on 2026-05-05."
+    },
+    {
+      "id": "C2-language-redesign",
+      "class": "currency-supersession",
+      "prompt": "The original fn / flow / record pipeline language design — what is its current status and what replaced it?",
+      "ground_truth": {
+        "answer": "Replaced by a complete redesign into a Rust-inspired systems language.",
+        "derivation": "CHANGELOG.md [Unreleased] > Language Design: 'Complete language redesign. Replaced the original fn/flow/record/-> pipeline design with a Rust-inspired systems language featuring: effect system with six built-in verbs, auto-concurrency via effect analysis, tiered ownership, data-layout separation, algebraic data types, AI-first compiler interface, phased runtime.'"
+      },
+      "reference_answer": "The original pipeline-style design — functions, flows, records, and the arrow operator — was dropped entirely. It was replaced by a complete redesign into a Rust-inspired systems language, whose defining features are an effect system with six built-in verbs and user-defined resources, automatic concurrency derived from effect analysis (no async/await), tiered ownership with parameter-mode inference and no lifetime annotations, a split between logical structure and physical memory layout, algebraic data types with exhaustive pattern matching, and a phased runtime."
+    },
+    {
+      "id": "C3-phase-resequence",
+      "class": "currency-supersession",
+      "prompt": "Is the execution order of the implementation phases the same as their numeric order? State the current order and what changed for self-hosting.",
+      "ground_truth": {
+        "answer": "No. Current execution order: 8 → 9 → 10 → LLJIT-productionization → 12 → 11. Self-hosting (Phase 12) was pulled into v1 and now executes before Phase 11.",
+        "derivation": "roadmap.md Phase Dependency Graph notes: 'Execution order is 8 → 9 → 10 → LLJIT-productionization → 12 → 11; numeric order ≠ execution order (2026-06-10 resequence; LLJIT insert owner-confirmed 2026-07-09).' And: 'Self-hosting (Phase 12) ships IN v1, sequenced before Phase 11 (was: post-v1).'"
+      },
+      "reference_answer": "No — numeric order no longer equals execution order. The current execution order is Phase 8, then 9, then 10, then the LLJIT-productionization spike, then Phase 12, then Phase 11. Self-hosting was resequenced on 2026-06-10 and pulled into the v1 release: it used to be planned for after v1, and it now executes before the long-tail standard library (Phase 11), so that every compiler-internal feature is written once, in the language itself. The LLJIT spike was inserted just before self-hosting on 2026-07-09."
+    },
+    {
+      "id": "A1-codegen-bug-count",
+      "class": "aggregation",
+      "prompt": "How many bugs in the tracker touch the code-generation area?",
+      "ground_truth": {
+        "answer_count": 321,
+        "counting_rule": "Count ledger records whose 'surface' field, lower-cased, contains the substring 'codegen'. The surface field is free-text and often lists several areas (e.g. 'interpreter + codegen (iter_mut)'); any record naming codegen counts. Result: 321 of 450.",
+        "derivation": "mechanical count over docs/bug-ledger.jsonl at HEAD."
+      },
+      "reference_answer": "321 of the 450 tracked bugs touch code generation — counting every record whose area names codegen, including the many that span codegen together with the interpreter, typechecker, or ownership stages. Code generation is by a wide margin the most bug-dense area of the compiler."
+    },
+    {
+      "id": "A2-ledger-totals",
+      "class": "aggregation",
+      "prompt": "How many bugs are recorded in total, and how many are fixed versus open?",
+      "ground_truth": {
+        "answer": {"total": 450, "fixed": 439, "open": 7, "other": {"not-reproduced": 1, "invalid": 2, "partial-fixed": 1}},
+        "derivation": "status distribution over docs/bug-ledger.jsonl at HEAD."
+      },
+      "reference_answer": "There are 450 bugs in total. 439 are fixed and 7 are open. The remaining four sit in other states: one could not be reproduced, two were judged invalid, and one is partially fixed."
+    },
+    {
+      "id": "A3-open-codegen-bugs",
+      "class": "aggregation",
+      "prompt": "List all currently-open bugs that touch the code-generation area.",
+      "ground_truth": {
+        "answer_ids": ["B-2026-07-10-5", "B-2026-07-14-6", "B-2026-07-14-8", "B-2026-07-14-10", "B-2026-07-14-11", "B-2026-07-14-15"],
+        "counting_rule": "Records with status == 'open' AND 'surface' (lower-cased) containing 'codegen'. Six of the seven open bugs qualify; B-2026-07-14-14 (typechecker slice-pattern) is the one open bug that does not name codegen.",
+        "derivation": "mechanical filter over docs/bug-ledger.jsonl at HEAD."
+      },
+      "reference_answer": "Six of the seven open bugs touch code generation: B-2026-07-10-5 (a performance gap on a substring benchmark), B-2026-07-14-6 (unimplemented Option/Result combinators), B-2026-07-14-8 (iterator for-loop adaptor lowering), B-2026-07-14-10 (iter_mut support), B-2026-07-14-11 (nested-collection element type lost in lowering), and B-2026-07-14-15 (the high-severity map-value ownership crash). The only open bug that does not touch code generation is B-2026-07-14-14, which is a typechecker slice-pattern gap."
+    }
+  ]
+}

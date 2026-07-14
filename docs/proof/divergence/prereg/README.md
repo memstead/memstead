@@ -20,11 +20,11 @@ _(none — no campaign run has occurred)_
 | `slices.json` | The slice manifest: ten SHA-pinned chronological slices, the boundary rule, and the structural events (rename / revert / supersession) named per slice. | **Committed** |
 | `models.json` | The model pins, captured from the authoring session and frozen. | **Committed** |
 | `arms.md` | Arm A / Arm B definitions and the two writer + two reader prompts (diff only in substrate/access mechanics). | _pending_ |
-| `tell-lists.json` | Both arms' judge tell lists (Arm B mem/tool vocabulary; Arm A substrate vocabulary), for two-directional blinding. | _pending_ |
-| `queries.json` | The twelve-query battery: per-query ground truth (slice citations only) + reference answers. | _pending_ |
+| `tell-lists.json` | Both arms' judge tell lists (Arm B mem/tool vocabulary; Arm A substrate vocabulary), for two-directional blinding — every active tell verified substring-disjoint from the source. | **Committed** |
+| `queries.json` | The twelve-query battery: per-query ground truth (source citations only) + tell-free reference answers. | **Committed** |
 | `rubrics.md` | The judge scoring rubric (incl. list-answer partial credit) and the integrity counting rubric. | _pending_ |
 | `bands.md` | The decision bands (uncertainty + slope qualifiers), the integrity margin, the checkpoint schedule, trial counts, token allowances, hurry-mode rounds, the cost cap, and the combined verdict table. | _pending_ |
 
 ## Status
 
-**Under construction (pre-first-run).** The source repository is selected and its slices are pinned; the model pin is captured. The arm definitions, prompts, tell lists, query battery, rubrics, and decision bands are not yet authored. The package is not ready to feed plan 02's harness until the pending files exist. Do not run the campaign against a partial package.
+**Under construction (pre-first-run).** The source repository is selected and its slices are pinned; the model pin is captured; the query battery and both tell lists are authored. The arm definitions and prompts, the judge/integrity rubrics, and the decision bands are not yet authored. The package is not ready to feed plan 02's harness until the pending files exist. Do not run the campaign against a partial package.
