@@ -687,36 +687,58 @@ pub struct LedgerSummary {
     pub auditor: u64,
 }
 
-/// What a writer session produced: the tokens it spent and the tools it called.
-/// The tool calls are the criterion-5 evidence that Arm B's writes really crossed
-/// the MCP mutation surface.
+/// What a writer session produced: the tokens it spent, the tools it called, and
+/// the model it actually ran on. The tool calls are the criterion-5 evidence that
+/// Arm B's writes really crossed the MCP mutation surface; `executed_model` is
+/// criterion 3's refusal complement — the driver invalidates the round if the
+/// session ran on a model other than the pin ([`ensure_model_honored`]).
 #[allow(dead_code)]
 #[derive(Clone, Debug, Default)]
 pub struct WriterOutcome {
     pub tokens: u64,
     pub tool_calls: Vec<String>,
+    pub executed_model: String,
 }
 
 /// What a reader session produced: the answer text (blinded before the judge
-/// sees it), the tokens spent, and the tools called.
+/// sees it), the tokens spent, the tools called, and the model it ran on
+/// (criterion 3's refusal complement, as for [`WriterOutcome`]).
 #[allow(dead_code)]
 #[derive(Clone, Debug, Default)]
 pub struct ReaderOutcome {
     pub answer: String,
     pub tokens: u64,
     pub tool_calls: Vec<String>,
+    pub executed_model: String,
+}
+
+/// What a judge session produced: the score, its token cost (criterion 7), and
+/// the model it ran on. `executed_model` carries criterion 3's refusal complement
+/// onto the judge session too — a judge that silently ran on an ambient model
+/// invalidates the round ([`ensure_model_honored`]).
+#[allow(dead_code)]
+#[derive(Clone, Debug, Default)]
+pub struct JudgeOutcome {
+    pub score: f64,
+    pub tokens: u64,
+    pub executed_model: String,
 }
 
 /// What one `claude -p` session produced, parsed from its stream-json: the
-/// answer text, the tools it called, and the tokens it spent. The real runner
-/// maps this onto a [`WriterOutcome`] (tokens + tool calls) or a
-/// [`ReaderOutcome`] (all three).
+/// answer text, the tools it called, the tokens it spent, and the model it ran
+/// on. The real runner maps this onto a [`WriterOutcome`] (tokens + tool calls +
+/// model), a [`ReaderOutcome`] (all four), or a [`JudgeOutcome`].
 #[allow(dead_code)]
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SessionOutput {
     pub text: String,
     pub tool_calls: Vec<String>,
     pub tokens: u64,
+    /// The model the session reported running on — read from the stream's
+    /// `model` field (the assistant `message.model`, or a top-level `model` on
+    /// the `system`/`result` events). Feeds the outcome's `executed_model` so the
+    /// pin-honor guard can invalidate a round that ran on the wrong model.
+    pub model: String,
 }
 
 /// Parse a `claude --output-format stream-json --verbose` NDJSON stream into a
@@ -734,6 +756,7 @@ pub fn parse_session(stdout: &str) -> Result<SessionOutput> {
     let mut tool_calls: Vec<String> = Vec::new();
     let mut result_text: Option<String> = None;
     let mut tokens: u64 = 0;
+    let mut model: Option<String> = None;
 
     for line in stdout.lines() {
         let line = line.trim();
@@ -743,6 +766,19 @@ pub fn parse_session(stdout: &str) -> Result<SessionOutput> {
         let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
             continue;
         };
+        // The executed model appears as a top-level `model` (system/result
+        // events) or nested under `message.model` (assistant events). Capture the
+        // first one seen — the pin-honor guard compares it to the requested pin.
+        if model.is_none() {
+            let found = v.get("model").and_then(|m| m.as_str()).or_else(|| {
+                v.get("message")
+                    .and_then(|m| m.get("model"))
+                    .and_then(|m| m.as_str())
+            });
+            if let Some(m) = found {
+                model = Some(m.to_string());
+            }
+        }
         match v.get("type").and_then(|t| t.as_str()) {
             Some("assistant") => {
                 if let Some(content) = v
@@ -797,6 +833,7 @@ pub fn parse_session(stdout: &str) -> Result<SessionOutput> {
         text,
         tool_calls,
         tokens,
+        model: model.unwrap_or_default(),
     })
 }
 
@@ -945,10 +982,27 @@ pub trait DivergenceRunner {
 /// Scores a blinded answer against a reference and reports its own token cost, so
 /// the judge's tokens enter the ledger (criterion 7). The mount/substrate modes'
 /// [`super::Judge`] reports no tokens; the divergence campaign needs them, hence
-/// this parallel trait.
+/// this parallel trait. The judge is invoked with the pinned `model` explicitly
+/// (criterion 3) and reports the model it ran on in [`JudgeOutcome`], so a judge
+/// that could not honor the pin invalidates its round like any other session.
 #[allow(dead_code)]
 pub trait DivergenceJudge {
-    fn score(&self, reference: &str, blinded_answer: &str) -> Result<(f64, u64)>;
+    fn score(&self, model: &str, reference: &str, blinded_answer: &str) -> Result<JudgeOutcome>;
+}
+
+/// Criterion 3's refusal complement: a session that ran on a model other than
+/// its pinned `requested` id invalidates its round rather than silently
+/// contributing an ambient-model result. Applied to every writer, reader, and
+/// judge session after it returns, comparing the model it reported running on
+/// (`executed`) against the pin the subprocess was invoked with.
+#[allow(dead_code)]
+fn ensure_model_honored(role: &str, requested: &str, executed: &str) -> Result<()> {
+    if executed != requested {
+        bail!(
+            "{role} session ran on model {executed:?}, not the pinned {requested:?} — the pin was not honored; round invalid"
+        );
+    }
+    Ok(())
 }
 
 /// Criterion 5: a writer session for Arm B must show at least one `memstead_*`
@@ -1025,6 +1079,7 @@ fn drive_writers<R: DivergenceRunner>(
     for arm in [Arm::A, Arm::B] {
         let prompt = package.prompts.writer(arm, rp.hurry, slice);
         let out = runner.write(arm, model, &prompt, rp.writer_allowance_tokens)?;
+        ensure_model_honored("writer", model, &out.executed_model)?;
         validate_writer_evidence(arm, &out.tool_calls)?;
         ledger.record(arm, Role::Writer, out.tokens);
         ledger.check_cap()?;
@@ -1138,6 +1193,11 @@ pub fn run_campaign<R: DivergenceRunner, J: DivergenceJudge>(
     state_path: Option<&Path>,
 ) -> Result<CampaignResult> {
     let model = package.single_model()?.to_string();
+    // The judge is pinned to its own model id from the package (criterion 3:
+    // every subprocess is invoked with its pinned model explicitly). It happens
+    // to equal the writer/reader pin in the committed package, but it is read
+    // from `models.judge` rather than assumed equal.
+    let judge_model = package.models.judge.clone();
     let schedule = package.campaign.schedule();
     require_slice_count(slices.len(), schedule.len())?;
     let tells = package.tell_lists.combined();
@@ -1198,14 +1258,16 @@ pub fn run_campaign<R: DivergenceRunner, J: DivergenceJudge>(
                             &prompt,
                             package.campaign.reader_budget_tokens,
                         )?;
+                        ensure_model_honored("reader", &model, &out.executed_model)?;
                         ledger.record(arm, Role::Reader, out.tokens);
                         let blinded = super::grade::strip_tells_with(&out.answer, &tells);
-                        let (score, judge_tokens) = judge.score(&query.reference, &blinded)?;
-                        ledger.record(arm, Role::Judge, judge_tokens);
+                        let jout = judge.score(&judge_model, &query.reference, &blinded)?;
+                        ensure_model_honored("judge", &judge_model, &jout.executed_model)?;
+                        ledger.record(arm, Role::Judge, jout.tokens);
                         ledger.check_cap()?;
                         match arm {
-                            Arm::A => a_scores.push(score),
-                            Arm::B => b_scores.push(score),
+                            Arm::A => a_scores.push(jout.score),
+                            Arm::B => b_scores.push(jout.score),
                         }
                     }
                 }
@@ -1934,6 +1996,10 @@ not-json-skip-me
         b_quality: f64,
         arm_b_omits_mutation: bool,
         reader_emits_tells: bool,
+        /// When set, every writer/reader session reports this model instead of the
+        /// pinned one it was invoked with — simulating a session that silently ran
+        /// on an ambient model, which the pin-honor guard must reject.
+        executed_model_override: Option<String>,
         seen: RefCell<Vec<(Arm, String, usize)>>,
         writes: RefCell<usize>,
         arm_a_dir: tempfile::TempDir,
@@ -1949,11 +2015,20 @@ not-json-skip-me
                 b_quality: 0.9,
                 arm_b_omits_mutation: false,
                 reader_emits_tells: false,
+                executed_model_override: None,
                 seen: RefCell::new(Vec::new()),
                 writes: RefCell::new(0),
                 arm_a_dir: tempfile::tempdir().unwrap(),
                 arm_b_dir: tempfile::tempdir().unwrap(),
             }
+        }
+
+        /// The model a session reports running on: the pinned `model` it was
+        /// invoked with, unless an override forces a mismatch.
+        fn reported_model(&self, model: &str) -> String {
+            self.executed_model_override
+                .clone()
+                .unwrap_or_else(|| model.to_string())
         }
     }
 
@@ -1997,13 +2072,14 @@ not-json-skip-me
             Ok(WriterOutcome {
                 tokens: self.writer_tokens,
                 tool_calls,
+                executed_model: self.reported_model(model),
             })
         }
 
         fn read(
             &self,
             arm: Arm,
-            _model: &str,
+            model: &str,
             _prompt: &str,
             _budget: usize,
         ) -> Result<ReaderOutcome> {
@@ -2022,6 +2098,7 @@ not-json-skip-me
                 answer,
                 tokens: self.reader_tokens,
                 tool_calls: vec![],
+                executed_model: self.reported_model(model),
             })
         }
 
@@ -2033,35 +2110,74 @@ not-json-skip-me
         }
     }
 
-    /// A judge that records every (blinded) answer it is handed, so a test can
-    /// prove no tell reached it.
+    /// A judge that records every (blinded) answer AND every model id it is
+    /// invoked with, so a test can prove no tell reached it and that it is pinned.
     struct RecordingJudge {
         seen: RefCell<Vec<String>>,
+        models: RefCell<Vec<String>>,
     }
     impl RecordingJudge {
         fn new() -> Self {
             Self {
                 seen: RefCell::new(Vec::new()),
+                models: RefCell::new(Vec::new()),
             }
         }
     }
     impl DivergenceJudge for RecordingJudge {
-        fn score(&self, _reference: &str, blinded_answer: &str) -> Result<(f64, u64)> {
+        fn score(
+            &self,
+            model: &str,
+            _reference: &str,
+            blinded_answer: &str,
+        ) -> Result<JudgeOutcome> {
             self.seen.borrow_mut().push(blinded_answer.to_string());
-            Ok((0.5, 5))
+            self.models.borrow_mut().push(model.to_string());
+            Ok(JudgeOutcome {
+                score: 0.5,
+                tokens: 5,
+                executed_model: model.to_string(),
+            })
         }
     }
 
     /// Scores the stub reader's `q=<x>` answer back to `x`, spending a fixed 5
-    /// tokens per judgment.
+    /// tokens per judgment. Honors the pin (reports the model it was invoked with).
     struct StubJudge;
     impl DivergenceJudge for StubJudge {
-        fn score(&self, _reference: &str, blinded_answer: &str) -> Result<(f64, u64)> {
+        fn score(
+            &self,
+            model: &str,
+            _reference: &str,
+            blinded_answer: &str,
+        ) -> Result<JudgeOutcome> {
             let x = blinded_answer
                 .strip_prefix("q=")
                 .and_then(|s| s.parse::<f64>().ok())
                 .unwrap_or(0.0);
-            Ok((x, 5))
+            Ok(JudgeOutcome {
+                score: x,
+                tokens: 5,
+                executed_model: model.to_string(),
+            })
+        }
+    }
+
+    /// A judge that silently runs on a different model than the pin — its round
+    /// must be invalidated by the pin-honor guard.
+    struct WrongModelJudge;
+    impl DivergenceJudge for WrongModelJudge {
+        fn score(
+            &self,
+            _model: &str,
+            _reference: &str,
+            _blinded_answer: &str,
+        ) -> Result<JudgeOutcome> {
+            Ok(JudgeOutcome {
+                score: 0.5,
+                tokens: 5,
+                executed_model: "ambient-model".to_string(),
+            })
         }
     }
 
@@ -2252,6 +2368,100 @@ not-json-skip-me
         // The cost book: writers + readers + judges = 2720.
         assert_eq!(v["cost"]["total_tokens"].as_u64().unwrap(), 2_720);
         assert_eq!(v["cost"]["arm_b_writer"].as_u64().unwrap(), 1_000);
+    }
+
+    #[test]
+    fn judge_is_invoked_with_the_pinned_model() {
+        // Criterion 3's refusal complement, judge half: every judge session is
+        // invoked with the package's pinned model id explicitly.
+        let dir = tmp();
+        write_fixture_package(&dir);
+        let pkg = Package::load(&dir).unwrap();
+        let judge = RecordingJudge::new();
+        run_campaign(
+            &StubRunner::new(100),
+            &judge,
+            &pkg,
+            &ten_slices(),
+            &two_queries(),
+            None,
+        )
+        .unwrap();
+        let models = judge.models.borrow();
+        assert!(!models.is_empty(), "the judge was invoked");
+        assert!(
+            models.iter().all(|m| m == &pkg.models.judge),
+            "every judge invocation carried the pinned judge model {:?}, got {:?}",
+            pkg.models.judge,
+            models
+        );
+    }
+
+    #[test]
+    fn a_writer_on_the_wrong_model_invalidates_the_round() {
+        // Criterion 3's refusal complement: a session that ran on an ambient model
+        // instead of the pin invalidates its round rather than contributing silently.
+        let dir = tmp();
+        write_fixture_package(&dir);
+        let pkg = Package::load(&dir).unwrap();
+        let mut runner = StubRunner::new(100);
+        runner.executed_model_override = Some("ambient-model".to_string());
+        let err = run_campaign(
+            &runner,
+            &StubJudge,
+            &pkg,
+            &ten_slices(),
+            &two_queries(),
+            None,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            err.contains("writer") && err.contains("not honored"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn a_judge_on_the_wrong_model_invalidates_the_round() {
+        // The pin-honor guard covers the judge session too, not just writers.
+        let dir = tmp();
+        write_fixture_package(&dir);
+        let pkg = Package::load(&dir).unwrap();
+        let err = run_campaign(
+            &StubRunner::new(100),
+            &WrongModelJudge,
+            &pkg,
+            &ten_slices(),
+            &two_queries(),
+            None,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            err.contains("judge") && err.contains("not honored"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn parse_session_extracts_the_executed_model() {
+        // The model is read from the assistant message; a top-level `model` on the
+        // system/result events is the fallback. The real runner maps it onto the
+        // outcome's executed_model for the pin-honor guard.
+        let from_message = r#"
+{"type":"system","subtype":"init","model":"claude-opus-4-8"}
+{"type":"assistant","message":{"model":"claude-opus-4-8","content":[{"type":"text","text":"ok"}]}}
+{"type":"result","result":"ok","usage":{"output_tokens":3}}
+"#;
+        assert_eq!(
+            parse_session(from_message).unwrap().model,
+            "claude-opus-4-8"
+        );
+
+        // A stream with no model field anywhere → empty (which the guard rejects).
+        let no_model = r#"{"type":"result","result":"ok"}"#;
+        assert_eq!(parse_session(no_model).unwrap().model, "");
     }
 
     #[test]
