@@ -351,6 +351,108 @@ fn hex(bytes: &[u8]) -> String {
     s
 }
 
+/// The role a session played, for cost attribution in the [`Ledger`]. Staged
+/// with the ledger ahead of the round-loop driver that constructs these.
+#[allow(dead_code)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Role {
+    Writer,
+    Reader,
+    Judge,
+    Auditor,
+}
+
+/// Per-arm, per-role token accounting across a campaign, carrying the hard cost
+/// cap.
+///
+/// Every writer, reader, judge, and auditor session records its tokens here —
+/// including Arm B's refusal-repair retries, which are charged to Arm B's writer
+/// cost — so the cap can be checked between sessions and the ledger published
+/// as-is whatever the outcome. Attribution is total by construction: [`record`]
+/// takes an `arm` and a `role`, so no token source can enter the ledger
+/// unattributed.
+///
+/// Staged ahead of its consumer: the round-loop driver records into this ledger
+/// and checks the cap between sessions. Until that driver lands and the CLI wires
+/// it, the ledger has no production caller, hence `allow(dead_code)`.
+///
+/// [`record`]: Ledger::record
+#[allow(dead_code)]
+#[derive(Clone, Debug)]
+pub struct Ledger {
+    cap_tokens: u64,
+    charges: Vec<Charge>,
+}
+
+#[allow(dead_code)]
+#[derive(Clone, Debug)]
+struct Charge {
+    arm: Arm,
+    role: Role,
+    tokens: u64,
+}
+
+#[allow(dead_code)]
+impl Ledger {
+    pub fn new(cap_tokens: u64) -> Self {
+        Self {
+            cap_tokens,
+            charges: Vec::new(),
+        }
+    }
+
+    /// Attribute `tokens` to `(arm, role)`. The only way tokens enter the ledger,
+    /// so every recorded token has an arm and a role.
+    pub fn record(&mut self, arm: Arm, role: Role, tokens: u64) {
+        self.charges.push(Charge { arm, role, tokens });
+    }
+
+    /// Every token recorded, both arms, all roles.
+    pub fn total(&self) -> u64 {
+        self.charges.iter().map(|c| c.tokens).sum()
+    }
+
+    /// Every token recorded for one arm.
+    pub fn total_for(&self, arm: Arm) -> u64 {
+        self.charges
+            .iter()
+            .filter(|c| c.arm == arm)
+            .map(|c| c.tokens)
+            .sum()
+    }
+
+    /// Tokens recorded for one arm in one role (e.g. Arm B's writer cost, which
+    /// includes its refusal-repair retries).
+    pub fn total_role(&self, arm: Arm, role: Role) -> u64 {
+        self.charges
+            .iter()
+            .filter(|c| c.arm == arm && c.role == role)
+            .map(|c| c.tokens)
+            .sum()
+    }
+
+    /// Would recording `next` more tokens push the running total past the cap?
+    /// Checked *before* a session so the campaign can abort cleanly with its
+    /// state intact for resume, rather than overspending the cap.
+    pub fn would_exceed(&self, next: u64) -> bool {
+        self.total().saturating_add(next) > self.cap_tokens
+    }
+
+    /// Refuse once the recorded total has passed the cap — the between-sessions
+    /// guard that aborts the campaign cleanly (state preserved for resume) rather
+    /// than continuing to spend.
+    pub fn check_cap(&self) -> Result<()> {
+        let total = self.total();
+        if total > self.cap_tokens {
+            bail!(
+                "campaign cost cap exceeded: {total} tokens spent, cap {} — aborting (state preserved for resume)",
+                self.cap_tokens
+            );
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -613,6 +715,40 @@ mod tests {
         // line in arms.md.
         want_arms(prompts.writer_full_skeleton.split("\n\n{SUBSTRATE_BLOCK}").next().unwrap());
         want_arms(prompts.reader_skeleton.split("\n\n{SUBSTRATE_BLOCK}").next().unwrap());
+    }
+
+    #[test]
+    fn ledger_attributes_tokens_by_arm_and_role() {
+        let mut led = Ledger::new(1_000);
+        led.record(Arm::A, Role::Writer, 100);
+        led.record(Arm::B, Role::Writer, 120);
+        // Arm B's refusal-repair retry is charged to Arm B's writer cost.
+        led.record(Arm::B, Role::Writer, 30);
+        led.record(Arm::A, Role::Reader, 50);
+        led.record(Arm::A, Role::Judge, 10);
+
+        assert_eq!(led.total(), 310);
+        assert_eq!(led.total_for(Arm::B), 150);
+        assert_eq!(led.total_for(Arm::A), 160);
+        assert_eq!(led.total_role(Arm::B, Role::Writer), 150);
+        assert_eq!(led.total_role(Arm::A, Role::Reader), 50);
+        assert_eq!(led.total_role(Arm::A, Role::Auditor), 0);
+    }
+
+    #[test]
+    fn ledger_cost_cap_guards_before_and_after() {
+        let mut led = Ledger::new(1_000);
+        led.record(Arm::A, Role::Writer, 900);
+        // Before a session: a 200-token session would exceed; a 100-token one fits.
+        assert!(led.would_exceed(200));
+        assert!(!led.would_exceed(100));
+        // Still within cap after 900.
+        assert!(led.check_cap().is_ok());
+        // Overspend, then the between-sessions check refuses.
+        led.record(Arm::B, Role::Writer, 200);
+        assert_eq!(led.total(), 1_100);
+        let err = led.check_cap().unwrap_err().to_string();
+        assert!(err.contains("cost cap exceeded"), "{err}");
     }
 
     #[test]
