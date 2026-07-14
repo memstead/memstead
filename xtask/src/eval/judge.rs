@@ -14,7 +14,7 @@ use super::claude::parse_stream_json;
 
 /// The judge's standing instruction. It frames a single grading task and pins the
 /// output format so [`parse_score`] has a reliable marker to read.
-const JUDGE_SYSTEM: &str = "You are a strict grader. You are given a REFERENCE answer (the ground \
+pub const JUDGE_SYSTEM: &str = "You are a strict grader. You are given a REFERENCE answer (the ground \
 truth, authored from the codebase) and a CANDIDATE answer. Score how well the candidate matches \
 the reference on factual correctness and completeness, ignoring style and verbosity. Output \
 exactly one line: `SCORE: <x>` where <x> is a number from 0.0 (wrong or empty) to 1.0 (fully \

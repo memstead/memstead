@@ -21,7 +21,7 @@ mod wasm;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use clap::{CommandFactory, Parser, Subcommand};
 
 #[derive(Parser, Debug)]
@@ -163,6 +163,24 @@ struct EvalArgs {
     /// resume/pinning guard that stops a run against an edited package.
     #[arg(long)]
     pin: Option<String>,
+    /// The pinned source repository clone (divergence mode): a `karalang/kara`
+    /// checkout whose history contains every commit the package's `slices.json`
+    /// references. The round digests (amendment A2) are assembled from it by `git`.
+    #[arg(long)]
+    source_repo: Option<PathBuf>,
+    /// Smoke mode (divergence): drive a reduced in-memory campaign — one round, one
+    /// query, one trial, one integrity audit — that exercises the whole live glue
+    /// without editing the pinned package. The result is a throwaway verification
+    /// (`smoke-result.json`), never the published campaign, and never resumed.
+    #[arg(long)]
+    smoke: bool,
+    /// Documentary fallback (divergence, amendment A1): omit the per-session
+    /// `--max-budget-usd` cap. Allowances become documentary targets, the ledger
+    /// still publishes actual usage, and the report must state that allowances were
+    /// not hard-enforced. Use when the proportional budget starves a session before
+    /// it completes a legitimate write.
+    #[arg(long)]
+    no_budget: bool,
 }
 
 #[derive(clap::Args, Debug)]
@@ -193,8 +211,8 @@ fn run_eval(args: EvalArgs) -> Result<()> {
     }
     // Divergence mode: selected by --package. It consumes the pre-registration
     // package as its only configuration and does not use --subject/--tasks.
-    if let Some(package_dir) = args.package.clone() {
-        return run_divergence_eval(&package_dir, args.pin.as_deref());
+    if args.package.is_some() {
+        return run_divergence_eval(&args);
     }
     let subject = args
         .subject
@@ -459,12 +477,19 @@ fn run_substrate_eval(args: &EvalArgs, subject: &str, tasks: &[eval::TaskSpec]) 
     Ok(())
 }
 
-/// Divergence mode entry: load and pin the pre-registration package, validate it,
-/// and report. The round loop, reader battery, entropy metrics, ledger, and
-/// resume land on top of this; until they do, the mode loads and verifies the
-/// package (so the pinning guard and the config surface are exercised) and then
-/// reports the round loop as not yet implemented rather than pretending to run.
-fn run_divergence_eval(package_dir: &std::path::Path, pin: Option<&str>) -> Result<()> {
+/// Divergence mode entry: load and content-hash-pin the pre-registration package,
+/// validate it, report the resolved round plan, then drive the real campaign —
+/// per-round `claude -p` writer sessions per arm, the blinded reader battery and
+/// integrity audit at their checkpoints, one cost ledger across all four roles,
+/// and the resumable serialised result. `--smoke` runs a reduced in-memory
+/// campaign (one round / query / trial) to verify the live glue without editing
+/// the pinned package.
+fn run_divergence_eval(args: &EvalArgs) -> Result<()> {
+    let package_dir = args
+        .package
+        .as_ref()
+        .context("divergence mode needs --package <pre-registration package dir>")?;
+    let pin = args.pin.as_deref();
     let pkg = eval::divergence::Package::load(package_dir).with_context(|| {
         format!(
             "loading pre-registration package at {}",
@@ -549,11 +574,155 @@ fn run_divergence_eval(package_dir: &std::path::Path, pin: Option<&str>) -> Resu
             rp.round, rp.writer_allowance_tokens, marks
         );
     }
-    bail!(
-        "divergence round loop not yet implemented — package loaded and pinned OK \
-         (pass this content hash to --pin to require it: {})",
-        pkg.content_hash
-    )
+    eprintln!("  package hash : {}", pkg.content_hash);
+
+    // ---- build the real runner/judge/auditor and drive the campaign ----
+    let cli_binary = args
+        .cli_binary
+        .as_ref()
+        .context("divergence mode needs --cli-binary <memstead> to provision Arm B's mem")?;
+    let mcp_binary = args
+        .mcp_binary
+        .as_ref()
+        .context("divergence mode needs --mcp-binary <memstead-mcp> to mount Arm B's mem")?;
+    let source_repo = args.source_repo.as_ref().context(
+        "divergence mode needs --source-repo <kara clone containing the pinned slice commits>",
+    )?;
+    let out_dir = args
+        .output
+        .as_ref()
+        .context("divergence mode needs --output <campaign output directory>")?;
+    std::fs::create_dir_all(out_dir)
+        .with_context(|| format!("creating campaign output dir {}", out_dir.display()))?;
+
+    // Every round's mechanical digest, assembled from the pinned source (A2).
+    let manifest = package_dir.join("slices.json");
+    let mut slices = eval::divergence::extract_round_slices(source_repo, &manifest)
+        .context("assembling round-slice digests from the source repo")?;
+    let mut queries = eval::divergence::load_queries(package_dir)?;
+
+    // Materialise both substrates. Arm A: a loose markdown directory. Arm B: a
+    // fresh folder-backed mem pinned to the built-in `software@0.1.0` schema,
+    // provisioned once through the CLI (the engine owns mem state) and reused on
+    // resume. Both accumulate across rounds.
+    let arm_a_dir = out_dir.join("arm-a");
+    let arm_b_workspace = out_dir.join("arm-b-mem");
+    let sandbox_dir = out_dir.join("sandbox");
+    std::fs::create_dir_all(&arm_a_dir)?;
+    std::fs::create_dir_all(&sandbox_dir)?;
+    let arm_b_mcp_config = arm_b_workspace.join("capture.mcp.json");
+    if !arm_b_mcp_config.exists() {
+        eprintln!(
+            "provisioning empty Arm B mem (software@0.1.0) at {}…",
+            arm_b_workspace.display()
+        );
+        eval::capture::provision_capture_mem(
+            cli_binary,
+            mcp_binary,
+            &arm_b_workspace,
+            "kara-knowledge",
+            "software@0.1.0",
+        )?;
+    } else {
+        eprintln!("reusing existing Arm B mem at {}", arm_b_workspace.display());
+    }
+
+    let runner = eval::divergence::ClaudeDivergenceRunner {
+        executable: "claude".to_string(),
+        arm_a_dir,
+        arm_b_workspace,
+        arm_b_mcp_config,
+        sandbox_dir: sandbox_dir.clone(),
+        // Amendment A1: enforce allowances as proportional `--max-budget-usd` caps,
+        // unless the documentary fallback (`--no-budget`) is selected.
+        usd_per_output_token: if args.no_budget {
+            None
+        } else {
+            Some(pkg.campaign.usd_per_output_token)
+        },
+    };
+    if args.no_budget {
+        eprintln!(
+            "A1 documentary fallback: allowances are NOT hard-enforced (no --max-budget-usd cap)"
+        );
+    }
+    let judge = eval::divergence::ClaudeDivergenceJudge {
+        executable: "claude".to_string(),
+        sandbox_dir: sandbox_dir.clone(),
+    };
+    let auditor = eval::divergence::ClaudeDivergenceAuditor {
+        executable: "claude".to_string(),
+        sandbox_dir,
+    };
+
+    // Smoke mode reduces the campaign in memory (never editing the pinned package):
+    // one round, one query, one trial, one integrity audit — enough to exercise
+    // every glue path (both writers, the reader battery + judge, the integrity
+    // audit, entropy, ledger, serialisation) with ~8 live sessions.
+    let pkg = if args.smoke {
+        eprintln!("SMOKE run: reduced campaign (1 round, 1 query, 1 trial, 1 integrity audit)");
+        let mut p = pkg.clone();
+        p.campaign.rounds = 1;
+        p.campaign.hurry_rounds = vec![];
+        p.campaign.reader_checkpoints = vec![1];
+        p.campaign.integrity_audit_rounds = vec![1];
+        p.campaign.trials = 1;
+        slices.truncate(1);
+        queries.truncate(1);
+        p
+    } else {
+        pkg
+    };
+
+    let state_path = out_dir.join("state.json");
+    let result = eval::divergence::run_campaign(
+        &runner,
+        &judge,
+        &auditor,
+        &pkg,
+        &slices,
+        &queries,
+        if args.smoke {
+            None
+        } else {
+            Some(state_path.as_path())
+        },
+    )?;
+
+    let result_path = out_dir.join(if args.smoke {
+        "smoke-result.json"
+    } else {
+        "result.json"
+    });
+    std::fs::write(&result_path, result.to_json()?)
+        .with_context(|| format!("writing campaign result {}", result_path.display()))?;
+
+    let cost = result.ledger.summary();
+    eprintln!("wrote campaign result to {}", result_path.display());
+    eprintln!(
+        "cost: {} / {} tokens (A writer {}, B writer {}, judge {}, auditor {})",
+        cost.total_tokens,
+        cost.cap_tokens,
+        cost.arm_a_writer,
+        cost.arm_b_writer,
+        cost.judge,
+        cost.auditor
+    );
+    for cp in &result.checkpoints {
+        for r in &cp.results {
+            eprintln!(
+                "  reader@{} {}: delta(B-A)={:+.3} (B={:.3} A={:.3})",
+                cp.round, r.task_id, r.delta, r.on_mean, r.off_mean
+            );
+        }
+    }
+    for ic in &result.integrity_checkpoints {
+        eprintln!(
+            "  integrity@{}: delta(A-B)={:+.3} defects/100 (A items {}, B items {})",
+            ic.round, ic.result.delta, ic.arm_a_items, ic.arm_b_items
+        );
+    }
+    Ok(())
 }
 
 fn generate_docs(args: GenerateDocsArgs) -> Result<()> {

@@ -21,7 +21,7 @@
 
 use anyhow::{Context, Result, bail};
 use sha2::{Digest, Sha256};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Machine-readable campaign parameters, from `campaign.json`.
 #[derive(Clone, Debug, serde::Deserialize)]
@@ -839,8 +839,27 @@ pub fn parse_session(stdout: &str) -> Result<SessionOutput> {
     let mut texts: Vec<String> = Vec::new();
     let mut tool_calls: Vec<String> = Vec::new();
     let mut result_text: Option<String> = None;
-    let mut tokens: u64 = 0;
+    // The `result` event carries the session's grand-total usage on a clean run.
+    let mut result_tokens: u64 = 0;
+    // Assistant events carry a running cumulative usage snapshot. On a
+    // `--max-budget-usd` cutoff (amendment A1) the `result` event errors with zero
+    // usage, so the last assistant snapshot is the only record of what was spent —
+    // taking the max recovers a budget-cut session's real cost for the ledger. On a
+    // clean run the result total dominates, so `max` leaves it unchanged.
+    let mut max_assistant_tokens: u64 = 0;
     let mut model: Option<String> = None;
+
+    let sum_usage = |usage: &serde_json::Map<String, serde_json::Value>| -> u64 {
+        [
+            "input_tokens",
+            "output_tokens",
+            "cache_creation_input_tokens",
+            "cache_read_input_tokens",
+        ]
+        .iter()
+        .map(|key| usage.get(*key).and_then(|t| t.as_u64()).unwrap_or(0))
+        .sum()
+    };
 
     for line in stdout.lines() {
         let line = line.trim();
@@ -865,6 +884,13 @@ pub fn parse_session(stdout: &str) -> Result<SessionOutput> {
         }
         match v.get("type").and_then(|t| t.as_str()) {
             Some("assistant") => {
+                if let Some(usage) = v
+                    .get("message")
+                    .and_then(|m| m.get("usage"))
+                    .and_then(|u| u.as_object())
+                {
+                    max_assistant_tokens = max_assistant_tokens.max(sum_usage(usage));
+                }
                 if let Some(content) = v
                     .get("message")
                     .and_then(|m| m.get("content"))
@@ -894,14 +920,7 @@ pub fn parse_session(stdout: &str) -> Result<SessionOutput> {
                     result_text = Some(r.to_string());
                 }
                 if let Some(usage) = v.get("usage").and_then(|u| u.as_object()) {
-                    for key in [
-                        "input_tokens",
-                        "output_tokens",
-                        "cache_creation_input_tokens",
-                        "cache_read_input_tokens",
-                    ] {
-                        tokens += usage.get(key).and_then(|t| t.as_u64()).unwrap_or(0);
-                    }
+                    result_tokens += sum_usage(usage);
                 }
             }
             _ => {}
@@ -916,7 +935,9 @@ pub fn parse_session(stdout: &str) -> Result<SessionOutput> {
     Ok(SessionOutput {
         text,
         tool_calls,
-        tokens,
+        // The result-event grand total on a clean run; the last assistant snapshot
+        // when a budget cutoff zeroed the result usage. `max` picks the right one.
+        tokens: result_tokens.max(max_assistant_tokens),
         model: model.unwrap_or_default(),
     })
 }
@@ -1482,6 +1503,268 @@ pub fn run_campaign<R: DivergenceRunner, J: DivergenceJudge, A: DivergenceAudito
     })
 }
 
+// ===========================================================================
+// The real subprocess glue (plan 03): concrete runner / judge / auditor that
+// shell to `claude -p`, plus the mechanical slice extractor. The whole harness
+// above is trait-driven and stub-tested; these are the thin production impls the
+// CLI wires into `run_campaign`.
+// ===========================================================================
+
+/// The pinned source repo's changelog and bug-ledger paths — the two files the
+/// mechanical round digest (amendment A2) diffs per slice. Fixed by the source
+/// repository record (`prereg/source-repo.md`): kara keeps a Keep-a-Changelog
+/// `CHANGELOG.md` and a structured bug ledger at `docs/bug-ledger.jsonl`.
+const SOURCE_CHANGELOG_PATH: &str = "CHANGELOG.md";
+const SOURCE_LEDGER_PATH: &str = "docs/bug-ledger.jsonl";
+
+/// Assemble every round's mechanical digest (amendment A2) from the pinned source
+/// repository, reading the boundary commits from the package's `slices.json`.
+/// Returns one digest per slice in `index` order — round `i`'s writer input. The
+/// same string feeds both arms, so the digest is never an arm-distinguishing
+/// variable (criterion 5's parity contract, preserved at the call site).
+pub fn extract_round_slices(repo: &Path, manifest_path: &Path) -> Result<Vec<String>> {
+    #[derive(serde::Deserialize)]
+    struct Manifest {
+        slices: Vec<Slice>,
+    }
+    #[derive(serde::Deserialize)]
+    struct Slice {
+        index: usize,
+        first_commit: String,
+        last_commit: String,
+    }
+    let bytes = std::fs::read(manifest_path)
+        .with_context(|| format!("reading slice manifest {}", manifest_path.display()))?;
+    let manifest: Manifest =
+        serde_json::from_slice(&bytes).context("parsing slices.json slice manifest")?;
+    let mut slices = manifest.slices;
+    slices.sort_by_key(|s| s.index);
+    let mut out = Vec::with_capacity(slices.len());
+    for s in &slices {
+        out.push(slice_digest(
+            repo,
+            &s.first_commit,
+            &s.last_commit,
+            SOURCE_CHANGELOG_PATH,
+            SOURCE_LEDGER_PATH,
+        )?);
+    }
+    Ok(out)
+}
+
+/// Parse the auditor's two defect counts from its answer text (criterion 10). The
+/// auditor skeleton pins the format to `DUPLICATES: <n>` and `CONTRADICTIONS: <n>`,
+/// each on its own line; this reads the first integer on the marker's line,
+/// case-insensitively. A missing marker is an error, never a silent zero — an
+/// auditor that did not answer in the pinned format must invalidate its trial
+/// rather than contribute a fabricated clean score.
+fn parse_audit_counts(text: &str) -> Result<(usize, usize)> {
+    let lower = text.to_lowercase();
+    let duplicates = count_on_marker_line(&lower, "duplicates")
+        .context("auditor output has no `DUPLICATES: <n>` count")?;
+    let contradictions = count_on_marker_line(&lower, "contradictions")
+        .context("auditor output has no `CONTRADICTIONS: <n>` count")?;
+    Ok((duplicates, contradictions))
+}
+
+/// The first run of ASCII digits on the line where `marker` first appears in the
+/// (already-lowercased) text. Scoped to the marker's own line so a marker with no
+/// number does not accidentally read the next line's count.
+fn count_on_marker_line(lower: &str, marker: &str) -> Option<usize> {
+    let idx = lower.find(marker)?;
+    let line = lower[idx + marker.len()..].lines().next().unwrap_or("");
+    let digits: String = line
+        .chars()
+        .skip_while(|c| !c.is_ascii_digit())
+        .take_while(|c| c.is_ascii_digit())
+        .collect();
+    if digits.is_empty() {
+        None
+    } else {
+        digits.parse().ok()
+    }
+}
+
+/// Spawn one `claude -p` session with `args` from `cwd` and parse its stream-json.
+///
+/// A non-zero exit is tolerated only when the stream still parsed a model id: the
+/// `--max-budget-usd` cutoff (amendment A1) terminates an over-budget session
+/// non-zero but emits a usable stream, and that must count as a real (budgeted)
+/// session whose partial usage enters the ledger — not a spawn failure. A
+/// non-zero exit with nothing parseable is a genuine failure and refuses.
+fn spawn_claude_session(executable: &str, args: &[String], cwd: &Path) -> Result<SessionOutput> {
+    std::fs::create_dir_all(cwd)
+        .with_context(|| format!("creating session working dir {}", cwd.display()))?;
+    let output = std::process::Command::new(executable)
+        .args(args)
+        .current_dir(cwd)
+        // Give the MCP server room to finish its handshake before the first turn.
+        .env("MCP_TIMEOUT", "60000")
+        .output()
+        .with_context(|| {
+            format!("spawning `{executable}` — is the claude CLI installed and on PATH?")
+        })?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed = parse_session(&stdout);
+    if !output.status.success() {
+        match &parsed {
+            // Budget cutoff or soft stop: the session ran and reported a model, so
+            // its usage is real and the round is valid.
+            Ok(s) if !s.model.is_empty() => {}
+            _ => bail!(
+                "claude session exited with {}: {}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            ),
+        }
+    }
+    parsed
+}
+
+/// The real divergence runner: shells to `claude -p` per session against each
+/// arm's materialised substrate. Arm A is a loose markdown directory the writer
+/// runs *inside* (its filesystem tools land there and accumulate across rounds);
+/// Arm B is a folder-backed mem mounted over MCP, the writer running from an empty
+/// sandbox so its built-in file tools find no codebase — only the mem is reachable.
+/// The writer/reader allowance is passed as the per-session `--max-budget-usd` cap
+/// (amendment A1); tests drive the same loop through a deterministic stub.
+pub struct ClaudeDivergenceRunner {
+    pub executable: String,
+    /// Arm A substrate: a persistent markdown directory the writer runs inside.
+    pub arm_a_dir: PathBuf,
+    /// Arm B substrate: the folder-backed mem's entity directory (workspace root).
+    pub arm_b_workspace: PathBuf,
+    /// MCP config mounting Arm B's mem (memstead server pointed at the workspace).
+    pub arm_b_mcp_config: PathBuf,
+    /// Empty working directory Arm B sessions run from, so claude's built-in file
+    /// tools find no codebase and the single variable (substrate access) holds.
+    pub sandbox_dir: PathBuf,
+    /// The pinned model's list output price, converting a token allowance into the
+    /// `--max-budget-usd` cost budget (amendment A1): `budget_usd = allowance ×
+    /// this`. `None` omits the cap (A1's documentary fallback).
+    pub usd_per_output_token: Option<f64>,
+}
+
+impl ClaudeDivergenceRunner {
+    fn budget(&self, token_allowance: usize) -> Option<f64> {
+        self.usd_per_output_token
+            .map(|rate| token_allowance as f64 * rate)
+    }
+}
+
+impl DivergenceRunner for ClaudeDivergenceRunner {
+    fn write(
+        &self,
+        arm: Arm,
+        model: &str,
+        prompt: &str,
+        token_allowance: usize,
+    ) -> Result<WriterOutcome> {
+        let budget = self.budget(token_allowance);
+        let (args, cwd) = match arm {
+            Arm::A => (
+                build_writer_args(Arm::A, model, prompt, budget, None),
+                self.arm_a_dir.as_path(),
+            ),
+            Arm::B => (
+                build_writer_args(Arm::B, model, prompt, budget, Some(&self.arm_b_mcp_config)),
+                self.sandbox_dir.as_path(),
+            ),
+        };
+        let out = spawn_claude_session(&self.executable, &args, cwd)?;
+        Ok(WriterOutcome {
+            tokens: out.tokens,
+            tool_calls: out.tool_calls,
+            executed_model: out.model,
+        })
+    }
+
+    fn read(
+        &self,
+        arm: Arm,
+        model: &str,
+        prompt: &str,
+        token_budget: usize,
+    ) -> Result<ReaderOutcome> {
+        let budget = self.budget(token_budget);
+        let (args, cwd) = match arm {
+            Arm::A => (
+                build_reader_args(Arm::A, model, prompt, budget, None),
+                self.arm_a_dir.as_path(),
+            ),
+            Arm::B => (
+                build_reader_args(Arm::B, model, prompt, budget, Some(&self.arm_b_mcp_config)),
+                self.sandbox_dir.as_path(),
+            ),
+        };
+        let out = spawn_claude_session(&self.executable, &args, cwd)?;
+        Ok(ReaderOutcome {
+            answer: out.text,
+            tokens: out.tokens,
+            tool_calls: out.tool_calls,
+            executed_model: out.model,
+        })
+    }
+
+    fn substrate_dir(&self, arm: Arm) -> &Path {
+        match arm {
+            Arm::A => &self.arm_a_dir,
+            Arm::B => &self.arm_b_workspace,
+        }
+    }
+}
+
+/// The real blind judge: shells to `claude -p` with the label-free grading prompt
+/// and the pinned model, reporting its tokens (criterion 7) and executed model
+/// (criterion 3). No tools; runs from an empty sandbox.
+pub struct ClaudeDivergenceJudge {
+    pub executable: String,
+    pub sandbox_dir: PathBuf,
+}
+
+impl DivergenceJudge for ClaudeDivergenceJudge {
+    fn score(&self, model: &str, reference: &str, blinded_answer: &str) -> Result<JudgeOutcome> {
+        let prompt = super::judge::build_judge_prompt(reference, blinded_answer);
+        let mut args = base_session_args(model, &prompt, None);
+        args.push("--allowedTools".to_string());
+        args.push(String::new());
+        args.push("--system-prompt".to_string());
+        args.push(super::judge::JUDGE_SYSTEM.to_string());
+        let out = spawn_claude_session(&self.executable, &args, &self.sandbox_dir)?;
+        let score = super::judge::parse_score(&out.text)?;
+        Ok(JudgeOutcome {
+            score,
+            tokens: out.tokens,
+            executed_model: out.model,
+        })
+    }
+}
+
+/// The real blind integrity auditor (criterion 10): shells to `claude -p` with the
+/// arm-neutral auditor prompt (skeleton + tell-stripped corpus, assembled by the
+/// harness) and the pinned model, parsing the two defect counts and reporting its
+/// tokens and executed model. No tools; runs from an empty sandbox.
+pub struct ClaudeDivergenceAuditor {
+    pub executable: String,
+    pub sandbox_dir: PathBuf,
+}
+
+impl DivergenceAuditor for ClaudeDivergenceAuditor {
+    fn audit(&self, model: &str, auditor_prompt: &str) -> Result<AuditOutcome> {
+        let mut args = base_session_args(model, auditor_prompt, None);
+        args.push("--allowedTools".to_string());
+        args.push(String::new());
+        let out = spawn_claude_session(&self.executable, &args, &self.sandbox_dir)?;
+        let (duplicates, contradictions) = parse_audit_counts(&out.text)?;
+        Ok(AuditOutcome {
+            duplicates,
+            contradictions,
+            tokens: out.tokens,
+            executed_model: out.model,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1988,6 +2271,62 @@ mod tests {
     }
 
     #[test]
+    fn extract_round_slices_reads_the_manifest_and_digests_each_slice_in_order() {
+        let (repo, c1, c2, c3) = fixture_git_repo();
+        // A two-slice manifest, deliberately out of order to prove index sorting:
+        // slice 2 is [c2,c3], slice 1 is the root [c1,c1].
+        let manifest = repo.join("slices.json");
+        fs::write(
+            &manifest,
+            format!(
+                r#"{{"slices":[
+                    {{"index":2,"first_commit":"{c2}","last_commit":"{c3}"}},
+                    {{"index":1,"first_commit":"{c1}","last_commit":"{c1}"}}
+                ]}}"#
+            ),
+        )
+        .unwrap();
+        let slices = extract_round_slices(&repo, &manifest).unwrap();
+        assert_eq!(slices.len(), 2, "one digest per manifest slice");
+        // Sorted by index: slice 1 (root) first, slice 2 second.
+        assert!(
+            slices[0].contains("seed the ledger and changelog"),
+            "slice[0] is the root slice: {}",
+            slices[0]
+        );
+        assert!(
+            slices[1].contains("resolve B-1") && slices[1].contains("resolve B-2"),
+            "slice[1] is [c2,c3]: {}",
+            slices[1]
+        );
+        // Each digest matches the standalone slice_digest for the same range — the
+        // extractor is a thin manifest-driven wrapper, not a second implementation.
+        let direct =
+            slice_digest(&repo, &c2, &c3, "CHANGELOG.md", "docs/bug-ledger.jsonl").unwrap();
+        assert_eq!(slices[1], direct);
+    }
+
+    #[test]
+    fn parse_audit_counts_reads_the_two_marked_counts() {
+        let (d, c) = parse_audit_counts("DUPLICATES: 3\nCONTRADICTIONS: 1").unwrap();
+        assert_eq!((d, c), (3, 1));
+        // Case-insensitive, with leading reasoning the skeleton forbids but a model
+        // might still emit — the marked line is what counts.
+        let (d, c) =
+            parse_audit_counts("some noise\nduplicates:  0\ncontradictions: 12\n").unwrap();
+        assert_eq!((d, c), (0, 12));
+    }
+
+    #[test]
+    fn parse_audit_counts_refuses_a_missing_marker() {
+        // A missing count must error, never silently score a clean zero.
+        assert!(parse_audit_counts("DUPLICATES: 2").is_err());
+        assert!(parse_audit_counts("no counts at all").is_err());
+        // A marker with no number on its line does not steal the next line's count.
+        assert!(parse_audit_counts("DUPLICATES:\nCONTRADICTIONS: 4").is_err());
+    }
+
+    #[test]
     fn parse_session_extracts_text_tools_and_usage_tokens() {
         // A minimal claude stream-json: an assistant turn with text + a tool_use,
         // then a result event carrying the usage token counts.
@@ -2001,6 +2340,26 @@ not-json-skip-me
         assert_eq!(out.text, "Recorded the change.");
         assert_eq!(out.tool_calls, vec!["mcp__memstead__memstead_create"]);
         assert_eq!(out.tokens, 1200 + 300 + 50, "usage tokens summed");
+    }
+
+    #[test]
+    fn parse_session_recovers_budget_cut_usage_from_assistant_events() {
+        // A `--max-budget-usd` cutoff (amendment A1): the assistant events carry the
+        // running cumulative usage, but the `result` event errors with zero usage.
+        // The ledger must still see the spent tokens, so the max assistant snapshot
+        // is used when the result total is zero.
+        let stream = r#"
+{"type":"assistant","message":{"model":"claude-opus-4-8","usage":{"input_tokens":2,"output_tokens":2,"cache_read_input_tokens":17047,"cache_creation_input_tokens":2931},"content":[{"type":"text","text":"Partial essay…"}]}}
+{"type":"result","subtype":"error_max_budget_usd","is_error":true,"usage":{"input_tokens":0,"output_tokens":0}}
+"#;
+        let out = parse_session(stream).unwrap();
+        assert_eq!(out.model, "claude-opus-4-8");
+        assert_eq!(
+            out.tokens,
+            2 + 2 + 17047 + 2931,
+            "budget-cut usage recovered from the assistant snapshot, not the zeroed result"
+        );
+        assert_eq!(out.text, "Partial essay…");
     }
 
     #[test]
