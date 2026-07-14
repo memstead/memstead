@@ -21,7 +21,7 @@ mod wasm;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use clap::{CommandFactory, Parser, Subcommand};
 
 #[derive(Parser, Debug)]
@@ -151,6 +151,18 @@ struct EvalArgs {
     /// surfaces the dropped (information-loss) set alongside the task delta.
     #[arg(long)]
     facts: Option<PathBuf>,
+
+    // --- divergence mode (the longitudinal write-side test) ---
+    /// The pre-registration package directory (e.g.
+    /// `docs/proof/divergence/prereg`). Selects the divergence mode: the harness
+    /// loads and content-hash-pins the package, then drives the round loop from it.
+    #[arg(long)]
+    package: Option<PathBuf>,
+    /// Optional expected package content hash. When set, the divergence mode
+    /// refuses to run unless the package hashes to exactly this value — the
+    /// resume/pinning guard that stops a run against an edited package.
+    #[arg(long)]
+    pin: Option<String>,
 }
 
 #[derive(clap::Args, Debug)]
@@ -178,6 +190,11 @@ fn run_eval(args: EvalArgs) -> Result<()> {
             .clone()
             .unwrap_or_else(|| std::env::temp_dir().join("memstead-eval-selftest.json"));
         return eval::selftest::run(&output);
+    }
+    // Divergence mode: selected by --package. It consumes the pre-registration
+    // package as its only configuration and does not use --subject/--tasks.
+    if let Some(package_dir) = args.package.clone() {
+        return run_divergence_eval(&package_dir, args.pin.as_deref());
     }
     let subject = args
         .subject
@@ -440,6 +457,48 @@ fn run_substrate_eval(args: &EvalArgs, subject: &str, tasks: &[eval::TaskSpec]) 
     }
     eprintln!("wrote series to {}", output.display());
     Ok(())
+}
+
+/// Divergence mode entry: load and pin the pre-registration package, validate it,
+/// and report. The round loop, reader battery, entropy metrics, ledger, and
+/// resume land on top of this; until they do, the mode loads and verifies the
+/// package (so the pinning guard and the config surface are exercised) and then
+/// reports the round loop as not yet implemented rather than pretending to run.
+fn run_divergence_eval(package_dir: &std::path::Path, pin: Option<&str>) -> Result<()> {
+    let pkg = eval::divergence::Package::load(package_dir)
+        .with_context(|| format!("loading pre-registration package at {}", package_dir.display()))?;
+    if let Some(expected) = pin {
+        pkg.verify_pin(expected)?;
+    }
+    let model = pkg.single_model()?;
+    let c = &pkg.campaign;
+    eprintln!("loaded pre-registration package at {}", package_dir.display());
+    eprintln!("  content hash : {}", pkg.content_hash);
+    eprintln!("  model        : {model} (judge {}, auditor {})", pkg.models.judge, pkg.models.auditor);
+    eprintln!(
+        "  schedule     : {} rounds, hurry {:?}, reader checkpoints {:?}, integrity audits {:?}",
+        c.rounds, c.hurry_rounds, c.reader_checkpoints, c.integrity_audit_rounds
+    );
+    eprintln!(
+        "  budgets      : {} trials; writer {}/{} (full/hurry), reader {}; cost cap {}; contamination {}",
+        c.trials,
+        c.writer_allowance_full_tokens,
+        c.writer_allowance_hurry_tokens,
+        c.reader_budget_tokens,
+        c.cost_cap_tokens,
+        c.contamination_threshold
+    );
+    eprintln!(
+        "  tell lists   : {} arm-A + {} arm-B = {} blinding phrases",
+        pkg.tell_lists.arm_a.len(),
+        pkg.tell_lists.arm_b.len(),
+        pkg.tell_lists.combined().len()
+    );
+    bail!(
+        "divergence round loop not yet implemented — package loaded and pinned OK \
+         (pass this content hash to --pin to require it: {})",
+        pkg.content_hash
+    )
 }
 
 fn generate_docs(args: GenerateDocsArgs) -> Result<()> {

@@ -46,6 +46,7 @@ pub mod capture;
 pub mod claude;
 pub mod contamination;
 pub mod coverage;
+pub mod divergence;
 pub mod grade;
 pub mod judge;
 pub mod replay;
