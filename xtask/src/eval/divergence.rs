@@ -554,6 +554,67 @@ mod tests {
         assert!(c.validate().is_err());
     }
 
+    /// Group an integer with thousands commas, matching how `bands.md` writes
+    /// token counts (`8000` -> `8,000`, `20000000` -> `20,000,000`).
+    fn with_commas(n: u64) -> String {
+        let s = n.to_string();
+        let bytes = s.as_bytes();
+        let mut out = String::new();
+        for (i, b) in bytes.iter().enumerate() {
+            if i > 0 && (bytes.len() - i).is_multiple_of(3) {
+                out.push(',');
+            }
+            out.push(*b as char);
+        }
+        out
+    }
+
+    /// Guards the drift risk between the machine files the harness reads
+    /// (`campaign.json`, `prompts.json`) and the human documents the
+    /// pre-registration exposition lives in (`bands.md`, `arms.md`): the two must
+    /// agree, and nothing else enforces it. Skips when the package is not in this
+    /// checkout (e.g. a published crate without the docs tree).
+    #[test]
+    fn committed_package_machine_files_match_their_prose_sources() {
+        let pkg_dir =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../docs/proof/divergence/prereg");
+        if !pkg_dir.join("campaign.json").exists() {
+            return; // package not present in this build context; nothing to guard
+        }
+
+        // campaign.json numeric values must appear (as bands.md formats them) in
+        // bands.md.
+        let campaign: Campaign =
+            serde_json::from_slice(&std::fs::read(pkg_dir.join("campaign.json")).unwrap()).unwrap();
+        let bands = std::fs::read_to_string(pkg_dir.join("bands.md")).unwrap();
+        let want = |needle: String| {
+            assert!(bands.contains(&needle), "bands.md does not contain {needle:?} — campaign.json has drifted from bands.md");
+        };
+        want(with_commas(campaign.writer_allowance_full_tokens as u64));
+        want(with_commas(campaign.writer_allowance_hurry_tokens as u64));
+        want(with_commas(campaign.cost_cap_tokens));
+        let join = |v: &[usize]| v.iter().map(|n| n.to_string()).collect::<Vec<_>>().join(", ");
+        want(join(&campaign.hurry_rounds));
+        want(join(&campaign.reader_checkpoints));
+        want(campaign.contamination_threshold.to_string());
+
+        // prompts.json prompt text must appear verbatim in arms.md.
+        let prompts: Prompts =
+            serde_json::from_slice(&std::fs::read(pkg_dir.join("prompts.json")).unwrap()).unwrap();
+        let arms = std::fs::read_to_string(pkg_dir.join("arms.md")).unwrap();
+        let want_arms = |needle: &str| {
+            assert!(arms.contains(needle), "arms.md does not contain {:?} — prompts.json has drifted from arms.md", &needle[..needle.len().min(60)]);
+        };
+        want_arms(&prompts.writer_substrate.arm_a);
+        want_arms(&prompts.writer_substrate.arm_b);
+        want_arms(&prompts.reader_substrate.arm_a);
+        want_arms(&prompts.reader_substrate.arm_b);
+        // The skeleton opening (before the first placeholder) is one blockquote
+        // line in arms.md.
+        want_arms(prompts.writer_full_skeleton.split("\n\n{SUBSTRATE_BLOCK}").next().unwrap());
+        want_arms(prompts.reader_skeleton.split("\n\n{SUBSTRATE_BLOCK}").next().unwrap());
+    }
+
     #[test]
     fn single_model_refuses_a_confounded_pair() {
         let dir = tmp();
