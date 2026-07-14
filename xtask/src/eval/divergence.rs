@@ -351,6 +351,74 @@ fn hex(bytes: &[u8]) -> String {
     s
 }
 
+/// Vocabulary-entropy counts over a substrate — a secondary, judge-free metric
+/// (reported, never band-moving). Higher counts mean a richer typed vocabulary.
+#[allow(dead_code)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct EntropyCounts {
+    /// Distinct frontmatter `type:` values.
+    pub distinct_types: usize,
+    /// Distinct frontmatter `status:` values.
+    pub distinct_status_values: usize,
+    /// Distinct relationship labels (ALL-CAPS relation-type tokens).
+    pub distinct_relation_labels: usize,
+}
+
+/// Count the vocabulary entropy of a substrate directory, mechanically and with
+/// no judge (criterion 6). Both substrates are markdown on disk — Arm A a loose
+/// directory, Arm B the mem's rendered entity files — so one pure function serves
+/// both: it walks every `.md` file, reads the distinct `type:` and `status:`
+/// values from each file's leading YAML frontmatter, and counts distinct
+/// relationship labels as the ALL-CAPS relation-type tokens in the body (the
+/// typed vocabulary Arm B emits and the untyped Arm A directory does not — so the
+/// count is itself a divergence signal).
+#[allow(dead_code)]
+pub fn vocabulary_entropy(dir: &Path) -> Result<EntropyCounts> {
+    use std::collections::BTreeSet;
+    let mut types = BTreeSet::new();
+    let mut statuses = BTreeSet::new();
+    let mut rels = BTreeSet::new();
+
+    for entry in std::fs::read_dir(dir).with_context(|| format!("reading {}", dir.display()))? {
+        let path = entry?.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("md") {
+            continue;
+        }
+        let content = std::fs::read_to_string(&path)?;
+
+        // Leading YAML frontmatter (delimited by `---` … `---`) and the body.
+        let (frontmatter, body) = match content
+            .strip_prefix("---\n")
+            .and_then(|rest| rest.split_once("\n---"))
+        {
+            Some((fm, after)) => (fm, after),
+            None => ("", content.as_str()),
+        };
+        for line in frontmatter.lines() {
+            if let Some(v) = line.strip_prefix("type:") {
+                types.insert(v.trim().to_string());
+            } else if let Some(v) = line.strip_prefix("status:") {
+                statuses.insert(v.trim().to_string());
+            }
+        }
+
+        // Relationship labels: ALL-CAPS underscore tokens (REFERENCES, DEPENDS_ON).
+        for tok in body.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_')) {
+            let is_label = tok.len() >= 3
+                && tok.chars().all(|c| c.is_ascii_uppercase() || c == '_')
+                && tok.chars().any(|c| c.is_ascii_uppercase());
+            if is_label {
+                rels.insert(tok.to_string());
+            }
+        }
+    }
+    Ok(EntropyCounts {
+        distinct_types: types.len(),
+        distinct_status_values: statuses.len(),
+        distinct_relation_labels: rels.len(),
+    })
+}
+
 /// The role a session played, for cost attribution in the [`Ledger`]. Staged
 /// with the ledger ahead of the round-loop driver that constructs these.
 #[allow(dead_code)]
@@ -928,6 +996,42 @@ mod tests {
         // line in arms.md.
         want_arms(prompts.writer_full_skeleton.split("\n\n{SUBSTRATE_BLOCK}").next().unwrap());
         want_arms(prompts.reader_skeleton.split("\n\n{SUBSTRATE_BLOCK}").next().unwrap());
+    }
+
+    #[test]
+    fn vocabulary_entropy_counts_types_statuses_and_relation_labels() {
+        let dir = tmp();
+        // Two typed entities (Arm-B-shaped): distinct types {spec, decision},
+        // statuses {accepted, proposed}, relation labels {REFERENCES, DEPENDS_ON}.
+        fs::write(
+            dir.join("a.md"),
+            "---\ntype: spec\nstatus: accepted\n---\n\nBody DEPENDS_ON other. REFERENCES x.",
+        )
+        .unwrap();
+        fs::write(
+            dir.join("b.md"),
+            "---\ntype: decision\nstatus: proposed\n---\n\nIt REFERENCES a.",
+        )
+        .unwrap();
+        // A non-markdown file is ignored.
+        fs::write(dir.join("note.txt"), "type: ignored\nBOGUS").unwrap();
+
+        let e = vocabulary_entropy(&dir).unwrap();
+        assert_eq!(e.distinct_types, 2, "spec, decision");
+        assert_eq!(e.distinct_status_values, 2, "accepted, proposed");
+        assert_eq!(e.distinct_relation_labels, 2, "REFERENCES, DEPENDS_ON");
+    }
+
+    #[test]
+    fn vocabulary_entropy_of_untyped_arm_a_notes_is_low() {
+        let dir = tmp();
+        // Arm-A-shaped: a free-string type, no status, untyped wikilinks (no
+        // ALL-CAPS relation labels).
+        fs::write(dir.join("x.md"), "---\ntype: note\n---\n\nSee [[other-note]] and [[third]].").unwrap();
+        let e = vocabulary_entropy(&dir).unwrap();
+        assert_eq!(e.distinct_types, 1);
+        assert_eq!(e.distinct_status_values, 0);
+        assert_eq!(e.distinct_relation_labels, 0, "untyped links carry no labels");
     }
 
     #[test]
