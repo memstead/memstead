@@ -176,7 +176,11 @@ impl Prompts {
             require(skeleton, "{SUBSTRATE_BLOCK}", name)?;
             require(skeleton, "{ROUND_SLICE_CONTENT}", name)?;
         }
-        require(&self.reader_skeleton, "{SUBSTRATE_BLOCK}", "reader_skeleton")?;
+        require(
+            &self.reader_skeleton,
+            "{SUBSTRATE_BLOCK}",
+            "reader_skeleton",
+        )?;
         require(&self.reader_skeleton, "{QUERY}", "reader_skeleton")?;
         Ok(())
     }
@@ -622,7 +626,14 @@ pub fn run_writer_rounds<R: DivergenceRunner>(
     require_slice_count(slices.len(), schedule.len())?;
     let mut ledger = Ledger::new(package.campaign.cost_cap_tokens);
     for rp in &schedule {
-        drive_writers(runner, package, &model, rp, &slices[rp.round - 1], &mut ledger)?;
+        drive_writers(
+            runner,
+            package,
+            &model,
+            rp,
+            &slices[rp.round - 1],
+            &mut ledger,
+        )?;
     }
     Ok(ledger)
 }
@@ -674,12 +685,41 @@ pub struct CampaignResult {
     pub ledger: Ledger,
 }
 
+/// Resume state, persisted between rounds so a killed campaign continues without
+/// re-running finished writer rounds. It pins the package by the content hash
+/// recorded at campaign start: a resume against an edited package refuses
+/// (criterion 2's refusal complement) rather than silently mixing two designs.
+#[allow(dead_code)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct CampaignState {
+    pub pinned_hash: String,
+    /// Highest round whose writer phase (and any checkpoint) fully completed.
+    pub completed_rounds: usize,
+}
+
+#[allow(dead_code)]
+impl CampaignState {
+    fn load(path: &Path) -> Result<Self> {
+        serde_json::from_slice(&std::fs::read(path)?)
+            .with_context(|| format!("reading campaign state {}", path.display()))
+    }
+
+    fn save(&self, path: &Path) -> Result<()> {
+        std::fs::write(path, serde_json::to_vec_pretty(self)?)
+            .with_context(|| format!("writing campaign state {}", path.display()))
+    }
+}
+
 /// Drive the full campaign on `slices` (one per round) and `queries` (the reader
 /// battery): every round runs its writer sessions; at each reader checkpoint the
 /// battery runs `trials` blinded, judged reader sessions per arm per query. One
 /// ledger spans writers, readers, and judges; the cost cap is checked between
 /// sessions throughout. Fully driven by the runner/judge traits, so a stub
 /// exercises the whole loop without a network call (criterion 1).
+/// `state_path`, when given, makes the campaign resumable: the state is persisted
+/// after every round, and a restart with the same path skips the rounds already
+/// completed (refusing if the package was edited since it was pinned). Passing
+/// `None` runs a fresh, non-resumable campaign.
 #[allow(dead_code)]
 pub fn run_campaign<R: DivergenceRunner, J: DivergenceJudge>(
     runner: &R,
@@ -687,6 +727,7 @@ pub fn run_campaign<R: DivergenceRunner, J: DivergenceJudge>(
     package: &Package,
     slices: &[String],
     queries: &[super::TaskSpec],
+    state_path: Option<&Path>,
 ) -> Result<CampaignResult> {
     let model = package.single_model()?.to_string();
     let schedule = package.campaign.schedule();
@@ -695,37 +736,79 @@ pub fn run_campaign<R: DivergenceRunner, J: DivergenceJudge>(
     let mut ledger = Ledger::new(package.campaign.cost_cap_tokens);
     let mut checkpoints = Vec::new();
 
+    // Determine where to start. A resume verifies the package pin and picks up
+    // after the last completed round; a fresh run seeds the state at round 0.
+    let start_round = match state_path {
+        Some(path) if path.exists() => {
+            let state = CampaignState::load(path)?;
+            package.verify_pin(&state.pinned_hash)?;
+            state.completed_rounds + 1
+        }
+        _ => {
+            if let Some(path) = state_path {
+                CampaignState {
+                    pinned_hash: package.content_hash.clone(),
+                    completed_rounds: 0,
+                }
+                .save(path)?;
+            }
+            1
+        }
+    };
+
     for rp in &schedule {
-        drive_writers(runner, package, &model, rp, &slices[rp.round - 1], &mut ledger)?;
-        if !rp.reader_checkpoint {
+        if rp.round < start_round {
             continue;
         }
-        let mut results = Vec::with_capacity(queries.len());
-        for query in queries {
-            let mut b_scores = Vec::with_capacity(package.campaign.trials);
-            let mut a_scores = Vec::with_capacity(package.campaign.trials);
-            for _ in 0..package.campaign.trials {
-                for arm in [Arm::A, Arm::B] {
-                    let prompt = package.prompts.reader(arm, &query.prompt);
-                    let out = runner.read(arm, &model, &prompt, package.campaign.reader_budget_tokens)?;
-                    ledger.record(arm, Role::Reader, out.tokens);
-                    let blinded = super::grade::strip_tells_with(&out.answer, &tells);
-                    let (score, judge_tokens) = judge.score(&query.reference, &blinded)?;
-                    ledger.record(arm, Role::Judge, judge_tokens);
-                    ledger.check_cap()?;
-                    match arm {
-                        Arm::A => a_scores.push(score),
-                        Arm::B => b_scores.push(score),
+        drive_writers(
+            runner,
+            package,
+            &model,
+            rp,
+            &slices[rp.round - 1],
+            &mut ledger,
+        )?;
+        if rp.reader_checkpoint {
+            let mut results = Vec::with_capacity(queries.len());
+            for query in queries {
+                let mut b_scores = Vec::with_capacity(package.campaign.trials);
+                let mut a_scores = Vec::with_capacity(package.campaign.trials);
+                for _ in 0..package.campaign.trials {
+                    for arm in [Arm::A, Arm::B] {
+                        let prompt = package.prompts.reader(arm, &query.prompt);
+                        let out = runner.read(
+                            arm,
+                            &model,
+                            &prompt,
+                            package.campaign.reader_budget_tokens,
+                        )?;
+                        ledger.record(arm, Role::Reader, out.tokens);
+                        let blinded = super::grade::strip_tells_with(&out.answer, &tells);
+                        let (score, judge_tokens) = judge.score(&query.reference, &blinded)?;
+                        ledger.record(arm, Role::Judge, judge_tokens);
+                        ledger.check_cap()?;
+                        match arm {
+                            Arm::A => a_scores.push(score),
+                            Arm::B => b_scores.push(score),
+                        }
                     }
                 }
+                // on = B, off = A, so TaskResult.delta = on_mean - off_mean = B - A.
+                results.push(super::TaskResult::new(query.id.clone(), b_scores, a_scores));
             }
-            // on = B, off = A, so TaskResult.delta = on_mean - off_mean = B - A.
-            results.push(super::TaskResult::new(query.id.clone(), b_scores, a_scores));
+            checkpoints.push(Checkpoint {
+                round: rp.round,
+                results,
+            });
         }
-        checkpoints.push(Checkpoint {
-            round: rp.round,
-            results,
-        });
+        // Persist progress so a kill after this round resumes past it.
+        if let Some(path) = state_path {
+            CampaignState {
+                pinned_hash: package.content_hash.clone(),
+                completed_rounds: rp.round,
+            }
+            .save(path)?;
+        }
     }
     Ok(CampaignResult {
         checkpoints,
@@ -826,16 +909,28 @@ mod tests {
         let p = Package::load(&dir).unwrap().prompts;
 
         let wa = p.writer(Arm::A, false, "SLICE-XYZ");
-        assert!(wa.contains("Use files."), "substrate block substituted: {wa}");
+        assert!(
+            wa.contains("Use files."),
+            "substrate block substituted: {wa}"
+        );
         assert!(wa.contains("SLICE-XYZ"), "round slice substituted: {wa}");
-        assert!(!wa.contains("{SUBSTRATE_BLOCK}") && !wa.contains("{ROUND_SLICE_CONTENT}"), "no placeholders left: {wa}");
+        assert!(
+            !wa.contains("{SUBSTRATE_BLOCK}") && !wa.contains("{ROUND_SLICE_CONTENT}"),
+            "no placeholders left: {wa}"
+        );
 
         let wh = p.writer(Arm::B, true, "S");
-        assert!(wh.starts_with("Quickly update."), "hurry skeleton used: {wh}");
+        assert!(
+            wh.starts_with("Quickly update."),
+            "hurry skeleton used: {wh}"
+        );
         assert!(wh.contains("Use the mem tools."));
 
         let r = p.reader(Arm::A, "How many bugs are open?");
-        assert!(r.contains("Read files.") && r.contains("How many bugs are open?"), "{r}");
+        assert!(
+            r.contains("Read files.") && r.contains("How many bugs are open?"),
+            "{r}"
+        );
         assert!(!r.contains("{QUERY}"), "{r}");
     }
 
@@ -894,11 +989,17 @@ mod tests {
         assert_eq!(sched[0].writer_allowance_tokens, 8000);
 
         // Reader checkpoints at 1/3/5/10, integrity audits at 5/10.
-        let checkpoints: Vec<usize> =
-            sched.iter().filter(|p| p.reader_checkpoint).map(|p| p.round).collect();
+        let checkpoints: Vec<usize> = sched
+            .iter()
+            .filter(|p| p.reader_checkpoint)
+            .map(|p| p.round)
+            .collect();
         assert_eq!(checkpoints, vec![1, 3, 5, 10]);
-        let audits: Vec<usize> =
-            sched.iter().filter(|p| p.integrity_audit).map(|p| p.round).collect();
+        let audits: Vec<usize> = sched
+            .iter()
+            .filter(|p| p.integrity_audit)
+            .map(|p| p.round)
+            .collect();
         assert_eq!(audits, vec![5, 10]);
     }
 
@@ -917,7 +1018,10 @@ mod tests {
         )
         .unwrap();
         let err = Package::load(&dir).unwrap_err().to_string();
-        assert!(err.contains("reader_checkpoints references round 11"), "{err}");
+        assert!(
+            err.contains("reader_checkpoints references round 11"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -959,8 +1063,8 @@ mod tests {
     /// checkout (e.g. a published crate without the docs tree).
     #[test]
     fn committed_package_machine_files_match_their_prose_sources() {
-        let pkg_dir =
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../docs/proof/divergence/prereg");
+        let pkg_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../docs/proof/divergence/prereg");
         if !pkg_dir.join("campaign.json").exists() {
             return; // package not present in this build context; nothing to guard
         }
@@ -971,12 +1075,20 @@ mod tests {
             serde_json::from_slice(&std::fs::read(pkg_dir.join("campaign.json")).unwrap()).unwrap();
         let bands = std::fs::read_to_string(pkg_dir.join("bands.md")).unwrap();
         let want = |needle: String| {
-            assert!(bands.contains(&needle), "bands.md does not contain {needle:?} — campaign.json has drifted from bands.md");
+            assert!(
+                bands.contains(&needle),
+                "bands.md does not contain {needle:?} — campaign.json has drifted from bands.md"
+            );
         };
         want(with_commas(campaign.writer_allowance_full_tokens as u64));
         want(with_commas(campaign.writer_allowance_hurry_tokens as u64));
         want(with_commas(campaign.cost_cap_tokens));
-        let join = |v: &[usize]| v.iter().map(|n| n.to_string()).collect::<Vec<_>>().join(", ");
+        let join = |v: &[usize]| {
+            v.iter()
+                .map(|n| n.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
         want(join(&campaign.hurry_rounds));
         want(join(&campaign.reader_checkpoints));
         want(campaign.contamination_threshold.to_string());
@@ -986,7 +1098,11 @@ mod tests {
             serde_json::from_slice(&std::fs::read(pkg_dir.join("prompts.json")).unwrap()).unwrap();
         let arms = std::fs::read_to_string(pkg_dir.join("arms.md")).unwrap();
         let want_arms = |needle: &str| {
-            assert!(arms.contains(needle), "arms.md does not contain {:?} — prompts.json has drifted from arms.md", &needle[..needle.len().min(60)]);
+            assert!(
+                arms.contains(needle),
+                "arms.md does not contain {:?} — prompts.json has drifted from arms.md",
+                &needle[..needle.len().min(60)]
+            );
         };
         want_arms(&prompts.writer_substrate.arm_a);
         want_arms(&prompts.writer_substrate.arm_b);
@@ -994,8 +1110,20 @@ mod tests {
         want_arms(&prompts.reader_substrate.arm_b);
         // The skeleton opening (before the first placeholder) is one blockquote
         // line in arms.md.
-        want_arms(prompts.writer_full_skeleton.split("\n\n{SUBSTRATE_BLOCK}").next().unwrap());
-        want_arms(prompts.reader_skeleton.split("\n\n{SUBSTRATE_BLOCK}").next().unwrap());
+        want_arms(
+            prompts
+                .writer_full_skeleton
+                .split("\n\n{SUBSTRATE_BLOCK}")
+                .next()
+                .unwrap(),
+        );
+        want_arms(
+            prompts
+                .reader_skeleton
+                .split("\n\n{SUBSTRATE_BLOCK}")
+                .next()
+                .unwrap(),
+        );
     }
 
     #[test]
@@ -1027,11 +1155,18 @@ mod tests {
         let dir = tmp();
         // Arm-A-shaped: a free-string type, no status, untyped wikilinks (no
         // ALL-CAPS relation labels).
-        fs::write(dir.join("x.md"), "---\ntype: note\n---\n\nSee [[other-note]] and [[third]].").unwrap();
+        fs::write(
+            dir.join("x.md"),
+            "---\ntype: note\n---\n\nSee [[other-note]] and [[third]].",
+        )
+        .unwrap();
         let e = vocabulary_entropy(&dir).unwrap();
         assert_eq!(e.distinct_types, 1);
         assert_eq!(e.distinct_status_values, 0);
-        assert_eq!(e.distinct_relation_labels, 0, "untyped links carry no labels");
+        assert_eq!(
+            e.distinct_relation_labels, 0,
+            "untyped links carry no labels"
+        );
     }
 
     #[test]
@@ -1097,8 +1232,16 @@ mod tests {
     }
 
     impl DivergenceRunner for StubRunner {
-        fn write(&self, arm: Arm, model: &str, _prompt: &str, allowance: usize) -> Result<WriterOutcome> {
-            self.seen.borrow_mut().push((arm, model.to_string(), allowance));
+        fn write(
+            &self,
+            arm: Arm,
+            model: &str,
+            _prompt: &str,
+            allowance: usize,
+        ) -> Result<WriterOutcome> {
+            self.seen
+                .borrow_mut()
+                .push((arm, model.to_string(), allowance));
             let tool_calls = match arm {
                 Arm::A => vec!["Write".to_string()],
                 Arm::B if self.arm_b_omits_mutation => vec!["memstead_search".to_string()],
@@ -1110,7 +1253,13 @@ mod tests {
             })
         }
 
-        fn read(&self, arm: Arm, _model: &str, _prompt: &str, _budget: usize) -> Result<ReaderOutcome> {
+        fn read(
+            &self,
+            arm: Arm,
+            _model: &str,
+            _prompt: &str,
+            _budget: usize,
+        ) -> Result<ReaderOutcome> {
             let q = match arm {
                 Arm::A => self.a_quality,
                 Arm::B => self.b_quality,
@@ -1138,8 +1287,16 @@ mod tests {
 
     fn two_queries() -> Vec<crate::eval::TaskSpec> {
         vec![
-            crate::eval::TaskSpec { id: "q1".into(), prompt: "how many?".into(), reference: "ten".into() },
-            crate::eval::TaskSpec { id: "q2".into(), prompt: "what state?".into(), reference: "open".into() },
+            crate::eval::TaskSpec {
+                id: "q1".into(),
+                prompt: "how many?".into(),
+                reference: "ten".into(),
+            },
+            crate::eval::TaskSpec {
+                id: "q2".into(),
+                prompt: "what state?".into(),
+                reference: "open".into(),
+            },
         ]
     }
 
@@ -1165,9 +1322,15 @@ mod tests {
         // Every session was invoked with the pinned model (criterion 3).
         assert!(seen.iter().all(|(_, m, _)| m == "claude-opus-4-8"));
         // Hurry rounds 3/6/9 carry the 4000 allowance, full rounds 8000.
-        let arm_a_allowances: Vec<usize> =
-            seen.iter().filter(|(a, _, _)| *a == Arm::A).map(|(_, _, al)| *al).collect();
-        assert_eq!(arm_a_allowances, vec![8000, 8000, 4000, 8000, 8000, 4000, 8000, 8000, 4000, 8000]);
+        let arm_a_allowances: Vec<usize> = seen
+            .iter()
+            .filter(|(a, _, _)| *a == Arm::A)
+            .map(|(_, _, al)| *al)
+            .collect();
+        assert_eq!(
+            arm_a_allowances,
+            vec![8000, 8000, 4000, 8000, 8000, 4000, 8000, 8000, 4000, 8000]
+        );
     }
 
     #[test]
@@ -1177,7 +1340,9 @@ mod tests {
         let pkg = Package::load(&dir).unwrap();
         let mut runner = StubRunner::new(100);
         runner.arm_b_omits_mutation = true;
-        let err = run_writer_rounds(&runner, &pkg, &ten_slices()).unwrap_err().to_string();
+        let err = run_writer_rounds(&runner, &pkg, &ten_slices())
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("did not cross the MCP gate"), "{err}");
     }
 
@@ -1188,7 +1353,9 @@ mod tests {
         let pkg = Package::load(&dir).unwrap();
         // Fixture cap is 20,000,000; 11M per session exceeds it within round 1.
         let runner = StubRunner::new(11_000_000);
-        let err = run_writer_rounds(&runner, &pkg, &ten_slices()).unwrap_err().to_string();
+        let err = run_writer_rounds(&runner, &pkg, &ten_slices())
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("cost cap exceeded"), "{err}");
     }
 
@@ -1198,7 +1365,9 @@ mod tests {
         write_fixture_package(&dir);
         let pkg = Package::load(&dir).unwrap();
         let runner = StubRunner::new(100);
-        let err = run_writer_rounds(&runner, &pkg, &["only one".to_string()]).unwrap_err().to_string();
+        let err = run_writer_rounds(&runner, &pkg, &["only one".to_string()])
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("expected 10 round slices, got 1"), "{err}");
     }
 
@@ -1209,7 +1378,8 @@ mod tests {
         let pkg = Package::load(&dir).unwrap();
         let runner = StubRunner::new(100);
         let judge = StubJudge;
-        let result = run_campaign(&runner, &judge, &pkg, &ten_slices(), &two_queries()).unwrap();
+        let result =
+            run_campaign(&runner, &judge, &pkg, &ten_slices(), &two_queries(), None).unwrap();
 
         // Reader checkpoints at rounds 1, 3, 5, 10.
         let rounds: Vec<usize> = result.checkpoints.iter().map(|c| c.round).collect();
@@ -1229,12 +1399,114 @@ mod tests {
         assert_eq!(result.ledger.total_role(Arm::A, Role::Writer), 1_000);
         // Reader sessions: 4 checkpoints x 2 queries x 3 trials x 2 arms = 48;
         // readers 10 tokens each, judges 5 each.
-        assert_eq!(result.ledger.total_role(Arm::B, Role::Reader), 4 * 2 * 3 * 10);
+        assert_eq!(
+            result.ledger.total_role(Arm::B, Role::Reader),
+            4 * 2 * 3 * 10
+        );
         assert_eq!(
             result.ledger.total(),
             2_000 + 48 * 10 + 48 * 5,
             "writers + readers + judges"
         );
+    }
+
+    #[test]
+    fn resume_skips_completed_rounds_without_rerunning_writers() {
+        let dir = tmp();
+        write_fixture_package(&dir);
+        let pkg = Package::load(&dir).unwrap();
+        let state_path = dir.join("state.json");
+        // Pre-seed state: rounds 1..=5 already completed, pinned to this package.
+        CampaignState {
+            pinned_hash: pkg.content_hash.clone(),
+            completed_rounds: 5,
+        }
+        .save(&state_path)
+        .unwrap();
+
+        let runner = StubRunner::new(100);
+        let judge = StubJudge;
+        run_campaign(
+            &runner,
+            &judge,
+            &pkg,
+            &ten_slices(),
+            &two_queries(),
+            Some(&state_path),
+        )
+        .unwrap();
+
+        // Only rounds 6..=10 ran their writers — rounds 1..=5 were not re-run.
+        let seen = runner.seen.borrow();
+        let arm_a_rounds_run = seen.iter().filter(|(a, _, _)| *a == Arm::A).count();
+        assert_eq!(arm_a_rounds_run, 5, "only rounds 6-10 write");
+        // Allowances seen are those of rounds 6-10 (rounds 6 and 9 are hurry → 4000).
+        let allowances: Vec<usize> = seen
+            .iter()
+            .filter(|(a, _, _)| *a == Arm::A)
+            .map(|(_, _, al)| *al)
+            .collect();
+        assert_eq!(allowances, vec![4000, 8000, 8000, 4000, 8000]);
+        // State advanced to round 10.
+        assert_eq!(
+            CampaignState::load(&state_path).unwrap().completed_rounds,
+            10
+        );
+    }
+
+    #[test]
+    fn resume_refuses_a_package_edited_since_it_was_pinned() {
+        let dir = tmp();
+        write_fixture_package(&dir);
+        let pkg = Package::load(&dir).unwrap();
+        let state_path = dir.join("state.json");
+        // State pinned to a different (earlier) package hash — as if the package
+        // was edited mid-campaign.
+        CampaignState {
+            pinned_hash: "0000000000000000000000000000000000000000000000000000000000000000".into(),
+            completed_rounds: 3,
+        }
+        .save(&state_path)
+        .unwrap();
+
+        let runner = StubRunner::new(100);
+        let judge = StubJudge;
+        let err = run_campaign(
+            &runner,
+            &judge,
+            &pkg,
+            &ten_slices(),
+            &two_queries(),
+            Some(&state_path),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("package content hash changed"), "{err}");
+    }
+
+    #[test]
+    fn fresh_run_seeds_and_advances_the_state_file() {
+        let dir = tmp();
+        write_fixture_package(&dir);
+        let pkg = Package::load(&dir).unwrap();
+        let state_path = dir.join("state.json");
+        assert!(!state_path.exists());
+
+        let runner = StubRunner::new(100);
+        let judge = StubJudge;
+        run_campaign(
+            &runner,
+            &judge,
+            &pkg,
+            &ten_slices(),
+            &two_queries(),
+            Some(&state_path),
+        )
+        .unwrap();
+
+        let state = CampaignState::load(&state_path).unwrap();
+        assert_eq!(state.completed_rounds, 10);
+        assert_eq!(state.pinned_hash, pkg.content_hash);
     }
 
     #[test]
