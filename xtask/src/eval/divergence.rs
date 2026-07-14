@@ -577,6 +577,99 @@ pub struct ReaderOutcome {
     pub tool_calls: Vec<String>,
 }
 
+/// What one `claude -p` session produced, parsed from its stream-json: the
+/// answer text, the tools it called, and the tokens it spent. The real runner
+/// maps this onto a [`WriterOutcome`] (tokens + tool calls) or a
+/// [`ReaderOutcome`] (all three).
+#[allow(dead_code)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SessionOutput {
+    pub text: String,
+    pub tool_calls: Vec<String>,
+    pub tokens: u64,
+}
+
+/// Parse a `claude --output-format stream-json --verbose` NDJSON stream into a
+/// [`SessionOutput`]. Like `claude.rs::parse_stream_json` it collects assistant
+/// `text` and `tool_use` items, but it additionally sums the `usage` token counts
+/// off the final `result` event — the mount/substrate modes never needed tokens,
+/// but the divergence ledger does. `usage` totals input + output (+ cache) tokens
+/// where present; unparseable lines are skipped, as the stream interleaves
+/// `system` and rate-limit events.
+///
+/// Staged ahead of the real runner that calls it on each session's output.
+#[allow(dead_code)]
+pub fn parse_session(stdout: &str) -> Result<SessionOutput> {
+    let mut texts: Vec<String> = Vec::new();
+    let mut tool_calls: Vec<String> = Vec::new();
+    let mut result_text: Option<String> = None;
+    let mut tokens: u64 = 0;
+
+    for line in stdout.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        match v.get("type").and_then(|t| t.as_str()) {
+            Some("assistant") => {
+                if let Some(content) = v
+                    .get("message")
+                    .and_then(|m| m.get("content"))
+                    .and_then(|c| c.as_array())
+                {
+                    for item in content {
+                        match item.get("type").and_then(|t| t.as_str()) {
+                            Some("text") => {
+                                if let Some(t) = item.get("text").and_then(|t| t.as_str())
+                                    && !t.is_empty()
+                                {
+                                    texts.push(t.to_string());
+                                }
+                            }
+                            Some("tool_use") => {
+                                if let Some(n) = item.get("name").and_then(|n| n.as_str()) {
+                                    tool_calls.push(n.to_string());
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            Some("result") => {
+                if let Some(r) = v.get("result").and_then(|r| r.as_str()) {
+                    result_text = Some(r.to_string());
+                }
+                if let Some(usage) = v.get("usage").and_then(|u| u.as_object()) {
+                    for key in [
+                        "input_tokens",
+                        "output_tokens",
+                        "cache_creation_input_tokens",
+                        "cache_read_input_tokens",
+                    ] {
+                        tokens += usage.get(key).and_then(|t| t.as_u64()).unwrap_or(0);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let text = if texts.is_empty() {
+        result_text.unwrap_or_default()
+    } else {
+        texts.join("\n")
+    };
+    Ok(SessionOutput {
+        text,
+        tool_calls,
+        tokens,
+    })
+}
+
 /// Drives writer and reader sessions against each arm's materialised substrate.
 /// The real impl shells to `claude -p` with the pinned model against a temp
 /// markdown directory (Arm A) or a throwaway mem over MCP (Arm B); tests use a
@@ -1136,6 +1229,31 @@ mod tests {
         }
         // A known query id is present with its reference intact.
         assert!(queries.iter().any(|q| q.id == "A2-ledger-totals"));
+    }
+
+    #[test]
+    fn parse_session_extracts_text_tools_and_usage_tokens() {
+        // A minimal claude stream-json: an assistant turn with text + a tool_use,
+        // then a result event carrying the usage token counts.
+        let stream = r#"
+{"type":"system","subtype":"init"}
+{"type":"assistant","message":{"content":[{"type":"text","text":"Recorded the change."},{"type":"tool_use","name":"mcp__memstead__memstead_create"}]}}
+not-json-skip-me
+{"type":"result","result":"Recorded the change.","usage":{"input_tokens":1200,"output_tokens":300,"cache_read_input_tokens":50}}
+"#;
+        let out = parse_session(stream).unwrap();
+        assert_eq!(out.text, "Recorded the change.");
+        assert_eq!(out.tool_calls, vec!["mcp__memstead__memstead_create"]);
+        assert_eq!(out.tokens, 1200 + 300 + 50, "usage tokens summed");
+    }
+
+    #[test]
+    fn parse_session_falls_back_to_result_text_and_zero_tokens() {
+        let stream = r#"{"type":"result","result":"just the result"}"#;
+        let out = parse_session(stream).unwrap();
+        assert_eq!(out.text, "just the result");
+        assert!(out.tool_calls.is_empty());
+        assert_eq!(out.tokens, 0, "no usage block → zero tokens");
     }
 
     #[test]
