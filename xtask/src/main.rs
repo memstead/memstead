@@ -494,6 +494,28 @@ fn run_divergence_eval(package_dir: &std::path::Path, pin: Option<&str>) -> Resu
         pkg.tell_lists.arm_b.len(),
         pkg.tell_lists.combined().len()
     );
+    eprintln!("  round plan   :");
+    for rp in c.schedule() {
+        let mut marks = Vec::new();
+        if rp.hurry {
+            marks.push("hurry");
+        }
+        if rp.reader_checkpoint {
+            marks.push("reader-checkpoint");
+        }
+        if rp.integrity_audit {
+            marks.push("integrity-audit");
+        }
+        let marks = if marks.is_empty() {
+            "writer only".to_string()
+        } else {
+            marks.join(", ")
+        };
+        eprintln!(
+            "    round {:>2}: writer {:>4} tokens — {}",
+            rp.round, rp.writer_allowance_tokens, marks
+        );
+    }
     bail!(
         "divergence round loop not yet implemented — package loaded and pinned OK \
          (pass this content hash to --pin to require it: {})",

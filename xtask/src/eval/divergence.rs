@@ -38,6 +38,71 @@ pub struct Campaign {
     pub cost_cap_tokens: u64,
 }
 
+/// One round's execution plan, derived from the campaign schedule — the unit the
+/// round-loop driver iterates. Nothing here is hardcoded; every field is
+/// resolved from the package's `campaign.json`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RoundPlan {
+    /// 1-based round number.
+    pub round: usize,
+    /// Hurry round — halved writer allowance and the terse writer prompt.
+    pub hurry: bool,
+    /// The writer token allowance for this round (full or hurry).
+    pub writer_allowance_tokens: usize,
+    /// Run the reader battery after this round.
+    pub reader_checkpoint: bool,
+    /// Run the blinded integrity audit after this round.
+    pub integrity_audit: bool,
+}
+
+impl Campaign {
+    /// The executable schedule: one [`RoundPlan`] per round (`1..=rounds`), with
+    /// the hurry / reader-checkpoint / integrity-audit flags and the per-round
+    /// writer allowance resolved from the package. Call [`Campaign::validate`]
+    /// first — this method assumes the schedule references are in range.
+    pub fn schedule(&self) -> Vec<RoundPlan> {
+        (1..=self.rounds)
+            .map(|round| {
+                let hurry = self.hurry_rounds.contains(&round);
+                RoundPlan {
+                    round,
+                    hurry,
+                    writer_allowance_tokens: if hurry {
+                        self.writer_allowance_hurry_tokens
+                    } else {
+                        self.writer_allowance_full_tokens
+                    },
+                    reader_checkpoint: self.reader_checkpoints.contains(&round),
+                    integrity_audit: self.integrity_audit_rounds.contains(&round),
+                }
+            })
+            .collect()
+    }
+
+    /// Refuse a malformed schedule: at least one round, and every hurry /
+    /// checkpoint / audit round must fall within `1..=rounds`. A schedule that
+    /// references a round the campaign never runs is a package authoring error,
+    /// not something to silently drop.
+    pub fn validate(&self) -> Result<()> {
+        if self.rounds == 0 {
+            bail!("campaign.json declares zero rounds");
+        }
+        let in_range = |rs: &[usize], label: &str| -> Result<()> {
+            if let Some(&bad) = rs.iter().find(|&&r| r < 1 || r > self.rounds) {
+                bail!(
+                    "campaign.json {label} references round {bad}, outside 1..={}",
+                    self.rounds
+                );
+            }
+            Ok(())
+        };
+        in_range(&self.hurry_rounds, "hurry_rounds")?;
+        in_range(&self.reader_checkpoints, "reader_checkpoints")?;
+        in_range(&self.integrity_audit_rounds, "integrity_audit_rounds")?;
+        Ok(())
+    }
+}
+
 /// The frozen model pins, from `models.json`.
 #[derive(Clone, Debug, serde::Deserialize)]
 pub struct Models {
@@ -110,6 +175,7 @@ impl Package {
     /// Load and parse the package at `dir`, computing its content hash.
     pub fn load(dir: &Path) -> Result<Self> {
         let campaign: Campaign = read_json(dir, "campaign.json")?;
+        campaign.validate()?;
         let models: Models = read_json(dir, "models.json")?;
         let tell_lists = TellLists::from_json(&read_file(dir, "tell-lists.json")?)?;
         let content_hash = hash_package_dir(dir)?;
@@ -267,6 +333,70 @@ mod tests {
             pkg.verify_pin("0000000000000000000000000000000000000000000000000000000000000000")
                 .is_err()
         );
+    }
+
+    #[test]
+    fn schedule_resolves_flags_and_allowances_from_the_package() {
+        let dir = tmp();
+        write_fixture_package(&dir);
+        let pkg = Package::load(&dir).unwrap();
+        let sched = pkg.campaign.schedule();
+        assert_eq!(sched.len(), 10, "one plan per round");
+        assert_eq!(sched[0].round, 1);
+        assert_eq!(sched.last().unwrap().round, 10);
+
+        // Hurry rounds 3/6/9 carry the halved allowance and the hurry flag.
+        for r in [3usize, 6, 9] {
+            let rp = &sched[r - 1];
+            assert!(rp.hurry, "round {r} should be hurry");
+            assert_eq!(rp.writer_allowance_tokens, 4000);
+        }
+        // A full round carries the full allowance and no hurry flag.
+        assert!(!sched[0].hurry);
+        assert_eq!(sched[0].writer_allowance_tokens, 8000);
+
+        // Reader checkpoints at 1/3/5/10, integrity audits at 5/10.
+        let checkpoints: Vec<usize> =
+            sched.iter().filter(|p| p.reader_checkpoint).map(|p| p.round).collect();
+        assert_eq!(checkpoints, vec![1, 3, 5, 10]);
+        let audits: Vec<usize> =
+            sched.iter().filter(|p| p.integrity_audit).map(|p| p.round).collect();
+        assert_eq!(audits, vec![5, 10]);
+    }
+
+    #[test]
+    fn validate_refuses_an_out_of_range_schedule() {
+        let dir = tmp();
+        write_fixture_package(&dir);
+        // A reader checkpoint at round 11 in a 10-round campaign.
+        fs::write(
+            dir.join("campaign.json"),
+            r#"{ "rounds": 10, "hurry_rounds": [3], "reader_checkpoints": [1, 11],
+                 "integrity_audit_rounds": [10], "trials": 3,
+                 "writer_allowance_full_tokens": 8000, "writer_allowance_hurry_tokens": 4000,
+                 "reader_budget_tokens": 8000, "contamination_threshold": 0.5,
+                 "cost_cap_tokens": 20000000 }"#,
+        )
+        .unwrap();
+        let err = Package::load(&dir).unwrap_err().to_string();
+        assert!(err.contains("reader_checkpoints references round 11"), "{err}");
+    }
+
+    #[test]
+    fn validate_refuses_zero_rounds() {
+        let c = Campaign {
+            rounds: 0,
+            hurry_rounds: vec![],
+            reader_checkpoints: vec![],
+            integrity_audit_rounds: vec![],
+            trials: 3,
+            writer_allowance_full_tokens: 8000,
+            writer_allowance_hurry_tokens: 4000,
+            reader_budget_tokens: 8000,
+            contamination_threshold: 0.5,
+            cost_cap_tokens: 20_000_000,
+        };
+        assert!(c.validate().is_err());
     }
 
     #[test]
