@@ -453,9 +453,99 @@ impl Ledger {
     }
 }
 
+/// What a writer session produced: the tokens it spent and the tools it called.
+/// The tool calls are the criterion-5 evidence that Arm B's writes really crossed
+/// the MCP mutation surface.
+#[allow(dead_code)]
+#[derive(Clone, Debug, Default)]
+pub struct WriterOutcome {
+    pub tokens: u64,
+    pub tool_calls: Vec<String>,
+}
+
+/// Drives writer (and, later, reader) sessions against each arm's materialised
+/// substrate. The real impl shells to `claude -p` with the pinned model against
+/// a temp markdown directory (Arm A) or a throwaway mem over MCP (Arm B); tests
+/// use a deterministic stub, so the loop, the evidence guard, the ledger, and the
+/// cost cap are all verified without a network call.
+#[allow(dead_code)]
+pub trait DivergenceRunner {
+    /// One writer session for `arm`, invoked with the pinned `model` explicitly
+    /// (criterion 3) and the round's token allowance. The session mutates the
+    /// arm's substrate as a side effect; the return value reports its cost and
+    /// tool calls.
+    fn write(
+        &self,
+        arm: Arm,
+        model: &str,
+        prompt: &str,
+        token_allowance: usize,
+    ) -> Result<WriterOutcome>;
+}
+
+/// Criterion 5: a writer session for Arm B must show at least one `memstead_*`
+/// mutation call — proof its write crossed the engine's gate rather than touching
+/// disk directly. A round where Arm B wrote without any mutation call is invalid.
+/// Arm A (the tolerant directory) carries no such requirement.
+#[allow(dead_code)]
+pub fn validate_writer_evidence(arm: Arm, tool_calls: &[String]) -> Result<()> {
+    if arm == Arm::B {
+        let mutated = tool_calls.iter().any(|t| {
+            let t = t.to_lowercase();
+            ["memstead_create", "memstead_update", "memstead_relate"]
+                .iter()
+                .any(|m| t.contains(m))
+        });
+        if !mutated {
+            bail!(
+                "Arm B writer session made no memstead_* mutation call — the write did not cross the MCP gate; round invalid"
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Drive every writer round of the campaign: for each round in the schedule, run
+/// one writer session per arm with that round's slice and allowance, validate the
+/// MCP-mutation evidence, record the cost, and check the cap between sessions.
+/// Returns the accumulated ledger (writer costs). The substrates are mutated in
+/// place by the runner; `slices[i]` is round `i+1`'s source content.
+///
+/// Staged ahead of the reader battery and the CLI wiring; the full campaign
+/// driver composes this with the reader checkpoints.
+#[allow(dead_code)]
+pub fn run_writer_rounds<R: DivergenceRunner>(
+    runner: &R,
+    package: &Package,
+    slices: &[String],
+) -> Result<Ledger> {
+    let model = package.single_model()?.to_string();
+    let schedule = package.campaign.schedule();
+    if slices.len() != schedule.len() {
+        bail!(
+            "expected {} round slices, got {}",
+            schedule.len(),
+            slices.len()
+        );
+    }
+    let mut ledger = Ledger::new(package.campaign.cost_cap_tokens);
+    for rp in &schedule {
+        let slice = &slices[rp.round - 1];
+        for arm in [Arm::A, Arm::B] {
+            let prompt = package.prompts.writer(arm, rp.hurry, slice);
+            let out = runner.write(arm, &model, &prompt, rp.writer_allowance_tokens)?;
+            validate_writer_evidence(arm, &out.tool_calls)?;
+            ledger.record(arm, Role::Writer, out.tokens);
+            ledger.check_cap()?;
+        }
+    }
+    Ok(ledger)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::RefCell;
     use std::fs;
     use std::path::PathBuf;
 
@@ -749,6 +839,100 @@ mod tests {
         assert_eq!(led.total(), 1_100);
         let err = led.check_cap().unwrap_err().to_string();
         assert!(err.contains("cost cap exceeded"), "{err}");
+    }
+
+    /// A deterministic writer stub: it records the (arm, model, allowance) of
+    /// every session so the loop's wiring can be checked, spends a fixed number of
+    /// tokens, and emits arm-appropriate tool calls (Arm B a real mutation unless
+    /// told to omit it, so the evidence guard can be exercised both ways).
+    struct StubWriter {
+        tokens_per_session: u64,
+        arm_b_omits_mutation: bool,
+        seen: RefCell<Vec<(Arm, String, usize)>>,
+    }
+
+    impl StubWriter {
+        fn new(tokens_per_session: u64) -> Self {
+            Self {
+                tokens_per_session,
+                arm_b_omits_mutation: false,
+                seen: RefCell::new(Vec::new()),
+            }
+        }
+    }
+
+    impl DivergenceRunner for StubWriter {
+        fn write(&self, arm: Arm, model: &str, _prompt: &str, allowance: usize) -> Result<WriterOutcome> {
+            self.seen.borrow_mut().push((arm, model.to_string(), allowance));
+            let tool_calls = match arm {
+                Arm::A => vec!["Write".to_string()],
+                Arm::B if self.arm_b_omits_mutation => vec!["memstead_search".to_string()],
+                Arm::B => vec!["memstead_create".to_string()],
+            };
+            Ok(WriterOutcome {
+                tokens: self.tokens_per_session,
+                tool_calls,
+            })
+        }
+    }
+
+    fn ten_slices() -> Vec<String> {
+        (1..=10).map(|i| format!("round {i} source")).collect()
+    }
+
+    #[test]
+    fn writer_rounds_drive_both_arms_and_bill_the_ledger() {
+        let dir = tmp();
+        write_fixture_package(&dir);
+        let pkg = Package::load(&dir).unwrap();
+        let runner = StubWriter::new(100);
+        let ledger = run_writer_rounds(&runner, &pkg, &ten_slices()).unwrap();
+
+        // 10 rounds x 2 arms = 20 sessions x 100 tokens.
+        assert_eq!(ledger.total(), 2_000);
+        assert_eq!(ledger.total_role(Arm::B, Role::Writer), 1_000);
+        assert_eq!(ledger.total_role(Arm::A, Role::Writer), 1_000);
+
+        let seen = runner.seen.borrow();
+        assert_eq!(seen.len(), 20);
+        // Every session was invoked with the pinned model (criterion 3).
+        assert!(seen.iter().all(|(_, m, _)| m == "claude-opus-4-8"));
+        // Hurry rounds 3/6/9 carry the 4000 allowance, full rounds 8000.
+        let arm_a_allowances: Vec<usize> =
+            seen.iter().filter(|(a, _, _)| *a == Arm::A).map(|(_, _, al)| *al).collect();
+        assert_eq!(arm_a_allowances, vec![8000, 8000, 4000, 8000, 8000, 4000, 8000, 8000, 4000, 8000]);
+    }
+
+    #[test]
+    fn writer_rounds_refuse_arm_b_without_a_mutation_call() {
+        let dir = tmp();
+        write_fixture_package(&dir);
+        let pkg = Package::load(&dir).unwrap();
+        let mut runner = StubWriter::new(100);
+        runner.arm_b_omits_mutation = true;
+        let err = run_writer_rounds(&runner, &pkg, &ten_slices()).unwrap_err().to_string();
+        assert!(err.contains("did not cross the MCP gate"), "{err}");
+    }
+
+    #[test]
+    fn writer_rounds_abort_on_the_cost_cap() {
+        let dir = tmp();
+        write_fixture_package(&dir);
+        let pkg = Package::load(&dir).unwrap();
+        // Fixture cap is 20,000,000; 11M per session exceeds it within round 1.
+        let runner = StubWriter::new(11_000_000);
+        let err = run_writer_rounds(&runner, &pkg, &ten_slices()).unwrap_err().to_string();
+        assert!(err.contains("cost cap exceeded"), "{err}");
+    }
+
+    #[test]
+    fn writer_rounds_refuse_a_slice_count_mismatch() {
+        let dir = tmp();
+        write_fixture_package(&dir);
+        let pkg = Package::load(&dir).unwrap();
+        let runner = StubWriter::new(100);
+        let err = run_writer_rounds(&runner, &pkg, &["only one".to_string()]).unwrap_err().to_string();
+        assert!(err.contains("expected 10 round slices, got 1"), "{err}");
     }
 
     #[test]
