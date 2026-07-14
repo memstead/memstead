@@ -463,11 +463,21 @@ pub struct WriterOutcome {
     pub tool_calls: Vec<String>,
 }
 
-/// Drives writer (and, later, reader) sessions against each arm's materialised
-/// substrate. The real impl shells to `claude -p` with the pinned model against
-/// a temp markdown directory (Arm A) or a throwaway mem over MCP (Arm B); tests
-/// use a deterministic stub, so the loop, the evidence guard, the ledger, and the
-/// cost cap are all verified without a network call.
+/// What a reader session produced: the answer text (blinded before the judge
+/// sees it), the tokens spent, and the tools called.
+#[allow(dead_code)]
+#[derive(Clone, Debug, Default)]
+pub struct ReaderOutcome {
+    pub answer: String,
+    pub tokens: u64,
+    pub tool_calls: Vec<String>,
+}
+
+/// Drives writer and reader sessions against each arm's materialised substrate.
+/// The real impl shells to `claude -p` with the pinned model against a temp
+/// markdown directory (Arm A) or a throwaway mem over MCP (Arm B); tests use a
+/// deterministic stub, so the loop, the evidence guard, the ledger, and the cost
+/// cap are all verified without a network call.
 #[allow(dead_code)]
 pub trait DivergenceRunner {
     /// One writer session for `arm`, invoked with the pinned `model` explicitly
@@ -481,6 +491,26 @@ pub trait DivergenceRunner {
         prompt: &str,
         token_allowance: usize,
     ) -> Result<WriterOutcome>;
+
+    /// One reader session for `arm`, invoked with the pinned `model` and the fixed
+    /// reader budget. Answers the query from the arm's substrate; the answer is
+    /// blinded ([`super::grade::strip_tells_with`]) before it reaches the judge.
+    fn read(
+        &self,
+        arm: Arm,
+        model: &str,
+        prompt: &str,
+        token_budget: usize,
+    ) -> Result<ReaderOutcome>;
+}
+
+/// Scores a blinded answer against a reference and reports its own token cost, so
+/// the judge's tokens enter the ledger (criterion 7). The mount/substrate modes'
+/// [`super::Judge`] reports no tokens; the divergence campaign needs them, hence
+/// this parallel trait.
+#[allow(dead_code)]
+pub trait DivergenceJudge {
+    fn score(&self, reference: &str, blinded_answer: &str) -> Result<(f64, u64)>;
 }
 
 /// Criterion 5: a writer session for Arm B must show at least one `memstead_*`
@@ -521,25 +551,118 @@ pub fn run_writer_rounds<R: DivergenceRunner>(
 ) -> Result<Ledger> {
     let model = package.single_model()?.to_string();
     let schedule = package.campaign.schedule();
-    if slices.len() != schedule.len() {
-        bail!(
-            "expected {} round slices, got {}",
-            schedule.len(),
-            slices.len()
-        );
-    }
+    require_slice_count(slices.len(), schedule.len())?;
     let mut ledger = Ledger::new(package.campaign.cost_cap_tokens);
     for rp in &schedule {
-        let slice = &slices[rp.round - 1];
-        for arm in [Arm::A, Arm::B] {
-            let prompt = package.prompts.writer(arm, rp.hurry, slice);
-            let out = runner.write(arm, &model, &prompt, rp.writer_allowance_tokens)?;
-            validate_writer_evidence(arm, &out.tool_calls)?;
-            ledger.record(arm, Role::Writer, out.tokens);
-            ledger.check_cap()?;
-        }
+        drive_writers(runner, package, &model, rp, &slices[rp.round - 1], &mut ledger)?;
     }
     Ok(ledger)
+}
+
+fn require_slice_count(got: usize, want: usize) -> Result<()> {
+    if got != want {
+        bail!("expected {want} round slices, got {got}");
+    }
+    Ok(())
+}
+
+/// One round's writer phase: a session per arm, evidence-checked, billed, and
+/// cap-checked. Shared by [`run_writer_rounds`] and [`run_campaign`] so both
+/// drive writers identically.
+fn drive_writers<R: DivergenceRunner>(
+    runner: &R,
+    package: &Package,
+    model: &str,
+    rp: &RoundPlan,
+    slice: &str,
+    ledger: &mut Ledger,
+) -> Result<()> {
+    for arm in [Arm::A, Arm::B] {
+        let prompt = package.prompts.writer(arm, rp.hurry, slice);
+        let out = runner.write(arm, model, &prompt, rp.writer_allowance_tokens)?;
+        validate_writer_evidence(arm, &out.tool_calls)?;
+        ledger.record(arm, Role::Writer, out.tokens);
+        ledger.check_cap()?;
+    }
+    Ok(())
+}
+
+/// One reader checkpoint's scored results: per query, `trials` reader sessions per
+/// arm, blinded and judged, aggregated into a signed `B − A` delta per query.
+#[allow(dead_code)]
+#[derive(Clone, Debug)]
+pub struct Checkpoint {
+    pub round: usize,
+    pub results: Vec<super::TaskResult>,
+}
+
+/// The whole campaign's output: the per-checkpoint scored results and the cost
+/// ledger. The per-query delta orientation is `B − A` (engine-gated minus
+/// tolerant), matching the package's accuracy band.
+#[allow(dead_code)]
+#[derive(Clone, Debug)]
+pub struct CampaignResult {
+    pub checkpoints: Vec<Checkpoint>,
+    pub ledger: Ledger,
+}
+
+/// Drive the full campaign on `slices` (one per round) and `queries` (the reader
+/// battery): every round runs its writer sessions; at each reader checkpoint the
+/// battery runs `trials` blinded, judged reader sessions per arm per query. One
+/// ledger spans writers, readers, and judges; the cost cap is checked between
+/// sessions throughout. Fully driven by the runner/judge traits, so a stub
+/// exercises the whole loop without a network call (criterion 1).
+#[allow(dead_code)]
+pub fn run_campaign<R: DivergenceRunner, J: DivergenceJudge>(
+    runner: &R,
+    judge: &J,
+    package: &Package,
+    slices: &[String],
+    queries: &[super::TaskSpec],
+) -> Result<CampaignResult> {
+    let model = package.single_model()?.to_string();
+    let schedule = package.campaign.schedule();
+    require_slice_count(slices.len(), schedule.len())?;
+    let tells = package.tell_lists.combined();
+    let mut ledger = Ledger::new(package.campaign.cost_cap_tokens);
+    let mut checkpoints = Vec::new();
+
+    for rp in &schedule {
+        drive_writers(runner, package, &model, rp, &slices[rp.round - 1], &mut ledger)?;
+        if !rp.reader_checkpoint {
+            continue;
+        }
+        let mut results = Vec::with_capacity(queries.len());
+        for query in queries {
+            let mut b_scores = Vec::with_capacity(package.campaign.trials);
+            let mut a_scores = Vec::with_capacity(package.campaign.trials);
+            for _ in 0..package.campaign.trials {
+                for arm in [Arm::A, Arm::B] {
+                    let prompt = package.prompts.reader(arm, &query.prompt);
+                    let out = runner.read(arm, &model, &prompt, package.campaign.reader_budget_tokens)?;
+                    ledger.record(arm, Role::Reader, out.tokens);
+                    let blinded = super::grade::strip_tells_with(&out.answer, &tells);
+                    let (score, judge_tokens) = judge.score(&query.reference, &blinded)?;
+                    ledger.record(arm, Role::Judge, judge_tokens);
+                    ledger.check_cap()?;
+                    match arm {
+                        Arm::A => a_scores.push(score),
+                        Arm::B => b_scores.push(score),
+                    }
+                }
+            }
+            // on = B, off = A, so TaskResult.delta = on_mean - off_mean = B - A.
+            results.push(super::TaskResult::new(query.id.clone(), b_scores, a_scores));
+        }
+        checkpoints.push(Checkpoint {
+            round: rp.round,
+            results,
+        });
+    }
+    Ok(CampaignResult {
+        checkpoints,
+        ledger,
+    })
 }
 
 #[cfg(test)]
@@ -841,27 +964,35 @@ mod tests {
         assert!(err.contains("cost cap exceeded"), "{err}");
     }
 
-    /// A deterministic writer stub: it records the (arm, model, allowance) of
-    /// every session so the loop's wiring can be checked, spends a fixed number of
-    /// tokens, and emits arm-appropriate tool calls (Arm B a real mutation unless
-    /// told to omit it, so the evidence guard can be exercised both ways).
-    struct StubWriter {
-        tokens_per_session: u64,
+    /// A deterministic runner stub. Writers record the (arm, model, allowance) of
+    /// every session so the loop's wiring can be checked, spend a fixed number of
+    /// tokens, and emit arm-appropriate tool calls (Arm B a real mutation unless
+    /// told to omit it, so the evidence guard can be exercised both ways). Readers
+    /// answer with a per-arm quality encoded as `q=<x>`, which the stub judge reads
+    /// back — so a B > A delta can be arranged deterministically.
+    struct StubRunner {
+        writer_tokens: u64,
+        reader_tokens: u64,
+        a_quality: f64,
+        b_quality: f64,
         arm_b_omits_mutation: bool,
         seen: RefCell<Vec<(Arm, String, usize)>>,
     }
 
-    impl StubWriter {
-        fn new(tokens_per_session: u64) -> Self {
+    impl StubRunner {
+        fn new(writer_tokens: u64) -> Self {
             Self {
-                tokens_per_session,
+                writer_tokens,
+                reader_tokens: 10,
+                a_quality: 0.6,
+                b_quality: 0.9,
                 arm_b_omits_mutation: false,
                 seen: RefCell::new(Vec::new()),
             }
         }
     }
 
-    impl DivergenceRunner for StubWriter {
+    impl DivergenceRunner for StubRunner {
         fn write(&self, arm: Arm, model: &str, _prompt: &str, allowance: usize) -> Result<WriterOutcome> {
             self.seen.borrow_mut().push((arm, model.to_string(), allowance));
             let tool_calls = match arm {
@@ -870,10 +1001,42 @@ mod tests {
                 Arm::B => vec!["memstead_create".to_string()],
             };
             Ok(WriterOutcome {
-                tokens: self.tokens_per_session,
+                tokens: self.writer_tokens,
                 tool_calls,
             })
         }
+
+        fn read(&self, arm: Arm, _model: &str, _prompt: &str, _budget: usize) -> Result<ReaderOutcome> {
+            let q = match arm {
+                Arm::A => self.a_quality,
+                Arm::B => self.b_quality,
+            };
+            Ok(ReaderOutcome {
+                answer: format!("q={q}"),
+                tokens: self.reader_tokens,
+                tool_calls: vec![],
+            })
+        }
+    }
+
+    /// Scores the stub reader's `q=<x>` answer back to `x`, spending a fixed 5
+    /// tokens per judgment.
+    struct StubJudge;
+    impl DivergenceJudge for StubJudge {
+        fn score(&self, _reference: &str, blinded_answer: &str) -> Result<(f64, u64)> {
+            let x = blinded_answer
+                .strip_prefix("q=")
+                .and_then(|s| s.parse::<f64>().ok())
+                .unwrap_or(0.0);
+            Ok((x, 5))
+        }
+    }
+
+    fn two_queries() -> Vec<crate::eval::TaskSpec> {
+        vec![
+            crate::eval::TaskSpec { id: "q1".into(), prompt: "how many?".into(), reference: "ten".into() },
+            crate::eval::TaskSpec { id: "q2".into(), prompt: "what state?".into(), reference: "open".into() },
+        ]
     }
 
     fn ten_slices() -> Vec<String> {
@@ -885,7 +1048,7 @@ mod tests {
         let dir = tmp();
         write_fixture_package(&dir);
         let pkg = Package::load(&dir).unwrap();
-        let runner = StubWriter::new(100);
+        let runner = StubRunner::new(100);
         let ledger = run_writer_rounds(&runner, &pkg, &ten_slices()).unwrap();
 
         // 10 rounds x 2 arms = 20 sessions x 100 tokens.
@@ -908,7 +1071,7 @@ mod tests {
         let dir = tmp();
         write_fixture_package(&dir);
         let pkg = Package::load(&dir).unwrap();
-        let mut runner = StubWriter::new(100);
+        let mut runner = StubRunner::new(100);
         runner.arm_b_omits_mutation = true;
         let err = run_writer_rounds(&runner, &pkg, &ten_slices()).unwrap_err().to_string();
         assert!(err.contains("did not cross the MCP gate"), "{err}");
@@ -920,7 +1083,7 @@ mod tests {
         write_fixture_package(&dir);
         let pkg = Package::load(&dir).unwrap();
         // Fixture cap is 20,000,000; 11M per session exceeds it within round 1.
-        let runner = StubWriter::new(11_000_000);
+        let runner = StubRunner::new(11_000_000);
         let err = run_writer_rounds(&runner, &pkg, &ten_slices()).unwrap_err().to_string();
         assert!(err.contains("cost cap exceeded"), "{err}");
     }
@@ -930,9 +1093,44 @@ mod tests {
         let dir = tmp();
         write_fixture_package(&dir);
         let pkg = Package::load(&dir).unwrap();
-        let runner = StubWriter::new(100);
+        let runner = StubRunner::new(100);
         let err = run_writer_rounds(&runner, &pkg, &["only one".to_string()]).unwrap_err().to_string();
         assert!(err.contains("expected 10 round slices, got 1"), "{err}");
+    }
+
+    #[test]
+    fn run_campaign_produces_checkpoints_ledger_and_b_minus_a_delta() {
+        let dir = tmp();
+        write_fixture_package(&dir);
+        let pkg = Package::load(&dir).unwrap();
+        let runner = StubRunner::new(100);
+        let judge = StubJudge;
+        let result = run_campaign(&runner, &judge, &pkg, &ten_slices(), &two_queries()).unwrap();
+
+        // Reader checkpoints at rounds 1, 3, 5, 10.
+        let rounds: Vec<usize> = result.checkpoints.iter().map(|c| c.round).collect();
+        assert_eq!(rounds, vec![1, 3, 5, 10]);
+        // Each checkpoint scored both queries with delta = B - A = 0.9 - 0.6 = 0.3.
+        for cp in &result.checkpoints {
+            assert_eq!(cp.results.len(), 2);
+            for r in &cp.results {
+                assert!((r.delta - 0.3).abs() < 1e-9, "delta {} != 0.3", r.delta);
+                assert!((r.on_mean - 0.9).abs() < 1e-9); // on = B
+                assert!((r.off_mean - 0.6).abs() < 1e-9); // off = A
+            }
+        }
+
+        // Ledger spans writers, readers, and judges.
+        // Writers: 10 rounds x 2 arms x 100 = 2000.
+        assert_eq!(result.ledger.total_role(Arm::A, Role::Writer), 1_000);
+        // Reader sessions: 4 checkpoints x 2 queries x 3 trials x 2 arms = 48;
+        // readers 10 tokens each, judges 5 each.
+        assert_eq!(result.ledger.total_role(Arm::B, Role::Reader), 4 * 2 * 3 * 10);
+        assert_eq!(
+            result.ledger.total(),
+            2_000 + 48 * 10 + 48 * 5,
+            "writers + readers + judges"
+        );
     }
 
     #[test]
