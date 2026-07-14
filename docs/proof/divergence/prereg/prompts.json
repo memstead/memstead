@@ -1,0 +1,19 @@
+{
+  "$comment": "Machine-readable form of the writer/reader prompts that arms.md states in prose — the harness's prompt interface (plan 02 drives writer and reader sessions from these). arms.md stays the human exposition; the two MUST agree verbatim. The parity contract (criterion 5) is preserved structurally: each prompt is a shared skeleton (byte-identical across arms) plus one substrate block that differs only in substrate/access mechanics. The harness assembles a prompt by substituting the placeholders in a skeleton: {SUBSTRATE_BLOCK} -> the arm's substrate block, {ROUND_SLICE_CONTENT} -> this round's source slice (writer), {QUERY} -> the query text (reader). Added pre-first-run; immutable after the first real run except by a dated amendment note (see README.md).",
+  "placeholders": {
+    "SUBSTRATE_BLOCK": "the arm's substrate/access block (writer_substrate.* or reader_substrate.*)",
+    "ROUND_SLICE_CONTENT": "the current round's source slice (writer prompts only)",
+    "QUERY": "the query text from queries.json (reader prompt only)"
+  },
+  "writer_full_skeleton": "You maintain a knowledge base about a software project. New source material about the project arrives this round: commits and changelog entries, a bug tracker, and design and roadmap documents. Read this round's new material and update the knowledge base so it reflects the current state of the project as accurately and completely as you can — its design decisions, its implementation phases and how they depend on one another, its bug tracker, and how things have changed over time, including renames, reversals, and features that supersede or deprecate earlier ones. Keep the knowledge base internally consistent: when the new material changes or overturns something already recorded, update or replace the earlier information rather than leaving both versions in place.\n\n{SUBSTRATE_BLOCK}\n\nThis round's new source material:\n\n{ROUND_SLICE_CONTENT}",
+  "writer_hurry_skeleton": "Quickly bring the knowledge base up to date with this round's new source material about the software project. Read the new material and record what changed — new decisions, phase and dependency changes, new or resolved bugs, and anything renamed, reversed, or superseded — keeping the knowledge base consistent with itself.\n\n{SUBSTRATE_BLOCK}\n\nThis round's new source material:\n\n{ROUND_SLICE_CONTENT}",
+  "reader_skeleton": "Answer the following question about the software project, using only the knowledge base. Answer the question directly and concisely: state the answer itself, not how you found it, which tools you used, or where in the knowledge base it is stored. If the knowledge base does not contain enough information to answer, say so plainly.\n\n{SUBSTRATE_BLOCK}\n\nQuestion: {QUERY}",
+  "writer_substrate": {
+    "arm_a": "The knowledge base is a directory of markdown files. Each file has YAML frontmatter with a `type:` field you choose and a markdown body; relate files to one another with `[[wikilinks]]`. Read the current directory and create, edit, or delete files with your filesystem tools. There are no restrictions on file structure, type names, or links.",
+    "arm_b": "The knowledge base is a Memstead mem accessed through the MCP tools. Call `memstead_schema` once to see the schema the mem is pinned to, then read the current state with `memstead_overview` / `memstead_search` / `memstead_entity` and record the material by creating, updating, and relating entities with `memstead_create` / `memstead_update` / `memstead_relate`. Writes are validated against the schema; when a write is refused, fix it from the recovery payload the refusal returns and resubmit."
+  },
+  "reader_substrate": {
+    "arm_a": "The knowledge base is a directory of markdown files. Read it with your filesystem tools.",
+    "arm_b": "The knowledge base is a Memstead mem. Read it with `memstead_overview`, `memstead_search`, and `memstead_entity`."
+  }
+}

@@ -21,6 +21,7 @@ _(none — no campaign run has occurred)_
 | `models.json` | The model pins, captured from the authoring session and frozen. | **Committed** |
 | `campaign.json` | Machine-readable campaign parameters (schedule, hurry rounds, trials, allowances, cost cap, contamination threshold, band thresholds) — the harness's config interface; the machine encoding of `bands.md`, which stays the human exposition. | **Committed** |
 | `arms.md` | Arm A / Arm B definitions, the Arm-A toolset justification, and the two writer + two reader prompts (shared skeleton + substrate block; diff only in substrate/access mechanics). | **Committed** |
+| `prompts.json` | Machine-readable form of the `arms.md` prompts — shared skeletons + per-arm substrate blocks with `{SUBSTRATE_BLOCK}`/`{ROUND_SLICE_CONTENT}`/`{QUERY}` placeholders; the harness's prompt interface (`arms.md` stays the human exposition; verified to match it verbatim). | **Committed** |
 | `tell-lists.json` | Both arms' judge tell lists (Arm B mem/tool vocabulary; Arm A substrate vocabulary), for two-directional blinding — every active tell verified substring-disjoint from the source. | **Committed** |
 | `queries.json` | The twelve-query battery: per-query ground truth (source citations only) + tell-free reference answers. | **Committed** |
 | `rubrics.md` | The judge scoring rubric (incl. list-answer F1 partial credit) and the integrity counting rubric. | **Committed** |

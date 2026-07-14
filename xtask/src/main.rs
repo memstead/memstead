@@ -494,6 +494,28 @@ fn run_divergence_eval(package_dir: &std::path::Path, pin: Option<&str>) -> Resu
         pkg.tell_lists.arm_b.len(),
         pkg.tell_lists.combined().len()
     );
+    // Prompt parity self-check: the two arms' assembled writer prompts (and
+    // reader prompts) must differ only where the substrate block is substituted
+    // (criterion 5). A violation would mean the skeleton is not shared.
+    use eval::divergence::Arm;
+    let prompts = &pkg.prompts;
+    let writer_parity = prompts
+        .writer(Arm::A, false, "")
+        .replace(&prompts.writer_substrate.arm_a, &prompts.writer_substrate.arm_b)
+        == prompts.writer(Arm::B, false, "");
+    let reader_parity = prompts
+        .reader(Arm::A, "")
+        .replace(&prompts.reader_substrate.arm_a, &prompts.reader_substrate.arm_b)
+        == prompts.reader(Arm::B, "");
+    eprintln!(
+        "  prompts      : writer/reader skeletons loaded; substrate blocks writer {}/{}, reader {}/{} chars; parity writer {}, reader {}",
+        prompts.writer_substrate.arm_a.len(),
+        prompts.writer_substrate.arm_b.len(),
+        prompts.reader_substrate.arm_a.len(),
+        prompts.reader_substrate.arm_b.len(),
+        if writer_parity { "OK" } else { "VIOLATED" },
+        if reader_parity { "OK" } else { "VIOLATED" }
+    );
     eprintln!("  round plan   :");
     for rp in c.schedule() {
         let mut marks = Vec::new();

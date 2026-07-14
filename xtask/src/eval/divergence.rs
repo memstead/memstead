@@ -103,6 +103,92 @@ impl Campaign {
     }
 }
 
+/// Which arm — the single variable under test. Arm A is the tolerant markdown
+/// directory, Arm B the engine-gated mem.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Arm {
+    A,
+    B,
+}
+
+/// A pair of per-arm text values (a substrate/access block for each arm).
+#[derive(Clone, Debug, serde::Deserialize)]
+pub struct ArmText {
+    pub arm_a: String,
+    pub arm_b: String,
+}
+
+impl ArmText {
+    pub fn get(&self, arm: Arm) -> &str {
+        match arm {
+            Arm::A => &self.arm_a,
+            Arm::B => &self.arm_b,
+        }
+    }
+}
+
+/// The writer/reader prompts, from `prompts.json`.
+///
+/// Each prompt is a shared skeleton (identical across arms) plus one substrate
+/// block that differs only in substrate/access mechanics — the criterion-5
+/// parity contract, preserved structurally: [`Prompts::writer`] and
+/// [`Prompts::reader`] assemble a prompt by substituting the substrate block and
+/// the round slice / query into the shared skeleton, so the two arms' prompts
+/// *cannot* differ anywhere but the substrate block.
+#[derive(Clone, Debug, serde::Deserialize)]
+pub struct Prompts {
+    pub writer_full_skeleton: String,
+    pub writer_hurry_skeleton: String,
+    pub reader_skeleton: String,
+    pub writer_substrate: ArmText,
+    pub reader_substrate: ArmText,
+}
+
+impl Prompts {
+    /// Assemble the writer prompt for `arm` in the given mode, with this round's
+    /// source slice substituted in.
+    pub fn writer(&self, arm: Arm, hurry: bool, round_slice: &str) -> String {
+        let skeleton = if hurry {
+            &self.writer_hurry_skeleton
+        } else {
+            &self.writer_full_skeleton
+        };
+        skeleton
+            .replace("{SUBSTRATE_BLOCK}", self.writer_substrate.get(arm))
+            .replace("{ROUND_SLICE_CONTENT}", round_slice)
+    }
+
+    /// Assemble the reader prompt for `arm`, with the query substituted in.
+    pub fn reader(&self, arm: Arm, query: &str) -> String {
+        self.reader_skeleton
+            .replace("{SUBSTRATE_BLOCK}", self.reader_substrate.get(arm))
+            .replace("{QUERY}", query)
+    }
+
+    /// Refuse a skeleton missing a placeholder the harness must substitute — the
+    /// prompt would silently omit the substrate block, the round slice, or the
+    /// query, which would break the run rather than fail loudly.
+    pub fn validate(&self) -> Result<()> {
+        for (name, skeleton) in [
+            ("writer_full_skeleton", &self.writer_full_skeleton),
+            ("writer_hurry_skeleton", &self.writer_hurry_skeleton),
+        ] {
+            require(skeleton, "{SUBSTRATE_BLOCK}", name)?;
+            require(skeleton, "{ROUND_SLICE_CONTENT}", name)?;
+        }
+        require(&self.reader_skeleton, "{SUBSTRATE_BLOCK}", "reader_skeleton")?;
+        require(&self.reader_skeleton, "{QUERY}", "reader_skeleton")?;
+        Ok(())
+    }
+}
+
+fn require(skeleton: &str, placeholder: &str, name: &str) -> Result<()> {
+    if !skeleton.contains(placeholder) {
+        bail!("prompts.json {name} is missing the {placeholder} placeholder");
+    }
+    Ok(())
+}
+
 /// The frozen model pins, from `models.json`.
 #[derive(Clone, Debug, serde::Deserialize)]
 pub struct Models {
@@ -166,6 +252,7 @@ pub struct Package {
     pub campaign: Campaign,
     pub models: Models,
     pub tell_lists: TellLists,
+    pub prompts: Prompts,
     /// Hex SHA-256 over every file in the package directory (see
     /// [`hash_package_dir`]). Recorded at campaign start and re-checked on resume.
     pub content_hash: String,
@@ -178,11 +265,14 @@ impl Package {
         campaign.validate()?;
         let models: Models = read_json(dir, "models.json")?;
         let tell_lists = TellLists::from_json(&read_file(dir, "tell-lists.json")?)?;
+        let prompts: Prompts = read_json(dir, "prompts.json")?;
+        prompts.validate()?;
         let content_hash = hash_package_dir(dir)?;
         Ok(Self {
             campaign,
             models,
             tell_lists,
+            prompts,
             content_hash,
         })
     }
@@ -289,6 +379,17 @@ mod tests {
                  "arm_b_tells": { "tokens": ["memstead"], "phrases": ["the mounted mem"] } }"#,
         )
         .unwrap();
+        fs::write(
+            dir.join("prompts.json"),
+            r#"{
+                "writer_full_skeleton": "Maintain the base.\n\n{SUBSTRATE_BLOCK}\n\nMaterial:\n\n{ROUND_SLICE_CONTENT}",
+                "writer_hurry_skeleton": "Quickly update.\n\n{SUBSTRATE_BLOCK}\n\nMaterial:\n\n{ROUND_SLICE_CONTENT}",
+                "reader_skeleton": "Answer directly.\n\n{SUBSTRATE_BLOCK}\n\nQuestion: {QUERY}",
+                "writer_substrate": { "arm_a": "Use files.", "arm_b": "Use the mem tools." },
+                "reader_substrate": { "arm_a": "Read files.", "arm_b": "Read the mem." }
+            }"#,
+        )
+        .unwrap();
     }
 
     fn tmp() -> PathBuf {
@@ -333,6 +434,60 @@ mod tests {
             pkg.verify_pin("0000000000000000000000000000000000000000000000000000000000000000")
                 .is_err()
         );
+    }
+
+    #[test]
+    fn writer_and_reader_prompts_assemble_with_substitutions() {
+        let dir = tmp();
+        write_fixture_package(&dir);
+        let p = Package::load(&dir).unwrap().prompts;
+
+        let wa = p.writer(Arm::A, false, "SLICE-XYZ");
+        assert!(wa.contains("Use files."), "substrate block substituted: {wa}");
+        assert!(wa.contains("SLICE-XYZ"), "round slice substituted: {wa}");
+        assert!(!wa.contains("{SUBSTRATE_BLOCK}") && !wa.contains("{ROUND_SLICE_CONTENT}"), "no placeholders left: {wa}");
+
+        let wh = p.writer(Arm::B, true, "S");
+        assert!(wh.starts_with("Quickly update."), "hurry skeleton used: {wh}");
+        assert!(wh.contains("Use the mem tools."));
+
+        let r = p.reader(Arm::A, "How many bugs are open?");
+        assert!(r.contains("Read files.") && r.contains("How many bugs are open?"), "{r}");
+        assert!(!r.contains("{QUERY}"), "{r}");
+    }
+
+    #[test]
+    fn writer_prompts_differ_only_in_the_substrate_block() {
+        // Criterion-5 parity, mechanically: the two arms' assembled prompts are
+        // identical once the substrate block is accounted for.
+        let dir = tmp();
+        write_fixture_package(&dir);
+        let p = Package::load(&dir).unwrap().prompts;
+        let a = p.writer(Arm::A, false, "SLICE");
+        let b = p.writer(Arm::B, false, "SLICE");
+        assert_ne!(a, b, "the substrate blocks differ, so the prompts differ");
+        // Swapping A's substrate text for B's turns the A prompt into the B prompt
+        // exactly — proving the substrate block is the ONLY difference.
+        assert_eq!(a.replace("Use files.", "Use the mem tools."), b);
+    }
+
+    #[test]
+    fn prompts_missing_a_placeholder_are_refused() {
+        let dir = tmp();
+        write_fixture_package(&dir);
+        fs::write(
+            dir.join("prompts.json"),
+            r#"{
+                "writer_full_skeleton": "No slice placeholder.\n\n{SUBSTRATE_BLOCK}",
+                "writer_hurry_skeleton": "{SUBSTRATE_BLOCK} {ROUND_SLICE_CONTENT}",
+                "reader_skeleton": "{SUBSTRATE_BLOCK} {QUERY}",
+                "writer_substrate": { "arm_a": "a", "arm_b": "b" },
+                "reader_substrate": { "arm_a": "a", "arm_b": "b" }
+            }"#,
+        )
+        .unwrap();
+        let err = Package::load(&dir).unwrap_err().to_string();
+        assert!(err.contains("ROUND_SLICE_CONTENT"), "{err}");
     }
 
     #[test]
