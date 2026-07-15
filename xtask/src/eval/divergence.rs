@@ -1021,11 +1021,15 @@ pub fn parse_session(stdout: &str) -> Result<SessionOutput> {
 /// that operationalises the pre-registered token allowance (amendment A1). Both
 /// arms receive the flag identically per round; only the substrate access surface
 /// differs (criterion 5), so the budget is not an arm-distinguishing variable.
+/// The prompt is NOT among these args — it is fed to the session over **stdin** by
+/// [`spawn_claude_session`]. Passing a large prompt as a command-line argument hit
+/// the OS `ARG_MAX` limit (`E2BIG`/"Argument list too long", observed at round 9
+/// where an accumulated corpus / slice digest grew large); stdin has no such limit.
+/// `claude -p` with no positional prompt reads it from stdin (verified 2026-07-15).
 #[allow(dead_code)]
-fn base_session_args(model: &str, prompt: &str, budget_usd: Option<f64>) -> Vec<String> {
+fn base_session_args(model: &str, budget_usd: Option<f64>) -> Vec<String> {
     let mut args = vec![
         "-p".to_string(),
-        prompt.to_string(),
         "--output-format".to_string(),
         "stream-json".to_string(),
         "--verbose".to_string(),
@@ -1057,11 +1061,10 @@ fn base_session_args(model: &str, prompt: &str, budget_usd: Option<f64>) -> Vec<
 fn build_writer_args(
     arm: Arm,
     model: &str,
-    prompt: &str,
     budget_usd: Option<f64>,
     mcp_config: Option<&Path>,
 ) -> Vec<String> {
-    let mut args = base_session_args(model, prompt, budget_usd);
+    let mut args = base_session_args(model, budget_usd);
     args.push("--allowedTools".to_string());
     match (arm, mcp_config) {
         // Arm A: filesystem write tools, no MCP.
@@ -1093,11 +1096,10 @@ fn build_writer_args(
 fn build_reader_args(
     arm: Arm,
     model: &str,
-    prompt: &str,
     budget_usd: Option<f64>,
     mcp_config: Option<&Path>,
 ) -> Vec<String> {
-    let mut args = base_session_args(model, prompt, budget_usd);
+    let mut args = base_session_args(model, budget_usd);
     args.push("--allowedTools".to_string());
     match (arm, mcp_config) {
         (Arm::A, _) => {
@@ -1696,18 +1698,44 @@ fn count_on_marker_line(lower: &str, marker: &str) -> Option<usize> {
 /// non-zero but emits a usable stream, and that must count as a real (budgeted)
 /// session whose partial usage enters the ledger — not a spawn failure. A
 /// non-zero exit with nothing parseable is a genuine failure and refuses.
-fn spawn_claude_session(executable: &str, args: &[String], cwd: &Path) -> Result<SessionOutput> {
+fn spawn_claude_session(
+    executable: &str,
+    args: &[String],
+    prompt: &str,
+    cwd: &Path,
+) -> Result<SessionOutput> {
+    use std::io::Write;
+    use std::process::Stdio;
     std::fs::create_dir_all(cwd)
         .with_context(|| format!("creating session working dir {}", cwd.display()))?;
-    let output = std::process::Command::new(executable)
+    // The prompt goes over stdin, never as an argv entry — a large corpus/digest
+    // prompt as a command-line argument hits ARG_MAX (E2BIG). `claude -p` with no
+    // positional prompt reads it from stdin.
+    let mut child = std::process::Command::new(executable)
         .args(args)
         .current_dir(cwd)
         // Give the MCP server room to finish its handshake before the first turn.
         .env("MCP_TIMEOUT", "60000")
-        .output()
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .with_context(|| {
             format!("spawning `{executable}` — is the claude CLI installed and on PATH?")
         })?;
+    {
+        let mut stdin = child
+            .stdin
+            .take()
+            .context("claude session stdin was not piped")?;
+        stdin
+            .write_all(prompt.as_bytes())
+            .context("writing prompt to claude session stdin")?;
+        // Dropping `stdin` here closes it so `claude -p` sees EOF and starts.
+    }
+    let output = child
+        .wait_with_output()
+        .with_context(|| format!("waiting on `{executable}` session"))?;
     let stdout = String::from_utf8_lossy(&output.stdout);
     let parsed = parse_session(&stdout);
     if !output.status.success() {
@@ -1767,15 +1795,15 @@ impl DivergenceRunner for ClaudeDivergenceRunner {
         let budget = self.budget(token_allowance);
         let (args, cwd) = match arm {
             Arm::A => (
-                build_writer_args(Arm::A, model, prompt, budget, None),
+                build_writer_args(Arm::A, model, budget, None),
                 self.arm_a_dir.as_path(),
             ),
             Arm::B => (
-                build_writer_args(Arm::B, model, prompt, budget, Some(&self.arm_b_mcp_config)),
+                build_writer_args(Arm::B, model, budget, Some(&self.arm_b_mcp_config)),
                 self.sandbox_dir.as_path(),
             ),
         };
-        let out = spawn_claude_session(&self.executable, &args, cwd)?;
+        let out = spawn_claude_session(&self.executable, &args, prompt, cwd)?;
         Ok(WriterOutcome {
             tokens: out.tokens,
             non_cache_tokens: out.non_cache_tokens,
@@ -1794,15 +1822,15 @@ impl DivergenceRunner for ClaudeDivergenceRunner {
         let budget = self.budget(token_budget);
         let (args, cwd) = match arm {
             Arm::A => (
-                build_reader_args(Arm::A, model, prompt, budget, None),
+                build_reader_args(Arm::A, model, budget, None),
                 self.arm_a_dir.as_path(),
             ),
             Arm::B => (
-                build_reader_args(Arm::B, model, prompt, budget, Some(&self.arm_b_mcp_config)),
+                build_reader_args(Arm::B, model, budget, Some(&self.arm_b_mcp_config)),
                 self.sandbox_dir.as_path(),
             ),
         };
-        let out = spawn_claude_session(&self.executable, &args, cwd)?;
+        let out = spawn_claude_session(&self.executable, &args, prompt, cwd)?;
         Ok(ReaderOutcome {
             answer: out.text,
             tokens: out.tokens,
@@ -1831,12 +1859,12 @@ pub struct ClaudeDivergenceJudge {
 impl DivergenceJudge for ClaudeDivergenceJudge {
     fn score(&self, model: &str, reference: &str, blinded_answer: &str) -> Result<JudgeOutcome> {
         let prompt = super::judge::build_judge_prompt(reference, blinded_answer);
-        let mut args = base_session_args(model, &prompt, None);
+        let mut args = base_session_args(model, None);
         args.push("--allowedTools".to_string());
         args.push(String::new());
         args.push("--system-prompt".to_string());
         args.push(super::judge::JUDGE_SYSTEM.to_string());
-        let out = spawn_claude_session(&self.executable, &args, &self.sandbox_dir)?;
+        let out = spawn_claude_session(&self.executable, &args, &prompt, &self.sandbox_dir)?;
         let score = super::judge::parse_score(&out.text)?;
         Ok(JudgeOutcome {
             score,
@@ -1858,10 +1886,10 @@ pub struct ClaudeDivergenceAuditor {
 
 impl DivergenceAuditor for ClaudeDivergenceAuditor {
     fn audit(&self, model: &str, auditor_prompt: &str) -> Result<AuditOutcome> {
-        let mut args = base_session_args(model, auditor_prompt, None);
+        let mut args = base_session_args(model, None);
         args.push("--allowedTools".to_string());
         args.push(String::new());
-        let out = spawn_claude_session(&self.executable, &args, &self.sandbox_dir)?;
+        let out = spawn_claude_session(&self.executable, &args, auditor_prompt, &self.sandbox_dir)?;
         let (duplicates, contradictions) = parse_audit_counts(&out.text)?;
         Ok(AuditOutcome {
             duplicates,
@@ -2141,8 +2169,10 @@ mod tests {
     }
 
     fn arg_pairs(args: &[String]) -> std::collections::HashMap<String, String> {
+        // `-p` is a bare flag now (the prompt goes over stdin), so only `--flag value`
+        // pairs are mapped.
         args.windows(2)
-            .filter(|w| w[0].starts_with("--") || w[0] == "-p")
+            .filter(|w| w[0].starts_with("--"))
             .map(|w| (w[0].clone(), w[1].clone()))
             .collect()
     }
@@ -2150,12 +2180,14 @@ mod tests {
     #[test]
     fn writer_args_carry_the_pinned_model_and_arm_tools() {
         let cfg = std::path::Path::new("/tmp/mem.json");
-        let a = build_writer_args(Arm::A, "claude-opus-4-8", "PROMPT", None, None);
-        let b = build_writer_args(Arm::B, "claude-opus-4-8", "PROMPT", None, Some(cfg));
+        let a = build_writer_args(Arm::A, "claude-opus-4-8", None, None);
+        let b = build_writer_args(Arm::B, "claude-opus-4-8", None, Some(cfg));
 
         // Criterion 3: both sessions are invoked with the pinned model.
         assert_eq!(arg_pairs(&a).get("--model").unwrap(), "claude-opus-4-8");
         assert_eq!(arg_pairs(&b).get("--model").unwrap(), "claude-opus-4-8");
+        // The prompt is never an argv entry (it goes over stdin) — no ARG_MAX risk.
+        assert!(a.iter().any(|x| x == "-p") && !a.iter().any(|x| x == "PROMPT"));
 
         // Arm A writes files, no MCP; Arm B mutates the mem over MCP (criterion 5).
         let a_tools = arg_pairs(&a).get("--allowedTools").unwrap().clone();
@@ -2172,8 +2204,8 @@ mod tests {
     #[test]
     fn reader_args_are_read_only_per_arm() {
         let cfg = std::path::Path::new("/tmp/mem.json");
-        let a = build_reader_args(Arm::A, "m", "Q", None, None);
-        let b = build_reader_args(Arm::B, "m", "Q", None, Some(cfg));
+        let a = build_reader_args(Arm::A, "m", None, None);
+        let b = build_reader_args(Arm::B, "m", None, Some(cfg));
 
         // Arm A reader has read tools but not Write/Edit.
         let a_tools = arg_pairs(&a).get("--allowedTools").unwrap().clone();
@@ -2204,9 +2236,10 @@ mod tests {
     fn writer_and_reader_args_differ_only_in_access_surface() {
         // The prompt, model, and base flags are shared; the tools/MCP differ.
         let cfg = std::path::Path::new("/tmp/mem.json");
-        let wb = build_writer_args(Arm::B, "m", "P", None, Some(cfg));
-        let rb = build_reader_args(Arm::B, "m", "P", None, Some(cfg));
-        assert_eq!(arg_pairs(&wb).get("-p"), arg_pairs(&rb).get("-p"));
+        let wb = build_writer_args(Arm::B, "m", None, Some(cfg));
+        let rb = build_reader_args(Arm::B, "m", None, Some(cfg));
+        // Both are print-mode sessions on the same pinned model (prompt via stdin).
+        assert!(wb.iter().any(|x| x == "-p") && rb.iter().any(|x| x == "-p"));
         assert_eq!(arg_pairs(&wb).get("--model"), arg_pairs(&rb).get("--model"));
         // Writer can mutate; reader cannot.
         assert_eq!(
@@ -2238,12 +2271,11 @@ mod tests {
         // The flag is emitted only when a budget is supplied; the value is the
         // dollar figure to four decimals. Both arms carry it identically — it is
         // not an arm-distinguishing variable.
-        let with = build_writer_args(Arm::A, "m", "P", Some(full), None);
+        let with = build_writer_args(Arm::A, "m", Some(full), None);
         assert_eq!(arg_pairs(&with).get("--max-budget-usd").unwrap(), "0.2000");
         let with_b = build_writer_args(
             Arm::B,
             "m",
-            "P",
             Some(full),
             Some(std::path::Path::new("/tmp/mem.json")),
         );
@@ -2251,7 +2283,7 @@ mod tests {
             arg_pairs(&with_b).get("--max-budget-usd").unwrap(),
             "0.2000"
         );
-        let without = build_writer_args(Arm::A, "m", "P", None, None);
+        let without = build_writer_args(Arm::A, "m", None, None);
         assert!(!without.iter().any(|x| x == "--max-budget-usd"));
     }
 
