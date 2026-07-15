@@ -1387,6 +1387,35 @@ impl CampaignState {
     }
 }
 
+/// Run a fallible session `attempts` times, returning the first success. A single
+/// `claude` session occasionally produces output the strict parsers reject — an
+/// auditor that omits its `CONTRADICTIONS:` marker, a judge whose score line is
+/// malformed — and without a retry that one flaky session aborts the entire
+/// multi-hour campaign (observed: round 5 died on a missing auditor marker after
+/// ~4.5 h). Retrying re-runs only the *stateless* sessions (reader/judge/auditor —
+/// never a writer, whose mem mutations would duplicate on a re-run); it takes the
+/// first *parseable* result, so it fixes a format failure without ever selecting on
+/// the value (both arms retry identically — no bias). If every attempt fails the
+/// last error propagates, so a genuinely broken session still aborts. Each retry
+/// spends tokens; the count is kept small.
+fn with_retries<T>(
+    label: &str,
+    attempts: usize,
+    mut f: impl FnMut() -> Result<T>,
+) -> Result<T> {
+    let mut last_err: Option<anyhow::Error> = None;
+    for attempt in 1..=attempts {
+        match f() {
+            Ok(v) => return Ok(v),
+            Err(e) => {
+                eprintln!("{label} session attempt {attempt}/{attempts} failed: {e}");
+                last_err = Some(e);
+            }
+        }
+    }
+    Err(last_err.expect("attempts >= 1, so at least one error was recorded"))
+}
+
 /// Drive the full campaign on `slices` (one per round) and `queries` (the reader
 /// battery): every round runs its writer sessions; at each reader checkpoint the
 /// battery runs `trials` blinded, judged reader sessions per arm per query. One
@@ -1470,16 +1499,20 @@ pub fn run_campaign<R: DivergenceRunner, J: DivergenceJudge, A: DivergenceAudito
                 for _ in 0..package.campaign.trials {
                     for arm in [Arm::A, Arm::B] {
                         let prompt = package.prompts.reader(arm, &query.prompt);
-                        let out = runner.read(
-                            arm,
-                            &model,
-                            &prompt,
-                            package.campaign.reader_budget_tokens,
-                        )?;
+                        let out = with_retries("reader", 3, || {
+                            runner.read(
+                                arm,
+                                &model,
+                                &prompt,
+                                package.campaign.reader_budget_tokens,
+                            )
+                        })?;
                         ensure_model_honored("reader", &model, &out.executed_model)?;
                         ledger.record(arm, Role::Reader, out.tokens, out.non_cache_tokens);
                         let blinded = super::grade::strip_tells_with(&out.answer, &tells);
-                        let jout = judge.score(&judge_model, &query.reference, &blinded)?;
+                        let jout = with_retries("judge", 3, || {
+                            judge.score(&judge_model, &query.reference, &blinded)
+                        })?;
                         ensure_model_honored("judge", &judge_model, &jout.executed_model)?;
                         ledger.record(arm, Role::Judge, jout.tokens, jout.non_cache_tokens);
                         ledger.check_cap()?;
@@ -1518,7 +1551,8 @@ pub fn run_campaign<R: DivergenceRunner, J: DivergenceJudge, A: DivergenceAudito
                     Arm::B => b_items = items,
                 }
                 for _ in 0..package.campaign.trials {
-                    let out = auditor.audit(&auditor_model, &prompt)?;
+                    let out =
+                        with_retries("auditor", 3, || auditor.audit(&auditor_model, &prompt))?;
                     ensure_model_honored("auditor", &auditor_model, &out.executed_model)?;
                     ledger.record(arm, Role::Auditor, out.tokens, out.non_cache_tokens);
                     ledger.check_cap()?;
@@ -2623,6 +2657,33 @@ not-json-skip-me
         assert_eq!(led.total(), 1_100);
         let err = led.check_cap().unwrap_err().to_string();
         assert!(err.contains("cost cap exceeded"), "{err}");
+    }
+
+    #[test]
+    fn with_retries_takes_the_first_success_and_gives_up_after_all_fail() {
+        use std::cell::Cell;
+        // Fails twice, succeeds on the third attempt → the success is returned and
+        // exactly three attempts were made.
+        let calls = Cell::new(0);
+        let got = with_retries("t", 3, || {
+            calls.set(calls.get() + 1);
+            if calls.get() < 3 {
+                anyhow::bail!("flaky")
+            }
+            Ok(42)
+        });
+        assert_eq!(got.unwrap(), 42);
+        assert_eq!(calls.get(), 3, "retried until the first success");
+
+        // Every attempt fails → the last error propagates after `attempts` tries.
+        let calls = Cell::new(0);
+        let err = with_retries::<()>("t", 3, || {
+            calls.set(calls.get() + 1);
+            anyhow::bail!("always {}", calls.get())
+        });
+        assert!(err.is_err());
+        assert_eq!(calls.get(), 3, "gave up after exactly `attempts` tries");
+        assert!(err.unwrap_err().to_string().contains("always 3"), "last error propagates");
     }
 
     #[test]
