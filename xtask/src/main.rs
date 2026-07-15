@@ -181,6 +181,14 @@ struct EvalArgs {
     /// it completes a legitimate write.
     #[arg(long)]
     no_budget: bool,
+    /// Publish a **partial** artifact from the persisted state of an incomplete run
+    /// (divergence) and exit — does not run the campaign. Reads `<output>/state.json`
+    /// and writes `<output>/partial/result.json`: the real scored deltas for the
+    /// rounds that completed, marked partial, with NO band verdict (per the
+    /// pre-registration). Use when a run was stopped or ran out of usage and the
+    /// finished rounds should still be captured as usable evidence.
+    #[arg(long)]
+    publish_partial: bool,
 }
 
 #[derive(clap::Args, Debug)]
@@ -575,6 +583,34 @@ fn run_divergence_eval(args: &EvalArgs) -> Result<()> {
         );
     }
     eprintln!("  package hash : {}", pkg.content_hash);
+
+    // Partial-publish mode: reconstruct a labelled artifact from the persisted state
+    // of an incomplete run (stopped, or out of usage) and exit. Needs only --package
+    // (for the cost cap) and --output — never runs the campaign.
+    if args.publish_partial {
+        let out_dir = args
+            .output
+            .as_ref()
+            .context("--publish-partial needs --output <campaign output directory>")?;
+        let state_path = out_dir.join("state.json");
+        if !state_path.exists() {
+            anyhow::bail!(
+                "no campaign state at {} — nothing to publish as a partial artifact",
+                state_path.display()
+            );
+        }
+        let json = eval::divergence::partial_report_json(&state_path, pkg.campaign.cost_cap_tokens)?;
+        let partial_dir = out_dir.join("partial");
+        std::fs::create_dir_all(&partial_dir)?;
+        let partial_path = partial_dir.join("result.json");
+        std::fs::write(&partial_path, json)
+            .with_context(|| format!("writing partial artifact {}", partial_path.display()))?;
+        eprintln!(
+            "wrote PARTIAL campaign artifact to {} — real deltas for completed rounds only, NO band verdict (incomplete campaign)",
+            partial_path.display()
+        );
+        return Ok(());
+    }
 
     // ---- build the real runner/judge/auditor and drive the campaign ----
     let cli_binary = args

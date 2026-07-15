@@ -1420,6 +1420,52 @@ impl CampaignState {
     }
 }
 
+/// A published **partial** campaign artifact, built from the persisted state of an
+/// incomplete run (e.g. one that ran out of usage before round 10). It carries the
+/// real scored deltas for the rounds that completed — the same numbers a full run
+/// would report for those rounds — but is explicitly marked partial and carries **no
+/// band verdict**: the pre-registration binds a band verdict to a completed campaign
+/// only, and a partial one never receives one. This exists so an interrupted
+/// campaign still yields genuine, usable evidence rather than nothing.
+#[derive(serde::Serialize)]
+pub struct PartialReport<'a> {
+    /// Always true — a marker so no downstream reader mistakes this for a full result.
+    pub partial: bool,
+    /// How many rounds completed (of the scheduled total). The reader checkpoints and
+    /// integrity audits present below are exactly those whose round completed.
+    pub completed_rounds: usize,
+    pub note: String,
+    #[serde(flatten)]
+    pub report: CampaignReport<'a>,
+}
+
+/// Build the partial-artifact JSON from a persisted campaign state file. Reads the
+/// accumulators saved after each completed round and reconstructs the same report
+/// shape a full run emits, wrapped in the partial marker. No band verdict is
+/// computed here (or anywhere for a partial) — the caller publishes this under a
+/// `partial/` path per the pre-registration.
+#[allow(dead_code)]
+pub fn partial_report_json(state_path: &Path, cap_tokens: u64) -> Result<String> {
+    let state = CampaignState::load(state_path)?;
+    let ledger = Ledger::from_state(cap_tokens, state.charges);
+    let report = CampaignReport {
+        checkpoints: &state.checkpoints,
+        integrity_checkpoints: &state.integrity_checkpoints,
+        entropy_series: &state.entropy_series,
+        cost: ledger.summary(),
+    };
+    let partial = PartialReport {
+        partial: true,
+        completed_rounds: state.completed_rounds,
+        note: "Incomplete campaign — NO band verdict. Per the pre-registration a band \
+               verdict binds only a completed campaign; this artifact reports the real \
+               scored deltas for the rounds that finished and nothing more."
+            .to_string(),
+        report,
+    };
+    serde_json::to_string_pretty(&partial).context("serialising partial campaign report")
+}
+
 /// Run a fallible session `attempts` times, returning the first success. A single
 /// `claude` session occasionally produces output the strict parsers reject — an
 /// auditor that omits its `CONTRADICTIONS:` marker, a judge whose score line is
@@ -3543,6 +3589,42 @@ not-json-skip-me
         );
         // The marker is consumed so a resume does not immediately re-stop.
         assert!(!dir.join("STOP").exists(), "STOP marker consumed on pause");
+    }
+
+    #[test]
+    fn partial_report_reconstructs_completed_rounds_with_no_verdict() {
+        // The out-of-usage safeguard: a persisted state becomes a labelled partial
+        // artifact carrying the real deltas for completed rounds and no band verdict.
+        let dir = tmp();
+        write_fixture_package(&dir);
+        let pkg = Package::load(&dir).unwrap();
+        let state_path = dir.join("state.json");
+        let runner = StubRunner::new(100);
+        run_campaign(
+            &runner,
+            &StubJudge,
+            &StubAuditor,
+            &pkg,
+            &ten_slices(),
+            &two_queries(),
+            Some(&state_path),
+        )
+        .unwrap()
+        .expect("completed");
+
+        let json = partial_report_json(&state_path, pkg.campaign.cost_cap_tokens).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["partial"], true, "marked partial");
+        assert_eq!(v["completed_rounds"], 10);
+        // The real scored deltas are present (report flattened in), and no band
+        // verdict is emitted anywhere for a partial.
+        assert_eq!(v["checkpoints"].as_array().unwrap().len(), 4);
+        assert_eq!(v["integrity_checkpoints"].as_array().unwrap().len(), 2);
+        assert!(
+            v.get("verdict").is_none() && v.get("band").is_none(),
+            "a partial carries no band verdict"
+        );
+        assert!(v["note"].as_str().unwrap().contains("NO band verdict"));
     }
 
     #[test]
