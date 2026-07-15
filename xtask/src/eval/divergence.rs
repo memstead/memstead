@@ -121,7 +121,7 @@ impl Campaign {
 
 /// Which arm — the single variable under test. Arm A is the tolerant markdown
 /// directory, Arm B the engine-gated mem.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
 pub enum Arm {
     A,
     B,
@@ -503,7 +503,7 @@ fn hex(bytes: &[u8]) -> String {
 /// Vocabulary-entropy counts over a substrate — a secondary, judge-free metric
 /// (reported, never band-moving). Higher counts mean a richer typed vocabulary.
 #[allow(dead_code)]
-#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct EntropyCounts {
     /// Distinct frontmatter `type:` values.
     pub distinct_types: usize,
@@ -624,7 +624,7 @@ fn defects_per_100_items(defects: usize, items: usize) -> f64 {
 /// The role a session played, for cost attribution in the [`Ledger`]. Staged
 /// with the ledger ahead of the round-loop driver that constructs these.
 #[allow(dead_code)]
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
 pub enum Role {
     Writer,
     Reader,
@@ -655,7 +655,7 @@ pub struct Ledger {
 }
 
 #[allow(dead_code)]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 struct Charge {
     arm: Arm,
     role: Role,
@@ -674,6 +674,22 @@ impl Ledger {
             cap_tokens,
             charges: Vec::new(),
         }
+    }
+
+    /// Rebuild a ledger from persisted charges on resume — the cap comes from the
+    /// (pin-verified) package, the charges from the campaign state file, so the
+    /// running total and the published breakdown continue across a stop/resume.
+    fn from_state(cap_tokens: u64, charges: Vec<Charge>) -> Self {
+        Self {
+            cap_tokens,
+            charges,
+        }
+    }
+
+    /// A clone of the recorded charges, for persisting into the campaign state so a
+    /// resume can rebuild this ledger.
+    fn charges_snapshot(&self) -> Vec<Charge> {
+        self.charges.clone()
     }
 
     /// Attribute a session's `tokens` (raw) and `non_cache_tokens` to `(arm,
@@ -1281,7 +1297,7 @@ fn drive_writers<R: DivergenceRunner>(
 /// One reader checkpoint's scored results: per query, `trials` reader sessions per
 /// arm, blinded and judged, aggregated into a signed `B − A` delta per query.
 #[allow(dead_code)]
-#[derive(Clone, Debug, serde::Serialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Checkpoint {
     pub round: usize,
     pub results: Vec<super::TaskResult>,
@@ -1295,7 +1311,7 @@ pub struct Checkpoint {
 /// mirroring the package's integrity band, and opposite the accuracy checkpoint's
 /// `B − A`. `arm_a_items` / `arm_b_items` publish the normalisation base.
 #[allow(dead_code)]
-#[derive(Clone, Debug, serde::Serialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct IntegrityCheckpoint {
     pub round: usize,
     pub arm_a_items: usize,
@@ -1308,7 +1324,7 @@ pub struct IntegrityCheckpoint {
 /// judge-free divergence signal, computed from substrate bytes after the round's
 /// writers ran.
 #[allow(dead_code)]
-#[derive(Clone, Debug, serde::Serialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct RoundEntropy {
     pub round: usize,
     pub arm_a: EntropyCounts,
@@ -1369,11 +1385,26 @@ impl CampaignResult {
 /// recorded at campaign start: a resume against an edited package refuses
 /// (criterion 2's refusal complement) rather than silently mixing two designs.
 #[allow(dead_code)]
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct CampaignState {
     pub pinned_hash: String,
     /// Highest round whose writer phase (and any checkpoint) fully completed.
     pub completed_rounds: usize,
+    /// The full result accumulators, persisted after every completed round so a
+    /// stop/resume rebuilds them rather than losing every prior round's scores. Only
+    /// the counter used to persist, which made a resumed campaign emit an
+    /// *incomplete* `result.json` (missing the rounds it skipped). Persisting these
+    /// makes resume produce the same result as one uninterrupted run.
+    #[serde(default)]
+    checkpoints: Vec<Checkpoint>,
+    #[serde(default)]
+    integrity_checkpoints: Vec<IntegrityCheckpoint>,
+    #[serde(default)]
+    entropy_series: Vec<RoundEntropy>,
+    /// The cost ledger's charges (the ledger is rebuilt from these + the package
+    /// cap on resume), so the running total and cap enforcement carry across.
+    #[serde(default)]
+    charges: Vec<Charge>,
 }
 
 #[allow(dead_code)]
@@ -1424,10 +1455,18 @@ fn with_retries<T>(
 /// ledger spans writers, readers, and judges; the cost cap is checked between
 /// sessions throughout. Fully driven by the runner/judge traits, so a stub
 /// exercises the whole loop without a network call (criterion 1).
-/// `state_path`, when given, makes the campaign resumable: the state is persisted
-/// after every round, and a restart with the same path skips the rounds already
-/// completed (refusing if the package was edited since it was pinned). Passing
-/// `None` runs a fresh, non-resumable campaign.
+/// `state_path`, when given, makes the campaign resumable: the **full result**
+/// (checkpoints, integrity, entropy, ledger) is persisted after every round, and a
+/// restart with the same path rebuilds those accumulators and continues after the
+/// last completed round (refusing if the package was edited since it was pinned), so
+/// a resumed campaign yields the same complete result as one uninterrupted run.
+/// Passing `None` runs a fresh, non-resumable campaign.
+///
+/// **Graceful stop:** if a file named `STOP` exists in the state directory at a
+/// round boundary, the campaign persists its progress, deletes the marker, and
+/// returns `Ok(None)` — a clean pause (never an error, never a partial result), safe
+/// because the substrate then reflects exactly the completed rounds. Re-running the
+/// same command resumes. A full completion returns `Ok(Some(result))`.
 #[allow(dead_code)]
 pub fn run_campaign<R: DivergenceRunner, J: DivergenceJudge, A: DivergenceAuditor>(
     runner: &R,
@@ -1437,7 +1476,7 @@ pub fn run_campaign<R: DivergenceRunner, J: DivergenceJudge, A: DivergenceAudito
     slices: &[String],
     queries: &[super::TaskSpec],
     state_path: Option<&Path>,
-) -> Result<CampaignResult> {
+) -> Result<Option<CampaignResult>> {
     let model = package.single_model()?.to_string();
     // The judge is pinned to its own model id from the package (criterion 3:
     // every subprocess is invoked with its pinned model explicitly). It happens
@@ -1449,34 +1488,67 @@ pub fn run_campaign<R: DivergenceRunner, J: DivergenceJudge, A: DivergenceAudito
     let schedule = package.campaign.schedule();
     require_slice_count(slices.len(), schedule.len())?;
     let tells = package.tell_lists.combined();
-    let mut ledger = Ledger::new(package.campaign.cost_cap_tokens);
-    let mut checkpoints = Vec::new();
-    let mut integrity_checkpoints = Vec::new();
-    let mut entropy_series = Vec::new();
+    let cap = package.campaign.cost_cap_tokens;
 
-    // Determine where to start. A resume verifies the package pin and picks up
-    // after the last completed round; a fresh run seeds the state at round 0.
-    let start_round = match state_path {
-        Some(path) if path.exists() => {
-            let state = CampaignState::load(path)?;
-            package.verify_pin(&state.pinned_hash)?;
-            state.completed_rounds + 1
-        }
-        _ => {
-            if let Some(path) = state_path {
-                CampaignState {
+    // Determine where to start and rebuild the accumulators. A resume verifies the
+    // package pin and reloads every prior round's scores + the ledger from the state
+    // file, then picks up after the last completed round; a fresh run seeds an empty
+    // state at round 0. The `STOP` marker lives in the state directory.
+    let stop_marker = state_path.and_then(|p| p.parent()).map(|d| d.join("STOP"));
+    let (start_round, mut checkpoints, mut integrity_checkpoints, mut entropy_series, mut ledger) =
+        match state_path {
+            Some(path) if path.exists() => {
+                let state = CampaignState::load(path)?;
+                package.verify_pin(&state.pinned_hash)?;
+                (
+                    state.completed_rounds + 1,
+                    state.checkpoints,
+                    state.integrity_checkpoints,
+                    state.entropy_series,
+                    Ledger::from_state(cap, state.charges),
+                )
+            }
+            _ => {
+                let fresh = CampaignState {
                     pinned_hash: package.content_hash.clone(),
                     completed_rounds: 0,
+                    checkpoints: Vec::new(),
+                    integrity_checkpoints: Vec::new(),
+                    entropy_series: Vec::new(),
+                    charges: Vec::new(),
+                };
+                if let Some(path) = state_path {
+                    fresh.save(path)?;
                 }
-                .save(path)?;
+                (
+                    1,
+                    Vec::new(),
+                    Vec::new(),
+                    Vec::new(),
+                    Ledger::new(cap),
+                )
             }
-            1
-        }
-    };
+        };
+    // Audits already present from a prior session (reloaded above); the final
+    // completeness check counts these plus the audits this session runs.
+    let reloaded_audits = integrity_checkpoints.len();
 
     for rp in &schedule {
         if rp.round < start_round {
             continue;
+        }
+        // Graceful stop at a round boundary: the substrate reflects exactly the
+        // completed rounds here, so a resume re-runs the *next* round's writers
+        // cleanly (no half-written round). Consume the marker and pause.
+        if let Some(marker) = &stop_marker
+            && marker.exists()
+        {
+            let _ = std::fs::remove_file(marker);
+            eprintln!(
+                "STOP marker found — pausing cleanly after round {}. Re-run the same command to resume.",
+                rp.round - 1
+            );
+            return Ok(None);
         }
         drive_writers(
             runner,
@@ -1575,11 +1647,16 @@ pub fn run_campaign<R: DivergenceRunner, J: DivergenceJudge, A: DivergenceAudito
                 result,
             });
         }
-        // Persist progress so a kill after this round resumes past it.
+        // Persist the full progress so a stop/resume after this round rebuilds every
+        // prior round's scores and the ledger — not just the round counter.
         if let Some(path) = state_path {
             CampaignState {
                 pinned_hash: package.content_hash.clone(),
                 completed_rounds: rp.round,
+                checkpoints: checkpoints.clone(),
+                integrity_checkpoints: integrity_checkpoints.clone(),
+                entropy_series: entropy_series.clone(),
+                charges: ledger.charges_snapshot(),
             }
             .save(path)?;
         }
@@ -1591,22 +1668,28 @@ pub fn run_campaign<R: DivergenceRunner, J: DivergenceJudge, A: DivergenceAudito
     // nothing — refuse the whole campaign rather than emit a result with missing
     // integrity deltas. This makes the old always-zero `Role::Auditor` aggregation
     // structurally impossible.
-    let expected_audits = schedule
-        .iter()
-        .filter(|rp| rp.integrity_audit && rp.round >= start_round)
-        .count();
+    // Reaching here means every scheduled round ran (this session plus any
+    // resumed-from predecessor). Every audit must be present: the ones this session
+    // ran (scheduled at or after `start_round`) plus the ones reloaded from a prior
+    // session's state. Counting both keeps the "no silent zero-filled integrity
+    // delta" guarantee across a stop/resume.
+    let expected_audits = reloaded_audits
+        + schedule
+            .iter()
+            .filter(|rp| rp.integrity_audit && rp.round >= start_round)
+            .count();
     if integrity_checkpoints.len() != expected_audits {
         bail!(
-            "campaign incomplete: {expected_audits} integrity-audit checkpoint(s) scheduled from round {start_round} but {} produced — refusing to emit a result with missing integrity deltas",
+            "campaign incomplete: {expected_audits} integrity-audit checkpoint(s) expected but {} present — refusing to emit a result with missing integrity deltas",
             integrity_checkpoints.len()
         );
     }
-    Ok(CampaignResult {
+    Ok(Some(CampaignResult {
         checkpoints,
         integrity_checkpoints,
         entropy_series,
         ledger,
-    })
+    }))
 }
 
 // ===========================================================================
@@ -3134,7 +3217,8 @@ not-json-skip-me
             &two_queries(),
             None,
         )
-        .unwrap();
+        .unwrap()
+        .expect("campaign completed, not stopped");
 
         // Reader checkpoints at rounds 1, 3, 5, 10.
         let rounds: Vec<usize> = result.checkpoints.iter().map(|c| c.round).collect();
@@ -3209,7 +3293,8 @@ not-json-skip-me
             &two_queries(),
             None,
         )
-        .unwrap();
+        .unwrap()
+        .expect("campaign completed, not stopped");
 
         let json = result.to_json().unwrap();
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -3379,6 +3464,88 @@ not-json-skip-me
     }
 
     #[test]
+    fn a_resume_reloads_all_prior_results_not_just_the_counter() {
+        // The whole point of the persistence: a resume must reconstruct the full
+        // result (every checkpoint, integrity delta, entropy sample, ledger charge),
+        // not emit a partial one missing the skipped rounds.
+        let dir = tmp();
+        write_fixture_package(&dir);
+        let pkg = Package::load(&dir).unwrap();
+        let state_path = dir.join("state.json");
+        let runner = StubRunner::new(100);
+
+        // First pass: a full run that persists its state after every round.
+        let full = run_campaign(
+            &runner,
+            &StubJudge,
+            &StubAuditor,
+            &pkg,
+            &ten_slices(),
+            &two_queries(),
+            Some(&state_path),
+        )
+        .unwrap()
+        .expect("completed");
+
+        // Second pass with the same state: every round is already done, so the loop
+        // runs nothing — the result must come entirely from the reloaded state and
+        // be identical to the uninterrupted run, not empty.
+        let resumed = run_campaign(
+            &runner,
+            &StubJudge,
+            &StubAuditor,
+            &pkg,
+            &ten_slices(),
+            &two_queries(),
+            Some(&state_path),
+        )
+        .unwrap()
+        .expect("completed");
+
+        assert_eq!(resumed.checkpoints.len(), 4, "all four reader checkpoints");
+        assert_eq!(
+            resumed.checkpoints.iter().map(|c| c.round).collect::<Vec<_>>(),
+            full.checkpoints.iter().map(|c| c.round).collect::<Vec<_>>(),
+        );
+        assert_eq!(resumed.integrity_checkpoints.len(), 2, "both audits");
+        assert_eq!(resumed.entropy_series.len(), 10, "every round's entropy");
+        assert_eq!(
+            resumed.ledger.total(),
+            full.ledger.total(),
+            "the reloaded ledger carries the full running total"
+        );
+    }
+
+    #[test]
+    fn a_stop_marker_pauses_cleanly_without_a_partial_result() {
+        let dir = tmp();
+        write_fixture_package(&dir);
+        let pkg = Package::load(&dir).unwrap();
+        let state_path = dir.join("state.json");
+        // A STOP marker in the state dir pauses at the next round boundary.
+        std::fs::write(dir.join("STOP"), b"").unwrap();
+        let runner = StubRunner::new(100);
+
+        let out = run_campaign(
+            &runner,
+            &StubJudge,
+            &StubAuditor,
+            &pkg,
+            &ten_slices(),
+            &two_queries(),
+            Some(&state_path),
+        )
+        .unwrap();
+
+        assert!(
+            out.is_none(),
+            "a STOP marker pauses (returns None), never a partial result"
+        );
+        // The marker is consumed so a resume does not immediately re-stop.
+        assert!(!dir.join("STOP").exists(), "STOP marker consumed on pause");
+    }
+
+    #[test]
     fn resume_skips_completed_rounds_without_rerunning_writers() {
         let dir = tmp();
         write_fixture_package(&dir);
@@ -3388,6 +3555,7 @@ not-json-skip-me
         CampaignState {
             pinned_hash: pkg.content_hash.clone(),
             completed_rounds: 5,
+            ..Default::default()
         }
         .save(&state_path)
         .unwrap();
@@ -3434,6 +3602,7 @@ not-json-skip-me
         CampaignState {
             pinned_hash: "0000000000000000000000000000000000000000000000000000000000000000".into(),
             completed_rounds: 3,
+            ..Default::default()
         }
         .save(&state_path)
         .unwrap();
@@ -3512,7 +3681,8 @@ not-json-skip-me
             &two_queries(),
             None,
         )
-        .unwrap();
+        .unwrap()
+        .expect("campaign completed, not stopped");
 
         // Audit checkpoints at rounds 5 and 10 (integrity_audit_rounds).
         let ic = &result.integrity_checkpoints;

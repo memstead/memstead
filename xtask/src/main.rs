@@ -699,6 +699,16 @@ fn run_divergence_eval(args: &EvalArgs) -> Result<()> {
         },
     )?;
 
+    // A graceful stop (the `STOP` marker at a round boundary) returns None: progress
+    // is persisted, no result is emitted. Re-running the same command resumes.
+    let Some(result) = result else {
+        eprintln!(
+            "campaign paused (STOP marker) — progress saved under {}. Re-run the same command to resume.",
+            out_dir.display()
+        );
+        return Ok(());
+    };
+
     let result_path = out_dir.join(if args.smoke {
         "smoke-result.json"
     } else {

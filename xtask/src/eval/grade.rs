@@ -95,7 +95,7 @@ fn collapse_ws(text: &str) -> String {
 
 /// The aggregated result for one task: the raw per-trial scores for each arm and
 /// the summary statistics derived from them.
-#[derive(Clone, Debug, serde::Serialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct TaskResult {
     pub task_id: String,
     pub on_scores: Vec<f64>,
