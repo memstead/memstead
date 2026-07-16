@@ -3,6 +3,7 @@
 pub mod community;
 pub mod query;
 pub mod relations;
+pub mod topology;
 
 use serde::Serialize;
 use std::collections::HashMap;

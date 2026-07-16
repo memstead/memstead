@@ -16,6 +16,16 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   back in sync, then stop".
 
 ### Added
+- **Bulk per-mem topology projection: `Engine::mem_topology`.** One call
+  returns `{nodes, edges, communities}` for a mem — every entity (id,
+  title, type, global Louvain cluster id, stub flag), every relationship
+  edge sourced in the mem with cross-mem targets marked
+  (`target_in_mem: false`, reported at the source mem only, so composing
+  all mems yields each edge exactly once), and the mem's community roster
+  from the workspace-global partition. Coordinate-free and unpaged by
+  contract. Unknown mems refuse with `UNKNOWN_MEM`. Hoists the projection
+  UI consumers previously re-derived per surface (serve's private variant,
+  the macOS app's paged N+1 assembly).
 - **`Actor::App` provenance category (`Actor: app` trailer / changelog
   value).** Human-driven application embedders — the macOS app, the node
   app's HTTP surface, any future UI consumer — get their own caller
