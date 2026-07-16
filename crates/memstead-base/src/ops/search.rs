@@ -268,6 +268,10 @@ pub fn search(
             mem: entity.mem.clone(),
             entity_type: entity.entity_type.clone(),
             stub: entity.stub,
+            last_modified: entity
+                .metadata
+                .get("last_modified")
+                .map(|v| v.to_string()),
             score,
             tokens,
             snippet,
@@ -523,6 +527,10 @@ pub fn list(
             mem: entity.mem.clone(),
             entity_type: entity.entity_type.clone(),
             stub: entity.stub,
+            last_modified: entity
+                .metadata
+                .get("last_modified")
+                .map(|v| v.to_string()),
             score: 0.0,
             tokens,
             snippet: None,
@@ -757,6 +765,10 @@ fn expand_hits(
             mem: entity.mem.clone(),
             entity_type: entity.entity_type.clone(),
             stub: entity.stub,
+            last_modified: entity
+                .metadata
+                .get("last_modified")
+                .map(|v| v.to_string()),
             score,
             tokens,
             snippet: None,

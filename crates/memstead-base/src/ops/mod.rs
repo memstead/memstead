@@ -2339,6 +2339,12 @@ pub struct SearchHit {
     pub stub: bool,
     pub score: f32,
     pub tokens: usize,
+    /// The entity's `last_modified` stamp (RFC-3339 date) — list/roster
+    /// consumers (the app's Liste, agents asking "what moved lately")
+    /// sort on it without per-entity reads. `None` for stubs and hits
+    /// built outside the engine ops.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_modified: Option<String>,
     pub snippet: Option<String>,
     /// Lead/key section bodies for the hit. The `search` op leaves this
     /// **empty** — search finds entities, `memstead_entity` reads their
