@@ -40,6 +40,7 @@ pub mod error;
 pub mod events;
 #[cfg(feature = "file-watcher")]
 pub mod file_watcher;
+pub mod history;
 pub mod lifecycle;
 pub mod mutation;
 pub mod outcomes;
@@ -56,14 +57,17 @@ pub use events::DEFAULT_BROADCAST_CAPACITY;
 pub use events::{EventCallback, MemChangedEvent, SubscriptionHandle};
 #[cfg(feature = "file-watcher")]
 pub use file_watcher::{FileWatcherError, MemRepoWatcher, watch_mem_repo};
+pub use history::{
+    EntityHistoryReport, EntityTouch, HISTORY_PAGE_DEFAULT, HISTORY_PAGE_MAX, StoryStart,
+};
 pub use mutation::delete::DeleteReferrers;
 pub use mutation::{PATCH_OLD_NOT_FOUND_CONTENT_CAP, RELATIONSHIP_CYCLE_PATH_CAP};
-pub use review::{ReviewMarkStatus, SetReviewMarkOutcome};
 pub use outcomes::{
     CreateEntityArgs, CreateEntityOutcome, DeleteEntityArgs, DeleteEntityOutcome, RelateAction,
     RelateEntityArgs, RelateEntityOutcome, RenameEntityArgs, RenameEntityOutcome, SetSchemaOutcome,
     SetSchemaResult, UpdateEntityArgs, UpdateEntityOutcome,
 };
+pub use review::{ReviewMarkStatus, SetReviewMarkOutcome};
 
 pub use boot::{SchemaResolver, resolve_builtin_schema_pin_pub};
 

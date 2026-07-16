@@ -62,13 +62,13 @@ pub use binding_migrate::{
 };
 pub use engine::{
     BackendFactory, BootError, CreateEntityArgs, CreateEntityOutcome, DeleteEntityArgs,
-    DeleteEntityOutcome, DeleteReferrers, Engine, EngineError, FromArchiveBytesError,
-    GitBranchBranchResetFn, GitBranchChangesSinceFn, GitBranchDiffFn, GitBranchExportFn,
-    GitBranchExportToBytesFn, GitBranchFetchFn, GitBranchOps, GitBranchPullFn, GitBranchPushFn,
-    GitBranchReadTreeFn, INLINE_LIST_CAP, ReferrerInfo, RelateAction, RelateEntityArgs,
-    RelateEntityOutcome, RenameEntityArgs, RenameEntityOutcome, ReviewMarkStatus,
-    SchemaSourceDiagnostic, SetReviewMarkOutcome, UpdateEntityArgs, UpdateEntityOutcome,
-    format_inline_list_overflow,
+    DeleteEntityOutcome, DeleteReferrers, Engine, EngineError, EntityHistoryReport, EntityTouch,
+    FromArchiveBytesError, GitBranchBranchResetFn, GitBranchChangesSinceFn, GitBranchDiffFn,
+    GitBranchExportFn, GitBranchExportToBytesFn, GitBranchFetchFn, GitBranchOps, GitBranchPullFn,
+    GitBranchPushFn, GitBranchReadTreeFn, HISTORY_PAGE_DEFAULT, HISTORY_PAGE_MAX, INLINE_LIST_CAP,
+    ReferrerInfo, RelateAction, RelateEntityArgs, RelateEntityOutcome, RenameEntityArgs,
+    RenameEntityOutcome, ReviewMarkStatus, SchemaSourceDiagnostic, SetReviewMarkOutcome,
+    StoryStart, UpdateEntityArgs, UpdateEntityOutcome, format_inline_list_overflow,
 };
 pub use entity::id::{ENTITY_ID_MAX_LEN, SlugError};
 pub use entity::{Entity, EntityId, MetadataValue, ParseResult, Relationship};

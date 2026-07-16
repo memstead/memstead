@@ -16,6 +16,25 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   back in sync, then stop".
 
 ### Added
+- **Per-entity history: `Engine::entity_history`.** Given a mem and an
+  entity id, one query returns the entity's recorded story — every
+  touch newest-first with when, provenance (actor / client / tool
+  verb), and the agent's stated note — with rename chains followed
+  through the engine's own rename provenance, so the story starts at
+  the entity's first appearance under any prior id, and batch commits
+  visible with their batch context (the other ids they touched) without
+  polluting those entities' own stories. Bounded and pageable (default
+  50 / cap 200, opaque continuation cursor; pages compose without gaps
+  or duplicates) and honest about its edges: `story_start` states where
+  and why a story truncates (unstitchable rename, records predating the
+  changelog), `limitations` names per-backend gaps (folder changelogs
+  record renames under the post-rename id only and carry no batch
+  attribution), and refusals are typed — `UNKNOWN_MEM`,
+  `ENTITY_NOT_FOUND` (an unknown id is never an empty story),
+  `INVALID_CURSOR`, and `INVALID_INPUT` on archive mounts (their seam
+  records no history; refusing beats fabricating emptiness). Built
+  entirely on the existing walks (the git-branch commit-note feed,
+  the folder/in-memory provenance log) — no new storage, no index.
 - **Review marks: one per-mem pointer to the last human-approved state.**
   `MemConfig` gains `reviewMark` (mem-repo state — every sibling process
   sees the same mark; stripped from published archives by the
