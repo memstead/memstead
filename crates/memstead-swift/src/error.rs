@@ -216,6 +216,7 @@ impl From<EngineError> for MemsteadError {
             | EngineError::SchemaViolationInFetch { .. }
             | EngineError::RenameSimilarityOutOfRange { .. }
             | EngineError::InvalidChangesCursor { .. }
+            | EngineError::ReviewMarkNotSet { .. }
             | EngineError::MissingRequiredDescription { .. }
             | EngineError::DescriptionNotPermitted { .. }
             | EngineError::RelationManualAuthoringForbidden { .. }

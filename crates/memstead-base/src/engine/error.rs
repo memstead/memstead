@@ -815,6 +815,14 @@ pub enum EngineError {
         "commit cursor '{since}' is not a known commit in mem '{mem}' — pass a commit_sha from a prior mutation, or the empty-tree sentinel to re-seed"
     )]
     InvalidChangesCursor { mem: String, since: String },
+    /// `review_mark_diff` was called on a mem with no review mark set.
+    /// Marklessness is a first-class, known-from-the-roster state — the
+    /// diff surface refuses typed rather than silently equating "no
+    /// mark" with "no changes".
+    #[error(
+        "mem '{mem}' has no review mark — set one first, or read the full history via changes_since"
+    )]
+    ReviewMarkNotSet { mem: String },
     /// Mem config is missing a required field that the engine
     /// itself would normally populate (today: `version` at mem
     /// init). Surfaced on the export path — pre-fix this collapsed
@@ -1052,6 +1060,7 @@ impl EngineError {
             EngineError::InvalidInput(_) => "INVALID_INPUT",
             EngineError::RenameSimilarityOutOfRange { .. } => "INVALID_INPUT",
             EngineError::InvalidChangesCursor { .. } => "INVALID_CURSOR",
+            EngineError::ReviewMarkNotSet { .. } => "REVIEW_MARK_NOT_SET",
             EngineError::MemConfigIncomplete { .. } => "MEM_CONFIG_INCOMPLETE",
             EngineError::MissingRequiredDescription { .. } => "MISSING_REQUIRED_DESCRIPTION",
             EngineError::DescriptionNotPermitted { .. } => "DESCRIPTION_NOT_PERMITTED",
@@ -1366,6 +1375,7 @@ impl EngineError {
                 "active_backend": active_backend,
                 "supported_backends": supported_backends,
             }),
+            EngineError::ReviewMarkNotSet { mem } => serde_json::json!({ "mem": mem }),
             EngineError::InvalidChangesCursor { mem, since } => serde_json::json!({
                 "mem": mem,
                 "since": since,

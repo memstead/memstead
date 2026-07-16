@@ -44,6 +44,7 @@ pub mod lifecycle;
 pub mod mutation;
 pub mod outcomes;
 pub mod query;
+pub mod review;
 
 pub use archive::FromArchiveBytesError;
 pub use error::{

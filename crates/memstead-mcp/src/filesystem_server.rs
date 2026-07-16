@@ -964,6 +964,12 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
                 Some(serde_json::json!({ "mem": mem, "since": since })),
             )
         }
+        // Review-mark diff on a markless mem — typed refusal.
+        ref err @ EngineError::ReviewMarkNotSet { ref mem } => tool_error_with_details(
+            "REVIEW_MARK_NOT_SET",
+            &err.to_string(),
+            Some(serde_json::json!({ "mem": mem })),
+        ),
         // Malformed `anchors[]` element on create/update: typed
         // `INVALID_ANCHOR` with the wrapped anchor error's recovery detail.
         ref err @ EngineError::InvalidAnchor(ref anchor_err) => tool_error_with_details(

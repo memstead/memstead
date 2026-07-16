@@ -1594,6 +1594,17 @@ fn engine_err_unified(
                 serde_json::json!({ "mem": mem, "since": since }),
             ),
         ),
+        // Review-mark diff on a markless mem — typed refusal so agents
+        // never equate "no mark" with "no changes".
+        E::ReviewMarkNotSet { mem } => tool_error_with_payload(
+            "REVIEW_MARK_NOT_SET",
+            &message,
+            envelope(
+                "REVIEW_MARK_NOT_SET",
+                message.clone(),
+                serde_json::json!({ "mem": mem }),
+            ),
+        ),
         // Malformed `anchors[]` element on create/update: typed
         // `INVALID_ANCHOR` with the wrapped anchor error's recovery detail
         // (offending field, bad value, allowed set). The whole mutation

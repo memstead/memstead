@@ -1473,6 +1473,7 @@ pub fn create_mem(
     // the export path hits the residual `MEM_CONFIG_INCOMPLETE` /
     // pre-fix `INTERNAL` collapse on the first archive attempt.
     let mem_config = memstead_schema::config::MemConfig {
+        review_mark: None,
         name: None,
         version: Some(semver::Version::new(0, 1, 0)),
         description: None,

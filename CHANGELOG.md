@@ -16,6 +16,19 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   back in sync, then stop".
 
 ### Added
+- **Review marks: one per-mem pointer to the last human-approved state.**
+  `MemConfig` gains `reviewMark` (mem-repo state — every sibling process
+  sees the same mark; stripped from published archives by the
+  `PublishedMemConfig` allowlist), carried in the backend-opaque
+  `changes_since` cursor vocabulary. Three engine ops:
+  `Engine::review_marks` (every mem's mark + current head),
+  `Engine::set_review_mark` (explicit target only, validated per backend
+  — garbage SHAs and malformed timestamps refuse `INVALID_CURSOR`;
+  clearing is first-class; provenance and require-notes mirror
+  `set_mem_sync_state`), and `Engine::review_mark_diff` (the accumulated
+  delta since the mark; markless mems refuse with the new
+  `REVIEW_MARK_NOT_SET` instead of silently equating "no mark" with "no
+  changes"). Marks never gate writes — no mutation path consults them.
 - **The mem-change event channel now carries sibling-process writes.**
   `reload_if_stale`'s drift arm emits the same `MemChangedEvent` the
   self-write path always emitted, so a broadcast subscriber (SSE
