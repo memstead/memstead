@@ -76,6 +76,7 @@ Surface entries the registry does not pin to a logical operation. Either add a r
 - `mem-repo`
 - `publish`
 - `quickstart`
+- `review-mark`
 - `schema`
 - `unpublish`
 

@@ -58,6 +58,7 @@ pub use events::{EventCallback, MemChangedEvent, SubscriptionHandle};
 pub use file_watcher::{FileWatcherError, MemRepoWatcher, watch_mem_repo};
 pub use mutation::delete::DeleteReferrers;
 pub use mutation::{PATCH_OLD_NOT_FOUND_CONTENT_CAP, RELATIONSHIP_CYCLE_PATH_CAP};
+pub use review::{ReviewMarkStatus, SetReviewMarkOutcome};
 pub use outcomes::{
     CreateEntityArgs, CreateEntityOutcome, DeleteEntityArgs, DeleteEntityOutcome, RelateAction,
     RelateEntityArgs, RelateEntityOutcome, RenameEntityArgs, RenameEntityOutcome, SetSchemaOutcome,

@@ -472,6 +472,19 @@ pub fn compose_overview(
             )
         })
         .collect();
+    // Review mark per mem, from the engine's one authority
+    // (`review_marks`): the last human-approved cursor plus the
+    // mark≠head indicator. Markless is the ordinary state and stays
+    // unmarked in the roster (the Access-line exception pattern) —
+    // agents that see no mark line have nothing to compose with.
+    let review_by_mem: std::collections::HashMap<String, (Option<String>, bool)> = engine
+        .review_marks()
+        .into_iter()
+        .map(|s| {
+            let unreviewed = s.mark.is_some() && s.mark != s.head;
+            (s.mem, (s.mark, unreviewed))
+        })
+        .collect();
     let mut mems_lite: Vec<serde_json::Value> = Vec::new();
     let mut mems_full: Vec<serde_json::Value> = Vec::new();
     for name in &visible_names {
@@ -503,6 +516,10 @@ pub fn compose_overview(
             .get(name.as_str())
             .copied()
             .unwrap_or(("unknown", false));
+        let (review_mark, unreviewed) = review_by_mem
+            .get(name.as_str())
+            .cloned()
+            .unwrap_or((None, false));
         mems_lite.push(serde_json::json!({
             "name": name,
             "schema": sref,
@@ -511,6 +528,8 @@ pub fn compose_overview(
             "writable": writable,
             "storage": storage,
             "durable": durable,
+            "review_mark": review_mark,
+            "unreviewed": unreviewed,
         }));
         mems_full.push(serde_json::json!({
             "name": name,
@@ -521,6 +540,8 @@ pub fn compose_overview(
             "writable": writable,
             "storage": storage,
             "durable": durable,
+            "review_mark": review_mark,
+            "unreviewed": unreviewed,
         }));
     }
     let sort_by_name = |a: &serde_json::Value, b: &serde_json::Value| {
@@ -975,6 +996,22 @@ pub fn compose_overview(
             }
             if let Some(ver) = version {
                 md.push_str(&format!("- **Version:** {ver}\n"));
+            }
+            // The review mark rides the roster only when one is set —
+            // markless is the ordinary state, never flagged. The line
+            // carries the composition affordance: the mark's value IS a
+            // `changes_since` cursor, so an agent needing the full delta
+            // has everything it needs right here (no dedicated tool).
+            if let Some(mark) = v["review_mark"].as_str() {
+                if v["unreviewed"].as_bool() == Some(true) {
+                    md.push_str(&format!(
+                        "- **Review mark:** `{mark}` — head has moved past the mark (changes_since with this cursor lists the unreviewed delta)\n"
+                    ));
+                } else {
+                    md.push_str(&format!(
+                        "- **Review mark:** `{mark}` — head is at the mark (nothing unreviewed)\n"
+                    ));
+                }
             }
             md.push_str(&format!("- **Entities:** {count}\n"));
             if emit_mem_distribution

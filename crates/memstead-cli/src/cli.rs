@@ -182,6 +182,14 @@ pub enum Command {
     /// hash `4b825dc642cb6eb9a060e54bf8d69288fbee4904` for a first sync.
     Changes(commands::changes::Args),
 
+    /// Read and move the per-mem review mark — the engine's one
+    /// pointer per mem to the last human-approved state. `list` shows
+    /// every mem's mark and head; `set`/`clear` move it (explicit
+    /// target only); `diff` reports the unreviewed delta. Marks never
+    /// gate writes.
+    #[command(name = "review-mark")]
+    ReviewMark(commands::review_mark::Args),
+
     /// Reload one writable mem's slice of the in-memory store from
     /// its on-disk branch tip — or every writable mem when
     /// `--mem` is omitted. CLI parity with the MCP `memstead_reload`

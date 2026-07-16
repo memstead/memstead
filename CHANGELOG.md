@@ -29,6 +29,14 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   delta since the mark; markless mems refuse with the new
   `REVIEW_MARK_NOT_SET` instead of silently equating "no mark" with "no
   changes"). Marks never gate writes — no mutation path consults them.
+  Surfaces: the CLI gains `memstead review-mark list|set|clear|diff`
+  (same cursor vocabulary as `memstead changes --since`; `set`/`clear`
+  are note-gated warn-and-commit like every mutation), and the overview's
+  `## Mems` roster carries a `Review mark` line for marked mems — the
+  mark value plus a head-moved indicator, naming `changes_since` as the
+  delta read, so agents see review state at cold-start without a new MCP
+  tool. Markless mems stay unmarked in the roster (ordinary state, never
+  flagged).
 - **The mem-change event channel now carries sibling-process writes.**
   `reload_if_stale`'s drift arm emits the same `MemChangedEvent` the
   self-write path always emitted, so a broadcast subscriber (SSE

@@ -426,4 +426,82 @@ mod tests {
             "published config must strip the mark: {json}"
         );
     }
+
+    #[test]
+    fn overview_roster_carries_the_mark_and_its_indicator() {
+        // The agents' cold-start read (overview `## Mems`) is a
+        // per-mem summary surface: a set mark rides it with the
+        // mark≠head indicator, a markless mem stays unmarked (ordinary
+        // state, never flagged).
+        let tmp = tempfile::TempDir::new().unwrap();
+        let mut engine = folder_engine(&tmp);
+        let overview_md = |engine: &mut crate::Engine| {
+            crate::overview::compose_overview(
+                engine,
+                crate::overview::OverviewArgs {
+                    include: &[],
+                    mem: None,
+                    rebuild: false,
+                    token_budget: 8000,
+                    operator_mode: false,
+                    suppress_lifecycle: false,
+                },
+                crate::overview::Surface::Mcp,
+            )
+            .unwrap()
+            .markdown
+        };
+
+        // Markless: no mark line anywhere.
+        let md = overview_md(&mut engine);
+        assert!(
+            !md.contains("Review mark"),
+            "markless roster must not mention marks: {md}"
+        );
+
+        // Mark at head: the line appears, indicator says at-mark.
+        let reviewed = head(&engine);
+        engine
+            .set_review_mark("specs", Some(&reviewed), Some("reviewed"))
+            .unwrap();
+        let md = overview_md(&mut engine);
+        assert!(
+            md.contains(&format!("**Review mark:** `{reviewed}`")),
+            "roster must carry the mark value: {md}"
+        );
+        assert!(
+            md.contains("head is at the mark"),
+            "at-mark indicator missing: {md}"
+        );
+
+        // Head moves past the mark: the indicator flips and names the
+        // composition path (changes_since with the mark's cursor).
+        engine
+            .create_entity(
+                crate::CreateEntityArgs {
+                    mem: "specs".to_string(),
+                    title: "Past The Mark Roster".to_string(),
+                    entity_type: "spec".to_string(),
+                    sections: [
+                        ("identity".to_string(), "x".to_string()),
+                        ("purpose".to_string(), "y".to_string()),
+                    ]
+                    .into_iter()
+                    .collect(),
+                    metadata: Default::default(),
+                    relations: Vec::new(),
+                    anchors: Vec::new(),
+                    dry_run: false,
+                },
+                crate::vcs::Actor::App,
+                None,
+                Some("agent work"),
+            )
+            .unwrap();
+        let md = overview_md(&mut engine);
+        assert!(
+            md.contains("head has moved past the mark") && md.contains("changes_since"),
+            "unreviewed indicator missing: {md}"
+        );
+    }
 }
