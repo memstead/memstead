@@ -1257,9 +1257,10 @@ mod tests {
 
     #[test]
     fn reload_if_stale_returns_empty_for_folder_only_engine() {
-        // The folder backend inherits MemBackend::current_head's
-        // default (Ok(None)). Drift detection sees no signal and
-        // returns no warnings.
+        // Folder mems now carry a changelog-derived drift cursor, so
+        // this pins the QUIET case: no sibling wrote between probes,
+        // so repeated checks stay warning-free (the first probe
+        // captures the baseline silently, the second sees no advance).
         let tmp = TempDir::new().unwrap();
         let mut engine = build_demo_engine(&tmp);
         let warnings = engine.reload_if_stale(None);

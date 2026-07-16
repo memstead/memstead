@@ -138,7 +138,11 @@ pub trait MemBackend: Send + Sync {
     /// archive) inherit the default impl returning `Ok(None)`; the
     /// engine treats `None` as "no drift signal available" and skips
     /// drift detection for that mount. The git-branch backend
-    /// overrides to return the per-mem branch tip's commit SHA hex.
+    /// overrides to return the per-mem branch tip's commit SHA hex;
+    /// the filesystem backend overrides to return the changelog's
+    /// last-line timestamp cursor (folder mems with no changelog yet
+    /// keep `None`). Archive and in-memory backends stay on the
+    /// default.
     ///
     /// Returning `Err` is reserved for backend-internal failures
     /// (refdb hiccup, archive read failure, etc.); the engine logs
