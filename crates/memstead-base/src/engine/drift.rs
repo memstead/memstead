@@ -116,6 +116,20 @@ impl Engine {
                             // for the response layer to drain.
                             let notice = self.mem_changed_notice(&name, &old, &new);
                             self.pending_mem_changed.push(notice);
+                            // Emit the same change on the mem-change
+                            // event channel: subscribers (SSE forwarders
+                            // foremost) previously saw only this engine's
+                            // own writes — a sibling process's commit,
+                            // detected here as drift, is every bit as
+                            // much a change. `n_commits: 1` per the
+                            // watcher precedent (events batch by
+                            // detection, not by commit archaeology).
+                            self.emit_mem_changed(&crate::engine::events::MemChangedEvent {
+                                mem: name.clone(),
+                                head: new.clone(),
+                                previous: old.clone(),
+                                n_commits: 1,
+                            });
                         }
                         Err(e) => {
                             tracing::warn!(

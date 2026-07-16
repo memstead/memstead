@@ -16,6 +16,12 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   back in sync, then stop".
 
 ### Added
+- **The mem-change event channel now carries sibling-process writes.**
+  `reload_if_stale`'s drift arm emits the same `MemChangedEvent` the
+  self-write path always emitted, so a broadcast subscriber (SSE
+  forwarders foremost) sees every change to a mem — this engine's own
+  commits and out-of-band siblings alike. Previously the channel was
+  self-writes only, documented as such; no wire-shape change.
 - **Folder mems join cross-process drift detection.** The filesystem
   backend's `current_head` now derives a drift cursor from its
   append-only changelog (the last line's RFC3339-millis `ts` — the same
