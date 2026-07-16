@@ -278,3 +278,62 @@ mod tests {
         assert!(matches!(err, crate::EngineError::UnknownMem(m) if m == "ghost"));
     }
 }
+
+#[cfg(test)]
+mod scale_tests {
+    use crate::storage::MemWriter;
+
+    /// Design-target guard (plan criterion: "a mem at the design-target
+    /// entity count is served whole — no page cap, no top-N
+    /// truncation"). 1,500 entities sit mid-target (1,000–5,000); a
+    /// future page cap or truncation lands as a failure here, not
+    /// silently.
+    #[test]
+    fn design_target_mem_is_served_whole() {
+        const N: usize = 1_500;
+        let tmp = tempfile::TempDir::new().unwrap();
+        let dir = tmp.path().join("bulk");
+        std::fs::create_dir_all(&dir).unwrap();
+        let writer = crate::storage::FilesystemMemWriter::new(dir.clone());
+        for i in 0..N {
+            // Chain edges so the edge count scales with the node count.
+            let rel = if i > 0 {
+                format!("\n## Relationships\n\n- **USES**: [[node-{}]]\n", i - 1)
+            } else {
+                String::new()
+            };
+            let body = format!(
+                "---\ntype: spec\ncreated_date: 2026-01-01\nlast_modified: 2026-01-01\nlevel: M0\n---\n# Node {i}\n\n## Identity\n\nBulk node {i}.\n{rel}"
+            );
+            writer
+                .write_entity(
+                    std::path::Path::new(&format!("node-{i}.md")),
+                    body.as_bytes(),
+                )
+                .unwrap();
+        }
+        writer
+            .commit("seed bulk", &crate::vcs::CommitContext::internal())
+            .unwrap();
+
+        let mount = crate::Mount {
+            mem: "bulk".to_string(),
+            schema: Some(memstead_schema::SchemaRef::new(
+                "default",
+                semver::Version::new(1, 0, 0),
+            )),
+            storage: crate::MountStorage::Folder { path: dir.clone() },
+            capability: crate::MountCapability::Write,
+            lifecycle: crate::MountLifecycle::Eager,
+            cross_linkable: false,
+            migration_target: None,
+        };
+        let backend =
+            Box::new(crate::storage::FilesystemMemWriter::new(dir)) as Box<dyn crate::MemBackend>;
+        let engine = crate::Engine::from_mounts(vec![(mount, backend)]).unwrap();
+
+        let topology = engine.mem_topology("bulk").unwrap();
+        assert_eq!(topology.nodes.len(), N, "every node, no cap");
+        assert_eq!(topology.edges.len(), N - 1, "every edge, no cap");
+    }
+}
