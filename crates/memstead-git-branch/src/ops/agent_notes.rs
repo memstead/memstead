@@ -56,7 +56,7 @@ pub fn read_memstead_ref(git_dir: &Path) -> Result<Option<String>, VcsError> {
 /// <optional note paragraph>
 ///
 /// Tool: <verb>
-/// Actor: <agent|cli|external|unknown>
+/// Actor: <agent|cli|app|external|unknown>
 /// Client: <name>@<version>
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -479,6 +479,39 @@ mod tests {
         assert!(parsed.note.is_none());
         assert!(parsed.tool.is_none());
         assert!(parsed.client.is_none());
+    }
+
+    #[test]
+    fn parser_round_trips_app_actor_with_client_identity() {
+        // The `app` category (human-driven application embedders — the
+        // macOS app, the node app's HTTP surface) must round-trip the
+        // commit-message path like agent/cli do, with the client
+        // identity naming which software spoke and an author identity
+        // derived from it — never the committer fallback.
+        let ctx = crate::vcs::CommitContext {
+            actor: crate::vcs::Actor::App,
+            client: Some(crate::vcs::ClientId {
+                name: "memstead-node-app".into(),
+                version: "0.1.0".into(),
+            }),
+            tool: None,
+            note: Some("edited via the workspace room".into()),
+            logical_operation_id: None,
+            entity_ids: None,
+        };
+        let raw = crate::vcs::format_commit_message("memstead: update specs--alpha", &ctx);
+        assert!(raw.contains("Actor: app"), "missing app trailer:\n{raw}");
+        let parsed = parse_commit_message(&raw);
+        assert_eq!(parsed.actor.as_deref(), Some("app"));
+        assert_eq!(parsed.client.as_deref(), Some("memstead-node-app@0.1.0"));
+        assert_eq!(
+            parsed.note.as_deref(),
+            Some("edited via the workspace room")
+        );
+
+        let author = crate::vcs::author_identity(&ctx).expect("app + client derives an author");
+        assert_eq!(author.0, "memstead-node-app");
+        assert_eq!(author.1, "memstead-node-app@memstead.io");
     }
 
     #[test]

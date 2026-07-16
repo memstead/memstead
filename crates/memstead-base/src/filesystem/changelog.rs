@@ -21,8 +21,8 @@
 //! - `entity` — mem-relative entity id (`mem:slug` form), or
 //!   `null` for batch mutations that span multiple entities.
 //! - `actor` — caller category from
-//!   [`memstead_base::vcs::Actor::as_trailer`]: `agent`, `cli`, `external`,
-//!   `unknown`.
+//!   [`memstead_base::vcs::Actor::as_trailer`]: `agent`, `cli`, `app`,
+//!   `external`, `unknown`.
 //! - `note` — agent-authored provenance note when present. Omitted
 //!   from the JSON object when absent or whitespace-only.
 //! - `client` — optional caller identity (`name@version`). Omitted

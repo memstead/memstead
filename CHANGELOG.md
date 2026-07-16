@@ -16,6 +16,15 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   back in sync, then stop".
 
 ### Added
+- **`Actor::App` provenance category (`Actor: app` trailer / changelog
+  value).** Human-driven application embedders — the macOS app, the node
+  app's HTTP surface, any future UI consumer — get their own caller
+  category, distinct from `agent` (LLM over MCP) and `cli`. The paired
+  `ClientId` names which software spoke and derives the commit author
+  (`<client>@memstead.io`), exactly as agent/cli identities do; `external`
+  keeps meaning out-of-band writes the engine discovered rather than
+  performed. Additive: existing trailers, readers, and wire values are
+  unchanged.
 - **Schema-level `system_context` in the full `memstead_schema` payload.**
   A schema manifest's `system_message` — the author's voice/posture prose —
   was previously unreachable from the agent surface (its only consumer was

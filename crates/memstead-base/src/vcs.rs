@@ -18,7 +18,7 @@
 const PROVENANCE_EMAIL_DOMAIN: &str = "memstead.io";
 
 /// Caller categories for the `Actor:` trailer and for picking an author
-/// signature. `Agent` and `Cli` get their author from the paired
+/// signature. `Agent`, `Cli`, and `App` get their author from the paired
 /// `ClientId` when one is present; `External` always uses the synthetic
 /// `external <external@memstead.io>` identity (no client is known); `Unknown`
 /// falls back to the committer identity.
@@ -26,6 +26,13 @@ const PROVENANCE_EMAIL_DOMAIN: &str = "memstead.io";
 pub enum Actor {
     Agent,
     Cli,
+    /// A human-driven application embedding or fronting the engine —
+    /// the macOS app, the node app's HTTP surface, any future UI
+    /// consumer. Distinct from `Agent` (an LLM speaking MCP) and `Cli`
+    /// (the memstead binary): ambient provenance needs "a human did
+    /// this through app software" as its own category, with the
+    /// paired [`ClientId`] naming which software spoke.
+    App,
     External,
     Unknown,
 }
@@ -37,6 +44,7 @@ impl Actor {
         match self {
             Actor::Agent => "agent",
             Actor::Cli => "cli",
+            Actor::App => "app",
             Actor::External => "external",
             Actor::Unknown => "unknown",
         }
@@ -50,6 +58,7 @@ impl Actor {
         match s {
             "agent" => Some(Actor::Agent),
             "cli" => Some(Actor::Cli),
+            "app" => Some(Actor::App),
             "external" => Some(Actor::External),
             "unknown" => Some(Actor::Unknown),
             _ => None,
@@ -175,7 +184,7 @@ pub fn sanitise_client_name(raw: &str) -> String {
 /// trailer + author convention.
 pub fn author_identity(ctx: &CommitContext<'_>) -> Option<(String, String)> {
     match (ctx.actor, ctx.client.as_ref()) {
-        (Actor::Agent | Actor::Cli, Some(c)) => {
+        (Actor::Agent | Actor::Cli | Actor::App, Some(c)) => {
             let local = sanitise_client_name(&c.name);
             let email = format!("{local}@{PROVENANCE_EMAIL_DOMAIN}");
             Some((local, email))
@@ -184,8 +193,8 @@ pub fn author_identity(ctx: &CommitContext<'_>) -> Option<(String, String)> {
             "external".to_string(),
             format!("external@{PROVENANCE_EMAIL_DOMAIN}"),
         )),
-        // Agent/Cli without a ClientId, or Unknown: no derived identity;
-        // caller falls back to the committer signature.
+        // Agent/Cli/App without a ClientId, or Unknown: no derived
+        // identity; caller falls back to the committer signature.
         _ => None,
     }
 }
