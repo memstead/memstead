@@ -25,7 +25,7 @@ use crate::ingest::cursor::source_moved;
 use crate::ingest::findings::{FindingClass, current_findings};
 use crate::ingest::render::mem_predates_binding;
 use crate::ingest::resolve::{
-    ChangeStrategy, ResolvedSource, resolve_binding_run, resolve_change_strategy,
+    ChangeStrategy, ResolvedIngest, ResolvedSource, resolve_binding_run, resolve_change_strategy,
 };
 use crate::pipeline_store::load_pipeline_configs;
 
@@ -55,9 +55,26 @@ pub struct AdvanceCounts {
     pub disposed: usize,
 }
 
-/// One binding's status entry (D11) — the per-binding drill-down. The dashboard
-/// rollup verdict is workspace-level ([`Rollup`] / [`projection_rollup`]), not a
-/// field here.
+/// Open-finding counts by class for one binding — the drill-down's share
+/// of the scan the rollup aggregates. All zero when the binding is clean
+/// or onboarding (onboarding skips the findings scan by design: its
+/// uncovered artifacts are the backfill worklist, not defects).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct FindingCounts {
+    /// Entities describing source that no longer exists.
+    pub unresolvable: usize,
+    /// Anchors drifted from source (adjudicated mismatches included).
+    pub drifted: usize,
+    /// In-scope source artifacts carrying no entity.
+    pub uncovered: usize,
+    /// Findings queued for adjudication.
+    pub queued: usize,
+}
+
+/// One binding's status entry (D11) — the per-binding drill-down, carrying
+/// the SAME resolution the workspace rollup aggregates (verdict, moved
+/// source, finding counts) so consumers never re-derive it client-side.
+/// The workspace-level lead stays [`Rollup`] / [`projection_rollup`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ProjectionStatus {
     /// The canonical binding id `<mem>/<stem>` (D3).
@@ -71,6 +88,80 @@ pub struct ProjectionStatus {
     pub state: BTreeMap<String, FacetState>,
     /// Pending / disposed advance counts for the binding.
     pub advance: AdvanceCounts,
+    /// This binding's own verdict, by the rollup's exact rules:
+    /// `onboarding` when the mem predates its binding (never red);
+    /// `action-needed` on open findings that count as actions or a moved
+    /// source; `clean` otherwise.
+    pub verdict: RollupVerdict,
+    /// True when a change-detectable source moved past its `#synced`
+    /// baseline. Always false for onboarding bindings (scan skipped).
+    pub source_moved: bool,
+    /// Open findings under the current key, by class.
+    pub findings: FindingCounts,
+}
+
+/// The shared per-binding scan both [`projection_status`] and
+/// [`projection_rollup`] resolve from — one truth, two projections.
+struct BindingResolution {
+    onboarding: bool,
+    source_moved: bool,
+    findings: FindingCounts,
+    /// Whether the findings/moved state counts as an action under the
+    /// rollup's rules (uncovered only under exhaustive coverage).
+    has_action: bool,
+}
+
+impl BindingResolution {
+    fn verdict(&self) -> RollupVerdict {
+        if self.onboarding {
+            RollupVerdict::Onboarding
+        } else if self.has_action {
+            RollupVerdict::ActionNeeded
+        } else {
+            RollupVerdict::Clean
+        }
+    }
+}
+
+fn resolve_binding_status(
+    engine: &Engine,
+    workspace_root: &Path,
+    binding: &crate::binding::BindingV1,
+    resolved: &ResolvedIngest,
+) -> BindingResolution {
+    if mem_predates_binding(engine, resolved) {
+        return BindingResolution {
+            onboarding: true,
+            source_moved: false,
+            findings: FindingCounts::default(),
+            has_action: false,
+        };
+    }
+    let source_moved = source_moved(engine, resolved, workspace_root);
+    let mut findings = FindingCounts::default();
+    if let Ok((_key, list)) = current_findings(engine, workspace_root, binding, resolved) {
+        for f in &list {
+            match f.class {
+                FindingClass::UnresolvableAnchor => findings.unresolvable += 1,
+                FindingClass::Drifted | FindingClass::Wrong => findings.drifted += 1,
+                FindingClass::Uncovered => findings.uncovered += 1,
+                FindingClass::QueuedForAdjudication => findings.queued += 1,
+            }
+        }
+    }
+    let uncovered_counts = findings.uncovered > 0
+        && matches!(binding.coverage_semantics, CoverageSemantics::Exhaustive);
+    let has_action = source_moved
+        || findings.unresolvable > 0
+        || findings.drifted > 0
+        || uncovered_counts
+        || findings.queued > 0;
+    BindingResolution {
+        onboarding: false,
+        source_moved,
+        findings,
+        has_action,
+    }
 }
 
 /// Map a resolved [`ChangeStrategy`] to its `signal` string (D11). `None`
@@ -123,7 +214,14 @@ pub fn projection_status(engine: &Engine, workspace_root: &Path) -> Vec<Projecti
         // Resolve the binding's sources so each facet's change-detection
         // strategy (its `signal`) is the same one the cursor/brief path uses.
         let mut state = BTreeMap::new();
+        let mut resolution: Option<BindingResolution> = None;
         if let Ok(resolved) = resolve_binding_run(&configs, &binding_id, binding) {
+            resolution = Some(resolve_binding_status(
+                engine,
+                workspace_root,
+                binding,
+                &resolved,
+            ));
             for source in &resolved.sources {
                 let (facet, signal) = match source {
                     ResolvedSource::Primary(p) => (
@@ -163,12 +261,19 @@ pub fn projection_status(engine: &Engine, workspace_root: &Path) -> Vec<Projecti
             },
         };
 
+        let (verdict, source_moved, findings) = match &resolution {
+            Some(r) => (r.verdict(), r.source_moved, r.findings),
+            None => (RollupVerdict::Clean, false, FindingCounts::default()),
+        };
         out.push(ProjectionStatus {
             binding: binding_id,
             destination_mem: binding.destination_mem.clone(),
             operations,
             state,
             advance,
+            verdict,
+            source_moved,
+            findings,
         });
     }
     out
@@ -274,10 +379,13 @@ pub fn projection_rollup(engine: &Engine, workspace_root: &Path) -> Rollup {
             continue;
         };
 
+        // The SAME per-binding scan projection_status serves (one truth).
+        let resolution = resolve_binding_status(engine, workspace_root, binding, &resolved);
+
         // Adopt (E1): a mem that predates its binding is onboarding, never a red
         // verdict. Its uncovered artifacts are the backfill worklist, so we skip
         // the findings/freshness scan that would otherwise read them as defects.
-        if mem_predates_binding(engine, &resolved) {
+        if resolution.onboarding {
             onboarding_bindings += 1;
             candidates.push(Candidate {
                 severity: 1,
@@ -289,11 +397,8 @@ pub fn projection_rollup(engine: &Engine, workspace_root: &Path) -> Rollup {
             continue;
         }
 
-        let mut binding_has_action = false;
-
         // Freshness: a change-detectable source moved past its `#synced` baseline.
-        if source_moved(engine, &resolved, workspace_root) {
-            binding_has_action = true;
+        if resolution.source_moved {
             candidates.push(Candidate {
                 severity: 4,
                 text: format!(
@@ -303,69 +408,55 @@ pub fn projection_rollup(engine: &Engine, workspace_root: &Path) -> Rollup {
             });
         }
 
-        // Open findings under the current `(hash(D), source_head)` key.
-        if let Ok((_key, findings)) = current_findings(engine, workspace_root, binding, &resolved) {
-            let mut unresolvable = 0usize;
-            let mut drifted = 0usize;
-            let mut uncovered = 0usize;
-            let mut queued = 0usize;
-            for f in &findings {
-                match f.class {
-                    FindingClass::UnresolvableAnchor => unresolvable += 1,
-                    // An adjudicated content mismatch is drift for the dashboard.
-                    FindingClass::Drifted | FindingClass::Wrong => drifted += 1,
-                    FindingClass::Uncovered => uncovered += 1,
-                    FindingClass::QueuedForAdjudication => queued += 1,
-                }
-            }
-            if unresolvable > 0 {
-                binding_has_action = true;
-                candidates.push(Candidate {
-                    severity: 6,
-                    text: format!(
-                        "{unresolvable} entit{} in `{binding_id}` describe source that no longer \
-                         exists — run `memstead projection sync {binding_id}`",
-                        if unresolvable == 1 { "y" } else { "ies" }
-                    ),
-                });
-            }
-            if drifted > 0 {
-                binding_has_action = true;
-                candidates.push(Candidate {
-                    severity: 5,
-                    text: format!(
-                        "{drifted} anchor(s) in `{binding_id}` drifted from their source — run \
-                         `memstead projection sync {binding_id}`"
-                    ),
-                });
-            }
-            // Uncovered drives an action only under exhaustive coverage — a
-            // curated binding covers a deliberate slice, so uncovered is
-            // information, not a defect (B4).
-            if uncovered > 0 && matches!(binding.coverage_semantics, CoverageSemantics::Exhaustive)
-            {
-                binding_has_action = true;
-                candidates.push(Candidate {
-                    severity: 3,
-                    text: format!(
-                        "{uncovered} in-scope source artifact(s) in `{binding_id}` carry no entity \
-                         — run `memstead projection verify {binding_id}`, then sync"
-                    ),
-                });
-            }
-            if queued > 0 {
-                binding_has_action = true;
-                candidates.push(Candidate {
-                    severity: 2,
-                    text: format!(
-                        "{queued} finding(s) in `{binding_id}` queued for adjudication — run \
-                         `memstead projection verify {binding_id}`"
-                    ),
-                });
-            }
+        let FindingCounts {
+            unresolvable,
+            drifted,
+            uncovered,
+            queued,
+        } = resolution.findings;
+        if unresolvable > 0 {
+            candidates.push(Candidate {
+                severity: 6,
+                text: format!(
+                    "{unresolvable} entit{} in `{binding_id}` describe source that no longer \
+                     exists — run `memstead projection sync {binding_id}`",
+                    if unresolvable == 1 { "y" } else { "ies" }
+                ),
+            });
+        }
+        if drifted > 0 {
+            candidates.push(Candidate {
+                severity: 5,
+                text: format!(
+                    "{drifted} anchor(s) in `{binding_id}` drifted from their source — run \
+                     `memstead projection sync {binding_id}`"
+                ),
+            });
+        }
+        // Uncovered drives an action only under exhaustive coverage — a
+        // curated binding covers a deliberate slice, so uncovered is
+        // information, not a defect (B4). (`has_action` already encodes
+        // this rule; the candidate mirrors it.)
+        if uncovered > 0 && matches!(binding.coverage_semantics, CoverageSemantics::Exhaustive) {
+            candidates.push(Candidate {
+                severity: 3,
+                text: format!(
+                    "{uncovered} in-scope source artifact(s) in `{binding_id}` carry no entity \
+                     — run `memstead projection verify {binding_id}`, then sync"
+                ),
+            });
+        }
+        if queued > 0 {
+            candidates.push(Candidate {
+                severity: 2,
+                text: format!(
+                    "{queued} finding(s) in `{binding_id}` queued for adjudication — run \
+                     `memstead projection verify {binding_id}`"
+                ),
+            });
         }
 
-        if binding_has_action {
+        if resolution.has_action {
             action_bindings += 1;
         }
     }
@@ -685,6 +776,31 @@ mod tests {
     /// rolls up to an **onboarding** verdict, never `action-needed`: the
     /// onboarding action is surfaced and pre-binding history alone drives no red
     /// verdict (E1's refusal at the dashboard level).
+
+    /// The per-binding drill-down carries the SAME resolution the rollup
+    /// aggregates: an adopt (pre-binding) mem reads `onboarding` on its own
+    /// entry — never red, no moved flag, zero finding counts — and the
+    /// workspace rollup agrees (one truth, two projections).
+    #[test]
+    fn projection_status_carries_the_per_binding_verdict() {
+        let tmp = TempDir::new().unwrap();
+        let engine = one_binding_workspace(&tmp);
+        let statuses = projection_status(&engine, tmp.path());
+        assert_eq!(statuses.len(), 1);
+        let s = &statuses[0];
+        assert_eq!(s.verdict, RollupVerdict::Onboarding);
+        assert!(!s.source_moved, "onboarding skips the freshness scan");
+        assert_eq!(s.findings, FindingCounts::default());
+        // Wire shape: the verdict serializes kebab-case like the rollup's.
+        let json = serde_json::to_value(s).unwrap();
+        assert_eq!(json["verdict"], "onboarding");
+        assert_eq!(json["source_moved"], false);
+        assert_eq!(json["findings"]["unresolvable"], 0);
+        // And the workspace rollup resolves from the same scan.
+        let rollup = projection_rollup(&engine, tmp.path());
+        assert_eq!(rollup.verdict, RollupVerdict::Onboarding);
+    }
+
     #[test]
     fn rollup_adopt_binding_is_onboarding_not_action_needed() {
         let tmp = TempDir::new().unwrap();

@@ -7,6 +7,17 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+- **Per-binding verdict on the projection status drill-down.** Each
+  `ProjectionStatus` entry now carries its own resolution — `verdict`
+  (`clean` / `onboarding` / `action-needed`, kebab-case like the rollup's),
+  `source_moved`, and `findings` counts by class (`unresolvable` / `drifted` /
+  `uncovered` / `queued`) — computed by the SAME scan the workspace rollup
+  aggregates, so status consumers (the app's Pipeline tab, agents reading the
+  HTTP status picture) never re-derive verdicts client-side. Additive wire
+  fields; the rollup's semantics are unchanged and now provably shared (one
+  scan, two projections).
+
 ### Changed
 - `/sync --all` under a recurring loop now **ends the loop on quiescence**:
   a second consecutive nothing-due rotation means the catch-up job is done —
