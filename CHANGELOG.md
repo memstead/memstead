@@ -16,6 +16,16 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   back in sync, then stop".
 
 ### Added
+- **Folder mems join cross-process drift detection.** The filesystem
+  backend's `current_head` now derives a drift cursor from its
+  append-only changelog (the last line's RFC3339-millis `ts` — the same
+  dialect `folder_changes_since` accepts), so a sibling process's commit
+  to a folder mem triggers the same reload-before-operation /
+  `MEM_RELOADED` / `MemChangedEvent` machinery git-branch mems always
+  had. Self-write bookkeeping records the backend's own probe answer
+  (`record_self_write` probes once post-commit), so an engine's own
+  writes never masquerade as sibling drift on any backend. Folder mems
+  with no changelog keep the historical no-drift-signal behavior.
 - **Bulk per-mem topology projection: `Engine::mem_topology`.** One call
   returns `{nodes, edges, communities}` for a mem — every entity (id,
   title, type, global Louvain cluster id, stub flag), every relationship

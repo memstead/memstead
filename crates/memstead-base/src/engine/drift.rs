@@ -174,8 +174,22 @@ impl Engine {
             ),
             None => return,
         };
+        // The recorded head must equal what the backend's next
+        // `current_head()` probe will report, or every self-write
+        // would look like sibling drift on the following operation.
+        // For git-branch backends the probe returns exactly the commit
+        // SHA just produced; the folder backend's drift cursor is the
+        // changelog's last-line timestamp (a different dialect from
+        // its synthetic commit id), so probe once and prefer the
+        // backend's answer. Probe errors fall back to the commit id —
+        // drift detection stays best-effort, never blocking the write.
+        let recorded = self
+            .mounts
+            .get(mount_idx)
+            .and_then(|state| state.backend.current_head().ok().flatten())
+            .unwrap_or_else(|| commit_sha.to_string());
         if let Some(state) = self.mounts.get_mut(mount_idx) {
-            state.last_known_head = Some(commit_sha.to_string());
+            state.last_known_head = Some(recorded.clone());
         }
         // Skip emit when no SHA actually advanced — folder backends
         // (and archive backends) carry `last_known_head: None` and
@@ -185,12 +199,15 @@ impl Engine {
         // pass through the same write path (e.g. a relate that
         // re-applies the same edge). Skipping keeps the event stream
         // a stream of *changes* rather than a stream of *writes*.
-        if previous == commit_sha {
+        if previous == recorded {
             return;
         }
         let event = crate::engine::events::MemChangedEvent {
             mem,
-            head: commit_sha.to_string(),
+            // The corrected head, not the raw commit id: consumers feed
+            // event heads into `changes_since`, whose folder dialect is
+            // the changelog-timestamp cursor `recorded` carries.
+            head: recorded,
             previous,
             n_commits: 1,
         };
