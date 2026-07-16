@@ -32,9 +32,12 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   attribution), and refusals are typed — `UNKNOWN_MEM`,
   `ENTITY_NOT_FOUND` (an unknown id is never an empty story),
   `INVALID_CURSOR`, and `INVALID_INPUT` on archive mounts (their seam
-  records no history; refusing beats fabricating emptiness). Built
-  entirely on the existing walks (the git-branch commit-note feed,
-  the folder/in-memory provenance log) — no new storage, no index.
+  records no history; refusing beats fabricating emptiness). A reused
+  slug never absorbs the previous holder's story — the walk stops at
+  the entity's own creation, so an id freed by rename or delete starts
+  a fresh narrative. Built entirely on the existing walks (the
+  git-branch commit-note feed, the folder/in-memory provenance log) —
+  no new storage, no index.
 - **Review marks: one per-mem pointer to the last human-approved state.**
   `MemConfig` gains `reviewMark` (mem-repo state — every sibling process
   sees the same mark; stripped from published archives by the

@@ -312,6 +312,13 @@ fn parse_cursor(c: &str) -> Option<(String, usize)> {
 /// old id, so every older touch is matched under its then-current id.
 /// A rename whose *old* id equals `current` is a different entity's
 /// departure from an id later reused — deliberately not a touch.
+///
+/// The walk STOPS at the entity's creation: a `create` of the tracked
+/// id is the story's birth, and anything older under the same id
+/// belonged to a previous holder of a reused slug (renamed away or
+/// deleted before this entity existed) — absorbing it would attribute
+/// a stranger's touches to this entity and present the polluted story
+/// as `Recorded` (found by plan 03/02's grading gate).
 fn filter_notes_for_entity(
     entity_id: &str,
     notes: &[crate::ops::agent_notes::CommitNote],
@@ -347,7 +354,11 @@ fn filter_notes_for_entity(
             continue;
         }
         if n.entity_id.as_deref() == Some(current.as_str()) {
+            let is_create = n.tool_verb.as_deref() == Some("create");
             out.push(base(&current));
+            if is_create {
+                break;
+            }
         } else if n.entity_ids.iter().any(|id| id == &current) {
             let mut touch = base(&current);
             touch.batch_entity_ids = n.entity_ids.clone();
@@ -362,13 +373,25 @@ fn filter_notes_for_entity(
 /// newest-first. Rename records match only when they carry this
 /// entity's (post-rename) id — the pre-rename chain is not recorded
 /// on this backend (stated limitation upstream).
+///
+/// Reused-id guard, symmetric with the git-branch walk: the story
+/// starts at the id's NEWEST `create` record — older records under the
+/// same id belonged to a previous holder of the slug, never to this
+/// entity.
 fn filter_provenance_for_entity(
     entity_id: &str,
     records: &[crate::provenance::Provenance],
 ) -> Vec<EntityTouch> {
-    let mut out: Vec<EntityTouch> = records
+    let matching: Vec<&crate::provenance::Provenance> = records
         .iter()
         .filter(|p| p.entity.as_deref() == Some(entity_id))
+        .collect();
+    let birth = matching
+        .iter()
+        .rposition(|p| matches!(p.kind, crate::provenance::ProvenanceKind::Create))
+        .unwrap_or(0);
+    let mut out: Vec<EntityTouch> = matching[birth..]
+        .iter()
         .map(|p| {
             let is_rename = matches!(p.kind, crate::provenance::ProvenanceKind::Rename);
             EntityTouch {
@@ -548,6 +571,39 @@ mod tests {
             }
             other => panic!("expected visible truncation, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn reused_id_never_absorbs_the_previous_holders_story() {
+        // Rename an entity away, then create a NEW entity under the
+        // freed slug: the newcomer's story must start at ITS create —
+        // pre-fix it absorbed the previous holder's touches and
+        // presented the polluted story as `Recorded` (grading-gate
+        // finding, plan 03/02).
+        let tmp = tempfile::TempDir::new().unwrap();
+        let mut engine = folder_engine(&tmp);
+        let id = create(&mut engine, "Slot", "first holder");
+        update(&mut engine, &id, "first holder grew");
+        engine
+            .rename_entity(
+                crate::RenameEntityArgs {
+                    id: crate::EntityId(id.clone()),
+                    expected_hash: None,
+                    new_title: "Slot Moved".to_string(),
+                },
+                crate::vcs::Actor::Cli,
+                None,
+                Some("moved away"),
+            )
+            .unwrap();
+        let reused = create(&mut engine, "Slot", "second holder");
+        assert_eq!(reused, id, "the slug is reused");
+
+        let report = engine.entity_history("specs", &reused, None, None).unwrap();
+        assert_eq!(report.total_recorded, 1, "only its own birth: {report:#?}");
+        assert_eq!(report.touches[0].verb.as_deref(), Some("create"));
+        assert_eq!(report.touches[0].note.as_deref(), Some("second holder"));
+        assert!(matches!(report.story_start, super::StoryStart::Recorded));
     }
 
     #[test]

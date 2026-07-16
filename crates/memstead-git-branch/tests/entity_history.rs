@@ -228,4 +228,31 @@ fn goal_fixture_full_story_under_the_current_id() {
         .entity_history("specs", &story, None, None)
         .unwrap_err();
     assert_eq!(err.code(), "ENTITY_NOT_FOUND");
+
+    // ---- Reused id: a fresh entity under the freed slug ----
+    // The rename freed `specs--story`; a NEW entity created there must
+    // not absorb the previous holder's touches (found by the plan's
+    // grading gate: pre-fix, its story reported the stranger's create/
+    // batch touches as its own, presented as `Recorded`).
+    let reused = create(&mut engine, "Story", "second holder");
+    assert_eq!(reused, story, "the slug is reused");
+    let reused_report = engine.entity_history("specs", &reused, None, None).unwrap();
+    assert_eq!(
+        reused_report.total_recorded, 1,
+        "only its own birth: {reused_report:#?}"
+    );
+    assert_eq!(reused_report.touches[0].verb.as_deref(), Some("create"));
+    assert_eq!(
+        reused_report.touches[0].note.as_deref(),
+        Some("second holder")
+    );
+    assert!(matches!(
+        reused_report.story_start,
+        memstead_base::StoryStart::Recorded
+    ));
+    // The renamed entity's own story is untouched by the reuse.
+    let after = engine
+        .entity_history("specs", &renamed, None, None)
+        .unwrap();
+    assert_eq!(after.total_recorded, 4);
 }
