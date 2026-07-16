@@ -25,6 +25,11 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   keeps meaning out-of-band writes the engine discovered rather than
   performed. Additive: existing trailers, readers, and wire values are
   unchanged.
+- **`create_mem` seeds commit with the caller's own provenance.**
+  `MemCreateParams` gains `actor` + `client`; each transport passes its
+  category (MCP `agent`, CLI `cli`, UniFFI/HTTP embedders `app`). The
+  previous hardcoded `Actor::Agent` misattributed every non-MCP mem
+  creation — including the macOS app's — as an agent write.
 - **Schema-level `system_context` in the full `memstead_schema` payload.**
   A schema manifest's `system_message` — the author's voice/posture prose —
   was previously unreachable from the agent surface (its only consumer was

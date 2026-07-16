@@ -71,6 +71,8 @@ fn explicit_folder_create_lands_beside_git_branch_mems() {
             recovery: None,
             write_guidance: Default::default(),
             storage: None,
+            actor: memstead_base::vcs::Actor::Cli,
+            client: None,
         },
     )
     .expect("heuristic create yields git-branch mem");
@@ -94,6 +96,8 @@ fn explicit_folder_create_lands_beside_git_branch_mems() {
             recovery: None,
             write_guidance: Default::default(),
             storage: Some(StorageKind::Folder),
+            actor: memstead_base::vcs::Actor::Cli,
+            client: None,
         },
     )
     .expect("explicit folder create succeeds in mem-repo workspace");
@@ -197,6 +201,8 @@ fn out_of_root_folder_mount_round_trips_relative_and_survives_clone() {
             recovery: None,
             write_guidance: Default::default(),
             storage: Some(StorageKind::Folder),
+            actor: memstead_base::vcs::Actor::Cli,
+            client: None,
         },
     )
     .expect("operator-mode out-of-root folder create succeeds");
@@ -306,6 +312,8 @@ fn engineering_schema_refuses_current_state_types_at_write() {
             recovery: None,
             write_guidance: Default::default(),
             storage: Some(StorageKind::Folder),
+            actor: memstead_base::vcs::Actor::Cli,
+            client: None,
         },
     )
     .expect("mem pinned to the engineering builtin creates");
@@ -471,6 +479,8 @@ fn detach_incoming_delete_supports_same_name_rehoming() {
             recovery: None,
             write_guidance: Default::default(),
             storage: Some(StorageKind::Folder),
+            actor: memstead_base::vcs::Actor::Cli,
+            client: None,
         },
     )
     .expect("same-name re-creation succeeds");
@@ -525,6 +535,8 @@ fn agent_mode_out_of_root_location_refuses_outside_workspace() {
             recovery: None,
             write_guidance: Default::default(),
             storage: Some(StorageKind::Folder),
+            actor: memstead_base::vcs::Actor::Cli,
+            client: None,
         },
     )
     .expect_err("agent-mode out-of-root create must refuse");

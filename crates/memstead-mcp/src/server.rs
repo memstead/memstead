@@ -3348,6 +3348,8 @@ impl McpServer {
             // Optional per-instance writing guidance from the wire
             // shape, forwarded opaquely into the seed config.
             write_guidance: p.write_guidance,
+            actor: Actor::Agent,
+            client: self.client.get().cloned(),
             // The MCP wire shape does not expose the storage override
             // yet — the workspace-shape heuristic keeps behaviour
             // identical.

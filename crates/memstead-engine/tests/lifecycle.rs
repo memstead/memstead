@@ -65,6 +65,8 @@ fn create_mem_rejects_overlong_note() {
             operator_mode: false,
             recovery: None,
             storage: None,
+            actor: memstead_base::vcs::Actor::Cli,
+            client: None,
         },
     )
     .unwrap_err();
@@ -100,6 +102,8 @@ fn create_mem_rejects_when_no_allowlist_configured() {
             operator_mode: false,
             recovery: None,
             storage: None,
+            actor: memstead_base::vcs::Actor::Cli,
+            client: None,
         },
     )
     .unwrap_err();
@@ -148,6 +152,8 @@ fn create_mem_rejects_name_collision() {
             operator_mode: false,
             recovery: None,
             storage: None,
+            actor: memstead_base::vcs::Actor::Cli,
+            client: None,
         },
     )
     .unwrap_err();
@@ -196,6 +202,8 @@ fn create_mem_succeeds_with_wildcard_rule() {
             operator_mode: false,
             recovery: None,
             storage: None,
+            actor: memstead_base::vcs::Actor::Cli,
+            client: None,
         },
     )
     .unwrap();
@@ -216,6 +224,97 @@ fn create_mem_succeeds_with_wildcard_rule() {
         config_path.exists(),
         "config.json must land at {config_path:?}"
     );
+}
+
+/// The seed commit's provenance carries the caller's actor + client
+/// verbatim — the pre-parameter behaviour hardcoded `Actor::Agent`
+/// for every transport, misattributing app/CLI mem creations. On the
+/// folder backend the provenance lands as a JSONL changelog line, so
+/// this also pins the `app` category's changelog rendering.
+#[test]
+fn create_mem_seed_provenance_carries_the_callers_actor_and_client() {
+    let tmp = TempDir::new().unwrap();
+    let mem_dir = tmp.path().join("seed");
+    std::fs::create_dir_all(&mem_dir).unwrap();
+    let writer = FilesystemMemWriter::new(mem_dir.clone());
+    let mut engine = Engine::from_mounts(vec![(
+        folder_mount("seed", mem_dir),
+        Box::new(writer) as Box<dyn MemBackend>,
+    )])
+    .unwrap();
+    engine.set_settings(WorkspaceSettings {
+        mem_create_rules: vec![CreateRuleSetting {
+            pattern: "*".to_string(),
+            schemas: vec!["*".to_string()],
+            default_cross_links: None,
+        }],
+        mem_delete_rules: Vec::new(),
+        cross_mem_links: Default::default(),
+        ..Default::default()
+    });
+
+    let new_loc = tmp.path().join("appmade");
+    mem_management::create_mem(
+        &mut engine,
+        mem_management::MemCreateParams {
+            write_guidance: Default::default(),
+            name: "appmade".to_string(),
+            vcs: None,
+            location: new_loc.clone(),
+            schema_ref: "default@1.0.0".parse().unwrap(),
+            note: Some("created from the app".to_string()),
+            operator_mode: false,
+            recovery: None,
+            storage: None,
+            actor: memstead_base::vcs::Actor::App,
+            client: Some(memstead_base::vcs::ClientId {
+                name: "memstead-node-app".to_string(),
+                version: "0.1.0".to_string(),
+            }),
+        },
+    )
+    .unwrap();
+
+    // The folder seed itself writes no changelog line (the changelog
+    // is per-mutation-record); an entity mutation into the new mem
+    // with the same provenance pins the app category's folder-side
+    // rendering — actor + client@version on the JSONL line.
+    engine
+        .create_entity(
+            memstead_base::CreateEntityArgs {
+                mem: "appmade".to_string(),
+                title: "App Born".to_string(),
+                entity_type: "spec".to_string(),
+                sections: [
+                    ("identity".to_string(), "x".to_string()),
+                    ("purpose".to_string(), "y".to_string()),
+                ]
+                .into_iter()
+                .collect(),
+                metadata: Default::default(),
+                relations: Vec::new(),
+                anchors: Vec::new(),
+                dry_run: false,
+            },
+            memstead_base::vcs::Actor::App,
+            Some(&memstead_base::vcs::ClientId {
+                name: "memstead-node-app".to_string(),
+                version: "0.1.0".to_string(),
+            }),
+            Some("created from the app"),
+        )
+        .unwrap();
+
+    let changelog = std::fs::read_to_string(memstead_base::filesystem::changelog::changelog_path(
+        &new_loc,
+    ))
+    .expect("entity mutation writes the changelog");
+    let line: serde_json::Value =
+        serde_json::from_str(changelog.lines().next_back().expect("a changelog line"))
+            .expect("changelog line is JSON");
+    assert_eq!(line["actor"], "app");
+    assert_eq!(line["client"], "memstead-node-app@0.1.0");
+    assert_eq!(line["note"], "created from the app");
 }
 
 /// The optional `write_guidance` create-parameter is persisted
@@ -265,6 +364,8 @@ fn create_mem_persists_write_guidance_into_seed_config() {
             operator_mode: false,
             recovery: None,
             storage: None,
+            actor: memstead_base::vcs::Actor::Cli,
+            client: None,
         },
     )
     .unwrap();
@@ -318,6 +419,8 @@ fn create_mem_with_hierarchical_name_matches_path_rule() {
             operator_mode: false,
             recovery: None,
             storage: None,
+            actor: memstead_base::vcs::Actor::Cli,
+            client: None,
         },
     )
     .unwrap();
@@ -366,6 +469,8 @@ fn create_mem_rejects_double_underscore_segment() {
             operator_mode: false,
             recovery: None,
             storage: None,
+            actor: memstead_base::vcs::Actor::Cli,
+            client: None,
         },
     )
     .unwrap_err();
@@ -431,6 +536,8 @@ fn create_mem_structural_invalid_name_matrix() {
                 operator_mode: false,
                 recovery: None,
                 storage: None,
+                actor: memstead_base::vcs::Actor::Cli,
+                client: None,
             },
         )
         .unwrap_err();
@@ -487,6 +594,8 @@ fn create_mem_rejects_basename_mismatch() {
             operator_mode: false,
             recovery: None,
             storage: None,
+            actor: memstead_base::vcs::Actor::Cli,
+            client: None,
         },
     )
     .unwrap_err();
@@ -525,6 +634,8 @@ fn create_mem_rejects_explicit_git_branch_without_mem_repo() {
             operator_mode: true,
             recovery: None,
             storage: Some(mem_management::StorageKind::GitBranch),
+            actor: memstead_base::vcs::Actor::Cli,
+            client: None,
         },
     )
     .unwrap_err();
@@ -725,6 +836,8 @@ fn create_delete_round_trip_flat_namespace() {
             operator_mode: false,
             recovery: None,
             storage: None,
+            actor: memstead_base::vcs::Actor::Cli,
+            client: None,
         },
     )
     .unwrap();
@@ -788,6 +901,8 @@ fn create_delete_round_trip_hierarchical_namespace() {
             operator_mode: false,
             recovery: None,
             storage: None,
+            actor: memstead_base::vcs::Actor::Cli,
+            client: None,
         },
     )
     .unwrap();
@@ -853,6 +968,8 @@ fn delete_mem_hierarchical_name_in_path_not_allowed_envelope() {
             operator_mode: false,
             recovery: None,
             storage: None,
+            actor: memstead_base::vcs::Actor::Cli,
+            client: None,
         },
     )
     .unwrap();
@@ -955,6 +1072,8 @@ fn create_mem_operator_mode_bypasses_empty_allowlist() {
             operator_mode: false,
             recovery: None,
             storage: None,
+            actor: memstead_base::vcs::Actor::Cli,
+            client: None,
         },
     )
     .unwrap_err();
@@ -978,6 +1097,8 @@ fn create_mem_operator_mode_bypasses_empty_allowlist() {
             operator_mode: true,
             recovery: None,
             storage: None,
+            actor: memstead_base::vcs::Actor::Cli,
+            client: None,
         },
     )
     .unwrap();
@@ -1013,6 +1134,8 @@ fn create_mem_operator_mode_still_enforces_input_validation() {
             operator_mode: true,
             recovery: None,
             storage: None,
+            actor: memstead_base::vcs::Actor::Cli,
+            client: None,
         },
     )
     .unwrap_err();

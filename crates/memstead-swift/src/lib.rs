@@ -878,6 +878,12 @@ impl Engine {
             // UniFFI does not expose the storage override yet — the
             // workspace-shape heuristic keeps behaviour identical.
             storage: None,
+            // The embedding application's own provenance category —
+            // the pre-parameter hardcode misattributed macOS mem
+            // creations as agent writes. Client identity plumbing is
+            // the embedder's follow-up; the category is correct now.
+            actor: memstead_base::vcs::Actor::App,
+            client: None,
         };
         let mut engine = self
             .inner
