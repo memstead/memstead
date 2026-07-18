@@ -10,9 +10,8 @@ A **binding** (stored as a `projection` file at `.memstead/projections/<mem>/<na
 
 | Field | Type | Required | Allowed values | Description |
 | --- | --- | --- | --- | --- |
-| `version` | integer | yes | `1` | Binding format version. v1 bindings carry the integer 1; a file without it is refused by the loader. |
+| `version` | integer | yes | `2` | Binding format version. v2 bindings carry the integer 2; a file without it (or with a prior version) is refused by the loader, which names `memstead projection migrate`. |
 | `intent` | string | no | — | What the binding is trying to accomplish — prose for the agent. Optional. |
-| `source_facets` | array | no | — | Facets (by name, resolved under the binding's own mem) the binding consumes. |
 | `reference_mems` | array | no | — | Read-only reference mems (by name) that supply cross-mem context. |
 | `destination_mem` | string | yes | — | The mem this binding writes into. |
 | `deny_paths` | array | no | — | Paths excluded from the binding's scope (workspace-relative globs). Strategy-invariant — moved up from the per-ingest record. A glob deny list is legal only over a path-shaped medium namespace (codebase / filesystem / git); the engine refuses it at binding-validation time over a graph or web medium. |
@@ -20,6 +19,7 @@ A **binding** (stored as a `projection` file at `.memstead/projections/<mem>/<na
 | `rules` | object | no | — | Free-form binding rules (e.g. a one-shot lens `routing` string). Opaque to the engine — consumed only by the one-shot brief renderer. |
 | `prune` | object | no | — | Prune policy — additive, optional. Absent means prune is disabled (no deletion proposals). Present means prune produces deletion proposals in the sync brief under the requested guarantee. Prune has no independent schedule: it rides the sync brief, so it carries no trigger/batch_size. |
 | `operations` | object | yes | — | The operations this binding declares. Every operation is optional; an absent mutating operation (build/sync) refuses at run time with a remedy, an absent verify means engine defaults. |
+| `sources` | array | no | — | The inline sources the binding consumes, in declaration order. Each `name` is unique within the record. |
 
 ## Operations
 
