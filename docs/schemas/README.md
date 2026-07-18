@@ -32,9 +32,9 @@ docs/schemas/
   memstead-plugin/
     v1/
       memstead-toml.schema.json          # `.memstead.toml` (legacy marker file; union of engine/plugin keys)
-      medium.schema.json                 # `.memstead/mediums/<mem>/<name>.json`
-      facet.schema.json                  # `.memstead/facets/<mem>/<name>.json`
-      binding.schema.json                # `.memstead/projections/<mem>/<name>.json`
+      binding.schema.json                # `.memstead/projections/<mem>/<name>.json` — the v2
+                                         # single-record binding (sources inline; the retired
+                                         # medium/facet record schemas died with their records)
       examples/
         binding.minimal.json
         binding.full.json

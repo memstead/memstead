@@ -107,9 +107,8 @@ pub struct PipelineRecord<T> {
 /// Every pipeline config in a workspace store, in the four-primitive shape.
 ///
 /// This is the **legacy** (gen-2) shape — produced only by
-/// [`load_legacy_pipeline_configs`], consumed by the referential-integrity
-/// edit layer, the `projection migrate` transform, and the macOS
-/// `pipeline_configs_json` surface. The live loader
+/// [`load_legacy_pipeline_configs`] and consumed only by the
+/// `projection migrate` conversion legs. The live loader
 /// ([`load_pipeline_configs`]) returns [`BindingConfigs`] instead.
 #[derive(Debug, Default, Clone, PartialEq, Serialize)]
 pub struct PipelineConfigs {
@@ -473,15 +472,15 @@ pub fn rename_ingest(workspace_root: &Path, old: &str, new: &str) -> Result<(), 
     )
 }
 
-/// Load the **legacy** (gen-2) four-primitive store from the workspace.
-/// Absent directories resolve to empty; a malformed file surfaces a typed
-/// [`StoreError::Parse`]. This reader is the counterpart of the version-gated
-/// [`load_pipeline_configs`]: it deliberately reads the old
-/// `Projection` + flat-`Ingest` shape (parsing a v1 binding file lossily as a
-/// [`Projection`], which ignores `version`/`operations`), so
-/// `projection migrate`, the referential-integrity edit layer, and the macOS
-/// `pipeline_configs_json` surface keep working. It performs **no** version
-/// gate — it is the escape hatch the gate points migrations at.
+/// Load the **legacy** (gen-2) four-primitive store from the workspace
+/// (migrate-local). Absent directories resolve to empty; a malformed file
+/// surfaces a typed [`StoreError::Parse`]. This reader is the counterpart of
+/// the version-gated [`load_pipeline_configs`]: it deliberately reads the
+/// old `Projection` + flat-`Ingest` shape (parsing a versioned binding file
+/// lossily as a [`Projection`], which ignores `version`/`operations`) so the
+/// `projection migrate` legs can see prior generations. It performs **no**
+/// version gate — it is the escape hatch the gate points migrations at, and
+/// nothing live consumes it.
 pub fn load_legacy_pipeline_configs(workspace_root: &Path) -> Result<PipelineConfigs, StoreError> {
     Ok(PipelineConfigs {
         mediums: load_mem_scoped(workspace_root, MEDIUMS_DIR)?,

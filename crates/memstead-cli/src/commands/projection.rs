@@ -75,7 +75,7 @@ pub enum ProjectionCommand {
     /// operation's brief; `--operation` picks which operations rotate (default
     /// `build` — the classic build-only rotation; `any` rotates every
     /// loop-declared build / sync / verify pair). An operation participates
-    /// only where its binding block declares `trigger: loop`. Reads the v1
+    /// only where its binding block declares `trigger: loop`. Reads the v2
     /// binding store and the destination mem's schema / writing guidance; the
     /// assembly is shared with the UniFFI surface, so CLI and app briefs are
     /// byte-identical by construction.

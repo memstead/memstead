@@ -502,8 +502,8 @@ mod tests {
         BINDING_VERSION, Binding, BuildMode, BuildOperation, CoverageSemantics, Operations,
         SyncOperation,
     };
-    use crate::pipeline::{Facet, IngestTrigger, Medium, MediumType, PatternEntry, PatternMode};
-    use crate::pipeline_store::{write_binding, write_facet, write_medium};
+    use crate::pipeline::{IngestTrigger, MediumType, PatternEntry, PatternMode};
+    use crate::pipeline_store::write_binding;
     use crate::storage::FilesystemMemWriter;
     use crate::workspace::{Mount, MountCapability, MountLifecycle, MountStorage};
     use tempfile::TempDir;

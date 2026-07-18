@@ -82,7 +82,7 @@ fn read_binding(root: &Path) -> Binding {
 /// A discovery ingest migrates: the projection file is promoted to a v1
 /// binding carrying the merged build operation, and the merged ingest is gone.
 #[test]
-fn migrate_promotes_projection_to_v1_binding() {
+fn migrate_promotes_projection_to_v2_binding() {
     let tmp = fixture("discovery", r#""dev","**/VISION.md""#);
     let root = tmp.path();
 
@@ -1498,7 +1498,7 @@ fn brief_outside_workspace_is_typed() {
 /// migrates straight to a v1 binding in one `projection migrate` pass (D10,
 /// gen-1 path — folded from the retired `pipeline migrate` command).
 #[test]
-fn migrate_gen1_root_folder_promotes_to_v1_binding() {
+fn migrate_gen1_root_folder_promotes_to_v2_binding() {
     let tmp = TempDir::new().unwrap();
     let root = tmp.path();
     write_store(root, "workspace.toml", "");
@@ -1551,6 +1551,123 @@ fn migrate_gen1_root_folder_promotes_to_v1_binding() {
     assert!(!root.join(".memstead/ingests/engine-graph.json").exists());
     assert!(!root.join(".memstead/mediums").exists());
     assert!(!root.join(".memstead/facets").exists());
+}
+
+/// Criterion-2 fixture proofs, end to end through the CLI: a genuine v1
+/// THREE-FILE store (medium + facet + `version:1` binding) with a live
+/// `#synced` watermark migrates to one v2 record — medium+facet content
+/// folded under the facet's name byte-verbatim, trees removed — the status
+/// surface reports the SAME synced state before-keyed and after, and a
+/// second migrate run changes zero bytes.
+#[test]
+fn migrate_v1_three_file_store_preserves_watermark_and_is_byte_idempotent() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+
+    // Workspace adapter + destination folder mount (status needs a real mem).
+    write_store(
+        root,
+        "workspace.toml",
+        "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+    );
+    write_store(
+        root,
+        "state/mounts.json",
+        r#"{"format":"memstead-mounts-3","mounts":[{"mem":"engine","schema":"default@1.0.0","storage":{"type":"folder","path":"engine-mem"},"capability":"write","lifecycle":"eager","cross_linkable":false}]}"#,
+    );
+
+    // The v1 THREE-FILE store: standalone medium + facet, and a version-1
+    // binding referencing the facet by name.
+    write_store(
+        root,
+        "mediums/engine/source-tree.json",
+        r#"{"name":"source-tree","type":"codebase","pointer":"src","change_detection":"git"}"#,
+    );
+    write_store(
+        root,
+        "facets/engine/source-tree.json",
+        r#"{"name":"source-tree","medium":"source-tree","scope":[{"path":"src/**/*.rs","mode":"allow"}]}"#,
+    );
+    write_store(
+        root,
+        "projections/engine/graph.json",
+        r#"{"version":1,"intent":"model the engine","source_facets":["source-tree"],"reference_mems":[],"destination_mem":"engine","deny_paths":[],"coverage_semantics":"exhaustive","operations":{"build":{"mode":"discovery","trigger":"loop","batch_size":20},"sync":{"trigger":"loop","batch_size":20}}}"#,
+    );
+
+    // A live watermark keyed `<binding>/<source>#synced` in the destination
+    // mem's config — the load-bearing key migration must keep resolving.
+    let watermark = "0123456789abcdef0123456789abcdef01234567";
+    let mem_meta = root.join("engine-mem").join(".memstead");
+    std::fs::create_dir_all(&mem_meta).unwrap();
+    std::fs::write(
+        mem_meta.join("config.json"),
+        format!(
+            r#"{{"format":1,"schema":"default@1.0.0","syncState":{{"engine/graph/source-tree#synced":"{watermark}"}}}}"#
+        ),
+    )
+    .unwrap();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+
+    // Migrate: the v1 leg folds the three files into one v2 record.
+    let out = memstead()
+        .current_dir(root)
+        .args(["--json", "projection", "migrate"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(env["migrated"], 1);
+    assert_eq!(env["bindings"][0], "engine/graph");
+
+    // One v2 record: facet name preserved byte-verbatim as the source name,
+    // medium half + facet half folded in, no invented fields.
+    let b = read_binding(root);
+    assert_eq!(b.version, 2);
+    assert_eq!(b.sources.len(), 1);
+    assert_eq!(b.sources[0].name, "source-tree");
+    assert_eq!(b.sources[0].pointer, "src");
+    assert_eq!(b.sources[0].change_detection.as_deref(), Some("git"));
+    assert_eq!(b.sources[0].scope.len(), 1);
+    assert!(b.operations.sync.is_some(), "operations block carried whole");
+    // The emptied trees are gone.
+    assert!(!root.join(".memstead/mediums").exists());
+    assert!(!root.join(".memstead/facets").exists());
+
+    // The watermark resolves identically after migration: the status surface
+    // reports the recorded token under the preserved source name.
+    let status = memstead()
+        .current_dir(root)
+        .args(["status"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let status = String::from_utf8_lossy(&status).to_string();
+    assert!(
+        status.contains(&format!("source-tree: signal git, synced {watermark}")),
+        "watermark must resolve under the preserved source name, got:\n{status}"
+    );
+
+    // A second migrate run changes zero bytes and reports nothing to do.
+    let before_bytes = std::fs::read(root.join(".memstead/projections/engine/graph.json")).unwrap();
+    let out = memstead()
+        .current_dir(root)
+        .args(["--json", "projection", "migrate"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(env["migrated"], 0);
+    assert_eq!(env["already_v2"], 1);
+    let after_bytes = std::fs::read(root.join(".memstead/projections/engine/graph.json")).unwrap();
+    assert_eq!(before_bytes, after_bytes, "re-run must be byte-idempotent");
+    let mem_config = std::fs::read_to_string(mem_meta.join("config.json")).unwrap();
+    assert!(mem_config.contains(watermark), "mem syncState untouched");
 }
 
 /// `--dry-run` on a gen-1 root-folder workspace previews the promotion without

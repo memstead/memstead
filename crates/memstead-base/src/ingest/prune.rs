@@ -414,8 +414,8 @@ mod tests {
     };
     use crate::ingest::render::render_sync_brief_for;
     use crate::ingest::resolve::resolve_binding_run;
-    use crate::pipeline::{Facet, IngestTrigger, Medium, MediumType, PatternEntry, PatternMode};
-    use crate::pipeline_store::{load_pipeline_configs, write_binding, write_facet, write_medium};
+    use crate::pipeline::{IngestTrigger, MediumType, PatternEntry, PatternMode};
+    use crate::pipeline_store::{load_pipeline_configs, write_binding};
     use crate::workspace::{
         Mount, MountCapability, MountLifecycle, MountStorage, Workspace, WorkspaceSettings,
     };

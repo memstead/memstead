@@ -67,7 +67,7 @@ The workspace is persisted in a single configuration file at the workspace root.
 - **Mem mounts** — which mems the workspace mounts, where each is sourced from (folder path, branch reference inside a mem-repo, `.mem` archive), and how each is attached (read / write, eager / lazy, cross-linkable / isolated).
 - **Cross-mem permissions** — the directed allowlist for wikilinks between mounted mems.
 - **Workspace-level policy** — mutation requirements (mandatory notes, expected-hash discipline), drift behaviour, mem lifecycle allowlists, plugin hooks.
-- **Pipeline configuration** — mediums, facets, projections; persisted centrally.
+- **Pipeline configuration** — one versioned binding per pipeline, sources inline; persisted centrally.
 
 Schema definitions and per-mem configs are **not** workspace-level — they live with each mount's [storage backend](#storage-backend). The workspace just mounts backends and dispatches schema resolution through them in a fixed order (local → built-in → registry). See [Schema](#schema).
 
@@ -157,7 +157,7 @@ The workspace store is logical, not physical. Its content is fixed; the form on 
 - **Mount list** — one entry per mounted mem, each carrying the mem's storage reference and attachment properties (capability, lifecycle, cross-linkable). The schema pin lives in per-mem config in the storage backend, not in the mount entry.
 - **Cross-mem permissions** — directed allowlist for wikilinks between mounted mems.
 - **Workspace-level policy** — mutation requirements (mandatory notes, expected-hash discipline), drift behaviour, mem lifecycle allowlists, plugin hooks.
-- **Pipeline configuration** — mediums, facets, projections. Per-mem primitives, persisted centrally because they change with workspace lifecycle, not with mem content.
+- **Pipeline configuration** — one versioned binding per pipeline (sources inline). Per-mem records, persisted centrally because they change with workspace lifecycle, not with mem content.
 
 **Role.**
 
@@ -173,16 +173,15 @@ The workspace store is logical, not physical. Its content is fixed; the form on 
   ├── .memstead/
   │   ├── workspace.toml        ← operator config (rules, permissions, policy, plugin hooks)
   │   ├── state/mounts.json     ← engine-managed mount records
-  │   ├── mediums/              ← pipeline configs (workspace-level)
-  │   ├── facets/
-  │   └── projections/          ← versioned bindings (declaration + operations)
+  │   └── projections/          ← pipeline configs: one versioned binding per pipeline
+  │                               (sources inline; declaration + operations)
   ├── <mem folders or storage containers like mem-repo/>
   └── ...
   ```
 
   Two halves of the store live in separate files: `workspace.toml` carries operator-curated config (mem management rules, cross-mem permissions, mutation policy, plugin hooks); `state/mounts.json` carries engine-managed mount records. The split mirrors two different update frequencies and two different authors — operator edits rules rarely (via `memstead workspace allow-create / grant-cross-link / set-mutations / show`; hand-editing is the fallback for batch edits and `[plugin.*]` sections the CLI does not own); engine writes mount records on every `mount add` / `mount remove`. Keeping them separate avoids merge-conflicts between operator intent and agent state mutations.
 
-  Pipeline configs sit alongside as separate directories under `.memstead/`.
+  Pipeline configs sit alongside as the `projections/` directory under `.memstead/`.
 
 - **Alternative adapters** (potential, not implemented) — single-file (TOML or JSON; conflates operator-config and engine-state and is therefore discouraged for shared workspaces), SQLite-backed (separate tables for config and state, atomic mount mutations), remote-service-backed, encrypted store, in-memory test fixture. The engine API is adapter-agnostic; new adapters do not change engine behaviour, only the source from which configuration is materialized.
 

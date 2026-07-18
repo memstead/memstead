@@ -702,8 +702,9 @@ impl Engine {
 
     /// The pipeline store serialized as JSON — the read counterpart of the edit
     /// methods, which the macOS pipeline editor deserializes to display the
-    /// store. Shape (D14): `{ mediums, facets, bindings }` — the v1 binding
-    /// shape, no `ingests` key. See `memstead_base::Engine::pipeline_configs_json`.
+    /// store. Shape: `{ bindings }` only — the v2 single-record store; the
+    /// retired `mediums` / `facets` / `ingests` keys are gone with their
+    /// record kinds. See `memstead_base::Engine::pipeline_configs_json`.
     pub fn pipeline_configs_json(&self) -> String {
         let engine = self
             .inner
