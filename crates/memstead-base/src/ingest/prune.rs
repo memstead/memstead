@@ -415,7 +415,7 @@ mod tests {
     use crate::ingest::render::render_sync_brief_for;
     use crate::ingest::resolve::resolve_binding_run;
     use crate::pipeline::{IngestTrigger, MediumType, PatternEntry, PatternMode};
-    use crate::pipeline_store::{load_pipeline_configs, write_binding};
+    use crate::pipeline_store::write_binding;
     use crate::workspace::{
         Mount, MountCapability, MountLifecycle, MountStorage, Workspace, WorkspaceSettings,
     };
@@ -545,7 +545,6 @@ mod tests {
         write_binding(&root, "engine", "graph", &binding).unwrap();
 
         let engine = Engine::from_workspace_root(&root).unwrap();
-        let configs = load_pipeline_configs(&root).unwrap();
         let resolved = resolve_binding_run("engine/graph", &binding).unwrap();
         (engine, root, binding, resolved)
     }

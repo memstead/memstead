@@ -740,10 +740,9 @@ mod tests {
 
     /// G1 + E1 — a binding whose mem predates it (no anchors, never synced)
     /// rolls up to an **onboarding** verdict, never `action-needed`: the
-    /// onboarding action is surfaced and pre-binding history alone drives no red
-    /// verdict (E1's refusal at the dashboard level).
-
-    /// The per-binding drill-down carries the SAME resolution the rollup
+    /// onboarding action is surfaced and pre-binding history alone drives no
+    /// red verdict (E1's refusal at the dashboard level). The per-binding
+    /// drill-down carries the SAME resolution the rollup
     /// aggregates: an adopt (pre-binding) mem reads `onboarding` on its own
     /// entry — never red, no moved flag, zero finding counts — and the
     /// workspace rollup agrees (one truth, two projections).
