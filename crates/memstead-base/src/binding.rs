@@ -1108,7 +1108,14 @@ mod tests {
         b.operations.sync = None;
         b.operations.verify = None;
         b.deny_paths = vec!["some/**".to_string()];
-        b.sources = vec![source("graph-source", MediumType::Graph, "home", vec![], None, None)];
+        b.sources = vec![source(
+            "graph-source",
+            MediumType::Graph,
+            "home",
+            vec![],
+            None,
+            None,
+        )];
         let errs = validate_binding(&b).unwrap_err();
         assert!(
             errs.iter()
@@ -1154,7 +1161,14 @@ mod tests {
             MediumType::Git,
         ] {
             let mut b = binding();
-            b.sources = vec![source("f", ty, "../src", vec![allow("../src/**")], None, None)];
+            b.sources = vec![source(
+                "f",
+                ty,
+                "../src",
+                vec![allow("../src/**")],
+                None,
+                None,
+            )];
             assert!(
                 validate_binding(&b).is_ok(),
                 "{ty:?} build+sync+verify should validate clean"

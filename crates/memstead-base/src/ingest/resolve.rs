@@ -17,8 +17,8 @@
 use std::path::{Path, PathBuf};
 
 use crate::binding::{Binding, BuildMode, medium_capabilities};
-use crate::pipeline::{IngestTrigger, MediumType};
 pub use crate::pipeline::Source;
+use crate::pipeline::{IngestTrigger, MediumType};
 
 /// A binding source resolved to what the run needs: a **primary** inline
 /// source (the territory to read and write back), or a read-only
@@ -252,12 +252,15 @@ pub fn find_git_root(start: &Path) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::binding::{
-        BINDING_VERSION, BuildOperation, CoverageSemantics, Operations,
-    };
+    use crate::binding::{BINDING_VERSION, BuildOperation, CoverageSemantics, Operations};
     use crate::pipeline::{PatternEntry, PatternMode};
 
-    fn source(name: &str, medium_type: MediumType, pointer: &str, declared: Option<&str>) -> Source {
+    fn source(
+        name: &str,
+        medium_type: MediumType,
+        pointer: &str,
+        declared: Option<&str>,
+    ) -> Source {
         Source {
             name: name.to_string(),
             medium_type,

@@ -558,11 +558,10 @@ fn load_bindings(workspace_root: &Path) -> Result<Vec<MemPipelineRecord<Binding>
                     _ => {}
                 },
             }
-            let config: Binding =
-                serde_json::from_value(value).map_err(|e| StoreError::Parse {
-                    path: path.clone(),
-                    message: e.to_string(),
-                })?;
+            let config: Binding = serde_json::from_value(value).map_err(|e| StoreError::Parse {
+                path: path.clone(),
+                message: e.to_string(),
+            })?;
             out.push(MemPipelineRecord {
                 mem: mem.clone(),
                 name,

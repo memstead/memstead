@@ -68,8 +68,7 @@ use serde::{Deserialize, Serialize};
 use crate::Engine;
 use crate::anchor::{Anchor, AnchorState, ObservedArtifactHash};
 use crate::binding::{
-    Binding, DEFAULT_ADJUDICATION_CAP, DEFAULT_FULL_RESYNC_EVERY, hash_binding,
-    medium_capabilities,
+    Binding, DEFAULT_ADJUDICATION_CAP, DEFAULT_FULL_RESYNC_EVERY, hash_binding, medium_capabilities,
 };
 use crate::workspace_store::{StoreError, WORKSPACE_STORE_DIR};
 
@@ -1958,9 +1957,9 @@ mod tests {
                     pointer: String::new(),
                     change_detection: Some("git".to_string()),
                     scope: vec![PatternEntry {
-                    path: "src/**/*.rs".to_string(),
-                    mode: PatternMode::Allow,
-                }],
+                        path: "src/**/*.rs".to_string(),
+                        mode: PatternMode::Allow,
+                    }],
                     engagement: None,
                     preparation: None,
                 }],
@@ -2148,9 +2147,9 @@ mod tests {
                     pointer: String::new(),
                     change_detection: Some("git".to_string()),
                     scope: vec![PatternEntry {
-                    path: "src/**/*.rs".to_string(),
-                    mode: PatternMode::Allow,
-                }],
+                        path: "src/**/*.rs".to_string(),
+                        mode: PatternMode::Allow,
+                    }],
                     engagement: None,
                     preparation: None,
                 }],
@@ -2362,9 +2361,9 @@ mod tests {
                     pointer: String::new(),
                     change_detection: Some("git".to_string()),
                     scope: vec![PatternEntry {
-                    path: "src/**/*.rs".to_string(),
-                    mode: PatternMode::Allow,
-                }],
+                        path: "src/**/*.rs".to_string(),
+                        mode: PatternMode::Allow,
+                    }],
                     engagement: None,
                     preparation: None,
                 }],
@@ -2716,9 +2715,9 @@ mod tests {
                     pointer: "vanished-src".to_string(),
                     change_detection: Some("git".to_string()),
                     scope: vec![PatternEntry {
-                    path: "**/*.rs".to_string(),
-                    mode: PatternMode::Allow,
-                }],
+                        path: "**/*.rs".to_string(),
+                        mode: PatternMode::Allow,
+                    }],
                     engagement: None,
                     preparation: None,
                 }],
@@ -2828,9 +2827,9 @@ mod tests {
                     pointer: String::new(),
                     change_detection: Some("git".to_string()),
                     scope: vec![PatternEntry {
-                    path: "src/**/*.rs".to_string(),
-                    mode: PatternMode::Allow,
-                }],
+                        path: "src/**/*.rs".to_string(),
+                        mode: PatternMode::Allow,
+                    }],
                     engagement: None,
                     preparation: None,
                 }],
@@ -3119,9 +3118,9 @@ mod tests {
                     pointer: String::new(),
                     change_detection: Some("git".to_string()),
                     scope: vec![PatternEntry {
-                    path: "src/**/*.rs".to_string(),
-                    mode: PatternMode::Allow,
-                }],
+                        path: "src/**/*.rs".to_string(),
+                        mode: PatternMode::Allow,
+                    }],
                     engagement: None,
                     preparation: None,
                 }],
@@ -3276,9 +3275,9 @@ mod tests {
                     pointer: String::new(),
                     change_detection: Some("git".to_string()),
                     scope: vec![PatternEntry {
-                    path: "src/**/*.rs".to_string(),
-                    mode: PatternMode::Allow,
-                }],
+                        path: "src/**/*.rs".to_string(),
+                        mode: PatternMode::Allow,
+                    }],
                     engagement: None,
                     preparation: None,
                 }],

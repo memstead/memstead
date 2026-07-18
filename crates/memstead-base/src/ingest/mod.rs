@@ -39,6 +39,7 @@ pub mod selection;
 pub mod slice;
 pub mod status;
 
+pub use crate::pipeline::Source;
 pub use advance::{
     AdvanceError, AdvanceOutcome, AdvanceState, DispositionInput, EXCLUDED_VERDICT, ExcludeError,
     ExcludeOutcome, advance_baseline, advance_store_path, delete_advance_store, read_advance_store,
@@ -85,7 +86,6 @@ pub use report::{
     FacetCapability, FacetFreshness, FidelityReport, GrainCoverage, RenderedFidelityReport,
     TreeFanout, compute_fidelity_report, render_fidelity_report,
 };
-pub use crate::pipeline::Source;
 pub use resolve::{
     ChangeStrategy, ResolveError, ResolvedIngest, ResolvedSource, find_git_root,
     resolve_binding_run, resolve_change_strategy,

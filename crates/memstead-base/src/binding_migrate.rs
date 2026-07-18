@@ -26,8 +26,7 @@
 use serde::Deserialize;
 
 use crate::binding::{
-    BINDING_VERSION, Binding, BuildMode, BuildOperation, CoverageSemantics, Operations,
-    PruneConfig,
+    BINDING_VERSION, Binding, BuildMode, BuildOperation, CoverageSemantics, Operations, PruneConfig,
 };
 use crate::pipeline::{Projection, Source};
 use crate::pipeline_store::{LegacyIngest, LegacyIngestMode, PipelineConfigs};

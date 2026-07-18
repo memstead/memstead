@@ -260,9 +260,7 @@ fn derive_corrected_ids(
         .sources
         .iter()
         .filter_map(|s| match s {
-            ResolvedSource::Primary(p) if !p.pointer.is_empty() => {
-                Some(p.pointer.as_str())
-            }
+            ResolvedSource::Primary(p) if !p.pointer.is_empty() => Some(p.pointer.as_str()),
             _ => None,
         })
         .collect();
@@ -808,7 +806,7 @@ mod tests {
     /// codebase rooted at the workspace root (medium pointer `""`), scoped to
     /// `**/*.rs`, keyed `engine/graph` → dest mem `engine`.
     fn resolved_engine_graph() -> ResolvedIngest {
-        use super::super::resolve::{Source, ResolvedSource};
+        use super::super::resolve::{ResolvedSource, Source};
         ResolvedIngest {
             name: "engine/graph".to_string(),
             mode: BuildMode::Discovery,

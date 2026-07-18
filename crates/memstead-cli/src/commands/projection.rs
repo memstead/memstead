@@ -999,11 +999,7 @@ fn migrate(ctx: &CliContext, args: MigrateArgs) -> anyhow::Result<()> {
         // whole migration refuses instead, naming each leftover.
         let consumed: Vec<(String, String)> = migrated
             .iter()
-            .flat_map(|m| {
-                m.consumed_facets
-                    .iter()
-                    .map(|f| (m.mem.clone(), f.clone()))
-            })
+            .flat_map(|m| m.consumed_facets.iter().map(|f| (m.mem.clone(), f.clone())))
             .collect();
         check_all_consumed(&configs, &consumed).map_err(map_migrate_err)?;
     }

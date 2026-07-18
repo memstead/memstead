@@ -1630,7 +1630,10 @@ fn migrate_v1_three_file_store_preserves_watermark_and_is_byte_idempotent() {
     assert_eq!(b.sources[0].pointer, "src");
     assert_eq!(b.sources[0].change_detection.as_deref(), Some("git"));
     assert_eq!(b.sources[0].scope.len(), 1);
-    assert!(b.operations.sync.is_some(), "operations block carried whole");
+    assert!(
+        b.operations.sync.is_some(),
+        "operations block carried whole"
+    );
     // The emptied trees are gone.
     assert!(!root.join(".memstead/mediums").exists());
     assert!(!root.join(".memstead/facets").exists());

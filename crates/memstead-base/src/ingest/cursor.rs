@@ -79,13 +79,13 @@ use super::brief::{NoSignalNote, SourceCursor, SyncCommand};
 use super::change_detection::{
     StatMap, compute_stat_map, digest_stat_map, parse_digest_token, serialize_digest_token,
 };
-use crate::pipeline::Source;
 use super::resolve::{
     ChangeStrategy, ResolvedIngest, ResolvedSource, find_git_root, resolve_change_strategy,
 };
 use super::slice::{
     NoSignalReason, Slice, SliceOutcome, graph_slice_outcome, is_git_token, mtime_slice_outcome,
 };
+use crate::pipeline::Source;
 
 /// Lexically normalize a path — resolve `.` and `..` without touching the
 /// filesystem (no symlink resolution), matching Node's `path.resolve` on an
@@ -708,9 +708,9 @@ fn compute_mtime_slice(
         &now_digest.aggregate,
         &now_map,
     );
-    let prev_map = baseline.and_then(parse_digest_token).and_then(|base| {
-        read_cursor_memo(cache_root, ingest_name, &source.name, &base.aggregate)
-    });
+    let prev_map = baseline
+        .and_then(parse_digest_token)
+        .and_then(|base| read_cursor_memo(cache_root, ingest_name, &source.name, &base.aggregate));
     mtime_slice_outcome(baseline, prev_map.as_ref(), &now_map)
 }
 
@@ -840,9 +840,7 @@ pub fn compute_source_cursor(
                         compute_git_slice(p, &resolved.deny_paths, workspace_root, baseline)
                     }
                     // A graph-typed primary's medium pointer is the source mem id.
-                    ChangeStrategy::Graph => {
-                        compute_graph_slice(engine, &p.pointer, baseline)
-                    }
+                    ChangeStrategy::Graph => compute_graph_slice(engine, &p.pointer, baseline),
                     ChangeStrategy::Mtime => compute_mtime_slice(
                         p,
                         &resolved.name,
