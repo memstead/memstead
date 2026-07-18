@@ -7,10 +7,10 @@
 //! - `brief` renders a binding's run-brief — the Markdown prompt an agent
 //!   consumes — for a canonical binding id `<mem>/<stem>` (D3/D9), or the next
 //!   due binding under `--all` (round-robin + backoff selection).
-//! - `init` scaffolds a fresh v1 binding non-interactively (D8).
-//! - `migrate` promotes both legacy generations into v1 bindings (D10): the
-//!   root-folder `scopes|projections|ingests/` layout (gen-1) and the gen-2
-//!   four-primitive store (`Projection` + flat `Ingest`).
+//! - `init` scaffolds a fresh v2 single-record binding non-interactively.
+//! - `migrate` converts every prior on-disk generation into v2 records in
+//!   place: gen-1 root folders, the gen-2 four-primitive store, and the v1
+//!   three-file store — folding medium+facet content inline.
 //! - `advance` records disposition-gated sync-baseline advances (D7).
 //! - `enable` adds a missing `build` / `sync` / `verify` operation block to an
 //!   existing binding (D6 — the remedy a refused mutating op cites).
@@ -89,8 +89,8 @@ pub enum ProjectionCommand {
     /// reach the mem only when an agent acts on it through the MCP mutation
     /// surface.
     Brief(BriefArgs),
-    /// Scaffold a fresh v1 binding non-interactively: a `Medium`, a `Facet`,
-    /// and a v1 binding under `.memstead/{mediums,facets,projections}/<mem>/`.
+    /// Scaffold a fresh v2 binding non-interactively: ONE record with one
+    /// inline source, at `.memstead/projections/<mem>/<stem>.json`.
     /// All inputs are flags — no prompts ever (parity across callers). The
     /// default binding declares build+sync+verify where the medium permits:
     /// a `web` source scaffolds build-only, with the deferral named in
@@ -99,16 +99,19 @@ pub enum ProjectionCommand {
     /// git-backed source). Refuses `PROJECTION_EXISTS` (without touching disk)
     /// when a binding of the same id already exists — never overwrites.
     Init(InitArgs),
-    /// Migrate both legacy generations into v1 bindings (D10). Gen-1 — the
-    /// root-folder `scopes|projections|ingests/` JSON layout the retired
-    /// `pipeline migrate` command handled — is first materialized into the
-    /// gen-2 `.memstead/` store, then promoted. Gen-2 — the four-primitive
-    /// store (per-mem `Projection` + flat `Ingest`) — merges each ingest into
-    /// the projection its `projection` ref names; the binding takes the
-    /// projection's file identity (`.memstead/projections/<mem>/<stem>.json`)
-    /// and the merged ingest is removed. `refinement` mode and dangling
-    /// projection refs refuse with a typed error. Use `--dry-run` to preview
-    /// without writing.
+    /// Migrate every prior on-disk generation into v2 single-record
+    /// bindings, in place. Gen-1 — the root-folder
+    /// `scopes|projections|ingests/` JSON layout — is first materialized
+    /// into the four-primitive store, then folded. Gen-2 — the
+    /// four-primitive store (per-mem `Projection` + flat `Ingest`) — merges
+    /// each ingest into its projection and folds the referenced facets +
+    /// mediums inline. v1 — the three-file store — folds each binding's
+    /// facet references inline the same way, source names preserved
+    /// byte-verbatim (they key sync watermarks). The emptied `mediums/` and
+    /// `facets/` trees are removed; orphan records refuse rather than drop.
+    /// `refinement` mode and dangling refs refuse with a typed error.
+    /// Idempotent on a migrated store. Use `--dry-run` to preview without
+    /// writing.
     Migrate(MigrateArgs),
     /// Enable a `build` / `sync` / `verify` operation on an existing binding by
     /// adding its block (with sensible defaults) if absent. This is the remedy
@@ -914,9 +917,9 @@ fn migrate(ctx: &CliContext, args: MigrateArgs) -> anyhow::Result<()> {
 
     // Gen-1 root-folder layout (`scopes|projections|ingests/` at the workspace
     // root) — the pre-four-primitive generation the retired `pipeline migrate`
-    // command handled. Fold it in (D10, gen-1 path): materialize it into the
-    // gen-2 `.memstead/` store first (mediums + facets + projections + ingests),
-    // then promote to v1 below in the same pass. `--dry-run` reads the
+    // command handled. Fold it in: materialize it into the four-primitive
+    // `.memstead/` store first (mediums + facets + projections + ingests),
+    // then fold to v2 below in the same pass. `--dry-run` reads the
     // root-folder configs directly without writing anything.
     let gen1 = has_legacy_root_layout(&root);
     if gen1 && !args.dry_run {

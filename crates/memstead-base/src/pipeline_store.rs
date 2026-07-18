@@ -62,7 +62,7 @@ pub(crate) struct LegacyIngest {
 
 /// The legacy ingest mode, including the deleted `refinement` value. Parsed so
 /// `projection migrate` can detect and refuse it (D1) — never carried forward
-/// into a v1 binding.
+/// into a binding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum LegacyIngestMode {

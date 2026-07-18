@@ -255,13 +255,13 @@ pub enum Command {
     /// without touching a workspace.
     Schema(commands::schema::Args),
 
-    /// Binding (projection-promotion) tooling — the projection is the unit,
-    /// one versioned binding per source→mem obligation. `memstead projection
-    /// brief <binding>` renders a binding's run-brief (the Markdown prompt an
-    /// agent consumes); `memstead projection init` scaffolds a fresh v1 binding
-    /// non-interactively; `memstead projection migrate` promotes both legacy
-    /// generations (root-folder `scopes|projections|ingests/` and the gen-2
-    /// four-primitive store) into v1 bindings; `memstead projection advance`
+    /// Pipeline tooling — one versioned v2 binding per pipeline, sources
+    /// inline. `memstead projection brief <binding>` renders a binding's
+    /// run-brief (the Markdown prompt an agent consumes); `memstead
+    /// projection init` scaffolds a fresh v2 record non-interactively;
+    /// `memstead projection migrate` converts every prior on-disk generation
+    /// (gen-1 root folders, the four-primitive store, the v1 three-file
+    /// store) into v2 records in place; `memstead projection advance`
     /// records disposition-gated sync-baseline advances; `memstead projection
     /// enable <build|sync|verify> <binding>` adds a missing operation block.
     Projection(commands::projection::Args),

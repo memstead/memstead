@@ -2,9 +2,9 @@
 //! decision D11).
 //!
 //! The `projections` array the status payload carries alongside the graph
-//! counts: one entry per v1 binding, reporting its declared operations, each
+//! counts: one entry per v2 binding, reporting its declared operations, each
 //! source's baseline tokens + resolved change-detection signal, and the
-//! pending/disposed advance counts. Purely read-only — it loads the v1 binding
+//! pending/disposed advance counts. Purely read-only — it loads the v2 binding
 //! store, reads the destination mem's `sync_state`, resolves each source's
 //! [`ChangeStrategy`], and reads the durable advance store. No mutation, no
 //! scheduling.
@@ -179,7 +179,7 @@ fn signal_of(strategy: ChangeStrategy) -> &'static str {
 /// binding store rooted at `workspace_root`, reading baselines off `engine`'s
 /// destination-mem `sync_state` and the durable advance store.
 ///
-/// Read-only and best-effort: a workspace with no v1 binding store (or one
+/// Read-only and best-effort: a workspace with no v2 binding store (or one
 /// whose store fails to load — e.g. a not-yet-migrated legacy layout) yields an
 /// empty array rather than failing the whole status call. A binding whose
 /// sources cannot be resolved (dangling facet/medium) contributes its
@@ -536,7 +536,7 @@ mod tests {
             .unwrap();
         assert!(out.status.success());
 
-        // The v1 binding + its facet/medium.
+        // The v2 binding with its inline source.
         write_binding(
             root,
             "engine",
@@ -619,7 +619,7 @@ mod tests {
         );
     }
 
-    /// A workspace with no v1 binding store yields an empty array — status
+    /// A workspace with no v2 binding store yields an empty array — status
     /// never fails because a workspace declares no projections.
     #[test]
     fn projection_status_empty_without_bindings() {
