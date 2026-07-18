@@ -94,3 +94,5 @@
 {"ts":"2026-07-13T16:44:06.774Z","kind":"relate","entity":"engineering--serve-read-only-state-as-html-and-mcp-only-without-a-json-api-channel","actor":"cli","client":"memstead-cli@0.3.0"}
 {"ts":"2026-07-13T16:44:06.923Z","kind":"relate","entity":"engineering--split-engine-into-lean-and-full-flavours","actor":"cli","client":"memstead-cli@0.3.0"}
 {"ts":"2026-07-13T16:44:07.072Z","kind":"relate","entity":"engineering--warn-rather-than-refuse-when-memstead-init-pins-an-uninstalled-schema","actor":"cli","client":"memstead-cli@0.3.0"}
+{"ts":"2026-07-18T11:37:35.381Z","kind":"create","entity":"engineering--consolidate-the-pipeline-into-one-record-per-pipeline-with-inline-sources","actor":"agent","note":"pipeline-binding-consolidation plan: v2 single-record model landed 2026-07-18","client":"claude-code@2.1.214"}
+{"ts":"2026-07-18T11:37:52.972Z","kind":"update","entity":"engineering--collapse-the-pipeline-into-one-versioned-binding-per-source-to-mem-obligation","actor":"agent","note":"superseded by the 2026-07-18 one-record-per-pipeline consolidation (v2)","client":"claude-code@2.1.214"}
