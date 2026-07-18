@@ -108,20 +108,23 @@ pub enum StoreError {
          branch tree to mems/ — then retry"
     )]
     LegacyLayout { path: PathBuf, found: String },
-    /// A `projections/` directory holds a version-less (pre-v1) config —
-    /// the gen-2 four-primitive layout the loader no longer serves live
-    /// (D2). The message names the one-shot migration command; the CLI maps
-    /// it to the `PROJECTION_STORE_LEGACY` token. Legacy layouts are
-    /// migrated once (`memstead projection migrate`), never silently served.
+    /// A `projections/` directory holds a pre-v2 config — either a
+    /// version-less (gen-2 four-primitive) projection or a v1 binding of the
+    /// retired three-file store. The loader serves only v2 (one record per
+    /// pipeline); prior generations are migrated once (`memstead projection
+    /// migrate`), never silently served. The message names the one-shot
+    /// migration command; the CLI maps it to the `PROJECTION_STORE_LEGACY`
+    /// token.
     #[error(
-        "legacy (pre-v1) projection config at {path}: this workspace predates binding format v1 \
-         — run `memstead projection migrate` to promote it to v1 bindings once"
+        "legacy (pre-v2) projection config at {path}: this workspace predates the single-record \
+         binding format v2 — run `memstead projection migrate` to convert it in place once"
     )]
     LegacyProjectionStore { path: PathBuf },
     /// A binding file declares a `version` the loader does not understand
-    /// (only v1 = `1` is supported). Refused rather than reinterpreted.
+    /// (only v2 = `2` is supported; v1 and version-less files surface
+    /// [`Self::LegacyProjectionStore`] instead). Refused, never reinterpreted.
     #[error(
-        "unsupported binding format version {version} at {path}: this engine understands v1 (version 1)"
+        "unsupported binding format version {version} at {path}: this engine understands v2 (version 2)"
     )]
     UnknownBindingVersion { path: PathBuf, version: i64 },
     /// Catch-all for adapter-specific failures. Carries an

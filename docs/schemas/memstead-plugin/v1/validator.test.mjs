@@ -28,9 +28,6 @@ describe("memstead-plugin/v1 — examples validate", () => {
     ["binding.schema.json", "examples/binding.minimal.json"],
     ["binding.schema.json", "examples/binding.full.json"],
     ["binding.schema.json", "examples/binding.from-init.json"],
-    ["medium.schema.json", "examples/medium.minimal.json"],
-    ["facet.schema.json", "examples/facet.minimal.json"],
-    ["facet.schema.json", "examples/facet.full.json"],
     ["memstead-toml.schema.json", "examples/memstead-toml.minimal.json"],
     ["memstead-toml.schema.json", "examples/memstead-toml.full.json"],
   ];
@@ -70,7 +67,7 @@ describe("memstead-plugin/v1 — refusals", () => {
   it("rejects a retired `mode: refinement` build operation", () => {
     const schema = loadJson("binding.schema.json");
     const bad = {
-      version: 1,
+      version: 2,
       destination_mem: "m",
       operations: { build: { mode: "refinement", trigger: "loop", batch_size: 20 } },
     };
@@ -82,17 +79,23 @@ describe("memstead-plugin/v1 — refusals", () => {
     );
   });
 
-  it("does NOT validate an old-layout (projection+ingest) fixture as a v1 binding", () => {
-    // A legacy v0 projection carries no `version`/`operations`; a legacy
-    // ingest carries `projection`/`mode`/`trigger` at the top level. Neither
-    // is a v1 binding — both must be refused (drives migration, not silent
-    // acceptance).
+  it("does NOT validate a prior-generation fixture as a v2 binding", () => {
+    // A gen-2 projection carries no `version`/`operations`; a legacy ingest
+    // carries `projection`/`mode`/`trigger` at the top level; a v1 binding
+    // carries `version: 1` + `source_facets`. None is a v2 binding — all
+    // must be refused (drives migration, not silent acceptance).
     const schema = loadJson("binding.schema.json");
     const legacyProjection = { destination_mem: "m", source_facets: ["f"] };
     const legacyIngest = { projection: "engine/src", mode: "discovery", trigger: "loop" };
-    for (const [label, inst] of [["projection", legacyProjection], ["ingest", legacyIngest]]) {
+    const v1Binding = {
+      version: 1,
+      destination_mem: "m",
+      source_facets: ["f"],
+      operations: { build: { mode: "discovery", trigger: "loop", batch_size: 20 } },
+    };
+    for (const [label, inst] of [["projection", legacyProjection], ["ingest", legacyIngest], ["v1 binding", v1Binding]]) {
       const r = validate(schema, inst);
-      assert.equal(r.valid, false, `legacy ${label} must not validate as a v1 binding`);
+      assert.equal(r.valid, false, `legacy ${label} must not validate as a v2 binding`);
     }
   });
 
@@ -109,7 +112,7 @@ describe("memstead-plugin/v1 — refusals", () => {
   it("rejects an unknown top-level binding property", () => {
     const schema = loadJson("binding.schema.json");
     const r = validate(schema, {
-      version: 1,
+      version: 2,
       destination_mem: "m",
       ingests: [],
       operations: { build: { mode: "discovery", trigger: "loop", batch_size: 20 } },

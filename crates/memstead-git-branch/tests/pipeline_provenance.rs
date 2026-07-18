@@ -5,15 +5,21 @@
 //! the audit record, the disk file stays the read path. Folder-backed
 //! workspaces have no commit timeline: the note is accepted and dropped,
 //! matching `set_mem_version`'s posture.
+//!
+//! The edit surface is the v2 single-record binding (the standalone
+//! medium/facet records — and their provenance kinds — are gone with the
+//! 2026-07 consolidation): every mirror path is `pipeline/projections/…`.
 
 use memstead_git_branch::test_support::init_real_mem_repo;
 use memstead_git_branch::workspace_store::engine_from_workspace_root;
 use tempfile::TempDir;
 
-fn medium() -> memstead_base::Medium {
-    serde_json::from_str(r#"{"name": "codebase", "type": "codebase", "pointer": "src/"}"#)
-        .expect("valid medium json")
-}
+/// A minimal v2 binding patch: one inline codebase source, destination `specs`.
+const BINDING_PATCH: &str = r#"{
+    "sources": [{ "name": "codebase", "type": "codebase", "pointer": "src/",
+                  "scope": [{ "path": "**/*", "mode": "allow" }] }],
+    "destination_mem": "specs"
+}"#;
 
 /// Read the `__MEMSTEAD` tip commit's full message from the mem-repo.
 fn memstead_tip_message(workspace_root: &std::path::Path) -> String {
@@ -56,18 +62,18 @@ fn pipeline_edit_commits_provenance_with_note() {
     let mut engine = engine_from_workspace_root(tmp.path()).expect("engine boots");
 
     engine
-        .add_medium(
+        .add_projection_json(
             "specs",
-            "codebase",
-            &medium(),
+            "graph",
+            BINDING_PATCH,
             Some("wire the source tree into specs"),
         )
-        .expect("add_medium lands");
+        .expect("add_projection_json lands");
 
     // The disk file is the read path…
     assert!(
         tmp.path()
-            .join(".memstead/mediums/specs/codebase.json")
+            .join(".memstead/projections/specs/graph.json")
             .exists(),
         "canonical disk config written"
     );
@@ -75,7 +81,7 @@ fn pipeline_edit_commits_provenance_with_note() {
     // the edit, the note rides the body, the mirror blob is in the tree.
     let msg = memstead_tip_message(tmp.path());
     assert!(
-        msg.contains("add mediums specs/codebase"),
+        msg.contains("add projections specs/graph"),
         "subject names the edit: {msg}"
     );
     assert!(
@@ -83,22 +89,22 @@ fn pipeline_edit_commits_provenance_with_note() {
         "note rides the commit body: {msg}"
     );
     assert!(
-        memstead_tree_has(tmp.path(), "pipeline/mediums/specs/codebase.json"),
+        memstead_tree_has(tmp.path(), "pipeline/projections/specs/graph.json"),
         "mirror blob committed"
     );
 
     // Delete removes the mirror in a fresh provenance commit.
     engine
-        .delete_medium("specs", "codebase", Some("retired"))
+        .delete_projection("specs", "graph", Some("retired"))
         .expect("delete lands");
     let msg = memstead_tip_message(tmp.path());
     assert!(
-        msg.contains("delete mediums specs/codebase"),
+        msg.contains("delete projections specs/graph"),
         "delete subject: {msg}"
     );
     assert!(msg.contains("retired"), "delete note: {msg}");
     assert!(
-        !memstead_tree_has(tmp.path(), "pipeline/mediums/specs/codebase.json"),
+        !memstead_tree_has(tmp.path(), "pipeline/projections/specs/graph.json"),
         "mirror blob removed"
     );
 }
@@ -110,22 +116,22 @@ fn rename_mirrors_as_remove_plus_upsert_in_one_commit() {
     let mut engine = engine_from_workspace_root(tmp.path()).expect("engine boots");
 
     engine
-        .add_medium("specs", "old-name", &medium(), None)
+        .add_projection_json("specs", "old-name", BINDING_PATCH, None)
         .expect("add lands");
     engine
-        .rename_medium("specs", "old-name", "new-name", Some("clearer name"))
+        .rename_projection("specs", "old-name", "new-name", Some("clearer name"))
         .expect("rename lands");
 
     assert!(
-        !memstead_tree_has(tmp.path(), "pipeline/mediums/specs/old-name.json"),
+        !memstead_tree_has(tmp.path(), "pipeline/projections/specs/old-name.json"),
         "old mirror path removed"
     );
     assert!(
-        memstead_tree_has(tmp.path(), "pipeline/mediums/specs/new-name.json"),
+        memstead_tree_has(tmp.path(), "pipeline/projections/specs/new-name.json"),
         "new mirror path present"
     );
     let msg = memstead_tip_message(tmp.path());
-    assert!(msg.contains("rename mediums"), "rename subject: {msg}");
+    assert!(msg.contains("rename projections"), "rename subject: {msg}");
     assert!(msg.contains("clearer name"), "rename note: {msg}");
 }
 
@@ -151,11 +157,11 @@ fn note_is_accepted_without_commit_on_folder_workspaces() {
 
     let mut engine = engine_from_workspace_root(tmp.path()).expect("engine boots");
     engine
-        .add_medium("specs", "codebase", &medium(), Some("noted anyway"))
+        .add_projection_json("specs", "graph", BINDING_PATCH, Some("noted anyway"))
         .expect("folder edit lands, note accepted and dropped");
     assert!(
         tmp.path()
-            .join(".memstead/mediums/specs/codebase.json")
+            .join(".memstead/projections/specs/graph.json")
             .exists()
     );
 }

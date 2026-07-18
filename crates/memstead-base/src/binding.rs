@@ -1,40 +1,42 @@
-//! Binding format **v1** — the additive format foundation for the projection
-//! promotion (bundle plan `03-projection-promotion`, decisions D1/D5/D6).
+//! Binding format **v2** — one record per pipeline.
 //!
 //! This is the **live** binding shape: [`crate::pipeline_store::load_pipeline_configs`]
 //! reads it (version-gated), the `projection` CLI tree writes it, and the
-//! resolve / brief / status / advance paths consume it. The legacy
-//! four-primitive `Projection` + flat-ingest store is parsed only by the
-//! migrate/legacy path (via [`crate::pipeline_store::LegacyIngest`]); the
-//! retired `Ingest` / `IngestMode` machinery is gone.
+//! resolve / brief / status / advance paths consume it. A v2 [`Binding`]
+//! alone fully defines a pipeline: intent, **inline sources** (each carrying
+//! what the retired standalone medium + facet records carried), reference
+//! mems, destination, deny paths, coverage semantics, and operations. The
+//! 2026-07 consolidation (operator directive, 2026-07-18) removed the
+//! three-file store: the engine reads only this format; `memstead projection
+//! migrate` converts prior generations, and there is no compatibility layer.
 //!
 //! Three things live here:
 //!
-//! 1. [`BindingV1`] — the versioned binding record (D1): one file per
-//!    source→mem obligation, collapsing the projection + ingest split into a
-//!    single record with an `operations { build, sync, verify }` block.
-//! 2. [`hash_binding`] — `hash(D)` (D5): the lowercase-hex SHA-256 of the
-//!    canonical JSON of a binding's *content-defining resolved projection*.
-//!    Scheduling knobs (`trigger` / `batch_size` / `post_actions`) are
-//!    excluded by construction; a facet selection pattern or a medium pointer
-//!    changing — inputs *outside* the binding file — changes the hash.
+//! 1. [`Binding`] — the versioned record: one file per pipeline, collapsing
+//!    the medium / facet / binding split into a single record with inline
+//!    [`Source`] entries and an `operations { build, sync, verify }` block.
+//! 2. [`hash_binding`] — `hash(D)`: the lowercase-hex SHA-256 of the
+//!    canonical JSON of the binding's *content-defining* projection.
+//!    Scheduling knobs (`trigger` / `batch_size` / `post_actions`, the
+//!    sync/verify blocks, prune) are excluded by construction; a source's
+//!    selection pattern or pointer changing — now inputs *inside* the one
+//!    record — changes the hash.
 //! 3. [`medium_capabilities`] + [`validate_binding`] — the medium-capability
-//!    matrix (D6) and the validation entry point that generalizes the
-//!    render-time preparation refusal to binding-validation time.
+//!    matrix (the medium *half* of a source description keeps the medium
+//!    vocabulary) and the validation entry point: capability refusals plus
+//!    in-record source validation (empty / duplicate source names).
 //!
-//! The findings-store key + record (plan 03's schema stub, once here) now live
-//! as the real, IO-backed store in [`crate::ingest::findings`] (group A of plan
-//! 05): [`crate::ingest::findings::FindingKey`] keys it, `hash(D)` still
-//! partitions its keyspace so a declaration edit invalidates prior findings.
+//! The findings store ([`crate::ingest::findings`]) keys on `hash(D)`, so the
+//! consolidation's shape change invalidates prior findings by construction —
+//! accepted and disclosed (findings are re-derivable measurements).
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 
-use crate::ingest::resolve::ResolvedPrimarySource;
-use crate::pipeline::{IngestTrigger, MediumType, PatternEntry};
+use crate::pipeline::{IngestTrigger, MediumType, PatternEntry, Source};
 
-/// The current binding format version. A v1 binding carries `version: 1`.
-pub const BINDING_VERSION: u32 = 1;
+/// The current binding format version. A v2 binding carries `version: 2`.
+pub const BINDING_VERSION: u32 = 2;
 
 /// The engine's current preparation-implementation version — the single
 /// source of truth for "which preparation implementation is live".
@@ -47,7 +49,7 @@ pub const BINDING_VERSION: u32 = 1;
 pub const PREPARATION_IMPL_VERSION: u32 = 0;
 
 // ---------------------------------------------------------------------------
-// D1 — Binding format v1
+// The v2 record
 // ---------------------------------------------------------------------------
 
 /// Coverage semantics — whether the binding claims to cover *everything* in
@@ -65,7 +67,7 @@ pub enum CoverageSemantics {
 }
 
 /// How a [`BuildOperation`] engages its binding. **`refinement` is deleted
-/// from the vocabulary** (D1) — it is neither a variant here nor migrated, so
+/// from the vocabulary** — it is neither a variant here nor migrated, so
 /// deserializing `"mode": "refinement"` fails as an unknown value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -143,17 +145,17 @@ pub struct VerifyOperation {
     pub trigger: IngestTrigger,
     /// How many artifacts a single run processes.
     pub batch_size: u32,
-    /// Per-run tier-3 adjudication cap (D1): the maximum number of hash-drift
+    /// Per-run tier-3 adjudication cap: the maximum number of hash-drift
     /// adjudications a single verify run asserts. Once the cap is reached the
     /// run **stops adjudicating** and queues the remaining drift candidates as
     /// `queued-for-adjudication` findings (the tier-3 backlog the fidelity
-    /// report renders). Combined with the rotating sample (D2), successive runs
+    /// report renders). Combined with the rotating sample, successive runs
     /// adjudicate different windows, so the whole anchor set is covered over a
     /// full rotation. `0` disables the cap. Defaults to
     /// [`DEFAULT_ADJUDICATION_CAP`].
     #[serde(default = "default_adjudication_cap")]
     pub adjudication_cap: u32,
-    /// Scheduled full-enumeration walk cadence (D3): every N verify runs, a full
+    /// Scheduled full-enumeration walk cadence: every N verify runs, a full
     /// coverage sweep enumerates the whole source set (`S(D)`) for **enumerable**
     /// mediums, guaranteeing eventual complete coverage rather than relying on
     /// the rotating sample to finish. For a medium the capability matrix marks
@@ -202,7 +204,7 @@ impl PruneGuarantee {
     }
 }
 
-/// The **prune** configuration of a [`BindingV1`] (F1) — additive, optional. An
+/// The **prune** configuration of a [`Binding`] (F1) — additive, optional. An
 /// absent `prune` block means prune is not enabled for the binding (no deletion
 /// proposals are produced). Prune has no independent schedule: it rides the sync
 /// brief (the sole maintenance-writer channel), so it carries no `trigger` /
@@ -218,8 +220,8 @@ pub struct PruneConfig {
     pub guarantee: PruneGuarantee,
 }
 
-/// The operations block of a [`BindingV1`]: every operation is **optional**
-/// (D1/D6). An absent `build` / `sync` block makes that *mutating* operation
+/// The operations block of a [`Binding`]: every operation is **optional**.
+/// An absent `build` / `sync` block makes that *mutating* operation
 /// refuse at run time with a `projection enable <op>` remedy; an absent
 /// `verify` block means engine defaults (verify is read-only — never a
 /// refusal). `build` is optional in serde so an absent block yields the
@@ -239,32 +241,34 @@ pub struct Operations {
     pub verify: Option<VerifyOperation>,
 }
 
-/// A **binding**, format version 1 (D1). One versioned record per source→mem
-/// obligation: the projection declaration (`intent`, `source_facets`,
+/// A **binding**, format version 2 — one record per pipeline. The single
+/// versioned file at `projections/<mem>/<name>.json` that alone fully defines
+/// the obligation: `intent`, inline [`Source`] entries (each carrying the
+/// medium and facet halves the retired standalone records held),
 /// `reference_mems`, `destination_mem`, `deny_paths`, `coverage_semantics`,
-/// `rules`) plus an `operations { build, sync, verify }` block. Collapses the
-/// legacy projection + flat-ingest split into one record.
+/// `rules`, `prune`, and the `operations { build, sync, verify }` block.
 ///
 /// This is the live store record — [`crate::pipeline_store::load_pipeline_configs`]
 /// reads it version-gated and the `projection` CLI tree writes it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct BindingV1 {
-    /// Format version — required. v1 is [`BINDING_VERSION`]. A projection file
-    /// without it is refused by the loader (integration deferred).
+pub struct Binding {
+    /// Format version — required. v2 is [`BINDING_VERSION`]. A projection file
+    /// without it (or with a prior version) is refused by the loader with a
+    /// typed error naming `memstead projection migrate`.
     pub version: u32,
     /// What the binding is trying to accomplish — prose for the agent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub intent: Option<String>,
-    /// Source facets (by name) the binding consumes.
+    /// The inline sources the binding consumes, in declaration order.
+    /// Each `name` is unique within the record and keys per-source state.
     #[serde(default)]
-    pub source_facets: Vec<String>,
+    pub sources: Vec<Source>,
     /// Read-only reference mems that supply cross-mem context.
     #[serde(default)]
     pub reference_mems: Vec<String>,
     /// The mem this binding writes into.
     pub destination_mem: String,
     /// Paths excluded from the binding's scope (workspace-relative globs).
-    /// Moved **up** from the per-ingest record — strategy-invariant.
     #[serde(default)]
     pub deny_paths: Vec<String>,
     /// Whether the binding claims exhaustive or curated coverage.
@@ -287,51 +291,35 @@ pub struct BindingV1 {
 }
 
 // ---------------------------------------------------------------------------
-// D5 — hash(D)
+// hash(D)
 // ---------------------------------------------------------------------------
 
-/// A binding joined to its **resolved** primary sources — the shape
-/// [`hash_binding`] and [`validate_binding`] consume. `reference_mems` are
-/// carried on the [`BindingV1`] itself; only the primary facets need
-/// resolving (each facet's selection patterns, preparation, and its medium's
-/// type / pointer / change-detection).
-///
-/// This mirrors the resolution [`crate::ingest::resolve`] performs for the
-/// legacy ingest, reusing [`ResolvedPrimarySource`], but is constructed
-/// independently for these additive primitives — it is not produced by the
-/// live resolve path yet.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ResolvedBinding {
-    /// The binding declaration.
-    pub binding: BindingV1,
-    /// The binding's primary sources, resolved (facet + medium), in
-    /// `source_facets` order.
-    pub primary_sources: Vec<ResolvedPrimarySource>,
-}
-
-/// One resolved facet's content-defining projection, in a fixed serde shape so
-/// [`hash_binding`] hashes every content input (D5). Private — the hash is the
+/// One source's content-defining projection, in a fixed serde shape so
+/// [`hash_binding`] hashes every content input. Private — the hash is the
 /// only consumer.
 #[derive(Serialize)]
-struct HashFacet<'a> {
-    facet: &'a str,
+struct HashSource<'a> {
+    source: &'a str,
     patterns: &'a [PatternEntry],
     preparation: &'a Option<String>,
     preparation_impl_version: u32,
     medium_type: MediumType,
-    medium_pointer: &'a str,
+    pointer: &'a str,
     change_detection: &'a Option<String>,
 }
 
 /// The content-defining projection of a binding, in a fixed serde shape.
 /// Private — serialized to canonical JSON for hashing. Excludes `trigger`,
-/// `batch_size`, `post_actions`, and the `sync` / `verify` blocks: scheduling
-/// never changes what the mem claims.
+/// `batch_size`, `post_actions`, and the `sync` / `verify` / `prune` blocks:
+/// scheduling and maintenance policy never change what the mem claims. The
+/// `engagement` slot is likewise excluded (an engagement contract shapes how
+/// an agent works, not what the mem claims — the pre-consolidation exclusion
+/// carried forward).
 #[derive(Serialize)]
 struct HashInput<'a> {
     version: u32,
     intent: &'a Option<String>,
-    source_facets: Vec<HashFacet<'a>>,
+    sources: Vec<HashSource<'a>>,
     reference_mems: &'a [String],
     destination_mem: &'a str,
     deny_paths: &'a [String],
@@ -368,45 +356,46 @@ fn canonical_json(value: &serde_json::Value) -> String {
     serde_json::to_string(&sorted(value)).expect("canonical JSON serializes")
 }
 
-/// Compute `hash(D)` (D5) — the lowercase-hex SHA-256 of the canonical JSON of
-/// a binding's content-defining resolved projection.
+/// Compute `hash(D)` — the lowercase-hex SHA-256 of the canonical JSON of a
+/// binding's content-defining projection.
 ///
-/// Hashed: `version`, `intent`, `source_facets` **resolved** (per facet: its
-/// selection patterns, its preparation identifier + [`PREPARATION_IMPL_VERSION`],
-/// and its medium's `type` / `pointer` / `change_detection`), `reference_mems`,
+/// Hashed: `version`, `intent`, `sources` (per source: its name, selection
+/// patterns, preparation identifier + [`PREPARATION_IMPL_VERSION`], and its
+/// medium half's `type` / `pointer` / `change_detection`), `reference_mems`,
 /// `destination_mem`, `deny_paths`, `coverage_semantics`, `rules`, and
 /// `operations.build.mode`.
 ///
-/// **Excluded:** `trigger`, `batch_size`, `post_actions`, and future tier
-/// knobs — scheduling never changes what the mem claims. Because facet
-/// selection and medium pointer participate (inputs *outside* the binding
-/// file), a change to either invalidates the hash, and thus any findings
-/// keyed on it.
-pub fn hash_binding(resolved: &ResolvedBinding) -> String {
-    let source_facets: Vec<HashFacet<'_>> = resolved
-        .primary_sources
+/// **Excluded:** `trigger`, `batch_size`, `post_actions`, the `sync` /
+/// `verify` / `prune` blocks, and each source's `engagement` contract —
+/// scheduling, maintenance policy, and engagement style never change what
+/// the mem claims. The v2 record needs no external resolution: every content
+/// input lives inside the one record, so a selection or pointer edit
+/// invalidates the hash — and thus any findings keyed on it — directly.
+pub fn hash_binding(binding: &Binding) -> String {
+    let sources: Vec<HashSource<'_>> = binding
+        .sources
         .iter()
-        .map(|p| HashFacet {
-            facet: &p.facet_ref,
-            patterns: &p.scope,
-            preparation: &p.preparation,
+        .map(|s| HashSource {
+            source: &s.name,
+            patterns: &s.scope,
+            preparation: &s.preparation,
             preparation_impl_version: PREPARATION_IMPL_VERSION,
-            medium_type: p.medium_type,
-            medium_pointer: &p.medium_pointer,
-            change_detection: &p.declared_change_detection,
+            medium_type: s.medium_type,
+            pointer: &s.pointer,
+            change_detection: &s.change_detection,
         })
         .collect();
 
     let input = HashInput {
-        version: resolved.binding.version,
-        intent: &resolved.binding.intent,
-        source_facets,
-        reference_mems: &resolved.binding.reference_mems,
-        destination_mem: &resolved.binding.destination_mem,
-        deny_paths: &resolved.binding.deny_paths,
-        coverage_semantics: resolved.binding.coverage_semantics,
-        rules: &resolved.binding.rules,
-        build_mode: resolved.binding.operations.build.as_ref().map(|b| b.mode),
+        version: binding.version,
+        intent: &binding.intent,
+        sources,
+        reference_mems: &binding.reference_mems,
+        destination_mem: &binding.destination_mem,
+        deny_paths: &binding.deny_paths,
+        coverage_semantics: binding.coverage_semantics,
+        rules: &binding.rules,
+        build_mode: binding.operations.build.as_ref().map(|b| b.mode),
     };
 
     let value = serde_json::to_value(&input).expect("hash input serializes to a JSON value");
@@ -416,12 +405,12 @@ pub fn hash_binding(resolved: &ResolvedBinding) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// D6 — medium-capability matrix + validation
+// Medium-capability matrix + validation
 // ---------------------------------------------------------------------------
 
-/// What a medium can support (D6) — the row of the capability matrix for a
-/// [`MediumType`]. Pure data; [`validate_binding`] reads it to refuse
-/// operations a medium cannot support.
+/// What a medium can support — the row of the capability matrix for a
+/// [`MediumType`] (the medium *half* of a source description). Pure data;
+/// [`validate_binding`] reads it to refuse operations a medium cannot support.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MediumCapabilities {
     /// Can the medium's scope be enumerated (`S(D)` computable)?
@@ -436,8 +425,8 @@ pub struct MediumCapabilities {
     pub glob_deny_legal: bool,
 }
 
-/// The capability-matrix row for a medium type (D6). The single source of
-/// truth the fidelity report (E3b) will also render.
+/// The capability-matrix row for a medium type. The single source of
+/// truth the fidelity report also renders.
 pub fn medium_capabilities(medium_type: MediumType) -> MediumCapabilities {
     match medium_type {
         MediumType::Codebase => MediumCapabilities {
@@ -512,71 +501,83 @@ impl Operation {
     }
 }
 
-/// A validation-time capability refusal (D6). Sibling to
-/// [`crate::ingest::resolve::ResolveError`] (which refuses *dangling*
-/// references); this refuses declared operations a medium cannot support.
-/// Every refusal names the offending facet/medium so it is diagnosable
-/// without re-reading the store.
+/// A validation-time refusal: a capability the source's medium half cannot
+/// support, or a malformed in-record source declaration. Every refusal names
+/// the offending source so it is diagnosable without re-reading the store.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum CapabilityError {
+    /// A source has an empty `name` — the name keys per-source sync/verify
+    /// state, so it must be present.
+    #[error("a source has an empty name: every source names itself (the name keys its state)")]
+    EmptySourceName,
+    /// Two sources in the record share a name — per-source state keys would
+    /// collide.
+    #[error(
+        "duplicate source name '{name}': source names are unique within a binding \
+         (they key per-source sync/verify state)"
+    )]
+    DuplicateSourceName {
+        /// The colliding name.
+        name: String,
+    },
     /// A `sync` / `verify` operation is declared over a medium that cannot
-    /// support it this cycle (a `web` medium — operator decision 7). The
+    /// support it this cycle (a `web` source — operator decision 7). The
     /// out-of-scope statement is said out loud, never a silent mtime-over-URL.
     #[error(
-        "operation '{operation}' is out of scope for facet '{facet}' over a '{medium_type}' \
+        "operation '{operation}' is out of scope for source '{source_name}' over a '{medium_type}' \
          medium: this medium has no change signal this cycle (deferred — operator decision 7)"
     )]
     OperationOutOfScope {
         /// The offending operation.
         operation: &'static str,
-        /// The source facet.
-        facet: String,
+        /// The source declaring it.
+        source_name: String,
         /// The medium type that cannot support the operation.
         medium_type: String,
     },
     /// Glob `deny_paths` are declared over a medium whose namespace is not
     /// path-shaped (`graph`, `web`) — a glob cannot select in that namespace.
     #[error(
-        "glob deny_paths are illegal for facet '{facet}' over a '{medium_type}' medium: its \
+        "glob deny_paths are illegal for source '{source_name}' over a '{medium_type}' medium: its \
          '{anchor_namespace}' namespace is not path-shaped"
     )]
     GlobDenyIllegal {
-        /// The source facet.
-        facet: String,
+        /// The offending source.
+        source_name: String,
         /// The medium type whose namespace is not path-shaped.
         medium_type: String,
         /// That medium's anchor namespace.
         anchor_namespace: &'static str,
     },
-    /// A facet declares a deterministic preparation step. No preparation
+    /// A source declares a deterministic preparation step. No preparation
     /// implementation exists ([`PREPARATION_IMPL_VERSION`] is `0`), so any
     /// declared preparation is unsupported — refused at validation time, not
     /// only at render time.
     #[error(
-        "facet '{facet}' declares preparation '{preparation}', which has no implementation \
+        "source '{source_name}' declares preparation '{preparation}', which has no implementation \
          (preparation impl version {impl_version})"
     )]
     PreparationUnsupported {
-        /// The source facet.
-        facet: String,
+        /// The offending source.
+        source_name: String,
         /// The declared preparation identifier.
         preparation: String,
         /// The current preparation-implementation version (`0` = none).
         impl_version: u32,
     },
-    /// The binding requests a `prune` guarantee the facet's medium cannot
+    /// The binding requests a `prune` guarantee the source's medium cannot
     /// support (F1) — `never-clobber` over a medium whose base leg is not
     /// retrievable (`web`). Refused at binding-validation time with the
     /// downgrade remedy, never discovered at run time.
     #[error(
-        "prune guarantee '{requested}' is unsupported for facet '{facet}' over a \
+        "prune guarantee '{requested}' is unsupported for source '{source_name}' over a \
          '{medium_type}' medium: its base leg is not retrievable, so only '{supported}' \
          degradation is possible — set the binding's prune guarantee to '{supported}', or \
-         point the facet at a git-backed medium"
+         point the source at a git-backed medium"
     )]
     PruneGuaranteeUnsupported {
-        /// The source facet.
-        facet: String,
+        /// The offending source.
+        source_name: String,
         /// The medium type that cannot support the requested guarantee.
         medium_type: String,
         /// The requested guarantee wire string.
@@ -586,39 +587,48 @@ pub enum CapabilityError {
     },
 }
 
-/// Validate a resolved binding against the medium-capability matrix (D6),
-/// returning **every** capability refusal (empty `Err` never returned — `Ok`
-/// means clean). Generalizes the render-time preparation refusal to
-/// binding-validation time.
+/// Validate a binding against the medium-capability matrix and the in-record
+/// source rules, returning **every** refusal (empty `Err` never returned —
+/// `Ok` means clean). The v2 record needs no external resolution: everything
+/// validated lives inside the one record.
 ///
-/// Refuses, per D6:
-/// - a declared `sync` / `verify` operation over a `web` medium
+/// Refuses:
+/// - an empty or duplicate source `name`
+///   ([`CapabilityError::EmptySourceName`] /
+///   [`CapabilityError::DuplicateSourceName`]) — names key per-source state;
+/// - a declared `sync` / `verify` operation over a `web` source
 ///   ([`CapabilityError::OperationOutOfScope`]);
 /// - a glob `deny_paths` list over a non-path-namespace medium
 ///   ([`CapabilityError::GlobDenyIllegal`]);
-/// - any declared facet preparation
+/// - any declared source preparation
 ///   ([`CapabilityError::PreparationUnsupported`]);
 /// - a `prune` block requesting `never-clobber` over a non-base-retrievable
 ///   medium ([`CapabilityError::PruneGuaranteeUnsupported`], F1).
-///
-/// A binding whose every declared operation the matrix marks legal validates
-/// clean (`Ok(())`). This is a new, callable entry point — it is not yet wired
-/// into the live loader / resolve path.
-pub fn validate_binding(resolved: &ResolvedBinding) -> Result<(), Vec<CapabilityError>> {
+pub fn validate_binding(binding: &Binding) -> Result<(), Vec<CapabilityError>> {
     let mut refusals = Vec::new();
-    let has_deny = !resolved.binding.deny_paths.is_empty();
-    let sync_declared = resolved.binding.operations.sync.is_some();
-    let verify_declared = resolved.binding.operations.verify.is_some();
+    let has_deny = !binding.deny_paths.is_empty();
+    let sync_declared = binding.operations.sync.is_some();
+    let verify_declared = binding.operations.verify.is_some();
     // F1: a `prune` block requesting `never-clobber` needs a base-retrievable
-    // medium on every facet; refuse per-facet where it cannot be honoured.
-    let requested_prune = resolved
-        .binding
+    // medium on every source; refuse per-source where it cannot be honoured.
+    let requested_prune = binding
         .prune
         .as_ref()
         .map(|p| p.guarantee)
         .filter(|g| *g == PruneGuarantee::NeverClobber);
 
-    for source in &resolved.primary_sources {
+    let mut seen_names: Vec<&str> = Vec::new();
+    for source in &binding.sources {
+        if source.name.is_empty() {
+            refusals.push(CapabilityError::EmptySourceName);
+        } else if seen_names.contains(&source.name.as_str()) {
+            refusals.push(CapabilityError::DuplicateSourceName {
+                name: source.name.clone(),
+            });
+        } else {
+            seen_names.push(&source.name);
+        }
+
         let caps = medium_capabilities(source.medium_type);
         let medium_type = serde_json::to_value(source.medium_type)
             .ok()
@@ -628,7 +638,7 @@ pub fn validate_binding(resolved: &ResolvedBinding) -> Result<(), Vec<Capability
         // A declared preparation is always unsupported (no implementation).
         if let Some(prep) = &source.preparation {
             refusals.push(CapabilityError::PreparationUnsupported {
-                facet: source.facet_ref.clone(),
+                source_name: source.name.clone(),
                 preparation: prep.clone(),
                 impl_version: PREPARATION_IMPL_VERSION,
             });
@@ -643,7 +653,7 @@ pub fn validate_binding(resolved: &ResolvedBinding) -> Result<(), Vec<Capability
                 if declared {
                     refusals.push(CapabilityError::OperationOutOfScope {
                         operation: op.name(),
-                        facet: source.facet_ref.clone(),
+                        source_name: source.name.clone(),
                         medium_type: medium_type.clone(),
                     });
                 }
@@ -653,7 +663,7 @@ pub fn validate_binding(resolved: &ResolvedBinding) -> Result<(), Vec<Capability
         // Glob deny_paths over a non-path-shaped namespace is illegal.
         if has_deny && !caps.glob_deny_legal {
             refusals.push(CapabilityError::GlobDenyIllegal {
-                facet: source.facet_ref.clone(),
+                source_name: source.name.clone(),
                 medium_type: medium_type.clone(),
                 anchor_namespace: caps.anchor_namespace,
             });
@@ -663,7 +673,7 @@ pub fn validate_binding(resolved: &ResolvedBinding) -> Result<(), Vec<Capability
         // is refused with the downgrade remedy — at validation, not run time.
         if requested_prune.is_some() && !caps.base_version_retrievable {
             refusals.push(CapabilityError::PruneGuaranteeUnsupported {
-                facet: source.facet_ref.clone(),
+                source_name: source.name.clone(),
                 medium_type: medium_type.clone(),
                 requested: PruneGuarantee::NeverClobber.as_wire(),
                 supported: prune_guarantee_for_medium(source.medium_type).as_wire(),
@@ -694,11 +704,48 @@ mod tests {
         }
     }
 
-    fn binding() -> BindingV1 {
-        BindingV1 {
+    fn allow(path: &str) -> PatternEntry {
+        PatternEntry {
+            path: path.to_string(),
+            mode: PatternMode::Allow,
+        }
+    }
+
+    fn source(
+        name: &str,
+        medium_type: MediumType,
+        pointer: &str,
+        scope: Vec<PatternEntry>,
+        preparation: Option<&str>,
+        change_detection: Option<&str>,
+    ) -> Source {
+        Source {
+            name: name.to_string(),
+            medium_type,
+            pointer: pointer.to_string(),
+            change_detection: change_detection.map(str::to_string),
+            scope,
+            engagement: None,
+            preparation: preparation.map(str::to_string),
+        }
+    }
+
+    fn codebase_source() -> Source {
+        source(
+            "source-tree",
+            MediumType::Codebase,
+            "../public",
+            vec![allow("../public/**/*.rs")],
+            None,
+            None,
+        )
+    }
+
+    fn binding() -> Binding {
+        Binding {
             version: BINDING_VERSION,
             intent: Some("prose for the agent".to_string()),
-            source_facets: vec!["source-tree".to_string()],
+            sources: vec![codebase_source()],
             reference_mems: vec!["engine".to_string()],
             destination_mem: "plugin".to_string(),
             deny_paths: vec!["VISION.md".to_string(), "dev/**".to_string()],
@@ -721,98 +768,65 @@ mod tests {
         }
     }
 
-    fn allow(path: &str) -> PatternEntry {
-        PatternEntry {
-            path: path.to_string(),
-            mode: PatternMode::Allow,
-        }
-    }
+    // ---- Binding serde --------------------------------------------------
 
-    fn primary(
-        facet: &str,
-        medium_type: MediumType,
-        pointer: &str,
-        scope: Vec<PatternEntry>,
-        preparation: Option<&str>,
-        change_detection: Option<&str>,
-    ) -> ResolvedPrimarySource {
-        ResolvedPrimarySource {
-            facet_ref: facet.to_string(),
-            medium: "m".to_string(),
-            medium_type,
-            medium_pointer: pointer.to_string(),
-            declared_change_detection: change_detection.map(str::to_string),
-            scope,
-            preparation: preparation.map(str::to_string),
-        }
-    }
-
-    fn resolved(binding: BindingV1, sources: Vec<ResolvedPrimarySource>) -> ResolvedBinding {
-        ResolvedBinding {
-            binding,
-            primary_sources: sources,
-        }
-    }
-
-    fn one_codebase_source() -> Vec<ResolvedPrimarySource> {
-        vec![primary(
-            "source-tree",
-            MediumType::Codebase,
-            "../public",
-            vec![allow("../public/**/*.rs")],
-            None,
-            None,
-        )]
-    }
-
-    // ---- D1: BindingV1 serde --------------------------------------------
-
-    /// A v1 binding round-trips: serialize → deserialize → equal.
+    /// A v2 binding round-trips: serialize → deserialize → equal.
     #[test]
     fn binding_round_trips() {
         let b = binding();
         let json = serde_json::to_string(&b).unwrap();
-        let back: BindingV1 = serde_json::from_str(&json).unwrap();
+        let back: Binding = serde_json::from_str(&json).unwrap();
         assert_eq!(back, b);
     }
 
-    /// A real-shaped v1 binding JSON (the D1 example) deserializes, with the
-    /// operations block and coverage semantics as declared.
+    /// The plan's v2 wire example deserializes: inline sources with both
+    /// halves, the operations block, and coverage semantics as declared.
     #[test]
-    fn real_shaped_v1_json_deserializes() {
+    fn plan_shaped_v2_json_deserializes() {
         let src = r#"{
-          "version": 1,
-          "intent": "prose for the agent",
-          "source_facets": ["source-tree"],
-          "reference_mems": ["engine"],
-          "destination_mem": "plugin",
-          "deny_paths": ["VISION.md", "dev/**"],
+          "version": 2,
+          "intent": "prose the building agent reads before every run",
+          "sources": [
+            {
+              "name": "source-tree",
+              "type": "codebase",
+              "pointer": "../public",
+              "change_detection": "auto",
+              "scope": [
+                { "path": "../public/**/*.rs", "mode": "allow" },
+                { "path": "../public/target/**", "mode": "deny" }
+              ]
+            }
+          ],
+          "reference_mems": ["engineering"],
+          "destination_mem": "engine",
+          "deny_paths": ["../dev/**"],
           "coverage_semantics": "exhaustive",
-          "rules": { "routing": "…" },
           "operations": {
-            "build": { "mode": "discovery", "trigger": "loop", "batch_size": 20, "post_actions": { "archive_source": true } },
-            "sync":  { "trigger": "manual", "batch_size": 20 },
-            "verify": { "trigger": "manual", "batch_size": 20 }
+            "build":  { "mode": "discovery", "trigger": "loop", "batch_size": 20 },
+            "sync":   { "trigger": "loop", "batch_size": 20 },
+            "verify": { "trigger": "loop", "batch_size": 20,
+                        "adjudication_cap": 50, "full_resync_every": 20 }
           }
         }"#;
-        let b: BindingV1 = serde_json::from_str(src).unwrap();
-        assert_eq!(b.version, 1);
-        assert_eq!(b.destination_mem, "plugin");
+        let b: Binding = serde_json::from_str(src).unwrap();
+        assert_eq!(b.version, 2);
+        assert_eq!(b.destination_mem, "engine");
+        assert_eq!(b.sources.len(), 1);
+        let s = &b.sources[0];
+        assert_eq!(s.name, "source-tree");
+        assert_eq!(s.medium_type, MediumType::Codebase);
+        assert_eq!(s.pointer, "../public");
+        assert_eq!(s.change_detection.as_deref(), Some("auto"));
+        assert_eq!(s.scope.len(), 2);
+        assert_eq!(b.reference_mems, vec!["engineering".to_string()]);
         assert_eq!(b.coverage_semantics, CoverageSemantics::Exhaustive);
         assert_eq!(
             b.operations.build.as_ref().unwrap().mode,
             BuildMode::Discovery
         );
-        assert_eq!(
-            b.operations.build.as_ref().unwrap().trigger,
-            IngestTrigger::Loop
-        );
-        assert_eq!(
-            b.operations.build.as_ref().unwrap().post_actions,
-            Some(serde_json::json!({ "archive_source": true }))
-        );
         assert!(b.operations.sync.is_some());
-        assert!(b.operations.verify.is_some());
+        assert_eq!(b.operations.verify.as_ref().unwrap().adjudication_cap, 50);
     }
 
     /// `coverage_semantics` defaults to exhaustive when absent, and `one-shot`
@@ -820,11 +834,11 @@ mod tests {
     #[test]
     fn coverage_defaults_and_one_shot_wire_form() {
         let src = r#"{
-          "version": 1,
+          "version": 2,
           "destination_mem": "m",
           "operations": { "build": { "mode": "one-shot", "trigger": "manual", "batch_size": 5 } }
         }"#;
-        let b: BindingV1 = serde_json::from_str(src).unwrap();
+        let b: Binding = serde_json::from_str(src).unwrap();
         assert_eq!(b.coverage_semantics, CoverageSemantics::Exhaustive);
         assert_eq!(
             b.operations.build.as_ref().unwrap().mode,
@@ -839,21 +853,20 @@ mod tests {
         );
     }
 
-    /// D4 — the tier-3 knobs are additive: a `verify` block written before they
-    /// existed (only `trigger` + `batch_size`) deserializes to the dogfood-tuned
-    /// defaults, and a block that sets them round-trips its values.
+    /// The tier-3 knobs are additive: a `verify` block without them
+    /// deserializes to the dogfood-tuned defaults, and a block that sets them
+    /// round-trips its values.
     #[test]
     fn verify_tier3_knobs_default_and_round_trip() {
-        // Legacy verify block — no adjudication_cap / full_resync_every.
         let src = r#"{
-          "version": 1,
+          "version": 2,
           "destination_mem": "m",
           "operations": {
             "build": { "mode": "discovery", "trigger": "loop", "batch_size": 20 },
             "verify": { "trigger": "manual", "batch_size": 20 }
           }
         }"#;
-        let b: BindingV1 = serde_json::from_str(src).unwrap();
+        let b: Binding = serde_json::from_str(src).unwrap();
         let v = b.operations.verify.as_ref().unwrap();
         assert_eq!(v.adjudication_cap, DEFAULT_ADJUDICATION_CAP);
         assert_eq!(v.full_resync_every, DEFAULT_FULL_RESYNC_EVERY);
@@ -876,14 +889,14 @@ mod tests {
     /// with the rest of the `verify` block (scheduling never changes the claim).
     #[test]
     fn tier3_knobs_do_not_change_the_hash() {
-        let base = hash_binding(&resolved(binding(), one_codebase_source()));
+        let base = hash_binding(&binding());
         let mut tuned = binding();
         let v = tuned.operations.verify.as_mut().unwrap();
         v.adjudication_cap = 999;
         v.full_resync_every = 1;
         assert_eq!(
             base,
-            hash_binding(&resolved(tuned, one_codebase_source())),
+            hash_binding(&tuned),
             "tier-3 verify knobs are excluded from hash(D)"
         );
     }
@@ -892,11 +905,11 @@ mod tests {
     #[test]
     fn refinement_mode_is_rejected() {
         let src = r#"{
-          "version": 1,
+          "version": 2,
           "destination_mem": "m",
           "operations": { "build": { "mode": "refinement", "trigger": "loop", "batch_size": 20 } }
         }"#;
-        let err = serde_json::from_str::<BindingV1>(src).unwrap_err();
+        let err = serde_json::from_str::<Binding>(src).unwrap_err();
         assert!(
             err.to_string().contains("refinement") || err.to_string().contains("unknown variant"),
             "unexpected error: {err}"
@@ -910,18 +923,18 @@ mod tests {
           "destination_mem": "m",
           "operations": { "build": { "mode": "discovery", "trigger": "loop", "batch_size": 20 } }
         }"#;
-        assert!(serde_json::from_str::<BindingV1>(src).is_err());
+        assert!(serde_json::from_str::<Binding>(src).is_err());
     }
 
-    // ---- D5: hash(D) ----------------------------------------------------
+    // ---- hash(D) --------------------------------------------------------
 
-    /// `hash(D)` is stable and recomputable: the same resolved binding hashes
+    /// `hash(D)` is stable and recomputable: the same binding hashes
     /// identically, and the digest is 64 lowercase hex chars.
     #[test]
     fn hash_is_stable_and_recomputable() {
-        let r = resolved(binding(), one_codebase_source());
-        let h1 = hash_binding(&r);
-        let h2 = hash_binding(&r);
+        let b = binding();
+        let h1 = hash_binding(&b);
+        let h2 = hash_binding(&b);
         assert_eq!(h1, h2);
         assert_eq!(h1.len(), 64);
         assert!(
@@ -930,116 +943,87 @@ mod tests {
         );
     }
 
-    /// Changing a facet selection pattern (an input *outside* the binding
-    /// file) changes the hash.
+    /// Changing a source's selection pattern — now an input *inside* the one
+    /// record — changes the hash.
     #[test]
-    fn changing_a_facet_pattern_changes_the_hash() {
-        let base = hash_binding(&resolved(binding(), one_codebase_source()));
-        let changed = hash_binding(&resolved(
-            binding(),
-            vec![primary(
-                "source-tree",
-                MediumType::Codebase,
-                "../public",
-                vec![allow("../public/**/*.md")], // different pattern
-                None,
-                None,
-            )],
-        ));
-        assert_ne!(base, changed);
+    fn changing_a_source_pattern_changes_the_hash() {
+        let base = hash_binding(&binding());
+        let mut changed = binding();
+        changed.sources[0].scope = vec![allow("../public/**/*.md")];
+        assert_ne!(base, hash_binding(&changed));
     }
 
-    /// Changing a medium pointer (an input *outside* the binding file) changes
-    /// the hash.
+    /// Changing a source's pointer changes the hash.
     #[test]
-    fn changing_a_medium_pointer_changes_the_hash() {
-        let base = hash_binding(&resolved(binding(), one_codebase_source()));
-        let changed = hash_binding(&resolved(
-            binding(),
-            vec![primary(
-                "source-tree",
-                MediumType::Codebase,
-                "../elsewhere", // different pointer
-                vec![allow("../public/**/*.rs")],
-                None,
-                None,
-            )],
-        ));
-        assert_ne!(base, changed);
+    fn changing_a_source_pointer_changes_the_hash() {
+        let base = hash_binding(&binding());
+        let mut changed = binding();
+        changed.sources[0].pointer = "../elsewhere".to_string();
+        assert_ne!(base, hash_binding(&changed));
     }
 
     /// Changing `trigger`, `batch_size`, or `post_actions` does **not** change
-    /// the hash — scheduling never changes what the mem claims.
+    /// the hash — scheduling never changes what the mem claims. Neither does a
+    /// source's `engagement` contract (the pre-consolidation exclusion carried
+    /// forward).
     #[test]
     fn scheduling_knobs_do_not_change_the_hash() {
-        let base = hash_binding(&resolved(binding(), one_codebase_source()));
+        let base = hash_binding(&binding());
 
         let mut b_trigger = binding();
         b_trigger.operations.build.as_mut().unwrap().trigger = IngestTrigger::Manual;
-        assert_eq!(
-            base,
-            hash_binding(&resolved(b_trigger, one_codebase_source())),
-            "trigger is excluded"
-        );
+        assert_eq!(base, hash_binding(&b_trigger), "trigger is excluded");
 
         let mut b_batch = binding();
         b_batch.operations.build.as_mut().unwrap().batch_size = 999;
-        assert_eq!(
-            base,
-            hash_binding(&resolved(b_batch, one_codebase_source())),
-            "batch_size is excluded"
-        );
+        assert_eq!(base, hash_binding(&b_batch), "batch_size is excluded");
 
         let mut b_post = binding();
         b_post.operations.build.as_mut().unwrap().post_actions =
             Some(serde_json::json!({ "archive_source": false }));
-        assert_eq!(
-            base,
-            hash_binding(&resolved(b_post, one_codebase_source())),
-            "post_actions is excluded"
-        );
+        assert_eq!(base, hash_binding(&b_post), "post_actions is excluded");
 
         // The sync/verify blocks are excluded too.
         let mut b_sync = binding();
         b_sync.operations.sync = None;
-        assert_eq!(
-            base,
-            hash_binding(&resolved(b_sync, one_codebase_source())),
-            "sync block is excluded"
-        );
+        assert_eq!(base, hash_binding(&b_sync), "sync block is excluded");
+
+        // A source's engagement contract is excluded.
+        let mut b_engage = binding();
+        b_engage.sources[0].engagement = Some(serde_json::json!({ "readVerb": "Study" }));
+        assert_eq!(base, hash_binding(&b_engage), "engagement is excluded");
     }
 
     /// Changing `operations.build.mode` — a content-defining input — **does**
     /// change the hash.
     #[test]
     fn changing_build_mode_changes_the_hash() {
-        let base = hash_binding(&resolved(binding(), one_codebase_source()));
+        let base = hash_binding(&binding());
         let mut b = binding();
         b.operations.build.as_mut().unwrap().mode = BuildMode::OneShot;
-        assert_ne!(base, hash_binding(&resolved(b, one_codebase_source())));
+        assert_ne!(base, hash_binding(&b));
     }
 
     /// An absent `build` block deserializes (serde default) and still hashes —
-    /// the build mode simply does not participate in `hash(D)` (D1/AC4).
+    /// the build mode simply does not participate in `hash(D)`.
     #[test]
     fn absent_build_deserializes_and_hashes() {
         let src = r#"{
-          "version": 1,
+          "version": 2,
           "destination_mem": "m",
           "operations": { "verify": { "trigger": "manual", "batch_size": 5 } }
         }"#;
-        let b: BindingV1 = serde_json::from_str(src).unwrap();
+        let b: Binding = serde_json::from_str(src).unwrap();
         assert!(b.operations.build.is_none(), "absent build parses to None");
-        // Hashes without panicking; build_mode is omitted from the canonical JSON.
-        let h = hash_binding(&resolved(b, one_codebase_source()));
+        let h = hash_binding(&b);
         assert_eq!(h.len(), 64);
     }
 
-    // ---- D6: capability matrix + validate -------------------------------
+    // ---- capability matrix + validate -----------------------------------
 
-    /// The matrix rows match D6's table.
+    /// The matrix rows are unchanged by the consolidation.
     #[test]
-    fn capability_matrix_matches_d6_table() {
+    fn capability_matrix_rows() {
         let web = medium_capabilities(MediumType::Web);
         assert!(!web.enumerable && !web.change_signal && !web.base_version_retrievable);
         assert!(!web.glob_deny_legal);
@@ -1065,21 +1049,47 @@ mod tests {
         );
     }
 
-    /// `sync` and `verify` over a `web` medium each refuse as out-of-scope.
+    /// An empty source name refuses, and a duplicate source name refuses —
+    /// per-source state keys must be present and collision-free.
+    #[test]
+    fn empty_and_duplicate_source_names_refuse() {
+        let mut b = binding();
+        b.deny_paths.clear();
+        b.sources = vec![
+            source("", MediumType::Codebase, "../a", vec![], None, None),
+            source("dup", MediumType::Codebase, "../b", vec![], None, None),
+            source("dup", MediumType::Codebase, "../c", vec![], None, None),
+        ];
+        let errs = validate_binding(&b).unwrap_err();
+        assert!(
+            errs.iter()
+                .any(|e| matches!(e, CapabilityError::EmptySourceName)),
+            "expected EmptySourceName, got {errs:?}"
+        );
+        assert!(
+            errs.iter().any(|e| matches!(
+                e,
+                CapabilityError::DuplicateSourceName { name } if name == "dup"
+            )),
+            "expected DuplicateSourceName, got {errs:?}"
+        );
+    }
+
+    /// `sync` and `verify` over a `web` source each refuse as out-of-scope.
     #[test]
     fn sync_and_verify_over_web_refuse() {
         // Web binding, no deny_paths (globs illegal), no prep — isolate the op refusal.
         let mut b = binding();
         b.deny_paths.clear();
-        let sources = vec![primary(
-            "web-facet",
+        b.sources = vec![source(
+            "web-source",
             MediumType::Web,
             "https://example.com",
             vec![],
             None,
             None,
         )];
-        let errs = validate_binding(&resolved(b, sources)).unwrap_err();
+        let errs = validate_binding(&b).unwrap_err();
         let ops: Vec<&str> = errs
             .iter()
             .filter_map(|e| match e {
@@ -1091,24 +1101,15 @@ mod tests {
         assert!(ops.contains(&"verify"), "verify refused: {errs:?}");
     }
 
-    /// Glob `deny_paths` over a `graph` medium refuses.
+    /// Glob `deny_paths` over a `graph` source refuses.
     #[test]
     fn glob_deny_over_graph_refuses() {
-        // Graph binding with build-only (avoid the change-signal check; graph
-        // *does* have a change signal anyway) and a glob deny list.
         let mut b = binding();
         b.operations.sync = None;
         b.operations.verify = None;
         b.deny_paths = vec!["some/**".to_string()];
-        let sources = vec![primary(
-            "graph-facet",
-            MediumType::Graph,
-            "home",
-            vec![],
-            None,
-            None,
-        )];
-        let errs = validate_binding(&resolved(b, sources)).unwrap_err();
+        b.sources = vec![source("graph-source", MediumType::Graph, "home", vec![], None, None)];
+        let errs = validate_binding(&b).unwrap_err();
         assert!(
             errs.iter()
                 .any(|e| matches!(e, CapabilityError::GlobDenyIllegal { .. })),
@@ -1116,14 +1117,14 @@ mod tests {
         );
     }
 
-    /// A declared facet preparation refuses at validation time.
+    /// A declared source preparation refuses at validation time.
     #[test]
     fn declared_preparation_refuses() {
         let mut b = binding();
         b.operations.sync = None;
         b.operations.verify = None;
         b.deny_paths.clear();
-        let sources = vec![primary(
+        b.sources = vec![source(
             "manual-pages",
             MediumType::Filesystem,
             "../docs",
@@ -1131,7 +1132,7 @@ mod tests {
             Some("pdf-to-markdown"),
             None,
         )];
-        let errs = validate_binding(&resolved(b, sources)).unwrap_err();
+        let errs = validate_binding(&b).unwrap_err();
         assert!(
             errs.iter().any(|e| matches!(
                 e,
@@ -1152,53 +1153,46 @@ mod tests {
             MediumType::Filesystem,
             MediumType::Git,
         ] {
-            let sources = vec![primary(
-                "f",
-                ty,
-                "../src",
-                vec![allow("../src/**")],
-                None,
-                None,
-            )];
+            let mut b = binding();
+            b.sources = vec![source("f", ty, "../src", vec![allow("../src/**")], None, None)];
             assert!(
-                validate_binding(&resolved(binding(), sources)).is_ok(),
+                validate_binding(&b).is_ok(),
                 "{ty:?} build+sync+verify should validate clean"
             );
         }
         // graph — build+sync+verify legal, but only without glob deny_paths.
         let mut graph_binding = binding();
         graph_binding.deny_paths.clear();
-        let graph_sources = vec![primary("g", MediumType::Graph, "home", vec![], None, None)];
+        graph_binding.sources = vec![source("g", MediumType::Graph, "home", vec![], None, None)];
         assert!(
-            validate_binding(&resolved(graph_binding, graph_sources)).is_ok(),
+            validate_binding(&graph_binding).is_ok(),
             "graph build+sync+verify with no glob deny should validate clean"
         );
     }
 
     // ---- F1: prune guarantee -------------------------------------------
 
-    /// F1 — the `prune` block is additive: a binding written before it existed
-    /// deserializes to `prune: None`, and a block that sets a guarantee
-    /// round-trips (defaulting to `conflict-flag` when the guarantee is absent).
+    /// F1 — the `prune` block is additive: a binding without it deserializes
+    /// to `prune: None`, and a block that sets a guarantee round-trips
+    /// (defaulting to `conflict-flag` when the guarantee is absent).
     #[test]
     fn prune_block_is_additive_and_round_trips() {
-        // Legacy binding — no `prune`.
         let src = r#"{
-          "version": 1,
+          "version": 2,
           "destination_mem": "m",
           "operations": { "build": { "mode": "discovery", "trigger": "loop", "batch_size": 20 } }
         }"#;
-        let b: BindingV1 = serde_json::from_str(src).unwrap();
+        let b: Binding = serde_json::from_str(src).unwrap();
         assert!(b.prune.is_none(), "absent prune parses to None");
 
         // A prune block with no guarantee defaults to conflict-flag.
         let with_default = r#"{
-          "version": 1,
+          "version": 2,
           "destination_mem": "m",
           "prune": {},
           "operations": { "build": { "mode": "discovery", "trigger": "loop", "batch_size": 20 } }
         }"#;
-        let b: BindingV1 = serde_json::from_str(with_default).unwrap();
+        let b: Binding = serde_json::from_str(with_default).unwrap();
         assert_eq!(
             b.prune.as_ref().unwrap().guarantee,
             PruneGuarantee::ConflictFlag
@@ -1220,14 +1214,14 @@ mod tests {
     /// policy, excluded like the sync/verify blocks).
     #[test]
     fn prune_does_not_change_the_hash() {
-        let base = hash_binding(&resolved(binding(), one_codebase_source()));
+        let base = hash_binding(&binding());
         let mut pruned = binding();
         pruned.prune = Some(PruneConfig {
             guarantee: PruneGuarantee::NeverClobber,
         });
         assert_eq!(
             base,
-            hash_binding(&resolved(pruned, one_codebase_source())),
+            hash_binding(&pruned),
             "prune policy is excluded from hash(D)"
         );
     }
@@ -1255,7 +1249,7 @@ mod tests {
         );
     }
 
-    /// F1 REFUSAL — requesting `never-clobber` prune over a `web` medium (no
+    /// F1 REFUSAL — requesting `never-clobber` prune over a `web` source (no
     /// retrievable base leg) fails at binding validation with a remedy-bearing
     /// error naming the downgrade, never a runtime surprise.
     #[test]
@@ -1267,15 +1261,15 @@ mod tests {
         b.prune = Some(PruneConfig {
             guarantee: PruneGuarantee::NeverClobber,
         });
-        let sources = vec![primary(
-            "web-facet",
+        b.sources = vec![source(
+            "web-source",
             MediumType::Web,
             "https://example.com",
             vec![],
             None,
             None,
         )];
-        let errs = validate_binding(&resolved(b, sources)).unwrap_err();
+        let errs = validate_binding(&b).unwrap_err();
         let refusal = errs
             .iter()
             .find_map(|e| match e {
@@ -1300,7 +1294,7 @@ mod tests {
         );
     }
 
-    /// F1 — `never-clobber` over a git-backed medium validates clean, and
+    /// F1 — `never-clobber` over a git-backed source validates clean, and
     /// `conflict-flag` (the always-supportable degradation) validates clean over
     /// `web` — the guarantee the matrix marks legal is accepted.
     #[test]
@@ -1310,7 +1304,7 @@ mod tests {
         nc.prune = Some(PruneConfig {
             guarantee: PruneGuarantee::NeverClobber,
         });
-        assert!(validate_binding(&resolved(nc, one_codebase_source())).is_ok());
+        assert!(validate_binding(&nc).is_ok());
 
         // conflict-flag over web — always supportable (build-only to isolate).
         let mut cf = binding();
@@ -1320,15 +1314,15 @@ mod tests {
         cf.prune = Some(PruneConfig {
             guarantee: PruneGuarantee::ConflictFlag,
         });
-        let web = vec![primary(
-            "web-facet",
+        cf.sources = vec![source(
+            "web-source",
             MediumType::Web,
             "https://example.com",
             vec![],
             None,
             None,
         )];
-        assert!(validate_binding(&resolved(cf, web)).is_ok());
+        assert!(validate_binding(&cf).is_ok());
     }
 
     /// A `web` binding scaffolded build-only (no sync/verify, no deny, no prep)
@@ -1339,14 +1333,14 @@ mod tests {
         b.operations.sync = None;
         b.operations.verify = None;
         b.deny_paths.clear();
-        let sources = vec![primary(
-            "web-facet",
+        b.sources = vec![source(
+            "web-source",
             MediumType::Web,
             "https://example.com",
             vec![],
             None,
             None,
         )];
-        assert!(validate_binding(&resolved(b, sources)).is_ok());
+        assert!(validate_binding(&b).is_ok());
     }
 }

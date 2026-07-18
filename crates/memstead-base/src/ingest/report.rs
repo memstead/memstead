@@ -38,7 +38,7 @@ use serde::Serialize;
 
 use crate::Engine;
 use crate::anchor::{AnchorGrain, AnchorProvenanceClass, AnchorState};
-use crate::binding::{BindingV1, CoverageSemantics, MediumCapabilities, medium_capabilities};
+use crate::binding::{Binding, CoverageSemantics, MediumCapabilities, medium_capabilities};
 use crate::chunking::estimate_tokens;
 
 use super::advance::read_advance_store;
@@ -719,7 +719,7 @@ pub fn render_fidelity_report(
 pub fn compute_fidelity_report(
     engine: &Engine,
     workspace_root: &Path,
-    binding: &BindingV1,
+    binding: &Binding,
     resolved: &ResolvedIngest,
     key: &FindingKey,
 ) -> FidelityReport {
@@ -749,20 +749,20 @@ pub fn compute_fidelity_report(
         any_change_detectable |= change_detectable;
 
         capabilities.push(FacetCapability::from_caps(
-            p.facet_ref.clone(),
+            p.name.clone(),
             medium_type,
             caps,
             strategy,
         ));
 
         let synced = sync_state
-            .get(&format!("{binding_id}/{}#synced", p.facet_ref))
+            .get(&format!("{binding_id}/{}#synced", p.name))
             .cloned();
         let verified = sync_state
-            .get(&format!("{binding_id}/{}#verified", p.facet_ref))
+            .get(&format!("{binding_id}/{}#verified", p.name))
             .cloned();
         freshness.push(FacetFreshness {
-            facet: p.facet_ref.clone(),
+            facet: p.name.clone(),
             signal,
             synced,
             verified,
@@ -1401,7 +1401,7 @@ mod tests {
 
     use crate::anchor::{Anchor, AnchorHashStability, AnchorProvenanceClass, AnchorSidecar};
     use crate::binding::{
-        BINDING_VERSION, BindingV1, BuildMode, BuildOperation, DEFAULT_ADJUDICATION_CAP,
+        BINDING_VERSION, Binding, BuildMode, BuildOperation, DEFAULT_ADJUDICATION_CAP,
         DEFAULT_FULL_RESYNC_EVERY, Operations, VerifyOperation,
     };
     use crate::ingest::findings::verify_binding;
@@ -1511,42 +1511,25 @@ mod tests {
         )
         .unwrap();
 
-        write_medium(
-            root,
-            "engine",
-            "graph",
-            &Medium {
-                name: "graph".to_string(),
-                medium_type: MediumType::Codebase,
-                pointer: String::new(),
-                change_detection: Some("git".to_string()),
-            },
-        )
-        .unwrap();
-        write_facet(
-            root,
-            "engine",
-            "graph",
-            &Facet {
-                name: "graph".to_string(),
-                medium: "graph".to_string(),
-                scope: vec![PatternEntry {
-                    path: "src/**/*.rs".to_string(),
-                    mode: PatternMode::Allow,
-                }],
-                engagement: None,
-                preparation: None,
-            },
-        )
-        .unwrap();
         write_binding(
             root,
             "engine",
             "graph",
-            &BindingV1 {
+            &Binding {
                 version: BINDING_VERSION,
                 intent: None,
-                source_facets: vec!["graph".to_string()],
+                sources: vec![crate::pipeline::Source {
+                    name: "graph".to_string(),
+                    medium_type: MediumType::Codebase,
+                    pointer: String::new(),
+                    change_detection: Some("git".to_string()),
+                    scope: vec![PatternEntry {
+                    path: "src/**/*.rs".to_string(),
+                    mode: PatternMode::Allow,
+                }],
+                    engagement: None,
+                    preparation: None,
+                }],
                 reference_mems: Vec::new(),
                 destination_mem: "engine".to_string(),
                 deny_paths: Vec::new(),
@@ -1575,7 +1558,7 @@ mod tests {
         let engine = Engine::from_workspace_root(root).unwrap();
         let configs = load_pipeline_configs(root).unwrap();
         let binding = &configs.bindings[0].config;
-        let resolved = resolve_binding_run(&configs, "engine/graph", binding).unwrap();
+        let resolved = resolve_binding_run("engine/graph", binding).unwrap();
 
         // Populate the durable findings store (group A) — read-only on the mem.
         let outcome = verify_binding(&engine, root, binding, &resolved).unwrap();
@@ -1680,42 +1663,25 @@ mod tests {
         std::fs::write(root.join("src").join("a.rs"), "fn a() {}\n").unwrap();
         std::fs::write(root.join("src").join("b.rs"), "fn b() {}\n").unwrap();
 
-        write_medium(
-            root,
-            "engine",
-            "graph",
-            &Medium {
-                name: "graph".to_string(),
-                medium_type: MediumType::Codebase,
-                pointer: String::new(),
-                change_detection: Some("git".to_string()),
-            },
-        )
-        .unwrap();
-        write_facet(
-            root,
-            "engine",
-            "graph",
-            &Facet {
-                name: "graph".to_string(),
-                medium: "graph".to_string(),
-                scope: vec![PatternEntry {
-                    path: "src/**/*.rs".to_string(),
-                    mode: PatternMode::Allow,
-                }],
-                engagement: None,
-                preparation: None,
-            },
-        )
-        .unwrap();
         write_binding(
             root,
             "engine",
             "graph",
-            &BindingV1 {
+            &Binding {
                 version: BINDING_VERSION,
                 intent: None,
-                source_facets: vec!["graph".to_string()],
+                sources: vec![crate::pipeline::Source {
+                    name: "graph".to_string(),
+                    medium_type: MediumType::Codebase,
+                    pointer: String::new(),
+                    change_detection: Some("git".to_string()),
+                    scope: vec![PatternEntry {
+                    path: "src/**/*.rs".to_string(),
+                    mode: PatternMode::Allow,
+                }],
+                    engagement: None,
+                    preparation: None,
+                }],
                 reference_mems: Vec::new(),
                 destination_mem: "engine".to_string(),
                 deny_paths: Vec::new(),
@@ -1744,7 +1710,7 @@ mod tests {
         let engine = Engine::from_workspace_root(root).unwrap();
         let configs = load_pipeline_configs(root).unwrap();
         let binding = &configs.bindings[0].config;
-        let resolved = resolve_binding_run(&configs, "engine/graph", binding).unwrap();
+        let resolved = resolve_binding_run("engine/graph", binding).unwrap();
         let outcome = verify_binding(&engine, root, binding, &resolved).unwrap();
         let report = compute_fidelity_report(&engine, root, binding, &resolved, &outcome.key);
 

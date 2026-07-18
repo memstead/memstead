@@ -535,143 +535,17 @@ impl Engine {
         Ok(convert::parse_recovery_report_to_ffi(report))
     }
 
-    // --- Four-primitive pipeline edits -------------------------------------
+    // --- Pipeline edits (v2 single-record) ---------------------------------
     //
-    // The macOS pipeline editor routes medium/facet/projection edits here
-    // instead of hand-writing `.memstead/` JSON, so the engine owns the
-    // pipeline store (referential integrity, snapshot refresh). A projection
-    // edit is binding-aware: the engine preserves the binding's `operations`
-    // block (D14). Create and update carry the primitive as a JSON string
-    // (the `Facet.engagement`
-    // field is free-form JSON, so a typed FFI record would not round-trip);
-    // delete and rename take plain identifiers. Each delegates to
+    // The macOS pipeline editor routes binding edits here instead of
+    // hand-writing `.memstead/` JSON, so the engine owns the pipeline store
+    // (in-record validation, snapshot refresh). A binding is ONE record —
+    // inline sources, operations block, everything; the standalone
+    // medium/facet records (and their eight edit methods) are gone with the
+    // 2026-07 consolidation. Create and update carry a JSON patch string
+    // (free-form fields like `engagement` would not round-trip a typed FFI
+    // record); delete and rename take plain identifiers. Each delegates to
     // `memstead_base::Engine`, whose methods refresh the in-memory snapshot.
-
-    /// Create a medium from a JSON-encoded `Medium`. See `Engine::add_medium`.
-    pub fn add_medium(
-        &self,
-        mem: String,
-        name: String,
-        medium_json: String,
-        note: Option<String>,
-    ) -> Result<(), MemsteadError> {
-        let mut engine = self
-            .inner
-            .lock()
-            .expect("memstead-swift engine mutex poisoned");
-        engine.add_medium_json(&mem, &name, &medium_json, note.as_deref())?;
-        Ok(())
-    }
-
-    /// Overwrite a medium from a JSON-encoded `Medium`. See `Engine::update_medium`.
-    pub fn update_medium(
-        &self,
-        mem: String,
-        name: String,
-        medium_json: String,
-        note: Option<String>,
-    ) -> Result<(), MemsteadError> {
-        let mut engine = self
-            .inner
-            .lock()
-            .expect("memstead-swift engine mutex poisoned");
-        engine.update_medium_json(&mem, &name, &medium_json, note.as_deref())?;
-        Ok(())
-    }
-
-    /// Delete a medium (refused while a facet references it). See `Engine::delete_medium`.
-    pub fn delete_medium(
-        &self,
-        mem: String,
-        name: String,
-        note: Option<String>,
-    ) -> Result<(), MemsteadError> {
-        let mut engine = self
-            .inner
-            .lock()
-            .expect("memstead-swift engine mutex poisoned");
-        engine.delete_medium(&mem, &name, note.as_deref())?;
-        Ok(())
-    }
-
-    /// Rename a medium, repointing dependent facets. See `Engine::rename_medium`.
-    pub fn rename_medium(
-        &self,
-        mem: String,
-        old_name: String,
-        new_name: String,
-        note: Option<String>,
-    ) -> Result<(), MemsteadError> {
-        let mut engine = self
-            .inner
-            .lock()
-            .expect("memstead-swift engine mutex poisoned");
-        engine.rename_medium(&mem, &old_name, &new_name, note.as_deref())?;
-        Ok(())
-    }
-
-    /// Create a facet from a JSON-encoded `Facet`. See `Engine::add_facet`.
-    pub fn add_facet(
-        &self,
-        mem: String,
-        name: String,
-        facet_json: String,
-        note: Option<String>,
-    ) -> Result<(), MemsteadError> {
-        let mut engine = self
-            .inner
-            .lock()
-            .expect("memstead-swift engine mutex poisoned");
-        engine.add_facet_json(&mem, &name, &facet_json, note.as_deref())?;
-        Ok(())
-    }
-
-    /// Overwrite a facet from a JSON-encoded `Facet`. See `Engine::update_facet`.
-    pub fn update_facet(
-        &self,
-        mem: String,
-        name: String,
-        facet_json: String,
-        note: Option<String>,
-    ) -> Result<(), MemsteadError> {
-        let mut engine = self
-            .inner
-            .lock()
-            .expect("memstead-swift engine mutex poisoned");
-        engine.update_facet_json(&mem, &name, &facet_json, note.as_deref())?;
-        Ok(())
-    }
-
-    /// Delete a facet (refused while a projection references it). See `Engine::delete_facet`.
-    pub fn delete_facet(
-        &self,
-        mem: String,
-        name: String,
-        note: Option<String>,
-    ) -> Result<(), MemsteadError> {
-        let mut engine = self
-            .inner
-            .lock()
-            .expect("memstead-swift engine mutex poisoned");
-        engine.delete_facet(&mem, &name, note.as_deref())?;
-        Ok(())
-    }
-
-    /// Rename a facet, repointing dependent projections. See `Engine::rename_facet`.
-    pub fn rename_facet(
-        &self,
-        mem: String,
-        old_name: String,
-        new_name: String,
-        note: Option<String>,
-    ) -> Result<(), MemsteadError> {
-        let mut engine = self
-            .inner
-            .lock()
-            .expect("memstead-swift engine mutex poisoned");
-        engine.rename_facet(&mem, &old_name, &new_name, note.as_deref())?;
-        Ok(())
-    }
 
     /// Create a binding from a JSON patch over the full author-editable
     /// record, applied to the default scaffold (a default build operation
@@ -1684,20 +1558,20 @@ mod tests {
     #[test]
     fn pipeline_configs_json_returns_the_binding_shape() {
         // The read counterpart of the edit methods is wired through the FFI
-        // surface and returns the v1 binding shape (D14) — mediums / facets /
-        // bindings, no `ingests` key. The canonical fixture seeds entities but
-        // no pipeline configs, so every array is empty — the keys must still be
-        // present, and `ingests` must be absent (the wire canary the macOS
-        // `WorkspaceServiceTests` mirrors).
+        // surface and returns the v2 single-record shape — `bindings` only.
+        // The canonical fixture seeds entities but no pipeline configs, so
+        // the array is empty — the key must still be present, and the
+        // retired `mediums` / `facets` / `ingests` keys must be absent (the
+        // wire canary the macOS `WorkspaceServiceTests` mirrors).
         let (engine, _tmp) = setup_test_engine();
         let json = engine.pipeline_configs_json();
-        for key in ["\"mediums\"", "\"facets\"", "\"bindings\""] {
-            assert!(json.contains(key), "missing {key} in: {json}");
+        assert!(json.contains("\"bindings\""), "missing bindings in: {json}");
+        for gone in ["\"mediums\"", "\"facets\"", "\"ingests\""] {
+            assert!(
+                !json.contains(gone),
+                "the {gone} key must be gone (one record per pipeline): {json}"
+            );
         }
-        assert!(
-            !json.contains("\"ingests\""),
-            "the `ingests` key must be gone (bindings carry operations): {json}"
-        );
     }
 
     // --- Mem lifecycle through the FFI -----------------------------------

@@ -42,7 +42,7 @@ use std::path::Path;
 
 use crate::Engine;
 use crate::anchor::{AnchorProvenanceClass, AnchorState, AnchorVersion};
-use crate::binding::{BindingV1, PruneGuarantee};
+use crate::binding::{Binding, PruneGuarantee};
 
 use super::resolve::ResolvedIngest;
 
@@ -187,7 +187,7 @@ pub struct PruneProposal {
 pub fn prune_proposals(
     engine: &Engine,
     _workspace_root: &Path,
-    binding: &BindingV1,
+    binding: &Binding,
     resolved: &ResolvedIngest,
 ) -> Vec<PruneProposal> {
     // Prune disabled → no proposals.
@@ -451,7 +451,7 @@ mod tests {
         tmp: &Path,
         guarantee: PruneGuarantee,
         entity_anchors: &[(&str, Vec<Anchor>)],
-    ) -> (Engine, std::path::PathBuf, BindingV1, ResolvedIngest) {
+    ) -> (Engine, std::path::PathBuf, Binding, ResolvedIngest) {
         let root = tmp.to_path_buf();
         let mem_dir = root.join("mem");
         std::fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
@@ -500,40 +500,23 @@ mod tests {
         )
         .unwrap();
 
-        // A filesystem-medium binding (namespace `path`, so mem_anchors_resolved
+        // A filesystem-source binding (namespace `path`, so mem_anchors_resolved
         // observes it) with the requested prune guarantee.
-        write_medium(
-            &root,
-            "engine",
-            "graph",
-            &Medium {
+        let binding = Binding {
+            version: BINDING_VERSION,
+            intent: None,
+            sources: vec![crate::pipeline::Source {
                 name: "graph".to_string(),
                 medium_type: MediumType::Filesystem,
                 pointer: String::new(),
                 change_detection: None,
-            },
-        )
-        .unwrap();
-        write_facet(
-            &root,
-            "engine",
-            "graph",
-            &Facet {
-                name: "graph".to_string(),
-                medium: "graph".to_string(),
                 scope: vec![PatternEntry {
                     path: "src/**/*.rs".to_string(),
                     mode: PatternMode::Allow,
                 }],
                 engagement: None,
                 preparation: None,
-            },
-        )
-        .unwrap();
-        let binding = BindingV1 {
-            version: BINDING_VERSION,
-            intent: None,
-            source_facets: vec!["graph".to_string()],
+            }],
             reference_mems: Vec::new(),
             destination_mem: "engine".to_string(),
             deny_paths: Vec::new(),
@@ -563,7 +546,7 @@ mod tests {
 
         let engine = Engine::from_workspace_root(&root).unwrap();
         let configs = load_pipeline_configs(&root).unwrap();
-        let resolved = resolve_binding_run(&configs, "engine/graph", &binding).unwrap();
+        let resolved = resolve_binding_run("engine/graph", &binding).unwrap();
         (engine, root, binding, resolved)
     }
 

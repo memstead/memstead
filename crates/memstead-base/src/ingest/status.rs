@@ -126,7 +126,7 @@ impl BindingResolution {
 fn resolve_binding_status(
     engine: &Engine,
     workspace_root: &Path,
-    binding: &crate::binding::BindingV1,
+    binding: &crate::binding::Binding,
     resolved: &ResolvedIngest,
 ) -> BindingResolution {
     if mem_predates_binding(engine, resolved) {
@@ -215,7 +215,7 @@ pub fn projection_status(engine: &Engine, workspace_root: &Path) -> Vec<Projecti
         // strategy (its `signal`) is the same one the cursor/brief path uses.
         let mut state = BTreeMap::new();
         let mut resolution: Option<BindingResolution> = None;
-        if let Ok(resolved) = resolve_binding_run(&configs, &binding_id, binding) {
+        if let Ok(resolved) = resolve_binding_run(&binding_id, binding) {
             resolution = Some(resolve_binding_status(
                 engine,
                 workspace_root,
@@ -225,7 +225,7 @@ pub fn projection_status(engine: &Engine, workspace_root: &Path) -> Vec<Projecti
             for source in &resolved.sources {
                 let (facet, signal) = match source {
                     ResolvedSource::Primary(p) => (
-                        p.facet_ref.clone(),
+                        p.name.clone(),
                         signal_of(resolve_change_strategy(p, workspace_root)).to_string(),
                     ),
                     // Reference mems are graph-detected by definition (the
@@ -375,7 +375,7 @@ pub fn projection_rollup(engine: &Engine, workspace_root: &Path) -> Rollup {
     for record in &configs.bindings {
         let binding_id = format!("{}/{}", record.mem, record.name);
         let binding = &record.config;
-        let Ok(resolved) = resolve_binding_run(&configs, &binding_id, binding) else {
+        let Ok(resolved) = resolve_binding_run(&binding_id, binding) else {
             continue;
         };
 
@@ -499,7 +499,7 @@ pub fn projection_rollup(engine: &Engine, workspace_root: &Path) -> Rollup {
 mod tests {
     use super::*;
     use crate::binding::{
-        BINDING_VERSION, BindingV1, BuildMode, BuildOperation, CoverageSemantics, Operations,
+        BINDING_VERSION, Binding, BuildMode, BuildOperation, CoverageSemantics, Operations,
         SyncOperation,
     };
     use crate::pipeline::{Facet, IngestTrigger, Medium, MediumType, PatternEntry, PatternMode};
@@ -537,42 +537,25 @@ mod tests {
         assert!(out.status.success());
 
         // The v1 binding + its facet/medium.
-        write_medium(
-            root,
-            "engine",
-            "graph",
-            &Medium {
-                name: "graph".to_string(),
-                medium_type: MediumType::Codebase,
-                pointer: String::new(),
-                change_detection: Some("git".to_string()),
-            },
-        )
-        .unwrap();
-        write_facet(
-            root,
-            "engine",
-            "graph",
-            &Facet {
-                name: "graph".to_string(),
-                medium: "graph".to_string(),
-                scope: vec![PatternEntry {
-                    path: "**/*.rs".to_string(),
-                    mode: PatternMode::Allow,
-                }],
-                engagement: None,
-                preparation: None,
-            },
-        )
-        .unwrap();
         write_binding(
             root,
             "engine",
             "graph",
-            &BindingV1 {
+            &Binding {
                 version: BINDING_VERSION,
                 intent: None,
-                source_facets: vec!["graph".to_string()],
+                sources: vec![crate::pipeline::Source {
+                    name: "graph".to_string(),
+                    medium_type: MediumType::Codebase,
+                    pointer: String::new(),
+                    change_detection: Some("git".to_string()),
+                    scope: vec![PatternEntry {
+                    path: "**/*.rs".to_string(),
+                    mode: PatternMode::Allow,
+                }],
+                    engagement: None,
+                    preparation: None,
+                }],
                 reference_mems: Vec::new(),
                 destination_mem: "engine".to_string(),
                 deny_paths: Vec::new(),
@@ -694,42 +677,25 @@ mod tests {
             .unwrap();
         assert!(out.status.success());
 
-        write_medium(
-            root,
-            "engine",
-            "graph",
-            &Medium {
-                name: "graph".to_string(),
-                medium_type: MediumType::Codebase,
-                pointer: String::new(),
-                change_detection: Some("git".to_string()),
-            },
-        )
-        .unwrap();
-        write_facet(
-            root,
-            "engine",
-            "graph",
-            &Facet {
-                name: "graph".to_string(),
-                medium: "graph".to_string(),
-                scope: vec![PatternEntry {
-                    path: "**/*.rs".to_string(),
-                    mode: PatternMode::Allow,
-                }],
-                engagement: None,
-                preparation: None,
-            },
-        )
-        .unwrap();
         write_binding(
             root,
             "engine",
             "graph",
-            &BindingV1 {
+            &Binding {
                 version: BINDING_VERSION,
                 intent: None,
-                source_facets: vec!["graph".to_string()],
+                sources: vec![crate::pipeline::Source {
+                    name: "graph".to_string(),
+                    medium_type: MediumType::Codebase,
+                    pointer: String::new(),
+                    change_detection: Some("git".to_string()),
+                    scope: vec![PatternEntry {
+                    path: "**/*.rs".to_string(),
+                    mode: PatternMode::Allow,
+                }],
+                    engagement: None,
+                    preparation: None,
+                }],
                 reference_mems: Vec::new(),
                 destination_mem: "engine".to_string(),
                 deny_paths: Vec::new(),

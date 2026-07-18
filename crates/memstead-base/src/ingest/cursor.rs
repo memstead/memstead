@@ -79,9 +79,9 @@ use super::brief::{NoSignalNote, SourceCursor, SyncCommand};
 use super::change_detection::{
     StatMap, compute_stat_map, digest_stat_map, parse_digest_token, serialize_digest_token,
 };
+use crate::pipeline::Source;
 use super::resolve::{
-    ChangeStrategy, ResolvedIngest, ResolvedPrimarySource, ResolvedSource, find_git_root,
-    resolve_change_strategy,
+    ChangeStrategy, ResolvedIngest, ResolvedSource, find_git_root, resolve_change_strategy,
 };
 use super::slice::{
     NoSignalReason, Slice, SliceOutcome, graph_slice_outcome, is_git_token, mtime_slice_outcome,
@@ -224,7 +224,7 @@ fn build_glob_set(patterns: &[&str]) -> Option<GlobSet> {
 /// diffs or enumerates the whole medium for such a facet, and refinement emits
 /// no batch for it. It is orthogonal to the ingest's `deny_paths` — an empty
 /// deny list is not an unscoped facet.
-fn facet_unscoped(source: &ResolvedPrimarySource) -> bool {
+fn facet_unscoped(source: &Source) -> bool {
     !source.scope.iter().any(|r| r.mode == PatternMode::Allow)
 }
 
@@ -245,7 +245,7 @@ fn facet_unscoped(source: &ResolvedPrimarySource) -> bool {
 /// input set exactly as it is from the git diff. Passing `&[]` yields the
 /// facet-scope-only behaviour.
 pub fn enumerate_facet_files(
-    source: &ResolvedPrimarySource,
+    source: &Source,
     deny_paths: &[String],
     workspace_root: &Path,
 ) -> Vec<String> {
@@ -287,7 +287,7 @@ pub fn enumerate_facet_files(
     // workspace-relative path. VCS internals are never source artifacts —
     // they are pruned here so `.git/**` plumbing cannot enter `S(D)`,
     // matching the git strategy (whose diffs never name `.git` files).
-    let base = medium_base(&source.medium_pointer, workspace_root);
+    let base = medium_base(&source.pointer, workspace_root);
     let mut out: Vec<String> = Vec::new();
     let mut stack = vec![base];
     while let Some(dir) = stack.pop() {
@@ -326,12 +326,12 @@ pub fn enumerate_facet_files(
 /// Compute the git changed slice for one primary source between its stored
 /// baseline commit and the tree's current `HEAD`. Mirrors `computeGitSlice`.
 fn compute_git_slice(
-    source: &ResolvedPrimarySource,
+    source: &Source,
     deny_paths: &[String],
     workspace_root: &Path,
     baseline: Option<&str>,
 ) -> SliceOutcome {
-    let base = medium_base(&source.medium_pointer, workspace_root);
+    let base = medium_base(&source.pointer, workspace_root);
     let Some(git_root) = find_git_root(&base) else {
         return SliceOutcome::NoSignal {
             reason: NoSignalReason::GitUnavailable,
@@ -684,7 +684,7 @@ fn dead_deny_entries(resolved: &ResolvedIngest, workspace_root: &Path) -> Vec<St
 /// baseline digest's memoised map (precise) or degrade to a full scan on memo
 /// miss. Mirrors the mtime branch of the plugin's `computeSourceCursor`.
 fn compute_mtime_slice(
-    source: &ResolvedPrimarySource,
+    source: &Source,
     ingest_name: &str,
     deny_paths: &[String],
     workspace_root: &Path,
@@ -704,12 +704,12 @@ fn compute_mtime_slice(
     write_cursor_memo(
         cache_root,
         ingest_name,
-        &source.facet_ref,
+        &source.name,
         &now_digest.aggregate,
         &now_map,
     );
     let prev_map = baseline.and_then(parse_digest_token).and_then(|base| {
-        read_cursor_memo(cache_root, ingest_name, &source.facet_ref, &base.aggregate)
+        read_cursor_memo(cache_root, ingest_name, &source.name, &base.aggregate)
     });
     mtime_slice_outcome(baseline, prev_map.as_ref(), &now_map)
 }
@@ -719,16 +719,16 @@ fn compute_mtime_slice(
 /// mtime digest. `None` when there is no signal.
 fn current_primary_token(
     engine: &Engine,
-    source: &ResolvedPrimarySource,
+    source: &Source,
     deny_paths: &[String],
     workspace_root: &Path,
 ) -> Option<String> {
     match resolve_change_strategy(source, workspace_root) {
         ChangeStrategy::Git => git_head(&find_git_root(&medium_base(
-            &source.medium_pointer,
+            &source.pointer,
             workspace_root,
         ))?),
-        ChangeStrategy::Graph => engine.mem_head_sha(&source.medium_pointer).ok().flatten(),
+        ChangeStrategy::Graph => engine.mem_head_sha(&source.pointer).ok().flatten(),
         ChangeStrategy::Mtime => {
             if facet_unscoped(source) {
                 // Unscoped facet has no signal — not an empty-set digest posing
@@ -783,7 +783,7 @@ pub fn source_moved_since(
     for source in &resolved.sources {
         let (facet_ref, current) = match source {
             ResolvedSource::Primary(p) => (
-                p.facet_ref.clone(),
+                p.name.clone(),
                 current_primary_token(engine, p, &resolved.deny_paths, workspace_root),
             ),
             ResolvedSource::Reference { mem } => {
@@ -833,7 +833,7 @@ pub fn compute_source_cursor(
         // reference sources — matching the plugin's sync_state keying.
         let (facet_ref, outcome) = match source {
             ResolvedSource::Primary(p) => {
-                let key = format!("{}/{}#synced", resolved.name, p.facet_ref);
+                let key = format!("{}/{}#synced", resolved.name, p.name);
                 let baseline = baseline_map.get(&key).map(String::as_str);
                 let outcome = match resolve_change_strategy(p, workspace_root) {
                     ChangeStrategy::Git => {
@@ -841,7 +841,7 @@ pub fn compute_source_cursor(
                     }
                     // A graph-typed primary's medium pointer is the source mem id.
                     ChangeStrategy::Graph => {
-                        compute_graph_slice(engine, &p.medium_pointer, baseline)
+                        compute_graph_slice(engine, &p.pointer, baseline)
                     }
                     ChangeStrategy::Mtime => compute_mtime_slice(
                         p,
@@ -856,7 +856,7 @@ pub fn compute_source_cursor(
                         reason: NoSignalReason::DetectionNone,
                     },
                 };
-                (p.facet_ref.clone(), outcome)
+                (p.name.clone(), outcome)
             }
             ResolvedSource::Reference { mem } => {
                 let key = format!("{}/{}#synced", resolved.name, mem);
@@ -986,7 +986,7 @@ mod tests {
         );
     }
 
-    use crate::ingest::resolve::ResolvedPrimarySource;
+    use crate::ingest::resolve::Source;
     use crate::pipeline::{MediumType, PatternEntry};
 
     fn git(repo: &Path, args: &[&str]) {
@@ -1006,14 +1006,14 @@ mod tests {
         );
     }
 
-    fn primary(scope: Vec<PatternEntry>) -> ResolvedPrimarySource {
-        ResolvedPrimarySource {
-            facet_ref: "src".to_string(),
-            medium: "m".to_string(),
+    fn primary(scope: Vec<PatternEntry>) -> Source {
+        Source {
+            name: "src".to_string(),
             medium_type: MediumType::Codebase,
-            medium_pointer: String::new(),
-            declared_change_detection: Some("git".to_string()),
+            pointer: String::new(),
+            change_detection: Some("git".to_string()),
             scope,
+            engagement: None,
             preparation: None,
         }
     }
@@ -1346,7 +1346,7 @@ mod tests {
     /// The mtime `source_moved` / `current_primary_token` value: the digest
     /// token over the deny-filtered enumeration — exactly what the mtime branch
     /// of `current_primary_token` computes.
-    fn mtime_token(source: &ResolvedPrimarySource, deny: &[String], root: &Path) -> String {
+    fn mtime_token(source: &Source, deny: &[String], root: &Path) -> String {
         let files = enumerate_facet_files(source, deny, root);
         serialize_digest_token(&digest_stat_map(&compute_stat_map(&files, root)))
     }
@@ -1600,13 +1600,13 @@ mod tests {
             }]
         };
         let src = |facet: &str, declared: &str, scope: Vec<PatternEntry>| {
-            ResolvedSource::Primary(ResolvedPrimarySource {
-                facet_ref: facet.to_string(),
-                medium: "m".to_string(),
+            ResolvedSource::Primary(Source {
+                name: facet.to_string(),
                 medium_type: MediumType::Filesystem,
-                medium_pointer: String::new(),
-                declared_change_detection: Some(declared.to_string()),
+                pointer: String::new(),
+                change_detection: Some(declared.to_string()),
                 scope,
+                engagement: None,
                 preparation: None,
             })
         };

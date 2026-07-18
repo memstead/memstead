@@ -1,8 +1,18 @@
 {
-  "version": 1,
+  "version": 2,
   "intent": "Keep the reference mem true to the source tree",
-  "source_facets": [
-    "guide"
+  "sources": [
+    {
+      "name": "guide",
+      "type": "codebase",
+      "pointer": "../src",
+      "scope": [
+        {
+          "path": "**/*",
+          "mode": "allow"
+        }
+      ]
+    }
   ],
   "reference_mems": [],
   "destination_mem": "docs",

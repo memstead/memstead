@@ -83,28 +83,30 @@ pub(crate) fn medium_type_wire(t: crate::pipeline::MediumType) -> &'static str {
 }
 
 impl super::Engine {
-    /// Resolve the single-medium anchor-namespace context for `mem`, when
-    /// unambiguous. An `anchors[]` element carries no medium name, so the
+    /// Resolve the single-source anchor-namespace context for `mem`, when
+    /// unambiguous. An `anchors[]` element carries no source name, so the
     /// grain/namespace refusal ([`crate::anchor::AnchorValidationError::GrainNamespaceUnsupported`])
-    /// can only be fired deterministically when the mem declares exactly
-    /// one medium; with zero or several the namespace check is skipped
-    /// (the vocabulary + hash-semantics rules still apply). Returns the
-    /// `(medium_type_wire, anchor_namespace)` pair the validator consumes.
+    /// can only be fired deterministically when the mem's bindings declare
+    /// exactly one inline source; with zero or several the namespace check
+    /// is skipped (the vocabulary + hash-semantics rules still apply).
+    /// Returns the `(medium_type_wire, anchor_namespace)` pair the
+    /// validator consumes — the medium *half* of the lone source.
     pub(crate) fn resolve_anchor_medium(&self, mem: &str) -> Option<(String, &'static str)> {
-        let mut mediums = self
+        let mut sources = self
             .pipeline_configs()
-            .mediums
+            .bindings
             .iter()
-            .filter(|r| r.mem == mem);
-        let first = mediums.next()?;
-        if mediums.next().is_some() {
-            // Ambiguous — the anchor does not name which medium it targets;
+            .filter(|r| r.mem == mem)
+            .flat_map(|r| r.config.sources.iter());
+        let first = sources.next()?;
+        if sources.next().is_some() {
+            // Ambiguous — the anchor does not name which source it targets;
             // skip the namespace refinement rather than guess.
             return None;
         }
-        let caps = crate::binding::medium_capabilities(first.config.medium_type);
+        let caps = crate::binding::medium_capabilities(first.medium_type);
         Some((
-            medium_type_wire(first.config.medium_type).to_string(),
+            medium_type_wire(first.medium_type).to_string(),
             caps.anchor_namespace,
         ))
     }

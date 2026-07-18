@@ -7,6 +7,29 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Changed
+- **BREAKING: one record per pipeline (binding format v2).** The pipeline
+  configuration is consolidated into a single versioned record at
+  `.memstead/projections/<mem>/<name>.json` (`version: 2`): the standalone
+  `mediums/` and `facets/` record kinds are retired, their content folded
+  into the binding's inline `sources[]` — each source carries the medium
+  half (`type` / `pointer` / `change_detection`) and the facet half
+  (`scope` / `engagement` / `preparation`) under the facet's name verbatim,
+  so per-source sync watermarks keep resolving. The engine reads **only**
+  v2: a pre-v2 store (version-less gen-2 projection or v1 three-file
+  binding) refuses at load/boot with a typed error naming
+  `memstead projection migrate`, which now converts every prior on-disk
+  generation in place (folding medium+facet content inline, removing the
+  emptied `mediums/`/`facets/` trees, refusing on orphan records rather
+  than dropping them; idempotent on a migrated store). The edit surface is
+  projection-only everywhere — the eight medium/facet CRUD methods are gone
+  from the engine, UniFFI, and wire surfaces; the cross-record dangling-
+  reference error class is gone with the references (in-record source
+  validation replaces it: empty/duplicate source names refuse typed).
+  `hash(D)` now derives from the record alone, so pre-consolidation verify
+  findings are invalidated by construction (re-derivable measurements).
+  `Engine::pipeline_configs_json` returns `{ "bindings": [...] }` only.
+
 ### Added
 - **Per-binding verdict on the projection status drill-down.** Each
   `ProjectionStatus` entry now carries its own resolution — `verdict`

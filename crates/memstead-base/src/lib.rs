@@ -58,7 +58,8 @@ pub use anchor::{
 };
 pub use backend::{BackendError, MemBackend};
 pub use binding_migrate::{
-    BindingMigrateError, MigratedBinding, migrate_gen2_bindings, resolve_migrated_binding,
+    BindingMigrateError, LegacyBindingV1, MigratedBinding, check_all_consumed, fold_v1_binding,
+    migrate_gen2_bindings,
 };
 pub use engine::{
     BackendFactory, BootError, CreateEntityArgs, CreateEntityOutcome, DeleteEntityArgs,

@@ -68,7 +68,7 @@ use serde::{Deserialize, Serialize};
 use crate::Engine;
 use crate::anchor::{Anchor, AnchorState, ObservedArtifactHash};
 use crate::binding::{
-    BindingV1, DEFAULT_ADJUDICATION_CAP, DEFAULT_FULL_RESYNC_EVERY, ResolvedBinding, hash_binding,
+    Binding, DEFAULT_ADJUDICATION_CAP, DEFAULT_FULL_RESYNC_EVERY, hash_binding,
     medium_capabilities,
 };
 use crate::workspace_store::{StoreError, WORKSPACE_STORE_DIR};
@@ -432,12 +432,10 @@ pub enum FindingsError {
     /// (the hash of nothing) is indistinguishable from a genuinely empty
     /// source and would overwrite a real `#verified` baseline with fake
     /// state. Typed and visible, mirroring the D3 non-enumerable refusal.
-    #[error("source unreachable for facet '{facet}' (medium '{medium}'): `{path}` does not exist")]
+    #[error("source '{source_name}' unreachable: `{path}` does not exist")]
     SourceUnreachable {
-        /// The facet whose medium resolved to the missing path.
-        facet: String,
-        /// The medium's name.
-        medium: String,
+        /// The source whose pointer resolved to the missing path.
+        source_name: String,
         /// The resolved base path that does not exist.
         path: String,
     },
@@ -562,7 +560,7 @@ fn source_facet_label(resolved: &ResolvedIngest) -> String {
         .sources
         .iter()
         .filter_map(|s| match s {
-            ResolvedSource::Primary(p) => Some(p.facet_ref.as_str()),
+            ResolvedSource::Primary(p) => Some(p.name.as_str()),
             ResolvedSource::Reference { .. } => None,
         })
         .collect();
@@ -639,28 +637,17 @@ fn current_source_head(
     join_facet_heads(&current_facet_heads(engine, workspace_root, resolved))
 }
 
-/// `hash(D)` for a binding joined to its resolved primary sources.
-fn binding_hash_of(binding: &BindingV1, resolved: &ResolvedIngest) -> String {
-    let primary_sources = resolved
-        .sources
-        .iter()
-        .filter_map(|s| match s {
-            ResolvedSource::Primary(p) => Some(p.clone()),
-            ResolvedSource::Reference { .. } => None,
-        })
-        .collect();
-    let rb = ResolvedBinding {
-        binding: binding.clone(),
-        primary_sources,
-    };
-    hash_binding(&rb)
+/// `hash(D)` for a v2 binding — the record alone carries every content
+/// input, so the resolved shape is not needed.
+fn binding_hash_of(binding: &Binding, _resolved: &ResolvedIngest) -> String {
+    hash_binding(binding)
 }
 
 /// The current recording key for a binding: `(hash(D), source_head)`.
 fn current_key(
     engine: &Engine,
     workspace_root: &Path,
-    binding: &BindingV1,
+    binding: &Binding,
     resolved: &ResolvedIngest,
 ) -> FindingKey {
     FindingKey {
@@ -681,7 +668,7 @@ fn current_key(
 pub fn current_findings(
     engine: &Engine,
     workspace_root: &Path,
-    binding: &BindingV1,
+    binding: &Binding,
     resolved: &ResolvedIngest,
 ) -> Result<(FindingKey, Vec<Finding>), FindingsError> {
     let (mem, name) = split_binding_id(&resolved.name)?;
@@ -1057,7 +1044,7 @@ fn merge_with_prior(
 pub fn verify_binding(
     engine: &Engine,
     workspace_root: &Path,
-    binding: &BindingV1,
+    binding: &Binding,
     resolved: &ResolvedIngest,
 ) -> Result<VerifyOutcome, FindingsError> {
     run_verify(engine, workspace_root, binding, resolved, false)
@@ -1081,7 +1068,7 @@ pub fn verify_binding(
 pub fn verify_binding_full(
     engine: &Engine,
     workspace_root: &Path,
-    binding: &BindingV1,
+    binding: &Binding,
     resolved: &ResolvedIngest,
 ) -> Result<VerifyOutcome, FindingsError> {
     run_verify(engine, workspace_root, binding, resolved, true)
@@ -1093,7 +1080,7 @@ pub fn verify_binding_full(
 fn run_verify(
     engine: &Engine,
     workspace_root: &Path,
-    binding: &BindingV1,
+    binding: &Binding,
     resolved: &ResolvedIngest,
     full: bool,
 ) -> Result<VerifyOutcome, FindingsError> {
@@ -1109,7 +1096,7 @@ fn run_verify(
                 let medium_type = medium_type_wire(p.medium_type);
                 if !medium_capabilities(p.medium_type).enumerable {
                     return Err(FindingsError::FullWalkNonEnumerable(FullResyncRefusal {
-                        facet: p.facet_ref.clone(),
+                        facet: p.name.clone(),
                         medium_type: medium_type.clone(),
                         reason: format!(
                             "medium type '{medium_type}' is non-enumerable — a full-enumeration \
@@ -1139,8 +1126,7 @@ fn run_verify(
             let base = super::resolve::source_base_path(p, workspace_root);
             if !base.exists() {
                 return Err(FindingsError::SourceUnreachable {
-                    facet: p.facet_ref.clone(),
-                    medium: p.medium.clone(),
+                    source_name: p.name.clone(),
                     path: base.display().to_string(),
                 });
             }
@@ -1182,7 +1168,7 @@ fn run_verify(
         .iter()
         .filter_map(|s| match s {
             ResolvedSource::Primary(p) => Some(FacetEnumerability {
-                facet: p.facet_ref.clone(),
+                facet: p.name.clone(),
                 medium_type: medium_type_wire(p.medium_type),
                 enumerable: medium_capabilities(p.medium_type).enumerable,
             }),
@@ -1863,8 +1849,8 @@ mod tests {
         DEFAULT_FULL_RESYNC_EVERY, Operations, VerifyOperation,
     };
     use crate::ingest::resolve::resolve_binding_run;
-    use crate::pipeline::{Facet, IngestTrigger, Medium, MediumType, PatternEntry, PatternMode};
-    use crate::pipeline_store::{load_pipeline_configs, write_binding, write_facet, write_medium};
+    use crate::pipeline::{IngestTrigger, MediumType, PatternEntry, PatternMode};
+    use crate::pipeline_store::{load_pipeline_configs, write_binding};
     use crate::workspace::{
         Mount, MountCapability, MountLifecycle, MountStorage, Workspace, WorkspaceSettings,
     };
@@ -1959,42 +1945,25 @@ mod tests {
         .unwrap();
 
         // Binding engine/graph over a codebase facet (medium root = workspace).
-        write_medium(
-            root,
-            "engine",
-            "graph",
-            &Medium {
-                name: "graph".to_string(),
-                medium_type: MediumType::Codebase,
-                pointer: String::new(),
-                change_detection: Some("git".to_string()),
-            },
-        )
-        .unwrap();
-        write_facet(
-            root,
-            "engine",
-            "graph",
-            &Facet {
-                name: "graph".to_string(),
-                medium: "graph".to_string(),
-                scope: vec![PatternEntry {
-                    path: "src/**/*.rs".to_string(),
-                    mode: PatternMode::Allow,
-                }],
-                engagement: None,
-                preparation: None,
-            },
-        )
-        .unwrap();
         write_binding(
             root,
             "engine",
             "graph",
-            &BindingV1 {
+            &Binding {
                 version: BINDING_VERSION,
                 intent: None,
-                source_facets: vec!["graph".to_string()],
+                sources: vec![crate::pipeline::Source {
+                    name: "graph".to_string(),
+                    medium_type: MediumType::Codebase,
+                    pointer: String::new(),
+                    change_detection: Some("git".to_string()),
+                    scope: vec![PatternEntry {
+                    path: "src/**/*.rs".to_string(),
+                    mode: PatternMode::Allow,
+                }],
+                    engagement: None,
+                    preparation: None,
+                }],
                 reference_mems: Vec::new(),
                 destination_mem: "engine".to_string(),
                 deny_paths: Vec::new(),
@@ -2024,7 +1993,7 @@ mod tests {
 
         let configs = load_pipeline_configs(root).unwrap();
         let binding = &configs.bindings[0].config;
-        let resolved = resolve_binding_run(&configs, "engine/graph", binding).unwrap();
+        let resolved = resolve_binding_run("engine/graph", binding).unwrap();
 
         // `&engine` — shared borrow, structurally cannot mutate the mem (A5).
         let outcome = verify_binding(&engine, root, binding, &resolved).unwrap();
@@ -2166,42 +2135,25 @@ mod tests {
         )
         .unwrap();
 
-        write_medium(
-            root,
-            "engine",
-            "graph",
-            &Medium {
-                name: "graph".to_string(),
-                medium_type: MediumType::Codebase,
-                pointer: String::new(),
-                change_detection: Some("git".to_string()),
-            },
-        )
-        .unwrap();
-        write_facet(
-            root,
-            "engine",
-            "graph",
-            &Facet {
-                name: "graph".to_string(),
-                medium: "graph".to_string(),
-                scope: vec![PatternEntry {
-                    path: "src/**/*.rs".to_string(),
-                    mode: PatternMode::Allow,
-                }],
-                engagement: None,
-                preparation: None,
-            },
-        )
-        .unwrap();
         write_binding(
             root,
             "engine",
             "graph",
-            &BindingV1 {
+            &Binding {
                 version: BINDING_VERSION,
                 intent: None,
-                source_facets: vec!["graph".to_string()],
+                sources: vec![crate::pipeline::Source {
+                    name: "graph".to_string(),
+                    medium_type: MediumType::Codebase,
+                    pointer: String::new(),
+                    change_detection: Some("git".to_string()),
+                    scope: vec![PatternEntry {
+                    path: "src/**/*.rs".to_string(),
+                    mode: PatternMode::Allow,
+                }],
+                    engagement: None,
+                    preparation: None,
+                }],
                 reference_mems: Vec::new(),
                 destination_mem: "engine".to_string(),
                 deny_paths: Vec::new(),
@@ -2228,7 +2180,7 @@ mod tests {
         // Verify at head A — records the orphaned-anchor finding.
         let configs = load_pipeline_configs(root).unwrap();
         let binding = &configs.bindings[0].config;
-        let resolved = resolve_binding_run(&configs, "engine/graph", binding).unwrap();
+        let resolved = resolve_binding_run("engine/graph", binding).unwrap();
         let head_a_outcome = {
             let engine = Engine::from_workspace_root(root).unwrap();
             verify_binding(&engine, root, binding, &resolved).unwrap()
@@ -2397,42 +2349,25 @@ mod tests {
         )
         .unwrap();
 
-        write_medium(
-            root,
-            "engine",
-            "graph",
-            &Medium {
-                name: "graph".to_string(),
-                medium_type: MediumType::Codebase,
-                pointer: String::new(),
-                change_detection: Some("git".to_string()),
-            },
-        )
-        .unwrap();
-        write_facet(
-            root,
-            "engine",
-            "graph",
-            &Facet {
-                name: "graph".to_string(),
-                medium: "graph".to_string(),
-                scope: vec![PatternEntry {
-                    path: "src/**/*.rs".to_string(),
-                    mode: PatternMode::Allow,
-                }],
-                engagement: None,
-                preparation: None,
-            },
-        )
-        .unwrap();
         write_binding(
             root,
             "engine",
             "graph",
-            &BindingV1 {
+            &Binding {
                 version: BINDING_VERSION,
                 intent: None,
-                source_facets: vec!["graph".to_string()],
+                sources: vec![crate::pipeline::Source {
+                    name: "graph".to_string(),
+                    medium_type: MediumType::Codebase,
+                    pointer: String::new(),
+                    change_detection: Some("git".to_string()),
+                    scope: vec![PatternEntry {
+                    path: "src/**/*.rs".to_string(),
+                    mode: PatternMode::Allow,
+                }],
+                    engagement: None,
+                    preparation: None,
+                }],
                 reference_mems: Vec::new(),
                 destination_mem: "engine".to_string(),
                 deny_paths: Vec::new(),
@@ -2455,7 +2390,7 @@ mod tests {
 
         let configs = load_pipeline_configs(root).unwrap();
         let binding = &configs.bindings[0].config;
-        let resolved = resolve_binding_run(&configs, "engine/graph", binding).unwrap();
+        let resolved = resolve_binding_run("engine/graph", binding).unwrap();
 
         // --- Pass 1: first observation backfills, once. ---
         {
@@ -2768,42 +2703,25 @@ mod tests {
         // The medium points at a subdirectory that does NOT exist — the
         // vanished-source case (`git` declared, so pre-fix the strategy
         // layer silently degraded instead of refusing).
-        write_medium(
-            root,
-            "engine",
-            "gone",
-            &Medium {
-                name: "gone".to_string(),
-                medium_type: MediumType::Codebase,
-                pointer: "vanished-src".to_string(),
-                change_detection: Some("git".to_string()),
-            },
-        )
-        .unwrap();
-        write_facet(
-            root,
-            "engine",
-            "gone",
-            &Facet {
-                name: "gone".to_string(),
-                medium: "gone".to_string(),
-                scope: vec![PatternEntry {
-                    path: "**/*.rs".to_string(),
-                    mode: PatternMode::Allow,
-                }],
-                engagement: None,
-                preparation: None,
-            },
-        )
-        .unwrap();
         write_binding(
             root,
             "engine",
             "gone",
-            &BindingV1 {
+            &Binding {
                 version: BINDING_VERSION,
                 intent: None,
-                source_facets: vec!["gone".to_string()],
+                sources: vec![crate::pipeline::Source {
+                    name: "gone".to_string(),
+                    medium_type: MediumType::Codebase,
+                    pointer: "vanished-src".to_string(),
+                    change_detection: Some("git".to_string()),
+                    scope: vec![PatternEntry {
+                    path: "**/*.rs".to_string(),
+                    mode: PatternMode::Allow,
+                }],
+                    engagement: None,
+                    preparation: None,
+                }],
                 reference_mems: Vec::new(),
                 destination_mem: "engine".to_string(),
                 deny_paths: Vec::new(),
@@ -2827,16 +2745,11 @@ mod tests {
         let engine = Engine::from_workspace_root(root).unwrap();
         let configs = load_pipeline_configs(root).unwrap();
         let binding = &configs.bindings[0].config;
-        let resolved = resolve_binding_run(&configs, "engine/gone", binding).unwrap();
+        let resolved = resolve_binding_run("engine/gone", binding).unwrap();
 
         match verify_binding(&engine, root, binding, &resolved) {
-            Err(FindingsError::SourceUnreachable {
-                facet,
-                medium,
-                path,
-            }) => {
-                assert_eq!(facet, "gone");
-                assert_eq!(medium, "gone");
+            Err(FindingsError::SourceUnreachable { source_name, path }) => {
+                assert_eq!(source_name, "gone");
                 assert!(
                     path.ends_with("vanished-src"),
                     "refusal must name the resolved missing path, got `{path}`",
@@ -2902,42 +2815,25 @@ mod tests {
             .unwrap();
         assert!(out.status.success());
 
-        write_medium(
-            root,
-            "engine",
-            "graph",
-            &Medium {
-                name: "graph".to_string(),
-                medium_type: MediumType::Codebase,
-                pointer: String::new(),
-                change_detection: Some("git".to_string()),
-            },
-        )
-        .unwrap();
-        write_facet(
-            root,
-            "engine",
-            "graph",
-            &Facet {
-                name: "graph".to_string(),
-                medium: "graph".to_string(),
-                scope: vec![PatternEntry {
-                    path: "src/**/*.rs".to_string(),
-                    mode: PatternMode::Allow,
-                }],
-                engagement: None,
-                preparation: None,
-            },
-        )
-        .unwrap();
         write_binding(
             root,
             "engine",
             "graph",
-            &BindingV1 {
+            &Binding {
                 version: BINDING_VERSION,
                 intent: None,
-                source_facets: vec!["graph".to_string()],
+                sources: vec![crate::pipeline::Source {
+                    name: "graph".to_string(),
+                    medium_type: MediumType::Codebase,
+                    pointer: String::new(),
+                    change_detection: Some("git".to_string()),
+                    scope: vec![PatternEntry {
+                    path: "src/**/*.rs".to_string(),
+                    mode: PatternMode::Allow,
+                }],
+                    engagement: None,
+                    preparation: None,
+                }],
                 reference_mems: Vec::new(),
                 destination_mem: "engine".to_string(),
                 deny_paths: Vec::new(),
@@ -2972,7 +2868,7 @@ mod tests {
 
         let configs = load_pipeline_configs(root).unwrap();
         let binding = &configs.bindings[0].config;
-        let resolved = resolve_binding_run(&configs, "engine/graph", binding).unwrap();
+        let resolved = resolve_binding_run("engine/graph", binding).unwrap();
 
         let outcome = verify_binding(&engine, root, binding, &resolved).unwrap();
         // The outcome decomposes its own key: joined facet heads == source_head.
@@ -3210,42 +3106,25 @@ mod tests {
             std::fs::write(root.join("src").join(f), "fn x() {}\n").unwrap();
         }
 
-        write_medium(
-            root,
-            "engine",
-            "graph",
-            &Medium {
-                name: "graph".to_string(),
-                medium_type: MediumType::Codebase,
-                pointer: String::new(),
-                change_detection: Some("git".to_string()),
-            },
-        )
-        .unwrap();
-        write_facet(
-            root,
-            "engine",
-            "graph",
-            &Facet {
-                name: "graph".to_string(),
-                medium: "graph".to_string(),
-                scope: vec![PatternEntry {
-                    path: "src/**/*.rs".to_string(),
-                    mode: PatternMode::Allow,
-                }],
-                engagement: None,
-                preparation: None,
-            },
-        )
-        .unwrap();
         write_binding(
             root,
             "engine",
             "graph",
-            &BindingV1 {
+            &Binding {
                 version: BINDING_VERSION,
                 intent: None,
-                source_facets: vec!["graph".to_string()],
+                sources: vec![crate::pipeline::Source {
+                    name: "graph".to_string(),
+                    medium_type: MediumType::Codebase,
+                    pointer: String::new(),
+                    change_detection: Some("git".to_string()),
+                    scope: vec![PatternEntry {
+                    path: "src/**/*.rs".to_string(),
+                    mode: PatternMode::Allow,
+                }],
+                    engagement: None,
+                    preparation: None,
+                }],
                 reference_mems: Vec::new(),
                 destination_mem: "engine".to_string(),
                 deny_paths: Vec::new(),
@@ -3274,7 +3153,7 @@ mod tests {
         let engine = Engine::from_workspace_root(root).unwrap();
         let configs = load_pipeline_configs(root).unwrap();
         let binding = &configs.bindings[0].config;
-        let resolved = resolve_binding_run(&configs, "engine/graph", binding).unwrap();
+        let resolved = resolve_binding_run("engine/graph", binding).unwrap();
 
         let outcome = verify_binding(&engine, root, binding, &resolved).unwrap();
         // The full walk is due on run 1 and covers the enumerable facet.
@@ -3384,42 +3263,25 @@ mod tests {
         )
         .unwrap();
 
-        write_medium(
-            root,
-            "engine",
-            "graph",
-            &Medium {
-                name: "graph".to_string(),
-                medium_type: MediumType::Codebase,
-                pointer: String::new(),
-                change_detection: Some("git".to_string()),
-            },
-        )
-        .unwrap();
-        write_facet(
-            root,
-            "engine",
-            "graph",
-            &Facet {
-                name: "graph".to_string(),
-                medium: "graph".to_string(),
-                scope: vec![PatternEntry {
-                    path: "src/**/*.rs".to_string(),
-                    mode: PatternMode::Allow,
-                }],
-                engagement: None,
-                preparation: None,
-            },
-        )
-        .unwrap();
         write_binding(
             root,
             "engine",
             "graph",
-            &BindingV1 {
+            &Binding {
                 version: BINDING_VERSION,
                 intent: None,
-                source_facets: vec!["graph".to_string()],
+                sources: vec![crate::pipeline::Source {
+                    name: "graph".to_string(),
+                    medium_type: MediumType::Codebase,
+                    pointer: String::new(),
+                    change_detection: Some("git".to_string()),
+                    scope: vec![PatternEntry {
+                    path: "src/**/*.rs".to_string(),
+                    mode: PatternMode::Allow,
+                }],
+                    engagement: None,
+                    preparation: None,
+                }],
                 reference_mems: Vec::new(),
                 destination_mem: "engine".to_string(),
                 deny_paths: Vec::new(),
@@ -3443,7 +3305,7 @@ mod tests {
         let engine = Engine::from_workspace_root(root).unwrap();
         let configs = load_pipeline_configs(root).unwrap();
         let binding = &configs.bindings[0].config;
-        let resolved = resolve_binding_run(&configs, "engine/graph", binding).unwrap();
+        let resolved = resolve_binding_run("engine/graph", binding).unwrap();
 
         // Byte-compat leg — the no-flag run keeps today's capped/sampled
         // economics: one candidate adjudicated, two queued by the cap, at
@@ -3547,39 +3409,22 @@ mod tests {
             .unwrap();
 
         // A web medium — the capability matrix marks it non-enumerable.
-        write_medium(
-            root,
-            "engine",
-            "manual",
-            &Medium {
-                name: "manual".to_string(),
-                medium_type: MediumType::Web,
-                pointer: "https://example.com/docs".to_string(),
-                change_detection: None,
-            },
-        )
-        .unwrap();
-        write_facet(
-            root,
-            "engine",
-            "manual",
-            &Facet {
-                name: "manual".to_string(),
-                medium: "manual".to_string(),
-                scope: Vec::new(),
-                engagement: None,
-                preparation: None,
-            },
-        )
-        .unwrap();
         write_binding(
             root,
             "engine",
             "manual",
-            &BindingV1 {
+            &Binding {
                 version: BINDING_VERSION,
                 intent: None,
-                source_facets: vec!["manual".to_string()],
+                sources: vec![crate::pipeline::Source {
+                    name: "manual".to_string(),
+                    medium_type: MediumType::Web,
+                    pointer: "https://example.com/docs".to_string(),
+                    change_detection: None,
+                    scope: Vec::new(),
+                    engagement: None,
+                    preparation: None,
+                }],
                 reference_mems: Vec::new(),
                 destination_mem: "engine".to_string(),
                 deny_paths: Vec::new(),
@@ -3603,7 +3448,7 @@ mod tests {
         let engine = Engine::from_workspace_root(root).unwrap();
         let configs = load_pipeline_configs(root).unwrap();
         let binding = &configs.bindings[0].config;
-        let resolved = resolve_binding_run(&configs, "engine/manual", binding).unwrap();
+        let resolved = resolve_binding_run("engine/manual", binding).unwrap();
 
         // Full: typed refusal naming the facet and medium type; nothing recorded.
         let err = verify_binding_full(&engine, root, binding, &resolved).unwrap_err();

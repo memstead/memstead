@@ -85,9 +85,10 @@ pub use report::{
     FacetCapability, FacetFreshness, FidelityReport, GrainCoverage, RenderedFidelityReport,
     TreeFanout, compute_fidelity_report, render_fidelity_report,
 };
+pub use crate::pipeline::Source;
 pub use resolve::{
-    ChangeStrategy, ResolveError, ResolvedIngest, ResolvedPrimarySource, ResolvedSource,
-    find_git_root, resolve_binding, resolve_binding_run, resolve_change_strategy,
+    ChangeStrategy, ResolveError, ResolvedIngest, ResolvedSource, find_git_root,
+    resolve_binding_run, resolve_change_strategy,
 };
 pub use selection::{
     BackoffEntry, MAX_SKIP_LEVEL, OperationFilter, OperationKind, apply_backoff, select_next_due,

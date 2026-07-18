@@ -221,7 +221,7 @@ pub struct Engine {
     /// runtime surface — exposed through [`Self::pipeline_configs`]; the
     /// engine neither runs nor schedules pipelines (the ingest skill and
     /// future consumers do).
-    pipeline_configs: crate::pipeline_store::PipelineConfigs,
+    pipeline_configs: crate::pipeline_store::BindingConfigs,
     /// Runtime snapshot of writable / visible mems. Derived from
     /// the mount list at construction: writable mounts
     /// (`MountCapability::Write`) register via `add_writable` with

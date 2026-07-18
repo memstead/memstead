@@ -1,7 +1,24 @@
 {
-  "version": 1,
+  "version": 2,
+  "sources": [
+    {
+      "name": "source-tree",
+      "type": "codebase",
+      "pointer": "../src",
+      "scope": [
+        {
+          "path": "../src/**/*.rs",
+          "mode": "allow"
+        }
+      ]
+    }
+  ],
   "destination_mem": "docs",
   "operations": {
-    "build": { "mode": "discovery", "trigger": "manual", "batch_size": 10 }
+    "build": {
+      "mode": "discovery",
+      "trigger": "manual",
+      "batch_size": 10
+    }
   }
 }
