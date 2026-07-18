@@ -18,6 +18,16 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   fields; the rollup's semantics are unchanged and now provably shared (one
   scan, two projections).
 
+### Fixed
+- **MCP contract now states the true `require_notes` semantics.** The server
+  instructions and the `memstead_create` tool description claimed a missing
+  note *refuses* with `NOTE_MISSING` when `[mutations].require_notes = true`;
+  the engine has always warned and committed ("the policy nudges, it never
+  blocks" — behavior test-asserted, and the CLI help said so correctly). The
+  descriptions, the pinned instruction copy in the tool-surface suite, and the
+  generated MCP reference now say **non-blocking warning**. Contract text only
+  — no behavior change on any surface.
+
 ### Changed
 - `/sync --all` under a recurring loop now **ends the loop on quiescence**:
   a second consecutive nothing-due rotation means the catch-up job is done —
