@@ -962,7 +962,7 @@ fn migrate(ctx: &CliContext, args: MigrateArgs) -> anyhow::Result<()> {
                 ProjectionGeneration::V2 => already_v2 += 1,
                 ProjectionGeneration::V1(v1) => {
                     let consumed = v1.source_facets.clone();
-                    let binding = fold_v1_binding(&binding_id, &mem, &v1, &configs)
+                    let binding = fold_v1_binding(&binding_id, &mem, v1.as_ref(), &configs)
                         .map_err(map_migrate_err)?;
                     migrated.push(memstead_base::binding_migrate::MigratedBinding {
                         id: binding_id,

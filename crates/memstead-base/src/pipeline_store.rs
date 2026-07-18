@@ -593,8 +593,10 @@ pub fn load_pipeline_configs(workspace_root: &Path) -> Result<BindingConfigs, St
 pub enum ProjectionGeneration {
     /// Already the live v2 single-record format — nothing to do (idempotence).
     V2,
-    /// A v1 three-file-store binding — the fold leg converts it.
-    V1(crate::binding_migrate::LegacyBindingV1),
+    /// A v1 three-file-store binding — the fold leg converts it. Boxed so
+    /// the enum stays small beside the data-less variants (clippy
+    /// large_enum_variant).
+    V1(Box<crate::binding_migrate::LegacyBindingV1>),
     /// A version-less gen-2 projection. The ingest-driven gen-2 leg covers
     /// the ones an ingest schedules; a leftover here is inert (nothing ever
     /// ran it) and the migrate command surfaces it rather than guessing.
@@ -641,7 +643,7 @@ pub fn load_projection_generations(
                         .unwrap_or_default(),
                         message: e.to_string(),
                     })?;
-                ProjectionGeneration::V1(v1)
+                ProjectionGeneration::V1(Box::new(v1))
             }
             _ => ProjectionGeneration::VersionLess,
         };
