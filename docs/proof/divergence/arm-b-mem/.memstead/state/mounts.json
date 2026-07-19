@@ -1,0 +1,16 @@
+{
+  "format": "memstead-mounts-3",
+  "mounts": [
+    {
+      "mem": "kara-knowledge",
+      "schema": "software@0.1.0",
+      "storage": {
+        "type": "folder",
+        "path": ""
+      },
+      "capability": "write",
+      "lifecycle": "eager",
+      "cross_linkable": true
+    }
+  ]
+}

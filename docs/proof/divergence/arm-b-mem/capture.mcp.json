@@ -1,0 +1,1 @@
+{"mcpServers":{"memstead":{"args":["-c","cd /Users/bjornbosenberg/Projekte/memstead/public/docs/proof/divergence/arm-b-mem && exec /Users/bjornbosenberg/Projekte/memstead/public/target/debug/memstead-mcp"],"command":"sh"}}}

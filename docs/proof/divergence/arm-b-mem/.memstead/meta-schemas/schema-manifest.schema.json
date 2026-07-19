@@ -1,0 +1,258 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SchemaManifest",
+  "type": "object",
+  "properties": {
+    "alias_target_rel_type": {
+      "description": "Schema-level pointer naming the rel-type that body wiki-links\n`[[target]]` should auto-emit as engine-synthesised relations.\n`None` (default) means the schema is opt-out of alias synthesis\n— unbacked body wiki-links continue to refuse with\n`WIKILINK_WITHOUT_RELATION`. When set, the named rel-type must\nbe declared in `relationships.definitions` or schema load\nfails with `SchemaLoadError::AliasTargetRelTypeNotDeclared`.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "community": {
+      "$ref": "#/$defs/CommunityConfig"
+    },
+    "cross_mem_relationships": {
+      "description": "Outbound cross-mem relationship vocabulary, per target schema\ndomain. Each entry names a target schema (bare name — never a\nversion; eligibility is name-based) and lists rel-types that may\ncross the boundary in that direction. Absent or `[]` means the\nschema declares no outbound cross-mem edges. Source-ownership\nonly — third-party bridge schemas are not modelled; each\ndirection is owned by exactly one schema.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/CrossMemRelationshipEntry"
+      }
+    },
+    "default_writing_guidance": {
+      "description": "Schema-generic writing guidance — `avoid` and `goal` prose that\napplies to every mem pinned to this schema. The plugin layer\nconcatenates these with per-mem `writeGuidance.avoid_additions`\n/ `goal_additions` (an opaque pass-through on the engine side —\nsee `MemConfig::write_guidance`'s contract).",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DefaultWritingGuidance"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "description": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "relationships": {
+      "$ref": "#/$defs/RelationshipVocabulary"
+    },
+    "system_message": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
+    },
+    "types": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "version": {
+      "description": "Semver string — parsed into `semver::Version` by the loader.",
+      "type": "string"
+    },
+    "when_to_use": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "name",
+    "version",
+    "description",
+    "when_to_use",
+    "types",
+    "relationships",
+    "community"
+  ],
+  "$defs": {
+    "Cardinality": {
+      "description": "Allowed cardinality ranges for `RelationshipDef::cardinality_per_source`.\nStringly-typed parsing rejected — typos surface at YAML load time via\n`serde`, the warning builder gets exhaustive matches, and the wire\npayload renders via `Display`.",
+      "type": "string",
+      "enum": [
+        "1",
+        "0..1",
+        "1..N",
+        "0..N"
+      ]
+    },
+    "CommunityConfig": {
+      "description": "Community-detection (Louvain) defaults — schema-level, not per-type.\n\nDistinct from the legacy `schemas::CommunityConfig` which was attached to\neach `TypeDefinition`; the legacy variant has been removed.",
+      "type": "object",
+      "properties": {
+        "resolution": {
+          "type": "number",
+          "format": "double"
+        },
+        "seed": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "resolution",
+        "seed"
+      ]
+    },
+    "CrossMemRelationshipEntry": {
+      "description": "One outbound cross-mem declaration — a target schema domain\n(named, never versioned) and the rel-types admitted in that\ndirection.\n\n`target_types` strings within each definition live in the target\nschema's namespace by construction — the source schema's loader\naccepts them as opaque since the target schema may not be present\nat source-schema load time.",
+      "type": "object",
+      "properties": {
+        "definitions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RelationshipDef"
+          }
+        },
+        "to_schema": {
+          "description": "Bare name of the target schema — the domain identity. A version\nsuffix (`software@1.0.0`) or range (`software@^1.0`) is rejected\nat schema load: cross-mem eligibility is name-based, so the\ndeclaration is satisfied by a target mem pinning *any* version\nof the named schema.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "to_schema",
+        "definitions"
+      ]
+    },
+    "DefaultWritingGuidance": {
+      "description": "Schema-level writing-guidance defaults. Both fields are optional so a\nschema can ship `avoid` without a `goal` (or vice versa). The engine\nsurfaces them via `build_schema_payload` at the top level of the\nschema-payload JSON; resolution (concatenation with mem additions)\nlives in the plugin layer.",
+      "type": "object",
+      "properties": {
+        "avoid": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "goal": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "ManualAuthoring": {
+      "description": "Manual-authoring posture declared per `RelationshipDef`.\n\n`Allow` (default) is the no-op posture for every rel-type a user\nor agent may author explicitly via `memstead_relate`. `Warn` lands the\nrelation but surfaces a warning so the audit trail records the\ndrift. `Forbidden` refuses with a typed code — used for rel-types\nthe engine emits via the body-link → relation alias machinery\n(e.g. REFERENCES), where explicit authoring duplicates work and\noften masks the author's intent. The schema's `when_to_use` text\nrides on the wire as recovery guidance.",
+      "type": "string",
+      "enum": [
+        "allow",
+        "warn",
+        "forbidden"
+      ]
+    },
+    "PerEdgeDescription": {
+      "description": "Per-edge description posture declared on a `RelationshipDef`.\n\n`Forbidden` (the default) rejects any trailing description text on\nedges of this rel-type. `Optional` accepts both shapes. `Required`\nrejects edges without a description — the schema author opts a\ncatch-all rel-type into this so every edge carries its own\nrationale.",
+      "type": "string",
+      "enum": [
+        "forbidden",
+        "optional",
+        "required"
+      ]
+    },
+    "RelationshipDef": {
+      "type": "object",
+      "properties": {
+        "acyclic": {
+          "description": "When true, the engine rejects writes that would close a cycle in the\nsubgraph restricted to edges of this relationship type. Defaults to\nfalse so existing user schemas stay opt-in. Semantically meaningless\non the `_default` sentinel (never a real edge's rel_type).",
+          "type": "boolean",
+          "default": false
+        },
+        "cardinality_per_source": {
+          "description": "Per-source cardinality hint, parsed and stored on the\nrelationship definition. Declarative only — the engine does not\ncurrently enforce it or warn when a relate pushes the source's\noutgoing count for this rel_type outside the declared range.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Cardinality"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "default_weight": {
+          "type": "number",
+          "format": "float"
+        },
+        "description": {
+          "type": "string"
+        },
+        "manual_authoring": {
+          "description": "Manual-authoring posture for this rel-type. `allow` (default)\nadmits explicit `memstead_relate` calls. `warn` lands the relation\nwith a `RELATION_MANUAL_AUTHORING_NOT_RECOMMENDED` warning.\n`forbidden` refuses explicit-author calls with the typed\n`RELATION_MANUAL_AUTHORING_FORBIDDEN` code. The body-link →\nrelation alias machinery (`memstead_update` / `memstead_create`'s\nwiki-link parser) is NOT gated — schema-emitted relations like\nREFERENCES synthesise unchanged.",
+          "$ref": "#/$defs/ManualAuthoring",
+          "default": "allow"
+        },
+        "name": {
+          "type": "string"
+        },
+        "per_edge_description": {
+          "description": "Per-edge description posture for edges of this rel-type:\n`forbidden` (default) rejects any trailing description text;\n`optional` accepts edges with or without a description;\n`required` rejects edges without a description. The schema\nauthor opts a catch-all rel-type (e.g. `OTHER`) into\n`required` to force per-edge documentation; most rel-types\nkeep the default `forbidden` posture so the rel-type's name\nis the edge's documentation.",
+          "$ref": "#/$defs/PerEdgeDescription",
+          "default": "forbidden"
+        },
+        "source_types": {
+          "description": "Schema-declared types whose entities may be the source of this\nedge. Empty (default) means shape-free — any source type admitted.\nThe loader validates every entry against the schema's declared\ntypes list; unknown names raise `SchemaLoadError::UndeclaredType`.\nAt write time, `memstead_relate` rejects shape violations with\n`INVALID_REL_SHAPE`.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "target_types": {
+          "description": "Same as `source_types` but for the target side. Empty = shape-free.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "when_to_use": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "description",
+        "default_weight"
+      ]
+    },
+    "RelationshipMode": {
+      "type": "string",
+      "enum": [
+        "strict",
+        "open"
+      ]
+    },
+    "RelationshipVocabulary": {
+      "type": "object",
+      "properties": {
+        "definitions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RelationshipDef"
+          }
+        },
+        "mode": {
+          "$ref": "#/$defs/RelationshipMode"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "definitions"
+      ]
+    }
+  }
+}

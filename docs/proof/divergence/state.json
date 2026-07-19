@@ -1,0 +1,4720 @@
+{
+  "pinned_hash": "3551f9c61bbc13987fbda4867b47c8659351e7e8c93336ad9a72907f6387689e",
+  "completed_rounds": 10,
+  "checkpoints": [
+    {
+      "round": 1,
+      "results": [
+        {
+          "task_id": "S1-open-bugs",
+          "on_scores": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "off_scores": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "on_mean": 0.0,
+          "off_mean": 0.0,
+          "delta": 0.0,
+          "on_stddev": 0.0,
+          "off_stddev": 0.0
+        },
+        {
+          "task_id": "S2-open-high-sev",
+          "on_scores": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "off_scores": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "on_mean": 0.0,
+          "off_mean": 0.0,
+          "delta": 0.0,
+          "on_stddev": 0.0,
+          "off_stddev": 0.0
+        },
+        {
+          "task_id": "S3-phase-status",
+          "on_scores": [
+            0.3,
+            0.2,
+            0.2
+          ],
+          "off_scores": [
+            0.1,
+            0.3,
+            0.1
+          ],
+          "on_mean": 0.2333333333333333,
+          "off_mean": 0.16666666666666666,
+          "delta": 0.06666666666666665,
+          "on_stddev": 0.04714045207910316,
+          "off_stddev": 0.09428090415820632
+        },
+        {
+          "task_id": "T1-selfhost-transitive-deps",
+          "on_scores": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "off_scores": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "on_mean": 0.0,
+          "off_mean": 0.0,
+          "delta": 0.0,
+          "on_stddev": 0.0,
+          "off_stddev": 0.0
+        },
+        {
+          "task_id": "T2-floor-transitive-deps",
+          "on_scores": [
+            0.0,
+            0.9,
+            0.0
+          ],
+          "off_scores": [
+            0.9,
+            0.9,
+            0.9
+          ],
+          "on_mean": 0.3,
+          "off_mean": 0.9,
+          "delta": -0.6000000000000001,
+          "on_stddev": 0.42426406871192857,
+          "off_stddev": 0.0
+        },
+        {
+          "task_id": "T3-selfhost-deps-on-9-10",
+          "on_scores": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "off_scores": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "on_mean": 0.0,
+          "off_mean": 0.0,
+          "delta": 0.0,
+          "on_stddev": 0.0,
+          "off_stddev": 0.0
+        },
+        {
+          "task_id": "C1-interpreter-role",
+          "on_scores": [
+            0.1,
+            0.2,
+            0.3
+          ],
+          "off_scores": [
+            0.2,
+            0.3,
+            0.3
+          ],
+          "on_mean": 0.20000000000000004,
+          "off_mean": 0.26666666666666666,
+          "delta": -0.06666666666666662,
+          "on_stddev": 0.0816496580927726,
+          "off_stddev": 0.04714045207910316
+        },
+        {
+          "task_id": "C2-language-redesign",
+          "on_scores": [
+            0.75,
+            0.5,
+            0.6
+          ],
+          "off_scores": [
+            0.75,
+            0.4,
+            0.4
+          ],
+          "on_mean": 0.6166666666666667,
+          "off_mean": 0.5166666666666666,
+          "delta": 0.10000000000000007,
+          "on_stddev": 0.10274023338281628,
+          "off_stddev": 0.1649915822768611
+        },
+        {
+          "task_id": "C3-phase-resequence",
+          "on_scores": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "off_scores": [
+            0.0,
+            0.0,
+            0.1
+          ],
+          "on_mean": 0.0,
+          "off_mean": 0.03333333333333333,
+          "delta": -0.03333333333333333,
+          "on_stddev": 0.0,
+          "off_stddev": 0.047140452079103175
+        },
+        {
+          "task_id": "A1-codegen-bug-count",
+          "on_scores": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "off_scores": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "on_mean": 0.0,
+          "off_mean": 0.0,
+          "delta": 0.0,
+          "on_stddev": 0.0,
+          "off_stddev": 0.0
+        },
+        {
+          "task_id": "A2-ledger-totals",
+          "on_scores": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "off_scores": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "on_mean": 0.0,
+          "off_mean": 0.0,
+          "delta": 0.0,
+          "on_stddev": 0.0,
+          "off_stddev": 0.0
+        },
+        {
+          "task_id": "A3-open-codegen-bugs",
+          "on_scores": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "off_scores": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "on_mean": 0.0,
+          "off_mean": 0.0,
+          "delta": 0.0,
+          "on_stddev": 0.0,
+          "off_stddev": 0.0
+        }
+      ]
+    },
+    {
+      "round": 3,
+      "results": [
+        {
+          "task_id": "S1-open-bugs",
+          "on_scores": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "off_scores": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "on_mean": 0.0,
+          "off_mean": 0.0,
+          "delta": 0.0,
+          "on_stddev": 0.0,
+          "off_stddev": 0.0
+        },
+        {
+          "task_id": "S2-open-high-sev",
+          "on_scores": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "off_scores": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "on_mean": 0.0,
+          "off_mean": 0.0,
+          "delta": 0.0,
+          "on_stddev": 0.0,
+          "off_stddev": 0.0
+        },
+        {
+          "task_id": "S3-phase-status",
+          "on_scores": [
+            0.1,
+            0.2,
+            0.1
+          ],
+          "off_scores": [
+            0.5,
+            0.4,
+            0.4
+          ],
+          "on_mean": 0.13333333333333333,
+          "off_mean": 0.43333333333333335,
+          "delta": -0.30000000000000004,
+          "on_stddev": 0.04714045207910317,
+          "off_stddev": 0.04714045207910316
+        },
+        {
+          "task_id": "T1-selfhost-transitive-deps",
+          "on_scores": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "off_scores": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "on_mean": 0.0,
+          "off_mean": 0.0,
+          "delta": 0.0,
+          "on_stddev": 0.0,
+          "off_stddev": 0.0
+        },
+        {
+          "task_id": "T2-floor-transitive-deps",
+          "on_scores": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "off_scores": [
+            0.5,
+            0.9,
+            0.9
+          ],
+          "on_mean": 0.0,
+          "off_mean": 0.7666666666666666,
+          "delta": -0.7666666666666666,
+          "on_stddev": 0.0,
+          "off_stddev": 0.18856180831641267
+        },
+        {
+          "task_id": "T3-selfhost-deps-on-9-10",
+          "on_scores": [
+            0.1,
+            0.0,
+            0.0
+          ],
+          "off_scores": [
+            0.0,
+            0.1,
+            0.0
+          ],
+          "on_mean": 0.03333333333333333,
+          "off_mean": 0.03333333333333333,
+          "delta": 0.0,
+          "on_stddev": 0.047140452079103175,
+          "off_stddev": 0.047140452079103175
+        },
+        {
+          "task_id": "C1-interpreter-role",
+          "on_scores": [
+            0.3,
+            0.1,
+            0.0
+          ],
+          "off_scores": [
+            0.2,
+            0.1,
+            0.2
+          ],
+          "on_mean": 0.13333333333333333,
+          "off_mean": 0.16666666666666666,
+          "delta": -0.033333333333333326,
+          "on_stddev": 0.1247219128924647,
+          "off_stddev": 0.04714045207910317
+        },
+        {
+          "task_id": "C2-language-redesign",
+          "on_scores": [
+            0.75,
+            0.85,
+            0.9
+          ],
+          "off_scores": [
+            0.4,
+            0.3,
+            0.4
+          ],
+          "on_mean": 0.8333333333333334,
+          "off_mean": 0.3666666666666667,
+          "delta": 0.4666666666666667,
+          "on_stddev": 0.062360956446232366,
+          "off_stddev": 0.04714045207910318
+        },
+        {
+          "task_id": "C3-phase-resequence",
+          "on_scores": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "off_scores": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "on_mean": 0.0,
+          "off_mean": 0.0,
+          "delta": 0.0,
+          "on_stddev": 0.0,
+          "off_stddev": 0.0
+        },
+        {
+          "task_id": "A1-codegen-bug-count",
+          "on_scores": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "off_scores": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "on_mean": 0.0,
+          "off_mean": 0.0,
+          "delta": 0.0,
+          "on_stddev": 0.0,
+          "off_stddev": 0.0
+        },
+        {
+          "task_id": "A2-ledger-totals",
+          "on_scores": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "off_scores": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "on_mean": 0.0,
+          "off_mean": 0.0,
+          "delta": 0.0,
+          "on_stddev": 0.0,
+          "off_stddev": 0.0
+        },
+        {
+          "task_id": "A3-open-codegen-bugs",
+          "on_scores": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "off_scores": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "on_mean": 0.0,
+          "off_mean": 0.0,
+          "delta": 0.0,
+          "on_stddev": 0.0,
+          "off_stddev": 0.0
+        }
+      ]
+    },
+    {
+      "round": 5,
+      "results": [
+        {
+          "task_id": "S1-open-bugs",
+          "on_scores": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "off_scores": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "on_mean": 0.0,
+          "off_mean": 0.0,
+          "delta": 0.0,
+          "on_stddev": 0.0,
+          "off_stddev": 0.0
+        },
+        {
+          "task_id": "S2-open-high-sev",
+          "on_scores": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "off_scores": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "on_mean": 0.0,
+          "off_mean": 0.0,
+          "delta": 0.0,
+          "on_stddev": 0.0,
+          "off_stddev": 0.0
+        },
+        {
+          "task_id": "S3-phase-status",
+          "on_scores": [
+            0.4,
+            0.4,
+            0.4
+          ],
+          "off_scores": [
+            0.1,
+            0.0,
+            0.1
+          ],
+          "on_mean": 0.4000000000000001,
+          "off_mean": 0.06666666666666667,
+          "delta": 0.3333333333333334,
+          "on_stddev": 5.551115123125783e-17,
+          "off_stddev": 0.04714045207910317
+        },
+        {
+          "task_id": "T1-selfhost-transitive-deps",
+          "on_scores": [
+            0.1,
+            0.3,
+            0.3
+          ],
+          "off_scores": [
+            0.7,
+            0.85,
+            0.6
+          ],
+          "on_mean": 0.2333333333333333,
+          "off_mean": 0.7166666666666667,
+          "delta": -0.4833333333333334,
+          "on_stddev": 0.09428090415820632,
+          "off_stddev": 0.10274023338281628
+        },
+        {
+          "task_id": "T2-floor-transitive-deps",
+          "on_scores": [
+            0.0,
+            0.0,
+            0.1
+          ],
+          "off_scores": [
+            0.85,
+            0.6,
+            0.9
+          ],
+          "on_mean": 0.03333333333333333,
+          "off_mean": 0.7833333333333333,
+          "delta": -0.75,
+          "on_stddev": 0.047140452079103175,
+          "off_stddev": 0.13123346456686352
+        },
+        {
+          "task_id": "T3-selfhost-deps-on-9-10",
+          "on_scores": [
+            0.75,
+            0.8,
+            0.4
+          ],
+          "off_scores": [
+            0.9,
+            0.85,
+            0.9
+          ],
+          "on_mean": 0.65,
+          "off_mean": 0.8833333333333333,
+          "delta": -0.23333333333333328,
+          "on_stddev": 0.17795130420052185,
+          "off_stddev": 0.023570226039551608
+        },
+        {
+          "task_id": "C1-interpreter-role",
+          "on_scores": [
+            0.1,
+            0.3,
+            0.3
+          ],
+          "off_scores": [
+            0.4,
+            0.2,
+            0.55
+          ],
+          "on_mean": 0.2333333333333333,
+          "off_mean": 0.38333333333333336,
+          "delta": -0.15000000000000005,
+          "on_stddev": 0.09428090415820632,
+          "off_stddev": 0.14337208778404378
+        },
+        {
+          "task_id": "C2-language-redesign",
+          "on_scores": [
+            0.5,
+            0.75,
+            0.75
+          ],
+          "off_scores": [
+            0.7,
+            0.3,
+            0.4
+          ],
+          "on_mean": 0.6666666666666666,
+          "off_mean": 0.4666666666666666,
+          "delta": 0.2,
+          "on_stddev": 0.11785113019775792,
+          "off_stddev": 0.16996731711975946
+        },
+        {
+          "task_id": "C3-phase-resequence",
+          "on_scores": [
+            0.75,
+            0.7,
+            0.75
+          ],
+          "off_scores": [
+            0.5,
+            0.6,
+            0.4
+          ],
+          "on_mean": 0.7333333333333334,
+          "off_mean": 0.5,
+          "delta": 0.2333333333333334,
+          "on_stddev": 0.023570226039551608,
+          "off_stddev": 0.08164965809277258
+        },
+        {
+          "task_id": "A1-codegen-bug-count",
+          "on_scores": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "off_scores": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "on_mean": 0.0,
+          "off_mean": 0.0,
+          "delta": 0.0,
+          "on_stddev": 0.0,
+          "off_stddev": 0.0
+        },
+        {
+          "task_id": "A2-ledger-totals",
+          "on_scores": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "off_scores": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "on_mean": 0.0,
+          "off_mean": 0.0,
+          "delta": 0.0,
+          "on_stddev": 0.0,
+          "off_stddev": 0.0
+        },
+        {
+          "task_id": "A3-open-codegen-bugs",
+          "on_scores": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "off_scores": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "on_mean": 0.0,
+          "off_mean": 0.0,
+          "delta": 0.0,
+          "on_stddev": 0.0,
+          "off_stddev": 0.0
+        }
+      ]
+    },
+    {
+      "round": 10,
+      "results": [
+        {
+          "task_id": "S1-open-bugs",
+          "on_scores": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "off_scores": [
+            0.9,
+            0.85,
+            0.9
+          ],
+          "on_mean": 0.0,
+          "off_mean": 0.8833333333333333,
+          "delta": -0.8833333333333333,
+          "on_stddev": 0.0,
+          "off_stddev": 0.023570226039551608
+        },
+        {
+          "task_id": "S2-open-high-sev",
+          "on_scores": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "off_scores": [
+            1.0,
+            1.0,
+            0.7
+          ],
+          "on_mean": 0.0,
+          "off_mean": 0.9,
+          "delta": -0.9,
+          "on_stddev": 0.0,
+          "off_stddev": 0.14142135623730953
+        },
+        {
+          "task_id": "S3-phase-status",
+          "on_scores": [
+            0.6,
+            0.5,
+            0.5
+          ],
+          "off_scores": [
+            0.4,
+            0.4,
+            0.4
+          ],
+          "on_mean": 0.5333333333333333,
+          "off_mean": 0.4000000000000001,
+          "delta": 0.13333333333333325,
+          "on_stddev": 0.04714045207910316,
+          "off_stddev": 5.551115123125783e-17
+        },
+        {
+          "task_id": "T1-selfhost-transitive-deps",
+          "on_scores": [
+            0.3,
+            0.3,
+            0.3
+          ],
+          "off_scores": [
+            0.5,
+            0.75,
+            0.7
+          ],
+          "on_mean": 0.3,
+          "off_mean": 0.65,
+          "delta": -0.35000000000000003,
+          "on_stddev": 0.0,
+          "off_stddev": 0.10801234497346433
+        },
+        {
+          "task_id": "T2-floor-transitive-deps",
+          "on_scores": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "off_scores": [
+            0.9,
+            0.3,
+            0.9
+          ],
+          "on_mean": 0.0,
+          "off_mean": 0.7000000000000001,
+          "delta": -0.7000000000000001,
+          "on_stddev": 0.0,
+          "off_stddev": 0.282842712474619
+        },
+        {
+          "task_id": "T3-selfhost-deps-on-9-10",
+          "on_scores": [
+            0.85,
+            0.85,
+            0.5
+          ],
+          "off_scores": [
+            0.9,
+            0.95,
+            0.8
+          ],
+          "on_mean": 0.7333333333333334,
+          "off_mean": 0.8833333333333334,
+          "delta": -0.15000000000000002,
+          "on_stddev": 0.1649915822768611,
+          "off_stddev": 0.062360956446232324
+        },
+        {
+          "task_id": "C1-interpreter-role",
+          "on_scores": [
+            0.4,
+            0.6,
+            0.6
+          ],
+          "off_scores": [
+            0.5,
+            0.6,
+            0.3
+          ],
+          "on_mean": 0.5333333333333333,
+          "off_mean": 0.46666666666666673,
+          "delta": 0.0666666666666666,
+          "on_stddev": 0.09428090415820632,
+          "off_stddev": 0.1247219128924647
+        },
+        {
+          "task_id": "C2-language-redesign",
+          "on_scores": [
+            0.75,
+            0.75,
+            0.75
+          ],
+          "off_scores": [
+            0.3,
+            0.4,
+            0.2
+          ],
+          "on_mean": 0.75,
+          "off_mean": 0.3,
+          "delta": 0.45,
+          "on_stddev": 0.0,
+          "off_stddev": 0.08164965809277261
+        },
+        {
+          "task_id": "C3-phase-resequence",
+          "on_scores": [
+            0.5,
+            0.5,
+            0.75
+          ],
+          "off_scores": [
+            0.75,
+            0.7,
+            0.85
+          ],
+          "on_mean": 0.5833333333333334,
+          "off_mean": 0.7666666666666666,
+          "delta": -0.18333333333333324,
+          "on_stddev": 0.11785113019775792,
+          "off_stddev": 0.062360956446232366
+        },
+        {
+          "task_id": "A1-codegen-bug-count",
+          "on_scores": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "off_scores": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "on_mean": 0.0,
+          "off_mean": 0.0,
+          "delta": 0.0,
+          "on_stddev": 0.0,
+          "off_stddev": 0.0
+        },
+        {
+          "task_id": "A2-ledger-totals",
+          "on_scores": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "off_scores": [
+            0.2,
+            0.2,
+            0.2
+          ],
+          "on_mean": 0.0,
+          "off_mean": 0.20000000000000004,
+          "delta": -0.20000000000000004,
+          "on_stddev": 0.0,
+          "off_stddev": 2.7755575615628914e-17
+        },
+        {
+          "task_id": "A3-open-codegen-bugs",
+          "on_scores": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "off_scores": [
+            0.7,
+            0.85,
+            0.7
+          ],
+          "on_mean": 0.0,
+          "off_mean": 0.75,
+          "delta": -0.75,
+          "on_stddev": 0.0,
+          "off_stddev": 0.07071067811865477
+        }
+      ]
+    }
+  ],
+  "integrity_checkpoints": [
+    {
+      "round": 5,
+      "arm_a_items": 32,
+      "arm_b_items": 66,
+      "result": {
+        "task_id": "integrity@5",
+        "on_scores": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "off_scores": [
+          0.0,
+          1.5151515151515151,
+          3.0303030303030303
+        ],
+        "on_mean": 0.0,
+        "off_mean": 1.515151515151515,
+        "delta": -1.515151515151515,
+        "on_stddev": 0.0,
+        "off_stddev": 1.237116031708676
+      }
+    },
+    {
+      "round": 10,
+      "arm_a_items": 41,
+      "arm_b_items": 81,
+      "result": {
+        "task_id": "integrity@10",
+        "on_scores": [
+          12.195121951219512,
+          9.75609756097561,
+          2.4390243902439024
+        ],
+        "off_scores": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "on_mean": 8.130081300813009,
+        "off_mean": 0.0,
+        "delta": 8.130081300813009,
+        "on_stddev": 4.1455443199941335,
+        "off_stddev": 0.0
+      }
+    }
+  ],
+  "entropy_series": [
+    {
+      "round": 1,
+      "arm_a": {
+        "distinct_types": 9,
+        "distinct_status_values": 0,
+        "distinct_relation_labels": 35
+      },
+      "arm_b": {
+        "distinct_types": 7,
+        "distinct_status_values": 3,
+        "distinct_relation_labels": 43
+      }
+    },
+    {
+      "round": 2,
+      "arm_a": {
+        "distinct_types": 9,
+        "distinct_status_values": 0,
+        "distinct_relation_labels": 58
+      },
+      "arm_b": {
+        "distinct_types": 7,
+        "distinct_status_values": 3,
+        "distinct_relation_labels": 62
+      }
+    },
+    {
+      "round": 3,
+      "arm_a": {
+        "distinct_types": 9,
+        "distinct_status_values": 0,
+        "distinct_relation_labels": 72
+      },
+      "arm_b": {
+        "distinct_types": 7,
+        "distinct_status_values": 3,
+        "distinct_relation_labels": 68
+      }
+    },
+    {
+      "round": 4,
+      "arm_a": {
+        "distinct_types": 9,
+        "distinct_status_values": 0,
+        "distinct_relation_labels": 91
+      },
+      "arm_b": {
+        "distinct_types": 7,
+        "distinct_status_values": 3,
+        "distinct_relation_labels": 87
+      }
+    },
+    {
+      "round": 5,
+      "arm_a": {
+        "distinct_types": 9,
+        "distinct_status_values": 0,
+        "distinct_relation_labels": 114
+      },
+      "arm_b": {
+        "distinct_types": 7,
+        "distinct_status_values": 3,
+        "distinct_relation_labels": 106
+      }
+    },
+    {
+      "round": 6,
+      "arm_a": {
+        "distinct_types": 9,
+        "distinct_status_values": 0,
+        "distinct_relation_labels": 129
+      },
+      "arm_b": {
+        "distinct_types": 7,
+        "distinct_status_values": 3,
+        "distinct_relation_labels": 124
+      }
+    },
+    {
+      "round": 7,
+      "arm_a": {
+        "distinct_types": 9,
+        "distinct_status_values": 0,
+        "distinct_relation_labels": 135
+      },
+      "arm_b": {
+        "distinct_types": 7,
+        "distinct_status_values": 3,
+        "distinct_relation_labels": 129
+      }
+    },
+    {
+      "round": 8,
+      "arm_a": {
+        "distinct_types": 9,
+        "distinct_status_values": 0,
+        "distinct_relation_labels": 163
+      },
+      "arm_b": {
+        "distinct_types": 7,
+        "distinct_status_values": 3,
+        "distinct_relation_labels": 133
+      }
+    },
+    {
+      "round": 9,
+      "arm_a": {
+        "distinct_types": 9,
+        "distinct_status_values": 0,
+        "distinct_relation_labels": 179
+      },
+      "arm_b": {
+        "distinct_types": 7,
+        "distinct_status_values": 3,
+        "distinct_relation_labels": 153
+      }
+    },
+    {
+      "round": 10,
+      "arm_a": {
+        "distinct_types": 9,
+        "distinct_status_values": 0,
+        "distinct_relation_labels": 219
+      },
+      "arm_b": {
+        "distinct_types": 7,
+        "distinct_status_values": 3,
+        "distinct_relation_labels": 159
+      }
+    }
+  ],
+  "charges": [
+    {
+      "arm": "A",
+      "role": "Writer",
+      "tokens": 2141851,
+      "non_cache_tokens": 30486
+    },
+    {
+      "arm": "B",
+      "role": "Writer",
+      "tokens": 5536840,
+      "non_cache_tokens": 73951
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 115256,
+      "non_cache_tokens": 1194
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22642,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 167417,
+      "non_cache_tokens": 735
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22340,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 115870,
+      "non_cache_tokens": 1273
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22617,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 178195,
+      "non_cache_tokens": 929
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22506,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 114801,
+      "non_cache_tokens": 1359
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22757,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 315680,
+      "non_cache_tokens": 1358
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22460,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 178635,
+      "non_cache_tokens": 1765
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22365,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 481368,
+      "non_cache_tokens": 4009
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22367,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 114602,
+      "non_cache_tokens": 1536
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22346,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 420116,
+      "non_cache_tokens": 3585
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22295,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 113701,
+      "non_cache_tokens": 1080
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22377,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 384134,
+      "non_cache_tokens": 2937
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22301,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 110570,
+      "non_cache_tokens": 1072
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22533,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 332676,
+      "non_cache_tokens": 3575
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22732,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 114311,
+      "non_cache_tokens": 1199
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22508,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 353373,
+      "non_cache_tokens": 3726
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22655,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 83106,
+      "non_cache_tokens": 795
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22476,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 301097,
+      "non_cache_tokens": 2690
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22558,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 112612,
+      "non_cache_tokens": 989
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22364,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 187444,
+      "non_cache_tokens": 1483
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22444,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 141076,
+      "non_cache_tokens": 829
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22449,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 219501,
+      "non_cache_tokens": 1305
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22435,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 112740,
+      "non_cache_tokens": 662
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22381,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 222505,
+      "non_cache_tokens": 1529
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22448,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 117026,
+      "non_cache_tokens": 1431
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22550,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 326821,
+      "non_cache_tokens": 3141
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22646,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 109017,
+      "non_cache_tokens": 1129
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22535,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 432603,
+      "non_cache_tokens": 4860
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22860,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 108351,
+      "non_cache_tokens": 869
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22472,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 301477,
+      "non_cache_tokens": 4256
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22637,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 114045,
+      "non_cache_tokens": 1027
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22402,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 221543,
+      "non_cache_tokens": 1312
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22421,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 112854,
+      "non_cache_tokens": 993
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22407,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 221952,
+      "non_cache_tokens": 1274
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22413,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 113120,
+      "non_cache_tokens": 1120
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22461,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 216062,
+      "non_cache_tokens": 1169
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22383,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 273473,
+      "non_cache_tokens": 1822
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22356,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 160908,
+      "non_cache_tokens": 726
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22458,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 211870,
+      "non_cache_tokens": 1461
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22395,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 126530,
+      "non_cache_tokens": 548
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22457,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 122848,
+      "non_cache_tokens": 1104
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22377,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 158629,
+      "non_cache_tokens": 795
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22459,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 82977,
+      "non_cache_tokens": 1217
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22548,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 123494,
+      "non_cache_tokens": 714
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22562,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 108429,
+      "non_cache_tokens": 882
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22381,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 151347,
+      "non_cache_tokens": 880
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22720,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 113090,
+      "non_cache_tokens": 1063
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22320,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 172261,
+      "non_cache_tokens": 928
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22603,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 110581,
+      "non_cache_tokens": 1329
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22520,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 327312,
+      "non_cache_tokens": 2249
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22634,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 146968,
+      "non_cache_tokens": 1855
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22477,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 321931,
+      "non_cache_tokens": 2573
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22620,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 242663,
+      "non_cache_tokens": 2378
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22612,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 408865,
+      "non_cache_tokens": 2736
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22566,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 82775,
+      "non_cache_tokens": 756
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22364,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 172764,
+      "non_cache_tokens": 1229
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22255,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 86102,
+      "non_cache_tokens": 1619
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22460,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 173726,
+      "non_cache_tokens": 1203
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22485,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 85716,
+      "non_cache_tokens": 1163
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22370,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 202859,
+      "non_cache_tokens": 1003
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22273,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 84411,
+      "non_cache_tokens": 1402
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22449,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 160888,
+      "non_cache_tokens": 721
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22220,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 83881,
+      "non_cache_tokens": 1154
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22424,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 179327,
+      "non_cache_tokens": 943
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22293,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 113205,
+      "non_cache_tokens": 1316
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22465,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 162669,
+      "non_cache_tokens": 801
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22315,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 115761,
+      "non_cache_tokens": 1155
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22607,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 231010,
+      "non_cache_tokens": 2164
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22516,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 115851,
+      "non_cache_tokens": 1166
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22585,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 239966,
+      "non_cache_tokens": 1496
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22617,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 119353,
+      "non_cache_tokens": 1596
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22731,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 380943,
+      "non_cache_tokens": 3137
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22586,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Writer",
+      "tokens": 4712074,
+      "non_cache_tokens": 49902
+    },
+    {
+      "arm": "B",
+      "role": "Writer",
+      "tokens": 3403336,
+      "non_cache_tokens": 31965
+    },
+    {
+      "arm": "A",
+      "role": "Writer",
+      "tokens": 6623916,
+      "non_cache_tokens": 51459
+    },
+    {
+      "arm": "B",
+      "role": "Writer",
+      "tokens": 720699,
+      "non_cache_tokens": 27177
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 122289,
+      "non_cache_tokens": 1430
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22624,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 169226,
+      "non_cache_tokens": 832
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22483,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 122659,
+      "non_cache_tokens": 1507
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22642,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 203389,
+      "non_cache_tokens": 804
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22444,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 117702,
+      "non_cache_tokens": 1194
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22555,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 247602,
+      "non_cache_tokens": 1221
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22431,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 151041,
+      "non_cache_tokens": 1394
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22414,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 424732,
+      "non_cache_tokens": 2131
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22270,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 183299,
+      "non_cache_tokens": 1642
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22355,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 769304,
+      "non_cache_tokens": 6558
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22342,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 149424,
+      "non_cache_tokens": 1738
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22283,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 422110,
+      "non_cache_tokens": 2699
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22297,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 84519,
+      "non_cache_tokens": 1124
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22525,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 319243,
+      "non_cache_tokens": 3988
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22644,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 115456,
+      "non_cache_tokens": 1308
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22526,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 382291,
+      "non_cache_tokens": 4399
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22698,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 116082,
+      "non_cache_tokens": 1214
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22504,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 407689,
+      "non_cache_tokens": 4315
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22579,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 114761,
+      "non_cache_tokens": 751
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22463,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 274316,
+      "non_cache_tokens": 1442
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22446,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 114811,
+      "non_cache_tokens": 737
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22529,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 229830,
+      "non_cache_tokens": 1429
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22473,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 115401,
+      "non_cache_tokens": 1263
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22422,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 278814,
+      "non_cache_tokens": 1715
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22439,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 121587,
+      "non_cache_tokens": 1433
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22455,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 352009,
+      "non_cache_tokens": 5970
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22540,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 84765,
+      "non_cache_tokens": 805
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22475,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 283494,
+      "non_cache_tokens": 3430
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22472,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 115782,
+      "non_cache_tokens": 1619
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22563,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 349481,
+      "non_cache_tokens": 5733
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22715,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 114838,
+      "non_cache_tokens": 818
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22325,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 230826,
+      "non_cache_tokens": 1111
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22416,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 84892,
+      "non_cache_tokens": 992
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22433,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 284851,
+      "non_cache_tokens": 1764
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22539,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 114381,
+      "non_cache_tokens": 902
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22381,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 229852,
+      "non_cache_tokens": 1425
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22387,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 189976,
+      "non_cache_tokens": 1998
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22451,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 161158,
+      "non_cache_tokens": 745
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22373,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 295337,
+      "non_cache_tokens": 2960
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22515,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 162481,
+      "non_cache_tokens": 608
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22446,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 309220,
+      "non_cache_tokens": 1947
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22443,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 181895,
+      "non_cache_tokens": 1081
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22485,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 109066,
+      "non_cache_tokens": 794
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22324,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 135975,
+      "non_cache_tokens": 647
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22562,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 116689,
+      "non_cache_tokens": 1135
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22363,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 154962,
+      "non_cache_tokens": 754
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22560,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 112974,
+      "non_cache_tokens": 950
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22353,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 154996,
+      "non_cache_tokens": 760
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22558,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 184139,
+      "non_cache_tokens": 2372
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22418,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 351690,
+      "non_cache_tokens": 3006
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22670,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 147702,
+      "non_cache_tokens": 1922
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22484,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 280451,
+      "non_cache_tokens": 2736
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22630,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 219358,
+      "non_cache_tokens": 2740
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22590,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 943572,
+      "non_cache_tokens": 8847
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22580,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 84822,
+      "non_cache_tokens": 714
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22329,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 211366,
+      "non_cache_tokens": 1571
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22310,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 85643,
+      "non_cache_tokens": 917
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22408,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 180628,
+      "non_cache_tokens": 3494
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22524,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 86073,
+      "non_cache_tokens": 1439
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22442,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 178668,
+      "non_cache_tokens": 2379
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22299,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 85647,
+      "non_cache_tokens": 891
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22392,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 135573,
+      "non_cache_tokens": 923
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22294,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 85579,
+      "non_cache_tokens": 849
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22414,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 168076,
+      "non_cache_tokens": 842
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22364,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 85501,
+      "non_cache_tokens": 741
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22352,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 201882,
+      "non_cache_tokens": 903
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22185,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 126386,
+      "non_cache_tokens": 1655
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22720,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 178571,
+      "non_cache_tokens": 1863
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22596,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 196440,
+      "non_cache_tokens": 2389
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22711,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 169837,
+      "non_cache_tokens": 1401
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22374,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 126946,
+      "non_cache_tokens": 1512
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22673,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 204049,
+      "non_cache_tokens": 1133
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22429,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Writer",
+      "tokens": 7500005,
+      "non_cache_tokens": 55003
+    },
+    {
+      "arm": "B",
+      "role": "Writer",
+      "tokens": 5195334,
+      "non_cache_tokens": 56354
+    },
+    {
+      "arm": "A",
+      "role": "Writer",
+      "tokens": 12693592,
+      "non_cache_tokens": 78957
+    },
+    {
+      "arm": "B",
+      "role": "Writer",
+      "tokens": 6442179,
+      "non_cache_tokens": 43964
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 89243,
+      "non_cache_tokens": 786
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22618,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 284533,
+      "non_cache_tokens": 2588
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22702,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 89388,
+      "non_cache_tokens": 733
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22562,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 323125,
+      "non_cache_tokens": 2393
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22613,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 89415,
+      "non_cache_tokens": 740
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22510,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 374351,
+      "non_cache_tokens": 3002
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22732,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 162862,
+      "non_cache_tokens": 1228
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22371,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 809001,
+      "non_cache_tokens": 6179
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22360,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 127115,
+      "non_cache_tokens": 1284
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22371,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 817045,
+      "non_cache_tokens": 8095
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22387,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 124088,
+      "non_cache_tokens": 1123
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22304,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 964023,
+      "non_cache_tokens": 5879
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22359,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 87617,
+      "non_cache_tokens": 968
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22500,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 329393,
+      "non_cache_tokens": 3308
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22791,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 87478,
+      "non_cache_tokens": 989
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22533,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 276253,
+      "non_cache_tokens": 2441
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22667,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 86799,
+      "non_cache_tokens": 1004
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22560,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 496138,
+      "non_cache_tokens": 3340
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22761,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 86799,
+      "non_cache_tokens": 870
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22476,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 418148,
+      "non_cache_tokens": 2827
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22625,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 86853,
+      "non_cache_tokens": 866
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22493,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 374358,
+      "non_cache_tokens": 6316
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22619,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 87453,
+      "non_cache_tokens": 850
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22483,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 416944,
+      "non_cache_tokens": 2531
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22616,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 129289,
+      "non_cache_tokens": 1193
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22496,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 328386,
+      "non_cache_tokens": 9723
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22614,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 130440,
+      "non_cache_tokens": 1262
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22490,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 326318,
+      "non_cache_tokens": 5953
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22806,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 87168,
+      "non_cache_tokens": 858
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22496,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 579530,
+      "non_cache_tokens": 5288
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22698,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 88875,
+      "non_cache_tokens": 970
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22604,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 220598,
+      "non_cache_tokens": 1560
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22530,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 89303,
+      "non_cache_tokens": 868
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22509,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 264781,
+      "non_cache_tokens": 1636
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22612,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 88727,
+      "non_cache_tokens": 886
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22535,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 254019,
+      "non_cache_tokens": 1610
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22567,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 388628,
+      "non_cache_tokens": 2712
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22517,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 194808,
+      "non_cache_tokens": 881
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22416,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 194748,
+      "non_cache_tokens": 3051
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22692,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 198513,
+      "non_cache_tokens": 942
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22424,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 149954,
+      "non_cache_tokens": 1884
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22597,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 201573,
+      "non_cache_tokens": 1067
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22450,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 112201,
+      "non_cache_tokens": 1391
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22511,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 131262,
+      "non_cache_tokens": 827
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22643,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 111591,
+      "non_cache_tokens": 1243
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22346,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 158792,
+      "non_cache_tokens": 700
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22544,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 118533,
+      "non_cache_tokens": 977
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22326,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 158711,
+      "non_cache_tokens": 679
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22540,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 89578,
+      "non_cache_tokens": 740
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22419,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 174471,
+      "non_cache_tokens": 730
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22428,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 89382,
+      "non_cache_tokens": 782
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22374,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 133122,
+      "non_cache_tokens": 800
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22415,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 89532,
+      "non_cache_tokens": 726
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22388,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 133120,
+      "non_cache_tokens": 795
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22498,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 89234,
+      "non_cache_tokens": 640
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22280,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 456362,
+      "non_cache_tokens": 5479
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22502,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 88732,
+      "non_cache_tokens": 706
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22344,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 187819,
+      "non_cache_tokens": 1684
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22374,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 88669,
+      "non_cache_tokens": 741
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22311,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 229296,
+      "non_cache_tokens": 2338
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22390,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 89425,
+      "non_cache_tokens": 833
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22439,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 61657,
+      "non_cache_tokens": 381
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22234,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 89633,
+      "non_cache_tokens": 807
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22385,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 146410,
+      "non_cache_tokens": 1262
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22390,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 89426,
+      "non_cache_tokens": 860
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22370,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 219866,
+      "non_cache_tokens": 1162
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22369,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 89888,
+      "non_cache_tokens": 1105
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22548,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 346685,
+      "non_cache_tokens": 3327
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22605,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 126598,
+      "non_cache_tokens": 1132
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22661,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 390589,
+      "non_cache_tokens": 3608
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22766,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 89529,
+      "non_cache_tokens": 909
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22548,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 547830,
+      "non_cache_tokens": 4752
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22723,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Auditor",
+      "tokens": 118965,
+      "non_cache_tokens": 15134
+    },
+    {
+      "arm": "A",
+      "role": "Auditor",
+      "tokens": 105125,
+      "non_cache_tokens": 1294
+    },
+    {
+      "arm": "A",
+      "role": "Auditor",
+      "tokens": 107452,
+      "non_cache_tokens": 3621
+    },
+    {
+      "arm": "B",
+      "role": "Auditor",
+      "tokens": 102348,
+      "non_cache_tokens": 13646
+    },
+    {
+      "arm": "B",
+      "role": "Auditor",
+      "tokens": 105711,
+      "non_cache_tokens": 17009
+    },
+    {
+      "arm": "B",
+      "role": "Auditor",
+      "tokens": 114793,
+      "non_cache_tokens": 26091
+    },
+    {
+      "arm": "A",
+      "role": "Writer",
+      "tokens": 19459089,
+      "non_cache_tokens": 71510
+    },
+    {
+      "arm": "B",
+      "role": "Writer",
+      "tokens": 2908929,
+      "non_cache_tokens": 26271
+    },
+    {
+      "arm": "A",
+      "role": "Writer",
+      "tokens": 8151441,
+      "non_cache_tokens": 44445
+    },
+    {
+      "arm": "B",
+      "role": "Writer",
+      "tokens": 3803771,
+      "non_cache_tokens": 28600
+    },
+    {
+      "arm": "A",
+      "role": "Writer",
+      "tokens": 18107335,
+      "non_cache_tokens": 58890
+    },
+    {
+      "arm": "B",
+      "role": "Writer",
+      "tokens": 6498881,
+      "non_cache_tokens": 30166
+    },
+    {
+      "arm": "A",
+      "role": "Writer",
+      "tokens": 68436620,
+      "non_cache_tokens": 82291
+    },
+    {
+      "arm": "B",
+      "role": "Writer",
+      "tokens": 17967958,
+      "non_cache_tokens": 36897
+    },
+    {
+      "arm": "A",
+      "role": "Writer",
+      "tokens": 10477041,
+      "non_cache_tokens": 48350
+    },
+    {
+      "arm": "B",
+      "role": "Writer",
+      "tokens": 14914241,
+      "non_cache_tokens": 34532
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 106961,
+      "non_cache_tokens": 1415
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 23235,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 344030,
+      "non_cache_tokens": 2180
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22602,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 106020,
+      "non_cache_tokens": 1212
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 23159,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 302181,
+      "non_cache_tokens": 1656
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22562,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 105917,
+      "non_cache_tokens": 1159
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 23135,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 261266,
+      "non_cache_tokens": 2235
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22733,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 116268,
+      "non_cache_tokens": 966
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22400,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 401102,
+      "non_cache_tokens": 2827
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22391,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 149930,
+      "non_cache_tokens": 1219
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22449,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 486701,
+      "non_cache_tokens": 2889
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22308,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 117251,
+      "non_cache_tokens": 1044
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22439,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 620783,
+      "non_cache_tokens": 3898
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22355,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 104313,
+      "non_cache_tokens": 1284
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22570,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 606364,
+      "non_cache_tokens": 5624
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22702,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 155912,
+      "non_cache_tokens": 1748
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22636,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 349861,
+      "non_cache_tokens": 3848
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22645,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 153830,
+      "non_cache_tokens": 1731
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22675,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 444761,
+      "non_cache_tokens": 3727
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22721,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 96348,
+      "non_cache_tokens": 1008
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22518,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 557513,
+      "non_cache_tokens": 3928
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22650,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 95409,
+      "non_cache_tokens": 1125
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22531,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 544948,
+      "non_cache_tokens": 3497
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22669,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 96027,
+      "non_cache_tokens": 1139
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22581,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 469882,
+      "non_cache_tokens": 3306
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22653,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 92755,
+      "non_cache_tokens": 1338
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22621,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 323807,
+      "non_cache_tokens": 2943
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22663,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 116794,
+      "non_cache_tokens": 1273
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22530,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 264531,
+      "non_cache_tokens": 3992
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22621,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 122205,
+      "non_cache_tokens": 1221
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22506,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 283908,
+      "non_cache_tokens": 6495
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22656,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 96964,
+      "non_cache_tokens": 1135
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22523,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 234581,
+      "non_cache_tokens": 2093
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22601,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 244569,
+      "non_cache_tokens": 3597
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22767,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 231732,
+      "non_cache_tokens": 2097
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22843,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 103490,
+      "non_cache_tokens": 1055
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22569,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 190526,
+      "non_cache_tokens": 1578
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22540,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 60504,
+      "non_cache_tokens": 620
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22471,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 158295,
+      "non_cache_tokens": 793
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22412,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 91011,
+      "non_cache_tokens": 807
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22497,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 161222,
+      "non_cache_tokens": 676
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22400,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 156313,
+      "non_cache_tokens": 1563
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22403,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 132947,
+      "non_cache_tokens": 504
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22414,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 115676,
+      "non_cache_tokens": 965
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22324,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 133367,
+      "non_cache_tokens": 672
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22523,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 54256,
+      "non_cache_tokens": 505
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22337,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 190916,
+      "non_cache_tokens": 740
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22526,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 155587,
+      "non_cache_tokens": 5294
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22376,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 133472,
+      "non_cache_tokens": 717
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22540,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 92130,
+      "non_cache_tokens": 836
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22455,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 177546,
+      "non_cache_tokens": 743
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22462,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 95252,
+      "non_cache_tokens": 752
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22449,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 180809,
+      "non_cache_tokens": 783
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22423,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 94959,
+      "non_cache_tokens": 679
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22430,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 177658,
+      "non_cache_tokens": 755
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22524,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 107277,
+      "non_cache_tokens": 1927
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22518,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 422808,
+      "non_cache_tokens": 2992
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22374,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 106963,
+      "non_cache_tokens": 1389
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22573,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 150336,
+      "non_cache_tokens": 1782
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22407,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 124244,
+      "non_cache_tokens": 1516
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22448,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 311224,
+      "non_cache_tokens": 1944
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22370,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 115133,
+      "non_cache_tokens": 1641
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22737,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 318280,
+      "non_cache_tokens": 1722
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22332,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 159817,
+      "non_cache_tokens": 2398
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22619,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 289645,
+      "non_cache_tokens": 1817
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22547,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 115023,
+      "non_cache_tokens": 1530
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22639,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 242266,
+      "non_cache_tokens": 1257
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22281,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 106954,
+      "non_cache_tokens": 1509
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22947,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 231314,
+      "non_cache_tokens": 2429
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22632,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 107387,
+      "non_cache_tokens": 1594
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 23040,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 198247,
+      "non_cache_tokens": 2092
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22748,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Reader",
+      "tokens": 106871,
+      "non_cache_tokens": 1480
+    },
+    {
+      "arm": "A",
+      "role": "Judge",
+      "tokens": 22942,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "B",
+      "role": "Reader",
+      "tokens": 238516,
+      "non_cache_tokens": 2898
+    },
+    {
+      "arm": "B",
+      "role": "Judge",
+      "tokens": 22725,
+      "non_cache_tokens": 13
+    },
+    {
+      "arm": "A",
+      "role": "Auditor",
+      "tokens": 223601,
+      "non_cache_tokens": 21733
+    },
+    {
+      "arm": "A",
+      "role": "Auditor",
+      "tokens": 224016,
+      "non_cache_tokens": 22148
+    },
+    {
+      "arm": "A",
+      "role": "Auditor",
+      "tokens": 204093,
+      "non_cache_tokens": 2225
+    },
+    {
+      "arm": "B",
+      "role": "Auditor",
+      "tokens": 119759,
+      "non_cache_tokens": 1368
+    },
+    {
+      "arm": "B",
+      "role": "Auditor",
+      "tokens": 127843,
+      "non_cache_tokens": 9452
+    },
+    {
+      "arm": "B",
+      "role": "Auditor",
+      "tokens": 119836,
+      "non_cache_tokens": 1445
+    }
+  ]
+}
