@@ -182,6 +182,14 @@ pub enum Command {
     /// hash `4b825dc642cb6eb9a060e54bf8d69288fbee4904` for a first sync.
     Changes(commands::changes::Args),
 
+    /// Read and move the per-mem review mark — the engine's one
+    /// pointer per mem to the last human-approved state. `list` shows
+    /// every mem's mark and head; `set`/`clear` move it (explicit
+    /// target only); `diff` reports the unreviewed delta. Marks never
+    /// gate writes.
+    #[command(name = "review-mark")]
+    ReviewMark(commands::review_mark::Args),
+
     /// Reload one writable mem's slice of the in-memory store from
     /// its on-disk branch tip — or every writable mem when
     /// `--mem` is omitted. CLI parity with the MCP `memstead_reload`
@@ -247,13 +255,13 @@ pub enum Command {
     /// without touching a workspace.
     Schema(commands::schema::Args),
 
-    /// Binding (projection-promotion) tooling — the projection is the unit,
-    /// one versioned binding per source→mem obligation. `memstead projection
-    /// brief <binding>` renders a binding's run-brief (the Markdown prompt an
-    /// agent consumes); `memstead projection init` scaffolds a fresh v1 binding
-    /// non-interactively; `memstead projection migrate` promotes both legacy
-    /// generations (root-folder `scopes|projections|ingests/` and the gen-2
-    /// four-primitive store) into v1 bindings; `memstead projection advance`
+    /// Pipeline tooling — one versioned v2 binding per pipeline, sources
+    /// inline. `memstead projection brief <binding>` renders a binding's
+    /// run-brief (the Markdown prompt an agent consumes); `memstead
+    /// projection init` scaffolds a fresh v2 record non-interactively;
+    /// `memstead projection migrate` converts every prior on-disk generation
+    /// (gen-1 root folders, the four-primitive store, the v1 three-file
+    /// store) into v2 records in place; `memstead projection advance`
     /// records disposition-gated sync-baseline advances; `memstead projection
     /// enable <build|sync|verify> <binding>` adds a missing operation block.
     Projection(commands::projection::Args),

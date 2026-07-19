@@ -7,10 +7,10 @@
 //! - `brief` renders a binding's run-brief — the Markdown prompt an agent
 //!   consumes — for a canonical binding id `<mem>/<stem>` (D3/D9), or the next
 //!   due binding under `--all` (round-robin + backoff selection).
-//! - `init` scaffolds a fresh v1 binding non-interactively (D8).
-//! - `migrate` promotes both legacy generations into v1 bindings (D10): the
-//!   root-folder `scopes|projections|ingests/` layout (gen-1) and the gen-2
-//!   four-primitive store (`Projection` + flat `Ingest`).
+//! - `init` scaffolds a fresh v2 single-record binding non-interactively.
+//! - `migrate` converts every prior on-disk generation into v2 records in
+//!   place: gen-1 root folders, the gen-2 four-primitive store, and the v1
+//!   three-file store — folding medium+facet content inline.
 //! - `advance` records disposition-gated sync-baseline advances (D7).
 //! - `enable` adds a missing `build` / `sync` / `verify` operation block to an
 //!   existing binding (D6 — the remedy a refused mutating op cites).
@@ -26,12 +26,12 @@ use clap::{Args as ClapArgs, Subcommand, ValueEnum};
 use serde_json::json;
 
 use memstead_base::binding::{
-    BINDING_VERSION, BindingV1, BuildMode, BuildOperation, CapabilityError, CoverageSemantics,
-    DEFAULT_ADJUDICATION_CAP, DEFAULT_FULL_RESYNC_EVERY, Operations, PruneConfig, ResolvedBinding,
-    SyncOperation, VerifyOperation, prune_guarantee_for_medium, validate_binding,
+    BINDING_VERSION, Binding, BuildMode, BuildOperation, CapabilityError, CoverageSemantics,
+    DEFAULT_ADJUDICATION_CAP, DEFAULT_FULL_RESYNC_EVERY, Operations, PruneConfig, SyncOperation,
+    VerifyOperation, prune_guarantee_for_medium, validate_binding,
 };
 use memstead_base::binding_migrate::{
-    BindingMigrateError, migrate_gen2_bindings, resolve_migrated_binding,
+    BindingMigrateError, check_all_consumed, fold_v1_binding, migrate_gen2_bindings,
 };
 use memstead_base::ingest::advance::{
     AdvanceError, DispositionInput, ExcludeError, advance_baseline, record_exclusions,
@@ -43,19 +43,15 @@ use memstead_base::ingest::findings::{
 use memstead_base::ingest::report::{
     DEFAULT_REPORT_BUDGET, compute_fidelity_report, render_fidelity_report,
 };
-use memstead_base::ingest::resolve::{
-    ResolveError, ResolvedPrimarySource, ResolvedSource, resolve_binding, resolve_binding_run,
-};
+use memstead_base::ingest::resolve::{ResolveError, ResolvedSource, resolve_binding_run};
 use memstead_base::ingest::{
     OperationFilter, OperationKind, RenderBriefError, render_ingest_brief, render_sync_brief_for,
     render_verify_brief_for, select_next_due_operation,
 };
-use memstead_base::pipeline::{
-    Facet, IngestTrigger, Medium, MediumType, PatternEntry, PatternMode,
-};
+use memstead_base::pipeline::{IngestTrigger, MediumType, PatternEntry, PatternMode, Source};
 use memstead_base::pipeline_store::{
-    delete_ingest, load_legacy_pipeline_configs, load_pipeline_configs, read_binding,
-    write_binding, write_facet, write_medium,
+    ProjectionGeneration, delete_ingest, load_legacy_pipeline_configs, load_pipeline_configs,
+    load_projection_generations, read_binding, remove_mediums_and_facets_trees, write_binding,
 };
 use memstead_base::workspace_store::StoreError;
 use memstead_base::{migrate_legacy_pipeline, read_legacy_pipeline_configs};
@@ -79,7 +75,7 @@ pub enum ProjectionCommand {
     /// operation's brief; `--operation` picks which operations rotate (default
     /// `build` — the classic build-only rotation; `any` rotates every
     /// loop-declared build / sync / verify pair). An operation participates
-    /// only where its binding block declares `trigger: loop`. Reads the v1
+    /// only where its binding block declares `trigger: loop`. Reads the v2
     /// binding store and the destination mem's schema / writing guidance; the
     /// assembly is shared with the UniFFI surface, so CLI and app briefs are
     /// byte-identical by construction.
@@ -93,8 +89,8 @@ pub enum ProjectionCommand {
     /// reach the mem only when an agent acts on it through the MCP mutation
     /// surface.
     Brief(BriefArgs),
-    /// Scaffold a fresh v1 binding non-interactively: a `Medium`, a `Facet`,
-    /// and a v1 binding under `.memstead/{mediums,facets,projections}/<mem>/`.
+    /// Scaffold a fresh v2 binding non-interactively: ONE record with one
+    /// inline source, at `.memstead/projections/<mem>/<stem>.json`.
     /// All inputs are flags — no prompts ever (parity across callers). The
     /// default binding declares build+sync+verify where the medium permits:
     /// a `web` source scaffolds build-only, with the deferral named in
@@ -103,16 +99,19 @@ pub enum ProjectionCommand {
     /// git-backed source). Refuses `PROJECTION_EXISTS` (without touching disk)
     /// when a binding of the same id already exists — never overwrites.
     Init(InitArgs),
-    /// Migrate both legacy generations into v1 bindings (D10). Gen-1 — the
-    /// root-folder `scopes|projections|ingests/` JSON layout the retired
-    /// `pipeline migrate` command handled — is first materialized into the
-    /// gen-2 `.memstead/` store, then promoted. Gen-2 — the four-primitive
-    /// store (per-mem `Projection` + flat `Ingest`) — merges each ingest into
-    /// the projection its `projection` ref names; the binding takes the
-    /// projection's file identity (`.memstead/projections/<mem>/<stem>.json`)
-    /// and the merged ingest is removed. `refinement` mode and dangling
-    /// projection refs refuse with a typed error. Use `--dry-run` to preview
-    /// without writing.
+    /// Migrate every prior on-disk generation into v2 single-record
+    /// bindings, in place. Gen-1 — the root-folder
+    /// `scopes|projections|ingests/` JSON layout — is first materialized
+    /// into the four-primitive store, then folded. Gen-2 — the
+    /// four-primitive store (per-mem `Projection` + flat `Ingest`) — merges
+    /// each ingest into its projection and folds the referenced facets +
+    /// mediums inline. v1 — the three-file store — folds each binding's
+    /// facet references inline the same way, source names preserved
+    /// byte-verbatim (they key sync watermarks). The emptied `mediums/` and
+    /// `facets/` trees are removed; orphan records refuse rather than drop.
+    /// `refinement` mode and dangling refs refuse with a typed error.
+    /// Idempotent on a migrated store. Use `--dry-run` to preview without
+    /// writing.
     Migrate(MigrateArgs),
     /// Enable a `build` / `sync` / `verify` operation on an existing binding by
     /// adding its block (with sensible defaults) if absent. This is the remedy
@@ -419,12 +418,6 @@ fn map_brief_err(binding_id: &str, err: RenderBriefError) -> CliError {
             ResolveError::BindingNotFound { .. } => {
                 CliError::new(ExitKind::NotFound, "PROJECTION_NOT_FOUND", message)
             }
-            ResolveError::FacetNotFound { .. } => {
-                CliError::new(ExitKind::NotFound, "PROJECTION_FACET_NOT_FOUND", message)
-            }
-            ResolveError::MediumNotFound { .. } => {
-                CliError::new(ExitKind::NotFound, "PROJECTION_MEDIUM_NOT_FOUND", message)
-            }
             ResolveError::MalformedProjectionRef { .. } => {
                 CliError::new(ExitKind::Validation, "PROJECTION_INVALID_NAME", message)
             }
@@ -638,37 +631,31 @@ fn init(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
         .into());
     }
 
-    // The scaffolded triple. The medium and facet share the binding stem as
-    // their file identity — one tidy `mediums`/`facets`/`projections` triple per
-    // obligation. The facet is scoped `**/*` (a scoped default: an unscoped
-    // facet — no allow patterns — would refuse at run time).
-    let medium = Medium {
+    // The scaffolded record: ONE v2 binding with one inline source under the
+    // binding stem. The source is scoped `**/*` (a scoped default: an
+    // unscoped source — no allow patterns — would refuse at run time).
+    let source = Source {
         name: stem.clone(),
         medium_type,
         pointer: args.source.clone(),
         change_detection: None,
-    };
-    let scope = vec![PatternEntry {
-        path: "**/*".to_string(),
-        mode: PatternMode::Allow,
-    }];
-    let facet = Facet {
-        name: stem.clone(),
-        medium: stem.clone(),
-        scope: scope.clone(),
+        scope: vec![PatternEntry {
+            path: "**/*".to_string(),
+            mode: PatternMode::Allow,
+        }],
         engagement: None,
         preparation: None,
     };
 
-    // Matrix-filtered defaults (D6): declare build+sync+verify, then let the
+    // Matrix-filtered defaults: declare build+sync+verify, then let the
     // capability matrix strip any operation the medium cannot support. A `web`
     // source has no change signal this cycle, so sync/verify are stripped and
     // the deferral is named in `warnings[]` (operator decision 7). Every other
     // medium keeps build+sync+verify.
-    let mut binding = BindingV1 {
+    let mut binding = Binding {
         version: BINDING_VERSION,
         intent: args.intent.clone(),
-        source_facets: vec![stem.clone()],
+        sources: vec![source],
         reference_mems: Vec::new(),
         destination_mem: mem.clone(),
         deny_paths: Vec::new(),
@@ -695,21 +682,8 @@ fn init(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
         },
     };
 
-    let resolved = ResolvedBinding {
-        binding: binding.clone(),
-        primary_sources: vec![ResolvedPrimarySource {
-            facet_ref: stem.clone(),
-            medium: stem.clone(),
-            medium_type,
-            medium_pointer: args.source.clone(),
-            declared_change_detection: None,
-            scope,
-            preparation: None,
-        }],
-    };
-
     let mut warnings: Vec<String> = Vec::new();
-    if let Err(refusals) = validate_binding(&resolved) {
+    if let Err(refusals) = validate_binding(&binding) {
         for r in &refusals {
             if let CapabilityError::OperationOutOfScope { operation, .. } = r {
                 match *operation {
@@ -741,18 +715,13 @@ fn init(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
         operations.push("verify");
     }
 
-    // Write the triple. The id-collision refusal above already guaranteed a
-    // fresh binding, so this path only runs on a clean scaffold; a store IO
-    // failure surfaces the typed `PROJECTION_INIT_FAILED`.
-    write_medium(&root, &mem, &stem, &medium).map_err(|e| init_write_error(&binding_id, e))?;
-    write_facet(&root, &mem, &stem, &facet).map_err(|e| init_write_error(&binding_id, e))?;
+    // Write the one record. The id-collision refusal above already
+    // guaranteed a fresh binding, so this path only runs on a clean
+    // scaffold; a store IO failure surfaces the typed
+    // `PROJECTION_INIT_FAILED`.
     write_binding(&root, &mem, &stem, &binding).map_err(|e| init_write_error(&binding_id, e))?;
 
-    let created = vec![
-        format!(".memstead/mediums/{mem}/{stem}.json"),
-        format!(".memstead/facets/{mem}/{stem}.json"),
-        format!(".memstead/projections/{mem}/{stem}.json"),
-    ];
+    let created = vec![format!(".memstead/projections/{mem}/{stem}.json")];
 
     if ctx.json {
         // D8's pinned skill contract: { binding, created, operations, warnings }.
@@ -795,9 +764,16 @@ fn map_migrate_err(err: BindingMigrateError) -> CliError {
             "PROJECTION_MIGRATE_MALFORMED_REF",
             message,
         ),
-        BindingMigrateError::DanglingProjectionRef { .. } => CliError::new(
+        BindingMigrateError::DanglingProjectionRef { .. }
+        | BindingMigrateError::DanglingFacetRef { .. }
+        | BindingMigrateError::DanglingMediumRef { .. } => CliError::new(
             ExitKind::Validation,
             "PROJECTION_MIGRATE_DANGLING_REF",
+            message,
+        ),
+        BindingMigrateError::OrphanRecords { .. } => CliError::new(
+            ExitKind::Validation,
+            "PROJECTION_MIGRATE_ORPHAN_RECORDS",
             message,
         ),
     }
@@ -903,15 +879,14 @@ fn consume_reconcile_cursors(
             };
             for record in &configs.bindings {
                 let binding_id = format!("{}/{}", record.mem, record.name);
-                let Ok(resolved) = resolve_binding_run(&configs, &binding_id, &record.config)
-                else {
+                let Ok(resolved) = resolve_binding_run(&binding_id, &record.config) else {
                     continue;
                 };
                 for source in &resolved.sources {
                     if let ResolvedSource::Primary(p) = source
-                        && pointer_resolves_to(root, &p.medium_pointer, abs_path)
+                        && pointer_resolves_to(root, &p.pointer, abs_path)
                     {
-                        let key = format!("{binding_id}/{}#synced", p.facet_ref);
+                        let key = format!("{binding_id}/{}#synced", p.name);
                         if engine
                             .set_mem_sync_state(
                                 &resolved.destination_mem,
@@ -942,9 +917,9 @@ fn migrate(ctx: &CliContext, args: MigrateArgs) -> anyhow::Result<()> {
 
     // Gen-1 root-folder layout (`scopes|projections|ingests/` at the workspace
     // root) — the pre-four-primitive generation the retired `pipeline migrate`
-    // command handled. Fold it in (D10, gen-1 path): materialize it into the
-    // gen-2 `.memstead/` store first (mediums + facets + projections + ingests),
-    // then promote to v1 below in the same pass. `--dry-run` reads the
+    // command handled. Fold it in: materialize it into the four-primitive
+    // `.memstead/` store first (mediums + facets + projections + ingests),
+    // then fold to v2 below in the same pass. `--dry-run` reads the
     // root-folder configs directly without writing anything.
     let gen1 = has_legacy_root_layout(&root);
     if gen1 && !args.dry_run {
@@ -964,33 +939,86 @@ fn migrate(ctx: &CliContext, args: MigrateArgs) -> anyhow::Result<()> {
         load_legacy_pipeline_configs(&root).map_err(migrate_load_err)?
     };
 
-    // Pure transform first: any refusal (refinement / dangling / malformed)
-    // aborts before a single file is touched — the migration is all-or-nothing.
-    let migrated = migrate_gen2_bindings(&configs).map_err(map_migrate_err)?;
+    // Pure transforms first: any refusal (refinement / dangling / malformed /
+    // orphan) aborts before a single file is touched — the migration is
+    // all-or-nothing.
+    //
+    // Leg A (gen-2): merge each flat ingest into its projection and fold the
+    // referenced facets + mediums inline — one v2 record per pipeline.
+    let mut migrated = migrate_gen2_bindings(&configs).map_err(map_migrate_err)?;
 
-    // Validate each produced binding against the D6 capability matrix. A
-    // capability refusal reflects a pre-existing config problem the binding
-    // faithfully carries; surface it as a per-binding warning rather than
-    // aborting the promotion.
-    let mut warnings: Vec<serde_json::Value> = Vec::new();
-    for m in &migrated {
-        match resolve_migrated_binding(&configs, &m.id, m.binding.clone()) {
-            Ok(resolved) => {
-                if let Err(refusals) = validate_binding(&resolved) {
-                    for r in refusals {
-                        warnings.push(json!({
-                            "binding": m.id,
-                            "kind": "capability",
-                            "message": r.to_string(),
-                        }));
+    // Leg B (v1 → v2): fold every on-disk `version: 1` binding of the
+    // retired three-file store the same way, in place. Source names are the
+    // facet names byte-verbatim, so sync watermarks keep resolving. A
+    // version-less projection file no ingest schedules is inert leftovers —
+    // refused with a remedy rather than silently dropped or left to break
+    // the loader. (Skipped in the gen-1 dry-run, which previews in-memory.)
+    let mut already_v2 = 0usize;
+    if !(gen1 && args.dry_run) {
+        let generations = load_projection_generations(&root).map_err(migrate_load_err)?;
+        for (mem, name, generation) in generations {
+            let binding_id = format!("{mem}/{name}");
+            match generation {
+                ProjectionGeneration::V2 => already_v2 += 1,
+                ProjectionGeneration::V1(v1) => {
+                    let consumed = v1.source_facets.clone();
+                    let binding = fold_v1_binding(&binding_id, &mem, v1.as_ref(), &configs)
+                        .map_err(map_migrate_err)?;
+                    migrated.push(memstead_base::binding_migrate::MigratedBinding {
+                        id: binding_id,
+                        mem,
+                        name,
+                        ingest_name: String::new(),
+                        consumed_facets: consumed,
+                        binding,
+                        notes: Vec::new(),
+                    });
+                }
+                ProjectionGeneration::VersionLess => {
+                    if !migrated.iter().any(|m| m.mem == mem && m.name == name) {
+                        return Err(CliError::new(
+                            ExitKind::Validation,
+                            "PROJECTION_MIGRATE_INERT_PROJECTION",
+                            format!(
+                                "projection `{binding_id}` is a version-less gen-2 file no \
+                                 ingest schedules — inert leftovers the loader refuses; delete \
+                                 .memstead/projections/{mem}/{name}.json (or add an ingest) and \
+                                 re-run `projection migrate`"
+                            ),
+                        )
+                        .with_details(json!({ "binding": binding_id }))
+                        .into());
                     }
                 }
             }
-            Err(e) => warnings.push(json!({
-                "binding": m.id,
-                "kind": "resolve",
-                "message": e.to_string(),
-            })),
+        }
+        migrated.sort_by(|a, b| a.id.cmp(&b.id));
+
+        // Every medium/facet record must have folded into some binding —
+        // an orphan would be silently dropped by the tree removal, so the
+        // whole migration refuses instead, naming each leftover.
+        let consumed: Vec<(String, String)> = migrated
+            .iter()
+            .flat_map(|m| m.consumed_facets.iter().map(|f| (m.mem.clone(), f.clone())))
+            .collect();
+        check_all_consumed(&configs, &consumed).map_err(map_migrate_err)?;
+    }
+
+    // Validate each produced binding against the capability matrix. A
+    // capability refusal reflects a pre-existing config problem the binding
+    // faithfully carries; surface it as a per-binding warning rather than
+    // aborting the promotion. The folded v2 record validates directly — no
+    // external resolution.
+    let mut warnings: Vec<serde_json::Value> = Vec::new();
+    for m in &migrated {
+        if let Err(refusals) = validate_binding(&m.binding) {
+            for r in refusals {
+                warnings.push(json!({
+                    "binding": m.id,
+                    "kind": "capability",
+                    "message": r.to_string(),
+                }));
+            }
         }
         for note in &m.notes {
             warnings.push(json!({
@@ -1001,8 +1029,10 @@ fn migrate(ctx: &CliContext, args: MigrateArgs) -> anyhow::Result<()> {
         }
     }
 
-    // Emit to disk unless previewing: promote each projection file to its v1
-    // binding in place, then remove the consumed flat ingest.
+    // Emit to disk unless previewing: promote each projection file to its v2
+    // binding in place, remove each consumed flat ingest, then remove the
+    // emptied `mediums/` and `facets/` trees (every record folded — the
+    // orphan check above guaranteed it).
     if !args.dry_run {
         for m in &migrated {
             write_binding(&root, &m.mem, &m.name, &m.binding).map_err(|e| {
@@ -1013,15 +1043,25 @@ fn migrate(ctx: &CliContext, args: MigrateArgs) -> anyhow::Result<()> {
                 )
                 .with_details(json!({ "binding": m.id, "error": e.to_string() }))
             })?;
-            delete_ingest(&root, &m.ingest_name).map_err(|e| {
-                CliError::new(
-                    ExitKind::Generic,
-                    "PROJECTION_MIGRATE_FAILED",
-                    format!("could not remove merged ingest `{}`: {e}", m.ingest_name),
-                )
-                .with_details(json!({ "ingest": m.ingest_name, "error": e.to_string() }))
-            })?;
+            if !m.ingest_name.is_empty() {
+                delete_ingest(&root, &m.ingest_name).map_err(|e| {
+                    CliError::new(
+                        ExitKind::Generic,
+                        "PROJECTION_MIGRATE_FAILED",
+                        format!("could not remove merged ingest `{}`: {e}", m.ingest_name),
+                    )
+                    .with_details(json!({ "ingest": m.ingest_name, "error": e.to_string() }))
+                })?;
+            }
         }
+        remove_mediums_and_facets_trees(&root).map_err(|e| {
+            CliError::new(
+                ExitKind::Generic,
+                "PROJECTION_MIGRATE_FAILED",
+                format!("could not remove the emptied mediums/facets trees: {e}"),
+            )
+            .with_details(json!({ "error": e.to_string() }))
+        })?;
     }
 
     // AC12/D10: consume `reconcile-cursors.json` (seed `#synced` baselines, then
@@ -1042,6 +1082,7 @@ fn migrate(ctx: &CliContext, args: MigrateArgs) -> anyhow::Result<()> {
             "ok": true,
             "dry_run": args.dry_run,
             "migrated": migrated.len(),
+            "already_v2": already_v2,
             "bindings": bindings,
             "warnings": warnings,
             "cursors_seeded": seeded,
@@ -1054,7 +1095,7 @@ fn migrate(ctx: &CliContext, args: MigrateArgs) -> anyhow::Result<()> {
             "Migrated"
         };
         let mut out = format!(
-            "# Projection migration\n\n{verb} {} binding(s) to v1:\n",
+            "# Projection migration\n\n{verb} {} binding(s) to v2 ({already_v2} already v2):\n",
             migrated.len()
         );
         for id in &bindings {
@@ -1083,8 +1124,9 @@ fn migrate(ctx: &CliContext, args: MigrateArgs) -> anyhow::Result<()> {
         }
         if !args.dry_run {
             out.push_str(
-                "\nEach projection file was promoted to a v1 binding in place and its merged \
-                 ingest removed.\n",
+                "\nEach projection file was converted to a v2 single-record binding in place \
+                 (medium + facet content folded inline, source names preserved verbatim); \
+                 merged ingests and the emptied mediums/ and facets/ trees were removed.\n",
             );
         }
         print_markdown(&out);
@@ -1220,22 +1262,13 @@ fn enable(ctx: &CliContext, args: EnableArgs) -> anyhow::Result<()> {
         }
     }
 
-    // Matrix validation (D6): resolve the candidate binding (facets → mediums,
-    // in the binding-id's `<mem>` tier) and refuse if the medium cannot support
-    // the operation being enabled — e.g. `sync`/`verify` over a `web` source.
-    // Refusals about *other* operations reflect pre-existing config and do not
-    // block this enable (mirrors `migrate`'s treat-as-warning posture). No write
-    // on refusal — the file stays byte-identical.
-    let configs = load_legacy_pipeline_configs(&root).map_err(|e| enable_failed(&binding_id, e))?;
-    let resolved = resolve_binding(&configs, &binding_id, &binding).map_err(|e| {
-        CliError::new(
-            ExitKind::Generic,
-            "PROJECTION_ENABLE_FAILED",
-            format!("could not resolve binding `{binding_id}` for validation: {e}"),
-        )
-        .with_details(json!({ "binding": binding_id, "error": e.to_string() }))
-    })?;
-    if let Err(refusals) = validate_binding(&resolved)
+    // Matrix validation: the v2 record carries its sources inline, so the
+    // candidate validates directly — refuse if a source's medium half cannot
+    // support the operation being enabled (e.g. `sync`/`verify` over a `web`
+    // source). Refusals about *other* operations reflect pre-existing config
+    // and do not block this enable (mirrors `migrate`'s treat-as-warning
+    // posture). No write on refusal — the file stays byte-identical.
+    if let Err(refusals) = validate_binding(&binding)
         && let Some(err) = refusals.iter().find(|r| {
             matches!(
                 r,
@@ -1281,19 +1314,12 @@ fn enable(ctx: &CliContext, args: EnableArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Map a `resolve_binding_run` failure (dangling facet/medium, malformed id)
-/// to a typed CLI error. `BindingNotFound` cannot arise from the binding
-/// resolver (the binding *is* the declaration), so it falls through to the
-/// generic advance-failure code.
+/// Map a `resolve_binding_run` failure to a typed CLI error. With inline
+/// sources the dangling facet/medium refusals are gone; a malformed id is the
+/// Validation-shaped name error, everything else generic.
 fn map_resolve_err(binding_id: &str, err: ResolveError) -> CliError {
     let message = err.to_string();
     let mapped = match err {
-        ResolveError::FacetNotFound { .. } => {
-            CliError::new(ExitKind::NotFound, "PROJECTION_FACET_NOT_FOUND", message)
-        }
-        ResolveError::MediumNotFound { .. } => {
-            CliError::new(ExitKind::NotFound, "PROJECTION_MEDIUM_NOT_FOUND", message)
-        }
         ResolveError::MalformedProjectionRef { .. } => {
             CliError::new(ExitKind::Validation, "PROJECTION_INVALID_NAME", message)
         }
@@ -1414,7 +1440,7 @@ fn advance(ctx: &CliContext, args: AdvanceArgs) -> anyhow::Result<()> {
         .into());
     }
 
-    let resolved = resolve_binding_run(&configs, &binding_id, &record.config)
+    let resolved = resolve_binding_run(&binding_id, &record.config)
         .map_err(|e| map_resolve_err(&binding_id, e))?;
 
     // The engine is mutable — a completing advance writes the `#synced`
@@ -1538,7 +1564,7 @@ fn exclude(ctx: &CliContext, args: ExcludeArgs) -> anyhow::Result<()> {
             .with_details(json!({ "binding": binding_id }))
         })?;
 
-    let resolved = resolve_binding_run(&configs, &binding_id, &record.config)
+    let resolved = resolve_binding_run(&binding_id, &record.config)
         .map_err(|e| map_resolve_err(&binding_id, e))?;
 
     let outcome = record_exclusions(&root, &resolved, &exclusions)
@@ -1648,7 +1674,7 @@ fn verify(ctx: &CliContext, args: VerifyArgs) -> anyhow::Result<()> {
             .with_details(json!({ "binding": binding_id }))
         })?;
 
-    let resolved = resolve_binding_run(&configs, &binding_id, &record.config)
+    let resolved = resolve_binding_run(&binding_id, &record.config)
         .map_err(|e| map_resolve_err(&binding_id, e))?;
 
     // The measurement pass takes a shared engine borrow (A5 — structurally
@@ -1667,24 +1693,19 @@ fn verify(ctx: &CliContext, args: VerifyArgs) -> anyhow::Result<()> {
         // measurement: nothing was observed, no findings were recorded,
         // and the `#verified` baseline is deliberately left untouched
         // (a transient unmount must never clobber real recorded state).
-        FindingsError::SourceUnreachable {
-            facet,
-            medium,
-            path,
-        } => CliError::new(
+        FindingsError::SourceUnreachable { source_name, path } => CliError::new(
             ExitKind::Validation,
             "SOURCE_UNREACHABLE",
             format!(
-                "verify refused for `{binding_id}`: source facet '{facet}' (medium \
-                 '{medium}') resolves to `{path}`, which does not exist — restore or \
-                 remount the source (or repoint the medium); the recorded `#verified` \
-                 baseline was left untouched"
+                "verify refused for `{binding_id}`: source '{source_name}' resolves to \
+                 `{path}`, which does not exist — restore or remount the source (or \
+                 repoint its pointer); the recorded `#verified` baseline was left \
+                 untouched"
             ),
         )
         .with_details(json!({
             "binding": binding_id,
-            "facet": facet,
-            "medium": medium,
+            "source": source_name,
             "path": path,
         })),
         // `--full` over a non-enumerable medium: the existing typed

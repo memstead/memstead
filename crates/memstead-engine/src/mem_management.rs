@@ -865,6 +865,17 @@ pub struct MemCreateParams {
     /// `mem-repo/.git/` refuses with `EngineError::InvalidInput` —
     /// there is no gitdir to host the branch.
     pub storage: Option<StorageKind>,
+    /// Caller category for the seed commit's provenance trailer.
+    /// Transports pass their own: MCP `Actor::Agent`, the CLI
+    /// `Actor::Cli`, application embedders (UniFFI, HTTP) `Actor::App`.
+    /// Pre-parameter behaviour hardcoded `Agent` for every transport —
+    /// the macOS app's mem creations were misattributed as agent
+    /// writes.
+    pub actor: memstead_base::vcs::Actor,
+    /// Client identity paired with `actor` — renders `name@version`
+    /// in the seed commit's `Client:` trailer and derives its author,
+    /// exactly as entity mutations do.
+    pub client: Option<memstead_base::vcs::ClientId>,
 }
 
 /// Response shape from [`create_mem`].
@@ -1462,6 +1473,7 @@ pub fn create_mem(
     // the export path hits the residual `MEM_CONFIG_INCOMPLETE` /
     // pre-fix `INTERNAL` collapse on the first archive attempt.
     let mem_config = memstead_schema::config::MemConfig {
+        review_mark: None,
         name: None,
         version: Some(semver::Version::new(0, 1, 0)),
         description: None,
@@ -1581,8 +1593,8 @@ pub fn create_mem(
     let backend = factory(&mount)
         .map_err(|e| memstead_base::EngineError::Mem(format!("instantiate backend: {e}")))?;
     let seed_ctx = memstead_base::vcs::CommitContext {
-        actor: memstead_base::vcs::Actor::Agent,
-        client: None,
+        actor: params.actor,
+        client: params.client.clone(),
         tool: Some("memstead_mem_create"),
         note: params.note.clone(),
         logical_operation_id: None,

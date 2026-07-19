@@ -2,29 +2,38 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://memstead.io/schemas/memstead-plugin/v1/binding",
   "title": "memstead-plugin/v1 binding",
-  "description": "A Binding is one versioned record per source→mem obligation: the declaration (`intent`, `source_facets`, `reference_mems`, `destination_mem`, `deny_paths`, `coverage_semantics`, `rules`) plus an `operations { build, sync, verify }` block. It collapses the retired projection + ingest pair into a single file at `.memstead/projections/<mem>/<name>.json`. `source_facets` reference facets by name under the binding's own mem; `reference_mems` supply read-only cross-mem context; `destination_mem` is the mem the binding writes into. Every operation is optional: an absent build/sync makes that mutating operation refuse at run time with a `projection enable <op>` remedy; an absent verify means engine defaults (verify is read-only). The `prune` block, when present, requests a deletion-proposal guarantee validated against the source medium at binding time.",
+  "description": "A Binding is ONE versioned record per pipeline at `.memstead/projections/<mem>/<name>.json`: the whole declaration (`intent`, inline `sources`, `reference_mems`, `destination_mem`, `deny_paths`, `coverage_semantics`, `rules`) plus an `operations { build, sync, verify }` block. The 2026-07 consolidation folded the retired standalone medium and facet records into the binding's `sources[]` — each source carries the medium half (where it lives: `type` / `pointer` / `change_detection`) and the facet half (which part of it: `scope` / `engagement` / `preparation`) under a `name` that keys per-source sync/verify state. `reference_mems` supply read-only cross-mem context; `destination_mem` is the mem the binding writes into. Every operation is optional: an absent build/sync makes that mutating operation refuse at run time with a `projection enable <op>` remedy; an absent verify means engine defaults (verify is read-only). The `prune` block, when present, requests a deletion-proposal guarantee validated against the source medium at binding time.",
   "type": "object",
-  "required": ["version", "destination_mem", "operations"],
+  "required": [
+    "version",
+    "destination_mem",
+    "operations"
+  ],
   "properties": {
     "version": {
-      "description": "Binding format version. v1 bindings carry the integer 1; a file without it is refused by the loader.",
+      "description": "Binding format version. v2 bindings carry the integer 2; a file without it (or with a prior version) is refused by the loader, which names `memstead projection migrate`.",
       "type": "integer",
-      "const": 1
+      "const": 2
     },
     "intent": {
       "description": "What the binding is trying to accomplish — prose for the agent. Optional.",
       "type": "string",
       "minLength": 1
     },
-    "source_facets": {
-      "description": "Facets (by name, resolved under the binding's own mem) the binding consumes.",
+    "sources": {
+      "description": "The inline sources the binding consumes, in declaration order. Each `name` is unique within the record.",
       "type": "array",
-      "items": { "type": "string", "minLength": 1 }
+      "items": {
+        "$ref": "#/$defs/source"
+      }
     },
     "reference_mems": {
       "description": "Read-only reference mems (by name) that supply cross-mem context.",
       "type": "array",
-      "items": { "type": "string", "minLength": 1 }
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
     },
     "destination_mem": {
       "description": "The mem this binding writes into.",
@@ -34,12 +43,17 @@
     "deny_paths": {
       "description": "Paths excluded from the binding's scope (workspace-relative globs). Strategy-invariant — moved up from the per-ingest record. A glob deny list is legal only over a path-shaped medium namespace (codebase / filesystem / git); the engine refuses it at binding-validation time over a graph or web medium.",
       "type": "array",
-      "items": { "type": "string" }
+      "items": {
+        "type": "string"
+      }
     },
     "coverage_semantics": {
       "description": "Whether the binding claims to cover everything in its declared scope (`exhaustive`) or a deliberately partial slice (`curated`). Defaults to `exhaustive` when absent.",
       "type": "string",
-      "enum": ["exhaustive", "curated"]
+      "enum": [
+        "exhaustive",
+        "curated"
+      ]
     },
     "rules": {
       "description": "Free-form binding rules (e.g. a one-shot lens `routing` string). Opaque to the engine — consumed only by the one-shot brief renderer.",
@@ -52,7 +66,10 @@
         "guarantee": {
           "description": "The guarantee the binding requests, validated against the medium's base-leg retrievability at binding-validation time. `never-clobber` is a full three-way merge, supportable only where the source base leg is retrievable (git-backed sources); `conflict-flag` (the default) presents both sides and never auto-writes over a model-side edit.",
           "type": "string",
-          "enum": ["never-clobber", "conflict-flag"]
+          "enum": [
+            "never-clobber",
+            "conflict-flag"
+          ]
         }
       },
       "additionalProperties": false
@@ -61,9 +78,15 @@
       "description": "The operations this binding declares. Every operation is optional; an absent mutating operation (build/sync) refuses at run time with a remedy, an absent verify means engine defaults.",
       "type": "object",
       "properties": {
-        "build": { "$ref": "#/$defs/buildOperation" },
-        "sync": { "$ref": "#/$defs/syncOperation" },
-        "verify": { "$ref": "#/$defs/verifyOperation" }
+        "build": {
+          "$ref": "#/$defs/buildOperation"
+        },
+        "sync": {
+          "$ref": "#/$defs/syncOperation"
+        },
+        "verify": {
+          "$ref": "#/$defs/verifyOperation"
+        }
       },
       "additionalProperties": false
     }
@@ -73,15 +96,26 @@
     "buildOperation": {
       "description": "The build operation — the only operation carrying a mode. Grows new coverage (`discovery`) or runs a single bounded pass (`one-shot`). trigger / batch_size / post_actions are scheduling attributes.",
       "type": "object",
-      "required": ["mode", "trigger", "batch_size"],
+      "required": [
+        "mode",
+        "trigger",
+        "batch_size"
+      ],
       "properties": {
         "mode": {
           "description": "`discovery` builds out new coverage; `one-shot` runs a single bounded pass. The retired `refinement` value is not accepted.",
           "type": "string",
-          "enum": ["discovery", "one-shot"]
+          "enum": [
+            "discovery",
+            "one-shot"
+          ]
         },
-        "trigger": { "$ref": "#/$defs/trigger" },
-        "batch_size": { "$ref": "#/$defs/batchSize" },
+        "trigger": {
+          "$ref": "#/$defs/trigger"
+        },
+        "batch_size": {
+          "$ref": "#/$defs/batchSize"
+        },
         "post_actions": {
           "description": "Free-form post-run actions (e.g. a one-shot `archive_source` flag). Opaque to the engine — consumed only by the one-shot brief renderer.",
           "type": "object",
@@ -99,20 +133,34 @@
     "syncOperation": {
       "description": "The sync operation — the sole maintenance writer. Carries no mode. An absent sync block makes that mutating operation refuse at run time.",
       "type": "object",
-      "required": ["trigger", "batch_size"],
+      "required": [
+        "trigger",
+        "batch_size"
+      ],
       "properties": {
-        "trigger": { "$ref": "#/$defs/trigger" },
-        "batch_size": { "$ref": "#/$defs/batchSize" }
+        "trigger": {
+          "$ref": "#/$defs/trigger"
+        },
+        "batch_size": {
+          "$ref": "#/$defs/batchSize"
+        }
       },
       "additionalProperties": false
     },
     "verifyOperation": {
       "description": "The verify operation — read-only measurement. Carries no mode. adjudication_cap and full_resync_every are additive tier-3 scheduling knobs that default to the engine's dogfood-tuned values when absent.",
       "type": "object",
-      "required": ["trigger", "batch_size"],
+      "required": [
+        "trigger",
+        "batch_size"
+      ],
       "properties": {
-        "trigger": { "$ref": "#/$defs/trigger" },
-        "batch_size": { "$ref": "#/$defs/batchSize" },
+        "trigger": {
+          "$ref": "#/$defs/trigger"
+        },
+        "batch_size": {
+          "$ref": "#/$defs/batchSize"
+        },
         "adjudication_cap": {
           "description": "The maximum number of hash-drift adjudications a single verify run asserts before queueing the remainder as backlog. 0 disables the cap.",
           "type": "integer",
@@ -129,12 +177,97 @@
     "trigger": {
       "description": "What sets an operation running. `loop` runs continuously under `/loop`; `manual` runs only when invoked; `on-event` is reserved for event-driven hooks.",
       "type": "string",
-      "enum": ["loop", "manual", "on-event"]
+      "enum": [
+        "loop",
+        "manual",
+        "on-event"
+      ]
     },
     "batchSize": {
       "description": "How many artifacts a single run processes.",
       "type": "integer",
       "minimum": 1
+    },
+    "source": {
+      "description": "One inline source — the full description of a body of information the pipeline reads: the medium half (`type` / `pointer` / `change_detection`) and the facet half (`scope` / `engagement` / `preparation`).",
+      "type": "object",
+      "required": [
+        "name",
+        "type",
+        "pointer"
+      ],
+      "properties": {
+        "name": {
+          "description": "Stable name — keys per-source sync/verify state (`<mem>/<binding>/<source>#synced`).",
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "description": "What kind of surface this source references.",
+          "type": "string",
+          "enum": [
+            "codebase",
+            "filesystem",
+            "graph",
+            "git",
+            "web"
+          ]
+        },
+        "pointer": {
+          "description": "Where the body of information lives — a path, URL, or mem id, interpreted per `type`.",
+          "type": "string"
+        },
+        "change_detection": {
+          "description": "Optional declared change-detection strategy: `none` / `git` / `mtime` / `auto`. Unset means `auto` (the engine probes for a git work tree). A graph-typed source always uses the graph snapshot signal.",
+          "type": "string",
+          "enum": [
+            "none",
+            "git",
+            "mtime",
+            "auto"
+          ]
+        },
+        "scope": {
+          "description": "Allow/deny selection over the source. A source with no allow patterns is unscoped — a typed refusal at run time, not \"everything\"; a source that truly wants everything writes `**/*`.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/patternEntry"
+          }
+        },
+        "engagement": {
+          "description": "Engagement contract — verbs, tools, terminology, discipline. Free-form; the engine does not interpret it.",
+          "type": "object"
+        },
+        "preparation": {
+          "description": "Optional deterministic preparation step identifier (e.g. `pdf-to-markdown`). A preparation the engine has no implementation for is refused at validation time.",
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "patternEntry": {
+      "description": "One allow/deny glob in a source's selection.",
+      "type": "object",
+      "required": [
+        "path",
+        "mode"
+      ],
+      "properties": {
+        "path": {
+          "description": "Glob pattern, interpreted relative to the source's pointer.",
+          "type": "string"
+        },
+        "mode": {
+          "description": "Whether the pattern admits or excludes.",
+          "type": "string",
+          "enum": [
+            "allow",
+            "deny"
+          ]
+        }
+      },
+      "additionalProperties": false
     }
   }
 }

@@ -1,8 +1,8 @@
 ---
 type: decision
 created_date: 2026-07-13T16:43:03Z
-last_modified: 2026-07-13T16:44:00Z
-status: accepted
+last_modified: 2026-07-18T11:37:52Z
+status: superseded
 decided_on: 2026-07-10
 deciders: memstead-core
 scope: subsystem

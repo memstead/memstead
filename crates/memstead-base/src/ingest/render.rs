@@ -12,7 +12,7 @@
 use std::path::Path;
 
 use crate::Engine;
-use crate::binding::{BindingV1, BuildMode};
+use crate::binding::{Binding, BuildMode};
 use crate::pipeline_store::{BindingConfigs, load_pipeline_configs};
 
 use super::brief::{
@@ -68,7 +68,7 @@ fn preparation_refusal(resolved: &ResolvedIngest) -> Option<String> {
             format!(
                 "> **[ingest] Ingest \"{}\" is unsupported: facet \"{}\" declares preparation \
                  \"{}\", which has no implementation. Skipping.**\n",
-                resolved.name, p.facet_ref, prep
+                resolved.name, p.name, prep
             )
         }),
         ResolvedSource::Reference { .. } => None,
@@ -93,7 +93,7 @@ pub fn mode_name(mode: BuildMode) -> &'static str {
 fn find_binding<'a>(
     configs: &'a BindingConfigs,
     arg: &str,
-) -> Result<(String, &'a BindingV1), ResolveError> {
+) -> Result<(String, &'a Binding), ResolveError> {
     // Exact canonical id: `<mem>/<stem>`.
     if let Some(r) = configs
         .bindings
@@ -142,7 +142,7 @@ pub fn render_ingest_brief(
         });
     }
 
-    let resolved = resolve_binding_run(&configs, &binding_id, binding)?;
+    let resolved = resolve_binding_run(&binding_id, binding)?;
 
     // Publish this ingest's deny list for the plugin's PreToolUse deny hook —
     // stale-safe (remove-then-write), overwrite-always, before any mode branch
@@ -179,7 +179,7 @@ pub fn render_verify_brief_for(
     let configs = load_pipeline_configs(workspace_root)
         .map_err(|e| RenderBriefError::ConfigLoad(e.to_string()))?;
     let (binding_id, binding) = find_binding(&configs, binding_id)?;
-    let resolved = resolve_binding_run(&configs, &binding_id, binding)?;
+    let resolved = resolve_binding_run(&binding_id, binding)?;
 
     let (_key, findings) =
         current_findings(engine, workspace_root, binding, &resolved).map_err(|e| {
@@ -211,7 +211,7 @@ pub fn render_sync_brief_for(
     let configs = load_pipeline_configs(workspace_root)
         .map_err(|e| RenderBriefError::ConfigLoad(e.to_string()))?;
     let (binding_id, binding) = find_binding(&configs, binding_id)?;
-    let resolved = resolve_binding_run(&configs, &binding_id, binding)?;
+    let resolved = resolve_binding_run(&binding_id, binding)?;
 
     let cursor = compute_source_cursor(engine, &resolved, workspace_root);
     let (_key, findings) =
@@ -355,7 +355,7 @@ fn build_process_mem(engine: &Engine, resolved: &ResolvedIngest) -> ProcessMemIn
 mod tests {
     use super::*;
     use crate::binding::BuildMode;
-    use crate::ingest::resolve::ResolvedPrimarySource;
+    use crate::ingest::resolve::Source;
     use crate::pipeline::{IngestTrigger, MediumType};
 
     fn ingest_with(sources: Vec<ResolvedSource>) -> ResolvedIngest {
@@ -377,13 +377,13 @@ mod tests {
     }
 
     fn primary(facet: &str, preparation: Option<&str>) -> ResolvedSource {
-        ResolvedSource::Primary(ResolvedPrimarySource {
-            facet_ref: facet.to_string(),
-            medium: "m".to_string(),
+        ResolvedSource::Primary(Source {
+            name: facet.to_string(),
             medium_type: MediumType::Codebase,
-            medium_pointer: String::new(),
-            declared_change_detection: None,
+            pointer: String::new(),
+            change_detection: None,
             scope: vec![],
+            engagement: None,
             preparation: preparation.map(str::to_string),
         })
     }

@@ -40,10 +40,12 @@ pub mod error;
 pub mod events;
 #[cfg(feature = "file-watcher")]
 pub mod file_watcher;
+pub mod history;
 pub mod lifecycle;
 pub mod mutation;
 pub mod outcomes;
 pub mod query;
+pub mod review;
 
 pub use archive::FromArchiveBytesError;
 pub use error::{
@@ -55,6 +57,9 @@ pub use events::DEFAULT_BROADCAST_CAPACITY;
 pub use events::{EventCallback, MemChangedEvent, SubscriptionHandle};
 #[cfg(feature = "file-watcher")]
 pub use file_watcher::{FileWatcherError, MemRepoWatcher, watch_mem_repo};
+pub use history::{
+    EntityHistoryReport, EntityTouch, HISTORY_PAGE_DEFAULT, HISTORY_PAGE_MAX, StoryStart,
+};
 pub use mutation::delete::DeleteReferrers;
 pub use mutation::{PATCH_OLD_NOT_FOUND_CONTENT_CAP, RELATIONSHIP_CYCLE_PATH_CAP};
 pub use outcomes::{
@@ -62,6 +67,7 @@ pub use outcomes::{
     RelateEntityArgs, RelateEntityOutcome, RenameEntityArgs, RenameEntityOutcome, SetSchemaOutcome,
     SetSchemaResult, UpdateEntityArgs, UpdateEntityOutcome,
 };
+pub use review::{ReviewMarkStatus, SetReviewMarkOutcome};
 
 pub use boot::{SchemaResolver, resolve_builtin_schema_pin_pub};
 
@@ -215,7 +221,7 @@ pub struct Engine {
     /// runtime surface — exposed through [`Self::pipeline_configs`]; the
     /// engine neither runs nor schedules pipelines (the ingest skill and
     /// future consumers do).
-    pipeline_configs: crate::pipeline_store::PipelineConfigs,
+    pipeline_configs: crate::pipeline_store::BindingConfigs,
     /// Runtime snapshot of writable / visible mems. Derived from
     /// the mount list at construction: writable mounts
     /// (`MountCapability::Write`) register via `add_writable` with

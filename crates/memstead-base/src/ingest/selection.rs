@@ -40,7 +40,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::Engine;
-use crate::binding::{BindingV1, BuildMode};
+use crate::binding::{Binding, BuildMode};
 use crate::pipeline::IngestTrigger;
 use crate::pipeline_store::BindingConfigs;
 
@@ -232,7 +232,7 @@ struct Pair<'a> {
     /// The resolved run (its `name` is the canonical binding id).
     ingest: ResolvedIngest,
     /// The stored binding declaration (the findings due-check needs it).
-    binding: &'a BindingV1,
+    binding: &'a Binding,
     /// The operation half of the pair.
     op: OperationKind,
 }
@@ -241,7 +241,7 @@ struct Pair<'a> {
 /// `trigger: loop` — the pair-eligibility gate. Consent to unattended `--all`
 /// rotation lives in the declaration: a `manual` / `on-event` operation never
 /// rotates, whatever the filter asks for.
-fn declared_for_loop(binding: &BindingV1, op: OperationKind) -> bool {
+fn declared_for_loop(binding: &Binding, op: OperationKind) -> bool {
     match op {
         OperationKind::Build => binding
             .operations
@@ -305,7 +305,7 @@ pub fn select_next_due_operation(
     let mut eligible: Vec<Pair<'_>> = Vec::new();
     for record in &configs.bindings {
         let binding_id = format!("{}/{}", record.mem, record.name);
-        let Ok(ingest) = resolve_binding_run(configs, &binding_id, &record.config) else {
+        let Ok(ingest) = resolve_binding_run(&binding_id, &record.config) else {
             continue;
         };
         for op in OperationKind::ALL {
@@ -452,10 +452,10 @@ mod tests {
     // ── op-aware selection (pairs, eligibility, due-checks) ─────────────────
 
     use crate::binding::{
-        BINDING_VERSION, BuildOperation, CoverageSemantics, Operations, ResolvedBinding,
-        SyncOperation, VerifyOperation, hash_binding,
+        BINDING_VERSION, BuildOperation, CoverageSemantics, Operations, SyncOperation,
+        VerifyOperation, hash_binding,
     };
-    use crate::pipeline::{Facet, Medium, MediumType, PatternEntry, PatternMode};
+    use crate::pipeline::{MediumType, PatternEntry, PatternMode, Source};
     use crate::pipeline_store::MemPipelineRecord;
 
     use super::super::findings::{
@@ -466,11 +466,11 @@ mod tests {
         Engine::from_mounts(Vec::new()).unwrap()
     }
 
-    fn binding_with(operations: Operations) -> BindingV1 {
-        BindingV1 {
+    fn binding_with(operations: Operations) -> Binding {
+        Binding {
             version: BINDING_VERSION,
             intent: None,
-            source_facets: Vec::new(),
+            sources: Vec::new(),
             reference_mems: Vec::new(),
             destination_mem: "m".to_string(),
             deny_paths: Vec::new(),
@@ -490,7 +490,7 @@ mod tests {
         }
     }
 
-    fn record(name: &str, config: BindingV1) -> MemPipelineRecord<BindingV1> {
+    fn record(name: &str, config: Binding) -> MemPipelineRecord<Binding> {
         MemPipelineRecord {
             mem: "m".to_string(),
             name: name.to_string(),
@@ -498,12 +498,8 @@ mod tests {
         }
     }
 
-    fn configs_of(bindings: Vec<MemPipelineRecord<BindingV1>>) -> BindingConfigs {
-        BindingConfigs {
-            mediums: Vec::new(),
-            facets: Vec::new(),
-            bindings,
-        }
+    fn configs_of(bindings: Vec<MemPipelineRecord<Binding>>) -> BindingConfigs {
+        BindingConfigs { bindings }
     }
 
     /// The eligibility gate: a pair rotates only when its operation block
@@ -616,10 +612,7 @@ mod tests {
 
         // The current key for a source-less binding: hash(D) + empty head.
         let key = FindingKey {
-            binding_hash: hash_binding(&ResolvedBinding {
-                binding: binding.clone(),
-                primary_sources: Vec::new(),
-            }),
+            binding_hash: hash_binding(&binding),
             source_head: String::new(),
         };
 
@@ -702,35 +695,22 @@ mod tests {
         );
     }
 
-    /// A binding with a live (mtime) source over `ws`, `source_facets: [f]`.
+    /// A binding with a live (mtime) inline source over `ws`, named `f`.
     fn configs_with_live_source(operations: Operations) -> BindingConfigs {
         let mut binding = binding_with(operations);
-        binding.source_facets = vec!["f".to_string()];
+        binding.sources = vec![Source {
+            name: "f".to_string(),
+            medium_type: MediumType::Filesystem,
+            pointer: String::new(),
+            change_detection: Some("mtime".to_string()),
+            scope: vec![PatternEntry {
+                path: "**/*.rs".to_string(),
+                mode: PatternMode::Allow,
+            }],
+            engagement: None,
+            preparation: None,
+        }];
         BindingConfigs {
-            mediums: vec![MemPipelineRecord {
-                mem: "m".to_string(),
-                name: "src".to_string(),
-                config: Medium {
-                    name: "src".to_string(),
-                    medium_type: MediumType::Filesystem,
-                    pointer: String::new(),
-                    change_detection: Some("mtime".to_string()),
-                },
-            }],
-            facets: vec![MemPipelineRecord {
-                mem: "m".to_string(),
-                name: "f".to_string(),
-                config: Facet {
-                    name: "f".to_string(),
-                    medium: "src".to_string(),
-                    scope: vec![PatternEntry {
-                        path: "**/*.rs".to_string(),
-                        mode: PatternMode::Allow,
-                    }],
-                    engagement: None,
-                    preparation: None,
-                },
-            }],
             bindings: vec![record("v", binding)],
         }
     }
@@ -766,9 +746,9 @@ mod tests {
             Some(("m/v".to_string(), OperationKind::Verify))
         );
 
-        // No signal (unscoped facet → no current token) → not due.
+        // No signal (unscoped source → no current token) → not due.
         let mut no_signal = configs_with_live_source(verify_loop);
-        no_signal.facets[0].config.scope.clear();
+        no_signal.bindings[0].config.sources[0].scope.clear();
         assert_eq!(
             select_next_due_operation(
                 &engine,

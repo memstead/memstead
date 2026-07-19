@@ -1,62 +1,47 @@
-//! Gen-2 four-primitive → binding **v1** migration (D10, gen-2 path).
+//! Migration to binding **v2** — the single-record pipeline format.
 //!
-//! Converts the current four-primitive store (per-mem [`Projection`] + flat
-//! [`Ingest`]) into v1 [`BindingV1`] records: each flat ingest is merged into
-//! the projection its `projection` ref names, collapsing the
-//! declaration/schedule split into one versioned binding. The canonical
-//! binding id is `<mem>/<stem>` — the projection's owning mem dir plus its
-//! file stem, i.e. the very string the ingest already used as its `projection`
-//! ref (D3).
+//! Two conversion legs live here, both pure and IO-free (the CLI's
+//! `memstead projection migrate` wraps them with the load / write /
+//! tree-removal IO):
 //!
-//! [`migrate_gen2_bindings`] is pure and IO-free — it transforms
-//! already-loaded [`PipelineConfigs`] into keyed bindings. The CLI
-//! (`memstead projection migrate`) wraps it with the load / write / validate
-//! IO. This module is **additive and un-wired**: it neither flips the loader
-//! version-gate (D2) nor implements the gen-1 root-folder path (also D10) —
-//! those are separate, later slices.
+//! 1. **Gen-2 → v2** ([`migrate_gen2_bindings`]): each flat legacy ingest is
+//!    merged into the projection its `projection` ref names, and the
+//!    projection's facet references are **folded inline** — each referenced
+//!    facet joins its medium and becomes one [`Source`] under the facet's
+//!    name, byte-verbatim (source names key sync watermarks).
+//! 2. **v1 → v2** ([`fold_v1_binding`]): a three-file-store binding
+//!    ([`LegacyBindingV1`], `source_facets` by name) folds its referenced
+//!    facets + mediums inline the same way; every other field carries over
+//!    verbatim and `version` becomes 2.
 //!
-//! ## Field mapping (gen-2 → v1)
+//! After both legs every medium/facet record must be **consumed**
+//! ([`check_all_consumed`]) — an orphan (a record no binding references) is a
+//! typed error, never a silent drop; the CLI removes the emptied `mediums/`
+//! and `facets/` trees only after that check passes.
 //!
-//! - `version` = 1 (`BINDING_VERSION`).
-//! - `intent` / `source_facets` / `reference_mems` / `destination_mem` /
-//!   `rules` — carried over from the [`Projection`] verbatim.
-//! - `deny_paths` — moved **up** from the per-ingest record to the binding
-//!   (strategy-invariant, E1); bare directory segments are rewritten to E1's
-//!   workspace-relative glob dialect where trivially derivable (see
-//!   [`to_glob_dialect`]), every rewrite recorded as a note.
-//! - `coverage_semantics` — defaults [`CoverageSemantics::Exhaustive`] (gen-2
-//!   has no such field).
-//! - `operations.build` — the ingest's `mode` / `trigger` / `batch_size` /
-//!   `post_actions`. `mode` maps `discovery` → [`BuildMode::Discovery`] and
-//!   `one-shot` → [`BuildMode::OneShot`]; **`refinement` is a typed migrate
-//!   error** ([`BindingMigrateError::RefinementModeDeleted`]) — the vocabulary
-//!   is deleted, not migrated (D1).
-//! - `operations.sync` / `operations.verify` — `None`. A gen-2 config declares
-//!   only the build-equivalent schedule; sync/verify are enabled later via
-//!   `projection enable`, never fabricated by migration.
-//!
-//! A **dangling ingest→projection ref** is a typed migrate error
-//! ([`BindingMigrateError::DanglingProjectionRef`]), never a silent drop (D10).
+//! A **dangling reference** (ingest→projection, projection→facet,
+//! facet→medium) is a typed migrate error, never a silent drop. `refinement`
+//! build mode is a typed error — the vocabulary is deleted, not migrated.
+
+use serde::Deserialize;
 
 use crate::binding::{
-    BINDING_VERSION, BindingV1, BuildMode, BuildOperation, CoverageSemantics, Operations,
-    ResolvedBinding,
+    BINDING_VERSION, Binding, BuildMode, BuildOperation, CoverageSemantics, Operations, PruneConfig,
 };
-use crate::ingest::resolve::{ResolveError, resolve_binding};
-use crate::pipeline::Projection;
+use crate::pipeline::{Projection, Source};
 use crate::pipeline_store::{LegacyIngest, LegacyIngestMode, PipelineConfigs};
 
-/// Why a gen-2 config could not be migrated to a v1 binding. Every variant
-/// names the offending ingest so the failure is diagnosable without
+/// Why a legacy config could not be migrated to a v2 binding. Every variant
+/// names the offending record so the failure is diagnosable without
 /// re-reading the store.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum BindingMigrateError {
     /// The ingest declares build mode `refinement` — deleted from the binding
-    /// vocabulary (D1). Not migrated: refinement-as-writer is gone, so there
-    /// is no v1 shape to carry it into.
+    /// vocabulary. Not migrated: refinement-as-writer is gone, so there
+    /// is no v2 shape to carry it into.
     #[error(
         "ingest '{ingest}' declares build mode 'refinement', which is deleted from the binding \
-         vocabulary (D1) — refinement-as-writer is gone; re-declare it as a discovery build (plus \
+         vocabulary — refinement-as-writer is gone; re-declare it as a discovery build (plus \
          a sync/verify obligation) before migrating"
     )]
     RefinementModeDeleted {
@@ -74,7 +59,7 @@ pub enum BindingMigrateError {
         projection: String,
     },
     /// The ingest references a projection that does not exist — a dangling ref.
-    /// A typed error, never a silent drop (D10).
+    /// A typed error, never a silent drop.
     #[error(
         "ingest '{ingest}' references projection '{projection_ref}' which does not exist in mem \
          '{mem}' (dangling ref — not migrated); available: {}",
@@ -90,6 +75,54 @@ pub enum BindingMigrateError {
         /// The projection names that do exist in that mem.
         available: Vec<String>,
     },
+    /// A binding/projection references a facet that does not exist in its
+    /// mem — the fold cannot inline what is not there.
+    #[error(
+        "'{owner}' references facet '{facet}' not found in mem '{mem}' (dangling ref — not \
+         migrated); available: {}",
+        fmt_list(available)
+    )]
+    DanglingFacetRef {
+        /// The binding/projection id holding the reference.
+        owner: String,
+        /// The missing facet name.
+        facet: String,
+        /// The mem the facet was looked up in.
+        mem: String,
+        /// The facet names that do exist in that mem.
+        available: Vec<String>,
+    },
+    /// A facet references a medium that does not exist in its mem.
+    #[error(
+        "facet '{facet}' (folded for '{owner}') references medium '{medium}' not found in mem \
+         '{mem}' (dangling ref — not migrated); available: {}",
+        fmt_list(available)
+    )]
+    DanglingMediumRef {
+        /// The binding/projection id whose fold hit the dangling medium.
+        owner: String,
+        /// The referencing facet.
+        facet: String,
+        /// The missing medium name.
+        medium: String,
+        /// The mem the medium was looked up in.
+        mem: String,
+        /// The medium names that do exist in that mem.
+        available: Vec<String>,
+    },
+    /// After folding every binding, medium/facet records remain that no
+    /// binding referenced. Removing the trees would silently drop their
+    /// content — refused instead; the operator deletes or binds them first.
+    #[error(
+        "orphan pipeline records not referenced by any binding: {} — delete them (or bind \
+         them) before migrating; the migration removes the mediums/ and facets/ trees only \
+         when every record folded into a binding",
+        fmt_list(orphans)
+    )]
+    OrphanRecords {
+        /// `mediums/<mem>/<name>` / `facets/<mem>/<name>` style identifiers.
+        orphans: Vec<String>,
+    },
 }
 
 /// Render a name list for an error message: `a, b, c` or `(none)`.
@@ -101,18 +134,42 @@ fn fmt_list(names: &[String]) -> String {
     }
 }
 
-/// Convert a legacy bare-name `deny_paths` entry to E1's workspace-relative
+/// The retired **v1 binding** shape (migrate-local): the three-file-store
+/// record that referenced facets by name. Parsed only by the v1→v2 fold leg;
+/// the live loader refuses `version: 1` files with the migrate-naming error.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct LegacyBindingV1 {
+    /// Always `1` on disk (the loader routed the file here by that value).
+    pub version: u32,
+    #[serde(default)]
+    pub intent: Option<String>,
+    #[serde(default)]
+    pub source_facets: Vec<String>,
+    #[serde(default)]
+    pub reference_mems: Vec<String>,
+    pub destination_mem: String,
+    #[serde(default)]
+    pub deny_paths: Vec<String>,
+    #[serde(default)]
+    pub coverage_semantics: CoverageSemantics,
+    #[serde(default)]
+    pub rules: Option<serde_json::Value>,
+    #[serde(default)]
+    pub prune: Option<PruneConfig>,
+    pub operations: Operations,
+}
+
+/// Convert a legacy bare-name `deny_paths` entry to the workspace-relative
 /// glob dialect where trivially derivable, else carry it through unchanged
-/// (D1 — the gen-2 dialect-forward-carry).
+/// (the gen-2 dialect-forward-carry).
 ///
 /// A **bare directory segment** — non-empty, no path separator, no glob
 /// metacharacter (`*?[]`), and no `.` extension marker — is rewritten to a
-/// recursive-subtree glob `<segment>/**` (so `dev` → `dev/**`, matching E1's
-/// `"dev/**"` example). Anything already carrying a `/`, a glob metacharacter,
-/// or a `.` (a file like `VISION.md`, already a valid workspace-relative
-/// match) is a no-op — carried through. The return value equals the input
-/// exactly when nothing changed, so callers can detect (and note) rewrites by
-/// comparison.
+/// recursive-subtree glob `<segment>/**` (so `dev` → `dev/**`). Anything
+/// already carrying a `/`, a glob metacharacter, or a `.` (a file like
+/// `VISION.md`, already a valid workspace-relative match) is a no-op —
+/// carried through. The return value equals the input exactly when nothing
+/// changed, so callers can detect (and note) rewrites by comparison.
 fn to_glob_dialect(entry: &str) -> String {
     let is_bare_segment = !entry.is_empty()
         && !entry.contains('/')
@@ -125,39 +182,103 @@ fn to_glob_dialect(entry: &str) -> String {
     }
 }
 
+/// Fold a list of facet references (`facet_names`, in the `<mem>` tier) into
+/// inline [`Source`]s: each facet joins its medium, the facet's name becomes
+/// the source's name **byte-verbatim** (it keys sync watermarks), the
+/// medium's `type` / `pointer` / `change_detection` become the medium half,
+/// and the facet's `scope` / `engagement` / `preparation` the facet half.
+/// `owner` names the folding binding/projection in dangling-ref errors.
+fn fold_sources(
+    owner: &str,
+    facet_names: &[String],
+    mem: &str,
+    configs: &PipelineConfigs,
+) -> Result<Vec<Source>, BindingMigrateError> {
+    let mut sources = Vec::with_capacity(facet_names.len());
+    for facet_name in facet_names {
+        let facet = configs
+            .facets
+            .iter()
+            .find(|r| r.mem == mem && r.name == *facet_name)
+            .map(|r| &r.config)
+            .ok_or_else(|| BindingMigrateError::DanglingFacetRef {
+                owner: owner.to_string(),
+                facet: facet_name.clone(),
+                mem: mem.to_string(),
+                available: configs
+                    .facets
+                    .iter()
+                    .filter(|r| r.mem == mem)
+                    .map(|r| r.name.clone())
+                    .collect(),
+            })?;
+        let medium = configs
+            .mediums
+            .iter()
+            .find(|r| r.mem == mem && r.name == facet.medium)
+            .map(|r| &r.config)
+            .ok_or_else(|| BindingMigrateError::DanglingMediumRef {
+                owner: owner.to_string(),
+                facet: facet_name.clone(),
+                medium: facet.medium.clone(),
+                mem: mem.to_string(),
+                available: configs
+                    .mediums
+                    .iter()
+                    .filter(|r| r.mem == mem)
+                    .map(|r| r.name.clone())
+                    .collect(),
+            })?;
+        sources.push(Source {
+            name: facet_name.clone(),
+            medium_type: medium.medium_type,
+            pointer: medium.pointer.clone(),
+            change_detection: medium.change_detection.clone(),
+            scope: facet.scope.clone(),
+            engagement: facet.engagement.clone(),
+            preparation: facet.preparation.clone(),
+        });
+    }
+    Ok(sources)
+}
+
 /// A single migrated binding paired with the identity and provenance the CLI
 /// needs to write it to disk and report it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MigratedBinding {
-    /// The canonical binding id `<mem>/<stem>` (D3) — the projection ref the
-    /// ingest already used.
+    /// The canonical binding id `<mem>/<stem>`.
     pub id: String,
-    /// The projection's owning mem dir (the `.memstead/projections/<mem>/`
+    /// The binding's owning mem dir (the `.memstead/projections/<mem>/`
     /// tier the binding file lives under).
     pub mem: String,
     /// The projection file stem (`<stem>` in the binding id).
     pub name: String,
-    /// The flat ingest merged into this binding (its file stem) — used to
-    /// resolve the binding for validation and to delete the consumed ingest.
+    /// The flat ingest merged into this binding (its file stem), when the
+    /// gen-2 leg produced it — used to delete the consumed ingest. Empty for
+    /// the v1→v2 fold leg (no ingest involved).
     pub ingest_name: String,
-    /// The produced v1 binding.
-    pub binding: BindingV1,
+    /// The facet names this binding's fold consumed (the orphan check reads
+    /// them; they equal the produced source names).
+    pub consumed_facets: Vec<String>,
+    /// The produced v2 binding.
+    pub binding: Binding,
     /// Human-readable notes about non-identity transforms applied (e.g.
     /// deny-path dialect rewrites). Empty when the migration was verbatim.
     pub notes: Vec<String>,
 }
 
-/// Convert one gen-2 (`Ingest` + its `Projection`) into a v1 [`BindingV1`],
-/// returning the binding plus any per-field transform notes. Pure — no IO.
-/// `ingest_name` is used only for error messages.
-///
-/// See the [module docs](self) for the full field mapping. `refinement` mode
-/// is a typed error; every other field carries over or defaults as documented.
+/// Convert one gen-2 (`Ingest` + its `Projection`) into a v2 [`Binding`],
+/// folding the projection's facet references inline. Returns the binding
+/// plus any per-field transform notes. Pure — no IO. `ingest_name` is used
+/// only for error messages.
 pub(crate) fn binding_from_gen2(
     ingest_name: &str,
     ingest: &LegacyIngest,
     projection: &Projection,
-) -> Result<(BindingV1, Vec<String>), BindingMigrateError> {
+    projection_ref: &str,
+    mem: &str,
+    configs: &PipelineConfigs,
+) -> Result<(Binding, Vec<String>), BindingMigrateError> {
     let mode = match ingest.mode {
         LegacyIngestMode::Discovery => BuildMode::Discovery,
         LegacyIngestMode::OneShot => BuildMode::OneShot,
@@ -183,10 +304,12 @@ pub(crate) fn binding_from_gen2(
         })
         .collect();
 
-    let binding = BindingV1 {
+    let sources = fold_sources(projection_ref, &projection.source_facets, mem, configs)?;
+
+    let binding = Binding {
         version: BINDING_VERSION,
         intent: projection.intent.clone(),
-        source_facets: projection.source_facets.clone(),
+        sources,
         reference_mems: projection.reference_mems.clone(),
         destination_mem: projection.destination_mem.clone(),
         deny_paths,
@@ -210,13 +333,14 @@ pub(crate) fn binding_from_gen2(
     Ok((binding, notes))
 }
 
-/// Migrate every gen-2 flat ingest in `configs` into a v1 [`MigratedBinding`],
-/// keyed by binding id (`<mem>/<stem>`, D3), in id order.
+/// Migrate every gen-2 flat ingest in `configs` into a v2 [`MigratedBinding`],
+/// keyed by binding id (`<mem>/<stem>`), in id order.
 ///
-/// Ingest-driven (D10 — "merge each flat ingest into its projection"): each
-/// ingest's `projection` ref is resolved to a projection in that mem and the
-/// pair merged. A malformed ref, a dangling ref, or a `refinement` mode is a
-/// typed [`BindingMigrateError`] — the migration refuses rather than dropping
+/// Ingest-driven ("merge each flat ingest into its projection"): each
+/// ingest's `projection` ref is resolved to a projection in that mem, the
+/// pair merged, and the projection's facet references folded inline. A
+/// malformed ref, a dangling ref, or a `refinement` mode is a typed
+/// [`BindingMigrateError`] — the migration refuses rather than dropping
 /// or fabricating. Pure and IO-free.
 ///
 /// A projection with no ingest pointing at it is inert (never runnable in
@@ -256,12 +380,20 @@ pub fn migrate_gen2_bindings(
                     .collect(),
             })?;
 
-        let (binding, notes) = binding_from_gen2(&record.name, ingest, projection)?;
+        let (binding, notes) = binding_from_gen2(
+            &record.name,
+            ingest,
+            projection,
+            &projection_ref,
+            &mem,
+            configs,
+        )?;
         out.push(MigratedBinding {
             id: projection_ref,
             mem,
             name,
             ingest_name: record.name.clone(),
+            consumed_facets: projection.source_facets.clone(),
             binding,
             notes,
         });
@@ -270,21 +402,68 @@ pub fn migrate_gen2_bindings(
     Ok(out)
 }
 
-/// Resolve a migrated binding's primary sources (facet + medium) via the
-/// binding resolve layer, so the produced binding can be validated against the
-/// D6 capability matrix ([`crate::binding::validate_binding`]).
-///
-/// Resolves the binding's own `source_facets` against the still-loaded gen-2
-/// configs (facets/mediums in the binding-id's `<mem>` tier) via
-/// [`resolve_binding`]; reference mems are not resolved (only primary facets
-/// carry capability constraints). This gives the D6 matrix a real,
-/// config-derived consumer.
-pub fn resolve_migrated_binding(
-    configs: &PipelineConfigs,
+/// Fold one v1 three-file-store binding into a v2 [`Binding`]: every field
+/// carries over verbatim, `version` becomes 2, and each `source_facets`
+/// entry folds its facet + medium inline under the facet's name
+/// byte-verbatim (it keys sync watermarks). Pure — no IO.
+pub fn fold_v1_binding(
     binding_id: &str,
-    binding: BindingV1,
-) -> Result<ResolvedBinding, ResolveError> {
-    resolve_binding(configs, binding_id, &binding)
+    mem: &str,
+    v1: &LegacyBindingV1,
+    configs: &PipelineConfigs,
+) -> Result<Binding, BindingMigrateError> {
+    let sources = fold_sources(binding_id, &v1.source_facets, mem, configs)?;
+    Ok(Binding {
+        version: BINDING_VERSION,
+        intent: v1.intent.clone(),
+        sources,
+        reference_mems: v1.reference_mems.clone(),
+        destination_mem: v1.destination_mem.clone(),
+        deny_paths: v1.deny_paths.clone(),
+        coverage_semantics: v1.coverage_semantics,
+        rules: v1.rules.clone(),
+        prune: v1.prune.clone(),
+        operations: v1.operations.clone(),
+    })
+}
+
+/// Verify every medium/facet record in `configs` was consumed by a fold —
+/// `consumed_facets` is the union of every migrated binding's
+/// `(mem, facet-name)` pairs. A facet no binding referenced, or a medium no
+/// consumed facet engages, is an **orphan**: removing the trees would drop
+/// its content silently, so the migration refuses instead
+/// ([`BindingMigrateError::OrphanRecords`]) and names each leftover.
+pub fn check_all_consumed(
+    configs: &PipelineConfigs,
+    consumed_facets: &[(String, String)],
+) -> Result<(), BindingMigrateError> {
+    let mut orphans = Vec::new();
+    for facet in &configs.facets {
+        if !consumed_facets
+            .iter()
+            .any(|(mem, name)| *mem == facet.mem && *name == facet.name)
+        {
+            orphans.push(format!("facets/{}/{}", facet.mem, facet.name));
+        }
+    }
+    for medium in &configs.mediums {
+        let engaged = configs.facets.iter().any(|f| {
+            f.mem == medium.mem
+                && f.config.medium == medium.name
+                && consumed_facets
+                    .iter()
+                    .any(|(mem, name)| *mem == f.mem && *name == f.name)
+        });
+        if !engaged {
+            orphans.push(format!("mediums/{}/{}", medium.mem, medium.name));
+        }
+    }
+    if orphans.is_empty() {
+        Ok(())
+    } else {
+        orphans.sort();
+        Err(BindingMigrateError::OrphanRecords { orphans })
+    }
 }
 
 #[cfg(test)]
@@ -365,12 +544,8 @@ mod tests {
         }
     }
 
-    /// A well-formed gen-2 pair migrates to a v1 binding that carries the
-    /// merged operations (mode/trigger/batch/post_actions) and the projection's
-    /// declarative fields, with build-only operations and the id `<mem>/<stem>`.
-    #[test]
-    fn migrates_a_well_formed_pair() {
-        let configs = PipelineConfigs {
+    fn gen2_configs() -> PipelineConfigs {
+        PipelineConfigs {
             mediums: vec![medium("engine", "src", MediumType::Codebase, "../public")],
             facets: vec![facet("engine", "source-tree", "src", None)],
             projections: vec![projection(
@@ -386,34 +561,46 @@ mod tests {
                 LegacyIngestMode::Discovery,
                 &[],
             )],
-        };
+        }
+    }
 
-        let migrated = migrate_gen2_bindings(&configs).unwrap();
+    /// A well-formed gen-2 pair migrates to a v2 binding: the merged
+    /// operations (mode/trigger/batch/post_actions), the projection's
+    /// declarative fields, and the facet+medium folded inline under the
+    /// facet's name byte-verbatim.
+    #[test]
+    fn migrates_a_well_formed_pair_folding_sources_inline() {
+        let migrated = migrate_gen2_bindings(&gen2_configs()).unwrap();
         assert_eq!(migrated.len(), 1);
         let m = &migrated[0];
         assert_eq!(m.id, "engine/graph");
         assert_eq!(m.mem, "engine");
         assert_eq!(m.name, "graph");
         assert_eq!(m.ingest_name, "engine-graph");
+        assert_eq!(m.consumed_facets, vec!["source-tree".to_string()]);
 
         let b = &m.binding;
         assert_eq!(b.version, BINDING_VERSION);
         assert_eq!(b.intent.as_deref(), Some("intent of graph"));
-        assert_eq!(b.source_facets, vec!["source-tree".to_string()]);
         assert_eq!(b.reference_mems, vec!["plugin".to_string()]);
         assert_eq!(b.destination_mem, "engine");
         assert_eq!(b.coverage_semantics, CoverageSemantics::Exhaustive);
         assert_eq!(b.rules, Some(serde_json::json!({ "routing": "r" })));
+        // The fold: one inline source under the facet's name, carrying the
+        // medium half (type/pointer) and the facet half (scope).
+        assert_eq!(b.sources.len(), 1);
+        let s = &b.sources[0];
+        assert_eq!(s.name, "source-tree");
+        assert_eq!(s.medium_type, MediumType::Codebase);
+        assert_eq!(s.pointer, "../public");
+        assert_eq!(s.scope.len(), 1);
+        assert_eq!(s.engagement, None);
+        assert_eq!(s.preparation, None);
         // Operations: build carries the merged schedule; sync/verify absent.
         assert_eq!(
             b.operations.build.as_ref().unwrap().mode,
             BuildMode::Discovery
         );
-        assert_eq!(
-            b.operations.build.as_ref().unwrap().trigger,
-            IngestTrigger::Loop
-        );
-        assert_eq!(b.operations.build.as_ref().unwrap().batch_size, 20);
         assert_eq!(
             b.operations.build.as_ref().unwrap().post_actions,
             Some(serde_json::json!({ "archive_source": true }))
@@ -423,31 +610,15 @@ mod tests {
     }
 
     /// The produced binding round-trips losslessly through serde (the on-disk
-    /// promotion is faithful).
+    /// promotion is faithful) and validates clean.
     #[test]
-    fn produced_binding_round_trips() {
-        let configs = PipelineConfigs {
-            mediums: vec![medium("engine", "src", MediumType::Codebase, "../public")],
-            facets: vec![facet("engine", "source-tree", "src", None)],
-            projections: vec![projection(
-                "engine",
-                "graph",
-                &["source-tree"],
-                &[],
-                "engine",
-            )],
-            ingests: vec![ingest(
-                "engine-graph",
-                "engine/graph",
-                LegacyIngestMode::Discovery,
-                &[],
-            )],
-        };
-        let migrated = migrate_gen2_bindings(&configs).unwrap();
+    fn produced_binding_round_trips_and_validates() {
+        let migrated = migrate_gen2_bindings(&gen2_configs()).unwrap();
         let b = &migrated[0].binding;
         let json = serde_json::to_string(b).unwrap();
-        let back: BindingV1 = serde_json::from_str(&json).unwrap();
+        let back: Binding = serde_json::from_str(&json).unwrap();
         assert_eq!(&back, b);
+        assert!(validate_binding(b).is_ok());
     }
 
     /// `deny_paths` move up to the binding; a bare directory segment is
@@ -455,23 +626,13 @@ mod tests {
     /// entries carry through unchanged.
     #[test]
     fn deny_paths_move_up_and_bare_segments_convert() {
-        let configs = PipelineConfigs {
-            mediums: vec![medium("engine", "src", MediumType::Codebase, "../public")],
-            facets: vec![facet("engine", "source-tree", "src", None)],
-            projections: vec![projection(
-                "engine",
-                "graph",
-                &["source-tree"],
-                &[],
-                "engine",
-            )],
-            ingests: vec![ingest(
-                "engine-graph",
-                "engine/graph",
-                LegacyIngestMode::Discovery,
-                &["dev", "VISION.md", "../public/target/**"],
-            )],
-        };
+        let mut configs = gen2_configs();
+        configs.ingests = vec![ingest(
+            "engine-graph",
+            "engine/graph",
+            LegacyIngestMode::Discovery,
+            &["dev", "VISION.md", "../public/target/**"],
+        )];
         let migrated = migrate_gen2_bindings(&configs).unwrap();
         let m = &migrated[0];
         assert_eq!(
@@ -541,6 +702,36 @@ mod tests {
         }
     }
 
+    /// A projection→facet dangling ref is a typed error at fold time.
+    #[test]
+    fn dangling_facet_ref_is_a_typed_error() {
+        let mut configs = gen2_configs();
+        configs.facets.clear();
+        let err = migrate_gen2_bindings(&configs).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                BindingMigrateError::DanglingFacetRef { ref facet, .. } if facet == "source-tree"
+            ),
+            "got {err:?}"
+        );
+    }
+
+    /// A facet→medium dangling ref is a typed error at fold time.
+    #[test]
+    fn dangling_medium_ref_is_a_typed_error() {
+        let mut configs = gen2_configs();
+        configs.mediums.clear();
+        let err = migrate_gen2_bindings(&configs).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                BindingMigrateError::DanglingMediumRef { ref medium, .. } if medium == "src"
+            ),
+            "got {err:?}"
+        );
+    }
+
     /// A malformed projection ref (no `/`) is a typed error.
     #[test]
     fn malformed_projection_ref_is_a_typed_error() {
@@ -555,35 +746,138 @@ mod tests {
         );
     }
 
-    /// A legal codebase binding resolves and validates clean against the D6
-    /// matrix.
-    #[test]
-    fn migrated_codebase_binding_validates_clean() {
-        let configs = PipelineConfigs {
-            mediums: vec![medium("engine", "src", MediumType::Codebase, "../public")],
-            facets: vec![facet("engine", "source-tree", "src", None)],
-            projections: vec![projection(
-                "engine",
-                "graph",
-                &["source-tree"],
-                &[],
-                "engine",
-            )],
-            ingests: vec![ingest(
-                "engine-graph",
-                "engine/graph",
-                LegacyIngestMode::Discovery,
-                &["../public/target/**"],
-            )],
-        };
-        let migrated = migrate_gen2_bindings(&configs).unwrap();
-        let m = &migrated[0];
-        let resolved = resolve_migrated_binding(&configs, &m.id, m.binding.clone()).unwrap();
-        assert!(validate_binding(&resolved).is_ok());
+    // ---- v1 → v2 fold ---------------------------------------------------
+
+    fn v1_binding(facets: &[&str]) -> LegacyBindingV1 {
+        LegacyBindingV1 {
+            version: 1,
+            intent: Some("v1 intent".to_string()),
+            source_facets: facets.iter().map(|s| s.to_string()).collect(),
+            reference_mems: vec!["engineering".to_string()],
+            destination_mem: "engine".to_string(),
+            deny_paths: vec!["../dev/**".to_string()],
+            coverage_semantics: CoverageSemantics::Exhaustive,
+            rules: None,
+            prune: None,
+            operations: Operations {
+                build: Some(BuildOperation {
+                    mode: BuildMode::Discovery,
+                    trigger: IngestTrigger::Loop,
+                    batch_size: 20,
+                    post_actions: None,
+                }),
+                sync: Some(crate::binding::SyncOperation {
+                    trigger: IngestTrigger::Loop,
+                    batch_size: 20,
+                }),
+                verify: None,
+            },
+        }
     }
 
-    /// A migrated binding whose facet declares a preparation surfaces the D6
-    /// capability refusal at validation.
+    /// The v1→v2 fold carries every field verbatim, bumps `version` to 2,
+    /// and inlines each referenced facet + medium as a source under the
+    /// facet's name **byte-verbatim** — the watermark-key preservation
+    /// contract.
+    #[test]
+    fn fold_v1_binding_preserves_fields_and_source_names() {
+        let configs = gen2_configs();
+        let v1 = v1_binding(&["source-tree"]);
+        let b = fold_v1_binding("engine/graph", "engine", &v1, &configs).unwrap();
+        assert_eq!(b.version, 2);
+        assert_eq!(b.intent.as_deref(), Some("v1 intent"));
+        assert_eq!(b.reference_mems, vec!["engineering".to_string()]);
+        assert_eq!(b.destination_mem, "engine");
+        assert_eq!(b.deny_paths, vec!["../dev/**".to_string()]);
+        // The operations block carries over whole — sync survives.
+        assert!(b.operations.sync.is_some());
+        assert!(b.operations.verify.is_none());
+        // The fold: facet name preserved byte-verbatim as the source name.
+        assert_eq!(b.sources.len(), 1);
+        assert_eq!(b.sources[0].name, "source-tree");
+        assert_eq!(b.sources[0].pointer, "../public");
+    }
+
+    /// A v1 binding referencing a missing facet is a typed fold error.
+    #[test]
+    fn fold_v1_binding_dangling_facet_errors() {
+        let mut configs = gen2_configs();
+        configs.facets.clear();
+        let v1 = v1_binding(&["source-tree"]);
+        let err = fold_v1_binding("engine/graph", "engine", &v1, &configs).unwrap_err();
+        assert!(matches!(
+            err,
+            BindingMigrateError::DanglingFacetRef { ref facet, .. } if facet == "source-tree"
+        ));
+    }
+
+    /// The raw v1 JSON on disk (the dogfood shape) parses as
+    /// [`LegacyBindingV1`] — the fold leg's reader contract.
+    #[test]
+    fn legacy_v1_json_parses() {
+        let src = r#"{
+          "version": 1,
+          "intent": "Rust engine source.",
+          "source_facets": ["source-tree"],
+          "reference_mems": ["engineering"],
+          "destination_mem": "engine",
+          "deny_paths": ["../dev/**"],
+          "coverage_semantics": "exhaustive",
+          "operations": {
+            "build": { "mode": "discovery", "trigger": "loop", "batch_size": 20 },
+            "sync": { "trigger": "loop", "batch_size": 20 },
+            "verify": { "trigger": "loop", "batch_size": 20,
+                        "adjudication_cap": 50, "full_resync_every": 20 }
+          }
+        }"#;
+        let v1: LegacyBindingV1 = serde_json::from_str(src).unwrap();
+        assert_eq!(v1.version, 1);
+        assert_eq!(v1.source_facets, vec!["source-tree".to_string()]);
+        assert!(v1.operations.verify.is_some());
+    }
+
+    // ---- orphan check ---------------------------------------------------
+
+    /// All records consumed → clean; an unreferenced facet (and its now
+    /// unengaged medium) are orphans, named in the typed error.
+    #[test]
+    fn check_all_consumed_flags_orphans() {
+        let mut configs = gen2_configs();
+        configs
+            .facets
+            .push(facet("engine", "stray-facet", "stray-medium", None));
+        configs.mediums.push(medium(
+            "engine",
+            "stray-medium",
+            MediumType::Filesystem,
+            "../docs",
+        ));
+
+        let consumed = vec![("engine".to_string(), "source-tree".to_string())];
+        let err = check_all_consumed(&configs, &consumed).unwrap_err();
+        match err {
+            BindingMigrateError::OrphanRecords { orphans } => {
+                assert_eq!(
+                    orphans,
+                    vec![
+                        "facets/engine/stray-facet".to_string(),
+                        "mediums/engine/stray-medium".to_string(),
+                    ]
+                );
+            }
+            other => panic!("expected OrphanRecords, got {other:?}"),
+        }
+
+        // With the stray facet consumed too, everything is clean.
+        let consumed_all = vec![
+            ("engine".to_string(), "source-tree".to_string()),
+            ("engine".to_string(), "stray-facet".to_string()),
+        ];
+        assert!(check_all_consumed(&configs, &consumed_all).is_ok());
+    }
+
+    /// A migrated binding whose facet declares a preparation surfaces the
+    /// capability refusal at validation of the folded record.
     #[test]
     fn migrated_binding_with_preparation_surfaces_capability_refusal() {
         let configs = PipelineConfigs {
@@ -598,9 +892,7 @@ mod tests {
             )],
         };
         let migrated = migrate_gen2_bindings(&configs).unwrap();
-        let m = &migrated[0];
-        let resolved = resolve_migrated_binding(&configs, &m.id, m.binding.clone()).unwrap();
-        let errs = validate_binding(&resolved).unwrap_err();
+        let errs = validate_binding(&migrated[0].binding).unwrap_err();
         assert!(
             errs.iter().any(|e| matches!(
                 e,

@@ -181,31 +181,30 @@ impl Engine {
         &self.settings
     }
 
-    /// The pipeline configs (Medium / Facet / Projection / Ingest) loaded
-    /// from the workspace store at boot — the read-only queryable surface
-    /// the loader exposes. Empty for engines not booted from a workspace
-    /// root, or for a workspace that declares no pipelines. The ingest
-    /// skill, future MCP tools, and the macOS app consume this structured
-    /// form rather than re-reading the JSON folders.
-    pub fn pipeline_configs(&self) -> &crate::pipeline_store::PipelineConfigs {
+    /// The pipeline configs — the v2 single-record binding store — loaded
+    /// from the workspace at boot: the read-only queryable surface the
+    /// loader exposes. Empty for engines not booted from a workspace root,
+    /// or for a workspace that declares no pipelines. The ingest skill,
+    /// future MCP tools, and the macOS app consume this structured form
+    /// rather than re-reading the JSON folders.
+    pub fn pipeline_configs(&self) -> &crate::pipeline_store::BindingConfigs {
         &self.pipeline_configs
     }
 
     /// The pipeline configs serialized as a JSON string — the read
-    /// counterpart of the `add_*_json` edit entry points. Serialization-
-    /// boundary callers (UniFFI, where serde does not live) get the store
-    /// in one call and deserialize on their side.
+    /// counterpart of the `add_projection_json` edit entry point.
+    /// Serialization-boundary callers (UniFFI, where serde does not live)
+    /// get the store in one call and deserialize on their side.
     ///
-    /// Shape (D14): `{ "mediums": [{ mem, name, config }], "facets": [...],
-    /// "bindings": [{ mem, name, config }] }` — the version-gated v1 binding
-    /// shape (`config` carries the binding's `operations` block). The `ingests`
-    /// key is **gone**; operations are attributes of the binding, not a peer
-    /// record. This reads the live binding store fresh (like the brief path)
-    /// rather than the legacy in-memory snapshot, so a projection edit that
-    /// preserves its operations shows them back immediately. A missing root or
-    /// a legacy/unreadable store yields the fallback empty object.
+    /// Shape: `{ "bindings": [{ mem, name, config }] }` — the v2
+    /// single-record store (`config` carries the whole binding: inline
+    /// `sources`, `operations`, everything). The `mediums` / `facets` /
+    /// `ingests` keys are **gone** with their record kinds. This reads the
+    /// live binding store fresh (like the brief path) rather than the
+    /// in-memory snapshot, so an edit shows back immediately. A missing
+    /// root or a legacy/unreadable store yields the fallback empty object.
     pub fn pipeline_configs_json(&self) -> String {
-        let empty = || "{\"mediums\":[],\"facets\":[],\"bindings\":[]}".to_string();
+        let empty = || "{\"bindings\":[]}".to_string();
         let Some(root) = self.workspace_root() else {
             return empty();
         };
@@ -219,7 +218,7 @@ impl Engine {
     /// paths call this after [`crate::pipeline_store::load_pipeline_configs`];
     /// exposed so the full boot helper (a separate crate) can populate the
     /// same surface.
-    pub fn set_pipeline_configs(&mut self, configs: crate::pipeline_store::PipelineConfigs) {
+    pub fn set_pipeline_configs(&mut self, configs: crate::pipeline_store::BindingConfigs) {
         self.pipeline_configs = configs;
     }
 
@@ -347,28 +346,30 @@ impl Engine {
             .collect()
     }
 
-    /// The observation root for `mem`'s single `path`-namespace medium
-    /// (codebase / filesystem), or `None` when the mem has zero / several
-    /// mediums, no workspace root, or its lone medium is not path-shaped
-    /// (`path+commit` / `entity` / `url` — those need commit-pinned or
-    /// non-filesystem observation, E3b). The root is the **workspace root**:
-    /// anchor artifact ids are workspace-relative (pointer-prefixed) — the
-    /// same dialect enumeration, deny_paths, coverage matching, and the
-    /// advance auto-`worked` derivation share — so observation joins them
-    /// onto the workspace root, never onto the medium pointer (which the
-    /// ids already embed).
+    /// The observation root for `mem`'s single `path`-namespace source
+    /// (codebase / filesystem), or `None` when the mem's bindings declare
+    /// zero / several inline sources, no workspace root, or the lone
+    /// source's medium half is not path-shaped (`path+commit` / `entity` /
+    /// `url` — those need commit-pinned or non-filesystem observation,
+    /// E3b). The root is the **workspace root**: anchor artifact ids are
+    /// workspace-relative (pointer-prefixed) — the same dialect
+    /// enumeration, deny_paths, coverage matching, and the advance
+    /// auto-`worked` derivation share — so observation joins them onto the
+    /// workspace root, never onto the source pointer (which the ids
+    /// already embed).
     fn single_path_medium_root(&self, mem: &str) -> Option<PathBuf> {
         let workspace_root = self.workspace_root.as_deref()?;
-        let mut mediums = self
+        let mut sources = self
             .pipeline_configs()
-            .mediums
+            .bindings
             .iter()
-            .filter(|r| r.mem == mem);
-        let first = mediums.next()?;
-        if mediums.next().is_some() {
-            return None; // ambiguous — an anchor names no medium
+            .filter(|r| r.mem == mem)
+            .flat_map(|r| r.config.sources.iter());
+        let first = sources.next()?;
+        if sources.next().is_some() {
+            return None; // ambiguous — an anchor names no source
         }
-        let caps = crate::binding::medium_capabilities(first.config.medium_type);
+        let caps = crate::binding::medium_capabilities(first.medium_type);
         if caps.anchor_namespace != "path" {
             return None; // only plain working-tree path mediums are observable here
         }

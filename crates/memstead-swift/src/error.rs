@@ -216,6 +216,7 @@ impl From<EngineError> for MemsteadError {
             | EngineError::SchemaViolationInFetch { .. }
             | EngineError::RenameSimilarityOutOfRange { .. }
             | EngineError::InvalidChangesCursor { .. }
+            | EngineError::ReviewMarkNotSet { .. }
             | EngineError::MissingRequiredDescription { .. }
             | EngineError::DescriptionNotPermitted { .. }
             | EngineError::RelationManualAuthoringForbidden { .. }
@@ -285,17 +286,15 @@ impl From<PipelineEditError> for MemsteadError {
                 message: err.to_string(),
             },
             // Caller-actionable shape problems collapse into ValidationFailed;
-            // the message carries the specifics (which key, which referrers).
-            // Capability carries the matrix's typed refusal messages with
-            // their remedies; Dangling names the unresolvable reference —
-            // both are caller-actionable, so they ride ValidationFailed
-            // with the message intact (the app renders it verbatim).
+            // the message carries the specifics (which key, which refusal).
+            // Capability carries the in-record validation's typed refusal
+            // messages with their remedies — caller-actionable, so it rides
+            // ValidationFailed with the message intact (the app renders it
+            // verbatim).
             PipelineEditError::AlreadyExists { .. }
-            | PipelineEditError::Referenced { .. }
             | PipelineEditError::RenameTargetExists { .. }
             | PipelineEditError::InvalidJson { .. }
-            | PipelineEditError::Capability { .. }
-            | PipelineEditError::Dangling { .. } => Self::ValidationFailed {
+            | PipelineEditError::Capability { .. } => Self::ValidationFailed {
                 message: err.to_string(),
             },
             PipelineEditError::NotFound { .. } => Self::NotFound {
@@ -341,16 +340,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn pipeline_edit_referenced_maps_to_validation_failed() {
-        let e: MemsteadError = PipelineEditError::Referenced {
-            primitive: "medium",
-            key: "v/m".into(),
-            referrers: vec!["f".into()],
+    fn pipeline_edit_already_exists_maps_to_validation_failed() {
+        let e: MemsteadError = PipelineEditError::AlreadyExists {
+            primitive: "projection",
+            key: "v/p".into(),
         }
         .into();
         match e {
             MemsteadError::ValidationFailed { message } => {
-                assert!(message.contains("referenced"), "got: {message}")
+                assert!(message.contains("already exists"), "got: {message}")
             }
             other => panic!("expected ValidationFailed, got {other:?}"),
         }

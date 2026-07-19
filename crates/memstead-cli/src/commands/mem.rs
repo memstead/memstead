@@ -465,6 +465,10 @@ pub fn run(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
         // Explicit storage override (`--storage folder|git-branch`);
         // omitted flag keeps the engine's workspace-shape heuristic.
         storage: args.storage.map(Into::into),
+        // CLI-direct provenance, matching the entity mutations'
+        // `Actor::Cli, None` convention.
+        actor: memstead_base::vcs::Actor::Cli,
+        client: None,
     };
 
     let mut engine = match ctx.cli_engine()? {

@@ -2760,16 +2760,26 @@ mod tests {
 
     #[test]
     fn reload_one_mem_report_returns_rich_shape_for_folder_default() {
-        // Folder backend has no current_head (Ok(None)); the wrapper
-        // falls back to EMPTY_TREE_SHA for both head_before and
-        // head_after. entities_loaded reflects the post-reload count;
+        // The folder backend's drift cursor is the changelog's
+        // last-line timestamp (RFC3339-millis) — the same dialect
+        // `folder_changes_since` accepts. With the demo engine's
+        // creates already logged, both heads carry that cursor and,
+        // with the disk unchanged between init and reload, they are
+        // equal. entities_loaded reflects the post-reload count;
         // changed_entity_ids is empty when the disk is unchanged.
         let tmp = TempDir::new().unwrap();
         let mut engine = build_demo_engine(&tmp);
         let report = engine.reload_one_mem_report("specs").unwrap();
         assert_eq!(report.mem, "specs");
-        assert_eq!(report.head_before, crate::ops::EMPTY_TREE_SHA);
-        assert_eq!(report.head_after, crate::ops::EMPTY_TREE_SHA);
+        assert_eq!(
+            report.head_before, report.head_after,
+            "unchanged disk → stable cursor"
+        );
+        assert!(
+            crate::filesystem::changelog::parse_rfc3339_utc(&report.head_after).is_some(),
+            "folder heads carry the changelog-ts cursor, got {}",
+            report.head_after
+        );
         // build_demo_engine seeds 3 entities (Source One, Target Two,
         // Lonely Three) — all real, no stubs from those creates.
         assert_eq!(report.entities_loaded, 3);

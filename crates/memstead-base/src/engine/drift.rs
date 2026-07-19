@@ -116,6 +116,20 @@ impl Engine {
                             // for the response layer to drain.
                             let notice = self.mem_changed_notice(&name, &old, &new);
                             self.pending_mem_changed.push(notice);
+                            // Emit the same change on the mem-change
+                            // event channel: subscribers (SSE forwarders
+                            // foremost) previously saw only this engine's
+                            // own writes — a sibling process's commit,
+                            // detected here as drift, is every bit as
+                            // much a change. `n_commits: 1` per the
+                            // watcher precedent (events batch by
+                            // detection, not by commit archaeology).
+                            self.emit_mem_changed(&crate::engine::events::MemChangedEvent {
+                                mem: name.clone(),
+                                head: new.clone(),
+                                previous: old.clone(),
+                                n_commits: 1,
+                            });
                         }
                         Err(e) => {
                             tracing::warn!(
@@ -174,8 +188,22 @@ impl Engine {
             ),
             None => return,
         };
+        // The recorded head must equal what the backend's next
+        // `current_head()` probe will report, or every self-write
+        // would look like sibling drift on the following operation.
+        // For git-branch backends the probe returns exactly the commit
+        // SHA just produced; the folder backend's drift cursor is the
+        // changelog's last-line timestamp (a different dialect from
+        // its synthetic commit id), so probe once and prefer the
+        // backend's answer. Probe errors fall back to the commit id —
+        // drift detection stays best-effort, never blocking the write.
+        let recorded = self
+            .mounts
+            .get(mount_idx)
+            .and_then(|state| state.backend.current_head().ok().flatten())
+            .unwrap_or_else(|| commit_sha.to_string());
         if let Some(state) = self.mounts.get_mut(mount_idx) {
-            state.last_known_head = Some(commit_sha.to_string());
+            state.last_known_head = Some(recorded.clone());
         }
         // Skip emit when no SHA actually advanced — folder backends
         // (and archive backends) carry `last_known_head: None` and
@@ -185,12 +213,15 @@ impl Engine {
         // pass through the same write path (e.g. a relate that
         // re-applies the same edge). Skipping keeps the event stream
         // a stream of *changes* rather than a stream of *writes*.
-        if previous == commit_sha {
+        if previous == recorded {
             return;
         }
         let event = crate::engine::events::MemChangedEvent {
             mem,
-            head: commit_sha.to_string(),
+            // The corrected head, not the raw commit id: consumers feed
+            // event heads into `changes_since`, whose folder dialect is
+            // the changelog-timestamp cursor `recorded` carries.
+            head: recorded,
             previous,
             n_commits: 1,
         };
@@ -1226,9 +1257,10 @@ mod tests {
 
     #[test]
     fn reload_if_stale_returns_empty_for_folder_only_engine() {
-        // The folder backend inherits MemBackend::current_head's
-        // default (Ok(None)). Drift detection sees no signal and
-        // returns no warnings.
+        // Folder mems now carry a changelog-derived drift cursor, so
+        // this pins the QUIET case: no sibling wrote between probes,
+        // so repeated checks stay warning-free (the first probe
+        // captures the baseline silently, the second sees no advance).
         let tmp = TempDir::new().unwrap();
         let mut engine = build_demo_engine(&tmp);
         let warnings = engine.reload_if_stale(None);

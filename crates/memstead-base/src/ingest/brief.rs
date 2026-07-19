@@ -1198,7 +1198,7 @@ pub fn render_sync_brief(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ingest::resolve::ResolvedPrimarySource;
+    use crate::ingest::resolve::Source;
     use crate::pipeline::{IngestTrigger, PatternEntry};
 
     fn guidance(goal: Option<&str>, avoid: Option<&str>) -> ResolvedGuidance {
@@ -1247,13 +1247,13 @@ mod tests {
     }
 
     fn primary(medium_type: MediumType, scope: Vec<PatternEntry>) -> ResolvedSource {
-        ResolvedSource::Primary(ResolvedPrimarySource {
-            facet_ref: "f".to_string(),
-            medium: "m".to_string(),
+        ResolvedSource::Primary(Source {
+            name: "f".to_string(),
             medium_type,
-            medium_pointer: "../src".to_string(),
-            declared_change_detection: None,
+            pointer: "../src".to_string(),
+            change_detection: None,
             scope,
+            engagement: None,
             preparation: None,
         })
     }

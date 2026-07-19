@@ -1493,3 +1493,120 @@ fn update_declare_relations_rejects_malformed_value() {
         .failure()
         .stderr(contains("expected REL_TYPE:TARGET_ID"));
 }
+
+/// `memstead review-mark` full lifecycle on a git-branch mem:
+/// markless list → set to the reviewed head → empty diff → a mutation
+/// past the mark shows up in diff and flips the list indicator →
+/// clear returns to markless. Plus the refusal complement: an invalid
+/// cursor refuses `INVALID_CURSOR` leaving the mark untouched, and a
+/// markless diff refuses `REVIEW_MARK_NOT_SET` (never a silent empty).
+#[test]
+fn review_mark_lifecycle_via_cli() {
+    let tmp = TempDir::new().unwrap();
+    let _mem = make_mem(tmp.path());
+
+    // Markless start — ordinary state, and the head rides the roster.
+    let assert = memstead()
+        .current_dir(tmp.path())
+        .args(["--json", "review-mark", "list"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let roster: Value = serde_json::from_str(stdout.trim()).unwrap();
+    let entry = &roster["marks"][0];
+    assert_eq!(entry["mem"], "cli-write");
+    assert!(entry.get("mark").is_none() || entry["mark"].is_null());
+    let head = entry["head"].as_str().expect("git-branch head").to_string();
+
+    // Markless diff refuses typed — exit through the failure path with
+    // the engine's code on the JSON envelope.
+    let assert = memstead()
+        .current_dir(tmp.path())
+        .args(["--json", "review-mark", "diff", "cli-write"])
+        .assert()
+        .failure();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let envelope: Value = serde_json::from_str(stdout.trim()).unwrap();
+    assert_eq!(envelope["code"], "REVIEW_MARK_NOT_SET");
+
+    // Invalid cursor refuses and leaves the mem markless.
+    let assert = memstead()
+        .current_dir(tmp.path())
+        .args(["--json", "review-mark", "set", "cli-write", "not-a-sha"])
+        .assert()
+        .failure();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let envelope: Value = serde_json::from_str(stdout.trim()).unwrap();
+    assert_eq!(envelope["code"], "INVALID_CURSOR");
+
+    // Set to the reviewed head; the diff is empty.
+    memstead()
+        .current_dir(tmp.path())
+        .args([
+            "review-mark",
+            "set",
+            "cli-write",
+            &head,
+            "--note",
+            "reviewed via CLI test",
+        ])
+        .assert()
+        .success()
+        .stdout(contains("Review mark set on `cli-write`"));
+    memstead()
+        .current_dir(tmp.path())
+        .args(["review-mark", "list"])
+        .assert()
+        .success()
+        .stdout(contains("at head (nothing unreviewed)"));
+    memstead()
+        .current_dir(tmp.path())
+        .args(["review-mark", "diff", "cli-write"])
+        .assert()
+        .success()
+        .stdout(contains("nothing unreviewed"));
+
+    // A mutation past the mark: diff reports it, the list indicator
+    // flips — and the mutation itself carries no mark-related refusal
+    // (marks never gate).
+    memstead()
+        .current_dir(tmp.path())
+        .args([
+            "create",
+            "--title",
+            "Past The Mark",
+            "--type",
+            "spec",
+            "--section",
+            "identity=Advances the head past the review mark.",
+            "--section",
+            "purpose=Review-mark CLI lifecycle.",
+        ])
+        .assert()
+        .success();
+    memstead()
+        .current_dir(tmp.path())
+        .args(["review-mark", "diff", "cli-write"])
+        .assert()
+        .success()
+        .stdout(contains("**added** `cli-write--past-the-mark`"));
+    memstead()
+        .current_dir(tmp.path())
+        .args(["review-mark", "list"])
+        .assert()
+        .success()
+        .stdout(contains("unreviewed changes"));
+
+    // Clear returns to markless.
+    memstead()
+        .current_dir(tmp.path())
+        .args(["--json", "review-mark", "clear", "cli-write"])
+        .assert()
+        .success();
+    memstead()
+        .current_dir(tmp.path())
+        .args(["review-mark", "list"])
+        .assert()
+        .success()
+        .stdout(contains("no mark"));
+}

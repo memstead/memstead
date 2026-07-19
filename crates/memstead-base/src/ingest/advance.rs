@@ -260,9 +260,7 @@ fn derive_corrected_ids(
         .sources
         .iter()
         .filter_map(|s| match s {
-            ResolvedSource::Primary(p) if !p.medium_pointer.is_empty() => {
-                Some(p.medium_pointer.as_str())
-            }
+            ResolvedSource::Primary(p) if !p.pointer.is_empty() => Some(p.pointer.as_str()),
             _ => None,
         })
         .collect();
@@ -808,7 +806,7 @@ mod tests {
     /// codebase rooted at the workspace root (medium pointer `""`), scoped to
     /// `**/*.rs`, keyed `engine/graph` → dest mem `engine`.
     fn resolved_engine_graph() -> ResolvedIngest {
-        use super::super::resolve::{ResolvedPrimarySource, ResolvedSource};
+        use super::super::resolve::{ResolvedSource, Source};
         ResolvedIngest {
             name: "engine/graph".to_string(),
             mode: BuildMode::Discovery,
@@ -819,16 +817,16 @@ mod tests {
             projection_mem: "engine".to_string(),
             projection_name: "graph".to_string(),
             intent: None,
-            sources: vec![ResolvedSource::Primary(ResolvedPrimarySource {
-                facet_ref: "source-tree".to_string(),
-                medium: "src".to_string(),
+            sources: vec![ResolvedSource::Primary(Source {
+                name: "source-tree".to_string(),
                 medium_type: MediumType::Codebase,
-                medium_pointer: String::new(),
-                declared_change_detection: Some("git".to_string()),
+                pointer: String::new(),
+                change_detection: Some("git".to_string()),
                 scope: vec![PatternEntry {
                     path: "**/*.rs".to_string(),
                     mode: PatternMode::Allow,
                 }],
+                engagement: None,
                 preparation: None,
             })],
             destination_mem: "engine".to_string(),
@@ -1104,7 +1102,7 @@ mod tests {
 
         let mut resolved = resolved_engine_graph();
         if let ResolvedSource::Primary(p) = &mut resolved.sources[0] {
-            p.medium_pointer = "sub".to_string();
+            p.pointer = "sub".to_string();
         }
         {
             let mut engine = engine_at(root);

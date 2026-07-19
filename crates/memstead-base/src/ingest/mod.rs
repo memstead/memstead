@@ -39,6 +39,7 @@ pub mod selection;
 pub mod slice;
 pub mod status;
 
+pub use crate::pipeline::Source;
 pub use advance::{
     AdvanceError, AdvanceOutcome, AdvanceState, DispositionInput, EXCLUDED_VERDICT, ExcludeError,
     ExcludeOutcome, advance_baseline, advance_store_path, delete_advance_store, read_advance_store,
@@ -86,8 +87,8 @@ pub use report::{
     TreeFanout, compute_fidelity_report, render_fidelity_report,
 };
 pub use resolve::{
-    ChangeStrategy, ResolveError, ResolvedIngest, ResolvedPrimarySource, ResolvedSource,
-    find_git_root, resolve_binding, resolve_binding_run, resolve_change_strategy,
+    ChangeStrategy, ResolveError, ResolvedIngest, ResolvedSource, find_git_root,
+    resolve_binding_run, resolve_change_strategy,
 };
 pub use selection::{
     BackoffEntry, MAX_SKIP_LEVEL, OperationFilter, OperationKind, apply_backoff, select_next_due,

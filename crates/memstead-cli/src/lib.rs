@@ -726,6 +726,12 @@ impl CliError {
                 ExitKind::Validation,
                 Some(serde_json::json!({ "mem": mem, "since": since })),
             ),
+            // Review-mark diff on a markless mem (code REVIEW_MARK_NOT_SET
+            // via `e.code()`).
+            ReviewMarkNotSet { mem } => (
+                ExitKind::Validation,
+                Some(serde_json::json!({ "mem": mem })),
+            ),
             // A malformed `anchors[]` element on create/update — typed
             // `INVALID_ANCHOR` (via `e.code()`) with the wrapped anchor
             // error's recovery detail (offending field, bad value, allowed

@@ -443,6 +443,23 @@ pub struct MemConfig {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub sync_state: BTreeMap<String, String>,
 
+    /// The mem's review mark: the last human-approved state, in the
+    /// backend-opaque cursor vocabulary `changes_since` consumes
+    /// (git-branch: commit SHA; folder: changelog RFC3339 timestamp).
+    /// Absent is a first-class state — a mem with no mark is ordinary,
+    /// never an error, and marks never gate writes. One mark per mem;
+    /// wire key `reviewMark` (camelCase per the config's convention).
+    ///
+    /// Stripped from `PublishedMemConfig` (allowlist projection) —
+    /// review state is workspace-collaboration bookkeeping, not part
+    /// of a published mem's identity.
+    #[serde(
+        default,
+        rename = "reviewMark",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub review_mark: Option<String>,
+
     /// Extra fields not in the known set (captured for round-tripping).
     ///
     /// Historical tombstones:
@@ -922,6 +939,7 @@ mod tests {
             vcs: None,
             unregistered_at: None,
             sync_state: Default::default(),
+            review_mark: None,
             extra: Default::default(),
         };
         let json = serde_json::to_string(&cfg).unwrap();
@@ -1313,6 +1331,7 @@ mod tests {
             vcs: None,
             unregistered_at: None,
             sync_state,
+            review_mark: None,
             extra,
         };
         let published = published_config_from(&cfg, "").expect("publish projection");
@@ -1667,6 +1686,7 @@ mod tests {
             vcs: None,
             unregistered_at: None,
             sync_state: BTreeMap::new(),
+            review_mark: None,
             extra: HashMap::new(),
         };
         cfg.vcs = Some(VcsConfig {

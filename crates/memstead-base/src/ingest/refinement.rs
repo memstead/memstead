@@ -233,7 +233,7 @@ pub fn next_batch(
 mod tests {
     use super::*;
     use crate::binding::BuildMode;
-    use crate::ingest::resolve::ResolvedPrimarySource;
+    use crate::ingest::resolve::Source;
     use crate::pipeline::{IngestTrigger, MediumType, PatternEntry, PatternMode};
 
     fn resolved(name: &str, batch_size: u32) -> ResolvedIngest {
@@ -247,16 +247,16 @@ mod tests {
             projection_mem: name.to_string(),
             projection_name: "p".to_string(),
             intent: None,
-            sources: vec![ResolvedSource::Primary(ResolvedPrimarySource {
-                facet_ref: "f".to_string(),
-                medium: "m".to_string(),
+            sources: vec![ResolvedSource::Primary(Source {
+                name: "f".to_string(),
                 medium_type: MediumType::Codebase,
-                medium_pointer: String::new(),
-                declared_change_detection: None,
+                pointer: String::new(),
+                change_detection: None,
                 scope: vec![PatternEntry {
                     path: "**/*.rs".to_string(),
                     mode: PatternMode::Allow,
                 }],
+                engagement: None,
                 preparation: None,
             })],
             destination_mem: name.to_string(),

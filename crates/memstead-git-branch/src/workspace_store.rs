@@ -164,14 +164,12 @@ pub fn engine_from_workspace_root(workspace_root: &Path) -> Result<Engine, BootE
     engine.set_workspace_root(workspace_root.to_path_buf());
     engine.set_backend_factory(crate::storage::instantiate_full_backend);
     engine.set_git_branch_ops(crate::storage::FULL_GIT_BRANCH_OPS);
-    // Load the workspace store's pipeline configs (Medium / Facet /
-    // Projection / Ingest) into the read-only queryable surface, matching
-    // the lean boot path. A malformed config surfaces a typed parse error.
-    // Pipeline configs from the workspace store — the legacy folders are no
-    // longer read at boot (the compat shim retired with the 2026-06-14 bundled
-    // migration; `memstead projection migrate` is the only path from old-shape
-    // configs).
-    engine.set_pipeline_configs(memstead_base::load_legacy_pipeline_configs(workspace_root)?);
+    // Load the workspace store's pipeline configs — the v2 single-record
+    // binding store — into the read-only queryable surface, matching the
+    // lean boot path. A malformed config surfaces a typed parse error; a
+    // pre-v2 store refuses boot with the migrate-naming error (`memstead
+    // projection migrate` is the only path from old-shape configs).
+    engine.set_pipeline_configs(memstead_base::load_pipeline_configs(workspace_root)?);
     // Publish the authoring meta-schemas into `.memstead/meta-schemas/`
     // (best-effort) so editors validate authored schema YAML.
     let _ = memstead_schema::meta_schema::publish_meta_schemas(workspace_root);

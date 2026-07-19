@@ -42,6 +42,11 @@ This document contains the help content for the `memstead` command-line program.
 * [`memstead recover`↴](#memstead-recover)
 * [`memstead anchors`↴](#memstead-anchors)
 * [`memstead changes`↴](#memstead-changes)
+* [`memstead review-mark`↴](#memstead-review-mark)
+* [`memstead review-mark list`↴](#memstead-review-mark-list)
+* [`memstead review-mark set`↴](#memstead-review-mark-set)
+* [`memstead review-mark clear`↴](#memstead-review-mark-clear)
+* [`memstead review-mark diff`↴](#memstead-review-mark-diff)
 * [`memstead reload`↴](#memstead-reload)
 * [`memstead fetch`↴](#memstead-fetch)
 * [`memstead pull`↴](#memstead-pull)
@@ -134,6 +139,7 @@ Exit codes:
 * `recover` — Apply parse-time-drift recovery across writable mems. Walks `PARSED_RELATION_INVALID` warnings, re-renders affected source entities to drop the stale rows, and reports per-entry outcomes. Read-only-origin drops surface as skipped
 * `anchors` — Read provenance anchors (E3a): `memstead anchors <id>` lists an entity's anchors + composition; `memstead anchors --artifact <path>` reverse-looks-up every entity whose anchor references that path (the query the check-realization hook consumes)
 * `changes` — Diff a mem's HEAD against a commit SHA. Pass `--since` = a prior `commit_sha` from a mutation, or the canonical empty-tree hash `4b825dc642cb6eb9a060e54bf8d69288fbee4904` for a first sync
+* `review-mark` — Read and move the per-mem review mark — the engine's one pointer per mem to the last human-approved state. `list` shows every mem's mark and head; `set`/`clear` move it (explicit target only); `diff` reports the unreviewed delta. Marks never gate writes
 * `reload` — Reload one writable mem's slice of the in-memory store from its on-disk branch tip — or every writable mem when `--mem` is omitted. CLI parity with the MCP `memstead_reload` tool
 * `fetch` — Fetch a mem's branch refs from a git remote into the mem-repo (no local branch moves — inspect first, then `pull`). Requires a git-branch-backed mem (`INVALID_INPUT` on folder mounts); refuses `UNKNOWN_REMOTE` when the remote is not configured
 * `pull` — Fast-forward a mem's branch to its fetched remote counterpart and reload the in-memory store. Refuses `LOCAL_DIVERGENCE` when the local branch is not an ancestor of the remote — reconcile via `branch-reset`, or resolve on another clone and push
@@ -143,7 +149,7 @@ Exit codes:
 * `mem-repo` — Mem-repo-git lifecycle commands
 * `workspace` — Introspect and configure workspace policy — `dump` reads the effective config; `allow-create`/`revoke-create`/`allow-delete`/ `revoke-delete`/`grant-cross-link`/`revoke-cross-link`/`set-mutations` write the mem-lifecycle allowlist, cross-mem link grants, and mutation policy
 * `schema` — Author-time schema tooling. `memstead schema validate <path>` checks a schema package directory against the engine's loader without touching a workspace
-* `projection` — Binding (projection-promotion) tooling — the projection is the unit, one versioned binding per source→mem obligation. `memstead projection brief <binding>` renders a binding's run-brief (the Markdown prompt an agent consumes); `memstead projection init` scaffolds a fresh v1 binding non-interactively; `memstead projection migrate` promotes both legacy generations (root-folder `scopes|projections|ingests/` and the gen-2 four-primitive store) into v1 bindings; `memstead projection advance` records disposition-gated sync-baseline advances; `memstead projection enable <build|sync|verify> <binding>` adds a missing operation block
+* `projection` — Pipeline tooling — one versioned v2 binding per pipeline, sources inline. `memstead projection brief <binding>` renders a binding's run-brief (the Markdown prompt an agent consumes); `memstead projection init` scaffolds a fresh v2 record non-interactively; `memstead projection migrate` converts every prior on-disk generation (gen-1 root folders, the four-primitive store, the v1 three-file store) into v2 records in place; `memstead projection advance` records disposition-gated sync-baseline advances; `memstead projection enable <build|sync|verify> <binding>` adds a missing operation block
 
 ###### **Options:**
 
@@ -825,6 +831,78 @@ Diff a mem's HEAD against a commit SHA. Pass `--since` = a prior `commit_sha` fr
 
 
 
+## `memstead review-mark`
+
+Read and move the per-mem review mark — the engine's one pointer per mem to the last human-approved state. `list` shows every mem's mark and head; `set`/`clear` move it (explicit target only); `diff` reports the unreviewed delta. Marks never gate writes
+
+**Usage:** `memstead review-mark <COMMAND>`
+
+###### **Subcommands:**
+
+* `list` — Every mem's mark (or its absence) alongside the current head. A mem with no mark is an ordinary state, not a warning
+* `set` — Set a mem's mark to an explicitly named state — the state the review actually covered. The value is a backend cursor: a commit SHA for git-branch mems, an RFC 3339 timestamp for folder mems (the same cursor `memstead changes --since` consumes; `list` shows each mem's current head in that vocabulary). An invalid cursor refuses with `INVALID_CURSOR` and leaves the mark untouched
+* `clear` — Clear a mem's mark, returning it to the markless state
+* `diff` — The accumulated per-entity delta from the mem's mark to its current head. Refuses with `REVIEW_MARK_NOT_SET` on a markless mem — marklessness is visible in `list`, never silently equated with "no changes"
+
+
+
+## `memstead review-mark list`
+
+Every mem's mark (or its absence) alongside the current head. A mem with no mark is an ordinary state, not a warning
+
+**Usage:** `memstead review-mark list`
+
+
+
+## `memstead review-mark set`
+
+Set a mem's mark to an explicitly named state — the state the review actually covered. The value is a backend cursor: a commit SHA for git-branch mems, an RFC 3339 timestamp for folder mems (the same cursor `memstead changes --since` consumes; `list` shows each mem's current head in that vocabulary). An invalid cursor refuses with `INVALID_CURSOR` and leaves the mark untouched
+
+**Usage:** `memstead review-mark set [OPTIONS] <MEM> <STATE>`
+
+###### **Arguments:**
+
+* `<MEM>` — Writable mem name
+* `<STATE>` — The reviewed state (backend cursor — see `set --help`)
+
+###### **Options:**
+
+* `--note <NOTE>` — Provenance note (≤280 chars). Under `[mutations].require_notes` a missing note adds a `NOTE_MISSING` warning; the write still commits (warn-and-commit, like every note-gated mutation)
+
+
+
+## `memstead review-mark clear`
+
+Clear a mem's mark, returning it to the markless state
+
+**Usage:** `memstead review-mark clear [OPTIONS] <MEM>`
+
+###### **Arguments:**
+
+* `<MEM>` — Writable mem name
+
+###### **Options:**
+
+* `--note <NOTE>` — Provenance note (≤280 chars)
+
+
+
+## `memstead review-mark diff`
+
+The accumulated per-entity delta from the mem's mark to its current head. Refuses with `REVIEW_MARK_NOT_SET` on a markless mem — marklessness is visible in `list`, never silently equated with "no changes"
+
+**Usage:** `memstead review-mark diff [OPTIONS] <MEM>`
+
+###### **Arguments:**
+
+* `<MEM>` — Mem name
+
+###### **Options:**
+
+* `--rename-similarity <RENAME_SIMILARITY>` — Rename detection threshold in [0.1, 1.0]; mirrors `memstead changes --rename-similarity`. Git-branch mems only — folder mems have no rename detection (renames surface as updates)
+
+
+
 ## `memstead reload`
 
 Reload one writable mem's slice of the in-memory store from its on-disk branch tip — or every writable mem when `--mem` is omitted. CLI parity with the MCP `memstead_reload` tool
@@ -1315,15 +1393,15 @@ Install a schema package into the current folder workspace's `.memstead/schemas/
 
 ## `memstead projection`
 
-Binding (projection-promotion) tooling — the projection is the unit, one versioned binding per source→mem obligation. `memstead projection brief <binding>` renders a binding's run-brief (the Markdown prompt an agent consumes); `memstead projection init` scaffolds a fresh v1 binding non-interactively; `memstead projection migrate` promotes both legacy generations (root-folder `scopes|projections|ingests/` and the gen-2 four-primitive store) into v1 bindings; `memstead projection advance` records disposition-gated sync-baseline advances; `memstead projection enable <build|sync|verify> <binding>` adds a missing operation block
+Pipeline tooling — one versioned v2 binding per pipeline, sources inline. `memstead projection brief <binding>` renders a binding's run-brief (the Markdown prompt an agent consumes); `memstead projection init` scaffolds a fresh v2 record non-interactively; `memstead projection migrate` converts every prior on-disk generation (gen-1 root folders, the four-primitive store, the v1 three-file store) into v2 records in place; `memstead projection advance` records disposition-gated sync-baseline advances; `memstead projection enable <build|sync|verify> <binding>` adds a missing operation block
 
 **Usage:** `memstead projection <COMMAND>`
 
 ###### **Subcommands:**
 
-* `brief` — Render a binding's run-brief — the Markdown prompt an agent consumes — on stdout. Takes the canonical binding id `<mem>/<stem>` (D3), e.g. `engine/graph`. Omit the id (or pass `--all`) to select the next due (binding, operation) pair by round-robin + backoff and render that operation's brief; `--operation` picks which operations rotate (default `build` — the classic build-only rotation; `any` rotates every loop-declared build / sync / verify pair). An operation participates only where its binding block declares `trigger: loop`. Reads the v1 binding store and the destination mem's schema / writing guidance; the assembly is shared with the UniFFI surface, so CLI and app briefs are byte-identical by construction
-* `init` — Scaffold a fresh v1 binding non-interactively: a `Medium`, a `Facet`, and a v1 binding under `.memstead/{mediums,facets,projections}/<mem>/`. All inputs are flags — no prompts ever (parity across callers). The default binding declares build+sync+verify where the medium permits: a `web` source scaffolds build-only, with the deferral named in `warnings[]`. A `prune` block is scaffolded wherever sync survived, with the strongest guarantee the medium supports (never-clobber for a git-backed source). Refuses `PROJECTION_EXISTS` (without touching disk) when a binding of the same id already exists — never overwrites
-* `migrate` — Migrate both legacy generations into v1 bindings (D10). Gen-1 — the root-folder `scopes|projections|ingests/` JSON layout the retired `pipeline migrate` command handled — is first materialized into the gen-2 `.memstead/` store, then promoted. Gen-2 — the four-primitive store (per-mem `Projection` + flat `Ingest`) — merges each ingest into the projection its `projection` ref names; the binding takes the projection's file identity (`.memstead/projections/<mem>/<stem>.json`) and the merged ingest is removed. `refinement` mode and dangling projection refs refuse with a typed error. Use `--dry-run` to preview without writing
+* `brief` — Render a binding's run-brief — the Markdown prompt an agent consumes — on stdout. Takes the canonical binding id `<mem>/<stem>` (D3), e.g. `engine/graph`. Omit the id (or pass `--all`) to select the next due (binding, operation) pair by round-robin + backoff and render that operation's brief; `--operation` picks which operations rotate (default `build` — the classic build-only rotation; `any` rotates every loop-declared build / sync / verify pair). An operation participates only where its binding block declares `trigger: loop`. Reads the v2 binding store and the destination mem's schema / writing guidance; the assembly is shared with the UniFFI surface, so CLI and app briefs are byte-identical by construction
+* `init` — Scaffold a fresh v2 binding non-interactively: ONE record with one inline source, at `.memstead/projections/<mem>/<stem>.json`. All inputs are flags — no prompts ever (parity across callers). The default binding declares build+sync+verify where the medium permits: a `web` source scaffolds build-only, with the deferral named in `warnings[]`. A `prune` block is scaffolded wherever sync survived, with the strongest guarantee the medium supports (never-clobber for a git-backed source). Refuses `PROJECTION_EXISTS` (without touching disk) when a binding of the same id already exists — never overwrites
+* `migrate` — Migrate every prior on-disk generation into v2 single-record bindings, in place. Gen-1 — the root-folder `scopes|projections|ingests/` JSON layout — is first materialized into the four-primitive store, then folded. Gen-2 — the four-primitive store (per-mem `Projection` + flat `Ingest`) — merges each ingest into its projection and folds the referenced facets + mediums inline. v1 — the three-file store — folds each binding's facet references inline the same way, source names preserved byte-verbatim (they key sync watermarks). The emptied `mediums/` and `facets/` trees are removed; orphan records refuse rather than drop. `refinement` mode and dangling refs refuse with a typed error. Idempotent on a migrated store. Use `--dry-run` to preview without writing
 * `enable` — Enable a `build` / `sync` / `verify` operation on an existing binding by adding its block (with sensible defaults) if absent. This is the remedy a refused *mutating* operation cites (D6): `projection enable sync <binding>`. Before writing, the operation is checked against the medium-capability matrix (D6) — enabling `sync`/`verify` over a medium that cannot support it (e.g. a `web` source) refuses with the capability gap and writes nothing. Enabling an already-present operation refuses `PROJECTION_OP_ALREADY_ENABLED`; a missing binding refuses `PROJECTION_NOT_FOUND`
 * `advance` — Advance a binding's sync baseline by recording per-artifact dispositions (D7). The engine freezes the presented changed slice, subtracts already-disposed artifacts on re-presentation, appends new-HEAD deltas when the source moves mid-pass, and — when the remainder empties — advances the destination mem's `#synced` token via the sync-state writer (provenance piggybacks that commit). Dispositions are durable (`.memstead/state/advance/`), so a partial pass resumes across process restarts. The gate accepts **only** artifact ids the engine presented — an unknown id refuses the whole call atomically (`PROJECTION_ADVANCE_UNKNOWN_ARTIFACT`). In this cycle the agent supplies a disposition for **every** artifact explicitly (auto-derivation lands later)
 * `exclude` — Declare authored **exclusions** for in-scope source artifacts. Unlike `advance` (whose gate accepts only artifacts in the changed slice), this gates on enumerable `S(D)` membership, so a stable, unchanged artifact can be recorded as deliberately not-modeled with a rationale. Each accepted `(artifact, rationale)` lands in the durable exclusion ledger the fidelity report consults, so the artifact stops re-surfacing as `uncovered` under exhaustive coverage and keeps its reasoning. An artifact outside `S(D)` refuses the whole call atomically (`PROJECTION_EXCLUDE_NOT_SOURCE_MEMBER`); re-declaring merges into the ledger. The write path for the option-(a) process-mem judgment migration, and the general "this in-scope artifact is mined and warrants no destination entity, because …" capability
@@ -1333,7 +1411,7 @@ Binding (projection-promotion) tooling — the projection is the unit, one versi
 
 ## `memstead projection brief`
 
-Render a binding's run-brief — the Markdown prompt an agent consumes — on stdout. Takes the canonical binding id `<mem>/<stem>` (D3), e.g. `engine/graph`. Omit the id (or pass `--all`) to select the next due (binding, operation) pair by round-robin + backoff and render that operation's brief; `--operation` picks which operations rotate (default `build` — the classic build-only rotation; `any` rotates every loop-declared build / sync / verify pair). An operation participates only where its binding block declares `trigger: loop`. Reads the v1 binding store and the destination mem's schema / writing guidance; the assembly is shared with the UniFFI surface, so CLI and app briefs are byte-identical by construction.
+Render a binding's run-brief — the Markdown prompt an agent consumes — on stdout. Takes the canonical binding id `<mem>/<stem>` (D3), e.g. `engine/graph`. Omit the id (or pass `--all`) to select the next due (binding, operation) pair by round-robin + backoff and render that operation's brief; `--operation` picks which operations rotate (default `build` — the classic build-only rotation; `any` rotates every loop-declared build / sync / verify pair). An operation participates only where its binding block declares `trigger: loop`. Reads the v2 binding store and the destination mem's schema / writing guidance; the assembly is shared with the UniFFI surface, so CLI and app briefs are byte-identical by construction.
 
 `--verify` renders the **verify brief** (group C) for the named binding: measurement + capped-adjudication instructions only, with no destination-mutation instruction. `--sync` renders the **sync brief** — the sole maintenance-writer prompt, carrying both the cursor slice and the open verify findings in one brief with the absorbed reconcile conservatism. Both are read-only on the mem; the sync brief's repairs reach the mem only when an agent acts on it through the MCP mutation surface.
 
@@ -1367,7 +1445,7 @@ Render a binding's run-brief — the Markdown prompt an agent consumes — on st
 
 ## `memstead projection init`
 
-Scaffold a fresh v1 binding non-interactively: a `Medium`, a `Facet`, and a v1 binding under `.memstead/{mediums,facets,projections}/<mem>/`. All inputs are flags — no prompts ever (parity across callers). The default binding declares build+sync+verify where the medium permits: a `web` source scaffolds build-only, with the deferral named in `warnings[]`. A `prune` block is scaffolded wherever sync survived, with the strongest guarantee the medium supports (never-clobber for a git-backed source). Refuses `PROJECTION_EXISTS` (without touching disk) when a binding of the same id already exists — never overwrites
+Scaffold a fresh v2 binding non-interactively: ONE record with one inline source, at `.memstead/projections/<mem>/<stem>.json`. All inputs are flags — no prompts ever (parity across callers). The default binding declares build+sync+verify where the medium permits: a `web` source scaffolds build-only, with the deferral named in `warnings[]`. A `prune` block is scaffolded wherever sync survived, with the strongest guarantee the medium supports (never-clobber for a git-backed source). Refuses `PROJECTION_EXISTS` (without touching disk) when a binding of the same id already exists — never overwrites
 
 **Usage:** `memstead projection init [OPTIONS] --mem <MEM> --source <SOURCE> --medium-type <MEDIUM_TYPE>`
 
@@ -1396,7 +1474,7 @@ Scaffold a fresh v1 binding non-interactively: a `Medium`, a `Facet`, and a v1 b
 
 ## `memstead projection migrate`
 
-Migrate both legacy generations into v1 bindings (D10). Gen-1 — the root-folder `scopes|projections|ingests/` JSON layout the retired `pipeline migrate` command handled — is first materialized into the gen-2 `.memstead/` store, then promoted. Gen-2 — the four-primitive store (per-mem `Projection` + flat `Ingest`) — merges each ingest into the projection its `projection` ref names; the binding takes the projection's file identity (`.memstead/projections/<mem>/<stem>.json`) and the merged ingest is removed. `refinement` mode and dangling projection refs refuse with a typed error. Use `--dry-run` to preview without writing
+Migrate every prior on-disk generation into v2 single-record bindings, in place. Gen-1 — the root-folder `scopes|projections|ingests/` JSON layout — is first materialized into the four-primitive store, then folded. Gen-2 — the four-primitive store (per-mem `Projection` + flat `Ingest`) — merges each ingest into its projection and folds the referenced facets + mediums inline. v1 — the three-file store — folds each binding's facet references inline the same way, source names preserved byte-verbatim (they key sync watermarks). The emptied `mediums/` and `facets/` trees are removed; orphan records refuse rather than drop. `refinement` mode and dangling refs refuse with a typed error. Idempotent on a migrated store. Use `--dry-run` to preview without writing
 
 **Usage:** `memstead projection migrate [OPTIONS]`
 

@@ -8,6 +8,50 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Changed
+- **BREAKING: one record per pipeline (binding format v2).** The pipeline
+  configuration is consolidated into a single versioned record at
+  `.memstead/projections/<mem>/<name>.json` (`version: 2`): the standalone
+  `mediums/` and `facets/` record kinds are retired, their content folded
+  into the binding's inline `sources[]` — each source carries the medium
+  half (`type` / `pointer` / `change_detection`) and the facet half
+  (`scope` / `engagement` / `preparation`) under the facet's name verbatim,
+  so per-source sync watermarks keep resolving. The engine reads **only**
+  v2: a pre-v2 store (version-less gen-2 projection or v1 three-file
+  binding) refuses at load/boot with a typed error naming
+  `memstead projection migrate`, which now converts every prior on-disk
+  generation in place (folding medium+facet content inline, removing the
+  emptied `mediums/`/`facets/` trees, refusing on orphan records rather
+  than dropping them; idempotent on a migrated store). The edit surface is
+  projection-only everywhere — the eight medium/facet CRUD methods are gone
+  from the engine, UniFFI, and wire surfaces; the cross-record dangling-
+  reference error class is gone with the references (in-record source
+  validation replaces it: empty/duplicate source names refuse typed).
+  `hash(D)` now derives from the record alone, so pre-consolidation verify
+  findings are invalidated by construction (re-derivable measurements).
+  `Engine::pipeline_configs_json` returns `{ "bindings": [...] }` only.
+
+### Added
+- **Per-binding verdict on the projection status drill-down.** Each
+  `ProjectionStatus` entry now carries its own resolution — `verdict`
+  (`clean` / `onboarding` / `action-needed`, kebab-case like the rollup's),
+  `source_moved`, and `findings` counts by class (`unresolvable` / `drifted` /
+  `uncovered` / `queued`) — computed by the SAME scan the workspace rollup
+  aggregates, so status consumers (the app's Pipeline tab, agents reading the
+  HTTP status picture) never re-derive verdicts client-side. Additive wire
+  fields; the rollup's semantics are unchanged and now provably shared (one
+  scan, two projections).
+
+### Fixed
+- **MCP contract now states the true `require_notes` semantics.** The server
+  instructions and the `memstead_create` tool description claimed a missing
+  note *refuses* with `NOTE_MISSING` when `[mutations].require_notes = true`;
+  the engine has always warned and committed ("the policy nudges, it never
+  blocks" — behavior test-asserted, and the CLI help said so correctly). The
+  descriptions, the pinned instruction copy in the tool-surface suite, and the
+  generated MCP reference now say **non-blocking warning**. Contract text only
+  — no behavior change on any surface.
+
+### Changed
 - `/sync --all` under a recurring loop now **ends the loop on quiescence**:
   a second consecutive nothing-due rotation means the catch-up job is done —
   the skill cancels the schedule driving it and reports quiescence, instead
@@ -16,6 +60,89 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   back in sync, then stop".
 
 ### Added
+- **Per-entity history: `Engine::entity_history`.** Given a mem and an
+  entity id, one query returns the entity's recorded story — every
+  touch newest-first with when, provenance (actor / client / tool
+  verb), and the agent's stated note — with rename chains followed
+  through the engine's own rename provenance, so the story starts at
+  the entity's first appearance under any prior id, and batch commits
+  visible with their batch context (the other ids they touched) without
+  polluting those entities' own stories. Bounded and pageable (default
+  50 / cap 200, opaque continuation cursor; pages compose without gaps
+  or duplicates) and honest about its edges: `story_start` states where
+  and why a story truncates (unstitchable rename, records predating the
+  changelog), `limitations` names per-backend gaps (folder changelogs
+  record renames under the post-rename id only and carry no batch
+  attribution), and refusals are typed — `UNKNOWN_MEM`,
+  `ENTITY_NOT_FOUND` (an unknown id is never an empty story),
+  `INVALID_CURSOR`, and `INVALID_INPUT` on archive mounts (their seam
+  records no history; refusing beats fabricating emptiness). A reused
+  slug never absorbs the previous holder's story — the walk stops at
+  the entity's own creation, so an id freed by rename or delete starts
+  a fresh narrative. Built entirely on the existing walks (the
+  git-branch commit-note feed, the folder/in-memory provenance log) —
+  no new storage, no index.
+- **Review marks: one per-mem pointer to the last human-approved state.**
+  `MemConfig` gains `reviewMark` (mem-repo state — every sibling process
+  sees the same mark; stripped from published archives by the
+  `PublishedMemConfig` allowlist), carried in the backend-opaque
+  `changes_since` cursor vocabulary. Three engine ops:
+  `Engine::review_marks` (every mem's mark + current head),
+  `Engine::set_review_mark` (explicit target only, validated per backend
+  — garbage SHAs and malformed timestamps refuse `INVALID_CURSOR`;
+  clearing is first-class; provenance and require-notes mirror
+  `set_mem_sync_state`), and `Engine::review_mark_diff` (the accumulated
+  delta since the mark; markless mems refuse with the new
+  `REVIEW_MARK_NOT_SET` instead of silently equating "no mark" with "no
+  changes"). Marks never gate writes — no mutation path consults them.
+  Surfaces: the CLI gains `memstead review-mark list|set|clear|diff`
+  (same cursor vocabulary as `memstead changes --since`; `set`/`clear`
+  are note-gated warn-and-commit like every mutation), and the overview's
+  `## Mems` roster carries a `Review mark` line for marked mems — the
+  mark value plus a head-moved indicator, naming `changes_since` as the
+  delta read, so agents see review state at cold-start without a new MCP
+  tool. Markless mems stay unmarked in the roster (ordinary state, never
+  flagged).
+- **The mem-change event channel now carries sibling-process writes.**
+  `reload_if_stale`'s drift arm emits the same `MemChangedEvent` the
+  self-write path always emitted, so a broadcast subscriber (SSE
+  forwarders foremost) sees every change to a mem — this engine's own
+  commits and out-of-band siblings alike. Previously the channel was
+  self-writes only, documented as such; no wire-shape change.
+- **Folder mems join cross-process drift detection.** The filesystem
+  backend's `current_head` now derives a drift cursor from its
+  append-only changelog (the last line's RFC3339-millis `ts` — the same
+  dialect `folder_changes_since` accepts), so a sibling process's commit
+  to a folder mem triggers the same reload-before-operation /
+  `MEM_RELOADED` / `MemChangedEvent` machinery git-branch mems always
+  had. Self-write bookkeeping records the backend's own probe answer
+  (`record_self_write` probes once post-commit), so an engine's own
+  writes never masquerade as sibling drift on any backend. Folder mems
+  with no changelog keep the historical no-drift-signal behavior.
+- **Bulk per-mem topology projection: `Engine::mem_topology`.** One call
+  returns `{nodes, edges, communities}` for a mem — every entity (id,
+  title, type, global Louvain cluster id, stub flag), every relationship
+  edge sourced in the mem with cross-mem targets marked
+  (`target_in_mem: false`, reported at the source mem only, so composing
+  all mems yields each edge exactly once), and the mem's community roster
+  from the workspace-global partition. Coordinate-free and unpaged by
+  contract. Unknown mems refuse with `UNKNOWN_MEM`. Hoists the projection
+  UI consumers previously re-derived per surface (serve's private variant,
+  the macOS app's paged N+1 assembly).
+- **`Actor::App` provenance category (`Actor: app` trailer / changelog
+  value).** Human-driven application embedders — the macOS app, the node
+  app's HTTP surface, any future UI consumer — get their own caller
+  category, distinct from `agent` (LLM over MCP) and `cli`. The paired
+  `ClientId` names which software spoke and derives the commit author
+  (`<client>@memstead.io`), exactly as agent/cli identities do; `external`
+  keeps meaning out-of-band writes the engine discovered rather than
+  performed. Additive: existing trailers, readers, and wire values are
+  unchanged.
+- **`create_mem` seeds commit with the caller's own provenance.**
+  `MemCreateParams` gains `actor` + `client`; each transport passes its
+  category (MCP `agent`, CLI `cli`, UniFFI/HTTP embedders `app`). The
+  previous hardcoded `Actor::Agent` misattributed every non-MCP mem
+  creation — including the macOS app's — as an agent write.
 - **Schema-level `system_context` in the full `memstead_schema` payload.**
   A schema manifest's `system_message` — the author's voice/posture prose —
   was previously unreachable from the agent surface (its only consumer was

@@ -298,7 +298,7 @@ impl Engine {
             declared_origins: HashMap::new(),
             workspace_root: None,
             load_warnings,
-            pipeline_configs: crate::pipeline_store::PipelineConfigs::default(),
+            pipeline_configs: crate::pipeline_store::BindingConfigs::default(),
             mem_router: Arc::new(mem_router),
             backend_factory: crate::workspace_store::instantiate_lean_backend,
             git_branch_ops: None,
@@ -368,28 +368,17 @@ impl Engine {
         let mut engine = Engine::from_mounts_inner(mounts, local)?;
         engine.set_settings(settings);
         engine.workspace_root = Some(workspace_root.to_path_buf());
-        // Load the workspace store's pipeline configs (Medium / Facet /
-        // Projection / Ingest) and expose them read-only. A malformed
-        // config surfaces a typed `StoreError::Parse` naming the file —
-        // early validation of operator-edited configs (the loader's stated
-        // value). Absent primitive directories resolve to empty.
-        // Authored pipeline configs (Medium / Facet / Projection / Ingest)
-        // from the workspace store. The legacy `scopes|projections|ingests/`
-        // JSON folders are no longer read at boot — the migration-window
-        // compatibility shim retired once the bundled pipelines migrated
-        // (2026-06-14). `memstead projection migrate` is the only path from
-        // old-shape configs into the store. A malformed config surfaces a
-        // typed `StoreError::Parse` naming the file.
-        // The engine's stored `pipeline_configs` is the four-primitive
-        // (legacy) shape — it backs the referential-integrity edit layer and
-        // the macOS `pipeline_configs_json` surface, both of which still speak
-        // Projection + flat-Ingest. The **live** brief / selection path reloads
-        // the version-gated binding shape fresh (`load_pipeline_configs`); boot
-        // uses the legacy reader so a not-yet-migrated dependent (the editor)
-        // keeps working. A migrated (v1) workspace reads its bindings lossily
-        // as projections here (version/operations ignored), which the edit
-        // layer and JSON surface tolerate.
-        engine.set_pipeline_configs(crate::pipeline_store::load_legacy_pipeline_configs(
+        // Load the workspace store's pipeline configs — the v2 single-record
+        // binding store — and expose them read-only. A malformed config
+        // surfaces a typed `StoreError::Parse` naming the file (early
+        // validation of operator-edited configs); an absent `projections/`
+        // directory resolves to empty. A pre-v2 store refuses boot with
+        // `StoreError::LegacyProjectionStore` naming `memstead projection
+        // migrate` — the engine never reads a prior generation (2026-07-18
+        // consolidation, no compatibility layer). The migrate command itself
+        // operates below engine boot, so an unmigrated workspace can still
+        // run it.
+        engine.set_pipeline_configs(crate::pipeline_store::load_pipeline_configs(
             workspace_root,
         )?);
         // Publish the authoring meta-schemas into `.memstead/meta-schemas/`
@@ -1346,14 +1335,13 @@ community:
         assert_eq!(entity.title, "Hello");
     }
 
-    /// AC ("engine-side pipeline loader is activated"): with a workspace
-    /// store carrying one Medium, one Facet, one Projection, one Ingest,
-    /// the engine on boot enumerates all four through its read-only
-    /// queryable surface in the post-refactor shape.
+    /// The engine-side pipeline loader: with a workspace store carrying one
+    /// v2 binding, the engine on boot enumerates it through its read-only
+    /// queryable surface; a pre-v2 store refuses boot with the
+    /// migrate-naming error (the loader never reads a prior generation).
     #[test]
     fn from_workspace_root_loads_pipeline_configs_into_queryable_surface() {
-        use crate::pipeline::{Facet, IngestTrigger, Medium, MediumType, Projection};
-        use crate::pipeline_store::{LegacyIngest, LegacyIngestMode};
+        use crate::pipeline::{MediumType, Projection};
         let tmp = TempDir::new().unwrap();
         let mem_dir = tmp.path().join("mem");
         std::fs::create_dir_all(&mem_dir).unwrap();
@@ -1376,36 +1364,32 @@ community:
             )
             .unwrap();
 
-        // One of each primitive in the store.
-        crate::pipeline_store::write_medium(
-            tmp.path(),
-            "specs",
-            "src",
-            &Medium {
-                name: "src".to_string(),
-                medium_type: MediumType::Codebase,
-                pointer: "..".to_string(),
-                change_detection: None,
-            },
-        )
-        .unwrap();
-        crate::pipeline_store::write_facet(
-            tmp.path(),
-            "specs",
-            "view",
-            &Facet {
-                name: "view".to_string(),
-                medium: "src".to_string(),
-                scope: Vec::new(),
-                engagement: None,
-                preparation: None,
-            },
-        )
-        .unwrap();
-        crate::pipeline_store::write_projection(
+        // One v2 binding in the store.
+        crate::pipeline_store::write_binding(
             tmp.path(),
             "specs",
             "graph",
+            &sample_v2_binding("specs"),
+        )
+        .unwrap();
+
+        let engine = Engine::from_workspace_root(tmp.path()).unwrap();
+        let pc = engine.pipeline_configs();
+        assert_eq!(pc.bindings.len(), 1, "one binding enumerated");
+        assert_eq!(pc.bindings[0].mem, "specs");
+        assert_eq!(pc.bindings[0].name, "graph");
+        assert_eq!(pc.bindings[0].config.destination_mem, "specs");
+        assert_eq!(
+            pc.bindings[0].config.sources[0].medium_type,
+            MediumType::Codebase
+        );
+
+        // REFUSAL: a pre-v2 (version-less gen-2) projection file refuses
+        // boot with the migrate-naming error — never read, never tolerated.
+        crate::pipeline_store::write_projection(
+            tmp.path(),
+            "specs",
+            "legacy",
             &Projection {
                 intent: None,
                 source_facets: vec!["view".to_string()],
@@ -1415,31 +1399,53 @@ community:
             },
         )
         .unwrap();
-        crate::pipeline_store::write_ingest(
-            tmp.path(),
-            "specs-graph",
-            &LegacyIngest {
-                projection: "specs/graph".to_string(),
-                mode: LegacyIngestMode::Discovery,
-                trigger: IngestTrigger::Loop,
-                batch_size: 10,
-                deny_paths: Vec::new(),
-                post_actions: None,
-            },
-        )
-        .unwrap();
+        let err = Engine::from_workspace_root(tmp.path()).unwrap_err();
+        assert!(
+            err.to_string().contains("memstead projection migrate"),
+            "boot refusal names the migrate command, got: {err}"
+        );
+    }
 
-        let engine = Engine::from_workspace_root(tmp.path()).unwrap();
-        let pc = engine.pipeline_configs();
-        assert_eq!(pc.mediums.len(), 1, "one medium enumerated");
-        assert_eq!(pc.mediums[0].config.medium_type, MediumType::Codebase);
-        assert_eq!(pc.facets.len(), 1, "one facet enumerated");
-        assert_eq!(pc.facets[0].config.medium, "src");
-        assert_eq!(pc.projections.len(), 1, "one projection enumerated");
-        assert_eq!(pc.projections[0].config.destination_mem, "specs");
-        assert_eq!(pc.ingests.len(), 1, "one ingest enumerated");
-        assert_eq!(pc.ingests[0].name, "specs-graph");
-        assert_eq!(pc.ingests[0].config.mode, LegacyIngestMode::Discovery);
+    /// One v2 binding with a single codebase source under `pointer` — the
+    /// shared fixture of the boot tests.
+    fn sample_v2_binding(dest: &str) -> crate::binding::Binding {
+        v2_binding_with_pointer(dest, "..")
+    }
+
+    fn v2_binding_with_pointer(dest: &str, pointer: &str) -> crate::binding::Binding {
+        use crate::binding::{
+            BINDING_VERSION, Binding, BuildMode, BuildOperation, CoverageSemantics, Operations,
+        };
+        use crate::pipeline::{IngestTrigger, MediumType, Source};
+        Binding {
+            version: BINDING_VERSION,
+            intent: None,
+            sources: vec![Source {
+                name: "src".to_string(),
+                medium_type: MediumType::Codebase,
+                pointer: pointer.to_string(),
+                change_detection: None,
+                scope: Vec::new(),
+                engagement: None,
+                preparation: None,
+            }],
+            reference_mems: Vec::new(),
+            destination_mem: dest.to_string(),
+            deny_paths: Vec::new(),
+            coverage_semantics: CoverageSemantics::Exhaustive,
+            rules: None,
+            prune: None,
+            operations: Operations {
+                build: Some(BuildOperation {
+                    mode: BuildMode::Discovery,
+                    trigger: IngestTrigger::Loop,
+                    batch_size: 10,
+                    post_actions: None,
+                }),
+                sync: None,
+                verify: None,
+            },
+        }
     }
 
     /// Live per-anchor state (criteria 1, 9 — path-medium subset): a
@@ -1452,7 +1458,6 @@ community:
     #[test]
     fn entity_anchors_resolve_live_state_for_path_medium() {
         use crate::anchor::{AnchorInput, AnchorState};
-        use crate::pipeline::{Medium, MediumType};
         use crate::vcs::Actor;
         use crate::workspace_store::WorkspaceStoreAdapter;
         use indexmap::IndexMap;
@@ -1483,20 +1488,16 @@ community:
             )
             .unwrap();
 
-        // A single `path` medium rooted at `<workspace>/src`. Anchor artifact
-        // ids are workspace-relative (pointer-prefixed) — the dialect
+        // A single `path` source rooted at `<workspace>/src` (medium context
+        // now derives from the mem's binding sources). Anchor artifact ids
+        // are workspace-relative (pointer-prefixed) — the dialect
         // enumeration / coverage / advance share — so `src/present.rs`
         // observes present and `src/gone.rs` observes absent.
-        crate::pipeline_store::write_medium(
+        crate::pipeline_store::write_binding(
             tmp.path(),
             "specs",
-            "src",
-            &Medium {
-                name: "src".to_string(),
-                medium_type: MediumType::Codebase,
-                pointer: "src".to_string(),
-                change_detection: None,
-            },
+            "graph",
+            &v2_binding_with_pointer("specs", "src"),
         )
         .unwrap();
         std::fs::create_dir_all(tmp.path().join("src")).unwrap();
@@ -1585,13 +1586,12 @@ community:
         );
     }
 
-    /// The engine edit surface: a wrapper edit (`add_medium`) routes through
-    /// the pipeline-edit layer, writes the store, and refreshes the in-memory
-    /// snapshot in place (no `reload()`), and referential integrity (a facet
-    /// pinning the medium) is enforced through the engine method.
+    /// The engine edit surface: a wrapper edit (`add_projection_json`)
+    /// routes through the pipeline-edit layer, writes the store, and
+    /// refreshes the in-memory snapshot in place (no `reload()`); the JSON
+    /// read counterpart reflects the collapsed `{bindings}`-only shape.
     #[test]
     fn engine_pipeline_edit_methods_mutate_and_refresh_the_snapshot() {
-        use crate::pipeline::{Facet, Medium, MediumType};
         use crate::workspace_store::WorkspaceStoreAdapter;
 
         let tmp = TempDir::new().unwrap();
@@ -1615,74 +1615,32 @@ community:
             .unwrap();
 
         let mut engine = Engine::from_workspace_root(tmp.path()).unwrap();
-        assert!(engine.pipeline_configs().mediums.is_empty());
+        assert!(engine.pipeline_configs().bindings.is_empty());
 
+        // The JSON entry point (the FFI-facing shape) deserializes and lands.
         engine
-            .add_medium(
+            .add_projection_json(
                 "specs",
-                "src",
-                &Medium {
-                    name: "src".to_string(),
-                    medium_type: MediumType::Codebase,
-                    pointer: "..".to_string(),
-                    change_detection: None,
-                },
+                "graph",
+                r#"{
+                    "sources": [{ "name": "src", "type": "codebase", "pointer": "..",
+                                  "scope": [{ "path": "**/*.rs", "mode": "allow" }] }],
+                    "destination_mem": "specs"
+                }"#,
                 None,
             )
             .unwrap();
         // Snapshot refreshed in place.
-        assert_eq!(engine.pipeline_configs().mediums.len(), 1);
-        assert_eq!(engine.pipeline_configs().mediums[0].name, "src");
-
-        engine
-            .add_facet(
-                "specs",
-                "view",
-                &Facet {
-                    name: "view".to_string(),
-                    medium: "src".to_string(),
-                    scope: Vec::new(),
-                    engagement: None,
-                    preparation: None,
-                },
-                None,
-            )
-            .unwrap();
-        // Deleting a referenced medium is refused through the engine surface.
-        let err = engine.delete_medium("specs", "src", None).unwrap_err();
-        assert!(
-            matches!(
-                err,
-                crate::pipeline_edit::PipelineEditError::Referenced { .. }
-            ),
-            "got {err:?}"
-        );
+        assert_eq!(engine.pipeline_configs().bindings.len(), 1);
+        assert_eq!(engine.pipeline_configs().bindings[0].name, "graph");
         assert_eq!(
-            engine.pipeline_configs().mediums.len(),
-            1,
-            "refused delete left the medium in place"
+            engine.pipeline_configs().bindings[0].config.sources[0].name,
+            "src"
         );
 
-        // The JSON entry point (the FFI-facing shape) deserializes and lands.
-        engine
-            .add_medium_json(
-                "specs",
-                "docs",
-                r#"{"name":"docs","type":"filesystem","pointer":"./docs"}"#,
-                None,
-            )
-            .unwrap();
-        assert!(
-            engine
-                .pipeline_configs()
-                .mediums
-                .iter()
-                .any(|m| m.name == "docs" && m.config.medium_type == MediumType::Filesystem),
-            "add_medium_json should land a filesystem medium"
-        );
         // A malformed payload is refused without touching the store.
         let err = engine
-            .add_medium_json("specs", "bad", "{ not json", None)
+            .add_projection_json("specs", "bad", "{ not json", None)
             .unwrap_err();
         assert!(
             matches!(
@@ -1692,17 +1650,37 @@ community:
             "got {err:?}"
         );
 
-        // The JSON read counterpart reflects the live store.
+        // Update patches over the stored record; delete removes and refreshes.
+        engine
+            .update_projection_json("specs", "graph", r#"{"intent":"i2"}"#, None)
+            .unwrap();
+        assert_eq!(
+            engine.pipeline_configs().bindings[0]
+                .config
+                .intent
+                .as_deref(),
+            Some("i2")
+        );
+
+        // Rename moves the record and refreshes the snapshot.
+        engine
+            .rename_projection("specs", "graph", "graph2", None)
+            .unwrap();
+        assert_eq!(engine.pipeline_configs().bindings[0].name, "graph2");
+
+        // The JSON read counterpart reflects the live store in the
+        // `{bindings}`-only shape — no `mediums` / `facets` keys.
         let json = engine.pipeline_configs_json();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
-        let mediums = parsed["mediums"].as_array().unwrap();
-        assert_eq!(mediums.len(), 2, "src + docs");
-        assert!(
-            mediums
-                .iter()
-                .any(|m| m["name"] == "docs" && m["config"]["type"] == "filesystem"),
-            "pipeline_configs_json should carry the docs medium: {json}"
-        );
+        assert!(parsed.get("mediums").is_none(), "no mediums key: {json}");
+        assert!(parsed.get("facets").is_none(), "no facets key: {json}");
+        let bindings = parsed["bindings"].as_array().unwrap();
+        assert_eq!(bindings.len(), 1);
+        assert_eq!(bindings[0]["name"], "graph2");
+        assert_eq!(bindings[0]["config"]["sources"][0]["type"], "codebase");
+
+        engine.delete_projection("specs", "graph2", None).unwrap();
+        assert!(engine.pipeline_configs().bindings.is_empty());
     }
 
     /// The lean folder authoring path: a schema package authored at the

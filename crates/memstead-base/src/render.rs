@@ -1735,6 +1735,7 @@ mod tests {
     fn make_hit(id: &str, title: &str, entity_type: &str, sections: &[(&str, &str)]) -> SearchHit {
         SearchHit {
             id: EntityId(id.to_string()),
+            last_modified: None,
             title: title.to_string(),
             mem: id.split("--").next().unwrap_or("").to_string(),
             entity_type: entity_type.to_string(),

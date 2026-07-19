@@ -582,49 +582,30 @@ interface Engine {
     [Throws=MemsteadError]
     ParseRecoveryReport apply_parse_recovery(string? note);
 
-    // Pipeline edits (medium / facet / projection). The macOS pipeline editor
-    // routes here instead of hand-writing `.memstead/` JSON. Create/update
-    // carry the primitive as a JSON string (Facet's free-form `engagement`
-    // field rules out a typed record); delete/rename take identifiers.
-    // Referential integrity and snapshot refresh live in the engine. See
-    // `memstead_base::pipeline_edit`.
+    // Pipeline edits — the v2 single-record model. The macOS pipeline editor
+    // routes binding edits here instead of hand-writing `.memstead/` JSON.
+    // A pipeline is ONE record: the binding, carrying its sources inline
+    // (each source holds what the retired standalone medium + facet records
+    // held). The eight medium/facet edit methods are gone with those record
+    // kinds (2026-07 consolidation). See `memstead_base::pipeline_edit`.
     //
-    // The **binding** is the unit (D1/D14): `add_projection` / `update_projection`
-    // carry a JSON **patch over the full author-editable binding record** —
-    // intent / source_facets / reference_mems / destination_mem / deny_paths /
-    // coverage_semantics / rules / prune / the whole `operations` block. Patch
-    // semantics: an absent field is preserved from the stored record; explicit
-    // `null` clears intent / rules / prune; a present `operations` block
-    // replaces the block as a unit. `version` is engine-managed (ignored in the
-    // payload, preserved on update), and unknown additive keys are tolerated.
-    // Candidate records are validated against the medium-capability matrix
-    // before anything is written; only refusals the edit *introduces* block it
-    // (typed ValidationFailed, message + remedy verbatim from the engine).
-    // There is no separate ingest CRUD: the flat ingest record died, and
-    // operations-block edits ride this one update seam.
+    // `add_projection` / `update_projection` carry a JSON **patch over the
+    // full author-editable binding record** — intent / sources /
+    // reference_mems / destination_mem / deny_paths / coverage_semantics /
+    // rules / prune / the whole `operations` block. Patch semantics: an
+    // absent field is preserved from the stored record; explicit `null`
+    // clears intent / rules / prune; a present `sources` or `operations`
+    // block replaces that block as a unit. `version` is engine-managed
+    // (ignored in the payload, preserved on update), and unknown additive
+    // keys are tolerated. Candidate records are validated in-record (source
+    // name rules + the medium-capability matrix) before anything is written;
+    // only refusals the edit *introduces* block it (typed ValidationFailed,
+    // message + remedy verbatim from the engine).
     //
     // Every edit accepts an optional provenance note. Git-branch
     // workspaces commit the edit's mirror to __MEMSTEAD with the note on
     // the commit body; folder workspaces accept and drop it (no commit
     // timeline exists) — the same posture as set_mem_version.
-    [Throws=MemsteadError]
-    void add_medium(string mem, string name, string medium_json, string? note);
-    [Throws=MemsteadError]
-    void update_medium(string mem, string name, string medium_json, string? note);
-    [Throws=MemsteadError]
-    void delete_medium(string mem, string name, string? note);
-    [Throws=MemsteadError]
-    void rename_medium(string mem, string old_name, string new_name, string? note);
-
-    [Throws=MemsteadError]
-    void add_facet(string mem, string name, string facet_json, string? note);
-    [Throws=MemsteadError]
-    void update_facet(string mem, string name, string facet_json, string? note);
-    [Throws=MemsteadError]
-    void delete_facet(string mem, string name, string? note);
-    [Throws=MemsteadError]
-    void rename_facet(string mem, string old_name, string new_name, string? note);
-
     [Throws=MemsteadError]
     void add_projection(string mem, string name, string projection_json, string? note);
     [Throws=MemsteadError]
@@ -657,10 +638,11 @@ interface Engine {
     boolean workspace_requires_notes();
 
     // Read the pipeline store as JSON (the edit methods' read counterpart).
-    // The macOS pipeline editor deserializes this to display the store. Shape
-    // (D14): `{ mediums:[{mem,name,config}], facets:[...], bindings:[{mem,name,
-    // config}] }` — the v1 binding shape; `config` carries the binding's
-    // `operations` block. The `ingests` key is gone. Cannot fail.
+    // The macOS pipeline editor deserializes this to display the store.
+    // Shape: `{ bindings:[{mem,name,config}] }` — the v2 single-record
+    // store; `config` carries the whole binding (inline `sources`,
+    // `operations`, everything). The `mediums` / `facets` / `ingests` keys
+    // are gone with their record kinds. Cannot fail.
     string pipeline_configs_json();
 
     // Mem lifecycle. The macOS roster routes create/delete/set-schema/

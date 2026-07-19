@@ -18,7 +18,7 @@
 //! and `--dry-run` writes nothing.
 
 use assert_cmd::Command;
-use memstead_base::binding::{BindingV1, BuildMode};
+use memstead_base::binding::{Binding, BuildMode};
 use memstead_base::pipeline::IngestTrigger;
 use serde_json::Value;
 use std::path::Path;
@@ -74,7 +74,7 @@ fn fixture(mode: &str, deny: &str) -> TempDir {
     tmp
 }
 
-fn read_binding(root: &Path) -> BindingV1 {
+fn read_binding(root: &Path) -> Binding {
     let bytes = std::fs::read(root.join(".memstead/projections/engine/graph.json")).unwrap();
     serde_json::from_slice(&bytes).expect("promoted projection file must parse as a v1 binding")
 }
@@ -82,7 +82,7 @@ fn read_binding(root: &Path) -> BindingV1 {
 /// A discovery ingest migrates: the projection file is promoted to a v1
 /// binding carrying the merged build operation, and the merged ingest is gone.
 #[test]
-fn migrate_promotes_projection_to_v1_binding() {
+fn migrate_promotes_projection_to_v2_binding() {
     let tmp = fixture("discovery", r#""dev","**/VISION.md""#);
     let root = tmp.path();
 
@@ -99,12 +99,17 @@ fn migrate_promotes_projection_to_v1_binding() {
     assert_eq!(env["migrated"], 1);
     assert_eq!(env["bindings"][0], "engine/graph");
 
-    // The projection file now parses as a v1 binding with the merged build op.
+    // The projection file now parses as a v2 binding with the merged build
+    // op and the medium+facet folded inline under the facet's name verbatim.
     let b = read_binding(root);
-    assert_eq!(b.version, 1);
+    assert_eq!(b.version, 2);
     assert_eq!(b.destination_mem, "engine");
     assert_eq!(b.intent.as_deref(), Some("the engine graph"));
     assert_eq!(b.reference_mems, vec!["plugin".to_string()]);
+    assert_eq!(b.sources.len(), 1);
+    assert_eq!(b.sources[0].name, "source-tree");
+    assert_eq!(b.sources[0].pointer, "../public");
+    assert_eq!(b.sources[0].scope.len(), 1);
     assert_eq!(
         b.operations.build.as_ref().unwrap().mode,
         BuildMode::Discovery
@@ -129,11 +134,14 @@ fn migrate_promotes_projection_to_v1_binding() {
 
     // Serde round-trip is lossless.
     let json = serde_json::to_string(&b).unwrap();
-    let back: BindingV1 = serde_json::from_str(&json).unwrap();
+    let back: Binding = serde_json::from_str(&json).unwrap();
     assert_eq!(back, b);
 
-    // The merged flat ingest was removed.
+    // The merged flat ingest was removed, along with the emptied
+    // mediums/ and facets/ trees (their content folded inline).
     assert!(!root.join(".memstead/ingests/engine-graph.json").exists());
+    assert!(!root.join(".memstead/mediums").exists());
+    assert!(!root.join(".memstead/facets").exists());
 
     // A dialect-rewrite warning was reported.
     let warnings = env["warnings"].as_array().unwrap();
@@ -294,21 +302,15 @@ fn migrate_outside_workspace_is_typed() {
 // projection init (D8)
 // ---------------------------------------------------------------------------
 
-/// Read the three scaffolded files' raw bytes as a comparable triple.
-fn triple_bytes(root: &Path, mem: &str, stem: &str) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
-    let m = root.join(format!(".memstead/mediums/{mem}/{stem}.json"));
-    let f = root.join(format!(".memstead/facets/{mem}/{stem}.json"));
-    let p = root.join(format!(".memstead/projections/{mem}/{stem}.json"));
-    (
-        std::fs::read(m).unwrap(),
-        std::fs::read(f).unwrap(),
-        std::fs::read(p).unwrap(),
-    )
+/// Read the scaffolded binding file's raw bytes.
+fn scaffold_bytes(root: &Path, mem: &str, stem: &str) -> Vec<u8> {
+    std::fs::read(root.join(format!(".memstead/projections/{mem}/{stem}.json"))).unwrap()
 }
 
-/// A codebase source scaffolds all three files, the binding declares
-/// build+sync+verify (matrix-permitting), the on-disk binding round-trips, and
-/// the `--json` output matches D8's pinned byte-shape.
+/// A codebase source scaffolds ONE v2 record with the source inline, the
+/// binding declares build+sync+verify (matrix-permitting), the on-disk
+/// binding round-trips, and the `--json` output matches the pinned
+/// byte-shape.
 #[test]
 fn init_codebase_scaffolds_all_three_with_full_operations() {
     let tmp = bare_workspace();
@@ -338,15 +340,11 @@ fn init_codebase_scaffolds_all_three_with_full_operations() {
         .clone();
     let env: Value = serde_json::from_slice(&output).expect("--json init must emit JSON");
 
-    // D8 pinned contract byte-shape: { binding, created, operations, warnings }.
+    // Pinned contract byte-shape: { binding, created, operations, warnings }.
     assert_eq!(env["binding"], "engine/graph");
     assert_eq!(
         env["created"],
-        serde_json::json!([
-            ".memstead/mediums/engine/graph.json",
-            ".memstead/facets/engine/graph.json",
-            ".memstead/projections/engine/graph.json",
-        ])
+        serde_json::json!([".memstead/projections/engine/graph.json"])
     );
     assert_eq!(
         env["operations"],
@@ -362,21 +360,22 @@ fn init_codebase_scaffolds_all_three_with_full_operations() {
         .collect();
     assert_eq!(keys, vec!["binding", "created", "operations", "warnings"]);
 
-    // All three files exist on disk.
-    assert!(root.join(".memstead/mediums/engine/graph.json").is_file());
-    assert!(root.join(".memstead/facets/engine/graph.json").is_file());
+    // Exactly one file exists on disk — no mediums/facets trees appear.
     assert!(
         root.join(".memstead/projections/engine/graph.json")
             .is_file()
     );
+    assert!(!root.join(".memstead/mediums").exists());
+    assert!(!root.join(".memstead/facets").exists());
 
-    // The projection file parses as a v1 binding and round-trips losslessly.
-    let bytes = std::fs::read(root.join(".memstead/projections/engine/graph.json")).unwrap();
-    let b: BindingV1 = serde_json::from_slice(&bytes).expect("scaffold must be a v1 binding");
-    assert_eq!(b.version, 1);
+    // The projection file parses as a v2 binding and round-trips losslessly.
+    let bytes = scaffold_bytes(root, "engine", "graph");
+    let b: Binding = serde_json::from_slice(&bytes).expect("scaffold must be a v2 binding");
+    assert_eq!(b.version, 2);
     assert_eq!(b.destination_mem, "engine");
     assert_eq!(b.intent.as_deref(), Some("model the engine"));
-    assert_eq!(b.source_facets, vec!["graph".to_string()]);
+    assert_eq!(b.sources.len(), 1);
+    assert_eq!(b.sources[0].name, "graph");
     assert_eq!(
         b.operations.build.as_ref().unwrap().mode,
         BuildMode::Discovery
@@ -390,7 +389,7 @@ fn init_codebase_scaffolds_all_three_with_full_operations() {
         memstead_base::binding::PruneGuarantee::NeverClobber
     );
     let round = serde_json::to_string(&b).unwrap();
-    let back: BindingV1 = serde_json::from_str(&round).unwrap();
+    let back: Binding = serde_json::from_str(&round).unwrap();
     assert_eq!(back, b);
 }
 
@@ -529,13 +528,13 @@ fn init_web_source_scaffolds_build_only_with_warning() {
 
     // On disk: build-only binding.
     let bytes = std::fs::read(root.join(".memstead/projections/research/docs.json")).unwrap();
-    let b: BindingV1 = serde_json::from_slice(&bytes).unwrap();
+    let b: Binding = serde_json::from_slice(&bytes).unwrap();
     assert!(b.operations.sync.is_none());
     assert!(b.operations.verify.is_none());
 }
 
 /// Re-running `init` on an existing binding id refuses `PROJECTION_EXISTS`
-/// (exit 5) and touches nothing — the three files are byte-identical after the
+/// (exit 5) and touches nothing — the record is byte-identical after the
 /// refused second run.
 #[test]
 fn init_existing_binding_refuses_without_touching_disk() {
@@ -555,7 +554,7 @@ fn init_existing_binding_refuses_without_touching_disk() {
     ];
 
     memstead().current_dir(root).args(args).assert().success();
-    let before = triple_bytes(root, "engine", "graph");
+    let before = scaffold_bytes(root, "engine", "graph");
 
     // Second run refuses.
     let output = memstead()
@@ -576,8 +575,8 @@ fn init_existing_binding_refuses_without_touching_disk() {
     assert_eq!(env["code"], "PROJECTION_EXISTS");
     assert_eq!(env["details"]["binding"], "engine/graph");
 
-    // No partial writes: all three files are byte-identical.
-    let after = triple_bytes(root, "engine", "graph");
+    // No partial writes: the record is byte-identical.
+    let after = scaffold_bytes(root, "engine", "graph");
     assert_eq!(before, after, "refused init must not touch disk");
 }
 
@@ -669,7 +668,7 @@ fn enable_sync_adds_block_to_codebase_binding() {
     // Every other field is the same declaration.
     assert_eq!(after.version, before.version);
     assert_eq!(after.intent, before.intent);
-    assert_eq!(after.source_facets, before.source_facets);
+    assert_eq!(after.sources, before.sources);
     assert_eq!(after.reference_mems, before.reference_mems);
     assert_eq!(after.destination_mem, before.destination_mem);
     assert_eq!(after.deny_paths, before.deny_paths);
@@ -679,7 +678,7 @@ fn enable_sync_adds_block_to_codebase_binding() {
 
     // Round-trips losslessly.
     let json = serde_json::to_string(&after).unwrap();
-    let back: BindingV1 = serde_json::from_str(&json).unwrap();
+    let back: Binding = serde_json::from_str(&json).unwrap();
     assert_eq!(back, after);
 }
 
@@ -900,18 +899,8 @@ fn advance_workspace() -> TempDir {
     // v1 binding store: medium (git codebase at `src`), facet, binding.
     write_store(
         root,
-        "mediums/engine/graph.json",
-        r#"{"name":"graph","type":"codebase","pointer":"src","change_detection":"git"}"#,
-    );
-    write_store(
-        root,
-        "facets/engine/source-tree.json",
-        r#"{"name":"source-tree","medium":"graph","scope":[{"path":"src/**/*.rs","mode":"allow"}]}"#,
-    );
-    write_store(
-        root,
         "projections/engine/graph.json",
-        r#"{"version":1,"intent":"model the engine","source_facets":["source-tree"],"reference_mems":[],"destination_mem":"engine","deny_paths":[],"coverage_semantics":"exhaustive","operations":{"build":{"mode":"discovery","trigger":"loop","batch_size":20},"sync":{"trigger":"manual","batch_size":20}}}"#,
+        r#"{"version":2,"intent":"model the engine","sources":[{"name":"source-tree","type":"codebase","pointer":"src","change_detection":"git","scope":[{"path":"src/**/*.rs","mode":"allow"}]}],"reference_mems":[],"destination_mem":"engine","deny_paths":[],"coverage_semantics":"exhaustive","operations":{"build":{"mode":"discovery","trigger":"loop","batch_size":20},"sync":{"trigger":"manual","batch_size":20}}}"#,
     );
 
     // The git source tree: base (a.rs + b.rs), then head1 (modify a.rs, delete b.rs).
@@ -1509,7 +1498,7 @@ fn brief_outside_workspace_is_typed() {
 /// migrates straight to a v1 binding in one `projection migrate` pass (D10,
 /// gen-1 path — folded from the retired `pipeline migrate` command).
 #[test]
-fn migrate_gen1_root_folder_promotes_to_v1_binding() {
+fn migrate_gen1_root_folder_promotes_to_v2_binding() {
     let tmp = TempDir::new().unwrap();
     let root = tmp.path();
     write_store(root, "workspace.toml", "");
@@ -1544,19 +1533,144 @@ fn migrate_gen1_root_folder_promotes_to_v1_binding() {
     assert_eq!(env["migrated"], 1);
     assert_eq!(env["bindings"][0], "engine/graph");
 
-    // The projection was promoted to a v1 binding in the `.memstead/` store.
+    // The projection was promoted to a v2 binding in the `.memstead/` store,
+    // the split scope folded inline (medium half from the derived pointer,
+    // facet half from the tree).
     let b = read_binding(root);
-    assert_eq!(b.version, 1);
+    assert_eq!(b.version, 2);
     assert_eq!(b.destination_mem, "engine");
-    assert_eq!(b.source_facets, vec!["src".to_string()]);
+    assert_eq!(b.sources.len(), 1);
+    assert_eq!(b.sources[0].name, "src");
+    assert_eq!(b.sources[0].pointer, "../public");
     assert_eq!(
         b.operations.build.as_ref().unwrap().mode,
         BuildMode::Discovery
     );
-    // The merged flat ingest was consumed; medium + facet were materialized.
+    // The merged flat ingest was consumed; the intermediate mediums/facets
+    // materialization was folded inline and its trees removed.
     assert!(!root.join(".memstead/ingests/engine-graph.json").exists());
-    assert!(root.join(".memstead/mediums/engine/src.json").exists());
-    assert!(root.join(".memstead/facets/engine/src.json").exists());
+    assert!(!root.join(".memstead/mediums").exists());
+    assert!(!root.join(".memstead/facets").exists());
+}
+
+/// Criterion-2 fixture proofs, end to end through the CLI: a genuine v1
+/// THREE-FILE store (medium + facet + `version:1` binding) with a live
+/// `#synced` watermark migrates to one v2 record — medium+facet content
+/// folded under the facet's name byte-verbatim, trees removed — the status
+/// surface reports the SAME synced state before-keyed and after, and a
+/// second migrate run changes zero bytes.
+#[test]
+fn migrate_v1_three_file_store_preserves_watermark_and_is_byte_idempotent() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+
+    // Workspace adapter + destination folder mount (status needs a real mem).
+    write_store(
+        root,
+        "workspace.toml",
+        "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+    );
+    write_store(
+        root,
+        "state/mounts.json",
+        r#"{"format":"memstead-mounts-3","mounts":[{"mem":"engine","schema":"default@1.0.0","storage":{"type":"folder","path":"engine-mem"},"capability":"write","lifecycle":"eager","cross_linkable":false}]}"#,
+    );
+
+    // The v1 THREE-FILE store: standalone medium + facet, and a version-1
+    // binding referencing the facet by name.
+    write_store(
+        root,
+        "mediums/engine/source-tree.json",
+        r#"{"name":"source-tree","type":"codebase","pointer":"src","change_detection":"git"}"#,
+    );
+    write_store(
+        root,
+        "facets/engine/source-tree.json",
+        r#"{"name":"source-tree","medium":"source-tree","scope":[{"path":"src/**/*.rs","mode":"allow"}]}"#,
+    );
+    write_store(
+        root,
+        "projections/engine/graph.json",
+        r#"{"version":1,"intent":"model the engine","source_facets":["source-tree"],"reference_mems":[],"destination_mem":"engine","deny_paths":[],"coverage_semantics":"exhaustive","operations":{"build":{"mode":"discovery","trigger":"loop","batch_size":20},"sync":{"trigger":"loop","batch_size":20}}}"#,
+    );
+
+    // A live watermark keyed `<binding>/<source>#synced` in the destination
+    // mem's config — the load-bearing key migration must keep resolving.
+    let watermark = "0123456789abcdef0123456789abcdef01234567";
+    let mem_meta = root.join("engine-mem").join(".memstead");
+    std::fs::create_dir_all(&mem_meta).unwrap();
+    std::fs::write(
+        mem_meta.join("config.json"),
+        format!(
+            r#"{{"format":1,"schema":"default@1.0.0","syncState":{{"engine/graph/source-tree#synced":"{watermark}"}}}}"#
+        ),
+    )
+    .unwrap();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+
+    // Migrate: the v1 leg folds the three files into one v2 record.
+    let out = memstead()
+        .current_dir(root)
+        .args(["--json", "projection", "migrate"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(env["migrated"], 1);
+    assert_eq!(env["bindings"][0], "engine/graph");
+
+    // One v2 record: facet name preserved byte-verbatim as the source name,
+    // medium half + facet half folded in, no invented fields.
+    let b = read_binding(root);
+    assert_eq!(b.version, 2);
+    assert_eq!(b.sources.len(), 1);
+    assert_eq!(b.sources[0].name, "source-tree");
+    assert_eq!(b.sources[0].pointer, "src");
+    assert_eq!(b.sources[0].change_detection.as_deref(), Some("git"));
+    assert_eq!(b.sources[0].scope.len(), 1);
+    assert!(
+        b.operations.sync.is_some(),
+        "operations block carried whole"
+    );
+    // The emptied trees are gone.
+    assert!(!root.join(".memstead/mediums").exists());
+    assert!(!root.join(".memstead/facets").exists());
+
+    // The watermark resolves identically after migration: the status surface
+    // reports the recorded token under the preserved source name.
+    let status = memstead()
+        .current_dir(root)
+        .args(["status"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let status = String::from_utf8_lossy(&status).to_string();
+    assert!(
+        status.contains(&format!("source-tree: signal git, synced {watermark}")),
+        "watermark must resolve under the preserved source name, got:\n{status}"
+    );
+
+    // A second migrate run changes zero bytes and reports nothing to do.
+    let before_bytes = std::fs::read(root.join(".memstead/projections/engine/graph.json")).unwrap();
+    let out = memstead()
+        .current_dir(root)
+        .args(["--json", "projection", "migrate"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(env["migrated"], 0);
+    assert_eq!(env["already_v2"], 1);
+    let after_bytes = std::fs::read(root.join(".memstead/projections/engine/graph.json")).unwrap();
+    assert_eq!(before_bytes, after_bytes, "re-run must be byte-idempotent");
+    let mem_config = std::fs::read_to_string(mem_meta.join("config.json")).unwrap();
+    assert!(mem_config.contains(watermark), "mem syncState untouched");
 }
 
 /// `--dry-run` on a gen-1 root-folder workspace previews the promotion without
@@ -1618,7 +1732,7 @@ fn brief_refuses_absent_build_then_enable_build_remedy_succeeds() {
     write_store(
         root,
         "projections/engine/graph.json",
-        r#"{"version":1,"intent":"model the engine","source_facets":["source-tree"],"reference_mems":[],"destination_mem":"engine","deny_paths":[],"coverage_semantics":"exhaustive","operations":{"verify":{"trigger":"manual","batch_size":20}}}"#,
+        r#"{"version":2,"intent":"model the engine","sources":[{"name":"source-tree","type":"codebase","pointer":"src","change_detection":"git","scope":[{"path":"src/**/*.rs","mode":"allow"}]}],"reference_mems":[],"destination_mem":"engine","deny_paths":[],"coverage_semantics":"exhaustive","operations":{"verify":{"trigger":"manual","batch_size":20}}}"#,
     );
 
     // brief refuses with the one-command remedy.
@@ -1666,7 +1780,7 @@ fn advance_refuses_absent_sync_then_enable_sync_remedy_succeeds() {
     write_store(
         root,
         "projections/engine/graph.json",
-        r#"{"version":1,"intent":"model the engine","source_facets":["source-tree"],"reference_mems":[],"destination_mem":"engine","deny_paths":[],"coverage_semantics":"exhaustive","operations":{"build":{"mode":"discovery","trigger":"loop","batch_size":20}}}"#,
+        r#"{"version":2,"intent":"model the engine","sources":[{"name":"source-tree","type":"codebase","pointer":"src","change_detection":"git","scope":[{"path":"src/**/*.rs","mode":"allow"}]}],"reference_mems":[],"destination_mem":"engine","deny_paths":[],"coverage_semantics":"exhaustive","operations":{"build":{"mode":"discovery","trigger":"loop","batch_size":20}}}"#,
     );
     assert!(read_binding(root).operations.sync.is_none());
 
@@ -2023,7 +2137,7 @@ fn verify_workspace() -> TempDir {
     write_store(
         root,
         "projections/engine/graph.json",
-        r#"{"version":1,"intent":"model the engine","source_facets":["source-tree"],"reference_mems":[],"destination_mem":"engine","deny_paths":[],"coverage_semantics":"exhaustive","operations":{"build":{"mode":"discovery","trigger":"loop","batch_size":20},"sync":{"trigger":"manual","batch_size":20},"verify":{"trigger":"manual","batch_size":20,"adjudication_cap":50,"full_resync_every":20}}}"#,
+        r#"{"version":2,"intent":"model the engine","sources":[{"name":"source-tree","type":"codebase","pointer":"src","change_detection":"git","scope":[{"path":"src/**/*.rs","mode":"allow"}]}],"reference_mems":[],"destination_mem":"engine","deny_paths":[],"coverage_semantics":"exhaustive","operations":{"build":{"mode":"discovery","trigger":"loop","batch_size":20},"sync":{"trigger":"manual","batch_size":20},"verify":{"trigger":"manual","batch_size":20,"adjudication_cap":50,"full_resync_every":20}}}"#,
     );
     std::fs::write(
         root.join("engine-mem").join(".memstead").join("anchors.json"),
@@ -2188,18 +2302,8 @@ fn verify_full_refuses_non_enumerable_medium() {
     let root = tmp.path();
     write_store(
         root,
-        "mediums/engine/manual.json",
-        r#"{"name":"manual","type":"web","pointer":"https://example.com/docs"}"#,
-    );
-    write_store(
-        root,
-        "facets/engine/manual.json",
-        r#"{"name":"manual","medium":"manual","scope":[]}"#,
-    );
-    write_store(
-        root,
         "projections/engine/manual.json",
-        r#"{"version":1,"intent":"the manual","source_facets":["manual"],"reference_mems":[],"destination_mem":"engine","deny_paths":[],"coverage_semantics":"curated","operations":{"verify":{"trigger":"manual","batch_size":20}}}"#,
+        r#"{"version":2,"intent":"the manual","sources":[{"name":"manual","type":"web","pointer":"https://example.com/docs","scope":[]}],"reference_mems":[],"destination_mem":"engine","deny_paths":[],"coverage_semantics":"curated","operations":{"verify":{"trigger":"manual","batch_size":20}}}"#,
     );
 
     let out = memstead()
