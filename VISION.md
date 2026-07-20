@@ -13,14 +13,22 @@ In an AI-coding world, specifications capture the lion's share of the value. Cod
 It has so far failed in practice — not because specs are wrong, but because they rot the moment code starts evolving. Three parts to the problem:
 
 1. **Format** — how should specs look so an LLM can actually use them?
-2. **Efficiency** — how do we represent them without burning thousands of tokens per query?
+2. **Integrity** — how do we stop them from going silently malformed or self-contradictory as many actors write to them?
 3. **Freshness** — how do they stay synchronised with the reality they describe?
 
 Memstead is the bet that all three are solvable with the same architecture.
 
 ## Core value proposition
 
-When an LLM reads well-structured specs, it understands a domain immediately. No ramp-up, no scrolling through hundreds of source files, no guessing.
+Memstead does **not** claim that an agent reads, understands, or answers better because the knowledge is typed. The project's own controlled evaluation ([docs/proof/substrate/](docs/proof/substrate/)) put a schema-forced typed mem against equally-curated free-form notes and measured a signed answer-quality delta of ≈ −0.010 ± 0.006 — no measurable read-side advantage. The token saving that does show up traces to *curation*, which flat notes share, not to typing. That axis is closed on the project's own evidence, and nothing here should be read as reopening it.
+
+What a typed graph gives that a folder of good markdown notes cannot:
+
+- **Enforcement on write** — the schema rejects a malformed or off-vocabulary entity at mutation time, so the knowledge cannot go quietly wrong. A convention in a style guide is advisory; a schema is a gate.
+- **Determinism** — traversal, community detection, and drift queries run over typed edges with no model in the query path. The same question returns the same answer, at no token cost, whether or not an LLM is present.
+- **Accountability** — every mutation is a native git commit with structured provenance. Who wrote a claim, by which tool, in which session, is answerable from `git log` without parsing prose.
+- **Ownership** — plain markdown in the user's own repository. No database to run, no vendor to leave, no export step.
+- **Packaging** — a mem travels as a sealed, semver-versioned `.mem` that embeds its schema and its provenance, so it stays self-describing and auditable offline.
 
 Three observations have repeated across early use:
 
@@ -95,7 +103,7 @@ Two tiers fall out of this:
 
 The federation pattern follows: a workspace mounts dozens of small working mems plus a handful of indexed mems; the memstead.io registry indexes published mems across authorities. The engine's `MemBackend` trait makes new backend kinds (indexed-archive, remote-fetch, etc.) additive — no engine surgery to add a new tier.
 
-This is what "engine is generic, apps come later" means at scale: the same engine drives a personal planning mem (50 entities) and a federated research-knowledge graph (5M entities across 500 mems). What changes is which backends each mount uses, not the engine's shape.
+This is what "engine is generic, apps come later" means at scale — as a **bet, not an achieved capability**. The engine ships the Working Mem tier today; the Indexed Mem tier the large end needs is planned and unbuilt, and no federated graph at that size has been run. The wager is that one engine can drive a personal planning mem (50 entities) and, once the indexed tier exists, a federated research-knowledge graph in the millions of entities across hundreds of mems — with the backend behind each mount changing, not the engine's shape. Knowledge-at-scale is an open frontier for this project, not a solved one.
 
 ### What Memstead refuses to become
 
@@ -175,7 +183,7 @@ https://memstead.io/v/mit.edu:cs-dept/ml-curriculum   index entry, links to mit.
 
 The projected graph is published as one or more `.mem` files on the university's own server. The authority file lists them. memstead.io indexes them but holds no copy — downloads go directly to `mit.edu`. When mems are added or removed, the registry updates.
 
-An AI agent researching *"machine-learning programmes in Europe"* hits memstead.io, finds `mit.edu:cs-dept/ml-curriculum`, downloads from `mit.edu`, and has a structured knowledge graph to reason against — no scraping, no hallucination, no token waste on HTML boilerplate.
+An AI agent researching *"machine-learning programmes in Europe"* hits memstead.io, finds `mit.edu:cs-dept/ml-curriculum`, downloads from `mit.edu`, and gets a graph the publishing authority validated and signed — a stated, attributable claim rather than whatever the agent managed to parse out of the HTML. The gain is provenance and publisher accountability, not a reading advantage.
 
 This turns Memstead from "a registry for sharing knowledge graphs" into "an open standard for how websites make their knowledge accessible to AI." The engine stays the same; the surface area grows from "developers sharing mems" to "any organisation publishing structured knowledge."
 
