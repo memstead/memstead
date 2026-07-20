@@ -177,7 +177,7 @@ https://mit.edu/mems/ml-curriculum.mem             self-hosted mem
 https://memstead.io/v/mit.edu:cs-dept/ml-curriculum   index entry, links to mit.edu
 ```
 
-`.well-known/memstead-authority.json` becomes a discoverability signal: *this domain has structured, machine-readable knowledge — here is the entry point.* AI agents discovering a domain check for that file and immediately access a navigable knowledge graph instead of scraping HTML.
+`.well-known/memstead-authority.json` becomes a discoverability signal: *this domain has structured, machine-readable knowledge — here is the entry point.* AI agents discovering a domain check for that file and find a graph the domain itself authored, typed, and stands behind — a stated claim with an accountable publisher, rather than whatever a page happened to render that day.
 
 **Example — a university.** A projection runs against the university website periodically. It extracts structural, timeless knowledge — departments, research areas, degree programmes, faculty expertise, institutional relationships — not events, news, or deadlines. Current information stays on the website; the mem is a durable understanding of what the university *is*.
 
