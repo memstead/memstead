@@ -1477,11 +1477,7 @@ pub fn partial_report_json(state_path: &Path, cap_tokens: u64) -> Result<String>
 /// the value (both arms retry identically — no bias). If every attempt fails the
 /// last error propagates, so a genuinely broken session still aborts. Each retry
 /// spends tokens; the count is kept small.
-fn with_retries<T>(
-    label: &str,
-    attempts: usize,
-    mut f: impl FnMut() -> Result<T>,
-) -> Result<T> {
+fn with_retries<T>(label: &str, attempts: usize, mut f: impl FnMut() -> Result<T>) -> Result<T> {
     let mut last_err: Option<anyhow::Error> = None;
     for attempt in 1..=attempts {
         match f() {
@@ -1566,13 +1562,7 @@ pub fn run_campaign<R: DivergenceRunner, J: DivergenceJudge, A: DivergenceAudito
                 if let Some(path) = state_path {
                     fresh.save(path)?;
                 }
-                (
-                    1,
-                    Vec::new(),
-                    Vec::new(),
-                    Vec::new(),
-                    Ledger::new(cap),
-                )
+                (1, Vec::new(), Vec::new(), Vec::new(), Ledger::new(cap))
             }
         };
     // Audits already present from a prior session (reloaded above); the final
@@ -1620,12 +1610,7 @@ pub fn run_campaign<R: DivergenceRunner, J: DivergenceJudge, A: DivergenceAudito
                     for arm in [Arm::A, Arm::B] {
                         let prompt = package.prompts.reader(arm, &query.prompt);
                         let out = with_retries("reader", 3, || {
-                            runner.read(
-                                arm,
-                                &model,
-                                &prompt,
-                                package.campaign.reader_budget_tokens,
-                            )
+                            runner.read(arm, &model, &prompt, package.campaign.reader_budget_tokens)
                         })?;
                         ensure_model_honored("reader", &model, &out.executed_model)?;
                         ledger.record(arm, Role::Reader, out.tokens, out.non_cache_tokens);
@@ -2634,7 +2619,8 @@ not-json-skip-me
             "budget-cut usage recovered from the assistant snapshot, not the zeroed result"
         );
         assert_eq!(
-            out.non_cache_tokens, 2 + 2,
+            out.non_cache_tokens,
+            2 + 2,
             "budget-cut non-cache is the assistant snapshot's fresh input + output, excluding its cache tokens"
         );
         assert_eq!(out.text, "Partial essay…");
@@ -2844,7 +2830,10 @@ not-json-skip-me
         });
         assert!(err.is_err());
         assert_eq!(calls.get(), 3, "gave up after exactly `attempts` tries");
-        assert!(err.unwrap_err().to_string().contains("always 3"), "last error propagates");
+        assert!(
+            err.unwrap_err().to_string().contains("always 3"),
+            "last error propagates"
+        );
     }
 
     #[test]
@@ -2856,7 +2845,11 @@ not-json-skip-me
         // Raw 5,000 tokens but only 500 non-cache (the other 4,500 are cache reads).
         led.record(Arm::A, Role::Writer, 5_000, 500);
         assert_eq!(led.total(), 5_000, "raw total published as-is");
-        assert_eq!(led.total_non_cache(), 500, "cap counts the non-cache portion");
+        assert_eq!(
+            led.total_non_cache(),
+            500,
+            "cap counts the non-cache portion"
+        );
         assert!(
             led.check_cap().is_ok(),
             "5,000 raw but only 500 non-cache is well under the 1,000 cap"
@@ -3550,7 +3543,11 @@ not-json-skip-me
 
         assert_eq!(resumed.checkpoints.len(), 4, "all four reader checkpoints");
         assert_eq!(
-            resumed.checkpoints.iter().map(|c| c.round).collect::<Vec<_>>(),
+            resumed
+                .checkpoints
+                .iter()
+                .map(|c| c.round)
+                .collect::<Vec<_>>(),
             full.checkpoints.iter().map(|c| c.round).collect::<Vec<_>>(),
         );
         assert_eq!(resumed.integrity_checkpoints.len(), 2, "both audits");

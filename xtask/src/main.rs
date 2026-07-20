@@ -599,7 +599,8 @@ fn run_divergence_eval(args: &EvalArgs) -> Result<()> {
                 state_path.display()
             );
         }
-        let json = eval::divergence::partial_report_json(&state_path, pkg.campaign.cost_cap_tokens)?;
+        let json =
+            eval::divergence::partial_report_json(&state_path, pkg.campaign.cost_cap_tokens)?;
         let partial_dir = out_dir.join("partial");
         std::fs::create_dir_all(&partial_dir)?;
         let partial_path = partial_dir.join("result.json");
@@ -670,7 +671,10 @@ fn run_divergence_eval(args: &EvalArgs) -> Result<()> {
             "software@0.1.0",
         )?;
     } else {
-        eprintln!("reusing existing Arm B mem at {}", arm_b_workspace.display());
+        eprintln!(
+            "reusing existing Arm B mem at {}",
+            arm_b_workspace.display()
+        );
     }
 
     let runner = eval::divergence::ClaudeDivergenceRunner {
