@@ -7,6 +7,8 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-20
+
 ### Changed
 - **VISION states what the project's own evidence supports.** The "Core value
   proposition" led with a read-side claim — an LLM reading well-structured
@@ -552,7 +554,8 @@ First tagged release, with pre-built binaries for macOS, Linux, and Windows
   store, the folder and git-branch storage backends, the `memstead` CLI, and the
   `memstead-mcp` MCP server.
 
-[Unreleased]: https://github.com/memstead/memstead/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/memstead/memstead/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/memstead/memstead/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/memstead/memstead/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/memstead/memstead/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/memstead/memstead/releases/tag/v0.1.0
