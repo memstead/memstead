@@ -8,6 +8,32 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Changed
+- **VISION states what the project's own evidence supports.** The "Core value
+  proposition" led with a read-side claim — an LLM reading well-structured
+  specs "understands a domain immediately … no guessing" — that the project's
+  controlled substrate evaluation (`docs/proof/substrate/`) falsified: against
+  equally-curated free-form notes, schema-forced typing showed a signed
+  answer-quality delta of ≈ −0.010 ± 0.006, and the observed token saving
+  traces to *curation*, which flat notes share. VISION now states that null
+  result explicitly and sells only what the mechanism supports: enforcement on
+  write, determinism (no model in the query path), git-native accountability,
+  ownership, and packaging. Token efficiency is no longer named as a founding
+  problem (integrity replaces it), the 5M-entity federation passage reads as an
+  open bet naming the unbuilt Indexed Mem tier rather than an achieved
+  capability, and the horizon publishing example claims publisher
+  accountability instead of avoided scraping. Documentation only — no engine,
+  schema, or MCP behaviour changed.
+- **The divergence proof package is leak-free and its status is true.** The
+  pre-registration package under `docs/proof/divergence/` had never passed
+  `scripts/leak-scan.sh`: it embedded an absolute developer home path in a
+  captured MCP config and pointed public readers at a planning path that exists
+  only in a private repository. Both are repaired (the capture config is now
+  repo-root-relative, so the recorded launch command is machine-independent),
+  and the package's `Status` no longer claims "no campaign has run" while
+  `state.json` records ten completed rounds. Recorded in-place as amendment A5
+  per the package's own amendment rule; no pre-registered parameter, prompt,
+  band, query, rubric, slice, or model pin was touched, and no result was
+  recomputed.
 - **BREAKING: one record per pipeline (binding format v2).** The pipeline
   configuration is consolidated into a single versioned record at
   `.memstead/projections/<mem>/<name>.json` (`version: 2`): the standalone
