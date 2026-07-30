@@ -7,6 +7,21 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Changed
+- **The lean MCP surface's tool descriptions go through the same lint suite
+  as the full server's.** The `tool_surface` description lints (lead-verb
+  allowlist, word/byte bounds, TODO markers, backtick-reference resolution
+  against the wire schema) covered only the mem-repo `McpServer`; the lean
+  `FilesystemMcpServer` descriptions were unlinted and had drifted. Both
+  flavours now lint identically, and the drift the first sweep caught is
+  fixed: lean leads align with their full-surface counterparts
+  (`Remove`/`Connect`/`Return`/`Start`), the lean `memstead_delete`
+  description no longer implies a per-call `force` parameter the surface
+  doesn't have, the internal kernel symbol `compute_health` no longer leaks
+  into the `memstead_health` contract, and the too-thin lean
+  `memstead_entity` description now documents `sections`,
+  `include_relations`, and `include_context`.
+
 ## [0.4.0] - 2026-07-20
 
 ### Changed

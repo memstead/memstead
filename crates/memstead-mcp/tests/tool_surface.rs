@@ -651,21 +651,47 @@ fn every_tool_has_expected_annotation_hints() {
     }
 }
 
-/// Helper — returns (tool_name, description) pairs for every tool that
-/// declares a description. Every Memstead tool MUST have one.
-fn descriptions() -> Vec<(String, String)> {
-    McpServer::tool_router()
-        .list_all()
-        .iter()
-        .map(|t| {
+/// Helper — returns (surface, tool_name, description) triples for every
+/// tool on BOTH server flavours: the full `McpServer` ("full") and the
+/// lean `FilesystemMcpServer` ("lean"). Every Memstead tool MUST declare
+/// a description, and both flavours' descriptions go through the same
+/// lints — an agent gets the same contract quality regardless of build.
+fn descriptions() -> Vec<(&'static str, String, String)> {
+    use memstead_mcp::filesystem_server::FilesystemMcpServer;
+
+    let mut out = Vec::new();
+    for (surface, tools) in [
+        ("full", McpServer::tool_router().list_all()),
+        ("lean", FilesystemMcpServer::tool_router().list_all()),
+    ] {
+        for t in &tools {
             let desc = t
                 .description
                 .as_deref()
-                .unwrap_or_else(|| panic!("{} must set a description", t.name))
+                .unwrap_or_else(|| panic!("{surface}/{} must set a description", t.name))
                 .to_string();
-            (t.name.to_string(), desc)
-        })
-        .collect()
+            out.push((surface, t.name.to_string(), desc));
+        }
+    }
+    out
+}
+
+/// Like `schema_for`, but resolves against the named surface's router so
+/// lean tools lint against the lean wire shape, not the full one.
+fn schema_for_surface(surface: &str, tool_name: &str) -> String {
+    use memstead_mcp::filesystem_server::FilesystemMcpServer;
+
+    let tools = match surface {
+        "full" => McpServer::tool_router().list_all(),
+        "lean" => FilesystemMcpServer::tool_router().list_all(),
+        other => panic!("unknown surface {other}"),
+    };
+    let tool = tools
+        .iter()
+        .find(|t| t.name == tool_name)
+        .unwrap_or_else(|| panic!("{surface}/{tool_name} must exist"));
+    serde_json::to_string(&tool.input_schema)
+        .unwrap_or_else(|e| panic!("{surface}/{tool_name} input_schema must serialize: {e}"))
 }
 
 /// Description must lead with an active verb (or an active-verbal phrase
@@ -702,19 +728,19 @@ fn descriptions_start_with_verb() {
     const BANNED_LEADS: &[&str] = &["This", "Allows", "A", "An", "The"];
 
     let mut violations = Vec::new();
-    for (name, desc) in descriptions() {
+    for (surface, name, desc) in descriptions() {
         let first = desc.split_whitespace().next().unwrap_or("");
         let first_word = first.trim_end_matches(|c: char| !c.is_alphanumeric() && c != '-');
 
         if BANNED_LEADS.contains(&first_word) {
             violations.push(format!(
-                "{name}: description starts with banned filler '{first_word}'"
+                "{surface}/{name}: description starts with banned filler '{first_word}'"
             ));
             continue;
         }
         if !ALLOWED_LEADS.contains(&first_word) {
             violations.push(format!(
-                "{name}: description starts with '{first_word}' — not in curated verb allowlist {ALLOWED_LEADS:?}"
+                "{surface}/{name}: description starts with '{first_word}' — not in curated verb allowlist {ALLOWED_LEADS:?}"
             ));
         }
     }
@@ -731,11 +757,11 @@ fn descriptions_have_no_todo_markers() {
     const FORBIDDEN: &[&str] = &["TODO", "FIXME", "XXX", "tbd", "TBD"];
 
     let mut violations = Vec::new();
-    for (name, desc) in descriptions() {
+    for (surface, name, desc) in descriptions() {
         for marker in FORBIDDEN {
             if desc.contains(marker) {
                 violations.push(format!(
-                    "{name}: description contains forbidden marker '{marker}'"
+                    "{surface}/{name}: description contains forbidden marker '{marker}'"
                 ));
             }
         }
@@ -766,13 +792,17 @@ fn descriptions_length_bounds() {
     const MAX_WORDS: usize = 290;
 
     let mut violations = Vec::new();
-    for (name, desc) in descriptions() {
+    for (surface, name, desc) in descriptions() {
         let words = desc.split_whitespace().count();
         if words < MIN_WORDS {
-            violations.push(format!("{name}: {words} words < {MIN_WORDS} (too thin)"));
+            violations.push(format!(
+                "{surface}/{name}: {words} words < {MIN_WORDS} (too thin)"
+            ));
         }
         if words > MAX_WORDS {
-            violations.push(format!("{name}: {words} words > {MAX_WORDS} (too long)"));
+            violations.push(format!(
+                "{surface}/{name}: {words} words > {MAX_WORDS} (too long)"
+            ));
         }
     }
     assert!(
@@ -797,11 +827,11 @@ fn descriptions_fit_primary_client_truncation() {
     const MAX_BYTES: usize = 2048;
 
     let mut violations = Vec::new();
-    for (name, desc) in descriptions() {
+    for (surface, name, desc) in descriptions() {
         let bytes = desc.len();
         if bytes > MAX_BYTES {
             violations.push(format!(
-                "{name}: {bytes} bytes > {MAX_BYTES} (truncated in Claude Code)"
+                "{surface}/{name}: {bytes} bytes > {MAX_BYTES} (truncated in Claude Code)"
             ));
         }
     }
@@ -825,14 +855,14 @@ fn descriptions_fit_primary_client_truncation() {
 #[test]
 fn descriptions_reference_only_existing_params() {
     let mut violations = Vec::new();
-    for (name, desc) in descriptions() {
-        let schema = schema_for(&name);
+    for (surface, name, desc) in descriptions() {
+        let schema = schema_for_surface(surface, &name);
         for token in extract_backtick_tokens(&desc) {
             if is_allowed_reference(&name, &token, &schema) {
                 continue;
             }
             violations.push(format!(
-                "{name}: backtick reference `{token}` is neither an input param nor a documented response/generic term"
+                "{surface}/{name}: backtick reference `{token}` is neither an input param nor a documented response/generic term"
             ));
         }
     }
@@ -887,6 +917,17 @@ fn extract_backtick_tokens(desc: &str) -> Vec<String> {
             if raw.len() == 40 && raw.bytes().all(|b| b.is_ascii_hexdigit()) {
                 continue;
             }
+            // Skip file-path literals (`.memstead/changes.jsonl`) — a
+            // slashed token whose final segment carries an extension is a
+            // path, not an identifier or slashed alternative.
+            if raw.contains('/')
+                && raw
+                    .rsplit('/')
+                    .next()
+                    .is_some_and(|last| last.contains('.'))
+            {
+                continue;
+            }
             out.push(raw.to_string());
         } else {
             i += 1;
@@ -930,6 +971,19 @@ fn is_allowed_reference(tool_name: &str, token: &str, schema: &str) -> bool {
     }
     if GENERIC_REFS.contains(&normalised) {
         return true;
+    }
+    // Cross-tool references — a `memstead_`-prefixed token naming a live
+    // tool on either server flavour is a valid sibling pointer, not drift.
+    if normalised.starts_with("memstead_") {
+        use memstead_mcp::filesystem_server::FilesystemMcpServer;
+        let is_tool = McpServer::tool_router()
+            .list_all()
+            .iter()
+            .chain(FilesystemMcpServer::tool_router().list_all().iter())
+            .any(|t| t.name == normalised);
+        if is_tool {
+            return true;
+        }
     }
     // For dotted tokens where the head did NOT resolve as a param, also
     // allow if the whole dotted form is listed in response-shape refs.
@@ -1106,12 +1160,26 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "_policy",
             "require_notes",
             "cross_mem_links",
+            // Lean-flavour overview: mount roster fields + the
+            // frontmatter/error tokens its description names.
+            "durable",
+            "storage",
+            "Origin",
+            "first-party",
+            "third-party",
+            "_entity_count",
+            "UNKNOWN_MEM",
+            "_mem_schema",
         ],
         "memstead_schema" => &[
             // Response-shape fields shipped by build_schema_payload.
             // Full and lite ship the heavy arrays under distinct keys;
             // the description names all four so consumers decode by key
             // presence.
+            // Lean-flavour additions: the canonical pin format literal
+            // and the `community` schema block.
+            "name@version",
+            "community",
             "ref",
             "types",
             "types_summary",
@@ -1165,6 +1233,9 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
         "memstead_create" => &[
             // Schema-discovery pointer named in the pre-fetch imperative.
             "memstead_schema",
+            // Lean-flavour refusal for params this surface doesn't honour.
+            "UNSUPPORTED_PARAM",
+            "details.params",
             "warnings",
             "commit_sha",
             "id",
@@ -1221,6 +1292,9 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
         "memstead_update" => &[
             // Schema-discovery pointer named in the pre-fetch imperative.
             "memstead_schema",
+            // Lean-flavour refusal for params this surface doesn't honour.
+            "UNSUPPORTED_PARAM",
+            "details.params",
             // Recovery-payload home named in the fix-from-details pointer.
             "details",
             "prospective_hash",
@@ -2005,7 +2079,7 @@ const STRUCTURED_ERROR_CODES: &[&str] = &[
 /// lock which exact tool must carry each clause.
 fn all_description_text() -> String {
     let mut acc = String::new();
-    for (_, desc) in descriptions() {
+    for (_, _, desc) in descriptions() {
         acc.push_str(&desc);
         acc.push('\n');
     }
@@ -2139,7 +2213,7 @@ fn every_mutation_description_clarifies_commit_sha_origin() {
         "memstead_relate",
     ];
     let mut violations = Vec::new();
-    for (name, desc) in descriptions() {
+    for (surface, name, desc) in descriptions() {
         if !MUTATION_TOOLS.contains(&name.as_str()) {
             continue;
         }
@@ -2155,7 +2229,7 @@ fn every_mutation_description_clarifies_commit_sha_origin() {
         let has_contract_pointer = desc.contains("server instructions");
         if !(has_contract_pointer || (has_per_mem && has_discovery)) {
             violations.push(format!(
-                "{name}: description mentions `commit_sha` but omits the \
+                "{surface}/{name}: description mentions `commit_sha` but omits the \
                  per-mem-git qualifier or the \
                  `memstead_health include_config=true` discovery pointer"
             ));
@@ -2168,15 +2242,17 @@ fn every_mutation_description_clarifies_commit_sha_origin() {
     );
 }
 
-/// Helper — return the description for one tool. Panics if the tool is
-/// absent (indicates the surface itself has drifted, which other tests
-/// already catch).
+/// Helper — return the FULL-surface description for one tool. Panics if
+/// the tool is absent (indicates the surface itself has drifted, which
+/// other tests already catch). The load-bearing substring tests below
+/// lock the full server's contract; the lean flavour is covered by the
+/// generic lints, not these per-clause pins.
 fn description_of(tool_name: &str) -> String {
     descriptions()
         .into_iter()
-        .find(|(n, _)| n == tool_name)
+        .find(|(surface, n, _)| *surface == "full" && n == tool_name)
         .unwrap_or_else(|| panic!("{tool_name} must exist"))
-        .1
+        .2
 }
 
 /// Load-bearing substring invariants — one assertion per load-bearing
@@ -2419,17 +2495,17 @@ fn memstead_overview_carries_always_load_meta() {
 #[ignore]
 fn print_description_sizes() {
     let mut tools = descriptions();
-    tools.sort_by(|a, b| a.0.cmp(&b.0));
+    tools.sort_by(|a, b| (a.0, &a.1).cmp(&(b.0, &b.1)));
     let mut total_bytes = 0usize;
     let mut total_words = 0usize;
-    println!("\n{:<22} {:>6} {:>6}", "tool", "words", "bytes");
-    println!("{}", "-".repeat(40));
-    for (name, desc) in &tools {
+    println!("\n{:<28} {:>6} {:>6}", "tool", "words", "bytes");
+    println!("{}", "-".repeat(46));
+    for (surface, name, desc) in &tools {
         let words = desc.split_whitespace().count();
         let bytes = desc.len();
         total_bytes += bytes;
         total_words += words;
-        println!("{:<22} {:>6} {:>6}", name, words, bytes);
+        println!("{:<28} {:>6} {:>6}", format!("{surface}/{name}"), words, bytes);
     }
     println!("{}", "-".repeat(40));
     println!(

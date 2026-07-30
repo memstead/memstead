@@ -994,7 +994,7 @@ fn validation_envelope(err: memstead_base::runtime_validator::ValidationError) -
 impl FilesystemMcpServer {
     #[tool(
         name = "memstead_entity",
-        description = "Read one entity as markdown (filesystem-mem flavour). Same JSON shape as the mem-repo `memstead_entity`. Frontmatter carries `_hash` (content hash) for optimistic locking on follow-up mutations.",
+        description = "Read one entity as markdown (filesystem-mem flavour). Same JSON shape as the mem-repo `memstead_entity`. Frontmatter carries `_hash` (content hash) for optimistic locking on follow-up mutations. Pass `sections` to narrow the rendered body; `include_relations` appends the entity's outgoing and incoming edges; `include_context` appends its community cluster.",
         annotations(
             read_only_hint = true,
             destructive_hint = false,
@@ -1266,7 +1266,7 @@ impl FilesystemMcpServer {
 
     #[tool(
         name = "memstead_delete",
-        description = "Delete an entity from the filesystem-mem workspace. `expected_hash` is required (read first via memstead_entity); mismatch returns HASH_MISMATCH. Refuses entities with incoming references unless the agent passes `force` via the workspace-level config (v1 has no per-call force toggle on the MCP surface — use `memstead delete --force` on the CLI). The `note` lands in `.memstead/changes.jsonl`.",
+        description = "Remove an entity from the filesystem-mem workspace. `expected_hash` is required (read first via memstead_entity); mismatch returns HASH_MISMATCH. Refuses entities with incoming references — v1 has no per-call force toggle on the MCP surface; use `memstead delete --force` on the CLI. The `note` lands in `.memstead/changes.jsonl` (the per-mutation changelog).",
         annotations(
             read_only_hint = false,
             destructive_hint = true,
@@ -1309,7 +1309,7 @@ impl FilesystemMcpServer {
 
     #[tool(
         name = "memstead_relate",
-        description = "Add or remove a typed relationship between two entities in the same filesystem-mem. Cross-mem targets are rejected with CROSS_MEM_RELATION (filesystem-mem is single-mem by design). `remove: true` drops the matching pair if present; otherwise the call appends. No-op paths (already present add, absent remove) succeed silently and do not append a changelog line.",
+        description = "Connect or disconnect two entities with a typed relationship in the same filesystem-mem. Cross-mem targets are rejected with CROSS_MEM_RELATION (filesystem-mem is single-mem by design). `remove: true` drops the matching pair if present; otherwise the call appends. No-op paths (already present add, absent remove) succeed silently and do not append a changelog line.",
         // idempotent_hint = true: relate's duplicate-add and
         // remove-nonexistent paths are typed-warning no-ops, so a retry
         // converges. Matches the mem-repo server's annotation —
@@ -1422,7 +1422,7 @@ impl FilesystemMcpServer {
 
     #[tool(
         name = "memstead_health",
-        description = "Health summary for the filesystem-mem workspace: orphans, stubs, missing required fields, stale entities. Returns the same JSON shape as the mem-repo `memstead_health` (single-mem, so `writable_mems` carries one entry). Detail sections are produced via the kernel's `compute_health`. `include` accepts the shared health key set — today the lean surface dispatches `dangling_links` (matching the mem-repo response shape: `{from, target_id, target_path, section}`) and validates every key against the allowed set, emitting `UNKNOWN_INCLUDE_KEY` on the response's `warnings[]` for typos. `conformance` / `integrity` are dispatched too: `conformance` lints every entity against the effective schema (the pin, or `target_schema` when given) into a `findings` array of `{id, axis, code, detail}` with write-time typed codes; `integrity` adds the consistency axis (DANGLING_LINK, ORPHAN_STUB) to the same list. Other detail keys (`orphans`, `stubs`, …) are accepted but the v1 surface returns the full report regardless — narrowing is a follow-up.",
+        description = "Return the filesystem-mem workspace's health summary: orphans, stubs, missing required fields, stale entities. Same JSON shape as the mem-repo `memstead_health` (single-mem, so `writable_mems` carries one entry). `include` accepts the shared health key set — today the lean surface dispatches `dangling_links` (matching the mem-repo response shape: `{from, target_id, target_path, section}`) and validates every key against the allowed set, emitting `UNKNOWN_INCLUDE_KEY` on the response's `warnings[]` for typos. `conformance` / `integrity` are dispatched too: `conformance` lints every entity against the effective schema (the pin, or `target_schema` when given) into a `findings` array of `{id, axis, code, detail}` with write-time typed codes; `integrity` adds the consistency axis (DANGLING_LINK, ORPHAN_STUB) to the same list. Other detail keys (`orphans`, `stubs`, …) are accepted but the v1 surface returns the full report regardless — narrowing is a follow-up.",
         annotations(
             read_only_hint = true,
             destructive_hint = false,
@@ -1613,7 +1613,7 @@ impl FilesystemMcpServer {
 
     #[tool(
         name = "memstead_diff",
-        description = "Two-ref structural diff at entity granularity. **Filesystem-mem flavour:** folder mounts carry no git refs, so this tool refuses with `INVALID_INPUT` against folder-backed mems. Use the mem-repo flavour for the real diff; the surface stays for cross-flavour clients that hit either server.",
+        description = "Return a two-ref structural diff at entity granularity. **Filesystem-mem flavour:** folder mounts carry no git refs, so this tool refuses with `INVALID_INPUT` against folder-backed mems. Use the mem-repo flavour for the real diff; the surface stays for cross-flavour clients that hit either server.",
         annotations(
             read_only_hint = true,
             destructive_hint = false,
@@ -1733,7 +1733,7 @@ impl FilesystemMcpServer {
 
     #[tool(
         name = "memstead_overview",
-        description = "Cold-start entry point for a Memstead engine. Returns the schema catalogue, the mem inventory, and the community clusters as Markdown. Every visible mem is listed under `## Mems`: a writable mem carries a `durable` flag and `storage` kind (an in-memory sketch reads `durable: false` / `storage: in-memory` — writes are volatile, evicted on session-TTL / restart), and a read-only mount carries `Access: read-only`, its deployment-declared trust `Origin` (`first-party` / `third-party`), and its own entity count. Per-mem counts, `_entity_count`, and the communities section always agree — one rendering authority. Schemas list as `{ref, description}` only — call `memstead_schema(name=<ref>)` for full per-type bodies. Token-budget-driven: hard-required content (mems, schema, community titles) always ships; heavy content greedy-fills the remaining budget by default-priority. Anything that didn't fit is advertised under `## Hints` with `estimated_tokens`; re-query by passing `key` into `include[]`. Allowed `include` keys: `community_members`, `community_bridges`, `mem_distribution`, `dangling_links`. `mem` scopes the roster, schema anchor, and communities to any one visible mem (a read-only mount included); a name matching no visible mem returns `UNKNOWN_MEM` whose list names every visible mem. Set `rebuild: true` to invalidate the community memo before computing — it recomputes the whole-graph Louvain partition (detection is global; there is no per-subgraph scoping). A small or disconnected subgraph may surface as no cluster: sparsely-connected / edge-less nodes collapse into a single catch-all rather than forming their own cluster. This surface carries no mem-lifecycle tools, so the `## Lifecycle Namespaces` section is omitted. Frontmatter `_overview_mode` is \"complete\", \"reduced\", or \"overbudget\"; `_mem_schema` appears only under a `mem` filter.",
+        description = "Start here — the cold-start entry point for a Memstead engine. Returns the schema catalogue, the mem inventory, and the community clusters as Markdown. Every visible mem is listed under `## Mems`: a writable mem carries a `durable` flag and `storage` kind (an in-memory sketch reads `durable: false` / `storage: in-memory` — writes are volatile, evicted on session-TTL / restart), and a read-only mount carries `Access: read-only`, its deployment-declared trust `Origin` (`first-party` / `third-party`), and its own entity count. Per-mem counts, `_entity_count`, and the communities section always agree — one rendering authority. Schemas list as `{ref, description}` only — call `memstead_schema(name=<ref>)` for full per-type bodies. Token-budget-driven: hard-required content (mems, schema, community titles) always ships; heavy content greedy-fills the remaining budget by default-priority. Anything that didn't fit is advertised under `## Hints` with `estimated_tokens`; re-query by passing `key` into `include[]`. Allowed `include` keys: `community_members`, `community_bridges`, `mem_distribution`, `dangling_links`. `mem` scopes the roster, schema anchor, and communities to any one visible mem (a read-only mount included); a name matching no visible mem returns `UNKNOWN_MEM` whose list names every visible mem. Set `rebuild: true` to invalidate the community memo before computing — it recomputes the whole-graph Louvain partition (detection is global; there is no per-subgraph scoping). A small or disconnected subgraph may surface as no cluster: sparsely-connected / edge-less nodes collapse into a single catch-all rather than forming their own cluster. This surface carries no mem-lifecycle tools, so the `## Lifecycle Namespaces` section is omitted. Frontmatter `_overview_mode` is \"complete\", \"reduced\", or \"overbudget\"; `_mem_schema` appears only under a `mem` filter.",
         annotations(
             read_only_hint = true,
             destructive_hint = false,
