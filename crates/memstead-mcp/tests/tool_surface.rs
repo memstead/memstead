@@ -2505,7 +2505,12 @@ fn print_description_sizes() {
         let bytes = desc.len();
         total_bytes += bytes;
         total_words += words;
-        println!("{:<28} {:>6} {:>6}", format!("{surface}/{name}"), words, bytes);
+        println!(
+            "{:<28} {:>6} {:>6}",
+            format!("{surface}/{name}"),
+            words,
+            bytes
+        );
     }
     println!("{}", "-".repeat(40));
     println!(
