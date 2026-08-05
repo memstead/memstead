@@ -54,6 +54,34 @@ use super::{
     validate_relation_target_grammar,
 };
 
+/// Everything a validated create needs to hit disk — the create-side
+/// twin of `PreparedUpdate`. Produced by `Engine::prepare_create`,
+/// consumed by `Engine::commit_prepared_create` (single item) and by
+/// `Engine::batch_create` (staged all-first, one commit per mem).
+struct PreparedCreate {
+    mount_idx: usize,
+    id: EntityId,
+    title: String,
+    mem: String,
+    file_path: String,
+    markdown: String,
+    anchors: Vec<crate::anchor::Anchor>,
+    warnings: Vec<WarningHint>,
+    type_guidance: std::collections::BTreeMap<String, Vec<String>>,
+    relations_declared: Vec<crate::engine::outcomes::RelationDeclared>,
+    /// Inline-relation targets — the commit tail materialises
+    /// forward-reference stubs for the ones the store still lacks.
+    relation_targets: Vec<EntityId>,
+    type_def: std::sync::Arc<memstead_schema::TypeDefinition>,
+}
+
+/// Outcome of `Engine::prepare_create`: a dry-run completes at prepare
+/// time; a real write returns the staged material.
+enum CreatePrepareOutcome {
+    Done(CreateEntityOutcome),
+    Prepared(PreparedCreate),
+}
+
 impl Engine {
     /// Create a new entity in `args.mem`. Six concerns wired here
     /// in one shape regardless of which backend serves the mount:
@@ -84,6 +112,41 @@ impl Engine {
         client: Option<&ClientId>,
         note: Option<&str>,
     ) -> Result<CreateEntityOutcome, EngineError> {
+        let drift_warnings = self.reload_if_stale(Some(&args.mem));
+        match self.prepare_create(args, None, drift_warnings)? {
+            CreatePrepareOutcome::Done(outcome) => Ok(outcome),
+            CreatePrepareOutcome::Prepared(prepared) => {
+                self.commit_prepared_create(prepared, actor, client, note)
+            }
+        }
+    }
+
+    /// Validate a create and compute everything up to (but not
+    /// including) the disk write — the create-side prepare of the
+    /// prepare-all-then-commit split `batch_update` established.
+    /// Returns [`CreatePrepareOutcome::Done`] for a dry-run (its
+    /// outcome is complete), [`CreatePrepareOutcome::Prepared`] for a
+    /// real write the caller commits via
+    /// [`Self::commit_prepared_create`].
+    ///
+    /// `batch_skeleton_ids` is the batch path's staging set: ids the
+    /// current batch has pre-inserted as skeleton entities so
+    /// intra-batch references validate as REAL targets. A create whose
+    /// id is in the set skips the already-exists refusal (the skeleton
+    /// is this very entry's placeholder — batch-side identity checks
+    /// have already refused genuine duplicates). Single-item callers
+    /// pass `None`.
+    /// NOTE: the reload-before-operation drift probe is the CALLER's
+    /// job (single-item: `create_entity` probes its one mem; batch:
+    /// `batch_create` probes every touched mem once, up front). A probe
+    /// inside prepare would reload mid-batch and wipe the staged
+    /// skeletons.
+    fn prepare_create(
+        &mut self,
+        args: CreateEntityArgs,
+        batch_skeleton_ids: Option<&std::collections::HashSet<EntityId>>,
+        mut drift_warnings: Vec<WarningHint>,
+    ) -> Result<CreatePrepareOutcome, EngineError> {
         let mut args = args;
         // Canonicalise rel_type on every inline relation — same contract
         // as `relate_entity`: input is case-insensitive, storage and
@@ -131,8 +194,6 @@ impl Engine {
         //     below). This is what makes a create at an id a sibling
         //     just created refuse as already-exists rather than
         //     silently rebasing onto an unobserved commit.
-        let mut drift_warnings = self.reload_if_stale(Some(&args.mem));
-
         // 2. Resolve schema + type. The schema map is populated for
         //    every mount during `from_mounts`, so the lookup is total.
         let schema = self
@@ -172,6 +233,7 @@ impl Engine {
         crate::entity::id::enforce_id_length(id.as_ref())?;
         if let Some(existing) = self.store.get(&id)
             && !existing.stub
+            && !batch_skeleton_ids.is_some_and(|set| set.contains(&id))
         {
             return Err(EngineError::AlreadyExists { id: id.to_string() });
         }
@@ -531,7 +593,7 @@ impl Engine {
             // stub exists at this id). Read before any mutation.
             let incoming = project_incoming(self.store.incoming(&id));
             let incoming_count = (!incoming.is_empty()).then_some(incoming.len());
-            return Ok(CreateEntityOutcome {
+            return Ok(CreatePrepareOutcome::Done(CreateEntityOutcome {
                 id,
                 title: args.title,
                 mem: args.mem,
@@ -544,8 +606,50 @@ impl Engine {
                 incoming_count,
                 incoming,
                 relations_declared: relations_declared.clone(),
-            });
+            }));
         }
+
+        Ok(CreatePrepareOutcome::Prepared(PreparedCreate {
+            mount_idx,
+            id,
+            title: args.title,
+            mem: args.mem,
+            file_path,
+            markdown,
+            anchors: validated_anchors,
+            warnings,
+            type_guidance,
+            relations_declared,
+            relation_targets: args.relations.iter().map(|r| r.to.clone()).collect(),
+            type_def,
+        }))
+    }
+
+    /// Stage the prepared disk write, commit it, append provenance, and
+    /// apply the change to the in-memory store — the single-create tail
+    /// of [`Self::create_entity`]. The batch path drives the same
+    /// steps but stages every item first and commits once per mem.
+    fn commit_prepared_create(
+        &mut self,
+        prepared: PreparedCreate,
+        actor: Actor,
+        client: Option<&ClientId>,
+        note: Option<&str>,
+    ) -> Result<CreateEntityOutcome, EngineError> {
+        let PreparedCreate {
+            mount_idx,
+            id,
+            title,
+            mem,
+            file_path,
+            markdown,
+            anchors: validated_anchors,
+            mut warnings,
+            type_guidance,
+            relations_declared,
+            relation_targets,
+            type_def,
+        } = prepared;
 
         // 8. Write + commit through the backend. The commit subject
         //    is `memstead: create <id>` so the git-branch backend's
@@ -590,7 +694,7 @@ impl Engine {
 
         // 10. Update the in-memory store via re-parse so the store
         //     mirrors the on-disk shape (content_hash, heading_spans).
-        let parse_result = parse_markdown(&markdown, &file_path, type_def.as_ref(), &args.mem)
+        let parse_result = parse_markdown(&markdown, &file_path, type_def.as_ref(), &mem)
             .map_err(|e| EngineError::ParseAfterWrite(e.to_string()))?;
         let content_hash = parse_result.entity.content_hash.clone();
 
@@ -621,11 +725,11 @@ impl Engine {
         // store doesn't auto-stub on push, so the engine does it
         // explicitly. Skipped when no relations were declared
         // (the args.relations vec is empty).
-        for rel in &args.relations {
-            if !self.store.contains(&rel.to) {
+        for target in &relation_targets {
+            if !self.store.contains(target) {
                 self.store.upsert(
-                    rel.to.clone(),
-                    make_stub(&rel.to, crate::entity::StubKind::ForwardReference),
+                    target.clone(),
+                    make_stub(target, crate::entity::StubKind::ForwardReference),
                 );
             }
         }
@@ -649,8 +753,8 @@ impl Engine {
 
         Ok(CreateEntityOutcome {
             id,
-            title: args.title,
-            mem: args.mem,
+            title,
+            mem,
             file_path,
             content_hash,
             commit_sha,
@@ -662,6 +766,322 @@ impl Engine {
             relations_declared,
         })
     }
+
+    /// Atomic batch create — the create-side sibling of
+    /// [`Self::batch_update`], with one upgrade and one addition:
+    ///
+    /// - **Report-all refusal.** Every failing entry is identified with
+    ///   its index and typed `{code, message, details}` envelope (the
+    ///   family's upgraded contract) — bounded at
+    ///   [`Self::BATCH_ERROR_REPORT_CAP`] detailed envelopes, with
+    ///   `errors_suppressed` counting the rest. A refused batch writes
+    ///   NOTHING: no entity, no edge, no head movement.
+    /// - **Intra-batch references resolve as REAL targets.** Every
+    ///   entity in the batch is staged (a skeleton store entry carrying
+    ///   its declared type) before per-entry validation runs, so an
+    ///   edge to a sibling created in the same batch gets full
+    ///   target-type shape validation, no transient stub, and no stub
+    ///   warning — the batch validates as one graph state, cycles
+    ///   included where the schema permits them. Duplicates within the
+    ///   batch are refused in the identity pass.
+    ///
+    /// One workspace load (the caller's), one commit per touched mem
+    /// (subject `memstead: batch-create (N entities)`), per-entry
+    /// provenance notes exactly like `batch_update`.
+    pub fn batch_create(
+        &mut self,
+        creates: Vec<(CreateEntityArgs, Option<String>)>,
+        actor: Actor,
+        client: Option<&ClientId>,
+    ) -> Result<crate::ops::BatchResult, EngineError> {
+        use std::collections::HashSet;
+
+        if creates.is_empty() {
+            return Ok(crate::ops::BatchResult {
+                errors_suppressed: 0,
+                applied: true,
+                results: Vec::new(),
+                succeeded: 0,
+                failed: 0,
+                commit_sha: String::new(),
+            });
+        }
+
+        // Reload every touched mem once, up front.
+        let mut touched_mems: Vec<String> = creates.iter().map(|(a, _)| a.mem.clone()).collect();
+        touched_mems.sort();
+        touched_mems.dedup();
+        for m in &touched_mems {
+            self.reload_if_stale(Some(m));
+        }
+
+        let store_snapshot = self.store.clone();
+
+        // --- Identity pass: derive every entry's id, refusing
+        // duplicates against the pre-batch store AND within the batch.
+        // Collect EVERY failure (report-all), never just the first.
+        struct IdentityRow {
+            id: Option<EntityId>,
+            error: Option<EngineError>,
+        }
+        let mut rows: Vec<IdentityRow> = Vec::with_capacity(creates.len());
+        let mut batch_ids: HashSet<EntityId> = HashSet::new();
+        for (args, _) in &creates {
+            let identity = (|| -> Result<EntityId, EngineError> {
+                let title = args.title.trim();
+                let slug = validate_and_derive_slug(title)?;
+                let id = EntityId::new(&args.mem, &slug);
+                crate::entity::id::enforce_id_length(id.as_ref())?;
+                if let Some(existing) = self.store.get(&id)
+                    && !existing.stub
+                {
+                    return Err(EngineError::AlreadyExists { id: id.to_string() });
+                }
+                if batch_ids.contains(&id) {
+                    // Duplicate WITHIN the batch — same typed code as
+                    // the store collision; the index in the report
+                    // localises it.
+                    return Err(EngineError::AlreadyExists { id: id.to_string() });
+                }
+                Ok(id)
+            })();
+            match identity {
+                Ok(id) => {
+                    batch_ids.insert(id.clone());
+                    rows.push(IdentityRow {
+                        id: Some(id),
+                        error: None,
+                    });
+                }
+                Err(e) => rows.push(IdentityRow {
+                    id: None,
+                    error: Some(e),
+                }),
+            }
+        }
+
+        // --- Skeleton staging: make every batch id a REAL, typed store
+        // entry so sibling references validate against present targets.
+        // A pre-existing stub at a batch id is replaced (its incoming
+        // edges survive the upsert — the same adoption the single-item
+        // create performs).
+        for ((args, _), row) in creates.iter().zip(rows.iter()) {
+            if let Some(id) = &row.id {
+                let mut skeleton = make_stub(id, crate::entity::StubKind::ForwardReference);
+                skeleton.stub = false;
+                skeleton.stub_kind = None;
+                skeleton.entity_type = args.entity_type.clone();
+                skeleton.title = args.title.trim().to_string();
+                self.store.upsert(id.clone(), skeleton);
+            }
+        }
+
+        // --- Full prepare pass, report-all. Skeletons make intra-batch
+        // targets real; each entry's own skeleton is exempted from the
+        // duplicate check via `batch_skeleton_ids`.
+        let mut prepared: Vec<PreparedCreate> = Vec::new();
+        let mut notes: Vec<Option<String>> = Vec::new();
+        let mut errors: Vec<(usize, EngineError)> = Vec::new();
+        let mut ids_in_order: Vec<EntityId> = Vec::new();
+        for (i, ((args, note), row)) in creates.into_iter().zip(rows.into_iter()).enumerate() {
+            let fallback_id = row
+                .id
+                .clone()
+                .unwrap_or_else(|| EntityId::new(&args.mem, "invalid-entry"));
+            ids_in_order.push(fallback_id);
+            if let Some(e) = row.error {
+                errors.push((i, e));
+                continue;
+            }
+            let mut args = args;
+            args.dry_run = false; // batch never dry-runs per entry
+            match self.prepare_create(args, Some(&batch_ids), Vec::new()) {
+                Ok(CreatePrepareOutcome::Prepared(p)) => {
+                    ids_in_order[i] = p.id.clone();
+                    prepared.push(p);
+                    notes.push(note);
+                }
+                Ok(CreatePrepareOutcome::Done(_)) => unreachable!("dry_run forced off"),
+                Err(e) => errors.push((i, e)),
+            }
+        }
+
+        if !errors.is_empty() {
+            // Refuse the whole batch; nothing was committed and the
+            // store snapshot rolls back the skeletons.
+            self.store = store_snapshot;
+            self.discard_all_pending();
+            let failed = errors.len();
+            let mut error_map: std::collections::HashMap<usize, EngineError> =
+                errors.into_iter().collect();
+            let mut reported = 0usize;
+            let mut suppressed = 0usize;
+            let results: Vec<crate::ops::BatchEntry> = ids_in_order
+                .into_iter()
+                .enumerate()
+                .map(|(i, id)| match error_map.remove(&i) {
+                    Some(e) => {
+                        if reported < Self::BATCH_ERROR_REPORT_CAP {
+                            reported += 1;
+                            crate::ops::BatchEntry {
+                                id,
+                                action: "error".to_string(),
+                                error: Some(super::update::batch_error_envelope(&e)),
+                            }
+                        } else {
+                            suppressed += 1;
+                            crate::ops::BatchEntry {
+                                id,
+                                action: "error".to_string(),
+                                error: None,
+                            }
+                        }
+                    }
+                    None => crate::ops::BatchEntry {
+                        id,
+                        action: "not_applied".to_string(),
+                        error: None,
+                    },
+                })
+                .collect();
+            return Ok(crate::ops::BatchResult {
+                errors_suppressed: suppressed,
+                applied: false,
+                results,
+                succeeded: 0,
+                failed,
+                commit_sha: String::new(),
+            });
+        }
+
+        // --- Stage every write + anchors, then commit once per mem.
+        for p in &prepared {
+            if let Err(e) = self.mounts[p.mount_idx]
+                .backend
+                .write_entity(Path::new(&p.file_path), p.markdown.as_bytes())
+            {
+                self.store = store_snapshot;
+                self.discard_all_pending();
+                return Err(e.into());
+            }
+            if !p.anchors.is_empty()
+                && let Err(e) = super::stage_anchors_sidecar(
+                    self.mounts[p.mount_idx].backend.as_ref(),
+                    &p.id,
+                    p.anchors.clone(),
+                )
+            {
+                self.store = store_snapshot;
+                self.discard_all_pending();
+                return Err(e);
+            }
+        }
+        let mut distinct_mounts: Vec<usize> = Vec::new();
+        for p in &prepared {
+            if !distinct_mounts.contains(&p.mount_idx) {
+                distinct_mounts.push(p.mount_idx);
+            }
+        }
+        let mut mount_commits: Vec<(usize, String)> = Vec::with_capacity(distinct_mounts.len());
+        for &m in &distinct_mounts {
+            let entity_ids: Vec<String> = prepared
+                .iter()
+                .filter(|p| p.mount_idx == m)
+                .map(|p| p.id.to_string())
+                .collect();
+            let count = entity_ids.len();
+            let subject = format!("memstead: batch-create ({count} entities)");
+            let ctx = CommitContext {
+                actor,
+                client: client.cloned(),
+                tool: Some("batch_create"),
+                note: None,
+                logical_operation_id: None,
+                entity_ids: Some(entity_ids),
+            };
+            match self.mounts[m].backend.commit(&subject, &ctx) {
+                Ok(sha) => mount_commits.push((m, sha)),
+                Err(e) => {
+                    self.store = store_snapshot;
+                    self.discard_all_pending();
+                    return Err(e.into());
+                }
+            }
+        }
+
+        // Provenance + store application (parse the generated bytes so
+        // the store mirrors disk, replacing the skeletons).
+        let fallback = engine_fallback_type();
+        for (p, note) in prepared.iter().zip(notes.iter()) {
+            let commit_sha = mount_commits
+                .iter()
+                .find(|(m, _)| *m == p.mount_idx)
+                .map(|(_, s)| s.clone())
+                .unwrap_or_default();
+            self.mounts[p.mount_idx]
+                .backend
+                .append_provenance(&Provenance::new(
+                    std::time::SystemTime::now(),
+                    ProvenanceKind::Create,
+                    Some(p.id.to_string()),
+                    actor,
+                    client.cloned(),
+                    note.clone(),
+                ))?;
+            self.record_self_write(p.mount_idx, &commit_sha);
+            let parse_result =
+                parse_markdown(&p.markdown, &p.file_path, p.type_def.as_ref(), &p.mem)
+                    .map_err(|e| EngineError::ParseAfterWrite(e.to_string()))?;
+            push_entities_into_store(&mut self.store, vec![parse_result], fallback.as_ref(), None);
+        }
+        crate::entity::store_builder::remap_alias_target_edge_sources(
+            &mut self.store,
+            &self.schemas,
+        );
+        // Forward-reference stubs for OUT-OF-BATCH targets only —
+        // in-batch targets are real entities now.
+        for p in &prepared {
+            for target in &p.relation_targets {
+                if !self.store.contains(target) {
+                    self.store.upsert(
+                        target.clone(),
+                        make_stub(target, crate::entity::StubKind::ForwardReference),
+                    );
+                }
+            }
+        }
+        self.invalidate_communities();
+        self.invalidate_search_indexes();
+
+        let commit_sha = mount_commits
+            .last()
+            .map(|(_, s)| s.clone())
+            .unwrap_or_default();
+        let succeeded = prepared.len();
+        let results: Vec<crate::ops::BatchEntry> = prepared
+            .into_iter()
+            .map(|p| crate::ops::BatchEntry {
+                id: p.id,
+                action: "created".to_string(),
+                error: None,
+            })
+            .collect();
+        Ok(crate::ops::BatchResult {
+            errors_suppressed: 0,
+            applied: true,
+            results,
+            succeeded,
+            failed: 0,
+            commit_sha,
+        })
+    }
+
+    /// Cap on fully-detailed error envelopes in a refused batch's
+    /// report — bounded reporting for very large failing batches.
+    /// Entries beyond the cap still carry `action: "error"`; the
+    /// result's `errors_suppressed` counts them. Never a silent
+    /// truncation.
+    pub const BATCH_ERROR_REPORT_CAP: usize = 50;
 
     /// CommitContext-bundling wrapper around [`Self::create_entity`].
     /// Destructures `CommitContext` into `(actor, client, note)`
@@ -1079,6 +1499,170 @@ write_rules: []
                 None,
             )
             .expect("unresolvable binding accepts any non-empty name");
+    }
+
+    /// Batch create: N mutually-referencing entities (cycle included —
+    /// USES is not acyclic in the default schema) land in ONE
+    /// invocation with every reference resolving to a REAL typed
+    /// entity, never a stub, and no stub warnings.
+    #[test]
+    fn batch_create_intra_batch_references_resolve_real() {
+        let tmp = TempDir::new().unwrap();
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let mut engine = Engine::from_mounts(vec![(
+            folder_mount("specs", mem_dir),
+            Box::new(writer) as Box<dyn MemBackend>,
+        )])
+        .unwrap();
+        let (actor, client) = cli_actor();
+
+        let with_rel = |title: &str, to: &str| {
+            let mut args = empty_create_args("specs", title);
+            args.relations = vec![crate::ops::RelateArg {
+                to: crate::entity::EntityId::new("specs", to),
+                rel_type: "USES".to_string(),
+                description: None,
+            }];
+            (args, Some(format!("note for {title}")))
+        };
+        // A → B → C → A: a cycle the schema permits.
+        let result = engine
+            .batch_create(
+                vec![
+                    with_rel("Alpha", "beta"),
+                    with_rel("Beta", "gamma"),
+                    with_rel("Gamma", "alpha"),
+                ],
+                actor,
+                Some(&client),
+            )
+            .unwrap();
+        assert!(result.applied, "{result:?}");
+        assert_eq!(result.succeeded, 3);
+        assert!(!result.commit_sha.is_empty(), "one real commit");
+        assert!(
+            result.results.iter().all(|r| r.action == "created"),
+            "{result:?}"
+        );
+
+        // Every reference resolves to a REAL entity of the right type.
+        for name in ["alpha", "beta", "gamma"] {
+            let e = engine
+                .get_entity(&crate::entity::EntityId::new("specs", name))
+                .unwrap();
+            assert!(!e.stub, "{name} must be real, not a stub");
+            assert_eq!(e.entity_type, "spec");
+            assert_eq!(e.relationships.len(), 1, "{name} carries its edge");
+        }
+        // No stub warnings anywhere in the outcome (in-batch targets
+        // never transit through the stub machinery).
+        // (BatchResult carries no warnings channel; absence of stubs in
+        // the store is the observable.)
+    }
+
+    /// Atomicity + report-all: a batch with several invalid entries
+    /// writes NOTHING (no entity, no head movement) and names EVERY
+    /// failing entry with its typed code — not only the first.
+    #[test]
+    fn batch_create_refuses_whole_batch_reporting_every_failure() {
+        let tmp = TempDir::new().unwrap();
+        let (mut engine, seeded) = engine_with_seed(&tmp, "Existing");
+        let (actor, client) = cli_actor();
+        let head_before = engine
+            .mem_head_sha("specs")
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        let count_before = engine.store().all_entities().count();
+
+        let plain = |title: &str| (empty_create_args("specs", title), None);
+        let result = engine
+            .batch_create(
+                vec![
+                    plain("Fine One"),
+                    plain("Existing"),  // duplicate vs pre-batch store
+                    plain("Bad/Title"), // invalid title character
+                    plain("Fine Two"),
+                    plain("Fine Two"), // duplicate WITHIN the batch
+                ],
+                actor,
+                Some(&client),
+            )
+            .unwrap();
+        assert!(!result.applied);
+        assert_eq!(result.failed, 3, "{result:?}");
+        assert!(result.commit_sha.is_empty());
+        let codes: Vec<(usize, &str)> = result
+            .results
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| r.action == "error")
+            .map(|(i, r)| (i, r.error.as_ref().map(|e| e.code.as_str()).unwrap_or("")))
+            .collect();
+        assert_eq!(
+            codes,
+            vec![
+                (1, "ENTITY_ALREADY_EXISTS"),
+                (2, "INVALID_TITLE"),
+                (4, "ENTITY_ALREADY_EXISTS"),
+            ],
+            "every failing entry named with index + typed code: {result:?}"
+        );
+        // Valid entries are marked not_applied, and NOTHING was written.
+        assert_eq!(result.results[0].action, "not_applied");
+        assert_eq!(result.results[3].action, "not_applied");
+        let head_after = engine
+            .mem_head_sha("specs")
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        assert_eq!(head_before, head_after, "mem head unmoved");
+        assert_eq!(
+            engine.store().all_entities().count(),
+            count_before,
+            "no entity created, no skeleton left behind"
+        );
+        let _ = seeded;
+    }
+
+    /// Bounded reporting: with more failing entries than the cap, the
+    /// report carries the cap's worth of detailed envelopes and counts
+    /// the suppressed remainder — never a silent truncation.
+    #[test]
+    fn batch_create_bounds_the_failure_report() {
+        let tmp = TempDir::new().unwrap();
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let mut engine = Engine::from_mounts(vec![(
+            folder_mount("specs", mem_dir),
+            Box::new(writer) as Box<dyn MemBackend>,
+        )])
+        .unwrap();
+        let (actor, client) = cli_actor();
+        let n = Engine::BATCH_ERROR_REPORT_CAP + 10;
+        let batch: Vec<_> = (0..n)
+            .map(|i| (empty_create_args("specs", &format!("Bad/Title {i}")), None))
+            .collect();
+        let result = engine.batch_create(batch, actor, Some(&client)).unwrap();
+        assert!(!result.applied);
+        assert_eq!(result.failed, n);
+        let detailed = result
+            .results
+            .iter()
+            .filter(|r| r.action == "error" && r.error.is_some())
+            .count();
+        let bare = result
+            .results
+            .iter()
+            .filter(|r| r.action == "error" && r.error.is_none())
+            .count();
+        assert_eq!(detailed, Engine::BATCH_ERROR_REPORT_CAP);
+        assert_eq!(bare, 10);
+        assert_eq!(
+            result.errors_suppressed, 10,
+            "suppression is counted, never silent"
+        );
     }
 
     #[test]

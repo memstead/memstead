@@ -8,6 +8,18 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Added
+- **Engine `batch_create` (in progress: CLI + batch-relate follow).**
+  `create_entity` is split into the prepare/commit halves
+  `batch_update` established, and a new `Engine::batch_create` creates
+  N entities in one call with one commit per touched mem. Intra-batch
+  references resolve as REAL typed targets (every entity is staged as
+  a skeleton before per-entry validation, so sibling edges get full
+  shape validation, duplicates within the batch are refused, and no
+  transient stub or stub warning is created for a batch-supplied
+  target — cycles included where the schema permits). Refusal is
+  all-or-nothing and REPORT-ALL: every failing entry is named with
+  its index and typed code, bounded at 50 detailed envelopes with an
+  `errors_suppressed` count beyond that (never silent truncation).
 - **Metadata values are findable.** The per-mem search index gains one
   tokenized `metadata` field per entity carrying that entity's
   metadata KEYS and VALUES — built from the entity, not the schema, so

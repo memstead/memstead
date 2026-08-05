@@ -923,6 +923,7 @@ impl Engine {
     ) -> Result<crate::ops::BatchResult, EngineError> {
         if updates.is_empty() {
             return Ok(crate::ops::BatchResult {
+                errors_suppressed: 0,
                 applied: true,
                 results: Vec::new(),
                 succeeded: 0,
@@ -1006,6 +1007,7 @@ impl Engine {
                         });
                     }
                     return Ok(crate::ops::BatchResult {
+                        errors_suppressed: 0,
                         applied: false,
                         results,
                         succeeded: 0,
@@ -1128,6 +1130,7 @@ impl Engine {
             .collect();
 
         Ok(crate::ops::BatchResult {
+            errors_suppressed: 0,
             applied: true,
             results,
             succeeded,
@@ -1140,7 +1143,7 @@ impl Engine {
     /// pending buffer — the disk-side half of an atomic-batch rollback.
     /// Discard errors (a poisoned pending mutex) are swallowed: we are
     /// already unwinding a refused batch and have nothing better to do.
-    fn discard_all_pending(&self) {
+    pub(super) fn discard_all_pending(&self) {
         for mount in &self.mounts {
             let _ = mount.backend.discard_pending();
         }
@@ -1163,7 +1166,7 @@ impl Engine {
 /// Variants without a typed recovery payload (boundary / internal failures
 /// like `ParseAfterWrite`, `Backend`) return an empty details object —
 /// the code and message channels still discriminate.
-fn batch_error_envelope(err: &EngineError) -> crate::ops::BatchError {
+pub(super) fn batch_error_envelope(err: &EngineError) -> crate::ops::BatchError {
     // The per-item envelope reads the centralised
     // `EngineError::details()` helper so every typed variant ships the
     // same recovery payload the singleton MCP/CLI surfaces emit, so

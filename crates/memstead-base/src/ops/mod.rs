@@ -2242,6 +2242,10 @@ pub struct RelateResult {
     pub orphan_stubs_removed: Vec<EntityId>,
 }
 
+fn is_zero(n: &usize) -> bool {
+    *n == 0
+}
+
 /// Result of an **atomic** batch update — all-or-nothing.
 ///
 /// A batch either applies in full as a single commit (`applied: true`)
@@ -2263,6 +2267,13 @@ pub struct BatchResult {
     pub results: Vec<BatchEntry>,
     /// Count of applied items when `applied`; `0` when refused.
     pub succeeded: usize,
+    /// Number of FAILING entries whose error envelopes were suppressed
+    /// beyond the reporting cap (bounded reporting for very large
+    /// failing batches — the entries still carry `action: "error"`,
+    /// only the detailed envelope is omitted). `0` when every failure
+    /// is fully reported.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub errors_suppressed: usize,
     /// Count of failed items when refused (≥1); `0` when applied.
     pub failed: usize,
     /// The single batch commit SHA when the batch applied and produced
