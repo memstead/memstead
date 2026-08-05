@@ -675,6 +675,18 @@ pub enum EngineError {
         pin: String,
         sources: Vec<SchemaSourceDiagnostic>,
     },
+    /// A schema package handed to `install_schema` failed validation —
+    /// the loader's semantic checks or the section-heading round-trip
+    /// gate. The engine refuses to seal an invalid schema onto
+    /// `__MEMSTEAD`: install time is the last moment the author can
+    /// act, because a schema already sealed keeps loading even when a
+    /// later rule would refuse it.
+    #[error("schema package '{name}@{version}' failed validation: {message}")]
+    SchemaPackageInvalid {
+        name: String,
+        version: String,
+        message: String,
+    },
     /// `memstead_schema::builtins::load_builtin_schemas` itself failed.
     /// Surfaces during `Engine::from_mounts`; should never trip in
     /// practice (the built-in catalogue is statically embedded), but
@@ -1054,6 +1066,7 @@ impl EngineError {
             EngineError::Parse(_) => "PARSE_ERROR",
             EngineError::Backend(_) => "MEM_ERROR",
             EngineError::SchemaNotFound { .. } => "SCHEMA_NOT_FOUND",
+            EngineError::SchemaPackageInvalid { .. } => "SCHEMA_VALIDATION_FAILED",
             EngineError::SchemaResolverInit(_) => "SCHEMA_RESOLVER_INIT_FAILED",
             EngineError::Mem(_) => "MEM_ERROR",
             EngineError::MemNameCollision { .. } => "MEM_NAME_COLLISION",
@@ -1384,6 +1397,14 @@ impl EngineError {
                 "mem": mem,
                 "pin": pin,
                 "sources": sources,
+            }),
+            EngineError::SchemaPackageInvalid {
+                name,
+                version,
+                message,
+            } => serde_json::json!({
+                "schema": format!("{name}@{version}"),
+                "error": message,
             }),
             EngineError::InvalidAnchor(e) => {
                 serde_json::Value::Object(e.detail().into_iter().collect::<serde_json::Map<_, _>>())

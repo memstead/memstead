@@ -188,6 +188,87 @@ pub enum SchemaLoadError {
         target: String,
         declared: Vec<String>,
     },
+
+    /// One or more declared section headings do not derive back to their
+    /// declared keys (`derive_section_key(heading) != key`), so content
+    /// written under the heading could never be parsed back into the
+    /// section — it would silently fork into a second heading or fall
+    /// through to the catch-all. Raised by
+    /// [`check_section_heading_roundtrip`] on the authoring/installation
+    /// path only; a schema already sealed into a mem-repo keeps loading
+    /// and surfaces the condition through health instead.
+    #[error(
+        "schema declares section heading(s) that cannot round-trip to their key(s): {}. \
+         Fix: make each heading derive to its key — lowercasing the heading and replacing \
+         spaces with underscores must yield the key exactly (key `current_state` ⇒ heading \
+         `Current State`)",
+        format_heading_violations(violations)
+    )]
+    SectionHeadingMismatch {
+        violations: Vec<HeadingKeyViolation>,
+    },
+}
+
+/// One `(type, key, heading, derived_key)` tuple in a
+/// [`SchemaLoadError::SectionHeadingMismatch`] refusal.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeadingKeyViolation {
+    pub type_name: String,
+    pub key: String,
+    pub heading: String,
+    pub derived_key: String,
+}
+
+fn format_heading_violations(violations: &[HeadingKeyViolation]) -> String {
+    violations
+        .iter()
+        .map(|v| {
+            format!(
+                "type '{}' section key '{}' has heading '{}' (derives to '{}')",
+                v.type_name, v.key, v.heading, v.derived_key
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+/// Refuse a schema in which any declared section's heading does not
+/// derive back to that section's declared key. Collects **every**
+/// offending `(type, key, heading, derived_key)` tuple — a schema with
+/// one good and one bad section is refused whole, and the author sees
+/// the complete list in one round.
+///
+/// Installation-path gate only: callers are the schema-authoring
+/// surfaces (CLI `schema validate` / `schema install`, the engine's
+/// `install_schema` primitive). Boot and sealed-schema loads must NOT
+/// call this — a schema already sealed on `__MEMSTEAD` that violates
+/// the rule keeps loading, and the violation surfaces as a health
+/// finding, never as a boot failure.
+pub fn check_section_heading_roundtrip(schema: &Schema) -> Result<(), SchemaLoadError> {
+    let mut violations = Vec::new();
+    // Deterministic report order: sort type names (Schema.types is a
+    // HashMap); sections keep declaration order within a type.
+    let mut type_names: Vec<&String> = schema.types.keys().collect();
+    type_names.sort();
+    for type_name in type_names {
+        let t = &schema.types[type_name];
+        for s in &t.sections {
+            let derived_key = crate::types::derive_section_key(&s.heading);
+            if derived_key != s.key {
+                violations.push(HeadingKeyViolation {
+                    type_name: type_name.clone(),
+                    key: s.key.clone(),
+                    heading: s.heading.clone(),
+                    derived_key,
+                });
+            }
+        }
+    }
+    if violations.is_empty() {
+        Ok(())
+    } else {
+        Err(SchemaLoadError::SectionHeadingMismatch { violations })
+    }
 }
 
 /// Engine-invariant section keys reserved against schema use. The

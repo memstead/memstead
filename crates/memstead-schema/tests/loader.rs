@@ -1428,3 +1428,136 @@ fn alias_target_rel_type_non_pointer_rel_types_unaffected_by_coupling() {
         "non-pointer rel-types must retain their declared posture",
     );
 }
+
+// ---------------------------------------------------------------------------
+// Section-heading round-trip (derive_section_key + install-time check)
+// ---------------------------------------------------------------------------
+
+/// A type whose section headings all derive back to their keys, across
+/// the shapes a schema author would write: single-word, multi-word
+/// matching the key, and non-ASCII whose lowercase equals the key.
+fn roundtrip_clean_type() -> String {
+    r#"name: sample
+description: Sample type for round-trip tests
+when_to_use: Round-trip tests
+sections:
+  - key: body
+    heading: Body
+    required: true
+    search_weight: 10.0
+    catch_all: true
+    write_rules: []
+  - key: current_state
+    heading: Current State
+    required: false
+    search_weight: 5.0
+    write_rules: []
+  - key: begründung
+    heading: Begründung
+    required: false
+    search_weight: 5.0
+    write_rules: []
+metadata_fields: []
+title_weight: 100.0
+text_fields:
+  - body
+hierarchy_relationship: PART_OF
+propagating_relationships: []
+updatable_fields:
+  - title
+  - body
+health_required_fields:
+  - body
+staleness_threshold_days: 90
+write_rules: []
+"#
+    .to_string()
+}
+
+#[test]
+fn derive_section_key_shapes() {
+    use memstead_schema::derive_section_key;
+    assert_eq!(derive_section_key("Body"), "body");
+    assert_eq!(derive_section_key("Current State"), "current_state");
+    assert_eq!(derive_section_key("Begründung"), "begründung");
+    assert_eq!(derive_section_key("Answers argued"), "answers_argued");
+    assert_eq!(derive_section_key("Out of Scope"), "out_of_scope");
+    assert_eq!(derive_section_key("A  B"), "a__b");
+}
+
+#[test]
+fn heading_roundtrip_check_accepts_conforming_schema() {
+    let schema = load(&minimal_manifest(), &[("sample", &roundtrip_clean_type())])
+        .expect("clean schema loads");
+    memstead_schema::check_section_heading_roundtrip(&schema)
+        .expect("all headings derive to their keys");
+}
+
+#[test]
+fn heading_roundtrip_check_refuses_and_names_every_tuple() {
+    // Two violations in one type — plus one good section, which must
+    // not rescue the schema (refused whole, not partially accepted).
+    let bad = roundtrip_clean_type()
+        .replace("    heading: Current State\n", "    heading: In Scope\n")
+        .replace("    heading: Begründung\n", "    heading: Answers argued\n");
+    let schema = load(&minimal_manifest(), &[("sample", &bad)])
+        .expect("violating schema still LOADS — the check is a separate gate");
+    let err = memstead_schema::check_section_heading_roundtrip(&schema)
+        .expect_err("non-deriving headings must be refused");
+    match &err {
+        SchemaLoadError::SectionHeadingMismatch { violations } => {
+            assert_eq!(violations.len(), 2, "every offending pair is listed");
+            let mut pairs: Vec<(&str, &str, &str)> = violations
+                .iter()
+                .map(|v| (v.key.as_str(), v.heading.as_str(), v.derived_key.as_str()))
+                .collect();
+            pairs.sort();
+            assert_eq!(
+                pairs,
+                vec![
+                    ("begründung", "Answers argued", "answers_argued"),
+                    ("current_state", "In Scope", "in_scope"),
+                ]
+            );
+            assert!(
+                violations.iter().all(|v| v.type_name == "sample"),
+                "tuples name the offending type"
+            );
+        }
+        other => panic!("expected SectionHeadingMismatch, got {other:?}"),
+    }
+    // The message names both offending pairs and states the fix.
+    let msg = err.to_string();
+    assert!(msg.contains("'current_state'") && msg.contains("'In Scope'"));
+    assert!(msg.contains("'begründung'") && msg.contains("'Answers argued'"));
+    assert!(msg.contains("Fix:"), "message states the fix: {msg}");
+}
+
+#[test]
+fn heading_roundtrip_violating_schema_still_loads() {
+    // Sealed-schema guarantee: the loader itself accepts a violating
+    // schema — only the explicit installation-path check refuses.
+    // load_schema_from_memory is the same function every boot path
+    // uses, so this locks "no boot path refuses on this condition"
+    // at the loader level.
+    let bad =
+        roundtrip_clean_type().replace("    heading: Current State\n", "    heading: In Scope\n");
+    load(&minimal_manifest(), &[("sample", &bad)])
+        .expect("violating schema must keep loading (sealed schemas must not brick)");
+}
+
+#[test]
+fn every_builtin_schema_passes_heading_roundtrip() {
+    // The refusal cannot land while a shipped built-in would be
+    // refused — the planning goal type's scope sections were fixed in
+    // the same change (scope_in/In Scope → in_scope/In Scope,
+    // scope_out/Out of Scope → out_of_scope/Out of Scope).
+    for schema in memstead_schema::builtins::load_builtin_schemas().expect("builtins load") {
+        memstead_schema::check_section_heading_roundtrip(&schema).unwrap_or_else(|e| {
+            panic!(
+                "built-in schema '{}' violates heading round-trip: {e}",
+                schema.manifest.name
+            )
+        });
+    }
+}

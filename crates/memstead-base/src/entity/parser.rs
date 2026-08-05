@@ -481,11 +481,13 @@ pub(super) fn split_sections(
         };
         let content = body[content_start..content_end].trim().to_string();
         // Schema section keys are underscore-separated (e.g. `current_state`).
-        // A heading like `## Current State` must slugify to the same form so
+        // A heading like `## Current State` must derive to the same form so
         // schema-declared sections land in `result_sections` under the right
         // key instead of falling through to catch-all — which would break
-        // canonical byte-stability for any multi-word section.
-        let key = name.to_lowercase().replace(' ', "_");
+        // canonical byte-stability for any multi-word section. The derivation
+        // is shared with the schema loader's round-trip check — never inline
+        // a second copy here.
+        let key = memstead_schema::derive_section_key(name);
 
         match sections.entry(key.clone()) {
             std::collections::hash_map::Entry::Vacant(slot) => {

@@ -1321,6 +1321,22 @@ fn engine_err_unified(
                 serde_json::json!({ "mem": mem, "pin": pin, "sources": sources }),
             ),
         ),
+        E::SchemaPackageInvalid {
+            name,
+            version,
+            message: detail,
+        } => tool_error_with_payload(
+            "SCHEMA_VALIDATION_FAILED",
+            &message,
+            envelope(
+                "SCHEMA_VALIDATION_FAILED",
+                message.clone(),
+                serde_json::json!({
+                    "schema": format!("{name}@{version}"),
+                    "error": detail,
+                }),
+            ),
+        ),
         E::SchemaResolverInit(detail) => tool_error_with_payload(
             "SCHEMA_RESOLVER_INIT_FAILED",
             &message,

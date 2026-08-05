@@ -649,6 +649,17 @@ impl CliError {
                 ExitKind::Validation,
                 Some(serde_json::json!({ "mem": mem, "pin": pin, "sources": sources })),
             ),
+            SchemaPackageInvalid {
+                name,
+                version,
+                message,
+            } => (
+                ExitKind::Validation,
+                Some(serde_json::json!({
+                    "schema": format!("{name}@{version}"),
+                    "error": message,
+                })),
+            ),
             InvalidInput(msg) => (
                 ExitKind::Validation,
                 Some(serde_json::json!({ "message": msg })),

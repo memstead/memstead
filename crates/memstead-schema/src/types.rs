@@ -156,6 +156,23 @@ pub struct TypeExample {
     pub sections: IndexMap<String, String>,
 }
 
+/// Derive the storage key a `## Heading` line resolves to.
+///
+/// The single owner of the heading→key mapping: the entity parser uses it
+/// to place parsed section content, and the schema loader's round-trip
+/// check uses it to refuse schemas whose declared headings could never
+/// find their way back to their declared keys. A second copy of this
+/// logic is how silent section forks return — both sides must call this
+/// function.
+///
+/// The mapping is deliberately narrow: lowercase the heading, replace
+/// spaces with underscores. Anything looser (slugging punctuation,
+/// folding diacritics) would let two distinct declared sections collide
+/// on one key, trading a visible refusal for an invisible content merge.
+pub fn derive_section_key(heading: &str) -> String {
+    heading.to_lowercase().replace(' ', "_")
+}
+
 /// A section within an entity (e.g. "Claim", "Evidence").
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]

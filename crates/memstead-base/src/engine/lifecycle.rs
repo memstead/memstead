@@ -80,6 +80,12 @@ impl Engine {
         version: &str,
         files: &[(String, Vec<u8>)],
     ) -> Result<String, EngineError> {
+        // Validation gate: the engine refuses to seal a package that the
+        // loader would reject or whose section headings cannot round-trip
+        // to their keys. Install time is the last moment the author can
+        // act — sealed schemas keep loading even when a later rule would
+        // refuse them, so nothing invalid may pass this point.
+        Self::validate_schema_package(name, version, files)?;
         // Resolve the shared mem-repo gitdir: prefer a live git-branch
         // mount's gitdir (authoritative — that is where the engine reads
         // schemas from), falling back to the workspace's `mem-repo/.git`
@@ -107,6 +113,55 @@ impl Engine {
             EngineError::Mem("git-branch ops are not wired on this engine".to_string())
         })?;
         (ops.write_schema)(&gitdir, name, version, files).map_err(EngineError::Backend)
+    }
+
+    /// Validate a schema package's files before they are sealed. Runs
+    /// the full loader (structural + semantic) plus the section-heading
+    /// round-trip gate, and checks the manifest's declared identity
+    /// matches the `(name, version)` the package is being installed
+    /// under — a mismatch would seal the schema under a ref its own
+    /// manifest contradicts.
+    fn validate_schema_package(
+        name: &str,
+        version: &str,
+        files: &[(String, Vec<u8>)],
+    ) -> Result<(), EngineError> {
+        let invalid = |message: String| EngineError::SchemaPackageInvalid {
+            name: name.to_string(),
+            version: version.to_string(),
+            message,
+        };
+        let manifest_yaml = files
+            .iter()
+            .find(|(rel, _)| rel == "schema.yaml")
+            .map(|(_, bytes)| String::from_utf8_lossy(bytes).into_owned())
+            .ok_or_else(|| invalid("package has no schema.yaml".to_string()))?;
+        let types: Vec<(String, String)> = files
+            .iter()
+            .filter_map(|(rel, bytes)| {
+                rel.strip_prefix("types/")
+                    .and_then(|f| f.strip_suffix(".yaml"))
+                    .map(|stem| {
+                        (
+                            stem.to_string(),
+                            String::from_utf8_lossy(bytes).into_owned(),
+                        )
+                    })
+            })
+            .collect();
+        let schema = memstead_schema::load_schema_from_memory(&manifest_yaml, &types)
+            .map_err(|e| invalid(e.to_string()))?;
+        memstead_schema::check_section_heading_roundtrip(&schema)
+            .map_err(|e| invalid(e.to_string()))?;
+        let (declared_name, declared_version) =
+            (schema.manifest.name.as_str(), schema.version.to_string());
+        if declared_name != name || declared_version != version {
+            return Err(invalid(format!(
+                "manifest declares '{declared_name}@{declared_version}' but the package is \
+                 being installed as '{name}@{version}'"
+            )));
+        }
+        Ok(())
     }
     /// Unregister a writable mem at runtime. Engine-level
     /// primitive that `memstead_mem_delete` builds on.
@@ -1563,6 +1618,105 @@ mod tests {
     use crate::mem::MemOrigin;
     use crate::ops::WarningHint;
     use crate::storage::{ArchiveBackend, FilesystemMemWriter};
+
+    fn schema_package_files(heading: &str, manifest_name: &str) -> Vec<(String, Vec<u8>)> {
+        let manifest = format!(
+            r#"name: {manifest_name}
+version: 1.0.0
+description: Install-gate test schema
+when_to_use: Tests
+types:
+  - sample
+relationships:
+  mode: strict
+  definitions:
+    - name: PART_OF
+      description: hier
+      default_weight: 3.0
+    - name: _default
+      description: fallback
+      default_weight: 1.0
+community:
+  resolution: 1.0
+  seed: 42
+"#
+        );
+        let type_yaml = format!(
+            r#"name: sample
+description: t
+when_to_use: tests
+sections:
+  - key: body
+    heading: {heading}
+    required: true
+    search_weight: 10.0
+    catch_all: true
+    write_rules: []
+metadata_fields: []
+title_weight: 100.0
+text_fields:
+  - body
+hierarchy_relationship: PART_OF
+propagating_relationships: []
+updatable_fields:
+  - title
+  - body
+health_required_fields:
+  - body
+staleness_threshold_days: 90
+write_rules: []
+"#
+        );
+        vec![
+            ("schema.yaml".to_string(), manifest.into_bytes()),
+            ("types/sample.yaml".to_string(), type_yaml.into_bytes()),
+        ]
+    }
+
+    /// The install gate accepts a conforming package and refuses one
+    /// whose section heading cannot round-trip to its key — the last
+    /// moment the author can act, since sealed schemas keep loading.
+    #[test]
+    fn install_gate_refuses_non_roundtrip_heading() {
+        let ok =
+            Engine::validate_schema_package("gate", "1.0.0", &schema_package_files("Body", "gate"));
+        assert!(ok.is_ok(), "conforming package passes: {ok:?}");
+
+        let err = Engine::validate_schema_package(
+            "gate",
+            "1.0.0",
+            &schema_package_files("Body Text", "gate"),
+        )
+        .expect_err("non-deriving heading must refuse install");
+        match &err {
+            EngineError::SchemaPackageInvalid { name, message, .. } => {
+                assert_eq!(name, "gate");
+                assert!(
+                    message.contains("'body'") && message.contains("'Body Text'"),
+                    "message names the offending tuple: {message}"
+                );
+            }
+            other => panic!("expected SchemaPackageInvalid, got {other:?}"),
+        }
+    }
+
+    /// A manifest whose declared identity contradicts the install ref
+    /// is refused — the schema would otherwise seal under a ref its
+    /// own manifest disagrees with.
+    #[test]
+    fn install_gate_refuses_manifest_identity_mismatch() {
+        let err = Engine::validate_schema_package(
+            "gate",
+            "1.0.0",
+            &schema_package_files("Body", "other"),
+        )
+        .expect_err("identity mismatch must refuse install");
+        assert!(
+            matches!(&err, EngineError::SchemaPackageInvalid { message, .. }
+                if message.contains("other@1.0.0")),
+            "got {err:?}"
+        );
+    }
 
     #[test]
     fn reload_each_writable_mem_repopulates_load_warnings() {

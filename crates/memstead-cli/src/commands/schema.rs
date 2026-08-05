@@ -519,7 +519,9 @@ write_rules:
 }
 
 fn validate(ctx: &CliContext, args: ValidateArgs) -> anyhow::Result<()> {
-    match memstead_schema::loader::load_schema_from_dir(&args.path) {
+    match memstead_schema::loader::load_schema_from_dir(&args.path)
+        .and_then(|s| memstead_schema::check_section_heading_roundtrip(&s).map(|()| s))
+    {
         Ok(schema) => {
             let (name, version) = schema.id();
             let type_count = schema.types.len();
@@ -666,14 +668,19 @@ fn resolve_source(
     let as_path = Path::new(source);
     if as_path.is_dir() {
         // Path source — validate with the engine loader before copying.
-        let schema = memstead_schema::load_schema_from_dir(as_path).map_err(|e| {
-            CliError::new(
-                ExitKind::Validation,
-                "SCHEMA_VALIDATION_FAILED",
-                format!("package at {source} is invalid: {e}"),
-            )
-            .with_details(json!({ "path": source, "error": e.to_string() }))
-        })?;
+        // Includes the heading round-trip gate: install is an authoring
+        // path, so a schema whose headings cannot derive back to their
+        // keys is refused here, never sealed.
+        let schema = memstead_schema::load_schema_from_dir(as_path)
+            .and_then(|s| memstead_schema::check_section_heading_roundtrip(&s).map(|()| s))
+            .map_err(|e| {
+                CliError::new(
+                    ExitKind::Validation,
+                    "SCHEMA_VALIDATION_FAILED",
+                    format!("package at {source} is invalid: {e}"),
+                )
+                .with_details(json!({ "path": source, "error": e.to_string() }))
+            })?;
         let (name, version) = schema.id();
         let files = collect_dir_package(as_path)?;
         Ok((SchemaRef::new(name, version), files))

@@ -32,7 +32,10 @@ pub use config::{
     VcsConfig, check_config, load_and_validate, load_config, parse_mem_config,
     published_config_from,
 };
-pub use loader::{SchemaLoadError, load_schema_from_dir, load_schema_from_memory};
+pub use loader::{
+    HeadingKeyViolation, SchemaLoadError, check_section_heading_roundtrip, load_schema_from_dir,
+    load_schema_from_memory,
+};
 pub use manifest::{
     Cardinality, CommunityConfig, CrossMemRelationshipEntry, DefaultWritingGuidance,
     ManualAuthoring, PerEdgeDescription, RelationshipDef, RelationshipMode, RelationshipVocabulary,
@@ -42,7 +45,7 @@ pub use schema::Schema;
 pub use source::{SchemaSourceError, SchemaSourceFile, collect_schema_source};
 pub use types::{
     FieldType, Filterable, MetadataFieldDef, RequiredCardinality, RequiredOutgoing, SectionDef,
-    Serialization, TypeDefinition, TypeExample,
+    Serialization, TypeDefinition, TypeExample, derive_section_key,
 };
 
 /// Name constants for the 10 built-in knowledge types shipped in the

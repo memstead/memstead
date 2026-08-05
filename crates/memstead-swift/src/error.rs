@@ -90,6 +90,9 @@ impl From<EngineError> for MemsteadError {
             EngineError::DuplicateMem(name) => Self::ValidationFailed {
                 message: format!("duplicate mem: {name}"),
             },
+            e @ EngineError::SchemaPackageInvalid { .. } => Self::ValidationFailed {
+                message: e.to_string(),
+            },
 
             // --- Optimistic locking / structural ---------------------------
             EngineError::HashMismatch { current, .. } => Self::HashMismatch {

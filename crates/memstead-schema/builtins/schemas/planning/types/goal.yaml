@@ -40,13 +40,13 @@ sections:
     search_weight: 15.0
     write_rules:
       - "How we know we're done. Concrete, checkable conditions. If success cannot be checked, the goal is too vague."
-  - key: scope_in
+  - key: in_scope
     heading: In Scope
     required: false
     search_weight: 5.0
     write_rules:
       - "Bullet list of what this planning phase covers."
-  - key: scope_out
+  - key: out_of_scope
     heading: Out of Scope
     required: false
     search_weight: 5.0
@@ -71,10 +71,10 @@ metadata_fields:
     enum_values: [active, paused, achieved, abandoned]
     filterable: equality
 title_weight: 100.0
-text_fields: [statement, rationale, success_criteria, scope_in, scope_out, notes]
+text_fields: [statement, rationale, success_criteria, in_scope, out_of_scope, notes]
 hierarchy_relationship: PART_OF
 propagating_relationships: [MOTIVATED_BY]
-updatable_fields: [title, statement, rationale, success_criteria, scope_in, scope_out, notes, priority, status, tags]
+updatable_fields: [title, statement, rationale, success_criteria, in_scope, out_of_scope, notes, priority, status, tags]
 health_required_fields: [statement, rationale, success_criteria]
 staleness_threshold_days: 60
 write_rules:

@@ -473,6 +473,82 @@ mod tests {
         assert!(md.ends_with('\n'));
     }
 
+    /// The planning `goal` type's scope sections round-trip after the
+    /// scope_in→in_scope / scope_out→out_of_scope key fix: content
+    /// written under `## In Scope` / `## Out of Scope` parses back
+    /// under the declared keys instead of falling through to the
+    /// catch-all (which pre-fix silently absorbed and re-headed it).
+    #[test]
+    fn planning_goal_scope_sections_roundtrip() {
+        let reg = memstead_schema::SchemaRegistry::builtin();
+        let planning = reg
+            .resolve_by_name("planning")
+            .expect("unambiguous")
+            .expect("planning is a built-in");
+        let goal = planning.get_type("goal").expect("goal type exists");
+
+        let mut metadata = IndexMap::new();
+        metadata.insert(
+            "type".to_string(),
+            MetadataValue::String("goal".to_string()),
+        );
+        let mut sections = IndexMap::new();
+        for s in &goal.sections {
+            sections.insert(s.key.clone(), String::new());
+        }
+        sections.insert("statement".to_string(), "Ship the gate.".to_string());
+        sections.insert("in_scope".to_string(), "- the engine".to_string());
+        sections.insert("out_of_scope".to_string(), "- the moon".to_string());
+
+        let entity = Entity {
+            id: EntityId::new("plan", "ship-the-gate"),
+            title: "Ship The Gate".to_string(),
+            entity_type: "goal".to_string(),
+            mem: "plan".to_string(),
+            file_path: "ship-the-gate.md".to_string(),
+            metadata,
+            sections,
+            relationships: Vec::new(),
+            content_hash: String::new(),
+            stub: false,
+            stub_kind: None,
+            heading_spans: std::collections::HashMap::new(),
+        };
+
+        let md = generate_markdown(&entity, &goal);
+        assert!(
+            md.contains("## In Scope"),
+            "declared heading emitted:\n{md}"
+        );
+        assert!(
+            md.contains("## Out of Scope"),
+            "declared heading emitted:\n{md}"
+        );
+
+        let parsed = crate::entity::parser::parse_markdown(&md, "ship-the-gate.md", &goal, "plan")
+            .expect("round-trip parse");
+        assert_eq!(
+            parsed.entity.sections.get("in_scope").map(|s| s.trim()),
+            Some("- the engine"),
+            "In Scope content lands under its declared key"
+        );
+        assert_eq!(
+            parsed.entity.sections.get("out_of_scope").map(|s| s.trim()),
+            Some("- the moon"),
+            "Out of Scope content lands under its declared key"
+        );
+        let notes = parsed
+            .entity
+            .sections
+            .get("notes")
+            .map(|s| s.as_str())
+            .unwrap_or("");
+        assert!(
+            !notes.contains("the engine") && !notes.contains("the moon"),
+            "scope content must not be absorbed into the catch-all: {notes:?}"
+        );
+    }
+
     #[test]
     fn roundtrip_parse_generate_parse() {
         let schema = type_by_name(builtin_names::SPEC).unwrap();

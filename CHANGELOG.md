@@ -7,6 +7,32 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+- **Schemas whose section headings cannot round-trip to their keys are
+  refused at install.** The heading→key derivation (lowercase, spaces to
+  underscores) now lives in one function (`derive_section_key`) shared by
+  the entity parser and the schema loader, and a new installation-path
+  check (`check_section_heading_roundtrip`) refuses any schema declaring
+  a section whose heading does not derive back to its key — the defect
+  class where a create writes one heading, a later update writes another,
+  and the same file silently carries both while health reports the
+  section *missing*. The refusal is typed
+  (`SchemaLoadError::SectionHeadingMismatch`, surfacing as
+  `SCHEMA_VALIDATION_FAILED` on the wire), names **every** offending
+  `(type, key, heading, derived_key)` tuple, and states the fix. It fires on the authoring/installation surfaces only —
+  CLI `schema validate`, CLI `schema install`, and the engine's
+  `install_schema` primitive (which now validates packages before
+  sealing, including a manifest-identity-vs-install-ref check) — never
+  on boot, so a schema already sealed into a mem-repo keeps loading.
+
+### Fixed
+- **The `planning` built-in's `goal` type round-trips its scope
+  sections.** `scope_in`/`In Scope` and `scope_out`/`Out of Scope`
+  violated the round-trip rule — content written under those headings
+  fell through to the catch-all on re-parse. The keys are now
+  `in_scope`/`out_of_scope` (headings unchanged), in the built-in and
+  its seed-fixture mirror.
+
 ### Changed
 - **The lean MCP surface's tool descriptions go through the same lint suite
   as the full server's.** The `tool_surface` description lints (lead-verb
