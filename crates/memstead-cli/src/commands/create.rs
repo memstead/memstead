@@ -142,6 +142,7 @@ struct CreatePayload {
     /// has no stored state to compare a hash against; the value is
     /// ignored (documented, not silent — this doc is the statement).
     #[serde(default)]
+    #[allow(dead_code)]
     expected_hash: Option<String>,
 }
 

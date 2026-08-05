@@ -155,6 +155,7 @@ Exit codes:
 
 * `--json` — Emit JSON instead of markdown. Matches MCP `structured_content` shape
 * `--quiet` — Suppress engine startup logs on stderr
+* `--workspace <PATH>` — Operate on the workspace at PATH instead of walking up from the current directory (like `git -C`: the process runs as if invoked from PATH, so relative path arguments resolve against it). Also settable via the `MEMSTEAD_WORKSPACE` environment variable; the flag wins when both are present. A PATH without the `.memstead/workspace.toml` marker refuses with `WORKSPACE_NOT_INITIALISED` naming the path — it never falls back to the directory walk
 
 
 
@@ -244,6 +245,7 @@ Filter surface:
 * `--level <LEVEL>`
 * `--status <STATUS>`
 * `--filter <KEY=VALUE>` — Equality filter on any schema-declared filterable field: repeatable `--filter KEY=VALUE`. The four named-flag shortcuts (`--type` / `--level` / `--status` / `--edge-type`) handle their common cases; every other `filterable: equality` field (e.g. `tags`, `scope`) is reachable via this generic flag. Unknown keys are dropped and surface as engine warnings. There is no `--confidence` shortcut: a field reached only when a schema declares it goes through `--filter <field>=<value>` rather than a dedicated flag
+* `--range-filter <KEY=VALUE>` — Range filter on any `filterable: range` field: repeatable `--range-filter KEY=VALUE` with the same key grammar as the MCP `range_filters` map — `min_<field>` / `max_<field>` for numbers, `<field>_after` / `<field>_before` for dates. The strings go to the same engine path the MCP tool uses, so the same four outcome codes apply with the same meaning: `RANGE_FILTER_KEY_MALFORMED` (key ignored), `UNKNOWN_RANGE_FILTER_FIELD` (no type declares the field — results stay unfiltered), `RANGE_FILTER_TYPE_SCOPED` (other types declare it — applied with strict type-narrowing), `FIELD_NOT_RANGE_FILTERABLE` (declared, but not `filterable: range`). Composable with `--filter` and the named shortcuts
 * `--stub` — Return only stub entities (conflicts with --no-stub)
 * `--no-stub` — Return only real (non-stub) entities (conflicts with --stub)
 
@@ -453,7 +455,6 @@ Link a filesystem mem to a registry-published dependency. `memstead link <scope/
 ###### **Options:**
 
 * `--registry <URL>` — Override the registry URL. Falls back to `MEMSTEAD_REGISTRY` then the default `https://memstead.io`
-* `--workspace <PATH>` — Override the workspace root. When omitted, the command walks up from the current working directory to find it
 
 
 
@@ -469,7 +470,6 @@ Publish a `.mem` archive to the registry. Triggers GitHub Device Flow on first u
 
 ###### **Options:**
 
-* `--workspace <PATH>` — Override the workspace root for the no-arg / `--mem` shapes. Ignored when an archive PATH is provided. Defaults to walking up from cwd
 * `--mem <NAME>` — Export-and-publish a named mem from the current workspace in one step — the path for mem-repo (multi-mem, git-branch) workspaces, which have no folder to wrap up. Ignored when an archive PATH is provided. A single-mem folder workspace can omit this and just run `memstead publish`
 * `--scope <NAME>` — Override the auto-derived scope — admin-only, reserved scopes only (currently just `memstead`). Without this flag the registry stores the mem under your GitHub username
 * `--token <TOKEN>` — Explicit token override. Takes precedence over `MEMSTEAD_TOKEN` and stored credentials
@@ -628,6 +628,9 @@ Section / append / patch flag values:
   sees the value, so a JSON-quoted `"line1\nline2"` round-trips as
   two lines on disk.
 
+Title grammar:
+  Titles accept Unicode alphanumerics, whitespace (not tab/newline or other control characters), and hyphen; every other character is rejected.
+
 Slug derivation:
   The entity slug derives from the title in five steps:
     1. NFC-normalize (combining sequences fold to precomposed form);
@@ -659,7 +662,7 @@ Slug derivation:
 * `--metadata <KEY=VALUE>` — Metadata override: repeatable `--metadata key=value`
 * `--relation <TYPE:TARGET>` — Initial relationship: repeatable `--relation TYPE:target-id`. Mem-repo workspaces only — on filesystem mems this refuses; use `memstead relate` after creation there
 * `--anchor <JSON>` — Provenance anchor: repeatable `--anchor '<json>'`, each a JSON object of the anchor shape (`{ "artifact": "...", "grain": "file", "class": "anchored", "hash": "...", "hash_stability": "stable" }`). Written into the mem-branch anchors sidecar in the same commit as the entity. A malformed anchor refuses `INVALID_ANCHOR`. Ignored when `--from` is given (the file's `anchors[]` is authoritative)
-* `--from <FILE>` — JSON file matching the MCP `memstead_create` args shape. If set, all `--title` / `--type` / `--section` / `--metadata` / `--relation` / `--anchor` flags are ignored (the file is the single source of truth). The JSON type field is `entity_type` (not `type`), matching the response envelopes — a previous `--json` response pipes back in unchanged
+* `--from <FILE>` — JSON file matching the MCP `memstead_create` args shape. If set, all `--title` / `--type` / `--section` / `--metadata` / `--relation` / `--anchor` flags are ignored (the file is the single source of truth). `--note` still applies (winning over the file's `note`), and `--dry-run` ORs with the file's `dry_run` — same semantics as `update --from`, so one template feeds both commands. The JSON type field is `entity_type` (not `type`), matching the response envelopes — a previous `--json` response pipes back in unchanged
 * `--dry-run` — Preview only — validate and compute the result without writing to disk, mutating the store, or producing a commit. Response carries the prospective id / file_path / content_hash plus any warnings
 * `--note <NOTE>` — Agent-authored provenance note (≤280 chars, one sentence describing why this mutation happened). Lands in the per-mem commit body between the mechanical subject line and the provenance trailers. When `[mutations].require_notes = true` in workspace config a missing note adds a `NOTE_MISSING` warning to the response (the mutation still commits). When `--from` also carries a `note`, this flag takes precedence
 
@@ -739,6 +742,9 @@ Delete an entity. Use `--dry-run` to preview impact first. Delete is hashless by
 Rename an entity (changes ID, file path, and every incoming wiki-link)
 
 **Usage:** `memstead rename [OPTIONS] <ID> <NEW_TITLE>`
+
+Title grammar:
+  Titles accept Unicode alphanumerics, whitespace (not tab/newline or other control characters), and hyphen; every other character is rejected.
 
 Slug derivation:
   The entity slug derives from the title in five steps:
