@@ -490,6 +490,25 @@ impl Engine {
             });
         }
 
+        // 7a-bis. Required-outgoing evaluation — the warning the tool
+        // descriptions have promised all along. Runs now that every
+        // edge this create carries (declared + alias-synthesised) is
+        // known, through the same evaluation the health sweep uses
+        // (one implementation; the two surfaces cannot disagree). A
+        // warning, never a refusal: entities are legitimately built up
+        // over several calls.
+        let unsatisfied = crate::ops::health::unsatisfied_required_outgoing(
+            &entity_for_render,
+            type_def.as_ref(),
+        );
+        if !unsatisfied.is_empty() {
+            warnings.push(WarningHint::MissingRequiredOutgoing {
+                entity_type: entity_for_render.entity_type.clone(),
+                entity_id: id.clone(),
+                missing: unsatisfied,
+            });
+        }
+
         // 7b. Dry-run: compute prospective hash from the in-memory
         //     entity and return without touching disk, store, or
         //     edges. Mirrors full's `CreateArgs.dry_run` semantics —
@@ -669,6 +688,269 @@ mod tests {
     };
     use crate::ops::WarningHint;
     use crate::storage::{ArchiveBackend, FilesystemMemWriter};
+
+    /// Boot an engine whose mem pins a schema with one type (`task`)
+    /// declaring `required_outgoing: [{relationships: [PART_OF],
+    /// cardinality: at_least_one}]` — the fixture for the
+    /// MISSING_REQUIRED_OUTGOING mutation-warning tests.
+    fn engine_with_required_outgoing_schema(tmp: &TempDir) -> Engine {
+        let schemas_dir = tmp.path().join("schemas");
+        let pkg = schemas_dir.join("reqout");
+        std::fs::create_dir_all(pkg.join("types")).unwrap();
+        std::fs::write(
+            pkg.join("schema.yaml"),
+            r#"name: reqout
+version: 0.1.0
+description: required-outgoing fixture
+when_to_use: tests
+types:
+  - task
+relationships:
+  mode: strict
+  definitions:
+    - name: PART_OF
+      description: hier
+      default_weight: 3.0
+    - name: _default
+      description: fallback
+      default_weight: 1.0
+community:
+  resolution: 1.0
+  seed: 42
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            pkg.join("types").join("task.yaml"),
+            r#"name: task
+description: t
+when_to_use: tests
+sections:
+  - key: body
+    heading: Body
+    required: true
+    search_weight: 10.0
+    catch_all: true
+    write_rules: []
+metadata_fields: []
+title_weight: 100.0
+text_fields:
+  - body
+hierarchy_relationship: PART_OF
+propagating_relationships: []
+updatable_fields:
+  - title
+  - body
+health_required_fields:
+  - body
+staleness_threshold_days: 90
+required_outgoing:
+  - relationships: [PART_OF]
+    cardinality: at_least_one
+write_rules: []
+"#,
+        )
+        .unwrap();
+        let mem_dir = tmp.path().join("mem");
+        std::fs::create_dir_all(&mem_dir).unwrap();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let mount = crate::workspace::Mount {
+            mem: "tasks".to_string(),
+            schema: Some(memstead_schema::SchemaRef::new(
+                "reqout",
+                semver::Version::new(0, 1, 0),
+            )),
+            storage: crate::workspace::MountStorage::Folder { path: mem_dir },
+            capability: crate::workspace::MountCapability::Write,
+            lifecycle: crate::workspace::MountLifecycle::Eager,
+            cross_linkable: true,
+            migration_target: None,
+        };
+        Engine::from_mounts_with_schemas_dir(
+            vec![(mount, Box::new(writer) as Box<dyn MemBackend>)],
+            Some(&schemas_dir),
+        )
+        .unwrap()
+    }
+
+    fn task_create_args(title: &str, relations: Vec<crate::ops::RelateArg>) -> CreateEntityArgs {
+        let mut sections = IndexMap::new();
+        sections.insert("body".to_string(), "a task body.".to_string());
+        CreateEntityArgs {
+            anchors: Vec::new(),
+            mem: "tasks".to_string(),
+            title: title.to_string(),
+            entity_type: "task".to_string(),
+            sections,
+            metadata: IndexMap::new(),
+            relations,
+            dry_run: false,
+        }
+    }
+
+    fn missing_outgoing_of(warnings: &[WarningHint]) -> Vec<(Vec<String>, String)> {
+        warnings
+            .iter()
+            .filter_map(|w| match w {
+                WarningHint::MissingRequiredOutgoing { missing, .. } => Some(
+                    missing
+                        .iter()
+                        .map(|b| (b.relationships.clone(), b.cardinality.clone()))
+                        .collect::<Vec<_>>(),
+                ),
+                _ => None,
+            })
+            .flatten()
+            .collect()
+    }
+
+    /// The advertised mutation warning is real: a create leaving a
+    /// required-outgoing block unsatisfied returns
+    /// `MISSING_REQUIRED_OUTGOING` naming the block with cardinality —
+    /// and still commits. Complements: a create satisfying the block
+    /// via inline `relations` emits no such warning; the health sweep
+    /// reports exactly the same unsatisfied blocks (shared evaluation).
+    #[test]
+    fn create_warns_missing_required_outgoing_and_still_commits() {
+        let tmp = TempDir::new().unwrap();
+        let mut engine = engine_with_required_outgoing_schema(&tmp);
+        let (actor, client) = cli_actor();
+
+        let outcome = engine
+            .create_entity(
+                task_create_args("Orphan Task", vec![]),
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap();
+        assert!(
+            !outcome.commit_sha.is_empty(),
+            "the warning never blocks the mutation"
+        );
+        let blocks = missing_outgoing_of(&outcome.warnings);
+        assert_eq!(
+            blocks,
+            vec![(vec!["PART_OF".to_string()], "at_least_one".to_string())],
+            "warning names the unsatisfied block with cardinality; warnings = {:?}",
+            outcome.warnings
+        );
+
+        // Health-path parity: the sweep reports the same entity with
+        // the same block — the two surfaces share one evaluation.
+        let reports = crate::ops::health::collect_missing_required_outgoing(
+            engine.store(),
+            None,
+            engine.schemas(),
+        );
+        assert_eq!(reports.len(), 1);
+        assert_eq!(reports[0].id, outcome.id);
+        assert_eq!(reports[0].missing.len(), 1);
+        assert_eq!(reports[0].missing[0].relationships, vec!["PART_OF"]);
+        assert_eq!(reports[0].missing[0].cardinality, "at_least_one");
+
+        // Complement: a create whose inline relation satisfies the
+        // block emits no MISSING_REQUIRED_OUTGOING.
+        let satisfied = engine
+            .create_entity(
+                task_create_args(
+                    "Child Task",
+                    vec![crate::ops::RelateArg {
+                        to: outcome.id.clone(),
+                        rel_type: "PART_OF".to_string(),
+                        description: None,
+                    }],
+                ),
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap();
+        assert!(
+            missing_outgoing_of(&satisfied.warnings).is_empty(),
+            "satisfied block emits no warning: {:?}",
+            satisfied.warnings
+        );
+    }
+
+    /// Update-side mirror: a section-only update on an entity with an
+    /// unsatisfied block warns; declaring the satisfying relation in
+    /// the same update clears it.
+    #[test]
+    fn update_warns_missing_required_outgoing_until_satisfied() {
+        let tmp = TempDir::new().unwrap();
+        let mut engine = engine_with_required_outgoing_schema(&tmp);
+        let (actor, client) = cli_actor();
+        let a = engine
+            .create_entity(
+                task_create_args("Task A", vec![]),
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap();
+        let b = engine
+            .create_entity(
+                task_create_args("Task B", vec![]),
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap();
+
+        let update = |engine: &mut Engine,
+                      id: &crate::entity::EntityId,
+                      declare: Vec<crate::ops::RelateArg>| {
+            let current = engine.get_entity(id).unwrap().content_hash.clone();
+            let mut sections = IndexMap::new();
+            sections.insert("body".to_string(), format!("edited at {:?}", declare.len()));
+            engine
+                .update_entity(
+                    crate::engine::UpdateEntityArgs {
+                        anchors: Vec::new(),
+                        id: id.clone(),
+                        expected_hash: Some(current),
+                        sections,
+                        append_sections: IndexMap::new(),
+                        patch_sections: IndexMap::new(),
+                        metadata: IndexMap::new(),
+                        metadata_unset: Vec::new(),
+                        declare_relations: declare,
+                        dry_run: false,
+                        relations_unset: Vec::new(),
+                    },
+                    actor,
+                    Some(&client),
+                    None,
+                )
+                .unwrap()
+        };
+
+        // Section-only update on an unsatisfied entity: warning fires,
+        // mutation commits.
+        let outcome = update(&mut engine, &a.id, vec![]);
+        assert!(!outcome.commit_sha.is_empty());
+        assert_eq!(
+            missing_outgoing_of(&outcome.warnings),
+            vec![(vec!["PART_OF".to_string()], "at_least_one".to_string())]
+        );
+
+        // Declaring the satisfying relation in the update clears it.
+        let outcome = update(
+            &mut engine,
+            &a.id,
+            vec![crate::ops::RelateArg {
+                to: b.id.clone(),
+                rel_type: "PART_OF".to_string(),
+                description: None,
+            }],
+        );
+        assert!(
+            missing_outgoing_of(&outcome.warnings).is_empty(),
+            "satisfied block emits no warning: {:?}",
+            outcome.warnings
+        );
+    }
 
     #[test]
     fn create_entity_writes_through_folder_backend_and_updates_store() {

@@ -508,22 +508,7 @@ pub fn collect_missing_required_outgoing(
         if td.required_outgoing.is_empty() {
             continue;
         }
-        let unsatisfied: Vec<MissingOutgoingBlock> = td
-            .required_outgoing
-            .iter()
-            .filter(|block| {
-                let count = entity
-                    .relationships
-                    .iter()
-                    .filter(|rel| block.relationships.iter().any(|name| name == &rel.rel_type))
-                    .count();
-                !block.admits(count)
-            })
-            .map(|block| MissingOutgoingBlock {
-                relationships: block.relationships.clone(),
-                cardinality: block.cardinality.to_string(),
-            })
-            .collect();
+        let unsatisfied = unsatisfied_required_outgoing(entity, td);
         if unsatisfied.is_empty() {
             continue;
         }
@@ -539,25 +524,48 @@ pub fn collect_missing_required_outgoing(
     out
 }
 
+/// Evaluate one entity's declared `required_outgoing` blocks against
+/// its current outgoing edges, returning the unsatisfied blocks in
+/// declaration order. THE single evaluation — shared by the health
+/// sweep ([`collect_missing_required_outgoing`]) and the per-mutation
+/// `MISSING_REQUIRED_OUTGOING` warning on create/update. A second
+/// implementation of the block check is a defect: the two surfaces
+/// must never disagree about what counts as unsatisfied.
+pub fn unsatisfied_required_outgoing(
+    entity: &crate::entity::Entity,
+    td: &TypeDefinition,
+) -> Vec<super::MissingRequiredOutgoingBlock> {
+    td.required_outgoing
+        .iter()
+        .filter(|block| {
+            let count = entity
+                .relationships
+                .iter()
+                .filter(|rel| block.relationships.iter().any(|name| name == &rel.rel_type))
+                .count();
+            !block.admits(count)
+        })
+        .map(|block| super::MissingRequiredOutgoingBlock {
+            relationships: block.relationships.clone(),
+            cardinality: block.cardinality.to_string(),
+        })
+        .collect()
+}
+
 /// One entity's unsatisfied `required_outgoing` blocks, surfaced from
-/// the health-time scan. Wire shape mirrors the per-write
-/// `MISSING_REQUIRED_OUTGOING` warning's `details` payload but adds
-/// the `mem` name (the warning's `entity_id` already encodes it via
-/// the mem prefix, but health is multi-mem by default and an
-/// explicit field is cheaper for downstream filters).
+/// the health-time scan. `missing` reuses the per-write warning's wire
+/// block type — one struct, one serialized shape (`{ relationships,
+/// cardinality }`) on both surfaces — and adds the `mem` name (the
+/// warning's `entity_id` already encodes it via the mem prefix, but
+/// health is multi-mem by default and an explicit field is cheaper for
+/// downstream filters).
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct MissingRequiredOutgoingReport {
     pub id: crate::entity::EntityId,
     pub title: String,
     pub entity_type: String,
     pub mem: String,
-    pub missing: Vec<MissingOutgoingBlock>,
-}
-
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct MissingOutgoingBlock {
-    pub relationships: Vec<String>,
-    pub cardinality: String,
+    pub missing: Vec<super::MissingRequiredOutgoingBlock>,
 }
 
 /// Detect the section-fork condition for one declared section: the

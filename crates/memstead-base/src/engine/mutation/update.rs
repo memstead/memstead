@@ -751,6 +751,22 @@ impl Engine {
             }
         }
 
+        // Required-outgoing evaluation — the warning the tool
+        // descriptions have promised all along. `next` carries this
+        // update's final edge set (declared relations applied,
+        // alias-synthesis run), evaluated through the same function
+        // the health sweep uses (one implementation; the two surfaces
+        // cannot disagree). A warning, never a refusal.
+        let unsatisfied =
+            crate::ops::health::unsatisfied_required_outgoing(&next, type_def.as_ref());
+        if !unsatisfied.is_empty() {
+            warnings.push(WarningHint::MissingRequiredOutgoing {
+                entity_type: next.entity_type.clone(),
+                entity_id: id.clone(),
+                missing: unsatisfied,
+            });
+        }
+
         // Mirror the create-path emission shape — drive the warning from
         // the synthesised relations the alias pass just emitted, not
         // from a re-parse of the generated markdown. `parse_markdown`

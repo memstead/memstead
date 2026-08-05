@@ -1428,6 +1428,26 @@ pub fn build_schema_payload(
             // can predict self-loop refusal. The engine refuses
             // `memstead_relate type=R from=X(type=T) to=X` whenever R
             // appears here, independent of R's `acyclic` flag.
+            //
+            // `required_outgoing` is the only declared legality condition
+            // on an entity's outgoing edges: each block lists the
+            // relationship-name alternatives and the cardinality bound,
+            // in declaration order. Always present — a type with no
+            // blocks emits an empty list, because an absent key would
+            // read as "unknown" and send agents back to the authoring
+            // YAML. Cardinality is rendered exactly as declared
+            // (`at_least_one` — an open upper bound stays open, never
+            // normalised into a number).
+            let required_outgoing: Vec<serde_json::Value> = td
+                .required_outgoing
+                .iter()
+                .map(|block| {
+                    serde_json::json!({
+                        "relationships": block.relationships,
+                        "cardinality": block.cardinality.to_string(),
+                    })
+                })
+                .collect();
             serde_json::json!({
                 "name": td.name,
                 "description": td.description,
@@ -1438,6 +1458,7 @@ pub fn build_schema_payload(
                 "system_context": td.system_message_str(),
                 "staleness_threshold_days": td.staleness_threshold_days,
                 "propagating_relationships": td.propagating_relationships,
+                "required_outgoing": required_outgoing,
             })
         })
         .collect();
@@ -1494,6 +1515,23 @@ pub fn build_schema_payload(
             );
         }
     }
+
+    // One-line effect note for the per-type `propagating_relationships`
+    // arrays — present in BOTH modes, right where the field is read.
+    // The name has misled outside schema authors into declaring it to
+    // express impact propagation or evidence obligations; its single
+    // functional effect is the self-loop refusal. Top-level (not
+    // per-type) so the note costs one key, not one per type.
+    obj.insert(
+        "propagating_relationships_effect".into(),
+        serde_json::Value::String(
+            "Per-type `propagating_relationships` governs exactly one behaviour: \
+             memstead_relate refuses a self-loop (from == to) on a rel-type the \
+             source type lists here. It does not propagate impact, imply an \
+             evidence obligation, or have any other effect."
+                .to_string(),
+        ),
+    );
 
     // Schema-level `alias_target_rel_type` pointer — names the rel-type
     // that body wiki-links `[[target]]` auto-emit through the
@@ -1610,13 +1648,17 @@ pub fn build_schema_payload(
 
         // Lite entity-type form: name + section keys (each with its
         // `required` marker) + metadata-field shapes (name, required,
-        // `enum`, `default`) + `propagating_relationships` — the
-        // structural minimum to author a legal write — with the
-        // type/section prose (descriptions, write_rules, writing_guidance,
-        // system_context) dropped. `propagating_relationships` rides along
-        // because it governs the self-loop relate refusal (relate R X→X
-        // when R propagates on type T), one of the refusals the lite view
-        // must let an agent avoid. Projected from the rich array.
+        // `enum`, `default`) + `propagating_relationships` +
+        // `required_outgoing` — the structural minimum to author a
+        // legal write — with the type/section prose (descriptions,
+        // write_rules, writing_guidance, system_context) dropped.
+        // `propagating_relationships` rides along because it governs
+        // the self-loop relate refusal (relate R X→X when R propagates
+        // on type T), one of the refusals the lite view must let an
+        // agent avoid. `required_outgoing` rides along because it is
+        // the only declared legality condition on outgoing edges —
+        // dropping it would make "enough to plan a legal write" false.
+        // Projected from the rich array.
         let types_summary: Vec<serde_json::Value> = types_full
             .iter()
             .map(|t| {
@@ -1657,6 +1699,7 @@ pub fn build_schema_payload(
                     "sections": sections,
                     "fields": fields,
                     "propagating_relationships": t["propagating_relationships"],
+                    "required_outgoing": t["required_outgoing"],
                 })
             })
             .collect();
@@ -3058,6 +3101,76 @@ mod tests {
         assert!(r.get("default_weight").is_some());
     }
 
+    /// The declared `required_outgoing` blocks appear per type — with
+    /// their relationship lists and cardinality, in declaration order —
+    /// at BOTH verbosity levels, and a type declaring none reports an
+    /// empty list (never a missing key). The `project` built-in is the
+    /// live fixture: `evidence` declares one block, `decision` (among
+    /// others) declares none. The `propagating_relationships_effect`
+    /// note ships at both levels and claims nothing beyond the
+    /// self-loop refusal.
+    #[test]
+    fn required_outgoing_reported_with_cardinality_at_both_levels() {
+        let reg = memstead_schema::SchemaRegistry::builtin();
+        let project = reg
+            .resolve_by_name("project")
+            .expect("unambiguous")
+            .expect("project is a built-in");
+
+        for verbosity in [SchemaVerbosity::Full, SchemaVerbosity::Lite] {
+            let payload =
+                build_schema_payload(&project, vec![], verbosity, OriginClass::FirstParty);
+            let types_key = if verbosity == SchemaVerbosity::Full {
+                "types"
+            } else {
+                "types_summary"
+            };
+            let types = payload[types_key].as_array().expect("types array");
+
+            let mut saw_evidence = false;
+            let mut saw_memo = false;
+            for t in types {
+                let ro = t
+                    .get("required_outgoing")
+                    .unwrap_or_else(|| panic!("type {} omits required_outgoing", t["name"]))
+                    .as_array()
+                    .expect("required_outgoing is an array for every type");
+                if t["name"] == "evidence" {
+                    saw_evidence = true;
+                    assert_eq!(ro.len(), 1, "evidence declares one block");
+                    assert_eq!(
+                        ro[0]["relationships"],
+                        serde_json::json!(["STRENGTHENS", "WEAKENS", "VALIDATES", "CONTRADICTS"]),
+                        "relationship alternatives in declaration order"
+                    );
+                    assert_eq!(
+                        ro[0]["cardinality"], "at_least_one",
+                        "cardinality rendered as declared — the open upper bound \
+                         stays open, never a finite number"
+                    );
+                } else if t["name"] == "memo" {
+                    // A type declaring no blocks reports the empty
+                    // list, not a missing key.
+                    saw_memo = true;
+                    assert!(ro.is_empty(), "memo declares no blocks → empty list");
+                }
+            }
+            assert!(saw_evidence, "project schema carries the evidence type");
+            assert!(saw_memo, "project schema carries the memo type");
+
+            // The effect note for propagating_relationships ships at both
+            // levels and states the single real effect.
+            let note = payload["propagating_relationships_effect"]
+                .as_str()
+                .expect("effect note present at both verbosity levels");
+            assert!(note.contains("self-loop"), "names the actual effect");
+            assert!(
+                !note.contains("propagates impact") || note.contains("does not propagate"),
+                "claims no propagation behaviour beyond the self-loop refusal"
+            );
+        }
+    }
+
     #[test]
     fn lite_payload_is_the_structural_skeleton_without_prose() {
         let schema = software_schema();
@@ -3131,6 +3244,13 @@ mod tests {
             assert!(
                 t.get("propagating_relationships").is_some(),
                 "lite type keeps propagating_relationships"
+            );
+            // `required_outgoing` rides along — the only declared
+            // legality condition on outgoing edges. Always an array,
+            // never an absent key (absence would read as "unknown").
+            assert!(
+                t.get("required_outgoing").is_some_and(|v| v.is_array()),
+                "lite type keeps required_outgoing as an array"
             );
             // Field shapes present (name + required), prose absent.
             if let Some(fields) = t["fields"].as_array() {

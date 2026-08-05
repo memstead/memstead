@@ -8,6 +8,21 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Added
+- **The schema response carries every legality condition on outgoing
+  edges.** Both the full and lite `memstead_schema` projections now
+  report each type's `required_outgoing` blocks (relationship
+  alternatives + cardinality, declaration order; a type with no blocks
+  reports an empty list, never a missing key), a top-level
+  `propagating_relationships_effect` note states that field's single
+  real effect (the self-loop relate refusal — outside schema authors
+  had read impact-propagation or evidence obligations into the name),
+  and the server-instructions legality-flag enumeration names
+  `required_outgoing`. The long-advertised `MISSING_REQUIRED_OUTGOING`
+  mutation warning is now real: create and update evaluate the entity's
+  blocks once the mutation's edges are known — through the same
+  evaluation the health sweep uses, so the two surfaces cannot
+  disagree — and warn (never refuse) with the unsatisfied blocks and
+  cardinality.
 - **Schemas whose section headings cannot round-trip to their keys are
   refused at install.** The heading→key derivation (lowercase, spaces to
   underscores) now lives in one function (`derive_section_key`) shared by
