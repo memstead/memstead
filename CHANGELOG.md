@@ -8,6 +8,21 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Added
+- **Directional graph traversal.** `related_to` and `expand_via` gain a
+  `direction` selector — `out` (edges pointing away from the seed:
+  what does this rest on), `in` (edges pointing at it: what rests on
+  this), `both` (default — the historical undirected walk, so every
+  existing query returns exactly what it always did). The choice
+  applies at every hop: depth > 1 is a pure transitive closure in the
+  chosen direction, never a mixed walk. Present on the MCP
+  `memstead_search` params, the CLI (`--direction`, which also gains
+  the previously missing `--expand-via` / `--expand-depth` pair), and
+  the UniFFI `SearchScope` record (defaulted — existing Swift call
+  sites compile unchanged). Expanded hits report the reaching edge's
+  traversal direction (`expansion.via_direction`, and `[out]`/`[in]`
+  beside the label in the markdown channel). The dead undirected
+  `reachable` walker was deleted; the two live walkers carry the
+  selector.
 - **Coverage semantics resolve per medium.** A binding can no longer
   assert exhaustive coverage over a medium whose ground set the engine
   cannot enumerate. `coverage_semantics` is now optional on the binding

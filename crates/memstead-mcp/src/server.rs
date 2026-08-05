@@ -2013,7 +2013,7 @@ impl McpServer {
 
     #[tool(
         name = "memstead_search",
-        description = "Search entities by lexical content + structural filters. Dual channel: rendered-markdown text plus typed `SearchResultEnvelope` on `structured_content`: `{ _total, _returned, _offset, _total_tokens, hits[], facets, warnings }` each hit: `score`, `score_breakdown`, `matched_terms`, `expansion`, `origin` (trust class), `snippet` (section bodies via memstead_entity). A page is bounded to `token_budget` (default 12000); an overflowing page is trimmed with a `SEARCH_RESULTS_TRUNCATED` warning (`kept`/`budget`), `_total` stays the full count, page with `offset`. The caller expands a concept into keyword variants. Put variants into `query.any` (OR, rank-boosted); excludes in `query.not`; `query.phrase` for exact adjacency; `query.field` to restrict to one field. Set `expand_via` to relationship types — reached hits surface with `expansion` metadata + decayed score (0.5^depth). `facets` (by_type, by_mem, by_level, by_status, by_confidence, by_subsection, by_expansion) compose results structurally. Sub-heading matches carry `heading_path`. `stub: true|false` filters stub status (with `entity_type` it flags `STUB_FILTER_EXCLUDES_ALL`). Equality filters on `filterable: equality` fields ride on `filters` (e.g. `{\"level\": \"M0\"}`); one code per outcome: `FILTER_TYPE_SCOPED` (applied, type-narrowed), `FIELD_NOT_FILTERABLE` (ignored — result unfiltered, never emptied), `UNKNOWN_FILTER_KEY` (ignored), `INVALID_ENUM_VALUE` (applies but matches nothing; `details.allowed`). `related_to` returns the proximity-ranked (nearer-first) neighbourhood, bounded with `NEIGHBOURHOOD_CAPPED`. Range filters on `filterable: range` fields ride on `range_filters` (`min_<field>`/`max_<field>`/`<field>_before`/`<field>_after`), same contract: `RANGE_FILTER_KEY_MALFORMED`, `RANGE_FILTER_TYPE_SCOPED`, `UNKNOWN_RANGE_FILTER_FIELD`, `FIELD_NOT_RANGE_FILTERABLE`. A mem whose search index is missing or failing surfaces `SEARCH_MEM_INDEX_UNAVAILABLE` (`details.mem`/`details.reason`). Omit `query` for a pure metadata filter.",
+        description = "Search entities by lexical content + structural filters. Dual channel: rendered-markdown text plus typed `SearchResultEnvelope` on `structured_content`: `{ _total, _returned, _offset, _total_tokens, hits[], facets, warnings }` each hit: `score`, `score_breakdown`, `matched_terms`, `expansion`, `origin` (trust class), `snippet` (section bodies via memstead_entity). A page is bounded to `token_budget` (default 12000); an overflowing page is trimmed with a `SEARCH_RESULTS_TRUNCATED` warning (`kept`/`budget`), `_total` stays the full count, page with `offset`. The caller expands a concept into keyword variants. Put variants into `query.any` (OR, rank-boosted); excludes in `query.not`; `query.phrase` for exact adjacency; `query.field` to restrict to one field. Set `expand_via` to relationship types — reached hits carry `expansion` metadata incl. `via_direction` + decayed score (0.5^depth); `direction` (out|in|both) narrows the walk per hop. `facets` (by_type, by_mem, by_level, by_status, by_confidence, by_subsection, by_expansion) compose results structurally. Sub-heading matches carry `heading_path`. `stub: true|false` filters stub status (with `entity_type` it flags `STUB_FILTER_EXCLUDES_ALL`). Equality filters on `filterable: equality` fields ride on `filters` (e.g. `{\"level\": \"M0\"}`); one code per outcome: `FILTER_TYPE_SCOPED` (applied, type-narrowed), `FIELD_NOT_FILTERABLE` (ignored — result unfiltered, never emptied), `UNKNOWN_FILTER_KEY` (ignored), `INVALID_ENUM_VALUE` (applies but matches nothing; `details.allowed`). `related_to`: proximity-ranked neighbourhood, bounded with `NEIGHBOURHOOD_CAPPED`. Range filters on `filterable: range` fields ride on `range_filters` (`min_<field>`/`max_<field>`/`<field>_before`/`<field>_after`), same contract: `RANGE_FILTER_KEY_MALFORMED`, `RANGE_FILTER_TYPE_SCOPED`, `UNKNOWN_RANGE_FILTER_FIELD`, `FIELD_NOT_RANGE_FILTERABLE`. A failing mem index surfaces `SEARCH_MEM_INDEX_UNAVAILABLE` (`details.mem`/`details.reason`). Omit `query` for a pure metadata filter.",
         annotations(
             read_only_hint = true,
             destructive_hint = false,
@@ -2059,6 +2059,7 @@ impl McpServer {
             depth: p.depth,
             expand_via: p.expand_via,
             expand_depth: p.expand_depth,
+            direction: p.direction.unwrap_or_default(),
             stub: p.stub,
             token_budget: p.token_budget,
         };
@@ -4341,6 +4342,7 @@ mod tests {
     fn search_params_defaults() -> SearchParams {
         SearchParams {
             query: None,
+            direction: None,
             mem: None,
             entity_type: None,
             expand_via: None,
@@ -8550,6 +8552,7 @@ community:
                 any: vec!["Entity".into(), "A".into()],
                 ..Default::default()
             }),
+            direction: None,
             mem: None,
             entity_type: None,
             expand_via: None,
@@ -8590,6 +8593,7 @@ community:
             range_filters: None,
             stub: None,
             token_budget: None,
+            direction: None,
         }));
         let text = extract_text(&result);
         assert!(text.contains("_total:"));
@@ -8609,6 +8613,7 @@ community:
                 any: vec!["Entity".into(), "A".into()],
                 ..Default::default()
             }),
+            direction: None,
             mem: None,
             entity_type: None,
             expand_via: None,
@@ -8676,6 +8681,7 @@ community:
             range_filters: None,
             stub: None,
             token_budget: None,
+            direction: None,
         }));
         let filter_sc = filter_only
             .structured_content
@@ -8711,6 +8717,7 @@ community:
             range_filters: None,
             stub: None,
             token_budget: None,
+            direction: None,
         })));
         assert!(page1.contains("_returned: 1"));
         assert!(page1.contains("_offset: 0"));
@@ -8731,6 +8738,7 @@ community:
             range_filters: None,
             stub: None,
             token_budget: None,
+            direction: None,
         })));
         assert!(page2.contains("_returned: 1"));
         assert!(page2.contains("_offset: 1"));
@@ -8776,6 +8784,7 @@ community:
                 any: vec!["Entity".into(), "A".into()],
                 ..Default::default()
             }),
+            direction: None,
             mem: None,
             entity_type: None,
             expand_via: None,

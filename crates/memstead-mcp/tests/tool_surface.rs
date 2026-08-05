@@ -1050,6 +1050,9 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "third-party",
         ],
         "memstead_search" => &[
+            // Expansion metadata: the traversal direction rides beside the
+            // edge label so a `both` walk stays interpretable.
+            "via_direction",
             // Response envelope fields
             "facets",
             "matched_terms",

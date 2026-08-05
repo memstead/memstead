@@ -125,6 +125,9 @@ dictionary SearchScope {
     boolean? stub;
     sequence<string>? expand_via;
     u32? expand_depth;
+    // Defaulted so existing Swift call sites keep their prior initializer
+    // shape (UniFFI emits a default argument for defaulted fields).
+    TraversalDirection? direction = null;
 };
 ```
 

@@ -1012,7 +1012,7 @@ Read one schema. Default `verbosity` is "lite": a structural skeleton — entity
 
 **Flavour:** lean + full
 
-Search entities by lexical content + structural filters. Dual channel: rendered-markdown text plus typed `SearchResultEnvelope` on `structured_content`: `{ _total, _returned, _offset, _total_tokens, hits[], facets, warnings }` each hit: `score`, `score_breakdown`, `matched_terms`, `expansion`, `origin` (trust class), `snippet` (section bodies via memstead_entity). A page is bounded to `token_budget` (default 12000); an overflowing page is trimmed with a `SEARCH_RESULTS_TRUNCATED` warning (`kept`/`budget`), `_total` stays the full count, page with `offset`. The caller expands a concept into keyword variants. Put variants into `query.any` (OR, rank-boosted); excludes in `query.not`; `query.phrase` for exact adjacency; `query.field` to restrict to one field. Set `expand_via` to relationship types — reached hits surface with `expansion` metadata + decayed score (0.5^depth). `facets` (by_type, by_mem, by_level, by_status, by_confidence, by_subsection, by_expansion) compose results structurally. Sub-heading matches carry `heading_path`. `stub: true|false` filters stub status (with `entity_type` it flags `STUB_FILTER_EXCLUDES_ALL`). Equality filters on `filterable: equality` fields ride on `filters` (e.g. `{"level": "M0"}`); one code per outcome: `FILTER_TYPE_SCOPED` (applied, type-narrowed), `FIELD_NOT_FILTERABLE` (ignored — result unfiltered, never emptied), `UNKNOWN_FILTER_KEY` (ignored), `INVALID_ENUM_VALUE` (applies but matches nothing; `details.allowed`). `related_to` returns the proximity-ranked (nearer-first) neighbourhood, bounded with `NEIGHBOURHOOD_CAPPED`. Range filters on `filterable: range` fields ride on `range_filters` (`min_<field>`/`max_<field>`/`<field>_before`/`<field>_after`), same contract: `RANGE_FILTER_KEY_MALFORMED`, `RANGE_FILTER_TYPE_SCOPED`, `UNKNOWN_RANGE_FILTER_FIELD`, `FIELD_NOT_RANGE_FILTERABLE`. A mem whose search index is missing or failing surfaces `SEARCH_MEM_INDEX_UNAVAILABLE` (`details.mem`/`details.reason`). Omit `query` for a pure metadata filter.
+Search entities by lexical content + structural filters. Dual channel: rendered-markdown text plus typed `SearchResultEnvelope` on `structured_content`: `{ _total, _returned, _offset, _total_tokens, hits[], facets, warnings }` each hit: `score`, `score_breakdown`, `matched_terms`, `expansion`, `origin` (trust class), `snippet` (section bodies via memstead_entity). A page is bounded to `token_budget` (default 12000); an overflowing page is trimmed with a `SEARCH_RESULTS_TRUNCATED` warning (`kept`/`budget`), `_total` stays the full count, page with `offset`. The caller expands a concept into keyword variants. Put variants into `query.any` (OR, rank-boosted); excludes in `query.not`; `query.phrase` for exact adjacency; `query.field` to restrict to one field. Set `expand_via` to relationship types — reached hits carry `expansion` metadata incl. `via_direction` + decayed score (0.5^depth); `direction` (out|in|both) narrows the walk per hop. `facets` (by_type, by_mem, by_level, by_status, by_confidence, by_subsection, by_expansion) compose results structurally. Sub-heading matches carry `heading_path`. `stub: true|false` filters stub status (with `entity_type` it flags `STUB_FILTER_EXCLUDES_ALL`). Equality filters on `filterable: equality` fields ride on `filters` (e.g. `{"level": "M0"}`); one code per outcome: `FILTER_TYPE_SCOPED` (applied, type-narrowed), `FIELD_NOT_FILTERABLE` (ignored — result unfiltered, never emptied), `UNKNOWN_FILTER_KEY` (ignored), `INVALID_ENUM_VALUE` (applies but matches nothing; `details.allowed`). `related_to`: proximity-ranked neighbourhood, bounded with `NEIGHBOURHOOD_CAPPED`. Range filters on `filterable: range` fields ride on `range_filters` (`min_<field>`/`max_<field>`/`<field>_before`/`<field>_after`), same contract: `RANGE_FILTER_KEY_MALFORMED`, `RANGE_FILTER_TYPE_SCOPED`, `UNKNOWN_RANGE_FILTER_FIELD`, `FIELD_NOT_RANGE_FILTERABLE`. A failing mem index surfaces `SEARCH_MEM_INDEX_UNAVAILABLE` (`details.mem`/`details.reason`). Omit `query` for a pure metadata filter.
 
 **Hints:** `read_only` = true, `destructive` = false, `idempotent` = true, `open_world` = false
 
@@ -1054,6 +1054,26 @@ Search entities by lexical content + structural filters. Dual channel: rendered-
         }
       },
       "type": "object"
+    },
+    "TraversalDirection": {
+      "description": "Traversal direction relative to the seed, applied at EVERY hop —\ndepth > 1 is a pure transitive closure in the chosen direction,\nnever a mixed walk (an entity reachable only by alternating\ndirections is not in an `out` or `in` result at any depth; that\nper-hop property is what makes a fall-through analysis correct).\n\n`in`/`out` describe the edge relative to the seed and match the\nStore's own vocabulary — domain words (ancestors/upstream) invert\nper schema, so the engine does not use them.",
+      "oneOf": [
+        {
+          "const": "out",
+          "description": "Follow edges pointing away from the seed (seed → target).",
+          "type": "string"
+        },
+        {
+          "const": "in",
+          "description": "Follow edges pointing at the seed (source → seed).",
+          "type": "string"
+        },
+        {
+          "const": "both",
+          "description": "Follow both — the historical undirected walk, and the default:\na query that omits the selector returns exactly what it always\nreturned.",
+          "type": "string"
+        }
+      ]
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -1067,6 +1087,17 @@ Search entities by lexical content + structural filters. Dual channel: rendered-
         "integer",
         "null"
       ]
+    },
+    "direction": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TraversalDirection"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Traversal direction for `related_to` and `expand_via`, applied at EVERY hop: \"out\" follows edges pointing away from the seed (what does this rest on), \"in\" follows edges pointing at it (what rests on this), \"both\" (default) is the historical undirected walk. Depth > 1 is a pure transitive closure in the chosen direction — never a mixed walk. Expanded hits report the reaching edge's direction as `expansion.via_direction`."
     },
     "edge_type": {
       "description": "Only entities having this edge type (e.g. IMPLEMENTS, USES)",

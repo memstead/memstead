@@ -90,6 +90,15 @@ dictionary Query {
     string? field;
 };
 
+// Traversal direction for `related_to` / `expand_via`, applied at every
+// hop (depth > 1 is a pure transitive closure in the chosen direction).
+// Absent (null) = Both — the historical undirected walk.
+enum TraversalDirection {
+    "Out",
+    "In",
+    "Both",
+};
+
 dictionary SearchScope {
     Query? query;
     string? mem;
@@ -104,6 +113,9 @@ dictionary SearchScope {
     boolean? stub;
     sequence<string>? expand_via;
     u32? expand_depth;
+    // Defaulted so existing Swift call sites keep their prior initializer
+    // shape (UniFFI emits a default argument for defaulted fields).
+    TraversalDirection? direction = null;
 };
 
 // ---------------------------------------------------------------------------

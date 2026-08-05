@@ -32,7 +32,7 @@ pub use types::{
     MemSchemaOutcome, MemVersionOutcome, MetadataEntry, MetadataValue, MissingField,
     ParseRecoveryEntry, ParseRecoveryReport, Query, RelationDirection, RelationEdge, Relations,
     Relationship, ReloadResult, SearchHit, SearchResult, SearchScope, Section, StaleEntity, Status,
-    StrandedCrossMemRef,
+    StrandedCrossMemRef, TraversalDirection,
 };
 
 uniffi::include_scaffolding!("memstead");
@@ -1280,6 +1280,7 @@ mod tests {
             stub: None,
             expand_via: None,
             expand_depth: None,
+            direction: None,
         });
         assert!(result.total >= 2, "total: {}", result.total);
         assert!(result.hits.iter().any(|h| h.id.ends_with("entity-a")));
@@ -1306,6 +1307,7 @@ mod tests {
             stub: None,
             expand_via: None,
             expand_depth: None,
+            direction: None,
         });
         assert!(
             result.hits.iter().any(|h| h.id.ends_with("entity-b")),

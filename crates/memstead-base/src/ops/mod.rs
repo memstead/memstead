@@ -2372,6 +2372,12 @@ pub struct SearchScope {
     /// Maximum hops to traverse via `expand_via` (default: 1 when `expand_via`
     /// is set).
     pub expand_depth: Option<usize>,
+    /// Traversal direction for `related_to` AND `expand_via`, applied at
+    /// EVERY hop (depth > 1 is a pure transitive closure in the chosen
+    /// direction, never a mixed walk). Defaults to `both` — the
+    /// historical undirected behaviour, so a query omitting the
+    /// selector returns exactly what it always returned.
+    pub direction: crate::graph::query::TraversalDirection,
     /// Filter by stub status. `None` = no filter (returns both stubs and real
     /// entities); `Some(true)` = only stubs; `Some(false)` = only real entities.
     pub stub: Option<bool>,
@@ -2419,6 +2425,10 @@ pub struct ExpansionInfo {
     pub of: EntityId,
     pub via_edge: String,
     pub depth: usize,
+    /// The direction the first-reaching edge was traversed in (`out` =
+    /// away from the seed, `in` = at the seed) — keeps a `both` result
+    /// interpretable. Additive: clients that ignore it decode unchanged.
+    pub via_direction: crate::graph::query::TraversalDirection,
 }
 
 /// One sub-section-level facet entry. `path` is ordered outermost →

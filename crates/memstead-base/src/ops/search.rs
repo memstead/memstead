@@ -287,7 +287,7 @@ pub fn search(
     let neighbourhood: Option<(HashMap<EntityId, usize>, HashSet<EntityId>)> =
         if let Some(ref related_to) = scope.related_to {
             let depth = scope.depth.unwrap_or(1);
-            let distances = query::reachable_distances(store, related_to, depth);
+            let distances = query::reachable_distances(store, related_to, depth, scope.direction);
             hits.retain(|h| distances.contains_key(&h.id));
             let typed_direct: HashSet<EntityId> = store
                 .outgoing(related_to)
@@ -676,27 +676,46 @@ fn expand_hits(
     // Dedup across seeds: if a neighbour is reached from two primaries,
     // keep the candidate with the highest score so agents see the shortest
     // / highest-ranking path.
-    let mut expanded: HashMap<EntityId, (f32, String, usize, EntityId)> = HashMap::new();
+    let mut expanded: HashMap<
+        EntityId,
+        (
+            f32,
+            String,
+            usize,
+            EntityId,
+            crate::graph::query::TraversalDirection,
+        ),
+    > = HashMap::new();
 
     for primary in hits.iter() {
-        let reached = query::reachable_via(store, &primary.id, edge_types, depth_limit);
-        for (neighbor_id, via_edge, depth) in reached {
-            if primary_ids.contains(&neighbor_id) {
+        let reached =
+            query::reachable_via(store, &primary.id, edge_types, depth_limit, scope.direction);
+        for reached_via in reached {
+            if primary_ids.contains(&reached_via.id) {
                 continue;
             }
-            let decay = 0.5f32.powi(depth as i32);
+            let decay = 0.5f32.powi(reached_via.depth as i32);
             let score = primary.score * decay;
-            let better = match expanded.get(&neighbor_id) {
-                Some((prev_score, _, _, _)) => score > *prev_score,
+            let better = match expanded.get(&reached_via.id) {
+                Some((prev_score, _, _, _, _)) => score > *prev_score,
                 None => true,
             };
             if better {
-                expanded.insert(neighbor_id, (score, via_edge, depth, primary.id.clone()));
+                expanded.insert(
+                    reached_via.id.clone(),
+                    (
+                        score,
+                        reached_via.via_edge,
+                        reached_via.depth,
+                        primary.id.clone(),
+                        reached_via.direction,
+                    ),
+                );
             }
         }
     }
 
-    for (id, (score, via_edge, depth, of)) in expanded {
+    for (id, (score, via_edge, depth, of, via_direction)) in expanded {
         let Some(entity) = store.get(&id) else {
             continue;
         };
@@ -771,6 +790,7 @@ fn expand_hits(
                 of,
                 via_edge,
                 depth,
+                via_direction,
             }),
         });
     }
@@ -1379,6 +1399,126 @@ mod tests {
         let (indexes, schemas) = build_test_indexes(store);
         let schema = type_by_name("spec").unwrap();
         search(store, scope, &schema, &indexes, &schemas)
+    }
+
+    /// The direction selector threads from `SearchScope` into BOTH
+    /// walkers: `related_to` membership narrows per direction with the
+    /// per-hop transitive-closure semantics, expanded hits report the
+    /// traversal direction, and the default (`both`) returns the
+    /// historical undirected set.
+    #[test]
+    fn search_direction_narrows_related_to_and_expansion() {
+        // x --USES--> seed --USES--> y --USES--> z
+        let mut store = Store::new();
+        for n in ["x", "seed", "y", "z"] {
+            let e = make_entity(n, "specs");
+            store.upsert(e.id.clone(), e);
+        }
+        let id = |n: &str| EntityId(format!("specs--{n}"));
+        let mut edge = |f: &str, t: &str| {
+            store.add_edge(
+                id(f),
+                crate::store::Edge {
+                    rel_type: "USES".into(),
+                    target: id(t),
+                    source: crate::store::EdgeSource::Explicit,
+                },
+            )
+        };
+        edge("x", "seed");
+        edge("seed", "y");
+        edge("y", "z");
+
+        let titles = |r: &SearchResult| {
+            let mut v: Vec<String> = r.hits.iter().map(|h| h.title.clone()).collect();
+            v.sort();
+            v
+        };
+
+        // related_to: both (the default) = undirected; out/in narrow.
+        let base = SearchScope {
+            related_to: Some(id("seed")),
+            depth: Some(5),
+            ..Default::default()
+        };
+        assert_eq!(titles(&run_search(&store, &base)), ["seed", "x", "y", "z"]);
+        let out_scope = SearchScope {
+            direction: crate::graph::query::TraversalDirection::Out,
+            ..base.clone()
+        };
+        assert_eq!(
+            titles(&run_search(&store, &out_scope)),
+            ["seed", "y", "z"],
+            "out = transitive descendants only, at every hop"
+        );
+        let in_scope = SearchScope {
+            direction: crate::graph::query::TraversalDirection::In,
+            ..base
+        };
+        assert_eq!(
+            titles(&run_search(&store, &in_scope)),
+            ["seed", "x"],
+            "in = transitive ancestors only"
+        );
+
+        // expand_via: primary hit is `seed`; `out` expands to y and z
+        // (via_direction Out at each), `in` expands to x only.
+        let expand_base = SearchScope {
+            query: Some(Query {
+                any: vec!["seed".into()],
+                ..Default::default()
+            }),
+            expand_via: Some(vec!["USES".into()]),
+            expand_depth: Some(3),
+            ..Default::default()
+        };
+        let out_result = run_search(
+            &store,
+            &SearchScope {
+                direction: crate::graph::query::TraversalDirection::Out,
+                ..expand_base.clone()
+            },
+        );
+        let expanded: Vec<(String, String)> = out_result
+            .hits
+            .iter()
+            .filter_map(|h| {
+                h.expansion.as_ref().map(|e| {
+                    (
+                        h.title.clone(),
+                        serde_json::to_value(e.via_direction)
+                            .unwrap()
+                            .as_str()
+                            .unwrap()
+                            .to_string(),
+                    )
+                })
+            })
+            .collect();
+        let mut expanded_sorted = expanded.clone();
+        expanded_sorted.sort();
+        assert_eq!(
+            expanded_sorted,
+            [
+                ("y".to_string(), "out".to_string()),
+                ("z".to_string(), "out".to_string())
+            ],
+            "out-expansion reaches descendants only and reports the direction"
+        );
+        let in_result = run_search(
+            &store,
+            &SearchScope {
+                direction: crate::graph::query::TraversalDirection::In,
+                ..expand_base
+            },
+        );
+        let expanded_in: Vec<String> = in_result
+            .hits
+            .iter()
+            .filter(|h| h.expansion.is_some())
+            .map(|h| h.title.clone())
+            .collect();
+        assert_eq!(expanded_in, ["x"], "in-expansion reaches ancestors only");
     }
 
     #[test]

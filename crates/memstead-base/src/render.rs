@@ -427,11 +427,19 @@ fn render_heading_paths_line(matched: Option<&HashMap<String, Vec<TermMatch>>>) 
 }
 
 /// Render the `**Expansion:**` line for one hit — `from <id> via <edge>
-/// (depth N)`.
+/// [out|in] (depth N)`. The direction rides wherever the label does,
+/// so a `both` walk stays interpretable per hit.
 fn render_expansion_line(expansion: Option<&ExpansionInfo>) -> Option<String> {
     let e = expansion?;
+    let dir = match e.via_direction {
+        crate::graph::query::TraversalDirection::Out => "out",
+        crate::graph::query::TraversalDirection::In => "in",
+        // A concrete reaching edge always has one direction; `Both`
+        // cannot occur here by construction.
+        crate::graph::query::TraversalDirection::Both => "both",
+    };
     Some(format!(
-        "**Expansion:** from `{}` via `{}` (depth {})",
+        "**Expansion:** from `{}` via `{}` [{dir}] (depth {})",
         e.of, e.via_edge, e.depth,
     ))
 }
@@ -2557,12 +2565,13 @@ mod tests {
         hit.expansion = Some(ExpansionInfo {
             of: EntityId("specs--seed".to_string()),
             via_edge: "refines".to_string(),
+            via_direction: crate::graph::query::TraversalDirection::Out,
             depth: 1,
         });
         let out = render_search_markdown(&search_result(vec![hit]), 0);
         assert!(
-            out.contains("**Expansion:** from `specs--seed` via `refines` (depth 1)"),
-            "expansion line wrong; got:\n{out}"
+            out.contains("**Expansion:** from `specs--seed` via `refines` [out] (depth 1)"),
+            "expansion line reports the traversal direction beside the label; got:\n{out}"
         );
     }
 
@@ -2644,6 +2653,7 @@ mod tests {
         hit.expansion = Some(ExpansionInfo {
             of: EntityId("specs--seed".to_string()),
             via_edge: "refines".to_string(),
+            via_direction: crate::graph::query::TraversalDirection::Out,
             depth: 2,
         });
 

@@ -3,50 +3,56 @@
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet, VecDeque};
 
+use schemars::JsonSchema;
+
 use crate::entity::EntityId;
 use crate::store::{EdgeSource, InEdge, Store};
 
-/// Find all entities reachable from a starting entity within max_depth hops.
-/// Undirected traversal (follows both outgoing and incoming edges).
-/// Returns the set of reachable entity IDs including the start node.
-pub fn reachable(store: &Store, from: &EntityId, max_depth: usize) -> Vec<EntityId> {
-    let mut visited = HashSet::new();
-    visited.insert(from.clone());
-
-    let mut queue: VecDeque<(EntityId, usize)> = VecDeque::new();
-    queue.push_back((from.clone(), 0));
-
-    while let Some((id, depth)) = queue.pop_front() {
-        if depth >= max_depth {
-            continue;
-        }
-
-        for edge in store.outgoing(&id) {
-            if !visited.contains(&edge.target) {
-                visited.insert(edge.target.clone());
-                queue.push_back((edge.target.clone(), depth + 1));
-            }
-        }
-        for edge in store.incoming(&id) {
-            if !visited.contains(&edge.from) {
-                visited.insert(edge.from.clone());
-                queue.push_back((edge.from.clone(), depth + 1));
-            }
-        }
-    }
-
-    visited.into_iter().collect()
+/// Traversal direction relative to the seed, applied at EVERY hop —
+/// depth > 1 is a pure transitive closure in the chosen direction,
+/// never a mixed walk (an entity reachable only by alternating
+/// directions is not in an `out` or `in` result at any depth; that
+/// per-hop property is what makes a fall-through analysis correct).
+///
+/// `in`/`out` describe the edge relative to the seed and match the
+/// Store's own vocabulary — domain words (ancestors/upstream) invert
+/// per schema, so the engine does not use them.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum TraversalDirection {
+    /// Follow edges pointing away from the seed (seed → target).
+    Out,
+    /// Follow edges pointing at the seed (source → seed).
+    In,
+    /// Follow both — the historical undirected walk, and the default:
+    /// a query that omits the selector returns exactly what it always
+    /// returned.
+    #[default]
+    Both,
 }
 
-/// Like [`reachable`] but returns each reached entity's hop-distance from
-/// `from` — the depth at which BFS first reaches it (`from` itself is 0).
-/// Undirected (outgoing + incoming), same membership as [`reachable`]. The
-/// distances drive proximity ranking of a `related_to` neighbourhood:
-/// nearer first.
+impl TraversalDirection {
+    /// Does this walk follow outgoing edges?
+    fn follows_out(self) -> bool {
+        !matches!(self, TraversalDirection::In)
+    }
+    /// Does this walk follow incoming edges?
+    fn follows_in(self) -> bool {
+        !matches!(self, TraversalDirection::Out)
+    }
+}
+
+/// Returns each reached entity's hop-distance from `from` — the depth at
+/// which BFS first reaches it (`from` itself is 0), following only edges
+/// admitted by `direction` at every hop. The distances drive proximity
+/// ranking of a `related_to` neighbourhood: nearer first.
 pub fn reachable_distances(
     store: &Store,
     from: &EntityId,
     max_depth: usize,
+    direction: TraversalDirection,
 ) -> HashMap<EntityId, usize> {
     let mut dist: HashMap<EntityId, usize> = HashMap::new();
     dist.insert(from.clone(), 0);
@@ -58,39 +64,56 @@ pub fn reachable_distances(
         if depth >= max_depth {
             continue;
         }
-        for edge in store.outgoing(&id) {
-            if !dist.contains_key(&edge.target) {
-                dist.insert(edge.target.clone(), depth + 1);
-                queue.push_back((edge.target.clone(), depth + 1));
+        if direction.follows_out() {
+            for edge in store.outgoing(&id) {
+                if !dist.contains_key(&edge.target) {
+                    dist.insert(edge.target.clone(), depth + 1);
+                    queue.push_back((edge.target.clone(), depth + 1));
+                }
             }
         }
-        for edge in store.incoming(&id) {
-            if !dist.contains_key(&edge.from) {
-                dist.insert(edge.from.clone(), depth + 1);
-                queue.push_back((edge.from.clone(), depth + 1));
+        if direction.follows_in() {
+            for edge in store.incoming(&id) {
+                if !dist.contains_key(&edge.from) {
+                    dist.insert(edge.from.clone(), depth + 1);
+                    queue.push_back((edge.from.clone(), depth + 1));
+                }
             }
         }
     }
     dist
 }
 
+/// One entity reached by [`reachable_via`]: the edge label it was first
+/// reached by, the depth of that first reach (1 = direct neighbour), and
+/// the direction that reaching edge was traversed in — so a `both` walk
+/// stays interpretable per hit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReachedVia {
+    pub id: EntityId,
+    pub via_edge: String,
+    pub depth: usize,
+    /// The direction of the FIRST-reaching edge: `Out` when it points
+    /// away from the entity we walked from, `In` when it points at it.
+    /// Never `Both` — a concrete edge has one traversal direction.
+    pub direction: TraversalDirection,
+}
+
 /// Find all entities reachable from `from` by walking only edges whose
-/// `rel_type` is in `edge_types`, up to `max_depth` hops. Undirected
-/// traversal (outgoing + incoming). Returns one tuple per reached entity
-/// — never `from` itself — carrying the edge label used to first reach it
-/// and the depth of that first reach (1 = direct neighbour).
+/// `rel_type` is in `edge_types`, up to `max_depth` hops, following only
+/// edges admitted by `direction` at every hop. Returns one
+/// [`ReachedVia`] per reached entity — never `from` itself.
 ///
 /// `max_depth == 0` or an empty `edge_types` returns an empty vec.
 ///
 /// This is the graph-expansion primitive behind `SearchScope.expand_via`.
-/// Shares the BFS shape with `reachable` but filters by rel_type and
-/// reports how each entity was reached.
 pub fn reachable_via(
     store: &Store,
     from: &EntityId,
     edge_types: &[String],
     max_depth: usize,
-) -> Vec<(EntityId, String, usize)> {
+    direction: TraversalDirection,
+) -> Vec<ReachedVia> {
     if max_depth == 0 || edge_types.is_empty() {
         return Vec::new();
     }
@@ -98,7 +121,7 @@ pub fn reachable_via(
     let mut visited: HashSet<EntityId> = HashSet::new();
     visited.insert(from.clone());
 
-    let mut results: Vec<(EntityId, String, usize)> = Vec::new();
+    let mut results: Vec<ReachedVia> = Vec::new();
     let mut queue: VecDeque<(EntityId, usize)> = VecDeque::new();
     queue.push_back((from.clone(), 0));
 
@@ -106,22 +129,36 @@ pub fn reachable_via(
         if depth >= max_depth {
             continue;
         }
-        for edge in store.outgoing(&id) {
-            if !edge_types.iter().any(|t| t == &edge.rel_type) {
-                continue;
-            }
-            if visited.insert(edge.target.clone()) {
-                results.push((edge.target.clone(), edge.rel_type.clone(), depth + 1));
-                queue.push_back((edge.target.clone(), depth + 1));
+        if direction.follows_out() {
+            for edge in store.outgoing(&id) {
+                if !edge_types.iter().any(|t| t == &edge.rel_type) {
+                    continue;
+                }
+                if visited.insert(edge.target.clone()) {
+                    results.push(ReachedVia {
+                        id: edge.target.clone(),
+                        via_edge: edge.rel_type.clone(),
+                        depth: depth + 1,
+                        direction: TraversalDirection::Out,
+                    });
+                    queue.push_back((edge.target.clone(), depth + 1));
+                }
             }
         }
-        for edge in store.incoming(&id) {
-            if !edge_types.iter().any(|t| t == &edge.rel_type) {
-                continue;
-            }
-            if visited.insert(edge.from.clone()) {
-                results.push((edge.from.clone(), edge.rel_type.clone(), depth + 1));
-                queue.push_back((edge.from.clone(), depth + 1));
+        if direction.follows_in() {
+            for edge in store.incoming(&id) {
+                if !edge_types.iter().any(|t| t == &edge.rel_type) {
+                    continue;
+                }
+                if visited.insert(edge.from.clone()) {
+                    results.push(ReachedVia {
+                        id: edge.from.clone(),
+                        via_edge: edge.rel_type.clone(),
+                        depth: depth + 1,
+                        direction: TraversalDirection::In,
+                    });
+                    queue.push_back((edge.from.clone(), depth + 1));
+                }
             }
         }
     }
@@ -366,27 +403,69 @@ mod tests {
     }
 
     #[test]
-    fn reachable_within_depth() {
+    fn reachable_distances_within_depth() {
         let store = build_linear_store();
         let a = EntityId("a".into());
+        let both = TraversalDirection::Both;
 
-        let r0 = reachable(&store, &a, 0);
-        assert_eq!(r0.len(), 1); // just self
-
-        let r1 = reachable(&store, &a, 1);
-        assert_eq!(r1.len(), 2); // a + b
-
-        let r2 = reachable(&store, &a, 2);
-        assert_eq!(r2.len(), 3); // a + b + c
+        assert_eq!(reachable_distances(&store, &a, 0, both).len(), 1); // just self
+        assert_eq!(reachable_distances(&store, &a, 1, both).len(), 2); // a + b
+        assert_eq!(reachable_distances(&store, &a, 2, both).len(), 3); // a + b + c
     }
 
     #[test]
-    fn reachable_undirected() {
+    fn reachable_distances_both_is_undirected() {
         let store = build_linear_store();
         let c = EntityId("c".into());
-        // From C, going backwards via incoming edges
-        let r = reachable(&store, &c, 10);
+        // From C, `both` still walks backwards via incoming edges.
+        let r = reachable_distances(&store, &c, 10, TraversalDirection::Both);
         assert_eq!(r.len(), 3);
+    }
+
+    /// The per-hop property the feature exists for: on a chain
+    /// x --> seed --> y --> z, `out` from the seed is exactly {seed, y,
+    /// z} at depth 2+, `in` exactly {seed, x} — and an entity reachable
+    /// only by ALTERNATING directions (w, via seed <- x -> w) is in
+    /// neither directed result at any depth, because depth > 1 is a
+    /// pure transitive closure, never a mixed walk.
+    #[test]
+    fn reachable_distances_directional_transitive_closure() {
+        let mut store = Store::new();
+        for id in ["x", "seed", "y", "z", "w"] {
+            store.upsert(EntityId(id.into()), entity(id, "s", false));
+        }
+        add_edge(&mut store, "x", "seed", "USES");
+        add_edge(&mut store, "seed", "y", "USES");
+        add_edge(&mut store, "y", "z", "USES");
+        add_edge(&mut store, "x", "w", "USES"); // reachable only via in-then-out
+
+        let seed = EntityId("seed".into());
+        let ids = |m: &HashMap<EntityId, usize>| {
+            let mut v: Vec<String> = m.keys().map(|i| i.0.clone()).collect();
+            v.sort();
+            v
+        };
+
+        let out = reachable_distances(&store, &seed, 10, TraversalDirection::Out);
+        assert_eq!(
+            ids(&out),
+            ["seed", "y", "z"],
+            "out = transitive descendants only"
+        );
+
+        let inward = reachable_distances(&store, &seed, 10, TraversalDirection::In);
+        assert_eq!(
+            ids(&inward),
+            ["seed", "x"],
+            "in = transitive ancestors only"
+        );
+
+        let both = reachable_distances(&store, &seed, 10, TraversalDirection::Both);
+        assert_eq!(
+            ids(&both),
+            ["seed", "w", "x", "y", "z"],
+            "both = the historical undirected set, mixed walks included"
+        );
     }
 
     #[test]
@@ -471,11 +550,18 @@ mod tests {
         add_edge(&mut store, "a", "b", "USES");
         add_edge(&mut store, "a", "c", "REFERENCES");
 
-        let r = reachable_via(&store, &EntityId("a".into()), &["USES".to_string()], 1);
+        let r = reachable_via(
+            &store,
+            &EntityId("a".into()),
+            &["USES".to_string()],
+            1,
+            TraversalDirection::Both,
+        );
         assert_eq!(r.len(), 1);
-        assert_eq!(r[0].0, EntityId("b".into()));
-        assert_eq!(r[0].1, "USES");
-        assert_eq!(r[0].2, 1);
+        assert_eq!(r[0].id, EntityId("b".into()));
+        assert_eq!(r[0].via_edge, "USES");
+        assert_eq!(r[0].depth, 1);
+        assert_eq!(r[0].direction, TraversalDirection::Out);
     }
 
     #[test]
@@ -485,38 +571,93 @@ mod tests {
         store.upsert(EntityId("a".into()), entity("a", "s", false));
         store.upsert(EntityId("b".into()), entity("b", "s", false));
         add_edge(&mut store, "a", "b", "USES");
-        let r = reachable_via(&store, &EntityId("b".into()), &["USES".to_string()], 1);
+        let r = reachable_via(
+            &store,
+            &EntityId("b".into()),
+            &["USES".to_string()],
+            1,
+            TraversalDirection::Both,
+        );
         assert_eq!(r.len(), 1);
-        assert_eq!(r[0].0, EntityId("a".into()));
-        assert_eq!(r[0].2, 1);
+        assert_eq!(r[0].id, EntityId("a".into()));
+        assert_eq!(r[0].depth, 1);
+        assert_eq!(
+            r[0].direction,
+            TraversalDirection::In,
+            "reached against the edge — reported as `in`"
+        );
+
+        // Directional complements on the same store: from b, `out`
+        // reaches nothing (no outgoing USES), `in` reaches a.
+        let out = reachable_via(
+            &store,
+            &EntityId("b".into()),
+            &["USES".to_string()],
+            1,
+            TraversalDirection::Out,
+        );
+        assert!(out.is_empty(), "no out-edges from b: {out:?}");
+        let inward = reachable_via(
+            &store,
+            &EntityId("b".into()),
+            &["USES".to_string()],
+            1,
+            TraversalDirection::In,
+        );
+        assert_eq!(inward.len(), 1);
+        assert_eq!(inward[0].id, EntityId("a".into()));
     }
 
     #[test]
     fn reachable_via_zero_depth_empty() {
         let store = build_linear_store();
-        let r = reachable_via(&store, &EntityId("a".into()), &["USES".to_string()], 0);
+        let r = reachable_via(
+            &store,
+            &EntityId("a".into()),
+            &["USES".to_string()],
+            0,
+            TraversalDirection::Both,
+        );
         assert!(r.is_empty());
     }
 
     #[test]
     fn reachable_via_empty_edge_types_empty() {
         let store = build_linear_store();
-        let r = reachable_via(&store, &EntityId("a".into()), &[], 10);
+        let r = reachable_via(
+            &store,
+            &EntityId("a".into()),
+            &[],
+            10,
+            TraversalDirection::Both,
+        );
         assert!(r.is_empty());
     }
 
     #[test]
     fn reachable_via_respects_depth_limit() {
         let store = build_linear_store(); // a -> b -> c with USES
-        let r1 = reachable_via(&store, &EntityId("a".into()), &["USES".to_string()], 1);
+        let r1 = reachable_via(
+            &store,
+            &EntityId("a".into()),
+            &["USES".to_string()],
+            1,
+            TraversalDirection::Both,
+        );
         assert_eq!(r1.len(), 1, "depth 1 reaches b only");
-        assert_eq!(r1[0].0, EntityId("b".into()));
-        assert_eq!(r1[0].2, 1);
+        assert_eq!(r1[0].id, EntityId("b".into()));
+        assert_eq!(r1[0].depth, 1);
 
-        let r2 = reachable_via(&store, &EntityId("a".into()), &["USES".to_string()], 2);
+        let r2 = reachable_via(
+            &store,
+            &EntityId("a".into()),
+            &["USES".to_string()],
+            2,
+            TraversalDirection::Both,
+        );
         assert_eq!(r2.len(), 2);
         let depths: std::collections::HashMap<EntityId, usize> =
-            r2.iter().map(|(id, _, d)| (id.clone(), *d)).collect();
+            r2.iter().map(|r| (r.id.clone(), r.depth)).collect();
         assert_eq!(depths[&EntityId("b".into())], 1);
         assert_eq!(depths[&EntityId("c".into())], 2);
     }
@@ -534,9 +675,15 @@ mod tests {
         add_edge(&mut store, "b", "d", "R");
         add_edge(&mut store, "c", "d", "R");
 
-        let r = reachable_via(&store, &EntityId("a".into()), &["R".to_string()], 3);
+        let r = reachable_via(
+            &store,
+            &EntityId("a".into()),
+            &["R".to_string()],
+            3,
+            TraversalDirection::Both,
+        );
         let entries: std::collections::HashMap<EntityId, usize> =
-            r.iter().map(|(id, _, d)| (id.clone(), *d)).collect();
+            r.iter().map(|e| (e.id.clone(), e.depth)).collect();
         assert_eq!(entries.len(), 3, "b, c, d each appear once");
         assert_eq!(entries[&EntityId("d".into())], 2);
     }

@@ -57,6 +57,10 @@ pub struct SearchParams {
     pub related_to: Option<String>,
     #[schemars(description = "Max hops from related_to (default: 1, ignored without related_to)")]
     pub depth: Option<usize>,
+    #[schemars(
+        description = "Traversal direction for `related_to` and `expand_via`, applied at EVERY hop: \"out\" follows edges pointing away from the seed (what does this rest on), \"in\" follows edges pointing at it (what rests on this), \"both\" (default) is the historical undirected walk. Depth > 1 is a pure transitive closure in the chosen direction — never a mixed walk. Expanded hits report the reaching edge's direction as `expansion.via_direction`."
+    )]
+    pub direction: Option<memstead_base::graph::query::TraversalDirection>,
     #[schemars(description = "Only entities having this edge type (e.g. IMPLEMENTS, USES)")]
     pub edge_type: Option<String>,
     #[schemars(description = "Max results to return (default: all, max: 200)")]

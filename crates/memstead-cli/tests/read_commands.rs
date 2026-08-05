@@ -939,3 +939,88 @@ fn workspace_override_flag_env_precedence_and_refusal() {
         .success()
         .stdout(contains("Alpha"));
 }
+
+// ---------------------------------------------------------------------------
+// Directional traversal (--direction) + CLI expansion parity
+// ---------------------------------------------------------------------------
+
+/// The CLI gains the expansion pair and the direction selector: an
+/// `out` expansion from alpha reaches beta (alpha --USES--> beta) and
+/// reports the traversal direction beside the edge label; `in` from
+/// alpha reaches nothing; an unrecognised selector refuses naming the
+/// accepted values instead of silently falling back to `both`.
+#[test]
+fn search_direction_and_expand_via_flags() {
+    let tmp = TempDir::new().unwrap();
+    seed_cli_test_mem(tmp.path());
+
+    // out: beta is reached and the direction rides beside the label.
+    let out = memstead()
+        .current_dir(tmp.path())
+        .args([
+            "--json",
+            "search",
+            "exercise",
+            "--expand-via",
+            "USES",
+            "--direction",
+            "out",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    let beta = json["hits"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|h| h["id"] == "cli-test--beta")
+        .unwrap_or_else(|| panic!("out-expansion reaches beta: {json}"));
+    assert_eq!(beta["expansion"]["via_edge"], "USES");
+    assert_eq!(
+        beta["expansion"]["via_direction"], "out",
+        "the reached entity reports its traversal direction: {beta}"
+    );
+
+    // in: alpha has no incoming USES — no expanded hit.
+    let out = memstead()
+        .current_dir(tmp.path())
+        .args([
+            "--json",
+            "search",
+            "exercise",
+            "--expand-via",
+            "USES",
+            "--direction",
+            "in",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert!(
+        !json["hits"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|h| h["id"] == "cli-test--beta"),
+        "in-expansion must not reach a descendant: {json}"
+    );
+
+    // Unrecognised selector: refuses naming the accepted values.
+    memstead()
+        .current_dir(tmp.path())
+        .args(["search", "alpha", "--direction", "sideways"])
+        .assert()
+        .failure()
+        .stderr(
+            contains("sideways")
+                .and(contains("out"))
+                .and(contains("in"))
+                .and(contains("both")),
+        );
+}

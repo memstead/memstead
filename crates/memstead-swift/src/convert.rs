@@ -179,6 +179,17 @@ pub(crate) fn search_scope_from_ffi(scope: SearchScope) -> core_ops::SearchScope
         depth: scope.depth.map(|v| v as usize),
         expand_via: scope.expand_via,
         expand_depth: scope.expand_depth.map(|v| v as usize),
+        direction: match scope.direction {
+            Some(crate::types::TraversalDirection::Out) => {
+                memstead_base::graph::query::TraversalDirection::Out
+            }
+            Some(crate::types::TraversalDirection::In) => {
+                memstead_base::graph::query::TraversalDirection::In
+            }
+            Some(crate::types::TraversalDirection::Both) | None => {
+                memstead_base::graph::query::TraversalDirection::Both
+            }
+        },
         stub: scope.stub,
         // The in-process FFI consumer (macOS) reads over a channel with no
         // token cap, so the search token-budget guard isn't surfaced on the

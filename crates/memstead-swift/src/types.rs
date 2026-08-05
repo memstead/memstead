@@ -31,6 +31,15 @@ pub struct Query {
     pub field: Option<String>,
 }
 
+/// Traversal direction relative to the seed — mirrors
+/// `memstead_base::graph::query::TraversalDirection`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TraversalDirection {
+    Out,
+    In,
+    Both,
+}
+
 #[derive(Debug, Clone)]
 pub struct SearchScope {
     pub query: Option<Query>,
@@ -46,6 +55,8 @@ pub struct SearchScope {
     pub stub: Option<bool>,
     pub expand_via: Option<Vec<String>>,
     pub expand_depth: Option<u32>,
+    /// `None` = `Both` (the historical undirected walk).
+    pub direction: Option<TraversalDirection>,
 }
 
 // ---------------------------------------------------------------------------

@@ -246,6 +246,14 @@ Filter surface:
 * `--status <STATUS>`
 * `--filter <KEY=VALUE>` — Equality filter on any schema-declared filterable field: repeatable `--filter KEY=VALUE`. The four named-flag shortcuts (`--type` / `--level` / `--status` / `--edge-type`) handle their common cases; every other `filterable: equality` field (e.g. `tags`, `scope`) is reachable via this generic flag. Unknown keys are dropped and surface as engine warnings. There is no `--confidence` shortcut: a field reached only when a schema declares it goes through `--filter <field>=<value>` rather than a dedicated flag
 * `--range-filter <KEY=VALUE>` — Range filter on any `filterable: range` field: repeatable `--range-filter KEY=VALUE` with the same key grammar as the MCP `range_filters` map — `min_<field>` / `max_<field>` for numbers, `<field>_after` / `<field>_before` for dates. The strings go to the same engine path the MCP tool uses, so the same four outcome codes apply with the same meaning: `RANGE_FILTER_KEY_MALFORMED` (key ignored), `UNKNOWN_RANGE_FILTER_FIELD` (no type declares the field — results stay unfiltered), `RANGE_FILTER_TYPE_SCOPED` (other types declare it — applied with strict type-narrowing), `FIELD_NOT_RANGE_FILTERABLE` (declared, but not `filterable: range`). Composable with `--filter` and the named shortcuts
+* `--expand-via <REL_TYPE>` — Relationship types to follow from primary hits to pull in graph-proximal neighbours: repeatable `--expand-via REL_TYPE`. Mirrors the MCP `expand_via` parameter — expanded hits carry `expansion: { of, via_edge, via_direction, depth }` and a decayed score (0.5^depth)
+* `--expand-depth <N>` — Max hops to traverse via `--expand-via` (default: 1). Mirrors the MCP `expand_depth` parameter
+* `--direction <DIRECTION>` — Traversal direction for `--related-to` and `--expand-via`, applied at EVERY hop: `out` follows edges pointing away from the seed (what does this rest on), `in` follows edges pointing at it (what rests on this), `both` (default) is the historical undirected walk. Depth > 1 is a pure transitive closure in the chosen direction — never a mixed walk
+
+  Default value: `both`
+
+  Possible values: `out`, `in`, `both`
+
 * `--stub` — Return only stub entities (conflicts with --no-stub)
 * `--no-stub` — Return only real (non-stub) entities (conflicts with --stub)
 

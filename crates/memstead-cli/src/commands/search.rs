@@ -100,6 +100,28 @@ pub struct Args {
     #[arg(long = "range-filter", value_name = "KEY=VALUE")]
     pub range_filter: Vec<String>,
 
+    /// Relationship types to follow from primary hits to pull in
+    /// graph-proximal neighbours: repeatable `--expand-via REL_TYPE`.
+    /// Mirrors the MCP `expand_via` parameter — expanded hits carry
+    /// `expansion: { of, via_edge, via_direction, depth }` and a
+    /// decayed score (0.5^depth).
+    #[arg(long = "expand-via", value_name = "REL_TYPE")]
+    pub expand_via: Vec<String>,
+
+    /// Max hops to traverse via `--expand-via` (default: 1). Mirrors
+    /// the MCP `expand_depth` parameter.
+    #[arg(long = "expand-depth", value_name = "N")]
+    pub expand_depth: Option<usize>,
+
+    /// Traversal direction for `--related-to` and `--expand-via`,
+    /// applied at EVERY hop: `out` follows edges pointing away from
+    /// the seed (what does this rest on), `in` follows edges pointing
+    /// at it (what rests on this), `both` (default) is the historical
+    /// undirected walk. Depth > 1 is a pure transitive closure in the
+    /// chosen direction — never a mixed walk.
+    #[arg(long, value_enum, default_value_t = DirectionArg::Both)]
+    pub direction: DirectionArg,
+
     /// Return only stub entities (conflicts with --no-stub).
     #[arg(long, conflicts_with = "no_stub")]
     pub stub: bool,
@@ -107,6 +129,26 @@ pub struct Args {
     /// Return only real (non-stub) entities (conflicts with --stub).
     #[arg(long, conflicts_with = "stub")]
     pub no_stub: bool,
+}
+
+/// CLI form of the traversal-direction selector. clap's `ValueEnum`
+/// refuses an unrecognised value with a typed error naming the
+/// accepted values — never a silent fallback to `both`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum DirectionArg {
+    Out,
+    In,
+    Both,
+}
+
+impl From<DirectionArg> for memstead_base::graph::query::TraversalDirection {
+    fn from(d: DirectionArg) -> Self {
+        match d {
+            DirectionArg::Out => Self::Out,
+            DirectionArg::In => Self::In,
+            DirectionArg::Both => Self::Both,
+        }
+    }
 }
 
 pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
@@ -176,8 +218,13 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         edge_type: args.edge_type,
         related_to: args.related_to.map(EntityId),
         depth: args.depth,
-        expand_via: None,
-        expand_depth: None,
+        expand_via: if args.expand_via.is_empty() {
+            None
+        } else {
+            Some(args.expand_via.clone())
+        },
+        expand_depth: args.expand_depth,
+        direction: args.direction.into(),
         stub,
         token_budget: None,
     };

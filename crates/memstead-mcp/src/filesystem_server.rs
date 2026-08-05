@@ -1403,6 +1403,7 @@ impl FilesystemMcpServer {
             depth: p.depth,
             expand_via: p.expand_via,
             expand_depth: p.expand_depth,
+            direction: p.direction.unwrap_or_default(),
             stub: p.stub,
             token_budget: p.token_budget,
         };
@@ -2765,6 +2766,7 @@ mod tests {
             range_filters: None,
             stub: Some(false),
             token_budget: None,
+            direction: None,
         }));
         assert!(!result.is_error.unwrap_or(false));
         let md = result
@@ -2808,6 +2810,7 @@ mod tests {
             range_filters: Some(range_filters),
             stub: Some(false),
             token_budget: None,
+            direction: None,
         }));
         let sc = result
             .structured_content
@@ -2851,6 +2854,7 @@ mod tests {
             range_filters: Some(range_filters),
             stub: Some(false),
             token_budget: None,
+            direction: None,
         }));
         let sc = result.structured_content.as_ref().unwrap();
         let warnings = sc["warnings"].as_array().unwrap();
@@ -2891,6 +2895,7 @@ mod tests {
             range_filters: Some(range_filters),
             stub: Some(false),
             token_budget: None,
+            direction: None,
         }));
         let sc = result.structured_content.as_ref().unwrap();
         let warnings = sc["warnings"].as_array().unwrap();
@@ -2926,6 +2931,7 @@ mod tests {
             range_filters: None,
             stub: Some(false),
             token_budget: None,
+            direction: None,
         }));
         let sc = result.structured_content.as_ref().unwrap();
         let warnings = sc["warnings"].as_array().unwrap_or(&Vec::new()).clone();
@@ -2963,6 +2969,7 @@ mod tests {
             range_filters: None,
             stub: Some(false),
             token_budget: None,
+            direction: None,
         }));
         let md = result
             .content
@@ -3032,6 +3039,7 @@ mod tests {
                 phrase: None,
                 field: None,
             }),
+            direction: None,
             mem: None,
             entity_type: None,
             expand_via: None,
@@ -3374,6 +3382,7 @@ mod tests {
                 phrase: None,
                 field: None,
             }),
+            direction: None,
             mem: None,
             entity_type: None,
             expand_via: None,
@@ -3431,6 +3440,7 @@ mod tests {
             range_filters: None,
             stub: Some(false),
             token_budget: None,
+            direction: None,
         }));
         assert!(!result.is_error.unwrap_or(false));
         let text = result
