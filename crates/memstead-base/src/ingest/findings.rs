@@ -1422,6 +1422,7 @@ mod tests {
             hash_stability: AnchorHashStability::Stable,
             derived_from: Vec::new(),
             binding: None,
+            source: None,
         }
     }
 
@@ -1927,6 +1928,7 @@ mod tests {
             hash_stability: AnchorHashStability::Stable,
             derived_from: Vec::new(),
             binding: None,
+            source: None,
         };
         let mut sidecar = AnchorSidecar::default();
         sidecar.set(
@@ -2125,6 +2127,7 @@ mod tests {
             hash_stability: AnchorHashStability::Stable,
             derived_from: Vec::new(),
             binding: None,
+            source: None,
         };
         let mut sidecar = AnchorSidecar::default();
         sidecar.set("engine--e", vec![mk("src/present.rs"), mk("src/gone.rs")]);
@@ -2329,6 +2332,7 @@ mod tests {
                 Vec::new()
             },
             binding: None,
+            source: None,
         };
         use AnchorHashStability::{Stable, Unstable};
         let mut sidecar = AnchorSidecar::default();
@@ -2600,6 +2604,7 @@ mod tests {
             hash_stability: AnchorHashStability::Stable,
             derived_from: Vec::new(),
             binding: None,
+            source: None,
         };
         let mut sidecar = AnchorSidecar::default();
         sidecar.set(
@@ -3250,6 +3255,7 @@ mod tests {
             hash_stability: AnchorHashStability::Stable,
             derived_from: Vec::new(),
             binding: None,
+            source: None,
         };
         let mut sidecar = AnchorSidecar::default();
         sidecar.set(

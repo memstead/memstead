@@ -438,6 +438,7 @@ mod tests {
             hash_stability: AnchorHashStability::Stable,
             derived_from: derived_from.into_iter().map(str::to_string).collect(),
             binding: None,
+            source: None,
         }
     }
 

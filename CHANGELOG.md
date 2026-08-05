@@ -8,6 +8,22 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Added
+- **An anchor names the source that produced it.** Anchor records gain
+  an optional `source` — the NAME of the producing binding's source
+  entry — so a discovery run over a multi-source binding is measurable
+  per entry point. Present-but-empty refuses `INVALID_ANCHOR`; a name
+  the anchor's own (still-resolvable) producing binding does not
+  declare refuses with the declared names in the recovery payload; an
+  absent or unresolvable binding accepts any non-empty name
+  (validation never requires the binding to resolve). The field rides
+  every anchor-accepting surface through the shared `AnchorInput`
+  (MCP `anchors[]`, CLI `--anchor` on create/update/batch-update);
+  the build/one-shot and sync briefs' provenance block now lists the
+  binding's declared source names and instructs setting `source`, the
+  verify brief notes per-source measurability, and the sync skill's
+  capability-gated anchor line names the entry point. Pre-existing
+  anchors are never backfilled — an absent value is honest — and the
+  sidecar loads unchanged (additive, no version bump).
 - **Directional graph traversal.** `related_to` and `expand_via` gain a
   `direction` selector — `out` (edges pointing away from the seed:
   what does this rest on), `in` (edges pointing at it: what rests on

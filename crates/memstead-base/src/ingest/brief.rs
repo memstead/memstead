@@ -540,14 +540,38 @@ pub fn render_changed_slice(cursor: &SourceCursor) -> String {
 /// own mutation surface (the reason the plugin-side capability gate exists for
 /// skill-carried prose). The element shape is taught by the mutation tools'
 /// own descriptions; the brief carries only the job.
-pub fn render_anchor_instruction() -> String {
-    "## Provenance — anchor your writes\n\n\
+pub fn render_anchor_instruction(resolved: &ResolvedIngest) -> String {
+    let mut block = "## Provenance — anchor your writes\n\n\
      Attach an `anchors` list to every `memstead_create` / `memstead_update`, naming the \
      source artifact(s) the entity is drawn from (the mutation tools document the element \
      shape). Anchored writes are what verify measures coverage and drift against, and — on \
      cursor-driven passes — what the advance gate auto-marks `worked`; an unanchored write \
      leaves the fidelity report and the disposition window blind to your work.\n\n"
-        .to_string()
+        .to_string();
+    // Name the producing entry point: each anchor's `source` carries the
+    // binding source NAME it came from, so a discovery run is measurable
+    // per entry point (which entry carries, which delivers nothing).
+    let primary_names: Vec<&str> = resolved
+        .sources
+        .iter()
+        .filter_map(|s| match s {
+            crate::ingest::resolve::ResolvedSource::Primary(src) => Some(src.name.as_str()),
+            crate::ingest::resolve::ResolvedSource::Reference { .. } => None,
+        })
+        .collect();
+    if !primary_names.is_empty() {
+        block.push_str(&format!(
+            "Set each anchor's `source` to the binding source name you drew the artifact \
+             from — this binding declares: {}. A name outside that list refuses \
+             `INVALID_ANCHOR` with the declared names in the recovery payload.\n\n",
+            primary_names
+                .iter()
+                .map(|n| format!("`{n}`"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    block
 }
 
 pub fn assemble_discovery_brief(
@@ -562,7 +586,7 @@ pub fn assemble_discovery_brief(
         render_intent(resolved),
         render_goal_and_avoid(guidance),
         render_operative_data(resolved, process_mem, destination_schema),
-        render_anchor_instruction(),
+        render_anchor_instruction(resolved),
         changed_slice_preface.to_string(),
     ];
     parts
@@ -687,7 +711,7 @@ pub fn assemble_one_shot_brief(
         render_intent(resolved),
         render_goal_and_avoid(guidance),
         render_operative_data(resolved, process_mem, destination_schema),
-        render_anchor_instruction(),
+        render_anchor_instruction(resolved),
         render_one_shot_lens(resolved, destination_schema, destination_purpose),
     ];
     parts
@@ -732,6 +756,13 @@ pub fn render_verify_brief(resolved: &ResolvedIngest, backlog: usize) -> String 
          you find. Nothing here writes into the destination mem.",
         resolved.name, resolved.destination_mem
     ));
+    lines.push(String::new());
+
+    lines.push(
+        "Anchors may carry a `source` naming the binding entry point that produced them — \
+         note it when recording findings, so fidelity stays measurable per source."
+            .to_string(),
+    );
     lines.push(String::new());
 
     lines.push("### Adjudicate the queued findings (capped)".to_string());
@@ -1186,6 +1217,7 @@ pub fn render_sync_brief(
     }
     parts.push(open_findings);
     parts.push(prune_block);
+    parts.push(render_anchor_instruction(resolved));
     parts.push(render_sync_conservatism());
 
     parts
@@ -2101,6 +2133,10 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
                 "## Open findings to repair",
                 "### Drifted — the anchored content changed",
                 "### Uncovered — a source artifact with no entity",
+                // Deliberate addition (anchor-source plan): the sync
+                // brief now carries the provenance instruction so
+                // repair writes are anchored — and name their source.
+                "## Provenance — anchor your writes",
                 "## How to repair — be conservative",
             ],
             "the loop-path sync brief carries exactly these blocks, in this order"

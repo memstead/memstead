@@ -127,10 +127,55 @@ impl super::Engine {
         }
         let medium = self.resolve_anchor_medium(mem);
         let medium_ref = medium.as_ref().map(|(t, ns)| (t.as_str(), *ns));
-        inputs
+        let anchors: Vec<crate::anchor::Anchor> = inputs
             .iter()
             .map(|i| i.validate(medium_ref).map_err(EngineError::from))
-            .collect()
+            .collect::<Result<_, _>>()?;
+
+        // Source-vs-binding check: when an anchor names BOTH a producing
+        // binding and a source, and that binding hash still resolves in
+        // this workspace (reverse lookup — any later binding edit moves
+        // the hash and drops earlier anchors into the accept-any-name
+        // branch for good), the source must be one of the binding's
+        // declared names. The bindings load is skipped entirely unless
+        // some input needs it, and a missing workspace root or an
+        // unloadable store degrades to accept-any-name — validation
+        // must never require the binding to resolve.
+        if anchors
+            .iter()
+            .any(|a| a.binding.is_some() && a.source.is_some())
+            && let Some(root) = self.workspace_root()
+            && let Ok(configs) = crate::pipeline_store::load_pipeline_configs(root)
+        {
+            for a in &anchors {
+                let (Some(binding_hash), Some(source)) = (&a.binding, &a.source) else {
+                    continue;
+                };
+                let Some(record) = configs
+                    .bindings
+                    .iter()
+                    .find(|r| crate::binding::hash_binding(&r.config) == *binding_hash)
+                else {
+                    continue; // unresolvable binding: accept any non-empty name
+                };
+                let declared: Vec<String> = record
+                    .config
+                    .sources
+                    .iter()
+                    .map(|s| s.name.clone())
+                    .collect();
+                if !declared.iter().any(|n| n == source) {
+                    return Err(EngineError::from(
+                        crate::anchor::AnchorValidationError::SourceNotDeclared {
+                            got: source.clone(),
+                            declared,
+                        },
+                    ));
+                }
+            }
+        }
+
+        Ok(anchors)
     }
 
     /// Record verify-observed prepared-content hashes onto **hash-less

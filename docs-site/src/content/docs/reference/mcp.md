@@ -165,6 +165,14 @@ Create a new entity. Read the target mem's schema first via `memstead_schema` (s
             "string",
             "null"
           ]
+        },
+        "source": {
+          "default": null,
+          "description": "NAME of the source (as declared in the producing binding's `sources[]`) that produced this anchor — lets a discovery run be measured per entry point. Name the source you are working from whenever the binding declares more than one. Present-but-empty refuses INVALID_ANCHOR; a name the (resolvable) producing binding does not declare refuses with the declared names in `details.declared`. Omit for a manually-authored anchor.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -1298,6 +1306,14 @@ Modify an existing entity. Pre-fetch the target mem's schema via `memstead_schem
         "hash_stability": {
           "default": null,
           "description": "Medium's declared hash stability: `stable` | `unstable` (defaults to `stable`). An unstable-source hash break resolves `recheck`, not `drifted`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "default": null,
+          "description": "NAME of the source (as declared in the producing binding's `sources[]`) that produced this anchor — lets a discovery run be measured per entry point. Name the source you are working from whenever the binding declares more than one. Present-but-empty refuses INVALID_ANCHOR; a name the (resolvable) producing binding does not declare refuses with the declared names in `details.declared`. Omit for a manually-authored anchor.",
           "type": [
             "string",
             "null"

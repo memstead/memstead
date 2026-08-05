@@ -98,6 +98,11 @@ pub struct AnchorInputParam {
     )]
     #[serde(default)]
     pub binding: Option<String>,
+    #[schemars(
+        description = "NAME of the source (as declared in the producing binding's `sources[]`) that produced this anchor — lets a discovery run be measured per entry point. Name the source you are working from whenever the binding declares more than one. Present-but-empty refuses INVALID_ANCHOR; a name the (resolvable) producing binding does not declare refuses with the declared names in `details.declared`. Omit for a manually-authored anchor."
+    )]
+    #[serde(default)]
+    pub source: Option<String>,
 }
 
 /// The medium-typed pinned version sub-object of an [`AnchorInputParam`].
@@ -128,6 +133,7 @@ impl AnchorInputParam {
         memstead_base::anchor::AnchorInput {
             artifact: self.artifact,
             grain: self.grain,
+            source: self.source,
             class: self.class,
             at_version,
             hash: self.hash,

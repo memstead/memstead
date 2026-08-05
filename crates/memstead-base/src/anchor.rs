@@ -304,6 +304,15 @@ pub struct Anchor {
     /// producing binding.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub binding: Option<String>,
+    /// The NAME of the source (as declared in the producing binding's
+    /// `sources[]`) that produced this anchor — so a discovery run can
+    /// be measured per entry point. Optional and additive: pre-existing
+    /// sidecars load unchanged and are never backfilled (a guessed
+    /// provenance is worse than an absent one). Validated against the
+    /// producing binding's declared names only when [`Self::binding`]
+    /// still resolves in the workspace.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -333,6 +342,8 @@ pub struct AnchorInput {
     pub derived_from: Option<Vec<String>>,
     #[serde(default)]
     pub binding: Option<String>,
+    #[serde(default)]
+    pub source: Option<String>,
 }
 
 /// A typed `INVALID_ANCHOR` refusal. The whole mutation refuses and the
@@ -365,6 +376,21 @@ pub enum AnchorValidationError {
     /// semantics (`authored` / `informed-by`).
     #[error("anchor class '{class}' carries no hash semantics — a content hash is not permitted")]
     HashOnNonHashClass { class: &'static str },
+    /// A `source` was supplied but is empty after trimming — a source
+    /// name, when present, must be one of the producing binding's
+    /// declared names, and an empty string can never be one.
+    #[error("anchor `source`, when present, must be a non-empty source name")]
+    EmptySource,
+    /// The anchor's `source` is not among the sources declared by its
+    /// own (resolvable) producing binding. Carries the declared names
+    /// as the recovery payload. Only fires when the `binding` hash
+    /// still resolves in this workspace — an orphaned or since-edited
+    /// binding accepts any non-empty name.
+    #[error(
+        "anchor `source` {got:?} is not declared by the anchor's producing binding; declared          sources: {}",
+        declared.join(", ")
+    )]
+    SourceNotDeclared { got: String, declared: Vec<String> },
     /// The grain cannot be expressed in the medium's anchor namespace
     /// (per the E2 capability matrix), e.g. `span` on a non-path medium.
     #[error(
@@ -406,6 +432,14 @@ impl AnchorValidationError {
             }
             AnchorValidationError::MissingArtifact => {
                 d.insert("field".into(), "artifact".into());
+            }
+            AnchorValidationError::EmptySource => {
+                d.insert("field".into(), "source".into());
+            }
+            AnchorValidationError::SourceNotDeclared { got, declared } => {
+                d.insert("field".into(), "source".into());
+                d.insert("got".into(), serde_json::json!(got));
+                d.insert("declared".into(), serde_json::json!(declared));
             }
             AnchorValidationError::HashOnNonHashClass { class } => {
                 d.insert("field".into(), "hash".into());
@@ -525,6 +559,21 @@ impl AnchorInput {
             });
         }
 
+        // `source`, when present, must be non-empty. (Whether it names a
+        // source the producing binding actually declares is checked at
+        // the engine seam, which can resolve the binding hash — this
+        // context-free validator cannot.)
+        let source = match self.source.as_deref() {
+            None => None,
+            Some(raw) => {
+                let trimmed = raw.trim();
+                if trimmed.is_empty() {
+                    return Err(AnchorValidationError::EmptySource);
+                }
+                Some(trimmed.to_string())
+            }
+        };
+
         Ok(Anchor {
             artifact,
             grain,
@@ -539,6 +588,7 @@ impl AnchorInput {
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
                 .map(str::to_string),
+            source,
         })
     }
 }
@@ -1055,6 +1105,7 @@ mod tests {
             hash_stability: stab,
             derived_from: Vec::new(),
             binding: None,
+            source: None,
         }
     }
 
@@ -1149,6 +1200,7 @@ mod tests {
                 hash_stability: AnchorHashStability::Stable,
                 derived_from: Vec::new(),
                 binding: None,
+                source: None,
             },
             Anchor {
                 artifact: "src/".into(),
@@ -1159,6 +1211,7 @@ mod tests {
                 hash_stability: AnchorHashStability::Stable,
                 derived_from: vec!["a.rs".into(), "b.rs".into()],
                 binding: None,
+                source: None,
             },
         ];
         let comp = compose_entity_anchors(&anchors);
@@ -1269,5 +1322,62 @@ mod tests {
         let v = serde_json::to_value(&a).unwrap();
         assert_eq!(v["at_version"]["kind"], "commit");
         assert_eq!(v["at_version"]["value"], "deadbeef");
+    }
+
+    /// `source` rides validation: a non-empty name is carried, absent
+    /// stays absent, and present-but-empty refuses `INVALID_ANCHOR`
+    /// with `field: source` in the recovery detail.
+    #[test]
+    fn validate_source_carried_absent_or_refused_when_empty() {
+        let mut input = AnchorInput {
+            artifact: Some("src/lib.rs".into()),
+            grain: Some("file".into()),
+            class: Some("anchored".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            input.validate(None).unwrap().source,
+            None,
+            "absent stays absent"
+        );
+
+        input.source = Some("  api-docs  ".into());
+        assert_eq!(
+            input.validate(None).unwrap().source.as_deref(),
+            Some("api-docs"),
+            "non-empty name is carried (trimmed)"
+        );
+
+        input.source = Some("   ".into());
+        let err = input.validate(None).unwrap_err();
+        assert_eq!(err.code(), INVALID_ANCHOR_CODE);
+        assert!(matches!(err, AnchorValidationError::EmptySource));
+        assert_eq!(
+            err.detail().get("field"),
+            Some(&serde_json::json!("source"))
+        );
+    }
+
+    /// A sidecar written before the `source` field existed loads
+    /// unchanged (additive, optional — no migration, no version bump),
+    /// and a sourced anchor round-trips through serde.
+    #[test]
+    fn source_is_additive_on_the_persisted_shape() {
+        let pre_plan = r#"{
+            "artifact": "src/lib.rs",
+            "grain": "file",
+            "class": "anchored",
+            "hash_stability": "stable"
+        }"#;
+        let a: Anchor = serde_json::from_str(pre_plan).expect("pre-plan anchor loads");
+        assert_eq!(a.source, None, "no backfill, no default");
+
+        let sourced = Anchor {
+            source: Some("api-docs".into()),
+            ..a
+        };
+        let json = serde_json::to_string(&sourced).unwrap();
+        let back: Anchor = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.source.as_deref(), Some("api-docs"));
     }
 }

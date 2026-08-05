@@ -952,6 +952,135 @@ write_rules: []
         );
     }
 
+    /// The source-vs-binding check at the engine seam: an anchor naming
+    /// BOTH a producing binding (by hash) and a `source` refuses when
+    /// the binding resolves in this workspace but does not declare the
+    /// name — with the declared names in the recovery payload. A
+    /// declared name is accepted; an unresolvable binding hash accepts
+    /// any non-empty name (validation never requires resolution).
+    #[test]
+    fn anchor_source_validated_against_resolvable_binding() {
+        use crate::binding::{
+            BINDING_VERSION, Binding, BuildMode, BuildOperation, Operations, hash_binding,
+        };
+        use crate::pipeline::{IngestTrigger, PatternEntry, PatternMode, Source};
+
+        let tmp = TempDir::new().unwrap();
+        let (mut engine, _seed) = engine_with_seed(&tmp, "Seed");
+        let (actor, client) = cli_actor();
+
+        // A workspace root carrying one binding with two declared sources.
+        let ws = TempDir::new().unwrap();
+        let binding = Binding {
+            version: BINDING_VERSION,
+            intent: None,
+            sources: ["api-docs", "guides"]
+                .into_iter()
+                .map(|n| Source {
+                    name: n.to_string(),
+                    medium_type: crate::pipeline::MediumType::Codebase,
+                    pointer: "../src".to_string(),
+                    change_detection: None,
+                    scope: vec![PatternEntry {
+                        path: "**/*".to_string(),
+                        mode: PatternMode::Allow,
+                    }],
+                    engagement: None,
+                    preparation: None,
+                })
+                .collect(),
+            reference_mems: Vec::new(),
+            destination_mem: "specs".to_string(),
+            deny_paths: Vec::new(),
+            coverage_semantics: None,
+            rules: None,
+            prune: None,
+            operations: Operations {
+                build: Some(BuildOperation {
+                    mode: BuildMode::Discovery,
+                    trigger: IngestTrigger::Loop,
+                    batch_size: 20,
+                    post_actions: None,
+                }),
+                sync: None,
+                verify: None,
+            },
+        };
+        let dir = ws
+            .path()
+            .join(".memstead")
+            .join("projections")
+            .join("specs");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("docs.json"),
+            serde_json::to_string_pretty(&binding).unwrap(),
+        )
+        .unwrap();
+        engine.set_workspace_root(ws.path().to_path_buf());
+        let binding_hash = hash_binding(&binding);
+
+        let anchor = |source: &str, binding: &str| crate::anchor::AnchorInput {
+            artifact: Some("src/x.rs".into()),
+            grain: Some("file".into()),
+            class: Some("anchored".into()),
+            binding: Some(binding.into()),
+            source: Some(source.into()),
+            ..Default::default()
+        };
+        let mut make_args = |title: &str, a: crate::anchor::AnchorInput| {
+            let mut args = empty_create_args("specs", title);
+            args.anchors = vec![a];
+            args
+        };
+
+        // Undeclared name against the RESOLVING binding: refuses with the
+        // declared names in the payload.
+        let err = engine
+            .create_entity(
+                make_args("Bad Source", anchor("front-page", &binding_hash)),
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap_err();
+        assert_eq!(err.code(), "INVALID_ANCHOR", "got {err:?}");
+        let details = err.details();
+        assert_eq!(details["field"], "source");
+        assert_eq!(details["got"], "front-page");
+        assert_eq!(
+            details["declared"],
+            serde_json::json!(["api-docs", "guides"])
+        );
+
+        // A declared name is accepted, and the anchor round-trips with it.
+        let ok = engine
+            .create_entity(
+                make_args("Good Source", anchor("api-docs", &binding_hash)),
+                actor,
+                Some(&client),
+                None,
+            )
+            .expect("declared source name accepted");
+        let anchors = engine.mem_anchors_resolved("specs");
+        let stored = anchors
+            .iter()
+            .find(|(id, _)| id == &ok.id)
+            .map(|(_, a)| &a.anchor)
+            .expect("anchor stored for the new entity");
+        assert_eq!(stored.source.as_deref(), Some("api-docs"));
+
+        // An unresolvable binding hash accepts any non-empty name.
+        engine
+            .create_entity(
+                make_args("Orphaned Binding", anchor("whatever", "deadbeef")),
+                actor,
+                Some(&client),
+                None,
+            )
+            .expect("unresolvable binding accepts any non-empty name");
+    }
+
     #[test]
     fn create_entity_writes_through_folder_backend_and_updates_store() {
         let tmp = TempDir::new().unwrap();

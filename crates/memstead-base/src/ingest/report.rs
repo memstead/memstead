@@ -1493,6 +1493,7 @@ mod tests {
             hash_stability: AnchorHashStability::Stable,
             derived_from: Vec::new(),
             binding: None,
+            source: None,
         };
         let mut sidecar = AnchorSidecar::default();
         sidecar.set(

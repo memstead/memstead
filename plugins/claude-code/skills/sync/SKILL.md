@@ -48,8 +48,8 @@ write-only on the mem; engine refusals are surfaced verbatim, never worked aroun
    node "${CLAUDE_PLUGIN_ROOT}/scripts/binary-version.mjs" gate "$(pwd)"
    ```
 
-   **Capable** → include `anchors` on each create/update naming the source
-   artifact(s) drawn from. **Not capable** → omit and say so with the reason.
+   **Capable** → include `anchors` naming the source artifact(s), with
+   `source` = the brief-listed entry point. **Not capable** → omit; say why.
 
 3. Render and read the sync brief, then follow it — it carries the changed
    slice, the open findings, and the conservatism rules:
