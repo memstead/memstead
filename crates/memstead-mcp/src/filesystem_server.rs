@@ -3005,6 +3005,63 @@ mod tests {
         assert!(!body.as_object().unwrap().is_empty());
     }
 
+    /// Plan 08 duplicate check (MCP leg): an identifier-shaped value
+    /// living only in an entity's metadata is findable by a plain
+    /// free-text `memstead_search`, and the hit reports the metadata
+    /// match in its matched-terms breakdown.
+    #[test]
+    fn search_finds_identifier_shaped_metadata_value() {
+        let tmp = TempDir::new().unwrap();
+        write_workspace(&tmp, "demo");
+        // Seed a file carrying the identifier in an UNDECLARED
+        // metadata field (tolerated on load; now findable).
+        std::fs::write(
+            tmp.path().join("akte.md"),
+            "---\ntype: spec\naktenzeichen: 20/54/033\n---\n# Akte\n\n\
+             ## Identity\n\nDie Akte selbst.\n\n## Purpose\n\nNachweis.\n",
+        )
+        .unwrap();
+        let server = FilesystemMcpServer::from_workspace_root(tmp.path()).unwrap();
+
+        let result = server.memstead_search(Parameters(SearchParams {
+            query: Some(memstead_base::ops::Query {
+                any: vec!["20/54/033".into()],
+                not: vec![],
+                phrase: None,
+                field: None,
+            }),
+            direction: None,
+            mem: None,
+            entity_type: None,
+            expand_via: None,
+            expand_depth: None,
+            related_to: None,
+            depth: None,
+            edge_type: None,
+            limit: None,
+            offset: None,
+            filters: None,
+            range_filters: None,
+            stub: None,
+            token_budget: None,
+        }));
+        assert!(!result.is_error.unwrap_or(false), "{result:?}");
+        let body = result.structured_content.unwrap();
+        let hits = body["hits"].as_array().expect("hits array");
+        assert_eq!(hits.len(), 1, "identifier found over MCP: {body}");
+        assert_eq!(hits[0]["id"], "demo--akte");
+        assert!(
+            hits[0]["matched_terms"]
+                .as_object()
+                .into_iter()
+                .flat_map(|m| m.values())
+                .flat_map(|v| v.as_array().cloned().unwrap_or_default())
+                .any(|tm| tm["field"] == "metadata"),
+            "hit identifiable as a metadata match: {}",
+            hits[0]
+        );
+    }
+
     #[test]
     fn health_via_new_engine_reflects_post_boot_mutations() {
         // Pins the migration template's "boot fresh per call" property:

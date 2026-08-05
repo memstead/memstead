@@ -54,6 +54,17 @@ pub fn compute_matched_terms(
         return None;
     }
 
+    // The schema-agnostic metadata blob — same builder the index
+    // writer uses, so a metadata-only hit is identifiable as such
+    // (`field: "metadata"`) instead of surfacing with no matched term.
+    // Only consulted on the unrestricted path (`query.field` scopes to
+    // title/sections exactly as before).
+    let metadata_text = if query.field.is_none() {
+        crate::search_index::metadata_index_text(entity)
+    } else {
+        String::new()
+    };
+
     let mut out: HashMap<String, Vec<TermMatch>> = HashMap::new();
     for term in positive_terms.iter().take(MAX_DISTINCT_TERMS) {
         let mut matches: Vec<TermMatch> = Vec::new();
@@ -67,6 +78,13 @@ pub fn compute_matched_terms(
                     heading_path,
                 });
             }
+        }
+        if let Some((start, end)) = find_folded(&metadata_text, term) {
+            matches.push(TermMatch {
+                field: "metadata".to_string(),
+                snippet: build_snippet_at(&metadata_text, start, end),
+                heading_path: None,
+            });
         }
         if !matches.is_empty() {
             out.insert(term.clone(), matches);

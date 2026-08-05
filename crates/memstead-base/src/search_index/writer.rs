@@ -100,6 +100,13 @@ impl MemIndex {
             }
         }
 
+        // The schema-agnostic keys+values field — one text blob per
+        // entity, shared builder with the matched-terms reporter.
+        doc.add_text(
+            self.fields.metadata_text,
+            super::metadata_index_text(entity),
+        );
+
         writer.add_document(doc)?;
         Ok(())
     }

@@ -8,6 +8,19 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Added
+- **Metadata values are findable.** The per-mem search index gains one
+  tokenized `metadata` field per entity carrying that entity's
+  metadata KEYS and VALUES — built from the entity, not the schema, so
+  it needs no `filterable` declaration and works for undeclared
+  fields. It joins the free-text query at a fixed weight below
+  title/section prose, so identifier-shaped values (the motivating
+  case: a search for `20/54/033` silently returned zero while an
+  entity carried exactly that value) are found without enum/date
+  tokens swamping prose ranking. A hit matched through metadata
+  reports `field: "metadata"` in its matched-terms breakdown. The
+  untokenized `meta_<key>` filter fields, the equality/range filters,
+  and their four outcome codes are untouched; prose-only queries
+  return the same entities in the same order.
 - **A published mem carries its identity and its subject.** `MemConfig`
   gains an optional human-readable `title` (display text, not identity
   — the slug name stays the sole handle everywhere) and an optional

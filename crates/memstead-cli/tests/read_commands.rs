@@ -1024,3 +1024,42 @@ fn search_direction_and_expand_via_flags() {
                 .and(contains("both")),
         );
 }
+
+/// Plan 08 duplicate check (CLI leg): an identifier-shaped metadata
+/// value is findable by plain free-text search — the silent-zero
+/// failure that produced duplicate entities is gone.
+#[test]
+fn search_finds_identifier_shaped_metadata_value() {
+    let tmp = TempDir::new().unwrap();
+    let dir = tmp.path().join("cli-test");
+    fs::create_dir_all(&dir).unwrap();
+    make_test_mem(&dir);
+    // A file carrying the identifier in a metadata field the schema
+    // never declared — tolerated on load, and now findable.
+    fs::write(
+        dir.join("akte.md"),
+        r#"---
+type: spec
+aktenzeichen: 20/54/033
+---
+# Akte
+
+## Identity
+
+Die Akte selbst.
+
+## Purpose
+
+Nachweis für Suche in Metadaten.
+"#,
+    )
+    .unwrap();
+    init_real_mem_repo_from_disk(tmp.path(), &[(&dir, "cli-test")]);
+
+    memstead()
+        .current_dir(tmp.path())
+        .args(["--json", "search", "20/54/033"])
+        .assert()
+        .success()
+        .stdout(contains("cli-test--akte").and(contains("\"metadata\"")));
+}

@@ -1521,6 +1521,86 @@ mod tests {
         assert_eq!(expanded_in, ["x"], "in-expansion reaches ancestors only");
     }
 
+    /// Plan 08 (metadata searchability): a value that exists only in an
+    /// entity's metadata — declared filterable or not, declared at all
+    /// or not — is returned by a free-text search; a metadata KEY finds
+    /// its carriers; the hit is identifiable as a metadata match; a
+    /// value that exists nowhere still returns zero; and where a term
+    /// lives in both prose and metadata, the prose hit stays and ranks
+    /// above the metadata-only hit (below-prose weight).
+    #[test]
+    fn search_finds_metadata_values_and_keys() {
+        let mut store = Store::new();
+        // `carrier` holds the identifier-shaped value in an UNDECLARED
+        // metadata field (the default schema declares no `aktenzeichen`).
+        let mut carrier = make_entity("carrier", "specs");
+        carrier.metadata.insert(
+            "aktenzeichen".into(),
+            MetadataValue::String("20/54/033".into()),
+        );
+        store.upsert(carrier.id.clone(), carrier);
+        // `prose` carries the shared term in its prose only.
+        let mut prose = make_entity("prose", "specs");
+        prose.sections.insert(
+            "identity".into(),
+            "shared-token lives in prose here.".into(),
+        );
+        store.upsert(prose.id.clone(), prose);
+        // `meta-only` carries the shared term in metadata only.
+        let mut meta_only = make_entity("meta-only", "specs");
+        meta_only.metadata.insert(
+            "note".into(),
+            MetadataValue::String("shared-token via metadata".into()),
+        );
+        store.upsert(meta_only.id.clone(), meta_only);
+
+        let q = |term: &str| SearchScope {
+            query: Some(Query {
+                any: vec![term.into()],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        // The motivating case: the identifier-shaped value is found.
+        let result = run_search(&store, &q("20/54/033"));
+        assert_eq!(result.hits.len(), 1, "identifier found: {result:?}");
+        assert_eq!(result.hits[0].title, "carrier");
+        // …and the hit is identifiable as a metadata match.
+        let matched = result.hits[0]
+            .matched_terms
+            .as_ref()
+            .expect("matched_terms present");
+        assert!(
+            matched.values().flatten().any(|tm| tm.field == "metadata"),
+            "metadata-only hit reports field \"metadata\": {matched:?}"
+        );
+
+        // The KEY finds its carrier too.
+        let result = run_search(&store, &q("aktenzeichen"));
+        assert_eq!(result.hits.len(), 1);
+        assert_eq!(result.hits[0].title, "carrier");
+
+        // A value that exists nowhere returns zero — no spurious matches.
+        let result = run_search(&store, &q("99/99/999"));
+        assert!(result.hits.is_empty(), "{result:?}");
+
+        // Shared term: the prose hit stays present and ranks above the
+        // metadata-only hit; the metadata hit is ADDED, nothing dropped.
+        let result = run_search(&store, &q("shared-token"));
+        let titles: Vec<&str> = result.hits.iter().map(|h| h.title.as_str()).collect();
+        assert!(
+            titles.contains(&"prose") && titles.contains(&"meta-only"),
+            "{titles:?}"
+        );
+        let prose_pos = titles.iter().position(|t| *t == "prose").unwrap();
+        let meta_pos = titles.iter().position(|t| *t == "meta-only").unwrap();
+        assert!(
+            prose_pos < meta_pos,
+            "prose match ranks above the metadata-only match: {titles:?}"
+        );
+    }
+
     #[test]
     fn search_by_title() {
         let mut store = Store::new();

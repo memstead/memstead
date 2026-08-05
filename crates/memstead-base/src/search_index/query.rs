@@ -268,7 +268,7 @@ fn resolve_target_fields(
             .map(|&f| vec![(f, section_weight(key, mem_schema).max(1.0))])
             .unwrap_or_default(),
         None => {
-            let mut out = Vec::with_capacity(mem_idx.fields.sections.len() + 1);
+            let mut out = Vec::with_capacity(mem_idx.fields.sections.len() + 2);
             out.push((mem_idx.fields.title, title_weight(mem_schema).max(1.0)));
             for (key, &f) in &mem_idx.fields.sections {
                 let w = section_weight(key, mem_schema);
@@ -276,10 +276,22 @@ fn resolve_target_fields(
                     out.push((f, w));
                 }
             }
+            // The schema-agnostic metadata keys+values field, at a
+            // fixed weight BELOW prose (title/sections carry
+            // schema-declared weights ≥ 1): an identifier-shaped value
+            // is findable, while enum/date/status tokens never swamp
+            // ordinary prose ranking. Adding a disjunct never removes
+            // a prose hit — it can only add previously unreachable
+            // ones.
+            out.push((mem_idx.fields.metadata_text, METADATA_TEXT_WEIGHT));
             out
         }
     }
 }
+
+/// Free-text weight of the schema-agnostic `metadata` field — fixed,
+/// deliberately below every schema-declared prose weight.
+const METADATA_TEXT_WEIGHT: f32 = 1.0;
 
 fn title_weight(schema: Option<&Arc<Schema>>) -> f32 {
     schema

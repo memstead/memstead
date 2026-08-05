@@ -14,6 +14,23 @@ pub mod tokenizer;
 pub mod writer;
 
 pub use query::execute_on_mem;
+
+/// Build the text indexed into the schema-agnostic `metadata` field:
+/// one "key value" line per metadata entry, keys included so "which
+/// entities carry this field at all" is answerable by the same
+/// free-text path. THE single builder — the index writer and the
+/// matched-terms reporter both call it, so what is indexed and what is
+/// reported can never drift.
+pub fn metadata_index_text(entity: &crate::entity::Entity) -> String {
+    let mut out = String::new();
+    for (key, value) in &entity.metadata {
+        out.push_str(key);
+        out.push(' ');
+        out.push_str(&value.to_frontmatter_string());
+        out.push('\n');
+    }
+    out
+}
 pub use schema::IndexFields;
 pub use snippets::{compute_matched_terms, compute_score_breakdown};
 pub use writer::MemIndex;

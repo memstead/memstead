@@ -34,6 +34,15 @@ pub struct IndexFields {
     /// Metadata field key → tantivy STRING field. Only filterable fields
     /// are added so the index doesn't carry fields no caller will query.
     pub metadata: BTreeMap<String, Field>,
+    /// ONE tokenized field carrying every entity's metadata KEYS and
+    /// VALUES ("key value" lines), built from the entity — no
+    /// `filterable` declaration needed, present even for a mem whose
+    /// schema declares no metadata fields. Participates in the
+    /// free-text query at a weight below title/sections so
+    /// identifier-shaped values are findable without enum/date tokens
+    /// swamping prose ranking. The untokenized `meta_<key>` fields
+    /// above keep their exact-match filter role untouched.
+    pub metadata_text: Field,
 }
 
 impl IndexFields {
@@ -51,6 +60,7 @@ impl IndexFields {
         let mem = builder.add_text_field("mem", STRING | STORED);
         let entity_type = builder.add_text_field("entity_type", STRING | STORED);
         let title = builder.add_text_field("title", text_options());
+        let metadata_text = builder.add_text_field("metadata", text_options());
 
         // Union of section keys across every type in the mem's schema.
         // BTreeSet — deterministic field order across runs, cheap to diff.
@@ -97,6 +107,7 @@ impl IndexFields {
             title,
             sections,
             metadata,
+            metadata_text,
         }
     }
 }
