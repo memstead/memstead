@@ -101,11 +101,22 @@ pub fn build_tantivy_query(
         }
     }
 
-    // `not` → per-term exclusion across the same target fields. Each exclusion
-    // is itself a field-disjunction so a match in any targeted field drops
-    // the doc.
+    // `not` → per-term exclusion across the PROSE target fields only
+    // (title + sections). Each exclusion is itself a field-disjunction
+    // so a match in any targeted prose field drops the doc. The
+    // schema-agnostic `metadata` field is deliberately excluded from
+    // the not-branch: the metadata field's contract is additive — it
+    // may only ADD previously unreachable hits, never remove a
+    // previously returned entity — and an exclusion consulting
+    // metadata would drop docs whose excluded token exists only in an
+    // enum/status/date value the caller never saw.
+    let not_fields: Vec<(Field, f32)> = target_fields
+        .iter()
+        .copied()
+        .filter(|(f, _)| *f != mem_idx.fields.metadata_text)
+        .collect();
     for term_str in &query.not {
-        if let Some(q) = build_term_across_fields(mem_idx, &target_fields, term_str)? {
+        if let Some(q) = build_term_across_fields(mem_idx, &not_fields, term_str)? {
             top_clauses.push((Occur::MustNot, q));
         }
     }

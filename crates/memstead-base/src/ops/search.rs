@@ -1601,6 +1601,73 @@ mod tests {
         );
     }
 
+    /// The metadata field is ADDITIVE only: an `--exclude` term that
+    /// exists solely in an entity's metadata must NOT drop that entity
+    /// from a prose query's results — exclusion consults prose fields
+    /// only, so the pre-metadata-field result set never shrinks.
+    /// (Grader counterexample from the plan-08 gate.)
+    #[test]
+    fn search_exclude_ignores_metadata_only_tokens() {
+        let mut store = Store::new();
+        let mut gamma = make_entity("gamma", "specs");
+        gamma
+            .sections
+            .insert("identity".into(), "graphword appears here.".into());
+        gamma.metadata.insert(
+            "status_note".into(),
+            MetadataValue::String("draftword".into()),
+        );
+        store.upsert(gamma.id.clone(), gamma);
+        let mut delta = make_entity("delta", "specs");
+        delta
+            .sections
+            .insert("identity".into(), "graphword also here.".into());
+        store.upsert(delta.id.clone(), delta);
+
+        let result = run_search(
+            &store,
+            &SearchScope {
+                query: Some(Query {
+                    any: vec!["graphword".into()],
+                    not: vec!["draftword".into()],
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        );
+        let mut titles: Vec<&str> = result.hits.iter().map(|h| h.title.as_str()).collect();
+        titles.sort();
+        assert_eq!(
+            titles,
+            ["delta", "gamma"],
+            "a metadata-only token must not exclude gamma"
+        );
+
+        // Complement: the same token in PROSE still excludes.
+        let mut store2 = Store::new();
+        let mut eps = make_entity("eps", "specs");
+        eps.sections.insert(
+            "identity".into(),
+            "graphword and draftword in prose.".into(),
+        );
+        store2.upsert(eps.id.clone(), eps);
+        let result = run_search(
+            &store2,
+            &SearchScope {
+                query: Some(Query {
+                    any: vec!["graphword".into()],
+                    not: vec!["draftword".into()],
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        );
+        assert!(
+            result.hits.is_empty(),
+            "prose exclusion unchanged: {result:?}"
+        );
+    }
+
     #[test]
     fn search_by_title() {
         let mut store = Store::new();
