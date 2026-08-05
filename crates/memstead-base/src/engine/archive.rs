@@ -343,12 +343,6 @@ mod tests {
         assert_eq!(names, vec!["alpha.md".to_string(), "beta.md".to_string()]);
     }
 
-    /// End-to-end producer → consumer round-trip: an entity created with
-    /// an authoring note exports per-entity provenance into the archive,
-    /// and a fresh engine that installs those bytes reads the rationale
-    /// back — matching the source. An entity created without a note is
-    /// absent from the payload (no fabricated provenance).
-    #[test]
     /// Export → validate/canonicalise (the install leg) → read
     /// preserves title, scope, method, and exclusions exactly —
     /// ordering and non-ASCII included, empty-exclusions included —
@@ -442,6 +436,12 @@ mod tests {
         assert_eq!(validated.config.title, None, "unset title stays unset");
     }
 
+    /// End-to-end producer → consumer round-trip: an entity created with
+    /// an authoring note exports per-entity provenance into the archive,
+    /// and a fresh engine that installs those bytes reads the rationale
+    /// back — matching the source. An entity created without a note is
+    /// absent from the payload (no fabricated provenance).
+    #[test]
     fn export_carries_provenance_that_install_reads_back() {
         let tmp = TempDir::new().unwrap();
         let mem_dir = tmp.path().join("specs");
