@@ -82,13 +82,20 @@ pub fn compute_health(
         for field in &schema.health_required_fields {
             // Check if it's a section or metadata field
             if schema.section(field).is_some() {
-                // It's a section
+                // It's a section. When the content is present in the
+                // file but sits under a non-deriving heading, report
+                // the distinct mismatch finding instead of "missing" —
+                // the two conditions must never collapse.
                 let content = entity.sections.get(field.as_str());
                 if content.is_none_or(|c| c.trim().is_empty()) {
-                    issues.push(HealthIssue {
-                        field: field.clone(),
-                        message: format!("required section '{field}' is empty"),
-                    });
+                    if let Some(issue) = section_heading_mismatch_issue(entity, schema, field) {
+                        issues.push(issue);
+                    } else {
+                        issues.push(HealthIssue {
+                            field: field.clone(),
+                            message: format!("required section '{field}' is empty"),
+                        });
+                    }
                 }
             } else {
                 // It's a metadata field. Treat missing AND empty /
@@ -107,6 +114,20 @@ pub fn compute_health(
                         message: format!("required field '{field}' is missing"),
                     });
                 }
+            }
+        }
+
+        // The heading-mismatch condition is drift worth surfacing on
+        // every declared section, not only the health-required ones.
+        for s in schema.sections.iter().filter(|s| !s.catch_all) {
+            if schema.health_required_fields.contains(&s.key) {
+                continue; // already handled above
+            }
+            let content = entity.sections.get(s.key.as_str());
+            if content.is_none_or(|c| c.trim().is_empty())
+                && let Some(issue) = section_heading_mismatch_issue(entity, schema, &s.key)
+            {
+                issues.push(issue);
             }
         }
 
@@ -539,6 +560,57 @@ pub struct MissingOutgoingBlock {
     pub cardinality: String,
 }
 
+/// Detect the section-fork condition for one declared section: the
+/// parsed content under `key` is empty, the schema's declared heading
+/// for the key does not derive back to it
+/// (`derive_section_key(heading) != key`), and the file carries that
+/// declared heading — so the content is present in the file but
+/// unreachable under the key: absorbed into the catch-all when the
+/// type declares one, dropped from the parsed sections otherwise.
+///
+/// Returns the distinct `SECTION_HEADING_MISMATCH` issue naming both
+/// the found heading and what a deriving heading would look like. The
+/// caller must NOT also report the section as missing — collapsing the
+/// two conditions into the missing-section report is exactly the
+/// misdirection this finding exists to prevent (the operator goes
+/// hunting for absent content that is in fact present).
+pub(crate) fn section_heading_mismatch_issue(
+    entity: &crate::entity::Entity,
+    schema: &TypeDefinition,
+    key: &str,
+) -> Option<HealthIssue> {
+    let def = schema.section(key)?;
+    let derived = memstead_schema::derive_section_key(&def.heading);
+    if derived == key {
+        return None;
+    }
+    if !entity
+        .raw_section_headings
+        .iter()
+        .any(|h| h == &def.heading)
+    {
+        return None;
+    }
+    let landing = match schema.catch_all_section() {
+        Some(c) => format!(
+            "the content was absorbed into catch-all section '{}'",
+            c.key
+        ),
+        None => "the content is unreachable under any declared key".to_string(),
+    };
+    Some(HealthIssue {
+        field: key.to_string(),
+        message: format!(
+            "SECTION_HEADING_MISMATCH: section '{key}' is not missing — its content sits \
+             under heading '{found}', which derives to '{derived}', not '{key}'; {landing}. \
+             The schema's declared heading cannot round-trip to its key (expected a heading \
+             that derives to '{key}'); fix the schema's heading/key pair — new installs of \
+             such a schema are refused",
+            found = def.heading,
+        ),
+    })
+}
+
 /// Get a single entity's health report.
 pub fn entity_health(entity: &crate::entity::Entity, schema: &TypeDefinition) -> HealthReport {
     let mut issues = Vec::new();
@@ -547,10 +619,14 @@ pub fn entity_health(entity: &crate::entity::Entity, schema: &TypeDefinition) ->
         if schema.section(field).is_some() {
             let content = entity.sections.get(field.as_str());
             if content.is_none_or(|c| c.trim().is_empty()) {
-                issues.push(HealthIssue {
-                    field: field.clone(),
-                    message: format!("required section '{field}' is empty"),
-                });
+                if let Some(issue) = section_heading_mismatch_issue(entity, schema, field) {
+                    issues.push(issue);
+                } else {
+                    issues.push(HealthIssue {
+                        field: field.clone(),
+                        message: format!("required section '{field}' is empty"),
+                    });
+                }
             }
         } else {
             let value = entity.metadata.get(field.as_str());
@@ -563,9 +639,24 @@ pub fn entity_health(entity: &crate::entity::Entity, schema: &TypeDefinition) ->
         }
     }
 
+    // The mismatch condition is drift worth surfacing on every declared
+    // section, not only the health-required ones — an optional section
+    // whose content forked away is just as invisible to readers.
+    for s in schema.sections.iter().filter(|s| !s.catch_all) {
+        if schema.health_required_fields.contains(&s.key) {
+            continue; // already handled above
+        }
+        let content = entity.sections.get(s.key.as_str());
+        if content.is_none_or(|c| c.trim().is_empty())
+            && let Some(issue) = section_heading_mismatch_issue(entity, schema, &s.key)
+        {
+            issues.push(issue);
+        }
+    }
+
     let total = schema.health_required_fields.len();
     let score = if total > 0 {
-        ((total - issues.len()) as f32) / (total as f32)
+        (total.saturating_sub(issues.len()) as f32) / (total as f32)
     } else {
         1.0
     };
@@ -671,7 +762,153 @@ mod tests {
             stub: false,
             stub_kind: None,
             heading_spans: std::collections::HashMap::new(),
+            raw_section_headings: Vec::new(),
         }
+    }
+
+    /// A sealed-violator type: section key `answers` with heading
+    /// `Answers argued` (derives to `answers_argued`) — the plenum
+    /// finding's exact shape. Loads fine; only new installs refuse.
+    fn violating_type() -> std::sync::Arc<TypeDefinition> {
+        let manifest = r#"name: debate
+version: 0.1.0
+description: sealed-violator fixture
+when_to_use: health tests
+types:
+  - question
+relationships:
+  mode: strict
+  definitions:
+    - name: PART_OF
+      description: hier
+      default_weight: 3.0
+    - name: _default
+      description: fallback
+      default_weight: 1.0
+community:
+  resolution: 1.0
+  seed: 42
+"#;
+        let type_yaml = r#"name: question
+description: t
+when_to_use: tests
+sections:
+  - key: answers
+    heading: Answers argued
+    required: true
+    search_weight: 10.0
+    write_rules: []
+  - key: notes
+    heading: Notes
+    required: false
+    search_weight: 3.0
+    catch_all: true
+    write_rules: []
+metadata_fields: []
+title_weight: 100.0
+text_fields:
+  - answers
+  - notes
+hierarchy_relationship: PART_OF
+propagating_relationships: []
+updatable_fields:
+  - title
+  - answers
+  - notes
+health_required_fields:
+  - answers
+staleness_threshold_days: 90
+write_rules: []
+"#;
+        memstead_schema::load_schema_from_memory(
+            manifest,
+            &[("question".to_string(), type_yaml.to_string())],
+        )
+        .expect("violating schema still loads")
+        .get_type("question")
+        .expect("question type")
+    }
+
+    /// Health must report the distinct SECTION_HEADING_MISMATCH finding
+    /// — naming both headings and the catch-all the content landed in —
+    /// for content sitting under a non-deriving heading, and must NOT
+    /// report that section as missing. A genuinely absent section keeps
+    /// the missing report; a conforming entity gets neither.
+    #[test]
+    fn health_distinguishes_heading_mismatch_from_missing_section() {
+        let schema = violating_type();
+
+        // Content present under the declared (non-deriving) heading.
+        let md = "---\ntype: question\n---\n# Q\n\n## Answers argued\n\nTwo answers.\n";
+        let parsed = crate::entity::parser::parse_markdown(md, "q.md", &schema, "debate")
+            .expect("parses")
+            .entity;
+        let report = entity_health(&parsed, &schema);
+        let mismatch: Vec<_> = report
+            .issues
+            .iter()
+            .filter(|i| i.message.starts_with("SECTION_HEADING_MISMATCH"))
+            .collect();
+        assert_eq!(mismatch.len(), 1, "issues: {:?}", report.issues);
+        let msg = &mismatch[0].message;
+        assert!(
+            msg.contains("'Answers argued'") && msg.contains("'answers_argued'"),
+            "names found heading and derived key: {msg}"
+        );
+        assert!(
+            msg.contains("'notes'"),
+            "names the catch-all landing: {msg}"
+        );
+        assert!(
+            !report.issues.iter().any(|i| i.message.contains("is empty")),
+            "must not also report the section as missing: {:?}",
+            report.issues
+        );
+
+        // Genuinely missing section: missing report exactly as today.
+        let md_missing = "---\ntype: question\n---\n# Q2\n";
+        let parsed_missing =
+            crate::entity::parser::parse_markdown(md_missing, "q2.md", &schema, "debate")
+                .expect("parses")
+                .entity;
+        let report_missing = entity_health(&parsed_missing, &schema);
+        assert!(
+            report_missing
+                .issues
+                .iter()
+                .any(|i| i.message == "required section 'answers' is empty"),
+            "absent section keeps the missing report: {:?}",
+            report_missing.issues
+        );
+        assert!(
+            !report_missing
+                .issues
+                .iter()
+                .any(|i| i.message.starts_with("SECTION_HEADING_MISMATCH")),
+            "no mismatch finding when the heading is not in the file"
+        );
+
+        // Conforming entity (content under a heading deriving to the
+        // key would need a deriving heading — for this violating
+        // schema no heading can reach `answers`, so use the conforming
+        // catch-all only): neither finding for a section with content.
+        let ok_type = crate::entity::parser::parse_markdown(
+            "---\ntype: question\n---\n# Q3\n\n## Answers\n\nfree.\n",
+            "q3.md",
+            &schema,
+            "debate",
+        )
+        .expect("parses")
+        .entity;
+        let report_ok = entity_health(&ok_type, &schema);
+        assert!(
+            !report_ok
+                .issues
+                .iter()
+                .any(|i| i.message.starts_with("SECTION_HEADING_MISMATCH")),
+            "mismatch fires only when the declared heading is present: {:?}",
+            report_ok.issues
+        );
     }
 
     fn make_concept_entity(name: &str, with_definition: bool) -> Entity {
@@ -710,6 +947,7 @@ mod tests {
             stub: false,
             stub_kind: None,
             heading_spans: std::collections::HashMap::new(),
+            raw_section_headings: Vec::new(),
         }
     }
 
@@ -1360,6 +1598,7 @@ community:
             stub: false,
             stub_kind: None,
             heading_spans: std::collections::HashMap::new(),
+            raw_section_headings: Vec::new(),
         }
     }
 

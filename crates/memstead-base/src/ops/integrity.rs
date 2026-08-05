@@ -496,6 +496,7 @@ community:
             stub: false,
             stub_kind: None,
             heading_spans: Default::default(),
+            raw_section_headings: Vec::new(),
         }
     }
 

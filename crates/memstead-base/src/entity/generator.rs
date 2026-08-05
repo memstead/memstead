@@ -258,6 +258,7 @@ mod tests {
             stub: false,
             stub_kind: None,
             heading_spans: std::collections::HashMap::new(),
+            raw_section_headings: Vec::new(),
         }
     }
 
@@ -296,6 +297,7 @@ mod tests {
             stub: false,
             stub_kind: None,
             heading_spans: std::collections::HashMap::new(),
+            raw_section_headings: Vec::new(),
         }
     }
 
@@ -458,6 +460,7 @@ mod tests {
             stub: false,
             stub_kind: None,
             heading_spans: std::collections::HashMap::new(),
+            raw_section_headings: Vec::new(),
         };
 
         let md = generate_markdown(&entity, &schema);
@@ -513,6 +516,7 @@ mod tests {
             stub: false,
             stub_kind: None,
             heading_spans: std::collections::HashMap::new(),
+            raw_section_headings: Vec::new(),
         };
 
         let md = generate_markdown(&entity, &goal);
@@ -698,6 +702,7 @@ Some content with [[inline-link]].
             stub: false,
             stub_kind: None,
             heading_spans: std::collections::HashMap::new(),
+            raw_section_headings: Vec::new(),
         };
 
         let md = generate_markdown(&entity, &schema);

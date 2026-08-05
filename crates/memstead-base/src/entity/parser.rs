@@ -43,7 +43,8 @@ pub fn parse_markdown(
     // Duplicate `## Heading` lines whose slug matches a schema-declared key
     // become `DuplicateSectionHeading` warnings below; first-wins is the
     // resolution policy.
-    let (sections_map, duplicate_headings) = split_sections(&body, &masked_body);
+    let (sections_map, duplicate_headings, raw_section_headings) =
+        split_sections(&body, &masked_body);
 
     // Parse typed relationships from the Relationships section.
     // The entity-id collector lets the parser surface
@@ -154,6 +155,7 @@ pub fn parse_markdown(
         stub: false,
         stub_kind: None,
         heading_spans,
+        raw_section_headings,
     };
 
     Ok(ParseResult {
@@ -454,12 +456,17 @@ pub(super) struct DuplicateSection {
 /// the storage value entirely (no embedded `## Heading` separator). The
 /// caller decides whether each duplicate becomes a `WarningHint`
 /// (schema-declared keys only — catch-all repetition stays silent).
+/// The third element is every literal heading text in document order
+/// (duplicates included) — the raw material for the health check that
+/// distinguishes "section absent" from "content under a non-deriving
+/// heading".
 pub(super) fn split_sections(
     body: &str,
     masked_body: &str,
-) -> (HashMap<String, String>, Vec<DuplicateSection>) {
+) -> (HashMap<String, String>, Vec<DuplicateSection>, Vec<String>) {
     let mut sections = HashMap::new();
     let mut duplicates: HashMap<String, DuplicateSection> = HashMap::new();
+    let mut raw_headings = Vec::new();
     static SECTION_RE: OnceLock<Regex> = OnceLock::new();
     let section_re = SECTION_RE.get_or_init(|| Regex::new(r"(?m)^## (.+)$").unwrap());
 
@@ -488,6 +495,7 @@ pub(super) fn split_sections(
         // is shared with the schema loader's round-trip check — never inline
         // a second copy here.
         let key = memstead_schema::derive_section_key(name);
+        raw_headings.push(name.to_string());
 
         match sections.entry(key.clone()) {
             std::collections::hash_map::Entry::Vacant(slot) => {
@@ -516,7 +524,7 @@ pub(super) fn split_sections(
         .filter(|d| d.occurrences > 1)
         .collect();
 
-    (sections, dup_list)
+    (sections, dup_list, raw_headings)
 }
 
 /// Extract the title from the first `# ` heading.

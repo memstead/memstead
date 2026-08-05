@@ -758,6 +758,7 @@ pub fn make_stub(id: EntityId) -> Entity {
         stub_kind: Some(crate::entity::StubKind::LoadTime),
         id,
         heading_spans: std::collections::HashMap::new(),
+        raw_section_headings: Vec::new(),
     }
 }
 
@@ -792,6 +793,7 @@ mod tests {
                 stub_kind: None,
                 id,
                 heading_spans: std::collections::HashMap::new(),
+                raw_section_headings: Vec::new(),
             },
             inline_links: Vec::new(),
             parse_warnings: Vec::new(),

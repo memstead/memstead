@@ -415,6 +415,7 @@ impl Engine {
             stub: false,
             stub_kind: None,
             heading_spans: HashMap::new(),
+            raw_section_headings: Vec::new(),
         };
         // Alias-synthesis pass: for schemas declaring
         // `alias_target_rel_type`, append engine-emitted relations of

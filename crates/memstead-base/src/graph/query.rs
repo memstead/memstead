@@ -325,6 +325,7 @@ mod tests {
                 None
             },
             heading_spans: std::collections::HashMap::new(),
+            raw_section_headings: Vec::new(),
         }
     }
 

@@ -24,6 +24,24 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `install_schema` primitive (which now validates packages before
   sealing, including a manifest-identity-vs-install-ref check) — never
   on boot, so a schema already sealed into a mem-repo keeps loading.
+- **Health distinguishes "section absent" from "content under a
+  non-deriving heading".** A sealed schema that violates the round-trip
+  rule surfaces per mem as a `SCHEMA_HEADING_ROUNDTRIP_VIOLATION` load
+  warning (boot succeeds; the finding lists every offending tuple), and
+  an entity whose declared section content sits under the non-deriving
+  declared heading gets a distinct `SECTION_HEADING_MISMATCH` health
+  issue naming both the found heading and the catch-all the content
+  landed in — instead of the misleading "required section is empty"
+  report that sent the plenum operator hunting for content that was
+  present all along. The parser now retains the file's literal `## `
+  heading list per entity (a derived, never-persisted parse artefact)
+  to power the distinction.
+- **Mutations warn on section-heading divergence.** An update writing a
+  section whose declared heading differs from a heading the file
+  already carried for the same key emits `SECTION_HEADING_DIVERGENCE`
+  naming both headings; the write still commits (refusing would strand
+  entities written before the gate existed) and the regenerated file
+  carries the declared heading.
 
 ### Fixed
 - **The `planning` built-in's `goal` type round-trips its scope

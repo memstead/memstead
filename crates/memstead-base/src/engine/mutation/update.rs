@@ -723,6 +723,34 @@ impl Engine {
 
         let mut warnings: Vec<WarningHint> = Vec::new();
 
+        // Heading-divergence check: when a written section's declared
+        // heading differs from a heading the file already carried for
+        // the same key (derives to it), warn — the write commits and
+        // the regenerated file replaces the old heading text, which
+        // the caller should see rather than discover on the next read.
+        // `next.raw_section_headings` is the pre-mutation parse
+        // artefact (cloned from the store entity; nothing in this
+        // pipeline rewrites it).
+        for key in modified_sections
+            .iter()
+            .chain(modified_sections_appended.iter())
+            .chain(modified_sections_patched.iter())
+        {
+            let Some(def) = type_def.section(key) else {
+                continue;
+            };
+            if let Some(existing) = next.raw_section_headings.iter().find(|h| {
+                h.as_str() != def.heading && memstead_schema::derive_section_key(h) == *key
+            }) {
+                warnings.push(WarningHint::SectionHeadingDivergence {
+                    entity_id: id.clone(),
+                    section_key: key.clone(),
+                    writing_heading: def.heading.clone(),
+                    existing_heading: existing.clone(),
+                });
+            }
+        }
+
         // Mirror the create-path emission shape — drive the warning from
         // the synthesised relations the alias pass just emitted, not
         // from a re-parse of the generated markdown. `parse_markdown`
@@ -1273,6 +1301,100 @@ mod tests {
 
     use crate::storage::{ArchiveBackend, FilesystemMemWriter};
     use crate::vcs::Actor;
+
+    /// A mutation writing a section whose declared heading differs
+    /// from a heading the file already carried for the same key warns
+    /// (`SECTION_HEADING_DIVERGENCE`, naming both headings) and still
+    /// commits. Refusal complement: once the file carries the matching
+    /// heading, the same update emits no such warning.
+    #[test]
+    fn update_warns_on_section_heading_divergence_and_still_commits() {
+        let tmp = TempDir::new().unwrap();
+        let mem_dir = tmp.path().to_path_buf();
+        // Pre-existing file whose heading derives to `identity` but is
+        // not the schema's declared `Identity`.
+        std::fs::write(
+            mem_dir.join("diverged.md"),
+            "---\ntype: spec\n---\n# Diverged\n\n## IDENTITY\n\nold text.\n",
+        )
+        .unwrap();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let mut engine = Engine::from_mounts(vec![(
+            folder_mount("specs", mem_dir),
+            Box::new(writer) as Box<dyn MemBackend>,
+        )])
+        .unwrap();
+        let (actor, client) = cli_actor();
+        let id = EntityId::new("specs", "diverged");
+
+        let update_identity = |engine: &mut Engine, body: &str| {
+            let current = engine.get_entity(&id).unwrap().content_hash.clone();
+            let mut sections = IndexMap::new();
+            sections.insert("identity".to_string(), body.to_string());
+            engine
+                .update_entity(
+                    UpdateEntityArgs {
+                        anchors: Vec::new(),
+                        id: id.clone(),
+                        expected_hash: Some(current),
+                        sections,
+                        append_sections: IndexMap::new(),
+                        patch_sections: IndexMap::new(),
+                        metadata: IndexMap::new(),
+                        metadata_unset: Vec::new(),
+                        declare_relations: Vec::new(),
+                        dry_run: false,
+                        relations_unset: Vec::new(),
+                    },
+                    actor,
+                    Some(&client),
+                    None,
+                )
+                .unwrap()
+        };
+
+        let outcome = update_identity(&mut engine, "new text.");
+        assert!(!outcome.commit_sha.is_empty(), "the mutation still commits");
+        let divergences: Vec<_> = outcome
+            .warnings
+            .iter()
+            .filter_map(|w| match w {
+                crate::ops::WarningHint::SectionHeadingDivergence {
+                    section_key,
+                    writing_heading,
+                    existing_heading,
+                    ..
+                } => Some((
+                    section_key.clone(),
+                    writing_heading.clone(),
+                    existing_heading.clone(),
+                )),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            divergences,
+            vec![(
+                "identity".to_string(),
+                "Identity".to_string(),
+                "IDENTITY".to_string()
+            )],
+            "warning names both headings; all warnings = {:?}",
+            outcome.warnings
+        );
+
+        // The regenerated file now carries the declared heading — a
+        // second update to the same section must not warn.
+        let outcome2 = update_identity(&mut engine, "third text.");
+        assert!(
+            !outcome2
+                .warnings
+                .iter()
+                .any(|w| matches!(w, crate::ops::WarningHint::SectionHeadingDivergence { .. })),
+            "matching heading emits no divergence warning: {:?}",
+            outcome2.warnings
+        );
+    }
 
     #[test]
     fn batch_update_empty_batch_returns_zero_counts() {

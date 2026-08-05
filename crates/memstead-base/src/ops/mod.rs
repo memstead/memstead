@@ -736,6 +736,61 @@ pub enum WarningHint {
         /// Expectation pin recorded on the workspace mount.
         mount_pin: String,
     },
+    /// A mutation wrote a section whose emitted heading differs from a
+    /// heading already present in the file that derives to the same
+    /// section key. The write still commits — refusing would strand
+    /// entities written before the round-trip gate existed — but the
+    /// divergence is surfaced so the caller sees the file's heading
+    /// text shifting under it (the regenerated file carries the
+    /// schema's declared heading; the previous text is replaced).
+    SectionHeadingDivergence {
+        entity_id: EntityId,
+        section_key: String,
+        /// Heading the mutation is writing (the schema's declared one).
+        writing_heading: String,
+        /// Different heading the file carried for the same key.
+        existing_heading: String,
+    },
+    /// A mem's resolved (already-installed) schema declares one or
+    /// more sections whose heading does not derive back to its key —
+    /// the condition new installs are refused for
+    /// (`check_section_heading_roundtrip`). Sealed schemas keep
+    /// loading by contract (refusing at boot would brick the
+    /// workspace), so the violation surfaces here instead: every write
+    /// against such a section forks its content into a second heading
+    /// or the catch-all. Recovery: fix the schema's heading/key pairs
+    /// and reinstall.
+    SchemaHeadingRoundtripViolation {
+        /// Mem whose pinned schema violates the rule.
+        mem: String,
+        /// The pinned `<name>@<version>`.
+        schema_ref: String,
+        /// Every offending `(type, key, heading, derived_key)` tuple.
+        violations: Vec<SchemaHeadingViolation>,
+    },
+}
+
+/// Wire-shape entry inside `SchemaHeadingRoundtripViolation.violations`
+/// — one section whose declared heading does not derive back to its
+/// declared key. Mirrors `memstead_schema::HeadingKeyViolation`, kept
+/// as a local struct so the warning's JSON shape is owned here.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SchemaHeadingViolation {
+    pub type_name: String,
+    pub key: String,
+    pub heading: String,
+    pub derived_key: String,
+}
+
+impl From<&memstead_schema::HeadingKeyViolation> for SchemaHeadingViolation {
+    fn from(v: &memstead_schema::HeadingKeyViolation) -> Self {
+        Self {
+            type_name: v.type_name.clone(),
+            key: v.key.clone(),
+            heading: v.heading.clone(),
+            derived_key: v.derived_key.clone(),
+        }
+    }
 }
 
 /// Wire-shape entry inside `MissingRequiredOutgoing.missing`. Lists the
@@ -879,6 +934,42 @@ impl fmt::Display for WarningHint {
                  mem's own config pins '{config_pin}' — the config pin is authoritative and \
                  was used; align the mounts.json entry or the mem config to clear this"
             ),
+            WarningHint::SectionHeadingDivergence {
+                entity_id,
+                section_key,
+                writing_heading,
+                existing_heading,
+            } => write!(
+                f,
+                "entity '{entity_id}': section '{section_key}' is being written under \
+                 heading '{writing_heading}' but the file carried '{existing_heading}' for \
+                 the same section — the write commits and the regenerated file uses \
+                 '{writing_heading}'; the previous heading text is replaced"
+            ),
+            WarningHint::SchemaHeadingRoundtripViolation {
+                mem,
+                schema_ref,
+                violations,
+            } => {
+                let list = violations
+                    .iter()
+                    .map(|v| {
+                        format!(
+                            "type '{}' section '{}' heading '{}' (derives to '{}')",
+                            v.type_name, v.key, v.heading, v.derived_key
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                write!(
+                    f,
+                    "mem '{mem}': pinned schema '{schema_ref}' declares section heading(s) \
+                     that cannot round-trip to their key(s): {list}. The mem keeps loading, \
+                     but writes to these sections fork content into a second heading or the \
+                     catch-all. Fix the schema's heading/key pairs and reinstall — new \
+                     installs of such a schema are refused"
+                )
+            }
             WarningHint::MissingRequiredSection {
                 key,
                 heading,
@@ -1403,6 +1494,8 @@ impl WarningHint {
             Self::DuplicateSectionHeading { .. } => "DUPLICATE_SECTION_HEADING",
             Self::MemReloaded { .. } => "MEM_RELOADED",
             Self::SchemaPinMismatch { .. } => "SCHEMA_PIN_MISMATCH",
+            Self::SchemaHeadingRoundtripViolation { .. } => "SCHEMA_HEADING_ROUNDTRIP_VIOLATION",
+            Self::SectionHeadingDivergence { .. } => "SECTION_HEADING_DIVERGENCE",
             Self::AutoStubCreated { .. } => "AUTO_STUB_CREATED",
             Self::SelfLinkIgnored { .. } => "SELF_LINK_IGNORED",
             Self::ParsedRelationInvalid { .. } => "PARSED_RELATION_INVALID",
@@ -1433,6 +1526,8 @@ impl WarningHint {
             Self::SuspiciousNestedPrefix { from, .. } => Some(from.mem()),
             Self::DuplicateSectionHeading { entity_id, .. } => Some(entity_id.mem()),
             Self::SchemaPinMismatch { mem, .. } => Some(mem.as_str()),
+            Self::SchemaHeadingRoundtripViolation { mem, .. } => Some(mem.as_str()),
+            Self::SectionHeadingDivergence { entity_id, .. } => Some(entity_id.mem()),
             Self::MemReloaded { mem, .. } => Some(mem.as_str()),
             Self::MemFilesNotDeleted { mem, .. } => Some(mem.as_str()),
             Self::MemReattachedAfterUnregister { mem, .. } => Some(mem.as_str()),
@@ -1901,6 +1996,30 @@ impl WarningHint {
                     "mem": mem,
                     "config_pin": config_pin,
                     "mount_pin": mount_pin,
+                })
+            }
+            Self::SchemaHeadingRoundtripViolation {
+                mem,
+                schema_ref,
+                violations,
+            } => {
+                serde_json::json!({
+                    "mem": mem,
+                    "schema_ref": schema_ref,
+                    "violations": violations,
+                })
+            }
+            Self::SectionHeadingDivergence {
+                entity_id,
+                section_key,
+                writing_heading,
+                existing_heading,
+            } => {
+                serde_json::json!({
+                    "entity_id": entity_id,
+                    "section_key": section_key,
+                    "writing_heading": writing_heading,
+                    "existing_heading": existing_heading,
                 })
             }
         }

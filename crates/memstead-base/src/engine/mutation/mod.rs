@@ -456,6 +456,7 @@ pub(super) fn make_stub(id: &EntityId, kind: crate::entity::StubKind) -> Entity 
         stub: true,
         stub_kind: Some(kind),
         heading_spans: HashMap::new(),
+        raw_section_headings: Vec::new(),
     }
 }
 

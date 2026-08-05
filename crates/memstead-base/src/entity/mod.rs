@@ -180,6 +180,15 @@ pub struct Entity {
     /// in-memory graph stays flat — sub-sections are search-only metadata.
     #[serde(skip, default)]
     pub heading_spans: HashMap<String, Vec<HeadingSpan>>,
+    /// Literal `## ` heading texts seen in the file, in document order —
+    /// a derived parse artefact used by health to distinguish "declared
+    /// section absent" from "content sits under a heading that does not
+    /// derive to the declared key" (the section-fork defect class).
+    /// Regenerated on every parse; never written back to markdown, never
+    /// hashed, never round-tripped. Empty on stubs and hand-built
+    /// entities.
+    #[serde(skip, default)]
+    pub raw_section_headings: Vec<String>,
 }
 
 /// Typed provenance for stub entities. Set at stub creation and lives

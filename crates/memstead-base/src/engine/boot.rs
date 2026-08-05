@@ -216,6 +216,21 @@ impl Engine {
                 })?;
             schemas.insert(m.mount.mem.clone(), schema.clone());
 
+            // Sealed schemas keep loading even when they violate the
+            // heading round-trip rule new installs are refused for —
+            // the violation surfaces as a health finding here, never
+            // as a boot failure (refusing would brick the workspace).
+            if let Err(memstead_schema::SchemaLoadError::SectionHeadingMismatch { violations }) =
+                memstead_schema::check_section_heading_roundtrip(&schema)
+            {
+                let (name, version) = schema.id();
+                load_warnings.push(WarningHint::SchemaHeadingRoundtripViolation {
+                    mem: m.mount.mem.clone(),
+                    schema_ref: format!("{name}@{version}"),
+                    violations: violations.iter().map(Into::into).collect(),
+                });
+            }
+
             let (entries, read_errors) = collect_source_entries(m.backend.as_ref())?;
             let load_result = parse_entries(entries, read_errors, &m.mount.mem, schema.as_ref());
             // Wire the LoadCollector so the parser/store-builder
@@ -1979,6 +1994,136 @@ pattern = "exec-*"
             matches!(err, crate::BootError::NotInitialised(_)),
             "got {err:?}"
         );
+    }
+
+    /// A workspace whose installed schema violates the heading
+    /// round-trip rule still boots and serves reads; the violation
+    /// surfaces as a `SCHEMA_HEADING_ROUNDTRIP_VIOLATION` load warning
+    /// (merged into health), never as a boot failure — refusing at
+    /// boot would brick every workspace that installed such a schema
+    /// before the install gate existed.
+    #[test]
+    fn boot_keeps_loading_violating_schema_and_surfaces_health_finding() {
+        let tmp = TempDir::new().unwrap();
+        let schemas_dir = tmp.path().join("schemas");
+        let pkg = schemas_dir.join("debate");
+        std::fs::create_dir_all(pkg.join("types")).unwrap();
+        std::fs::write(
+            pkg.join("schema.yaml"),
+            r#"name: debate
+version: 0.1.0
+description: sealed-violator fixture
+when_to_use: tests
+types:
+  - question
+relationships:
+  mode: strict
+  definitions:
+    - name: PART_OF
+      description: hier
+      default_weight: 3.0
+    - name: _default
+      description: fallback
+      default_weight: 1.0
+community:
+  resolution: 1.0
+  seed: 42
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            pkg.join("types").join("question.yaml"),
+            r#"name: question
+description: t
+when_to_use: tests
+sections:
+  - key: answers
+    heading: Answers argued
+    required: true
+    search_weight: 10.0
+    write_rules: []
+  - key: notes
+    heading: Notes
+    required: false
+    search_weight: 3.0
+    catch_all: true
+    write_rules: []
+metadata_fields: []
+title_weight: 100.0
+text_fields:
+  - answers
+  - notes
+hierarchy_relationship: PART_OF
+propagating_relationships: []
+updatable_fields:
+  - title
+  - answers
+  - notes
+health_required_fields:
+  - answers
+staleness_threshold_days: 90
+write_rules: []
+"#,
+        )
+        .unwrap();
+
+        let mem_dir = tmp.path().join("mem");
+        std::fs::create_dir_all(&mem_dir).unwrap();
+        std::fs::write(
+            mem_dir.join("q.md"),
+            "---\ntype: question\n---\n# Q\n\n## Answers argued\n\nTwo answers.\n",
+        )
+        .unwrap();
+
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let mount = Mount {
+            mem: "debate-mem".to_string(),
+            schema: Some(SchemaRef::new("debate", semver::Version::new(0, 1, 0))),
+            storage: MountStorage::Folder { path: mem_dir },
+            capability: MountCapability::Write,
+            lifecycle: MountLifecycle::Eager,
+            cross_linkable: true,
+            migration_target: None,
+        };
+        let engine = Engine::from_mounts_with_schemas_dir(
+            vec![(mount, Box::new(writer) as Box<dyn MemBackend>)],
+            Some(&schemas_dir),
+        )
+        .expect("a violating sealed schema must keep loading, never refuse boot");
+
+        // Reads still serve.
+        assert!(
+            engine.status().entity_count >= 1,
+            "entities load despite the schema violation"
+        );
+
+        // The violation is a health finding with the full tuple.
+        let hits: Vec<_> = engine
+            .load_warnings()
+            .iter()
+            .filter_map(|w| match w {
+                WarningHint::SchemaHeadingRoundtripViolation {
+                    mem,
+                    schema_ref,
+                    violations,
+                } => Some((mem.clone(), schema_ref.clone(), violations.clone())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            hits.len(),
+            1,
+            "exactly one schema-level finding; all warnings = {:?}",
+            engine.load_warnings()
+        );
+        let (mem, schema_ref, violations) = &hits[0];
+        assert_eq!(mem, "debate-mem");
+        assert_eq!(schema_ref, "debate@0.1.0");
+        assert_eq!(violations.len(), 1);
+        assert_eq!(violations[0].type_name, "question");
+        assert_eq!(violations[0].key, "answers");
+        assert_eq!(violations[0].heading, "Answers argued");
+        assert_eq!(violations[0].derived_key, "answers_argued");
     }
 
     // ---- Engine::reload_one_mem -----------------------------------

@@ -329,6 +329,7 @@ mod tests {
             stub: false,
             stub_kind: None,
             heading_spans: HashMap::new(),
+            raw_section_headings: Vec::new(),
         }
     }
 

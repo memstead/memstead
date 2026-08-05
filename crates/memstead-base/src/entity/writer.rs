@@ -104,6 +104,7 @@ mod tests {
             stub: false,
             stub_kind: None,
             heading_spans: std::collections::HashMap::new(),
+            raw_section_headings: Vec::new(),
         }
     }
 
@@ -158,6 +159,7 @@ mod tests {
             stub: false,
             stub_kind: None,
             heading_spans: std::collections::HashMap::new(),
+            raw_section_headings: Vec::new(),
         }
     }
 
