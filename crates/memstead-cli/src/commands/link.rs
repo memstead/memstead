@@ -38,14 +38,21 @@ pub struct LinkArgs {
     /// the default `https://memstead.io`.
     #[arg(long, value_name = "URL")]
     pub registry: Option<String>,
-
-    /// Override the workspace root. When omitted, the command walks up
-    /// from the current working directory to find it.
-    #[arg(long, value_name = "PATH")]
-    pub workspace: Option<PathBuf>,
 }
 
 pub fn run(ctx: &CliContext, args: LinkArgs) -> anyhow::Result<()> {
+    run_with_root(ctx, args, None)
+}
+
+/// Inner seam: `root_override` replaces the cwd walk — used by tests
+/// (the CLI-level workspace override is the ROOT command's global
+/// `--workspace` / `MEMSTEAD_WORKSPACE`, applied before dispatch; no
+/// subcommand-level flag exists).
+fn run_with_root(
+    ctx: &CliContext,
+    args: LinkArgs,
+    root_override: Option<std::path::PathBuf>,
+) -> anyhow::Result<()> {
     let dep: DepRef = args.dep.parse().map_err(|e: String| CliError {
         code: "INVALID_INPUT",
         message: format!(
@@ -56,23 +63,8 @@ pub fn run(ctx: &CliContext, args: LinkArgs) -> anyhow::Result<()> {
         details: None,
     })?;
 
-    let workspace_root = match args.workspace.clone() {
-        Some(p) => {
-            let canon = p.canonicalize().unwrap_or(p);
-            if !memstead_base::is_workspace_root(&canon) {
-                return Err(CliError {
-                    code: "WORKSPACE_NOT_INITIALISED",
-                    message: format!(
-                        "no workspace at {} (missing .memstead/workspace.toml)",
-                        canon.display()
-                    ),
-                    kind: ExitKind::NotFound,
-                    details: None,
-                }
-                .into());
-            }
-            canon
-        }
+    let workspace_root = match root_override {
+        Some(p) => p,
         None => find_filesystem_workspace_root()?,
     };
 
@@ -285,13 +277,13 @@ mod tests {
                 json: false,
                 quiet: false,
             };
-            run(
+            run_with_root(
                 &ctx,
                 LinkArgs {
                     dep: "anthropic/core".to_string(),
                     registry: Some(base_clone),
-                    workspace: Some(workspace),
                 },
+                Some(workspace),
             )
         })
         .await
@@ -339,13 +331,13 @@ mod tests {
                     json: false,
                     quiet: false,
                 };
-                run(
+                run_with_root(
                     &ctx,
                     LinkArgs {
                         dep: "anthropic/core".to_string(),
                         registry: Some(base_clone),
-                        workspace: Some(workspace),
                     },
+                    Some(workspace),
                 )
                 .unwrap();
             })
@@ -377,13 +369,13 @@ mod tests {
                 json: false,
                 quiet: false,
             };
-            run(
+            run_with_root(
                 &ctx,
                 LinkArgs {
                     dep: "anthropic/missing".to_string(),
                     registry: Some(base_clone),
-                    workspace: Some(workspace),
                 },
+                Some(workspace),
             )
             .unwrap_err()
         })
@@ -405,35 +397,22 @@ mod tests {
             json: false,
             quiet: false,
         };
-        let err = run(
+        let err = run_with_root(
             &ctx,
             LinkArgs {
                 dep: "not-a-scope-name".to_string(),
                 registry: None,
-                workspace: Some(tmp.path().to_path_buf()),
             },
+            Some(tmp.path().to_path_buf()),
         )
         .unwrap_err();
         assert!(err.to_string().contains("invalid dependency reference"));
     }
 
-    #[test]
-    fn link_rejects_missing_workspace() {
-        let tmp = TempDir::new().unwrap();
-        // No .memstead/workspace.toml under tmp.
-        let ctx = CliContext {
-            json: false,
-            quiet: false,
-        };
-        let err = run(
-            &ctx,
-            LinkArgs {
-                dep: "anthropic/core".to_string(),
-                registry: None,
-                workspace: Some(tmp.path().to_path_buf()),
-            },
-        )
-        .unwrap_err();
-        assert!(err.to_string().contains("no workspace"));
-    }
+    // The former `link_rejects_missing_workspace` test exercised the
+    // per-subcommand `--workspace` validation, which was folded into
+    // the root command's global override (validated in `main` before
+    // dispatch, refusing with the tried path). The binary-level
+    // refusal is covered by
+    // `read_commands::workspace_override_flag_env_precedence_and_refusal`.
 }

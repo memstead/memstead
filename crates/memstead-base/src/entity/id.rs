@@ -178,6 +178,17 @@ pub fn title_to_slug(title: &str) -> Result<String, SlugError> {
     Ok(slug)
 }
 
+/// The accepted title grammar, stated as a rule. THE single sentence
+/// every surface that documents titles carries: the CLI's
+/// create/rename help embeds it at build time, the MCP
+/// `memstead_create` / `memstead_rename` descriptions contain it
+/// verbatim (a tool-surface test asserts the containment), and the
+/// handbook quotes it naming this constant as its source. A
+/// conformance test in this module asserts
+/// [`validate_and_derive_slug`]'s behaviour matches the sentence's
+/// claim — so neither the prose nor the validator can drift alone.
+pub const TITLE_GRAMMAR_RULE: &str = "Titles accept Unicode alphanumerics, whitespace (not tab/newline or other control characters), and hyphen; every other character is rejected";
+
 /// Strict slug derivation for mutation entry (`memstead_create`,
 /// `memstead_rename`). Runs the same pipeline as [`title_to_slug`] but
 /// rejects two residual cases the permissive variant tolerates:
@@ -1464,5 +1475,68 @@ mod tests {
     fn validate_rel_type_invalid() {
         assert!(validate_rel_type("has spaces").is_err());
         assert!(validate_rel_type("").is_err());
+    }
+
+    /// TITLE_GRAMMAR_RULE conformance: the documented sentence and the
+    /// validator agree — for the characters the plenum channel found
+    /// by collision (`.`, `(`, `)`, `/`, `:`, em dash) and for
+    /// non-ASCII alphanumerics. If this test fails, either the
+    /// validator's accept set or the constant changed alone; change
+    /// them together.
+    #[test]
+    fn title_grammar_rule_matches_validator_behaviour() {
+        // Accepted per the rule: Unicode alphanumerics, whitespace, hyphen.
+        for ok in [
+            "Plain Title",
+            "hyphen-ated",
+            "Große Änderung", // non-ASCII alphanumerics
+            "日本語 タイトル",
+            "nbsp\u{a0}space", // non-control whitespace folds to hyphen
+        ] {
+            assert!(
+                validate_and_derive_slug(ok).is_ok(),
+                "rule says {ok:?} is accepted"
+            );
+        }
+        // Rejected per the rule: every other character — the plenum
+        // collision list plus representative symbol/punctuation cases.
+        for (title, bad) in [
+            ("v1.0", '.'),
+            ("a (draft)", '('),
+            ("a (draft", '('),
+            ("either/or", '/'),
+            ("re: title", ':'),
+            ("a \u{2014} b", '\u{2014}'), // em dash
+            ("hello!", '!'),
+        ] {
+            match validate_and_derive_slug(title) {
+                Err(SlugError::TitleHasInvalidChars {
+                    invalid_chars,
+                    proposed_slug,
+                    ..
+                }) => {
+                    assert!(
+                        invalid_chars.contains(&bad),
+                        "{title:?}: rejection names {bad:?}, got {invalid_chars:?}"
+                    );
+                    assert!(
+                        !proposed_slug.is_empty(),
+                        "{title:?}: char-class refusal carries a proposed_slug"
+                    );
+                }
+                other => panic!("rule says {title:?} is rejected on {bad:?}, got {other:?}"),
+            }
+        }
+        // Control-class whitespace (tab, newline) is rejected too, per
+        // the rule's parenthetical — via its own more specific refusal.
+        for title in ["tabs\tinside", "line\nbreak"] {
+            assert!(
+                matches!(
+                    validate_and_derive_slug(title),
+                    Err(SlugError::TitleHasControlChars { .. })
+                ),
+                "rule says {title:?} is rejected as a control character"
+            );
+        }
     }
 }

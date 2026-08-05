@@ -13,7 +13,7 @@ use crate::output::{ExitKind, print_json, print_markdown};
 use crate::setup::{CliContext, CliEngine};
 
 #[derive(Parser, Debug)]
-#[command(after_long_help = super::SLUG_DERIVATION_HELP)]
+#[command(after_long_help = super::slug_derivation_help())]
 pub struct Args {
     /// Current entity ID.
     pub id: String,

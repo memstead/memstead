@@ -86,6 +86,20 @@ pub struct Args {
     #[arg(long = "filter", value_name = "KEY=VALUE")]
     pub filter: Vec<String>,
 
+    /// Range filter on any `filterable: range` field: repeatable
+    /// `--range-filter KEY=VALUE` with the same key grammar as the MCP
+    /// `range_filters` map — `min_<field>` / `max_<field>` for numbers,
+    /// `<field>_after` / `<field>_before` for dates. The strings go to
+    /// the same engine path the MCP tool uses, so the same four outcome
+    /// codes apply with the same meaning: `RANGE_FILTER_KEY_MALFORMED`
+    /// (key ignored), `UNKNOWN_RANGE_FILTER_FIELD` (no type declares
+    /// the field — results stay unfiltered), `RANGE_FILTER_TYPE_SCOPED`
+    /// (other types declare it — applied with strict type-narrowing),
+    /// `FIELD_NOT_RANGE_FILTERABLE` (declared, but not `filterable:
+    /// range`). Composable with `--filter` and the named shortcuts.
+    #[arg(long = "range-filter", value_name = "KEY=VALUE")]
+    pub range_filter: Vec<String>,
+
     /// Return only stub entities (conflicts with --no-stub).
     #[arg(long, conflicts_with = "no_stub")]
     pub stub: bool,
@@ -106,6 +120,17 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     for raw in &args.filter {
         let (key, value) = super::parse_filter_arg(raw)?;
         filters.insert(key, value);
+    }
+
+    // Range filters: the CLI only splits KEY=VALUE — the key grammar
+    // (`min_*` / `max_*` / `*_before` / `*_after`) is parsed by the
+    // same engine path the MCP `range_filters` map goes through, so
+    // the typed outcome codes are identical on both surfaces. A
+    // second grammar parser here is a defect.
+    let mut range_filters = HashMap::new();
+    for raw in &args.range_filter {
+        let (key, value) = super::parse_filter_arg(raw)?;
+        range_filters.insert(key, value);
     }
 
     // Wrap a positional CLI text argument into the flat Query shape. Each
@@ -147,7 +172,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         limit: args.limit,
         offset: args.offset,
         filters,
-        range_filters: HashMap::new(),
+        range_filters,
         edge_type: args.edge_type,
         related_to: args.related_to.map(EntityId),
         depth: args.depth,

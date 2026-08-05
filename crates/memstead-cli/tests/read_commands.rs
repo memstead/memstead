@@ -691,3 +691,251 @@ fn health_strict_exits_one_when_violations_present() {
         "violation report still rendered to stdout before non-zero exit; got:\n{stdout}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Range filters (`--range-filter`) — MCP key grammar, same outcome codes
+// ---------------------------------------------------------------------------
+
+/// A range-filterable field narrows results from the CLI with the MCP
+/// key grammar, and each of the four typed outcome codes is reachable
+/// with the same meaning as over MCP (same engine path — the CLI only
+/// splits KEY=VALUE).
+#[test]
+fn search_range_filter_narrows_and_surfaces_the_typed_codes() {
+    let tmp = TempDir::new().unwrap();
+    // Two mems: the default-schema `cli-test` (base-metadata dates are
+    // range-filterable on every type) and a planning-schema `cli-plan`
+    // (whose `decision.decided_on` is a type-SPECIFIC range field —
+    // needed to reach RANGE_FILTER_TYPE_SCOPED).
+    let dir = tmp.path().join("cli-test");
+    fs::create_dir_all(&dir).unwrap();
+    make_test_mem(&dir);
+    let plan = tmp.path().join("cli-plan");
+    fs::create_dir_all(plan.join(".memstead")).unwrap();
+    fs::write(
+        plan.join(".memstead").join("config.json"),
+        r#"{ "schema": "planning@0.1.0" }"#,
+    )
+    .unwrap();
+    init_real_mem_repo_from_disk(tmp.path(), &[(&dir, "cli-test"), (&plan, "cli-plan")]);
+
+    // Supported key form narrows: alpha's created_date is 2026-01-01.
+    let out = memstead()
+        .current_dir(tmp.path())
+        .args([
+            "--json",
+            "search",
+            "--type",
+            "spec",
+            "--range-filter",
+            "created_date_after=2025-01-01",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert!(
+        json["hits"].as_array().is_some_and(|r| !r.is_empty()),
+        "in-range date filter keeps the hit: {json}"
+    );
+
+    // …and excludes when out of range.
+    let out = memstead()
+        .current_dir(tmp.path())
+        .args([
+            "--json",
+            "search",
+            "--type",
+            "spec",
+            "--range-filter",
+            "created_date_before=2020-01-01",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert!(
+        json["hits"].as_array().is_some_and(|r| r.is_empty()),
+        "out-of-range date filter drops the hit: {json}"
+    );
+
+    // Composable with --filter (equality) and the named shortcuts.
+    memstead()
+        .current_dir(tmp.path())
+        .args([
+            "--json",
+            "search",
+            "--type",
+            "spec",
+            "--filter",
+            "level=M0",
+            "--range-filter",
+            "created_date_after=2025-01-01",
+        ])
+        .assert()
+        .success()
+        .stdout(contains("alpha"));
+
+    // The four typed outcome codes, same meaning as over MCP:
+    // 1. malformed key → RANGE_FILTER_KEY_MALFORMED (not ignored).
+    memstead()
+        .current_dir(tmp.path())
+        .args([
+            "--json",
+            "search",
+            "--type",
+            "spec",
+            "--range-filter",
+            "bogus=1",
+        ])
+        .assert()
+        .success()
+        .stdout(contains("RANGE_FILTER_KEY_MALFORMED"));
+
+    // 2. field declared on OTHER types in scope but not the queried
+    //    one → RANGE_FILTER_TYPE_SCOPED (applied with type-narrowing):
+    //    `decided_on` is range-filterable on planning's `decision`,
+    //    not on `step`.
+    memstead()
+        .current_dir(tmp.path())
+        .args([
+            "--json",
+            "search",
+            "--mem",
+            "cli-plan",
+            "--type",
+            "step",
+            "--range-filter",
+            "decided_on_after=2020-01-01",
+        ])
+        .assert()
+        .success()
+        .stdout(contains("RANGE_FILTER_TYPE_SCOPED"));
+
+    // 3. unknown field → UNKNOWN_RANGE_FILTER_FIELD, results UNFILTERED
+    //    (not empty) — the filter is dropped with a warning.
+    let out = memstead()
+        .current_dir(tmp.path())
+        .args([
+            "--json",
+            "search",
+            "--type",
+            "spec",
+            "--range-filter",
+            "min_nonexistent=1",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert!(
+        out.windows(b"UNKNOWN_RANGE_FILTER_FIELD".len())
+            .any(|w| w == b"UNKNOWN_RANGE_FILTER_FIELD"),
+        "unknown field surfaces its code: {json}"
+    );
+    assert!(
+        json["hits"].as_array().is_some_and(|r| !r.is_empty()),
+        "unknown range field leaves results unfiltered, not empty: {json}"
+    );
+
+    // 4. declared-but-not-range-filterable field → FIELD_NOT_RANGE_FILTERABLE.
+    memstead()
+        .current_dir(tmp.path())
+        .args([
+            "--json",
+            "search",
+            "--type",
+            "spec",
+            "--range-filter",
+            "min_level=1",
+        ])
+        .assert()
+        .success()
+        .stdout(contains("FIELD_NOT_RANGE_FILTERABLE"));
+}
+
+// ---------------------------------------------------------------------------
+// Workspace override (global --workspace / MEMSTEAD_WORKSPACE)
+// ---------------------------------------------------------------------------
+
+/// The global override lets the CLI operate on a named workspace from
+/// any working directory: flag alone, env alone, flag over env. An
+/// override without the marker refuses naming the tried path and never
+/// falls back to the walk — even when the walk WOULD succeed from cwd.
+#[test]
+fn workspace_override_flag_env_precedence_and_refusal() {
+    let ws = TempDir::new().unwrap();
+    seed_cli_test_mem(ws.path());
+    let elsewhere = TempDir::new().unwrap();
+
+    // Flag alone, from an unrelated cwd.
+    memstead()
+        .current_dir(elsewhere.path())
+        .env_remove("MEMSTEAD_WORKSPACE")
+        .args([
+            "--workspace",
+            ws.path().to_str().unwrap(),
+            "entity",
+            "cli-test--alpha",
+        ])
+        .assert()
+        .success()
+        .stdout(contains("Alpha"));
+
+    // Env alone.
+    memstead()
+        .current_dir(elsewhere.path())
+        .env("MEMSTEAD_WORKSPACE", ws.path())
+        .args(["entity", "cli-test--alpha"])
+        .assert()
+        .success()
+        .stdout(contains("Alpha"));
+
+    // Both: the flag wins (env points at a non-workspace; the flag's
+    // valid path must be used, or this would refuse).
+    memstead()
+        .current_dir(elsewhere.path())
+        .env("MEMSTEAD_WORKSPACE", elsewhere.path())
+        .args([
+            "--workspace",
+            ws.path().to_str().unwrap(),
+            "entity",
+            "cli-test--alpha",
+        ])
+        .assert()
+        .success()
+        .stdout(contains("Alpha"));
+
+    // Refusal: a marker-less override refuses, names the tried path,
+    // and does NOT fall back to the walk — run from INSIDE the valid
+    // workspace so a fallback would have succeeded.
+    memstead()
+        .current_dir(ws.path())
+        .env_remove("MEMSTEAD_WORKSPACE")
+        .args([
+            "--workspace",
+            elsewhere.path().to_str().unwrap(),
+            "entity",
+            "cli-test--alpha",
+        ])
+        .assert()
+        .failure()
+        .stderr(
+            contains("WORKSPACE_NOT_INITIALISED").and(contains(elsewhere.path().to_str().unwrap())),
+        );
+
+    // Without either, the walk behaves exactly as today.
+    memstead()
+        .current_dir(ws.path())
+        .env_remove("MEMSTEAD_WORKSPACE")
+        .args(["entity", "cli-test--alpha"])
+        .assert()
+        .success()
+        .stdout(contains("Alpha"));
+}

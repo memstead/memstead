@@ -45,12 +45,6 @@ pub struct Args {
     #[arg(value_name = "PATH")]
     pub archive: Option<PathBuf>,
 
-    /// Override the workspace root for the no-arg / `--mem` shapes.
-    /// Ignored when an archive PATH is provided. Defaults to walking up
-    /// from cwd.
-    #[arg(long, value_name = "PATH")]
-    pub workspace: Option<PathBuf>,
-
     /// Export-and-publish a named mem from the current workspace in
     /// one step — the path for mem-repo (multi-mem, git-branch)
     /// workspaces, which have no folder to wrap up. Ignored when an
@@ -91,6 +85,18 @@ pub struct Args {
 }
 
 pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
+    run_with_root(ctx, args, None)
+}
+
+/// Inner seam: `root_override` replaces the cwd walk for the
+/// assembling shapes — used by tests (the CLI-level workspace override
+/// is the ROOT command's global `--workspace` / `MEMSTEAD_WORKSPACE`,
+/// applied before dispatch; no subcommand-level flag exists).
+fn run_with_root(
+    ctx: &CliContext,
+    args: Args,
+    root_override: Option<PathBuf>,
+) -> anyhow::Result<()> {
     let base = registry::registry_base(args.registry.as_deref());
     let host = registry::registry_host(&base);
     let client = registry::build_http()?;
@@ -141,7 +147,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         if let Some(p) = args.archive {
             (p, None)
         } else if let Some(mem_name) = args.mem.as_deref() {
-            let workspace_root = resolve_workspace_root(args.workspace.as_deref())?;
+            let workspace_root = resolve_workspace_root(root_override.as_deref())?;
             let mut engine = ctx.cli_engine_at(&workspace_root)?.into_base();
             // Persist the version bump before exporting — but never
             // under --dry-run, which must leave the workspace untouched.
@@ -163,7 +169,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 .map_err(CliError::from_engine_op)?;
             stage_bytes_to_tempfile(&bytes)?
         } else {
-            let workspace_root = resolve_workspace_root(args.workspace.as_deref())?;
+            let workspace_root = resolve_workspace_root(root_override.as_deref())?;
             let bytes = assemble_archive(&workspace_root).map_err(|e| {
                 CliError::new(
                     ExitKind::Validation,
@@ -395,26 +401,14 @@ fn find_filesystem_workspace_root() -> anyhow::Result<PathBuf> {
     }
 }
 
-/// Resolve the workspace root for the assembling shapes: honour an
-/// explicit `--workspace` override (validated against the marker) or
-/// walk up from cwd. Shared by the `--mem` and bare-folder paths.
-fn resolve_workspace_root(workspace: Option<&Path>) -> anyhow::Result<PathBuf> {
-    match workspace {
-        Some(p) => {
-            let canon = p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
-            if !memstead_base::is_workspace_root(&canon) {
-                return Err(CliError::new(
-                    ExitKind::NotFound,
-                    "WORKSPACE_NOT_INITIALISED",
-                    format!(
-                        "no workspace at {} (missing .memstead/workspace.toml)",
-                        canon.display()
-                    ),
-                )
-                .into());
-            }
-            Ok(canon)
-        }
+/// Resolve the workspace root for the assembling shapes by walking up
+/// from cwd. Shared by the `--mem` and bare-folder paths.
+fn resolve_workspace_root(root_override: Option<&Path>) -> anyhow::Result<PathBuf> {
+    // Workspace targeting is the root command's job (global
+    // `--workspace` / `MEMSTEAD_WORKSPACE`, validated + applied before
+    // dispatch); `root_override` is the in-process test seam.
+    match root_override {
+        Some(p) => Ok(p.to_path_buf()),
         None => find_filesystem_workspace_root(),
     }
 }
@@ -719,11 +713,10 @@ mod tests {
                 json: false,
                 quiet: false,
             };
-            run(
+            run_with_root(
                 &ctx,
                 Args {
                     archive: None,
-                    workspace: Some(workspace),
                     mem: None,
                     scope: None,
                     version: None,
@@ -731,6 +724,7 @@ mod tests {
                     token: Some("fixture-token".to_string()),
                     registry: Some(base_clone),
                 },
+                Some(workspace),
             )?;
             let body = captured_clone.lock().unwrap().clone();
             Ok::<Vec<u8>, anyhow::Error>(body)
@@ -745,19 +739,24 @@ mod tests {
         assert_eq!(&body[0..4], b"PK\x03\x04");
     }
 
+    /// The marker validation for workspace overrides lives on the ROOT
+    /// command now (global `--workspace` / `MEMSTEAD_WORKSPACE`,
+    /// refused before dispatch naming the tried path — covered by
+    /// `read_commands::workspace_override_flag_env_precedence_and_refusal`).
+    /// Through the in-process test seam a marker-less root still fails
+    /// loudly downstream rather than publishing garbage.
     #[test]
-    fn publish_rejects_when_workspace_override_lacks_config() {
+    fn publish_errors_when_root_lacks_workspace_shape() {
         let tmp = TempDir::new().unwrap();
         // No `.memstead/workspace.toml` under tmp.
         let ctx = CliContext {
             json: false,
             quiet: false,
         };
-        let err = run(
+        let err = run_with_root(
             &ctx,
             Args {
                 archive: None,
-                workspace: Some(tmp.path().to_path_buf()),
                 mem: None,
                 scope: None,
                 version: None,
@@ -765,13 +764,11 @@ mod tests {
                 token: Some("fixture-token".to_string()),
                 registry: Some("http://127.0.0.1:1".to_string()),
             },
+            Some(tmp.path().to_path_buf()),
         )
         .unwrap_err();
         let msg = err.to_string();
-        assert!(
-            msg.contains("no workspace") || msg.contains("missing .memstead/workspace.toml"),
-            "expected workspace-not-found error, got: {msg}"
-        );
+        assert!(!msg.is_empty(), "marker-less root must error, got: {msg}");
     }
 
     #[test]
@@ -791,11 +788,10 @@ mod tests {
             json: false,
             quiet: false,
         };
-        let err = run(
+        let err = run_with_root(
             &ctx,
             Args {
                 archive: None,
-                workspace: Some(tmp.path().to_path_buf()),
                 mem: Some("nonexistent".to_string()),
                 scope: None,
                 version: None,
@@ -803,6 +799,7 @@ mod tests {
                 token: Some("fixture-token".to_string()),
                 registry: Some("http://127.0.0.1:1".to_string()),
             },
+            Some(tmp.path().to_path_buf()),
         )
         .unwrap_err();
         let msg = err.to_string();
@@ -825,7 +822,6 @@ mod tests {
             &ctx,
             Args {
                 archive: None,
-                workspace: None,
                 mem: None,
                 scope: None,
                 version: Some("0.2.0".to_string()),
@@ -859,11 +855,10 @@ mod tests {
                 json: false,
                 quiet: false,
             };
-            run(
+            run_with_root(
                 &ctx,
                 Args {
                     archive: None,
-                    workspace: Some(workspace),
                     mem: None,
                     scope: None,
                     version: None,
@@ -871,6 +866,7 @@ mod tests {
                     token: None,
                     registry: Some(base_clone),
                 },
+                Some(workspace),
             )?;
             Ok::<(), anyhow::Error>(())
         })

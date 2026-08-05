@@ -1610,3 +1610,166 @@ fn review_mark_lifecycle_via_cli() {
         .success()
         .stdout(contains("no mark"));
 }
+
+// ---------------------------------------------------------------------------
+// Payload symmetry — one JSON template feeds create --from AND update --from
+// ---------------------------------------------------------------------------
+
+/// One JSON document carrying `note` and `dry_run` (plus the identity
+/// fields of both commands) feeds `create --from` and `update --from`
+/// unrefused. The file's note commits as provenance; the `--note` flag
+/// wins over the file's; `dry_run: true` in the file previews on
+/// create. Refusal complements: a payload carrying `auto_hash` or
+/// `force` is refused as an unknown field on both commands.
+#[test]
+fn shared_from_template_feeds_create_and_update() {
+    let tmp = TempDir::new().unwrap();
+    let _mem = make_mem(tmp.path());
+    let git_log_note = |n: usize| -> String {
+        let out = std::process::Command::new("git")
+            .args([
+                "--git-dir",
+                tmp.path().join("mem-repo/.git").to_str().unwrap(),
+                "log",
+                &format!("-{n}"),
+                "--format=%B",
+                "cli-write",
+            ])
+            .output()
+            .expect("git log runs");
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+
+    // The shared template: identity fields of BOTH commands plus the
+    // symmetric note/dry_run. `id` on create is consistency-checked
+    // against the derived slug; `title`/`entity_type` on update are
+    // consistency-checked against the live entity.
+    let template = tmp.path().join("template.json");
+    fs::write(
+        &template,
+        r#"{
+            "id": "cli-write--tmpl",
+            "title": "Tmpl",
+            "entity_type": "spec",
+            "sections": {
+                "identity": "Template identity.",
+                "purpose": "Template purpose."
+            },
+            "note": "file note",
+            "dry_run": true
+        }"#,
+    )
+    .unwrap();
+
+    // dry_run: true in the file previews — nothing lands.
+    memstead()
+        .current_dir(tmp.path())
+        .args(["create", "--from", template.to_str().unwrap()])
+        .assert()
+        .success()
+        .stdout(contains("Dry run"));
+
+    // Same document with dry_run off creates for real, and the file's
+    // note lands as commit-body provenance.
+    let template_live = tmp.path().join("template-live.json");
+    fs::write(
+        &template_live,
+        &fs::read_to_string(&template)
+            .unwrap()
+            .replace("\"dry_run\": true", "\"dry_run\": false"),
+    )
+    .unwrap();
+    memstead()
+        .current_dir(tmp.path())
+        .args(["create", "--from", template_live.to_str().unwrap()])
+        .assert()
+        .success()
+        .stdout(contains("Created `cli-write--tmpl`"));
+    assert!(
+        git_log_note(1).contains("file note"),
+        "create --from commits the file's note as provenance: {}",
+        git_log_note(1)
+    );
+
+    // The SAME document feeds update --from unrefused (content change
+    // so it commits; --expected-hash flag supplies CAS). The file's
+    // note lands again.
+    let hash = entity_hash(tmp.path(), "cli-write--tmpl");
+    let update_doc = tmp.path().join("template-update.json");
+    fs::write(
+        &update_doc,
+        &fs::read_to_string(&template_live)
+            .unwrap()
+            .replace("Template identity.", "Updated identity."),
+    )
+    .unwrap();
+    memstead()
+        .current_dir(tmp.path())
+        .args([
+            "update",
+            "--from",
+            update_doc.to_str().unwrap(),
+            "--expected-hash",
+            &hash,
+        ])
+        .assert()
+        .success()
+        .stdout(contains("Updated `cli-write--tmpl`"));
+    assert!(
+        git_log_note(1).contains("file note"),
+        "update --from commits the file's note as provenance: {}",
+        git_log_note(1)
+    );
+
+    // Flag beats file: --note on the command line wins.
+    let hash = entity_hash(tmp.path(), "cli-write--tmpl");
+    let update_doc2 = tmp.path().join("template-update2.json");
+    fs::write(
+        &update_doc2,
+        &fs::read_to_string(&update_doc)
+            .unwrap()
+            .replace("Updated identity.", "Third identity."),
+    )
+    .unwrap();
+    memstead()
+        .current_dir(tmp.path())
+        .args([
+            "update",
+            "--from",
+            update_doc2.to_str().unwrap(),
+            "--expected-hash",
+            &hash,
+            "--note",
+            "flag note wins",
+        ])
+        .assert()
+        .success();
+    let body = git_log_note(1);
+    assert!(
+        body.contains("flag note wins") && !body.contains("file note"),
+        "the --note flag wins over the file's note: {body}"
+    );
+
+    // Refusal complements: the optimistic-locking selectors stay
+    // flag-only — a payload carrying them refuses as unknown fields on
+    // BOTH commands.
+    for field in ["auto_hash", "force"] {
+        let bad = tmp.path().join(format!("bad-{field}.json"));
+        fs::write(
+            &bad,
+            fs::read_to_string(&update_doc).unwrap().replace(
+                "\"dry_run\": false",
+                &format!("\"dry_run\": false, \"{field}\": true"),
+            ),
+        )
+        .unwrap();
+        for cmd in ["create", "update"] {
+            memstead()
+                .current_dir(tmp.path())
+                .args([cmd, "--from", bad.to_str().unwrap()])
+                .assert()
+                .failure()
+                .stderr(contains("unknown field"));
+        }
+    }
+}

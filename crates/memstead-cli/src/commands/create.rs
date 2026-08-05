@@ -25,7 +25,7 @@ use crate::output::{ExitKind, print_json, print_markdown};
 use crate::setup::{CliContext, CliEngine};
 
 #[derive(Parser, Debug)]
-#[command(after_long_help = super::CREATE_AFTER_LONG_HELP)]
+#[command(after_long_help = super::create_after_long_help())]
 pub struct Args {
     /// Entity title. Required unless `--from` is given.
     #[arg(long)]
@@ -69,6 +69,9 @@ pub struct Args {
     /// JSON file matching the MCP `memstead_create` args shape. If set,
     /// all `--title` / `--type` / `--section` / `--metadata` / `--relation`
     /// / `--anchor` flags are ignored (the file is the single source of truth).
+    /// `--note` still applies (winning over the file's `note`), and
+    /// `--dry-run` ORs with the file's `dry_run` — same semantics as
+    /// `update --from`, so one template feeds both commands.
     /// The JSON type field is `entity_type` (not `type`), matching the
     /// response envelopes — a previous `--json` response pipes back in
     /// unchanged.
@@ -120,6 +123,26 @@ struct CreatePayload {
     /// precedence when both are supplied.
     #[serde(default)]
     note: Option<String>,
+    /// Preview-only marker — OR-ed with the `--dry-run` flag, same
+    /// semantics as `update --from`. One JSON template can therefore
+    /// feed both `create --from` and `update --from`. The
+    /// optimistic-locking selectors (`auto_hash`, `force`) are
+    /// deliberately flag-only on both commands: a stored payload must
+    /// never be able to disable locking on a future run.
+    #[serde(default)]
+    dry_run: bool,
+    /// Tolerated for template symmetry with `update --from` (one JSON
+    /// document feeds both commands). Create derives the entity id
+    /// from the title, so a supplied `id` is only *checked*: a value
+    /// whose slug part does not match the derived slug refuses with
+    /// `INVALID_INPUT` rather than silently landing elsewhere.
+    #[serde(default)]
+    id: Option<String>,
+    /// Tolerated for template symmetry with `update --from`. Create
+    /// has no stored state to compare a hash against; the value is
+    /// ignored (documented, not silent — this doc is the statement).
+    #[serde(default)]
+    expected_hash: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -142,7 +165,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 format!("failed to read {}: {e}", file.display()),
             )
         })?;
-        let parsed: CreatePayload = serde_json::from_slice(&bytes).map_err(|e| {
+        let mut parsed: CreatePayload = serde_json::from_slice(&bytes).map_err(|e| {
             CliError::new(
                 ExitKind::Validation,
                 "INVALID_INPUT",
@@ -153,6 +176,9 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 "parser_error": e.to_string(),
             }))
         })?;
+        // `--dry-run` and the file's `dry_run` OR — same semantics as
+        // `update --from`; the flag can force a preview, never disable one.
+        parsed.dry_run |= args.dry_run;
         parsed
     } else {
         let title = args.title.clone().ok_or_else(|| {
@@ -178,8 +204,42 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             relations: parse_relation_list(&args.relations)?,
             anchors: parse_anchor_list(&args.anchors)?,
             note: None,
+            dry_run: args.dry_run,
+            id: None,
+            expected_hash: None,
         }
     };
+
+    // `dry_run` is settled at payload level (file OR flag) — read it
+    // from here on, never from `args`, so the `--from` file's value
+    // is honoured on every branch below.
+    let dry_run = payload.dry_run;
+
+    // Template-symmetry `id` consistency check: create derives its id
+    // from the title, so a template `id` must agree with the derived
+    // slug — catching template drift instead of silently creating a
+    // second entity beside the intended one. `expected_hash` is
+    // tolerated and ignored (nothing exists yet to compare against).
+    if let Some(template_id) = payload.id.as_deref() {
+        let derived_slug = memstead_base::entity::id::validate_and_derive_slug(&payload.title)
+            .map_err(|e| CliError::new(ExitKind::Validation, "INVALID_TITLE", e.to_string()))?;
+        let slug_part = template_id
+            .rsplit_once("--")
+            .map(|(_, s)| s)
+            .unwrap_or(template_id);
+        if slug_part != derived_slug {
+            return Err(CliError::new(
+                ExitKind::Validation,
+                "INVALID_INPUT",
+                format!(
+                    "template `id` {template_id:?} does not match the id derived from the \
+                     title (slug {derived_slug:?}) — create derives identity from the title; \
+                     fix the template's id or title"
+                ),
+            )
+            .into());
+        }
+    }
 
     // `--note` (CLI flag) wins over a `note` carried in the `--from`
     // payload when both are present; otherwise the file's note is used.
@@ -209,7 +269,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                         description: r.description,
                     })
                     .collect(),
-                dry_run: args.dry_run,
+                dry_run,
             };
 
             let result = engine
@@ -235,7 +295,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 let incoming_block = if result.incoming.is_empty() {
                     String::new()
                 } else {
-                    let heading = if args.dry_run {
+                    let heading = if dry_run {
                         format!("Would adopt incoming edges ({})", result.incoming.len())
                     } else {
                         format!("Adopted incoming edges ({})", result.incoming.len())
@@ -249,7 +309,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                         .collect();
                     format!("\n\n## {}\n\n{}", heading, rows.join("\n"))
                 };
-                let title_heading = if args.dry_run {
+                let title_heading = if dry_run {
                     format!("Dry run — would create `{}`", result.id)
                 } else {
                     format!("Created `{}`", result.id)
@@ -304,7 +364,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 )
                 .into());
             }
-            if args.dry_run {
+            if dry_run {
                 return Err(CliError::new(
                     ExitKind::Validation,
                     "INVALID_INPUT",

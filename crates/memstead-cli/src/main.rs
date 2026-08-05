@@ -44,6 +44,38 @@ fn main() -> ExitCode {
 }
 
 fn run(cli: Cli) -> anyhow::Result<()> {
+    // Workspace override — `--workspace` beats `MEMSTEAD_WORKSPACE`,
+    // and either beats the upward walk. Applied by verifying the
+    // marker and then chdir-ing (git `-C` semantics), so every
+    // subcommand's resolution — the walk in `setup.rs`, the
+    // per-command walkers — honours the override through one
+    // mechanism. The marker check is NOT weakened: an override
+    // without `.memstead/workspace.toml` refuses here, naming the
+    // tried path, and never falls back to the walk (a typo must not
+    // silently target the wrong graph).
+    let override_path = cli
+        .workspace
+        .clone()
+        .or_else(|| std::env::var_os("MEMSTEAD_WORKSPACE").map(std::path::PathBuf::from));
+    if let Some(root) = override_path {
+        if !memstead_base::is_workspace_root(&root) {
+            return Err(setup::workspace_not_initialised_error(&format!(
+                "workspace override `{}` (from --workspace or MEMSTEAD_WORKSPACE) does not \
+                 carry `.memstead/workspace.toml` — refusing rather than falling back to \
+                 the directory walk",
+                root.display()
+            ))
+            .into());
+        }
+        std::env::set_current_dir(&root).map_err(|e| {
+            CliError::new(
+                ExitKind::Generic,
+                "INVALID_INPUT",
+                format!("cannot enter workspace override {}: {e}", root.display()),
+            )
+        })?;
+    }
+
     let ctx = setup::CliContext {
         json: cli.json,
         quiet: cli.quiet,

@@ -163,6 +163,32 @@ struct UpdatePayload {
     anchors: Vec<memstead_base::anchor::AnchorInput>,
     #[serde(default)]
     dry_run: bool,
+    /// Agent-authored provenance note — same semantics as
+    /// `create --from`: the command-line `--note` wins when both are
+    /// supplied. One JSON template can therefore feed both
+    /// `create --from` and `update --from`. The optimistic-locking
+    /// selectors (`auto_hash`, `force`) are deliberately flag-only: a
+    /// stored payload must never be able to disable locking on a
+    /// future run.
+    #[serde(default)]
+    note: Option<String>,
+    /// Tolerated for template symmetry with `create --from` (one JSON
+    /// document feeds both commands). Update cannot rename an entity,
+    /// so a supplied `title` is only *checked*: a value differing from
+    /// the entity's current title refuses with `INVALID_INPUT`
+    /// pointing at `memstead rename` — never silently dropped.
+    #[serde(default)]
+    title: Option<String>,
+    /// Tolerated for template symmetry with `create --from`; must
+    /// match the entity's current type (update cannot retype —
+    /// delete + create instead). A differing value refuses.
+    #[serde(default)]
+    entity_type: Option<String>,
+    /// Tolerated for template symmetry with `create --from`; must
+    /// match the mem encoded in the entity id (update cannot move an
+    /// entity between mems). A differing value refuses.
+    #[serde(default)]
+    mem: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -188,6 +214,48 @@ struct PatchPayload {
     new: String,
     #[serde(default)]
     all: bool,
+}
+
+/// Template-symmetry check against the live entity: a shared
+/// create/update template may carry `title` / `entity_type`; update
+/// can change neither, so a present-but-differing value refuses
+/// instead of being silently dropped. Absent entity → skip (the
+/// engine's own `ENTITY_NOT_FOUND` is the better error).
+fn check_template_identity(
+    entity: Option<&memstead_base::Entity>,
+    payload_title: Option<&str>,
+    payload_type: Option<&str>,
+) -> Result<(), CliError> {
+    let Some(entity) = entity else {
+        return Ok(());
+    };
+    if let Some(t) = payload_title
+        && t != entity.title
+    {
+        return Err(CliError::new(
+            ExitKind::Validation,
+            "INVALID_INPUT",
+            format!(
+                "template `title` {t:?} differs from the entity's current title {:?} — \
+                 update cannot rename; use `memstead rename`",
+                entity.title
+            ),
+        ));
+    }
+    if let Some(ty) = payload_type
+        && ty != entity.entity_type
+    {
+        return Err(CliError::new(
+            ExitKind::Validation,
+            "INVALID_INPUT",
+            format!(
+                "template `entity_type` {ty:?} differs from the entity's current type {:?} — \
+                 update cannot retype; delete + create instead",
+                entity.entity_type
+            ),
+        ));
+    }
+    Ok(())
 }
 
 pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
@@ -238,14 +306,45 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             declare_relations: parse_declare_relations(&args.declare_relations)?,
             anchors: super::create::parse_anchor_list(&args.anchors)?,
             dry_run: args.dry_run,
+            note: None,
+            title: None,
+            entity_type: None,
+            mem: None,
         }
     };
 
+    // `--note` (CLI flag) wins over a `note` carried in the `--from`
+    // payload when both are present — same precedence as `create --from`.
+    let note = args.note.clone().or_else(|| payload.note.clone());
+
     let entity_id = EntityId::canonical(&payload.id);
+
+    // Template-symmetry consistency checks: a shared create/update
+    // template may carry `title` / `entity_type` / `mem`. Update can
+    // change none of them, so each present value must match the
+    // entity id's mem (checkable here) — the title/type compare runs
+    // against the live entity below, per engine flavour.
+    if let Some(m) = payload.mem.as_deref()
+        && m != entity_id.mem()
+    {
+        return Err(CliError::new(
+            ExitKind::Validation,
+            "INVALID_INPUT",
+            format!(
+                "template `mem` {m:?} does not match the mem in id `{entity_id}` — update                  cannot move an entity between mems (delete + create instead)"
+            ),
+        )
+        .into());
+    }
 
     match ctx.cli_engine()? {
         #[cfg(feature = "mem-repo")]
         CliEngine::MemRepo(mut engine) => {
+            check_template_identity(
+                engine.get_entity(&entity_id),
+                payload.title.as_deref(),
+                payload.entity_type.as_deref(),
+            )?;
             let expected_hash = resolve_hash_mem_repo(
                 &engine,
                 &entity_id,
@@ -293,10 +392,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             };
 
             let result = engine
-                .update_entity_with_ctx(
-                    update_args,
-                    &crate::setup::cli_ctx_with_note(args.note.clone()),
-                )
+                .update_entity_with_ctx(update_args, &crate::setup::cli_ctx_with_note(note.clone()))
                 .map_err(CliError::from_engine_op)?;
             let mem_changed = engine.take_mem_changed_notices();
 
@@ -353,6 +449,11 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             }
         }
         CliEngine::Filesystem(mut engine) => {
+            check_template_identity(
+                engine.get_entity(&entity_id),
+                payload.title.as_deref(),
+                payload.entity_type.as_deref(),
+            )?;
             // The filesystem-mem `memstead_update` surface is intentionally
             // smaller than mem-repo's: whole-section replacement,
             // metadata set, and metadata unset are honoured;
@@ -418,7 +519,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 relations_unset: Vec::new(),
             };
             let outcome = engine
-                .update_entity(update_args, Actor::Cli, None, args.note.as_deref())
+                .update_entity(update_args, Actor::Cli, None, note.as_deref())
                 .map_err(CliError::from_engine_op)?;
 
             if ctx.json {

@@ -1372,6 +1372,10 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "warnings",
             // Warning code referenced literally in the description.
             "TITLE_NORMALIZED_TO_SLUG_NOOP",
+            // Title-grammar refusal + its recovery field, named by the
+            // TITLE_GRAMMAR_RULE sentence the description carries.
+            "INVALID_TITLE",
+            "proposed_slug",
             // Error-envelope code + details field referenced literally.
             "HASH_MISMATCH",
             "details.current",
@@ -2533,5 +2537,28 @@ fn print_description_sizes() {
         "GRAND_TOTAL",
         total_words + instr_words,
         total_bytes + instr_bytes
+    );
+}
+
+/// The title-grammar rule in the `memstead_create` / `memstead_rename`
+/// descriptions is the validator's own sentence — asserted verbatim
+/// against `memstead_base::TITLE_GRAMMAR_RULE`, whose conformance test
+/// in `memstead-base` binds the sentence to `validate_and_derive_slug`
+/// behaviour. Derived, not transcribed: neither surface can drift from
+/// the accept set alone.
+#[test]
+fn title_taking_descriptions_carry_the_validator_grammar_rule() {
+    let mut missing = Vec::new();
+    for (surface, name, desc) in descriptions() {
+        if !(name == "memstead_create" || name == "memstead_rename") {
+            continue;
+        }
+        if !desc.contains(memstead_base::TITLE_GRAMMAR_RULE) {
+            missing.push(format!("{surface}/{name}"));
+        }
+    }
+    assert!(
+        missing.is_empty(),
+        "descriptions missing the verbatim TITLE_GRAMMAR_RULE sentence: {missing:?}"
     );
 }

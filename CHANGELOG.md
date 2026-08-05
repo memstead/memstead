@@ -8,6 +8,31 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Added
+- **CLI parity and surface honesty (four gaps closed).** (1) One JSON
+  template feeds both `create --from` and `update --from`:
+  `UpdatePayload` gains `note` (flag wins), `CreatePayload` gains
+  `dry_run` (ORs with the flag), and each command *tolerates* the
+  other's identity fields with consistency checks instead of silent
+  drops (a template `id` must match create's derived slug; a template
+  `title`/`entity_type`/`mem` must match the entity on update). The
+  optimistic-locking selectors (`auto_hash`, `force`) stay flag-only
+  by design — a stored payload must never disable locking. (2)
+  `memstead search` gains a repeatable `--range-filter KEY=VALUE`
+  using the MCP `range_filters` key grammar and the same engine path,
+  so the four typed outcome codes reach the CLI with identical
+  meaning. (3) A global `--workspace <path>` flag plus
+  `MEMSTEAD_WORKSPACE` (flag wins, then env, then the upward walk)
+  points the CLI at a workspace from any working directory; a
+  marker-less override refuses naming the tried path and never falls
+  back to the walk. The per-subcommand `--workspace` flags on
+  `publish`/`link` were folded into the global one. (4) The title
+  grammar is stated as a rule derived from the validator
+  (`memstead_base::TITLE_GRAMMAR_RULE`): CLI create/rename help embeds
+  it at build time, the MCP `memstead_create`/`memstead_rename`
+  descriptions carry it verbatim (surface-test-enforced), and a
+  conformance test binds the sentence to `validate_and_derive_slug`
+  behaviour — covering the characters outside projects found by
+  collision (`.`, `(`, `)`, `/`, `:`, em dash).
 - **The schema response carries every legality condition on outgoing
   edges.** Both the full and lite `memstead_schema` projections now
   report each type's `required_outgoing` blocks (relationship

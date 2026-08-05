@@ -71,7 +71,7 @@ pub use engine::{
     RenameEntityOutcome, ReviewMarkStatus, SchemaSourceDiagnostic, SetReviewMarkOutcome,
     StoryStart, UpdateEntityArgs, UpdateEntityOutcome, format_inline_list_overflow,
 };
-pub use entity::id::{ENTITY_ID_MAX_LEN, SlugError};
+pub use entity::id::{ENTITY_ID_MAX_LEN, SlugError, TITLE_GRAMMAR_RULE};
 pub use entity::{Entity, EntityId, MetadataValue, ParseResult, Relationship};
 pub use graph::{ClusterInfo, LouvainOutput};
 pub use mem::{MEM_META_DIR, MemOrigin, MemRouterSnapshot};

@@ -7,8 +7,19 @@ pub mod create;
 /// `memstead create` and `memstead rename` so an agent reading either
 /// command's help can predict what slug a given title will produce
 /// (and therefore why the strict gate refuses titles outside the
-/// pipeline's accepted character classes).
-pub const SLUG_DERIVATION_HELP: &str = "\
+/// pipeline's accepted character classes). The leading title-grammar
+/// rule is derived from the validator's own
+/// [`memstead_base::TITLE_GRAMMAR_RULE`] at build time, not
+/// transcribed — the docs cannot drift from the accept set alone.
+pub fn slug_derivation_help() -> String {
+    format!(
+        "Title grammar:\n  {}.\n\n{}",
+        memstead_base::TITLE_GRAMMAR_RULE,
+        SLUG_DERIVATION_BODY
+    )
+}
+
+const SLUG_DERIVATION_BODY: &str = "\
 Slug derivation:
   The entity slug derives from the title in five steps:
     1. NFC-normalize (combining sequences fold to precomposed form);
@@ -51,45 +62,18 @@ Section / append / patch flag values:
   two lines on disk.";
 
 /// Combined `--help` epilog for `memstead create`: the section-bytes-
-/// verbatim note followed by the title→slug pipeline description.
-/// `clap`'s `after_long_help` takes a single string, so the two
-/// epilogs are pre-concatenated here.
-pub const CREATE_AFTER_LONG_HELP: &str = concat!(
-    "Section / append / patch flag values:\n",
-    "  `--section KEY=VALUE`, `--append KEY=VALUE`, and `--patch KEY=OLD=>NEW`\n",
-    "  store the right-hand side as bytes verbatim. The CLI does NOT\n",
-    "  interpret backslash escapes — `--section purpose=\"line1\\nline2\"`\n",
-    "  writes the literal two-character sequence `\\n` into the section\n",
-    "  body, not a newline.\n",
-    "\n",
-    "  For multi-line section content, use `--from <FILE>` where FILE is a\n",
-    "  JSON payload matching the MCP `memstead_create` / `memstead_update` shape.\n",
-    "  The JSON parser de-escapes `\\n`, `\\t`, etc. before the engine\n",
-    "  sees the value, so a JSON-quoted `\"line1\\nline2\"` round-trips as\n",
-    "  two lines on disk.\n",
-    "\n",
-    "Slug derivation:\n",
-    "  The entity slug derives from the title in five steps:\n",
-    "    1. NFC-normalize (combining sequences fold to precomposed form);\n",
-    "    2. Unicode case-fold to lowercase;\n",
-    "    3. rewrite each whitespace character to '-';\n",
-    "    4. drop every character that is not Unicode alphanumeric and not '-';\n",
-    "    5. collapse hyphen runs, trim leading/trailing hyphens.\n",
-    "\n",
-    "  The mutation entry refuses titles where step 4 would drop any\n",
-    "  character, or where the pipeline output is empty (whitespace- or\n",
-    "  hyphen-only input). Errors carry a `proposed_slug` recovery hint\n",
-    "  so a sanitised retry is mechanical.\n",
-    "\n",
-    "  The title body is stored as-sent (byte-form preserved); slug bytes\n",
-    "  derive from the NFC-normalised form. An NFD-spelled title therefore\n",
-    "  produces an NFC-spelled slug — the two byte forms are semantically\n",
-    "  equivalent and compare equal under NFC normalization.\n",
-    "\n",
-    "  Pre-gate entities (created before this stricter rule landed) remain\n",
-    "  readable. The gate runs at mutation entry only — it does not\n",
-    "  retroactively reject entities loaded from disk.",
-);
+/// verbatim note followed by the title-grammar rule (derived from the
+/// validator via [`memstead_base::TITLE_GRAMMAR_RULE`]) and the
+/// title→slug pipeline description. `clap`'s `after_long_help` takes a
+/// single string, so the epilogs are concatenated here.
+pub fn create_after_long_help() -> String {
+    format!(
+        "{}\n\nTitle grammar:\n  {}.\n\n{}",
+        SECTION_BYTES_VERBATIM_HELP,
+        memstead_base::TITLE_GRAMMAR_RULE,
+        SLUG_DERIVATION_BODY
+    )
+}
 
 /// `--help` epilog for `memstead search` and `memstead list`. Names the five
 /// frozen named-flag shortcuts and points at `--filter KEY=VALUE` as

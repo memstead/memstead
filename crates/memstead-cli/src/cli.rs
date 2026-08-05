@@ -42,6 +42,17 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub quiet: bool,
 
+    /// Operate on the workspace at PATH instead of walking up from the
+    /// current directory (like `git -C`: the process runs as if
+    /// invoked from PATH, so relative path arguments resolve against
+    /// it). Also settable via the `MEMSTEAD_WORKSPACE` environment
+    /// variable; the flag wins when both are present. A PATH without
+    /// the `.memstead/workspace.toml` marker refuses with
+    /// `WORKSPACE_NOT_INITIALISED` naming the path — it never falls
+    /// back to the directory walk.
+    #[arg(long, global = true, value_name = "PATH")]
+    pub workspace: Option<std::path::PathBuf>,
+
     #[command(subcommand)]
     pub command: Command,
 }
