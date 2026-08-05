@@ -143,6 +143,10 @@ fn run(cli: Cli) -> anyhow::Result<()> {
             commands::mem::MemAction::SetDescription(args) => {
                 commands::mem::run_set_description(&ctx, args)
             }
+            commands::mem::MemAction::SetTitle(args) => commands::mem::run_set_title(&ctx, args),
+            commands::mem::MemAction::SetSubject(args) => {
+                commands::mem::run_set_subject(&ctx, args)
+            }
             commands::mem::MemAction::SetInternal(args) => {
                 commands::mem::run_set_internal(&ctx, args)
             }

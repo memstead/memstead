@@ -499,6 +499,10 @@ pub fn compose_overview(
             .mem_config_for(name)
             .and_then(|cfg| cfg.version.as_ref())
             .map(|v| v.to_string());
+        // Display title, when set — display text, not identity.
+        let title = engine
+            .mem_config_for(name)
+            .and_then(|cfg| cfg.title.clone());
         let mut entity_count: usize = 0;
         let mut type_dist: BTreeMap<String, usize> = Default::default();
         for e in engine.store().all_entities() {
@@ -522,6 +526,7 @@ pub fn compose_overview(
             .unwrap_or((None, false));
         mems_lite.push(serde_json::json!({
             "name": name,
+            "title": title,
             "schema": sref,
             "version": version,
             "entity_count": entity_count,
@@ -533,6 +538,7 @@ pub fn compose_overview(
         }));
         mems_full.push(serde_json::json!({
             "name": name,
+            "title": title,
             "schema": sref,
             "version": version,
             "entity_count": entity_count,
@@ -954,11 +960,17 @@ pub fn compose_overview(
             let schema = v["schema"].as_str().unwrap_or("(unspecified)");
             let count = v["entity_count"].as_u64().unwrap_or(0);
             let version = v["version"].as_str();
+            // Prefer the display title; the name (identity) stays
+            // visible beside it so the addressable slug never hides.
+            let title = v["title"].as_str();
             // Absent on writable entries (the ordinary case) so their lines are
             // unchanged; a read-only mem is marked so "not writable" never
             // reads as "absent".
             let read_only = v["writable"].as_bool() == Some(false);
-            md.push_str(&format!("### {name}\n\n"));
+            match title {
+                Some(t) => md.push_str(&format!("### {t} (`{name}`)\n\n")),
+                None => md.push_str(&format!("### {name}\n\n")),
+            }
             md.push_str(&format!("- **Schema:** {schema}\n"));
             if read_only {
                 md.push_str("- **Access:** read-only\n");

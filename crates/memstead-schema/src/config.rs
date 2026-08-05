@@ -308,6 +308,27 @@ where
     }
 }
 
+/// The subject block of a mem — what it covers, by what method, and
+/// above all what was considered and deliberately left out. Exactly
+/// three members, by design: every additional slot invites the
+/// working-notes leakage this block exists to avoid, and three is what
+/// a recipient can actually read before deciding whether to trust the
+/// mem. Published verbatim in [`PublishedMemConfig`]; the engine never
+/// parses, links, or validates the prose.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct MemSubject {
+    /// What this mem covers.
+    pub scope: String,
+    /// How its content was arrived at.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub method: Option<String>,
+    /// What was considered and deliberately left out — prose
+    /// statements, order preserved. May be empty.
+    #[serde(default)]
+    pub exclusions: Vec<String>,
+}
+
 /// Full mem configuration loaded from .memstead/config.json.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -335,6 +356,20 @@ pub struct MemConfig {
     /// and UI.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+
+    /// Human-readable display title. Display text, NOT identity: no
+    /// slug grammar, no uniqueness rule — the mem name stays the sole
+    /// handle everywhere (paths, grants, namespace patterns, cross-mem
+    /// references, archive filenames). Surfaces that print a mem
+    /// prefer this and fall back to the name. Published in
+    /// [`PublishedMemConfig`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+
+    /// The mem's subject — scope, method, deliberate exclusions.
+    /// Published verbatim; clears as a unit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subject: Option<MemSubject>,
 
     /// Optional author attribution, surfaced in mem-archive metadata.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -496,17 +531,36 @@ pub struct PublishedMemConfig {
     pub version: semver::Version,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// Human-readable display title (format ≥ 4). Display text, not
+    /// identity — a format-3 archive simply has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// The mem's subject block (format ≥ 4), published verbatim —
+    /// exclusions included and in order.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subject: Option<MemSubject>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub authors: Option<Vec<String>>,
     pub schema: SchemaRef,
 }
 
 /// Archive format integer written to the archive config's `format`
-/// field. Bumped to `3` for the schema-path relocation (embedded schema
-/// moved from top-level `schema/` to the meta-dir schema tree). `format: 1` (V1)
-/// and `format: 2` (V2, top-level `schema/` tree) archives are rejected
-/// cleanly (pre-release, no external users to migrate).
-pub const PUBLISHED_MEM_FORMAT: u32 = 3;
+/// field. Bumped to `4` for the mem title + subject block (both
+/// optional — a format-3 archive simply has neither). Readers accept
+/// `3` and `4` via [`published_format_accepted`]; `format: 1` (V1) and
+/// `format: 2` (V2, top-level `schema/` tree) archives keep refusing
+/// cleanly.
+pub const PUBLISHED_MEM_FORMAT: u32 = 4;
+
+/// Does a reader updated for the current format accept an archive at
+/// `format`? Accepts the current integer and format 3 (the
+/// pre-title/subject shape — the two mems already published on the
+/// live registry stay installable without a re-publish). The single
+/// predicate every reader gate consults, so acceptance cannot drift
+/// per surface.
+pub fn published_format_accepted(format: u32) -> bool {
+    format == PUBLISHED_MEM_FORMAT || format == 3
+}
 
 /// Errors returned by `published_config_from`. Actionable messages —
 /// the caller (export pipeline, publish pipeline) surfaces these
@@ -563,6 +617,8 @@ pub fn published_config_from(
         name: resolved_name,
         version,
         description: config.description.clone(),
+        title: config.title.clone(),
+        subject: config.subject.clone(),
         authors: config.authors.clone(),
         schema,
     })
@@ -575,6 +631,8 @@ pub fn published_config_from(
 const KNOWN_TOP_LEVEL_KEYS: &[&str] = &[
     "version",
     "description",
+    "title",
+    "subject",
     "authors",
     "schema",
     "writeGuidance",
@@ -926,6 +984,8 @@ mod tests {
     fn mem_config_omits_name_when_none_on_serialize() {
         let cfg = MemConfig {
             name: None,
+            title: None,
+            subject: None,
             version: None,
             description: None,
             authors: None,
@@ -1318,6 +1378,8 @@ mod tests {
         );
         let cfg = MemConfig {
             name: Some("demo".to_string()),
+            title: None,
+            subject: None,
             version: Some(semver::Version::new(0, 1, 0)),
             description: None,
             authors: None,
@@ -1673,6 +1735,8 @@ mod tests {
         // PublishedMemConfig with no `vcs` on the wire.
         let mut cfg = MemConfig {
             name: Some("demo".to_string()),
+            title: None,
+            subject: None,
             version: Some(semver::Version::new(0, 1, 0)),
             description: None,
             authors: None,

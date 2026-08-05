@@ -2771,6 +2771,32 @@ pub struct SetMemVersionOutcome {
     pub warnings: Vec<WarningHint>,
 }
 
+/// Result of `Engine::set_mem_title`. Same shape discipline as
+/// [`SetMemDescriptionOutcome`].
+#[derive(Debug, Clone, Serialize)]
+pub struct SetMemTitleOutcome {
+    pub mem: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub old_title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub new_title: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<WarningHint>,
+}
+
+/// Result of `Engine::set_mem_subject`. The block sets/clears as a
+/// unit; old/new carry the whole block.
+#[derive(Debug, Clone, Serialize)]
+pub struct SetMemSubjectOutcome {
+    pub mem: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub old_subject: Option<memstead_schema::MemSubject>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub new_subject: Option<memstead_schema::MemSubject>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<WarningHint>,
+}
+
 /// Result of `Engine::set_mem_description`. Carries the (mem,
 /// old_description, new_description) triple so callers can surface
 /// the change without an extra read.

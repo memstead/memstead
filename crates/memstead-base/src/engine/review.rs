@@ -227,6 +227,8 @@ mod tests {
             // the mark (mirrors an initialized mem).
             let config = memstead_schema::config::MemConfig {
                 name: None,
+                title: None,
+                subject: None,
                 version: None,
                 description: None,
                 authors: None,
@@ -402,6 +404,8 @@ mod tests {
         // own tests).
         let mut config = memstead_schema::config::MemConfig {
             name: None,
+            title: None,
+            subject: None,
             version: Some(semver::Version::new(1, 0, 0)),
             description: None,
             authors: None,

@@ -1040,6 +1040,111 @@ impl Engine {
         })
     }
 
+    /// Update a mem's display `title` — free text, NOT identity: the
+    /// mem name stays the sole handle everywhere. `None` clears it.
+    /// Mirrors [`Self::set_mem_description`] in backend symmetry,
+    /// drift probe, and provenance-note posture.
+    pub fn set_mem_title(
+        &mut self,
+        mem_name: &str,
+        new_title: Option<String>,
+        note: Option<&str>,
+    ) -> Result<crate::ops::SetMemTitleOutcome, EngineError> {
+        let mount_idx = self
+            .mounts
+            .iter()
+            .position(|m| m.mount.mem == mem_name)
+            .ok_or_else(|| EngineError::UnknownMem(mem_name.to_string()))?;
+        if self.mounts[mount_idx].mount.capability != crate::workspace::MountCapability::Write {
+            return Err(EngineError::ReadOnlyMount(mem_name.to_string()));
+        }
+
+        let mut warnings = self.reload_if_stale(Some(mem_name));
+        if let Some(w) = self.note_missing_warning("set_mem_title", note) {
+            warnings.push(w);
+        }
+
+        let mounted = &mut self.mounts[mount_idx];
+        let mut config = mounted.mem_config.clone().ok_or_else(|| {
+            EngineError::InvalidInput(format!(
+                "mem '{mem_name}' has no loaded MemConfig — cannot set title"
+            ))
+        })?;
+        let old_title = config.title.clone();
+        config.title = new_title.clone();
+
+        let mut bytes = serde_json::to_vec_pretty(&config).map_err(|e| {
+            EngineError::InvalidInput(format!("could not serialize mem config: {e}"))
+        })?;
+        bytes.push(b'\n');
+        mounted.backend.write_mem_config_with_note(&bytes, note)?;
+        mounted.mem_config = Some(config);
+
+        let new_head = mounted.backend.current_head().ok().flatten();
+        if let Some(sha) = new_head {
+            mounted.last_known_head = Some(sha);
+        }
+
+        Ok(crate::ops::SetMemTitleOutcome {
+            mem: mem_name.to_string(),
+            old_title,
+            new_title,
+            warnings,
+        })
+    }
+
+    /// Update a mem's `subject` block — scope, method, deliberate
+    /// exclusions, published verbatim. `None` clears the block AS A
+    /// UNIT. Mirrors [`Self::set_mem_description`].
+    pub fn set_mem_subject(
+        &mut self,
+        mem_name: &str,
+        new_subject: Option<memstead_schema::MemSubject>,
+        note: Option<&str>,
+    ) -> Result<crate::ops::SetMemSubjectOutcome, EngineError> {
+        let mount_idx = self
+            .mounts
+            .iter()
+            .position(|m| m.mount.mem == mem_name)
+            .ok_or_else(|| EngineError::UnknownMem(mem_name.to_string()))?;
+        if self.mounts[mount_idx].mount.capability != crate::workspace::MountCapability::Write {
+            return Err(EngineError::ReadOnlyMount(mem_name.to_string()));
+        }
+
+        let mut warnings = self.reload_if_stale(Some(mem_name));
+        if let Some(w) = self.note_missing_warning("set_mem_subject", note) {
+            warnings.push(w);
+        }
+
+        let mounted = &mut self.mounts[mount_idx];
+        let mut config = mounted.mem_config.clone().ok_or_else(|| {
+            EngineError::InvalidInput(format!(
+                "mem '{mem_name}' has no loaded MemConfig — cannot set subject"
+            ))
+        })?;
+        let old_subject = config.subject.clone();
+        config.subject = new_subject.clone();
+
+        let mut bytes = serde_json::to_vec_pretty(&config).map_err(|e| {
+            EngineError::InvalidInput(format!("could not serialize mem config: {e}"))
+        })?;
+        bytes.push(b'\n');
+        mounted.backend.write_mem_config_with_note(&bytes, note)?;
+        mounted.mem_config = Some(config);
+
+        let new_head = mounted.backend.current_head().ok().flatten();
+        if let Some(sha) = new_head {
+            mounted.last_known_head = Some(sha);
+        }
+
+        Ok(crate::ops::SetMemSubjectOutcome {
+            mem: mem_name.to_string(),
+            old_subject,
+            new_subject,
+            warnings,
+        })
+    }
+
     /// Mark (or unmark) a mem as **internal** — hidden from the default
     /// `memstead_overview` roster and public projections, while remaining a
     /// real, schema-validated, diffable mem (inspectable when explicitly

@@ -735,3 +735,129 @@ fn workspace_dump_and_type_resolve_for_ro_mount_after_install() {
         .assert()
         .success();
 }
+
+// ---------------------------------------------------------------------------
+// Mem title + subject (display text, not identity)
+// ---------------------------------------------------------------------------
+
+/// `mem set-title` / `mem set-subject` round-trip: the roster prefers
+/// the title and falls back to the name; clearing restores the
+/// fallback; the subject sets and clears as a unit. Refusal
+/// complements: identity is untouched — addressing a mem by its title
+/// refuses UNKNOWN_MEM while the name keeps resolving.
+#[test]
+fn mem_title_and_subject_lifecycle() {
+    let tmp = TempDir::new().unwrap();
+    let _mem = make_sender_mem(tmp.path());
+
+    // Set a title (non-ASCII, spaces — no slug grammar).
+    memstead()
+        .current_dir(tmp.path())
+        .args([
+            "mem",
+            "set-title",
+            "sender-mem",
+            "Einrichtungsbezogene Impfpflicht Deutschland",
+        ])
+        .assert()
+        .success()
+        .stdout(contains("title updated"));
+
+    // The roster prefers the title; the name stays visible.
+    let out = memstead()
+        .current_dir(tmp.path())
+        .args(["--json", "mem", "list"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    let row = &json["mems"][0];
+    assert_eq!(row["name"], "sender-mem");
+    assert_eq!(row["title"], "Einrichtungsbezogene Impfpflicht Deutschland");
+    memstead()
+        .current_dir(tmp.path())
+        .args(["mem", "list"])
+        .assert()
+        .success()
+        .stdout(contains(
+            "Einrichtungsbezogene Impfpflicht Deutschland (`sender-mem`)",
+        ));
+
+    // Identity untouched: the title does NOT address the mem…
+    memstead()
+        .current_dir(tmp.path())
+        .args([
+            "--json",
+            "search",
+            "--mem",
+            "Einrichtungsbezogene Impfpflicht Deutschland",
+        ])
+        .assert()
+        .failure()
+        .stdout(contains("UNKNOWN_MEM"));
+    // …while the name keeps resolving exactly as before.
+    memstead()
+        .current_dir(tmp.path())
+        .args(["--json", "search", "--mem", "sender-mem"])
+        .assert()
+        .success();
+
+    // Subject sets with scope + method + ordered exclusions…
+    memstead()
+        .current_dir(tmp.path())
+        .args([
+            "mem",
+            "set-subject",
+            "sender-mem",
+            "--scope",
+            "Die Impfpflicht in Einrichtungen",
+            "--method",
+            "Primärquellen, händisch geprüft",
+            "--exclusion",
+            "Länderverordnungen nach 2023",
+            "--exclusion",
+            "Presseberichte",
+        ])
+        .assert()
+        .success()
+        .stdout(contains("subject updated"));
+
+    // …method/exclusion without scope refuses…
+    memstead()
+        .current_dir(tmp.path())
+        .args([
+            "mem",
+            "set-subject",
+            "sender-mem",
+            "--method",
+            "nur Methode",
+        ])
+        .assert()
+        .failure()
+        .stderr(contains("--scope"));
+
+    // …and no fields clears the block as a unit.
+    memstead()
+        .current_dir(tmp.path())
+        .args(["--json", "mem", "set-subject", "sender-mem"])
+        .assert()
+        .success()
+        .stdout(predicates::prelude::PredicateBooleanExt::not(contains(
+            "\"new_subject\"",
+        )));
+
+    // Clearing the title restores the name fallback.
+    memstead()
+        .current_dir(tmp.path())
+        .args(["mem", "set-title", "sender-mem", ""])
+        .assert()
+        .success();
+    memstead()
+        .current_dir(tmp.path())
+        .args(["mem", "list"])
+        .assert()
+        .success()
+        .stdout(contains("- `sender-mem`"));
+}

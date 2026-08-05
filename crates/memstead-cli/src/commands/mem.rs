@@ -74,6 +74,18 @@ pub enum MemAction {
     /// `memstead publish` so the shared archive carries its card text.
     #[command(name = "set-description")]
     SetDescription(SetDescriptionArgs),
+    /// Set a mem's human-readable display `title` — display text, NOT
+    /// identity (the mem name stays the sole handle everywhere). Every
+    /// surface that prints a mem prefers the title and falls back to
+    /// the name. An empty string clears it.
+    #[command(name = "set-title")]
+    SetTitle(SetTitleArgs),
+    /// Set a mem's `subject` block — scope, optional method, and the
+    /// deliberate exclusions — published verbatim in archives and on
+    /// the registry mem page. Passing only the name with no fields
+    /// clears the block as a unit.
+    #[command(name = "set-subject")]
+    SetSubject(SetSubjectArgs),
     /// Set (or clear) one opaque sync-state token in a mem's config —
     /// the pipeline layer's durable "last synced source state" baseline.
     /// `<KEY>` and `<TOKEN>` are opaque to the engine (the binding layer
@@ -896,6 +908,49 @@ pub fn run_set_description(ctx: &CliContext, args: SetDescriptionArgs) -> anyhow
     Ok(())
 }
 
+/// `memstead mem set-title <NAME> <TITLE>` arguments.
+#[derive(Args, Debug)]
+pub struct SetTitleArgs {
+    /// Mem name (must be registered in the workspace).
+    pub name: String,
+
+    /// Human-readable display title (free text — no slug grammar, no
+    /// uniqueness rule). An empty string clears it.
+    pub title: String,
+
+    /// Optional provenance note (≤280 chars) recorded on the commit
+    /// body, like the other commit-producing mem-lifecycle commands.
+    #[arg(long)]
+    pub note: Option<String>,
+}
+
+/// `memstead mem set-subject <NAME> --scope … [--method …]
+/// [--exclusion …]…` arguments.
+#[derive(Args, Debug)]
+pub struct SetSubjectArgs {
+    /// Mem name (must be registered in the workspace).
+    pub name: String,
+
+    /// What this mem covers. Required to SET the block; omit every
+    /// field to CLEAR the block as a unit.
+    #[arg(long)]
+    pub scope: Option<String>,
+
+    /// How the mem's content was arrived at.
+    #[arg(long)]
+    pub method: Option<String>,
+
+    /// What was considered and deliberately left out — repeatable;
+    /// order preserved. May be omitted (empty exclusions).
+    #[arg(long = "exclusion", value_name = "TEXT")]
+    pub exclusions: Vec<String>,
+
+    /// Optional provenance note (≤280 chars) recorded on the commit
+    /// body, like the other commit-producing mem-lifecycle commands.
+    #[arg(long)]
+    pub note: Option<String>,
+}
+
 /// `memstead mem set-internal <NAME> [--off]` arguments.
 #[derive(Args, Debug)]
 pub struct SetInternalArgs {
@@ -910,6 +965,95 @@ pub struct SetInternalArgs {
     /// Optional provenance note (≤280 chars) recorded on the commit body.
     #[arg(long)]
     pub note: Option<String>,
+}
+
+pub fn run_set_title(ctx: &CliContext, args: SetTitleArgs) -> anyhow::Result<()> {
+    let new_title = {
+        let trimmed = args.title.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    };
+    let note = args.note.as_deref();
+    let outcome = match ctx.cli_engine()? {
+        crate::setup::CliEngine::MemRepo(mut engine) => engine
+            .set_mem_title(&args.name, new_title, note)
+            .map_err(crate::CliError::from_engine_op)?,
+        crate::setup::CliEngine::Filesystem(mut engine) => engine
+            .set_mem_title(&args.name, new_title, note)
+            .map_err(crate::CliError::from_engine_op)?,
+    };
+
+    if ctx.json {
+        crate::output::print_json(&outcome)?;
+    } else {
+        let old = outcome.old_title.as_deref().unwrap_or("<none>");
+        let new = outcome.new_title.as_deref().unwrap_or("<cleared>");
+        crate::output::print_markdown(&format!(
+            "# Mem `{}` title updated\n\n- Old: {}\n- New: {}",
+            outcome.mem, old, new,
+        ));
+    }
+    Ok(())
+}
+
+pub fn run_set_subject(ctx: &CliContext, args: SetSubjectArgs) -> anyhow::Result<()> {
+    // A subject needs a scope; no fields at all clears the block as a
+    // unit. `--method`/`--exclusion` without `--scope` is refused —
+    // a subject block cannot exist without its scope member.
+    let new_subject = match &args.scope {
+        Some(scope) => Some(memstead_schema::MemSubject {
+            scope: scope.clone(),
+            method: args.method.clone(),
+            exclusions: args.exclusions.clone(),
+        }),
+        None if args.method.is_none() && args.exclusions.is_empty() => None,
+        None => {
+            return Err(crate::CliError::new(
+                crate::output::ExitKind::Validation,
+                "INVALID_INPUT",
+                "--method / --exclusion require --scope (a subject block cannot exist \
+                 without its scope); pass no fields at all to clear the block as a unit",
+            )
+            .into());
+        }
+    };
+    let note = args.note.as_deref();
+    let outcome = match ctx.cli_engine()? {
+        crate::setup::CliEngine::MemRepo(mut engine) => engine
+            .set_mem_subject(&args.name, new_subject, note)
+            .map_err(crate::CliError::from_engine_op)?,
+        crate::setup::CliEngine::Filesystem(mut engine) => engine
+            .set_mem_subject(&args.name, new_subject, note)
+            .map_err(crate::CliError::from_engine_op)?,
+    };
+
+    if ctx.json {
+        crate::output::print_json(&outcome)?;
+    } else {
+        let describe = |s: &Option<memstead_schema::MemSubject>| match s {
+            None => "<none>".to_string(),
+            Some(sub) => format!(
+                "scope: {}; method: {}; exclusions: {}",
+                sub.scope,
+                sub.method.as_deref().unwrap_or("<none>"),
+                if sub.exclusions.is_empty() {
+                    "<none>".to_string()
+                } else {
+                    sub.exclusions.join(" | ")
+                }
+            ),
+        };
+        crate::output::print_markdown(&format!(
+            "# Mem `{}` subject updated\n\n- Old: {}\n- New: {}",
+            outcome.mem,
+            describe(&outcome.old_subject),
+            describe(&outcome.new_subject),
+        ));
+    }
+    Ok(())
 }
 
 /// `memstead mem set-internal <NAME> [--off]` — mark or unmark a mem as
@@ -1100,6 +1244,8 @@ pub fn run_list(ctx: &CliContext, _args: ListArgs) -> anyhow::Result<()> {
         };
         rows.push(serde_json::json!({
             "name": name,
+            // Display title, when set — display text, not identity.
+            "title": cfg.and_then(|c| c.title.clone()),
             "schema_ref": cfg.and_then(|c| c.schema.as_ref()).map(|s| s.to_string()),
             "version": cfg.and_then(|c| c.version.clone()),
             "entity_count": entity_count,
@@ -1122,8 +1268,14 @@ pub fn run_list(ctx: &CliContext, _args: ListArgs) -> anyhow::Result<()> {
             let version = v["version"].as_str().unwrap_or("—");
             let count = v["entity_count"].as_u64().unwrap_or(0);
             let cap = v["capability"].as_str().unwrap_or("?");
+            // Prefer the display title, fall back to the name — the
+            // name (the identity) stays visible in the backticked slug.
+            let display = match v["title"].as_str() {
+                Some(t) => format!("{t} (`{name}`)"),
+                None => format!("`{name}`"),
+            };
             lines.push(format!(
-                "- `{name}` ({cap}) — schema `{schema}`, version `{version}`, {count} entities"
+                "- {display} ({cap}) — schema `{schema}`, version `{version}`, {count} entities"
             ));
         }
     }

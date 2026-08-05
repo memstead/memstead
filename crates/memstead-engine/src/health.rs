@@ -601,6 +601,15 @@ pub fn compose_health(
                     entry.insert("vcs".into(), serde_json::Value::Object(vcs_obj));
                 }
                 if let Some(cfg) = engine.mem_config_for(name) {
+                    // Display title + subject block, when set — the
+                    // config projection prefers the title wherever a
+                    // mem is printed; the name stays the identity.
+                    if let Some(title) = &cfg.title {
+                        entry.insert("title".into(), serde_json::json!(title));
+                    }
+                    if let Some(subject) = &cfg.subject {
+                        entry.insert("subject".into(), serde_json::json!(subject));
+                    }
                     let guidance = serde_json::Map::from_iter(
                         cfg.write_guidance
                             .iter()

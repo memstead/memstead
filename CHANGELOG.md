@@ -8,6 +8,23 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Added
+- **A published mem carries its identity and its subject.** `MemConfig`
+  gains an optional human-readable `title` (display text, not identity
+  — the slug name stays the sole handle everywhere) and an optional
+  three-member `subject` block: `scope` (what the mem covers),
+  `method` (how its content was arrived at, optional), and
+  `exclusions` (what was considered and deliberately left out — prose,
+  order preserved, may be empty; exactly three members by design, so
+  the block stays reviewable). Both publish verbatim in
+  `PublishedMemConfig`; `write_guidance` and `rules` stay author-only.
+  `PUBLISHED_MEM_FORMAT` moves 3 → 4; readers accept both via the
+  shared `published_format_accepted` predicate (the two mems already
+  on the live registry stay installable), writers emit 4, formats 1/2
+  keep refusing. New `memstead mem set-title` / `mem set-subject`
+  setters mirror `set-description` (empty clears; the subject clears
+  as a unit). The mem roster, the workspace overview, and the health
+  config projection prefer the title with the name kept visible as
+  the addressable slug.
 - **An anchor names the source that produced it.** Anchor records gain
   an optional `source` — the NAME of the producing binding's source
   entry — so a discovery run over a multi-source binding is measurable

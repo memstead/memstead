@@ -27,10 +27,10 @@ pub use archive_provenance::{
 pub use config::{
     ARCHIVE_ANCHORS_PATH, ARCHIVE_CONFIG_PATH, ARCHIVE_EXTENSION, ARCHIVE_META_DIR,
     ARCHIVE_PROVENANCE_PATH, ARCHIVE_SCHEMA_PREFIX, CommunityOverride, ConfigCheckResult,
-    ConfigError, MEM_META_DIR, MemConfig, PUBLISHED_MEM_FORMAT, PublishConfig,
+    ConfigError, MEM_META_DIR, MemConfig, MemSubject, PUBLISHED_MEM_FORMAT, PublishConfig,
     PublishConversionError, PublishedMemConfig, ReadMemSource, ReadMemSpec, RoleConfig, SchemaRef,
     VcsConfig, check_config, load_and_validate, load_config, parse_mem_config,
-    published_config_from,
+    published_config_from, published_format_accepted,
 };
 pub use loader::{
     HeadingKeyViolation, SchemaLoadError, check_section_heading_roundtrip, load_schema_from_dir,

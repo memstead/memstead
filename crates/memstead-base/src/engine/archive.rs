@@ -349,6 +349,99 @@ mod tests {
     /// back — matching the source. An entity created without a note is
     /// absent from the payload (no fabricated provenance).
     #[test]
+    /// Export → validate/canonicalise (the install leg) → read
+    /// preserves title, scope, method, and exclusions exactly —
+    /// ordering and non-ASCII included, empty-exclusions included —
+    /// and a mem without either exports as today (format aside).
+    #[test]
+    fn export_round_trips_title_and_subject() {
+        let tmp = TempDir::new().unwrap();
+        let mem_dir = tmp.path().join("specs");
+        std::fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
+        std::fs::write(
+            mem_dir.join(".memstead").join("config.json"),
+            serde_json::json!({
+                "format": 1,
+                "schema": "default@1.0.0",
+                "version": "1.0.0",
+                "title": "Einrichtungsbezogene Impfpflicht Deutschland",
+                "subject": {
+                    "scope": "Die einrichtungsbezogene Impfpflicht — Rechtslage und Vollzug",
+                    "method": "Primärquellen, händisch geprüft",
+                    "exclusions": ["Länderverordnungen nach 2023", "Presseberichte", "Άλλα θέματα"],
+                },
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let mut engine = Engine::from_mounts(vec![(
+            folder_mount("specs", mem_dir.clone()),
+            Box::new(writer) as Box<dyn MemBackend>,
+        )])
+        .unwrap();
+        let (actor, client) = cli_actor();
+        engine
+            .create_entity(
+                empty_create_args("specs", "Alpha"),
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap();
+
+        let bytes = engine.export_mem_to_bytes("specs").unwrap();
+        // Install leg: validate + canonical repack, then read the config.
+        let validated =
+            crate::validator::validate_and_normalize_archive(&bytes).expect("archive re-validates");
+        let cfg = &validated.config;
+        assert_eq!(cfg.format, memstead_schema::PUBLISHED_MEM_FORMAT);
+        assert_eq!(
+            cfg.title.as_deref(),
+            Some("Einrichtungsbezogene Impfpflicht Deutschland")
+        );
+        let subject = cfg.subject.as_ref().expect("subject rides the archive");
+        assert_eq!(
+            subject.scope,
+            "Die einrichtungsbezogene Impfpflicht — Rechtslage und Vollzug"
+        );
+        assert_eq!(
+            subject.method.as_deref(),
+            Some("Primärquellen, händisch geprüft")
+        );
+        assert_eq!(
+            subject.exclusions,
+            vec![
+                "Länderverordnungen nach 2023",
+                "Presseberichte",
+                "Άλλα θέματα"
+            ],
+            "exclusions preserved in order, non-ASCII intact"
+        );
+
+        // Empty-exclusions case round-trips as an empty list, not a drop.
+        std::fs::write(
+            mem_dir.join(".memstead").join("config.json"),
+            serde_json::json!({
+                "format": 1,
+                "schema": "default@1.0.0",
+                "version": "1.0.0",
+                "subject": { "scope": "Nur der Rahmen", "exclusions": [] },
+            })
+            .to_string(),
+        )
+        .unwrap();
+        engine.reload_each_writable_mem().unwrap();
+        let bytes = engine.export_mem_to_bytes("specs").unwrap();
+        let validated =
+            crate::validator::validate_and_normalize_archive(&bytes).expect("re-validates");
+        let subject = validated.config.subject.as_ref().expect("subject present");
+        assert_eq!(subject.scope, "Nur der Rahmen");
+        assert_eq!(subject.method, None);
+        assert!(subject.exclusions.is_empty());
+        assert_eq!(validated.config.title, None, "unset title stays unset");
+    }
+
     fn export_carries_provenance_that_install_reads_back() {
         let tmp = TempDir::new().unwrap();
         let mem_dir = tmp.path().join("specs");

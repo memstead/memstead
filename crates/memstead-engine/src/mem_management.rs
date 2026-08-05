@@ -1475,6 +1475,8 @@ pub fn create_mem(
     let mem_config = memstead_schema::config::MemConfig {
         review_mark: None,
         name: None,
+        title: None,
+        subject: None,
         version: Some(semver::Version::new(0, 1, 0)),
         description: None,
         authors: None,

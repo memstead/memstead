@@ -59,6 +59,8 @@ This document contains the help content for the `memstead` command-line program.
 * [`memstead mem set-version`↴](#memstead-mem-set-version)
 * [`memstead mem set-schema`↴](#memstead-mem-set-schema)
 * [`memstead mem set-description`↴](#memstead-mem-set-description)
+* [`memstead mem set-title`↴](#memstead-mem-set-title)
+* [`memstead mem set-subject`↴](#memstead-mem-set-subject)
 * [`memstead mem set-sync-state`↴](#memstead-mem-set-sync-state)
 * [`memstead mem set-internal`↴](#memstead-mem-set-internal)
 * [`memstead mem list`↴](#memstead-mem-list)
@@ -1014,6 +1016,8 @@ Mem lifecycle commands
 * `set-version` — Update a mem's `version` field. The version is consumed by `memstead export --format mem` to stamp the archive filename and the `.mem` archive's published config. `version` is seeded at init (`0.1.0`); bump via this command before publishing
 * `set-schema` — Set a mem's schema pin — the integrity-driven schema-migration trigger. Already-integral mems switch immediately; otherwise the mem enters dual-pin migration (writes validate against the target) and the response lists the non-integral entities. Re-issue after repairing to complete the switch
 * `set-description` — Set a mem's one-line `description` — embedded in `.mem` archive exports and surfaced on the registry card at publish time. An empty string clears the field. Set it before `memstead export` / `memstead publish` so the shared archive carries its card text
+* `set-title` — Set a mem's human-readable display `title` — display text, NOT identity (the mem name stays the sole handle everywhere). Every surface that prints a mem prefers the title and falls back to the name. An empty string clears it
+* `set-subject` — Set a mem's `subject` block — scope, optional method, and the deliberate exclusions — published verbatim in archives and on the registry mem page. Passing only the name with no fields clears the block as a unit
 * `set-sync-state` — Set (or clear) one opaque sync-state token in a mem's config — the pipeline layer's durable "last synced source state" baseline. `<KEY>` and `<TOKEN>` are opaque to the engine (the binding layer keys per `<binding-id>/<facet>#synced` and owns the token's meaning). An empty `<TOKEN>` clears the key. Written into the per-mem config and surfaced verbatim on `memstead workspace dump`
 * `set-internal` — Mark (or unmark) a mem as internal — hidden from the default `memstead overview` roster and public projections, while staying a real, inspectable (`overview --mem <name>`), deletable mem. Ingest process-state mems are flagged this way
 * `list` — Enumerate every mounted mem in the workspace with its schema pin, version, entity count, and capability (writable vs read-only). Markdown by default; pass `--json` (root flag) for the structured envelope
@@ -1133,6 +1137,42 @@ Set a mem's one-line `description` — embedded in `.mem` archive exports and su
 
 ###### **Options:**
 
+* `--note <NOTE>` — Optional provenance note (≤280 chars) recorded on the commit body, like the other commit-producing mem-lifecycle commands
+
+
+
+## `memstead mem set-title`
+
+Set a mem's human-readable display `title` — display text, NOT identity (the mem name stays the sole handle everywhere). Every surface that prints a mem prefers the title and falls back to the name. An empty string clears it
+
+**Usage:** `memstead mem set-title [OPTIONS] <NAME> <TITLE>`
+
+###### **Arguments:**
+
+* `<NAME>` — Mem name (must be registered in the workspace)
+* `<TITLE>` — Human-readable display title (free text — no slug grammar, no uniqueness rule). An empty string clears it
+
+###### **Options:**
+
+* `--note <NOTE>` — Optional provenance note (≤280 chars) recorded on the commit body, like the other commit-producing mem-lifecycle commands
+
+
+
+## `memstead mem set-subject`
+
+Set a mem's `subject` block — scope, optional method, and the deliberate exclusions — published verbatim in archives and on the registry mem page. Passing only the name with no fields clears the block as a unit
+
+**Usage:** `memstead mem set-subject [OPTIONS] <NAME>`
+
+###### **Arguments:**
+
+* `<NAME>` — Mem name (must be registered in the workspace)
+
+###### **Options:**
+
+* `--scope <SCOPE>` — What this mem covers. Required to SET the block; omit every field to CLEAR the block as a unit
+* `--method <METHOD>` — How the mem's content was arrived at
+* `--exclusion <TEXT>` — What was considered and deliberately left out — repeatable; order preserved. May be omitted (empty exclusions)
 * `--note <NOTE>` — Optional provenance note (≤280 chars) recorded on the commit body, like the other commit-producing mem-lifecycle commands
 
 

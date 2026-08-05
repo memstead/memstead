@@ -208,6 +208,8 @@ mod tests {
             name: "example".to_string(),
             version: Version::parse("0.1.0").unwrap(),
             description: Some("a test mem".to_string()),
+            title: None,
+            subject: None,
             authors: Some(vec!["Alice".to_string(), "Bob".to_string()]),
             schema: "default@1.0.0".parse().unwrap(),
         }
@@ -217,7 +219,7 @@ mod tests {
     fn canonical_json_is_alpha_sorted() {
         let json = canonical_json(&config()).unwrap();
         // Top-level keys in sorted order: authors, description, format, name, schema, version
-        let expected = "{\n  \"authors\": [\n    \"Alice\",\n    \"Bob\"\n  ],\n  \"description\": \"a test mem\",\n  \"format\": 3,\n  \"name\": \"example\",\n  \"schema\": \"default@1.0.0\",\n  \"version\": \"0.1.0\"\n}\n";
+        let expected = "{\n  \"authors\": [\n    \"Alice\",\n    \"Bob\"\n  ],\n  \"description\": \"a test mem\",\n  \"format\": 4,\n  \"name\": \"example\",\n  \"schema\": \"default@1.0.0\",\n  \"version\": \"0.1.0\"\n}\n";
         assert_eq!(json, expected);
     }
 

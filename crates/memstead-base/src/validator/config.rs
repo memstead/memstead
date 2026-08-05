@@ -67,7 +67,10 @@ pub fn parse_config_bytes(bytes: &[u8]) -> Result<PublishedMemConfig, Validation
 }
 
 fn check_format(config: &PublishedMemConfig) -> Result<(), ValidationError> {
-    if config.format == PUBLISHED_MEM_FORMAT {
+    // Readers accept the current format AND format 3 (pre-title/subject:
+    // such an archive simply has neither field) — the single shared
+    // predicate keeps acceptance from drifting per surface.
+    if memstead_schema::published_format_accepted(config.format) {
         return Ok(());
     }
     // `format: 2` archives (top-level `schema/` tree, pre-relocation)
@@ -342,5 +345,76 @@ mod tests {
         v["version"] = serde_json::json!(format!("0.1.0-{long}"));
         let err = parse(v).unwrap_err();
         assert!(matches!(err, ValidationError::InvalidVersion { .. }));
+    }
+
+    /// Format compatibility across the title/subject bump: readers
+    /// accept 3 (pre-title/subject — the two live-registry mems) and 4
+    /// (current); 1 and 2 keep refusing with their existing errors; an
+    /// unknown future format refuses; and an unknown key is still
+    /// refused whatever the format says.
+    #[test]
+    fn format_three_and_four_accepted_older_and_unknown_refused() {
+        // Format 3 installs cleanly and simply has no title/subject.
+        let mut v3 = ok_config();
+        v3["format"] = serde_json::json!(3);
+        let parsed = parse(v3).expect("format 3 accepted");
+        assert_eq!(parsed.title, None);
+        assert_eq!(parsed.subject, None);
+
+        // Format 4 with title + subject parses them.
+        let mut v4 = ok_config();
+        v4["title"] = serde_json::json!("Einrichtungsbezogene Impfpflicht Deutschland");
+        v4["subject"] = serde_json::json!({
+            "scope": "Die Impfpflicht in Einrichtungen",
+            "method": "Primärquellen, händisch geprüft",
+            "exclusions": ["Länderverordnungen nach 2023", "Presseberichte"],
+        });
+        let parsed = parse(v4).expect("format 4 accepted");
+        assert_eq!(
+            parsed.title.as_deref(),
+            Some("Einrichtungsbezogene Impfpflicht Deutschland")
+        );
+        let subject = parsed.subject.expect("subject parsed");
+        assert_eq!(subject.scope, "Die Impfpflicht in Einrichtungen");
+        assert_eq!(
+            subject.method.as_deref(),
+            Some("Primärquellen, händisch geprüft")
+        );
+        assert_eq!(
+            subject.exclusions,
+            vec!["Länderverordnungen nach 2023", "Presseberichte"]
+        );
+
+        // Formats 1 and 2 keep their current refusals.
+        let mut v2 = ok_config();
+        v2["format"] = serde_json::json!(2);
+        let err = parse(v2).unwrap_err();
+        assert!(
+            matches!(err, ValidationError::InvalidConfig { ref reason } if reason.contains("format: 2")),
+            "format 2 keeps its actionable refusal: {err:?}"
+        );
+        let mut v1 = ok_config();
+        v1["format"] = serde_json::json!(1);
+        assert!(matches!(
+            parse(v1).unwrap_err(),
+            ValidationError::UnsupportedFormat { got: 1, .. }
+        ));
+
+        // An unknown future format refuses — a format-4 archive is not
+        // accepted by an un-updated reader, symmetrically.
+        let mut v5 = ok_config();
+        v5["format"] = serde_json::json!(5);
+        assert!(matches!(
+            parse(v5).unwrap_err(),
+            ValidationError::UnsupportedFormat { got: 5, .. }
+        ));
+
+        // An unknown key is still refused (deny_unknown_fields holds).
+        let mut smuggle = ok_config();
+        smuggle["writeGuidance"] = serde_json::json!({"note": "leak"});
+        assert!(matches!(
+            parse(smuggle).unwrap_err(),
+            ValidationError::InvalidConfig { .. }
+        ));
     }
 }

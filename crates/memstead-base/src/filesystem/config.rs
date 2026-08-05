@@ -144,6 +144,13 @@ pub struct WorkspaceConfig {
     /// Optional human-readable description.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// Optional human-readable display title (display text, not
+    /// identity — the slug `name` stays the sole handle).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// Optional subject block — published verbatim.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subject: Option<memstead_schema::MemSubject>,
     /// Optional author list.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub authors: Option<Vec<String>>,
@@ -172,6 +179,8 @@ impl WorkspaceConfig {
             schema,
             version: Some(semver::Version::new(0, 1, 0)),
             description: None,
+            title: None,
+            subject: None,
             authors: None,
             deps: Vec::new(),
             extra: serde_json::Map::new(),
@@ -204,6 +213,8 @@ impl WorkspaceConfig {
             name: self.name.clone(),
             version,
             description: self.description.clone(),
+            title: self.title.clone(),
+            subject: self.subject.clone(),
             authors: self.authors.clone(),
             schema: self.schema.clone(),
         })
