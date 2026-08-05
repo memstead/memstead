@@ -150,8 +150,11 @@ pub struct LegacyBindingV1 {
     pub destination_mem: String,
     #[serde(default)]
     pub deny_paths: Vec<String>,
+    /// Optional in v1 files too — a v1 file that never declared the
+    /// field migrates to an undeclared v2 field (resolved per medium),
+    /// not to a baked-in "exhaustive by silence".
     #[serde(default)]
-    pub coverage_semantics: CoverageSemantics,
+    pub coverage_semantics: Option<CoverageSemantics>,
     #[serde(default)]
     pub rules: Option<serde_json::Value>,
     #[serde(default)]
@@ -313,7 +316,11 @@ pub(crate) fn binding_from_gen2(
         reference_mems: projection.reference_mems.clone(),
         destination_mem: projection.destination_mem.clone(),
         deny_paths,
-        coverage_semantics: CoverageSemantics::Exhaustive,
+        // Migrated bindings never DECLARED coverage (the legacy shape had
+        // no author-visible field on this path) — leave it unstated so the
+        // effective value resolves per medium instead of baking in an
+        // "exhaustive by silence" the author never wrote.
+        coverage_semantics: None,
         rules: projection.rules.clone(),
         prune: None,
         operations: Operations {
@@ -584,7 +591,9 @@ mod tests {
         assert_eq!(b.intent.as_deref(), Some("intent of graph"));
         assert_eq!(b.reference_mems, vec!["plugin".to_string()]);
         assert_eq!(b.destination_mem, "engine");
-        assert_eq!(b.coverage_semantics, CoverageSemantics::Exhaustive);
+        // The v1 fixture never declared coverage — it migrates as
+        // UNSTATED (resolved per medium), not as a baked-in exhaustive.
+        assert_eq!(b.coverage_semantics, None);
         assert_eq!(b.rules, Some(serde_json::json!({ "routing": "r" })));
         // The fold: one inline source under the facet's name, carrying the
         // medium half (type/pointer) and the facet half (scope).
@@ -756,7 +765,7 @@ mod tests {
             reference_mems: vec!["engineering".to_string()],
             destination_mem: "engine".to_string(),
             deny_paths: vec!["../dev/**".to_string()],
-            coverage_semantics: CoverageSemantics::Exhaustive,
+            coverage_semantics: None,
             rules: None,
             prune: None,
             operations: Operations {

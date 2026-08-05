@@ -1966,7 +1966,7 @@ mod tests {
                 reference_mems: Vec::new(),
                 destination_mem: "engine".to_string(),
                 deny_paths: Vec::new(),
-                coverage_semantics: CoverageSemantics::Exhaustive,
+                coverage_semantics: None,
                 rules: None,
                 prune: None,
                 operations: Operations {
@@ -2156,7 +2156,7 @@ mod tests {
                 reference_mems: Vec::new(),
                 destination_mem: "engine".to_string(),
                 deny_paths: Vec::new(),
-                coverage_semantics: CoverageSemantics::Exhaustive,
+                coverage_semantics: None,
                 rules: None,
                 prune: None,
                 operations: Operations {
@@ -2370,7 +2370,7 @@ mod tests {
                 reference_mems: Vec::new(),
                 destination_mem: "engine".to_string(),
                 deny_paths: Vec::new(),
-                coverage_semantics: CoverageSemantics::Exhaustive,
+                coverage_semantics: None,
                 rules: None,
                 prune: None,
                 operations: Operations {
@@ -2724,7 +2724,7 @@ mod tests {
                 reference_mems: Vec::new(),
                 destination_mem: "engine".to_string(),
                 deny_paths: Vec::new(),
-                coverage_semantics: CoverageSemantics::Exhaustive,
+                coverage_semantics: None,
                 rules: None,
                 prune: None,
                 operations: Operations {
@@ -2836,7 +2836,7 @@ mod tests {
                 reference_mems: Vec::new(),
                 destination_mem: "engine".to_string(),
                 deny_paths: Vec::new(),
-                coverage_semantics: CoverageSemantics::Exhaustive,
+                coverage_semantics: None,
                 rules: None,
                 prune: None,
                 operations: Operations {
@@ -3127,7 +3127,7 @@ mod tests {
                 reference_mems: Vec::new(),
                 destination_mem: "engine".to_string(),
                 deny_paths: Vec::new(),
-                coverage_semantics: CoverageSemantics::Exhaustive,
+                coverage_semantics: None,
                 rules: None,
                 prune: None,
                 operations: Operations {
@@ -3284,7 +3284,7 @@ mod tests {
                 reference_mems: Vec::new(),
                 destination_mem: "engine".to_string(),
                 deny_paths: Vec::new(),
-                coverage_semantics: CoverageSemantics::Exhaustive,
+                coverage_semantics: None,
                 rules: None,
                 prune: None,
                 operations: Operations {
@@ -3427,7 +3427,7 @@ mod tests {
                 reference_mems: Vec::new(),
                 destination_mem: "engine".to_string(),
                 deny_paths: Vec::new(),
-                coverage_semantics: CoverageSemantics::Curated,
+                coverage_semantics: Some(CoverageSemantics::Curated),
                 rules: None,
                 prune: None,
                 operations: Operations {

@@ -17,7 +17,6 @@
   "reference_mems": [],
   "destination_mem": "docs",
   "deny_paths": [],
-  "coverage_semantics": "exhaustive",
   "prune": {
     "guarantee": "never-clobber"
   },

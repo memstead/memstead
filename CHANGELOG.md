@@ -8,6 +8,25 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Added
+- **Coverage semantics resolve per medium.** A binding can no longer
+  assert exhaustive coverage over a medium whose ground set the engine
+  cannot enumerate. `coverage_semantics` is now optional on the binding
+  record — absent means "not stated", a different fact from "stated as
+  exhaustive" — and the effective value resolves per binding (all
+  sources on enumerable media → `exhaustive`; any non-enumerable
+  source → `curated`, the weaker claim a mixed binding can honestly
+  make). A declared `exhaustive` with a non-enumerable source is
+  refused by `validate_binding` (typed, names the source, the medium,
+  and `curated` as the remedy, reported alongside other refusals).
+  `hash_binding` serialises the resolved value, never the `Option`, so
+  enumerable-media bindings keep their hash byte-for-byte (findings
+  survive) and a web-source binding that declared nothing rehashes
+  exactly once. The fidelity report and status gates read the
+  effective value; the report marks a resolved (undeclared) value so a
+  reader never mistakes a resolution for an author's assertion.
+  Legacy migrations now carry coverage through as unstated instead of
+  baking in "exhaustive by silence"; the `projection init` scaffold
+  asserts nothing.
 - **CLI parity and surface honesty (four gaps closed).** (1) One JSON
   template feeds both `create --from` and `update --from`:
   `UpdatePayload` gains `note` (flag wins), `CreatePayload` gains

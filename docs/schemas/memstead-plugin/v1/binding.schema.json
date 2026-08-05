@@ -48,7 +48,7 @@
       }
     },
     "coverage_semantics": {
-      "description": "Whether the binding claims to cover everything in its declared scope (`exhaustive`) or a deliberately partial slice (`curated`). Defaults to `exhaustive` when absent.",
+      "description": "Whether the binding claims to cover everything in its declared scope (`exhaustive`) or a deliberately partial slice (`curated`). Optional: absent means NOT STATED — the effective value is resolved per medium (all sources on enumerable media → exhaustive; at least one non-enumerable source, e.g. web → curated). A declared `exhaustive` over a non-enumerable source is refused at binding validation with `curated` as the remedy.",
       "type": "string",
       "enum": [
         "exhaustive",

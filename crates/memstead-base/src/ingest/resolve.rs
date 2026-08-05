@@ -252,7 +252,7 @@ pub fn find_git_root(start: &Path) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::binding::{BINDING_VERSION, BuildOperation, CoverageSemantics, Operations};
+    use crate::binding::{BINDING_VERSION, BuildOperation, Operations};
     use crate::pipeline::{PatternEntry, PatternMode};
 
     fn source(
@@ -287,7 +287,7 @@ mod tests {
             reference_mems: vec![],
             destination_mem: dest.to_string(),
             deny_paths: vec![],
-            coverage_semantics: CoverageSemantics::Exhaustive,
+            coverage_semantics: None,
             rules: None,
             prune: None,
             operations: Operations {

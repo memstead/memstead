@@ -26,9 +26,9 @@ use clap::{Args as ClapArgs, Subcommand, ValueEnum};
 use serde_json::json;
 
 use memstead_base::binding::{
-    BINDING_VERSION, Binding, BuildMode, BuildOperation, CapabilityError, CoverageSemantics,
-    DEFAULT_ADJUDICATION_CAP, DEFAULT_FULL_RESYNC_EVERY, Operations, PruneConfig, SyncOperation,
-    VerifyOperation, prune_guarantee_for_medium, validate_binding,
+    BINDING_VERSION, Binding, BuildMode, BuildOperation, CapabilityError, DEFAULT_ADJUDICATION_CAP,
+    DEFAULT_FULL_RESYNC_EVERY, Operations, PruneConfig, SyncOperation, VerifyOperation,
+    prune_guarantee_for_medium, validate_binding,
 };
 use memstead_base::binding_migrate::{
     BindingMigrateError, check_all_consumed, fold_v1_binding, migrate_gen2_bindings,
@@ -659,7 +659,9 @@ fn init(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
         reference_mems: Vec::new(),
         destination_mem: mem.clone(),
         deny_paths: Vec::new(),
-        coverage_semantics: CoverageSemantics::Exhaustive,
+        // Unstated: the scaffold asserts nothing — the effective value
+        // resolves per medium (enumerable → exhaustive, web → curated).
+        coverage_semantics: None,
         rules: None,
         prune: None,
         operations: Operations {

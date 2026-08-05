@@ -452,8 +452,7 @@ mod tests {
     // ── op-aware selection (pairs, eligibility, due-checks) ─────────────────
 
     use crate::binding::{
-        BINDING_VERSION, BuildOperation, CoverageSemantics, Operations, SyncOperation,
-        VerifyOperation, hash_binding,
+        BINDING_VERSION, BuildOperation, Operations, SyncOperation, VerifyOperation, hash_binding,
     };
     use crate::pipeline::{MediumType, PatternEntry, PatternMode, Source};
     use crate::pipeline_store::MemPipelineRecord;
@@ -474,7 +473,7 @@ mod tests {
             reference_mems: Vec::new(),
             destination_mem: "m".to_string(),
             deny_paths: Vec::new(),
-            coverage_semantics: CoverageSemantics::Exhaustive,
+            coverage_semantics: None,
             rules: None,
             prune: None,
             operations,

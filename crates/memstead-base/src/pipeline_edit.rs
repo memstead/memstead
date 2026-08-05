@@ -161,7 +161,11 @@ pub struct BindingPatch {
     /// Replace the deny-path glob list when present.
     #[serde(default)]
     pub deny_paths: Option<Vec<String>>,
-    /// Replace the coverage claim when present.
+    /// Replace the coverage claim when present. Patch semantics are
+    /// option-as-patch: absent (`None`) = leave untouched. This surface
+    /// therefore cannot express *clearing* a declaration back to
+    /// unstated — deliberate: clearing stays out of scope, an author
+    /// edits the declaration in the binding file itself.
     #[serde(default)]
     pub coverage_semantics: Option<CoverageSemantics>,
     /// Set / clear (`null`) / preserve (absent) the free-form rules value.
@@ -195,7 +199,7 @@ impl BindingPatch {
             binding.deny_paths = v;
         }
         if let Some(v) = self.coverage_semantics {
-            binding.coverage_semantics = v;
+            binding.coverage_semantics = Some(v);
         }
         if let Some(v) = self.rules {
             binding.rules = v;
@@ -220,7 +224,9 @@ fn default_binding_scaffold() -> Binding {
         reference_mems: Vec::new(),
         destination_mem: String::new(),
         deny_paths: Vec::new(),
-        coverage_semantics: CoverageSemantics::default(),
+        // Unstated: the scaffold asserts nothing — the effective value
+        // resolves per medium once sources are patched in.
+        coverage_semantics: None,
         rules: None,
         prune: None,
         operations: Operations {
@@ -612,7 +618,7 @@ mod tests {
         assert_eq!(b.operations.sync.as_ref().unwrap().batch_size, 20);
         assert!(b.operations.verify.is_some());
         assert_eq!(b.deny_paths, vec!["dev/**"]);
-        assert_eq!(b.coverage_semantics, CoverageSemantics::Curated);
+        assert_eq!(b.coverage_semantics, Some(CoverageSemantics::Curated));
         assert_eq!(
             b.prune.as_ref().unwrap().guarantee,
             PruneGuarantee::NeverClobber
@@ -855,7 +861,7 @@ mod tests {
             reference_mems: vec![],
             destination_mem: "v".to_string(),
             deny_paths: vec![],
-            coverage_semantics: CoverageSemantics::Exhaustive,
+            coverage_semantics: None,
             rules: None,
             prune: None,
             operations: Operations {

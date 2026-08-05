@@ -54,12 +54,18 @@ pub const PREPARATION_IMPL_VERSION: u32 = 0;
 
 /// Coverage semantics — whether the binding claims to cover *everything* in
 /// its declared scope (`exhaustive`) or a deliberately partial slice
-/// (`curated`). Defaults to [`CoverageSemantics::Exhaustive`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+/// (`curated`).
+///
+/// On the [`Binding`] record the field is **optional**: absent means "not
+/// stated", which is a different fact from "stated as exhaustive". The
+/// effective value is resolved per medium by
+/// [`effective_coverage_semantics`] — there is deliberately no `Default`
+/// impl, because a default is exactly the silence-as-assertion this
+/// design retired.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum CoverageSemantics {
     /// Every artifact in scope is expected to be accounted for.
-    #[default]
     Exhaustive,
     /// A deliberately partial selection — an unaccounted artifact is
     /// information, not a defect.
@@ -272,8 +278,14 @@ pub struct Binding {
     #[serde(default)]
     pub deny_paths: Vec<String>,
     /// Whether the binding claims exhaustive or curated coverage.
-    #[serde(default)]
-    pub coverage_semantics: CoverageSemantics,
+    /// Optional: `None` means **not stated** — a different fact from
+    /// "stated as exhaustive". Consumers never read this raw; they read
+    /// [`effective_coverage_semantics`], which resolves `None` per
+    /// medium (all sources enumerable → exhaustive; any non-enumerable
+    /// source → curated). An explicit `exhaustive` over a
+    /// non-enumerable source is refused by [`validate_binding`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coverage_semantics: Option<CoverageSemantics>,
     /// Free-form binding rules (e.g. a one-shot lens `routing` string).
     /// Opaque to the engine — consumed only by the one-shot brief renderer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -393,7 +405,14 @@ pub fn hash_binding(binding: &Binding) -> String {
         reference_mems: &binding.reference_mems,
         destination_mem: &binding.destination_mem,
         deny_paths: &binding.deny_paths,
-        coverage_semantics: binding.coverage_semantics,
+        // The RESOLVED effective value, never the `Option`: a binding
+        // over enumerable sources that never declared the field keeps
+        // its pre-optionality hash byte-for-byte (resolved
+        // `exhaustive` == the old default), so its findings survive. A
+        // non-enumerable-source binding that declared nothing rehashes
+        // exactly once — correct, its asserted coverage genuinely
+        // changed.
+        coverage_semantics: effective_coverage_semantics(binding).value,
         rules: &binding.rules,
         build_mode: binding.operations.build.as_ref().map(|b| b.mode),
     };
@@ -466,6 +485,47 @@ pub fn medium_capabilities(medium_type: MediumType) -> MediumCapabilities {
             anchor_namespace: "url",
             glob_deny_legal: false,
         },
+    }
+}
+
+/// The effective coverage of a binding plus its provenance — whether the
+/// value was declared by the author or resolved from the sources' media.
+/// The fidelity report renders the distinction; every other consumer
+/// reads only [`Self::value`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EffectiveCoverage {
+    /// The coverage every consumer acts on.
+    pub value: CoverageSemantics,
+    /// `true` when the binding declared the field; `false` when the
+    /// value was resolved from the medium capabilities.
+    pub declared: bool,
+}
+
+/// Resolve a binding's **effective** coverage semantics. A declared value
+/// wins (validation has already refused an illegal `exhaustive`). An
+/// undeclared value resolves per binding, not per source: all sources on
+/// enumerable media → `exhaustive`; at least one non-enumerable source →
+/// `curated` — a mixed binding can only honestly claim the weaker of its
+/// parts, because coverage is an obligation of the binding as a whole
+/// (the artifact that is measured, reported, and keyed).
+pub fn effective_coverage_semantics(binding: &Binding) -> EffectiveCoverage {
+    if let Some(declared) = binding.coverage_semantics {
+        return EffectiveCoverage {
+            value: declared,
+            declared: true,
+        };
+    }
+    let all_enumerable = binding
+        .sources
+        .iter()
+        .all(|s| medium_capabilities(s.medium_type).enumerable);
+    EffectiveCoverage {
+        value: if all_enumerable {
+            CoverageSemantics::Exhaustive
+        } else {
+            CoverageSemantics::Curated
+        },
+        declared: false,
     }
 }
 
@@ -565,6 +625,24 @@ pub enum CapabilityError {
         /// The current preparation-implementation version (`0` = none).
         impl_version: u32,
     },
+    /// The binding declares `coverage_semantics: exhaustive` while at least
+    /// one source sits on a medium whose scope the engine cannot enumerate
+    /// (`web`) — `S(D)` is not computable, so exhaustive coverage cannot be
+    /// asserted over it. Refused at binding-validation time with `curated`
+    /// as the remedy. An *undeclared* field never trips this: it resolves
+    /// per medium via [`effective_coverage_semantics`].
+    #[error(
+        "coverage_semantics 'exhaustive' is unsupported for source '{source_name}' over a \
+         '{medium_type}' medium: its scope is not enumerable (S(D) is not computable), so \
+         exhaustive coverage cannot be asserted — declare 'curated', or omit the field to \
+         resolve per medium"
+    )]
+    CoverageExhaustiveUnsupported {
+        /// The offending source.
+        source_name: String,
+        /// The medium type whose scope is not enumerable.
+        medium_type: String,
+    },
     /// The binding requests a `prune` guarantee the source's medium cannot
     /// support (F1) — `never-clobber` over a medium whose base leg is not
     /// retrievable (`web`). Refused at binding-validation time with the
@@ -602,6 +680,8 @@ pub enum CapabilityError {
 ///   ([`CapabilityError::GlobDenyIllegal`]);
 /// - any declared source preparation
 ///   ([`CapabilityError::PreparationUnsupported`]);
+/// - a declared `coverage_semantics: exhaustive` over a non-enumerable
+///   medium ([`CapabilityError::CoverageExhaustiveUnsupported`]);
 /// - a `prune` block requesting `never-clobber` over a non-base-retrievable
 ///   medium ([`CapabilityError::PruneGuaranteeUnsupported`], F1).
 pub fn validate_binding(binding: &Binding) -> Result<(), Vec<CapabilityError>> {
@@ -666,6 +746,17 @@ pub fn validate_binding(binding: &Binding) -> Result<(), Vec<CapabilityError>> {
                 source_name: source.name.clone(),
                 medium_type: medium_type.clone(),
                 anchor_namespace: caps.anchor_namespace,
+            });
+        }
+
+        // A declared `exhaustive` over a non-enumerable medium is refused —
+        // the engine cannot compute S(D) there, so the claim is unassertable.
+        // Fires only on what the author actually wrote (`Some(Exhaustive)`);
+        // an undeclared field resolves per medium instead of refusing.
+        if binding.coverage_semantics == Some(CoverageSemantics::Exhaustive) && !caps.enumerable {
+            refusals.push(CapabilityError::CoverageExhaustiveUnsupported {
+                source_name: source.name.clone(),
+                medium_type: medium_type.clone(),
             });
         }
 
@@ -749,7 +840,7 @@ mod tests {
             reference_mems: vec!["engine".to_string()],
             destination_mem: "plugin".to_string(),
             deny_paths: vec!["VISION.md".to_string(), "dev/**".to_string()],
-            coverage_semantics: CoverageSemantics::Exhaustive,
+            coverage_semantics: None,
             rules: Some(serde_json::json!({ "routing": "…" })),
             prune: None,
             operations: Operations {
@@ -820,7 +911,7 @@ mod tests {
         assert_eq!(s.change_detection.as_deref(), Some("auto"));
         assert_eq!(s.scope.len(), 2);
         assert_eq!(b.reference_mems, vec!["engineering".to_string()]);
-        assert_eq!(b.coverage_semantics, CoverageSemantics::Exhaustive);
+        assert_eq!(b.coverage_semantics, Some(CoverageSemantics::Exhaustive));
         assert_eq!(
             b.operations.build.as_ref().unwrap().mode,
             BuildMode::Discovery
@@ -829,8 +920,9 @@ mod tests {
         assert_eq!(b.operations.verify.as_ref().unwrap().adjudication_cap, 50);
     }
 
-    /// `coverage_semantics` defaults to exhaustive when absent, and `one-shot`
-    /// is the kebab wire form.
+    /// An absent `coverage_semantics` deserializes to `None` ("not
+    /// stated" — resolved per medium, never a baked-in default), and
+    /// `one-shot` is the kebab wire form.
     #[test]
     fn coverage_defaults_and_one_shot_wire_form() {
         let src = r#"{
@@ -839,7 +931,7 @@ mod tests {
           "operations": { "build": { "mode": "one-shot", "trigger": "manual", "batch_size": 5 } }
         }"#;
         let b: Binding = serde_json::from_str(src).unwrap();
-        assert_eq!(b.coverage_semantics, CoverageSemantics::Exhaustive);
+        assert_eq!(b.coverage_semantics, None, "absent = not stated");
         assert_eq!(
             b.operations.build.as_ref().unwrap().mode,
             BuildMode::OneShot
@@ -1356,5 +1448,150 @@ mod tests {
             None,
         )];
         assert!(validate_binding(&b).is_ok());
+    }
+
+    // ---- coverage semantics: resolution / refusal / hash stability ------
+
+    fn web_source(name: &str) -> Source {
+        source(
+            name,
+            MediumType::Web,
+            "https://example.test",
+            vec![allow("**/*")],
+            None,
+            None,
+        )
+    }
+
+    /// Resolution: an undeclared field resolves per binding — all
+    /// sources enumerable → exhaustive; at least one non-enumerable
+    /// source → curated (a mixed binding claims the weaker of its
+    /// parts). An explicit `curated` validates over any medium and
+    /// resolves to curated, declared.
+    #[test]
+    fn coverage_resolves_per_medium_when_undeclared() {
+        let enumerable = binding();
+        assert_eq!(enumerable.coverage_semantics, None);
+        let eff = effective_coverage_semantics(&enumerable);
+        assert_eq!(eff.value, CoverageSemantics::Exhaustive);
+        assert!(!eff.declared, "resolved, not declared");
+        validate_binding(&enumerable).expect("undeclared over enumerable validates");
+
+        // Mixed: one enumerable + one web source → curated.
+        let mut mixed = binding();
+        mixed.sources.push(web_source("front"));
+        // web has no change signal — drop sync/verify so only coverage
+        // resolution is under test.
+        mixed.operations.sync = None;
+        mixed.operations.verify = None;
+        mixed.deny_paths.clear();
+        let eff = effective_coverage_semantics(&mixed);
+        assert_eq!(eff.value, CoverageSemantics::Curated);
+        assert!(!eff.declared);
+        validate_binding(&mixed).expect("undeclared over web validates (resolves, never refuses)");
+
+        // Explicit curated over any medium: validates, declared.
+        let mut curated = mixed.clone();
+        curated.coverage_semantics = Some(CoverageSemantics::Curated);
+        validate_binding(&curated).expect("explicit curated validates over any medium");
+        let eff = effective_coverage_semantics(&curated);
+        assert_eq!(eff.value, CoverageSemantics::Curated);
+        assert!(eff.declared);
+    }
+
+    /// Refusal: an explicit `exhaustive` with at least one
+    /// non-enumerable source refuses, naming the source, the medium,
+    /// and `curated` as the remedy — alongside other refusals of the
+    /// same binding, not replacing them. Complements: a binding whose
+    /// ONLY problem is this one still reports it; an explicit
+    /// `exhaustive` over enumerable sources is NOT refused.
+    #[test]
+    fn explicit_exhaustive_over_non_enumerable_refuses() {
+        // Only-problem case: clean web binding, explicit exhaustive.
+        let mut only = binding();
+        only.sources = vec![web_source("front")];
+        only.operations.sync = None;
+        only.operations.verify = None;
+        only.deny_paths.clear();
+        only.coverage_semantics = Some(CoverageSemantics::Exhaustive);
+        let errs = validate_binding(&only).expect_err("must refuse");
+        assert_eq!(errs.len(), 1, "only this refusal: {errs:?}");
+        match &errs[0] {
+            CapabilityError::CoverageExhaustiveUnsupported {
+                source_name,
+                medium_type,
+            } => {
+                assert_eq!(source_name, "front");
+                assert_eq!(medium_type, "web");
+            }
+            other => panic!("expected CoverageExhaustiveUnsupported, got {other:?}"),
+        }
+        let msg = errs[0].to_string();
+        assert!(
+            msg.contains("'front'") && msg.contains("'web'") && msg.contains("curated"),
+            "refusal names source, medium, and the curated remedy: {msg}"
+        );
+
+        // Alongside other refusals: keep sync declared (web has no change
+        // signal) — both refusals must be reported together.
+        let mut multi = binding();
+        multi.sources = vec![web_source("front")];
+        multi.operations.verify = None;
+        multi.deny_paths.clear();
+        multi.coverage_semantics = Some(CoverageSemantics::Exhaustive);
+        assert!(multi.operations.sync.is_some(), "fixture declares sync");
+        let errs = validate_binding(&multi).expect_err("must refuse");
+        assert!(
+            errs.iter()
+                .any(|e| matches!(e, CapabilityError::CoverageExhaustiveUnsupported { .. })),
+            "coverage refusal present: {errs:?}"
+        );
+        assert!(
+            errs.iter()
+                .any(|e| matches!(e, CapabilityError::OperationOutOfScope { .. })),
+            "reported alongside the sync refusal, not replacing it: {errs:?}"
+        );
+
+        // Complement: explicit exhaustive over enumerable is NOT refused.
+        let mut ok = binding();
+        ok.coverage_semantics = Some(CoverageSemantics::Exhaustive);
+        validate_binding(&ok).expect("explicit exhaustive over enumerable validates");
+    }
+
+    /// Hash stability: the hash serialises the RESOLVED value, never
+    /// the `Option`. Over enumerable sources, an undeclared field
+    /// hashes byte-identically to an explicit `exhaustive` (== the
+    /// pre-optionality bytes, whose serialized projection was the
+    /// same `"exhaustive"` value). Over a non-enumerable source, an
+    /// undeclared field hashes identically to an explicit `curated`
+    /// (the moved-once, stable-thereafter hash) and differently from
+    /// the enumerable case's resolution.
+    #[test]
+    fn hash_serialises_the_resolved_coverage_value() {
+        // Enumerable: None == Some(Exhaustive), byte-for-byte.
+        let undeclared = binding();
+        let mut declared = binding();
+        declared.coverage_semantics = Some(CoverageSemantics::Exhaustive);
+        assert_eq!(
+            hash_binding(&undeclared),
+            hash_binding(&declared),
+            "undeclared over enumerable keeps the pre-optionality hash"
+        );
+        // ...and an explicit curated moves it (a genuine coverage change).
+        let mut curated = binding();
+        curated.coverage_semantics = Some(CoverageSemantics::Curated);
+        assert_ne!(hash_binding(&undeclared), hash_binding(&curated));
+
+        // Non-enumerable: None == Some(Curated) — the one-time move is
+        // to the curated hash, stable thereafter.
+        let mut web_undeclared = binding();
+        web_undeclared.sources = vec![web_source("front")];
+        let mut web_curated = web_undeclared.clone();
+        web_curated.coverage_semantics = Some(CoverageSemantics::Curated);
+        assert_eq!(
+            hash_binding(&web_undeclared),
+            hash_binding(&web_curated),
+            "undeclared over web resolves (and hashes) as curated"
+        );
     }
 }

@@ -935,9 +935,7 @@ mod tests {
     // ── binding v2 loader (version gate) ─────────────────────────────────
 
     fn sample_binding() -> Binding {
-        use crate::binding::{
-            BINDING_VERSION, BuildMode, BuildOperation, CoverageSemantics, Operations,
-        };
+        use crate::binding::{BINDING_VERSION, BuildMode, BuildOperation, Operations};
         use crate::pipeline::{IngestTrigger, Source};
         Binding {
             version: BINDING_VERSION,
@@ -957,7 +955,7 @@ mod tests {
             reference_mems: vec![],
             destination_mem: "engine".to_string(),
             deny_paths: vec![],
-            coverage_semantics: CoverageSemantics::Exhaustive,
+            coverage_semantics: None,
             rules: None,
             prune: None,
             operations: Operations {

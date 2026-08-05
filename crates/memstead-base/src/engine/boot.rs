@@ -1428,9 +1428,7 @@ community:
     }
 
     fn v2_binding_with_pointer(dest: &str, pointer: &str) -> crate::binding::Binding {
-        use crate::binding::{
-            BINDING_VERSION, Binding, BuildMode, BuildOperation, CoverageSemantics, Operations,
-        };
+        use crate::binding::{BINDING_VERSION, Binding, BuildMode, BuildOperation, Operations};
         use crate::pipeline::{IngestTrigger, MediumType, Source};
         Binding {
             version: BINDING_VERSION,
@@ -1447,7 +1445,7 @@ community:
             reference_mems: Vec::new(),
             destination_mem: dest.to_string(),
             deny_paths: Vec::new(),
-            coverage_semantics: CoverageSemantics::Exhaustive,
+            coverage_semantics: None,
             rules: None,
             prune: None,
             operations: Operations {

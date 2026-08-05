@@ -150,7 +150,10 @@ fn resolve_binding_status(
         }
     }
     let uncovered_counts = findings.uncovered > 0
-        && matches!(binding.coverage_semantics, CoverageSemantics::Exhaustive);
+        && matches!(
+            crate::binding::effective_coverage_semantics(binding).value,
+            CoverageSemantics::Exhaustive
+        );
     let has_action = source_moved
         || findings.unresolvable > 0
         || findings.drifted > 0
@@ -437,7 +440,12 @@ pub fn projection_rollup(engine: &Engine, workspace_root: &Path) -> Rollup {
         // curated binding covers a deliberate slice, so uncovered is
         // information, not a defect (B4). (`has_action` already encodes
         // this rule; the candidate mirrors it.)
-        if uncovered > 0 && matches!(binding.coverage_semantics, CoverageSemantics::Exhaustive) {
+        if uncovered > 0
+            && matches!(
+                crate::binding::effective_coverage_semantics(binding).value,
+                CoverageSemantics::Exhaustive
+            )
+        {
             candidates.push(Candidate {
                 severity: 3,
                 text: format!(
@@ -499,8 +507,7 @@ pub fn projection_rollup(engine: &Engine, workspace_root: &Path) -> Rollup {
 mod tests {
     use super::*;
     use crate::binding::{
-        BINDING_VERSION, Binding, BuildMode, BuildOperation, CoverageSemantics, Operations,
-        SyncOperation,
+        BINDING_VERSION, Binding, BuildMode, BuildOperation, Operations, SyncOperation,
     };
     use crate::pipeline::{IngestTrigger, MediumType, PatternEntry, PatternMode};
     use crate::pipeline_store::write_binding;
@@ -559,7 +566,7 @@ mod tests {
                 reference_mems: Vec::new(),
                 destination_mem: "engine".to_string(),
                 deny_paths: Vec::new(),
-                coverage_semantics: CoverageSemantics::Exhaustive,
+                coverage_semantics: None,
                 rules: None,
                 prune: None,
                 operations: Operations {
@@ -699,7 +706,7 @@ mod tests {
                 reference_mems: Vec::new(),
                 destination_mem: "engine".to_string(),
                 deny_paths: Vec::new(),
-                coverage_semantics: CoverageSemantics::Exhaustive,
+                coverage_semantics: None,
                 rules: None,
                 prune: None,
                 operations: Operations {

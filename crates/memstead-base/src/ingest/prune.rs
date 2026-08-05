@@ -409,7 +409,7 @@ mod tests {
 
     use crate::anchor::{Anchor, AnchorGrain, AnchorHashStability, AnchorSidecar};
     use crate::binding::{
-        BINDING_VERSION, BuildMode, BuildOperation, CoverageSemantics, DEFAULT_ADJUDICATION_CAP,
+        BINDING_VERSION, BuildMode, BuildOperation, DEFAULT_ADJUDICATION_CAP,
         DEFAULT_FULL_RESYNC_EVERY, Operations, PruneConfig, VerifyOperation,
     };
     use crate::ingest::render::render_sync_brief_for;
@@ -520,7 +520,7 @@ mod tests {
             reference_mems: Vec::new(),
             destination_mem: "engine".to_string(),
             deny_paths: Vec::new(),
-            coverage_semantics: CoverageSemantics::Exhaustive,
+            coverage_semantics: None,
             rules: None,
             prune: Some(PruneConfig { guarantee }),
             operations: Operations {

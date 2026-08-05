@@ -225,8 +225,15 @@ pub struct FidelityReport {
     /// as defects: no failure/error framing and no red verdict is produced
     /// **solely** by pre-binding history.
     pub adopt: bool,
-    /// Whether the binding claims exhaustive or curated coverage (B4).
+    /// The binding's EFFECTIVE coverage (B4) — declared when the author
+    /// wrote the field, otherwise resolved per medium
+    /// ([`crate::binding::effective_coverage_semantics`]).
     pub coverage_semantics: CoverageSemantics,
+    /// `true` when the binding declared the field; `false` when the
+    /// effective value was resolved from the sources' media. The render
+    /// marks the resolved case so a reader never mistakes a resolution
+    /// for an author's assertion.
+    pub coverage_semantics_declared: bool,
     /// Per-facet capability rows (B1 capability block).
     pub capabilities: Vec<FacetCapability>,
     /// Per-facet freshness (B1/B2).
@@ -300,11 +307,16 @@ fn render_hard_required(report: &FidelityReport) -> String {
     let mut md = String::new();
     md.push_str(&format!("# Fidelity report — `{}`\n\n", report.binding));
     md.push_str(&format!(
-        "- **Destination mem:** `{}`\n- **Coverage semantics:** {}\n\n",
+        "- **Destination mem:** `{}`\n- **Coverage semantics:** {}{}\n\n",
         report.destination_mem,
         match report.coverage_semantics {
             CoverageSemantics::Exhaustive => "exhaustive",
             CoverageSemantics::Curated => "curated",
+        },
+        if report.coverage_semantics_declared {
+            ""
+        } else {
+            " (resolved from the sources' media — not declared)"
         }
     ));
 
@@ -976,12 +988,14 @@ pub fn compute_fidelity_report(
     // the sync brief and the status rollup: a mem with no anchors and no recorded
     // `#synced` baseline predates its binding, so 0% anchored is expected.
     let adopt = super::render::mem_predates_binding(engine, resolved);
+    let effective_coverage = crate::binding::effective_coverage_semantics(binding);
 
     FidelityReport {
         binding: binding_id,
         destination_mem: dest,
         adopt,
-        coverage_semantics: binding.coverage_semantics,
+        coverage_semantics: effective_coverage.value,
+        coverage_semantics_declared: effective_coverage.declared,
         capabilities,
         freshness,
         source_moved_past_synced,
@@ -1041,6 +1055,7 @@ mod tests {
             destination_mem: "engine".to_string(),
             adopt: false,
             coverage_semantics: CoverageSemantics::Exhaustive,
+            coverage_semantics_declared: true,
             capabilities: vec![FacetCapability {
                 facet: "src".to_string(),
                 medium_type: "codebase".to_string(),
@@ -1533,7 +1548,7 @@ mod tests {
                 reference_mems: Vec::new(),
                 destination_mem: "engine".to_string(),
                 deny_paths: Vec::new(),
-                coverage_semantics: CoverageSemantics::Exhaustive,
+                coverage_semantics: None,
                 rules: None,
                 prune: None,
                 operations: Operations {
@@ -1685,7 +1700,7 @@ mod tests {
                 reference_mems: Vec::new(),
                 destination_mem: "engine".to_string(),
                 deny_paths: Vec::new(),
-                coverage_semantics: CoverageSemantics::Exhaustive,
+                coverage_semantics: None,
                 rules: None,
                 prune: None,
                 operations: Operations {
@@ -1725,5 +1740,31 @@ mod tests {
         // REFUSAL: the uncovered source is NOT a red findings verdict here.
         assert!(!md.contains("are **findings**"));
         assert!(md.contains("Exhaustive coverage (onboarding):"));
+    }
+
+    /// The report renders the EFFECTIVE coverage and marks the case
+    /// where it was resolved from the media rather than declared —
+    /// a reader never mistakes a resolution for an author's assertion.
+    #[test]
+    fn report_marks_resolved_coverage_semantics() {
+        let mut resolved = base_report();
+        resolved.coverage_semantics = CoverageSemantics::Curated;
+        resolved.coverage_semantics_declared = false;
+        let md = render_hard_required(&resolved);
+        assert!(
+            md.contains("curated (resolved from the sources' media — not declared)"),
+            "resolved value carries the marker: {md}"
+        );
+
+        let declared = base_report(); // declared: true in the fixture
+        let md = render_hard_required(&declared);
+        assert!(
+            md.contains("**Coverage semantics:** exhaustive\n"),
+            "declared value renders bare: {md}"
+        );
+        assert!(
+            !md.contains("(resolved from the sources' media"),
+            "no resolution marker on a declared value: {md}"
+        );
     }
 }
