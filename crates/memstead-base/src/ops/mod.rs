@@ -3051,6 +3051,38 @@ pub struct ReloadReport {
     pub changed_entity_ids: Vec<EntityId>,
 }
 
+/// What `Engine::full_refresh` changed — and, just as deliberately,
+/// what it SKIPPED. The refresh is additive-only: removals never take
+/// effect warm, and this report is how the caller learns whether its
+/// next call will succeed instead of guessing.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct FullRefreshReport {
+    /// Schema versions (`name@version`) newly resolvable.
+    pub schemas_added: Vec<String>,
+    /// In-memory schema versions absent from the re-scanned sources —
+    /// the removal was skipped; they stay resolvable until restart.
+    pub schema_removals_skipped: Vec<String>,
+    /// Mems newly mounted (cold-loaded like any boot-time mount).
+    pub mems_mounted: Vec<String>,
+    /// Mounted writable mems absent from the re-scanned manifest —
+    /// the removal was skipped; they stay live until restart.
+    pub mem_removals_skipped: Vec<String>,
+    /// Per-item failures: a source or mount that failed to refresh.
+    /// Failed items never surface as newly available; the others
+    /// proceed.
+    pub failures: Vec<RefreshFailure>,
+    /// Wall-clock cost of the refresh (the bounded-cost report).
+    pub elapsed_ms: u64,
+}
+
+/// One failed refresh item — `item` is `schema-source:<which>`,
+/// `mount:<mem>`, `mount-manifest`, or `workspace`.
+#[derive(Debug, Clone, Serialize)]
+pub struct RefreshFailure {
+    pub item: String,
+    pub error: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

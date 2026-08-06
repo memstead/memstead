@@ -74,6 +74,7 @@ pub const FULL_GIT_BRANCH_OPS: memstead_base::GitBranchOps = memstead_base::GitB
     prune_residue: prune_residue_dispatch,
     write_schema: write_schema_dispatch,
     read_schema_file: read_schema_file_dispatch,
+    read_ref_schemas: read_ref_schemas_dispatch,
 };
 
 /// Dispatcher for `Engine::install_schema` on git-branch workspaces.
@@ -93,6 +94,23 @@ fn write_schema_dispatch(
                 gitdir.display(),
             ))
         })
+}
+
+/// Dispatcher for `Engine::full_refresh`: re-read every schema sealed
+/// on the `__MEMSTEAD:schemas/` ref so an out-of-band install becomes
+/// resolvable warm. Absent ref/subtree resolves to empty.
+fn read_ref_schemas_dispatch(
+    workspace_root: &std::path::Path,
+) -> Result<Vec<std::sync::Arc<memstead_schema::Schema>>, memstead_base::backend::BackendError> {
+    use crate::mem_repo_schemas::LoadOutcome;
+    match crate::mem_repo_schemas::load_schemas_from_ref(workspace_root) {
+        Ok(LoadOutcome::Schemas(schemas)) => Ok(schemas),
+        Ok(_) => Ok(Vec::new()),
+        Err(e) => Err(memstead_base::backend::BackendError::Other(format!(
+            "schema re-read from __MEMSTEAD ref at {}: {e}",
+            workspace_root.display(),
+        ))),
+    }
 }
 
 /// Dispatcher for the authoring-drift health axis: read one file from

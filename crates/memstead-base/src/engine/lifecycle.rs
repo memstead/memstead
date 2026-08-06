@@ -283,6 +283,25 @@ impl Engine {
         backend: Box<dyn MemBackend>,
         origin: MemOrigin,
     ) -> Result<(), EngineError> {
+        self.register_writable_mem_inner(mount, backend, origin, true)
+    }
+
+    /// [`Self::register_writable_mem`] with the workspace-global
+    /// passes (relation validation, alias remap, memo invalidation)
+    /// made optional: `run_global_passes: false` lets a batch caller
+    /// ([`Self::full_refresh`]) attach N mounts and run the global
+    /// passes ONCE afterwards instead of N times under the engine
+    /// lock. A `false` caller MUST run
+    /// [`Self::finish_batched_registrations`] after its loop, or
+    /// loaded relations skip validation and alias edges stay
+    /// unmapped.
+    fn register_writable_mem_inner(
+        &mut self,
+        mount: Mount,
+        backend: Box<dyn MemBackend>,
+        origin: MemOrigin,
+        run_global_passes: bool,
+    ) -> Result<(), EngineError> {
         // Step 1: name collision probe.
         if let Some(existing) = self.mem_router.origin_for_mem(&mount.mem) {
             return Err(EngineError::MemNameCollision {
@@ -398,22 +417,27 @@ impl Engine {
         // The newly-pushed mount isn't in `self.mounts` yet (that's
         // Step 6 below), so build the map from `self.mounts` plus the
         // about-to-be-attached mount we're still holding.
-        let mut mount_caps: std::collections::HashMap<String, crate::workspace::MountCapability> =
-            self.mounts
+        if run_global_passes {
+            let mut mount_caps: std::collections::HashMap<
+                String,
+                crate::workspace::MountCapability,
+            > = self
+                .mounts
                 .iter()
                 .map(|m| (m.mount.mem.clone(), m.mount.capability))
                 .collect();
-        mount_caps.insert(mount.mem.clone(), mount.capability);
-        crate::entity::store_builder::validate_loaded_relations(
-            &mut self.store,
-            &self.schemas,
-            &mount_caps,
-            &mut self.load_warnings,
-        );
-        crate::entity::store_builder::remap_alias_target_edge_sources(
-            &mut self.store,
-            &self.schemas,
-        );
+            mount_caps.insert(mount.mem.clone(), mount.capability);
+            crate::entity::store_builder::validate_loaded_relations(
+                &mut self.store,
+                &self.schemas,
+                &mount_caps,
+                &mut self.load_warnings,
+            );
+            crate::entity::store_builder::remap_alias_target_edge_sources(
+                &mut self.store,
+                &self.schemas,
+            );
+        }
 
         // Step 6: push the MountedBackend.
         let last_known_head = backend.current_head().ok().flatten();
@@ -441,10 +465,209 @@ impl Engine {
         Arc::make_mut(&mut self.mem_router).add_writable(mem_name_for_router, dir, origin);
 
         // Step 8: invalidate dependent memos.
-        self.invalidate_communities();
-        self.invalidate_search_indexes();
+        if run_global_passes {
+            self.invalidate_communities();
+            self.invalidate_search_indexes();
+        }
 
         Ok(())
+    }
+
+    /// The batched tail of `register_writable_mem_inner(...,
+    /// run_global_passes: false)`: one workspace-global relation
+    /// validation, one alias remap, one memo invalidation for the
+    /// whole batch of registrations.
+    fn finish_batched_registrations(&mut self) {
+        let mount_caps: std::collections::HashMap<String, crate::workspace::MountCapability> = self
+            .mounts
+            .iter()
+            .map(|m| (m.mount.mem.clone(), m.mount.capability))
+            .collect();
+        crate::entity::store_builder::validate_loaded_relations(
+            &mut self.store,
+            &self.schemas,
+            &mount_caps,
+            &mut self.load_warnings,
+        );
+        crate::entity::store_builder::remap_alias_target_edge_sources(
+            &mut self.store,
+            &self.schemas,
+        );
+        self.invalidate_communities();
+        self.invalidate_search_indexes();
+    }
+
+    /// Additive full refresh — the warm-server half of "restart the
+    /// process": re-scan the schema sources and the mount manifest,
+    /// making newly installed schema versions resolvable and newly
+    /// registered mems usable, WITHOUT applying removals. The
+    /// asymmetry is deliberate and is the whole safety argument:
+    /// adding extends what the in-memory store can answer, while
+    /// removing can strand entities, in-flight handles, and cached
+    /// hashes the process is still serving. Removals are skipped and
+    /// reported; a restart applies them.
+    ///
+    /// Failure model is per-item: a schema source or a mount that
+    /// fails to refresh lands in `failures` and never surfaces as
+    /// newly available; the others proceed. Each mount registration
+    /// is all-or-nothing (every fallible step runs before the store
+    /// is touched), so a failed item leaves no half-updated state.
+    /// The workspace-global passes (relation validation, alias remap,
+    /// memo invalidation) run ONCE per refresh regardless of how many
+    /// mounts attached.
+    ///
+    /// A newly mounted mem starts cold and loads like any other
+    /// mount. Content reload of pre-existing mems is NOT part of this
+    /// method — callers that want both (the `memstead_reload
+    /// full=true` surface) run the existing content-reload sweep
+    /// alongside.
+    pub fn full_refresh(&mut self) -> crate::ops::FullRefreshReport {
+        let started = std::time::Instant::now();
+        let mut report = crate::ops::FullRefreshReport::default();
+
+        let Some(root) = self.workspace_root.clone() else {
+            report.failures.push(crate::ops::RefreshFailure {
+                item: "workspace".to_string(),
+                error: "engine has no workspace root (ad-hoc mount-list construction) — \
+                        nothing to re-scan"
+                    .to_string(),
+            });
+            report.elapsed_ms = started.elapsed().as_millis() as u64;
+            return report;
+        };
+
+        // Workspace policy — same best-effort refresh the
+        // workspace-wide content reload performs.
+        self.refresh_workspace_settings_if_possible();
+
+        // --- Schema sources, additively. ---
+        use crate::schema_source::SchemaSource as _;
+        let mut fresh: Vec<std::sync::Arc<memstead_schema::Schema>> = Vec::new();
+        let mut sources_complete = true;
+        match crate::schema_source::FolderSchemaSource::for_workspace(&root).read_schemas() {
+            Ok(mut s) => fresh.append(&mut s),
+            Err(e) => {
+                sources_complete = false;
+                report.failures.push(crate::ops::RefreshFailure {
+                    item: "schema-source:folder".to_string(),
+                    error: e.to_string(),
+                });
+            }
+        }
+        if let Some(ops) = self.git_branch_ops() {
+            match (ops.read_ref_schemas)(&root) {
+                Ok(mut s) => fresh.append(&mut s),
+                Err(e) => {
+                    sources_complete = false;
+                    report.failures.push(crate::ops::RefreshFailure {
+                        item: "schema-source:memstead-ref".to_string(),
+                        error: e.to_string(),
+                    });
+                }
+            }
+        }
+        let key = |s: &memstead_schema::Schema| {
+            let (name, version) = s.id();
+            format!("{name}@{version}")
+        };
+        let existing: std::collections::HashSet<String> =
+            self.workspace_schemas.iter().map(|s| key(s)).collect();
+        let fresh_keys: std::collections::HashSet<String> = fresh.iter().map(|s| key(s)).collect();
+        for schema in fresh {
+            let k = key(&schema);
+            if !existing.contains(&k) && !report.schemas_added.contains(&k) {
+                report.schemas_added.push(k);
+                self.workspace_schemas.push(schema);
+            }
+        }
+        report.schemas_added.sort();
+        // Removal detection is only meaningful when every source was
+        // actually readable — otherwise an unreadable source would
+        // masquerade as a mass removal.
+        if sources_complete {
+            report.schema_removals_skipped = existing
+                .difference(&fresh_keys)
+                .cloned()
+                .collect::<Vec<_>>();
+            report.schema_removals_skipped.sort();
+        }
+
+        // --- Mount manifest, additively. ---
+        let store = crate::workspace_store::FileWorkspaceStore::new();
+        match crate::workspace_store::WorkspaceStoreAdapter::load(&store, &root) {
+            Err(e) => {
+                report.failures.push(crate::ops::RefreshFailure {
+                    item: "mount-manifest".to_string(),
+                    error: e.to_string(),
+                });
+            }
+            Ok(workspace) => {
+                let manifest_names: std::collections::HashSet<String> =
+                    workspace.mounts.iter().map(|m| m.mem.clone()).collect();
+                let mut any_mounted = false;
+                for mount in workspace.mounts {
+                    if self.mounts.iter().any(|m| m.mount.mem == mount.mem) {
+                        continue;
+                    }
+                    let name = mount.mem.clone();
+                    if mount.capability != crate::workspace::MountCapability::Write {
+                        report.failures.push(crate::ops::RefreshFailure {
+                            item: format!("mount:{name}"),
+                            error: "only writable mounts attach on a warm refresh — \
+                                    restart the process to attach this mount"
+                                .to_string(),
+                        });
+                        continue;
+                    }
+                    let backend = match (self.backend_factory)(&mount) {
+                        Ok(b) => b,
+                        Err(e) => {
+                            report.failures.push(crate::ops::RefreshFailure {
+                                item: format!("mount:{name}"),
+                                error: e.to_string(),
+                            });
+                            continue;
+                        }
+                    };
+                    match self.register_writable_mem_inner(
+                        mount,
+                        backend,
+                        crate::mem::MemOrigin::ExplicitToml,
+                        false,
+                    ) {
+                        Ok(()) => {
+                            any_mounted = true;
+                            report.mems_mounted.push(name);
+                        }
+                        Err(e) => report.failures.push(crate::ops::RefreshFailure {
+                            item: format!("mount:{name}"),
+                            error: e.to_string(),
+                        }),
+                    }
+                }
+                // Removals: a currently-mounted WRITABLE mem absent
+                // from the manifest. Read-only attachments (archive
+                // read-mems hydrated from per-mem configs) are not
+                // manifest entries and never count as removals.
+                report.mem_removals_skipped = self
+                    .mounts
+                    .iter()
+                    .filter(|m| {
+                        m.mount.capability == crate::workspace::MountCapability::Write
+                            && !manifest_names.contains(&m.mount.mem)
+                    })
+                    .map(|m| m.mount.mem.clone())
+                    .collect();
+                report.mem_removals_skipped.sort();
+                if any_mounted {
+                    // One workspace-global pass for the whole batch.
+                    self.finish_batched_registrations();
+                }
+            }
+        }
+
+        report.elapsed_ms = started.elapsed().as_millis() as u64;
+        report
     }
 
     /// Override the workspace root after construction. The full

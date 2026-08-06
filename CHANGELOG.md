@@ -8,6 +8,25 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Added
+- **The warm server picks up out-of-band installs.** `memstead_reload`
+  (and CLI `memstead reload`) gain an additive full-refresh mode:
+  `full: true` re-scans the schema sources and the mount manifest on
+  top of the workspace-wide content reload, so a schema installed and
+  a mem registered out of band become usable in the running process —
+  the reported end-to-end blockage (install schema → `memstead_mem_create`
+  pinned to it → write an entity) now closes with no restart and no
+  operator action. Additive only, deliberately: removals (an
+  unregistered/deleted mem, a schema version gone from a source) are
+  SKIPPED and reported — they take effect on restart — because
+  removing live state can strand entities and cached hashes the
+  process is still serving. The response's `refresh` block says what
+  changed (`schemas_added`, `mems_mounted`), what was skipped
+  (`schema_removals_skipped`, `mem_removals_skipped`), per-item
+  `failures` (a failed source or mount never surfaces as newly
+  available and never aborts the rest), and `elapsed_ms`. Newly
+  mounted mems load cold like any boot-time mount, with the
+  workspace-global validation passes batched once per refresh. The
+  default reload is byte-for-byte unchanged.
 - **Cross-mem wildcard destination, bound to the alias rel-type.** A
   schema's `cross_mem_relationships` may now declare `to_schema: "*"`
   — restricted at load to the rel-type the schema names as its

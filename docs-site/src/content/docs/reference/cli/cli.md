@@ -956,6 +956,7 @@ Reload one writable mem's slice of the in-memory store from its on-disk branch t
 ###### **Options:**
 
 * `--mem <MEM>` — Writable mem name to reload. Omit to reload every writable mem. Mirrors the MCP `memstead_reload` parameter shape and the op's semantics: per-mem form is cheap and skips the workspace-level settings refresh; workspace-wide form (omit `--mem`) reloads every mem and also re-reads the workspace policy to pick up edits
+* `--full` — Additive full refresh: re-scan the schema sources and the mount manifest on top of the workspace-wide content reload. Out-of-band schema installs become resolvable and out-of-band mem registrations mount cold; removals are skipped and reported (they take effect on restart). Workspace-scoped — conflicts with `--mem`. Mirrors MCP `memstead_reload full=true`. (Mostly useful against a live server via MCP; in a fresh CLI process boot already sees everything — the flag exists for parity and for exercising the refresh path.)
 
 
 

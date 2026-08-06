@@ -3120,7 +3120,7 @@ impl McpServer {
 
     #[tool(
         name = "memstead_reload",
-        description = "Reload one writable mem's slice of the in-memory store from its on-disk branch tip — or every writable mem when `mem` is omitted. For multi-engine coexistence: a sibling (forked subagent, macOS app, parallel terminal) or out-of-band `git pull` may have advanced HEAD past this engine's snapshot. The auto-reload-on-read pipeline surfaces `MEM_RELOADED` on the next read; this tool is explicit operator-driven refresh for the rare cases the throttle missed. Not a workaround for direct .md edits — restart the server instead. Per-mem form is cheap (~10 ms per few-hundred-entity mem); workspace-wide scales linearly. Response: `reports[]`, each entry `{ mem, head_before, head_after, entities_loaded, changed_entity_ids[] }`. `head_before` is the engine's prior cached SHA (canonical empty-tree hash for fresh mems); `head_after` is the freshly-peeled branch tip. `changed_entity_ids` is the union of added ∪ content-hash-changed ∪ removed entity ids — pass `head_before` to `memstead_changes_since` for the full per-entity diff. The workspace-wide form (omit `mem`) additionally picks up CLI writes to allowlist / cross-link / mutation policy (via `memstead workspace allow-create` etc.) without process restart. Per-mem form skips that workspace-level settings refresh. **Mem membership is fixed at process boot** — neither form re-scans the mount manifest. In-band lifecycle goes through `memstead_mem_create` / `memstead_mem_delete`; out-of-band creates / deletes require an MCP server restart.",
+        description = "Reload one writable mem's slice of the in-memory store from its on-disk branch tip — or every writable mem when `mem` is omitted. For multi-engine coexistence: a sibling (forked subagent, macOS app, parallel terminal) or out-of-band `git pull` may have advanced HEAD past this engine's snapshot. The auto-reload-on-read pipeline surfaces `MEM_RELOADED` on the next read; this tool is explicit operator-driven refresh for the rare cases the throttle missed. Not a workaround for direct .md edits — restart the server instead. Per-mem form is cheap (~10 ms per few-hundred-entity mem); workspace-wide scales linearly. Response: `reports[]`, each entry `{ mem, head_before, head_after, entities_loaded, changed_entity_ids[] }`. `head_before` is the engine's prior cached SHA (canonical empty-tree hash for fresh mems); `head_after` is the freshly-peeled branch tip. `changed_entity_ids` is the union of added ∪ content-hash-changed ∪ removed entity ids — pass `head_before` to `memstead_changes_since` for the full per-entity diff. The workspace-wide form (omit `mem`) additionally picks up CLI writes to allowlist / cross-link / mutation policy (via `memstead workspace allow-create` etc.) without process restart. Per-mem form skips that workspace-level settings refresh. **Mem membership and the schema catalogue are fixed at process boot for both default forms** — neither re-scans the mount manifest or the schema sources. Pass `full: true` (workspace-wide form only) for the ADDITIVE full refresh: schema versions installed out of band become resolvable and mems registered out of band mount cold, no restart; removals are skipped and reported (they take effect on restart). The full response adds `refresh` `{schemas_added, schema_removals_skipped, mems_mounted, mem_removals_skipped, failures, elapsed_ms}` — per-item failures never surface as newly available and never abort the rest. In-band lifecycle still goes through `memstead_mem_create` / `memstead_mem_delete`; out-of-band DELETES still require a restart.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -3131,13 +3131,41 @@ impl McpServer {
     fn memstead_reload(&self, Parameters(p): Parameters<ReloadParams>) -> CallToolResult {
         let unified = self.unified_engine();
         let mut engine = crate::lock_engine!(unified);
+        // Full mode: the additive schema-source + mount-manifest
+        // re-scan runs FIRST (so newly registered mems join the
+        // content sweep below), then the ordinary workspace-wide
+        // content reload — coherence (MEM_RELOADED, expected_hash
+        // discipline) rides the same content-reload path it always
+        // did. Per-item refresh failures ride the `refresh` block;
+        // they never abort the content reload.
+        let refresh = if p.full.unwrap_or(false) {
+            if p.mem.is_some() {
+                let msg = "`full: true` is workspace-scoped — omit `mem`".to_string();
+                return tool_error_with_payload(
+                    "INVALID_INPUT",
+                    &msg,
+                    envelope(
+                        "INVALID_INPUT",
+                        msg.clone(),
+                        serde_json::json!({ "message": msg }),
+                    ),
+                );
+            }
+            Some(engine.full_refresh())
+        } else {
+            None
+        };
         let result = match p.mem.as_deref() {
             Some(name) => engine.reload_one_mem_report(name).map(|r| vec![r]),
             None => engine.reload_each_writable_mem_reports(),
         };
         match result {
             Ok(reports) => {
-                let payload = serde_json::json!({ "reports": reports });
+                let mut payload = serde_json::json!({ "reports": reports });
+                if let Some(refresh) = refresh {
+                    payload["refresh"] =
+                        serde_json::to_value(&refresh).unwrap_or(serde_json::Value::Null);
+                }
                 json_response(&payload)
             }
             // `engine_err_unified` reads `EngineError::code()` for the
@@ -7023,6 +7051,7 @@ community:
 
         let result = server.memstead_reload(Parameters(ReloadParams {
             mem: Some("specs".to_string()),
+            full: None,
         }));
         assert!(!result.is_error.unwrap_or(false));
         let text = extract_text(&result);
@@ -7034,6 +7063,188 @@ community:
         assert!(text.contains("\"head_after\""));
         assert!(text.contains("\"entities_loaded\""));
         assert!(text.contains("\"changed_entity_ids\""));
+        // Default form carries NO refresh block — the content reload
+        // is unchanged for callers that don't ask for the full mode.
+        assert!(
+            !text.contains("\"refresh\""),
+            "default reload must not carry a refresh block: {text}"
+        );
+        // `full` is workspace-scoped: combining it with `mem` refuses.
+        let result = server.memstead_reload(Parameters(ReloadParams {
+            mem: Some("specs".to_string()),
+            full: Some(true),
+        }));
+        assert!(result.is_error.unwrap_or(false));
+        let envelope = result.structured_content.as_ref().unwrap();
+        assert_eq!(envelope["code"], "INVALID_INPUT");
+    }
+
+    /// Plan 12 end-to-end: the EXACT sequence the plenum channel
+    /// reported blocked — install a new schema out of band, create a
+    /// mem pinned to it in-band, write an entity into it — completes
+    /// warm, with `memstead_reload full=true` as the only extra step
+    /// and no process restart. Pre-refresh, the same `mem_create`
+    /// still fails with `SCHEMA_NOT_FOUND` (the refresh changes the
+    /// outcome, not incidental timing).
+    #[test]
+    fn test_memstead_reload_full_closes_the_out_of_band_schema_gap() {
+        use memstead_base::workspace_store::WorkspaceStoreAdapter;
+
+        let tmp = TempDir::new().unwrap();
+        // Canonicalize so the mem-create location gate (which
+        // canonicalizes candidates) sees paths inside the root even
+        // on macOS's symlinked tmp.
+        let root = tmp.path().canonicalize().unwrap();
+        let root = root.as_path();
+        let mem_dir = root.join("specs");
+        fs::create_dir_all(&mem_dir).unwrap();
+        fs::create_dir_all(root.join(".memstead")).unwrap();
+        // Workspace policy on disk: wildcard create rule, so the
+        // in-band `memstead_mem_create` is admitted (and survives the
+        // refresh's settings re-read).
+        fs::write(
+            root.join(".memstead").join("workspace.toml"),
+            "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n\n[[mem_management.create]]\npattern = \"*\"\nschemas = [\"*\"]\n",
+        )
+        .unwrap();
+        let mount = memstead_base::Mount {
+            mem: "specs".to_string(),
+            schema: Some("default@1.0.0".parse().unwrap()),
+            storage: memstead_base::MountStorage::Folder {
+                path: mem_dir.clone(),
+            },
+            capability: memstead_base::MountCapability::Write,
+            lifecycle: memstead_base::MountLifecycle::Eager,
+            cross_linkable: true,
+            migration_target: None,
+        };
+        memstead_base::FileWorkspaceStore::new()
+            .save_state(
+                root,
+                &memstead_base::workspace::Workspace {
+                    mounts: vec![mount],
+                    settings: memstead_base::workspace::WorkspaceSettings::default(),
+                },
+            )
+            .unwrap();
+        let engine = memstead_base::Engine::from_workspace_root(root).expect("workspace boots");
+        let server = McpServer::new(engine, crate::config::DEFAULT_TOKEN_BUDGET);
+
+        // Out of band, while the server runs: install a schema the
+        // way `memstead schema install` does on a folder workspace —
+        // the package lands under `.memstead/schemas/<name>@<ver>/`.
+        let pkg = root
+            .join(".memstead")
+            .join("schemas")
+            .join("authored@0.1.0");
+        fs::create_dir_all(pkg.join("types")).unwrap();
+        fs::write(
+            pkg.join("schema.yaml"),
+            r#"name: authored
+version: 0.1.0
+description: out-of-band installed schema
+when_to_use: tests
+types:
+  - doc
+relationships:
+  mode: strict
+  definitions:
+    - name: _default
+      description: fallback
+      default_weight: 1.0
+community:
+  resolution: 1.0
+  seed: 42
+"#,
+        )
+        .unwrap();
+        fs::write(
+            pkg.join("types").join("doc.yaml"),
+            r#"name: doc
+description: t
+when_to_use: tests
+sections:
+  - key: body
+    heading: Body
+    required: true
+    search_weight: 10.0
+    catch_all: true
+    write_rules: []
+metadata_fields: []
+title_weight: 100.0
+text_fields:
+  - body
+hierarchy_relationship: _default
+propagating_relationships: []
+updatable_fields:
+  - title
+  - body
+health_required_fields:
+  - body
+staleness_threshold_days: 90
+write_rules: []
+"#,
+        )
+        .unwrap();
+
+        let mem_create = |name: &str| {
+            server.memstead_mem_create(Parameters(crate::lifecycle::MemCreateParams {
+                name: name.to_string(),
+                location: name.to_string(),
+                schema: "authored@0.1.0".to_string(),
+                vcs: None,
+                note: None,
+                recovery: None,
+                include_schema: false,
+                schema_verbosity: None,
+                write_guidance: Default::default(),
+            }))
+        };
+
+        // Refusal complement: BEFORE the refresh, the in-band create
+        // still fails with SCHEMA_NOT_FOUND — this is the reported
+        // five-round blockage.
+        let result = mem_create("notes");
+        assert!(result.is_error.unwrap_or(false));
+        let envelope = result.structured_content.as_ref().unwrap();
+        assert_eq!(envelope["code"], "SCHEMA_NOT_FOUND", "{envelope}");
+
+        // The full refresh makes the schema resolvable, warm.
+        let result = server.memstead_reload(Parameters(ReloadParams {
+            mem: None,
+            full: Some(true),
+        }));
+        assert!(!result.is_error.unwrap_or(false), "{result:?}");
+        let text = extract_text(&result);
+        assert!(text.contains("\"refresh\""), "{text}");
+        assert!(text.contains("authored@0.1.0"), "{text}");
+
+        // In-band mem create pinned to the fresh schema now succeeds…
+        let result = mem_create("notes");
+        assert!(
+            !result.is_error.unwrap_or(false),
+            "mem_create must succeed after the refresh: {result:?}"
+        );
+
+        // …and an entity lands in it. End-to-end closure, no restart.
+        let result = server.memstead_create(Parameters(crate::tools::mutation::CreateParams {
+            title: "First Entry".to_string(),
+            entity_type: "doc".to_string(),
+            mem: Some("notes".to_string()),
+            sections: Some(indexmap::IndexMap::from_iter([(
+                "body".to_string(),
+                "written warm".to_string(),
+            )])),
+            metadata: None,
+            relations: None,
+            anchors: None,
+            dry_run: None,
+            note: None,
+        }));
+        assert!(
+            !result.is_error.unwrap_or(false),
+            "entity create into the fresh mem must succeed: {result:?}"
+        );
     }
 
     /// `memstead_changes_since` end-to-end with `include_notes = false`.
@@ -7248,6 +7459,7 @@ community:
         // UNKNOWN_MEM via the reload handler's generic mapper.
         let bad_mem = server.memstead_reload(Parameters(ReloadParams {
             mem: Some("no-such-mem".to_string()),
+            full: None,
         }));
         let body2 = bad_mem.structured_content.unwrap();
         assert_eq!(body2["code"], "UNKNOWN_MEM");

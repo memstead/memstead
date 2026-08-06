@@ -1706,6 +1706,15 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "head_after",
             "entities_loaded",
             "changed_entity_ids",
+            // Full-refresh mode (plan 12): the additive re-scan block on
+            // the response and its fields.
+            "refresh",
+            "schemas_added",
+            "schema_removals_skipped",
+            "mems_mounted",
+            "mem_removals_skipped",
+            "failures",
+            "elapsed_ms",
             // Auto-reload-on-read warning the description points at.
             "MEM_RELOADED",
             // Cross-tool reference for diff-list lookup.

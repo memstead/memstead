@@ -1923,6 +1923,183 @@ community:
         assert_eq!(drift_codes(&engine), Vec::<String>::new());
     }
 
+    /// Plan 12: `full_refresh` makes an out-of-band schema install and
+    /// an out-of-band mem registration usable warm — additively.
+    /// Removals are skipped and reported; a failed mount is reported
+    /// per-item and does not abort the rest.
+    #[test]
+    fn full_refresh_is_additive_and_reports_skipped_removals() {
+        use crate::engine::test_helpers::write_schema_files_with_default_type;
+        use crate::workspace_store::WorkspaceStoreAdapter;
+
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let mem_a = root.join("mem-a");
+        std::fs::create_dir_all(&mem_a).unwrap();
+        std::fs::create_dir_all(root.join(".memstead")).unwrap();
+        std::fs::write(
+            root.join(".memstead").join("workspace.toml"),
+            "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+        )
+        .unwrap();
+        let mount = |mem: &str, dir: &Path, schema: &str, version: semver::Version| Mount {
+            mem: mem.to_string(),
+            schema: Some(SchemaRef::new(schema, version)),
+            storage: MountStorage::Folder {
+                path: dir.to_path_buf(),
+            },
+            capability: MountCapability::Write,
+            lifecycle: MountLifecycle::Eager,
+            cross_linkable: true,
+            migration_target: None,
+        };
+        let save = |mounts: Vec<Mount>| {
+            crate::FileWorkspaceStore::new()
+                .save_state(
+                    root,
+                    &crate::workspace::Workspace {
+                        mounts,
+                        settings: crate::workspace::WorkspaceSettings::default(),
+                    },
+                )
+                .unwrap();
+        };
+        save(vec![mount(
+            "specs",
+            &mem_a,
+            "default",
+            semver::Version::new(1, 0, 0),
+        )]);
+        let mut engine = Engine::from_workspace_root(root).expect("workspace boots");
+        assert_eq!(engine.mem_names(), vec!["specs"]);
+
+        // --- Out of band, while the "server" runs: install a schema
+        // and register a mem pinned to it. ---
+        let manifest = r#"name: authored
+version: 0.1.0
+description: an out-of-band installed schema
+when_to_use: tests
+types:
+  - doc
+relationships:
+  mode: strict
+  definitions:
+    - name: _default
+      description: fallback
+      default_weight: 1.0
+community:
+  resolution: 1.0
+  seed: 42
+"#;
+        write_schema_files_with_default_type(
+            &root.join(".memstead").join("schemas"),
+            "authored@0.1.0",
+            manifest,
+            &["doc"],
+        );
+        let mem_b = root.join("mem-b");
+        std::fs::create_dir_all(&mem_b).unwrap();
+        save(vec![
+            mount("specs", &mem_a, "default", semver::Version::new(1, 0, 0)),
+            mount("notes", &mem_b, "authored", semver::Version::new(0, 1, 0)),
+        ]);
+
+        // Refusal complement, pre-refresh: the running engine still
+        // refuses — the refresh is what changes the outcome.
+        let (actor, client) = cli_actor();
+        let mut pre = crate::engine::test_helpers::empty_create_args("notes", "Too Early");
+        pre.entity_type = "doc".to_string();
+        pre.sections = indexmap::IndexMap::from_iter([("body".to_string(), "body".to_string())]);
+        let err = engine
+            .create_entity(pre.clone(), actor, Some(&client), None)
+            .unwrap_err();
+        assert_eq!(err.code(), "UNKNOWN_MEM", "{err:?}");
+        assert!(
+            !engine
+                .workspace_schemas()
+                .iter()
+                .any(|s| s.id().0 == "authored"),
+            "schema catalogue is fixed pre-refresh"
+        );
+
+        // --- Full refresh: both become usable, warm. ---
+        let report = engine.full_refresh();
+        assert_eq!(report.schemas_added, vec!["authored@0.1.0".to_string()]);
+        assert_eq!(report.mems_mounted, vec!["notes".to_string()]);
+        assert!(report.schema_removals_skipped.is_empty(), "{report:?}");
+        assert!(report.mem_removals_skipped.is_empty(), "{report:?}");
+        assert!(report.failures.is_empty(), "{report:?}");
+        engine
+            .create_entity(pre, actor, Some(&client), None)
+            .expect("newly mounted mem accepts writes after the refresh");
+
+        // --- Removals do NOT take effect: drop `specs` from the
+        // manifest and delete the schema package from its source. ---
+        std::fs::remove_dir_all(
+            root.join(".memstead")
+                .join("schemas")
+                .join("authored@0.1.0"),
+        )
+        .unwrap();
+        save(vec![mount(
+            "notes",
+            &mem_b,
+            "authored",
+            semver::Version::new(0, 1, 0),
+        )]);
+        let report = engine.full_refresh();
+        assert_eq!(report.mem_removals_skipped, vec!["specs".to_string()]);
+        assert_eq!(
+            report.schema_removals_skipped,
+            vec!["authored@0.1.0".to_string()]
+        );
+        assert!(report.schemas_added.is_empty());
+        assert!(report.mems_mounted.is_empty());
+        // Both stay live: the unregistered mem still accepts writes,
+        // the removed schema version still resolves for its mem.
+        engine
+            .create_entity(
+                crate::engine::test_helpers::empty_create_args("specs", "Still Here"),
+                actor,
+                Some(&client),
+                None,
+            )
+            .expect("skipped-removal mem stays writable");
+        let mut into_notes =
+            crate::engine::test_helpers::empty_create_args("notes", "Still Resolvable");
+        into_notes.entity_type = "doc".to_string();
+        into_notes.sections =
+            indexmap::IndexMap::from_iter([("body".to_string(), "body".to_string())]);
+        engine
+            .create_entity(into_notes, actor, Some(&client), None)
+            .expect("removed-from-source schema stays resolvable");
+
+        // --- Per-item failure: a manifest mount whose path is a FILE
+        // fails alone; the rest of the refresh proceeds. ---
+        let broken = root.join("broken-mem");
+        std::fs::write(&broken, b"not a directory").unwrap();
+        save(vec![
+            mount("notes", &mem_b, "authored", semver::Version::new(0, 1, 0)),
+            mount("broken", &broken, "default", semver::Version::new(1, 0, 0)),
+        ]);
+        let report = engine.full_refresh();
+        assert!(
+            report.failures.iter().any(|f| f.item == "mount:broken"),
+            "failed mount must be reported per-item: {report:?}"
+        );
+        assert!(
+            !report.mems_mounted.contains(&"broken".to_string()),
+            "a failed mount never surfaces as newly available"
+        );
+        assert!(
+            engine
+                .get_entity(&crate::EntityId::new("broken", "anything"))
+                .is_none()
+                && engine.mem_names().iter().any(|m| *m == "notes"),
+            "other mounts unaffected"
+        );
+    }
+
     #[test]
     fn from_workspace_root_propagates_mem_management_settings() {
         // workspace.toml carries [mem_management] rules; the file

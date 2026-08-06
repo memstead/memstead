@@ -448,6 +448,14 @@ pub type GitBranchReadSchemaFileFn = fn(
     rel: &str,
 ) -> Result<Option<Vec<u8>>, BackendError>;
 
+/// Re-read every schema sealed on the workspace's
+/// `__MEMSTEAD:schemas/` ref (empty when the ref or subtree is
+/// absent). Read-only; `Engine::full_refresh` is the consumer — the
+/// warm-server path that makes an out-of-band `memstead schema
+/// install` resolvable without a process restart.
+pub type GitBranchReadRefSchemasFn =
+    fn(workspace_root: &Path) -> Result<Vec<Arc<memstead_schema::Schema>>, BackendError>;
+
 /// Bundle of git-branch-specific op dispatchers. Installed on the
 /// engine at full boot. Each field is one ops-method that previously
 /// lived on the `MemBackend` trait; moving them off the trait keeps
@@ -467,6 +475,7 @@ pub struct GitBranchOps {
     pub prune_residue: GitBranchPruneResidueFn,
     pub write_schema: GitBranchWriteSchemaFn,
     pub read_schema_file: GitBranchReadSchemaFileFn,
+    pub read_ref_schemas: GitBranchReadRefSchemasFn,
 }
 
 impl std::fmt::Debug for Engine {
