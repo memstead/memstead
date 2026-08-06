@@ -506,6 +506,12 @@ pub fn compose_health(
             .collect();
         obj.insert("dangling_links".into(), serde_json::json!(arr));
     }
+    if include.iter().any(|s| s == "anchors") {
+        obj.insert(
+            "anchors".into(),
+            memstead_base::ops::health::health_anchors_axis(engine),
+        );
+    }
     if include.iter().any(|s| s == "missing_required_outgoing") {
         let reports = engine.missing_required_outgoing(vf);
         let arr: Vec<serde_json::Value> = reports
@@ -652,6 +658,22 @@ pub fn render_health_markdown(v: &serde_json::Value) -> String {
             for item in arr {
                 let _ = writeln!(s, "- {}", summarize_health_item(item));
             }
+        }
+    }
+
+    // Anchors axis — an object (mem → four counts), not an array, so it
+    // renders its own compact section.
+    if let Some(obj) = v.get("anchors").and_then(|x| x.as_object()) {
+        let _ = writeln!(s, "\n## Anchors ({} mems)", obj.len());
+        for (mem, counts) in obj {
+            let _ = writeln!(
+                s,
+                "- `{mem}`: resolved {}, drifted {}, recheck {}, unresolvable {}",
+                counts["resolved"].as_u64().unwrap_or(0),
+                counts["drifted"].as_u64().unwrap_or(0),
+                counts["recheck"].as_u64().unwrap_or(0),
+                counts["unresolvable"].as_u64().unwrap_or(0),
+            );
         }
     }
 

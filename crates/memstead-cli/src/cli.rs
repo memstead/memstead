@@ -113,6 +113,11 @@ pub enum Command {
     #[cfg(feature = "mem-repo")]
     Uninstall(commands::uninstall::Args),
 
+    /// Verify every anchor in a mem against its declared source — the
+    /// standalone drift statement, no binding required. Read-only.
+    #[command(name = "verify-anchors")]
+    VerifyAnchors(commands::verify_anchors::Args),
+
     /// Link a filesystem mem to a registry-published dependency.
     /// `memstead link <scope/name>` fetches the archive into the
     /// workspace and records the dependency in the workspace config.

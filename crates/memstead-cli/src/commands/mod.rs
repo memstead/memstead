@@ -247,6 +247,7 @@ pub mod branch_reset;
 pub mod install;
 #[cfg(feature = "mem-repo")]
 pub mod uninstall;
+pub mod verify_anchors;
 #[cfg(feature = "mem-repo")]
 pub mod mem;
 #[cfg(feature = "mem-repo")]

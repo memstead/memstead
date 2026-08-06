@@ -23,6 +23,7 @@ This document contains the help content for the `memstead` command-line program.
 * [`memstead quickstart`↴](#memstead-quickstart)
 * [`memstead install`↴](#memstead-install)
 * [`memstead uninstall`↴](#memstead-uninstall)
+* [`memstead verify-anchors`↴](#memstead-verify-anchors)
 * [`memstead link`↴](#memstead-link)
 * [`memstead publish`↴](#memstead-publish)
 * [`memstead unpublish`↴](#memstead-unpublish)
@@ -130,6 +131,7 @@ Exit codes:
 * `quickstart` — One-command cold start: workspace + default-schema mem + seed entity + MCP wiring for your agent(s), in the current (or named) folder. Tolerates dotfiles and README-grade files; derives the mem name from the folder. For the strict, script-safe variant use `memstead init`
 * `install` — Install a sealed `.mem` mem — either a local file, or `<scope>/<name>` from the memstead.io registry. Registers it as a workspace-level read-only mount; `memstead uninstall` is the symmetric removal
 * `uninstall` — Remove an installed read-mem's workspace-level mount. The global cache copy survives by default; re-`install` re-registers it
+* `verify-anchors` — Verify every anchor in a mem against its declared source — the standalone drift statement, no binding required. Read-only
 * `link` — Link a filesystem mem to a registry-published dependency. `memstead link <scope/name>` fetches the archive into the workspace and records the dependency in the workspace config
 * `publish` — Publish a `.mem` archive to the registry. Triggers GitHub Device Flow on first use; subsequent runs are silent
 * `unpublish` — Unpublish (hard-delete) `<scope>/<name>` from the registry. Permitted to the original uploader and to admins. The same `<scope>/<name>` becomes immediately re-publishable
@@ -467,6 +469,18 @@ Remove an installed read-mem's workspace-level mount. The global cache copy surv
 ###### **Arguments:**
 
 * `<NAME>` — The installed read-mem's name (the archive's internal name, as shown by `memstead mem list`)
+
+
+
+## `memstead verify-anchors`
+
+Verify every anchor in a mem against its declared source — the standalone drift statement, no binding required. Read-only
+
+**Usage:** `memstead verify-anchors --mem <NAME>`
+
+###### **Options:**
+
+* `--mem <NAME>` — Which mem to verify (by name)
 
 
 

@@ -326,13 +326,10 @@ impl Engine {
     /// deferred (E3b's remaining leg).
     pub fn entity_anchors_resolved(&self, id: &EntityId) -> Vec<ResolvedAnchor> {
         let anchors = self.entity_anchors(id);
-        let root = self.single_path_medium_root(id.mem());
         anchors
             .into_iter()
             .map(|anchor| {
-                let observed = root
-                    .as_deref()
-                    .and_then(|r| observe_path_anchor(r, &anchor));
+                let observed = self.observe_anchor(&anchor);
                 let (state, observed_hash) = match observed {
                     Some((state, hash)) => (Some(state), hash),
                     None => (None, None),
@@ -346,34 +343,28 @@ impl Engine {
             .collect()
     }
 
-    /// The observation root for `mem`'s single `path`-namespace source
-    /// (codebase / filesystem), or `None` when the mem's bindings declare
-    /// zero / several inline sources, no workspace root, or the lone
-    /// source's medium half is not path-shaped (`path+commit` / `entity` /
-    /// `url` — those need commit-pinned or non-filesystem observation,
-    /// E3b). The root is the **workspace root**: anchor artifact ids are
-    /// workspace-relative (pointer-prefixed) — the same dialect
-    /// enumeration, deny_paths, coverage matching, and the advance
-    /// auto-`worked` derivation share — so observation joins them onto the
-    /// workspace root, never onto the source pointer (which the ids
-    /// already embed).
-    fn single_path_medium_root(&self, mem: &str) -> Option<PathBuf> {
-        let workspace_root = self.workspace_root.as_deref()?;
-        let mut sources = self
-            .pipeline_configs()
-            .bindings
-            .iter()
-            .filter(|r| r.mem == mem)
-            .flat_map(|r| r.config.sources.iter());
-        let first = sources.next()?;
-        if sources.next().is_some() {
-            return None; // ambiguous — an anchor names no source
-        }
-        let caps = crate::binding::medium_capabilities(first.medium_type);
-        if caps.anchor_namespace != "path" {
-            return None; // only plain working-tree path mediums are observable here
-        }
-        Some(workspace_root.to_path_buf())
+    /// Per-anchor observation — THE one resolution mechanism, shared by
+    /// binding-backed verify (`mem_anchors_resolved`, which the ingest
+    /// render/report/prune/findings paths consume), the per-entity read
+    /// (`entity_anchors_resolved`), and the standalone
+    /// `verify_mem_anchors` operation. Each anchor resolves against its
+    /// own declared reference: path-shaped grains (`span`/`file`/`tree`)
+    /// observe against the **workspace root** — anchor artifact ids are
+    /// workspace-relative (pointer-prefixed), so no binding roster is
+    /// consulted and a hand-authored mem's anchors resolve identically
+    /// to a binding-backed mem's. `url`/`entity` grains have no
+    /// filesystem observation and return `None` (the report vocabulary's
+    /// `unresolvable`), as does a workspace-root-less engine. This
+    /// replaces the retired `single_path_medium_root` gate, whose
+    /// single-source assumption nulled every anchor of a mem with zero
+    /// or several bindings — the honest per-anchor answer supersedes the
+    /// all-or-nothing mem-level one.
+    fn observe_anchor(
+        &self,
+        anchor: &crate::anchor::Anchor,
+    ) -> Option<(crate::anchor::AnchorState, Option<String>)> {
+        let root = self.workspace_root.as_deref()?;
+        observe_path_anchor(root, anchor)
     }
 
     /// Reverse anchor lookup: every `(entity_id, anchor)` across all mems
@@ -428,11 +419,10 @@ impl Engine {
         let Ok(sc) = crate::anchor::AnchorSidecar::from_bytes(&bytes) else {
             return Vec::new();
         };
-        let root = self.single_path_medium_root(mem);
         let mut out = Vec::new();
         for (eid, anchors) in &sc.entities {
             for anchor in anchors {
-                let observed = root.as_deref().and_then(|r| observe_path_anchor(r, anchor));
+                let observed = self.observe_anchor(anchor);
                 let (state, observed_hash) = match observed {
                     Some((state, hash)) => (Some(state), hash),
                     None => (None, None),
@@ -448,6 +438,57 @@ impl Engine {
             }
         }
         out
+    }
+
+    /// Standalone anchor verification — "do my sources still say what I
+    /// recorded?" for one mem, regardless of how it was built. Walks the
+    /// mem's anchor sidecar through the shared per-anchor mechanism
+    /// ([`Self::observe_anchor`] via [`Self::mem_anchors_resolved`]) and
+    /// classifies every anchor into the report vocabulary: `resolved`
+    /// (source present, hash matches or non-hash class), `drifted`
+    /// (present, hash differs, stability `stable`), `recheck` (hash
+    /// differs under `unstable`, or a hash is missing on either side),
+    /// `unresolvable` (source absent, or a grain/medium the mechanism
+    /// does not reach — never fabricated into drift). Read-only on mem
+    /// content: pure sidecar read + filesystem observation, no commit on
+    /// any backend. A mem with no anchors returns an empty report.
+    pub fn verify_mem_anchors(&self, mem: &str) -> Result<MemAnchorVerification, EngineError> {
+        if !self.mem_router.is_visible(mem) {
+            return Err(EngineError::UnknownMem(mem.to_string()));
+        }
+        let mut report = MemAnchorVerification {
+            mem: mem.to_string(),
+            ..Default::default()
+        };
+        for (eid, resolved) in self.mem_anchors_resolved(mem) {
+            let state = match resolved.state {
+                Some(crate::anchor::AnchorState::Resolves) => {
+                    report.resolved += 1;
+                    "resolved"
+                }
+                Some(crate::anchor::AnchorState::Drifted) => {
+                    report.drifted += 1;
+                    "drifted"
+                }
+                Some(crate::anchor::AnchorState::Recheck) => {
+                    report.recheck += 1;
+                    "recheck"
+                }
+                Some(crate::anchor::AnchorState::Orphaned) | None => {
+                    report.unresolvable += 1;
+                    "unresolvable"
+                }
+            };
+            report.anchors.push(VerifiedAnchor {
+                entity_id: eid.to_string(),
+                artifact: resolved.anchor.artifact.clone(),
+                grain: resolved.anchor.grain.as_wire().to_string(),
+                class: resolved.anchor.class.as_wire().to_string(),
+                state: state.to_string(),
+                observed_hash: resolved.observed_hash,
+            });
+        }
+        Ok(report)
     }
 
     /// Mem names the engine knows about, in declaration order.
@@ -1416,6 +1457,37 @@ impl Engine {
 fn anchor_base_path(artifact: &str) -> &str {
     let cut = artifact.find(['@', '#']).unwrap_or(artifact.len());
     &artifact[..cut]
+}
+
+/// One mem's standalone anchor-verification report — the counts plus
+/// the per-anchor rows, in sidecar order.
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct MemAnchorVerification {
+    pub mem: String,
+    /// Source present, hash matches (or a non-hash class whose source
+    /// exists).
+    pub resolved: usize,
+    /// Source present, hash differs, stability `stable` — real drift.
+    pub drifted: usize,
+    /// Hash differs under `unstable` stability, or a hash is missing on
+    /// either side — flagged for re-examination, never called drift.
+    pub recheck: usize,
+    /// Source absent, or a grain/medium the mechanism does not reach.
+    pub unresolvable: usize,
+    pub anchors: Vec<VerifiedAnchor>,
+}
+
+/// One anchor's verification row.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct VerifiedAnchor {
+    pub entity_id: String,
+    pub artifact: String,
+    pub grain: String,
+    pub class: String,
+    /// `resolved` | `drifted` | `recheck` | `unresolvable`.
+    pub state: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub observed_hash: Option<String>,
 }
 
 /// Whether `anchor` references `path`. `tree`-grain anchors match `path`

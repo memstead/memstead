@@ -1947,3 +1947,257 @@ fn uninstall_refusals_are_typed_and_effect_free() {
         fs::read_to_string(receiver.path().join(".memstead/state/mounts.json")).unwrap();
     assert_eq!(mounts_before, mounts_after, "refusals must not touch mount state");
 }
+
+// ---------------------------------------------------------------------------
+// `verify-anchors` — the standalone drift statement (no binding required)
+// ---------------------------------------------------------------------------
+
+/// Build a one-mem workspace with an entity whose anchors span the four
+/// verification states. Returns the workspace root.
+fn make_anchor_workspace(root: &Path) {
+    let m = |args: &[&str]| {
+        memstead()
+            .current_dir(root)
+            .env("MEMSTEAD_OPERATOR_MODE", "1")
+            .args(args)
+            .assert()
+            .success();
+    };
+    m(&["mem-repo", "init", "."]);
+    m(&["mem", "init", "hold", "--no-gitignore"]);
+    m(&[
+        "create", "--mem", "hold", "--title", "Holder", "--type", "spec",
+        "--section", "identity=Anchored fixture entity.",
+        "--section", "purpose=Verification states.",
+    ]);
+
+    // Four source files; anchors record the ORIGINAL content's
+    // prepared hash, then edits/deletes produce the states.
+    for (name, content) in [
+        ("src-a.txt", "alpha"),
+        ("src-b.txt", "beta"),
+        ("src-c.txt", "gamma"),
+        ("src-d.txt", "delta"),
+    ] {
+        fs::write(root.join(name), content).unwrap();
+    }
+    let h = |content: &str| memstead_base::anchor::prepared_content_hash(content.as_bytes());
+    let anchors = [
+        // resolved: intact source, matching hash, stable.
+        format!(
+            r#"{{"artifact":"src-a.txt","grain":"file","class":"anchored","hash":"{}","hash_stability":"stable"}}"#,
+            h("alpha")
+        ),
+        // drifted: source will be edited; stable stability.
+        format!(
+            r#"{{"artifact":"src-b.txt","grain":"file","class":"anchored","hash":"{}","hash_stability":"stable"}}"#,
+            h("beta")
+        ),
+        // recheck: source will be edited; unstable stability.
+        format!(
+            r#"{{"artifact":"src-c.txt","grain":"file","class":"anchored","hash":"{}","hash_stability":"unstable"}}"#,
+            h("gamma")
+        ),
+        // unresolvable: source will be deleted.
+        format!(
+            r#"{{"artifact":"src-d.txt","grain":"file","class":"anchored","hash":"{}","hash_stability":"stable"}}"#,
+            h("delta")
+        ),
+    ];
+    let mut args: Vec<String> = vec![
+        "update".into(),
+        "hold--holder".into(),
+        "--auto-hash".into(),
+        "--append".into(),
+        "purpose= Anchored.".into(),
+    ];
+    for a in &anchors {
+        args.push("--anchor".into());
+        args.push(a.clone());
+    }
+    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    m(&arg_refs);
+
+    // Produce the states: edit b and c, delete d.
+    fs::write(root.join("src-b.txt"), "beta CHANGED").unwrap();
+    fs::write(root.join("src-c.txt"), "gamma CHANGED").unwrap();
+    fs::remove_file(root.join("src-d.txt")).unwrap();
+}
+
+/// Criterion 1: all four states on a hand-authored mem with no binding,
+/// in one run. Criterion 5's read-only complement rides the same test.
+#[test]
+fn verify_anchors_reports_four_states_without_binding() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    make_anchor_workspace(root);
+
+    let refs_before = std::process::Command::new("git")
+        .arg("--git-dir")
+        .arg(root.join("mem-repo/.git"))
+        .args(["for-each-ref", "--format=%(refname) %(objectname)"])
+        .output()
+        .unwrap()
+        .stdout;
+
+    let out = memstead()
+        .current_dir(root)
+        .args(["--json", "verify-anchors", "--mem", "hold"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["resolved"], 1, "full: {v}");
+    assert_eq!(v["drifted"], 1, "full: {v}");
+    assert_eq!(v["recheck"], 1, "full: {v}");
+    assert_eq!(v["unresolvable"], 1, "full: {v}");
+    let state_of = |artifact: &str| -> String {
+        v["anchors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|a| a["artifact"] == artifact)
+            .map(|a| a["state"].as_str().unwrap().to_string())
+            .unwrap_or_else(|| panic!("anchor for {artifact} missing: {v}"))
+    };
+    assert_eq!(state_of("src-a.txt"), "resolved");
+    assert_eq!(state_of("src-b.txt"), "drifted");
+    assert_eq!(state_of("src-c.txt"), "recheck");
+    assert_eq!(state_of("src-d.txt"), "unresolvable");
+
+    // Read-only: no ref moved.
+    let refs_after = std::process::Command::new("git")
+        .arg("--git-dir")
+        .arg(root.join("mem-repo/.git"))
+        .args(["for-each-ref", "--format=%(refname) %(objectname)"])
+        .output()
+        .unwrap()
+        .stdout;
+    assert_eq!(refs_before, refs_after, "verify-anchors must not move any ref");
+}
+
+/// Criterion 3: a mem whose bindings span multiple media no longer
+/// nulls — path anchors resolve against their own recorded paths, and a
+/// grain the mechanism does not reach reports `unresolvable`.
+#[test]
+fn verify_anchors_multi_binding_mem_no_longer_nulls() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    make_anchor_workspace(root);
+
+    // Two v2 bindings on the mem — the shape that made
+    // `single_path_medium_root` return None (ambiguous) pre-rework.
+    let proj = root.join(".memstead/projections/hold");
+    fs::create_dir_all(&proj).unwrap();
+    for (name, pointer) in [("graph-a", "src-a.txt"), ("graph-b", "src-b.txt")] {
+        fs::write(
+            proj.join(format!("{name}.json")),
+            format!(
+                r#"{{"version":2,"intent":"t","sources":[{{"name":"s","type":"codebase","pointer":"{pointer}","change_detection":"git","scope":[{{"path":"**","mode":"allow"}}]}}],"reference_mems":[],"destination_mem":"hold","deny_paths":[],"coverage_semantics":"exhaustive","operations":{{"build":{{"mode":"discovery","trigger":"loop","batch_size":20}},"sync":{{"trigger":"manual","batch_size":20}}}}}}"#
+            ),
+        )
+        .unwrap();
+    }
+
+    // Add a url-grain anchor — the mechanism doesn't reach it.
+    memstead()
+        .current_dir(root)
+        .env("MEMSTEAD_OPERATOR_MODE", "1")
+        .args([
+            "update", "hold--holder", "--auto-hash",
+            "--append", "purpose= Url anchor.",
+            "--anchor",
+            r#"{"artifact":"https://example.com/spec","grain":"url","class":"informed-by"}"#,
+        ])
+        .assert()
+        .success();
+
+    let out = memstead()
+        .current_dir(root)
+        .args(["--json", "verify-anchors", "--mem", "hold"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    // Path anchors still resolve per their own states — nothing nulls.
+    assert_eq!(v["resolved"], 1, "{v}");
+    assert_eq!(v["drifted"], 1, "{v}");
+    assert_eq!(v["recheck"], 1, "{v}");
+    // src-d (deleted) + the url anchor.
+    assert_eq!(v["unresolvable"], 2, "{v}");
+}
+
+/// Criterion 4 + 5 remainders: the health anchors axis is include-gated
+/// (absent by default), an anchor-less mem reports empty, and an
+/// unknown mem refuses typed.
+#[test]
+fn verify_anchors_health_axis_and_refusals() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    make_anchor_workspace(root);
+
+    // Default health carries no anchors key.
+    let plain = memstead()
+        .current_dir(root)
+        .args(["--json", "health"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let plain: serde_json::Value = serde_json::from_slice(&plain).unwrap();
+    assert!(
+        plain.get("anchors").is_none(),
+        "anchors axis must be include-gated: {plain}"
+    );
+
+    // With the include: per-mem four-state counts.
+    let with = memstead()
+        .current_dir(root)
+        .args(["--json", "health", "--include", "anchors"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let with: serde_json::Value = serde_json::from_slice(&with).unwrap();
+    let axis = with.get("anchors").expect("axis present under include");
+    assert_eq!(axis["hold"]["drifted"], 1, "{with}");
+    assert_eq!(axis["hold"]["unresolvable"], 1, "{with}");
+
+    // Anchor-less mem: empty result, not an error.
+    memstead()
+        .current_dir(root)
+        .env("MEMSTEAD_OPERATOR_MODE", "1")
+        .args(["mem", "init", "bare", "--no-gitignore"])
+        .assert()
+        .success();
+    let empty = memstead()
+        .current_dir(root)
+        .args(["--json", "verify-anchors", "--mem", "bare"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let empty: serde_json::Value = serde_json::from_slice(&empty).unwrap();
+    assert_eq!(empty["resolved"], 0);
+    assert_eq!(empty["anchors"].as_array().map(|a| a.len()), Some(0));
+
+    // Unknown mem: typed refusal, no INTERNAL.
+    let unknown = memstead()
+        .current_dir(root)
+        .args(["verify-anchors", "--mem", "nope"])
+        .assert()
+        .failure()
+        .get_output()
+        .stderr
+        .clone();
+    let unknown = String::from_utf8(unknown).unwrap();
+    assert!(unknown.contains("UNKNOWN_MEM"), "got: {unknown}");
+    assert!(!unknown.contains("INTERNAL"), "INTERNAL leaked: {unknown}");
+}

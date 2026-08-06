@@ -1574,7 +1574,7 @@ impl FilesystemMcpServer {
 
     #[tool(
         name = "memstead_health",
-        description = "Return the filesystem-mem workspace's health summary: orphans, stubs, missing required fields, stale entities. Same JSON shape as the mem-repo `memstead_health` (single-mem, so `writable_mems` carries one entry). `include` accepts the shared health key set — today the lean surface dispatches `dangling_links` (matching the mem-repo response shape: `{from, target_id, target_path, section}`) and validates every key against the allowed set, emitting `UNKNOWN_INCLUDE_KEY` on the response's `warnings[]` for typos. `conformance` / `integrity` are dispatched too: `conformance` lints every entity against the effective schema (the pin, or `target_schema` when given) into a `findings` array of `{id, axis, code, detail}` with write-time typed codes; `integrity` adds the consistency axis (DANGLING_LINK, ORPHAN_STUB) to the same list. Other detail keys (`orphans`, `stubs`, …) are accepted but the v1 surface returns the full report regardless — narrowing is a follow-up.",
+        description = "Return the filesystem-mem workspace's health summary: orphans, stubs, missing required fields, stale entities. Same JSON shape as the mem-repo `memstead_health` (single-mem, so `writable_mems` carries one entry). `include` accepts the shared health key set — today the lean surface dispatches `dangling_links` (matching the mem-repo response shape: `{from, target_id, target_path, section}`) and validates every key against the allowed set, emitting `UNKNOWN_INCLUDE_KEY` on the response's `warnings[]` for typos. `conformance` / `integrity` are dispatched too: `conformance` lints every entity against the effective schema (the pin, or `target_schema` when given) into a `findings` array of `{id, axis, code, detail}` with write-time typed codes; `integrity` adds the consistency axis (DANGLING_LINK, ORPHAN_STUB) to the same list; `anchors` adds per-mem counts of the four standalone anchor-verification states (resolved/drifted/recheck/unresolvable). Other detail keys (`orphans`, `stubs`, …) are accepted but the v1 surface returns the full report regardless — narrowing is a follow-up.",
         annotations(
             read_only_hint = true,
             destructive_hint = false,
@@ -1658,6 +1658,17 @@ impl FilesystemMcpServer {
                 }
             }
             health.findings = Some(findings);
+        }
+
+        // `include=["anchors"]` — the per-mem four-state counts from the
+        // shared axis helper (same axis the full flavour renders).
+        if include.iter().any(|s| s == "anchors") {
+            let mut value = match serde_json::to_value(&health) {
+                Ok(v) => v,
+                Err(e) => return tool_error("INTERNAL", &format!("serialize health: {e}")),
+            };
+            value["anchors"] = memstead_base::ops::health::health_anchors_axis(&engine);
+            return json_response(&value);
         }
 
         json_response(&health)

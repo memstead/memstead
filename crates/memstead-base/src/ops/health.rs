@@ -41,7 +41,34 @@ pub const HEALTH_INCLUDE_KEYS: &[&str] = &[
     "conformance",
     "integrity",
     "config",
+    "anchors",
 ];
+
+/// The `include=["anchors"]` axis — per-mem counts of the four
+/// standalone-verification states, computed through the same
+/// per-anchor mechanism `verify-anchors` and the binding verify use.
+/// Shared by the full composer, the CLI health command, and the lean
+/// MCP server so the axis cannot drift between surfaces.
+pub fn health_anchors_axis(engine: &crate::engine::Engine) -> serde_json::Value {
+    let mut mems: Vec<String> = engine.mem_names().iter().map(|s| s.to_string()).collect();
+    mems.sort();
+    let mut out = serde_json::Map::new();
+    for mem in mems {
+        let Ok(report) = engine.verify_mem_anchors(&mem) else {
+            continue;
+        };
+        out.insert(
+            mem,
+            serde_json::json!({
+                "resolved": report.resolved,
+                "drifted": report.drifted,
+                "recheck": report.recheck,
+                "unresolvable": report.unresolvable,
+            }),
+        );
+    }
+    serde_json::Value::Object(out)
+}
 
 /// Compute health reports for all entities in the store.
 ///

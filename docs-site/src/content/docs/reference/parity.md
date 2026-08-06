@@ -83,6 +83,7 @@ Surface entries the registry does not pin to a logical operation. Either add a r
 - `schema`
 - `uninstall`
 - `unpublish`
+- `verify-anchors`
 
 ### Unaligned — UniFFI
 

@@ -1544,6 +1544,13 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "note",
         ],
         "memstead_health" => &[
+            // Standalone anchor-verification axis (include=anchors).
+            "anchors",
+            "resolved",
+            "drifted",
+            "recheck",
+            "unresolvable",
+            "memstead verify-anchors",
             "writable_mems",
             "default_writable_mem",
             "read_mems",

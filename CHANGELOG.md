@@ -43,6 +43,21 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   the cross-surface hash-parity flake.
 
 ### Added
+- **`memstead verify-anchors` — a drift statement without a binding.**
+  Verifies every anchor in a mem against its declared source and
+  reports, per anchor: `resolved`, `drifted` (hash differs under
+  `stable` stability), `recheck` (differs under `unstable`, or a hash
+  is missing), or `unresolvable` (source absent, or a grain the
+  mechanism does not reach) — honestly, never fabricating a state.
+  Works on hand-authored mems with no binding at all; binding-backed
+  mems report the same states the binding verify sees, because both
+  now share one per-anchor resolution mechanism: the old
+  workspace-wide single-source gate is gone, so a mem whose bindings
+  span multiple media no longer collapses to "unobserved". Read-only —
+  no entity change, no commit. `memstead health` gains an
+  include-gated `anchors` axis (per-mem counts of the four states) on
+  the CLI and both MCP server flavours; without the include, health
+  output is unchanged.
 - **`memstead_relate` is a list of relation operations, applied
   atomically.** Breaking parameter-shape change: the tool now takes
   `relations: [{from, to, type, remove?, description?}, ...]` plus an

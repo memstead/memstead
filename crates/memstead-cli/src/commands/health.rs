@@ -17,7 +17,9 @@ use crate::setup::{CliContext, CliEngine};
 pub struct Args {
     /// Opt heavy content into the response: orphans, stubs,
     /// most_connected, missing_fields, stale, dangling_links, tags,
-    /// missing_required_outgoing, conformance, integrity, config.
+    /// missing_required_outgoing, conformance, integrity, config,
+    /// anchors (per-mem counts of the four standalone
+    /// anchor-verification states).
     /// `conformance` lints every entity against the effective schema
     /// into a `findings` array (write-time typed codes); `integrity`
     /// adds the consistency axis (dangling links, stubs) to the same
@@ -88,6 +90,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         dangling_links,
         findings,
         config_entries,
+        anchors_axis,
     } = match ctx.cli_engine()? {
         #[cfg(feature = "mem-repo")]
         CliEngine::MemRepo(mut engine) => {
@@ -240,6 +243,9 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         for (k, v) in entries {
             obj.insert(k, v);
         }
+    }
+    if let Some(axis) = &anchors_axis {
+        obj.insert("anchors".to_string(), axis.clone());
     }
 
     // Typed warnings array — engine-level health warnings (load-time
@@ -485,6 +491,20 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         lines.push(String::new());
     }
 
+    if let Some(axis) = anchors_axis.as_ref().and_then(|a| a.as_object()) {
+        lines.push(format!("## Anchors ({} mems)", axis.len()));
+        for (mem, counts) in axis {
+            lines.push(format!(
+                "- `{mem}`: resolved {}, drifted {}, recheck {}, unresolvable {}",
+                counts["resolved"].as_u64().unwrap_or(0),
+                counts["drifted"].as_u64().unwrap_or(0),
+                counts["recheck"].as_u64().unwrap_or(0),
+                counts["unresolvable"].as_u64().unwrap_or(0),
+            ));
+        }
+        lines.push(String::new());
+    }
+
     print_markdown(&lines.join("\n"));
     strict_exit(args.strict, &strict_violations)
 }
@@ -541,6 +561,11 @@ struct GatheredHealth {
     /// policy values derived from `Engine::settings()`. `None`
     /// otherwise — absence of the key means "not requested".
     config_entries: Option<serde_json::Map<String, serde_json::Value>>,
+    /// `Some(...)` when the caller asked for `--include anchors`: the
+    /// per-mem four-state counts from the shared
+    /// `health_anchors_axis` helper (same axis MCP renders). `None`
+    /// otherwise — absence of the key means "not requested".
+    anchors_axis: Option<serde_json::Value>,
 }
 
 /// Conformance/integrity findings across every mounted mem, in
@@ -603,6 +628,7 @@ fn gather_mem_repo(
     );
     fill_schema_breakdowns(engine, &mut g);
     fill_config_projection(engine, include, &mut g);
+    fill_anchors_axis(engine, include, &mut g);
     g
 }
 
@@ -622,6 +648,7 @@ fn gather_filesystem(
     );
     fill_schema_breakdowns(engine, &mut g);
     fill_config_projection(engine, include, &mut g);
+    fill_anchors_axis(engine, include, &mut g);
     g
 }
 
@@ -648,6 +675,18 @@ fn fill_config_projection(
         g.config_entries = Some(memstead_base::ops::health::config_projection(
             engine, &mems, mutations, plugin,
         ));
+    }
+}
+
+/// Engine-aware step for `--include anchors` — the per-mem four-state
+/// counts from the shared axis helper.
+fn fill_anchors_axis(
+    engine: &memstead_base::Engine,
+    include: &[String],
+    g: &mut GatheredHealth,
+) {
+    if include.iter().any(|s| s == "anchors") {
+        g.anchors_axis = Some(memstead_base::ops::health::health_anchors_axis(engine));
     }
 }
 
@@ -720,6 +759,7 @@ fn gather_from_store(
         tag_distribution,
         dangling_links,
         config_entries: None,
+        anchors_axis: None,
     }
 }
 
