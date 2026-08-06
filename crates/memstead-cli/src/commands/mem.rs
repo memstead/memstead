@@ -1348,6 +1348,7 @@ pub fn run_list(ctx: &CliContext, _args: ListArgs) -> anyhow::Result<()> {
             "name": name,
             // Display title, when set — display text, not identity.
             "title": cfg.and_then(|c| c.title.clone()),
+            "description": cfg.and_then(|c| c.description.clone()),
             "schema_ref": cfg.and_then(|c| c.schema.as_ref()).map(|s| s.to_string()),
             "version": cfg.and_then(|c| c.version.clone()),
             "entity_count": entity_count,
@@ -1376,9 +1377,13 @@ pub fn run_list(ctx: &CliContext, _args: ListArgs) -> anyhow::Result<()> {
                 Some(t) => format!("{t} (`{name}`)"),
                 None => format!("`{name}`"),
             };
-            lines.push(format!(
+            let mut line = format!(
                 "- {display} ({cap}) — schema `{schema}`, version `{version}`, {count} entities"
-            ));
+            );
+            if let Some(desc) = v["description"].as_str() {
+                line.push_str(&format!(" — {desc}"));
+            }
+            lines.push(line);
         }
     }
     crate::output::print_markdown(&lines.join("\n"));

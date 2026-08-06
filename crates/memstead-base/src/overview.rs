@@ -503,6 +503,16 @@ pub fn compose_overview(
         let title = engine
             .mem_config_for(name)
             .and_then(|cfg| cfg.title.clone());
+        // Curation fields: one-line description and the subject's
+        // scope line ride the roster so a mem's card text is visible
+        // where the mems are listed, not only via a configure
+        // read-back.
+        let description = engine
+            .mem_config_for(name)
+            .and_then(|cfg| cfg.description.clone());
+        let subject_scope = engine
+            .mem_config_for(name)
+            .and_then(|cfg| cfg.subject.as_ref().map(|sub| sub.scope.clone()));
         let mut entity_count: usize = 0;
         let mut type_dist: BTreeMap<String, usize> = Default::default();
         for e in engine.store().all_entities() {
@@ -527,6 +537,8 @@ pub fn compose_overview(
         mems_lite.push(serde_json::json!({
             "name": name,
             "title": title,
+            "description": description,
+            "subject_scope": subject_scope,
             "schema": sref,
             "version": version,
             "entity_count": entity_count,
@@ -539,6 +551,8 @@ pub fn compose_overview(
         mems_full.push(serde_json::json!({
             "name": name,
             "title": title,
+            "description": description,
+            "subject_scope": subject_scope,
             "schema": sref,
             "version": version,
             "entity_count": entity_count,
@@ -972,6 +986,14 @@ pub fn compose_overview(
                 None => md.push_str(&format!("### {name}\n\n")),
             }
             md.push_str(&format!("- **Schema:** {schema}\n"));
+            // Curation card text — rendered only when set, so
+            // uncurated mems keep their lines unchanged.
+            if let Some(desc) = v["description"].as_str() {
+                md.push_str(&format!("- **Description:** {desc}\n"));
+            }
+            if let Some(scope) = v["subject_scope"].as_str() {
+                md.push_str(&format!("- **Subject:** {scope}\n"));
+            }
             if read_only {
                 md.push_str("- **Access:** read-only\n");
                 // Data-origin posture at the cold-start surface. The class
