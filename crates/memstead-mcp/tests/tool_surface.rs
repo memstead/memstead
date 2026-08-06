@@ -156,16 +156,26 @@ fn memstead_mcp_does_not_depend_on_memstead_cli() {
     );
 }
 
-/// Explicit guard for removed tools — named so a re-introduction fails
-/// with an obvious per-tool message, not just "drift" on the set diff.
+/// Explicit guard for removed/abstained tools — named so a
+/// re-introduction fails with an obvious per-tool message, not just
+/// "drift" on the set diff. The whole batch family is CLI-only by
+/// design: the MCP server stays warm, so the engine-boot cost that
+/// motivates batching does not apply there, and the tool-surface
+/// policy resists additions without a demonstrated need.
 #[test]
 fn mcp_does_not_expose_batch_update_or_export() {
     let names = current_tool_names();
-    for removed in ["memstead_batch_update", "memstead_export"] {
+    for removed in [
+        "memstead_batch_update",
+        "memstead_batch_create",
+        "memstead_batch_relate",
+        "memstead_export",
+    ] {
         assert!(
             !names.iter().any(|n| n == removed),
-            "{removed} must not be re-exposed — agents use memstead_update in a loop for batches; \
-             export is human-triggered via memstead-cli export or the macOS app."
+            "{removed} must not be re-exposed — agents use the single mutation tools in a loop \
+             for batches (the batch commands are CLI-only); export is human-triggered via \
+             memstead-cli export or the macOS app."
         );
     }
 }
