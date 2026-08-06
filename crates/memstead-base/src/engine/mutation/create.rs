@@ -663,7 +663,7 @@ impl Engine {
         // carried anchors — an anchorless create writes no sidecar and is
         // byte-identical to a pre-anchor create.
         if !validated_anchors.is_empty() {
-            super::stage_anchors_sidecar(backend, &id, validated_anchors)?;
+            super::stage_anchors_sidecar(backend, &id, &[], validated_anchors)?;
         }
         let commit_subject = format!("memstead: create {id}");
         let ctx = CommitContext {
@@ -968,6 +968,7 @@ impl Engine {
                 && let Err(e) = super::stage_anchors_sidecar(
                     self.mounts[p.mount_idx].backend.as_ref(),
                     &p.id,
+                    &[],
                     p.anchors.clone(),
                 )
             {
@@ -1338,6 +1339,7 @@ write_rules: []
                         declare_relations: declare,
                         dry_run: false,
                         relations_unset: Vec::new(),
+                        anchors_unset: Vec::new(),
                     },
                     actor,
                     Some(&client),
@@ -2160,6 +2162,7 @@ write_rules: []
                 dry_run: false,
                 declare_relations: Vec::new(),
                 relations_unset: Vec::new(),
+                anchors_unset: Vec::new(),
             }
         };
         for key in ["created_date", "last_modified"] {
@@ -3705,6 +3708,7 @@ community:
                     declare_relations: Vec::new(),
                     dry_run: false,
                     relations_unset: Vec::new(),
+                    anchors_unset: Vec::new(),
                 },
                 actor,
                 Some(&client),

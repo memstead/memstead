@@ -208,6 +208,7 @@ impl Engine {
             dry_run: false,
             declare_relations: Vec::new(),
             relations_unset: Vec::new(),
+            anchors_unset: Vec::new(),
         };
         let outcome = self.update_entity(args, actor, client, note)?;
         Ok(outcome.commit_sha)

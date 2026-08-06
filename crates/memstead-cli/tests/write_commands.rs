@@ -447,6 +447,7 @@ fn update_from_refuses_content_flags() {
         vec!["--metadata-unset", "status"],
         vec!["--declare-relations", "USES:cli-write--y"],
         vec!["--anchor", "{}"],
+        vec!["--anchor-unset", "{}"],
     ] {
         memstead()
             .current_dir(tmp.path())
@@ -457,6 +458,85 @@ fn update_from_refuses_content_flags() {
             .code(2)
             .stderr(contains("cannot be used with"));
     }
+}
+
+/// The regression that motivated the anchors-merge contract is dead at
+/// the CLI surface: "anchor batch A, later anchor batch B" leaves A ∪ B
+/// queryable via `memstead anchors --artifact`, and removal only flows
+/// through the explicit `--anchor-unset` selector.
+#[test]
+fn update_anchor_batches_merge_and_unset_is_explicit() {
+    let tmp = TempDir::new().unwrap();
+    let _mem = make_mem(tmp.path());
+
+    // Batch A rides the create.
+    memstead()
+        .current_dir(tmp.path())
+        .args([
+            "create",
+            "--title",
+            "Anchored",
+            "--type",
+            "spec",
+            "--section",
+            "identity=x",
+            "--section",
+            "purpose=y",
+            "--anchor",
+            r#"{ "artifact": "src/a.rs", "grain": "file", "class": "anchored", "hash": "h-a" }"#,
+        ])
+        .assert()
+        .success();
+
+    // Batch B rides a later anchor-only update — batch A must survive.
+    let hash = entity_hash(tmp.path(), "cli-write--anchored");
+    memstead()
+        .current_dir(tmp.path())
+        .args([
+            "update",
+            "cli-write--anchored",
+            "--expected-hash",
+            &hash,
+            "--anchor",
+            r#"{ "artifact": "src/b.rs", "grain": "file", "class": "anchored", "hash": "h-b" }"#,
+        ])
+        .assert()
+        .success();
+    // Anchors never move `_hash`.
+    assert_eq!(entity_hash(tmp.path(), "cli-write--anchored"), hash);
+    for artifact in ["src/a.rs", "src/b.rs"] {
+        memstead()
+            .current_dir(tmp.path())
+            .args(["anchors", "--artifact", artifact])
+            .assert()
+            .success()
+            .stdout(contains("cli-write--anchored"));
+    }
+
+    // Explicit removal via --anchor-unset takes batch A back out.
+    memstead()
+        .current_dir(tmp.path())
+        .args([
+            "update",
+            "cli-write--anchored",
+            "--expected-hash",
+            &hash,
+            "--anchor-unset",
+            r#"{ "artifact": "src/a.rs" }"#,
+        ])
+        .assert()
+        .success();
+    let out = memstead()
+        .current_dir(tmp.path())
+        .args(["--json", "anchors", "cli-write--anchored"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&out).expect("anchors --json output is JSON");
+    assert_eq!(json["count"], 1, "only batch B survives the unset: {json}");
+    assert_eq!(json["anchors"][0]["artifact"], "src/b.rs");
 }
 
 #[test]

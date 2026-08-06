@@ -59,6 +59,7 @@ fn empty_update(id: EntityId, expected_hash: Option<String>) -> UpdateEntityArgs
         declare_relations: Vec::new(),
         dry_run: false,
         relations_unset: Vec::new(),
+        anchors_unset: Vec::new(),
     }
 }
 

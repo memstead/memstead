@@ -51,6 +51,7 @@ const RECOGNISED_MUTATION_KEYS: &[&str] = &[
     "metadata_unset",
     "declare_relations",
     "anchors",
+    "anchors_unset",
 ];
 
 #[derive(Debug, Deserialize)]
@@ -85,6 +86,11 @@ struct EntryPayload {
     /// the same batch commit; malformed input refuses `INVALID_ANCHOR`.
     #[serde(default)]
     anchors: Vec<memstead_base::anchor::AnchorInput>,
+    /// Explicit anchor removals for THIS entry — matches the MCP
+    /// `memstead_update` `anchors_unset[]` shape; applied before the
+    /// entry's `anchors` merge in the same batch commit.
+    #[serde(default)]
+    anchors_unset: Vec<memstead_base::anchor::AnchorUnsetInput>,
     /// Agent-authored provenance note for THIS entry's commit — matches
     /// the MCP mutation shape's `note`. Per-entry: distinct notes across
     /// batch entries are expressible. Optional; omit for note-less
@@ -252,6 +258,7 @@ fn build_update_args(
     Ok((
         UpdateEntityArgs {
             anchors: entry.anchors,
+            anchors_unset: entry.anchors_unset,
             id,
             expected_hash,
             sections: entry.sections,

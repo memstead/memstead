@@ -57,10 +57,14 @@ struct PreparedUpdate {
     modified_metadata: ModifiedMetadata,
     warnings: Vec<WarningHint>,
     relations_declared: Vec<RelationDeclared>,
-    /// Validated anchors to attach to this entity — staged into the same
-    /// commit as the disk write on the commit step. Empty when the update
-    /// carried no `anchors[]`.
+    /// Validated anchors to merge into this entity's sidecar row — staged
+    /// into the same commit as the disk write on the commit step. Empty
+    /// when the update carried no `anchors[]`.
     anchors: Vec<crate::anchor::Anchor>,
+    /// Validated explicit anchor removals, applied before the `anchors`
+    /// merge in the same staged write. Empty when the update carried no
+    /// `anchors_unset[]`.
+    anchor_unsets: Vec<crate::anchor::AnchorUnset>,
     /// True when this update's *sole* delta is the anchors sidecar —
     /// sections, metadata, and relationships are byte-identical to the
     /// on-disk entity. Such a commit earns the distinct
@@ -137,9 +141,14 @@ impl Engine {
         let backend = self.mounts[prepared.mount_idx].backend.as_ref();
         backend.write_entity(Path::new(&prepared.file_path), prepared.markdown.as_bytes())?;
         // Stage the anchors sidecar into the same commit as the entity
-        // write. Only when the update carried anchors.
-        if !prepared.anchors.is_empty() {
-            super::stage_anchors_sidecar(backend, &prepared.id, prepared.anchors.clone())?;
+        // write. Only when the update carried anchors or anchor unsets.
+        if !prepared.anchors.is_empty() || !prepared.anchor_unsets.is_empty() {
+            super::stage_anchors_sidecar(
+                backend,
+                &prepared.id,
+                &prepared.anchor_unsets,
+                prepared.anchors.clone(),
+            )?;
         }
         // Anchor-only commits carry the distinct `anchor` verb so their
         // otherwise-invisible sidecar change is legible in the note log;
@@ -311,16 +320,18 @@ impl Engine {
             && args.declare_relations.is_empty()
             && args.relations_unset.is_empty()
             && args.anchors.is_empty()
+            && args.anchors_unset.is_empty()
         {
             return Err(EngineError::EmptyUpdate { id: id.to_string() });
         }
 
-        // Validate any `anchors[]` payload up front — a malformed element
-        // refuses the whole update with a typed `INVALID_ANCHOR` envelope
-        // before any disk write, on every path (real / dry-run / no-op).
-        // Empty payload → empty vec (no sidecar write; byte-identical to a
-        // pre-anchor update).
+        // Validate any `anchors[]` / `anchors_unset[]` payload up front —
+        // a malformed element refuses the whole update with a typed
+        // `INVALID_ANCHOR` envelope before any disk write, on every path
+        // (real / dry-run / no-op). Empty payloads → empty vecs (no
+        // sidecar write; byte-identical to a pre-anchor update).
         let validated_anchors = self.validate_anchor_inputs(&mem, &args.anchors)?;
+        let validated_anchor_unsets = Self::validate_anchor_unsets(&args.anchors_unset)?;
 
         let schema = self
             .schemas
@@ -676,10 +687,14 @@ impl Engine {
         // lose the prospective-hash channel callers use to chain a
         // follow-up real update with `expected_hash`.
         if !args.dry_run {
-            // An update carrying `anchors[]` is never a no-op even when the
-            // entity content is unchanged — the anchors sidecar must be
-            // written, so fall through to the real-commit path.
-            if content_unchanged && validated_anchors.is_empty() {
+            // An update carrying `anchors[]` or `anchors_unset[]` is never
+            // a no-op even when the entity content is unchanged — the
+            // anchors sidecar must be written, so fall through to the
+            // real-commit path.
+            if content_unchanged
+                && validated_anchors.is_empty()
+                && validated_anchor_unsets.is_empty()
+            {
                 // No-op: report the preserved `last_modified` from
                 // the pre-stamp `next` (which still carries the
                 // entity's on-disk value because we haven't run the
@@ -875,11 +890,14 @@ impl Engine {
             // Anchor-only: content byte-identical to disk, so the sidecar
             // is the sole delta. Reachable here only past the no-op guard,
             // which already returned when content is unchanged AND no
-            // anchors — so `content_unchanged` here implies anchors are
-            // present. The explicit `!is_empty()` keeps the predicate
-            // self-evidently correct without leaning on that invariant.
-            anchor_only: content_unchanged && !validated_anchors.is_empty(),
+            // anchors or unsets — so `content_unchanged` here implies
+            // anchor work is present. The explicit `!is_empty()` keeps the
+            // predicate self-evidently correct without leaning on that
+            // invariant.
+            anchor_only: content_unchanged
+                && (!validated_anchors.is_empty() || !validated_anchor_unsets.is_empty()),
             anchors: validated_anchors,
+            anchor_unsets: validated_anchor_unsets,
         }))
     }
 
@@ -1057,10 +1075,11 @@ impl Engine {
             }
             // Stage each item's anchors into the same per-mem pending
             // buffer so they ride the batch commit atomically.
-            if !p.anchors.is_empty()
+            if (!p.anchors.is_empty() || !p.anchor_unsets.is_empty())
                 && let Err(e) = super::stage_anchors_sidecar(
                     self.mounts[p.mount_idx].backend.as_ref(),
                     &p.id,
+                    &p.anchor_unsets,
                     p.anchors.clone(),
                 )
             {
@@ -1391,6 +1410,7 @@ mod tests {
                         declare_relations: Vec::new(),
                         dry_run: false,
                         relations_unset: Vec::new(),
+                        anchors_unset: Vec::new(),
                     },
                     actor,
                     Some(&client),
@@ -1511,6 +1531,7 @@ mod tests {
             declare_relations: Vec::new(),
             dry_run: false,
             relations_unset: Vec::new(),
+            anchors_unset: Vec::new(),
         };
         let missing_update = UpdateEntityArgs {
             anchors: Vec::new(),
@@ -1524,6 +1545,7 @@ mod tests {
             declare_relations: Vec::new(),
             dry_run: false,
             relations_unset: Vec::new(),
+            anchors_unset: Vec::new(),
         };
 
         let result = engine
@@ -1612,6 +1634,7 @@ mod tests {
             declare_relations: Vec::new(),
             dry_run: false,
             relations_unset: Vec::new(),
+            anchors_unset: Vec::new(),
         };
 
         let result = engine
@@ -1699,6 +1722,7 @@ mod tests {
             declare_relations: Vec::new(),
             dry_run: false,
             relations_unset: Vec::new(),
+            anchors_unset: Vec::new(),
         };
         let result = engine
             .batch_update(
@@ -1772,6 +1796,7 @@ mod tests {
         let item1 = UpdateEntityArgs {
             anchors: Vec::new(),
             relations_unset: Vec::new(),
+            anchors_unset: Vec::new(),
             id: a.id.clone(),
             expected_hash: Some(a.content_hash.clone()),
             sections: IndexMap::new(),
@@ -1798,6 +1823,7 @@ mod tests {
             declare_relations: Vec::new(),
             dry_run: false,
             relations_unset: Vec::new(),
+            anchors_unset: Vec::new(),
         };
 
         // Sanity: the would-be stub does not exist before the batch.
@@ -1845,6 +1871,7 @@ mod tests {
                     declare_relations: Vec::new(),
                     dry_run: false,
                     relations_unset: Vec::new(),
+                    anchors_unset: Vec::new(),
                 },
                 actor,
                 Some(&client),
@@ -1894,6 +1921,7 @@ mod tests {
                     declare_relations: Vec::new(),
                     dry_run: false,
                     relations_unset: Vec::new(),
+                    anchors_unset: Vec::new(),
                 },
                 actor,
                 Some(&client),
@@ -1933,6 +1961,7 @@ mod tests {
                     declare_relations: Vec::new(),
                     dry_run: false,
                     relations_unset: Vec::new(),
+                    anchors_unset: Vec::new(),
                 },
                 actor,
                 Some(&client),
@@ -1974,6 +2003,7 @@ mod tests {
                     declare_relations: Vec::new(),
                     dry_run: false,
                     relations_unset: Vec::new(),
+                    anchors_unset: Vec::new(),
                 },
                 actor,
                 Some(&client),
@@ -2007,6 +2037,7 @@ mod tests {
                     declare_relations: Vec::new(),
                     dry_run: false,
                     relations_unset: Vec::new(),
+                    anchors_unset: Vec::new(),
                 },
                 actor,
                 Some(&client),
@@ -2038,6 +2069,7 @@ mod tests {
                     declare_relations: Vec::new(),
                     dry_run: false,
                     relations_unset: Vec::new(),
+                    anchors_unset: Vec::new(),
                 },
                 actor,
                 Some(&client),
@@ -2083,6 +2115,7 @@ mod tests {
                     declare_relations: Vec::new(),
                     dry_run: false,
                     relations_unset: Vec::new(),
+                    anchors_unset: Vec::new(),
                 },
                 actor,
                 Some(&client),
@@ -2120,6 +2153,7 @@ mod tests {
                     declare_relations: Vec::new(),
                     dry_run: false,
                     relations_unset: Vec::new(),
+                    anchors_unset: Vec::new(),
                 },
                 actor,
                 Some(&client),
@@ -2185,6 +2219,7 @@ mod tests {
                     declare_relations: Vec::new(),
                     dry_run: false,
                     relations_unset: Vec::new(),
+                    anchors_unset: Vec::new(),
                 },
                 actor,
                 Some(&client),
@@ -2222,6 +2257,7 @@ mod tests {
                     declare_relations: Vec::new(),
                     dry_run: false,
                     relations_unset: Vec::new(),
+                    anchors_unset: Vec::new(),
                 },
                 actor,
                 Some(&client),
@@ -2268,6 +2304,7 @@ mod tests {
                     declare_relations: Vec::new(),
                     dry_run: false,
                     relations_unset: Vec::new(),
+                    anchors_unset: Vec::new(),
                 },
                 actor,
                 Some(&client),
@@ -2343,6 +2380,7 @@ mod tests {
                     declare_relations: Vec::new(),
                     dry_run: false,
                     relations_unset: Vec::new(),
+                    anchors_unset: Vec::new(),
                 },
                 actor,
                 Some(&client),
@@ -2437,6 +2475,7 @@ mod tests {
                 UpdateEntityArgs {
                     anchors: Vec::new(),
                     relations_unset: Vec::new(),
+                    anchors_unset: Vec::new(),
                     id: source.id.clone(),
                     expected_hash: Some(source.content_hash.clone()),
                     sections,
@@ -2494,6 +2533,7 @@ mod tests {
                 UpdateEntityArgs {
                     anchors: Vec::new(),
                     relations_unset: Vec::new(),
+                    anchors_unset: Vec::new(),
                     id: source.id.clone(),
                     expected_hash: Some(source.content_hash.clone()),
                     sections: IndexMap::new(),
@@ -2582,6 +2622,7 @@ mod tests {
                     declare_relations: Vec::new(),
                     dry_run: false,
                     relations_unset: Vec::new(),
+                    anchors_unset: Vec::new(),
                 },
                 actor,
                 Some(&client),
@@ -2625,6 +2666,7 @@ mod tests {
                     declare_relations: Vec::new(),
                     dry_run: true,
                     relations_unset: Vec::new(),
+                    anchors_unset: Vec::new(),
                 },
                 actor,
                 Some(&client),
@@ -2782,6 +2824,7 @@ mod tests {
                     declare_relations: Vec::new(),
                     dry_run: false,
                     relations_unset: Vec::new(),
+                    anchors_unset: Vec::new(),
                 },
                 actor,
                 Some(&client),
@@ -2877,6 +2920,7 @@ mod tests {
                     declare_relations: Vec::new(),
                     dry_run: false,
                     relations_unset: Vec::new(),
+                    anchors_unset: Vec::new(),
                 },
                 actor,
                 Some(&client),
@@ -2951,6 +2995,7 @@ mod tests {
                     declare_relations: Vec::new(),
                     dry_run: false,
                     relations_unset: Vec::new(),
+                    anchors_unset: Vec::new(),
                 },
                 actor,
                 Some(&client),
@@ -3025,6 +3070,7 @@ mod tests {
                     declare_relations: Vec::new(),
                     dry_run: false,
                     relations_unset: Vec::new(),
+                    anchors_unset: Vec::new(),
                 },
                 actor,
                 Some(&client),
@@ -3074,6 +3120,7 @@ mod tests {
                     declare_relations: Vec::new(),
                     dry_run: false,
                     relations_unset: Vec::new(),
+                    anchors_unset: Vec::new(),
                 },
                 actor,
                 Some(&client),
@@ -3117,6 +3164,7 @@ mod tests {
                     declare_relations: Vec::new(),
                     dry_run: false,
                     relations_unset: Vec::new(),
+                    anchors_unset: Vec::new(),
                 },
                 actor,
                 Some(&client),
@@ -3156,6 +3204,7 @@ mod tests {
                     declare_relations: Vec::new(),
                     dry_run: false,
                     relations_unset: Vec::new(),
+                    anchors_unset: Vec::new(),
                 },
                 actor,
                 Some(&client),
@@ -3196,6 +3245,7 @@ mod tests {
                     declare_relations: Vec::new(),
                     dry_run: false,
                     relations_unset: Vec::new(),
+                    anchors_unset: Vec::new(),
                 },
                 actor,
                 Some(&client),
@@ -3272,6 +3322,7 @@ mod tests {
                 UpdateEntityArgs {
                     anchors: Vec::new(),
                     relations_unset: Vec::new(),
+                    anchors_unset: Vec::new(),
                     id: source.id.clone(),
                     expected_hash: Some(after_relate.content_hash.clone()),
                     sections: IndexMap::new(),
@@ -3333,6 +3384,7 @@ mod tests {
                     declare_relations: Vec::new(),
                     dry_run: false,
                     relations_unset: Vec::new(),
+                    anchors_unset: Vec::new(),
                 },
                 actor,
                 Some(&client),
@@ -3382,6 +3434,7 @@ mod tests {
                         declare_relations: Vec::new(),
                         dry_run: false,
                         relations_unset: Vec::new(),
+                        anchors_unset: Vec::new(),
                     },
                     actor,
                     Some(&client),
@@ -3413,6 +3466,7 @@ mod tests {
                     declare_relations: Vec::new(),
                     dry_run: false,
                     relations_unset: Vec::new(),
+                    anchors_unset: Vec::new(),
                 },
                 actor,
                 Some(&client),
@@ -3512,6 +3566,7 @@ mod tests {
                     declare_relations: Vec::new(),
                     dry_run: false,
                     relations_unset: Vec::new(),
+                    anchors_unset: Vec::new(),
                 },
                 actor,
                 Some(&client),
@@ -3603,6 +3658,7 @@ mod tests {
                     declare_relations: Vec::new(),
                     dry_run: false,
                     relations_unset: Vec::new(),
+                    anchors_unset: Vec::new(),
                 },
                 actor,
                 Some(&client),
@@ -3705,6 +3761,7 @@ mod tests {
                     declare_relations: Vec::new(),
                     dry_run: false,
                     relations_unset: Vec::new(),
+                    anchors_unset: Vec::new(),
                 },
                 actor,
                 Some(&client),
@@ -3783,6 +3840,7 @@ mod tests {
                     declare_relations: Vec::new(),
                     dry_run: false,
                     relations_unset: Vec::new(),
+                    anchors_unset: Vec::new(),
                 },
                 actor,
                 Some(&client),
@@ -3877,6 +3935,7 @@ mod tests {
                     declare_relations: Vec::new(),
                     dry_run: false,
                     relations_unset: Vec::new(),
+                    anchors_unset: Vec::new(),
                 },
                 actor,
                 Some(&client),
@@ -3949,6 +4008,7 @@ mod tests {
                     declare_relations: Vec::new(),
                     dry_run: false,
                     relations_unset: Vec::new(),
+                    anchors_unset: Vec::new(),
                 },
                 actor,
                 Some(&client),
@@ -4041,6 +4101,7 @@ mod tests {
                     declare_relations: Vec::new(),
                     dry_run: false,
                     relations_unset: Vec::new(),
+                    anchors_unset: Vec::new(),
                 },
                 actor,
                 Some(&client),
@@ -4353,6 +4414,7 @@ community:
                         declare_relations: Vec::new(),
                         dry_run: false,
                         relations_unset: Vec::new(),
+                        anchors_unset: Vec::new(),
                     },
                     actor,
                     Some(&client),
@@ -4643,6 +4705,7 @@ community:
                 rel_type: "USES".to_string(),
                 target: EntityId::new("specs", "anchor"),
             }],
+            anchors_unset: Vec::new(),
         }
     }
 
@@ -4777,5 +4840,254 @@ community:
             1,
             "the USES relation must survive an unmatched unset"
         );
+    }
+
+    // ---- anchors merge / unset -------------------------------------------
+
+    fn anchor_input(artifact: &str, hash: &str) -> crate::anchor::AnchorInput {
+        crate::anchor::AnchorInput {
+            artifact: Some(artifact.to_string()),
+            grain: Some("file".to_string()),
+            class: Some("anchored".to_string()),
+            hash: Some(hash.to_string()),
+            hash_stability: Some("stable".to_string()),
+            ..Default::default()
+        }
+    }
+
+    fn anchor_unset(artifact: &str) -> crate::anchor::AnchorUnsetInput {
+        crate::anchor::AnchorUnsetInput {
+            artifact: Some(artifact.to_string()),
+            grain: None,
+            class: None,
+        }
+    }
+
+    /// Bare update-args shell for anchor tests — no content mutation.
+    fn anchor_args(id: EntityId, hash: Option<String>) -> UpdateEntityArgs {
+        UpdateEntityArgs {
+            anchors: Vec::new(),
+            anchors_unset: Vec::new(),
+            id,
+            expected_hash: hash,
+            sections: IndexMap::new(),
+            append_sections: IndexMap::new(),
+            patch_sections: IndexMap::new(),
+            metadata: IndexMap::new(),
+            metadata_unset: Vec::new(),
+            declare_relations: Vec::new(),
+            dry_run: false,
+            relations_unset: Vec::new(),
+        }
+    }
+
+    /// Engine over a folder mount, seeded with one entity carrying two
+    /// anchors (a.rs, b.rs). Returns the engine, tempdir, id, and hash.
+    fn anchored_engine() -> (Engine, TempDir, EntityId, String) {
+        let tmp = TempDir::new().unwrap();
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let mut engine = Engine::from_mounts(vec![(
+            folder_mount("specs", mem_dir),
+            Box::new(writer) as Box<dyn MemBackend>,
+        )])
+        .unwrap();
+        let (actor, client) = cli_actor();
+        let mut args = empty_create_args("specs", "Anchored");
+        args.anchors = vec![anchor_input("a.rs", "h-a"), anchor_input("b.rs", "h-b")];
+        let created = engine
+            .create_entity(args, actor, Some(&client), None)
+            .unwrap();
+        let id = EntityId::new("specs", "anchored");
+        assert_eq!(engine.entity_anchors(&id).len(), 2);
+        (engine, tmp, id, created.content_hash)
+    }
+
+    /// Merge acceptance: one new anchor on N existing yields N+1 with the
+    /// others byte-identical; a same-`(artifact, grain, class)` write
+    /// replaces exactly that one; the motivating regression is dead —
+    /// "anchor batch A, later anchor batch B" leaves A ∪ B queryable.
+    #[test]
+    fn update_anchors_merge_appends_and_replaces_by_triple() {
+        let (mut engine, _tmp, id, hash) = anchored_engine();
+        let (actor, client) = cli_actor();
+
+        // Batch B: one new artifact. A ∪ B must survive.
+        let mut args = anchor_args(id.clone(), Some(hash));
+        args.anchors = vec![anchor_input("c.rs", "h-c")];
+        let out = engine
+            .update_entity(args, actor, Some(&client), None)
+            .unwrap();
+        let anchors = engine.entity_anchors(&id);
+        assert_eq!(anchors.len(), 3, "N existing + 1 new = N+1");
+        assert_eq!(anchors[0].artifact, "a.rs");
+        assert_eq!(anchors[0].hash.as_deref(), Some("h-a"));
+        assert_eq!(anchors[1].artifact, "b.rs");
+        assert_eq!(anchors[2].artifact, "c.rs");
+        assert!(!engine.anchors_referencing_artifact("a.rs").is_empty());
+        assert!(!engine.anchors_referencing_artifact("c.rs").is_empty());
+
+        // Same-triple write replaces exactly that one, in place.
+        let mut args = anchor_args(id.clone(), Some(out.content_hash));
+        args.anchors = vec![anchor_input("a.rs", "h-a2")];
+        engine
+            .update_entity(args, actor, Some(&client), None)
+            .unwrap();
+        let anchors = engine.entity_anchors(&id);
+        assert_eq!(anchors.len(), 3);
+        assert_eq!(anchors[0].artifact, "a.rs");
+        assert_eq!(anchors[0].hash.as_deref(), Some("h-a2"));
+        assert_eq!(anchors[1].hash.as_deref(), Some("h-b"), "b untouched");
+        assert_eq!(anchors[2].hash.as_deref(), Some("h-c"), "c untouched");
+    }
+
+    /// Re-sending the full current set is a no-op on the stored sidecar
+    /// bytes, and an update with an empty/absent `anchors` list leaves the
+    /// stored set untouched.
+    #[test]
+    fn update_anchors_full_resend_and_absent_are_noops_on_stored_set() {
+        let (mut engine, tmp, id, hash) = anchored_engine();
+        let (actor, client) = cli_actor();
+        let sidecar_path = tmp.path().join(crate::anchor::ANCHOR_SIDECAR_PATH);
+        let before = std::fs::read(&sidecar_path).unwrap();
+
+        // Full re-send of the current set.
+        let mut args = anchor_args(id.clone(), Some(hash));
+        args.anchors = vec![anchor_input("a.rs", "h-a"), anchor_input("b.rs", "h-b")];
+        let out = engine
+            .update_entity(args, actor, Some(&client), None)
+            .unwrap();
+        assert_eq!(
+            std::fs::read(&sidecar_path).unwrap(),
+            before,
+            "full re-send keeps the stored bytes"
+        );
+
+        // Absent anchors list + a real content change: set untouched.
+        let mut args = anchor_args(id.clone(), Some(out.content_hash));
+        args.sections
+            .insert("identity".to_string(), "changed body".to_string());
+        engine
+            .update_entity(args, actor, Some(&client), None)
+            .unwrap();
+        assert_eq!(
+            std::fs::read(&sidecar_path).unwrap(),
+            before,
+            "an anchorless update never touches the stored set"
+        );
+    }
+
+    /// Unset acceptance: bare-artifact unset removes all of that
+    /// artifact's anchors and nothing else; a grain-narrowed unset removes
+    /// only the match; a nonexistent target succeeds and changes nothing;
+    /// unset + merge in one call apply unset-first.
+    #[test]
+    fn update_anchors_unset_bare_narrowed_idempotent_and_unset_first() {
+        let (mut engine, _tmp, id, hash) = anchored_engine();
+        let (actor, client) = cli_actor();
+
+        // Add a span-grain anchor on a.rs so a.rs carries two grains.
+        let mut span = anchor_input("a.rs", "h-span");
+        span.grain = Some("span".to_string());
+        let mut args = anchor_args(id.clone(), Some(hash));
+        args.anchors = vec![span];
+        let out = engine
+            .update_entity(args, actor, Some(&client), None)
+            .unwrap();
+        assert_eq!(engine.entity_anchors(&id).len(), 3);
+
+        // Narrowed unset: only the span-grain anchor goes.
+        let mut narrowed = anchor_unset("a.rs");
+        narrowed.grain = Some("span".to_string());
+        let mut args = anchor_args(id.clone(), Some(out.content_hash));
+        args.anchors_unset = vec![narrowed];
+        let out = engine
+            .update_entity(args, actor, Some(&client), None)
+            .unwrap();
+        let anchors = engine.entity_anchors(&id);
+        assert_eq!(anchors.len(), 2);
+        assert!(
+            anchors
+                .iter()
+                .all(|a| a.grain == crate::anchor::AnchorGrain::File)
+        );
+
+        // Nonexistent target: succeeds, changes nothing.
+        let mut args = anchor_args(id.clone(), Some(out.content_hash.clone()));
+        args.anchors_unset = vec![anchor_unset("never-there.rs")];
+        engine
+            .update_entity(args, actor, Some(&client), None)
+            .expect("unset of a nonexistent target is a no-op, not an error");
+        assert_eq!(engine.entity_anchors(&id).len(), 2);
+
+        // Unset + merge in one call: bare unset of a.rs plus a fresh a.rs
+        // anchor — unset applies first, so the fresh anchor lands.
+        let mut args = anchor_args(id.clone(), Some(out.content_hash));
+        args.anchors_unset = vec![anchor_unset("a.rs")];
+        args.anchors = vec![anchor_input("a.rs", "h-a-fresh")];
+        engine
+            .update_entity(args, actor, Some(&client), None)
+            .unwrap();
+        let anchors = engine.entity_anchors(&id);
+        assert_eq!(anchors.len(), 2);
+        assert_eq!(anchors[0].artifact, "b.rs", "b.rs untouched throughout");
+        assert_eq!(anchors[1].hash.as_deref(), Some("h-a-fresh"));
+    }
+
+    /// An anchor-write update never moves `_hash`, and an unset-only
+    /// update is a real commit (not a no-op) that leaves the entity bytes
+    /// untouched.
+    #[test]
+    fn update_anchor_only_and_unset_only_commit_without_hash_movement() {
+        let (mut engine, _tmp, id, hash) = anchored_engine();
+        let (actor, client) = cli_actor();
+
+        let mut args = anchor_args(id.clone(), Some(hash.clone()));
+        args.anchors_unset = vec![anchor_unset("b.rs")];
+        let out = engine
+            .update_entity(args, actor, Some(&client), None)
+            .unwrap();
+        assert!(
+            !out.commit_sha.is_empty(),
+            "unset-only update commits the sidecar"
+        );
+        assert_eq!(out.content_hash, hash, "anchors never move `_hash`");
+        assert_eq!(engine.entity_anchors(&id).len(), 1);
+
+        // Refusal complement: with no anchors, no unsets, and no content,
+        // the empty-update guard still fires.
+        let err = engine
+            .update_entity(
+                anchor_args(id.clone(), Some(hash)),
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap_err();
+        assert!(matches!(err, EngineError::EmptyUpdate { .. }));
+    }
+
+    /// A malformed `anchors_unset[]` selector refuses the whole update
+    /// with the typed `INVALID_ANCHOR` envelope and nothing is written —
+    /// merge introduces no partial-apply.
+    #[test]
+    fn malformed_anchor_unset_refuses_and_nothing_is_written() {
+        let (mut engine, tmp, id, hash) = anchored_engine();
+        let (actor, client) = cli_actor();
+        let sidecar_path = tmp.path().join(crate::anchor::ANCHOR_SIDECAR_PATH);
+        let before = std::fs::read(&sidecar_path).unwrap();
+
+        let mut bad = anchor_unset("a.rs");
+        bad.grain = Some("paragraph".to_string()); // unknown grain
+        let mut args = anchor_args(id.clone(), Some(hash));
+        args.anchors_unset = vec![bad];
+        // A valid incoming anchor rides the same call — it must not land.
+        args.anchors = vec![anchor_input("c.rs", "h-c")];
+        let err = engine
+            .update_entity(args, actor, Some(&client), None)
+            .unwrap_err();
+        assert_eq!(err.code(), crate::anchor::INVALID_ANCHOR_CODE);
+        assert_eq!(engine.entity_anchors(&id).len(), 2, "no partial apply");
+        assert_eq!(std::fs::read(&sidecar_path).unwrap(), before);
     }
 }

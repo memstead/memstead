@@ -173,13 +173,25 @@ pub struct UpdateEntityArgs {
     pub declare_relations: Vec<crate::ops::RelateArg>,
     /// Permissive `anchors[]` provenance records to attach to this entity
     /// — validated ([`crate::anchor::AnchorInput::validate`]) and, when
-    /// non-empty, written into the mem-branch anchors sidecar in the SAME
-    /// commit as the update so entity + anchors land atomically. Empty (the
-    /// default) writes no sidecar and leaves the update byte-identical to a
-    /// pre-anchor call. A malformed element refuses the whole update with
-    /// [`EngineError::InvalidAnchor`] (`INVALID_ANCHOR`) — nothing is
-    /// written. Not folded into `_hash` (sidecar lives under `.memstead/`).
+    /// non-empty, **merged** into the entity's row in the mem-branch
+    /// anchors sidecar in the SAME commit as the update so entity +
+    /// anchors land atomically: an incoming anchor replaces the existing
+    /// anchor with the same `(artifact, grain, class)` triple and appends
+    /// otherwise — writing never removes an anchor this call did not name
+    /// in [`Self::anchors_unset`]. Empty (the default) merges nothing and
+    /// leaves the stored set untouched. A malformed element refuses the
+    /// whole update with [`EngineError::InvalidAnchor`] (`INVALID_ANCHOR`)
+    /// — nothing is written. Not folded into `_hash` (sidecar lives under
+    /// `.memstead/`).
     pub anchors: Vec<crate::anchor::AnchorInput>,
+    /// Explicit anchor removals, applied **before** the [`Self::anchors`]
+    /// merge in the same mutation (mirroring the `metadata_unset` /
+    /// `relations_unset` conventions). Each selector names an `artifact`
+    /// and may narrow by `grain` and/or `class`; a bare artifact removes
+    /// every anchor on it. Unsetting an anchor that does not exist is a
+    /// no-op, not an error — removal is idempotent. A malformed selector
+    /// refuses the whole update with [`EngineError::InvalidAnchor`].
+    pub anchors_unset: Vec<crate::anchor::AnchorUnsetInput>,
     /// Repair-shaped relation removals (`{ rel_type, target }`),
     /// applied atomically within this update. Accepted only when the
     /// entity currently FAILS the conformance check (against the

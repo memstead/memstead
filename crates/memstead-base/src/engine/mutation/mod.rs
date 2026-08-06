@@ -178,6 +178,20 @@ impl super::Engine {
         Ok(anchors)
     }
 
+    /// Validate an update's `anchors_unset[]` payload up front — a
+    /// malformed selector (missing artifact, unknown grain/class wire
+    /// string) refuses the whole mutation with the same typed
+    /// `INVALID_ANCHOR` envelope as a malformed `anchors[]` element.
+    /// Empty payload → empty vec.
+    pub(crate) fn validate_anchor_unsets(
+        inputs: &[crate::anchor::AnchorUnsetInput],
+    ) -> Result<Vec<crate::anchor::AnchorUnset>, EngineError> {
+        inputs
+            .iter()
+            .map(|i| i.validate().map_err(EngineError::from))
+            .collect()
+    }
+
     /// Record verify-observed prepared-content hashes onto **hash-less
     /// hash-bearing** anchors in `mem_name`'s anchors sidecar — the
     /// measurement-bookkeeping backfill the verify pass hands over via
@@ -254,15 +268,20 @@ impl super::Engine {
 }
 
 /// Stage a write of `entity_id`'s anchors into the mem's anchors sidecar
-/// through `backend`, merged over the existing sidecar and buffered into
-/// the SAME pending op set the entity write used — so the next
-/// [`crate::backend::MemBackend::commit`] carries entity + anchors as one
-/// atomic commit. An empty `anchors` vec prunes the entity's row (the
-/// delete / rename-residual legs lean on this). Reads honour pending-buffer
-/// precedence, so successive stages within one transaction compose.
+/// through `backend`, merged over the existing sidecar at BOTH levels —
+/// other entities' rows survive (document level), and within the entity's
+/// own row `unsets` apply first, then each incoming anchor replaces the
+/// existing anchor with the same `(artifact, grain, class)` triple or
+/// appends ([`crate::anchor::AnchorSidecar::merge`]). Writing never
+/// removes an anchor the call did not name in `unsets`. The write is
+/// buffered into the SAME pending op set the entity write used — so the
+/// next [`crate::backend::MemBackend::commit`] carries entity + anchors
+/// as one atomic commit. Reads honour pending-buffer precedence, so
+/// successive stages within one transaction compose.
 pub(crate) fn stage_anchors_sidecar(
     backend: &dyn crate::backend::MemBackend,
     entity_id: &EntityId,
+    unsets: &[crate::anchor::AnchorUnset],
     anchors: Vec<crate::anchor::Anchor>,
 ) -> Result<(), EngineError> {
     let mut sidecar = match backend.read_anchors_sidecar()? {
@@ -273,7 +292,7 @@ pub(crate) fn stage_anchors_sidecar(
         })?,
         None => crate::anchor::AnchorSidecar::default(),
     };
-    sidecar.set(entity_id.as_ref(), anchors);
+    sidecar.merge(entity_id.as_ref(), unsets, anchors);
     backend.write_anchors_sidecar(&sidecar.to_bytes())?;
     Ok(())
 }
@@ -1077,6 +1096,7 @@ mod tests {
             dry_run: false,
             declare_relations: Vec::new(),
             relations_unset: Vec::new(),
+            anchors_unset: Vec::new(),
         };
         let updated = engine.update_entity_with_ctx(update_args, &ctx).unwrap();
         assert!(

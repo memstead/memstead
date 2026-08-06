@@ -3631,6 +3631,7 @@ community:
             declare_relations: Vec::new(),
             dry_run: false,
             relations_unset: Vec::new(),
+            anchors_unset: Vec::new(),
         };
         let err = engine
             .update_entity(bad.clone(), crate::vcs::Actor::Cli, None, None)
@@ -3663,6 +3664,7 @@ community:
             declare_relations: Vec::new(),
             dry_run: false,
             relations_unset: Vec::new(),
+            anchors_unset: Vec::new(),
         };
         engine
             .update_entity(repair, crate::vcs::Actor::Cli, None, None)
@@ -3721,6 +3723,7 @@ community:
                         rel_type: "USES".to_string(),
                         target: two.clone(),
                     }],
+                    anchors_unset: Vec::new(),
                 },
                 crate::vcs::Actor::Cli,
                 None,
@@ -3755,6 +3758,7 @@ community:
                         rel_type: "USES".to_string(),
                         target: two.clone(),
                     }],
+                    anchors_unset: Vec::new(),
                 },
                 crate::vcs::Actor::Cli,
                 None,

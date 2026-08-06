@@ -112,6 +112,17 @@ pub struct Args {
     #[arg(long = "anchor", value_name = "JSON", conflicts_with = "from")]
     pub anchors: Vec<String>,
 
+    /// Explicit anchor removal: repeatable `--anchor-unset '<json>'`, each
+    /// a JSON object `{ "artifact": "…" }` optionally narrowed by
+    /// `"grain"` and/or `"class"` — a bare artifact removes every anchor
+    /// on it. Applied BEFORE the `--anchor` merge in the same commit
+    /// (anchors merge; writing never removes an anchor not named here).
+    /// Unsetting a nonexistent target is a no-op. A malformed selector
+    /// refuses `INVALID_ANCHOR`. Conflicts with `--from` (the file's
+    /// `anchors_unset[]` is authoritative there).
+    #[arg(long = "anchor-unset", value_name = "JSON", conflicts_with = "from")]
+    pub anchors_unset: Vec<String>,
+
     /// Preview what would change without writing. Applies on both the
     /// inline and `--from` paths; with `--from` it forces a dry run even
     /// when the file's `dry_run` field is absent or `false`.
@@ -121,8 +132,9 @@ pub struct Args {
     /// JSON file matching MCP `memstead_update` args shape. The file is the
     /// single source of the mutation content — the content flags
     /// (`--section` / `--append` / `--patch` / `--patch-all` / `--metadata` /
-    /// `--metadata-unset` / `--declare-relations` / `--anchor`) conflict with
-    /// `--from` rather than being silently ignored. The flags that DO apply
+    /// `--metadata-unset` / `--declare-relations` / `--anchor` /
+    /// `--anchor-unset`) conflict with `--from` rather than being silently
+    /// ignored. The flags that DO apply
     /// alongside `--from`: the hash-mode flags (`--expected-hash`, which
     /// overrides the file's `expected_hash` field; `--auto-hash`; `--force`),
     /// `--dry-run` (forces a dry run even when the file says otherwise), and
@@ -135,6 +147,29 @@ pub struct Args {
     /// `NOTE_MISSING` warning.
     #[arg(long)]
     pub note: Option<String>,
+}
+
+/// Parse repeatable `--anchor-unset '<json>'` values into the engine's
+/// permissive `AnchorUnsetInput` shape — sibling of
+/// [`super::create::parse_anchor_list`]. Only JSON-shape errors refuse
+/// here; selector validation (missing artifact, unknown grain/class) is
+/// the engine's typed `INVALID_ANCHOR`.
+fn parse_anchor_unset_list(
+    items: &[String],
+) -> anyhow::Result<Vec<memstead_base::anchor::AnchorUnsetInput>> {
+    let mut out = Vec::with_capacity(items.len());
+    for raw in items {
+        let unset: memstead_base::anchor::AnchorUnsetInput =
+            serde_json::from_str(raw).map_err(|e| {
+                CliError::new(
+                    ExitKind::Validation,
+                    "INVALID_INPUT",
+                    format!("--anchor-unset: expected a JSON selector object, got `{raw}`: {e}"),
+                )
+            })?;
+        out.push(unset);
+    }
+    Ok(out)
 }
 
 /// On-disk JSON payload shape — mirrors MCP `UpdateParams` + hash flags.
@@ -158,9 +193,14 @@ struct UpdatePayload {
     declare_relations: Vec<DeclareRelationPayload>,
     /// Provenance anchors — matches the MCP `memstead_update` `anchors[]`
     /// shape; validated engine-side into a typed `INVALID_ANCHOR` refusal
-    /// on malformed input.
+    /// on malformed input. Merged into the entity's existing set (same
+    /// `(artifact, grain, class)` triple replaces, otherwise appends).
     #[serde(default)]
     anchors: Vec<memstead_base::anchor::AnchorInput>,
+    /// Explicit anchor removals — matches the MCP `memstead_update`
+    /// `anchors_unset[]` shape; applied before the `anchors` merge.
+    #[serde(default)]
+    anchors_unset: Vec<memstead_base::anchor::AnchorUnsetInput>,
     #[serde(default)]
     dry_run: bool,
     /// Agent-authored provenance note — same semantics as
@@ -305,6 +345,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             metadata_unset: args.metadata_unset.clone(),
             declare_relations: parse_declare_relations(&args.declare_relations)?,
             anchors: super::create::parse_anchor_list(&args.anchors)?,
+            anchors_unset: parse_anchor_unset_list(&args.anchors_unset)?,
             dry_run: args.dry_run,
             note: None,
             title: None,
@@ -389,6 +430,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 dry_run: payload.dry_run,
                 declare_relations,
                 relations_unset: Vec::new(),
+                anchors_unset: payload.anchors_unset,
             };
 
             let result = engine
@@ -517,6 +559,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 declare_relations,
                 dry_run: false,
                 relations_unset: Vec::new(),
+                anchors_unset: payload.anchors_unset,
             };
             let outcome = engine
                 .update_entity(update_args, Actor::Cli, None, note.as_deref())

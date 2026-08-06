@@ -35,7 +35,7 @@ pub struct CreateParams {
     #[schemars(description = "Initial relationships to create after entity is created")]
     pub relations: Option<Vec<RelationInput>>,
     #[schemars(
-        description = "Optional provenance anchors to attach to the new entity — durable records tying it to the source artifacts it describes (which artifact, at which grain, under which provenance class). Written into the mem-branch anchors sidecar in the SAME commit as the entity (atomic); omitting it is byte-identical to a create without anchors. A malformed element refuses the whole create with `INVALID_ANCHOR` (`details` carries the offending field + allowed set) and the entity is not written. Anchors do NOT participate in `_hash`."
+        description = "Optional provenance anchors to attach to the new entity — durable records tying it to the source artifacts it describes (which artifact, at which grain, under which provenance class). Written into the mem-branch anchors sidecar in the SAME commit as the entity (atomic); omitting it is byte-identical to a create without anchors. Anchor writes MERGE: later `memstead_update` calls carrying `anchors` add to this set (same `(artifact, grain, class)` triple replaces, otherwise appends) and never silently discard it — removal is explicit via `memstead_update`'s `anchors_unset`. A malformed element refuses the whole create with `INVALID_ANCHOR` (`details` carries the offending field + allowed set) and the entity is not written. Anchors do NOT participate in `_hash`."
     )]
     #[serde(default)]
     pub anchors: Option<Vec<AnchorInputParam>>,
@@ -201,12 +201,54 @@ pub struct UpdateParams {
     )]
     pub relations_unset: Option<Vec<RelationUnsetInput>>,
     #[schemars(
-        description = "Optional provenance anchors to attach to this entity — durable records tying it to the source artifacts it describes. Written into the mem-branch anchors sidecar in the SAME commit as the update (atomic); omitting it is byte-identical to an update without anchors. An update carrying only `anchors` (no section/metadata change) still commits the sidecar. A malformed element refuses the whole update with `INVALID_ANCHOR` and nothing is written. Anchors do NOT participate in `_hash`."
+        description = "Optional provenance anchors to attach to this entity — durable records tying it to the source artifacts it describes. Anchors MERGE into the entity's existing set: an incoming anchor replaces the existing anchor with the same `(artifact, grain, class)` triple and appends otherwise — writing anchors never removes an anchor this call did not name in `anchors_unset` (an empty or omitted list leaves the stored set untouched; incremental anchoring works). Written into the mem-branch anchors sidecar in the SAME commit as the update (atomic). An update carrying only `anchors` (no section/metadata change) still commits the sidecar. A malformed element refuses the whole update with `INVALID_ANCHOR` and nothing is written. Anchors do NOT participate in `_hash`."
     )]
     #[serde(default)]
     pub anchors: Option<Vec<AnchorInputParam>>,
+    #[schemars(
+        description = "Explicit anchor removals, applied BEFORE the `anchors` merge in the same mutation (mirroring `metadata_unset` / `relations_unset`) — removal is explicit, never a side effect of writing. Each entry names an `artifact` and may narrow by `grain` and/or `class`; a bare artifact removes every anchor on it. Unsetting an anchor that does not exist is a no-op, not an error. Full-replace stays expressible: unset the artifact(s) and write the new set in one call. A malformed selector (missing artifact, unknown grain/class) refuses the whole update with `INVALID_ANCHOR`."
+    )]
+    #[serde(default)]
+    pub anchors_unset: Option<Vec<AnchorUnsetParam>>,
     #[schemars(description = NOTE_PARAM_DESCRIPTION)]
     pub note: Option<String>,
+}
+
+/// One `anchors_unset[]` entry on `memstead_update` — an explicit anchor-
+/// removal selector. Permissive like [`AnchorInputParam`]: a malformed
+/// selector refuses the whole mutation with a typed `INVALID_ANCHOR`
+/// envelope rather than an opaque schema-deserialisation error.
+#[derive(Debug, Clone, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AnchorUnsetParam {
+    #[schemars(
+        description = "Artifact reference whose anchors to remove, exactly as stored. Required; a missing/empty value refuses INVALID_ANCHOR. Bare (no grain/class) removes every anchor on the artifact."
+    )]
+    #[serde(default)]
+    pub artifact: Option<String>,
+    #[schemars(
+        description = "Optional narrowing: only remove anchors of this grain (`span` | `file` | `tree` | `url` | `entity`). An unknown value refuses INVALID_ANCHOR."
+    )]
+    #[serde(default)]
+    pub grain: Option<String>,
+    #[schemars(
+        description = "Optional narrowing: only remove anchors of this provenance class (`anchored` | `derived` | `authored` | `informed-by`). An unknown value refuses INVALID_ANCHOR."
+    )]
+    #[serde(default)]
+    pub class: Option<String>,
+}
+
+impl AnchorUnsetParam {
+    /// Lower the permissive wire element into the engine's
+    /// `AnchorUnsetInput` (which performs the typed `INVALID_ANCHOR`
+    /// validation).
+    pub(crate) fn into_engine(self) -> memstead_base::anchor::AnchorUnsetInput {
+        memstead_base::anchor::AnchorUnsetInput {
+            artifact: self.artifact,
+            grain: self.grain,
+            class: self.class,
+        }
+    }
 }
 
 /// One `relations_unset` entry — `{ rel_type, target }`.

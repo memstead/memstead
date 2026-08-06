@@ -346,6 +346,85 @@ pub struct AnchorInput {
     pub source: Option<String>,
 }
 
+/// A permissive wire-shaped `anchors_unset[]` element — an explicit
+/// removal selector on the update surface. Each entry names an `artifact`
+/// and may narrow by `grain` and/or `class`; a bare artifact selects every
+/// anchor on it. String-typed like [`AnchorInput`] so an unknown grain or
+/// class refuses typed (`INVALID_ANCHOR`) rather than silently selecting
+/// nothing forever. Call [`Self::validate`] to obtain a strict
+/// [`AnchorUnset`].
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AnchorUnsetInput {
+    #[serde(default)]
+    pub artifact: Option<String>,
+    #[serde(default)]
+    pub grain: Option<String>,
+    #[serde(default)]
+    pub class: Option<String>,
+}
+
+impl AnchorUnsetInput {
+    /// Validate this wire element into a strict [`AnchorUnset`], or refuse
+    /// typed. Rules: artifact present and non-empty; grain / class, when
+    /// supplied, must be known wire strings (absent means "any").
+    pub fn validate(&self) -> Result<AnchorUnset, AnchorValidationError> {
+        let artifact = self
+            .artifact
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .ok_or(AnchorValidationError::MissingArtifact)?;
+        let grain = match self.grain.as_deref() {
+            None => None,
+            Some(s) => Some(AnchorGrain::from_wire(s).ok_or_else(|| {
+                AnchorValidationError::UnknownGrain {
+                    got: Some(s.to_string()),
+                    allowed: AnchorGrain::WIRE_VALUES,
+                }
+            })?),
+        };
+        let class = match self.class.as_deref() {
+            None => None,
+            Some(s) => Some(AnchorProvenanceClass::from_wire(s).ok_or_else(|| {
+                AnchorValidationError::UnknownClass {
+                    got: Some(s.to_string()),
+                    allowed: AnchorProvenanceClass::WIRE_VALUES,
+                }
+            })?),
+        };
+        Ok(AnchorUnset {
+            artifact,
+            grain,
+            class,
+        })
+    }
+}
+
+/// A validated explicit-removal selector: which of an entity's anchors an
+/// update's `anchors_unset[]` entry removes. Selection is by artifact,
+/// optionally narrowed by grain and/or class; a selector matching nothing
+/// is a no-op (removal is idempotent — its job in recovery flows is "make
+/// sure this is gone").
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnchorUnset {
+    /// Artifact reference to remove anchors from, exactly as stored.
+    pub artifact: String,
+    /// When present, only anchors of this grain are removed.
+    pub grain: Option<AnchorGrain>,
+    /// When present, only anchors of this class are removed.
+    pub class: Option<AnchorProvenanceClass>,
+}
+
+impl AnchorUnset {
+    /// Whether this selector removes `anchor`.
+    pub fn matches(&self, anchor: &Anchor) -> bool {
+        anchor.artifact == self.artifact
+            && self.grain.is_none_or(|g| anchor.grain == g)
+            && self.class.is_none_or(|c| anchor.class == c)
+    }
+}
+
 /// A typed `INVALID_ANCHOR` refusal. The whole mutation refuses and the
 /// entity is not written; [`Self::detail`] carries the recovery payload
 /// (offending value + allowed set) the agent fixes from.
@@ -832,6 +911,33 @@ impl AnchorSidecar {
         }
     }
 
+    /// Merge `incoming` into `entity_id`'s anchor row after applying
+    /// `unsets` — the write-path set arithmetic.
+    ///
+    /// Unset applies **first**: each selector removes its matching anchors
+    /// (a selector matching nothing is a no-op). Then each incoming anchor
+    /// **replaces** the surviving anchor with the same
+    /// `(artifact, grain, class)` triple in place, and **appends**
+    /// otherwise — untouched anchors keep their bytes and their position.
+    /// Writing anchors never removes an anchor the call did not name in
+    /// `unsets`; an empty `incoming` merges nothing. A row emptied by
+    /// unsets prunes its key so the sidecar never accumulates empty rows.
+    pub fn merge(&mut self, entity_id: &str, unsets: &[AnchorUnset], incoming: Vec<Anchor>) {
+        let mut row = self.entities.remove(entity_id).unwrap_or_default();
+        row.retain(|a| !unsets.iter().any(|u| u.matches(a)));
+        for anchor in incoming {
+            match row.iter_mut().find(|e| {
+                e.artifact == anchor.artifact && e.grain == anchor.grain && e.class == anchor.class
+            }) {
+                Some(existing) => *existing = anchor,
+                None => row.push(anchor),
+            }
+        }
+        if !row.is_empty() {
+            self.entities.insert(entity_id.to_string(), row);
+        }
+    }
+
     /// Drop `entity_id`'s anchors entirely (delete leg). Idempotent.
     pub fn remove(&mut self, entity_id: &str) {
         self.entities.remove(entity_id);
@@ -1249,6 +1355,218 @@ mod tests {
         sc.set("specs--x", vec![]);
         assert!(sc.is_empty());
         assert!(sc.get("specs--x").is_empty());
+    }
+
+    // -- merge / unset arithmetic ------------------------------------------
+
+    fn file_anchor(artifact: &str, hash: &str) -> Anchor {
+        Anchor {
+            artifact: artifact.into(),
+            grain: AnchorGrain::File,
+            class: AnchorProvenanceClass::Anchored,
+            at_version: None,
+            hash: Some(hash.into()),
+            hash_stability: AnchorHashStability::Stable,
+            derived_from: Vec::new(),
+            binding: None,
+            source: None,
+        }
+    }
+
+    /// Merge appends a new triple and leaves the existing set untouched —
+    /// the incremental-anchoring contract (N existing + 1 new ⇒ N+1).
+    #[test]
+    fn merge_appends_new_triple_without_touching_others() {
+        let mut sc = AnchorSidecar::default();
+        sc.set(
+            "m--e",
+            vec![file_anchor("a.rs", "h-a"), file_anchor("b.rs", "h-b")],
+        );
+        sc.merge("m--e", &[], vec![file_anchor("c.rs", "h-c")]);
+        let row = sc.get("m--e");
+        assert_eq!(row.len(), 3);
+        assert_eq!(row[0], file_anchor("a.rs", "h-a"));
+        assert_eq!(row[1], file_anchor("b.rs", "h-b"));
+        assert_eq!(row[2], file_anchor("c.rs", "h-c"));
+    }
+
+    /// An incoming anchor with an existing `(artifact, grain, class)`
+    /// triple replaces exactly that one, in place; others stay
+    /// byte-identical.
+    #[test]
+    fn merge_replaces_same_triple_in_place() {
+        let mut sc = AnchorSidecar::default();
+        sc.set(
+            "m--e",
+            vec![file_anchor("a.rs", "h-old"), file_anchor("b.rs", "h-b")],
+        );
+        sc.merge("m--e", &[], vec![file_anchor("a.rs", "h-new")]);
+        let row = sc.get("m--e");
+        assert_eq!(row.len(), 2);
+        assert_eq!(row[0], file_anchor("a.rs", "h-new"));
+        assert_eq!(row[1], file_anchor("b.rs", "h-b"));
+    }
+
+    /// Same artifact under a different grain or class is a different
+    /// identity — it appends rather than replaces (the triple is the merge
+    /// key, not the artifact alone).
+    #[test]
+    fn merge_treats_grain_and_class_as_identity() {
+        let mut sc = AnchorSidecar::default();
+        sc.set("m--e", vec![file_anchor("a.rs", "h-a")]);
+        let mut span = file_anchor("a.rs", "h-span");
+        span.grain = AnchorGrain::Span;
+        let mut informed = file_anchor("a.rs", "h-a");
+        informed.class = AnchorProvenanceClass::InformedBy;
+        informed.hash = None;
+        sc.merge("m--e", &[], vec![span, informed]);
+        assert_eq!(sc.get("m--e").len(), 3);
+    }
+
+    /// Re-sending an entity's full current set is a no-op on the stored
+    /// bytes, and merging an empty list changes nothing.
+    #[test]
+    fn merge_full_resend_and_empty_are_noops() {
+        let mut sc = AnchorSidecar::default();
+        sc.set(
+            "m--e",
+            vec![file_anchor("a.rs", "h-a"), file_anchor("b.rs", "h-b")],
+        );
+        let before = sc.to_bytes();
+        sc.merge(
+            "m--e",
+            &[],
+            vec![file_anchor("a.rs", "h-a"), file_anchor("b.rs", "h-b")],
+        );
+        assert_eq!(sc.to_bytes(), before, "full re-send is byte-stable");
+        sc.merge("m--e", &[], Vec::new());
+        assert_eq!(sc.to_bytes(), before, "empty merge is a no-op");
+    }
+
+    /// A bare-artifact unset removes all of that artifact's anchors and
+    /// nothing else; a grain/class-narrowed unset removes only the match;
+    /// a selector matching nothing is a no-op.
+    #[test]
+    fn unset_selects_by_artifact_with_optional_narrowing() {
+        let mut span = file_anchor("a.rs", "h-span");
+        span.grain = AnchorGrain::Span;
+        let mut sc = AnchorSidecar::default();
+        sc.set(
+            "m--e",
+            vec![
+                file_anchor("a.rs", "h-a"),
+                span.clone(),
+                file_anchor("b.rs", "h-b"),
+            ],
+        );
+
+        // Narrowed: only the span-grain anchor on a.rs goes.
+        let narrowed = AnchorUnset {
+            artifact: "a.rs".into(),
+            grain: Some(AnchorGrain::Span),
+            class: None,
+        };
+        sc.merge("m--e", &[narrowed], Vec::new());
+        assert_eq!(
+            sc.get("m--e"),
+            &[file_anchor("a.rs", "h-a"), file_anchor("b.rs", "h-b")]
+        );
+
+        // Nonexistent target: idempotent no-op.
+        let missing = AnchorUnset {
+            artifact: "never-there.rs".into(),
+            grain: None,
+            class: None,
+        };
+        sc.merge("m--e", &[missing], Vec::new());
+        assert_eq!(sc.get("m--e").len(), 2);
+
+        // Bare artifact: everything on a.rs goes, b.rs untouched.
+        let bare = AnchorUnset {
+            artifact: "a.rs".into(),
+            grain: None,
+            class: None,
+        };
+        sc.merge("m--e", &[bare], Vec::new());
+        assert_eq!(sc.get("m--e"), &[file_anchor("b.rs", "h-b")]);
+    }
+
+    /// Unset applies before merge in the same call: unsetting an artifact
+    /// and writing a new anchor on it lands the new anchor (full-replace
+    /// stays expressible in one call).
+    #[test]
+    fn unset_applies_before_merge() {
+        let mut span = file_anchor("a.rs", "h-span");
+        span.grain = AnchorGrain::Span;
+        let mut sc = AnchorSidecar::default();
+        sc.set("m--e", vec![file_anchor("a.rs", "h-old"), span]);
+        let bare = AnchorUnset {
+            artifact: "a.rs".into(),
+            grain: None,
+            class: None,
+        };
+        sc.merge("m--e", &[bare], vec![file_anchor("a.rs", "h-new")]);
+        assert_eq!(sc.get("m--e"), &[file_anchor("a.rs", "h-new")]);
+    }
+
+    /// A row emptied by unsets prunes its key — the sidecar never keeps
+    /// empty rows.
+    #[test]
+    fn merge_prunes_row_emptied_by_unset() {
+        let mut sc = AnchorSidecar::default();
+        sc.set("m--e", vec![file_anchor("a.rs", "h-a")]);
+        let bare = AnchorUnset {
+            artifact: "a.rs".into(),
+            grain: None,
+            class: None,
+        };
+        sc.merge("m--e", &[bare], Vec::new());
+        assert!(sc.is_empty());
+        assert!(!sc.to_bytes().windows(5).any(|w| w == b"m--e\""));
+    }
+
+    /// The unset validator: artifact required; grain/class, when supplied,
+    /// must be known wire strings; absent narrowing means "any".
+    #[test]
+    fn unset_input_validates_typed() {
+        let ok = AnchorUnsetInput {
+            artifact: Some("  a.rs  ".into()),
+            grain: Some("span".into()),
+            class: None,
+        }
+        .validate()
+        .unwrap();
+        assert_eq!(ok.artifact, "a.rs");
+        assert_eq!(ok.grain, Some(AnchorGrain::Span));
+        assert_eq!(ok.class, None);
+
+        let missing = AnchorUnsetInput::default().validate().unwrap_err();
+        assert!(matches!(missing, AnchorValidationError::MissingArtifact));
+        assert_eq!(missing.code(), INVALID_ANCHOR_CODE);
+
+        let bad_grain = AnchorUnsetInput {
+            artifact: Some("a.rs".into()),
+            grain: Some("paragraph".into()),
+            class: None,
+        }
+        .validate()
+        .unwrap_err();
+        assert!(matches!(
+            bad_grain,
+            AnchorValidationError::UnknownGrain { .. }
+        ));
+
+        let bad_class = AnchorUnsetInput {
+            artifact: Some("a.rs".into()),
+            grain: None,
+            class: Some("guessed".into()),
+        }
+        .validate()
+        .unwrap_err();
+        assert!(matches!(
+            bad_class,
+            AnchorValidationError::UnknownClass { .. }
+        ));
     }
 
     #[test]

@@ -62,6 +62,7 @@ fn update_purpose_args(id: EntityId, expected_hash: String, body: &str) -> Updat
         dry_run: false,
         declare_relations: Vec::new(),
         relations_unset: Vec::new(),
+        anchors_unset: Vec::new(),
     }
 }
 
@@ -83,6 +84,7 @@ fn anchor_only_args(id: EntityId, expected_hash: String, anchor_json: &str) -> U
         dry_run: false,
         declare_relations: Vec::new(),
         relations_unset: Vec::new(),
+        anchors_unset: Vec::new(),
     }
 }
 

@@ -3179,6 +3179,7 @@ community:
                         declare_relations: Vec::new(),
                         dry_run: false,
                         relations_unset: Vec::new(),
+                        anchors_unset: Vec::new(),
                     },
                     actor,
                     Some(&client),

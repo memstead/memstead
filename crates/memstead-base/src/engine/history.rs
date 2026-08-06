@@ -500,6 +500,7 @@ mod tests {
                     declare_relations: Vec::new(),
                     anchors: Vec::new(),
                     relations_unset: Vec::new(),
+                    anchors_unset: Vec::new(),
                 },
                 crate::vcs::Actor::App,
                 None,

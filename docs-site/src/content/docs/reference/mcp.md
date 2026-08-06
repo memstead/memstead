@@ -229,7 +229,7 @@ Create a new entity. Read the target mem's schema first via `memstead_schema` (s
   "additionalProperties": false,
   "properties": {
     "anchors": {
-      "description": "Optional provenance anchors to attach to the new entity — durable records tying it to the source artifacts it describes (which artifact, at which grain, under which provenance class). Written into the mem-branch anchors sidecar in the SAME commit as the entity (atomic); omitting it is byte-identical to a create without anchors. A malformed element refuses the whole create with `INVALID_ANCHOR` (`details` carries the offending field + allowed set) and the entity is not written. Anchors do NOT participate in `_hash`.",
+      "description": "Optional provenance anchors to attach to the new entity — durable records tying it to the source artifacts it describes (which artifact, at which grain, under which provenance class). Written into the mem-branch anchors sidecar in the SAME commit as the entity (atomic); omitting it is byte-identical to a create without anchors. Anchor writes MERGE: later `memstead_update` calls carrying `anchors` add to this set (same `(artifact, grain, class)` triple replaces, otherwise appends) and never silently discard it — removal is explicit via `memstead_update`'s `anchors_unset`. A malformed element refuses the whole create with `INVALID_ANCHOR` (`details` carries the offending field + allowed set) and the entity is not written. Anchors do NOT participate in `_hash`.",
       "items": {
         "$ref": "#/$defs/AnchorInputParam"
       },
@@ -908,7 +908,7 @@ Connect two entities with a typed edge. Pre-fetch the mem's schema via `memstead
 
 **Flavour:** full only
 
-Reload one writable mem's slice of the in-memory store from its on-disk branch tip — or every writable mem when `mem` is omitted. For multi-engine coexistence: a sibling (forked subagent, macOS app, parallel terminal) or out-of-band `git pull` may have advanced HEAD past this engine's snapshot. The auto-reload-on-read pipeline surfaces `MEM_RELOADED` on the next read; this tool is explicit operator-driven refresh for the rare cases the throttle missed. Not a workaround for direct .md edits — restart the server instead. Per-mem form is cheap (~10 ms per few-hundred-entity mem); workspace-wide scales linearly. Response: `reports[]`, each entry `{ mem, head_before, head_after, entities_loaded, changed_entity_ids[] }`. `head_before` is the engine's prior cached SHA (canonical empty-tree hash for fresh mems); `head_after` is the freshly-peeled branch tip. `changed_entity_ids` is the union of added ∪ content-hash-changed ∪ removed entity ids — pass `head_before` to `memstead_changes_since` for the full per-entity diff. The workspace-wide form (omit `mem`) additionally picks up CLI writes to allowlist / cross-link / mutation policy (via `memstead workspace allow-create` etc.) without process restart. Per-mem form skips that workspace-level settings refresh. **Mem membership and the schema catalogue are fixed at process boot for both default forms** — neither re-scans the mount manifest or the schema sources. Pass `full: true` (workspace-wide form only) for the ADDITIVE full refresh: schema versions installed out of band become resolvable and mems registered out of band mount cold, no restart; removals are skipped and reported (they take effect on restart). The full response adds `refresh` `{schemas_added, schema_removals_skipped, mems_mounted, mem_removals_skipped, failures, elapsed_ms}` — per-item failures never surface as newly available and never abort the rest. In-band lifecycle still goes through `memstead_mem_create` / `memstead_mem_delete`; out-of-band DELETES still require a restart.
+Reload one writable mem's slice of the in-memory store from its on-disk branch tip — or every writable mem when `mem` is omitted. For multi-engine coexistence: a sibling (forked subagent, macOS app, parallel terminal) or out-of-band `git pull` may have advanced HEAD past this engine's snapshot. The auto-reload-on-read pipeline surfaces `MEM_RELOADED` on the next read; this tool is explicit operator-driven refresh for the rare cases the throttle missed. Not a workaround for direct .md edits — restart the server instead. Per-mem form is cheap (~10 ms per few-hundred-entity mem); workspace-wide scales linearly. Response: `reports[]`, each entry `{ mem, head_before, head_after, entities_loaded, changed_entity_ids[] }`. `head_before` is the engine's prior cached SHA (canonical empty-tree hash for fresh mems); `head_after` is the freshly-peeled branch tip. `changed_entity_ids` is the union of added ∪ content-hash-changed ∪ removed entity ids — pass `head_before` to `memstead_changes_since` for the full per-entity diff. The workspace-wide form (omit `mem`) additionally picks up CLI writes to allowlist / cross-link / mutation policy (via `memstead workspace allow-create` etc.) without process restart. Per-mem form skips that workspace-level settings refresh. **Membership and the schema catalogue are fixed at boot for both default forms.** `full: true` (workspace-wide only) adds the ADDITIVE re-scan: out-of-band schema installs become resolvable, out-of-band mems mount cold, no restart; removals are skipped and reported — a deleted mem leaves the roster only on restart (its content sweep still reads current storage, so a hard-deleted branch reads empty while membership stays). Response adds `refresh` `{schemas_added, schema_removals_skipped, mems_mounted, mem_removals_skipped, failures, elapsed_ms}`; per-item failures never surface as available and never abort the rest. In-band lifecycle: `memstead_mem_create` / `memstead_mem_delete`.
 
 **Hints:** `read_only` = false, `destructive` = false, `idempotent` = true, `open_world` = false
 
@@ -1329,6 +1329,37 @@ Modify an existing entity. Pre-fetch the target mem's schema via `memstead_schem
       },
       "type": "object"
     },
+    "AnchorUnsetParam": {
+      "additionalProperties": false,
+      "description": "One `anchors_unset[]` entry on `memstead_update` — an explicit anchor-\nremoval selector. Permissive like [`AnchorInputParam`]: a malformed\nselector refuses the whole mutation with a typed `INVALID_ANCHOR`\nenvelope rather than an opaque schema-deserialisation error.",
+      "properties": {
+        "artifact": {
+          "default": null,
+          "description": "Artifact reference whose anchors to remove, exactly as stored. Required; a missing/empty value refuses INVALID_ANCHOR. Bare (no grain/class) removes every anchor on the artifact.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "class": {
+          "default": null,
+          "description": "Optional narrowing: only remove anchors of this provenance class (`anchored` | `derived` | `authored` | `informed-by`). An unknown value refuses INVALID_ANCHOR.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "grain": {
+          "default": null,
+          "description": "Optional narrowing: only remove anchors of this grain (`span` | `file` | `tree` | `url` | `entity`). An unknown value refuses INVALID_ANCHOR.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "AnchorVersionParam": {
       "additionalProperties": false,
       "description": "The medium-typed pinned version sub-object of an [`AnchorInputParam`].",
@@ -1426,9 +1457,19 @@ Modify an existing entity. Pre-fetch the target mem's schema via `memstead_schem
   "additionalProperties": false,
   "properties": {
     "anchors": {
-      "description": "Optional provenance anchors to attach to this entity — durable records tying it to the source artifacts it describes. Written into the mem-branch anchors sidecar in the SAME commit as the update (atomic); omitting it is byte-identical to an update without anchors. An update carrying only `anchors` (no section/metadata change) still commits the sidecar. A malformed element refuses the whole update with `INVALID_ANCHOR` and nothing is written. Anchors do NOT participate in `_hash`.",
+      "description": "Optional provenance anchors to attach to this entity — durable records tying it to the source artifacts it describes. Anchors MERGE into the entity's existing set: an incoming anchor replaces the existing anchor with the same `(artifact, grain, class)` triple and appends otherwise — writing anchors never removes an anchor this call did not name in `anchors_unset` (an empty or omitted list leaves the stored set untouched; incremental anchoring works). Written into the mem-branch anchors sidecar in the SAME commit as the update (atomic). An update carrying only `anchors` (no section/metadata change) still commits the sidecar. A malformed element refuses the whole update with `INVALID_ANCHOR` and nothing is written. Anchors do NOT participate in `_hash`.",
       "items": {
         "$ref": "#/$defs/AnchorInputParam"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "anchors_unset": {
+      "description": "Explicit anchor removals, applied BEFORE the `anchors` merge in the same mutation (mirroring `metadata_unset` / `relations_unset`) — removal is explicit, never a side effect of writing. Each entry names an `artifact` and may narrow by `grain` and/or `class`; a bare artifact removes every anchor on it. Unsetting an anchor that does not exist is a no-op, not an error. Full-replace stays expressible: unset the artifact(s) and write the new set in one call. A malformed selector (missing artifact, unknown grain/class) refuses the whole update with `INVALID_ANCHOR`.",
+      "items": {
+        "$ref": "#/$defs/AnchorUnsetParam"
       },
       "type": [
         "array",

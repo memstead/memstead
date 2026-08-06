@@ -1201,6 +1201,12 @@ impl FilesystemMcpServer {
                 .into_iter()
                 .map(|a| a.into_engine())
                 .collect(),
+            anchors_unset: p
+                .anchors_unset
+                .unwrap_or_default()
+                .into_iter()
+                .map(|u| u.into_engine())
+                .collect(),
             relations_unset: p
                 .relations_unset
                 .unwrap_or_default()
@@ -2197,6 +2203,7 @@ mod tests {
             dry_run: None,
             declare_relations: None,
             relations_unset: None,
+            anchors_unset: None,
             note: None,
         };
         let mut u = base();
@@ -2482,6 +2489,7 @@ mod tests {
         let result = server.memstead_update(Parameters(UpdateParams {
             anchors: None,
             relations_unset: None,
+            anchors_unset: None,
             id: id.clone(),
             expected_hash: hash.clone(),
             sections: Some(sections),
@@ -2510,6 +2518,7 @@ mod tests {
         let result = server.memstead_update(Parameters(UpdateParams {
             anchors: None,
             relations_unset: None,
+            anchors_unset: None,
             id,
             expected_hash: "0000000000".into(),
             sections: None,
@@ -2543,6 +2552,7 @@ mod tests {
             let result = server.memstead_update(Parameters(UpdateParams {
                 anchors: None,
                 relations_unset: None,
+                anchors_unset: None,
                 id: id.clone(),
                 expected_hash: hash.clone(),
                 sections: None,
@@ -2576,6 +2586,7 @@ mod tests {
         let result = server.memstead_update(Parameters(UpdateParams {
             anchors: None,
             relations_unset: None,
+            anchors_unset: None,
             id: id.clone(),
             expected_hash: hash,
             sections: None,
@@ -2609,6 +2620,7 @@ mod tests {
         let result = server.memstead_update(Parameters(UpdateParams {
             anchors: None,
             relations_unset: None,
+            anchors_unset: None,
             id,
             expected_hash: hash,
             sections: Some(sections),
@@ -3668,6 +3680,7 @@ mod tests {
         let upd = server.memstead_update(Parameters(UpdateParams {
             anchors: None,
             relations_unset: None,
+            anchors_unset: None,
             id: id.clone(),
             expected_hash: hash,
             sections: Some(sections),

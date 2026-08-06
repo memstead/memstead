@@ -7,6 +7,27 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Changed
+- **Anchors merge; they no longer silently replace.** An update carrying
+  `anchors` used to discard the entity's entire prior anchor set —
+  observed live as a sync loop regressing an entity's coverage because
+  each later batch displaced the earlier one. Anchor writes now
+  **merge**: an incoming anchor replaces the existing anchor with the
+  same `(artifact, grain, class)` triple and appends otherwise, so
+  incremental anchoring works and writing never removes an anchor the
+  call did not name. Removal is explicit via the new `anchors_unset`
+  on the update surface (MCP `memstead_update`, CLI `--anchor-unset` /
+  `--from` payload / batch-update entries): each selector names an
+  `artifact` and may narrow by `grain` and/or `class`; a bare artifact
+  removes every anchor on it; unset applies before the merge in the
+  same mutation; unsetting a nonexistent target is an idempotent no-op
+  (the `metadata_unset` / `relations_unset` conventions). Full-replace
+  stays expressible — unset the artifact(s) and write the new set in
+  one call. Re-sending an entity's full current set produces exactly
+  the same stored state as before; an empty or absent `anchors` list
+  remains a no-op, never a prune. The sidecar format, `INVALID_ANCHOR`
+  validation, and the `_hash` exclusion are unchanged.
+
 ### Added
 - **The warm server picks up out-of-band installs.** `memstead_reload`
   (and CLI `memstead reload`) gain an additive full-refresh mode:
