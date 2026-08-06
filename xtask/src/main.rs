@@ -15,6 +15,7 @@ mod eval;
 mod mcp;
 mod parity;
 mod release;
+mod sizing;
 mod udl;
 mod wasm;
 
@@ -50,6 +51,12 @@ enum Command {
     /// steps (commit → push → CI green → tag → gitlink bump) — it never
     /// runs `git` mutations itself.
     Release(release::ReleaseArgs),
+    /// Measured operating limits: generate graded synthetic mem-repo
+    /// workspaces through the product surface and time the four
+    /// everyday cold-CLI operations (boot, update, search, overview)
+    /// at every size point. On-demand only — never part of the default
+    /// test suite. Results feed `docs/sizing-curve.md`.
+    SizingCurve(sizing::SizingArgs),
 }
 
 #[derive(clap::Args, Debug)]
@@ -205,6 +212,7 @@ fn main() -> Result<()> {
         Command::GenerateDocs(args) => generate_docs(args),
         Command::Eval(args) => run_eval(args),
         Command::Release(args) => release::run(args),
+        Command::SizingCurve(args) => sizing::run(args),
     }
 }
 

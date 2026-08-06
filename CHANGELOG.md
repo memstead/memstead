@@ -36,6 +36,20 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   the cross-surface hash-parity flake.
 
 ### Added
+- **The sizing curve is measured, not advertised.** A new on-demand
+  harness (`cargo run -p xtask -- sizing-curve`) generates graded
+  synthetic mem-repo workspaces through the product surface and times
+  the four everyday cold-CLI operations (boot, update, search,
+  overview) across 500–7,500 entities, writing machine-readable
+  results (`sizing-curve/v1`). The committed curve
+  (`docs/sizing-curve.md`) records the measured shape: on the cold
+  path every operation costs what boot costs — load is the only
+  visible cost and grows super-linearly (~0.36 ms/entity at 500 →
+  ~0.75 at 7,500) — plus what that implies for the deferred lazy-mount
+  / incremental-index / deferred-cross-mem redesigns. The MCP server
+  instructions' "designed for 1,000–5,000 entities" statement now
+  cites the measured document. The harness runs in temp directories,
+  leaves no residue, and is not part of the default test suite.
 - **`memstead export --format json` — the bulk read.** One CLI
   invocation, one engine boot, emits the complete non-stub entity set
   as a single JSON document on stdout (`format: "memstead-export/v1"`),
