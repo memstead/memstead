@@ -116,23 +116,18 @@ pub enum InstallError {
     /// message so callers can surface it without wrapping the variant.
     #[error("mem-repo tree write failed: {0}")]
     MemRepo(#[from] MemRepoWriteError),
-    /// The archive's
-    /// authoritative mem name (carried in its canonical config)
-    /// matches a writable mount that already exists in this
-    /// workspace. Registering the read-mem would silently shadow
-    /// (the engine's boot-time `hydrate_read_mems` skips read-mem
-    /// names that collide with writable mounts), so the install
-    /// surface refuses up-front rather than registering a no-op.
-    /// An earlier message advised `install to a different
-    /// `--mem-name` target` — but `--mem-name` selects the
-    /// *host* writable mem to register the read-mem into, not
-    /// the read-mem's internal name. The flag cannot rename the
-    /// archive. The genuine recovery is to unregister or rename
-    /// the writable mount that shadows the archive's internal name.
+    /// The archive's authoritative mem name (carried in its canonical
+    /// config) matches a writable mount that already exists in this
+    /// workspace. A read-only mount cannot share a writable mount's
+    /// name (the archive's internal name is its sole identity and
+    /// nothing can rename it at install time), so the install surface
+    /// refuses up-front. The genuine recovery is to rename or
+    /// unregister the writable mount that shadows the archive's
+    /// internal name.
     #[error(
         "archive's mem name `{archive_name}` already exists as a writable mount in this workspace; \
-         unregister or rename the writable mount first (the `--mem` flag selects which writable \
-         host mem to register *into* — it does not rename the archive's internal mem)"
+         rename the writable mount (`memstead mem rename`) or unregister it first — the archive's \
+         internal name is its sole identity and cannot be changed at install time"
     )]
     ShadowsWritable {
         archive_name: String,

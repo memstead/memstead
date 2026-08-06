@@ -53,12 +53,16 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     let mut engine = crate::setup::full_engine(ctx)?;
 
     // The legacy `@scope/name` syntax is rejected, not silently treated as a
-    // local path.
+    // local path. Typed refusal — a user-triggerable input shape must
+    // never surface as INTERNAL.
     if args.source.starts_with('@') {
-        anyhow::bail!(
+        return Err(CliError::new(
+            ExitKind::Validation,
+            "INVALID_INPUT",
             "the `@scope/name` syntax is no longer supported — use \
-             `github:<handle>/<name>`, `<domain>/<name>`, or a bare `<handle>/<name>`"
-        );
+             `github:<handle>/<name>`, `<domain>/<name>`, or a bare `<handle>/<name>`",
+        )
+        .into());
     }
 
     // Registry install path: "<scope>/<name>".
