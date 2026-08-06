@@ -43,6 +43,18 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   the cross-surface hash-parity flake.
 
 ### Added
+- **Mem curation reaches MCP.** `memstead_mem_create` gains optional
+  `title`, `description`, and `subject` parameters (applied at
+  creation through the same setters the CLI verbs use), and the new
+  `memstead_mem_configure` tool updates the same three fields on an
+  existing mem — set what is present: absent fields untouched, empty
+  string clears, `clear_subject` clears the subject block as a unit.
+  Gate-free like the sibling setters; unknown mems and read-only
+  mounts refuse typed. The MCP consumer profile — what the tool
+  surface is complete for, and what deliberately stays off it — is
+  now written down in `dev/handbook/agent-surfaces.md`, and the batch
+  abstention test's rationale argues against that profile (boot cost,
+  agent-context cost, atomicity) rather than boot cost alone.
 - **Read-mems are ordinary read-only mounts, and `memstead uninstall`
   exists.** Installed read-mems no longer attach to a host writable
   mem's config — `memstead install` (and the MCP server's `--read-mem`

@@ -6,7 +6,7 @@ title: "MCP tools"
 
 Generated from the live `tool_router().list_all()` catalogues on `FilesystemMcpServer` (the lean `--no-default-features` build) and `McpServer` (the full default build). Every tool the running server exposes appears below; each section is tagged with the flavour pair (`lean + full`, `lean only`, or `full only`).
 
-**Counts:** the lean build exposes 12 tools; the full build exposes 23 (a strict superset on shared names).
+**Counts:** the lean build exposes 12 tools; the full build exposes 24 (a strict superset on shared names).
 
 ## Index
 
@@ -16,6 +16,7 @@ Generated from the live `tool_router().list_all()` catalogues on `FilesystemMcpS
 - [`memstead_diff`](#memstead-diff)
 - [`memstead_entity`](#memstead-entity)
 - [`memstead_health`](#memstead-health)
+- [`memstead_mem_configure`](#memstead-mem-configure)
 - [`memstead_mem_create`](#memstead-mem-create)
 - [`memstead_mem_delete`](#memstead-mem-delete)
 - [`memstead_mem_set_schema`](#memstead-mem-set-schema)
@@ -545,6 +546,108 @@ Return graph health metrics. Typed payload on `structured_content` (always whole
 }
 ```
 
+## `memstead_mem_configure`
+
+**Flavour:** full only
+
+Update a mem's curation fields — display title, one-line description, and subject block — in one call: set what is present. Absent field = untouched; empty string (`title` / `description`) = clear; `clear_subject: true` clears the subject block as a unit (mutually exclusive with `subject`, both set refuses `INVALID_INPUT`). `subject` is `{scope, method?, exclusions?}` — what the mem covers, how its content was arrived at, what was deliberately left out. Display text, never identity: the mem stays addressed by `name` everywhere; a title is roster/UI text only. Same validation and storage as the CLI's `mem set-title` / `set-description` / `set-subject` — one config commit per touched field. Gate-free like the sibling setters (no `[[mem_management.*]]` allowlist applies), but every structural gate holds: unknown mem refuses `UNKNOWN_MEM`; read-only mounts refuse `READ_ONLY_MOUNT`. A call with no field present is a no-op returning the unchanged state. Response `{mem, title, description, subject, warnings}` carries the post-call values (null = unset); `MEM_RELOADED` rides on `warnings` when a sibling engine commit landed since the prior snapshot. Optional `note` (≤280 chars) rides each field's config commit.
+
+**Hints:** `read_only` = false, `destructive` = false, `idempotent` = true, `open_world` = false
+
+**Input schema:**
+
+```json
+{
+  "$defs": {
+    "MemSubjectInput": {
+      "additionalProperties": false,
+      "description": "Subject block for mem curation — mirrors\n`memstead_schema::MemSubject`.",
+      "properties": {
+        "exclusions": {
+          "default": null,
+          "description": "What was considered and deliberately left out — prose statements, order preserved.",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "method": {
+          "default": null,
+          "description": "How the mem's content was arrived at.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scope": {
+          "description": "What this mem covers. Required to set the block.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scope"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "clear_subject": {
+      "default": false,
+      "description": "Clear the subject block as a unit. Mutually exclusive with `subject` (both set refuses `INVALID_INPUT`).",
+      "type": "boolean"
+    },
+    "description": {
+      "default": null,
+      "description": "New one-line description. Absent = untouched; empty string = clear.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "name": {
+      "description": "Name of the mem to configure (must be a registered writable mem).",
+      "type": "string"
+    },
+    "note": {
+      "default": null,
+      "description": "Optional provenance note (≤280 chars) recorded on each field's config commit.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "subject": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/MemSubjectInput"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "New subject block `{scope, method?, exclusions?}`. Absent = untouched; to clear the block as a unit pass `clear_subject: true` instead."
+    },
+    "title": {
+      "default": null,
+      "description": "New display title. Absent = untouched; empty string = clear (the roster falls back to the mem name).",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "name"
+  ],
+  "type": "object"
+}
+```
+
 ## `memstead_mem_create`
 
 **Flavour:** full only
@@ -558,6 +661,39 @@ Create and register a new writable mem at runtime. Requires workspace opt-in via
 ```json
 {
   "$defs": {
+    "MemSubjectInput": {
+      "additionalProperties": false,
+      "description": "Subject block for mem curation — mirrors\n`memstead_schema::MemSubject`.",
+      "properties": {
+        "exclusions": {
+          "default": null,
+          "description": "What was considered and deliberately left out — prose statements, order preserved.",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "method": {
+          "default": null,
+          "description": "How the mem's content was arrived at.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scope": {
+          "description": "What this mem covers. Required to set the block.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scope"
+      ],
+      "type": "object"
+    },
     "RecoveryActionInput": {
       "description": "Wire-shape recovery action for `memstead_mem_create`. The\nstorage-residue refusal path exposes three explicit\nrecovery options the caller picks via this enum. The wire\ntokens (`reattach` / `force_overwrite` / `hard_cleanup_first`)\nmatch `memstead_engine::RecoveryAction::as_wire_str()` so the\nMCP serde shape and the CLI flag bridge converge on a single\nengine-side enum.",
       "oneOf": [
@@ -601,6 +737,14 @@ Create and register a new writable mem at runtime. Requires workspace opt-in via
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
+    "description": {
+      "default": null,
+      "description": "Optional one-line description applied at creation — embedded in `.mem` archive exports and surfaced on rosters. Same storage as the CLI's `mem set-description`.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "include_schema": {
       "default": false,
       "description": "Inline the resolved schema body on the response (byte-identical to `memstead_schema(name=<resolved-schema>)` at the same verbosity). Default `false` — the response carries only `schema_ref`, `name`, `location`, and `seed_commit_sha`. Set to `true` for first-time-schema callers that want one round-trip instead of two; the schema is workspace-stable, so for the agent's second+ mem on the same schema the omitted default is the right call.",
@@ -638,6 +782,25 @@ Create and register a new writable mem at runtime. Requires workspace opt-in via
     },
     "schema_verbosity": {
       "description": "Verbosity of the inlined schema body when `include_schema: true`. `\"lite\"` (default, absent) inlines the cheap cold-start skeleton (entity-type names + section keys + field shapes, relationship names + endpoints, the alias pointer; prose dropped) — the right pairing for a first-mem create that only needs to orient, and byte-identical to `memstead_schema`'s default reply. `\"full\"` inlines the complete schema — byte-identical to `memstead_schema(name=<resolved-schema>, verbosity=\"full\")`. Ignored when `include_schema` is false. Any value other than `\"full\"`/`\"lite\"` returns `INVALID_INPUT` naming the bad value.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "subject": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/MemSubjectInput"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Optional subject block applied at creation — `{scope, method?, exclusions?}`: what the mem covers, how its content was arrived at, and what was deliberately left out. Same storage as the CLI's `mem set-subject`."
+    },
+    "title": {
+      "default": null,
+      "description": "Optional human-readable display title applied at creation — display text, not identity (the mem is always addressed by `name`). Same validation and storage as the CLI's `mem set-title`. Omit to leave the mem untitled.",
       "type": [
         "string",
         "null"

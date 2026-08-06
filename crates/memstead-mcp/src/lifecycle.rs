@@ -101,6 +101,21 @@ pub struct MemCreateParams {
     )]
     pub vcs: Option<VcsConfigInput>,
     #[schemars(
+        description = "Optional human-readable display title applied at creation — display text, not identity (the mem is always addressed by `name`). Same validation and storage as the CLI's `mem set-title`. Omit to leave the mem untitled."
+    )]
+    #[serde(default)]
+    pub title: Option<String>,
+    #[schemars(
+        description = "Optional one-line description applied at creation — embedded in `.mem` archive exports and surfaced on rosters. Same storage as the CLI's `mem set-description`."
+    )]
+    #[serde(default)]
+    pub description: Option<String>,
+    #[schemars(
+        description = "Optional subject block applied at creation — `{scope, method?, exclusions?}`: what the mem covers, how its content was arrived at, and what was deliberately left out. Same storage as the CLI's `mem set-subject`."
+    )]
+    #[serde(default)]
+    pub subject: Option<MemSubjectInput>,
+    #[schemars(
         description = "Agent-authored provenance note recorded in the seed commit's body (≤280 chars). One sentence describing why this mem was created."
     )]
     pub note: Option<String>,
@@ -266,4 +281,73 @@ pub struct WorkspaceRevokeDeleteParams {
         description = "Glob pattern of the `[[mem_management.delete]]` rule to drop. Matched exactly against the rule's `pattern` field."
     )]
     pub pattern: String,
+}
+
+/// Subject block for mem curation — mirrors
+/// `memstead_schema::MemSubject`.
+#[derive(Debug, Clone, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MemSubjectInput {
+    #[schemars(description = "What this mem covers. Required to set the block.")]
+    pub scope: String,
+    #[schemars(description = "How the mem's content was arrived at.")]
+    #[serde(default)]
+    pub method: Option<String>,
+    #[schemars(
+        description = "What was considered and deliberately left out — prose statements, order preserved."
+    )]
+    #[serde(default)]
+    pub exclusions: Option<Vec<String>>,
+}
+
+impl MemSubjectInput {
+    /// Lower into the engine's config shape.
+    pub(crate) fn into_engine(self) -> memstead_schema::MemSubject {
+        memstead_schema::MemSubject {
+            scope: self.scope,
+            method: self.method,
+            exclusions: self.exclusions.unwrap_or_default(),
+        }
+    }
+}
+
+/// Parameters for `memstead_mem_configure` — set what is present.
+///
+/// One behaviour, no action discriminator: each optional field left
+/// absent is untouched; an empty string (`title` / `description`) or
+/// `clear_subject: true` clears that field. Gate-free like the sibling
+/// setters (`memstead_mem_set_version` / `_set_schema`): no
+/// `[[mem_management.*]]` allowlist applies — but every structural
+/// gate does (unknown mem refuses `UNKNOWN_MEM`, read-only mounts
+/// refuse `READ_ONLY_MOUNT`).
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MemConfigureParams {
+    #[schemars(description = "Name of the mem to configure (must be a registered writable mem).")]
+    pub name: String,
+    #[schemars(
+        description = "New display title. Absent = untouched; empty string = clear (the roster falls back to the mem name)."
+    )]
+    #[serde(default)]
+    pub title: Option<String>,
+    #[schemars(
+        description = "New one-line description. Absent = untouched; empty string = clear."
+    )]
+    #[serde(default)]
+    pub description: Option<String>,
+    #[schemars(
+        description = "New subject block `{scope, method?, exclusions?}`. Absent = untouched; to clear the block as a unit pass `clear_subject: true` instead."
+    )]
+    #[serde(default)]
+    pub subject: Option<MemSubjectInput>,
+    #[schemars(
+        description = "Clear the subject block as a unit. Mutually exclusive with `subject` (both set refuses `INVALID_INPUT`)."
+    )]
+    #[serde(default)]
+    pub clear_subject: bool,
+    #[schemars(
+        description = "Optional provenance note (≤280 chars) recorded on each field's config commit."
+    )]
+    #[serde(default)]
+    pub note: Option<String>,
 }

@@ -59,6 +59,7 @@ Surface entries the registry does not pin to a logical operation. Either add a r
 ### Unaligned — MCP
 
 - `memstead_diff`
+- `memstead_mem_configure`
 - `memstead_mem_set_schema`
 
 ### Unaligned — CLI

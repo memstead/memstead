@@ -3284,6 +3284,107 @@ impl McpServer {
     }
 
     #[tool(
+        name = "memstead_mem_configure",
+        description = "Update a mem's curation fields — display title, one-line description, and subject block — in one call: set what is present. Absent field = untouched; empty string (`title` / `description`) = clear; `clear_subject: true` clears the subject block as a unit (mutually exclusive with `subject`, both set refuses `INVALID_INPUT`). `subject` is `{scope, method?, exclusions?}` — what the mem covers, how its content was arrived at, what was deliberately left out. Display text, never identity: the mem stays addressed by `name` everywhere; a title is roster/UI text only. Same validation and storage as the CLI's `mem set-title` / `set-description` / `set-subject` — one config commit per touched field. Gate-free like the sibling setters (no `[[mem_management.*]]` allowlist applies), but every structural gate holds: unknown mem refuses `UNKNOWN_MEM`; read-only mounts refuse `READ_ONLY_MOUNT`. A call with no field present is a no-op returning the unchanged state. Response `{mem, title, description, subject, warnings}` carries the post-call values (null = unset); `MEM_RELOADED` rides on `warnings` when a sibling engine commit landed since the prior snapshot. Optional `note` (≤280 chars) rides each field's config commit.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    fn memstead_mem_configure(
+        &self,
+        Parameters(p): Parameters<crate::lifecycle::MemConfigureParams>,
+    ) -> CallToolResult {
+        if let Some(err) = validate_note(p.note.as_deref()) {
+            return err;
+        }
+        if p.subject.is_some() && p.clear_subject {
+            let msg = "`subject` and `clear_subject` are mutually exclusive — pass one";
+            return tool_error_with_payload(
+                "INVALID_INPUT",
+                msg,
+                envelope(
+                    "INVALID_INPUT",
+                    msg.to_string(),
+                    serde_json::json!({ "message": msg }),
+                ),
+            );
+        }
+        let unified = self.unified_engine();
+        let mut engine = crate::lock_engine!(unified);
+        let mut warnings: Vec<memstead_base::ops::WarningHint> = Vec::new();
+
+        // "Set what is present": each Some field routes through the
+        // engine setter the CLI verb uses; empty string clears.
+        if let Some(t) = p.title.clone() {
+            let value = if t.is_empty() { None } else { Some(t) };
+            match engine.set_mem_title(&p.name, value, p.note.as_deref()) {
+                Ok(o) => warnings.extend(o.warnings),
+                Err(e) => {
+                    let notices = engine.take_mem_changed_notices();
+                    let drift = notices_as_reload_warnings(&notices);
+                    return attach_drift_to_error(engine_err_unified(e, &engine), &drift, notices);
+                }
+            }
+        }
+        if let Some(d) = p.description.clone() {
+            let value = if d.is_empty() { None } else { Some(d) };
+            match engine.set_mem_description(&p.name, value, p.note.as_deref()) {
+                Ok(o) => warnings.extend(o.warnings),
+                Err(e) => {
+                    let notices = engine.take_mem_changed_notices();
+                    let drift = notices_as_reload_warnings(&notices);
+                    return attach_drift_to_error(engine_err_unified(e, &engine), &drift, notices);
+                }
+            }
+        }
+        if p.subject.is_some() || p.clear_subject {
+            let value = p.subject.clone().map(|s| s.into_engine());
+            match engine.set_mem_subject(&p.name, value, p.note.as_deref()) {
+                Ok(o) => warnings.extend(o.warnings),
+                Err(e) => {
+                    let notices = engine.take_mem_changed_notices();
+                    let drift = notices_as_reload_warnings(&notices);
+                    return attach_drift_to_error(engine_err_unified(e, &engine), &drift, notices);
+                }
+            }
+        }
+
+        // No-field calls still validate the mem exists (a pure no-op
+        // against an unknown name would be a silent lie).
+        let no_field =
+            p.title.is_none() && p.description.is_none() && p.subject.is_none() && !p.clear_subject;
+        if no_field && engine.mount(&p.name).is_none() {
+            let e = memstead_base::EngineError::UnknownMem(p.name.clone());
+            let notices = engine.take_mem_changed_notices();
+            let drift = notices_as_reload_warnings(&notices);
+            return attach_drift_to_error(engine_err_unified(e, &engine), &drift, notices);
+        }
+
+        // Post-call state from the loaded config — the stable response
+        // shape regardless of which fields were touched.
+        let config = engine
+            .mem_configs_named()
+            .find(|(name, _)| *name == p.name)
+            .map(|(_, c)| c.clone());
+        let mut body = serde_json::json!({
+            "mem": p.name,
+            "title": config.as_ref().and_then(|c| c.title.clone()),
+            "description": config.as_ref().and_then(|c| c.description.clone()),
+            "subject": config.as_ref().and_then(|c| c.subject.as_ref().map(|sub| serde_json::json!({
+                "scope": sub.scope,
+                "method": sub.method,
+                "exclusions": sub.exclusions,
+            }))),
+            "warnings": warnings,
+        });
+        attach_mem_changed(&mut body, engine.take_mem_changed_notices());
+        json_response(&body)
+    }
+
+    #[tool(
         name = "memstead_mem_set_schema",
         description = "Update a mem's schema pin — the integrity-driven schema-migration trigger. Stable response `{mem, schema_pin, migration_target, outcome, findings}`; branch on `outcome`: `noop` (requested == current pin), `switched` (mem already integral against the target — pin moved atomically), `migration_started` (not integral — mem enters dual-pin: writes now validate against the target, `findings` lists the non-integral entities as `{id, axis, code, detail}`), `migration_pending` (same target re-issued while repairs remain — `findings` carries the remaining entities). Migration loop: read `findings`, read both schemas via `memstead_schema`, repair each entity via `memstead_update` (validated strictly against the target; `relations_unset` is available on non-conformant entities), then re-issue this call — once every entity is integral it completes the switch. Reads stay permissive throughout; the dual-pin state survives engine restarts. Unknown mem refuses `UNKNOWN_MEM`; a schema ref that resolves to no loaded schema refuses `SCHEMA_NOT_FOUND`; malformed refs refuse `INVALID_INPUT`. Distinct from `memstead_mem_set_version`, which sets the mem *content* version, never the pin.",
         annotations(
@@ -3388,6 +3489,13 @@ impl McpServer {
             render::SchemaVerbosity::Full
         };
 
+        // Curation fields ride the create call and are applied through
+        // the same setters the CLI verbs use, after the create lands.
+        let cur_title = p.title.clone().filter(|t| !t.is_empty());
+        let cur_description = p.description.clone().filter(|d| !d.is_empty());
+        let cur_subject = p.subject.clone();
+        let cur_note = p.note.clone();
+
         // Hierarchical paths are first-class. The separate `path`
         // wire-shape field retired; `name` carries the full
         // identifier (`team/sub-mem`) verbatim.
@@ -3417,6 +3525,36 @@ impl McpServer {
 
         match memstead_engine::mem_management::create_mem(&mut engine, params) {
             Ok(response) => {
+                // Apply curation at creation — same setters, same
+                // validation, same storage as the CLI verbs. Each is
+                // its own config commit; a failure here surfaces after
+                // the mem exists (the create itself has no implicit
+                // rollback, matching the seed-commit contract).
+                let mut curation_warnings: Vec<memstead_base::ops::WarningHint> = Vec::new();
+                if let Some(t) = cur_title {
+                    match engine.set_mem_title(&response.name, Some(t), cur_note.as_deref()) {
+                        Ok(o) => curation_warnings.extend(o.warnings),
+                        Err(e) => return engine_err_unified(e, &engine),
+                    }
+                }
+                if let Some(d) = cur_description {
+                    match engine.set_mem_description(&response.name, Some(d), cur_note.as_deref())
+                    {
+                        Ok(o) => curation_warnings.extend(o.warnings),
+                        Err(e) => return engine_err_unified(e, &engine),
+                    }
+                }
+                if let Some(subj) = cur_subject {
+                    match engine.set_mem_subject(
+                        &response.name,
+                        Some(subj.into_engine()),
+                        cur_note.as_deref(),
+                    ) {
+                        Ok(o) => curation_warnings.extend(o.warnings),
+                        Err(e) => return engine_err_unified(e, &engine),
+                    }
+                }
+
                 // Build wire response with the same shape full emits.
                 let body = serde_json::json!({
                     "name": response.name,
@@ -3429,8 +3567,9 @@ impl McpServer {
                 // create response. Surface every response-side warning
                 // via `append_warning_hint` so MCP callers see the
                 // structured envelope alongside the success payload.
-                let create_warnings: Vec<memstead_base::ops::WarningHint> =
+                let mut create_warnings: Vec<memstead_base::ops::WarningHint> =
                     response.warnings.clone();
+                create_warnings.extend(curation_warnings);
                 let res = json_response(&body);
                 let res = create_warnings.iter().fold(res, append_warning_hint);
                 // Inline the
@@ -6233,6 +6372,9 @@ community:
         let server = McpServer::new(unified, crate::config::DEFAULT_TOKEN_BUDGET);
         let target = tmp.path().join("runtime-born");
         let create_result = server.memstead_mem_create(Parameters(TlsMemCreateParams {
+                title: None,
+                description: None,
+                subject: None,
             schema_verbosity: None,
             write_guidance: Default::default(),
             name: "runtime-born".to_string(),
@@ -6534,6 +6676,9 @@ community:
         let server = McpServer::new(unified, crate::config::DEFAULT_TOKEN_BUDGET);
 
         let result = server.memstead_mem_create(Parameters(crate::lifecycle::MemCreateParams {
+            title: None,
+            description: None,
+            subject: None,
             schema_verbosity: None,
             write_guidance: Default::default(),
             name: "alpha".to_string(),
@@ -6567,6 +6712,9 @@ community:
         // cheap skeleton instead of the ~25 KB full body.
         let lite_create =
             server.memstead_mem_create(Parameters(crate::lifecycle::MemCreateParams {
+            title: None,
+            description: None,
+            subject: None,
                 schema_verbosity: Some("lite".to_string()),
                 write_guidance: Default::default(),
                 name: "beta".to_string(),
@@ -6596,6 +6744,9 @@ community:
         // An unknown schema_verbosity refuses up front (before the mem
         // lands) rather than silently inlining full.
         let bad = server.memstead_mem_create(Parameters(crate::lifecycle::MemCreateParams {
+            title: None,
+            description: None,
+            subject: None,
             schema_verbosity: Some("brief".to_string()),
             write_guidance: Default::default(),
             name: "gamma".to_string(),
@@ -7364,6 +7515,9 @@ write_rules: []
 
         let mem_create = |name: &str| {
             server.memstead_mem_create(Parameters(crate::lifecycle::MemCreateParams {
+            title: None,
+            description: None,
+            subject: None,
                 name: name.to_string(),
                 location: name.to_string(),
                 schema: "authored@0.1.0".to_string(),
@@ -12295,6 +12449,9 @@ write_rules: []
         let server = setup_lifecycle_server(&tmp);
         let target = tmp.path().join("fresh");
         let result = server.memstead_mem_create(Parameters(TlsMemCreateParams {
+                title: None,
+                description: None,
+                subject: None,
             schema_verbosity: None,
             write_guidance: Default::default(),
             name: "fresh".to_string(),
@@ -12343,6 +12500,9 @@ write_rules: []
         let server = setup_lifecycle_server(&tmp);
         let target = tmp.path().join("hier");
         let result = server.memstead_mem_create(Parameters(TlsMemCreateParams {
+                title: None,
+                description: None,
+                subject: None,
             schema_verbosity: None,
             write_guidance: Default::default(),
             name: "planning/hier".to_string(),
@@ -12398,6 +12558,9 @@ write_rules: []
         // sealed at `refs/heads/demo/engine`.
         let first_target = tmp.path().join("engine");
         let first = server.memstead_mem_create(Parameters(TlsMemCreateParams {
+                title: None,
+                description: None,
+                subject: None,
             schema_verbosity: None,
             write_guidance: Default::default(),
             name: "engine".to_string(),
@@ -12421,6 +12584,9 @@ write_rules: []
         // `colliding_paths` and `suggestion` regardless.
         let second_target = tmp.path().join("engine-second");
         let second = server.memstead_mem_create(Parameters(TlsMemCreateParams {
+                title: None,
+                description: None,
+                subject: None,
             schema_verbosity: None,
             write_guidance: Default::default(),
             name: "engine".to_string(),
@@ -12466,6 +12632,9 @@ write_rules: []
         let server = setup_lifecycle_server(&tmp);
         let target = tmp.path().join("bad");
         let result = server.memstead_mem_create(Parameters(TlsMemCreateParams {
+                title: None,
+                description: None,
+                subject: None,
             schema_verbosity: None,
             write_guidance: Default::default(),
             name: "/leading-slash".to_string(),
@@ -12517,6 +12686,9 @@ write_rules: []
 
         let target = tmp.path().join("blocked");
         let result = server.memstead_mem_create(Parameters(TlsMemCreateParams {
+                title: None,
+                description: None,
+                subject: None,
             schema_verbosity: None,
             write_guidance: Default::default(),
             name: "blocked".to_string(),
@@ -12551,6 +12723,9 @@ write_rules: []
         // the basename-invariant, so the location is `tmp/same/`.
         let first = tmp.path().join("same");
         let ok = server.memstead_mem_create(Parameters(TlsMemCreateParams {
+                title: None,
+                description: None,
+                subject: None,
             schema_verbosity: None,
             write_guidance: Default::default(),
             name: "same".to_string(),
@@ -12569,6 +12744,9 @@ write_rules: []
         std::fs::create_dir_all(tmp.path().join("b")).unwrap();
         let second = tmp.path().join("b").join("same");
         let err = server.memstead_mem_create(Parameters(TlsMemCreateParams {
+                title: None,
+                description: None,
+                subject: None,
             schema_verbosity: None,
             write_guidance: Default::default(),
             name: "same".to_string(),
@@ -12629,6 +12807,9 @@ write_rules: []
 
         let target = canonical_root.join("persisted");
         let ok = server.memstead_mem_create(Parameters(TlsMemCreateParams {
+                title: None,
+                description: None,
+                subject: None,
             schema_verbosity: None,
             write_guidance: Default::default(),
             name: "persisted".to_string(),
@@ -12667,6 +12848,9 @@ write_rules: []
         // Second create with the same name trips MEM_NAME_COLLISION —
         // F3 follows from the persistence fix.
         let dup = server.memstead_mem_create(Parameters(TlsMemCreateParams {
+                title: None,
+                description: None,
+                subject: None,
             schema_verbosity: None,
             write_guidance: Default::default(),
             name: "persisted".to_string(),
@@ -12715,6 +12899,9 @@ write_rules: []
         let tmp = TempDir::new().unwrap();
         let server = setup_lifecycle_server(&tmp);
         let result = server.memstead_mem_create(Parameters(TlsMemCreateParams {
+                title: None,
+                description: None,
+                subject: None,
             schema_verbosity: None,
             write_guidance: Default::default(),
             name: "bad-schema".to_string(),
@@ -12774,6 +12961,9 @@ write_rules: []
         // Seed a mem first so delete has something to remove.
         let target = tmp.path().join("wipe");
         let create_result = server.memstead_mem_create(Parameters(TlsMemCreateParams {
+                title: None,
+                description: None,
+                subject: None,
             schema_verbosity: None,
             write_guidance: Default::default(),
             name: "wipe".to_string(),
@@ -12837,6 +13027,9 @@ write_rules: []
         // Set up a mem we can try to delete.
         let target = tmp.path().join("pinned");
         let _ = server.memstead_mem_create(Parameters(TlsMemCreateParams {
+                title: None,
+                description: None,
+                subject: None,
             schema_verbosity: None,
             write_guidance: Default::default(),
             name: "pinned".to_string(),
@@ -12897,6 +13090,9 @@ write_rules: []
         // `.memstead/workspace.toml` directly).
         let server = setup_lifecycle_server_with_delete(&tmp);
         let _ = server.memstead_mem_create(Parameters(TlsMemCreateParams {
+                title: None,
+                description: None,
+                subject: None,
             schema_verbosity: None,
             write_guidance: Default::default(),
             name: "primary".to_string(),
@@ -12908,6 +13104,9 @@ write_rules: []
             include_schema: false,
         }));
         let _ = server.memstead_mem_create(Parameters(TlsMemCreateParams {
+                title: None,
+                description: None,
+                subject: None,
             schema_verbosity: None,
             write_guidance: Default::default(),
             name: "plan-x".to_string(),
@@ -13017,6 +13216,9 @@ write_rules: []
         let gitdir = tmp.path().join("mem-repo").join(".git");
 
         let _ = server.memstead_mem_create(Parameters(TlsMemCreateParams {
+                title: None,
+                description: None,
+                subject: None,
             schema_verbosity: None,
             write_guidance: Default::default(),
             name: "ephemeral".to_string(),
@@ -13138,6 +13340,9 @@ write_rules: []
 
         let mem_dir = tmp.path().join("scratch");
         let _ = server.memstead_mem_create(Parameters(TlsMemCreateParams {
+                title: None,
+                description: None,
+                subject: None,
             schema_verbosity: None,
             write_guidance: Default::default(),
             name: "scratch".to_string(),
@@ -13218,6 +13423,9 @@ write_rules: []
         // `planning/plan-q4` name is the canonical input — no
         // separate `path` field.
         let create_result = server.memstead_mem_create(Parameters(TlsMemCreateParams {
+                title: None,
+                description: None,
+                subject: None,
             schema_verbosity: None,
             write_guidance: Default::default(),
             name: "planning/plan-q4".to_string(),
@@ -14200,6 +14408,9 @@ write_rules: []
         ) -> serde_json::Value {
             let target = tmp.path().join(name);
             let result = server.memstead_mem_create(Parameters(TlsMemCreateParams {
+                title: None,
+                description: None,
+                subject: None,
                 // These payload tests pin the FULL catalogue content;
                 // the omitted-param default is lite (tested separately).
                 schema_verbosity: Some("full".to_string()),
@@ -14220,6 +14431,256 @@ write_rules: []
             result
                 .structured_content
                 .expect("structured_content present")
+        }
+
+        /// Plan-05 criterion 2 (create half): curation params applied
+        /// at creation are visible on the loaded config and the
+        /// configure tool's stable response.
+        #[test]
+        fn mem_create_with_curation_carries_all_three() {
+            let (server, tmp) = setup();
+            let target = tmp.path().join("curated");
+            let result = server.memstead_mem_create(Parameters(TlsMemCreateParams {
+                title: Some("Curated Library".to_string()),
+                description: Some("One-line card text.".to_string()),
+                subject: Some(crate::lifecycle::MemSubjectInput {
+                    scope: "Everything about curation.".to_string(),
+                    method: Some("Hand-written fixtures.".to_string()),
+                    exclusions: Some(vec!["History.".to_string()]),
+                }),
+                schema_verbosity: None,
+                write_guidance: Default::default(),
+                name: "curated".to_string(),
+                location: target.to_string_lossy().into_owned(),
+                schema: "default@1.0.0".to_string(),
+                vcs: None,
+                note: Some("curation at create".to_string()),
+                recovery: None,
+                include_schema: false,
+            }));
+            assert!(
+                !result.is_error.unwrap_or(false),
+                "create must succeed: {result:?}"
+            );
+
+            // The stable read-back: a no-field configure call returns
+            // the post-create state.
+            let state = server.memstead_mem_configure(Parameters(
+                crate::lifecycle::MemConfigureParams {
+                    name: "curated".to_string(),
+                    title: None,
+                    description: None,
+                    subject: None,
+                    clear_subject: false,
+                    note: None,
+                },
+            ));
+            assert!(!state.is_error.unwrap_or(false), "{state:?}");
+            let body = state.structured_content.expect("structured body");
+            assert_eq!(body["title"], "Curated Library");
+            assert_eq!(body["description"], "One-line card text.");
+            assert_eq!(body["subject"]["scope"], "Everything about curation.");
+            assert_eq!(body["subject"]["method"], "Hand-written fixtures.");
+            assert_eq!(body["subject"]["exclusions"][0], "History.");
+        }
+
+        /// Plan-05 criterion 2 (configure half): set, overwrite, and
+        /// clear each field on an existing mem; unknown mem refuses.
+        #[test]
+        fn mem_configure_sets_overwrites_and_clears() {
+            let (server, tmp) = setup();
+            let target = tmp.path().join("plain");
+            let create = server.memstead_mem_create(Parameters(TlsMemCreateParams {
+                title: None,
+                description: None,
+                subject: None,
+                schema_verbosity: None,
+                write_guidance: Default::default(),
+                name: "plain".to_string(),
+                location: target.to_string_lossy().into_owned(),
+                schema: "default@1.0.0".to_string(),
+                vcs: None,
+                note: Some("plain create".to_string()),
+                recovery: None,
+                include_schema: false,
+            }));
+            assert!(!create.is_error.unwrap_or(false), "{create:?}");
+
+            let configure = |title: Option<&str>,
+                             description: Option<&str>,
+                             subject: Option<crate::lifecycle::MemSubjectInput>,
+                             clear_subject: bool| {
+                server.memstead_mem_configure(Parameters(
+                    crate::lifecycle::MemConfigureParams {
+                        name: "plain".to_string(),
+                        title: title.map(String::from),
+                        description: description.map(String::from),
+                        subject,
+                        clear_subject,
+                        note: Some("configure test".to_string()),
+                    },
+                ))
+            };
+
+            // Set.
+            let set = configure(
+                Some("First Title"),
+                Some("First description."),
+                Some(crate::lifecycle::MemSubjectInput {
+                    scope: "Scope one.".to_string(),
+                    method: None,
+                    exclusions: None,
+                }),
+                false,
+            );
+            assert!(!set.is_error.unwrap_or(false), "{set:?}");
+            let body = set.structured_content.unwrap();
+            assert_eq!(body["title"], "First Title");
+            assert_eq!(body["subject"]["scope"], "Scope one.");
+
+            // Overwrite one field, leave the rest untouched.
+            let over = configure(Some("Second Title"), None, None, false);
+            let body = over.structured_content.unwrap();
+            assert_eq!(body["title"], "Second Title");
+            assert_eq!(body["description"], "First description.");
+            assert_eq!(body["subject"]["scope"], "Scope one.");
+
+            // Clear: empty string for the strings, clear_subject for
+            // the block.
+            let cleared = configure(Some(""), Some(""), None, true);
+            let body = cleared.structured_content.unwrap();
+            assert!(body["title"].is_null(), "cleared title must be null: {body}");
+            assert!(body["description"].is_null());
+            assert!(body["subject"].is_null());
+
+            // Unknown mem refuses with the typed code.
+            let unknown = server.memstead_mem_configure(Parameters(
+                crate::lifecycle::MemConfigureParams {
+                    name: "no-such-mem".to_string(),
+                    title: Some("X".to_string()),
+                    description: None,
+                    subject: None,
+                    clear_subject: false,
+                    note: None,
+                },
+            ));
+            assert!(unknown.is_error.unwrap_or(false));
+            let err = unknown.structured_content.unwrap();
+            assert_eq!(err["code"], "UNKNOWN_MEM", "{err}");
+        }
+
+        /// Plan-05 criterion 3 (the operator's permission complement):
+        /// curation params change nothing about the create allowlist
+        /// gate — a rejected name refuses with the same typed code and
+        /// detail shape; and configure against a read-only mount
+        /// refuses READ_ONLY_MOUNT.
+        #[test]
+        fn mem_curation_changes_no_permission_gate() {
+            // Restrictive create allowlist: only `allowed-*` passes.
+            let tmp = TempDir::new().unwrap();
+            let settings = memstead_git_branch::test_support::auto_seed_with_settings(
+                tmp.path(),
+                WorkspaceSettings {
+                    mem_create_rules: vec![memstead_base::CreateRuleSetting {
+                        pattern: "allowed-*".to_string(),
+                        schemas: vec!["default@1.0.0".to_string()],
+                        default_cross_links: None,
+                    }],
+                    mem_delete_rules: vec![],
+                    ..Default::default()
+                },
+            );
+            let mut unified = setup_unified_test_engine(tmp.path());
+            unified.set_settings(settings);
+            let canonical_root =
+                std::fs::canonicalize(tmp.path()).unwrap_or_else(|_| tmp.path().to_path_buf());
+            unified.set_workspace_root(canonical_root);
+            let server = McpServer::new(unified, crate::config::DEFAULT_TOKEN_BUDGET);
+
+            let target = tmp.path().join("denied-x");
+            let refused = server.memstead_mem_create(Parameters(TlsMemCreateParams {
+                title: Some("Sneaky Title".to_string()),
+                description: Some("Sneaky description.".to_string()),
+                subject: None,
+                schema_verbosity: None,
+                write_guidance: Default::default(),
+                name: "denied-x".to_string(),
+                location: target.to_string_lossy().into_owned(),
+                schema: "default@1.0.0".to_string(),
+                vcs: None,
+                note: None,
+                recovery: None,
+                include_schema: false,
+            }));
+            assert!(refused.is_error.unwrap_or(false), "{refused:?}");
+            let err = refused.structured_content.unwrap();
+            assert_eq!(err["code"], "MEM_PATH_NOT_ALLOWED", "{err}");
+            assert!(
+                err["details"]["candidate"].is_string()
+                    && err["details"]["patterns"].is_array()
+                    && err["details"]["reason"].is_string(),
+                "detail shape must match the param-less refusal: {err}"
+            );
+
+            // Read-only mount: build a real sealed archive, register
+            // it read-only on the live engine (the exact mount shape
+            // `memstead install` produces), and configure against it.
+            {
+                let src = tmp.path().join("frozen-src").join("frozen");
+                std::fs::create_dir_all(src.join(".memstead")).unwrap();
+                std::fs::write(
+                    src.join(".memstead/config.json"),
+                    r#"{"version":"1.0.0","schema":"default@1.0.0"}"#,
+                )
+                .unwrap();
+                std::fs::write(
+                    src.join("solo.md"),
+                    "---\ntype: spec\ncreated_date: 2026-01-15\nlast_modified: 2026-01-15\nlevel: M0\n---\n# Solo\n\n## Identity\n\nA.\n\n## Purpose\n\nB.\n",
+                ).unwrap();
+                let archive = tmp.path().join("frozen.mem");
+                let config = memstead_schema::load_and_validate(&src).unwrap();
+                memstead_git_branch::ops::export::export_mem(&src, &config, &archive, None, None)
+                    .unwrap();
+
+                let unified = server.unified_engine();
+                let mut engine = unified.lock().unwrap_or_else(|e| e.into_inner());
+                let mount = memstead_base::Mount {
+                    mem: "frozen".to_string(),
+                    schema: Some("default@1.0.0".parse().unwrap()),
+                    storage: memstead_base::MountStorage::Archive {
+                        path: archive.clone(),
+                    },
+                    capability: memstead_base::MountCapability::ReadOnly,
+                    lifecycle: memstead_base::MountLifecycle::Eager,
+                    cross_linkable: false,
+                    migration_target: None,
+                };
+                let backend: Box<dyn memstead_base::MemBackend> =
+                    Box::new(memstead_base::storage::ArchiveBackend::new(archive));
+                engine
+                    .register_read_mount(
+                        mount,
+                        backend,
+                        memstead_base::MemOrigin::RuntimeCreated {
+                            at: std::time::SystemTime::now(),
+                            by_tool: "test",
+                        },
+                    )
+                    .unwrap();
+            }
+            let ro = server.memstead_mem_configure(Parameters(
+                crate::lifecycle::MemConfigureParams {
+                    name: "frozen".to_string(),
+                    title: Some("New Title".to_string()),
+                    description: None,
+                    subject: None,
+                    clear_subject: false,
+                    note: None,
+                },
+            ));
+            assert!(ro.is_error.unwrap_or(false), "{ro:?}");
+            let err = ro.structured_content.unwrap();
+            assert_eq!(err["code"], "READ_ONLY_MOUNT", "{err}");
         }
 
         /// The schema payload exists, names the pinned schema, and ships

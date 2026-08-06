@@ -58,7 +58,8 @@ const EXPECTED_TOOLS: &[&str] = &[
     "memstead_changes_since",
     "memstead_diff",
     "memstead_reload",
-    // Mem lifecycle (4)
+    // Mem lifecycle (5)
+    "memstead_mem_configure",
     "memstead_mem_create",
     "memstead_mem_delete",
     "memstead_mem_set_schema",
@@ -158,10 +159,20 @@ fn memstead_mcp_does_not_depend_on_memstead_cli() {
 
 /// Explicit guard for removed/abstained tools — named so a
 /// re-introduction fails with an obvious per-tool message, not just
-/// "drift" on the set diff. The whole batch family is CLI-only by
-/// design: the MCP server stays warm, so the engine-boot cost that
-/// motivates batching does not apply there, and the tool-surface
-/// policy resists additions without a demonstrated need.
+/// "drift" on the set diff.
+///
+/// The rationale argues against the MCP-only **consumer profile**
+/// (`dev/handbook/agent-surfaces.md`, "Consumer profile"), not merely
+/// the agent-with-a-shell case. All three of plenum finding 18's axes
+/// were weighed: (1) *boot cost* — the MCP server stays warm, so the
+/// engine-boot cost that motivates CLI batching does not apply;
+/// (2) *agent-context cost* — mass create/update payloads are
+/// file-scale, and their report-all responses would flood an agent
+/// context, which is why mass ingest is deliberately off the profile;
+/// (3) *atomicity* — atomic multi-relate belongs on
+/// `memstead_relate`'s list form, never a second tool, and atomic
+/// mass-create stays CLI-only because its payloads are file-scale.
+/// Export is distribution, off the profile by contract.
 #[test]
 fn mcp_does_not_expose_batch_update_or_export() {
     let names = current_tool_names();
@@ -173,9 +184,11 @@ fn mcp_does_not_expose_batch_update_or_export() {
     ] {
         assert!(
             !names.iter().any(|n| n == removed),
-            "{removed} must not be re-exposed — agents use the single mutation tools in a loop \
-             for batches (the batch commands are CLI-only); export is human-triggered via \
-             memstead-cli export or the macOS app."
+            "{removed} must not be re-exposed — the MCP consumer profile \
+             (dev/handbook/agent-surfaces.md) deliberately excludes distribution and \
+             mass ingest: batch payloads are file-scale and their responses would flood \
+             an agent context; atomic multi-relate belongs on memstead_relate's list \
+             form, never a second tool; export is human/CLI-triggered distribution."
         );
     }
 }
@@ -569,6 +582,16 @@ fn expected_hints(tool_name: &str) -> HintTriple {
         // version is technically a no-op on disk, but the response
         // still ships `{old, new}` and the engine writes the config
         // bytes either way.
+        // `memstead_mem_configure` — sets curation fields (title /
+        // description / subject) through the same setters the CLI
+        // verbs use. Mutation but not destructive; idempotent — the
+        // same call twice lands the same state.
+        "memstead_mem_configure" => HintTriple {
+            read_only: Some(false),
+            destructive: Some(false),
+            idempotent: Some(true),
+            open_world: Some(false),
+        },
         "memstead_mem_set_schema" => HintTriple {
             read_only: Some(false),
             destructive: Some(false),
@@ -1888,6 +1911,26 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "UNKNOWN_MEM",
             "SCHEMA_NOT_FOUND",
             "INVALID_INPUT",
+        ],
+        "memstead_mem_configure" => &[
+            // Response-shape fields.
+            "mem",
+            "warnings",
+            // Subject block fields the description names.
+            "scope",
+            "method",
+            "exclusions",
+            // Error / warning codes named literally.
+            "INVALID_INPUT",
+            "UNKNOWN_MEM",
+            "READ_ONLY_MOUNT",
+            "MEM_RELOADED",
+            // CLI sibling verbs cited for storage parity.
+            "mem set-title",
+            "set-description",
+            "set-subject",
+            // Allowlist token (description disclaims the gate).
+            "mem_management",
         ],
         "memstead_mem_set_version" => &[
             // Response-shape fields.
