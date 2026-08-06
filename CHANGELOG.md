@@ -8,6 +8,13 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Fixed
+- **`--force-overwrite`'s documentation stops lying.** The CLI flag
+  help and the MCP `memstead_mem_create` recovery-parameter
+  description both claimed the destroy-and-recreate recovery path was
+  "not yet implemented" — it has been implemented and tested for some
+  time (residual branch + config blob pruned in one ref-edit
+  transaction, then the normal create path). Both surfaces now state
+  the real behaviour; the flag and recovery value are unchanged.
 - **Plugin guard hooks now block with their designed message.** The
   entity-edit, entity-bash, and ingest deny hooks wrote their
   `BLOCKED: …` reason to stdout — but Claude Code's exit-2 hook
