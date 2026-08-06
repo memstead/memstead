@@ -197,6 +197,12 @@ impl CliError {
                     "missing": missing,
                 })),
             ),
+            // Block-tier declared-constraint refusals — validation
+            // errors with the same recovery payload the MCP envelope
+            // carries (`EngineError::details`).
+            ConstraintUnsatisfied { .. } | RequiredOutgoingUnsatisfied { .. } => {
+                (ExitKind::Validation, Some(e.details()))
+            }
             RelationHasBodyLinks {
                 from_id,
                 to_id,

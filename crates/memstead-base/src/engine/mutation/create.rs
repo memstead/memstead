@@ -595,10 +595,51 @@ impl Engine {
             type_def.as_ref(),
         );
         if !unsatisfied.is_empty() {
+            // A block declared `severity: block` promotes the warning
+            // to a refusal — evaluated here, before any disk or store
+            // effect, so a refused create leaves nothing behind.
+            let blocked: Vec<_> = unsatisfied
+                .iter()
+                .filter(|b| b.severity == memstead_schema::ConstraintSeverity::Block)
+                .cloned()
+                .collect();
+            if !blocked.is_empty() {
+                return Err(EngineError::RequiredOutgoingUnsatisfied {
+                    entity_type: entity_for_render.entity_type.clone(),
+                    entity_id: id.to_string(),
+                    missing: blocked,
+                });
+            }
             warnings.push(WarningHint::MissingRequiredOutgoing {
                 entity_type: entity_for_render.entity_type.clone(),
                 entity_id: id.clone(),
                 missing: unsatisfied,
+            });
+        }
+
+        // Declared-constraints evaluation (`requires_when`, …) — the
+        // same single evaluation the health `constraints` include
+        // runs. Block-tier violations refuse; warn-tier violations
+        // warn and the write proceeds.
+        let violated =
+            crate::ops::health::unsatisfied_constraints(&entity_for_render, type_def.as_ref());
+        if !violated.is_empty() {
+            let blocked: Vec<_> = violated
+                .iter()
+                .filter(|v| v.severity == memstead_schema::ConstraintSeverity::Block)
+                .cloned()
+                .collect();
+            if !blocked.is_empty() {
+                return Err(EngineError::ConstraintUnsatisfied {
+                    entity_type: entity_for_render.entity_type.clone(),
+                    entity_id: id.to_string(),
+                    violations: blocked,
+                });
+            }
+            warnings.push(WarningHint::ConstraintUnsatisfied {
+                entity_type: entity_for_render.entity_type.clone(),
+                entity_id: id.clone(),
+                violations: violated,
             });
         }
 
@@ -1274,6 +1315,457 @@ write_rules: []
             })
             .flatten()
             .collect()
+    }
+
+    /// Fixture for the declared-constraints vertical: type `task`
+    /// declares `requires_when` (checked → checked_by) at the given
+    /// severity, plus a `required_outgoing` block at the given
+    /// severity — so one schema exercises form 1 and form 4 at either
+    /// tier.
+    fn engine_with_constraints_schema(
+        tmp: &TempDir,
+        requires_when_severity: &str,
+        required_outgoing_severity: &str,
+    ) -> Engine {
+        let schemas_dir = tmp.path().join("schemas");
+        let pkg = schemas_dir.join("constr");
+        std::fs::create_dir_all(pkg.join("types")).unwrap();
+        std::fs::write(
+            pkg.join("schema.yaml"),
+            r#"name: constr
+version: 0.1.0
+description: constraint fixture
+when_to_use: tests
+types:
+  - task
+relationships:
+  mode: strict
+  definitions:
+    - name: PART_OF
+      description: hier
+      default_weight: 3.0
+    - name: _default
+      description: fallback
+      default_weight: 1.0
+community:
+  resolution: 1.0
+  seed: 42
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            pkg.join("types").join("task.yaml"),
+            format!(
+                r#"name: task
+description: t
+when_to_use: tests
+sections:
+  - key: body
+    heading: Body
+    required: true
+    search_weight: 10.0
+    catch_all: true
+    write_rules: []
+metadata_fields:
+  - key: status
+    description: workflow state
+    field_type: string
+    enum_values: [open, checked]
+    optional: true
+  - key: checked_by
+    description: who checked
+    field_type: string
+    optional: true
+title_weight: 100.0
+text_fields:
+  - body
+hierarchy_relationship: PART_OF
+propagating_relationships: [PART_OF]
+updatable_fields:
+  - title
+  - body
+  - status
+  - checked_by
+health_required_fields:
+  - body
+staleness_threshold_days: 90
+required_outgoing:
+  - relationships: [PART_OF]
+    cardinality: at_least_one
+    severity: {required_outgoing_severity}
+constraints:
+  - kind: requires_when
+    field: checked_by
+    when_field: status
+    when_value: checked
+    severity: {requires_when_severity}
+write_rules: []
+"#
+            ),
+        )
+        .unwrap();
+        let mem_dir = tmp.path().join("mem");
+        std::fs::create_dir_all(&mem_dir).unwrap();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let mount = crate::workspace::Mount {
+            mem: "tasks".to_string(),
+            schema: Some(memstead_schema::SchemaRef::new(
+                "constr",
+                semver::Version::new(0, 1, 0),
+            )),
+            storage: crate::workspace::MountStorage::Folder { path: mem_dir },
+            capability: crate::workspace::MountCapability::Write,
+            lifecycle: crate::workspace::MountLifecycle::Eager,
+            cross_linkable: true,
+            migration_target: None,
+        };
+        Engine::from_mounts_with_schemas_dir(
+            vec![(mount, Box::new(writer) as Box<dyn MemBackend>)],
+            Some(&schemas_dir),
+        )
+        .unwrap()
+    }
+
+    fn checked_task_args(title: &str, relations: Vec<crate::ops::RelateArg>) -> CreateEntityArgs {
+        let mut args = task_create_args(title, relations);
+        args.metadata
+            .insert("status".to_string(), "checked".to_string());
+        args
+    }
+
+    /// Form 1 at warn: a create violating `requires_when` warns
+    /// `CONSTRAINT_UNSATISFIED` and still commits; the health sweep
+    /// reports the same violation (shared evaluation); a create
+    /// satisfying the constraint emits neither.
+    #[test]
+    fn create_warns_requires_when_and_still_commits() {
+        let tmp = TempDir::new().unwrap();
+        let mut engine = engine_with_constraints_schema(&tmp, "warn", "warn");
+        let (actor, client) = cli_actor();
+
+        let outcome = engine
+            .create_entity(
+                checked_task_args("Unbacked Judgment", vec![]),
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap();
+        assert!(!outcome.commit_sha.is_empty(), "warn tier never blocks");
+        let violation = outcome
+            .warnings
+            .iter()
+            .find_map(|w| match w {
+                WarningHint::ConstraintUnsatisfied { violations, .. } => Some(violations.clone()),
+                _ => None,
+            })
+            .expect("CONSTRAINT_UNSATISFIED warning present");
+        assert_eq!(violation.len(), 1);
+        assert_eq!(violation[0].kind, "requires_when");
+        assert_eq!(violation[0].field, "checked_by");
+        assert_eq!(violation[0].when_field, "status");
+        assert_eq!(violation[0].when_value, "checked");
+
+        // Health parity — same single evaluation.
+        let reports = crate::ops::health::collect_constraint_findings(
+            engine.store(),
+            None,
+            engine.schemas(),
+        );
+        assert_eq!(reports.len(), 1);
+        assert_eq!(reports[0].id, outcome.id);
+        assert_eq!(reports[0].violations.len(), 1);
+        assert_eq!(reports[0].violations[0].field, "checked_by");
+
+        // Complement 1: satisfying the constraint in the same create
+        // emits no warning and no finding.
+        let mut satisfied_args = checked_task_args("Backed Judgment", vec![]);
+        satisfied_args
+            .metadata
+            .insert("checked_by".to_string(), "reviewer-a".to_string());
+        let satisfied = engine
+            .create_entity(satisfied_args, actor, Some(&client), None)
+            .unwrap();
+        assert!(
+            !satisfied.warnings.iter().any(|w| matches!(
+                w,
+                WarningHint::ConstraintUnsatisfied { .. }
+            )),
+            "satisfied constraint emits no warning: {:?}",
+            satisfied.warnings
+        );
+
+        // Complement 2: an untriggered constraint (status != checked)
+        // emits nothing even with checked_by unset.
+        let untriggered = engine
+            .create_entity(
+                task_create_args("Open Task", vec![]),
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap();
+        assert!(
+            !untriggered.warnings.iter().any(|w| matches!(
+                w,
+                WarningHint::ConstraintUnsatisfied { .. }
+            )),
+            "untriggered constraint emits no warning"
+        );
+    }
+
+    /// Form 1 at block: the same violation refuses the create with
+    /// `CONSTRAINT_UNSATISFIED`, leaves nothing behind, and the
+    /// refusal payload restates the declaration.
+    #[test]
+    fn create_refuses_block_tier_requires_when() {
+        let tmp = TempDir::new().unwrap();
+        let mut engine = engine_with_constraints_schema(&tmp, "block", "warn");
+        let (actor, client) = cli_actor();
+
+        let err = engine
+            .create_entity(
+                checked_task_args("Unbacked Judgment", vec![]),
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap_err();
+        assert_eq!(err.code(), "CONSTRAINT_UNSATISFIED");
+        let details = err.details();
+        assert_eq!(details["violations"][0]["field"], "checked_by");
+        assert_eq!(details["violations"][0]["severity"], "block");
+        assert_eq!(
+            engine.store().all_entities().count(),
+            0,
+            "refused create leaves nothing behind"
+        );
+
+        // The satisfying create passes under the same schema.
+        let mut ok_args = checked_task_args("Backed Judgment", vec![]);
+        ok_args
+            .metadata
+            .insert("checked_by".to_string(), "reviewer-a".to_string());
+        engine
+            .create_entity(ok_args, actor, Some(&client), None)
+            .unwrap();
+    }
+
+    /// Form 4 at block: a create leaving a `severity: block`
+    /// `required_outgoing` block unsatisfied refuses with
+    /// `MISSING_REQUIRED_OUTGOING` (the same code the warn tier
+    /// warns with — one condition, one vocabulary); an inline
+    /// relation satisfying the block lets the create pass.
+    #[test]
+    fn create_refuses_block_tier_required_outgoing() {
+        let tmp = TempDir::new().unwrap();
+        let mut engine = engine_with_constraints_schema(&tmp, "warn", "block");
+        let (actor, client) = cli_actor();
+
+        let err = engine
+            .create_entity(
+                task_create_args("Orphan Task", vec![]),
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap_err();
+        assert_eq!(err.code(), "MISSING_REQUIRED_OUTGOING");
+        let details = err.details();
+        assert_eq!(details["missing"][0]["relationships"][0], "PART_OF");
+        assert_eq!(details["missing"][0]["severity"], "block");
+        assert_eq!(engine.store().all_entities().count(), 0);
+
+        // A create satisfying the block via an inline relation to an
+        // auto-stubbed target passes — the stub itself has no type
+        // definition under this schema's `task`-only vocabulary, so
+        // wire the edge from the real entity.
+        let outcome = engine.create_entity(
+            task_create_args(
+                "Child Task",
+                vec![crate::ops::RelateArg {
+                    to: crate::entity::EntityId("tasks--parent".to_string()),
+                    rel_type: "PART_OF".to_string(),
+                    description: None,
+                }],
+            ),
+            actor,
+            Some(&client),
+            None,
+        );
+        assert!(
+            outcome.is_ok(),
+            "satisfied block-tier create passes: {:?}",
+            outcome.err()
+        );
+    }
+
+    /// Update-side severity mirror for form 1: at warn, an update
+    /// that makes the constraint trigger warns and commits; at block,
+    /// the same update refuses and the entity keeps its prior state.
+    #[test]
+    fn update_enforces_requires_when_by_severity() {
+        let (actor, client) = cli_actor();
+        let set_checked = |engine: &mut Engine, id: &crate::entity::EntityId| {
+            let current = engine.get_entity(id).unwrap().content_hash.clone();
+            let mut metadata = IndexMap::new();
+            metadata.insert("status".to_string(), "checked".to_string());
+            engine.update_entity(
+                crate::engine::UpdateEntityArgs {
+                    anchors: Vec::new(),
+                    id: id.clone(),
+                    expected_hash: Some(current),
+                    sections: IndexMap::new(),
+                    append_sections: IndexMap::new(),
+                    patch_sections: IndexMap::new(),
+                    metadata,
+                    metadata_unset: Vec::new(),
+                    declare_relations: vec![],
+                    dry_run: false,
+                    relations_unset: Vec::new(),
+                    anchors_unset: Vec::new(),
+                },
+                actor,
+                Some(&client),
+                None,
+            )
+        };
+
+        // Warn tier: the update commits with the typed warning.
+        let tmp = TempDir::new().unwrap();
+        let mut engine = engine_with_constraints_schema(&tmp, "warn", "warn");
+        let a = engine
+            .create_entity(
+                task_create_args("Task A", vec![]),
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap();
+        let outcome = set_checked(&mut engine, &a.id).unwrap();
+        assert!(!outcome.commit_sha.is_empty());
+        assert!(
+            outcome
+                .warnings
+                .iter()
+                .any(|w| matches!(w, WarningHint::ConstraintUnsatisfied { .. })),
+            "warn-tier update carries the warning: {:?}",
+            outcome.warnings
+        );
+
+        // Block tier: the same update refuses; the entity keeps its
+        // prior metadata.
+        let tmp = TempDir::new().unwrap();
+        let mut engine = engine_with_constraints_schema(&tmp, "block", "warn");
+        let b = engine
+            .create_entity(
+                task_create_args("Task B", vec![]),
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap();
+        let err = set_checked(&mut engine, &b.id).unwrap_err();
+        assert_eq!(err.code(), "CONSTRAINT_UNSATISFIED");
+        assert!(
+            !engine
+                .get_entity(&b.id)
+                .unwrap()
+                .metadata
+                .contains_key("status"),
+            "refused update leaves the entity unchanged"
+        );
+    }
+
+    /// Form 4 at block on the relate surface: removing the edge that
+    /// satisfies a `severity: block` `required_outgoing` block refuses
+    /// with `MISSING_REQUIRED_OUTGOING`; the edge survives.
+    #[test]
+    fn relate_remove_refuses_block_tier_required_outgoing() {
+        let tmp = TempDir::new().unwrap();
+        let mut engine = engine_with_constraints_schema(&tmp, "warn", "block");
+        let (actor, client) = cli_actor();
+        let parent_id = crate::entity::EntityId("tasks--parent".to_string());
+        let child = engine
+            .create_entity(
+                task_create_args(
+                    "Child Task",
+                    vec![crate::ops::RelateArg {
+                        to: parent_id.clone(),
+                        rel_type: "PART_OF".to_string(),
+                        description: None,
+                    }],
+                ),
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap();
+
+        let err = engine
+            .relate_entity(
+                crate::engine::RelateEntityArgs {
+                    source: child.id.clone(),
+                    target: parent_id.clone(),
+                    rel_type: "PART_OF".to_string(),
+                    description: None,
+                    remove: true,
+                    expected_hash: None,
+                },
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap_err();
+        assert_eq!(err.code(), "MISSING_REQUIRED_OUTGOING");
+        assert!(
+            engine
+                .get_entity(&child.id)
+                .unwrap()
+                .relationships
+                .iter()
+                .any(|r| r.rel_type == "PART_OF" && r.target == parent_id),
+            "refused remove leaves the edge in place"
+        );
+    }
+
+    /// Regression pin for `propagating_relationships`' single
+    /// functional behavior: a self-loop (`from == to`) on a rel-type
+    /// the source type lists there refuses with `RELATIONSHIP_CYCLE`.
+    /// The constraint vocabulary settles the field's semantics — the
+    /// new propagation declaration gets a distinct name, and this pin
+    /// guards that the old field keeps exactly this effect.
+    #[test]
+    fn propagating_rel_type_self_loop_refusal_is_pinned() {
+        let tmp = TempDir::new().unwrap();
+        // The `constr` fixture declares `propagating_relationships:
+        // [PART_OF]` on `task`.
+        let mut engine = engine_with_constraints_schema(&tmp, "warn", "warn");
+        let (actor, client) = cli_actor();
+        let a = engine
+            .create_entity(
+                task_create_args("Task A", vec![]),
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap();
+        let err = engine
+            .relate_entity(
+                crate::engine::RelateEntityArgs {
+                    source: a.id.clone(),
+                    target: a.id.clone(),
+                    rel_type: "PART_OF".to_string(),
+                    description: None,
+                    remove: false,
+                    expected_hash: None,
+                },
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap_err();
+        assert_eq!(err.code(), "RELATIONSHIP_CYCLE");
     }
 
     /// The advertised mutation warning is real: a create leaving a

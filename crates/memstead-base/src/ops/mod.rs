@@ -533,6 +533,16 @@ pub enum WarningHint {
         /// cardinality literal (`"at_least_one"`).
         missing: Vec<MissingRequiredOutgoingBlock>,
     },
+    /// The written entity violates warn-tier declared `constraints`
+    /// of its type (e.g. `requires_when`: a field required under the
+    /// current value of another field is unset). Block-tier violations
+    /// refuse instead ([`EngineError::ConstraintUnsatisfied`]) — the
+    /// warning only ever carries `severity: warn` entries.
+    ConstraintUnsatisfied {
+        entity_type: String,
+        entity_id: EntityId,
+        violations: Vec<crate::ops::health::UnsatisfiedConstraint>,
+    },
     /// A markdown file declared the same `## <Heading>` twice or more for a
     /// schema-declared section key. The parser keeps the first occurrence's
     /// body and drops the rest — the duplicate headers and their bodies are
@@ -850,6 +860,16 @@ impl From<&memstead_schema::HeadingKeyViolation> for SchemaHeadingViolation {
 pub struct MissingRequiredOutgoingBlock {
     pub relationships: Vec<String>,
     pub cardinality: String,
+    /// The block's declared severity. Serialized only for `block` —
+    /// warn is the default the vocabulary has always had, and existing
+    /// consumers keep their byte-identical `{ relationships,
+    /// cardinality }` shape.
+    #[serde(skip_serializing_if = "severity_is_warn")]
+    pub severity: memstead_schema::ConstraintSeverity,
+}
+
+fn severity_is_warn(s: &memstead_schema::ConstraintSeverity) -> bool {
+    *s == memstead_schema::ConstraintSeverity::Warn
 }
 
 /// Abstract recovery action attached to a `PARSED_RELATION_INVALID`
@@ -1309,6 +1329,25 @@ impl fmt::Display for WarningHint {
                 }
                 Ok(())
             }
+            WarningHint::ConstraintUnsatisfied {
+                entity_type,
+                entity_id,
+                violations,
+            } => {
+                write!(
+                    f,
+                    "{entity_id} ({entity_type}) violates {n} declared constraint(s):",
+                    n = violations.len(),
+                )?;
+                for v in violations {
+                    write!(
+                        f,
+                        "\n  - {}: '{}' is required when {}={} and is unset",
+                        v.kind, v.field, v.when_field, v.when_value,
+                    )?;
+                }
+                Ok(())
+            }
             WarningHint::DuplicateSectionHeading {
                 entity_id,
                 section_key,
@@ -1590,6 +1629,7 @@ impl WarningHint {
             Self::IgnoredReadonlyField { .. } => "IGNORED_READONLY_FIELD",
             Self::OuterRepoNotIgnoringMemRepo { .. } => "OUTER_REPO_NOT_IGNORING_MEM_REPO",
             Self::MissingRequiredOutgoing { .. } => "MISSING_REQUIRED_OUTGOING",
+            Self::ConstraintUnsatisfied { .. } => "CONSTRAINT_UNSATISFIED",
             Self::DuplicateSectionHeading { .. } => "DUPLICATE_SECTION_HEADING",
             Self::MemReloaded { .. } => "MEM_RELOADED",
             Self::SchemaPinMismatch { .. } => "SCHEMA_PIN_MISMATCH",
@@ -1637,6 +1677,7 @@ impl WarningHint {
             Self::ReadMemsMigratedToMounts { .. } => None,
             Self::FolderMemProvenance { mem } => Some(mem.as_str()),
             Self::MissingRequiredOutgoing { entity_id, .. } => Some(entity_id.mem()),
+            Self::ConstraintUnsatisfied { entity_id, .. } => Some(entity_id.mem()),
             Self::DuplicateRelationship { from, .. } => Some(from.mem()),
             Self::NoSuchRelationship { from, .. } => Some(from.mem()),
             Self::InlineWikiLinkAutoStubbed { from, .. } => Some(from.mem()),
@@ -1795,10 +1836,12 @@ impl WarningHint {
                     MissingRequiredOutgoingBlock {
                         relationships: vec!["CHOSEN".into()],
                         cardinality: "at_least_one".into(),
+                        severity: memstead_schema::ConstraintSeverity::Warn,
                     },
                     MissingRequiredOutgoingBlock {
                         relationships: vec!["REJECTED".into()],
                         cardinality: "at_least_one".into(),
+                        severity: memstead_schema::ConstraintSeverity::Warn,
                     },
                 ],
             },
@@ -2018,6 +2061,15 @@ impl WarningHint {
                 "entity_type": entity_type,
                 "entity_id": entity_id,
                 "missing": missing,
+            }),
+            Self::ConstraintUnsatisfied {
+                entity_type,
+                entity_id,
+                violations,
+            } => serde_json::json!({
+                "entity_type": entity_type,
+                "entity_id": entity_id,
+                "violations": violations,
             }),
             Self::DuplicateSectionHeading {
                 entity_id,

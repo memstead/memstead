@@ -520,6 +520,14 @@ pub fn compose_health(
             .collect();
         obj.insert("missing_required_outgoing".into(), serde_json::json!(arr));
     }
+    if include.iter().any(|s| s == "constraints") {
+        let reports = engine.constraint_findings(vf);
+        let arr: Vec<serde_json::Value> = reports
+            .into_iter()
+            .map(|r| serde_json::to_value(&r).unwrap())
+            .collect();
+        obj.insert("constraints".into(), serde_json::json!(arr));
+    }
     if include.iter().any(|s| s == "tags") {
         let (distribution, folded, untagged) =
             memstead_base::ops::health::collect_tag_distribution(engine.store(), vf, limit);
@@ -651,6 +659,7 @@ pub fn render_health_markdown(v: &serde_json::Value) -> String {
         ("stale", "Stale"),
         ("dangling_links", "Dangling links"),
         ("missing_required_outgoing", "Missing required outgoing"),
+        ("constraints", "Constraint violations"),
         ("findings", "Findings"),
     ] {
         if let Some(arr) = v.get(key).and_then(|x| x.as_array()) {

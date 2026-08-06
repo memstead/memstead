@@ -11,6 +11,13 @@
         "type": "string"
       }
     },
+    "constraints": {
+      "description": "Declared keep-health constraints (the constraint vocabulary —\nsee [`ConstraintDef`]). Empty default: a schema declaring no\nconstraints behaves byte-identically to before the vocabulary\nexisted.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/ConstraintDef"
+      }
+    },
     "description": {
       "type": "string"
     },
@@ -121,6 +128,59 @@
     "write_rules"
   ],
   "$defs": {
+    "ConstraintDef": {
+      "description": "One declared keep-health constraint on a type — the constraint\nvocabulary (agent-toolbox plan 07). Declarations travel sealed with\nthe schema package and are rendered on the `memstead_schema`\nresponse at BOTH verbosity levels (a hidden legality condition is a\ndefect class of its own). The `kind` tag is closed: an unknown kind\nfails deserialization, so no declaration can load and be silently\nignored. Forms land vertically — a form is only declarable once the\nengine evaluates it.",
+      "oneOf": [
+        {
+          "description": "Form 1 — conditional requirement: `field` (a metadata field or\nsection key of this type) is required whenever `when_field`\nholds `when_value` (\"`status: checked` requires `checked_by`\").",
+          "type": "object",
+          "properties": {
+            "field": {
+              "description": "The field or section that becomes required.",
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "requires_when"
+            },
+            "severity": {
+              "$ref": "#/$defs/ConstraintSeverity",
+              "default": "warn"
+            },
+            "when_field": {
+              "description": "The metadata field whose value triggers the requirement.",
+              "type": "string"
+            },
+            "when_value": {
+              "description": "The triggering value (validated against `when_field`'s\nenum, when it declares one).",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "field",
+            "when_field",
+            "when_value"
+          ]
+        }
+      ]
+    },
+    "ConstraintSeverity": {
+      "description": "Uniform severity for the constraint vocabulary — one model across\nevery constraint form, never five ad-hoc ones. `warn` produces a\nhealth finding only; `block` additionally refuses at write time\n(and still surfaces pre-existing violations in health). Severity\napplies to every write surface uniformly — operator-mode bypasses\nallowlists, never validation.",
+      "oneOf": [
+        {
+          "description": "Health finding only (and, where a write-time warning exists,\nthat warning). The default for every form except uniqueness.",
+          "type": "string",
+          "const": "warn"
+        },
+        {
+          "description": "Write-time refusal plus health finding for pre-existing\nviolations.",
+          "type": "string",
+          "const": "block"
+        }
+      ]
+    },
     "FieldType": {
       "type": "string",
       "enum": [
@@ -216,6 +276,11 @@
           "items": {
             "type": "string"
           }
+        },
+        "severity": {
+          "description": "Constraint severity (form 4 of the constraint vocabulary):\n`warn` (the historical default — health finding +\n`MISSING_REQUIRED_OUTGOING` write-time warning) or `block`\n(write-time refusal when a create/update would land, or a\nrelate-remove would leave, the entity below cardinality).",
+          "$ref": "#/$defs/ConstraintSeverity",
+          "default": "warn"
         }
       },
       "additionalProperties": false,

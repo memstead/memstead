@@ -542,6 +542,28 @@ impl Engine {
             }
         };
 
+        // Block-tier `required_outgoing` on the remove path: dropping
+        // this edge must not leave a `severity: block` block
+        // unsatisfied — the same refusal create/update raise when the
+        // written edge set falls short. Warn-tier blocks stay silent
+        // here (the health sweep owns standing warn-tier findings;
+        // relate-remove has never warned and the no-noise rule keeps
+        // it that way).
+        if matches!(action, RelateAction::Removed) {
+            let blocked: Vec<_> =
+                crate::ops::health::unsatisfied_required_outgoing(&next, type_def.as_ref())
+                    .into_iter()
+                    .filter(|b| b.severity == memstead_schema::ConstraintSeverity::Block)
+                    .collect();
+            if !blocked.is_empty() {
+                return Err(EngineError::RequiredOutgoingUnsatisfied {
+                    entity_type: next.entity_type.clone(),
+                    entity_id: args.source.to_string(),
+                    missing: blocked,
+                });
+            }
+        }
+
         // Plan a stub for an absent target on the real-add path.
         // Skipped on no-op paths (NoOpAlreadyPresent / NoOpAbsent — the
         // edge isn't actually being added) and on the remove path (the

@@ -1558,6 +1558,9 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "stubs",
             "most_connected",
             "missing_fields",
+            // Standing declared-constraint violations (include=constraints).
+            "constraints",
+            "severity",
             "stale",
             "warnings",
             "community_count",
@@ -1681,6 +1684,9 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "relationships",
             "cardinality",
             "title",
+            // Standing declared-constraint violations (include=constraints).
+            "constraints",
+            "severity",
         ],
         "memstead_diff" => &[
             // Response-shape fields the description names.

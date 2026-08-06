@@ -41,6 +41,12 @@ pub struct TypeDefinition {
     /// keep current behaviour.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub required_outgoing: Vec<RequiredOutgoing>,
+    /// Declared keep-health constraints (the constraint vocabulary —
+    /// see [`ConstraintDef`]). Empty default: a schema declaring no
+    /// constraints behaves byte-identically to before the vocabulary
+    /// existed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub constraints: Vec<ConstraintDef>,
     // Populated by loader from schema-level defaults merged with
     // edge_weight_overrides. Skipped during serialization so the on-disk
     // form round-trips.
@@ -74,6 +80,58 @@ pub struct RequiredOutgoing {
     /// raise `SchemaLoadError::UndeclaredRelationship`.
     pub relationships: Vec<String>,
     pub cardinality: RequiredCardinality,
+    /// Constraint severity (form 4 of the constraint vocabulary):
+    /// `warn` (the historical default — health finding +
+    /// `MISSING_REQUIRED_OUTGOING` write-time warning) or `block`
+    /// (write-time refusal when a create/update would land, or a
+    /// relate-remove would leave, the entity below cardinality).
+    #[serde(default)]
+    pub severity: ConstraintSeverity,
+}
+
+/// Uniform severity for the constraint vocabulary — one model across
+/// every constraint form, never five ad-hoc ones. `warn` produces a
+/// health finding only; `block` additionally refuses at write time
+/// (and still surfaces pre-existing violations in health). Severity
+/// applies to every write surface uniformly — operator-mode bypasses
+/// allowlists, never validation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ConstraintSeverity {
+    /// Health finding only (and, where a write-time warning exists,
+    /// that warning). The default for every form except uniqueness.
+    #[default]
+    Warn,
+    /// Write-time refusal plus health finding for pre-existing
+    /// violations.
+    Block,
+}
+
+/// One declared keep-health constraint on a type — the constraint
+/// vocabulary (agent-toolbox plan 07). Declarations travel sealed with
+/// the schema package and are rendered on the `memstead_schema`
+/// response at BOTH verbosity levels (a hidden legality condition is a
+/// defect class of its own). The `kind` tag is closed: an unknown kind
+/// fails deserialization, so no declaration can load and be silently
+/// ignored. Forms land vertically — a form is only declarable once the
+/// engine evaluates it.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ConstraintDef {
+    /// Form 1 — conditional requirement: `field` (a metadata field or
+    /// section key of this type) is required whenever `when_field`
+    /// holds `when_value` ("`status: checked` requires `checked_by`").
+    RequiresWhen {
+        /// The field or section that becomes required.
+        field: String,
+        /// The metadata field whose value triggers the requirement.
+        when_field: String,
+        /// The triggering value (validated against `when_field`'s
+        /// enum, when it declares one).
+        when_value: String,
+        #[serde(default)]
+        severity: ConstraintSeverity,
+    },
 }
 
 /// Required-cardinality variants. `AtLeastOne` is the only variant

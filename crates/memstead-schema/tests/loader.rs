@@ -1701,3 +1701,121 @@ fn every_builtin_schema_passes_reserved_metadata_keys() {
         });
     }
 }
+
+// ---------------------------------------------------------------------------
+// Constraint vocabulary (plan: schemas declare what is unhealthy to keep)
+// ---------------------------------------------------------------------------
+
+/// Valid `requires_when` declarations load; severity defaults to warn
+/// and parses when declared as block. `field` may name a section
+/// (`body`) or a metadata field (`status`).
+#[test]
+fn constraint_requires_when_accepted_with_severity() {
+    use memstead_schema::{ConstraintDef, ConstraintSeverity};
+    let t = minimal_type()
+        + r#"constraints:
+  - kind: requires_when
+    field: body
+    when_field: status
+    when_value: closed
+  - kind: requires_when
+    field: status
+    when_field: status
+    when_value: active
+    severity: block
+"#;
+    let schema = load(&minimal_manifest(), &[("sample", &t)]).expect("must load");
+    let td = schema.types.get("sample").unwrap();
+    assert_eq!(td.constraints.len(), 2);
+    let ConstraintDef::RequiresWhen { severity, .. } = &td.constraints[0];
+    assert_eq!(*severity, ConstraintSeverity::Warn, "default is warn");
+    let ConstraintDef::RequiresWhen { severity, .. } = &td.constraints[1];
+    assert_eq!(*severity, ConstraintSeverity::Block);
+}
+
+#[test]
+fn constraint_requires_when_unknown_field_rejected() {
+    let t = minimal_type()
+        + r#"constraints:
+  - kind: requires_when
+    field: nonexistent
+    when_field: status
+    when_value: closed
+"#;
+    let err = load(&minimal_manifest(), &[("sample", &t)]).expect_err("must fail");
+    assert!(
+        matches!(err, SchemaLoadError::InvalidConstraint { ref offender, .. } if offender == "nonexistent"),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn constraint_requires_when_unknown_when_field_rejected() {
+    let t = minimal_type()
+        + r#"constraints:
+  - kind: requires_when
+    field: body
+    when_field: phase
+    when_value: closed
+"#;
+    let err = load(&minimal_manifest(), &[("sample", &t)]).expect_err("must fail");
+    assert!(
+        matches!(err, SchemaLoadError::InvalidConstraint { ref offender, .. } if offender == "phase"),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn constraint_requires_when_value_outside_enum_rejected() {
+    let t = minimal_type()
+        + r#"constraints:
+  - kind: requires_when
+    field: body
+    when_field: status
+    when_value: archived
+"#;
+    let err = load(&minimal_manifest(), &[("sample", &t)]).expect_err("must fail");
+    assert!(
+        matches!(err, SchemaLoadError::InvalidConstraint { ref offender, .. } if offender == "archived"),
+        "got: {err}"
+    );
+}
+
+/// The `kind` tag is closed: a constraint form the engine does not
+/// evaluate fails deserialization — no declaration can load and be
+/// silently ignored (the `propagating_relationships` lesson).
+#[test]
+fn constraint_unknown_kind_rejected() {
+    let t = minimal_type()
+        + r#"constraints:
+  - kind: uniqueness
+    fields: [status]
+"#;
+    load(&minimal_manifest(), &[("sample", &t)]).expect_err("unknown kind must fail");
+}
+
+/// `required_outgoing` blocks parse a declared severity; an unknown
+/// severity literal fails deserialization.
+#[test]
+fn required_outgoing_severity_parses_and_rejects_unknown() {
+    let t = minimal_type()
+        + r#"required_outgoing:
+  - relationships: [PART_OF]
+    cardinality: at_least_one
+    severity: block
+"#;
+    let schema = load(&minimal_manifest(), &[("sample", &t)]).expect("must load");
+    let td = schema.types.get("sample").unwrap();
+    assert_eq!(
+        td.required_outgoing[0].severity,
+        memstead_schema::ConstraintSeverity::Block
+    );
+
+    let bad = minimal_type()
+        + r#"required_outgoing:
+  - relationships: [PART_OF]
+    cardinality: at_least_one
+    severity: fatal
+"#;
+    load(&minimal_manifest(), &[("sample", &bad)]).expect_err("unknown severity must fail");
+}

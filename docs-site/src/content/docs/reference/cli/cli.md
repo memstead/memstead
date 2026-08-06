@@ -365,12 +365,12 @@ Health summary (orphans, stubs, stale entities, missing fields)
 
 ###### **Options:**
 
-* `--include <INCLUDE>` — Opt heavy content into the response: orphans, stubs, most_connected, missing_fields, stale, dangling_links, tags, missing_required_outgoing, conformance, integrity, config. `conformance` lints every entity against the effective schema into a `findings` array (write-time typed codes); `integrity` adds the consistency axis (dangling links, stubs) to the same list. `config` renders the workspace-config projection (per-mem origin/storage/vcs detail, `mutations`, `plugin`) — the same block MCP's `include_config: true` serves. Repeatable (`--include K --include K`) AND comma-string (`--include K1,K2`) forms both parse — uniform with `memstead overview --include`
+* `--include <INCLUDE>` — Opt heavy content into the response: orphans, stubs, most_connected, missing_fields, stale, dangling_links, tags, missing_required_outgoing, constraints (standing violations of declared schema constraints), conformance, integrity, config, anchors (per-mem counts of the four standalone anchor-verification states). `conformance` lints every entity against the effective schema into a `findings` array (write-time typed codes); `integrity` adds the consistency axis (dangling links, stubs) to the same list. `config` renders the workspace-config projection (per-mem origin/storage/vcs detail, `mutations`, `plugin`) — the same block MCP's `include_config: true` serves. Repeatable (`--include K --include K`) AND comma-string (`--include K1,K2`) forms both parse — uniform with `memstead overview --include`
 * `--target-schema <TARGET_SCHEMA>` — Schema ref (`name@x.y.z`) the conformance/integrity includes lint against instead of each mem's current pin
 * `--limit <LIMIT>` — Max rows for `most_connected` and `tag_distribution` (default: 10)
 
   Default value: `10`
-* `--strict` — Exit non-zero (1) when any included Tier-2 warning kind has present violations, or when the always-on authoring-drift axis reports findings (`SCHEMA_AUTHORING_SOURCE_MISSING` / `SCHEMA_AUTHORING_SOURCE_DIVERGED` — no `--include` opt-in). The output is rendered first, then the non-zero exit fires. Include-gated participation today: `missing_required_outgoing`; new Tier-2 codes opt in additively without breaking the flag's semantics
+* `--strict` — Exit non-zero (1) when any included Tier-2 warning kind has present violations, or when the always-on authoring-drift axis reports findings (`SCHEMA_AUTHORING_SOURCE_MISSING` / `SCHEMA_AUTHORING_SOURCE_DIVERGED` — no `--include` opt-in). The output is rendered first, then the non-zero exit fires. Include-gated participation today: `missing_required_outgoing`, `constraints`; new Tier-2 codes opt in additively without breaking the flag's semantics
 
 
 

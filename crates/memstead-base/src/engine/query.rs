@@ -927,6 +927,17 @@ impl Engine {
         )
     }
 
+    /// Standing violations of declared `constraints` (the health
+    /// `constraints` include) — every non-stub entity whose type
+    /// declares constraints its current state violates, in
+    /// deterministic `(mem, id)` order.
+    pub fn constraint_findings(
+        &self,
+        mem_filter: Option<&str>,
+    ) -> Vec<crate::ops::health::ConstraintFindingReport> {
+        crate::ops::health::collect_constraint_findings(&self.store, mem_filter, &self.schemas)
+    }
+
     /// Conformance-axis integrity findings for one mem — which
     /// entities a write would refuse under the effective schema, and
     /// why. `target_schema = None` lints against the mem's current

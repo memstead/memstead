@@ -46,8 +46,9 @@ pub use source::{
     INSTALL_PROVENANCE_FILE, SchemaSourceError, SchemaSourceFile, collect_schema_source,
 };
 pub use types::{
-    FieldType, Filterable, MetadataFieldDef, RequiredCardinality, RequiredOutgoing, SectionDef,
-    Serialization, TypeDefinition, TypeExample, derive_section_key,
+    ConstraintDef, ConstraintSeverity, FieldType, Filterable, MetadataFieldDef,
+    RequiredCardinality, RequiredOutgoing, SectionDef, Serialization, TypeDefinition, TypeExample,
+    derive_section_key,
 };
 
 /// Name constants for the 10 built-in knowledge types shipped in the

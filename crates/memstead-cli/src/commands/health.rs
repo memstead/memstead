@@ -4,7 +4,8 @@ use serde_json::json;
 use memstead_base::EntityId;
 use memstead_base::Store;
 use memstead_base::ops::{
-    DanglingLink, HealthSummary, health::HEALTH_INCLUDE_KEYS, health::MissingRequiredOutgoingReport,
+    DanglingLink, HealthSummary, health::ConstraintFindingReport, health::HEALTH_INCLUDE_KEYS,
+    health::MissingRequiredOutgoingReport,
 };
 
 use crate::output::{ExitKind, print_json, print_markdown};
@@ -17,7 +18,8 @@ use crate::setup::{CliContext, CliEngine};
 pub struct Args {
     /// Opt heavy content into the response: orphans, stubs,
     /// most_connected, missing_fields, stale, dangling_links, tags,
-    /// missing_required_outgoing, conformance, integrity, config,
+    /// missing_required_outgoing, constraints (standing violations of
+    /// declared schema constraints), conformance, integrity, config,
     /// anchors (per-mem counts of the four standalone
     /// anchor-verification states).
     /// `conformance` lints every entity against the effective schema
@@ -46,7 +48,7 @@ pub struct Args {
     /// reports findings (`SCHEMA_AUTHORING_SOURCE_MISSING` /
     /// `SCHEMA_AUTHORING_SOURCE_DIVERGED` — no `--include` opt-in).
     /// The output is rendered first, then the non-zero exit fires.
-    /// Include-gated participation today: `missing_required_outgoing`;
+    /// Include-gated participation today: `missing_required_outgoing`, `constraints`;
     /// new Tier-2 codes opt in additively without breaking the flag's
     /// semantics.
     #[arg(long)]
@@ -86,6 +88,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         communities_by_schema,
         most_connected_with_titles,
         missing_required_outgoing,
+        constraint_findings,
         tag_distribution,
         dangling_links,
         findings,
@@ -214,6 +217,15 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         obj.insert(
             "missing_required_outgoing".into(),
             serde_json::to_value(&missing_required_outgoing)?,
+        );
+    }
+    if include.iter().any(|s| s == "constraints") {
+        if !constraint_findings.is_empty() {
+            strict_violations.push(("constraints", constraint_findings.len()));
+        }
+        obj.insert(
+            "constraints".into(),
+            serde_json::to_value(&constraint_findings)?,
         );
     }
     if include.iter().any(|s| s == "dangling_links") {
@@ -540,6 +552,9 @@ struct GatheredHealth {
     /// [`MostConnectedRow`] tuples — same reasoning as `orphan_ids`.
     most_connected_with_titles: Vec<MostConnectedRow>,
     missing_required_outgoing: Vec<MissingRequiredOutgoingReport>,
+    /// Standing violations of declared schema `constraints`
+    /// (`--include constraints`), empty otherwise.
+    constraint_findings: Vec<ConstraintFindingReport>,
     /// `Some(...)` when the caller asked for `--include tags`,
     /// `None` otherwise. The triple is `(distribution, folded,
     /// untagged)` mirroring `collect_tag_distribution`'s return
@@ -625,6 +640,7 @@ fn gather_mem_repo(
         include,
         |limit| engine_most_connected_mem_repo(engine, limit),
         || engine.missing_required_outgoing(None),
+        || engine.constraint_findings(None),
     );
     fill_schema_breakdowns(engine, &mut g);
     fill_config_projection(engine, include, &mut g);
@@ -645,6 +661,7 @@ fn gather_filesystem(
         include,
         |limit| engine_most_connected_filesystem(engine, limit),
         || engine.missing_required_outgoing(None),
+        || engine.constraint_findings(None),
     );
     fill_schema_breakdowns(engine, &mut g);
     fill_config_projection(engine, include, &mut g);
@@ -707,6 +724,7 @@ fn gather_from_store(
     include: &[String],
     most_connected_fn: impl FnOnce(usize) -> Vec<MostConnectedRow>,
     missing_required_outgoing_fn: impl FnOnce() -> Vec<MissingRequiredOutgoingReport>,
+    constraint_findings_fn: impl FnOnce() -> Vec<ConstraintFindingReport>,
 ) -> GatheredHealth {
     let real_count = store.all_entities().filter(|e| !e.stub).count();
     let orphan_ids: Vec<(EntityId, String)> = memstead_base::graph::query::find_orphans(store)
@@ -724,6 +742,11 @@ fn gather_from_store(
     };
     let missing_required_outgoing = if include.iter().any(|s| s == "missing_required_outgoing") {
         missing_required_outgoing_fn()
+    } else {
+        Vec::new()
+    };
+    let constraint_findings = if include.iter().any(|s| s == "constraints") {
+        constraint_findings_fn()
     } else {
         Vec::new()
     };
@@ -756,6 +779,7 @@ fn gather_from_store(
         communities_by_schema: std::collections::BTreeMap::new(),
         most_connected_with_titles,
         missing_required_outgoing,
+        constraint_findings,
         tag_distribution,
         dangling_links,
         config_entries: None,

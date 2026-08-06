@@ -87,6 +87,13 @@ impl From<EngineError> for MemsteadError {
             EngineError::AlreadyExists { id } => Self::ValidationFailed {
                 message: format!("already exists: {id}"),
             },
+            // Block-tier declared-constraint refusals — validation
+            // failures with the engine's own message (names the
+            // entity and the violated declaration).
+            e @ (EngineError::ConstraintUnsatisfied { .. }
+            | EngineError::RequiredOutgoingUnsatisfied { .. }) => Self::ValidationFailed {
+                message: e.to_string(),
+            },
             EngineError::DuplicateMem(name) => Self::ValidationFailed {
                 message: format!("duplicate mem: {name}"),
             },

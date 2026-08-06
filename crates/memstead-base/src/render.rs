@@ -1461,7 +1461,35 @@ pub fn build_schema_payload(
                     serde_json::json!({
                         "relationships": block.relationships,
                         "cardinality": block.cardinality.to_string(),
+                        "severity": block.severity,
                     })
+                })
+                .collect();
+
+            // Declared `constraints` — like `required_outgoing`, a
+            // legality/health condition that must never be invisible
+            // in the schema response (a hidden legality condition is
+            // a defect class of its own). Always present, empty list
+            // for a type declaring none; each entry restates the
+            // declaration with its `severity` (`warn` = health
+            // finding, `block` = write-time refusal), in declaration
+            // order, at BOTH verbosity levels.
+            let constraints: Vec<serde_json::Value> = td
+                .constraints
+                .iter()
+                .map(|c| match c {
+                    memstead_schema::ConstraintDef::RequiresWhen {
+                        field,
+                        when_field,
+                        when_value,
+                        severity,
+                    } => serde_json::json!({
+                        "kind": "requires_when",
+                        "field": field,
+                        "when_field": when_field,
+                        "when_value": when_value,
+                        "severity": severity,
+                    }),
                 })
                 .collect();
             serde_json::json!({
@@ -1475,6 +1503,7 @@ pub fn build_schema_payload(
                 "staleness_threshold_days": td.staleness_threshold_days,
                 "propagating_relationships": td.propagating_relationships,
                 "required_outgoing": required_outgoing,
+                "constraints": constraints,
             })
         })
         .collect();
@@ -1716,6 +1745,7 @@ pub fn build_schema_payload(
                     "fields": fields,
                     "propagating_relationships": t["propagating_relationships"],
                     "required_outgoing": t["required_outgoing"],
+                    "constraints": t["constraints"],
                 })
             })
             .collect();
@@ -2187,6 +2217,7 @@ mod tests {
             staleness_threshold_days: 90,
             write_rules: vec![],
             required_outgoing: vec![],
+            constraints: vec![],
             declared_metadata_keys: vec![],
         };
 
@@ -2972,6 +3003,130 @@ mod tests {
             OriginClass::FirstParty,
         );
         assert_eq!(lite["origin"], "first-party");
+    }
+
+    /// Declared constraints and `required_outgoing` severities are
+    /// visible at BOTH verbosity levels — no legality condition may
+    /// exist that the schema response omits. Complement: a type
+    /// declaring none renders `constraints: []`, never an absent key.
+    #[test]
+    fn constraints_and_severity_render_at_both_verbosities() {
+        let manifest = r#"name: constrained
+version: 1.0.0
+description: constraint render fixture
+when_to_use: render tests
+types:
+  - sample
+relationships:
+  mode: strict
+  definitions:
+    - name: PART_OF
+      description: hier
+      default_weight: 3.0
+    - name: _default
+      description: fallback
+      default_weight: 1.0
+community:
+  resolution: 1.0
+  seed: 42
+"#;
+        let type_yaml = r#"name: sample
+description: t
+when_to_use: tests
+sections:
+  - key: body
+    heading: Body
+    required: true
+    search_weight: 10.0
+    catch_all: true
+    write_rules: []
+metadata_fields:
+  - key: status
+    description: state
+    field_type: string
+    enum_values: [open, checked]
+    optional: true
+  - key: checked_by
+    description: who
+    field_type: string
+    optional: true
+title_weight: 100.0
+text_fields:
+  - body
+hierarchy_relationship: PART_OF
+propagating_relationships: []
+updatable_fields:
+  - title
+  - body
+health_required_fields:
+  - body
+staleness_threshold_days: 90
+required_outgoing:
+  - relationships: [PART_OF]
+    cardinality: at_least_one
+    severity: block
+constraints:
+  - kind: requires_when
+    field: checked_by
+    when_field: status
+    when_value: checked
+write_rules: []
+"#;
+        let schema = Arc::new(
+            memstead_schema::loader::load_schema_from_memory(
+                manifest,
+                &[("sample".to_string(), type_yaml.to_string())],
+            )
+            .expect("fixture loads"),
+        );
+
+        let expected_constraint = serde_json::json!({
+            "kind": "requires_when",
+            "field": "checked_by",
+            "when_field": "status",
+            "when_value": "checked",
+            "severity": "warn",
+        });
+
+        let full = build_schema_payload(
+            &schema,
+            vec![],
+            SchemaVerbosity::Full,
+            OriginClass::FirstParty,
+        );
+        let t = &full["types"].as_array().unwrap()[0];
+        assert_eq!(t["constraints"].as_array().unwrap().len(), 1);
+        assert_eq!(t["constraints"][0], expected_constraint);
+        assert_eq!(t["required_outgoing"][0]["severity"], "block");
+
+        let lite = build_schema_payload(
+            &schema,
+            vec![],
+            SchemaVerbosity::Lite,
+            OriginClass::FirstParty,
+        );
+        let ts = &lite["types_summary"].as_array().unwrap()[0];
+        assert_eq!(ts["constraints"][0], expected_constraint);
+        assert_eq!(ts["required_outgoing"][0]["severity"], "block");
+
+        // Complement: a constraint-free builtin renders the
+        // always-present empty list at both levels.
+        let plain_full = build_schema_payload(
+            &software_schema(),
+            vec![],
+            SchemaVerbosity::Full,
+            OriginClass::FirstParty,
+        );
+        let pt = &plain_full["types"].as_array().unwrap()[0];
+        assert_eq!(pt["constraints"], serde_json::json!([]));
+        let plain_lite = build_schema_payload(
+            &software_schema(),
+            vec![],
+            SchemaVerbosity::Lite,
+            OriginClass::FirstParty,
+        );
+        let pts = &plain_lite["types_summary"].as_array().unwrap()[0];
+        assert_eq!(pts["constraints"], serde_json::json!([]));
     }
 
     /// A third-party schema is de-framed: a `full`-verbosity request is

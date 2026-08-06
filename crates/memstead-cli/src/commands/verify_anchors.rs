@@ -7,7 +7,7 @@ use clap::Parser;
 use serde_json::json;
 
 use crate::CliError;
-use crate::output::{ExitKind, print_json, print_markdown};
+use crate::output::{print_json, print_markdown};
 use crate::setup::CliContext;
 
 /// Verify every anchor in a mem against its declared source. Per

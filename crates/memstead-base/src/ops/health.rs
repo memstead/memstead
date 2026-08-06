@@ -38,6 +38,7 @@ pub const HEALTH_INCLUDE_KEYS: &[&str] = &[
     "dangling_links",
     "tags",
     "missing_required_outgoing",
+    "constraints",
     "conformance",
     "integrity",
     "config",
@@ -580,8 +581,140 @@ pub fn unsatisfied_required_outgoing(
         .map(|block| super::MissingRequiredOutgoingBlock {
             relationships: block.relationships.clone(),
             cardinality: block.cardinality.to_string(),
+            severity: block.severity,
         })
         .collect()
+}
+
+/// One unsatisfied declared constraint on one entity — the wire entry
+/// shared by the write-path surface (the `CONSTRAINT_UNSATISFIED`
+/// warning or refusal, tier decided by the declared severity) and the
+/// health `constraints` include. `kind` names the constraint form
+/// (`requires_when`); the remaining fields restate the declaration so
+/// a consumer can repair without re-fetching the schema. `severity`
+/// always serializes here — the entry is new wire surface, so there is
+/// no pre-existing shape to keep byte-identical.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct UnsatisfiedConstraint {
+    pub kind: &'static str,
+    pub field: String,
+    pub when_field: String,
+    pub when_value: String,
+    pub severity: memstead_schema::ConstraintSeverity,
+}
+
+/// Evaluate one entity's declared `constraints` against its current
+/// state, returning the violated ones in declaration order. THE single
+/// evaluation — shared by the health sweep
+/// ([`collect_constraint_findings`]) and the per-mutation
+/// `CONSTRAINT_UNSATISFIED` surface on create/update; a second
+/// implementation of any form is a defect.
+///
+/// `requires_when` semantics: the constraint triggers when
+/// `when_field`'s frontmatter value equals `when_value` exactly; a
+/// triggered constraint is satisfied when `field` — a metadata field
+/// or a section key, the loader guarantees it is one of the two — is
+/// present with non-blank content.
+pub fn unsatisfied_constraints(
+    entity: &crate::entity::Entity,
+    td: &TypeDefinition,
+) -> Vec<UnsatisfiedConstraint> {
+    use memstead_schema::ConstraintDef;
+    td.constraints
+        .iter()
+        .filter_map(|c| match c {
+            ConstraintDef::RequiresWhen {
+                field,
+                when_field,
+                when_value,
+                severity,
+            } => {
+                let triggered = entity
+                    .metadata
+                    .get(when_field.as_str())
+                    .is_some_and(|v| v.to_frontmatter_string() == *when_value);
+                if !triggered {
+                    return None;
+                }
+                let satisfied = entity
+                    .metadata
+                    .get(field.as_str())
+                    .is_some_and(|v| !v.to_frontmatter_string().trim().is_empty())
+                    || entity
+                        .sections
+                        .get(field.as_str())
+                        .is_some_and(|body| !body.trim().is_empty());
+                if satisfied {
+                    return None;
+                }
+                Some(UnsatisfiedConstraint {
+                    kind: "requires_when",
+                    field: field.clone(),
+                    when_field: when_field.clone(),
+                    when_value: when_value.clone(),
+                    severity: *severity,
+                })
+            }
+        })
+        .collect()
+}
+
+/// One entity's violated declared constraints, surfaced from the
+/// health-time scan (`include=["constraints"]`). Mirrors
+/// [`MissingRequiredOutgoingReport`]'s envelope shape — the two
+/// includes read the same way.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ConstraintFindingReport {
+    pub id: crate::entity::EntityId,
+    pub title: String,
+    pub entity_type: String,
+    pub mem: String,
+    pub violations: Vec<UnsatisfiedConstraint>,
+}
+
+/// Collect every non-stub entity whose type declares `constraints`
+/// that the entity's current state violates. Deterministic — sorted by
+/// `(mem, id)`. Same skip rules as
+/// [`collect_missing_required_outgoing`]: no schema or no type
+/// definition for the entity means nothing to evaluate.
+pub fn collect_constraint_findings(
+    store: &Store,
+    mem_filter: Option<&str>,
+    mem_schemas: &HashMap<String, Arc<memstead_schema::Schema>>,
+) -> Vec<ConstraintFindingReport> {
+    let mut out = Vec::new();
+    for entity in store.all_entities() {
+        if entity.stub {
+            continue;
+        }
+        if let Some(v) = mem_filter
+            && entity.mem != v
+        {
+            continue;
+        }
+        let Some(mem_schema) = mem_schemas.get(entity.mem.as_str()) else {
+            continue;
+        };
+        let Some(td) = mem_schema.types.get(entity.entity_type.as_str()) else {
+            continue;
+        };
+        if td.constraints.is_empty() {
+            continue;
+        }
+        let violations = unsatisfied_constraints(entity, td);
+        if violations.is_empty() {
+            continue;
+        }
+        out.push(ConstraintFindingReport {
+            id: entity.id.clone(),
+            title: entity.title.clone(),
+            entity_type: entity.entity_type.clone(),
+            mem: entity.mem.clone(),
+            violations,
+        });
+    }
+    out.sort_by(|a, b| a.mem.cmp(&b.mem).then_with(|| a.id.0.cmp(&b.id.0)));
+    out
 }
 
 /// One entity's unsatisfied `required_outgoing` blocks, surfaced from

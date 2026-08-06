@@ -817,10 +817,49 @@ impl Engine {
         let unsatisfied =
             crate::ops::health::unsatisfied_required_outgoing(&next, type_def.as_ref());
         if !unsatisfied.is_empty() {
+            // `severity: block` promotes the warning to a refusal —
+            // evaluated in the prepare step, before any disk write or
+            // commit, so a refused update leaves nothing behind.
+            let blocked: Vec<_> = unsatisfied
+                .iter()
+                .filter(|b| b.severity == memstead_schema::ConstraintSeverity::Block)
+                .cloned()
+                .collect();
+            if !blocked.is_empty() {
+                return Err(EngineError::RequiredOutgoingUnsatisfied {
+                    entity_type: next.entity_type.clone(),
+                    entity_id: id.to_string(),
+                    missing: blocked,
+                });
+            }
             warnings.push(WarningHint::MissingRequiredOutgoing {
                 entity_type: next.entity_type.clone(),
                 entity_id: id.clone(),
                 missing: unsatisfied,
+            });
+        }
+
+        // Declared-constraints evaluation — same single evaluation the
+        // health `constraints` include runs, against this update's
+        // final state. Block-tier violations refuse; warn-tier warn.
+        let violated = crate::ops::health::unsatisfied_constraints(&next, type_def.as_ref());
+        if !violated.is_empty() {
+            let blocked: Vec<_> = violated
+                .iter()
+                .filter(|v| v.severity == memstead_schema::ConstraintSeverity::Block)
+                .cloned()
+                .collect();
+            if !blocked.is_empty() {
+                return Err(EngineError::ConstraintUnsatisfied {
+                    entity_type: next.entity_type.clone(),
+                    entity_id: id.to_string(),
+                    violations: blocked,
+                });
+            }
+            warnings.push(WarningHint::ConstraintUnsatisfied {
+                entity_type: next.entity_type.clone(),
+                entity_id: id.clone(),
+                violations: violated,
             });
         }
 

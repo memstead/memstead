@@ -96,6 +96,16 @@ pub enum SchemaLoadError {
     },
 
     #[error(
+        "type '{type_name}' constraint ({kind}) is invalid: {reason} — offending name: '{offender}'"
+    )]
+    InvalidConstraint {
+        type_name: String,
+        kind: &'static str,
+        offender: String,
+        reason: String,
+    },
+
+    #[error(
         "type '{type_name}' metadata field '{field}' default '{default}' is not listed in enum_values: [{}]",
         allowed.join(", ")
     )]
@@ -777,6 +787,60 @@ fn validate_type(
     for block in &td.required_outgoing {
         for r in &block.relationships {
             check_rel(&td.name, "required_outgoing", r, rel_names, available_rels)?;
+        }
+    }
+
+    // Constraint vocabulary (loader honesty: a malformed declaration
+    // refuses with a typed error naming the offender — never
+    // load-and-ignore).
+    let field_keys: std::collections::HashSet<&str> = td
+        .metadata_fields
+        .iter()
+        .map(|f| f.key.as_str())
+        .collect();
+    let section_keys: std::collections::HashSet<&str> =
+        td.sections.iter().map(|sec| sec.key.as_str()).collect();
+    for c in &td.constraints {
+        match c {
+            crate::types::ConstraintDef::RequiresWhen {
+                field,
+                when_field,
+                when_value,
+                ..
+            } => {
+                if !field_keys.contains(field.as_str()) && !section_keys.contains(field.as_str())
+                {
+                    return Err(SchemaLoadError::InvalidConstraint {
+                        type_name: td.name.clone(),
+                        kind: "requires_when",
+                        offender: field.clone(),
+                        reason: "`field` names neither a metadata field nor a section of this type"
+                            .to_string(),
+                    });
+                }
+                let Some(when_def) = td.metadata_fields.iter().find(|f| f.key == *when_field)
+                else {
+                    return Err(SchemaLoadError::InvalidConstraint {
+                        type_name: td.name.clone(),
+                        kind: "requires_when",
+                        offender: when_field.clone(),
+                        reason: "`when_field` names no metadata field of this type".to_string(),
+                    });
+                };
+                if let Some(allowed) = &when_def.enum_values
+                    && !allowed.contains(when_value)
+                {
+                    return Err(SchemaLoadError::InvalidConstraint {
+                        type_name: td.name.clone(),
+                        kind: "requires_when",
+                        offender: when_value.clone(),
+                        reason: format!(
+                            "`when_value` is not in `{when_field}`'s enum_values [{}]",
+                            allowed.join(", ")
+                        ),
+                    });
+                }
+            }
         }
     }
 

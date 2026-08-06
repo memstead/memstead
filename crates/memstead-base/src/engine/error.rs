@@ -221,6 +221,40 @@ pub enum EngineError {
     /// Create attempted against an id already present in the store.
     #[error("entity already exists: {id}")]
     AlreadyExists { id: String },
+    /// Write refused: the entity as written would violate a
+    /// block-tier declared constraint of its type (`severity: block`
+    /// in the schema's `constraints`). Warn-tier violations warn
+    /// instead (`WarningHint::ConstraintUnsatisfied`) — same
+    /// evaluation, tier decided by the declaration. `violations`
+    /// restates each violated declaration so the caller can repair
+    /// without re-fetching the schema.
+    #[error(
+        "write refused: {entity_id} ({entity_type}) violates {n} block-tier declared constraint(s) — first: '{first_field}' is required and unset",
+        n = violations.len(),
+        first_field = violations.first().map(|v| v.field.as_str()).unwrap_or("?"),
+    )]
+    ConstraintUnsatisfied {
+        entity_type: String,
+        entity_id: String,
+        violations: Vec<crate::ops::health::UnsatisfiedConstraint>,
+    },
+    /// Write refused: the entity's final edge set leaves a
+    /// block-tier `required_outgoing` block unsatisfied
+    /// (`severity: block` on the block). The default warn tier keeps
+    /// the long-standing warning behavior; this refusal exists only
+    /// where a schema explicitly promoted the block. Shares the
+    /// `MISSING_REQUIRED_OUTGOING` code and `missing` payload shape
+    /// with the warning — one condition, one vocabulary, tier decided
+    /// by the declaration.
+    #[error(
+        "write refused: {entity_id} ({entity_type}) leaves {n} block-tier `required_outgoing` block(s) unsatisfied",
+        n = missing.len(),
+    )]
+    RequiredOutgoingUnsatisfied {
+        entity_type: String,
+        entity_id: String,
+        missing: Vec<crate::ops::MissingRequiredOutgoingBlock>,
+    },
     /// Mutation rejected because the named entity is not in the
     /// store. Distinct from `UnknownMem`: the mem exists, the
     /// entity does not.
@@ -1050,6 +1084,8 @@ impl EngineError {
             EngineError::UnknownType { .. } => "UNKNOWN_ENTITY_TYPE",
             EngineError::InvalidTitle(_) => "INVALID_TITLE",
             EngineError::AlreadyExists { .. } => "ENTITY_ALREADY_EXISTS",
+            EngineError::ConstraintUnsatisfied { .. } => "CONSTRAINT_UNSATISFIED",
+            EngineError::RequiredOutgoingUnsatisfied { .. } => "MISSING_REQUIRED_OUTGOING",
             EngineError::NotFound { .. } => "ENTITY_NOT_FOUND",
             EngineError::HashMismatch { .. } => "HASH_MISMATCH",
             EngineError::HasIncomingRefs { .. } => "HAS_INCOMING_REFS",
@@ -1126,6 +1162,24 @@ impl EngineError {
     pub fn details(&self) -> serde_json::Value {
         match self {
             EngineError::NotFound { id } => serde_json::json!({ "id": id }),
+            EngineError::ConstraintUnsatisfied {
+                entity_type,
+                entity_id,
+                violations,
+            } => serde_json::json!({
+                "entity_type": entity_type,
+                "entity_id": entity_id,
+                "violations": violations,
+            }),
+            EngineError::RequiredOutgoingUnsatisfied {
+                entity_type,
+                entity_id,
+                missing,
+            } => serde_json::json!({
+                "entity_type": entity_type,
+                "entity_id": entity_id,
+                "missing": missing,
+            }),
             EngineError::RepairNotNeeded { id, recovery } => {
                 serde_json::json!({ "id": id, "recovery": recovery })
             }
