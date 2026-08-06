@@ -215,6 +215,7 @@ Health.
 ```idl
 dictionary HealthIssue {
     string field;
+    string code;
     string message;
 };
 ```

@@ -40,6 +40,7 @@ pub const HEALTH_INCLUDE_KEYS: &[&str] = &[
     "missing_required_outgoing",
     "conformance",
     "integrity",
+    "config",
 ];
 
 /// Compute health reports for all entities in the store.
@@ -93,6 +94,7 @@ pub fn compute_health(
                     } else {
                         issues.push(HealthIssue {
                             field: field.clone(),
+                            code: super::HealthIssueCode::Missing,
                             message: format!("required section '{field}' is empty"),
                         });
                     }
@@ -111,6 +113,7 @@ pub fn compute_health(
                 if is_empty {
                     issues.push(HealthIssue {
                         field: field.clone(),
+                        code: super::HealthIssueCode::Missing,
                         message: format!("required field '{field}' is missing"),
                     });
                 }
@@ -158,6 +161,7 @@ pub fn compute_health(
                         let (schema_name, schema_version) = mem_schema.id();
                         issues.push(HealthIssue {
                             field: "relationships".to_string(),
+                            code: super::HealthIssueCode::UndeclaredRelationship,
                             message: format!(
                                 "relationship '{}' is not declared in schema \
                                  '{schema_name}@{schema_version}'.{suggestion}",
@@ -197,6 +201,7 @@ pub fn compute_health(
                     };
                     issues.push(HealthIssue {
                         field: "relationships".to_string(),
+                        code: super::HealthIssueCode::InvalidRelShape,
                         message: format!(
                             "INVALID_REL_SHAPE: edge '{rel_type}' from \
                              '{from_type}' to '{to_type}' (target {target}) \
@@ -568,6 +573,120 @@ pub struct MissingRequiredOutgoingReport {
     pub missing: Vec<super::MissingRequiredOutgoingBlock>,
 }
 
+/// Render the workspace-config projection the health surface serves —
+/// per-writable-mem detail (`origin`, storage/durability, `vcs`
+/// `gitdir`/`worktree`/`head`, title/subject, `write_guidance`,
+/// `extra`) plus the `mutations` and `plugin` policy values. One
+/// implementation, every surface: the MCP composer reaches it through
+/// `include_config: true` OR the `config` include key; the CLI through
+/// `--include config`. `mutations` / `plugin` are passed prebuilt so a
+/// server that owns its own copies inserts them verbatim; callers
+/// without server state derive them from `Engine::settings()` (see
+/// [`config_projection_from_settings`]). Returns the three top-level
+/// entries (`mems`, `mutations`, `plugin`) for the caller to merge —
+/// callers gate on their own opt-in flag and must render at most once.
+pub fn config_projection(
+    engine: &crate::Engine,
+    writable_mems: &[String],
+    mutations: serde_json::Value,
+    plugin: serde_json::Value,
+) -> serde_json::Map<String, serde_json::Value> {
+    // Per-mem storage backend → durability marker, derived from the
+    // mount's `MountStorage` kind. Lives alongside `vcs` so an agent
+    // reading per-mem config learns whether a `commit_sha` this mem
+    // returns is durable-on-disk or volatile-in-RAM.
+    let backend_by_mem: std::collections::HashMap<&str, (&'static str, bool)> = engine
+        .mounts()
+        .iter()
+        .map(|m| {
+            (
+                m.mem.as_str(),
+                (m.storage.backend_id(), m.storage.is_durable()),
+            )
+        })
+        .collect();
+    let mems_detail: Vec<serde_json::Value> = writable_mems
+        .iter()
+        .map(|name| {
+            let origin = engine
+                .mem_router()
+                .origin_for_mem(name)
+                .map(|o| o.kind())
+                .unwrap_or("explicit");
+            let mut entry = serde_json::Map::new();
+            entry.insert("name".into(), serde_json::json!(name));
+            entry.insert("origin".into(), serde_json::json!(origin));
+            if let Some((storage, durable)) = backend_by_mem.get(name.as_str()).copied() {
+                entry.insert("storage".into(), serde_json::json!(storage));
+                entry.insert("durable".into(), serde_json::json!(durable));
+            }
+            let mut vcs_obj = serde_json::Map::new();
+            if let Ok(gitdir) = engine.gitdir_for(name) {
+                vcs_obj.insert("gitdir".into(), serde_json::json!(gitdir));
+            }
+            if let Ok(worktree) = engine.worktree_for(name) {
+                vcs_obj.insert("worktree".into(), serde_json::json!(worktree));
+            }
+            if let Some(sha) = engine.mem_head_sha(name).ok().flatten() {
+                vcs_obj.insert("head".into(), serde_json::json!(sha));
+            }
+            if !vcs_obj.is_empty() {
+                entry.insert("vcs".into(), serde_json::Value::Object(vcs_obj));
+            }
+            if let Some(cfg) = engine.mem_config_for(name) {
+                // Display title + subject block, when set — the
+                // config projection prefers the title wherever a
+                // mem is printed; the name stays the identity.
+                if let Some(title) = &cfg.title {
+                    entry.insert("title".into(), serde_json::json!(title));
+                }
+                if let Some(subject) = &cfg.subject {
+                    entry.insert("subject".into(), serde_json::json!(subject));
+                }
+                let guidance = serde_json::Map::from_iter(
+                    cfg.write_guidance
+                        .iter()
+                        .map(|(k, v)| (k.clone(), v.clone())),
+                );
+                entry.insert("write_guidance".into(), serde_json::Value::Object(guidance));
+                let extra = serde_json::Map::from_iter(
+                    cfg.extra.iter().map(|(k, v)| (k.clone(), v.clone())),
+                );
+                entry.insert("extra".into(), serde_json::Value::Object(extra));
+            }
+            serde_json::Value::Object(entry)
+        })
+        .collect();
+
+    let mut out = serde_json::Map::new();
+    out.insert("mems".into(), serde_json::json!(mems_detail));
+    out.insert("mutations".into(), mutations);
+    out.insert("plugin".into(), plugin);
+    out
+}
+
+/// The `(mutations, plugin)` pair for [`config_projection`], derived
+/// from the engine's own [`crate::workspace::WorkspaceSettings`] — for
+/// callers (the CLI) that carry no server-owned config copies. Produces
+/// the same bytes the MCP server passes when both were loaded from the
+/// same `workspace.toml`.
+pub fn config_projection_from_settings(
+    settings: &crate::workspace::WorkspaceSettings,
+) -> (serde_json::Value, serde_json::Value) {
+    let mutations = serde_json::json!({ "require_notes": settings.mutations.require_notes });
+    let plugin_map: serde_json::Map<String, serde_json::Value> = settings
+        .plugin
+        .iter()
+        .map(|(k, v)| {
+            (
+                k.clone(),
+                serde_json::to_value(v).unwrap_or(serde_json::Value::Null),
+            )
+        })
+        .collect();
+    (mutations, serde_json::Value::Object(plugin_map))
+}
+
 /// Detect the section-fork condition for one declared section: the
 /// parsed content under `key` is empty, the schema's declared heading
 /// for the key does not derive back to it
@@ -608,6 +727,7 @@ pub(crate) fn section_heading_mismatch_issue(
     };
     Some(HealthIssue {
         field: key.to_string(),
+        code: super::HealthIssueCode::SectionHeadingMismatch,
         message: format!(
             "SECTION_HEADING_MISMATCH: section '{key}' is not missing — its content sits \
              under heading '{found}', which derives to '{derived}', not '{key}'; {landing}. \
@@ -632,6 +752,7 @@ pub fn entity_health(entity: &crate::entity::Entity, schema: &TypeDefinition) ->
                 } else {
                     issues.push(HealthIssue {
                         field: field.clone(),
+                        code: super::HealthIssueCode::Missing,
                         message: format!("required section '{field}' is empty"),
                     });
                 }
@@ -641,6 +762,7 @@ pub fn entity_health(entity: &crate::entity::Entity, schema: &TypeDefinition) ->
             if value.is_none() {
                 issues.push(HealthIssue {
                     field: field.clone(),
+                    code: super::HealthIssueCode::Missing,
                     message: format!("required field '{field}' is missing"),
                 });
             }
@@ -855,7 +977,7 @@ write_rules: []
         let mismatch: Vec<_> = report
             .issues
             .iter()
-            .filter(|i| i.message.starts_with("SECTION_HEADING_MISMATCH"))
+            .filter(|i| i.code == super::super::HealthIssueCode::SectionHeadingMismatch)
             .collect();
         assert_eq!(mismatch.len(), 1, "issues: {:?}", report.issues);
         let msg = &mismatch[0].message;
@@ -884,15 +1006,16 @@ write_rules: []
             report_missing
                 .issues
                 .iter()
-                .any(|i| i.message == "required section 'answers' is empty"),
-            "absent section keeps the missing report: {:?}",
+                .any(|i| i.code == super::super::HealthIssueCode::Missing
+                    && i.message == "required section 'answers' is empty"),
+            "absent section keeps the missing report (structured MISSING code): {:?}",
             report_missing.issues
         );
         assert!(
             !report_missing
                 .issues
                 .iter()
-                .any(|i| i.message.starts_with("SECTION_HEADING_MISMATCH")),
+                .any(|i| i.code == super::super::HealthIssueCode::SectionHeadingMismatch),
             "no mismatch finding when the heading is not in the file"
         );
 
@@ -913,7 +1036,7 @@ write_rules: []
             !report_ok
                 .issues
                 .iter()
-                .any(|i| i.message.starts_with("SECTION_HEADING_MISMATCH")),
+                .any(|i| i.code == super::super::HealthIssueCode::SectionHeadingMismatch),
             "mismatch fires only when the declared heading is present: {:?}",
             report_ok.issues
         );

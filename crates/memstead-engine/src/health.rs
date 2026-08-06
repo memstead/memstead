@@ -449,8 +449,29 @@ pub fn compose_health(
                 None => true,
             })
             .map(|h| {
+                // `missing` (bare field names) stays byte-identical for
+                // existing consumers; the per-issue detail rides next
+                // to it so the projection carries WHICH condition each
+                // issue reports (a heading mismatch must never surface
+                // as "missing" only).
                 let missing: Vec<&str> = h.issues.iter().map(|i| i.field.as_str()).collect();
-                serde_json::json!({"id": h.id.to_string(), "title": h.title, "missing": missing})
+                let issues: Vec<serde_json::Value> = h
+                    .issues
+                    .iter()
+                    .map(|i| {
+                        serde_json::json!({
+                            "field": i.field,
+                            "code": i.code,
+                            "message": i.message,
+                        })
+                    })
+                    .collect();
+                serde_json::json!({
+                    "id": h.id.to_string(),
+                    "title": h.title,
+                    "missing": missing,
+                    "issues": issues,
+                })
             })
             .collect();
         obj.insert("missing_fields".into(), serde_json::json!(missing_fields));
@@ -549,85 +570,24 @@ pub fn compose_health(
         obj.insert("findings".into(), serde_json::to_value(&findings).unwrap());
     }
 
-    // Workspace policy surface — opt-in `include_config: true`. Per-mem
-    // `vcs: { gitdir?, worktree?, head? }` uses `gitdir_for` / `worktree_for`
-    // / `mem_head_sha`. Each sub-field is conditionally present — folder
-    // mounts have a worktree but no per-mem gitdir; freshly-created mems
-    // have no head yet — and the `vcs` object emits whenever at least one of
-    // them is available. `write_guidance` + `extra` come from
-    // `mem_config_for`. `mutations` + `plugin` are passed in via
-    // [`HealthConfig`] (server state the engine does not own).
-    if args.include_config {
-        // Per-mem storage backend → durability marker, derived from the
-        // mount's `MountStorage` kind. Lives alongside `vcs` so an agent
-        // reading per-mem config learns whether a `commit_sha` this mem
-        // returns is durable-on-disk or volatile-in-RAM.
-        let backend_by_mem: std::collections::HashMap<&str, (&'static str, bool)> = engine
-            .mounts()
-            .iter()
-            .map(|m| {
-                (
-                    m.mem.as_str(),
-                    (m.storage.backend_id(), m.storage.is_durable()),
-                )
-            })
-            .collect();
-        let mems_detail: Vec<serde_json::Value> = writable_mems
-            .iter()
-            .map(|name| {
-                let origin = engine
-                    .mem_router()
-                    .origin_for_mem(name)
-                    .map(|o| o.kind())
-                    .unwrap_or("explicit");
-                let mut entry = serde_json::Map::new();
-                entry.insert("name".into(), serde_json::json!(name));
-                entry.insert("origin".into(), serde_json::json!(origin));
-                if let Some((storage, durable)) = backend_by_mem.get(name.as_str()).copied() {
-                    entry.insert("storage".into(), serde_json::json!(storage));
-                    entry.insert("durable".into(), serde_json::json!(durable));
-                }
-                let mut vcs_obj = serde_json::Map::new();
-                if let Ok(gitdir) = engine.gitdir_for(name) {
-                    vcs_obj.insert("gitdir".into(), serde_json::json!(gitdir));
-                }
-                if let Ok(worktree) = engine.worktree_for(name) {
-                    vcs_obj.insert("worktree".into(), serde_json::json!(worktree));
-                }
-                if let Some(sha) = engine.mem_head_sha(name).ok().flatten() {
-                    vcs_obj.insert("head".into(), serde_json::json!(sha));
-                }
-                if !vcs_obj.is_empty() {
-                    entry.insert("vcs".into(), serde_json::Value::Object(vcs_obj));
-                }
-                if let Some(cfg) = engine.mem_config_for(name) {
-                    // Display title + subject block, when set — the
-                    // config projection prefers the title wherever a
-                    // mem is printed; the name stays the identity.
-                    if let Some(title) = &cfg.title {
-                        entry.insert("title".into(), serde_json::json!(title));
-                    }
-                    if let Some(subject) = &cfg.subject {
-                        entry.insert("subject".into(), serde_json::json!(subject));
-                    }
-                    let guidance = serde_json::Map::from_iter(
-                        cfg.write_guidance
-                            .iter()
-                            .map(|(k, v)| (k.clone(), v.clone())),
-                    );
-                    entry.insert("write_guidance".into(), serde_json::Value::Object(guidance));
-                    let extra = serde_json::Map::from_iter(
-                        cfg.extra.iter().map(|(k, v)| (k.clone(), v.clone())),
-                    );
-                    entry.insert("extra".into(), serde_json::Value::Object(extra));
-                }
-                serde_json::Value::Object(entry)
-            })
-            .collect();
-        obj.insert("mems".into(), serde_json::json!(mems_detail));
-
-        obj.insert("mutations".into(), config.mutations.clone());
-        obj.insert("plugin".into(), config.plugin.clone());
+    // Workspace policy surface — opt-in via `include_config: true`
+    // (the documented boolean alias) OR the catalogue key
+    // `include=["config"]`; both render the same projection, and
+    // passing both renders it once (a single gate). The rendering
+    // itself is shared with the CLI's `--include config` via
+    // `memstead_base::ops::health::config_projection` — one
+    // implementation, every surface. `mutations` + `plugin` are passed
+    // in via [`HealthConfig`] (server-owned copies, inserted verbatim).
+    if args.include_config || include.iter().any(|s| s == "config") {
+        let entries = memstead_base::ops::health::config_projection(
+            engine,
+            &writable_mems,
+            config.mutations.clone(),
+            config.plugin.clone(),
+        );
+        for (k, v) in entries {
+            obj.insert(k, v);
+        }
     }
 
     Ok(result)

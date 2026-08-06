@@ -1545,6 +1545,14 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "UNKNOWN_INCLUDE_KEY",
             "LIMIT_CLAMPED",
             "details",
+            // Config projection: the `config` include key (catalogue
+            // form of `include_config: true`) and the per-issue
+            // `missing_fields` codes the description tells agents to
+            // branch on.
+            "config",
+            "issues",
+            "MISSING",
+            "SECTION_HEADING_MISMATCH",
             // Integrity-linter surface: the `conformance` / `integrity` include
             // keys, the `findings` response array, its field names,
             // and the two consistency-axis codes.

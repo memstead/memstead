@@ -182,6 +182,7 @@ dictionary Status {
 
 dictionary HealthIssue {
     string field;
+    string code;
     string message;
 };
 

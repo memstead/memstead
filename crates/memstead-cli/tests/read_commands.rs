@@ -650,6 +650,194 @@ A decision entity authored without any CHOSEN edge — exercises the
     init_real_mem_repo_from_disk(root, &[(&mem_dir, "strictmem")]);
 }
 
+/// Seed a workspace pinned to a heading-round-trip-violating schema
+/// (sealed posture: it loads; new installs would be refused) with one
+/// entity whose content sits under the non-deriving heading and one
+/// whose required section is genuinely absent — the two conditions the
+/// `missing_fields` issue codes distinguish.
+fn seed_violator_workspace(root: &Path) {
+    let schema_dir = root.join(".memstead").join("schemas").join("debate");
+    fs::create_dir_all(schema_dir.join("types")).unwrap();
+    fs::write(
+        schema_dir.join("schema.yaml"),
+        r#"name: debate
+version: 0.1.0
+description: sealed-violator fixture for the CLI health projection tests.
+when_to_use: Used only by memstead-cli integration tests.
+types:
+  - question
+relationships:
+  mode: strict
+  definitions:
+    - name: PART_OF
+      description: hier
+      default_weight: 3.0
+    - name: _default
+      description: fallback
+      default_weight: 1.0
+community:
+  resolution: 1.0
+  seed: 42
+"#,
+    )
+    .unwrap();
+    fs::write(
+        schema_dir.join("types").join("question.yaml"),
+        r#"name: question
+description: t
+when_to_use: tests
+sections:
+  - key: answers
+    heading: Answers argued
+    required: true
+    search_weight: 10.0
+    write_rules: []
+  - key: notes
+    heading: Notes
+    required: false
+    search_weight: 3.0
+    catch_all: true
+    write_rules: []
+metadata_fields: []
+title_weight: 100.0
+text_fields:
+  - answers
+  - notes
+hierarchy_relationship: PART_OF
+propagating_relationships: []
+updatable_fields:
+  - title
+  - answers
+health_required_fields:
+  - answers
+staleness_threshold_days: 90
+write_rules: []
+"#,
+    )
+    .unwrap();
+
+    let mem_dir = root.join("debatemem");
+    fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
+    fs::write(
+        mem_dir.join(".memstead").join("config.json"),
+        r#"{ "schema": "debate@0.1.0" }"#,
+    )
+    .unwrap();
+    fs::write(
+        mem_dir.join("mismatch.md"),
+        "---\ntype: question\n---\n# Mismatch\n\n## Answers argued\n\nPresent.\n",
+    )
+    .unwrap();
+    fs::write(
+        mem_dir.join("absent.md"),
+        "---\ntype: question\n---\n# Absent\n",
+    )
+    .unwrap();
+
+    init_real_mem_repo_from_disk(root, &[(&mem_dir, "debatemem")]);
+}
+
+/// The CLI `missing_fields` projection carries per-issue codes beside
+/// the legacy `missing` array: a genuinely absent section reports
+/// `MISSING`, content under a non-deriving heading reports
+/// `SECTION_HEADING_MISMATCH` — never "missing"-only. The legacy array
+/// stays bare field names for both.
+#[test]
+fn health_missing_fields_carries_issue_codes() {
+    let tmp = TempDir::new().unwrap();
+    seed_violator_workspace(tmp.path());
+
+    let out = memstead()
+        .current_dir(tmp.path())
+        .args(["--json", "health", "--include", "missing_fields"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: serde_json::Value = serde_json::from_slice(&out).expect("health --json is JSON");
+    let entries = json["missing_fields"].as_array().expect("include renders");
+    let entry_for = |id: &str| {
+        entries
+            .iter()
+            .find(|e| e["id"] == format!("debatemem--{id}"))
+            .unwrap_or_else(|| panic!("entry for {id}: {entries:?}"))
+    };
+
+    let mismatch = entry_for("mismatch");
+    assert_eq!(mismatch["missing"], serde_json::json!(["answers"]));
+    assert_eq!(mismatch["issues"][0]["code"], "SECTION_HEADING_MISMATCH");
+    assert!(
+        mismatch["issues"][0]["message"]
+            .as_str()
+            .unwrap()
+            .contains("is not missing"),
+        "message rides beside the code: {mismatch}"
+    );
+
+    let absent = entry_for("absent");
+    assert_eq!(absent["missing"], serde_json::json!(["answers"]));
+    assert_eq!(absent["issues"][0]["code"], "MISSING");
+    assert!(
+        absent["issues"][0]["message"]
+            .as_str()
+            .unwrap()
+            .contains("is empty"),
+        "message rides beside the code: {absent}"
+    );
+}
+
+/// `memstead health --include config` renders the same projection MCP's
+/// `include_config: true` serves (`mems` / `mutations` / `plugin`);
+/// without the token the response carries no config block.
+#[test]
+fn health_include_config_renders_workspace_config_projection() {
+    let tmp = TempDir::new().unwrap();
+    seed_strict_health_workspace(tmp.path(), false);
+
+    let out = memstead()
+        .current_dir(tmp.path())
+        .args(["--json", "health", "--include", "config"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: serde_json::Value = serde_json::from_slice(&out).expect("health --json is JSON");
+    for key in ["mems", "mutations", "plugin"] {
+        assert!(
+            json.get(key).is_some(),
+            "--include config must render `{key}`: {json}"
+        );
+    }
+    let mems = json["mems"].as_array().expect("mems detail array");
+    assert!(
+        mems.iter().any(|m| m["name"] == "strictmem"),
+        "per-mem detail names the writable mem: {mems:?}"
+    );
+    assert!(
+        json["mutations"].get("require_notes").is_some(),
+        "mutations posture rides the projection: {json}"
+    );
+
+    // Refusal complement: no config block without the token.
+    let out = memstead()
+        .current_dir(tmp.path())
+        .args(["--json", "health"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: serde_json::Value = serde_json::from_slice(&out).expect("health --json is JSON");
+    for key in ["mems", "mutations", "plugin"] {
+        assert!(
+            json.get(key).is_none(),
+            "no config block without the opt-in: {json}"
+        );
+    }
+}
+
 #[test]
 fn health_strict_exits_zero_when_no_violations() {
     let tmp = TempDir::new().unwrap();

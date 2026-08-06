@@ -2697,9 +2697,48 @@ pub struct HealthReport {
     pub issues: Vec<HealthIssue>,
 }
 
+/// Machine-readable condition discriminator for a [`HealthIssue`] —
+/// the enumeration lives here, with the issue type, and is never
+/// re-derived per projection. A projection that lists issues carries
+/// the code; the code is NEVER only a message-string prefix (a
+/// projection that drops messages would silently collapse distinct
+/// conditions — the exact misdirection `SECTION_HEADING_MISMATCH`
+/// exists to prevent).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum HealthIssueCode {
+    /// The required section/field is genuinely absent or empty.
+    Missing,
+    /// The section's content is present in the file but sits under a
+    /// heading that does not derive back to the section key — NOT
+    /// missing; fix the schema's heading/key pair.
+    SectionHeadingMismatch,
+    /// The entity carries a relationship whose rel-type the mem's
+    /// schema does not declare.
+    UndeclaredRelationship,
+    /// An existing edge violates the rel-type's declared
+    /// `source_types` / `target_types` shape.
+    InvalidRelShape,
+}
+
+impl HealthIssueCode {
+    /// Stable wire string — matches the serde `SCREAMING_SNAKE_CASE`
+    /// serialization, exposed for text renderers.
+    pub fn as_wire(&self) -> &'static str {
+        match self {
+            HealthIssueCode::Missing => "MISSING",
+            HealthIssueCode::SectionHeadingMismatch => "SECTION_HEADING_MISMATCH",
+            HealthIssueCode::UndeclaredRelationship => "UNDECLARED_RELATIONSHIP",
+            HealthIssueCode::InvalidRelShape => "INVALID_REL_SHAPE",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct HealthIssue {
     pub field: String,
+    /// Which condition this issue reports — see [`HealthIssueCode`].
+    pub code: HealthIssueCode,
     pub message: String,
 }
 

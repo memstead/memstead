@@ -136,6 +136,7 @@ pub(crate) fn health_summary_to_ffi(summary: core_ops::HealthSummary) -> HealthS
                     .into_iter()
                     .map(|i| HealthIssue {
                         field: i.field,
+                        code: i.code.as_wire().to_string(),
                         message: i.message,
                     })
                     .collect(),

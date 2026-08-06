@@ -2465,5 +2465,167 @@ write_rules: []
         assert_eq!(violations[0].derived_key, "answers_argued");
     }
 
+    /// The other half of "still serves reads AND writes": a mem pinned
+    /// to a sealed heading-round-trip-violating schema accepts writes.
+    /// The update commits (refusal complement: it is NOT refused), the
+    /// schema-level health finding persists after the write, and the
+    /// write-path `SECTION_HEADING_DIVERGENCE` warning fires where its
+    /// condition holds (the file carries a heading that derives to the
+    /// written key while the schema declares a different heading text).
+    #[test]
+    fn sealed_violator_mem_still_serves_writes() {
+        // Same fixture as the read test above.
+        let tmp = TempDir::new().unwrap();
+        let schemas_dir = tmp.path().join("schemas");
+        let pkg = schemas_dir.join("debate");
+        std::fs::create_dir_all(pkg.join("types")).unwrap();
+        std::fs::write(
+            pkg.join("schema.yaml"),
+            r#"name: debate
+version: 0.1.0
+description: sealed-violator fixture
+when_to_use: tests
+types:
+  - question
+relationships:
+  mode: strict
+  definitions:
+    - name: PART_OF
+      description: hier
+      default_weight: 3.0
+    - name: _default
+      description: fallback
+      default_weight: 1.0
+community:
+  resolution: 1.0
+  seed: 42
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            pkg.join("types").join("question.yaml"),
+            r#"name: question
+description: t
+when_to_use: tests
+sections:
+  - key: answers
+    heading: Answers argued
+    required: true
+    search_weight: 10.0
+    write_rules: []
+  - key: notes
+    heading: Notes
+    required: false
+    search_weight: 3.0
+    catch_all: true
+    write_rules: []
+metadata_fields: []
+title_weight: 100.0
+text_fields:
+  - answers
+  - notes
+hierarchy_relationship: PART_OF
+propagating_relationships: []
+updatable_fields:
+  - title
+  - answers
+  - notes
+health_required_fields:
+  - answers
+staleness_threshold_days: 90
+write_rules: []
+"#,
+        )
+        .unwrap();
+
+        let mem_dir = tmp.path().join("mem");
+        std::fs::create_dir_all(&mem_dir).unwrap();
+        // The file's own heading "Answers" derives to the key
+        // `answers`, differing from the schema's declared
+        // "Answers argued" — the divergence-warning condition.
+        std::fs::write(
+            mem_dir.join("q.md"),
+            "---\ntype: question\n---\n# Q\n\n## Answers\n\nTwo answers.\n",
+        )
+        .unwrap();
+
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let mount = Mount {
+            mem: "debate-mem".to_string(),
+            schema: Some(SchemaRef::new("debate", semver::Version::new(0, 1, 0))),
+            storage: MountStorage::Folder { path: mem_dir },
+            capability: MountCapability::Write,
+            lifecycle: MountLifecycle::Eager,
+            cross_linkable: true,
+            migration_target: None,
+        };
+        let mut engine = Engine::from_mounts_with_schemas_dir(
+            vec![(mount, Box::new(writer) as Box<dyn MemBackend>)],
+            Some(&schemas_dir),
+        )
+        .expect("a violating sealed schema must keep loading");
+
+        let id = crate::EntityId::new("debate-mem", "q");
+        let hash = engine.get_entity(&id).unwrap().content_hash.clone();
+        let mut sections = indexmap::IndexMap::new();
+        sections.insert("answers".to_string(), "Updated answers body.".to_string());
+        let outcome = engine
+            .update_entity(
+                crate::engine::UpdateEntityArgs {
+                    anchors: Vec::new(),
+                    anchors_unset: Vec::new(),
+                    id: id.clone(),
+                    expected_hash: Some(hash),
+                    sections,
+                    append_sections: indexmap::IndexMap::new(),
+                    patch_sections: indexmap::IndexMap::new(),
+                    metadata: indexmap::IndexMap::new(),
+                    metadata_unset: Vec::new(),
+                    declare_relations: Vec::new(),
+                    dry_run: false,
+                    relations_unset: Vec::new(),
+                },
+                crate::vcs::Actor::Cli,
+                None,
+                None,
+            )
+            .expect("a write against a sealed-violator mem must NOT be refused");
+        assert!(!outcome.commit_sha.is_empty(), "the write commits");
+        assert!(
+            outcome
+                .warnings
+                .iter()
+                .any(|w| w.code() == "SECTION_HEADING_DIVERGENCE"),
+            "the write-path divergence warning fires where its condition holds: {:?}",
+            outcome.warnings
+        );
+
+        // The schema-level finding persists after the write.
+        assert!(
+            engine.load_warnings().iter().any(|w| matches!(
+                w,
+                WarningHint::SchemaHeadingRoundtripViolation { mem, .. } if mem == "debate-mem"
+            )),
+            "the health finding persists across writes"
+        );
+        // The written content is durably on disk and survives the
+        // reparse — under the catch-all, because the violating schema's
+        // declared heading cannot round-trip to the written key. That
+        // fork is exactly what the divergence warning announced (and
+        // what the persisting health finding tells the operator to fix
+        // at the schema); the "serves writes" guarantee is that the
+        // write lands and nothing refuses, not that a broken schema
+        // routes content correctly.
+        let entity = engine.get_entity(&id).unwrap();
+        assert!(
+            entity
+                .sections
+                .values()
+                .any(|s| s.contains("Updated answers body.")),
+            "written content survives the round-trip (in the catch-all): {:?}",
+            entity.sections
+        );
+    }
+
     // ---- Engine::reload_one_mem -----------------------------------
 }

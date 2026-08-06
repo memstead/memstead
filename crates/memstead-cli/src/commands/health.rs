@@ -17,10 +17,13 @@ use crate::setup::{CliContext, CliEngine};
 pub struct Args {
     /// Opt heavy content into the response: orphans, stubs,
     /// most_connected, missing_fields, stale, dangling_links, tags,
-    /// missing_required_outgoing, conformance, integrity. `conformance`
-    /// lints every entity against the effective schema into a
-    /// `findings` array (write-time typed codes); `integrity` adds the
-    /// consistency axis (dangling links, stubs) to the same list.
+    /// missing_required_outgoing, conformance, integrity, config.
+    /// `conformance` lints every entity against the effective schema
+    /// into a `findings` array (write-time typed codes); `integrity`
+    /// adds the consistency axis (dangling links, stubs) to the same
+    /// list. `config` renders the workspace-config projection (per-mem
+    /// origin/storage/vcs detail, `mutations`, `plugin`) — the same
+    /// block MCP's `include_config: true` serves.
     /// Repeatable (`--include K --include K`)
     /// AND comma-string (`--include K1,K2`) forms both parse — uniform
     /// with `memstead overview --include`.
@@ -84,6 +87,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         tag_distribution,
         dangling_links,
         findings,
+        config_entries,
     } = match ctx.cli_engine()? {
         #[cfg(feature = "mem-repo")]
         CliEngine::MemRepo(mut engine) => {
@@ -165,8 +169,23 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             .missing_fields
             .iter()
             .map(|h| {
+                // `missing` (bare field names) stays byte-identical for
+                // existing consumers; the per-issue detail rides next to
+                // it so the CLI projection carries WHICH condition each
+                // issue reports — same additive shape as the MCP
+                // composer's.
                 let missing: Vec<&str> = h.issues.iter().map(|i| i.field.as_str()).collect();
-                json!({ "id": h.id.to_string(), "title": h.title, "missing": missing })
+                let issues: Vec<_> = h
+                    .issues
+                    .iter()
+                    .map(|i| json!({ "field": i.field, "code": i.code, "message": i.message }))
+                    .collect();
+                json!({
+                    "id": h.id.to_string(),
+                    "title": h.title,
+                    "missing": missing,
+                    "issues": issues,
+                })
             })
             .collect();
         obj.insert("missing_fields".into(), json!(list));
@@ -213,6 +232,14 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         obj.insert("tag_distribution".into(), distribution);
         obj.insert("tag_distribution_folded".into(), folded);
         obj.insert("untagged_entities".into(), untagged);
+    }
+    // `--include config`: the shared workspace-config projection
+    // (`mems` / `mutations` / `plugin`), rendered by the same
+    // implementation MCP's `include_config: true` uses.
+    if let Some(entries) = config_entries {
+        for (k, v) in entries {
+            obj.insert(k, v);
+        }
     }
 
     // Typed warnings array — engine-level health warnings (load-time
@@ -328,15 +355,37 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     if let Some(v) = obj.get("missing_fields").and_then(|v| v.as_array()) {
         lines.push("## Missing fields".to_string());
         for item in v {
-            let missing: Vec<&str> = item["missing"]
-                .as_array()
-                .map(|a| a.iter().filter_map(|s| s.as_str()).collect())
-                .unwrap_or_default();
+            // Render per-issue `field (CODE)` so a heading mismatch never
+            // reads as "missing" to a human either — content under a
+            // non-deriving heading EXISTS; the label must say which
+            // condition fired. Falls back to the legacy field-name list
+            // for payloads without `issues` (older JSON piped back in).
+            let labels: Vec<String> = match item["issues"].as_array() {
+                Some(issues) if !issues.is_empty() => issues
+                    .iter()
+                    .map(|i| {
+                        format!(
+                            "{} ({})",
+                            i["field"].as_str().unwrap_or(""),
+                            i["code"].as_str().unwrap_or("MISSING"),
+                        )
+                    })
+                    .collect(),
+                _ => item["missing"]
+                    .as_array()
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|s| s.as_str())
+                            .map(str::to_string)
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+            };
             lines.push(format!(
-                "- {} — {} (missing: {})",
+                "- {} — {} (issues: {})",
                 item["id"].as_str().unwrap_or(""),
                 item["title"].as_str().unwrap_or(""),
-                missing.join(", ")
+                labels.join(", ")
             ));
         }
         lines.push(String::new());
@@ -485,6 +534,13 @@ struct GatheredHealth {
     /// otherwise. Matches the MCP `memstead_health` tool's response
     /// shape — `{from, target_id, target_path, section}` per entry.
     dangling_links: Vec<DanglingLink>,
+    /// `Some(...)` when the caller asked for `--include config`: the
+    /// same top-level entries (`mems`, `mutations`, `plugin`) the MCP
+    /// composer renders for `include_config: true`, produced by the
+    /// shared `memstead_base::ops::health::config_projection` with the
+    /// policy values derived from `Engine::settings()`. `None`
+    /// otherwise — absence of the key means "not requested".
+    config_entries: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
 /// Conformance/integrity findings across every mounted mem, in
@@ -546,6 +602,7 @@ fn gather_mem_repo(
         || engine.missing_required_outgoing(None),
     );
     fill_schema_breakdowns(engine, &mut g);
+    fill_config_projection(engine, include, &mut g);
     g
 }
 
@@ -564,11 +621,36 @@ fn gather_filesystem(
         || engine.missing_required_outgoing(None),
     );
     fill_schema_breakdowns(engine, &mut g);
+    fill_config_projection(engine, include, &mut g);
     g
 }
 
 /// #49: attribute the orphan / community headlines per pinned schema (the
 /// engine-aware step `gather_from_store` can't do off a bare `&Store`).
+/// Engine-aware step for `--include config` — renders the shared
+/// workspace-config projection (one implementation with the MCP
+/// composer) off the engine's own settings.
+fn fill_config_projection(
+    engine: &memstead_base::Engine,
+    include: &[String],
+    g: &mut GatheredHealth,
+) {
+    if include.iter().any(|s| s == "config") {
+        let mut mems: Vec<String> = engine
+            .mem_router()
+            .writable_mems()
+            .iter()
+            .cloned()
+            .collect();
+        mems.sort();
+        let (mutations, plugin) =
+            memstead_base::ops::health::config_projection_from_settings(engine.settings());
+        g.config_entries = Some(memstead_base::ops::health::config_projection(
+            engine, &mems, mutations, plugin,
+        ));
+    }
+}
+
 fn fill_schema_breakdowns(engine: &memstead_base::Engine, g: &mut GatheredHealth) {
     let mems: Vec<String> = engine.mounts().iter().map(|m| m.mem.clone()).collect();
     g.orphans_by_schema = engine.orphans_by_schema(&engine.orphans());
@@ -637,6 +719,7 @@ fn gather_from_store(
         missing_required_outgoing,
         tag_distribution,
         dangling_links,
+        config_entries: None,
     }
 }
 

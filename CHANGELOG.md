@@ -7,6 +7,26 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+- **Health includes carry what health knows.** Three closures on the
+  health surface. (1) `HealthIssue` gains a structured `code`
+  (`MISSING`, `SECTION_HEADING_MISMATCH`, `UNDECLARED_RELATIONSHIP`,
+  `INVALID_REL_SHAPE`) — the code stops being a message-string prefix,
+  and both `missing_fields` projections (MCP composer and CLI) carry
+  per-issue `issues[] {field, code, message}` additively beside the
+  byte-identical legacy `missing` field-name array. A heading-mismatch
+  finding can no longer surface under a bare "missing" label through a
+  projection that drops messages. The Swift/UniFFI `HealthIssue`
+  record carries the code too. (2) `config` joins the health include
+  catalogue: `memstead health --include config` on the CLI and
+  `include: ["config"]` over MCP render the same workspace-config
+  projection `include_config: true` always served (one shared
+  renderer in `memstead-base`; the boolean stays as a documented
+  alias; passing both renders once). (3) The sealed-violator write
+  guarantee — a mem pinned to a heading-round-trip-violating sealed
+  schema serves writes, with the divergence warning and the persisting
+  health finding — is now locked by a test, not by review.
+
 ### Changed
 - **A guard that exists on one write path exists on all of them.** Two
   closures of the same defect class. (1) The cycle family — the

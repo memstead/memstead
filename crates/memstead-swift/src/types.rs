@@ -123,6 +123,11 @@ pub struct Status {
 #[derive(Debug, Clone)]
 pub struct HealthIssue {
     pub field: String,
+    /// Machine-readable condition discriminator (`MISSING`,
+    /// `SECTION_HEADING_MISMATCH`, …) — mirrors the engine's
+    /// `HealthIssueCode` wire strings so the app can branch without
+    /// parsing messages.
+    pub code: String,
     pub message: String,
 }
 

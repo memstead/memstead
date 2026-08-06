@@ -2904,7 +2904,7 @@ impl McpServer {
 
     #[tool(
         name = "memstead_health",
-        description = "Return graph health metrics. Typed payload on `structured_content` (always whole); text is pretty JSON, chunkable past `token_budget` (page via `chunk`). Default: summary counts (entities, orphans, stubs, stale, missing-fields, communities; per-schema `orphans_by_schema`/`communities_by_schema` alongside raw totals), node/edge totals, type/edge distributions, `writable_mems`/`read_mems` rosters, `default_writable_mem` (omitted-`mem` target), `mem_schemas`. `include` drills in — keys: `orphans`, `stubs`, `most_connected`, `missing_fields`, `stale`, `dangling_links`, `tags`, `missing_required_outgoing`, `conformance`, `integrity`. `conformance` lints entities against `target_schema` or each mem's pin into `findings` `{id, axis, code, detail}` (write-time typed codes); `integrity` adds `DANGLING_LINK`/`ORPHAN_STUB`. `dangling_links` lists body `[[id]]` refs lacking on-disk files (`from`/`target_id`/`target_path`/`section`). `tags` aggregates authored tags into `tag_distribution` (count desc, `limit`-capped), casing-drift sidecar `tag_distribution_folded`, and `untagged_entities`. `missing_required_outgoing` lists unsatisfied `required_outgoing` blocks (`id`/`title`/`entity_type`/`mem`/`missing[]`). `most_connected` entries: `total`/`incoming`/`outgoing` plus mention-free `typed_*` counterparts; ranked `typed_total` → `total` → id so co-mention hubs don't outrank dependency hubs. Unknown `include` keys emit `UNKNOWN_INCLUDE_KEY`; `limit` caps `most_connected`/`tag_distribution` at 10 (>100 clamps, `LIMIT_CLAMPED`). Warnings (`SUSPICIOUS_NESTED_PREFIX`, `DUPLICATE_SECTION_HEADING`, `OUTER_REPO_NOT_IGNORING_MEM_REPO`, `MEM_RELOADED`) — glossed in server instructions. Pass `mem` to scope to one writable mem (rosters stay global; edge counts turn source-in-mem; `dangling_links`/`warnings` filter accordingly). `include_config: true` adds `mutations` (`require_notes`), the opaque `plugin` map, and per-mem `mems` entries (`origin`, `vcs` `gitdir`/`worktree`/`head`, `write_guidance`, forward-compat `extra`).",
+        description = "Return graph health metrics. Typed payload on `structured_content` (always whole); text chunkable past `token_budget` (page via `chunk`). Default: summary counts (per-schema `orphans_by_schema`/`communities_by_schema` beside raw totals), node/edge totals, type/edge distributions, `writable_mems`/`read_mems` rosters, `default_writable_mem` (omitted-`mem` target), `mem_schemas`. `include` drills in — keys: `orphans`, `stubs`, `most_connected`, `missing_fields`, `stale`, `dangling_links`, `tags`, `missing_required_outgoing`, `conformance`, `integrity`, `config`. `missing_fields` adds per-issue `issues[]` with `code` (`MISSING` / `SECTION_HEADING_MISMATCH` — content EXISTS under a non-deriving heading) beside the legacy `missing` names. `config` = the `include_config` projection (rendered once if both). `conformance` lints entities against `target_schema` or each mem's pin into `findings` `{id, axis, code, detail}` (write-time typed codes); `integrity` adds `DANGLING_LINK`/`ORPHAN_STUB`. `dangling_links` lists body `[[id]]` refs lacking files (`from`/`target_id`/`target_path`/`section`). `tags` aggregates into `tag_distribution` (`limit`-capped), casing-drift `tag_distribution_folded`, `untagged_entities`. `missing_required_outgoing` lists unsatisfied `required_outgoing` blocks. `most_connected` entries: `total`/`incoming`/`outgoing` plus mention-free `typed_*` counterparts; ranked `typed_total` → `total` → id. Unknown `include` keys emit `UNKNOWN_INCLUDE_KEY`; `limit` caps `most_connected`/`tag_distribution` at 10 (>100 clamps: `LIMIT_CLAMPED`). Warnings (`SUSPICIOUS_NESTED_PREFIX`, `DUPLICATE_SECTION_HEADING`, `OUTER_REPO_NOT_IGNORING_MEM_REPO`, `MEM_RELOADED`) — see server instructions. Pass `mem` to scope to one writable mem (rosters stay global; edge counts turn source-in-mem; `dangling_links`/`warnings` filter too). `include_config: true` adds `mutations` (`require_notes`), the opaque `plugin` map, and per-mem `mems` entries (`origin`, `vcs` `gitdir`/`worktree`/`head`, `write_guidance`, `extra`).",
         annotations(
             read_only_hint = true,
             destructive_hint = false,
@@ -5091,6 +5091,173 @@ mod tests {
     /// entities conform to the pin, so the array's conformance
     /// entries are keyed to whatever genuinely fails — the shape, not
     /// a violator count, is the contract here.
+    /// The `config` include key and the `include_config: true` boolean
+    /// are aliases: each renders the identical projection, passing both
+    /// renders it once, and a call with neither carries no config block.
+    #[test]
+    fn health_config_include_key_and_boolean_alias_render_identically() {
+        let (server, _tmp) = setup_test_engine();
+        let call = |include: Option<Vec<String>>, include_config: bool| {
+            let r = server.memstead_health(Parameters(HealthParams {
+                include,
+                limit: None,
+                mem: None,
+                include_config,
+                token_budget: None,
+                chunk: None,
+                target_schema: None,
+            }));
+            assert!(!r.is_error.unwrap_or(false), "health must succeed: {r:?}");
+            r.structured_content.unwrap()
+        };
+
+        let via_alias = call(None, true);
+        let via_key = call(Some(vec!["config".to_string()]), false);
+        let via_both = call(Some(vec!["config".to_string()]), true);
+        for payload in [&via_alias, &via_key, &via_both] {
+            for key in ["mems", "mutations", "plugin"] {
+                assert!(
+                    payload.get(key).is_some(),
+                    "config projection must carry `{key}`: {payload}"
+                );
+            }
+        }
+        assert_eq!(
+            via_alias, via_key,
+            "alias and catalogue key must render the identical projection"
+        );
+        assert_eq!(via_key, via_both, "passing both renders it once");
+        // The catalogue key is known — no UNKNOWN_INCLUDE_KEY warning.
+        assert!(
+            !via_key
+                .get("warnings")
+                .and_then(|w| w.as_array())
+                .is_some_and(|w| w.iter().any(|e| e["code"] == "UNKNOWN_INCLUDE_KEY")),
+            "`config` is a catalogue member, not an unknown key: {via_key}"
+        );
+
+        // Refusal complement: without the token there is no config block.
+        let plain = call(None, false);
+        for key in ["mems", "mutations", "plugin"] {
+            assert!(
+                plain.get(key).is_none(),
+                "no config block without the opt-in: {plain}"
+            );
+        }
+    }
+
+    /// The `missing_fields` include carries WHICH condition each issue
+    /// reports: a genuinely absent section and content under a
+    /// non-deriving heading produce entries with distinct `code`s and
+    /// their messages, while the legacy `missing` field-name array
+    /// stays exactly as today for both. Exercised through the engine
+    /// composer (`compose_health`) over a sealed-violator workspace.
+    #[test]
+    fn health_missing_fields_include_carries_issue_codes_additively() {
+        use memstead_base::backend::MemBackend;
+        use memstead_base::storage::FilesystemMemWriter;
+        use memstead_base::workspace::{Mount, MountCapability, MountLifecycle, MountStorage};
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let schemas_dir = tmp.path().join("schemas");
+        let pkg = schemas_dir.join("debate");
+        std::fs::create_dir_all(pkg.join("types")).unwrap();
+        std::fs::write(
+            pkg.join("schema.yaml"),
+            "name: debate\nversion: 0.1.0\ndescription: fixture\nwhen_to_use: tests\ntypes:\n  - question\nrelationships:\n  mode: strict\n  definitions:\n    - name: PART_OF\n      description: hier\n      default_weight: 3.0\n    - name: _default\n      description: fallback\n      default_weight: 1.0\ncommunity:\n  resolution: 1.0\n  seed: 42\n",
+        )
+        .unwrap();
+        std::fs::write(
+            pkg.join("types").join("question.yaml"),
+            "name: question\ndescription: t\nwhen_to_use: tests\nsections:\n  - key: answers\n    heading: Answers argued\n    required: true\n    search_weight: 10.0\n    write_rules: []\n  - key: notes\n    heading: Notes\n    required: false\n    search_weight: 3.0\n    catch_all: true\n    write_rules: []\nmetadata_fields: []\ntitle_weight: 100.0\ntext_fields:\n  - answers\n  - notes\nhierarchy_relationship: PART_OF\npropagating_relationships: []\nupdatable_fields:\n  - title\n  - answers\nhealth_required_fields:\n  - answers\nstaleness_threshold_days: 90\nwrite_rules: []\n",
+        )
+        .unwrap();
+        let mem_dir = tmp.path().join("mem");
+        std::fs::create_dir_all(&mem_dir).unwrap();
+        // Content present under the schema's non-deriving heading →
+        // SECTION_HEADING_MISMATCH, never "missing".
+        std::fs::write(
+            mem_dir.join("mismatch.md"),
+            "---\ntype: question\n---\n# Mismatch\n\n## Answers argued\n\nPresent.\n",
+        )
+        .unwrap();
+        // Genuinely absent section → MISSING, exactly as today.
+        std::fs::write(
+            mem_dir.join("absent.md"),
+            "---\ntype: question\n---\n# Absent\n",
+        )
+        .unwrap();
+
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let mount = Mount {
+            mem: "debate-mem".to_string(),
+            schema: Some(memstead_schema::SchemaRef::new(
+                "debate",
+                semver::Version::new(0, 1, 0),
+            )),
+            storage: MountStorage::Folder { path: mem_dir },
+            capability: MountCapability::Write,
+            lifecycle: MountLifecycle::Eager,
+            cross_linkable: true,
+            migration_target: None,
+        };
+        let mut engine = memstead_base::Engine::from_mounts_with_schemas_dir(
+            vec![(mount, Box::new(writer) as Box<dyn MemBackend>)],
+            Some(&schemas_dir),
+        )
+        .unwrap();
+
+        let include = vec!["missing_fields".to_string()];
+        let args = memstead_engine::health::HealthArgs {
+            mem: None,
+            include: &include,
+            limit: None,
+            target_schema: None,
+            include_config: false,
+        };
+        let config = memstead_engine::health::HealthConfig {
+            mutations: serde_json::Value::Null,
+            plugin: serde_json::Value::Object(Default::default()),
+        };
+        let payload =
+            memstead_engine::health::compose_health(&mut engine, &args, Vec::new(), &config)
+                .expect("compose_health succeeds");
+
+        let entries = payload["missing_fields"]
+            .as_array()
+            .expect("missing_fields include renders");
+        let entry_for = |id: &str| {
+            entries
+                .iter()
+                .find(|e| e["id"] == format!("debate-mem--{id}"))
+                .unwrap_or_else(|| panic!("entry for {id}: {entries:?}"))
+        };
+
+        let mismatch = entry_for("mismatch");
+        // Legacy array byte-identical to today's: bare field names.
+        assert_eq!(mismatch["missing"], serde_json::json!(["answers"]));
+        assert_eq!(mismatch["issues"][0]["code"], "SECTION_HEADING_MISMATCH");
+        assert_eq!(mismatch["issues"][0]["field"], "answers");
+        assert!(
+            mismatch["issues"][0]["message"]
+                .as_str()
+                .unwrap()
+                .contains("is not missing"),
+            "the message rides beside the code: {mismatch}"
+        );
+
+        let absent = entry_for("absent");
+        assert_eq!(absent["missing"], serde_json::json!(["answers"]));
+        assert_eq!(absent["issues"][0]["code"], "MISSING");
+        assert!(
+            absent["issues"][0]["message"]
+                .as_str()
+                .unwrap()
+                .contains("is empty"),
+            "the message rides beside the code: {absent}"
+        );
+    }
+
     /// Shared read-envelope contract — the MCP `memstead_health` path and a
     /// direct, rmcp-free call to `compose_health` emit identical bytes. Proves the
     /// health read-envelope is produced by one transport-neutral builder
