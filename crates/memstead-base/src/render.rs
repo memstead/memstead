@@ -1606,7 +1606,11 @@ pub fn build_schema_payload(
             "Per-type `propagating_relationships` governs exactly one behaviour: \
              memstead_relate refuses a self-loop (from == to) on a rel-type the \
              source type lists here. It does not propagate impact, imply an \
-             evidence obligation, or have any other effect."
+             evidence obligation, or have any other effect. Deprecated for new \
+             schemas: to declare real impact propagation, use the \
+             `status_propagation` constraint (`constraints:` on the type), which \
+             taints dependents of a terminal status value via a named rel-type \
+             and direction and surfaces them as health findings."
                 .to_string(),
         ),
     );
@@ -3410,6 +3414,10 @@ write_rules: []
             assert!(
                 !note.contains("propagates impact") || note.contains("does not propagate"),
                 "claims no propagation behaviour beyond the self-loop refusal"
+            );
+            assert!(
+                note.contains("status_propagation"),
+                "deprecation pointer names the real propagation declaration"
             );
         }
     }
